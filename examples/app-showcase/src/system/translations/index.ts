@@ -514,13 +514,20 @@ export const ShowcaseTranslationBundle = {
         _actions: {
           // The two recalc surfaces of the same endpoint: one dispatch per
           // record vs ONE dispatch for the whole selection (objectui#3139).
+          //
+          // Each success message names the task it changed, as its English
+          // source does (`src/ui/actions/index.ts`): this entry REPLACES the
+          // source copy for a zh-CN viewer, and the runner fills its
+          // `{{ record.title }}` hole the same way. An unbound path prints
+          // empty, so `default` restores the object wording for a list row
+          // whose view does not project `title`.
           showcase_recalc_estimate: {
             label: '重算工时',
-            successMessage: '工时已重算。',
+            successMessage: "已重算{{ record.title | default:'该任务' }}的工时。",
           },
           showcase_recalc_selection: {
             label: '重算所选',
-            successMessage: '已为整个选中集重算工时。',
+            successMessage: "已为{{ record.title | default:'整个选中集' }}重算工时。",
           },
           // The hook-refusal specimen: every click is refused by
           // showcase_guard_task_reopen, so it carries no successMessage.
@@ -530,13 +537,13 @@ export const ShowcaseTranslationBundle = {
           // word the recalc entries above use; 重新分配 is the reassign
           // wizard's own flow label (`flows.showcase_reassign_wizard`); 新建…
           // is the shape a create entry takes in this bundle.
-          showcase_mark_done: { label: '标记为完成', successMessage: '任务已标记为完成。' },
+          showcase_mark_done: { label: '标记为完成', successMessage: "{{ record.title | default:'任务' }}已标记为完成。" },
           showcase_open_docs: { label: '打开文档' },
           showcase_bulk_reassign: { label: '重新分配…' },
           showcase_quick_view: { label: '快速查看' },
           showcase_log_time: { label: '记录工时' },
           showcase_new_task: { label: '新建任务' },
-          showcase_archive_task: { label: '归档', successMessage: '任务已归档（演示——未修改任何数据）。' },
+          showcase_archive_task: { label: '归档', successMessage: "{{ record.title | default:'任务' }}已归档（演示——未修改任何数据）。" },
         },
         // Section headings of the six form-view projections in
         // `ui/views/task.view.ts` (edit / tabbed / wizard / split / quick).

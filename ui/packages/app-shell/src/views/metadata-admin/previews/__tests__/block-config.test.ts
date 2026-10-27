@@ -431,12 +431,23 @@ describe('page:header `icon` — the designer field retired with the spec key (#
   // criterion is `@object-ui/test-support`'s shared judge (objectui#3809,
   // converged here by objectui#4947), which OR-s the structural channel this
   // block used to spell out by hand with the `[REMOVED]` description channel.
-  it('the spec tombstones `icon` rather than deleting it', () => {
-    expect(listedShapeKeys(PageHeaderProps)).toContain('icon');
-    expect(isShapeKeyTombstoned(PageHeaderProps, 'icon')).toBe(true);
-    // Non-vacuity for the probe itself: a Zod-internals change that made every
-    // member read `'never'` would make the line above meaningless, and a live
-    // key is the only thing that can tell the difference.
+  it('the spec aged the `icon` tombstone out — the key is no longer listed, and the strict row refuses it as unknown', () => {
+    // Through spec 18.1 the ADR-0087 D2 tombstone kept `icon` IN the shape as
+    // `z.never()`; at 18.2 the ≤16.x tombstones aged out one major on
+    // (objectstack#25767), so `icon` is not a key of the shape at all and the
+    // strict row refuses it as an unknown key naming the protocol upgrade guide.
+    expect(listedShapeKeys(PageHeaderProps)).not.toContain('icon');
+    const refused = PageHeaderProps.safeParse({ title: 'T', icon: 'users' });
+    expect(refused.success).toBe(false);
+    const root = refused.success ? '' : refused.error.issues.filter((i) => i.path.length === 0).map((i) => i.message).join('\n');
+    expect(root).toMatch(/Unrecognized key\(s\)[^\n]*`icon`/);
+    expect(root).toContain('https://objectstack.ai/docs/protocol-upgrade');
+    // The tombstone probe's own non-vacuity moves to a tombstone the pin still
+    // carries: `breadcrumb` (spec 17.x, objectstack#20758) is listed AND reads
+    // as tombstoned, and a live key is the only thing that can tell the
+    // difference from a Zod-internals change that made every member `'never'`.
+    expect(listedShapeKeys(PageHeaderProps)).toContain('breadcrumb');
+    expect(isShapeKeyTombstoned(PageHeaderProps, 'breadcrumb')).toBe(true);
     expect(isShapeKeyTombstoned(PageHeaderProps, 'title')).toBe(false);
     expect(shapeMemberTypeName(PageHeaderProps, 'title')).toBeTruthy();
   });

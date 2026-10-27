@@ -60,12 +60,10 @@ import {
   assertFilterIsMaterializable,
   invalidFilterError,
   collectComposableReadableIds,
-  composeReadableIdsLeaves,
   describeReadableIdsLeaf,
   readableIdsRefusalError,
   type ComposableReadableIdsSite,
 } from './filter-comparand-shape.js';
-import { ReadableIds, RLS_DENY_FILTER, markFilterSubtreeProvenance, isControlledByParentMasterField } from '@objectstack/spec/data';
 import type { ISecurityService } from '@objectstack/spec/contracts';
 import {
   assertHavingResolvedTemporalTokensInRange,
@@ -303,7 +301,7 @@ import { applyProtection, pluralToSingular, ExternalWriteForbiddenError } from '
 import { SchemaRegistry, computeFQN, type ArtifactInstallScope } from './registry.js';
 import { expandSearchToFilter, normalizeSearch, SEARCHABLE_ENUM_TYPES, SEARCHABLE_TEXTUAL_TYPES } from './search-filter.js';
 import { stripSearchCompanion } from './search-companion.js';
-import { ExpressionEngine, analyzeRelationshipTraversals, toEvalPermissions, type EvalError, type EvalPermissions } from '@objectstack/formula';
+import { ExpressionEngine, analyzeRelationshipTraversals, type EvalError, type EvalPermissions } from '@objectstack/formula';
 import type { Expression } from '@objectstack/spec';
 import {
   isAggregatedViewContainer,
@@ -363,6 +361,12 @@ import { isFederatedObject, isFederatedUnprovisionedInjectedColumn } from './fed
 // every module those bodies import, so the engine's module evaluation order
 // is what it was.
 import { resolveOneHopRelated, resolvePredicateRelated, resolvePreviewParents, settleMasterDetailLanding } from './engine-master-detail-related.js';
+// [#25522 cut 15] The `ReadableIds` chain composition, the controlled-by-parent
+// boot screen, and the permission and formula resolutions an operation shares;
+// the methods of the same names below hand each body the members it reads
+// (`ReadableIdsPermissionFormulaHost`). Imported after every module those bodies import, so
+// the engine's module evaluation order is what it was.
+import { composeReadableIdsChain, findUnservableControlledByParentMasters, permissionResolution, readableIdsScopeOf, reportFormulaFault, resolveDefaultPermissions, resolveFormulaPermissions, resolveOptionPermissions } from './engine-readable-ids-permission-formula.js';
 import { applyInMemoryAggregation } from './in-memory-aggregation.js';
 import {
   resolveEngineDeleteDispatch,
@@ -765,7 +769,7 @@ interface IssuedAutonumber {
  * @param meta   The entry's own meta (`object`, and `developerMessage` on the
  *               delete door).
  */
-function writeFailureLogMeta(
+export function writeFailureLogMeta(
   logged: unknown,
   meta: Record<string, unknown>,
 ): Record<string, unknown> {
@@ -1535,7 +1539,7 @@ function relationSitesOf(
  * once for the operation and hands every caller the same answer, or the same
  * rejection.
  */
-interface PermissionResolution {
+export interface PermissionResolution {
   get(): Promise<EvalPermissions>;
 }
 
@@ -1546,13 +1550,13 @@ interface PermissionResolution {
  * {@link ObjectQL.resolveDefaultPermissions} plans by, so the two can never
  * disagree about which defaults are expressions.
  */
-function isExpressionDefault(dv: unknown): dv is Expression {
+export function isExpressionDefault(dv: unknown): dv is Expression {
   return typeof dv === 'object' && dv !== null
     && Boolean((dv as { dialect?: unknown }).dialect)
     && typeof (dv as { source?: unknown }).source === 'string';
 }
 
-interface FormulaPlanEntry {
+export interface FormulaPlanEntry {
   name: string;
   expression: Expression;
   /**
@@ -4595,7 +4599,7 @@ function stampObjectPackage(def: ServiceObject, packageId: string, packageVersio
  * `canReadObject` or, when a service predates that optional method, the
  * `allowed` of its `explain`.
  */
-type ReadableIdsSecurity = Pick<ISecurityService, 'getReadFilter'> & Partial<Pick<ISecurityService, 'canReadObject' | 'explain'>>;
+export type ReadableIdsSecurity = Pick<ISecurityService, 'getReadFilter'> & Partial<Pick<ISecurityService, 'canReadObject' | 'explain'>>;
 
 /** The three resolutions of the `security` service (`ObjectQL#resolveReadableIdsSecurity`). */
 type ReadableIdsSecurityResolution =
@@ -4612,33 +4616,13 @@ type ReadableIdsSecurityResolution =
  * the scope already composed, or `null` for `$in: []` — so a parent is asked
  * once per read at whichever level it first appears.
  */
-interface ReadableIdsChain {
+export interface ReadableIdsChain {
   readonly object: string;
   readonly operation: 'find' | 'findOne' | 'count' | 'aggregate';
   readonly security: ReadableIdsSecurityResolution;
   readonly context: ExecutionContext | undefined;
   readonly answers: Map<string, { scope: FilterCondition | undefined } | null>;
 }
-
-/**
- * [ADR-0139 D6, as amended — the nested master chain] How deep a chain of
- * composed scopes the engine composes: the scope answered for a leaf in the
- * read's own `where` is one scope deep, the scope answered for a leaf inside
- * it is two, and so on down a master-detail chain whose every master is
- * itself `controlled_by_parent`. A chain deeper than this is refused by name.
- *
- * A COST ceiling, not a semantic rule, and the same cut as the
- * `controlled_by_parent` derivation's (`CBP_MAX_CHAIN_DEPTH`,
- * `packages/plugins/plugin-security`): a detail with seven derived masters
- * above it composes, an eighth derived master is refused there and here.
- * Every authored chain in this repository is one hop, the deepest any consumer
- * has asked for is two, and 8 is four times that. Termination needs no bound —
- * the chain refuses a parent already on its branch — so what this caps is the
- * statement the driver compiles, one nested subquery per level. At the bound
- * the read is REFUSED, loud (D5's envelope), ⛔ never composed partway and
- * never answered "no restriction".
- */
-const READABLE_IDS_MAX_CHAIN_DEPTH = 8;
 
 /**
  * [ADR-0139 D5.2 / D5.3] A `controlled_by_parent` detail whose master the
@@ -6256,52 +6240,13 @@ export class ObjectQL implements IObjectQLEngine {
     sites: readonly ComposableReadableIdsSite[],
     ancestors: readonly string[],
   ): Promise<N> {
-    const { object, operation } = chain;
-    const parents = this.refuseUncomposableReadableIdsClasses(object, operation, sites);
-    for (const parent of parents) {
-      if (chain.answers.has(parent)) continue;
-      const site = sites.find((s) => s.leaf.object === parent)!;
-      const branch = [object, ...ancestors, parent];
-      if (ancestors.includes(parent)) {
-        throw readableIdsRefusalError(
-          object,
-          `${operation}('${object}'): ${describeReadableIdsLeaf(site.at, site.leaf)}, inside the read scope of ` +
-          `'${ancestors[ancestors.length - 1]}', and the engine composes no such leaf: the chain of read scopes ` +
-          `${branch.join(' -> ')} returns to '${parent}', a cycle. The query was NOT run and no driver was asked. ` +
-          `A parent's read scope cannot be derived from its own readable ids; fix the read scope the security ` +
-          `service answers for '${ancestors[ancestors.length - 1]}'.`,
-        );
-      }
-      if (ancestors.length >= READABLE_IDS_MAX_CHAIN_DEPTH) {
-        throw readableIdsRefusalError(
-          object,
-          `${operation}('${object}'): ${describeReadableIdsLeaf(site.at, site.leaf)}, and the engine composes no ` +
-          `such leaf: the chain of read scopes ${branch.join(' -> ')} is ${ancestors.length + 1} scopes deep, and the ` +
-          `engine composes a chain at most ${READABLE_IDS_MAX_CHAIN_DEPTH} scopes deep. The query was NOT run and ` +
-          `no driver was asked. A master-detail chain this deep is not one the engine composes; read '${parent}' as ` +
-          'the caller first and match its ids with a list, or shorten the chain.',
-        );
-      }
-      const answer = chain.security.kind === 'usable'
-        ? await this.readableIdsScopeOf(object, operation, parent, chain.security.svc, chain.context)
-        : null;
-      if (answer === null || answer.scope === undefined) {
-        chain.answers.set(parent, answer);
-        continue;
-      }
-      // The scope is the `where` of a read of `parent`: judged as one, and
-      // the leaves it carries are composed before this parent's leaf is.
-      const nested = collectComposableReadableIds(object, operation, answer.scope, 'where', `${site.at}.scope`);
-      chain.answers.set(parent, nested.length === 0
-        ? answer
-        : { scope: await this.composeReadableIdsChain(chain, answer.scope, nested, [...ancestors, parent]) });
-    }
-    // A parent with no answer (`null`, or never asked: not registered) is
-    // `$in: []`.
-    return composeReadableIdsLeaves(node, (leaf) => {
-      const answer = chain.answers.get(leaf.object);
-      return answer ? ReadableIds.compose(leaf, answer.scope) : [];
-    });
+    // [#25522 cut 15] The body moved to `engine-readable-ids-permission-formula.ts` (see `ReadableIdsPermissionFormulaHost`).
+    const host: ThisParameterType<typeof composeReadableIdsChain> = {
+      refuseUncomposableReadableIdsClasses: (...a) => this.refuseUncomposableReadableIdsClasses(...a),
+      readableIdsScopeOf: (...a) => this.readableIdsScopeOf(...a),
+      composeReadableIdsChain: (...a) => this.composeReadableIdsChain(...a),
+    };
+    return (composeReadableIdsChain<N>).call(host, chain, node, sites, ancestors);
   }
 
   /**
@@ -6383,18 +6328,13 @@ export class ObjectQL implements IObjectQLEngine {
    * registry does not hold, is no entry: other rules own those.
    */
   findUnservableControlledByParentMasters(): UnservableControlledByParentMaster[] {
-    const found: UnservableControlledByParentMaster[] = [];
-    for (const object of this._registry.getAllObjects() as Array<{ name?: string; sharingModel?: unknown; fields?: Record<string, unknown> }>) {
-      if (object?.sharingModel !== 'controlled_by_parent' || typeof object.name !== 'string') continue;
-      const masters = Object.entries(object.fields ?? {}).filter(([, f]) => isControlledByParentMasterField(f));
-      if (masters.length !== 1) continue;
-      const [field, def] = masters[0];
-      const master = (def as { reference?: unknown }).reference;
-      if (typeof master !== 'string' || !this._registry.getObject(master)) continue;
-      const uncomposable = this.uncomposableReadableIdsParent(object.name, master);
-      if (uncomposable) found.push({ detail: object.name, field, master, ...uncomposable });
-    }
-    return found;
+    // [#25522 cut 15] The body moved to `engine-readable-ids-permission-formula.ts` (see `ReadableIdsPermissionFormulaHost`).
+    const readRegistry = () => this._registry;
+    const host: ThisParameterType<typeof findUnservableControlledByParentMasters> = {
+      get _registry() { return readRegistry(); },
+      uncomposableReadableIdsParent: (...a) => this.uncomposableReadableIdsParent(...a),
+    };
+    return findUnservableControlledByParentMasters.call(host);
   }
 
   /**
@@ -6409,35 +6349,12 @@ export class ObjectQL implements IObjectQLEngine {
     svc: ReadableIdsSecurity,
     context: ExecutionContext | undefined,
   ): Promise<{ scope: FilterCondition | undefined } | null> {
-    const deny = (why: string, e?: unknown): null => {
-      this.logger.warn(
-        `[ObjectQL] ${operation}('${object}'): the ReadableIds leaf over '${parent}' is answered $in: [] ` +
-        `(fail-closed) — ${why}`,
-        e === undefined ? undefined : writeFailureLogMeta(e, { object, parent }),
-      );
-      return null;
+    // [#25522 cut 15] The body moved to `engine-readable-ids-permission-formula.ts` (see `ReadableIdsPermissionFormulaHost`).
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof readableIdsScopeOf> = {
+      get logger() { return readLogger(); },
     };
-    let admitted: boolean;
-    try {
-      admitted = typeof svc.canReadObject === 'function'
-        ? (await svc.canReadObject(parent, context)) === true
-        : (await svc.explain!({ object: parent, operation: 'read' }, context))?.allowed === true;
-    } catch (e) {
-      return deny('the object-level read admission threw', e);
-    }
-    if (!admitted) return null;
-    let scope: unknown;
-    try {
-      scope = await svc.getReadFilter(parent, context);
-    } catch (e) {
-      return deny('getReadFilter() threw', e);
-    }
-    if (scope === undefined) return { scope: undefined };
-    if (scope === RLS_DENY_FILTER) return null;
-    if (scope === null || typeof scope !== 'object' || Array.isArray(scope)) {
-      return deny(`getReadFilter() answered ${scope === null ? 'null' : Array.isArray(scope) ? 'an array' : typeof scope}, not a filter`);
-    }
-    return { scope: markFilterSubtreeProvenance(scope as FilterCondition, 'policy') };
+    return readableIdsScopeOf.call(host, object, operation, parent, svc, context);
   }
 
   /**
@@ -6474,25 +6391,8 @@ export class ObjectQL implements IObjectQLEngine {
     payloads: ReadonlyArray<Record<string, unknown> | null | undefined>,
     resolution: PermissionResolution | undefined,
   ): Promise<(payload: Record<string, unknown> | null | undefined) => EvalPermissions | undefined> {
-    const none = (): undefined => undefined;
-    // [#20082] The write's ONE resolution ({@link permissionResolution}) —
-    // `undefined` on exactly the two conditions this method used to test
-    // itself: no resolver registered, or no acting user.
-    if (!resolution) return none;
-    const fields = (schema as { fields?: Parameters<typeof optionVisibilityReadsPermissions>[0] } | null | undefined)?.fields;
-    const needs = (payload: Record<string, unknown> | null | undefined): boolean =>
-      optionVisibilityReadsPermissions(fields, payload);
-    if (!payloads.some(needs)) return none;
-    let permissions: EvalPermissions;
-    try {
-      permissions = await resolution.get();
-    } catch (err) {
-      return (payload) => {
-        if (needs(payload)) throw err;
-        return undefined;
-      };
-    }
-    return (payload) => (needs(payload) ? permissions : undefined);
+    // [#25522 cut 15] The body moved to `engine-readable-ids-permission-formula.ts`; it reads no member of the class.
+    return resolveOptionPermissions(schema, payloads, resolution);
   }
 
   /**
@@ -6520,17 +6420,13 @@ export class ObjectQL implements IObjectQLEngine {
    * held across operations would serve a grant that may since have been revoked.
    */
   private permissionResolution(context: ExecutionContext | undefined): PermissionResolution | undefined {
-    const resolver = this._effectiveObjectPermissionsResolver;
-    if (!resolver || !this.buildEvalUser(context)) return undefined;
-    let pending: Promise<EvalPermissions> | undefined;
-    return {
-      // `Promise.resolve().then(...)` so a resolver that throws SYNCHRONOUSLY is
-      // memoised as a rejection too, rather than escaping `get()` un-memoised
-      // and being asked again by the next consumer.
-      get: () => (pending ??= Promise.resolve()
-        .then(() => resolver(context))
-        .then((answer) => toEvalPermissions(answer))),
+    // [#25522 cut 15] The body moved to `engine-readable-ids-permission-formula.ts` (see `ReadableIdsPermissionFormulaHost`).
+    const readEffectiveObjectPermissionsResolver = () => this._effectiveObjectPermissionsResolver;
+    const host: ThisParameterType<typeof permissionResolution> = {
+      get _effectiveObjectPermissionsResolver() { return readEffectiveObjectPermissionsResolver(); },
+      buildEvalUser: (...a) => this.buildEvalUser(...a),
     };
+    return permissionResolution.call(host, context);
   }
 
   /**
@@ -6567,31 +6463,12 @@ export class ObjectQL implements IObjectQLEngine {
     context: ExecutionContext | undefined,
     resolution: PermissionResolution | undefined,
   ): Promise<EvalPermissions | undefined> {
-    if (!context?.userId) return undefined;
-    if (!records.some((r) => r != null && typeof r === 'object')) return undefined;
-    const fields = plan.filter((entry) => readsPermissionPredicate(entry.expression)).map((entry) => entry.name);
-    if (fields.length === 0) return undefined;
-    if (!resolution) {
-      this.logger.warn(
-        `formula field(s) ${fields.join(', ')} on '${object}' call current_user.can(), and no `
-        + 'effective-permission source is registered, so they read null: compose a security '
-        + 'service that registers one (registerEffectiveObjectPermissionsResolver) for can() to '
-        + 'be answered',
-        { object, fields, reason: 'no-permission-source' },
-      );
-      return undefined;
-    }
-    try {
-      return await resolution.get();
-    } catch (error) {
-      this.logger.warn(
-        `formula field(s) ${fields.join(', ')} on '${object}' call current_user.can(), and the `
-        + 'effective-permission resolution failed, so they read null on this read (failed closed: '
-        + 'neither a grant nor a denial was assumed)',
-        { object, fields, reason: 'permission-resolution-failed', error },
-      );
-      return undefined;
-    }
+    // [#25522 cut 15] The body moved to `engine-readable-ids-permission-formula.ts` (see `ReadableIdsPermissionFormulaHost`).
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof resolveFormulaPermissions> = {
+      get logger() { return readLogger(); },
+    };
+    return resolveFormulaPermissions.call(host, object, plan, records, context, resolution);
   }
 
   /**
@@ -6767,20 +6644,14 @@ export class ObjectQL implements IObjectQLEngine {
    * the first line already names the field to fix.
    */
   private reportFormulaFault(object: string, field: string, error: EvalError): void {
-    const key = JSON.stringify([object, field]);
-    if (this.formulaFaultReported.has(key)) return;
-    this.formulaFaultReported.add(key);
-    // The evaluator's message carries the source and a caret on the lines after
-    // its first; the first line goes in the sentence, the whole of it in the meta.
-    const headline = error.message.split('\n', 1)[0];
-    this.logger.warn(
-      `formula field '${field}' on '${object}' could not be evaluated, so it reads null wherever this `
-      + `fault holds (${error.kind}: ${headline}). If the expression itself is at fault — an unknown `
-      + 'function, a missing field — `os validate`, or a re-save of the object, refuses it with a located '
-      + 'message; if it faults on some records\' values, guard the operands it reads. Reported once per '
-      + 'object and field per engine instance.',
-      { object, field, kind: error.kind, error: error.message },
-    );
+    // [#25522 cut 15] The body moved to `engine-readable-ids-permission-formula.ts` (see `ReadableIdsPermissionFormulaHost`).
+    const readFormulaFaultReported = () => this.formulaFaultReported;
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof reportFormulaFault> = {
+      get formulaFaultReported() { return readFormulaFaultReported(); },
+      get logger() { return readLogger(); },
+    };
+    return reportFormulaFault.call(host, object, field, error);
   }
 
   /**
@@ -6813,27 +6684,11 @@ export class ObjectQL implements IObjectQLEngine {
     /** Only these fields' defaults count — the insert's re-default pass keeps no others. */
     onlyFields?: readonly string[],
   ): Promise<(row: unknown) => EvalPermissions | undefined> {
-    const none = (): undefined => undefined;
-    if (!resolution || !context?.userId) return none;
-    const gated = (this.defaultFieldEntries(object) ?? [])
-      .filter((f) => !onlyFields || onlyFields.includes(f.name))
-      .filter((f) => isExpressionDefault(f.defaultValue) && readsPermissionPredicate(f.defaultValue))
-      .map((f) => f.name);
-    if (gated.length === 0) return none;
-    const needs = (row: unknown): boolean =>
-      row != null && typeof row === 'object'
-      && gated.some((name) => (row as Record<string, unknown>)[name] == null);
-    if (!rows.some(needs)) return none;
-    let permissions: EvalPermissions;
-    try {
-      permissions = await resolution.get();
-    } catch (err) {
-      return (row) => {
-        if (needs(row)) throw err;
-        return undefined;
-      };
-    }
-    return (row) => (needs(row) ? permissions : undefined);
+    // [#25522 cut 15] The body moved to `engine-readable-ids-permission-formula.ts` (see `ReadableIdsPermissionFormulaHost`).
+    const host: ThisParameterType<typeof resolveDefaultPermissions> = {
+      defaultFieldEntries: (...a) => this.defaultFieldEntries(...a),
+    };
+    return resolveDefaultPermissions.call(host, object, rows, context, resolution, onlyFields);
   }
 
 

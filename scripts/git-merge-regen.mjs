@@ -174,9 +174,15 @@ const DECLARED_WATCH_HINTS = [
  */
 const MIXED_COMPARATORS = Object.freeze({
   /**
-   * Equal modulo `file:line` anchor numbers. The generated half of
-   * `content/docs/permissions/system-context.mdx` is exactly those numbers:
-   * `check-system-context-census.mjs --fix` rewrites them and touches nothing else.
+   * Equal modulo `file:line` anchor numbers. Written for
+   * `content/docs/permissions/system-context.mdx`, whose generated half was those
+   * numbers until #15921 made its anchors `path#symbol`; on that page it is now the
+   * identity (`scripts/doc-line-anchors.mjs` header), and the census `--fix` that
+   * re-anchored them is retired. No row names it today: the page left this driver
+   * at #22927, and the site register #26442 generated on it since lives between
+   * markers this comparator does not blank (`check-system-context-census.mjs
+   * --write` rebuilds it). Kept for the next `file:line` mixed artifact; a
+   * marker-region page would need a comparator of its own.
    */
   'line-anchors': blankAnchorLineNumbers,
 });
@@ -298,9 +304,10 @@ function readSide(file) {
  * Two shapes are lossless, and they are the ones the comparator can PROVE:
  *
  *   1. THEIRS differs from the ANCESTOR only in the generated half. Then theirs
- *      contributes nothing but numbers `--fix` will re-derive from the merged tree,
- *      and dropping it drops nothing. This is the common case by a wide margin —
- *      24 of the last 25 main commits to `system-context.mdx`.
+ *      contributes nothing but what the row's `gen:` re-derives from the merged
+ *      tree, and dropping it drops nothing. It was the common case by a wide margin
+ *      when `system-context.mdx` was the routed page this was written for — 24 of
+ *      its last 25 main commits, measured then.
  *   2. THEIRS and OURS agree once the generated half is blanked. Then whatever
  *      hand-written change theirs carries, ours carries too, so keeping ours keeps
  *      it. (Two branches landing the same doc edit, or one rebased onto the other.)

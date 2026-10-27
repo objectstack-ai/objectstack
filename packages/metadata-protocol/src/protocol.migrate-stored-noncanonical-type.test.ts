@@ -192,7 +192,8 @@ const legacyObjectsPluralRow: SeedRow = {
         label: 'Invoice',
         fields: {
             status: { type: 'select', label: 'Status' },
-            amount: { type: 'currency', label: 'Amount', conditionalRequired: "record.status == 'sent'" },
+            amount: { type: 'currency', label: 'Amount' },
+            account_id: { type: 'lookup', label: 'Account', reference_to: 'crm_account' },
         },
     },
 };
@@ -299,8 +300,8 @@ describe('migrateStoredMetadata — a non-canonical stored `type` is reported, n
         expect(report.pending).toBe(1);
         const row = report.rows[0]!;
         expect(row).toMatchObject({ type: 'object', name: 'crm_invoice', outcome: 'pending' });
-        expect(row.notices[0]!.from).toBe('conditionalRequired');
-        expect(row.notices[0]!.to).toBe('requiredWhen');
+        expect(row.notices[0]!.from).toBe('reference_to');
+        expect(row.notices[0]!.to).toBe('reference');
     });
 
     it('⛔ an apply run writes NOTHING for it — the identity move stays unruled', async () => {

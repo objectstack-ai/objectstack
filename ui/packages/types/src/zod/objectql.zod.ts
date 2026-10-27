@@ -93,7 +93,7 @@ import {
 // reference.
 import { InlineGridColumnSchema as SpecInlineGridColumnSchema } from '@objectstack/spec/data';
 import { BaseSchema, specFieldsExcept } from './base.zod.js';
-import { aliasKeyRefusal, handlerKeyRefusal, neitherContentChannelGuidance, retirementTombstone } from './tombstone.zod.js';
+import { agedOutSpecKeyRefusal, aliasKeyRefusal, handlerKeyRefusal, neitherContentChannelGuidance, retirementTombstone } from './tombstone.zod.js';
 import { DataTableSchema, DrillDownConfigSchema, PivotTableSchema } from './data-display.zod.js';
 // The kanban CARD vocabulary has one authority (`./complex.zod.ts`); the
 // `object-kanban` lane below reads it rather than restating it (objectui#8913).
@@ -2288,24 +2288,24 @@ export const ListViewSchema = BaseSchema
   // `scripts/check-spec-symbol-derivation.mjs` instead of hidden one hop away.
   //
   // Imported here: data, filter, sort, searchableFields,
-  // filterableFields, resizable, striped, bordered, compactToolbar, selection, navigation,
+  // filterableFields, resizable, compactToolbar, selection, navigation,
   // pagination, chart, tree, rowHeight, grouping, rowColor, hiddenFields, fieldOrder,
-  // rowActions, bulkActions, bulkActionDefs, virtualScroll, inlineEdit, userActions,
-  // appearance, tabs, addRecord, showRecordCount, allowPrinting, emptyState, responsive,
-  // performance.
+  // rowActions, bulkActions, bulkActionDefs, inlineEdit, userActions,
+  // appearance, tabs, addRecord, showRecordCount, allowPrinting, emptyState.
   //
-  // `striped`, `bordered` and `virtualScroll` are in that list because the spec
-  // pin still carries them, NOT because objectui offers them: objectstack#7176
-  // retired all three (maintainer-ruled 2026-08-10) after measuring every
-  // objectui reader as pass-through — no renderer ever applied one. objectui's
-  // own declarations and the forwarding chain came out with objectui#4649; what
-  // is left here is the by-reference import, which is exactly what must stay.
-  // It carries the spec's `retiredKey()` tombstones in on the GA bump, so an
-  // author writing one gets a rejection from the protocol rather than silence.
-  // Do NOT add them to LIST_VIEW_LOCAL_OVERRIDES to "clean this up" — that
-  // excludes the tombstone and hands the key back to `BaseSchema`'s
-  // passthrough, turning a loud rejection into a silently-accepted dead key.
-  // Re-forwarding needs an implementation card filed first (the ruling's text).
+  // `striped`, `bordered`, `virtualScroll`, `responsive` and `performance` are
+  // NOT in that list any more: the spec carried them as `retiredKey()`
+  // tombstones through 18.1 (objectstack#7176 retired the first three,
+  // maintainer-ruled 2026-08-10, after measuring every objectui reader as
+  // pass-through; the #3896 audit close-out the last two), and this import
+  // brought each tombstone in by reference, so an author got a rejection from
+  // the protocol rather than silence. At spec 18.2 the tombstones aged out of
+  // the shape one major on (objectstack#25767, ADR-0087), so the projection
+  // carries nothing under those names and `BaseSchema`'s passthrough would
+  // turn the loud rejection into a silently-accepted dead key. The five are
+  // the console's OWN refusals now, declared in the `.extend({...})` below
+  // (`agedOutSpecKeyRefusal`). Re-forwarding any of them needs an
+  // implementation card filed first (the ruling's text).
   .extend(specFieldsExcept(stripImportedDefaults(SpecListViewSchema).shape, LIST_VIEW_LOCAL_OVERRIDES).shape)
   .extend({
     // Component discriminator — load-bearing for the ObjectQLComponentSchema union.
@@ -2483,6 +2483,45 @@ export const ListViewSchema = BaseSchema
     // ⚠️ This arm feeds its own TypeScript face (`ListViewInferred` below), so these two members are
     // what put `body?: undefined` / `children?: undefined` on `ListViewSchema`; there is no separate
     // `?: never` pair to keep in step.
+    //
+    // The five list view keys the spec retired at 17.0.0 and carried as
+    // `retiredKey()` tombstones through 18.1 — flowing in by reference through
+    // the projection above, so an authored value was refused at the key's own
+    // path. At spec 18.2 the tombstones aged out of `ListViewSchema` one major
+    // on (objectstack#25767, ADR-0087): the spec refuses each as an unknown key
+    // naming the upgrade guide, and the projection no longer carries the name,
+    // so without these arms `BaseSchema`'s `.passthrough()` would KEEP an
+    // authored `striped: true` in silence. Each is the console's own refusal
+    // now (`agedOutSpecKeyRefusal`, the reasoning on its docblock). As with
+    // `body` / `children` above, the TypeScript face is derived from this arm
+    // (`ListViewInferred`), so each key is `?: undefined` on `ListViewSchema`
+    // with no hand-kept twin; `ListViewPropsBag` reads this shape, so a page
+    // `list-view` node refuses the five in its `properties` bag and, through
+    // the row's own retirement, written flat. Pinned by
+    // `../__tests__/list-view-aged-out-spec-keys-25767.test.ts`.
+    striped: agedOutSpecKeyRefusal(
+      'list view', 'ListView.striped', 'striped', '17.0.0',
+      'Every measured reader only copied it forward and no renderer ever applied it (objectstack#7176), so '
+        + 'there is no authorable striped-rows switch. Delete the key.',
+    ),
+    bordered: agedOutSpecKeyRefusal(
+      'list view', 'ListView.bordered', 'bordered', '17.0.0',
+      'Every measured reader only copied it forward and no renderer ever applied it (objectstack#7176); the '
+        + 'grid frame is the renderer\'s own constant, not authorable. Delete the key.',
+    ),
+    virtualScroll: agedOutSpecKeyRefusal(
+      'list view', 'ListView.virtualScroll', 'virtualScroll', '17.0.0',
+      'Every measured reader only copied it forward and no grid ever virtualized off it (objectstack#7176). '
+        + 'Large datasets page via `pagination`. Delete the key.',
+    ),
+    responsive: agedOutSpecKeyRefusal(
+      'list view', 'ListView.responsive', 'responsive', '17.0.0',
+      'No renderer ever read it; the grid is responsive by its own layout rules. Delete the key.',
+    ),
+    performance: agedOutSpecKeyRefusal(
+      'list view', 'ListView.performance', 'performance', '17.0.0',
+      'No renderer or runtime read it; list view performance tuning was never implemented. Delete the key.',
+    ),
   })
   // ⭐ THE SPEC'S OBJECT-LEVEL CHECKS, re-attached (objectui#7715, ruling B1).
   //

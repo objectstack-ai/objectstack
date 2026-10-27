@@ -685,8 +685,9 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // harness.
     //
     // [#22032, pass 2] The field-rule-slot pass joins the object door: every
-    // field's `requiredWhen` / `readonlyWhen` / `conditionalRequired` /
-    // `visibleWhen`, with the `parent` gate, the `requiredWhen` null guard and
+    // field's `requiredWhen` / `readonlyWhen` / `visibleWhen` (and, until its
+    // tombstone aged out at #25767, `conditionalRequired`), with the `parent`
+    // gate, the `requiredWhen` null guard and
     // the reference-traversal refusal — the same sentence of `formulas.mdx`,
     // and the gap the card measured (a bare `requiredWhen: 'amount > 1'` saved
     // with a 200). The per-option `visibleWhen` stays fenced. No entry-level

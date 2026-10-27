@@ -71,12 +71,12 @@ describe('AIModelConfigSchema', () => {
   });
 });
 
-describe('agent.tools retirement (ADR-0064) — tombstoned; tools move into skills', () => {
-  it('REJECTS a legacy inline tools array, with the fix in the message', () => {
-    // Tombstoned, not deleted: AgentSchema is `strictObject`, so a plain
-    // deletion would reject the key with a generic unknown-key error.
-    // `retiredKey()` is what makes the rejection carry the prescription —
-    // which is the payload, and what this assertion pins.
+describe('agent.tools retirement (ADR-0064) — aged out; tools move into skills', () => {
+  it('REFUSES a legacy inline tools array as an unknown key naming the upgrade guide', () => {
+    // The tombstone that carried the prescription was a 16.x retirement kit
+    // and left the shape at 18 (#25767, ADR-0087 D2 = A). AgentSchema is
+    // `strictObject`, so the key is still refused loudly — the unknown-key
+    // refusal names it and the guide the `skills` prescription now lives in.
     expect(() =>
       AgentSchema.parse({
         name: 'legacy',
@@ -85,7 +85,7 @@ describe('agent.tools retirement (ADR-0064) — tombstoned; tools move into skil
         instructions: 'x',
         tools: [{ type: 'action', name: 'create_ticket' }],
       }),
-    ).toThrow(/agent\.tools.*removed.*use `skills`/s);
+    ).toThrow(/`tools`[\s\S]*https:\/\/objectstack\.ai\/docs\/protocol-upgrade/);
   });
 
   it('parses cleanly once the capability moves into skills', () => {
@@ -203,15 +203,17 @@ describe('AgentSchema', () => {
       })).toThrow(/knowledge/);
     });
 
-    it('the rejection names where retrieval scoping actually lives', () => {
+    it('the refusal is the strict unknown-key one, naming the guide where the scoping prescription lives', () => {
+      // The `knowledge` tombstone aged out at 18 with its kit (#25767).
       let message = '';
       try {
         AgentSchema.parse({ name: 'a', label: 'A', instructions: 'x', knowledge: { sources: ['s'] } });
       } catch (e) {
         message = String((e as Error).message);
       }
-      expect(message).toMatch(/knowledge-service|source level/);
-      expect(message).toMatch(/audit close-out/);
+      expect(message).toMatch(/unrecognized_keys/);
+      expect(message).toMatch(/`knowledge`/);
+      expect(message).toContain('https://objectstack.ai/docs/protocol-upgrade');
     });
 
     it('should accept agent with skills (Agent→Skill→Tool architecture)', () => {

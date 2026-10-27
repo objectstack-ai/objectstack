@@ -207,9 +207,10 @@ export const ToolSchema = lazySchema(() => strictObject({
   // promised a capability gate on invocation that nothing enforced, and
   // `active: false` read as "withdrawn" while the tool kept reaching the LLM
   // set and `POST /ai/tools/:name/execute` kept running it. The `.strict()`
-  // parse rejects each with its prescription (TOOL_RETIRED_KEY_GUIDANCE), and
-  // the `tool-inert-authoring-keys-removed` conversion strips them from
-  // authored sources.
+  // parse rejects each with its prescription (TOOL_RETIRED_KEY_GUIDANCE); the
+  // `tool-inert-authoring-keys-removed` conversion that stripped them from
+  // authored sources was a ≤16.x kit and retired on #25767 — the prescription
+  // is the surviving route.
   /**
    * ADR-0010 §3.7 — Package-level protection envelope. Package
    * authors declare lock policy here, in a code package's source;

@@ -339,7 +339,12 @@ describe('objectui#10872 batch 10 — what the refusal leaves alone', () => {
   });
 
   it('some row members are the spec\'s own retirements (non-vacuity)', () => {
-    expect(RETIRED.map(([label]) => label)).toContain('page:header.icon');
+    // `page:header.breadcrumb`, retired at spec 17.x, is the row member that
+    // still carries a tombstone; `page:header.icon` (retired at 17.0.0) aged out
+    // of the shape one major on (objectstack#25767) and is an unknown key there
+    // now, so it is not a RETIRED row member any more.
+    expect(RETIRED.map(([label]) => label)).toContain('page:header.breadcrumb');
+    expect(RETIRED.map(([label]) => label)).not.toContain('page:header.icon');
   });
 
   it.each(RETIRED.filter(([label]) => label !== 'page:card.body'))(

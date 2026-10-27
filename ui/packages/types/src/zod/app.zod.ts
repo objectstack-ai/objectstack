@@ -39,7 +39,7 @@ import {
   EvaluatedExpressionSchema as SpecEvaluatedExpressionSchema,
 } from '@objectstack/spec/shared';
 import { BaseSchema, specFieldsExcept } from './base.zod.js';
-import { aliasKeyRefusal, retirementTombstone } from './tombstone.zod.js';
+import { agedOutSpecKeyRefusal, aliasKeyRefusal, retirementTombstone } from './tombstone.zod.js';
 import type { AppMenuItem, NavigationItemType } from '../app.js';
 import { stripImportedDefaults } from './imported-defaults.js';
 
@@ -749,6 +749,60 @@ export const AppComponentSchema = BaseSchema.extend(SpecAppFields.shape).extend(
   areas: z.array(NavigationAreaSchema).optional().describe('Navigation areas (business-domain partitions)'),
   contextSelectors: z.array(AppContextSelectorSchema).optional().describe('App-level scope dropdowns injected into nav items as {<id>} vars'),
   actions: retirementTombstone(APP_ACTIONS_REFUSAL),
+  // The eight `App` keys the spec retired at 17.0.0 (#4667 and the 2026-06
+  // liveness audit) and carried as `retiredKey()` tombstones through 18.1 —
+  // flowing into this twin by reference, so an authored value was refused
+  // HERE at the key's own path. At spec 18.2 the tombstones aged out of
+  // `AppSchema` one major on (objectstack#25767, ADR-0087): the spec refuses
+  // each as an unknown key naming the upgrade guide, and `SpecAppFields` no
+  // longer carries the name — so without these arms `BaseSchema`'s
+  // `.passthrough()` would turn a two-major refusal into a silent KEEP. Each
+  // is the console's own refusal now (`agedOutSpecKeyRefusal`, the reasoning
+  // on its docblock); the TS twins are `?: never` in `../app.ts`, and the pins
+  // are `../__tests__/page-app-dashboard-spec-parity.test.ts` and
+  // `../__tests__/twins-spec-by-reference-9736.test.ts`.
+  version: agedOutSpecKeyRefusal(
+    'app', 'App.version', 'version', '17.0.0',
+    'An app is versioned by its owning package: use `manifest.version`. Delete the key.',
+  ),
+  homePageId: agedOutSpecKeyRefusal(
+    'app', 'App.homePageId', 'homePageId', '17.0.0',
+    'The landing page is the first reachable `navigation` item (by `order`), and the root landing follows '
+    + '`isDefault`; an id cross-reference with no referential integrity fell back to the first item in silence. '
+    + 'Delete the key.',
+  ),
+  objects: agedOutSpecKeyRefusal(
+    'app', 'App.objects', 'objects', '17.0.0',
+    'Objects belong to the stack (`defineStack({ objects })`); an app reaches them through its navigation items. '
+    + 'Delete the key.',
+  ),
+  apis: agedOutSpecKeyRefusal(
+    'app', 'App.apis', 'apis', '17.0.0',
+    'Declare the endpoint on the stack instead, `defineStack({ apis })` — a surface that EXECUTES under its own '
+    + 'publish gates (ADR-0121): read the `declarative-apis-endpoints-live` entry of the protocol upgrade guide '
+    + 'before moving it, since the move is a security review, not a rename. Delete the key here.',
+  ),
+  sharing: agedOutSpecKeyRefusal(
+    'app', 'App.sharing', 'sharing', '17.0.0',
+    'Public access is granted per form view (`FormView.sharing`, the public-data-collection surface); no '
+    + 'public-app route ever read an app-level block. Delete the key.',
+  ),
+  embed: agedOutSpecKeyRefusal(
+    'app', 'App.embed', 'embed', '17.0.0',
+    'Embedding is a per-form-view surface (`FormView.sharing`), not an app-level switch; no iframe route ever read '
+    + 'it. Delete the key.',
+  ),
+  mobileNavigation: agedOutSpecKeyRefusal(
+    'app', 'App.mobileNavigation', 'mobileNavigation', '17.0.0',
+    'No renderer, `packages/mobile` included, ever read it. The console\'s mobile navigation mode is the '
+    + '`mobileNavMode` prop of `AppSchemaRenderer` or the same key of an `app-schema-renderer` node, never a key of '
+    + 'this document. Delete the key.',
+  ),
+  aria: agedOutSpecKeyRefusal(
+    'app', 'App.aria', 'aria', '17.0.0',
+    'No renderer read app-level ARIA attributes. Declare `aria` on the page component that renders the DOM node '
+    + '(`page.components[].aria`; `page.aria` and the list view\'s `aria` are live too). Delete the key.',
+  ),
 });
 
 /**

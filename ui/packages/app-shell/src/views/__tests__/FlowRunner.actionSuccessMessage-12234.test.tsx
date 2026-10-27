@@ -22,9 +22,11 @@
  *    `ScreenFlowState.actionSuccessMessage`, it is the terminal toast — and it
  *    wins over the flow's own `successMessage`, because it is what the same
  *    click shows when the run does not pause.
- * 2. **Only the TERMINAL toast moves.** A multi-step run still toasts the
- *    next-step notice between screens; a run that ends `refused` or fails after
- *    the pause still shows no success toast at all.
+ * 2. **Only the TERMINAL toast moves.** A multi-step run of flat screens shows
+ *    nothing between them (objectstack#26578: a flat step saved no record, so
+ *    it has no "Saved" to say) and closes with the action message alone; a run
+ *    that ends `refused` or fails after the pause still shows no success toast
+ *    at all.
  * 3. **The controls keep today's toast.** No action copy (absent, blank, or an
  *    `I18nLabel` map no localizer resolved) ⇒ the flow's own message, else the
  *    catalog sentence — asserted in zh with the reported wording, so the
@@ -106,7 +108,7 @@ describe("objectui#12234 — the invoking action's successMessage closes the run
     expect(toastSuccess.mock.calls).toEqual([[ACTION_MESSAGE]]);
   });
 
-  it('a multi-step run keeps the next-step notice between screens and closes with the action message', async () => {
+  it('a multi-step run shows nothing between flat screens and closes with the action message', async () => {
     const { onComplete } = mount(stateWith(ACTION_MESSAGE), [
       jsonResponse({
         success: true,
@@ -119,7 +121,7 @@ describe("objectui#12234 — the invoking action's successMessage closes the run
     await submit();
 
     await waitFor(() => expect(onComplete).toHaveBeenCalledTimes(1));
-    expect(toastSuccess.mock.calls).toEqual([['已保存 — 下一步'], [ACTION_MESSAGE]]);
+    expect(toastSuccess.mock.calls).toEqual([[ACTION_MESSAGE]]);
   });
 
   it('a run that ends refused after the pause still shows no success toast', async () => {

@@ -256,7 +256,7 @@ for (const posture of ['group', 'isolated'] as const) {
             expect({ nameRead, gate: statusOf(response) === 200, rung }).toEqual({
                 nameRead: true, gate: true, rung: true,
             });
-            expect(h.toggleFlow).toHaveBeenCalledWith(FLOW, false);
+            expect(h.toggleFlow).toHaveBeenCalledWith(FLOW, false, expect.anything());
         });
     });
 }

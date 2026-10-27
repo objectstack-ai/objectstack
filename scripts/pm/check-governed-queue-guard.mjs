@@ -234,6 +234,13 @@
  * `head_ref`'s PR number is used as a fallback only when the group holds
  * exactly one commit, where it is unambiguous.
  *
+ * The `pull_request` leg is NOT decomposed: its payload names the one pull
+ * request being judged, so every governed path is attributed to that number
+ * (a subject naming an issue would read the issue's reviews), and the paths
+ * are the net diff against the merge-base (a merge of `origin/main` on the
+ * branch would otherwise forecast every path `main` already landed). See
+ * `enumerateRows`; the `merge_group` reading above is unchanged by it.
+ *
  * ## The generated-artifact exception is honoured, and that is not optional
  *
  * A generator-owned file sitting inside a governed surface makes routine
@@ -606,9 +613,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the approval predicate': 3,
   '⭐ The fail-open direction a naive `.some(r => r.state === \'APPROVED\')`': 5,
   'the 2026-09-04 unpinned predicate (the queue leg\'s)': 12,
-  'decomposition, and the multi-PR group trap': 6,
+  'decomposition, and the multi-PR group trap': 13,
   'the verdict table, both events': 10,
-  'the pull_request leg is an EARLY WARNING and never reddens': 5,
+  'the pull_request leg is an EARLY WARNING and never reddens': 6,
   'the replay fixtures: the three incidents this guard descends from': 11,
   '⭐ the ordering guarantee, measured with a spy that THROWS': 7,
   'the words a reader acts on (requirement (e))': 26,
@@ -2376,13 +2383,29 @@ function hasRev(root, rev) {
 }
 
 /**
- * The first-parent commits between `baseSha` and `headSha`, each with the
- * paths it changed and the pull request its subject names. One row per PR
- * landing in a merge group; see the header on why the group is decomposed
- * rather than keyed to `head_ref`.
+ * The rows a diff is judged on, read two ways — one per event, because the two
+ * events ask different questions of the same range.
+ *
+ * `merge_group` (the default): the first-parent commits between `baseSha` and
+ * `headSha`, each with the paths it changed and the pull request its subject
+ * names. One row per PR landing in a merge group; see the header on why the
+ * group is decomposed rather than keyed to `head_ref`.
+ *
+ * `pull_request`: ONE row — the net diff `baseSha..headSha` (the caller hands
+ * in the merge-base), attributed to the payload's own pull request number,
+ * which the event names outright. A subject is no evidence here: a commit
+ * subject naming an ISSUE (`fix: … (#<issue>)`) would read that issue's
+ * reviews, and a branch that merged `origin/main` would carry, on its merge
+ * commit's first-parent diff, every path `main` already landed. The net diff
+ * against the merge-base holds only what the pull request itself changes.
+ * `commits` keeps the range's first-parent commit count for the header line.
+ *
+ * `runGit(args)` is the seam the self-test drives; production passes none and
+ * reads the checkout at `root`.
  */
-export function enumerateRows(root, baseSha, headSha, fallbackPull = null) {
-  const log = git(root, ['log', '--first-parent', '--format=%H%x09%s', `${baseSha}..${headSha}`]);
+export function enumerateRows(root, baseSha, headSha, fallbackPull = null, { event = EVENT_MERGE_GROUP, runGit = null } = {}) {
+  const readGit = runGit ?? ((args) => git(root, args));
+  const log = readGit(['log', '--first-parent', '--format=%H%x09%s', `${baseSha}..${headSha}`]);
   const commits = log
     .split('\n')
     .filter((l) => l !== '')
@@ -2390,16 +2413,40 @@ export function enumerateRows(root, baseSha, headSha, fallbackPull = null) {
       const [sha, ...rest] = l.split('\t');
       return { sha, subject: rest.join('\t') };
     });
+  if (event === EVENT_PULL_REQUEST) {
+    if (commits.length === 0) return [];
+    return [
+      {
+        sha: headSha,
+        subject: commits[0].subject,
+        pr: fallbackPull,
+        commits: commits.length,
+        paths: readGit(['diff-tree', '-r', '--no-commit-id', '--no-renames', '--name-only', baseSha, headSha])
+          .split('\n')
+          .filter((p) => p !== ''),
+      },
+    ];
+  }
   return commits.map((commit) => ({
     ...commit,
     // The fallback is only unambiguous when the range holds exactly one
     // commit; in a multi-PR group `head_ref` names the LAST PR, and applying
     // it to an earlier commit attributes a governed diff to the wrong PR.
     pr: pullNumberFromSubject(commit.subject) ?? (commits.length === 1 ? fallbackPull : null),
-    paths: git(root, ['diff-tree', '-r', '--no-commit-id', '--no-renames', '--name-only', '-m', '--first-parent', commit.sha])
+    paths: readGit(['diff-tree', '-r', '--no-commit-id', '--no-renames', '--name-only', '-m', '--first-parent', commit.sha])
       .split('\n')
       .filter((p) => p !== ''),
   }));
+}
+
+/**
+ * How many commits the read range held — the header line's count. A
+ * `pull_request` net row carries its range's count; a `merge_group` reading
+ * is one row per commit, so the row count IS the commit count there.
+ */
+export function commitsInRange(rows) {
+  const list = Array.isArray(rows) ? rows : [];
+  return list.reduce((n, row) => n + (Number.isInteger(row?.commits) ? row.commits : 1), 0);
 }
 
 /**
@@ -2744,7 +2791,7 @@ function readEventDiff(env) {
 
   try {
     const mergeBase = git(repoRoot, ['merge-base', context.baseSha, context.headSha]).trim();
-    const rows = enumerateRows(repoRoot, mergeBase, context.headSha, context.namedPull);
+    const rows = enumerateRows(repoRoot, mergeBase, context.headSha, context.namedPull, { event: context.event });
     return { ok: true, context, where, mergeBase, rows };
   } catch (error) {
     return { ok: false, message: `⛔ ${CHECK_CONTEXT_NAME}: could not read the diff (${String(error?.message ?? error).split('\n')[0]}).` };
@@ -2775,7 +2822,7 @@ export function toolchainNeededAnswer({ eventName, read }) {
     const hits = [...new Set(read.rows.flatMap((r) => r.paths).filter((p) => generatedExceptionFor(p) !== null))];
     return { needed: true, why: `the diff touches ${hits.length} register path(s) the lift recomputes: ${hits.join(', ')}` };
   }
-  return { needed: false, why: `${read.rows.length} commit(s) in range touch no register path the lift recomputes` };
+  return { needed: false, why: `${commitsInRange(read.rows)} commit(s) in range touch no register path the lift recomputes` };
 }
 
 async function main() {
@@ -2840,7 +2887,7 @@ async function main() {
   });
   const sizeBlock = renderSizeVerdict(size);
   const report = [
-    `${context.label} — ${rows.length} commit(s) in range`,
+    `${context.label} — ${commitsInRange(read.rows)} commit(s) in range`,
     ...notes,
     renderGuardVerdict(verdict),
     ...(sizeBlock === '' ? [] : ['', sizeBlock]),
@@ -3176,6 +3223,77 @@ export async function selfTest() {
   const unattributed = decomposeGovernedWork([{ sha: 'c'.repeat(40), subject: 'chore: direct work', pr: null, paths: ['CLAUDE.md'] }], REPO);
   assert('a-governed-commit-naming-no-pr-is-UNATTRIBUTED-never-dropped', unattributed.unattributed.length === 1 && unattributed.governed.length === 0);
   assert('an-UNGOVERNED-commit-naming-no-pr-is-simply-not-our-business', decomposeGovernedWork([{ sha: 'd'.repeat(40), subject: 'x', pr: null, paths: ['README.md'] }], REPO).unattributed.length === 0);
+  // The enumeration itself, through its git seam. Two branch shapes: one
+  // commit whose subject names an ISSUE (the PR #25965 shape), and a branch
+  // that merged `origin/main` between its own two commits (the PR #26311
+  // shape). The fake answers only the three reads `enumerateRows` makes, and
+  // records them, so the pull_request leg is measured to read the NET diff.
+  const EB = 'b'.repeat(40);
+  const enumGit = (log, perCommit, net) => {
+    const reads = [];
+    const fake = (args) => {
+      reads.push(args.join(' '));
+      if (args[0] === 'log') return log.map(([sha, subject]) => `${sha}\t${subject}`).join('\n') + '\n';
+      if (args[0] === 'diff-tree' && args.includes('--first-parent')) return (perCommit[args[args.length - 1]] ?? []).join('\n') + '\n';
+      if (args[0] === 'diff-tree') return net.join('\n') + '\n';
+      throw new Error(`unexpected git read: ${args.join(' ')}`);
+    };
+    return { fake, reads };
+  };
+  const ISSUE_HEAD = '1'.repeat(40);
+  const issueBranch = () => enumGit([[ISSUE_HEAD, 'fix(pm): the main-line script reads the lock slot (#25770)']], { [ISSUE_HEAD]: ['AGENTS.md'] }, ['AGENTS.md']);
+  const MERGED_HEAD = '2'.repeat(40);
+  const MERGE_SHA = '3'.repeat(40);
+  const FIRST = '4'.repeat(40);
+  const mergedBranch = () =>
+    enumGit(
+      [[MERGED_HEAD, 'ci(governed-surface-guard): the workflow commit'], [MERGE_SHA, "Merge branch 'main' into claude/issue-26201-x"], [FIRST, 'ci(governed-surface-guard): pin the self-test step']],
+      { [MERGED_HEAD]: ['.github/workflows/governed-surface-guard.yml'], [MERGE_SHA]: ['.github/workflows/lint.yml', 'AGENTS.md', 'packages/core/src/x.ts'], [FIRST]: ['.github/workflows/governed-surface-guard.yml'] },
+      ['.github/workflows/governed-surface-guard.yml'],
+    );
+  {
+    const g = issueBranch();
+    const prRows = enumerateRows('/w', EB, ISSUE_HEAD, 25965, { event: EVENT_PULL_REQUEST, runGit: g.fake });
+    const prWork = decomposeGovernedWork(prRows, REPO);
+    assert(
+      '⭐ pull_request-leg: a-subject-naming-an-ISSUE-is-attributed-to-the-PAYLOAD-pr-never-the-issue',
+      prRows.length === 1 && prRows[0].pr === 25965 && prWork.governed.map((e) => e.pr).join() === '25965' && prWork.unattributed.length === 0,
+      JSON.stringify(prRows),
+    );
+    const qg = issueBranch();
+    const queueRows = enumerateRows('/w', EB, ISSUE_HEAD, 26000, { event: EVENT_MERGE_GROUP, runGit: qg.fake });
+    assert(
+      '⛔ CONTROL merge_group-leg: the-same-subject-still-attributes-by-its-trailing-number-unchanged',
+      queueRows.length === 1 && queueRows[0].pr === 25770 && queueRows[0].sha === ISSUE_HEAD,
+      JSON.stringify(queueRows),
+    );
+  }
+  {
+    const g = mergedBranch();
+    const prRows = enumerateRows('/w', EB, MERGED_HEAD, 26311, { event: EVENT_PULL_REQUEST, runGit: g.fake });
+    const prWork = decomposeGovernedWork(prRows, REPO);
+    assert(
+      '⭐ pull_request-leg: a-branch-that-merged-origin-main-carries-ONLY-its-net-rows-against-the-merge-base',
+      prRows.length === 1 && prRows[0].paths.join() === '.github/workflows/governed-surface-guard.yml' &&
+        prWork.governed.length === 1 && prWork.governed[0].pr === 26311 && prWork.governed[0].paths.join() === '.github/workflows/governed-surface-guard.yml' &&
+        prWork.unattributed.length === 0,
+      JSON.stringify(prRows),
+    );
+    assert(
+      'and-it-reads-the-net-diff-base-to-head-never-a-per-commit-first-parent-diff',
+      g.reads.some((r) => r === `diff-tree -r --no-commit-id --no-renames --name-only ${EB} ${MERGED_HEAD}`) && !g.reads.some((r) => r.includes('--first-parent') && r.startsWith('diff-tree')),
+      g.reads.join(' | '),
+    );
+    assert('and-the-header-still-counts-the-ranges-three-commits', commitsInRange(prRows) === 3, String(commitsInRange(prRows)));
+    const qg = mergedBranch();
+    const queueRows = enumerateRows('/w', EB, MERGED_HEAD, 26311, { event: EVENT_MERGE_GROUP, runGit: qg.fake });
+    assert(
+      '⛔ CONTROL merge_group-leg: the-same-range-is-still-one-row-per-first-parent-commit-unattributed-without-a-subject-number',
+      queueRows.length === 3 && queueRows.every((r) => r.pr === null) && queueRows[1].paths.includes('AGENTS.md') && commitsInRange(queueRows) === 3,
+      JSON.stringify(queueRows.map((r) => [r.sha.slice(0, 1), r.pr, r.paths.length])),
+    );
+    assert('and-an-empty-pull_request-range-is-no-rows', enumerateRows('/w', EB, EB, 1, { event: EVENT_PULL_REQUEST, runGit: enumGit([], {}, []).fake }).length === 0);
+  }
 
   // ── the verdict table, both events ────────────────────────────────────────
   battery('the verdict table, both events');
@@ -3230,6 +3348,19 @@ export async function selfTest() {
   );
   const warnedHText = renderGuardVerdict(warnedV);
   assert('and-names-Tier-H-and-the-approval-it-waits-for-with-no-Tier-S-block', /landing tier: H/.test(warnedHText) && /authorized APPROVED review/.test(warnedHText) && !/Tier S \(/.test(warnedHText), warnedHText);
+  // The PR #25965 shape end to end on this leg: the warning names the PAYLOAD's
+  // pull request, whose reviews it reads, and never the issue the subject names.
+  {
+    const ISSUE_ONLY = '5'.repeat(40);
+    const fake = (args) => {
+      if (args[0] === 'log') return `${ISSUE_ONLY}\tfix(pm): the main-line script reads the lock slot (#25770)\n`;
+      if (args[0] === 'diff-tree') return 'AGENTS.md\n';
+      throw new Error(args.join(' '));
+    };
+    const issueRows = enumerateRows('/w', 'b'.repeat(40), ISSUE_ONLY, 25965, { event: EVENT_PULL_REQUEST, runGit: fake });
+    const issueText = renderGuardVerdict(run('pull_request', issueRows, new Map([[25965, approvalVerdict([])]])));
+    assert('⭐ the-early-warning-names-the-payloads-pull-request-and-never-the-issue-its-subject-names', /#25965 — governed/.test(issueText) && !/#25770/.test(issueText), issueText);
+  }
 
   // ── the replay fixtures: the three incidents this guard descends from ─────
   battery('the replay fixtures: the three incidents this guard descends from');

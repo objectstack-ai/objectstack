@@ -49,12 +49,13 @@ function unknownKeyMessage(schema: Parseable, value: unknown): string | undefine
   return result.error!.issues.find((i) => i.code === 'unrecognized_keys')?.message;
 }
 
-/** Every key the contract still declares, tombstones included. */
-const SCRIPT_SHAPE_KEYS = [
-  'actionType', 'function', 'inputs', 'outputVariable',
-  'recipients', 'script', 'template', 'variables',
-];
-/** The keys #4343 retired — each must reject with its own prescription. */
+/** Every key the contract declares. */
+const SCRIPT_SHAPE_KEYS = ['function', 'inputs', 'outputVariable'];
+/**
+ * The keys #4343 retired. Their tombstones were a 16.x retirement kit and aged
+ * out of the shape at 18 (#25767, ADR-0087 D2 = A): each is refused as a strict
+ * unknown key naming the upgrade guide, where the per-branch prescriptions now live.
+ */
 const SCRIPT_RETIRED: ReadonlyArray<[string, unknown]> = [
   ['actionType', 'email'],
   ['template', 'task_done'],
@@ -90,16 +91,15 @@ describe('ScriptConfigSchema (converged to a function call)', () => {
     expect(ScriptConfigSchema.safeParse({ function: '' }).success).toBe(false);
   });
 
-  it.each(SCRIPT_RETIRED)('rejects the retired `%s` with its own prescription', (key, value) => {
+  it.each(SCRIPT_RETIRED)('refuses the aged-out `%s` as an unknown key naming the upgrade guide', (key, value) => {
     const result = ScriptConfigSchema.safeParse({ function: 'score_lead', [key]: value });
     expect(result.success).toBe(false);
-    const message = result.error!.issues.map((i) => i.message).join('\n');
-    // The tombstone's payload is the prescription, not "unrecognized key" —
-    // this string IS the upgrade doc for whoever hits it (retired-key.ts).
-    expect(message).toContain(`\`script.config.${key}\``);
-    expect(message).toMatch(/was removed in @objectstack\/spec 17/);
-    expect(message).toMatch(/os migrate meta --from 16/);
-    expect(result.error!.issues[0]!.path).toEqual([key]);
+    const issue = result.error!.issues[0] as { code: string; keys?: string[]; path: PropertyKey[]; message: string };
+    expect(issue.code).toBe('unrecognized_keys');
+    expect(issue.keys).toEqual([key]);
+    expect(issue.message).toContain(`\`${key}\``);
+    expect(issue.message).toContain('https://objectstack.ai/docs/protocol-upgrade');
+    expect(issue.message).not.toMatch(/os migrate meta --from 16/);
   });
 
   it('names every violated key at once, so one refusal lists the whole job', () => {
@@ -107,18 +107,9 @@ describe('ScriptConfigSchema (converged to a function call)', () => {
       function: 'score_lead', actionType: 'email', template: 't', recipients: ['a'],
     });
     expect(result.success).toBe(false);
-    expect(result.error!.issues.map((i) => i.path[0]).sort())
-      .toEqual(['actionType', 'recipients', 'template']);
-  });
-
-  it('prescribes a different mechanism per branch — the retirement is not one rename', () => {
-    const messageFor = (key: string, value: unknown) =>
-      ScriptConfigSchema.safeParse({ function: 'f', [key]: value }).error!.issues[0]!.message;
-    // Mail has a real delivery path; Slack does not go through it (no slack
-    // channel exists — that is a connector), and an inline body is a function.
-    expect(messageFor('actionType', 'email')).toMatch(/`notify` node/);
-    expect(messageFor('actionType', 'email')).toMatch(/connector_action/);
-    expect(messageFor('script', 'return 1;')).toMatch(/defineStack\(\{ functions \}\)/);
+    const issues = result.error!.issues as Array<{ code: string; keys?: string[] }>;
+    expect(issues).toHaveLength(1);
+    expect([...(issues[0]!.keys ?? [])].sort()).toEqual(['actionType', 'recipients', 'template']);
   });
 });
 
@@ -438,14 +429,14 @@ describe('DecisionConfigSchema — `mode` beside a non-empty `conditions` list i
 });
 
 describe('structural contract — what the downstream walkers require', () => {
-  it('keeps the tombstoned keys IN the shape, so the ratchet can see them retired', () => {
-    // A `retiredKey()` is still a property. Deleting it outright would read as
-    // "the key vanished" to the authorable-surface gate, which is the hard
-    // failure the tombstone route exists to avoid.
+  it('the aged-out keys are OUT of the shape — the ratchet saw them retired for one major, then dated their exit', () => {
+    // A `retiredKey()` stayed a property for the major after its retirement so
+    // the authorable-surface gate could see it retired rather than vanished;
+    // at 18 the gate dated each line's exit by the 17.0.0 release tag (#25767)
+    // and the keys left the shape. None may come back as a declared key.
     expect(Object.keys(ScriptConfigSchema.shape).sort()).toEqual(SCRIPT_SHAPE_KEYS);
     for (const [key] of SCRIPT_RETIRED) {
-      expect(ScriptConfigSchema.shape[key as keyof typeof ScriptConfigSchema.shape].description)
-        .toMatch(/^\[REMOVED\]/);
+      expect(ScriptConfigSchema.shape).not.toHaveProperty(key);
     }
   });
 

@@ -67,7 +67,8 @@ export const RENAMED_DEFS: Readonly<Record<string, string>> = {
   // longer emits, which is precisely the decay guard that made this table
   // trustworthy. The removal is carried by the real retirement kit instead —
   // a `retiredKey()` tombstone on `ConnectorSchema.rateLimitConfig`, the
-  // `connector-rate-limit-config-removed` D2 conversion, and the deliberate
+  // `connector-rate-limit-config-removed` D2 conversion (a ≤16.x kit, retired
+  // on #25767; the tombstone stays because its container strips), and the deliberate
   // manifest deletion of both `integration/ConnectorRateLimitConfig` and
   // `integration/RateLimitStrategy`. A retirement must never ride this table
   // (same ruling as `automation/ConflictResolution` below).

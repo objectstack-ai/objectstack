@@ -462,10 +462,25 @@ export function refuseUngrantedActivationAuthoring(
  * bare system context, which the store falls back to, names nobody.
  *
  * Shared by every door that writes a `sys_metadata_activation` row for a
- * caller, so the doors cannot disagree about who a row names.
+ * caller, so the doors cannot disagree about who a row names. The flow door is
+ * the exception that proves it: its write happens behind
+ * `IAutomationService.toggleFlow`, so it hands over {@link activationCaller}
+ * and the automation service builds the context.
  */
 export function activationWriteContext(context: HttpProtocolContext): MetadataActivationWriteContext {
     const ec: unknown = context?.executionContext;
     const caller = ec && typeof ec === 'object' ? (ec as Record<string, unknown>) : {};
     return { ...caller, isSystem: true };
+}
+
+/**
+ * [#26474] Who an activation door's caller is, in the shape
+ * `IAutomationService.toggleFlow`'s `caller` declares: the signed-in user's id
+ * and nothing else. No positions, permissions or tenant: the gates above have
+ * already judged the caller, and the channel is attribution only. A context
+ * with no user yields `{}`, an unattributed write.
+ */
+export function activationCaller(context: HttpProtocolContext): { userId?: string } {
+    const userId = (context?.executionContext as { userId?: unknown } | undefined)?.userId;
+    return typeof userId === 'string' && userId !== '' ? { userId } : {};
 }

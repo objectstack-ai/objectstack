@@ -285,7 +285,7 @@ import type * as M194 from './automation/assignment-rule.zod.js';
 import type * as M195 from './security/queue.zod.js';
 
 // ---------------------------------------------------------------------------
-// 795 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 796 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -1452,6 +1452,9 @@ export type Iso_system_translation__LocaleSchema = Assert<Eq< z.input< typeof M1
 export type Iso_system_translation__ObjectTranslationDataSchema = Assert<Eq< z.input< typeof M152.ObjectTranslationDataSchema >, z.infer< typeof M152.ObjectTranslationDataSchema > >>;
 export type Iso_system_translation__PlatformTranslationBundleSchema = Assert<Eq< z.input< typeof M152.PlatformTranslationBundleSchema >, z.infer< typeof M152.PlatformTranslationBundleSchema > >>;
 export type Iso_system_translation__PlatformTranslationDataSchema = Assert<Eq< z.input< typeof M152.PlatformTranslationDataSchema >, z.infer< typeof M152.PlatformTranslationDataSchema > >>;
+// #25785: the served face is the platform face less one `.optional()` group, so its
+// two states coincide as the platform face's do.
+export type Iso_system_translation__ServedTranslationDataSchema = Assert<Eq< z.input< typeof M152.ServedTranslationDataSchema >, z.infer< typeof M152.ServedTranslationDataSchema > >>;
 export type Iso_system_translation__TranslationBundleSchema = Assert<Eq< z.input< typeof M152.TranslationBundleSchema >, z.infer< typeof M152.TranslationBundleSchema > >>;
 export type Iso_system_translation__TranslationConfigSchema = Assert<Eq< z.input< typeof M152.TranslationConfigSchema >, z.infer< typeof M152.TranslationConfigSchema > >>;
 export type Iso_system_translation__TranslationCoverageResultSchema = Assert<Eq< z.input< typeof M152.TranslationCoverageResultSchema >, z.infer< typeof M152.TranslationCoverageResultSchema > >>;
@@ -1727,7 +1730,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 795 isomorphic pins', () => {
+  it('still declares all 796 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2629,14 +2632,22 @@ describe('ADR-0122 type-alias convention', () => {
     // string with a pattern, so it is pinned here
     // (Iso_data_seedFile__SeedFilePathSchema) rather than given a `…Parsed`
     // synonym. +1 added.
-    // 791 -> 795 is ADR-0142 phase 2 (#25769): the ownership queue's
+    //
+    // 791 -> 792 is #25785: `ServedTranslationDataSchema`
+    // (`system/translation.zod.ts`, module slot M152), the served face of the
+    // translation document — the platform face less the server-resolved
+    // `metadataForms` group, so it gains no default or transform and is pinned
+    // here (Iso_system_translation__ServedTranslationDataSchema) beside its
+    // platform sibling rather than given a `…Parsed` synonym. +1 added.
+    //
+    // 792 -> 796 is ADR-0142 phase 2 (#25769): the ownership queue's
     // `QueueMemberType` enum and `DeclaredQueueMemberSchema`, and the assignment
     // rule's `AssignmentStrategy` enum and `AssignmentTargetSchema`, pinned here
     // (Iso_security_queue__QueueMemberType, Iso_security_queue__DeclaredQueueMemberSchema,
     // Iso_automation_assignmentRule__AssignmentStrategy,
     // Iso_automation_assignmentRule__AssignmentTargetSchema). The rule's entry
     // schema has two shapes and carries `AssignmentRuleEntryParsed` instead. +4 added.
-    expect(pins).toHaveLength(795);
+    expect(pins).toHaveLength(796);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either

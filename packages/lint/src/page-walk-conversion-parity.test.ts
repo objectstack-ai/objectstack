@@ -156,16 +156,19 @@ describe('#6775 — walkPageComponents and the conversion walk reach the same co
     ]);
   });
 
-  it('a conversion rewrites the probe at every one of them, spelling the same paths — and at the retired `body` besides', () => {
+  it('a conversion rewrites the probe at every one of them, spelling the same paths — and nowhere else', () => {
     // Order-insensitive: the walks are free to visit in different orders, but
-    // the conversion walker may not miss a component lint judges. What it
-    // reaches BEYOND lint is exactly the retired spelling's probe.
+    // the conversion walker may not miss a component lint judges. Until #25767
+    // it reached ONE position beyond lint — the retired `body` spelling of
+    // `page:card` — because the slot list carried that entry as retired for the
+    // stored-row conversion that moved it. That kit was a ≤16.x retirement and
+    // left the list with its conversion, so today the two walks agree exactly;
+    // the fixture keeps the `body` probe so the next retired slot entry shows
+    // up here by path rather than silently.
     const walked = new Set(walkedProbePaths());
     const converted = new Set(convertedProbePaths());
     expect([...walked].filter((p) => !converted.has(p))).toEqual([]);
-    expect([...converted].filter((p) => !walked.has(p))).toEqual([
-      'pages[0].regions[0].components[3].properties.body[0]',
-    ]);
+    expect([...converted].filter((p) => !walked.has(p))).toEqual([]);
   });
 
   it('source-authored pages are the one deliberate difference', () => {
@@ -188,7 +191,7 @@ describe('#6775 — walkPageComponents and the conversion walk reach the same co
 });
 
 describe('#20940 — the three page walks read one slot list and reach the same positions', () => {
-  it('lint, the exported walk and the conversion walker reach the same probes on one page — the retired spelling aside', () => {
+  it('lint, the exported walk and the conversion walker reach the same probes on one page', () => {
     const { lint, exportedWalk, conversion } = reachedBy();
     // Guards the fixture: a walk reaching nothing would agree with another
     // reaching nothing.
@@ -198,15 +201,17 @@ describe('#20940 — the three page walks read one slot list and reach the same 
     // The two authoring walks: identical, `card footer` and `two deep`
     // (under the footer) included — the pair #20940 found apart.
     expect([...exportedWalk].sort()).toEqual([...lint].sort());
-    // The conversion walker: the same, plus exactly the probe under a
-    // position the list marks retired.
-    expect([...conversion].filter((title) => !lint.has(title))).toEqual(['card body']);
+    // The conversion walker: the same. (Until #25767 it also reached `card
+    // body`, the one position the list marked retired; that entry left with
+    // its ≤16.x conversion, so the three sets are now equal.)
+    expect([...conversion].filter((title) => !lint.has(title))).toEqual([]);
     expect([...lint].filter((title) => !conversion.has(title))).toEqual([]);
   });
 
   it('the difference IS the list\'s retired entries — no walk keeps a position of its own', () => {
     const positions = pageComponentSlotPositions();
-    expect(positions.filter((p) => p.retired).map((p) => p.key)).toEqual(['body']);
+    // No position is marked retired today: `body` was, and left on #25767.
+    expect(positions.filter((p) => p.retired).map((p) => p.key)).toEqual([]);
     // Every authorable position has a probe on the fixture page, so the
     // equality above covers the whole list, not a sample of it.
     const authorable = positions.filter((p) => !p.retired)

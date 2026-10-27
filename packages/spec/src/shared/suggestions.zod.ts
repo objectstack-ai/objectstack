@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { z } from 'zod';
+import { RETIRED_KEY_UPGRADE_GUIDE_SENTENCE } from './protocol-upgrade-guide';
 
 import { aliasProbe } from './alias-probe';
 import {
@@ -427,6 +428,15 @@ export function strictUnknownKeyError(options: StrictUnknownKeyErrorOptions): z.
     let message = `Unrecognized key(s) on ${surface}: ${keys.map((k) => `\`${k}\``).join(', ')}.`;
     if (renames.length) message += ` Did you mean ${renames.join(', ')}?`;
     if (prescriptions.length) message += `\n${prescriptions.map((p) => `  • ${p}`).join('\n')}`;
-    return `${message} ${history}`;
+    // The last fix channel, still ahead of `history`: where an aged-out
+    // retirement's prescription now lives (ADR-0087 amendment, #25767). A key
+    // whose tombstone left the shape one major after it retired arrives here as
+    // a plain unknown key — nothing in this message can tell it from a typo —
+    // and the generated upgrade guide is the one place its prescription is
+    // still written down. It is a pointer, not a prescription, so it is one
+    // static sentence on every refusal rather than a per-key bullet, and it
+    // sits with the fixes rather than behind the history sentence the #5955
+    // ruling moved last.
+    return `${message} ${RETIRED_KEY_UPGRADE_GUIDE_SENTENCE} ${history}`;
   };
 }

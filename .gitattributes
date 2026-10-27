@@ -95,17 +95,25 @@
 # the three hottest artifacts; each gate sums its shards when it reads them.
 #
 # The elevation census page (`content/docs/permissions/system-context.mdx`) was
-# routed here from #13646 to #22927 and is not any more: nothing on it is
-# generated. It joined as a `file:line` anchor table whose correct merged values
-# were on NEITHER side of a conflict, became a MIXED row when #14064 measured that
-# a whole-side deferral dropped its hand-written prose (`mixed: 'line-anchors'`),
-# lost its line numbers to `path#symbol` anchors at #15921, and lost its last
-# generated half — the census totals — to #22927's ruling. It text-merges like
-# its prose neighbours now. ⚠️ What still catches a merge that leaves it wrong is
-# `scripts/check-system-context-census.mjs`, which re-derives the census from the
-# tree on every PR in the required `Lint & Repo Gates` job: a read no row anchors,
-# or an anchor that no longer resolves. The `mixed` field and its comparator stay
-# for the next mixed artifact (scripts/regen-artifacts.mjs, scripts/git-merge-regen.mjs).
+# routed here from #13646 to #22927 and is not any more. It joined as a `file:line`
+# anchor table whose correct merged values were on NEITHER side of a conflict,
+# became a MIXED row when #14064 measured that a whole-side deferral dropped its
+# hand-written prose (`mixed: 'line-anchors'`), lost its line numbers to
+# `path#symbol` anchors at #15921, and lost its census totals to #22927's ruling,
+# which took this row and `gen:system-context-census` with them. #26442 gave it a
+# generated half again: the site register between its BEGIN/END GENERATED
+# markers, rebuilt by `node scripts/check-system-context-census.mjs --write`. It
+# stays unrouted, as `tenant-audit-census.mdx` beside it (a generated region that
+# `node scripts/tenant-audit-census.mjs --write` rebuilds) always has: both are
+# MIXED pages that git text-merges, so neither side's prose is dropped, and the
+# register carries one line per symbol and no total, so two read-adding branches
+# merge apart. ⚠️ What catches a merge that leaves a region wrong is that page's
+# gate, which holds the region equal to its `--write` output on every PR in the
+# required `Lint & Repo Gates` job (`scripts/check-system-context-census.mjs`,
+# `scripts/check-tenant-audit-census.mjs`). Why neither is routed is recorded in
+# NOT_DRIVER_MANAGED's `content/docs/permissions/**` entry; the `mixed` field and
+# its comparator stay for the next mixed artifact (scripts/regen-artifacts.mjs,
+# scripts/git-merge-regen.mjs).
 
 #
 # #13731 enumerated this file's blind spot and closed it: `check:merge-driver` now

@@ -239,6 +239,18 @@ export const CENSUS_17065 = {
   trackedTargetFiles: 5,
   hardFindings: 7,
   hardFindingFiles: 6,
+  /* CENSUS_RESIDUAL rows deleted since the census, each because the cited
+   * docblock LEFT THE TREE (never because a finding was re-graded). The
+   * self-test pins the residual at `hardFindings - repairedRows.length`, so the
+   * ratchet still only moves down, and every move is dated and named here. */
+  repairedRows: [
+    {
+      doc: 'packages/spec/src/conversions/registry.ts',
+      raw: 'packages/rest/src/import-mapping.ts:115-167',
+      dated: '2026-10-26',
+      why: '#25767 deleted the docblock with its conversion (a retirement kit at or below protocol 16.x)',
+    },
+  ],
   declinedCitations: 183,
   declinedByShape: { 'bare-filename': 69, 'directory-qualified': 62, continuation: 52 },
   softCrossRepoRows: 3,
@@ -589,14 +601,6 @@ export const CENSUS_RESIDUAL = Object.freeze([
     dated: '2026-09-09',
     repair: 'the symbol is real — write the path from the repo root, '
       + '`packages/spec/src/contracts/realtime-service.ts#RealtimeSubscriptionOptions`',
-  },
-  {
-    doc: 'packages/spec/src/conversions/registry.ts',
-    raw: 'packages/rest/src/import-mapping.ts:115-167',
-    kind: 'line-anchor',
-    count: 1,
-    dated: '2026-09-09',
-    repair: 'cite the symbol in `packages/core/src/utils/import-mapping.ts` (`applyMappingToRows`), or drop to a file-level anchor',
   },
   {
     doc: 'packages/spec/src/data/filter-array-declaration.test.ts',
@@ -1262,9 +1266,18 @@ export function selfTest() {
     check(row.repair && row.repair.length > 20, `the residual row for \`${row.raw}\` must name its repair`);
     check(row.doc.startsWith(`${SPEC_SRC_DIR}/`), `a residual row may only name a file in this corpus, got \`${row.doc}\``);
   }
-  // ...and it is the census's own number, so a row quietly added later reds.
-  check(liveTriage.pinned.length === CENSUS_17065.hardFindings,
-    `the pinned residual must equal the census's ${CENSUS_17065.hardFindings} hard findings, got ${liveTriage.pinned.length}`);
+  // ...and it is the census's own number less the rows it names as repaired,
+  // so a row quietly added later reds, and so does a row quietly deleted.
+  const expectedPinned = CENSUS_17065.hardFindings - CENSUS_17065.repairedRows.length;
+  check(liveTriage.pinned.length === expectedPinned,
+    `the pinned residual must equal the census's ${CENSUS_17065.hardFindings} hard findings less its `
+      + `${CENSUS_17065.repairedRows.length} repaired row(s), got ${liveTriage.pinned.length}`);
+  for (const row of CENSUS_17065.repairedRows) {
+    check(/^\d{4}-\d{2}-\d{2}$/.test(row.dated), `the repaired row for \`${row.raw}\` must carry an ISO date`);
+    check(row.why && row.why.length > 20, `the repaired row for \`${row.raw}\` must say why the citation left`);
+    check(!CENSUS_RESIDUAL.some((r) => r.doc === row.doc && r.raw === row.raw),
+      `the repaired row for \`${row.raw}\` is still in CENSUS_RESIDUAL — a row is repaired or pinned, never both`);
+  }
   check(liveTriage.hard.length === 0,
     `the live corpus must carry NO finding outside the day-one residual: ${liveTriage.hard.map((f) => `${f.doc} ${f.raw}`).join(', ')}`);
 

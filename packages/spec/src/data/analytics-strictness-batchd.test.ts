@@ -294,9 +294,17 @@ describe('batch D — the strict base does not break the request wrapper', () =>
     });
   });
 
-  it('the retired-envelope tombstones still fire — `query` and `format` carry their migration text', () => {
-    expect(reject(AnalyticsQueryRequestSchema, { ...QUERY, query: { measures: ['count'] } })).toContain('was removed from AnalyticsQueryRequest');
-    expect(reject(AnalyticsQueryRequestSchema, { ...QUERY, format: 'csv' })).toContain('was removed from AnalyticsQueryRequest');
+  it('the retired envelope keys `query` and `format` are refused as unknown keys naming the upgrade guide', () => {
+    // Their tombstones were 16.x retirement kits and aged out at 18 (#25767,
+    // ADR-0087 D2 = A): the strict base refuses each as an unknown key, and the
+    // refusal points at the protocol upgrade guide, where the envelope
+    // prescription now lives. Still never a silent strip.
+    for (const [key, body] of [['query', { measures: ['count'] }], ['format', 'csv']] as const) {
+      const message = reject(AnalyticsQueryRequestSchema, { ...QUERY, [key]: body });
+      expect(message).toContain('unrecognized_keys');
+      expect(message).toContain(`\`${key}\``);
+      expect(message).toContain('https://objectstack.ai/docs/protocol-upgrade');
+    }
   });
 });
 

@@ -67,7 +67,7 @@ const _typoTarget: ActionDef = { type: 'script', targt: 'saveRecord' };
 
 // A retired SPEC key that is not a tombstone, to show the closure is general
 // rather than a list of two special cases.
-// @ts-expect-error - `bulkEnabled` is a retiredKey() tombstone in spec 17
+// @ts-expect-error - `bulkEnabled` is not an `ActionDef` key: its spec-17 tombstone aged out at objectstack#25767 and the mirror left with it
 const _retiredBulk: ActionDef = { type: 'api', bulkEnabled: true };
 
 // ── The unified `visible` / `disabled` shape: three arms each ────────────────

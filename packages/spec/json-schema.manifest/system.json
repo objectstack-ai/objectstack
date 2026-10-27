@@ -215,6 +215,7 @@
     "system/SearchProvider",
     "system/SecurityContextConfig",
     "system/SecurityEventCorrelation",
+    "system/ServedTranslationData",
     "system/ServerRateLimitConfig",
     "system/ServiceConfig",
     "system/ServiceCriticality",

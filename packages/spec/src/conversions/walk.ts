@@ -237,10 +237,12 @@ const MAX_COMPONENT_DEPTH = 32;
  * and the three walks disagreed about `page:card.footer`).
  *
  * This walker reads EVERY entry, the retired ones included: `page:card.body`
- * is a tombstoned spelling the authoring walks skip, but the renderers still
- * read it for stored documents, and normalizing stored documents is what this
- * walker is for — a conversion that runs before `page-card-body-to-children`
- * in the chain meets the sub-tree still under `body`.
+ * was a tombstoned spelling the authoring walks skip (the tombstone and its
+ * `page-card-body-to-children` conversion were a ≤16.x kit and aged out on
+ * #25767; the slot is still listed as retired in COMPONENT_SLOTS), but the
+ * renderers still read it for stored documents, and normalizing stored
+ * documents is what this walker is for — a conversion that ran before the
+ * rename in the chain met the sub-tree still under `body`.
  *
  * Recognised by SHAPE — an array (a panel list: an array whose object entries
  * carry the panel key's array) — and deliberately NOT keyed by component
@@ -280,10 +282,10 @@ function mapComponentList(
  * The mapper runs on the container FIRST and the descent then reads the
  * *mapped* component's `properties`, the same ordering {@link mapNodeTree} uses
  * for flow regions. That is what keeps the walk single-visit under a conversion
- * that MOVES a container key: `page-card-body-to-children` renames
+ * that MOVES a container key: the retired `page-card-body-to-children` renamed
  * `properties.body` → `properties.children`, and because the descent happens
  * after the rename, the sub-tree is walked once under the canonical key instead
- * of once per spelling.
+ * of once per spelling — the ordering stays for the next such conversion.
  */
 function mapComponentTree(
   component: Dict,

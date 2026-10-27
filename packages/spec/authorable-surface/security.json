@@ -176,7 +176,6 @@
     "security/RowLevelSecurityPolicy:object",
     "security/RowLevelSecurityPolicy:operation",
     "security/RowLevelSecurityPolicy:positions",
-    "security/RowLevelSecurityPolicy:priority [RETIRED]",
     "security/RowLevelSecurityPolicy:tags [RETIRED]",
     "security/RowLevelSecurityPolicy:using",
     "security/SharingRule:_lock",

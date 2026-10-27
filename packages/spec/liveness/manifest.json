@@ -252,12 +252,6 @@
         }
       }
     },
-    "loading": {
-      "status": "dead",
-      "verifiedAt": "2026-08-23",
-      "evidenceScope": "cross-repo",
-      "note": "RETIRED, and the row must STAY: `retiredKey()` keeps the key in the walked shape (a tombstone, not a strict removal), so the orphans direction expects a row here — see the ledger README's asymmetry note. Removed in @objectstack/spec 17.0.0 (#4914, ADR-0049), ADR-0087 D3 entry `17.plugin-manifest-loading-retired`. The whole block — strategy / preload / codeSplitting / dynamicImport / initialization / dependencyResolution / hotReload / caching / sandboxing / monitoring — had no runtime reader in ANY of the three repos, so authoring it configured nothing. `loading.sandboxing` is the reason this is recorded as a security finding rather than tidying: it ran nothing in a process, vm, iframe or worker, and its `allowedServices` gated no call, so an author relying on it for isolation had none. This retirement is also what put the manifest on the ledger's agenda — it was found and paid by hand, because no gate could ask."
-    },
     "engine": {
       "children": {
         "objectstack": {

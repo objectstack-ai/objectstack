@@ -7,8 +7,10 @@
  * ## The state this closes
  *
  * `validateStackExpressions` is the build's expression rule. Its field walk
- * judges every field's `requiredWhen` / `readonlyWhen` / `conditionalRequired`
- * / `visibleWhen` as a `record`-scoped predicate, with the root verdict, the
+ * judges every field's `requiredWhen` / `readonlyWhen` / `visibleWhen` as a
+ * `record`-scoped predicate (`conditionalRequired` left the walk at #25767:
+ * its tombstone aged out of `FieldSchema`, so the key is a strict unknown key
+ * and no longer a slot the pass judges), with the root verdict, the
  * `parent` gate (a slot reading `parent` on an object that does not declare
  * exactly one `master_detail`), the #4811 null-guard gate over `requiredWhen`,
  * and the #20078 refusal of a `requiredWhen` / `readonlyWhen` read through a
@@ -67,7 +69,6 @@ const REFUSED = [
   { slot: 'requiredWhen', slots: { requiredWhen: 'amount > 1' }, subject: 'bare reference `amount`' },
   { slot: 'readonlyWhen', slots: { readonlyWhen: 'sqrt(record.amount) > 1' }, subject: '`sqrt`' },
   { slot: 'visibleWhen', slots: { visibleWhen: 'sqrt(record.amount) > 1' }, subject: '`sqrt`' },
-  { slot: 'conditionalRequired', slots: { conditionalRequired: 'amount > 1' }, subject: 'bare reference `amount`' },
   // The root verdict: a root a field-level rule never binds.
   { slot: 'requiredWhen', slots: { requiredWhen: 'current_user.id != null' }, subject: 'reads `current_user`' },
   // The `parent` gate: `fx_field` declares no `master_detail`.
