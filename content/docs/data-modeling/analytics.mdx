@@ -260,6 +260,10 @@ measure values by hand:
   result `fields`, so a KPI or chart legend reads "Total Spent / $616,000"
   rather than "spent_sum / 616000". The renderer applies the `format` at display
   time (it can't be baked into the numeric row value charts plot).
+  A measure that declares `polarity` (`higher`, `lower` or `neutral`: which
+  direction of change is good news) carries it on its column too, so a
+  period-over-period delta on a lower-is-better KPI draws a rise as bad news;
+  undeclared keeps a rise green and a fall red.
 
 ## Migrating from inline queries
 
