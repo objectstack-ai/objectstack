@@ -6,6 +6,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 import {
     classifyIndexFailure,
+    countDuplicateKeys,
+    describeDuplicateKeys,
     dropIndexQuietly,
     logProblem,
     probeThenReplaceIndex,
@@ -396,5 +398,157 @@ describe('probe-first partial index replacement (#6418)', () => {
         expect(() =>
             logProblem({} as unknown as IndexMigrationLogger, 'msg', 'detail'),
         ).not.toThrow();
+    });
+});
+
+/**
+ * [#26630] The PostgreSQL arm of the replace step, as the statements it sends.
+ *
+ * The live behaviour is pinned in `identity-index.live-postgres.test.ts`; this
+ * pins the ORDER and the spelling without a server, and — the half a server
+ * cannot give — that every other client still gets the dialect-blind order,
+ * statement for statement.
+ */
+describe('probe-first replacement, PostgreSQL arm (#26630)', () => {
+    const REAL = 'uniq_t_k';
+    const PROBE = 'idx_t_k_probe';
+    const buildSql = (indexName: string): string =>
+        `CREATE UNIQUE INDEX IF NOT EXISTS ${indexName} ON t (COALESCE(k, ''))`;
+    const TARGET = " ON public.t USING btree (COALESCE(k, ''::text))";
+
+    /**
+     * A catalog double: `pg_get_indexdef` answers from `defs`, and any statement
+     * matching `refuse` throws. Every statement is recorded.
+     */
+    const pgDouble = (opts: { defs: Record<string, string | null>; refuse?: RegExp }) => {
+        const seen: string[] = [];
+        const exec: IndexExec = async (sql: string) => {
+            seen.push(sql);
+            if (opts.refuse?.test(sql)) {
+                throw new Error(`cannot drop index ${REAL} because constraint ${REAL} on table t requires it`);
+            }
+            const read = /to_regclass\('"(\w+)"'\)/.exec(sql);
+            if (read) return { rows: [{ indexdef: opts.defs[read[1]!] ?? null }] };
+            return { rows: [] };
+        };
+        return { exec, seen };
+    };
+
+    it('frees the name constraint-first, then index, with no CASCADE, and answers created only on a matching read-back', async () => {
+        const { exec, seen } = pgDouble({
+            defs: {
+                [PROBE]: `CREATE UNIQUE INDEX ${PROBE}${TARGET}`,
+                [REAL]: `CREATE UNIQUE INDEX ${REAL}${TARGET}`,
+            },
+        });
+
+        const outcome = await probeThenReplaceIndex(exec, {
+            indexName: REAL,
+            probeIndexName: PROBE,
+            buildSql,
+            table: 't',
+            client: 'pg',
+        });
+
+        expect(outcome).toEqual({ status: 'created' });
+        expect(seen).toEqual([
+            `DROP INDEX IF EXISTS ${PROBE}`,
+            buildSql(PROBE),
+            `SELECT pg_get_indexdef(to_regclass('"${PROBE}"')) AS indexdef`,
+            `DROP INDEX IF EXISTS ${PROBE}`,
+            `ALTER TABLE t DROP CONSTRAINT IF EXISTS ${REAL}`,
+            `DROP INDEX IF EXISTS ${REAL}`,
+            buildSql(REAL),
+            `SELECT pg_get_indexdef(to_regclass('"${REAL}"')) AS indexdef`,
+        ]);
+        expect(seen.some((sql) => /cascade/i.test(sql))).toBe(false);
+    });
+
+    it('a CREATE … IF NOT EXISTS that no-ops under a still-held name is failed at verify, naming the refusal', async () => {
+        const { exec } = pgDouble({
+            defs: {
+                [PROBE]: `CREATE UNIQUE INDEX ${PROBE}${TARGET}`,
+                // What the constraint's own index reads back as.
+                [REAL]: `CREATE UNIQUE INDEX ${REAL} ON public.t USING btree (k)`,
+            },
+            refuse: /^(ALTER TABLE t DROP CONSTRAINT|DROP INDEX IF EXISTS uniq_t_k)/,
+        });
+
+        const outcome = await probeThenReplaceIndex(exec, {
+            indexName: REAL,
+            probeIndexName: PROBE,
+            buildSql,
+            table: 't',
+            client: 'postgresql',
+        });
+
+        expect(outcome.status).toBe('failed');
+        expect(outcome.failedAt).toBe('verify');
+        expect(outcome.detail).toContain('USING btree (k)');
+        expect(outcome.detail).toContain('cannot drop index');
+    });
+
+    it('a probe whose definition cannot be read fails at probe, before the real name is touched', async () => {
+        const { exec, seen } = pgDouble({ defs: {} });
+
+        const outcome = await probeThenReplaceIndex(exec, {
+            indexName: REAL,
+            probeIndexName: PROBE,
+            buildSql,
+            table: 't',
+            client: 'pg',
+        });
+
+        expect(outcome.status).toBe('failed');
+        expect(outcome.failedAt).toBe('probe');
+        expect(seen.some((sql) => sql.includes(REAL))).toBe(false);
+    });
+
+    it('every other client — and a pg caller that names no table — keeps the dialect-blind order, statement for statement', async () => {
+        const legacy = [
+            `DROP INDEX IF EXISTS ${PROBE}`,
+            buildSql(PROBE),
+            `DROP INDEX IF EXISTS ${PROBE}`,
+            `DROP INDEX IF EXISTS ${REAL}`,
+            buildSql(REAL),
+        ];
+        for (const opts of [
+            { table: 't', client: 'sqlite3' },
+            { table: 't', client: 'better-sqlite3' },
+            { table: 't', client: 'mysql2' },
+            { table: 't', client: undefined },
+            { table: undefined, client: 'pg' },
+        ]) {
+            const { exec, seen } = pgDouble({ defs: {} });
+            const outcome = await probeThenReplaceIndex(exec, { indexName: REAL, probeIndexName: PROBE, buildSql, ...opts });
+            expect(outcome, JSON.stringify(opts)).toEqual({ status: 'created' });
+            expect(seen, JSON.stringify(opts)).toEqual(legacy);
+        }
+    });
+
+    it('countDuplicateKeys counts through the caller\'s probe and never hands back a value', async () => {
+        const db = new DatabaseSync(':memory:');
+        try {
+            db.exec('CREATE TABLE d (k TEXT, secret TEXT)');
+            for (const [k, secret] of [['a', 's1'], ['a', 's2'], ['a', 's3'], ['b', 's4'], ['b', 's5'], ['c', 's6']]) {
+                db.prepare('INSERT INTO d (k, secret) VALUES (?, ?)').run(k, secret);
+            }
+            const exec: IndexExec = async (sql: string) => db.prepare(sql).all();
+            const count = await countDuplicateKeys(
+                exec,
+                'SELECT k, COUNT(*) AS duplicate_rows FROM d GROUP BY k HAVING COUNT(*) > 1',
+            );
+            expect(count).toEqual({ keys: 2, rows: 5 });
+            expect(describeDuplicateKeys(count)).toBe(' (2 duplicated keys, held by 5 rows)');
+        } finally {
+            db.close();
+        }
+        // Unreadable is no count, never a throw, and never a fabricated zero clause.
+        const refusing: IndexExec = async () => {
+            throw new Error('permission denied');
+        };
+        expect(await countDuplicateKeys(refusing, 'SELECT 1')).toBeUndefined();
+        expect(describeDuplicateKeys(undefined)).toBe('');
+        expect(describeDuplicateKeys({ keys: 0, rows: 0 })).toBe('');
     });
 });

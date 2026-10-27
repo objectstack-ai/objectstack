@@ -3440,6 +3440,27 @@ const LIST_VIEW_GROUP_ORDER_UNORDERABLE_EXPLANATION: RuleExplanation = {
   ],
 };
 
+const LIST_VIEW_CHART_DATASET_FOREIGN_OBJECT_EXPLANATION: RuleExplanation = {
+  rule: 'list-view-chart-dataset-foreign-object',
+  covers: 'why a list view\'s chart must chart the object the list lists',
+  paragraphs: [
+    'A list view\'s `chart` names a dataset, and the dataset declares its own base `object`. The chart ' +
+      'draws that object\'s records: the list view hands the dataset query the dataset name, its ' +
+      'dimensions and its measures and nothing else, so neither the list\'s object nor its filter reaches ' +
+      'the query. A chart bound to a dataset over another object therefore plots that other object\'s ' +
+      'records under this object\'s list, and nothing on the screen says so.',
+    'A dataset whose `include` reaches the list\'s object through a relationship is refused too. ' +
+      '`include` lists to-one relationships from the dataset\'s base object, so it adds columns to group ' +
+      'by and never a second set of rows: a dataset over opportunities that includes their account still ' +
+      'counts opportunities. The two object names must be equal.',
+    'An error, so the publish is refused (`422`) and `os validate` and `os build` fail. Not judged: a ' +
+      'draft save, a dataset that resolves to nothing (`chart-dataset-unknown`), a dataset that declares no ' +
+      '`object`, and a list view whose own binding does not resolve.',
+    'To fix it, bind a dataset declared over the list\'s object, or move the chart to a list view of the ' +
+      'dataset\'s object, or to a dashboard, where a widget names its dataset without a list object.',
+  ],
+};
+
 /** Which keys a list view's binding is read from, and what stays unjudged (both binding ids write it out). */
 const LIST_VIEW_BINDING_SCOPE =
   'One finding per list view, at the key the binding was read from: the view\'s `object`, or a list ' +
@@ -5201,6 +5222,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [LIST_VIEW_FIELD_UNKNOWN_EXPLANATION.rule]: LIST_VIEW_FIELD_UNKNOWN_EXPLANATION,
   [LIST_VIEW_FIELD_DOTTED_EXPLANATION.rule]: LIST_VIEW_FIELD_DOTTED_EXPLANATION,
   [LIST_VIEW_GROUP_ORDER_UNORDERABLE_EXPLANATION.rule]: LIST_VIEW_GROUP_ORDER_UNORDERABLE_EXPLANATION,
+  [LIST_VIEW_CHART_DATASET_FOREIGN_OBJECT_EXPLANATION.rule]: LIST_VIEW_CHART_DATASET_FOREIGN_OBJECT_EXPLANATION,
   [LIST_VIEW_OBJECT_OUTSIDE_CLOSURE_EXPLANATION.rule]: LIST_VIEW_OBJECT_OUTSIDE_CLOSURE_EXPLANATION,
   [LIST_VIEW_OBJECT_UNKNOWN_EXPLANATION.rule]: LIST_VIEW_OBJECT_UNKNOWN_EXPLANATION,
   [TRANSLATION_TARGET_UNKNOWN_EXPLANATION.rule]: TRANSLATION_TARGET_UNKNOWN_EXPLANATION,

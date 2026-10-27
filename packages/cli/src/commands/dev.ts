@@ -941,6 +941,7 @@ export default class Dev extends Command {
                 sqliteFile,
                 env: localEnv,
                 cwd: process.cwd(),
+                announce: (line) => console.log(chalk.yellow(`  ⚠ ${line}`)),
               });
             },
           });

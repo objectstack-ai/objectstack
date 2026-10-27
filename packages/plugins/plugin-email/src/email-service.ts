@@ -1461,11 +1461,27 @@ export class EmailService implements IEmailService {
     // parameter named `amp;callbackURL` and lost the post-verification
     // redirect. The derived fallback was already right: `htmlToText` decodes
     // the entities the HTML render introduced.
-    const subject = renderPlainTextTemplate(row.subject, data, renderOpts);
-    const html = renderTemplate(row.body_html, data, renderOpts);
-    const text = row.body_text
-      ? renderPlainTextTemplate(row.body_text, data, renderOpts)
-      : htmlToText(html);
+    //
+    // A hole the shared grammar refuses throws `TEMPLATE_INVALID` from the
+    // renderer: this names the template and its locale in front of the hole,
+    // and the send or render fails rather than deliver a wrong value.
+    let subject: string;
+    let html: string;
+    let text: string;
+    try {
+      subject = renderPlainTextTemplate(row.subject, data, renderOpts);
+      html = renderTemplate(row.body_html, data, renderOpts);
+      text = row.body_text
+        ? renderPlainTextTemplate(row.body_text, data, renderOpts)
+        : htmlToText(html);
+    } catch (err: any) {
+      const message = String(err?.message ?? err);
+      if (!message.startsWith('TEMPLATE_INVALID: ')) throw err;
+      throw new Error(
+        `TEMPLATE_INVALID: email template ${input.template} (locale=${row.locale}): `
+        + message.slice('TEMPLATE_INVALID: '.length),
+      );
+    }
 
     return { row, rendered: { subject, html, text } };
   }

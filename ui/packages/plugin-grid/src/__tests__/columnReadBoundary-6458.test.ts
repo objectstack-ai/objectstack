@@ -95,8 +95,9 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 // packages/plugin-grid/src/__tests__ -> repo root
 const repoRoot = path.resolve(here, '../../../..');
 const GRID_SOURCE = path.join(repoRoot, 'packages/plugin-grid/src/ObjectGrid.tsx');
+const GENERATE_COLUMNS_SOURCE = path.join(repoRoot, 'packages/plugin-grid/src/objectGridGenerateColumns.tsx');
 
-const gridSource = readFileSync(GRID_SOURCE, 'utf8');
+const gridSource = [GENERATE_COLUMNS_SOURCE, GRID_SOURCE].map((file) => readFileSync(file, 'utf8')).join('\n');
 
 /**
  * The bounds of the `ListColumn` branch of `generateColumns()`. The scan is

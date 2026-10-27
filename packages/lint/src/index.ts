@@ -532,11 +532,14 @@ export type {
 // name with the tombstone's prescription (`os lint` never parses).
 // [#25786] Its SIXTH: a grouping level's `orderBy` naming a field the group
 // header query cannot order by (`min` / `max` refused for its type).
+// [#26719] Its SEVENTH: a list view whose `chart` binds a dataset declared
+// over another object than the one the list view lists.
 export {
   validateListViewFieldRefs,
   LIST_VIEW_FIELD_UNKNOWN,
   LIST_VIEW_FIELD_DOTTED,
   LIST_VIEW_GROUP_ORDER_UNORDERABLE,
+  LIST_VIEW_CHART_DATASET_FOREIGN_OBJECT,
   LIST_VIEW_OBJECT_OUTSIDE_CLOSURE,
   LIST_VIEW_OBJECT_UNKNOWN,
   LIST_VIEW_KEY_RETIRED,
@@ -1000,6 +1003,15 @@ export {
   EMAIL_TEMPLATE_HOLE_PLACEMENT,
 } from './validate-email-template-hole-placements.js';
 export type { EmailTemplateHolePlacementFinding } from './validate-email-template-hole-placements.js';
+
+// Every hole of an email template is within the mail hole grammar
+// (`@objectstack/formula`'s `judgeMailHoleGrammar`). The rule id is published
+// for `--json` consumers (`rule-id-barrel-exports.test.ts`).
+export {
+  validateEmailTemplateHoleGrammar,
+  EMAIL_TEMPLATE_HOLE_GRAMMAR,
+} from './validate-email-template-hole-grammar.js';
+export type { EmailTemplateHoleGrammarFinding } from './validate-email-template-hole-grammar.js';
 
 export { lintAutonumberFormats } from './lint-autonumber-formats.js';
 export type { AutonumberLintFinding } from './lint-autonumber-formats.js';

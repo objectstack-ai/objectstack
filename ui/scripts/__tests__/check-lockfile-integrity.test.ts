@@ -21,10 +21,10 @@
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { lockfilePath } from '../workspace-root.mjs';
 
-import { repoRoot } from './workflow-checks';
 import { NOT_A_GATE, OPTIONAL_CONTEXTS, REQUIRED_CONTEXTS } from '../dependabot-merge-gate.mjs';
 import {
   compareLockfiles,
@@ -33,6 +33,7 @@ import {
   readSnapshotKeys,
 } from '../check-lockfile-integrity.mjs';
 
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const GATE = path.join(repoRoot, 'scripts/check-lockfile-integrity.mjs');
 const LOCKFILE = lockfilePath();
 const realLock = fs.readFileSync(LOCKFILE, 'utf8');
