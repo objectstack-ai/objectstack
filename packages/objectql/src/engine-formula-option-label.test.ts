@@ -86,8 +86,10 @@ function makeStubDriver() {
     async disconnect() {},
     async checkHealth() { return true; },
     async execute() { return null; },
-    async find(_o: string, ast: { where?: unknown }) {
-      return [...store.values()].filter((r) => matches(r, ast?.where)).map((r) => ({ ...r }));
+    async find(_o: string, ast: { where?: unknown; limit?: number }) {
+      const rows = [...store.values()].filter((r) => matches(r, ast?.where));
+      const page = typeof ast?.limit === 'number' ? rows.slice(0, ast.limit) : rows;
+      return page.map((r) => ({ ...r }));
     },
     async findOne(_o: string, ast: { where?: unknown }) {
       for (const r of store.values()) if (matches(r, ast?.where)) return { ...r };
