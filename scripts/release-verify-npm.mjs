@@ -152,8 +152,12 @@
  * Battery 15 pins the parse on npm's real log. It runs the real `pnpm publish`
  * (through to `npm publish`, as changesets calls it) against a stub registry
  * on 127.0.0.1, so if npm changes its log format the self-test goes red and
- * the release log does not quietly lose this information. Battery 16 runs
- * `release-publish.sh` itself with a stub `changeset` and `git`.
+ * the release log does not quietly lose this information. Its first case
+ * asserts that the pnpm it ran IS the repo's `packageManager` pin: on a runner
+ * `pnpm` is a Corepack shim, and a fixture without the pin, in an env without
+ * `COREPACK_HOME`, made Corepack fetch `pnpm/latest` instead, so the upload
+ * never reached npm. Battery 16 runs `release-publish.sh` itself with a stub
+ * `changeset` and `git`.
  *
  * ## ⛔ It still fails CLOSED, and that is the whole point
  *
@@ -265,7 +269,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
@@ -312,7 +316,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '12. The audit step backfills only a version whose whole group is on npm, and no publish or image build of it is in flight': 34,
   '13. The backfill builds from the version commit\'s tree, as the publish does': 13,
   '14. The 18.0.0 publish window: console readable at +16m22s, past the old 900 s': 14,
-  '15. Lag or loss: npm\'s own answer per package, parsed from its real log': 25,
+  '15. Lag or loss: npm\'s own answer per package, parsed from its real log': 26,
   '16. release-publish.sh keeps npm\'s record, prints it, and still pushes tags only after a clean publish': 8,
 });
 
@@ -2943,22 +2947,53 @@ export async function selfTest() {
       writeFileSync(join(home, '.npmrc'), `//127.0.0.1:${server.address().port}/:_authToken=stub-not-a-secret\nregistry=${url}\n`);
       const recordDir = npmRecordDir({ RUNNER_TEMP: real });
       mkdirSync(recordDir, { recursive: true });
-      const publishOne = (name) => new Promise((resolve_) => {
+      // The SAME pnpm the job runs. On a runner `pnpm` is a Corepack shim: it
+      // resolves the version from the nearest `packageManager` and reads the
+      // materialised store at COREPACK_HOME. A fixture with no pin, in an env
+      // without COREPACK_HOME, makes Corepack fetch `pnpm/latest` off the
+      // registry (and write it into the job's store), so the publish below
+      // never reaches npm. So each fixture carries the repo's own pin, read
+      // from the root package.json, and the env keeps the COREPACK_* variables.
+      // A pnpm installed WITHOUT Corepack reads the same pin the other way: it
+      // switches to that exact build, materialised under its own home's
+      // `.tools`, which a fresh HOME would hide (it then downloads it, from
+      // the stub registry, and fails). So PNPM_HOME is the caller's. Either
+      // way the first case below asserts the pnpm that ran IS the pinned one.
+      const pin = JSON.parse(readFileSync(resolve(SCRIPTS_DIR, '..', 'package.json'), 'utf8')).packageManager;
+      const pnpmHome = process.env.PNPM_HOME
+        || (process.platform === 'darwin' ? join(homedir(), 'Library', 'pnpm')
+          : process.platform === 'win32' ? join(process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), 'pnpm')
+            : join(process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share'), 'pnpm'));
+      // A sealed environment otherwise: no inherited registry, token or npm config.
+      const sealedEnv = {
+        ...Object.fromEntries(Object.entries(process.env).filter(([k]) => k.startsWith('COREPACK_'))),
+        PNPM_HOME: pnpmHome,
+        PATH: process.env.PATH,
+        HOME: home,
+        npm_config_logs_dir: recordDir,
+        npm_config_logs_max: '100000',
+        npm_config_update_notifier: 'false',
+      };
+      const runPnpm = (name, args) => new Promise((resolve_) => {
         const dir = join(real, name.replace('/', '-'));
         mkdirSync(dir, { recursive: true });
-        writeFileSync(join(dir, 'package.json'), `${JSON.stringify({ name, version: '1.0.0' })}\n`);
-        // A sealed environment: no inherited registry, token or npm config.
-        const child = spawn('pnpm', ['publish', '--json', '--access', 'public', '--tag', 'latest', '--no-git-checks'], {
-          cwd: dir,
-          env: { PATH: process.env.PATH, HOME: home, npm_config_logs_dir: recordDir, npm_config_logs_max: '100000', npm_config_update_notifier: 'false' },
-          stdio: ['ignore', 'pipe', 'pipe'],
-        });
+        writeFileSync(join(dir, 'package.json'), `${JSON.stringify({ name, version: '1.0.0', packageManager: pin })}\n`);
+        const child = spawn('pnpm', args, { cwd: dir, env: sealedEnv, stdio: ['ignore', 'pipe', 'pipe'] });
         let out = '';
         child.stdout.on('data', (d) => { out += d; });
         child.stderr.on('data', (d) => { out += d; });
         child.on('error', (e) => resolve_({ status: `spawn failed: ${e.message}`, out }));
         child.on('close', (status) => resolve_({ status, out }));
       });
+      const publishOne = (name) => runPnpm(name, ['publish', '--json', '--access', 'public', '--tag', 'latest', '--no-git-checks']);
+      const pinned = typeof pin === 'string' ? pin.split('+')[0].replace(/^pnpm@/, '') : null;
+      const version = await runPnpm('@stub/version', ['--version']);
+      t(
+        'REAL npm: the sealed env runs the repo\'s pinned pnpm, the one the publish job runs',
+        Boolean(pinned) && version.status === 0 && version.out.trim() === pinned,
+        `root packageManager=${pin}; pnpm --version exit ${version.status}: ${version.out.trim().split('\n').slice(0, 4).join(' | ').slice(0, 300)}`
+          + ' — if this is red, every REAL npm case below is red for the same reason: pnpm in this env is not the pinned one',
+      );
       const took = await publishOne('@stub/accepted');
       const refusedRun = await publishOne('@stub/refused');
       const realRecord = readNpmRecord(recordDir, [{ name: '@stub/accepted', version: '1.0.0' }, { name: '@stub/refused', version: '1.0.0' }]);
