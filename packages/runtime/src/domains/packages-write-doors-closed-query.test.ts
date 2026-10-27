@@ -149,8 +149,10 @@ describe('[#26857] DELETE /packages/:id — a misspelled keep-data flag is refus
         const { dispatcher, registry, acts } = boot();
         const answer = await call(dispatcher, 'DELETE', `/packages/${PKG}`, undefined, query);
         expectRecognitionRefusal(answer, query, ['keepData']);
-        // The sentence names the misspelling and the one name the door reads.
-        expect(answer.body.error.message).toContain('"keepData"');
+        // The sentence names each misspelling the caller sent.
+        for (const name of Object.keys(query).filter((n) => n !== 'keepData')) {
+            expect(answer.body.error.message).toContain(`"${name}"`);
+        }
         expect(acts.deletePackage).not.toHaveBeenCalled();
         expect(registry.getPackage(PKG)).toBeDefined();
     });
