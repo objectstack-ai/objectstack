@@ -829,6 +829,12 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.inspector.action.scriptBody': '脚本主体',
   'engine.inspector.action.scriptBodyHint': '在沙箱中以 {signature} 的形式运行。',
   'engine.inspector.action.method': '请求方法',
+  // objectstack#26736 — 请求体形态，对应规范的两种形态。
+  'engine.inspector.action.bodyShape': '请求体形态',
+  'engine.inspector.action.bodyShape.flat': '平铺 —— 输入项位于顶层',
+  'engine.inspector.action.bodyShape.wrap': '包裹 —— 输入项嵌套在一个键下',
+  'engine.inspector.action.bodyShapeKey': '包裹键',
+  'engine.inspector.action.bodyShapeHint': '收集到的输入项在请求体中的发送方式。包裹在填写键之后才会保存。',
   'engine.inspector.action.inputs': '输入项',
   'engine.inspector.action.inputsHint': '在动作运行前通过对话框向用户收集。',
   'engine.inspector.action.inputsEmpty': '没有输入项 —— 点击后立即运行动作。',
@@ -869,6 +875,10 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.inspector.action.aiDescription': '工具描述（必填，≥40 个字符）',
   'engine.inspector.action.aiDescriptionPlaceholder': '智能体应在何时、出于何种目的调用此动作…',
   'engine.inspector.action.aiDescriptionTooShort': '开放期间必须提供至少 40 个字符的描述。',
+  // objectstack#26736 — 数据支柱的拒绝提示条与暂存提示，针对操作（与数据支柱的「操作」标签一致）。
+  'engine.studio.refusal.action': '操作「{action}」',
+  'engine.studio.refusal.actionInput': '操作「{action}」的「{input}」',
+  'engine.studio.held.actionNeedsInput': '操作「{action}」的「{input}」需要填写',
   'engine.inspector.action.moreFieldsHint': '高级 / 不常用的属性。',
   // Dataset default (home) inspector (objectui#10586). zh has one plural form,
   // so each `…One` / `…Other` pair carries the same row.

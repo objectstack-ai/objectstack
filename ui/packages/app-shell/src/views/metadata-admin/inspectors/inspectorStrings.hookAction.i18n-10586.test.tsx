@@ -289,8 +289,7 @@ const ACTION_FIXTURES: readonly Fixture[] = [
       ],
       locations: [],
       requiredPermissions: ['a.b'],
-      aiExposed: true,
-      aiDescription: 'short',
+      ai: { exposed: true, description: 'short' },
     });
   },
   // An API action against an object catalog with none picked, gated on two
