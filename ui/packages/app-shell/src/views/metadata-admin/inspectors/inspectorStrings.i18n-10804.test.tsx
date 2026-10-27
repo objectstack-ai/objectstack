@@ -47,6 +47,12 @@ import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, act, within } from '@testing-library/react';
 import { I18nProvider } from '@object-ui/i18n';
+// The `engine.inspector.flowNode.*` rows live in `@object-ui/i18n`'s `studio`
+// namespace (#25922 slice S2), whose `zh` catalogue is fetched on demand.
+// Resident before any case, so `zhRow` reads the zh row, never the en fallback
+// while the chunk is in flight (objectstack#26692).
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+await loadStudioCatalogue('zh');
 
 // Every roster in these inspectors comes through the shared metadata client
 // (stable identity, like the real memoized client). Nothing here needs a
