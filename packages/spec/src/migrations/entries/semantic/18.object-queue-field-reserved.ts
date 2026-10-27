@@ -18,7 +18,9 @@ export const entry: SemanticMigration = {
     'an object field named queue on an object whose records have a user owner (ownership user, the '
     + 'default). Reachable wherever an object is registered: defineStack({ objects }) sources, a '
     + 'package installed at boot, an object saved from Studio or the metadata API, and an object row '
-    + 'already sitting in sys_metadata',
+    + 'already sitting in sys_metadata. An objectExtensions entry that declares queue on such an object is '
+    + 'not refused, because an extension is folded over its object at read time in either registration '
+    + 'order: its queue is ignored, the platform column stands, and a warning names the extension',
   replacement:
     'a business field under another name (for example `support_queue`), with its data copied across; '
     + 'or, when the object\'s records have no user owner, `ownership: \'business_unit\'`, `\'org\'` or '
@@ -35,10 +37,11 @@ export const entry: SemanticMigration = {
     + 'with another ownership tier keeps any `queue` field it declares. No D2 conversion: the platform '
     + 'cannot choose the new name or move the rows. Ships at once, no grace window. ADR-0087, ADR-0142.',
   acceptanceCriteria:
-    'Search every object your stacks declare for a field named `queue` on an object with no '
-    + '`ownership` or `ownership: \'user\'`. Rename each one and copy its data to the new column. Two '
-    + 'proofs. (1) Boot the stack and confirm each object REGISTERS: no `ObjectQueueColumnRefusedError` '
-    + 'for it. (2) Read a record of each renamed object and confirm the business value is under the new '
-    + 'name and its `queue` column is empty unless a queue holds it. An object without such a field '
+    'Search every object your stacks declare, and every `objectExtensions` entry, for a field named '
+    + '`queue` on an object with no `ownership` or `ownership: \'user\'`. Rename each one and copy its '
+    + 'data to the new column. Two proofs. (1) Boot the stack and confirm each object REGISTERS: no '
+    + '`ObjectQueueColumnRefusedError` for it, and no warning that an extension\'s `queue` is ignored. '
+    + '(2) Read a record of each renamed object and confirm the business value is under the new name '
+    + 'and its `queue` column is empty unless a queue holds it. An object without such a field '
     + 'registers byte-identically to before, apart from the injected column.',
 };

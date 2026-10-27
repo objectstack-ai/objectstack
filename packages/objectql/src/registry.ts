@@ -3600,7 +3600,9 @@ export class SchemaRegistry {
     // [ADR-0142 D3] Beside it, for its reason: an eligible object's own
     // `queue` field is refused before the injection could be skipped for it —
     // see {@link ObjectQueueColumnRefusedError}. A base layer only: an `extend`
-    // body is never planned on its own (#24314, below).
+    // body is never planned on its own (#24314, below), so its `queue` is
+    // governed in the fold instead ({@link withoutExtensionQueueField}),
+    // whichever order the layers register in.
     if (ownership !== 'extend') {
       const queueRefusal = objectQueueColumnRefusal(schema);
       if (queueRefusal) throw queueRefusal;
@@ -3917,10 +3919,19 @@ export class SchemaRegistry {
     // base carries the audit family, a `created_at` an extender declares cannot
     // replace the platform's read-only definition with a writable one (#4447).
     const governAudit = resolveInjectedSystemColumns(baseDefinition).audit;
+    // [ADR-0142 D3] The ownership-queue column, for the same reason: the
+    // registration door's refusal ({@link objectQueueColumnRefusal}) never sees
+    // an `extend` body, so where the base plans `queue` an extender's own `queue`
+    // field is dropped here and the platform's column stands. Letting it replace
+    // the injected definition would read as `author` provenance and switch the
+    // access path, the claim and the assignment seam off on this object, while
+    // the gate kept judging the extender's business column.
+    const governQueue = resolveInjectedSystemColumns(baseDefinition).queue;
     let merged = { ...baseDefinition };
     for (const contrib of contributors) {
       if (contrib.ownership === 'extend') {
-        const extension = governAudit ? applyAuditFieldGovernance(contrib.definition) : contrib.definition;
+        let extension = governAudit ? applyAuditFieldGovernance(contrib.definition) : contrib.definition;
+        if (governQueue) extension = this.withoutExtensionQueueField(extension, contrib.packageId);
         merged = mergeObjectDefinitions(merged, extension, tenantAuthored);
       }
     }
@@ -3928,6 +3939,38 @@ export class SchemaRegistry {
     // it — here, in the fold every object read and the write door share, so
     // the set a client is offered and the set a write is judged by are one.
     return this.finishServedObject(merged);
+  }
+
+  /**
+   * Extension `queue` declarations already named, keyed `object|package`. Per
+   * registry, not module-level, for the reason {@link navGroupDiagnostics}
+   * gives: the fold runs on every read, and a second registry must still say it.
+   */
+  private shadowedExtensionQueueWarned = new Set<string>();
+
+  /**
+   * [ADR-0142 D3] An extender's body without its own `queue` field, for a base
+   * that plans the column; the body itself when it declares none or carries
+   * the platform's own definition (a served document coming back). The first
+   * drop per object and package is named once, with the remedy the
+   * registration door's refusal prescribes.
+   */
+  private withoutExtensionQueueField(extension: ServiceObject, packageId: string | undefined): ServiceObject {
+    const fields = extension.fields as Record<string, unknown> | undefined;
+    const declared = fields?.[QUEUE_FIELD];
+    if (declared === undefined || isInjectedColumnDefinition(declared, QUEUE_FIELD_DEF)) return extension;
+    const { [QUEUE_FIELD]: _dropped, ...rest } = fields!;
+    const key = `${extension.name}|${packageId ?? ''}`;
+    if (!this.shadowedExtensionQueueWarned.has(key)) {
+      this.shadowedExtensionQueueWarned.add(key);
+      console.warn(
+        `[Registry] An extension of object "${extension.name}"${packageId ? ` from package "${packageId}"` : ''} ` +
+          'declares a field named `queue`, which the platform reserves on an object whose records have a user ' +
+          'owner: it holds the ownership queue a record without an owner sits in. The extension\'s `queue` is ' +
+          'ignored and the platform\'s column stands. Rename the business field (for example `support_queue`).',
+      );
+    }
+    return { ...extension, fields: rest } as ServiceObject;
   }
 
   /**

@@ -162,6 +162,34 @@ describe('[ADR-0142 D3] the injected `queue` column', () => {
     expect(objectQueueColumnRefusal({ name: 'catalog', ownership: 'org', fields: { queue: { type: 'text' } } })).toBeNull();
     expect(objectQueueColumnRefusal({ name: 'sys_job_queue', fields: { queue: { type: 'text' } } })).toBeNull();
   });
+
+  it('an extension\'s own `queue` never replaces the injected column, in either registration order, and is named once', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const extension = { name: 'ticket', fields: { queue: { type: 'text', label: 'Print queue' }, region: { type: 'text', label: 'Region' } } };
+      for (const extendFirst of [false, true]) {
+        const engine = new ObjectQL();
+        const register = {
+          base: () => engine.registry.registerObject(TICKET as any, 'pkg'),
+          ext: () => engine.registry.registerObject(extension as any, 'com.ext', undefined, 'extend'),
+        };
+        if (extendFirst) { register.ext(); register.base(); } else { register.base(); register.ext(); }
+        const served = engine.registry.getObject('ticket') as any;
+        expect(served.fields.queue).toEqual(QUEUE_FIELD_DEF);
+        expect(served.fields.region).toMatchObject({ label: 'Region' });
+        engine.registry.getObject('ticket');
+      }
+      const named = warn.mock.calls.filter((c: unknown[]) => /An extension of object "ticket" from package "com\.ext" declares a field named `queue`/.test(String(c[0])));
+      expect(named).toHaveLength(2); // once per registry, never once per read
+
+      const catalog = new ObjectQL();
+      catalog.registry.registerObject({ name: 'catalog', ownership: 'org', fields: {} } as any, 'pkg');
+      catalog.registry.registerObject({ name: 'catalog', fields: { queue: { type: 'text', label: 'Print queue' } } } as any, 'com.ext', undefined, 'extend');
+      expect((catalog.registry.getObject('catalog') as any).fields.queue).toEqual({ type: 'text', label: 'Print queue' });
+    } finally {
+      warn.mockRestore();
+    }
+  });
 });
 
 // ─── D4: the by-id write precondition ──────────────────────────────────────
