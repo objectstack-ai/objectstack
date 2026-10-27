@@ -56,19 +56,22 @@ import {
  *   would narrow what `os build` accepts past what the platform installs.
  */
 
-/** The four findings, by the fact the author acts on. */
+/**
+ * The four findings, by the fact the author acts on. Author-time diagnostic
+ * codes (ADR-0112 D6c), not wire error codes, so kebab-case and out of the ledger.
+ */
 export type DependencyRangeCode =
-  | 'DEPENDENCY_RANGE_UNREADABLE'
-  | 'DEPENDENCY_DECLARATION_UNREADABLE'
-  | 'DEPENDENCY_RANGE_UNMET_IN_ARTIFACT'
-  | 'DEPENDENCY_VERSION_UNREADABLE_IN_ARTIFACT';
+  | 'dependency-range-unreadable'
+  | 'dependency-declaration-unreadable'
+  | 'dependency-range-unmet-in-artifact'
+  | 'dependency-version-unreadable-in-artifact';
 
 export interface DependencyRangeDiagnostic {
   readonly code: DependencyRangeCode;
   readonly severity: 'error' | 'warning';
   /** The delivered package that declares the entry. */
   readonly packageId: string;
-  /** The declared dependency id; absent for `DEPENDENCY_DECLARATION_UNREADABLE`. */
+  /** The declared dependency id; absent for `dependency-declaration-unreadable`. */
   readonly dependency?: string;
   /** The declared range, as written. */
   readonly range?: string;
@@ -112,7 +115,7 @@ function diagnosticOf(
 ): DependencyRangeDiagnostic | null {
   if (entry.found === 'unreadable-declaration') {
     return {
-      code: 'DEPENDENCY_DECLARATION_UNREADABLE',
+      code: 'dependency-declaration-unreadable',
       severity: 'error',
       packageId: entry.packageId,
       path: `${at}.dependencies`,
@@ -134,7 +137,7 @@ function diagnosticOf(
   if (entry.found === 'unreadable-range') {
     return {
       ...base,
-      code: 'DEPENDENCY_RANGE_UNREADABLE',
+      code: 'dependency-range-unreadable',
       severity: inArtifact ? 'warning' : 'error',
       ...(siblingVersion === undefined ? {} : { siblingVersion }),
       message: inArtifact
@@ -149,7 +152,7 @@ function diagnosticOf(
   if (entry.found === 'out-of-range') {
     return {
       ...base,
-      code: 'DEPENDENCY_RANGE_UNMET_IN_ARTIFACT',
+      code: 'dependency-range-unmet-in-artifact',
       severity: 'warning',
       ...(siblingVersion === undefined ? {} : { siblingVersion }),
       message:
@@ -161,7 +164,7 @@ function diagnosticOf(
   }
   return {
     ...base,
-    code: 'DEPENDENCY_VERSION_UNREADABLE_IN_ARTIFACT',
+    code: 'dependency-version-unreadable-in-artifact',
     severity: 'warning',
     ...(siblingVersion === undefined ? {} : { siblingVersion }),
     message:

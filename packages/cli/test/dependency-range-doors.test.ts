@@ -88,7 +88,7 @@ interface Diagnostic {
 
 const dependencyCodes = (list: unknown): Array<[string | undefined, string | undefined]> =>
   ((list ?? []) as Diagnostic[])
-    .filter((d) => typeof d.code === 'string' && d.code.startsWith('DEPENDENCY_'))
+    .filter((d) => typeof d.code === 'string' && d.code.startsWith('dependency-'))
     .map((d) => [d.code, d.path]);
 
 const dirs = new Map<keyof typeof FIXTURES, string>();
@@ -120,7 +120,7 @@ describe('an unreadable out-of-artifact range is refused at build', () => {
     expect(run.code, `expected exit 1:\n${run.stdout}\n${run.stderr}`).toBe(1);
     const out = JSON.parse(run.stdout) as { valid?: boolean; errors?: unknown };
     expect(out.valid).toBe(false);
-    expect(dependencyCodes(out.errors)).toEqual([['DEPENDENCY_RANGE_UNREADABLE', UNREADABLE_AT]]);
+    expect(dependencyCodes(out.errors)).toEqual([['dependency-range-unreadable', UNREADABLE_AT]]);
   }, 180_000);
 
   it('os build: exit 1, the same entry in `errors`', async () => {
@@ -128,7 +128,7 @@ describe('an unreadable out-of-artifact range is refused at build', () => {
     expect(run.code, `expected exit 1:\n${run.stdout}\n${run.stderr}`).toBe(1);
     const out = JSON.parse(run.stdout) as { success?: boolean; errors?: unknown };
     expect(out.success).toBe(false);
-    expect(dependencyCodes(out.errors)).toEqual([['DEPENDENCY_RANGE_UNREADABLE', UNREADABLE_AT]]);
+    expect(dependencyCodes(out.errors)).toEqual([['dependency-range-unreadable', UNREADABLE_AT]]);
   }, 180_000);
 });
 
@@ -138,7 +138,7 @@ describe('an in-artifact range the sibling version does not meet is reported, ne
     expect(run.code, `expected exit 0:\n${run.stdout}\n${run.stderr}`).toBe(0);
     const out = JSON.parse(run.stdout) as { valid?: boolean; warnings?: unknown };
     expect(out.valid).toBe(true);
-    expect(dependencyCodes(out.warnings)).toEqual([['DEPENDENCY_RANGE_UNMET_IN_ARTIFACT', MISMATCH_AT]]);
+    expect(dependencyCodes(out.warnings)).toEqual([['dependency-range-unmet-in-artifact', MISMATCH_AT]]);
   }, 180_000);
 
   it('os lint: a warning-severity issue at the entry', async () => {
@@ -146,7 +146,7 @@ describe('an in-artifact range the sibling version does not meet is reported, ne
     const out = JSON.parse(run.stdout) as { issues?: Diagnostic[] };
     const found = (out.issues ?? []).filter((i) => i.rule?.startsWith('dependencies/'));
     expect(found.map((i) => [i.rule, i.severity, i.path])).toEqual([
-      ['dependencies/DEPENDENCY_RANGE_UNMET_IN_ARTIFACT', 'warning', MISMATCH_AT],
+      ['dependencies/dependency-range-unmet-in-artifact', 'warning', MISMATCH_AT],
     ]);
   }, 180_000);
 

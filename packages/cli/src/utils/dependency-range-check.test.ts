@@ -36,7 +36,7 @@ describe('checkDependencyRanges — arm 1: an unreadable range', () => {
     const found = checkDependencyRanges(stack);
     expect(found).toHaveLength(1);
     expect(found[0]).toMatchObject({
-      code: 'DEPENDENCY_RANGE_UNREADABLE',
+      code: 'dependency-range-unreadable',
       severity: 'error',
       packageId: 'com.acme.orders',
       dependency: 'com.vendor.billing',
@@ -53,7 +53,7 @@ describe('checkDependencyRanges — arm 1: an unreadable range', () => {
     );
     const found = checkDependencyRanges(stack);
     expect(found.map((d) => [d.code, d.severity, d.path])).toEqual([
-      ['DEPENDENCY_RANGE_UNREADABLE', 'error', 'manifest.dependencies["com.vendor.billing"]'],
+      ['dependency-range-unreadable', 'error', 'manifest.dependencies["com.vendor.billing"]'],
     ]);
   });
 
@@ -62,7 +62,7 @@ describe('checkDependencyRanges — arm 1: an unreadable range', () => {
       pkg('com.acme.core', '1.0.0'),
       pkg('com.acme.orders', '1.0.0', { 'com.acme.core': 'v-one' }),
     );
-    expect(codes(stack)).toEqual([['DEPENDENCY_RANGE_UNREADABLE', 'warning']]);
+    expect(codes(stack)).toEqual([['dependency-range-unreadable', 'warning']]);
     expect(checkDependencyRanges(stack)[0]!.inArtifact).toBe(true);
   });
 
@@ -83,7 +83,7 @@ describe('checkDependencyRanges — arm 2: an in-artifact range the sibling vers
     const found = checkDependencyRanges(stack);
     expect(found).toHaveLength(1);
     expect(found[0]).toMatchObject({
-      code: 'DEPENDENCY_RANGE_UNMET_IN_ARTIFACT',
+      code: 'dependency-range-unmet-in-artifact',
       severity: 'warning',
       packageId: 'com.acme.orders',
       dependency: 'com.acme.core',
@@ -106,7 +106,7 @@ describe('checkDependencyRanges — arm 2: an in-artifact range the sibling vers
       pkg('com.acme.core', '2.0.0-beta.1'),
       pkg('com.acme.orders', '1.0.0', { 'com.acme.core': '^2.0.0' }),
     );
-    expect(codes(stack)).toEqual([['DEPENDENCY_VERSION_UNREADABLE_IN_ARTIFACT', 'warning']]);
+    expect(codes(stack)).toEqual([['dependency-version-unreadable-in-artifact', 'warning']]);
   });
 
   it('does not judge an out-of-artifact entry it can read — the target environment decides that', () => {
@@ -179,6 +179,6 @@ describe('deliveredPackages', () => {
 
   it('reports a `dependencies` that is not a record as an ERROR (the normalized tier `os lint` reads)', () => {
     expect(codes({ manifest: { id: 'com.acme.orders', dependencies: ['com.acme.core'] } }))
-      .toEqual([['DEPENDENCY_DECLARATION_UNREADABLE', 'error']]);
+      .toEqual([['dependency-declaration-unreadable', 'error']]);
   });
 });
