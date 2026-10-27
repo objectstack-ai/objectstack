@@ -334,8 +334,9 @@ export const GetMetaItemsResponseSchema = lazySchema(() => z.object({
 
 /**
  * [#22877] The `member` every by-name door that reads or changes ONE stored
- * item declares (get, delete, publish, history; revert has no declared
- * request) — one sentence, so the four requests cannot drift apart. On the
+ * item declares (get, delete, publish, history and [#26699] the layered read;
+ * revert has no declared request) — one sentence, so the five requests cannot
+ * drift apart. On the
  * REST door it is the `?member=` query parameter of each route's closed set.
  */
 const BUNDLE_MEMBER_SELECTOR_DESCRIPTION =
@@ -708,6 +709,12 @@ export const GetMetaItemResponseSchema = lazySchema(() => z.object({
  * parameter type in `@objectstack/metadata-protocol` member for member — a
  * declared-surface catch-up, not a new capability: the verb and every member
  * here already ship and are enforced.
+ *
+ * [#26699] `member` joins the by-name doors' bundle member selector (ruling
+ * 6116165299, extended to the layered read by the option-A ruling on #26649):
+ * the same name and the same one sentence as {@link GetMetaItemRequestSchema}'s,
+ * so the layers of one non-canonical member (an `email_template` locale) can be
+ * read. Absent, the canonical member's layers, as before.
  */
 export const GetMetaItemLayeredRequestSchema = lazySchema(() => z.object({
   type: z.string().describe('Metadata type name'),
@@ -716,6 +723,7 @@ export const GetMetaItemLayeredRequestSchema = lazySchema(() => z.object({
     'Optional package ID — scopes the `code` layer so a same-name collision '
     + 'resolves to the requested package\'s artifact (ADR-0048).',
   ),
+  member: z.string().optional().describe(BUNDLE_MEMBER_SELECTOR_DESCRIPTION),
 }));
 
 /**
