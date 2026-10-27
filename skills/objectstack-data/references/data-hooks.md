@@ -4,7 +4,7 @@
 - [Hook Definition Schema](#hook-definition-schema) · [Key Properties Explained](#key-properties-explained)
 - [Sandboxed Hook Bodies (`body`)](#sandboxed-hook-bodies-body--what-the-sandbox-ctx-can-call) · [Capabilities — the complete list](#capabilities--the-complete-list) · [Sandbox restrictions](#sandbox-restrictions)
 - [Hook Context API](#hook-context-api) · [Common Patterns](#common-patterns) · [Registration Methods](#registration-methods)
-- [Best Practices](#best-practices) · [Error Handling](#error-handling) · [Testing Hooks](#testing-hooks) · [References](#references)
+- [Best Practices](#best-practices) · [Error Handling](#error-handling) · [References](#references)
 
 Reference companion to `objectstack-data/SKILL.md`, and the catalog's anchor for
 data hooks. Covers the 8 lifecycle events, the inline `handler` and sandboxed
@@ -112,9 +112,6 @@ const myHook = defineHook({
 
   // Optional: Error handling strategy
   onError: 'abort',  // 'abort' | 'log'
-
-  // Optional: Declared refusal catalogue (sandboxed `body` refuses by code)
-  // refusals: { CREDIT_LIMIT: { message: 'Over the credit limit.', status: 422 } },
 
   // Optional: Execution timeout (ms)
   timeoutMs: 5000,
@@ -938,101 +935,29 @@ hook re-trigger itself; use `object: '*'` unless you mean every object; throw in
 
 ## Error Handling
 
-### Throwing Errors (Abort Operation)
+A throw aborts the operation and rolls back its transaction; `onError: 'log'`
+(above) makes an `after*` hook log and continue instead.
+
+### Declared refusals (`refusals`)
+
+With a `refusals` catalogue, a sandboxed `body` refuses **by code only** and the
+runtime answers with that entry:
 
 ```typescript
-handler: async (ctx) => {
-  if (!ctx.input.email) {
-    // Aborts operation, rolls back transaction
-    throw new Error('Email is required');
-  }
-}
+refusals: {
+  CREDIT_LIMIT: { message: 'Over the credit limit.' },
+  ON_HOLD: { message: 'Account on hold.', status: 409 }, // default 400
+},
+body: { language: 'js', source: `
+  if (ctx.input.amount > 100000) throw Object.assign(new Error(), { code: 'CREDIT_LIMIT' });
+` },
 ```
 
-### Logging Errors (Continue)
-
-```typescript
-{
-  onError: 'log',  // Log error, don't abort
-  handler: async (ctx) => {
-    try {
-      await sendEmail(ctx.input.email);
-    } catch (error) {
-      // Error is logged, operation continues
-      console.error('Failed to send email', error);
-    }
-  }
-}
-```
-
-### Custom Error Messages
-
-```typescript
-handler: async (ctx) => {
-  if (ctx.input.annual_revenue < 0) {
-    throw new Error('Annual revenue cannot be negative');
-  }
-
-  if (ctx.input.annual_revenue > 1000000000) {
-    throw new Error('Annual revenue exceeds maximum allowed value (1B)');
-  }
-}
-```
-
-### Declared refusals (`refusals`) — coded, translatable refusals
-
-A hook can declare its refusal catalogue: one entry per code, each with the
-sentence the user reads and an optional 4xx `status` (default `400`). The body
-then refuses **by code only** — it throws an error carrying a declared `code`,
-and the runtime answers with the entry's message and status:
-
-```typescript
-defineHook({
-  name: 'credit_guard',
-  object: 'order',
-  events: ['beforeInsert'],
-  refusals: {
-    CREDIT_LIMIT: { message: 'This order exceeds the customer credit limit.' },
-    ACCOUNT_ON_HOLD: { message: 'The account is on hold.', status: 409 },
-  },
-  body: {
-    language: 'js',
-    source: `
-      if (ctx.input.amount > 100000) {
-        throw Object.assign(new Error('over limit'), { code: 'CREDIT_LIMIT' });
-      }
-    `,
-  },
-});
-```
-
-- **Codes** are SCREAMING_SNAKE (`CREDIT_LIMIT`). The error envelope carries
-  it as `declaredCode`, beside the status's registered `code`
-  (`VALIDATION_ERROR` for 400), so a client can branch on it.
-- **The message is translated** through
-  `hooks.<hook>.refusals.<CODE>.message` in the caller's locale; `os i18n
-  extract` scaffolds one key per declared entry and `os i18n check` counts them.
-  The message is plain text — no `{{ }}` holes are filled. The body's own
-  `Error` text and `status` are not what the caller reads.
-- **An undeclared code is refused loudly.** A code the body throws literally
-  (`{ code: 'X' }`, or `e.code = 'X'; throw e`) that the catalogue does not
-  declare fails the save at `body.source`. Any other undeclared code — or a
-  throw with no code — is a `500` fault at run time, naming the hook and the
-  code. So once a hook declares `refusals`, every refusal it makes is one of them.
-- An error a `ctx.api` call raised that the body lets leave unchanged, and a
-  crash (`TypeError`), pass through as before; they are not the body's refusal.
-- The catalogue is read for a sandboxed `body`. An inline `handler` keeps
-  throwing its own errors.
-
----
-
-## Testing Hooks
-
-Hook test harnesses — vitest units and `LiteKernel` integration setups — are the
-**objectstack-platform** skill's surface (its frontmatter claims "test harnesses via
-LiteKernel"): see [objectstack-platform/SKILL.md](../../objectstack-platform/SKILL.md).
-
----
+- Codes are SCREAMING_SNAKE; the error envelope carries one as `declaredCode`.
+- The plain-text message is translated via `hooks.<hook>.refusals.<CODE>.message`
+  in the caller's locale; the body's own error text and `status` are not used.
+- An undeclared code, or none, is refused: at save if thrown literally, else as
+  a `500` fault. Unchanged `ctx.api` errors and crashes pass through.
 
 ---
 
@@ -1042,5 +967,6 @@ LiteKernel"): see [objectstack-platform/SKILL.md](../../objectstack-platform/SKI
 - [Project hooks pattern](../SKILL.md#lifecycle-hooks) — Hook integration in the data skill
 - [objectstack-platform/references/plugin-hooks.md](../../objectstack-platform/references/plugin-hooks.md) — plugin/kernel hooks (a different extension point)
 - [objectstack-automation](../../objectstack-automation/SKILL.md) — Flows and Workflows
+- [objectstack-platform/SKILL.md](../../objectstack-platform/SKILL.md) — hook test harnesses (vitest units, `LiteKernel`)
 
 ---
