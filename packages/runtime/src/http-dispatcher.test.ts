@@ -453,7 +453,7 @@ describe('HttpDispatcher', () => {
             // so only the caller changes.
             const result = await dispatcher.handleAutomation('flow_a/toggle', 'POST', { enabled: false }, FLOW_AUTHOR());
             expect(result.handled).toBe(true);
-            expect(mockAutomationService.toggleFlow).toHaveBeenCalledWith('flow_a', false);
+            expect(mockAutomationService.toggleFlow).toHaveBeenCalledWith('flow_a', false, expect.anything());
         });
 
         it('should list runs via GET /:name/runs', async () => {

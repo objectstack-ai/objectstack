@@ -11,6 +11,7 @@ import type {
     FlowRunSummary,
 } from '@objectstack/spec/automation';
 import type { AutomationContext, AutomationResult, ResumeSignal, IAutomationService, RunListResult, ScreenSpec, ScreenFieldSpec, ConnectorSourcePullRequest, ConnectorSourcePullResult } from '@objectstack/spec/contracts';
+import type { MetadataActivationWriteOptions } from '@objectstack/core';
 import type { FlowRegistration, FlowRegistrationRefusal, FlowInnerRefusal } from '@objectstack/spec/api';
 import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
 import {
@@ -2326,8 +2327,12 @@ export interface FlowActivationRow {
 export interface FlowActivationStore {
     /** Every flow activation row — the ledger is deployment-wide. */
     list(): Promise<FlowActivationRow[]>;
-    /** Insert or update the row for one packaged flow. */
-    setActive(row: FlowActivationRow): Promise<void>;
+    /**
+     * Insert or update the row for one packaged flow. `options.context` is the
+     * caller the write is made for, already elevated (#26474); absent, the
+     * store writes under its own system context and the row names nobody.
+     */
+    setActive(row: FlowActivationRow, options?: MetadataActivationWriteOptions): Promise<void>;
 }
 
 /**
@@ -5288,11 +5293,17 @@ export class AutomationEngine implements IAutomationService {
      *
      * ADR-0126 §5 gates the write on posture and the platform-operator
      * capability. That gate lives at the automation domain's toggle route,
-     * because it needs the CALLER — and `toggleFlow(name, enabled)` is a
-     * `packages/spec` contract with no caller channel and no room to grow one
-     * on this line. In-process callers are trusted here exactly as they are at
-     * every other service method; the wire is the untrusted surface, and the
-     * wire goes through the gate.
+     * because it needs the caller's grants, and the contract's `caller`
+     * carries none: it is attribution only. In-process callers are trusted
+     * here exactly as they are at every other service method; the wire is the
+     * untrusted surface, and the wire goes through the gate.
+     *
+     * ## Who the row names (#26474)
+     *
+     * `caller.userId`, when there is one: the ledger write runs as that user,
+     * elevated, so the engine stamps `created_by` / `updated_by` and the audit
+     * plugin records the same id. Only the id crosses; an absent `caller` is an
+     * unattributed write under the store's own system context.
      *
      * @throws when the flow is unknown, when no package ships it
      *   (`RESOURCE_CONFLICT` / 409, before anything is written or changed),
@@ -5302,7 +5313,7 @@ export class AutomationEngine implements IAutomationService {
      *   reported flip that did not persist is the failure mode this whole leg
      *   exists to remove.
      */
-    toggleFlow(name: string, enabled: boolean): Promise<void> {
+    toggleFlow(name: string, enabled: boolean, caller?: Pick<AutomationContext, 'userId'>): Promise<void> {
         // The body lives in ./flow-definitions.ts (#25222).
         const readFlowActivationStore = () => this.flowActivationStore;
         const host: ThisParameterType<typeof toggleFlow> = {
@@ -5321,7 +5332,7 @@ export class AutomationEngine implements IAutomationService {
             deactivateFlowTrigger: (...a) => this.deactivateFlowTrigger(...a),
             rejudgeSubflowCallers: (...a) => this.rejudgeSubflowCallers(...a),
         };
-        return toggleFlow.call(host, name, enabled);
+        return toggleFlow.call(host, name, enabled, caller);
     }
 
     /** Get flow version history */
