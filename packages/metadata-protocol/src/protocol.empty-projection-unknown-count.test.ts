@@ -40,6 +40,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 const SCHEMA = {
@@ -53,7 +54,10 @@ const SCHEMA = {
 
 function makeProtocol() {
     const find = vi.fn(async () => [{ id: 'r1', name: 'a', status: 'open' }] as unknown[]);
-    const findOne = vi.fn(async () => ({ id: 'r1', name: 'a', status: 'open' }));
+    const findOne = vi.fn(async (object: string, query?: EngineFindOneQueryInput) => {
+        assertEngineFindOnePredicate(object, query);
+        return { id: 'r1', name: 'a', status: 'open' };
+    });
     const count = vi.fn(async () => 7);
     const engine = {
         registry: { getObject: (n: string) => (n === 'invoice' ? SCHEMA : undefined) },
