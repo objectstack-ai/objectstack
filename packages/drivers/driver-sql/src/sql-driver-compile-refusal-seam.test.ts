@@ -29,8 +29,9 @@
  *
  * 1. **The enumeration** reads `sql-driver.ts` and its cross-field seam module
  *    `sql-driver-cross-field-comparison.ts` (#25521 cut 13), plus the read-exit
- *    fault module `sql-driver-read-exit-fault.ts` (#25521 cut 15), and lists every
- *    function that builds an `INVALID_FILTER` error. Only three may call
+ *    fault module `sql-driver-read-exit-fault.ts` (#25521 cut 15) and the
+ *    predicate-emitter module `sql-driver-predicate-emitters.ts` (#25521 cut 16),
+ *    and lists every function that builds an `INVALID_FILTER` error. Only three may call
  *    `unsupportedFilterError` directly (the seam itself, the `'author'`
  *    re-issue, and the column refusal raised from a dialect error AFTER the
  *    statement ran), and every caller of `withheldFilterError` must have a row
@@ -66,7 +67,7 @@ const SECRET_NUM = 7770123;
 const UNDECLARED_KEY = '$psecret_combinator';
 
 type Door = {
-  /** The builder in `sql-driver.ts` or its cross-field seam module this row drives — asserted by the error's stack. */
+  /** The builder in `sql-driver.ts` or one of its seam modules this row drives — asserted by the error's stack. */
   readonly builder: string;
   readonly where: () => Record<string, unknown> | unknown[];
   readonly secrets: readonly string[];
@@ -273,8 +274,8 @@ const DOORS: readonly Door[] = [
 // ── Half 1: the enumeration ───────────────────────────────────────────────────
 
 /**
- * Every function in `sql-driver.ts`, `sql-driver-cross-field-comparison.ts` and
- * `sql-driver-read-exit-fault.ts` that builds an `INVALID_FILTER` error, by the route it takes. Read with the TypeScript parser, not a regex, so a call
+ * Every function in `sql-driver.ts`, `sql-driver-cross-field-comparison.ts`,
+ * `sql-driver-read-exit-fault.ts` and `sql-driver-predicate-emitters.ts` that builds an `INVALID_FILTER` error, by the route it takes. Read with the TypeScript parser, not a regex, so a call
  * split across lines, an inline `throw`, or a builder written as a method or an
  * arrow cannot slip past the count.
  */
@@ -287,10 +288,13 @@ function enumerateRefusalBuilders(): {
   // its own seam module with two of the builders below; the scan reads both.
   // [#25521 cut 15] The read exits' fault terminals moved to a third, with
   // `unresolvableFilterColumnError`; the scan reads it too.
+  // [#25521 cut 16] The leaf predicate emitters moved to a fourth, with the two
+  // `$empty` refusals; the scan reads it too.
   const sources = [
     ['sql-driver.ts', readFileSync(new URL('./sql-driver.ts', import.meta.url), 'utf8')],
     ['sql-driver-cross-field-comparison.ts', readFileSync(new URL('./sql-driver-cross-field-comparison.ts', import.meta.url), 'utf8')],
     ['sql-driver-read-exit-fault.ts', readFileSync(new URL('./sql-driver-read-exit-fault.ts', import.meta.url), 'utf8')],
+    ['sql-driver-predicate-emitters.ts', readFileSync(new URL('./sql-driver-predicate-emitters.ts', import.meta.url), 'utf8')],
   ] as const;
   const directCallers = new Set<string>();
   const seamCallers = new Set<string>();

@@ -186,6 +186,26 @@ const PROBES: Record<string, { name: string; item: Record<string, unknown> }> = 
             active: true,
         },
     },
+    // [ADR-0142 D1/D5] `queue` and `assignment_rule`, regime C like
+    // `sharing_rule`: a stack's declaration, or (for a queue) an
+    // organization's `sys_queue` row, never a runtime `sys_metadata` item.
+    queue: {
+        name: 'rc3_queue_probe',
+        item: {
+            name: 'rc3_queue_probe',
+            label: 'Probe',
+            members: [{ type: 'position', value: 'probe_position' }],
+        },
+    },
+    assignment_rule: {
+        name: 'rc3_assignment_rule_probe',
+        item: {
+            name: 'rc3_assignment_rule_probe',
+            label: 'Probe',
+            object: 'task',
+            entries: [{ name: 'all_rows', assignTo: { type: 'queue', value: 'rc3_queue_probe' } }],
+        },
+    },
 };
 
 function makeStubEngine(artifacts: Array<{ type: string; name: string }> = []) {
@@ -302,7 +322,9 @@ describe('code-only metadata types are refused on every kernel (#5086)', () => {
         // auto-enrolment is the point of deriving the set instead of listing it
         // (Prime Directive #8).
         expect(CODE_ONLY_TYPES.length).toBeGreaterThan(0);
-        expect([...CODE_ONLY_TYPES].sort()).toEqual(['agent', 'api', 'capability', 'field', 'job', 'picklist', 'sharing_rule']);
+        expect([...CODE_ONLY_TYPES].sort()).toEqual([
+            'agent', 'api', 'assignment_rule', 'capability', 'field', 'job', 'picklist', 'queue', 'sharing_rule',
+        ]);
         for (const type of CODE_ONLY_TYPES) {
             expect(PROBES[type], `no probe payload for code-only type '${type}'`).toBeDefined();
         }

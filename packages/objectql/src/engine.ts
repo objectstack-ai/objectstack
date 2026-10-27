@@ -246,6 +246,8 @@ import { applyArtifactForwardConversions, resolveDeclaredRange } from '@objectst
 import { isUniqueViolationError, uniqueViolationColumn } from '@objectstack/types';
 import { DuplicateRecordError } from './duplicate-record-error.js';
 import { NotNullRefusalError, envelopeDriverWriteRefusal } from './not-null-refusal-error.js';
+import { ConcurrentUpdateError } from './concurrent-update-error.js';
+import { AssignmentRuleEvaluator, ASSIGNMENT_RULE_TYPE, OWNERSHIP_QUEUE_SOURCE_SLOT, type AssignmentQueueService } from './assignment-rules.js';
 // [#8682] The write-path loggers' redaction — bound values never reach the log.
 // [#21274] …and its boundary face — nor the error that leaves the engine.
 // [#21385] It lives in `@objectstack/types` now, so `driver-sql`'s own log lines
@@ -299,7 +301,8 @@ import { applyProtection, pluralToSingular, ExternalWriteForbiddenError } from '
 import { SchemaRegistry, computeFQN, type ArtifactInstallScope } from './registry.js';
 import { expandSearchToFilter, normalizeSearch, SEARCHABLE_ENUM_TYPES, SEARCHABLE_TEXTUAL_TYPES } from './search-filter.js';
 import { stripSearchCompanion } from './search-companion.js';
-import { ExpressionEngine, analyzeRelationshipTraversals, type EvalError, type EvalPermissions } from '@objectstack/formula';
+import { ExpressionEngine, analyzeRelationshipTraversals, type EvalError, type EvalOptionLabels, type EvalPermissions } from '@objectstack/formula';
+import { declaredOptionLabels, readerOptionLabels } from './formula-option-labels.js';
 import type { Expression } from '@objectstack/spec';
 import {
   isAggregatedViewContainer,
@@ -2913,6 +2916,13 @@ function applyFormulaPlan(
   permissions?: EvalPermissions,
   onFault?: FormulaFaultSink,
   related?: FormulaRelated,
+  /**
+   * [#26608] What `label(record.<field>)` reads: the object's option labels,
+   * built once per call by {@link readerOptionLabels} (a read, in the reader's
+   * locale) or {@link declaredOptionLabels} (a stored expression). `undefined`
+   * when no formula of the plan calls `label()`.
+   */
+  optionLabels?: EvalOptionLabels,
 ): void {
   if (!plan.length) return;
   const now = new Date();
@@ -2941,7 +2951,7 @@ function applyFormulaPlan(
         scope = hop.record;
         empty = hop.empty;
       }
-      const r = ExpressionEngine.evaluate(fp.expression, { now, timezone, user, org, permissions, record: scope });
+      const r = ExpressionEngine.evaluate(fp.expression, { now, timezone, user, org, permissions, optionLabels, record: scope });
       if (r.ok) {
         rec[fp.name] = roundFormulaValue(r.value, fp.scale);
         continue;
@@ -3013,6 +3023,8 @@ async function hydrateWriteFormulas(
   onFault?: FormulaFaultSink,
   /** [#24197] The hops the plan reads, resolved over `records` as a read resolves them. */
   relatedFor?: (plan: FormulaPlanEntry[], records: ReadonlyArray<Record<string, unknown>>) => Promise<FormulaRelated | undefined>,
+  /** [#26608] The option labels `label()` reads, in the writer's locale — the reader of this response. */
+  optionLabelsFor?: (plan: FormulaPlanEntry[]) => EvalOptionLabels | undefined,
 ): Promise<void> {
   const records = results.filter(
     (r): r is Record<string, unknown> => r != null && typeof r === 'object',
@@ -3020,7 +3032,10 @@ async function hydrateWriteFormulas(
   if (records.length === 0) return;
   const { plan } = planFormulaProjection(schema, undefined);
   if (plan.length === 0) return;
-  applyFormulaPlan(plan, records, execCtx, await permissionsFor(plan, records), onFault, await relatedFor?.(plan, records));
+  applyFormulaPlan(
+    plan, records, execCtx, await permissionsFor(plan, records), onFault, await relatedFor?.(plan, records),
+    optionLabelsFor?.(plan),
+  );
 }
 
 /**
@@ -3112,6 +3127,12 @@ interface StoredExpressionServing {
   permissionsFor: (plan: FormulaPlanEntry[], records: readonly unknown[]) => Promise<EvalPermissions | undefined>;
   onFault?: FormulaFaultSink;
   relatedFor?: (plan: FormulaPlanEntry[], records: ReadonlyArray<Record<string, unknown>>) => Promise<FormulaRelated | undefined>;
+  /**
+   * [#26608] The option labels `label()` reads — always the DECLARED ones
+   * ({@link declaredOptionLabels}): a stored value is computed once and read by
+   * every later reader and by search, so it never depends on the writer's locale.
+   */
+  optionLabelsFor?: (plan: FormulaPlanEntry[]) => EvalOptionLabels | undefined;
 }
 
 /**
@@ -3133,7 +3154,7 @@ async function computeStoredExpressions(
   const scratch = images.map((image) => ({ ...image }));
   applyFormulaPlan(
     plan, scratch, execCtx, await serving.permissionsFor(plan, scratch), serving.onFault,
-    await serving.relatedFor?.(plan, scratch),
+    await serving.relatedFor?.(plan, scratch), serving.optionLabelsFor?.(plan),
   );
   return scratch.map((row) => {
     const values: Record<string, unknown> = {};
@@ -3311,6 +3332,9 @@ function replacedStoredExpressionFields(
  * above. [#24197] For the same reason it preloads no relationship hop, so a
  * formula reading `record.<reference>.<field>` yields `null` here too. The read and write paths resolve the map first
  * ({@link ObjectQL.resolveFormulaPermissions}); a helper with no resolver cannot.
+ * [#26608] And it holds no i18n service, so `label(record.<field>)` reads the
+ * DECLARED option labels here ({@link declaredOptionLabels}), whatever
+ * `execCtx.locale` says.
  * A caller that holds a read channel and wants the read's answer calls
  * {@link ObjectQL.serveFormulaField} (through `ScopedContext.serveFormulaField`).
  *
@@ -3331,7 +3355,7 @@ export function evaluateFormulaField(
   const scratch: Record<string, unknown> = { ...record };
   // [#24197] Synchronous, so it preloads no hop: a formula reading through a
   // reference yields `null` here, as a `can()` formula does above.
-  applyFormulaPlan(plan, [scratch], execCtx);
+  applyFormulaPlan(plan, [scratch], execCtx, undefined, undefined, undefined, declaredOptionLabels(schema, plan));
   return scratch[field];
 }
 
@@ -3880,6 +3904,24 @@ export interface OperationContext {
    * write is one it does not gate. The engine never invents one.
    */
   postHookWriteImageCheck?: PostHookWriteImageCheck;
+
+  /**
+   * [ADR-0142 D4] The by-id write PRECONDITION: an equality predicate over the
+   * stored row (`{ <field>: <value> }`) the write is conditional on. Set by an
+   * enforcement layer's middleware — the ownership gate sets `{ owner_id: null }`
+   * on a claim, so two members claiming at once produce exactly one owner — and
+   * by the engine's own assignment cursor (`{ version }`). Engine-internal:
+   * reachable from no data door, and read only on a by-id `update`.
+   *
+   * The engine lowers the write to the driver's conditional
+   * `updateMany(object, { where: { id, ...expect } }, data)`; one affected row
+   * is re-read by id and the by-id branch continues unchanged (hooks, formulas,
+   * the event, the roll-up, the response); zero rows answer 409
+   * `CONCURRENT_UPDATE` ("the record was taken"). A driver with no `updateMany`
+   * degrades to the pre-image check its setter already made, and the write
+   * goes through unconditionally, logged once per process at `warn`.
+   */
+  writePrecondition?: Readonly<Record<string, unknown>>;
 }
 
 /**
@@ -4185,6 +4227,11 @@ const METADATA_ARRAY_KEYS = [
   // `security`-domain type (`engine-security-catalog-package-door.test.ts`).
   // `roles` stays in the list as the inert retired spelling it already was.
   'roles', 'positions', 'permissions', 'capabilities', 'profiles', 'sharingRules', 'policies',
+  // [ADR-0142 D1/D5] Ownership queues and the assignment rules that route
+  // inserted rows into them — both read from the registry on every use (the
+  // queue service, the assignment seam), so a declaration must reach it with
+  // its package stamped, as every collection on this list does.
+  'queues', 'assignmentRules',
   // AI Protocol
   'agents', 'tools', 'skills', 'ragPipelines',
   // API Protocol
@@ -4640,6 +4687,14 @@ export type UnservableControlledByParentMaster = {
  */
 export const SECURITY_SERVICE_SOURCE_SLOT: unique symbol = Symbol.for('objectstack.objectql.securityServiceSource');
 
+/**
+ * [ADR-0142 D4] The engine's own channel for {@link OperationContext.writePrecondition}
+ * on an `update` it issues itself (the assignment cursor). A module-private
+ * symbol, so no options object a door builds — and nothing outside this
+ * module — can carry it.
+ */
+const WRITE_PRECONDITION_OPTION: unique symbol = Symbol('objectql.writePrecondition');
+
 export class ObjectQL implements IObjectQLEngine {
   /**
    * Ambient transaction store (ADR-0034). While a `transaction()` callback
@@ -4815,6 +4870,12 @@ export class ObjectQL implements IObjectQLEngine {
     // the same reason `t` is — the setter accepts any partial shim, and a shim
     // that cannot say what it holds is simply not negotiated against.
     getLocales?: () => string[];
+    // [#26608] What a formula's `label()` is translated through: the bundle
+    // and the declared locale chain, read as the metadata route reads them
+    // (`formula-option-labels.ts`). Optional for the same reason.
+    getTranslations?: (locale: string) => Record<string, unknown>;
+    getFallbackLocale?: () => string | undefined;
+    getDefaultLocale?: () => string | undefined;
   };
 
   // Crypto provider backing `secret`-typed fields. Optional: when absent,
@@ -6566,8 +6627,25 @@ export class ObjectQL implements IObjectQLEngine {
     const scratch: Record<string, unknown> = { ...record };
     applyFormulaPlan(plan, [scratch], context, await this.resolveFormulaPermissions(
       objectName, plan, [scratch], context, this.permissionResolution(context),
-    ), this.formulaFaultSink(objectName), await this.resolveFormulaRelated(schema, plan, [scratch], context));
+    ), this.formulaFaultSink(objectName), await this.resolveFormulaRelated(schema, plan, [scratch], context),
+    this.formulaOptionLabels(schema, plan, context));
     return scratch[field];
+  }
+
+  /**
+   * [#26608] The option labels `label(record.<field>)` reads on a read or a
+   * write response of `schema`'s object: in the reader's locale
+   * (`ExecutionContext.locale`, which the request's `Accept-Language` sets),
+   * translated through the bridged i18n service as `GET /meta/object/:name`
+   * serves the object to the same reader — see {@link readerOptionLabels}.
+   * `undefined` when no formula of `plan` calls `label()`.
+   */
+  private formulaOptionLabels(
+    schema: unknown,
+    plan: FormulaPlanEntry[],
+    context: { locale?: string } | undefined,
+  ): EvalOptionLabels | undefined {
+    return readerOptionLabels(schema, plan, context?.locale, this.i18nService);
   }
 
   /**
@@ -9379,8 +9457,17 @@ export class ObjectQL implements IObjectQLEngine {
    * locale against the field's DECLARED label. The service adds two things —
    * a deployment's `validation.field.*` message overrides, and the field's
    * TRANSLATED label for apps whose declared labels are in another language.
+   * [#26608] It is also what a formula's `label(record.<field>)` is translated
+   * through on a read and a write response (`getTranslations` plus the
+   * declared locale chain); without it `label()` reads the declared labels.
    */
-  setI18nService(service: { t?: (key: string, locale: string, params?: Record<string, unknown>) => string; getLocales?: () => string[] }): void {
+  setI18nService(service: {
+    t?: (key: string, locale: string, params?: Record<string, unknown>) => string;
+    getLocales?: () => string[];
+    getTranslations?: (locale: string) => Record<string, unknown>;
+    getFallbackLocale?: () => string | undefined;
+    getDefaultLocale?: () => string | undefined;
+  }): void {
     this.i18nService = service;
     this.logger.info('I18nService configured for validation messages');
   }
@@ -13540,7 +13627,7 @@ export class ObjectQL implements IObjectQLEngine {
               // [#24197] One batched read per reference field for this PAGE —
               // the rows the driver returned, after limit/offset.
               _findSchema, _findFormula.plan, result, opCtx.context, query,
-            ));
+            ), this.formulaOptionLabels(_findSchema, _findFormula.plan, opCtx.context));
           }
 
           // Post-process: expand related records if expand is requested
@@ -13827,7 +13914,7 @@ export class ObjectQL implements IObjectQLEngine {
           objectName, _findOneFormula.plan, [result], opCtx.context, this.permissionResolution(opCtx.context),
         ), this.formulaFaultSink(objectName), await this.resolveFormulaRelated(
           _findOneSchema, _findOneFormula.plan, [result], opCtx.context, query,
-        ));
+        ), this.formulaOptionLabels(_findOneSchema, _findOneFormula.plan, opCtx.context));
       }
 
       // Post-process: expand related records if expand is requested
@@ -14642,6 +14729,77 @@ export class ObjectQL implements IObjectQLEngine {
    * returned row would make every update of a row carrying a retired column
    * record that column as changed, its stored value included.
    */
+  /**
+   * [ADR-0142 D4] The by-id write under {@link OperationContext.writePrecondition}:
+   * the driver's conditional `updateMany` over `{ id, ...expect }`, then a
+   * readback by id. Zero rows matched is {@link ConcurrentUpdateError}. A driver
+   * with no `updateMany` writes unconditionally, logged once per process.
+   */
+  private async updateByIdExpecting(
+    driver: IDataDriver,
+    object: string,
+    id: unknown,
+    data: Record<string, unknown>,
+    expect: Readonly<Record<string, unknown>>,
+    options: Parameters<IDataDriver['findOne']>[2],
+  ): Promise<unknown> {
+    if (typeof driver.updateMany !== 'function') {
+      if (!this.preconditionDegradedWarned) {
+        this.preconditionDegradedWarned = true;
+        this.logger.warn(
+          `[objectql] the driver for '${object}' has no conditional update (updateMany), so a by-id write ` +
+            'precondition degrades to the pre-image check and the write goes through unconditionally: two ' +
+            'concurrent claims of one record may both land, and the round-robin cursor may repeat a member.',
+          { object },
+        );
+      }
+      return driver.update(object, id as string, data, options);
+    }
+    const affected = await driver.updateMany(object, { object, where: { ...expect, id } } as QueryAST, data, options);
+    if (!(Number(affected) > 0)) throw new ConcurrentUpdateError(object, String(id));
+    return driver.findOne(object, { object, where: { id }, limit: 1 } as QueryAST, options);
+  }
+
+  /** [ADR-0142 D4] Set once the precondition's no-`updateMany` degradation has been logged. */
+  private preconditionDegradedWarned = false;
+
+  /** [ADR-0142 D5] The assignment seam, built on first use. */
+  private assignmentEvaluator?: AssignmentRuleEvaluator;
+
+  /** The registered ownership-queue service, through the plugin's slot — `null` on every other state. */
+  private ownershipQueueService(): AssignmentQueueService | null {
+    const source = (this as unknown as Record<symbol, unknown>)[OWNERSHIP_QUEUE_SOURCE_SLOT];
+    if (typeof source !== 'function') return null;
+    try {
+      const svc = (source as () => unknown)();
+      return svc && typeof (svc as AssignmentQueueService).resolveQueue === 'function'
+        && typeof (svc as AssignmentQueueService).expandMembers === 'function'
+        ? (svc as AssignmentQueueService)
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private assignment(): AssignmentRuleEvaluator {
+    if (!this.assignmentEvaluator) {
+      this.assignmentEvaluator = new AssignmentRuleEvaluator({
+        listRules: () => this._registry.listItems(ASSIGNMENT_RULE_TYPE) as unknown[],
+        getSchema: (object) => this._registry.getObject(object),
+        hasObject: (object) => Boolean(this._registry.getObject(object)),
+        queues: () => this.ownershipQueueService(),
+        find: async (object, where, context, limit) =>
+          (await this.find(object, { where, ...(limit ? { limit } : {}) } as EngineQueryOptions, { context: context as ExecutionContext })) as Record<string, unknown>[],
+        count: (object, where, context) => this.count(object, { where } as EngineCountOptions, { context: context as ExecutionContext }),
+        insert: (object, data, context) => this.insert(object, data, { context: context as ExecutionContext }),
+        updateExpecting: (object, id, data, expect, context) =>
+          this.update(object, { ...data, id }, { context: context as ExecutionContext, [WRITE_PRECONDITION_OPTION]: expect } as any),
+        logger: this.logger,
+      });
+    }
+    return this.assignmentEvaluator;
+  }
+
   private async readUpdatePriorRow(
     object: string,
     id: unknown,
@@ -14914,6 +15072,7 @@ export class ObjectQL implements IObjectQLEngine {
         permissionsFor: (plan, records) => this.resolveFormulaPermissions(object, plan, records, opCtx.context, permissionResolution),
         onFault: this.formulaFaultSink(object),
         relatedFor: (plan, records) => this.resolveFormulaRelated(this._registry.getObject(object), plan, records, opCtx.context),
+        optionLabelsFor: (plan) => declaredOptionLabels(this._registry.getObject(object), plan),
       };
       if (storedExpressionPlan.length > 0) {
         const defaultedRows = (isBatch ? defaultedData : [defaultedData]) as Array<Record<string, unknown>>;
@@ -15368,6 +15527,10 @@ export class ObjectQL implements IObjectQLEngine {
       //    the platform's.
       //  - `normalizeMultiValueFields` coerces a declared multi-value field to
       //    its stored array shape.
+      //  - [ADR-0142 D5] the assignment seam writes `owner_id` and `queue` onto a
+      //    row whose owner and queue are both still EMPTY — routing chosen by a
+      //    declared rule, never a value the caller supplied (a supplied one
+      //    means the row is not evaluated at all).
       //
       // So the invariant this seam buys is stated to its real edge: a stored row
       // satisfies the insert `check` on every field the CALLER can steer. ⛔ It
@@ -15419,6 +15582,32 @@ export class ObjectQL implements IObjectQLEngine {
         opCtx.context,
         rowHookContexts.map((rowCtx) => rowCtx.input.data as Record<string, unknown>),
       );
+
+      // [ADR-0142 D5] The assignment seam — after every `beforeInsert` hook
+      // and the organization the row lands in, before the write. It writes
+      // `owner_id` / `queue` onto a row whose owner and queue are both still
+      // empty, as the platform, and never refuses: see `assignment-rules.ts`.
+      // An engine-owned producer like the two above, so the post-hook `check`
+      // (judged above, on the row as the hooks left it) does not see the owner
+      // a rule picks — that owner is the platform's routing, not the caller's
+      // steering. Free for every object no rule names (`rulesFor` is a registry
+      // read).
+      {
+        const evaluator = this.assignment();
+        if (evaluator.rulesFor(object).length > 0) {
+          const activeOrg = opCtx.context?.tenantId ? String(opCtx.context.tenantId) : null;
+          const candidates = [];
+          for (let i = 0; i < rows.length; i++) {
+            if (rowErrors[i] !== undefined) continue;
+            const row = rows[i];
+            if (!row || typeof row !== 'object') continue;
+            const own = (row as Record<string, unknown>).organization_id;
+            const organizationId = own != null && own !== '' ? String(own) : activeOrg ?? derivedOrganizationId ?? null;
+            candidates.push({ row: row as Record<string, unknown>, organizationId });
+          }
+          await evaluator.apply(object, candidates);
+        }
+      }
       const optionsBase = rowHookContexts[0]?.input.options as any;
       const driverOptions = this.buildDriverOptions(
         object,
@@ -15821,6 +16010,8 @@ export class ObjectQL implements IObjectQLEngine {
           (plan, records) => this.resolveFormulaPermissions(object, plan, records, opCtx.context, permissionResolution),
           this.formulaFaultSink(object),
           (plan, records) => this.resolveFormulaRelated(schemaForValidation, plan, records, opCtx.context),
+          // [#26608] The 201 body is what the save toast names the record from.
+          (plan) => this.formulaOptionLabels(schemaForValidation, plan, opCtx.context),
         );
         for (let k = 0; k < liveIndexes.length; k++) {
           const rowCtx = rowHookContexts[liveIndexes[k]];
@@ -16092,6 +16283,12 @@ export class ObjectQL implements IObjectQLEngine {
        options,
        context: options?.context,
      };
+     // [ADR-0142 D4] The engine's own precondition (the assignment cursor). A
+     // middleware sets the member directly; nothing else can reach it.
+     const internalPrecondition = (options as Record<symbol, unknown> | undefined)?.[WRITE_PRECONDITION_OPTION];
+     if (internalPrecondition && typeof internalPrecondition === 'object') {
+       opCtx.writePrecondition = internalPrecondition as Record<string, unknown>;
+     }
 
      // [#2982] A no-single-id update routes to `driver.updateMany` below with
      // an AST that used to be REBUILT from `options.where` AFTER the
@@ -16326,6 +16523,7 @@ export class ObjectQL implements IObjectQLEngine {
          permissionsFor: (plan, records) => this.resolveFormulaPermissions(object, plan, records, opCtx.context, permissionResolution),
          onFault: this.formulaFaultSink(object),
          relatedFor: (plan, records) => this.resolveFormulaRelated(updateSchema, plan, records, opCtx.context),
+         optionLabelsFor: (plan) => declaredOptionLabels(updateSchema, plan),
        };
        const undeclared = undeclaredWriteFieldErrors(
          object,
@@ -17376,7 +17574,13 @@ export class ObjectQL implements IObjectQLEngine {
                // there would attribute a violation raised by a nested driver
                // call inside a hook to THIS object.
                try {
-                   result = await driver.update(object, hookContext.input.id as string, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
+                   // [ADR-0142 D4] A write under a precondition is the driver's
+                   // conditional update plus a readback — see
+                   // `OperationContext.writePrecondition`.
+                   const precondition = opCtx.writePrecondition;
+                   result = precondition && Object.keys(precondition).length > 0
+                     ? await this.updateByIdExpecting(driver, object, hookContext.input.id, hookContext.input.data as Record<string, unknown>, precondition, hookContext.input.options as Parameters<IDataDriver['findOne']>[2])
+                     : await driver.update(object, hookContext.input.id as string, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
                } catch (driverError) {
                    throw envelopeDriverWriteRefusal(driverError, object, this.getSchema(object), 'update', updateMsgCtx);
                }
@@ -17765,6 +17969,7 @@ export class ObjectQL implements IObjectQLEngine {
                (plan, records) => this.resolveFormulaPermissions(object, plan, records, opCtx.context, permissionResolution),
                this.formulaFaultSink(object),
                (plan, records) => this.resolveFormulaRelated(updateSchema, plan, records, opCtx.context),
+               (plan) => this.formulaOptionLabels(updateSchema, plan, opCtx.context),
              );
            }
            // Coerce boolean fields (SQLite 0/1 → JS bool) on the after-hook view

@@ -206,6 +206,29 @@ export const WEBHOOK_ACTIVATION_SUBJECT: ActivationSubject = {
 };
 
 /**
+ * [ADR-0142 D1, ADR-0131 D6 regime C] The declared-queue door's wording. A
+ * declared queue is switched off for the installation; an organization still
+ * authors queues of its own (`sys_queue`), so the remedy names that half.
+ */
+export const QUEUE_ACTIVATION_SUBJECT: ActivationSubject = {
+    subject: 'a declared queue',
+    remedy:
+        'To switch a declared queue on or off for this installation, ask your platform operator; queues your ' +
+        'organization authors under names of its own stay yours to create and staff.',
+};
+
+/**
+ * [ADR-0142 D5] The declared-assignment-rule door's wording. Assignment rules
+ * are declared only (an organization authors none, ADR-0142 merge question
+ * 11), so the switch is the one lever and it is the operator's.
+ */
+export const ASSIGNMENT_RULE_ACTIVATION_SUBJECT: ActivationSubject = {
+    subject: 'a declared assignment rule',
+    remedy:
+        'To switch a declared assignment rule on or off for this installation, ask your platform operator.',
+};
+
+/**
  * The activation body every `_activation` door reads: `{ enabled?: boolean }`,
  * unknown keys refused, `enabled` defaulting to `true`.
  *

@@ -85,6 +85,8 @@ export const MAP_SUPPORTED_FIELDS = [
   'positions',
   'permissions',
   'sharingRules',
+  'queues',
+  'assignmentRules',
   'apis',
   'webhooks',
   'agents',

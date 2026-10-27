@@ -130,6 +130,7 @@ import { validateSemanticRoles } from './validate-semantic-roles.js';
 import { validateFormLayout } from './validate-form-layout.js';
 import { validatePublicFormFileFields } from './validate-public-form-file-fields.js';
 import { validateSeedReplaySafety } from './validate-seed-replay-safety.js';
+import { validateAssignmentRules } from './validate-assignment-rules.js';
 import { validateSeedStateMachine } from './validate-seed-state-machine.js';
 import { validateVisibilityPredicates } from './validate-visibility-predicates.js';
 import { validatePredicatePathRefs } from './validate-predicate-path-refs.js';
@@ -1607,6 +1608,21 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_ONLY,
     surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateActionLocations(stack),
+  },
+  // [ADR-0142 D5] An assignment rule naming a user id carries one
+  // organization's data in package metadata, and one targeting a declared queue
+  // with no member parks every row it matches. Advisory: the engine never
+  // refuses an insert on a rule's account. CLI-only — the queue check reads the
+  // stack's `queues` beside its `assignmentRules`.
+  {
+    name: 'validateAssignmentRules',
+    tier: 'advisory',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-assignment-rules.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
+    run: (stack) => validateAssignmentRules(stack),
   },
   // framework#3434 — seeds replay on every boot, so a `mode: 'insert'` dataset
   // duplicates its table on every restart.
