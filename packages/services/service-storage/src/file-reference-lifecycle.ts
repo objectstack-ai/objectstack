@@ -46,12 +46,20 @@ import { callerContext } from './attachment-access-hooks.js';
  * a file's id would be holding its bytes, which is exactly what ADR-0104 D3's
  * governed download ended. The question is the download door's own, asked of
  * the write's caller: {@link FileReferenceReadAuthorizer}, which the storage
- * plugin binds to the door's verdict rather than restating it here. A file the
- * writer may not read is answered exactly as one the organization-scoped
- * lookup cannot see ({@link systemReadContext}): the value is kept as written,
- * nothing is claimed or copied, and constraint verdicts do not run ahead of
- * the read check. System writes and context-less programmatic calls carry no
- * caller to ask, and reference files as before.
+ * plugin binds to the door's verdict rather than restating it here. System
+ * writes and context-less programmatic calls carry no caller to ask, and
+ * reference files as before.
+ *
+ * [#26043] A write naming a file its caller may not read is refused at the
+ * field, before the driver runs and before any file is copied: one
+ * `400 VALIDATION_FAILED` with an ADR-0114 `invalid_value` entry per field,
+ * naming the field and nothing about the file ({@link refuseUnreadableFile}).
+ * An id the organization-scoped lookup cannot see ({@link systemReadContext})
+ * gets the same answer, so the write door cannot tell "may not read" from
+ * "does not exist". It replaces #25951's quiet answer, which kept the id as
+ * written: that left a slot holding a file it does not own, the state
+ * ADR-0104's `verify-references` counts as blocking. Constraint verdicts still
+ * never run ahead of the read check.
  *
  * ### An anonymous write carries no file
  *
@@ -183,8 +191,10 @@ function systemWriteContext(organizationId?: string | null): Record<string, unkn
  * whether the posture walls at all (`single` does not) are the platform's
  * answers, for the same reason the copy is never stamped on the payload.
  *
- * A file the lookup cannot see is answered exactly as an id the platform does
- * not manage: the value is kept as written and nothing is claimed or copied.
+ * A file the lookup cannot see is, for a write with no caller to judge, an id
+ * the platform does not manage: the value is kept as written and nothing is
+ * claimed or copied. [#26043] For a write with a caller, it is refused exactly
+ * as a file the caller may not read ({@link findReferenceableFile}).
  * No organization ⇒ the key is absent and the lookup reads as it did before.
  */
 function systemReadContext(organizationId?: string | null): Record<string, unknown> {
@@ -279,15 +289,19 @@ function claimingCallerOf(ctx: any, fileId: string, caller: ExecutionContext | n
 }
 
 /**
- * The `sys_file` row a field's id token names, as THIS write may reference it,
- * or `null`. Both halves of the claim path — copy-on-claim before the write,
- * the claim after it — ask through here, so they cannot disagree about which
- * file a write may take.
+ * The `sys_file` row a field's id token names, as THIS write may reference it.
+ * Both halves of the claim path — copy-on-claim before the write, the claim
+ * after it — ask through here, so they cannot disagree about which file a
+ * write may take.
  *
  *  1. The row as the acting organization reaches it ({@link systemReadContext}).
  *  2. [#25692] Then, when the plugin bound a read verdict and the write has a
- *     caller, whether that caller may read it. A file it may not read is
- *     answered as the lookup answers a file it cannot see.
+ *     caller, whether that caller may read it.
+ *
+ * [#26043] When a caller is asked about, a file it may not read and an id the
+ * lookup cannot see are one answer, `'refused'`, which copy-on-claim refuses
+ * at the field. With no caller to ask, an id the lookup cannot see is `null`:
+ * an id the platform does not manage, kept as written.
  */
 async function findReferenceableFile(
   engine: FileReferenceEngine,
@@ -295,11 +309,51 @@ async function findReferenceableFile(
   organizationId: string | null,
   caller: ExecutionContext | null,
   authorizeRead: FileReferenceReadAuthorizer | undefined,
-): Promise<Record<string, unknown> | null> {
+): Promise<Record<string, unknown> | 'refused' | null> {
   const row = await engine.findOne('sys_file', { where: { id: fileId }, context: systemReadContext(organizationId) });
-  if (!row) return null;
-  if (!caller || !authorizeRead) return row;
-  return (await authorizeRead(row, caller)) ? row : null;
+  if (!caller || !authorizeRead) return row ?? null;
+  if (!row) return 'refused';
+  return (await authorizeRead(row, caller)) ? row : 'refused';
+}
+
+/** One field a file-field judgement refuses: the ADR-0114 entry the form door's envelope carries. */
+interface FileFieldRefusal {
+  field: string;
+  code: 'invalid_value';
+  message: string;
+  label: string;
+}
+
+/** A field's declared label, or its name when it declares none. */
+function fieldLabelOf(engine: FileReferenceEngine, object: string, field: string): string {
+  const def = fieldDefOf(engine, object, field);
+  const declared = typeof def?.label === 'string' ? def.label.trim() : '';
+  return declared.length > 0 ? declared : field;
+}
+
+/**
+ * The form door's envelope (`form-routes.ts`, #25572) for a write's refused
+ * file fields: one `400 VALIDATION_FAILED` naming every refused field, with
+ * the closed ADR-0114 field code `invalid_value`. Throws nothing when none is.
+ */
+function assertNoFileFieldRefused(refused: FileFieldRefusal[]): void {
+  if (refused.length > 0) throw validationFailure(refused.map((f) => f.message).join('; '), refused);
+}
+
+/**
+ * [#26043] The refusal of a field naming a file its write's caller may not
+ * read, or one the acting organization cannot see. It names the field only:
+ * the same words for both, and nothing about the file or who holds it.
+ */
+function refuseUnreadableFile(engine: FileReferenceEngine, object: string, field: string): FileFieldRefusal {
+  const label = fieldLabelOf(engine, object, field);
+  return {
+    field,
+    code: 'invalid_value',
+    message: `${label} cannot reference this file: it is not a file you can open. `
+      + 'Choose a file you can open, or upload it again.',
+    label,
+  };
 }
 
 /**
@@ -312,9 +366,8 @@ async function findReferenceableFile(
  *
  * The form door's own judgement (`form-routes.ts`, #25572), held at the
  * engine: the same emptiness rule (`isEmptyForRequired`), and the same
- * envelope — one `400 VALIDATION_FAILED` naming every refused field by its
- * label with the closed ADR-0114 field code `invalid_value`. The form door
- * keeps its own judgement, which answers before anything reaches the engine.
+ * envelope ({@link assertNoFileFieldRefused}). The form door keeps its own
+ * judgement, which answers before anything reaches the engine.
  *
  * `caller` is {@link referencingCallerOf}'s answer, the caller the read
  * verdict is asked about: a system write and a context-less programmatic
@@ -328,13 +381,11 @@ function assertAnonymousWriteCarriesNoFile(
   caller: ExecutionContext | null,
 ): void {
   if (!caller || caller.userId) return;
-  const refused: Array<{ field: string; code: 'invalid_value'; message: string; label: string }> = [];
+  const refused: FileFieldRefusal[] = [];
   for (const field of fileFields) {
     if (!Object.prototype.hasOwnProperty.call(data, field)) continue;
-    const def = fieldDefOf(engine, object, field);
-    if (isEmptyForRequired(def, data[field])) continue;
-    const declared = typeof def?.label === 'string' ? def.label.trim() : '';
-    const label = declared.length > 0 ? declared : field;
+    if (isEmptyForRequired(fieldDefOf(engine, object, field), data[field])) continue;
+    const label = fieldLabelOf(engine, object, field);
     refused.push({
       field,
       code: 'invalid_value',
@@ -343,7 +394,7 @@ function assertAnonymousWriteCarriesNoFile(
       label,
     });
   }
-  if (refused.length > 0) throw validationFailure(refused.map((f) => f.message).join('; '), refused);
+  assertNoFileFieldRefused(refused);
 }
 
 /** Bound on owned files released per record delete. */
@@ -691,8 +742,9 @@ async function copyOwnedFile(
  *
  * `recordId` is null on insert: a new record can never be the current owner,
  * so every already-owned id is copied. [#25692] `caller` is the write's caller
- * ({@link referencingCallerOf}): a file it may not read is neither copied nor
- * judged against the field's declaration.
+ * ({@link referencingCallerOf}). [#26043] Every file the write names is judged
+ * for that caller before any is copied or held to its field's declaration,
+ * and a field naming one it may not read refuses the whole write.
  */
 async function applyCopyOnClaim(
   engine: FileReferenceEngine,
@@ -707,21 +759,40 @@ async function applyCopyOnClaim(
   authorizeRead: FileReferenceReadAuthorizer | undefined,
   minted: Set<string> | null,
 ): Promise<void> {
+  // [#26043] Judge every file the write names first, so a refused field fails
+  // the write before any bytes are copied for another one.
+  const named: Array<{ field: string; value: unknown; rows: Array<[string, Record<string, unknown>]> }> = [];
+  const refused: FileFieldRefusal[] = [];
   for (const field of fileFields) {
     if (!(field in data)) continue;
     const value = data[field];
     const tokens = idTokensIn(value);
     if (tokens.length === 0) continue;
 
-    const replacements = new Map<string, string>();
+    const rows: Array<[string, Record<string, unknown>]> = [];
+    let fieldRefused = false;
     for (const token of [...new Set(tokens)]) {
-      const row = await findReferenceableFile(engine, token, organizationId, caller, authorizeRead);
-      // Unknown id: not a file this platform manages (external/legacy value),
-      // not one the acting organization can reach (`systemReadContext`), or
-      // [#25692] not one this write's caller may read. Left verbatim — the
-      // read resolver ignores it for the same reason.
-      if (!row) continue;
+      const found = await findReferenceableFile(engine, token, organizationId, caller, authorizeRead);
+      // [#26043] A file this write's caller may not read, or one the acting
+      // organization cannot see: the field is refused.
+      if (found === 'refused') {
+        fieldRefused = true;
+        break;
+      }
+      // Unknown id, and no caller to judge: not a file this platform manages
+      // (external/legacy value), or not one the acting organization can reach
+      // (`systemReadContext`). Left verbatim — the read resolver ignores it
+      // for the same reason.
+      if (found) rows.push([token, found]);
+    }
+    if (fieldRefused) refused.push(refuseUnreadableFile(engine, object, field));
+    else if (rows.length > 0) named.push({ field, value, rows });
+  }
+  assertNoFileFieldRefused(refused);
 
+  for (const { field, value, rows } of named) {
+    const replacements = new Map<string, string>();
+    for (const [token, row] of rows) {
       // The file is real, this caller may read it, and it is about to be
       // referenced by this field, so its declared constraints bind now —
       // before ownership, before any copy, and [#25692] never ahead of the
@@ -793,7 +864,10 @@ async function claimFile(
   authorizeRead: FileReferenceReadAuthorizer | undefined,
 ): Promise<void> {
   const row = await findReferenceableFile(engine, fileId, organizationId, caller, authorizeRead);
-  if (!row) return; // not a platform-managed file this write may reference — nothing to own
+  // Not a platform-managed file this write may reference — nothing to own.
+  // [#26043] Copy-on-claim refused such a write before it ran; a claim that
+  // finds one now still takes nothing.
+  if (!row || row === 'refused') return;
   if (row.ref_id != null && !isSameSlot(row, object, recordId, field)) {
     logger.warn(
       `[storage] file reference: ${fileId} is already owned by ` +

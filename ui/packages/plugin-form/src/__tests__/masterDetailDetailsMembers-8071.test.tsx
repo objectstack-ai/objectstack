@@ -520,23 +520,28 @@ const derivedFromSpec: Equal<MasterDetailDetailConfig, Omit<SpecDetailEntry, 'so
 const columnsAreTheGridColumn: Equal<NonNullable<MasterDetailDetailConfig['columns']>[number], GridColumn> = true;
 
 /**
- * Every member a detail can be authored with, spelled out: the spec entry's
- * keys minus `sortField` (objectui#11070 round 9). A key the spec adds is a
- * red row here, never a silent widening of what this block is said to read.
+ * Every member a detail is authored with today, spelled out: the spec entry's
+ * keys minus `sortField` (objectui#11070 round 9). Each must stay on the
+ * config. The list is not closed: `derivedFromSpec` above already makes the
+ * config the spec's entry, so a closed list would only restate the spec, and a
+ * key the spec adds would be a red row here with no ui change behind it.
  */
 const memberList: Equal<
-  keyof MasterDetailDetailConfig,
-  | 'childObject'
-  | 'relationshipField'
-  | 'columns'
-  | 'formFields'
-  | 'inlineMode'
-  | 'amountField'
-  | 'totalField'
-  | 'title'
-  | 'minRows'
-  | 'maxRows'
-  | 'addLabel'
+  Exclude<
+    | 'childObject'
+    | 'relationshipField'
+    | 'columns'
+    | 'formFields'
+    | 'inlineMode'
+    | 'amountField'
+    | 'totalField'
+    | 'title'
+    | 'minRows'
+    | 'maxRows'
+    | 'addLabel',
+    keyof MasterDetailDetailConfig
+  >,
+  never
 > = true;
 
 /** The lit control for the directive below: the same literal without the retired member compiles. */

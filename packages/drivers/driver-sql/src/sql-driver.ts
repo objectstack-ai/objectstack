@@ -16,7 +16,7 @@ import type {
   IntrospectedSchema as SpecIntrospectedSchema,
   IntrospectedTable as SpecIntrospectedTable,
 } from '@objectstack/spec/contracts';
-import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readAutonumberCounter, missingFieldValues, isTenancyDisabled, type AutonumberToken } from '@objectstack/spec/data';
+import { parseAutonumberFormat, resolveAutonumberFormat, isTenancyDisabled, type AutonumberToken } from '@objectstack/spec/data';
 // The DECLARED aggregate vocabulary (#5907). Read from the spec so this driver's
 // "the protocol has no such function" refusal cannot drift from what
 // `AggregationNodeSchema.function` actually admits.
@@ -99,9 +99,7 @@ import { ExternalSchemaModeViolationError } from '@objectstack/spec/shared';
 import { UnsupportedDialectEmissionError } from './dialect-emission-refusal.js';
 import { OrganizationlessCounterRefusal } from './organizationless-counter-refusal.js';
 import {
-  isUniqueViolationError,
   isUnbackedConflictTargetError,
-  uniqueViolationColumn,
   resolveTenancyPosture,
   declareTargetedTable,
   isMissingTableError,
@@ -110,24 +108,14 @@ import { postureEnforcesWall } from '@objectstack/spec/security';
 import { temporalStorageForm } from '@objectstack/core';
 import {
   buildIndexName,
-  describeMissingIndexColumns,
   diffManagedIndexes,
-  diffManagedTable,
-  diffUnbuildableIndexes,
-  driftKey,
-  expectedIndexes,
   fieldHasColumn,
   GLOBAL_TENANT,
   canonicalIndexKey,
-  carriesNullSafeTenantKeyPart,
-  ceremonyOwnedDropFinding,
-  isCeremonyOwnedColumnDrop,
   hashShadowColumnFor,
   parseHashShadowKeyParts,
   indexedKeyColumns,
-  isIndexDriftOp,
   isUniqueScopeDeclared,
-  legacyUniqueReplacements,
   normalizeDeclaredIndex,
   organizationKeyPartSql,
   uniqueIndexesFromFields,
@@ -137,17 +125,11 @@ import {
   type DriftOp,
   type PhysicalIndex,
   type SqlDialectName,
-  type PhysicalColumn,
   type PendingSchemaWork,
 } from './schema-drift.js';
 // [#15989] The ADR-0104 column step's per-dialect statements. Built here, run
 // by `os migrate files-to-references --apply` — see {@link SqlDriver.planMediaColumnMove}.
 import {
-  isJsonColumnType,
-  mediaColumnMoveDialect,
-  mediaColumnMovePlan,
-  type MediaColumnMovePlan,
-  type MediaColumnMoveRefusal,
   type MediaColumnMoveScan,
 } from './media-column-move.js';
 import {
@@ -155,7 +137,6 @@ import {
   formatAttribute,
   type UndeliveredAttribute,
 } from './builtin-column-collision.js';
-import { recoverUnencodedJsonText } from './unencoded-json-text.js';
 import { withUpsertConflictClause } from './upsert-conflict-clause.js';
 // [#25521 cut 1] The catalog-introspection helpers (`introspectColumnOrder`,
 // `introspectColumns` and the foreign-key, primary-key and unique-constraint reads),
@@ -195,7 +176,18 @@ import {
 // the methods of the same names below hand each body the members it reads
 // (`SchemaSyncHost`). [#25521 cut 8] The index drift op and its failed-tighten
 // restore (`applyIndexDriftOp`, `restoreBareIndexAfterFailedTighten`) beside them.
-import { applyDriftOpInPlace, applyIndexDriftOp, rebuildSqliteTablePatched, restoreBareIndexAfterFailedTighten } from './sql-driver-schema-sync.js';
+// [#25521 cut 9] The unique pre-flight and the declared-index sync too
+// (`applyNullSafeUniquePreflight`, `syncDeclaredIndexes`, `createNullSafeUniqueIndex`).
+// [#25521 cut 10] And the drift pipeline that drives them (`detectTableDrift`, `detectTableIndexDrift`,
+// `detectManagedDrift`, `planMediaColumnMove`, `reconcileAndWarnDrift`, `applyMigrationEntries`).
+// [#25521 cut 12] And the canonical-encoding convergence schema sync runs at init (the SQLite
+// backfills, and the MySQL widening's column reads and ALTER runner, `runWideningAlters`).
+import { applyDriftOpInPlace, applyIndexDriftOp, applyMigrationEntries, applyNullSafeUniquePreflight, backfillCanonicalDatetimes, backfillCanonicalJsonEncoding, backfillCanonicalTimes, convergeJsonColumn, countNonTemporalTextRows, createNullSafeUniqueIndex, detectManagedDrift, detectTableDrift, detectTableIndexDrift, legacyMysqlTimeColumns, legacyMysqlTimestampColumns, planMediaColumnMove, rebuildSqliteTablePatched, reconcileAndWarnDrift, restoreBareIndexAfterFailedTighten, runWideningAlters, syncDeclaredIndexes } from './sql-driver-schema-sync.js';
+// [#25521 cut 11] The autonumber sequence path (`getNextSequenceValue`, `fillAutoNumberFields`,
+// `issueAutonumbers`, `maxAutonumberCounter`, and the #5495 collision re-seed `collidingAutoNumberReservations`
+// and `resyncSequenceToDataMax`); the methods of the same names below hand each body the members it reads
+// (`AutonumberHost`).
+import { collidingAutoNumberReservations, fillAutoNumberFields, getNextSequenceValue, issueAutonumbers, maxAutonumberCounter, resyncSequenceToDataMax } from './sql-driver-autonumber.js';
 import { makeDatabaseDirectory, probeAbsentSqliteDatabaseFile, SqliteDatabaseFileError } from './sqlite-database-file.js';
 import { jsonMembershipPredicate } from '@objectstack/core';
 import knex, { Knex } from 'knex';
@@ -315,7 +307,7 @@ export function lastIdentifierSegment(raw: string): string {
  * counters so sequences are monotonic, tenant-isolated, and resilient to
  * concurrent writers. Lazily created on first autonumber-bearing insert.
  */
-const SEQUENCES_TABLE = '_objectstack_sequences';
+export const SEQUENCES_TABLE = '_objectstack_sequences';
 
 /**
  * How many times `create()` will re-seed a stale autonumber counter and retry
@@ -463,7 +455,7 @@ const NUMERIC_SCALAR_TYPES = new Set<string>([
  * as that same canonical instant text by {@link presentAuditTimestampOutput}
  * ([ADR-0053 D-F1], #13973).
  */
-const AUDIT_TIMESTAMP_COLUMNS = ['created_at', 'updated_at'] as const;
+export const AUDIT_TIMESTAMP_COLUMNS = ['created_at', 'updated_at'] as const;
 
 /**
  * [#21241] The fractional-seconds precision of every MySQL `DATETIME` column
@@ -769,21 +761,14 @@ function canonicalTimeOfDay(value: unknown): unknown {
  * reference — the binding count a caller must supply per use of the expression.
  * (1 `typeof` + 3 per `strftime` CASE branch pair × 2 + 1 `coalesce` fallback.)
  */
-const SQLITE_TIME_EXPR_REFS = 8;
+export const SQLITE_TIME_EXPR_REFS = 8;
 
 /**
  * How many times {@link SqlDriver.sqliteNonTemporalTextSql} spells its column
  * reference — the binding count a caller must supply per use of the predicate.
  * (1 `typeof` + 2 `instr` + 1 `julianday`.)
  */
-const SQLITE_NON_TEMPORAL_TEXT_REFS = 4;
-
-/**
- * How many candidate cells {@link SqlDriver.backfillCanonicalJsonEncoding}
- * reads per page. It bounds the memory one column's pass holds, never how much
- * of the column one pass converges: the pass walks every page.
- */
-const SQLITE_JSON_BACKFILL_PAGE_SIZE = 500;
+export const SQLITE_NON_TEMPORAL_TEXT_REFS = 4;
 
 /**
  * [#4436] A filter this driver cannot COMPILE — the caller sent an operator (or
@@ -1257,149 +1242,13 @@ function insertedRowsNotReadBackError(object: string, missingIds: unknown[], wri
   return err;
 }
 
-/**
- * [#9354] How long a widening ALTER waits for a metadata lock, in seconds.
- *
- * Named for the seam it arrived on; since commit 8bbf45947 it governs BOTH callers of
- * {@link SqlDriver.runWideningAlters} — the deferred-DDL flush and boot
- * schema-sync.
- *
- * MySQL's own default for `lock_wait_timeout` is **31,536,000 — one year**. A
- * widening `ALTER … MODIFY COLUMN` needs an exclusive metadata lock on the
- * table, so a single long-running transaction elsewhere (an open REPEATABLE
- * READ snapshot, a forgotten `BEGIN` in a psql-style shell, a stuck report
- * query) parks the ALTER in `Waiting for table metadata lock` for that long.
- * Nothing prints. `os migrate apply` looks like it hung, and no operator can
- * tell that from a crash — which is the condition this bound exists to end.
- *
- * # Why 120 seconds
- *
- * The bound is a diagnosis deadline, not a capacity knob: its job is to end the
- * silence, not to decide how patient a migration may be. So it is chosen as the
- * shortest wait that still clears the legitimate blockers, and no longer.
- *
- *   - **Above the noise.** Normal OLTP transactions on a table being migrated
- *     hold their metadata lock for milliseconds. Two minutes is three orders of
- *     magnitude above that, so an ordinary busy table never trips it — the bound
- *     does not convert a working migration into a failing one.
- *   - **Below an operator's patience.** A command that has printed nothing for
- *     two minutes is still within the window where the operator is watching it.
- *     At ten minutes they have already reached for `SHOW PROCESSLIST` or killed
- *     it, so a bound that fires later than that arrives after the diagnosis it
- *     was supposed to provide.
- *   - **Minutes-scale, per the ruling**, and deliberately at the low end of it:
- *     failing fast is cheap here. `os migrate apply` is re-runnable and the
- *     widening is idempotent (`migrateMysqlDatetimeColumns` re-reads
- *     `information_schema` and does nothing when the column is already
- *     `DATETIME(3)`), so the cost of a bound that fires too eagerly is one
- *     re-run once the blocker is gone — against an unbounded hang as the cost of
- *     one that never fires.
- *
- * # The same number on boot (commit 8bbf45947)
- *
- * Boot schema-sync arms this bound too, at the same value rather than a longer
- * one. Everything above is reasoning about how long a legitimate metadata-lock
- * holder can plausibly hold it — a property of the lock, not of who is waiting
- * on it. Boot's difference from the flush is what happens when the bound fires
- * (boot reports at `error` and carries on; the flush refuses), never how long
- * it waits.
- *
- * ⛔ Deliberately NOT configurable, and deliberately NOT retried — the 2026-08-17
- * ruling's explicit minimality. Both wait for measured demand. A knob added now
- * would have to be supported forever on the evidence of one CI stall.
- */
-const DEFERRED_DDL_LOCK_WAIT_TIMEOUT_SECONDS = 120;
-
-/**
- * [#9354] MySQL's lock-wait timeout, as it arrives through mysql2 and knex.
- *
- * `ER_LOCK_WAIT_TIMEOUT` (**errno 1205**) is what BOTH lock waits raise — the
- * InnoDB row-lock timeout (`innodb_lock_wait_timeout`) and the metadata-lock
- * timeout (`lock_wait_timeout`) this bound arms. The ALTER path can only be
- * blocked by the second, so on this seam 1205 means the metadata lock.
- *
- * Both spellings are checked because the two layers carry different ones:
- * mysql2 sets a string `code` (`'ER_LOCK_WAIT_TIMEOUT'`) alongside the numeric
- * `errno`, and a wrapper that rebuilds the error commonly keeps one and drops
- * the other. `cause` is followed because knex re-throws the driver error with
- * the original attached — the same cause-chaining
- * {@link backendStatementFaultError} relies on, and the reason a recognizer
- * that inspected only the top-level error would go quietly blind.
- *
- * ⛔ Message text is NOT sniffed. MySQL and MariaDB word this differently and
- * both translate it, so a prose match is a recognizer that fails in another
- * locale — silently, back to the year-long hang.
- */
-function isMysqlLockWaitTimeout(err: unknown, depth = 0): boolean {
-  if (!err || typeof err !== 'object' || depth > 4) return false;
-  const e = err as { errno?: unknown; code?: unknown; cause?: unknown };
-  if (Number(e.errno) === 1205) return true;
-  if (e.code === 'ER_LOCK_WAIT_TIMEOUT') return true;
-  return isMysqlLockWaitTimeout(e.cause, depth + 1);
-}
-
 /** [#9354] Marks the enveloped refusal below, so the flush's own catch can tell
  *  it from every other failure without re-running the recognizer on a wrapper. */
-const LOCK_WAIT_REFUSAL = Symbol.for('objectstack.driver-sql.deferredDdlLockWaitRefusal');
+export const LOCK_WAIT_REFUSAL = Symbol.for('objectstack.driver-sql.deferredDdlLockWaitRefusal');
 
 /** [#9354] True only for the refusal {@link deferredDdlLockWaitError} built. */
 function isDeferredDdlLockWaitRefusal(err: unknown): boolean {
   return Boolean(err && typeof err === 'object' && (err as Record<symbol, unknown>)[LOCK_WAIT_REFUSAL]);
-}
-
-/**
- * [#9354] The refusal a blocked deferred-DDL widening ALTER fails with.
- *
- * # Why this is thrown at all, when every sibling here is swallowed
- *
- * {@link SqlDriver.migrateMysqlDatetimeColumns} logs and swallows its failures
- * on purpose: correctness never depends on the widening having run, and a
- * migration must not take boot down. That policy is right for boot and wrong
- * for the flush. `os migrate apply` is a command an operator RAN, whose whole
- * contract is to report what it did; a swallowed lock wait there prints
- * "Applied 0 change(s)" and reports success while the widening silently did not
- * happen. So the escape is scoped exactly to this condition on exactly that
- * path — every other failure keeps the swallow it has today.
- *
- * # `DATABASE_ERROR` / 500
- *
- * The 2026-08-17 ruling requires a code from the CLOSED standard vocabulary
- * (ADR-0112), from the `DATABASE_ERROR` family, naming the lock wait. That is
- * the catalog's own "database operation failed", and it is the same pair
- * {@link backendStatementFaultError} answers with one refusal over — so this
- * mints nothing and adds no code to the catalog. 500 rather than 4xx: nothing
- * about the operator's request is at fault. The blocker is another session.
- *
- * # The message carries the diagnosis, because it is the only thing shown
- *
- * `os migrate apply` prints `error.message` and exits 1 — `code` and `status`
- * reach programmatic consumers, but the operator reads this sentence and
- * nothing else. So it names the lock wait, the table, the bound it hit, and the
- * one thing that resolves it. The table name is the operator's own schema
- * (the line beside it already logs it), so naming it discloses nothing new —
- * and unlike the query-refusal envelope there is no caller-bound literal here
- * to leak: the statement's only bindings are the table and column.
- */
-function deferredDdlLockWaitError(table: string, seconds: number, cause: unknown): Error {
-  const err = new Error(
-    `Migration of table '${table}' timed out after ${seconds}s waiting for a MySQL metadata ` +
-      'lock (lock_wait_timeout). Another session is holding a lock on the table — a long-running ' +
-      'transaction or an open, uncommitted session. No schema change was made. Identify the ' +
-      "holder with `SHOW PROCESSLIST` or by querying `performance_schema.metadata_locks`, end " +
-      'it, then re-run `os migrate apply` — the widening is idempotent, so re-running is safe.',
-  ) as Error & { code?: string; status?: number };
-  err.code = StandardErrorCode.enum.DATABASE_ERROR;
-  err.status = 500;
-  Object.defineProperty(err, LOCK_WAIT_REFUSAL, { value: true, enumerable: false });
-  // Non-enumerable, like every sibling refusal in this file: the carrier must be
-  // readable by cause-following predicates and invisible to `JSON.stringify`.
-  Object.defineProperty(err, 'cause', {
-    value: cause,
-    enumerable: false,
-    writable: true,
-    configurable: true,
-  });
-  return err;
 }
 
 /**
@@ -2085,7 +1934,7 @@ function isDeclaredFieldType(field: { type?: unknown }): boolean {
  * 'string'`, the driver-internal alias default) and two spellings of that
  * default is how the drift this fixes started.
  */
-function isMultiValuedColumn(type: string, field: { multiple?: unknown } | null | undefined): boolean {
+export function isMultiValuedColumn(type: string, field: { multiple?: unknown } | null | undefined): boolean {
   return isMultiValueField({ type, multiple: field?.multiple === true });
 }
 
@@ -2888,6 +2737,92 @@ function fieldReferenceOffsetOf(value: unknown): CrossFieldOffset | null {
 }
 
 /**
+ * [#25808] A `{ $now, addDays }` now-anchored comparand — the current instant
+ * shifted by whole days, compared against a temporal column of the row
+ * (`NowAnchorSchema`, `data/filter.zod.ts`; maintainer ruling 2026-10-26,
+ * letter A). Recognised by SHAPE — an object carrying a `$now` key — the way
+ * {@link fieldReferenceOf} recognises a reference, and for the same reason: the
+ * evaluator (`@objectstack/formula`'s `resolveValue`) reads the same shape, so
+ * the two paths agree on what an anchor IS and a malformed one is refused here
+ * rather than bound as a literal object.
+ *
+ * `$now` arrives in two spellings. `true` is the AUTHORED form; the engine's
+ * token resolver (`resolveFilterTokens`, `@objectstack/core`) pins it to the
+ * tree's instant — the ISO string of the same `now` every `{N_days_ago}`
+ * token in the tree resolved from — before any driver runs. A caller that
+ * reaches this driver without that seam (a direct `find`, a permission filter
+ * assembled in code) still carries `true`, and the driver reads its own clock
+ * for it, as the evaluator does. Anything else is `invalid`.
+ */
+type NowAnchor = { kind: 'instant'; at: Date } | { kind: 'invalid'; reason: string };
+
+function nowAnchorOf(value: unknown): NowAnchor | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || value instanceof Date) return null;
+  if (!('$now' in value)) return null;
+  const raw = (value as Record<string, unknown>).$now;
+  if (raw === true) return { kind: 'instant', at: new Date() };
+  if (typeof raw === 'string') {
+    const ms = Date.parse(raw);
+    if (Number.isFinite(ms)) return { kind: 'instant', at: new Date(ms) };
+    return { kind: 'invalid', reason: `$now ${JSON.stringify(raw)} is not an instant the resolver could have pinned` };
+  }
+  return {
+    kind: 'invalid',
+    reason: `$now must be the literal true (the resolver pins it to the current instant), not ${JSON.stringify(raw)}`,
+  };
+}
+
+/**
+ * [#25808] A `{ $now }` anchor reached a position this driver does not compile:
+ * a list member, a text pattern, the bare `{ field: { $now: true } }` spelling
+ * (which reaches the operator loop as an operator named `$now`). The same
+ * boundary as {@link crossFieldComparisonError}, for the same reason, with the
+ * same withholding (#7929): the anchor compiles only as the WHOLE comparand of
+ * one of the six scalar comparisons, where {@link SqlDriver.applyNowAnchorComparison}
+ * answers it.
+ */
+function nowAnchorPositionError(field: string, op: string, subtree?: unknown, index?: number): Error {
+  const position = index === undefined ? '' : ` at index ${index} of its value list`;
+  const diagnostic =
+    `Operator "${op}" on field "${field}" compares against a now-anchored comparand ` +
+    `({ "$now": true, "addDays": … })${position}, a position SQL push-down does not compile.`;
+  return withheldFilterError(
+    `A now-anchored comparand ({ "$now": true, "addDays": … }) in this filter sits in a position SQL ` +
+      `push-down does not compile. It compiles only as the whole comparand of a scalar comparison ` +
+      `operator ($eq/$ne/$gt/$gte/$lt/$lte) on a date or datetime column. Compare against a literal ` +
+      `value here, or write the test as one of those comparisons. The field and the operator this ` +
+      `filter used are withheld from the message; the full diagnostic is in the server log.`,
+    diagnostic,
+    subtree,
+    `${diagnostic} It compiles only as the whole comparand of a scalar comparison operator ` +
+      `($eq/$ne/$gt/$gte/$lt/$lte) on a date or datetime column.`,
+  );
+}
+
+/**
+ * [#25808] A `{ $now }` anchor in a scalar-comparison position this driver
+ * cannot compile for the stated reason — the target column is not temporal, the
+ * offset column breaks one of the #5222 rulings, the anchor is malformed. The
+ * caller-visible message states the capability boundary and names nothing
+ * (#7929); the diagnostic goes to the server log through the same withhold
+ * {@link uncompilableFieldReferenceError} uses.
+ */
+function uncompilableNowAnchorError(field: string, op: string, reason: string, subtree?: unknown): Error {
+  const diagnostic =
+    `Operator "${op}" on field "${field}" compares against a now-anchored comparand ` +
+    `({ "$now": true, "addDays": … }), which cannot be compiled here: ${reason}`;
+  return withheldFilterError(
+    `A now-anchored comparison ({ "$now": true, "addDays": … }) in this filter cannot be compiled ` +
+      `here. On SQL push-down the anchor compares against a date or datetime column the object ` +
+      `declares, and its addDays offset is an integer or a same-table numeric column the object ` +
+      `declares, excluding the tenant-isolation column. The field, the operator this filter used ` +
+      `and the specific reason are withheld from the message; the full diagnostic is in the server log.`,
+    diagnostic,
+    subtree,
+  );
+}
+
+/**
  * [#5041→#5222] `{ $field }` reached a position this driver does NOT compile to
  * a column-to-column comparison.
  *
@@ -3325,6 +3260,8 @@ function assertCompilableComparand(
 ): void {
   const ref = fieldReferenceOf(value);
   if (ref !== null) throw crossFieldComparisonError(field, op, ref, value);
+  // [#25808] …and a now-anchored comparand, outside the six comparisons.
+  if (nowAnchorOf(value) !== null) throw nowAnchorPositionError(field, op, value);
 
   // [#5234] The pattern family answers first: an array IS an object here, so
   // the member scan below would otherwise report `{$contains: ['a', {}]}` as a
@@ -3339,6 +3276,7 @@ function assertCompilableComparand(
     for (const [index, member] of value.entries()) {
       const memberRef = fieldReferenceOf(member);
       if (memberRef !== null) throw crossFieldComparisonError(field, op, memberRef, member, index);
+      if (nowAnchorOf(member) !== null) throw nowAnchorPositionError(field, op, member, index);
       // [#5234] Every member of a list operator's array is a comparand in its
       // own right and gets the same bind test the whole comparand gets. Scoped
       // to the operators for which an array is legitimate, so a scalar operator
@@ -4877,6 +4815,8 @@ function classifyFilterKey(
       if (CROSS_FIELD_COMPARISON_OPERATORS.has(op)) continue;
       const ref = fieldReferenceOf(comparand);
       if (ref !== null) throw crossFieldComparisonError(key, op, ref, comparand);
+      // [#25808] A now-anchored comparand under any other operator, likewise.
+      if (nowAnchorOf(comparand) !== null) throw nowAnchorPositionError(key, op, comparand);
     }
   }
 
@@ -5434,26 +5374,6 @@ interface RowWidthContribution {
   name: string;
   chars: number;
   bytes: number;
-}
-
-/**
- * Render the duplicate groups a unique pre-flight probe found, for an operator
- * message: at most five groups, then a count of the rest.
- *
- * Module-local on purpose (commit 61821e54c). The two sites that report a blocked unique
- * — the drift entry and the boot-time durability log — must name the SAME rows
- * in the SAME shape, and a second hand-rolled `.slice(0, 5).join('; ')` is
- * exactly how the plain and the NULL-safe path drifted apart in the first
- * place. Not a method, and not exported: `SqlDriver`'s `.d.ts` carries its
- * protected members, so a new method there would move a published entry point
- * for a string helper.
- */
-function formatDuplicateGroups(duplicates: ReadonlyArray<{ key: string; rows: number }>): string {
-  const shown = duplicates
-    .slice(0, 5)
-    .map((g) => `(${g.key}) \u00d7 ${g.rows} rows`)
-    .join('; ');
-  return duplicates.length > 5 ? `${shown}; \u2026and ${duplicates.length - 5} more group(s)` : shown;
 }
 
 /** The part of a better-sqlite3 `Database` that {@link reclaimBetterSqlite3} drives. */
@@ -8290,27 +8210,8 @@ export class SqlDriver implements IDataDriver {
    * transport reads them by this one rule rather than by a copy of it.
    */
   protected maxAutonumberCounter(values: Iterable<unknown>, prefix: string, suffix: string): number {
-    let maxN = 0;
-    const anchored = prefix !== '' || suffix !== '';
-    for (const v of values) {
-      if (typeof v !== 'string') continue;
-      let n: number;
-      if (anchored) {
-        // Spec's inverse of `renderAutonumber` (#6560). It also re-checks the
-        // prefix in JS: a driver-side `LIKE` can match looser than `startsWith`
-        // (collation, case-insensitive columns), and a row from another scope
-        // must not inflate this counter — it reads as `undefined`, same as a
-        // row carrying no counter at all.
-        const read = readAutonumberCounter(v, prefix, suffix);
-        if (read === undefined) continue;
-        n = read;
-      } else {
-        // Unanchored: `prefix` is '' here, so this is the whole value.
-        n = parseInt(v.replace(/[^0-9]/g, ''), 10);
-      }
-      if (Number.isFinite(n) && n > maxN) maxN = n;
-    }
-    return maxN;
+    // [#25521 cut 11] The body moved to `sql-driver-autonumber.ts`; it reads no member of the driver.
+    return maxAutonumberCounter(values, prefix, suffix);
   }
 
   /**
@@ -8414,7 +8315,7 @@ export class SqlDriver implements IDataDriver {
    * contract is unchanged: it still hands out one value per call and never
    * takes one back.
    */
-  protected async getNextSequenceValue(
+  protected getNextSequenceValue(
     object: string,
     tableName: string,
     field: string,
@@ -8428,85 +8329,19 @@ export class SqlDriver implements IDataDriver {
     // (#6468). Purely positional plumbing; no sequencing logic reads it.
     suffix = '',
   ): Promise<number> {
-    // Pass the caller's transaction so a cold-cache first write inside a batch
-    // transaction ensures the table on the right connection instead of dead-
-    // locking on a second one (SQLite pool max=1). `initObjects` normally warms
-    // this up front, making the call a no-op — this only bites the lazy path.
-    // The bucket first: an organization-less row on a tenant table is refused
-    // here (ADR-0131 D9), before the lazy DDL below or any counter read.
-    const resolvedTenantId = this.resolveSequenceTenantId(tenantField, tenantId, tableName, field);
-    await this.ensureSequencesTable(parentTrx);
-    if (scope !== '' && !this.sequencesHasKeyHash) {
-      // The legacy sequences table could not be migrated to the key_hash shape,
-      // so it cannot represent per-scope counters. Fail with a clear, actionable
-      // message instead of corrupting the single legacy counter.
-      throw new Error(
-        `Cannot generate a per-scope autonumber for "${object}.${field}": the ` +
-          `${SEQUENCES_TABLE} table is still the legacy shape. ` +
-          `Migrate it to the key_hash shape before using date/{field}/per-parent formats.`,
-      );
-    }
-    // `scope` (rendered date/field prefix, boundary-delimited) gives each
-    // period/group its own counter; '' keeps the single global counter for
-    // fixed-prefix formats. `prefix` is the full rendered prefix used to
-    // bootstrap from existing data. The row is keyed by a hash of the composite;
-    // on an un-migrated legacy table only fixed-prefix (scope '') reaches here,
-    // so fall back to the original `(object, tenant_id, field)` key for it.
-    const key = this.sequencesHasKeyHash
-      ? { key_hash: this.sequenceKeyHash(tableName, resolvedTenantId, field, scope) }
-      : { object: tableName, tenant_id: resolvedTenantId, field };
-    const insertRow = this.sequencesHasKeyHash
-      ? { ...key, object: tableName, tenant_id: resolvedTenantId, field, scope }
-      : { ...key };
-
-    const runner: Knex | Knex.Transaction = parentTrx ?? this.knex;
-
-    return runner.transaction(async (trx) => {
-      // Lock the row (no-op on SQLite, real lock on Postgres/MySQL).
-      //
-      // Speculative, so it runs under a savepoint: `.forUpdate()` on a MISSING
-      // row does NOT throw on Postgres (measured: returns zero rows), so the
-      // fallback below is unreachable for the reason the old comment gave. It
-      // IS reachable for lock-level failures — deadlock (40P01), lock/statement
-      // timeout (55P03/57014) — and without the savepoint each of those turned
-      // into a `25P02` from the fallback SELECT, masking the real error.
-      let existing: any;
-      const locked = await this.attemptWithoutPoisoning(trx, (scoped) =>
-        scoped(SEQUENCES_TABLE).where(key).forUpdate().first(),
-      );
-      if (locked.ok) {
-        existing = locked.value;
-      } else {
-        // Fall back to a plain SELECT then rely on transaction isolation.
-        existing = await trx(SEQUENCES_TABLE).where(key).first();
-      }
-
-      if (!existing) {
-        const seedMax = await this.scanMaxNumericTail(
-          trx,
-          tableName,
-          field,
-          prefix,
-          tenantField,
-          resolvedTenantId === GLOBAL_TENANT ? null : resolvedTenantId,
-          suffix,
-        );
-        const initial = seedMax + 1;
-        const inserted = await this.attemptWithoutPoisoning(trx, (scoped) =>
-          scoped(SEQUENCES_TABLE).insert({ ...insertRow, last_value: initial }),
-        );
-        if (inserted.ok) return initial;
-        // Another writer raced us to the first INSERT. Fall through to
-        // the UPDATE path with the now-present row. This `SELECT … FOR UPDATE`
-        // blocks until the winner commits, so it sees the committed counter.
-        existing = await trx(SEQUENCES_TABLE).where(key).forUpdate().first();
-        if (!existing) throw inserted.error;
-      }
-
-      const next = Number(existing.last_value) + 1;
-      await trx(SEQUENCES_TABLE).where(key).update({ last_value: next, updated_at: this.knex.fn.now() });
-      return next;
-    });
+    // [#25521 cut 11] The body moved to `sql-driver-autonumber.ts` (see `AutonumberHost`).
+    const readKnex = () => this.knex;
+    const readSequencesHasKeyHash = () => this.sequencesHasKeyHash;
+    const host: ThisParameterType<typeof getNextSequenceValue> = {
+      attemptWithoutPoisoning: (...a) => this.attemptWithoutPoisoning(...a),
+      ensureSequencesTable: (...a) => this.ensureSequencesTable(...a),
+      get knex() { return readKnex(); },
+      resolveSequenceTenantId: (...a) => this.resolveSequenceTenantId(...a),
+      scanMaxNumericTail: (...a) => this.scanMaxNumericTail(...a),
+      sequenceKeyHash: (...a) => this.sequenceKeyHash(...a),
+      get sequencesHasKeyHash() { return readSequencesHasKeyHash(); },
+    };
+    return getNextSequenceValue.call(host, object, tableName, field, prefix, tenantField, tenantId, parentTrx, scope, suffix);
   }
 
   /**
@@ -8524,72 +8359,20 @@ export class SqlDriver implements IDataDriver {
    * filled is not reported, because a duplicate on it is the caller's 409 to
    * receive, not a sequence to re-seed.
    */
-  protected async fillAutoNumberFields(
+  protected fillAutoNumberFields(
     object: string,
     row: Record<string, any>,
     options?: DriverOptions,
   ): Promise<AutoNumberReservation[]> {
-    // Scan/seed the physical (remote) table for an external object; managed
-    // objects fall through to the storage-mapped name. Config lookup stays
-    // keyed by object name (matching initObjects/registerExternalObject).
-    const tableName = this.physicalTableByObject[object] ?? StorageNameMapping.resolveTableName({ name: object } as any);
-    const cfgs = this.autoNumberFields[object] || this.autoNumberFields[tableName];
-    if (!cfgs || cfgs.length === 0) return [];
-    const reservations: AutoNumberReservation[] = [];
-    const parentTrx = options?.transaction as Knex.Transaction | undefined;
-    const timezone = options?.timezone;
-    const now = new Date();
-    for (const cfg of cfgs) {
-      if (row[cfg.name] !== undefined && row[cfg.name] !== null && row[cfg.name] !== '') continue;
-      // A `{field}` token with no value would render to an empty prefix and
-      // silently merge this record into the wrong counter scope, so refuse to
-      // generate rather than emit a wrong record number (the referenced field
-      // must be populated before the autonumber — see field.zod docs).
-      const missing = missingFieldValues(cfg.tokens, row);
-      if (missing.length > 0) {
-        throw new Error(
-          `Cannot generate autonumber "${object}.${cfg.name}" (format "${cfg.format}"): ` +
-            `referenced field(s) [${missing.join(', ')}] are empty on the record. ` +
-            `Fields interpolated into an autonumber format must be set before the record is created.`,
-        );
-      }
-      // Resolve tenant for this row: explicit field on the record wins,
-      // then driver options, else null → global sequence.
-      const rowTenant = cfg.tenantField ? row[cfg.tenantField] : undefined;
-      const optTenant = options?.tenantId;
-      const tenantId = rowTenant != null && rowTenant !== ''
-        ? String(rowTenant)
-        : optTenant != null && optTenant !== ''
-          ? String(optTenant)
-          : null;
-      // Resolve the scope/prefix for this row (counter-value-independent),
-      // reserve the next value under that scope, then render the final string.
-      const probe = renderAutonumber({ tokens: cfg.tokens, seq: 0, record: row, now, timezone });
-      const next = await this.getNextSequenceValue(
-        object,
-        tableName,
-        cfg.name,
-        probe.prefix,
-        cfg.tenantField,
-        tenantId,
-        parentTrx,
-        probe.scope,
-        probe.suffix,
-      );
-      const value = renderAutonumber({ tokens: cfg.tokens, seq: next, record: row, now, timezone }).value;
-      row[cfg.name] = value;
-      reservations.push({
-        field: cfg.name,
-        tableName,
-        prefix: probe.prefix,
-        scope: probe.scope,
-        suffix: probe.suffix,
-        tenantField: cfg.tenantField ?? null,
-        tenantId,
-        value,
-      });
-    }
-    return reservations;
+    // [#25521 cut 11] The body moved to `sql-driver-autonumber.ts` (see `AutonumberHost`).
+    const readAutoNumberFields = () => this.autoNumberFields;
+    const readPhysicalTableByObject = () => this.physicalTableByObject;
+    const host: ThisParameterType<typeof fillAutoNumberFields> = {
+      get autoNumberFields() { return readAutoNumberFields(); },
+      getNextSequenceValue: (...a) => this.getNextSequenceValue(...a),
+      get physicalTableByObject() { return readPhysicalTableByObject(); },
+    };
+    return fillAutoNumberFields.call(host, object, row, options);
   }
 
   /**
@@ -8625,63 +8408,23 @@ export class SqlDriver implements IDataDriver {
    * `autoNumberValueExists` / `resyncSequenceToDataMax`, the overrides its
    * `create()` already calls.
    */
-  async issueAutonumbers(
+  issueAutonumbers(
     object: string,
     rows: Record<string, unknown>[],
     options?: DriverOptions,
     afterCollision?: unknown,
   ): Promise<string[][]> {
-    if (afterCollision === undefined) {
-      const filled: string[][] = [];
-      for (const row of rows) {
-        if (!row || typeof row !== 'object') {
-          filled.push([]);
-          continue;
-        }
-        // Filled as `create()` fills it: the caller's organization stamped
-        // first (numbers are issued per organization), on a view, so only
-        // the numbers land on the caller's row.
-        const view: Record<string, any> = { ...row };
-        this.injectTenantOnInsert(object, view, options);
-        const reserved = await this.fillAutoNumberFields(object, view, options);
-        for (const r of reserved) row[r.field] = view[r.field];
-        // A value kept from an earlier issue on this row is still this
-        // driver's, so it stays described beside the fresh ones (#6943).
-        const fresh = new Set(reserved.map((r) => r.field));
-        const kept = (this.issuedAutoNumbers.get(row) ?? []).filter((r) => !fresh.has(r.field));
-        this.issuedAutoNumbers.set(row, [...kept, ...reserved]);
-        filled.push(reserved.map((r) => r.field));
-      }
-      return filled;
-    }
-
-    const none = rows.map((): string[] => []);
-    if (options?.transaction !== undefined) return none;
-    const issued = rows.map((row) => (row && typeof row === 'object' ? this.issuedAutoNumbers.get(row) ?? [] : []));
-    const colliding = await this.collidingAutoNumberReservations(afterCollision, issued.flat(), options);
-    if (colliding.length === 0) return none;
-
-    const stale = new Set<string>();
-    for (const reservation of colliding) {
-      const key = this.autoNumberCounterKey(reservation);
-      if (stale.has(key)) continue;
-      stale.add(key);
-      await this.resyncSequenceToDataMax(reservation);
-    }
-    return rows.map((row, i) => {
-      const emptied: string[] = [];
-      const kept: AutoNumberReservation[] = [];
-      for (const reservation of issued[i]) {
-        if (stale.has(this.autoNumberCounterKey(reservation))) {
-          delete row[reservation.field];
-          emptied.push(reservation.field);
-        } else {
-          kept.push(reservation);
-        }
-      }
-      if (emptied.length > 0) this.issuedAutoNumbers.set(row, kept);
-      return emptied;
-    });
+    // [#25521 cut 11] The body moved to `sql-driver-autonumber.ts` (see `AutonumberHost`).
+    const readIssuedAutoNumbers = () => this.issuedAutoNumbers;
+    const host: ThisParameterType<typeof issueAutonumbers> = {
+      autoNumberCounterKey: (...a) => this.autoNumberCounterKey(...a),
+      collidingAutoNumberReservations: (...a) => this.collidingAutoNumberReservations(...a),
+      fillAutoNumberFields: (...a) => this.fillAutoNumberFields(...a),
+      injectTenantOnInsert: (...a) => this.injectTenantOnInsert(...a),
+      get issuedAutoNumbers() { return readIssuedAutoNumbers(); },
+      resyncSequenceToDataMax: (...a) => this.resyncSequenceToDataMax(...a),
+    };
+    return issueAutonumbers.call(host, object, rows, options, afterCollision);
   }
 
   /**
@@ -8747,22 +8490,18 @@ export class SqlDriver implements IDataDriver {
    *     the data instead of the message. On this repo's tenanted autonumber
    *     index, state 3 is the ONLY state that ever occurs.
    */
-  protected async collidingAutoNumberReservations(
+  protected collidingAutoNumberReservations(
     error: unknown,
     reservations: AutoNumberReservation[],
     options?: DriverOptions,
   ): Promise<AutoNumberReservation[]> {
-    if (reservations.length === 0 || !isUniqueViolationError(error)) return [];
-
-    const column = uniqueViolationColumn(error);
-    if (column !== undefined) return reservations.filter((r) => r.field === column);
-
-    const runner: Knex | Knex.Transaction = (options?.transaction as Knex.Transaction | undefined) ?? this.knex;
-    const colliding: AutoNumberReservation[] = [];
-    for (const reservation of reservations) {
-      if (await this.autoNumberValueExists(runner, reservation)) colliding.push(reservation);
-    }
-    return colliding;
+    // [#25521 cut 11] The body moved to `sql-driver-autonumber.ts` (see `AutonumberHost`).
+    const readKnex = () => this.knex;
+    const host: ThisParameterType<typeof collidingAutoNumberReservations> = {
+      autoNumberValueExists: (...a) => this.autoNumberValueExists(...a),
+      get knex() { return readKnex(); },
+    };
+    return collidingAutoNumberReservations.call(host, error, reservations, options);
   }
 
   /**
@@ -8785,32 +8524,19 @@ export class SqlDriver implements IDataDriver {
    * *because* an INSERT into this very table was refused by a constraint, so
    * the table demonstrably exists.
    */
-  protected async resyncSequenceToDataMax(reservation: AutoNumberReservation): Promise<void> {
-    await this.ensureSequencesTable();
-    const resolvedTenantId = this.resolveSequenceTenantId(
-      reservation.tenantField,
-      reservation.tenantId,
-      reservation.tableName,
-      reservation.field,
-    );
-    const key = this.sequencesHasKeyHash
-      ? { key_hash: this.sequenceKeyHash(reservation.tableName, resolvedTenantId, reservation.field, reservation.scope) }
-      : { object: reservation.tableName, tenant_id: resolvedTenantId, field: reservation.field };
-
-    await this.knex.transaction(async (trx) => {
-      const observedMax = await this.scanMaxNumericTail(
-        trx,
-        reservation.tableName,
-        reservation.field,
-        reservation.prefix,
-        reservation.tenantField,
-        resolvedTenantId === GLOBAL_TENANT ? null : resolvedTenantId,
-        reservation.suffix,
-      );
-      const existing = await trx(SEQUENCES_TABLE).where(key).first();
-      if (!existing || Number(existing.last_value) >= observedMax) return;
-      await trx(SEQUENCES_TABLE).where(key).update({ last_value: observedMax, updated_at: this.knex.fn.now() });
-    });
+  protected resyncSequenceToDataMax(reservation: AutoNumberReservation): Promise<void> {
+    // [#25521 cut 11] The body moved to `sql-driver-autonumber.ts` (see `AutonumberHost`).
+    const readKnex = () => this.knex;
+    const readSequencesHasKeyHash = () => this.sequencesHasKeyHash;
+    const host: ThisParameterType<typeof resyncSequenceToDataMax> = {
+      ensureSequencesTable: (...a) => this.ensureSequencesTable(...a),
+      get knex() { return readKnex(); },
+      resolveSequenceTenantId: (...a) => this.resolveSequenceTenantId(...a),
+      scanMaxNumericTail: (...a) => this.scanMaxNumericTail(...a),
+      sequenceKeyHash: (...a) => this.sequenceKeyHash(...a),
+      get sequencesHasKeyHash() { return readSequencesHasKeyHash(); },
+    };
+    return resyncSequenceToDataMax.call(host, reservation);
   }
 
   /**
@@ -13193,67 +12919,24 @@ export class SqlDriver implements IDataDriver {
    * #6009 probe runs BEFORE the `UPDATE` for the same reason: a gate that could
    * not be measured must stop the write, not wave it through.
    */
-  protected async backfillCanonicalDatetimes(table: string, tableExisted: boolean): Promise<void> {
-    const fields = this.datetimeFields[table];
-    if (!this.isSqlite || !fields || fields.size === 0) return;
-
-    const clean = (this.canonicalDatetimeFields[table] ??= new Set<string>());
-    // A table created by this very call is empty, so every datetime column in it
-    // is canonical without a single row being read.
-    if (!tableExisted) {
-      for (const field of fields) clean.add(field);
-      return;
-    }
-
-    const canonical = this.sqliteCanonicalDatetimeSql('??');
-    // The expression spells `??` 4×, and the statement uses it twice (the SET
-    // value and the WHERE guard) — hence the column name repeated per use.
-    const exprBindings = (field: string) => [field, field, field, field];
-    // #6009: the rows whose only reading is the julian-day limb.
-    const guard = this.sqliteNonTemporalTextSql('??');
-    const guardBindings = (field: string): string[] =>
-      Array(SQLITE_NON_TEMPORAL_TEXT_REFS).fill(field);
-    for (const field of fields) {
-      try {
-        const withheld = await this.countNonTemporalTextRows(table, field, canonical, exprBindings(field));
-        const res = await this.knex.raw(
-          `update ?? set ?? = ${canonical} where ?? is not null and ?? is not ${canonical} and not ${guard}`,
-          [
-            table, field, ...exprBindings(field),
-            field, field, ...exprBindings(field), ...guardBindings(field),
-          ],
-        );
-        const converted = (res as any)?.changes ?? 0;
-        if (converted) {
-          this.logger.info?.(
-            `[sql-driver] canonicalised datetime storage for ${table}.${field}: every value is now one ` +
-              `UTC ISO-8601 text form, so filters and sorts compare instants rather than mixed encodings`,
-            { rowsConverted: converted },
-          );
-        }
-        if (withheld > 0) {
-          // #6009 — the tracker id stays in this comment, never in the string:
-          // an operator reading the log has no way to resolve one.
-          this.logger.warn(
-            `[sql-driver] left ${withheld} row(s) of ${table}.${field} unconverted: ` +
-            `their stored value is a bare number, which SQLite's date functions read as a ` +
-            `JULIAN DAY, so canonicalising them would overwrite the original bytes with a ` +
-            `date nobody wrote. Reads are unchanged — the column keeps its (unindexed) ` +
-            `read-side repair until the values are corrected or cleared at the source`,
-            { table, field, rowsWithheld: withheld },
-          );
-          continue;
-        }
-        clean.add(field);
-      } catch (err) {
-        // Correctness does not depend on this succeeding — only performance does.
-        this.logger.warn(
-          `[sql-driver] could not canonicalise datetime storage for ${table}.${field}; ` +
-          `queries stay correct via the read-side repair`,
-          { error: err instanceof Error ? err.message : String(err) },
-        );
-      }
-    }
+  protected backfillCanonicalDatetimes(table: string, tableExisted: boolean): Promise<void> {
+    // [#25521 cut 12] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const readCanonicalDatetimeFields = () => this.canonicalDatetimeFields;
+    const readDatetimeFields = () => this.datetimeFields;
+    const readIsSqlite = () => this.isSqlite;
+    const readKnex = () => this.knex;
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof backfillCanonicalDatetimes> = {
+      get canonicalDatetimeFields() { return readCanonicalDatetimeFields(); },
+      countNonTemporalTextRows: (...a) => this.countNonTemporalTextRows(...a),
+      get datetimeFields() { return readDatetimeFields(); },
+      get isSqlite() { return readIsSqlite(); },
+      get knex() { return readKnex(); },
+      get logger() { return readLogger(); },
+      sqliteCanonicalDatetimeSql: (...a) => this.sqliteCanonicalDatetimeSql(...a),
+      sqliteNonTemporalTextSql: (...a) => this.sqliteNonTemporalTextSql(...a),
+    };
+    return backfillCanonicalDatetimes.call(host, table, tableExisted);
   }
 
   /**
@@ -13272,21 +12955,19 @@ export class SqlDriver implements IDataDriver {
    * @param canonicalSql the caller's canonical expression, spelling `??`
    * @param exprBindings one binding per `??` in `canonicalSql`
    */
-  protected async countNonTemporalTextRows(
+  protected countNonTemporalTextRows(
     table: string,
     field: string,
     canonicalSql: string,
     exprBindings: string[],
   ): Promise<number> {
-    const guard = this.sqliteNonTemporalTextSql('??');
-    const res: any = await this.knex.raw(
-      `select count(*) as n from ?? where ?? is not null and ?? is not ${canonicalSql} and ${guard}`,
-      [
-        table, field, field, ...exprBindings,
-        ...Array(SQLITE_NON_TEMPORAL_TEXT_REFS).fill(field),
-      ],
-    );
-    return Number((Array.isArray(res) ? res[0] : res)?.n ?? 0);
+    // [#25521 cut 12] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const readKnex = () => this.knex;
+    const host: ThisParameterType<typeof countNonTemporalTextRows> = {
+      get knex() { return readKnex(); },
+      sqliteNonTemporalTextSql: (...a) => this.sqliteNonTemporalTextSql(...a),
+    };
+    return countNonTemporalTextRows.call(host, table, field, canonicalSql, exprBindings);
   }
 
   /**
@@ -13390,44 +13071,18 @@ export class SqlDriver implements IDataDriver {
    * and the rest legacy — each cell reads the same either way, so nothing is
    * lost and `warn` is the level (AGENTS.md, degradation log levels).
    */
-  protected async backfillCanonicalJsonEncoding(table: string, tableExisted: boolean): Promise<void> {
-    const fields = this.jsonFields[table];
-    if (!this.isSqlite || !fields || fields.length === 0) return;
-    // A table created by this very call is empty, so every json column in it is
-    // canonical without a single row being read.
-    if (!tableExisted) return;
-
-    for (const field of fields) {
-      const tally = { converted: 0, withheld: 0 };
-      try {
-        await this.convergeJsonColumn(table, field, tally);
-      } catch (err) {
-        // Correctness does not depend on this succeeding: `formatOutput` keeps
-        // its parse fallback precisely so an un-migrated row still reads back
-        // as the string it is.
-        this.logger.warn(
-          `[sql-driver] could not canonicalise json storage for ${table}.${field}; ` +
-          `reads stay correct via formatOutput's parse fallback`,
-          { error: err instanceof Error ? err.message : String(err), rowsConverted: tally.converted },
-        );
-        continue;
-      }
-      if (tally.converted) {
-        this.logger.info?.(
-          `[sql-driver] canonicalised json storage for ${table}.${field}: plain-text cells are now ` +
-            `JSON-encoded strings, the one encoding a json column holds on every dialect`,
-          { rowsConverted: tally.converted },
-        );
-      }
-      if (tally.withheld) {
-        this.logger.info?.(
-          `[sql-driver] left ${tally.withheld} json cell(s) of ${table}.${field} as stored: ` +
-          `SQLite's json_valid() rejects them but they parse as JSON (e.g. nested past ` +
-          `SQLite's JSON depth limit), so they already read back as the value they encode`,
-          { rowsWithheld: tally.withheld },
-        );
-      }
-    }
+  protected backfillCanonicalJsonEncoding(table: string, tableExisted: boolean): Promise<void> {
+    // [#25521 cut 12] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const readIsSqlite = () => this.isSqlite;
+    const readJsonFields = () => this.jsonFields;
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof backfillCanonicalJsonEncoding> = {
+      convergeJsonColumn: (...a) => this.convergeJsonColumn(...a),
+      get isSqlite() { return readIsSqlite(); },
+      get jsonFields() { return readJsonFields(); },
+      get logger() { return readLogger(); },
+    };
+    return backfillCanonicalJsonEncoding.call(host, table, tableExisted);
   }
 
   /**
@@ -13437,48 +13092,17 @@ export class SqlDriver implements IDataDriver {
    * it rewrites. Throws on a failed statement; `tally` then holds what the
    * committed pages did.
    */
-  private async convergeJsonColumn(
+  private convergeJsonColumn(
     table: string,
     field: string,
     tally: { converted: number; withheld: number },
   ): Promise<void> {
-    let cursor: number | undefined;
-    for (;;) {
-      const page = this.knex(table)
-        .select(this.knex.raw('rowid as ??', ['rid']), this.knex.raw('?? as ??', [field, 'val']))
-        .whereRaw(`typeof(??) = 'text' and json_valid(??) = 0`, [field, field]);
-      if (cursor !== undefined) page.andWhereRaw('rowid > ?', [cursor]);
-      const rows = (await page.orderByRaw('rowid').limit(SQLITE_JSON_BACKFILL_PAGE_SIZE)) as Array<{
-        rid: number;
-        val: unknown;
-      }>;
-
-      const writes: Array<{ rid: number; stored: string; next: string }> = [];
-      for (const row of rows) {
-        const next = typeof row.val === 'string' ? recoverUnencodedJsonText(row.val) : null;
-        if (next === null) tally.withheld++;
-        else writes.push({ rid: row.rid, stored: row.val as string, next });
-      }
-      if (writes.length > 0) {
-        tally.converted += await this.knex.transaction(async (trx) => {
-          let changed = 0;
-          for (const w of writes) {
-            changed += await trx(table)
-              .whereRaw(`rowid = ? and typeof(??) = 'text' and ?? = ?`, [w.rid, field, field, w.stored])
-              .update({ [field]: w.next });
-          }
-          return changed;
-        });
-      }
-
-      if (rows.length < SQLITE_JSON_BACKFILL_PAGE_SIZE) return;
-      const last = rows[rows.length - 1].rid;
-      // The cursor must advance, or the same page would be read forever. A
-      // rowid past 2^53 comes back rounded and can stall it; the rest of the
-      // column then stays legacy, which reads the same.
-      if (cursor !== undefined && !(last > cursor)) return;
-      cursor = last;
-    }
+    // [#25521 cut 12] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const readKnex = () => this.knex;
+    const host: ThisParameterType<typeof convergeJsonColumn> = {
+      get knex() { return readKnex(); },
+    };
+    return convergeJsonColumn.call(host, table, field, tally);
   }
 
   /**
@@ -13511,62 +13135,24 @@ export class SqlDriver implements IDataDriver {
    * filter paths keep their repair expression, and queries stay correct (just
    * unindexed). A migration must never take boot down.
    */
-  protected async backfillCanonicalTimes(table: string, tableExisted: boolean): Promise<void> {
-    const fields = this.timeFields[table];
-    if (!this.isSqlite || !fields || fields.size === 0) return;
-
-    const clean = (this.canonicalTimeFields[table] ??= new Set<string>());
-    if (!tableExisted) {
-      for (const field of fields) clean.add(field);
-      return;
-    }
-
-    const canonical = this.sqliteCanonicalTimeSql('??');
-    const exprBindings = (field: string) => Array(SQLITE_TIME_EXPR_REFS).fill(field);
-    // #6009: the rows whose only reading is the julian-day limb.
-    const guard = this.sqliteNonTemporalTextSql('??');
-    const guardBindings = (field: string): string[] =>
-      Array(SQLITE_NON_TEMPORAL_TEXT_REFS).fill(field);
-    for (const field of fields) {
-      try {
-        const withheld = await this.countNonTemporalTextRows(table, field, canonical, exprBindings(field));
-        const res = await this.knex.raw(
-          `update ?? set ?? = ${canonical} where ?? is not null and ?? is not ${canonical} and not ${guard}`,
-          [
-            table, field, ...exprBindings(field),
-            field, field, ...exprBindings(field), ...guardBindings(field),
-          ],
-        );
-        const converted = (res as any)?.changes ?? 0;
-        if (converted) {
-          this.logger.info?.(
-            `[sql-driver] canonicalised time-of-day storage for ${table}.${field}: every value is now one ` +
-              `HH:MM:SS[.sss] text form, so filters and sorts compare times rather than mixed encodings`,
-            { rowsConverted: converted },
-          );
-        }
-        if (withheld > 0) {
-          // #6009 — the tracker id stays in this comment, never in the string:
-          // an operator reading the log has no way to resolve one.
-          this.logger.warn(
-            `[sql-driver] left ${withheld} row(s) of ${table}.${field} unconverted: ` +
-            `their stored value is a bare number, which SQLite's date functions read as a ` +
-            `JULIAN DAY, so canonicalising them would overwrite the original bytes with a ` +
-            `time nobody wrote. Reads are unchanged — the column keeps its (unindexed) ` +
-            `read-side repair until the values are corrected or cleared at the source`,
-            { table, field, rowsWithheld: withheld },
-          );
-          continue;
-        }
-        clean.add(field);
-      } catch (err) {
-        this.logger.warn(
-          `[sql-driver] could not canonicalise time storage for ${table}.${field}; ` +
-          `queries stay correct via the read-side repair`,
-          { error: err instanceof Error ? err.message : String(err) },
-        );
-      }
-    }
+  protected backfillCanonicalTimes(table: string, tableExisted: boolean): Promise<void> {
+    // [#25521 cut 12] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const readCanonicalTimeFields = () => this.canonicalTimeFields;
+    const readIsSqlite = () => this.isSqlite;
+    const readKnex = () => this.knex;
+    const readLogger = () => this.logger;
+    const readTimeFields = () => this.timeFields;
+    const host: ThisParameterType<typeof backfillCanonicalTimes> = {
+      get canonicalTimeFields() { return readCanonicalTimeFields(); },
+      countNonTemporalTextRows: (...a) => this.countNonTemporalTextRows(...a),
+      get isSqlite() { return readIsSqlite(); },
+      get knex() { return readKnex(); },
+      get logger() { return readLogger(); },
+      sqliteCanonicalTimeSql: (...a) => this.sqliteCanonicalTimeSql(...a),
+      sqliteNonTemporalTextSql: (...a) => this.sqliteNonTemporalTextSql(...a),
+      get timeFields() { return readTimeFields(); },
+    };
+    return backfillCanonicalTimes.call(host, table, tableExisted);
   }
 
   /**
@@ -13580,30 +13166,18 @@ export class SqlDriver implements IDataDriver {
    *
    * `[]` on any dialect but MySQL, and on a table declaring no datetime column.
    */
-  protected async legacyMysqlTimestampColumns(
+  protected legacyMysqlTimestampColumns(
     table: string,
     fields: Record<string, any>,
   ): Promise<Array<{ name: string; nullable: boolean }>> {
-    if (!this.isMysql) return [];
-    const candidates = new Set<string>(AUDIT_TIMESTAMP_COLUMNS);
-    for (const [name, field] of Object.entries(fields)) {
-      if ((field?.type ?? 'string') === 'datetime' && !isMultiValuedColumn('datetime', field)) candidates.add(name);
-    }
-    if (candidates.size === 0) return [];
-
-    const res: any = await this.knex.raw(
-      `select column_name, is_nullable from information_schema.columns
-       where table_schema = database() and table_name = ? and data_type = 'timestamp'`,
-      [table],
-    );
-    // mysql2 returns [rows, fields]; column names vary in case by server.
-    const rows: any[] = Array.isArray(res?.[0]) ? res[0] : (res?.rows ?? res ?? []);
-    return rows
-      .map((r) => ({
-        name: String(r.COLUMN_NAME ?? r.column_name ?? ''),
-        nullable: String(r.IS_NULLABLE ?? r.is_nullable ?? 'YES').toUpperCase() !== 'NO',
-      }))
-      .filter((c) => c.name && candidates.has(c.name));
+    // [#25521 cut 12] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const readIsMysql = () => this.isMysql;
+    const readKnex = () => this.knex;
+    const host: ThisParameterType<typeof legacyMysqlTimestampColumns> = {
+      get isMysql() { return readIsMysql(); },
+      get knex() { return readKnex(); },
+    };
+    return legacyMysqlTimestampColumns.call(host, table, fields);
   }
 
   /**
@@ -13671,50 +13245,21 @@ export class SqlDriver implements IDataDriver {
    * same one. `this.isMysql` is therefore the only early return left; no other
    * dialect takes this lock, and `lock_wait_timeout` is MySQL's variable.
    */
-  protected async runWideningAlters(
+  protected runWideningAlters(
     table: string,
     statements: ReadonlyArray<{ sql: string; bindings: unknown[] }>,
   ): Promise<void> {
-    if (!this.isMysql) {
-      for (const s of statements) await this.knex.raw(s.sql, s.bindings as any);
-      return;
-    }
-    await this.withPinnedSession(async (run) => {
-      let prior: unknown;
-      try {
-        const res: any = await run('select @@session.lock_wait_timeout as v');
-        const rows = Array.isArray(res?.[0]) ? res[0] : (res?.rows ?? res ?? []);
-        prior = (rows?.[0] as any)?.v;
-      } catch {
-        // Unreadable prior value only costs the restore below; it must not stop
-        // the bound from being armed, which is the point of the whole seam.
-      }
-      await run('set session lock_wait_timeout = ?', [DEFERRED_DDL_LOCK_WAIT_TIMEOUT_SECONDS]);
-      try {
-        for (const s of statements) {
-          try {
-            await run(s.sql, s.bindings);
-          } catch (err) {
-            // Commit 8bbf45947: the bound is armed on both callers, the ESCAPE is not.
-            // Off the flush this rethrows the server's own error, which the
-            // widening's catch reports and swallows — boot's policy
-            // unchanged, now reached by a wait that ends.
-            if (this.flushingDeferredDdl && isMysqlLockWaitTimeout(err)) {
-              throw deferredDdlLockWaitError(table, DEFERRED_DDL_LOCK_WAIT_TIMEOUT_SECONDS, err);
-            }
-            throw err;
-          }
-        }
-      } finally {
-        if (prior !== undefined && prior !== null) {
-          try {
-            await run('set session lock_wait_timeout = ?', [Number(prior)]);
-          } catch {
-            // Best-effort: never mask the refusal being thrown past this block.
-          }
-        }
-      }
-    });
+    // [#25521 cut 12] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const readFlushingDeferredDdl = () => this.flushingDeferredDdl;
+    const readIsMysql = () => this.isMysql;
+    const readKnex = () => this.knex;
+    const host: ThisParameterType<typeof runWideningAlters> = {
+      get flushingDeferredDdl() { return readFlushingDeferredDdl(); },
+      get isMysql() { return readIsMysql(); },
+      get knex() { return readKnex(); },
+      withPinnedSession: (...a) => this.withPinnedSession(...a),
+    };
+    return runWideningAlters.call(host, table, statements);
   }
 
   /**
@@ -13795,30 +13340,18 @@ export class SqlDriver implements IDataDriver {
    * {@link migrateMysqlTimeColumns} and {@link previewTimeConvergence} — the
    * plan and the migration are the same set by construction (#3954 pattern).
    */
-  protected async legacyMysqlTimeColumns(
+  protected legacyMysqlTimeColumns(
     table: string,
     fields: Record<string, any>,
   ): Promise<Array<{ name: string; nullable: boolean }>> {
-    if (!this.isMysql) return [];
-    const candidates = new Set<string>();
-    for (const [name, field] of Object.entries(fields)) {
-      if ((field?.type ?? 'string') === 'time' && !isMultiValuedColumn('time', field)) candidates.add(name);
-    }
-    if (candidates.size === 0) return [];
-
-    const res: any = await this.knex.raw(
-      `select column_name, is_nullable from information_schema.columns
-       where table_schema = database() and table_name = ? and data_type = 'time'
-         and coalesce(datetime_precision, 0) = 0`,
-      [table],
-    );
-    const rows: any[] = Array.isArray(res) ? res[0] : (res?.rows ?? []);
-    return rows
-      .map((r) => ({
-        name: String(r.COLUMN_NAME ?? r.column_name ?? ''),
-        nullable: String(r.IS_NULLABLE ?? r.is_nullable ?? 'YES').toUpperCase() !== 'NO',
-      }))
-      .filter((c) => c.name && candidates.has(c.name));
+    // [#25521 cut 12] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const readIsMysql = () => this.isMysql;
+    const readKnex = () => this.knex;
+    const host: ThisParameterType<typeof legacyMysqlTimeColumns> = {
+      get isMysql() { return readIsMysql(); },
+      get knex() { return readKnex(); },
+    };
+    return legacyMysqlTimeColumns.call(host, table, fields);
   }
 
   /**
@@ -14199,63 +13732,23 @@ export class SqlDriver implements IDataDriver {
    * object it is diffing, and falling back to the last-synced set would make a
    * removed `indexes[]` undetectable as an orphan.
    */
-  protected async detectTableDrift(
+  protected detectTableDrift(
     tableName: string,
     fields: Record<string, any>,
     declaredIndexes?: any[],
   ): Promise<ManagedDriftEntry[]> {
-    const cols = await this.introspectColumns(tableName);
-    const physical: PhysicalColumn[] = cols.map((c) => ({
-      name: c.name,
-      type: c.type,
-      nullable: c.nullable,
-      maxLength: c.maxLength,
-      // The raw, dialect-decorated DEFAULT — the only evidence that a column was
-      // created by a build which turned a `defaultValue` runtime token into a
-      // literal (#4560).
-      defaultValue: c.defaultValue,
-    }));
-    // #12732: `diffManagedTable`'s varchar-length branch asks `createColumn`'s
-    // own read-only mirror (`varcharColumnChars`) whether it would even build
-    // a varchar for a given field — and for the text family that answer needs
-    // keyedness (commit d0e3a885b), the same input `initObjects` / `ensureShardTable`
-    // already resolve via `indexedKeyColumns` before any DDL. Resolved here
-    // too so the DIFFER'S expectation, not only the DDL, agrees with keyed
-    // columns.
-    const keyedColumns = indexedKeyColumns({
-      table: tableName,
-      fields,
-      tenantField: this.resolveTenantField(tableName),
-      declaredIndexes,
-    });
-    const out = diffManagedTable({
-      table: tableName,
-      fields,
-      columns: physical,
-      dialect: this.dialectName,
-      keyedColumns,
-      varcharColumnChars: (field, keyed) => this.varcharColumnChars(field, keyed),
-      // ADR-0104: the media family's column shape is this deployment's fact,
-      // not the type's — the differ must ask the arm the emitter just used.
-      fileColumnsMoved: this.fileColumnsMoved,
-      // ADR-0131 D10 (ruling record 6269955919, ② A): the tenant column's
-      // NOT NULL is the organization-ownership ceremony's, not drift.
-      ceremonyOwnedNullability: this.resolveTenantField(tableName),
-    });
-    // [ADR-0131 D1] A physically NOT NULL tenant column is its own proof that
-    // the NULL-safe and the plain tenant key part are one constraint here.
-    const tenantField = this.resolveTenantField(tableName);
-    const tenantColumnNotNull = !!tenantField && cols.some((c) => c.name === tenantField && c.nullable === false);
-    out.push(
-      ...(await this.detectTableIndexDrift(
-        tableName,
-        fields,
-        declaredIndexes,
-        new Set(cols.map((c) => c.name)),
-        tenantColumnNotNull,
-      )),
-    );
-    return out;
+    // [#25521 cut 10] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const readDialectName = () => this.dialectName;
+    const readFileColumnsMoved = () => this.fileColumnsMoved;
+    const host: ThisParameterType<typeof detectTableDrift> = {
+      detectTableIndexDrift: (...a) => this.detectTableIndexDrift(...a),
+      get dialectName() { return readDialectName(); },
+      get fileColumnsMoved() { return readFileColumnsMoved(); },
+      introspectColumns: (...a) => this.introspectColumns(...a),
+      resolveTenantField: (...a) => this.resolveTenantField(...a),
+      varcharColumnChars: (...a) => this.varcharColumnChars(...a),
+    };
+    return detectTableDrift.call(host, tableName, fields, declaredIndexes);
   }
 
   /**
@@ -14272,45 +13765,23 @@ export class SqlDriver implements IDataDriver {
    * as the plain column new DDL keys. The certification is asked only when a
    * physical index carries that form and the column is not NOT NULL already.
    */
-  protected async detectTableIndexDrift(
+  protected detectTableIndexDrift(
     tableName: string,
     fields: Record<string, any>,
     declaredIndexes: any[] | undefined,
     physicalColumns: Set<string>,
     tenantColumnNotNull = false,
   ): Promise<ManagedDriftEntry[]> {
-    const tenantField = this.resolveTenantField(tableName);
-    const physical = await this.introspectIndexes(tableName);
-    const tenantKeyCertified =
-      tenantColumnNotNull ||
-      (carriesNullSafeTenantKeyPart(physical, tenantField) && (await this.isTenantKeyCertified()));
-    const entries = diffManagedIndexes({
-      table: tableName,
-      expected: expectedIndexes({ table: tableName, fields, tenantField, declaredIndexes, physicalColumns }),
-      // `declaredIndexes` goes to BOTH: it is what the table should have, and
-      // therefore also what must never be mistaken for legacy debt (#3955).
-      legacy: legacyUniqueReplacements({ table: tableName, fields, tenantField, physicalColumns, declaredIndexes }),
-      physical,
-      // Indexes the framework built through raw DDL on this boot are its own to
-      // manage — never this differ's to propose dropping (#4884).
-      runtimeCreated: this.runtimeCreatedIndexes.get(tableName),
-      // Lets the differ recognise the NULL-safe organization key part as the
-      // sync's own vocabulary (ADR-0120 D3).
-      tenantField,
-      tenantKeyCertified,
-    });
-    // ADR-0120 D4: the duplicate pre-flight probe decides each NULL-safe
-    // unique op's fate — clean data upgrades the pure tightening to `safe`
-    // (dev autoMigrate may apply it); duplicates block the op with a row
-    // report. Data-dependent, so it runs HERE, not in the pure differ.
-    await this.applyNullSafeUniquePreflight(entries);
-    // The declared indexes `expectedIndexes` leaves out because a key column
-    // will never materialize (a misspelt name, a virtual `formula` field).
-    // `syncDeclaredIndexes` skips each one at `error` on every sync, and this
-    // is its plan-side face: a report-only entry, so `os migrate plan` shows
-    // the unenforced declaration instead of reporting nothing.
-    entries.push(...diffUnbuildableIndexes({ table: tableName, fields, tenantField, declaredIndexes, physicalColumns }));
-    return entries;
+    // [#25521 cut 10] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const readRuntimeCreatedIndexes = () => this.runtimeCreatedIndexes;
+    const host: ThisParameterType<typeof detectTableIndexDrift> = {
+      applyNullSafeUniquePreflight: (...a) => this.applyNullSafeUniquePreflight(...a),
+      introspectIndexes: (...a) => this.introspectIndexes(...a),
+      isTenantKeyCertified: (...a) => this.isTenantKeyCertified(...a),
+      resolveTenantField: (...a) => this.resolveTenantField(...a),
+      get runtimeCreatedIndexes() { return readRuntimeCreatedIndexes(); },
+    };
+    return detectTableIndexDrift.call(host, tableName, fields, declaredIndexes, physicalColumns, tenantColumnNotNull);
   }
 
   /**
@@ -14352,71 +13823,14 @@ export class SqlDriver implements IDataDriver {
    * retires is a platform-wide unique, strictly stronger than the NULL-safe
    * composite, so duplicates in the new key are impossible by construction.
    */
-  protected async applyNullSafeUniquePreflight(entries: ManagedDriftEntry[]): Promise<void> {
-    for (const d of entries) {
-      const op = d.op;
-      if (op.type !== 'recreate_index' && op.type !== 'create_index') continue;
-      if (!op.unique) continue;
-      const nullSafeColumns = op.nullSafeColumns ?? [];
-      const nullSafeKey = nullSafeColumns.length > 0;
-      const tighten = op.type === 'recreate_index' && op.tightenNullSafeOnly === true;
-      // A generic unique recreate (columns differ beyond the key-part form)
-      // keeps its pre-ADR-0120 semantics untouched.
-      if (op.type === 'recreate_index' && !tighten) continue;
-      // …and a PLAIN unique has no tightening shape at all, so only its CREATE
-      // reaches the probe (commit 61821e54c).
-      if (!nullSafeKey && op.type !== 'create_index') continue;
-
-      let duplicates: Array<{ key: string; rows: number }>;
-      try {
-        duplicates = await this.probeNullSafeUniqueDuplicates(op.table, op.columns, nullSafeColumns);
-      } catch (e: any) {
-        // Probe failure must fail SAFE: without evidence the data is clean the
-        // op may not claim eligibility for auto-apply.
-        this.logger.warn(
-          `[schema-drift] duplicate pre-flight for '${op.indexName}' on '${op.table}' failed — leaving the op gated`,
-          e?.message ?? e,
-        );
-        continue;
-      }
-
-      const signature = d.expected;
-      if (duplicates.length === 0) {
-        if (tighten) {
-          d.category = 'safe';
-          d.severity = 'warning';
-          d.message =
-            `${op.table}: index '${op.indexName}' tightens to ${signature} — the organization key part becomes ` +
-            `NULL-safe (ADR-0120 D3), so rows without an organization are constrained too. The duplicate ` +
-            `pre-flight probe found no conflicting rows: pure tightening, applied by "os migrate apply" ` +
-            `(auto-applied at boot under dev autoMigrate: 'safe').`;
-        }
-        continue;
-      }
-
-      const report = formatDuplicateGroups(duplicates);
-      d.category = 'destructive';
-      d.severity = 'error';
-      // The block, declared on the entry: `os migrate plan` / `apply` read it
-      // here and never offer `--allow-destructive` for an op the apply refuses
-      // on this data however it is confirmed.
-      d.applyLimit = `existing rows already violate the unique key: ${report}`;
-      d.message = nullSafeKey
-        ? `${op.table}: cannot ${tighten ? 'tighten' : 'create'} '${op.indexName}' as ${signature} — existing rows ` +
-          `already violate the NULL-safe unique constraint (duplicates the old index wrongly admitted: SQL ` +
-          `UNIQUE is NULL-distinct, so it never constrained rows without an organization): ` +
-          `${report}. The op is BLOCKED: apply re-probes and refuses, and the existing index stays in place ` +
-          `(ADR-0120 D4). Deduplicate the listed rows, then re-run "os migrate plan".`
-        : // Commit 61821e54c: the plain unique has no #5030 history behind it — nothing
-          // ever admitted these rows, the constraint is simply newly declared
-          // over data that does not satisfy it. So the message says what IS
-          // true, and above all withdraws the `safe` claim: this op is not
-          // applied by `os migrate apply` and not auto-applied at boot.
-          `${op.table}: cannot create '${op.indexName}' as ${signature} — existing rows already violate it: ` +
-          `${report}. The op is BLOCKED: neither "os migrate apply" nor dev autoMigrate: 'safe' will create it, ` +
-          `so the constraint is NOT enforced. Deduplicate the listed rows, then re-run "os migrate plan" ` +
-          `(ADR-0120 D4).`;
-    }
+  protected applyNullSafeUniquePreflight(entries: ManagedDriftEntry[]): Promise<void> {
+    // [#25521 cut 9] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof applyNullSafeUniquePreflight> = {
+      get logger() { return readLogger(); },
+      probeNullSafeUniqueDuplicates: (...a) => this.probeNullSafeUniqueDuplicates(...a),
+    };
+    return applyNullSafeUniquePreflight.call(host, entries);
   }
 
   /**
@@ -14469,30 +13883,20 @@ export class SqlDriver implements IDataDriver {
    *   last synced (captured in {@link managedObjectFields} /
    *   {@link managedObjectIndexes}).
    */
-  async detectManagedDrift(
+  detectManagedDrift(
     objects?: Array<{ name: string; fields?: Record<string, any>; indexes?: any[] }>,
   ): Promise<ManagedDriftEntry[]> {
-    const tables = new Map<string, { fields: Record<string, any>; indexes?: any[] }>();
-    if (objects) {
-      for (const o of objects) {
-        tables.set(StorageNameMapping.resolveTableName(o), {
-          fields: o.fields ?? {},
-          indexes: o.indexes,
-        });
-      }
-    } else {
-      for (const [t, f] of this.managedObjectFields) {
-        tables.set(t, { fields: f, indexes: this.managedObjectIndexes.get(t) });
-      }
-    }
-
-    const out: ManagedDriftEntry[] = [];
-    for (const [tableName, meta] of tables) {
-      if (!(await this.knex.schema.hasTable(tableName))) continue;
-      out.push(...(await this.detectTableDrift(tableName, meta.fields, meta.indexes)));
-    }
-    out.sort((a, b) => (a.table === b.table ? (a.column ?? '').localeCompare(b.column ?? '') : a.table.localeCompare(b.table)));
-    return out;
+    // [#25521 cut 10] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const readKnex = () => this.knex;
+    const readManagedObjectFields = () => this.managedObjectFields;
+    const readManagedObjectIndexes = () => this.managedObjectIndexes;
+    const host: ThisParameterType<typeof detectManagedDrift> = {
+      detectTableDrift: (...a) => this.detectTableDrift(...a),
+      get knex() { return readKnex(); },
+      get managedObjectFields() { return readManagedObjectFields(); },
+      get managedObjectIndexes() { return readManagedObjectIndexes(); },
+    };
+    return detectManagedDrift.call(host, objects);
   }
 
   /**
@@ -14529,82 +13933,20 @@ export class SqlDriver implements IDataDriver {
    *    naming the dialect. ⛔ MySQL lands here on purpose: #17788 owns its
    *    statement order, on a real instance.
    */
-  async planMediaColumnMove(): Promise<MediaColumnMoveScan> {
-    const dialect = mediaColumnMoveDialect(this.dialectName);
-    if (!dialect) {
-      return {
-        dialect: this.dialectName,
-        plans: [],
-        refusals: [
-          {
-            table: '*',
-            column: '*',
-            reason: 'dialect_not_supported',
-            // ⛔ No tracker id in the string: this `detail` reaches an operator
-            // reading a migration report, who has no tracker to resolve one
-            // against (`check:doc-authoring`). The card that owns the MySQL
-            // leg is #17788; the reader who can resolve that reads this line.
-            detail:
-              `the ADR-0104 column step has no measured statement for dialect '${this.dialectName}'. ` +
-              'The MySQL leg is tracked separately and is settled against a real instance, because ' +
-              'its statement ORDER is what the ADR leaves open; no other dialect has been ' +
-              'rehearsed. Nothing was planned and nothing ran.',
-          },
-        ],
-      };
-    }
-
-    const plans: MediaColumnMovePlan[] = [];
-    const refusals: MediaColumnMoveRefusal[] = [];
-
-    for (const [tableName] of this.managedObjectFields) {
-      const columns = this.mediaFields[tableName];
-      if (!columns || columns.length === 0) continue;
-      if (!(await this.knex.schema.hasTable(tableName))) continue;
-
-      let physical: IntrospectedColumn[];
-      try {
-        physical = await this.introspectColumns(tableName);
-      } catch (e: any) {
-        refusals.push({
-          table: tableName,
-          column: '*',
-          reason: 'introspection_failed',
-          detail:
-            `could not read the physical columns of '${tableName}' (${e?.message ?? e}), so the ` +
-            'shape of its media columns is unknown and no statement can be chosen for them.',
-        });
-        continue;
-      }
-      const byName = new Map(physical.map((c) => [c.name, c]));
-
-      for (const column of columns) {
-        const found = byName.get(column);
-        if (!found) {
-          refusals.push({
-            table: tableName,
-            column,
-            reason: 'column_absent',
-            detail:
-              `'${tableName}.${column}' is declared as a media field but the datastore has no such ` +
-              'column, so there is nothing here to move and nothing that could be verified moved.',
-          });
-          continue;
-        }
-        plans.push(
-          mediaColumnMovePlan(
-            dialect,
-            isJsonColumnType(found.type) ? 'retype' : 'unquote',
-            tableName,
-            column,
-          ),
-        );
-      }
-    }
-
-    plans.sort((a, b) => (a.table === b.table ? a.column.localeCompare(b.column) : a.table.localeCompare(b.table)));
-    refusals.sort((a, b) => (a.table === b.table ? a.column.localeCompare(b.column) : a.table.localeCompare(b.table)));
-    return { dialect, plans, refusals };
+  planMediaColumnMove(): Promise<MediaColumnMoveScan> {
+    // [#25521 cut 10] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const readDialectName = () => this.dialectName;
+    const readKnex = () => this.knex;
+    const readManagedObjectFields = () => this.managedObjectFields;
+    const readMediaFields = () => this.mediaFields;
+    const host: ThisParameterType<typeof planMediaColumnMove> = {
+      get dialectName() { return readDialectName(); },
+      introspectColumns: (...a) => this.introspectColumns(...a),
+      get knex() { return readKnex(); },
+      get managedObjectFields() { return readManagedObjectFields(); },
+      get mediaFields() { return readMediaFields(); },
+    };
+    return planMediaColumnMove.call(host);
   }
 
   /**
@@ -14612,68 +13954,27 @@ export class SqlDriver implements IDataDriver {
    * auto-reconcile the *safe* (loosening) subset when `autoMigrate==='safe'`,
    * then WARN once per remaining divergence with an actionable hint.
    */
-  protected async reconcileAndWarnDrift(
+  protected reconcileAndWarnDrift(
     tableName: string,
     fields: Record<string, any>,
     declaredIndexes?: any[],
   ): Promise<void> {
-    let drift: ManagedDriftEntry[];
-    try {
-      drift = await this.detectTableDrift(tableName, fields, declaredIndexes);
-    } catch (e: any) {
-      this.logger.warn(`[schema-drift] could not introspect '${tableName}' for drift detection`, e?.message ?? e);
-      return;
-    }
-    if (drift.length === 0) return;
-
-    const autoOn = this.autoMigrate === 'safe' && this.schemaMode === 'managed';
-    if (autoOn && this.isProductionEnv()) {
-      this.logger.warn(
-        `[schema-drift] autoMigrate='safe' is ignored under NODE_ENV=production — schema is never auto-altered in production. Run 'os migrate' deliberately.`,
-      );
-    } else if (autoOn) {
-      const safe = drift.filter((d) => d.category === 'safe');
-      if (safe.length > 0) {
-        try {
-          const { applied } = await this.applyMigrationEntries(safe, { allowDestructive: false });
-          for (const d of applied) {
-            // ⛔ Call through the PROPERTY, never an extracted `(a ?? b)(…)`
-            // reference: that evaluates to the bare function and invokes it with
-            // `this === undefined`, which `@objectstack/core`'s class-based
-            // `ObjectLogger` throws on — its `info`/`warn` reach for `this.write`
-            // (#12792). ⛔ And NOT routed through {@link logDurabilityFailure}:
-            // this line reports a reconcile that SUCCEEDED, so its channel is
-            // `info`, and the durability channel would escalate a functional
-            // report to `error` — the over-application AGENTS.md warns trains
-            // everyone to skim `error`. Keep the level, the fallback AND the
-            // receiver.
-            const reconciled = `[schema-drift] auto-reconciled ${d.op.type} on ${d.table}.${d.column ?? ''}`;
-            if (this.logger.info) this.logger.info(reconciled);
-            else this.logger.warn(reconciled);
-          }
-          // Re-detect so the warnings below reflect the post-reconcile state.
-          drift = await this.detectTableDrift(tableName, fields, declaredIndexes);
-        } catch (e: any) {
-          this.logger.warn(`[schema-drift] dev auto-reconcile failed for '${tableName}' — falling back to warning`, e?.message ?? e);
-        }
-      }
-    }
-
-    // [ADR-0131 D10 item 5] An `organization_id` drop is the ownership
-    // ceremony's until the database is certified: `--allow-destructive` is
-    // refused there, so the line names the ceremony instead. Asked once per
-    // table, and only when such a drop is about to be warned.
-    let certified: boolean | undefined;
-    for (const d of drift) {
-      const k = driftKey(d);
-      if (this.driftWarned.has(k)) continue;
-      this.driftWarned.add(k);
-      if (isCeremonyOwnedColumnDrop(d) && !(certified ??= await this.isTenantKeyCertified())) {
-        this.logger.warn(`[schema-drift] ${ceremonyOwnedDropFinding(d)}`);
-        continue;
-      }
-      this.logger.warn(`[schema-drift] ${d.message}`);
-    }
+    // [#25521 cut 10] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const readAutoMigrate = () => this.autoMigrate;
+    const readDriftWarned = () => this.driftWarned;
+    const readLogger = () => this.logger;
+    const readSchemaMode = () => this.schemaMode;
+    const host: ThisParameterType<typeof reconcileAndWarnDrift> = {
+      applyMigrationEntries: (...a) => this.applyMigrationEntries(...a),
+      get autoMigrate() { return readAutoMigrate(); },
+      detectTableDrift: (...a) => this.detectTableDrift(...a),
+      get driftWarned() { return readDriftWarned(); },
+      isProductionEnv: (...a) => this.isProductionEnv(...a),
+      isTenantKeyCertified: (...a) => this.isTenantKeyCertified(...a),
+      get logger() { return readLogger(); },
+      get schemaMode() { return readSchemaMode(); },
+    };
+    return reconcileAndWarnDrift.call(host, tableName, fields, declaredIndexes);
   }
 
   /**
@@ -14687,87 +13988,24 @@ export class SqlDriver implements IDataDriver {
    * @returns the entries actually applied and those skipped (e.g. destructive
    *   without `allowDestructive`, or unsupported on the dialect).
    */
-  async applyMigrationEntries(
+  applyMigrationEntries(
     entries: ManagedDriftEntry[],
     opts: { allowDestructive?: boolean } = {},
   ): Promise<{ applied: ManagedDriftEntry[]; skipped: ManagedDriftEntry[] }> {
-    this.assertSchemaMutable('reconcileManagedSchema');
-    const allowDestructive = opts.allowDestructive === true;
-
-    const applied: ManagedDriftEntry[] = [];
-    const skipped: ManagedDriftEntry[] = [];
-
-    const candidates = entries.filter((d) => {
-      if (d.category === 'destructive' && !allowDestructive) {
-        skipped.push(d);
-        return false;
-      }
-      return true;
-    });
-    if (candidates.length === 0) return { applied, skipped };
-
-    // Index ops (#3728) are portable DDL on every dialect — no ALTER COLUMN, no
-    // SQLite table rebuild — so they take their own path. Column ops run FIRST:
-    // a `drop_column` takes its indexes with it, and on SQLite the rebuild
-    // re-materializes the whole index set from metadata, which may already
-    // satisfy the index entries below (they are idempotent, so that is fine).
-    const columnEntries = candidates.filter((d) => !isIndexDriftOp(d.op));
-    const indexEntries = candidates.filter((d) => isIndexDriftOp(d.op));
-
-    // Group by table — SQLite reconciles a whole table in one rebuild.
-    const byTable = new Map<string, ManagedDriftEntry[]>();
-    for (const d of columnEntries) {
-      (byTable.get(d.table) ?? byTable.set(d.table, []).get(d.table)!).push(d);
-    }
-
-    for (const [table, ents] of byTable) {
-      try {
-        if (this.isSqlite) {
-          // `applied` means "this op happened", not "a rebuild ran" — every
-          // consumer reads it that way (`reconcileAndWarnDrift` logs
-          // "auto-reconciled <op> on <table>", the artifact boot gate prints
-          // "↪ migrated <op>"). The rebuild honours four op types and
-          // IGNORES the rest (#11722), so reporting the whole batch applied
-          // turned an op that never happened into a green log line: the
-          // finding is still there on the next boot, reports as drift again,
-          // and is "migrated" again — a loop with no failing signal anywhere
-          // in it. So only the entries the rebuild actually acted on are
-          // reported applied, and the remainder is skipped and logged in the
-          // SAME words the in-place arm uses for an op its dialect cannot do
-          // ({@link applyDriftOpInPlace}).
-          const honoured = new Set(await this.rebuildSqliteTablePatched(table, ents));
-          for (const d of ents) {
-            if (honoured.has(d)) {
-              applied.push(d);
-              continue;
-            }
-            this.logger.warn(
-              `[schema-drift] ${d.op.type} on ${d.table}.${d.column ?? ''} is unsupported on dialect '${this.dialectName}' — skipped`,
-            );
-            skipped.push(d);
-          }
-        } else {
-          for (const d of ents) {
-            const ok = await this.applyDriftOpInPlace(d.op);
-            (ok ? applied : skipped).push(d);
-          }
-        }
-      } catch (e: any) {
-        this.logger.warn(`[schema-drift] failed to reconcile '${table}'`, e?.message ?? e);
-        for (const d of ents) if (!applied.includes(d)) skipped.push(d);
-      }
-    }
-
-    for (const d of indexEntries) {
-      try {
-        const ok = await this.applyIndexDriftOp(d.op);
-        (ok ? applied : skipped).push(d);
-      } catch (e: any) {
-        this.logger.warn(`[schema-drift] failed to reconcile index on '${d.table}'`, e?.message ?? e);
-        skipped.push(d);
-      }
-    }
-    return { applied, skipped };
+    // [#25521 cut 10] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const readDialectName = () => this.dialectName;
+    const readIsSqlite = () => this.isSqlite;
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof applyMigrationEntries> = {
+      applyDriftOpInPlace: (...a) => this.applyDriftOpInPlace(...a),
+      applyIndexDriftOp: (...a) => this.applyIndexDriftOp(...a),
+      assertSchemaMutable: (...a) => this.assertSchemaMutable(...a),
+      get dialectName() { return readDialectName(); },
+      get isSqlite() { return readIsSqlite(); },
+      get logger() { return readLogger(); },
+      rebuildSqliteTablePatched: (...a) => this.rebuildSqliteTablePatched(...a),
+    };
+    return applyMigrationEntries.call(host, entries, opts);
   }
 
   /**
@@ -15205,7 +14443,7 @@ export class SqlDriver implements IDataDriver {
    *   refusal instead of the duplicate rows. Measured on live MySQL 8.0.46 in
    *   `sql-driver-15479-shadow-plain-unique-duplicates.test.ts`.
    */
-  protected async syncDeclaredIndexes(
+  protected syncDeclaredIndexes(
     tableName: string,
     indexes: DeclaredIndexInput[],
     physicalColumns: Set<string>,
@@ -15217,264 +14455,19 @@ export class SqlDriver implements IDataDriver {
      */
     fields?: Record<string, any>,
   ): Promise<void> {
-    const existing = await this.getExistingIndexNames(tableName);
-    const resolvedTenantField = tenantField !== undefined ? tenantField : this.resolveTenantField(tableName);
-
-    for (const idx of indexes) {
-      const norm = normalizeDeclaredIndex(tableName, idx, resolvedTenantField);
-      if (!norm) continue;
-      const { name, columns, unique } = norm;
-      const nullSafe = new Set(norm.nullSafeColumns ?? []);
-
-      const missing = columns.filter((f) => !physicalColumns.has(f));
-      if (missing.length > 0) {
-        // Durability, not function (AGENTS.md "Degradation log levels"): the
-        // sync goes on and the object serves normally, while DDL the metadata
-        // declares did not run. For a UNIQUE index, that means duplicate rows
-        // are accepted. So this goes on the durability channel, like the
-        // duplicate-row arms further down this loop. One line per skipped index
-        // per sync. It states the consequence and the fix, and says whether
-        // the index was UNIQUE (the prose, and `unique` in the meta).
-        this.logDurabilityFailure(
-          `[sql-driver] declared ${unique ? 'UNIQUE ' : ''}index '${name}' on "${tableName}" was NOT created: ` +
-            `no column for ${describeMissingIndexColumns(missing, fields)}. ` +
-            (unique
-              ? `The uniqueness it declares is NOT enforced: duplicate rows are accepted, and the object keeps ` +
-                `working as if the constraint existed. `
-              : `The index does not exist, and the object keeps working as if it did. `) +
-            `Fix the metadata so every column in the index's fields is a stored field of the object, or ` +
-            `remove the index ("os validate" refuses a name that is not a field).`,
-          { tableName, index: name, fields: columns, missing, unique },
-        );
-        continue;
-      }
-
-      if (existing.has(name)) continue;
-
-      try {
-        if (nullSafe.size > 0) {
-          await this.createNullSafeUniqueIndex(tableName, name, columns, nullSafe);
-        } else {
-          await this.knex.schema.alterTable(tableName, (table) => {
-            if (unique) {
-              table.unique(columns, { indexName: name });
-            } else {
-              table.index(columns, name);
-            }
-          });
-        }
-        existing.add(name);
-      } catch (e: any) {
-        const msg = String(e?.message ?? e);
-        // A concurrent creator or a pre-existing equivalent index under a
-        // different name can race us here — both are benign for our intent
-        // (the index exists). Anything else is a real failure.
-        if (/already exists|duplicate key name|exists/i.test(msg)) continue;
-        // The ERROR OBJECT, not `msg` (#6543). This used to be a private
-        // inline regex over the message alone, which is the only channel the
-        // SQLite family reliably fills — but Postgres answers this exact
-        // failure with `could not create unique index "…"` and puts the
-        // verdict on `code` (SQLSTATE 23505) instead, so a message-only read
-        // missed the dialect entirely and took the boot down on the very case
-        // the branch below exists to absorb. The shared predicate reads
-        // `code` / `errno` / `message` / `cause`; see
-        // `@objectstack/types`' `unique-violation.ts` for why it is the one
-        // name for this question.
-        // Commit d0e3a885b: MySQL's refusal of a TEXT key part names a column in a table
-        // that was just created successfully, which reads as an index quirk
-        // rather than what it is — the object is now registered with its
-        // declared uniqueness absent. Re-throw the SAME failure carrying the
-        // field-level fix; the boot still fails loudly, it just says why.
-        const unkeyable = await this.explainUnkeyableTextColumn(tableName, name, columns, e);
-        if (unkeyable) {
-          // #11627: a UNIQUE index MySQL cannot key directly is expressible
-          // after all — over a SHA-256 shadow of the same values. Attempted
-          // only AFTER the server has refused the direct index, deliberately:
-          // the same reasoning `explainRowSizeOverflow` records for the row
-          // budget. A pre-flight would have to reproduce MySQL's 3072-byte key
-          // arithmetic and, wrong in the strict direction, would move an object
-          // to a shadow key on a server that would have taken the real index —
-          // a physical schema decided by our arithmetic rather than by the
-          // server's. Reacting to the refusal cannot over-apply, and it is what
-          // keeps Postgres and SQLite (which never refuse) byte-identical to
-          // before: the dialect divergence is selected BY THE ERROR CODE, never
-          // by a dialect getter.
-          //
-          // ⛔ UNIQUE only. A non-unique index exists for an ACCESS PATH, and an
-          // index over a hash serves no lookup the planner can find on its own
-          // — `WHERE col = ?` cannot use it without rewriting the read side to
-          // filter on the digest too. Silently creating one would turn a loud
-          // refusal into a table that syncs, costs writes, and accelerates
-          // nothing. Those cases stay refused below, and stay tracked.
-          if (unique) {
-            try {
-              // Commit df1c75c4b: the shadow must hash the DECLARED key, so the NULL-safe
-              // organization key parts (ADR-0120 D3) ride along — without them
-              // the generation expression hashed the RAW columns, `CONCAT`
-              // returned NULL for every NULL-organization row, and the rows the
-              // COALESCE bucket exists to constrain were constrained by nothing
-              // (#5030's shape, reintroduced by the fallback while the boot log
-              // reported the constraint as carried).
-              if (await this.createHashShadowUniqueIndex(tableName, name, columns, nullSafe)) {
-                existing.add(name);
-                continue;
-              }
-            } catch (shadowErr: any) {
-              const shadowMsg = String(shadowErr?.message ?? shadowErr);
-              if (/already exists|duplicate key name/i.test(shadowMsg)) {
-                existing.add(name);
-                continue;
-              }
-              if (nullSafe.size > 0 && isUniqueViolationError(shadowErr)) {
-                // Commit df1c75c4b: the shadow ALTER computes the generated column for the
-                // EXISTING rows, so a database that accumulated duplicates under
-                // the NULL-safe key while the constraint was void fails here
-                // with a uniqueness violation — the same data-dependent
-                // #5030-made-visible case the direct route handles below. Same
-                // disposition: do not take the boot down, name what collided
-                // and what fixes it, and let the ADR-0120 D4 drift pre-flight
-                // keep reporting the exact rows.
-                let report = '';
-                try {
-                  const duplicates = await this.probeNullSafeUniqueDuplicates(tableName, columns, [
-                    ...nullSafe,
-                  ]);
-                  if (duplicates.length > 0) {
-                    report = ` Conflicting group(s): ${formatDuplicateGroups(duplicates)}.`;
-                  }
-                } catch {
-                  // The probe is a diagnostic; the refusal below stands without it.
-                }
-                this.logDurabilityFailure(
-                  `[sql-driver] cannot create hash-shadow unique index '${name}' on "${tableName}" — ` +
-                    `existing rows violate the NULL-safe key (duplicates the previous void constraint ` +
-                    `admitted: SQL UNIQUE is NULL-distinct, so it never constrained rows without an organization).${report} The constraint '${columns
-                      .map((c) => (nullSafe.has(c) ? `COALESCE(${c}, '${GLOBAL_TENANT}')` : c))
-                      .join(', ')}' is NOT enforced until the data is deduplicated: run "os migrate plan" ` +
-                    `for the conflicting rows (ADR-0120 D4).`,
-                  shadowMsg,
-                );
-                continue;
-              }
-              if (isUniqueViolationError(shadowErr)) {
-                // #15479 — the PLAIN unique on the SHADOW route: no
-                // organization key part at all (`tenancy: { enabled: false }`
-                // or an explicit `unique: 'global'`), reached here because
-                // MySQL refused to key the column directly. The uniqueness
-                // limb is supplied by the enclosing `if (unique)` a few lines
-                // above, which is why this asks only the violation question --
-                // the same load-bearing role the explicit `unique &&` limb
-                // plays on the direct arm below, where no enclosing block
-                // supplies it.
-                //
-                // This branch used to be part of the NULL-safe one above,
-                // behind `nullSafe.size > 0`, so with no organization key part
-                // NOTHING fired: the code fell through to
-                // `logDurabilityFailure(unkeyable, msg)` + `throw` and the boot
-                // DIED carrying `ER_BLOB_KEY_WITHOUT_LENGTH` -- a message about
-                // an unkeyable TEXT column, telling the operator to declare a
-                // `maxLength` the field already declares, naming NO rows and NO
-                // remedy -- while the actual cause was duplicate rows. Commit 61821e54c
-                // fixed exactly that on the direct arm; the two arms of one
-                // `catch` then disagreed about one question.
-                //
-                // The message is deliberately NOT the NULL-safe one above.
-                // Neither of its clauses is true here: nothing "admitted" these
-                // rows (there was no previous void constraint, #5030), and
-                // there is no NULL-safe key. Widening the guard while keeping
-                // one message would ship a factually FALSE durability log --
-                // worse than the throw it replaces, because it sends the
-                // operator hunting a NULL-distinct index that never existed.
-                // The sentence below is the direct arm's, verbatim; only the
-                // route noun ("hash-shadow") is this arm's own, because it is
-                // what honestly names which physical route was attempted, and
-                // the NULL-safe branch above already spells it that way.
-                let report = '';
-                try {
-                  const duplicates = await this.probeNullSafeUniqueDuplicates(tableName, columns, []);
-                  if (duplicates.length > 0) {
-                    report = ` Conflicting group(s): ${formatDuplicateGroups(duplicates)}.`;
-                  }
-                } catch {
-                  // The probe is a diagnostic; the report below stands without it.
-                }
-                this.logDurabilityFailure(
-                  `[sql-driver] cannot create hash-shadow unique index '${name}' on "${tableName}" — existing ` +
-                    `rows violate it.${report} The constraint '${columns.join(', ')}' is NOT enforced until the ` +
-                    `data is deduplicated: run "os migrate plan" for the conflicting rows.`,
-                  shadowMsg,
-                );
-                continue;
-              }
-              // Fall through to the named refusal, which is still the honest
-              // outcome — but say that the shadow route was tried and why it
-              // did not land, so this does not read as never having been
-              // attempted.
-              this.logDurabilityFailure(
-                `[sql-driver] hash-shadow UNIQUE index '${name}' on "${tableName}" could not be created; ` +
-                  `falling back to the refusal below.`,
-                shadowMsg,
-              );
-            }
-          }
-          this.logDurabilityFailure(unkeyable, msg);
-          throw Object.assign(new Error(`${unkeyable} (server said: ${msg})`), {
-            code: (e as { code?: string }).code,
-            cause: e,
-          });
-        }
-        if (nullSafe.size > 0 && isUniqueViolationError(e)) {
-          // Existing rows violate the NULL-safe unique — the #5030 defect made
-          // visible. Do not take the boot down: the declared constraint is not
-          // enforced yet, say so at `error` (from the outside everything looks
-          // normal), and let the D4 drift pre-flight report the exact rows.
-          this.logDurabilityFailure(
-            `[sql-driver] cannot create NULL-safe unique index '${name}' on "${tableName}" — existing rows ` +
-              `violate it (duplicates the previous NULL-distinct index admitted: it never constrained rows ` +
-              `without an organization). The constraint ` +
-              `'${columns.join(', ')}' is NOT enforced until the data is deduplicated: run "os migrate plan" ` +
-              `for the conflicting rows (ADR-0120 D4).`,
-            msg,
-          );
-          continue;
-        }
-        if (unique && isUniqueViolationError(e)) {
-          // Commit 61821e54c — the PLAIN unique: no organization key part at all, reached
-          // by `tenancy: { enabled: false }` or by an explicit
-          // `unique: 'global'`. It used to fall through to `throw e`, so the
-          // boot DIED carrying the database's own error, which names the index
-          // and the column and NO rows and NO remedy — while the arm above,
-          // one branch away, kept the boot up and told the operator exactly
-          // what to do. Same defect, same disposition: the declared constraint
-          // is not enforced, say so on the durability channel, name the
-          // conflicting groups, and let the boot continue. The D4 pre-flight
-          // reports the same rows in `os migrate plan`.
-          //
-          // ⚠️ The `unique` limb is load-bearing, not decoration. A NON-unique
-          // index cannot raise a uniqueness violation, so a failure that reads
-          // as one while creating a non-unique index is something else
-          // entirely and must keep failing loudly rather than being absorbed
-          // into a log line here.
-          let report = '';
-          try {
-            const duplicates = await this.probeNullSafeUniqueDuplicates(tableName, columns, []);
-            if (duplicates.length > 0) {
-              report = ` Conflicting group(s): ${formatDuplicateGroups(duplicates)}.`;
-            }
-          } catch {
-            // The probe is a diagnostic; the report below stands without it.
-          }
-          this.logDurabilityFailure(
-            `[sql-driver] cannot create unique index '${name}' on "${tableName}" — existing rows violate ` +
-              `it.${report} The constraint '${columns.join(', ')}' is NOT enforced until the data is ` +
-              `deduplicated: run "os migrate plan" for the conflicting rows.`,
-            msg,
-          );
-          continue;
-        }
-        throw e;
-      }
-    }
+    // [#25521 cut 9] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const readKnex = () => this.knex;
+    const host: ThisParameterType<typeof syncDeclaredIndexes> = {
+      createHashShadowUniqueIndex: (...a) => this.createHashShadowUniqueIndex(...a),
+      createNullSafeUniqueIndex: (...a) => this.createNullSafeUniqueIndex(...a),
+      explainUnkeyableTextColumn: (...a) => this.explainUnkeyableTextColumn(...a),
+      getExistingIndexNames: (...a) => this.getExistingIndexNames(...a),
+      get knex() { return readKnex(); },
+      logDurabilityFailure: (...a) => this.logDurabilityFailure(...a),
+      probeNullSafeUniqueDuplicates: (...a) => this.probeNullSafeUniqueDuplicates(...a),
+      resolveTenantField: (...a) => this.resolveTenantField(...a),
+    };
+    return syncDeclaredIndexes.call(host, tableName, indexes, physicalColumns, tenantField, fields);
   }
 
   /**
@@ -15491,44 +14484,21 @@ export class SqlDriver implements IDataDriver {
    * such deployment for every unique field. The drift differ keeps reporting
    * the tightening for the day the server is upgraded.
    */
-  protected async createNullSafeUniqueIndex(
+  protected createNullSafeUniqueIndex(
     tableName: string,
     name: string,
     columns: string[],
     nullSafe: ReadonlySet<string>,
   ): Promise<void> {
-    const q = (id: string) => this.knex.ref(id).toQuery();
-    const parts = columns.map((c) => {
-      if (!nullSafe.has(c)) return q(c);
-      const expr = `COALESCE(${q(c)}, '${GLOBAL_TENANT}')`;
-      return this.isMysql ? `(${expr})` : expr;
-    });
-    const sql = `CREATE UNIQUE INDEX ${q(name)} ON ${q(tableName)} (${parts.join(', ')})`;
-    try {
-      await this.knex.raw(sql);
-    } catch (e: any) {
-      const msg = String(e?.message ?? e);
-      // The positive limb is this site's own question — "does this server
-      // reject functional key parts?" — and stays a message test, because
-      // that is the only channel the answer is on. The NEGATIVE limb was a
-      // seventh spelling of the unique-violation vocabulary (`/duplicate/i`)
-      // and is now the shared predicate (#6543): a conflict must never be
-      // read as a syntax rejection and silently degraded to the bare
-      // composite, and on the `errno`-only shape mysql2 can hand back, a
-      // message-only exclusion did not fire.
-      const functionalUnsupported =
-        this.isMysql && /syntax|functional|not supported|near '\(/i.test(msg) && !isUniqueViolationError(e);
-      if (!functionalUnsupported) throw e;
-      this.logDurabilityFailure(
-        `[sql-driver] this MySQL/MariaDB server rejects functional key parts — created '${name}' on ` +
-          `"${tableName}" over the BARE columns instead. Rows without an organization are NOT constrained ` +
-          `by it (SQL UNIQUE is NULL-distinct): upgrade to MySQL >= 8.0.13 and re-run "os migrate plan" to tighten it (ADR-0120 D3).`,
-        msg,
-      );
-      await this.knex.schema.alterTable(tableName, (table) => {
-        table.unique(columns, { indexName: name });
-      });
-    }
+    // [#25521 cut 9] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const readIsMysql = () => this.isMysql;
+    const readKnex = () => this.knex;
+    const host: ThisParameterType<typeof createNullSafeUniqueIndex> = {
+      get isMysql() { return readIsMysql(); },
+      get knex() { return readKnex(); },
+      logDurabilityFailure: (...a) => this.logDurabilityFailure(...a),
+    };
+    return createNullSafeUniqueIndex.call(host, tableName, name, columns, nullSafe);
   }
 
   // ===================================
@@ -17509,6 +16479,18 @@ export class SqlDriver implements IDataDriver {
             this.applyCrossFieldComparison(builder, method, table, key, localField, field, rawOp, crossFieldRef, opValue);
             continue;
           }
+          // [#25808] The bare `{ field: { $now: true, addDays } }` spelling reaches
+          // this loop as an operator named `$now`, as the bare `$field` does.
+          if (rawOp === '$now') throw nowAnchorPositionError(field, rawOp, value);
+          // [#25808] A `{ $now, addDays }` anchor that is the WHOLE comparand of a
+          // scalar comparison compiles to `column <op> <instant + days>` (or
+          // refuses inside the emitter, with the boundary named). Same slot as
+          // the `{ $field }` arm above, for the same reasons.
+          const nowAnchor = nowAnchorOf(opValue);
+          if (nowAnchor !== null && CROSS_FIELD_COMPARISON_OPERATORS.has(rawOp)) {
+            this.applyNowAnchorComparison(builder, method, table, key, localField, field, rawOp, nowAnchor, opValue);
+            continue;
+          }
           // #5041 — reject a comparand that cannot become a bind parameter
           // BEFORE any rewrite or coercion touches it, so the message names the
           // shape the caller actually sent.
@@ -18038,6 +17020,182 @@ export class SqlDriver implements IDataDriver {
         // Unreachable: the call site gates on CROSS_FIELD_COMPARISON_OPERATORS.
         throw crossFieldComparisonError(targetColumn, op, ref, refNode);
     }
+  }
+
+  /**
+   * [#25808] `column <op> (now + days)` — a now-anchored comparand on a
+   * temporal column, maintainer ruling 2026-10-26 (letter A): the current
+   * instant, shifted by a whole-day offset read from an integer literal or a
+   * NUMERIC column of the SAME record, compared against a `date` or `datetime`
+   * column. The analytics shape it was ruled for: "opened more than
+   * `review_sla_days` ago", where the SLA is a column of the row and the row's
+   * own clock is `now`.
+   *
+   * The arithmetic is {@link SqlDriver.crossFieldOffsetExpr}'s — the `addDays`
+   * arm of {@link SqlDriver.applyCrossFieldComparison}, with the anchor's
+   * instant bound where the referenced column would be read. The offset column
+   * is held to every rule that arm holds it to (same-table, declared, numeric,
+   * never the tenant-isolation column; a NULL offset is zero days through the
+   * same `coalesce`), so an offset that compiles there compiles here and no
+   * other does. What differs is the base: it is a VALUE, never NULL, so the
+   * `<base> is not null` conjunct the reference arm writes is dropped and the
+   * predicate reads as the plain literal comparison would — an ordering and
+   * `$eq` need the target to have a value, `$ne` holds when it has none or
+   * differs (`@objectstack/formula`'s `evalOp` over the resolved anchor,
+   * made total so `$not` re-admits exactly the complement).
+   *
+   * The instant is bound in the TARGET column's storage form, so the shifted
+   * value compares against the column exactly as a stored value would — the
+   * rule every literal comparand on a temporal column follows
+   * (`coerceFilterValue`): a `datetime` column keeps the time of day (the
+   * canonical UTC ISO text, through `mysqlDatetimeLiteral` on MySQL); a `date`
+   * column takes the instant's UTC calendar day (`temporalStorageForm`, the
+   * reading `{now}` and `{today}` take on a `date` column). PostgreSQL and
+   * MySQL cast the bound text (`timestamptz` / `datetime(3)`, `date`) because
+   * the dialect's day arithmetic needs a typed operand where a bare `?` beside
+   * a column would have been inferred; SQLite's `date()` / `strftime()` read
+   * the canonical text directly, as they read a stored value.
+   */
+  protected applyNowAnchorComparison(
+    builder: Knex.QueryBuilder,
+    method: 'where' | 'orWhere',
+    table: string | null,
+    targetKey: string,
+    targetLocalField: string,
+    targetColumn: string,
+    op: string,
+    anchor: NowAnchor,
+    // The `{ $now, addDays }` node itself, for the provenance resolver (#8220).
+    node?: unknown,
+  ): void {
+    if (anchor.kind === 'invalid') {
+      throw uncompilableNowAnchorError(targetColumn, op, `${anchor.reason}.`, node);
+    }
+    const offset = fieldReferenceOffsetOf(node);
+    if (offset === null) {
+      throw uncompilableNowAnchorError(targetColumn, op,
+        `a { "$now": true } comparand must carry an addDays offset — an integer literal of any sign ` +
+        `or a { "$field" } reference to a numeric column; for the unshifted instant write the "{now}" ` +
+        `placeholder.`, node);
+    }
+    if (offset.kind === 'invalid') {
+      throw uncompilableNowAnchorError(targetColumn, op,
+        `${offset.reason}; addDays is an integer literal of any sign or a { "$field" } reference ` +
+        `to a numeric column.`, node);
+    }
+    if (!table) {
+      throw uncompilableNowAnchorError(targetColumn, op,
+        `the target table of this query could not be resolved, so the target column's type ` +
+        `cannot be read.`, node);
+    }
+    const declared = this.declaredFieldsFor(table);
+    if (!declared) {
+      throw uncompilableNowAnchorError(targetColumn, op,
+        `object "${table}" has no declared column set on this driver (an external/federated ` +
+        `or unregistered table), so the target column's type cannot be read.`, node);
+    }
+    const hasOwn = (name: string) => Object.prototype.hasOwnProperty.call(declared, name);
+    const tenantField = this.resolveTenantField(table);
+    if (tenantField !== null && (targetKey === tenantField || targetLocalField === tenantField)) {
+      throw uncompilableNowAnchorError(targetColumn, op,
+        `"${tenantField}" is the tenant-isolation column of "${table}", which must not be the ` +
+        `target of a now-anchored comparison.`, node);
+    }
+    const targetDeclaredName = hasOwn(targetKey) ? targetKey : targetLocalField;
+    if (!hasOwn(targetDeclaredName)) {
+      throw uncompilableNowAnchorError(targetColumn, op,
+        `the target field "${targetKey}" is not a declared field of "${table}", so its type ` +
+        `cannot be checked as temporal.`, node);
+    }
+    const targetClass = crossFieldComparisonClass(declared[targetDeclaredName] ?? {});
+    if (targetClass !== 'date' && targetClass !== 'datetime') {
+      throw uncompilableNowAnchorError(targetColumn, op,
+        `a now-anchored comparand is an instant shifted by whole days, and the target field ` +
+        `"${targetKey}" (type "${String(declared[targetDeclaredName]?.type ?? 'string')}"` +
+        `${declared[targetDeclaredName]?.multiple ? ', multiple' : ''}) is stored as ` +
+        `${targetClass ?? 'no scalar column'} — only a date or datetime column can be compared ` +
+        `against it.`, node);
+    }
+
+    let offsetOperand: { sql: string; bindings: any[] };
+    if (offset.kind === 'literal') {
+      offsetOperand = { sql: '?', bindings: [offset.days] };
+    } else {
+      const offsetRef = offset.ref;
+      if (offsetRef.includes('.')) {
+        throw uncompilableNowAnchorError(targetColumn, op,
+          `the addDays offset "${offsetRef}" is a dotted path, and SQL push-down compiles ` +
+          `same-table column references only (no relation traversal, no alias-qualified columns).`,
+          node);
+      }
+      if (tenantField !== null && offsetRef === tenantField) {
+        throw uncompilableNowAnchorError(targetColumn, op,
+          `"${tenantField}" is the tenant-isolation column of "${table}", which must not appear ` +
+          `in a cross-field comparison — not as the addDays offset either.`, node);
+      }
+      const offsetDeclaredName = hasOwn(offsetRef) ? offsetRef : this.mapSortField(offsetRef);
+      if (!hasOwn(offsetDeclaredName)) {
+        throw uncompilableNowAnchorError(targetColumn, op,
+          `the addDays offset "${offsetRef}" is not a declared field of "${table}" — only ` +
+          `declared fields can be referenced.`, node);
+      }
+      const offsetClass = crossFieldComparisonClass(declared[offsetDeclaredName] ?? {});
+      if (offsetClass !== 'numeric') {
+        throw uncompilableNowAnchorError(targetColumn, op,
+          `the addDays offset "${offsetRef}" (type ` +
+          `"${String(declared[offsetDeclaredName]?.type ?? 'string')}"` +
+          `${declared[offsetDeclaredName]?.multiple ? ', multiple' : ''}) is not a numeric ` +
+          `column, and a day offset must be a number of days.`, node);
+      }
+      const offsetLocal = this.mapSortField(offsetRef);
+      offsetOperand = { sql: '??', bindings: [this.remoteColumn(table, offsetRef, offsetLocal)] };
+    }
+
+    const lhs = this.filterColumnExpr(table, targetLocalField, targetColumn)
+      ?? { sql: '??', bindings: [targetColumn] };
+    const base = this.nowAnchorBaseExpr(anchor.at, targetClass);
+    const shifted = this.crossFieldOffsetExpr(base, offsetOperand, targetClass);
+    const raw = method === 'orWhere' ? 'orWhereRaw' : 'whereRaw';
+    const A = lhs.sql;
+    const Bx = shifted.sql;
+    switch (op) {
+      case '$eq':
+        (builder as any)[raw](`(${A} is not null and ${A} = ${Bx})`, [...lhs.bindings, ...lhs.bindings, ...shifted.bindings]);
+        return;
+      case '$ne':
+        (builder as any)[raw](`(${A} is null or ${A} <> ${Bx})`, [...lhs.bindings, ...lhs.bindings, ...shifted.bindings]);
+        return;
+      case '$gt':
+      case '$gte':
+      case '$lt':
+      case '$lte': {
+        const sqlOp = op === '$gt' ? '>' : op === '$gte' ? '>=' : op === '$lt' ? '<' : '<=';
+        (builder as any)[raw](
+          `(${A} is not null and ${A} ${sqlOp} ${Bx})`,
+          [...lhs.bindings, ...lhs.bindings, ...shifted.bindings],
+        );
+        return;
+      }
+      default:
+        // Unreachable: the call site gates on CROSS_FIELD_COMPARISON_OPERATORS.
+        throw nowAnchorPositionError(targetColumn, op, node);
+    }
+  }
+
+  /**
+   * [#25808] The anchor's instant as a typed operand in `cls`'s storage form,
+   * per dialect — see {@link SqlDriver.applyNowAnchorComparison}.
+   */
+  protected nowAnchorBaseExpr(at: Date, cls: 'date' | 'datetime'): { sql: string; bindings: any[] } {
+    if (cls === 'date') {
+      const day = temporalStorageForm(at, 'date');
+      if (this.isSqlite) return { sql: '?', bindings: [day] };
+      return { sql: 'cast(? as date)', bindings: [day] };
+    }
+    const instant = at.toISOString();
+    if (this.isSqlite) return { sql: '?', bindings: [instant] };
+    if (this.isMysql) return { sql: 'cast(? as datetime(3))', bindings: [mysqlDatetimeLiteral(instant)] };
+    return { sql: 'cast(? as timestamptz)', bindings: [instant] };
   }
 
   /**

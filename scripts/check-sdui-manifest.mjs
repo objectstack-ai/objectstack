@@ -40,9 +40,8 @@
  *   3. STALENESS — the record's `objectuiSha` equals the live `.objectui-sha`.
  *      A pin bump changes which registry the shipped console runs, so the bump
  *      PR goes red HERE until the manifest is regenerated against the new pin
- *      — the same moment `check-sdui-lockstep` already forces a parser parity
- *      re-verification, and the moment an objectui checkout is guaranteed to
- *      exist (the bump required one).
+ *      — the moment an objectui checkout is guaranteed to exist (the bump
+ *      required one).
  *   4. VERSION ↔ PIN CORRESPONDENCE — the record's `objectuiWorkspaceVersion`
  *      is the version `packages/core/package.json` DECLARES at the pinned
  *      commit. Checks 1-3 reach both fields and relate neither: the version is
@@ -86,10 +85,11 @@
  *        line, and so does a PR that moves the artefact (it re-records every
  *        package against the new sha256): those still conflict, on purpose,
  *        because only a regeneration on the merged tree can say what the
- *        manifest of the combination is. What is NOT forced is the case where
- *        two PRs on different packages each leave the artefact unchanged and
- *        their combination would not; the next regeneration of any registry
- *        package sees the combination.
+ *        manifest of the combination is. What is NOT forced HERE is the case
+ *        where two PRs on different packages each leave the artefact unchanged
+ *        and their combination would not. The regeneration in ci.yml (below)
+ *        runs on the merge queue's combined tree, and that is where it is
+ *        caught (#26137).
  *   4.   none. The in-tree `@object-ui/core` version moves with every release
  *        of the one fixed version group while the registry does not, so the
  *        record carries it as provenance and the success line prints it.
@@ -99,15 +99,18 @@
  *
  * ## What this deliberately does NOT do, and where that risk is held
  *
- * No per-PR regeneration: that would put an objectui clone and build (network,
- * minutes) inside a required lint job — the shape `check-sdui-lockstep`'s
- * header declines, for the same reasons. Under an unchanged pin the pinned
- * commit's registry is immutable, so content drift per-PR is not a live axis.
- * The residual axis — this repo's OWN adapter (`manifestFromConfigs`) changing
- * while the pin stands still — is held by `packages/sdui-parser`'s lockstep
- * gate and unit suite, and by regeneration being byte-deterministic (two runs
- * over one built tree, identical bytes), so the remedy this gate prints always
- * converges.
+ * No regeneration in this gate: it runs in a required lint job that builds
+ * nothing, and the registry takes minutes to build. The regeneration runs where
+ * the registry is built: ci.yml's Build & E2E UI step "The committed SDUI
+ * manifest is the one this tree generates" (#26137) runs the generator and
+ * compares the committed artefact with its output byte for byte, on
+ * pull_request and on the merge queue's combined tree. It serialises through
+ * the built `@objectstack/sdui-parser`, so an edit to this repo's OWN adapter
+ * (`manifestFromConfigs`) moves its verdict, which no digest here does.
+ * Regeneration is byte-deterministic (two runs over one built tree, identical
+ * bytes), so that comparison and the remedy this gate prints both converge.
+ * With a pin, the pinned commit's registry is immutable, so content drift
+ * per-PR is not a live axis there.
  *
  * Check 4 relates two fields of the record; it does not re-run the producer.
  * That the artefact describes the pinned SOURCE (rather than a tarball objectui

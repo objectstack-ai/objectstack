@@ -248,7 +248,7 @@ const READERS: Record<string, Row> = {
   },
 
   // ── Seams that are not a storage read of a federated object's column ─────
-  'engine.ts#assertReferencesResolve :: referenceTargetOf()': {
+  'engine-referential-integrity.ts#assertReferencesResolve :: referenceTargetOf()': {
     disposition: 'target-by-id',
     why: "the id a caller wrote into a reference field is looked up on the TARGET object",
   },
@@ -317,11 +317,11 @@ const READERS: Record<string, Row> = {
     disposition: 'writer',
     why: 'stamps the acting user onto a record the caller writes; it reads nothing',
   },
+  'engine-compatibility-api.ts#syncObjectSchema :: isFederatedObject()': { disposition: 'not-a-read', why: SYNC_ROUTE },
+  'engine-compatibility-api.ts#syncSchemas :: isFederatedObject()': { disposition: 'not-a-read', why: SYNC_ROUTE },
   'engine-secret-internal-fields.ts#encryptSecretFields :: created_at': { disposition: 'not-a-read', why: PLATFORM_ROW },
   'engine.ts#recordObservedDeviation :: updated_at': { disposition: 'not-a-read', why: PLATFORM_ROW },
   'engine.ts#retractCreationAttestation :: updated_at': { disposition: 'not-a-read', why: PLATFORM_ROW },
-  'engine.ts#syncObjectSchema :: isFederatedObject()': { disposition: 'not-a-read', why: SYNC_ROUTE },
-  'engine.ts#syncSchemas :: isFederatedObject()': { disposition: 'not-a-read', why: SYNC_ROUTE },
   'plugin.ts#reconcileFederatedBindings :: isFederatedObject()': { disposition: 'not-a-read', why: SYNC_ROUTE },
   'plugin.ts#registerSchemasWithoutDdl :: isFederatedObject()': { disposition: 'not-a-read', why: SYNC_ROUTE },
   'plugin.ts#syncRegisteredSchemas :: isFederatedObject()': { disposition: 'not-a-read', why: SYNC_ROUTE },

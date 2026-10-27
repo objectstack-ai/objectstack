@@ -21,7 +21,7 @@ The `strict` column is the one the campaign schedules against; it counts both th
 
 | Dir | Sites | strict | passthrough | catchall | strip |
 |---|---|---|---|---|---|
-| `data/` | 163 | 86 | 2 | 0 | 75 |
+| `data/` | 164 | 87 | 2 | 0 | 75 |
 
 ## `data/` — sites
 
@@ -46,7 +46,7 @@ classify and is not listed (it becomes reportable the day it grows its first sit
 | `external-catalog.zod.ts` | 4 |
 | `field-value.zod.ts` | 4 |
 | `field.zod.ts` | 14 |
-| `filter.zod.ts` | 12 |
+| `filter.zod.ts` | 13 |
 | `hook-body.zod.ts` | 2 |
 | `hook.zod.ts` | 7 |
 | `mapping.zod.ts` | 5 |
@@ -57,7 +57,7 @@ classify and is not listed (it becomes reportable the day it grows its first sit
 | `seed-loader.zod.ts` | 12 |
 | `seed.zod.ts` | 2 |
 | `validation.zod.ts` | 6 |
-| **total** | **163** |
+| **total** | **164** |
 
 ## `data/` — open
 
@@ -65,7 +65,7 @@ Per file, how many of its sites still silently discard unknown keys. The `Class`
 column that decides the bucket split is hand-written in the ledger; the arithmetic
 over it is here.
 
-**75 strip of 163**, in 10 file(s).
+**75 strip of 164**, in 10 file(s).
 
 | File | Strip | Sites |
 |---|---|---|
@@ -75,11 +75,11 @@ over it is here.
 | `driver.zod.ts` | 9 | 9 |
 | `external-catalog.zod.ts` | 4 | 4 |
 | `field.zod.ts` | 2 | 14 |
-| `filter.zod.ts` | 11 | 12 |
+| `filter.zod.ts` | 11 | 13 |
 | `hook.zod.ts` | 5 | 7 |
 | `query.zod.ts` | 4 | 5 |
 | `seed-loader.zod.ts` | 12 | 12 |
-| **total** | **75** | **163** |
+| **total** | **75** | **164** |
 
 | Bucket | Sites |
 |---|---|

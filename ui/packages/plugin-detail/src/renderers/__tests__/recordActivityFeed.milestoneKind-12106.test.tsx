@@ -107,11 +107,13 @@ describe('the mapper reads the milestone marker (objectui#12106)', () => {
     expect(PRODUCED_FEED_TYPES.has(MILESTONE_ACTIVITY_FEED_TYPE)).toBe(true);
   });
 
-  it('changes only the type: the rest of the item is built as before', () => {
+  it('changes only the type: the rest of the item is built as before, plus the kind it carries', () => {
     const marked = activityRowToFeedItem(CASE_RESOLVED, 'System');
     const unmarked = activityRowToFeedItem({ ...CASE_RESOLVED, metadata: undefined }, 'System');
     expect(unmarked?.type).toBe('task');
-    expect(marked).toEqual({ ...unmarked, type: MILESTONE_ACTIVITY_FEED_TYPE });
+    // `activityKind` is carried since objectstack#25959, so the timeline's fold
+    // can keep a milestone out of a run of plain updates.
+    expect(marked).toEqual({ ...unmarked, type: MILESTONE_ACTIVITY_FEED_TYPE, activityKind: 'milestone' });
   });
 
   it.each([

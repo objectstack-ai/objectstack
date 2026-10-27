@@ -2,7 +2,9 @@
 // ADR-0090 D12 — delegated administration: scoped admin, no self-escalation.
 
 import { describe, it, expect, beforeEach } from 'vitest';
+import { mapDataError } from '@objectstack/types';
 import { DelegatedAdminGate } from './delegated-admin-gate';
+import { isPermissionDeniedError } from './errors.js';
 import { bindCatalogFromTables, bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 
 /**
@@ -1113,7 +1115,8 @@ describe('DelegatedAdminGate — granted_by is the writer on every admitted inse
  * (a capability nobody declares — condition c), and the shipped names the ADR
  * keeps outside. Positions: `in_pos` → [in_set], `mixed_pos` → [in_set,
  * wild_set], `ghost_pos` → [missing_set], `self_named` → [in_set] beside a
- * permission set of the position's own name that carries a platform capability.
+ * permission set of the position's own name that carries a platform capability
+ * — which no assignment grants (#24757), so it is not judged.
  */
 function makeOrganizationHarness() {
   const tables: Record<string, any[]> = {
@@ -1277,10 +1280,11 @@ describe('DelegatedAdminGate — organization administrators (ADR-0090 D12 as am
         await deniedOf(() => write(o.ctxOf(principal), 'sys_user_permission_set', 'delete', { id: 'ups_a_wild' }));
       });
 
-      it("counts the permission set of the position's own name, which the resolver also grants", async () => {
-        const err = await deniedOf(() => write(o.ctxOf(principal), 'sys_user_position', 'insert',
-          { user_id: 'u_member', position: 'self_named' }));
-        expect(err.message).toMatch(/position 'self_named' carries permission set 'self_named'.*condition \(c\).*'manage_users'/);
+      it("does not count a set that only shares the position's name: no assignment grants it (#24757)", async () => {
+        // `self_named`'s own-name set carries a platform capability and would
+        // fail condition (c); the position lists only `in_set`, which is inside.
+        await expect(write(o.ctxOf(principal), 'sys_user_position', 'insert',
+          { user_id: 'u_member', position: 'self_named' })).resolves.toBeUndefined();
       });
 
       it('refuses a position that carries organization_admin, and a position the catalog does not hold', async () => {
@@ -1360,7 +1364,7 @@ describe('DelegatedAdminGate — organization administrators (ADR-0090 D12 as am
           isTenantAdmin: false,
           scopes: [],
           placeableBusinessUnitIds: ['bu_a1'],
-          assignablePositions: ['in_pos'],
+          assignablePositions: ['in_pos', 'self_named'],
         });
       }
     });
@@ -1386,14 +1390,16 @@ describe('DelegatedAdminGate — organization administrators (ADR-0090 D12 as am
 });
 
 // ---------------------------------------------------------------------------
-// [ADR-0090 D12, amended 2026-10-17] The delegated walk counts the own-name set
+// [ADR-0090 D12, amended 2026-10-17; #24757] The delegated walk judges the
+// listed sets, never a set that only shares the position's name
 // ---------------------------------------------------------------------------
 
 /**
- * The sets a position carries are every set an assignment of it grants: the
- * names its definition lists and, while the resolver folds held position names
- * into the requested set names, the permission set of the position's own name.
- * The delegated branch judges all of them — in the allowlist check, in strict
+ * The sets a position carries are every set an assignment of it grants:
+ * exactly the names its definition lists. The permission set of the position's
+ * own name was judged too while the resolver folded held position names into
+ * the requested set names; #24757 retired the fold, so that set is granted by
+ * nothing and judged by nothing — in the allowlist check, in strict
  * containment, in the self-delegation rule against handing out administration
  * and in the delegable-scope listing.
  *
@@ -1401,7 +1407,11 @@ describe('DelegatedAdminGate — organization administrators (ADR-0090 D12 as am
  * `lead_pos` → [field_user] beside a set named `lead_pos` that carries the wide
  * delegate's own scope; `clerk_pos` → [field_user] with no set of its name;
  * `duty_pos` (delegatable) → [field_user] beside a set named `duty_pos` that
- * carries an adminScope; `duty_plain` (delegatable) → [field_user].
+ * carries an adminScope; `duty_plain` (delegatable) → [field_user]. The
+ * controls that keep the admissions from being a gate judging nothing:
+ * `audit_pos` → [audit_set], which neither delegate allowlists, and
+ * `duty_admin` (delegatable) → [duty_admin_set], a LISTED set carrying an
+ * adminScope.
  */
 function makeOwnNameHarness() {
   const tables: Record<string, any[]> = {
@@ -1416,6 +1426,7 @@ function makeOwnNameHarness() {
       // holdings are stamped with the one the delegation below runs in.
       { id: 'boss_duty', user_id: 'u_boss', position: 'duty_pos', organization_id: DELEGATION_ORG },
       { id: 'boss_plain', user_id: 'u_boss', position: 'duty_plain', organization_id: DELEGATION_ORG },
+      { id: 'boss_admin', user_id: 'u_boss', position: 'duty_admin', organization_id: DELEGATION_ORG },
     ],
     sys_business_unit_member: [{ id: 'm1', business_unit_id: 'bu_es', user_id: 'u_east_1' }],
     sys_user: [{ id: 'u_east_1' }, { id: 'u_boss' }, { id: 'u_deleg' }],
@@ -1444,6 +1455,8 @@ function makeOwnNameHarness() {
       { name: 'rep_pos', objects: { crm_account: { allowRead: true, allowEdit: true } } },
       { name: 'lead_pos', objects: {}, adminScope: scope(WIDE_ALLOW) },
       { name: 'duty_pos', objects: {}, adminScope: scope(['field_user']) },
+      { name: 'audit_set', objects: { crm_account: { allowRead: true } } },
+      { name: 'duty_admin_set', objects: {}, adminScope: scope(['field_user']) },
     ],
     positions: [
       { name: 'rep_pos', permissionSets: ['field_user'] },
@@ -1451,12 +1464,14 @@ function makeOwnNameHarness() {
       { name: 'clerk_pos', permissionSets: ['field_user'] },
       { name: 'duty_pos', permissionSets: ['field_user'], delegatable: true },
       { name: 'duty_plain', permissionSets: ['field_user'], delegatable: true },
+      { name: 'audit_pos', permissionSets: ['audit_set'] },
+      { name: 'duty_admin', permissionSets: ['duty_admin_set'], delegatable: true },
     ],
   });
   const SETS: Record<string, any[]> = {
-    // Allowlists the sets the positions LIST, not their own-name sets.
+    // Allowlists the set the positions LIST, not their own-name sets.
     narrow: [{ name: 'east_admin', objects: {}, adminScope: scope(['field_user']) }],
-    // Also allowlists the own-name sets.
+    // Also allowlists the own-name sets — which no assignment hands out.
     wide: [{ name: 'east_admin_wide', objects: {}, adminScope: scope(WIDE_ALLOW) }],
     member: [{ name: 'member_default', objects: {} }],
   };
@@ -1475,63 +1490,208 @@ function makeOwnNameHarness() {
   return { gate, tables, ctxOf, assign, offered };
 }
 
-describe("DelegatedAdminGate — a delegate is judged on the permission set of the position's own name (ADR-0090 D12 as amended 2026-10-17)", () => {
+describe("DelegatedAdminGate — a set that only shares the position's name is not judged (ADR-0090 D12 as amended 2026-10-17; #24757)", () => {
   let n: ReturnType<typeof makeOwnNameHarness>;
   beforeEach(() => { n = makeOwnNameHarness(); });
 
-  it("refuses an assignment whose own-name set is outside the allowlist — 403 PERMISSION_DENIED, naming the set", async () => {
-    const err = await deniedOf(() => n.assign('narrow', 'rep_pos'));
-    expect(err.message).toMatch(/position 'rep_pos' distributes permission set 'rep_pos' \(the permission set of the position's own name.*not in the scope's allowlist/);
-    expect(err.details).toMatchObject({ position: 'rep_pos' });
+  it("admits an assignment whose own-name set is outside the allowlist: the assignment does not grant it", async () => {
+    const row: any = { user_id: 'u_east_1', position: 'rep_pos', business_unit_id: 'bu_es' };
+    await expect(n.gate.assert({ object: 'sys_user_position', operation: 'insert', data: row, context: n.ctxOf('narrow') }))
+      .resolves.toBeUndefined();
+    expect(row.granted_by).toBe('u_narrow');
   });
 
-  it('CONTROL: admits the same assignment for a delegate whose allowlist covers the own-name set too', async () => {
-    const row: any = { user_id: 'u_east_1', position: 'rep_pos', business_unit_id: 'bu_es' };
-    await expect(n.gate.assert({ object: 'sys_user_position', operation: 'insert', data: row, context: n.ctxOf('wide') }))
-      .resolves.toBeUndefined();
-    expect(row.granted_by).toBe('u_wide');
+  it("CONTROL: refuses an assignment whose LISTED set is outside the allowlist — 403 DELEGATION_SCOPE_VIOLATION (#26189), naming the set", async () => {
+    const err = await refusalOf(() => n.assign('narrow', 'audit_pos'));
+    expect([err.code, err.status]).toEqual(['DELEGATION_SCOPE_VIOLATION', 403]);
+    expect(err.message).toMatch(/position 'audit_pos' distributes permission set 'audit_set', which is not in the scope's allowlist/);
+    expect(err.details).toMatchObject({ position: 'audit_pos' });
   });
 
   it('a position with no own-name set in the catalog is judged on its listed sets alone, as before', async () => {
     await expect(n.assign('narrow', 'clerk_pos')).resolves.toBeUndefined();
   });
 
-  it('removing an assignment is judged on the same sets: the narrow delegate may not evict one granting a set outside its allowlist', async () => {
-    const err = await deniedOf(() => n.gate.assert({
-      object: 'sys_user_position', operation: 'delete', options: { where: { id: 'held_rep' } }, context: n.ctxOf('narrow'),
-    }));
-    expect(err.message).toMatch(/permission set 'rep_pos'.*not in the scope's allowlist/);
+  it('removing an assignment is judged on the same sets: the narrow delegate may evict one whose own-name set it does not allowlist', async () => {
     await expect(n.gate.assert({
-      object: 'sys_user_position', operation: 'delete', options: { where: { id: 'held_rep' } }, context: n.ctxOf('wide'),
+      object: 'sys_user_position', operation: 'delete', options: { where: { id: 'held_rep' } }, context: n.ctxOf('narrow'),
     })).resolves.toBeUndefined();
   });
 
-  it('an own-name set carrying an adminScope is held to strict containment, allowlisted or not', async () => {
-    const err = await deniedOf(() => n.assign('wide', 'lead_pos'));
-    expect(err.message).toMatch(/granting set 'lead_pos' would hand out an adminScope not strictly contained by yours/);
+  it('an own-name set carrying an adminScope is not held to strict containment: the assignment does not hand it out', async () => {
+    await expect(n.assign('wide', 'lead_pos')).resolves.toBeUndefined();
   });
 
   it('the delegable-scope listing offers exactly the positions the write admits', async () => {
-    expect(await n.offered('narrow')).toEqual(['clerk_pos', 'duty_plain']);
-    expect(await n.offered('wide')).toEqual(['clerk_pos', 'duty_plain', 'rep_pos']);
+    const all = ['audit_pos', 'clerk_pos', 'duty_admin', 'duty_plain', 'duty_pos', 'lead_pos', 'rep_pos'];
+    expect(await n.offered('narrow')).toEqual(all.filter((p) => p !== 'audit_pos' && p !== 'duty_admin'));
+    expect(await n.offered('wide')).toEqual(all.filter((p) => p !== 'audit_pos' && p !== 'duty_admin'));
     for (const principal of ['narrow', 'wide']) {
       const offered = await n.offered(principal);
-      for (const position of ['rep_pos', 'lead_pos', 'clerk_pos', 'duty_pos', 'duty_plain']) {
+      for (const position of all) {
         const admitted = await n.assign(principal, position).then(() => true, () => false);
         expect(admitted, `${principal} · ${position}`).toBe(offered.includes(position));
       }
     }
   });
 
-  it('a delegatable position whose own-name set carries an adminScope cannot be self-delegated', async () => {
+  it('a delegatable position whose own-name set carries an adminScope may be self-delegated: it distributes no administration', async () => {
     const delegation = (position: string) => n.gate.assert({
       object: 'sys_user_position', operation: 'insert', context: { userId: 'u_boss', positions: [], principal: 'member', organizationId: DELEGATION_ORG },
       data: { user_id: 'u_deleg', position, delegated_from: 'u_boss', valid_until: iso(T0 + 5 * DAY), reason: 'cover' },
     });
-    const err = await deniedOf(() => delegation('duty_pos'));
-    expect(err.message).toMatch(/position 'duty_pos' distributes the admin set 'duty_pos' \(the permission set of the position's own name.*administration cannot be self-delegated/);
-    expect(err.details).toMatchObject({ position: 'duty_pos', permissionSet: 'duty_pos' });
-    // CONTROL: the same holder delegates a delegatable position with no such set.
-    await expect(delegation('duty_plain')).resolves.toBeUndefined();
+    await expect(delegation('duty_pos')).resolves.toBeUndefined();
+    // CONTROL: a delegatable position whose LISTED set carries an adminScope
+    // still cannot be self-delegated.
+    const err = await deniedOf(() => delegation('duty_admin'));
+    expect(err.message).toMatch(/position 'duty_admin' distributes the admin set 'duty_admin_set' — administration cannot be self-delegated/);
+    expect(err.details).toMatchObject({ position: 'duty_admin', permissionSet: 'duty_admin_set' });
+  });
+});
+
+// ── [#26189] A refusal that describes the caller's OWN delegated scope answers
+//    its own code. The split is the ruling's (#26059 Q3, child 3): a unit
+//    outside the subtree, a set not in the allowlist, or a target user outside
+//    the subtree answer `403 DELEGATION_SCOPE_VIOLATION` with the gate's reason
+//    as the message; every other refusal of the gate keeps `403
+//    PERMISSION_DENIED`, opaque to the console (ruling #24914 B′). Each cell is
+//    pinned on the thrown value AND on the REST door's classification
+//    (`mapDataError`), because a message opening with the `[Security] Access
+//    denied` matcher would be re-flattened there.
+
+async function refusalOf(run: () => Promise<unknown>): Promise<any> {
+  try {
+    await run();
+  } catch (e) {
+    return e;
+  }
+  throw new Error('expected the write to be refused, but it was admitted');
+}
+
+function expectScopeViolation(err: any, object: string, reason: RegExp): void {
+  expect([err.code, err.status, err.statusCode], err.message).toEqual(['DELEGATION_SCOPE_VIOLATION', 403, 403]);
+  expect(err.message).toMatch(reason);
+  // The three limbs every PERMISSION_DENIED matcher reads (`isPermissionDeniedError`,
+  // `mapDataError`, `rest/src/security-routes.ts`): code, name and message prefix.
+  expect(err.name).toBe('DelegationScopeViolationError');
+  expect(err.message.startsWith('[Security] Access denied'), 'the PERMISSION_DENIED matcher prefix').toBe(false);
+  expect(isPermissionDeniedError(err)).toBe(false);
+  const wire = mapDataError(err, object);
+  expect([wire.status, wire.body.code]).toEqual([403, 'DELEGATION_SCOPE_VIOLATION']);
+  expect(wire.body.error).toBe(err.message);
+}
+
+function expectOpaqueDenial(err: any, object: string): void {
+  expect([err.code, err.status], err.message).toEqual(['PERMISSION_DENIED', 403]);
+  expect(isPermissionDeniedError(err)).toBe(true);
+  const wire = mapDataError(err, object);
+  expect([wire.status, wire.body.code]).toEqual([403, 'PERMISSION_DENIED']);
+}
+
+describe('[#26189] DelegatedAdminGate — a scope violation answers DELEGATION_SCOPE_VIOLATION; every other refusal keeps PERMISSION_DENIED', () => {
+  const position = (row: any, operation = 'insert') =>
+    h.gate.assert({ object: 'sys_user_position', operation, data: row, context: h.ctxOf('delegate') });
+  const grant = (row: any) =>
+    h.gate.assert({ object: 'sys_user_permission_set', operation: 'insert', data: row, context: h.ctxOf('delegate') });
+
+  describe('the caller\'s own scope: DELEGATION_SCOPE_VIOLATION, the reason as the message', () => {
+    it('sys_user_position: a business unit outside the subtree', async () => {
+      const err = await refusalOf(() => position({ user_id: 'u_west_1', position: 'sales_rep', business_unit_id: 'bu_west' }));
+      expectScopeViolation(err, 'sys_user_position', /business unit 'bu_west' is outside the delegated subtree \(scope from 'sub_admin'\)/);
+      expect(err.details).toMatchObject({ operation: 'insert', object: 'sys_user_position', position: 'sales_rep' });
+    });
+
+    it('sys_user_position: an existing assignment whose business unit is outside the subtree (the pre-image)', async () => {
+      h.tables.sys_user_position.push({ id: 'a_west', user_id: 'u_west_1', position: 'sales_rep', business_unit_id: 'bu_west' });
+      const err = await refusalOf(() => h.gate.assert({
+        object: 'sys_user_position', operation: 'delete', options: { where: { id: 'a_west' } }, context: h.ctxOf('delegate'),
+      }));
+      expectScopeViolation(err, 'sys_user_position', /the existing assignment's business unit 'bu_west' is outside the delegated subtree/);
+    });
+
+    it('sys_user_position: the position distributes a set not in the allowlist', async () => {
+      const err = await refusalOf(() => position({ user_id: 'u_east_1', position: 'mixed_pos', business_unit_id: 'bu_es' }));
+      expectScopeViolation(err, 'sys_user_position', /position 'mixed_pos' distributes permission set 'finance_admin', which is not in the scope's allowlist/);
+    });
+
+    it('sys_user_permission_set: a set not in the allowlist', async () => {
+      const err = await refusalOf(() => grant({ user_id: 'u_east_1', permission_set: 'finance_admin' }));
+      expectScopeViolation(err, 'sys_user_permission_set', /permission set 'finance_admin' is not in the scope's allowlist/);
+      expect(err.details).toMatchObject({ permissionSet: 'finance_admin' });
+    });
+
+    it('sys_user_permission_set: a target user outside the subtree', async () => {
+      const err = await refusalOf(() => grant({ user_id: 'u_west_1', permission_set: 'sales_user' }));
+      expectScopeViolation(err, 'sys_user_permission_set', /target user 'u_west_1' is outside the delegated subtree/);
+    });
+  });
+
+  describe('every other refusal: PERMISSION_DENIED, unchanged', () => {
+    it('the audience anchor', async () => {
+      expectOpaqueDenial(await refusalOf(() => position({ user_id: 'u_east_1', position: 'everyone', business_unit_id: 'bu_es' })), 'sys_user_position');
+    });
+
+    it('a principal-less write', async () => {
+      expectOpaqueDenial(await refusalOf(() => h.gate.assert({
+        object: 'sys_user_position', operation: 'insert', data: { user_id: 'u_east_1', position: 'sales_rep', business_unit_id: 'bu_es' }, context: {},
+      })), 'sys_user_position');
+    });
+
+    it('sys_member is tenant-only', async () => {
+      expectOpaqueDenial(await refusalOf(() => h.gate.assert({
+        object: 'sys_member', operation: 'insert', data: { user_id: 'u_east_1', role: 'member' }, context: h.ctxOf('delegate'),
+      })), 'sys_member');
+    });
+
+    it('plain CRUD with no scope', async () => {
+      expectOpaqueDenial(await refusalOf(() => h.gate.assert({
+        object: 'sys_user_position', operation: 'insert', data: { user_id: 'u_east_1', position: 'sales_rep', business_unit_id: 'bu_es' }, context: h.ctxOf('crud_only'),
+      })), 'sys_user_position');
+    });
+
+    it('a filter write', async () => {
+      expectOpaqueDenial(await refusalOf(() => h.gate.assert({
+        object: 'sys_user_position', operation: 'delete', options: { where: { position: 'sales_rep' } }, context: h.ctxOf('delegate'),
+      })), 'sys_user_position');
+    });
+
+    it('an unanchored assignment, new or existing', async () => {
+      expectOpaqueDenial(await refusalOf(() => position({ user_id: 'u_east_1', position: 'sales_rep' })), 'sys_user_position');
+      h.tables.sys_user_position.push({ id: 'a_loose', user_id: 'u_east_1', position: 'sales_rep', business_unit_id: null });
+      expectOpaqueDenial(await refusalOf(() => h.gate.assert({
+        object: 'sys_user_position', operation: 'delete', options: { where: { id: 'a_loose' } }, context: h.ctxOf('delegate'),
+      })), 'sys_user_position');
+    });
+
+    it('a scope that does not grant manageAssignments', async () => {
+      const gate = new DelegatedAdminGate({
+        ql: h.ql,
+        resolveSets: async () => [{ name: 'viewer_admin', objects: {}, adminScope: { ...EAST_SCOPE, manageAssignments: false } }],
+      } as any);
+      expectOpaqueDenial(await refusalOf(() => gate.assert({
+        object: 'sys_user_position', operation: 'insert', data: { user_id: 'u_east_1', position: 'sales_rep', business_unit_id: 'bu_es' }, context: h.ctxOf('delegate'),
+      })), 'sys_user_position');
+    });
+
+    it('granting an adminScope not strictly contained by the caller\'s own', async () => {
+      expectOpaqueDenial(await refusalOf(() => grant({ user_id: 'u_east_1', permission_set: 'sub_admin' })), 'sys_user_permission_set');
+    });
+
+    it('a stored grant whose set the catalog does not hold, a grant naming no target user, or one whose target has no business unit', async () => {
+      // An INSERT naming an unknown set is judged by the allowlist (a scope
+      // violation, above); the catalog miss is the PRE-IMAGE's reason.
+      h.tables.sys_user_permission_set = [{ id: 'g_retired', user_id: 'u_east_1', permission_set: 'sales_user_retired' }];
+      expectOpaqueDenial(await refusalOf(() => h.gate.assert({
+        object: 'sys_user_permission_set', operation: 'delete', options: { where: { id: 'g_retired' } }, context: h.ctxOf('delegate'),
+      })), 'sys_user_permission_set');
+      expectOpaqueDenial(await refusalOf(() => grant({ permission_set: 'sales_user' })), 'sys_user_permission_set');
+      expectOpaqueDenial(await refusalOf(() => grant({ user_id: 'u_delegate', permission_set: 'sales_user' })), 'sys_user_permission_set');
+    });
+
+    it('a self-service delegation of duty (ADR-0091 D3)', async () => {
+      expectOpaqueDenial(await refusalOf(() => position({
+        user_id: 'u_east_1', position: 'sales_rep', business_unit_id: 'bu_es', delegated_from: 'u_delegate', reason: 'cover',
+      })), 'sys_user_position');
+    });
   });
 });

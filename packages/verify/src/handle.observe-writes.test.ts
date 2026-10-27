@@ -62,7 +62,6 @@ const armAsyncGate = () => {
   });
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type HookCtx = { input?: { data?: Record<string, any> }; api: any };
 
 /** Write through the hook's `ctx.api` and record what the engine answered, swallowing a refusal. */
@@ -215,7 +214,6 @@ async function refusalOf(p: Promise<unknown>): Promise<unknown> {
 }
 
 /** The ADR-0112 pair: `code`, and `status` (or the engine's `statusCode`). */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const envelope = (e: unknown) => ({ code: (e as any)?.code, status: (e as any)?.statusCode ?? (e as any)?.status });
 
 /** The observed writes to the fixture's objects: the window also holds the stack's own writes. */

@@ -6,8 +6,7 @@
 
 - 整车道一次读全,本地求交:`list_issues` 带 `labels: [domain:X]` + 最小字段拿回全车道 open 集。
 - 候选 = open、未 assign、无 `needs-user-decision`、无 `pm:retriage`;⛔ 排除三门皆无的 `tooling` 卡。
-- `tooling` 卡至多占一轮派发的 10%,溢出留积压、⛔ 不入 `pm:queue`;⛔ 无门禁无脚本强制。
-- 无分诊审计评论的卡不是候选,预贴 `pm:queue` 视同无;例外一的 sub-issue 承父卡首触。
+- 无分诊审计评论即非候选;例外:sub-issue 承父卡首触,main-red 锚卡见 `landing-operations.md`。
 - 已排队父单的 open sub-issue 自动是候选,`pm:epic` 父单的子树除外。
 - 每张候选读全文 + 全部评论,写派发词前做决策复读:评论读到最后一页。
 - 维护者裁决逐字引入派发词裁决分区作约束,无则写明无裁决。
@@ -37,7 +36,7 @@
 - 阻塞解除后延后单重定价:前一单派发词必答 #X 变简单、变难、不必要或无影响。
 - 派发后一单前用该回答重读它的选项与成本,⛔ 不沿用立单时那份。
 - 在飞卡衍生三分:不修它验收过不过;in-scope ⇒ 父卡 sub-issue,认领席自有、优先级继承。
-- 该 sub-issue 带父卡域与优先级直接派发,绕过分诊;sweep 事后扫,重复关 `duplicate`。
+- 该 sub-issue 与 main-red 锚卡各带域与级直接派发,绕过分诊;sweep 事后扫,重复关 `duplicate`。
 - 排队卡含他车道项 ⇒ 发现席自拆:新卡无 `domain:*`,首行 `carries item k of #N; #N keeps items …`。
 - 分诊首触定域可改判;拆出卡 ⛔ 不承父卡域(承域只及本车道 sub-issue),父卡余项照 `Fixes`。
 - 自在飞派发升级出的卡首行一句:本卡承哪一半、父卡留哪一半;缺此行不入队不入箱。
@@ -176,6 +175,7 @@
 
 - 你是记录在案的复核人:对 GitHub 核验,⛔ 不对报告的自述核验。
 - 逐项判据展开在 `references/review-checklist.md`,每份报告对着它过。
+- 报告 `open_questions`/`out_of_scope_findings` 涉 cloud 车道者,按 `cross-repo-coordination.md` 立 cloud 卡。
 - 改到已有 `.changeset/*.md` 的 PR ⛔ 不打 `skip-changeset`;确认取同 head 达档 PASS 或维护者原话。
 - 报告在草稿 PR 时点到达,CI 收敛读数只属于复核侧:gate `in_progress` 是诚实读数。
 - 绿色输出≠ 该绿证明了被测风险:拒收断言、全绿方向与时序、pin 翻转、边界后收益。

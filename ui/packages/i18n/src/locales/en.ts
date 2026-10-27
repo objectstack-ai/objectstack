@@ -202,15 +202,16 @@ const en = {
     email: 'Please enter a valid email address',
     url: 'Please enter a valid URL',
     pattern: '{{field}} format is invalid',
-    formInvalid: 'Please check the highlighted fields: {{fields}}',
-    // Separator between the field names interpolated into `formInvalid`.
+    // Separator between the field labels a form names in one sentence: the
+    // record form's clear-on-hide notice (`form.clearedOnHide`) and
+    // faulted-`visibleWhen` refusal (`form.visibleWhenFaulted`), and the
+    // option-group "select the parent first" hint (`fields.options.selectFirst`).
     // Per-locale because list punctuation is a locale property, not a code
     // constant: CJK enumerates with U+3001, Latin scripts with a comma+space,
     // Arabic with U+060C. Hardcoding one of them in the renderer put the CJK
-    // comma into the English toast (objectstack#5407).
+    // comma into the English invalid-submit toast (objectstack#5407).
     formInvalidJoiner: ', ',
     unique: '{{field}} must be unique',
-    type: '{{field}} must be a valid {{type}}',
   },
   form: {
     noPermissionToSave: "You don't have permission to save this record.",
@@ -234,10 +235,7 @@ const en = {
     // `validation.formInvalidJoiner` — because the fix is to the metadata, not
     // to anything the person filling the form can type.
     visibleWhenFaulted: "Can't submit: the visibleWhen rule of {{fields}} could not be evaluated. The rule must be fixed before this form can be submitted.",
-    removeItem: 'Remove item',
     fieldRequired: 'This field is required',
-    invalidFormat: 'Invalid format',
-    saveSuccess: 'Saved successfully',
     saveError: 'Failed to save',
     unsavedChanges: 'You have unsaved changes. Are you sure you want to leave?',
     discardTitle: 'Discard changes?',
@@ -324,7 +322,12 @@ const en = {
     update: 'Update',
     createSuccess: '{{object}} created successfully',
     updateSuccess: '{{object}} updated successfully',
-    deleteSuccess: '{{object}} deleted successfully',
+    // The console's record-save toasts when the saved record has a display
+    // name (ADR-0079): `{{object}}` is the object label, `{{title}}` the
+    // record's name. A record with no name keeps `createSuccess` /
+    // `updateSuccess` above.
+    createdNamed: '{{object}} "{{title}}" created',
+    updatedNamed: '{{object}} "{{title}}" updated',
     // plugin-form's own feedback chrome (objectui#11039): the success toast
     // a form raises when the author declared no `successMessage` (`created`
     // after a create, `saved` after an edit), the master-detail form's edit
@@ -632,22 +635,15 @@ const en = {
   },
   table: {
     rowsPerPage: 'Rows per page',
-    showing: 'Showing {{from}} to {{to}} of {{total}}',
     noRows: 'No rows to display',
     sortAsc: 'Sort ascending',
     sortDesc: 'Sort descending',
-    filterColumn: 'Filter {{column}}',
     columns: 'Columns',
     exportCSV: 'Export CSV',
-    exportExcel: 'Export Excel',
     selectRow: 'Select row',
     selectAllRows: 'Select all rows',
-    expandRow: 'Expand row',
-    collapseRow: 'Collapse row',
     rowActions: 'Row actions',
     hideColumn: 'Hide column',
-    freezeColumn: 'Freeze column',
-    unfreezeColumn: 'Unfreeze column',
     pageInfo: 'Page {{current}} of {{total}}',
     firstPage: 'First page',
     previousPage: 'Previous page',
@@ -702,7 +698,6 @@ const en = {
     bulkSelectAllMatching: 'Select all {{count}} matching',
     bulkAllMatchingSelected: 'All {{count}} matching records are selected.',
     bulkActions: 'Bulk actions',
-    rowHeight: 'Row height: {{mode}}',
     empty: 'Empty',
     yes: 'Yes',
     no: 'No',
@@ -1127,8 +1122,6 @@ const en = {
     addCard: 'Add card',
     addColumn: 'Add column',
     moveCard: 'Move card',
-    deleteCard: 'Delete card',
-    deleteColumn: 'Delete column',
     noCards: 'No cards',
     columnCards: '{{column}} cards',
     laneCards: '{{column}} - {{lane}} cards',
@@ -1325,11 +1318,7 @@ const en = {
     changeViewType: 'Change View Type',
     deleteView: 'Delete View',
     addView: 'Add View',
-    unsavedChanges: 'Unsaved changes',
-    saveAsView: 'Save as View',
     moreViews: '{{count}} more',
-    activeFilters: 'Active filters',
-    activeSort: 'Active sort',
     manageViews: 'Manage views',
     manageAllViews: 'Manage all views…',
     manageViewsDescription: 'Reorder, rename, pin, or delete every view in this object.',
@@ -1592,6 +1581,16 @@ const en = {
     edited: '(edited)',
     via: 'via {{source}}',
     viewSource: 'View source',
+    // objectstack#25959 — a run of consecutive updates folded into one feed row.
+    foldedUpdates: 'Updated {{fields}}',
+    foldedUpdateCount: '{{count}} updates',
+    foldedUpdateCount_one: '{{count}} update',
+    foldedUpdateCount_other: '{{count}} updates',
+    foldedMoreFields: '{{count}} more',
+    foldedMoreFields_one: '{{count}} more',
+    foldedMoreFields_other: '{{count}} more',
+    expandFolded: 'Show each update',
+    collapseFolded: 'Hide updates',
     // Replies
     replyCount: '{{count}} reply',
     replyCount_one: '{{count}} reply',
@@ -1667,17 +1666,8 @@ const en = {
   },
   report: {
     total: 'Total',
-    rowTotal: 'Row Total',
-    columnTotal: 'Column Total',
-    grandTotal: 'Grand Total',
     totals: 'Totals',
-    rowsLabel: 'Row',
-    columnsLabel: 'Column',
-    allLabel: '(All)',
-    emptyLabel: '(Empty)',
     loading: 'Loading…',
-    failedToLoad: 'Failed to load matrix: {{message}}',
-    needsAcross: 'Matrix report requires at least one `groupingsAcross` field.',
     // objectui#12330 — the report's no-access state; its title is `dashboard.widgetForbiddenTitle`.
     forbiddenMessage: 'You don’t have permission to view the data behind this report.',
     aggregate: {
@@ -1714,10 +1704,6 @@ const en = {
     versionHistory: 'Version history',
   },
   dashboard: {
-    addWidget: 'Add widget',
-    editLayout: 'Edit layout',
-    saveLayout: 'Save layout',
-    resetLayout: 'Reset layout',
     total: 'Total',
     noDataSourceFor: 'No data source available for',
     // objectui#7063 — the DEFAULT empty state every dashboard widget renders
@@ -1876,8 +1862,6 @@ const en = {
     },
   },
   appDesigner: {
-    createApp: 'Create Application',
-    editApp: 'Edit Application',
     basicInfo: 'Basic Info',
     objects: 'Objects',
     navigation: 'Navigation',
@@ -1887,11 +1871,9 @@ const en = {
     appDescription: 'Description',
     appIcon: 'Icon',
     template: 'Template',
-    selectObjects: 'Select Objects',
     searchObjects: 'Search objects…',
     selectAll: 'Select All',
     deselectAll: 'Deselect All',
-    navBuilder: 'Navigation Builder',
     addGroup: 'Add Group',
     addUrl: 'Add URL',
     addSeparator: 'Add Separator',
@@ -1902,25 +1884,9 @@ const en = {
     complete: 'Complete',
     snakeCaseHint: 'Must be snake_case (e.g. my_app)',
     modeEdit: 'Edit',
-    modePreview: 'Preview',
-    modeCode: 'Code',
     addWidget: 'Add Widget',
     widgetProperties: 'Widget Properties',
     dataSource: 'Data Source',
-    valueField: 'Value Field',
-    aggregate: 'Aggregate',
-    colorVariant: 'Color Variant',
-    addComponent: 'Add Component',
-    componentProperties: 'Component Properties',
-    viewType: 'View Type',
-    fields: 'Fields',
-    toolbar: 'Toolbar',
-    showSearch: 'Show Search',
-    showFilters: 'Show Filters',
-    showSort: 'Show Sort',
-    appearance: 'Appearance',
-    rowHeight: 'Row Height',
-    livePreview: 'Live Preview',
     stepBasicDesc: 'Name, title, and icon',
     stepObjectsDesc: 'Select business objects',
     stepNavigationDesc: 'Build navigation tree',
@@ -2079,7 +2045,6 @@ const en = {
     savedViewsUnavailable: 'Saved views for {{object}} could not be loaded',
     savedViewsRefused: 'The server refused this request, so this list is empty because it could not be read — not because this object has no saved views. Sign in again, or ask an administrator for access.',
     savedViewsUnreadable: 'This list is empty because it could not be read, not because this object has no saved views. Try again, and report this if it keeps happening.',
-    title: 'ObjectOS',
     initializing: 'Opening your console…',
     skipToContent: 'Skip to content',
     search: 'Search…',
@@ -2222,9 +2187,7 @@ const en = {
     },
     error: {
       connectionFailed: 'Cannot connect to server',
-      serverUnreachable: 'The server at {{url}} is unreachable.',
       checkServer: 'Please check your network connection or that the backend is running.',
-      timeout: 'Connection timed out after 10 seconds.',
     },
     actions: {
       retry: 'Retry',
@@ -2284,7 +2247,6 @@ const en = {
       systemTheme: 'System Theme',
       actions: 'Actions',
       openFullSearch: 'Open Full Search Page',
-      createApp: 'Create New App',
     },
     ai: {
       pendingDrafts: {
@@ -2321,8 +2283,6 @@ const en = {
         ctaTopUp: 'Add credits to continue',
         ariaLabel: 'AI usage: {{status}}',
       },
-      workspaceTitle: 'AI Workspace',
-      workspaceSubtitle: 'Ask, inspect, and resume conversations',
       openChats: 'Open chats',
       chats: 'Chats',
       chatsDescription: 'Browse and manage AI conversations.',
@@ -2372,8 +2332,6 @@ const en = {
       saveRename: 'Save rename',
       cancelRename: 'Cancel rename',
       loadingHistory: 'Loading conversation history…',
-      conversationReady: 'Conversation ready',
-      preparingConversation: 'Preparing a new conversation',
       offlineDemoMode: 'Offline demo mode — agent list unavailable',
       sendFailedRateLimited:
         "You're sending messages too quickly. Your message is kept below — wait a moment and try again.",
@@ -2777,7 +2735,6 @@ const en = {
       selectOption: 'Select…',
       noEligibleFieldForType: 'No eligible field of this type. Add one to the object first.',
       viewTypeUnavailable: 'This object has no field that can serve as "{{field}}".',
-      viewTypeUnavailableShort: 'Not supported by this object.',
       chartType: 'Chart type',
       chartTypeHelp: 'Determines how the data is rendered.',
       chartTypeBar: 'Bar chart',
@@ -2794,7 +2751,6 @@ const en = {
       viewTypeUnavailableDataset: 'This object exposes no dataset to chart.',
       noDatasetMeasure: 'This dataset declares no measure to chart.',
       endDateField: 'End date field',
-      ufTabs: 'Tabs',
       ufAddField: '+ Add filter field…',
       ufShowAllRecords: 'Show "All records" tab',
     },
@@ -3068,6 +3024,14 @@ const en = {
       // field's reveal toggle, and the footer's legal links.
       welcomeTitle: 'Welcome back',
       welcomeDescription: 'Sign in to continue your work',
+      // The same card's header when the visitor arrived signed out from an
+      // invitation link (`?redirect=/accept-invitation/ID`), and the
+      // register-first action above the form. The copy names no organization
+      // or inviter: a signed-out page has no read of the invitation (#25886).
+      invitationTitle: 'Accept your invitation',
+      invitationDescription: 'Use the email address the invitation was sent to.',
+      invitationSignUpButton: 'Create an account and join',
+      invitationSignInDivider: 'or sign in to an existing account',
       showPasswordText: 'Show password',
       hidePasswordText: 'Hide password',
       footer: {
@@ -3087,6 +3051,8 @@ const en = {
     register: {
       title: 'Create an account',
       description: 'Create your account to start building.',
+      invitationTitle: 'Create an account to join',
+      invitationDescription: 'Register with the email address the invitation was sent to. The invitation can only be accepted with that address.',
       nameLabel: 'Name',
       namePlaceholder: 'John Doe',
       emailLabel: 'Email',
@@ -3233,6 +3199,7 @@ const en = {
     },
     shell: {
       tenantHostHint: 'You are signing in to this system',
+      poweredBy: 'Powered by ObjectStack',
     },
     // These were previously supplied only as inline `defaultValue:` args at the
     // SetPasswordPage call sites, so `zh` was the only pack that could carry a
@@ -3385,12 +3352,8 @@ const en = {
     },
   },
   errors: {
-    networkError: 'Network error. Please check your connection.',
-    serverError: 'Server error. Please try again later.',
-    notFound: 'Resource not found.',
     unauthorized: 'You are not authorized to perform this action.',
     forbidden: 'Access denied.',
-    timeout: 'Request timed out. Please try again.',
     unknown: 'An unexpected error occurred.',
   },
   // A refused write's message (objectui#13332): its first sentence is shown,
@@ -3413,8 +3376,6 @@ const en = {
     namePlaceholder: 'e.g., Acme Inc',
     slugLabel: 'URL slug',
     slugHint: 'Used in URLs. Only lowercase letters, numbers, and hyphens.',
-    invite: 'Invite member',
-    members: 'Members',
     settings: 'Organization settings',
     multiOrgDisabled: 'Creating new organizations is disabled on this instance.',
     createFailed: 'Failed to create organization',
@@ -3433,7 +3394,6 @@ const en = {
     aboutBuildUnknown: 'Unknown build (no version was set when this console was built)',
   },
   sidebar: {
-    settings: 'Settings',
     helpTooltip: 'Help & Documentation',
     activityFeed: 'Activity feed',
     notifications: 'Notifications',
@@ -3441,7 +3401,6 @@ const en = {
     inbox: 'Inbox',
     inboxAriaLabel: 'Open inbox',
     area: 'Area',
-    scope: 'Scope',
     packageManagement: 'Package management',
     searchNavigation: 'Search navigation…',
     recent: 'Recent',
@@ -3471,9 +3430,7 @@ const en = {
     },
   },
   home: {
-    title: 'Home',
     nav: 'Home',
-    allApps: 'All Applications',
     yourApps: 'Your apps',
     showMoreApps: 'More',
     showLess: 'Show less',
@@ -3529,7 +3486,6 @@ const en = {
     open: 'Open',
     loading: 'Loading…',
     welcome: 'Build your business system with AI',
-    welcomeDescription: 'Describe your business in one sentence — AI generates the objects, screens, APIs and agent tools. Or start from scratch.',
     welcomeAdminDescription: 'Describe your business in one sentence — AI generates the objects, screens, APIs and agent tools. Or set things up yourself from the menu on the left.',
     welcomeAdminDescriptionNoBuild: 'Set up your first application from the Administration menu on the left. Once you have data, the AI assistant can help you explore it.',
     welcomeAdminDescriptionNoAi: 'Set up your first application from the Administration menu on the left.',
@@ -3566,7 +3522,6 @@ const en = {
       publishedVerified: 'Published & verified — {{count}} sample row(s) live.',
       capabilityWarn: 'Authoring check: {{count}} capability reference(s) resolve nowhere.',
     },
-    createFirstApp: 'Create app manually',
     systemSettings: 'System Settings',
     browseMarketplace: 'Browse App Marketplace',
     quickActions: {
@@ -3593,10 +3548,8 @@ const en = {
       title: 'Starred',
     },
     gettingStarted: {
-      title: 'Make this home yours',
       description:
         'Star an app to pin it here for one-click access. Anything you open will show up under Recently Accessed automatically.',
-      cta: 'Browse all applications',
     },
     appCard: {
       noDescription: 'No description',
@@ -3605,15 +3558,8 @@ const en = {
   },
   layout: {
     appSwitcher: {
-      home: 'Home',
       switchApplication: 'Switch Application',
       appsAvailable: '{{count}} apps available',
-      addApp: 'Add App',
-      editApp: 'Edit App',
-      editNavigation: 'Edit Navigation',
-      manageAllApps: 'Manage All Apps',
-      systemConsole: 'System Console',
-      noAppsConfigured: 'No apps configured',
       allApps: 'All apps',
       editAppInStudio: 'Edit {{app}} in Studio',
       backToHome: 'Back to home',
@@ -3933,7 +3879,6 @@ const en = {
     // objectui#13461 — the top bar's avatar button, which holds only the avatar.
     accountMenu: 'Account menu',
     profile: 'Profile',
-    settings: 'Settings',
     logout: 'Log out',
     preferences: 'Preferences',
     theme: 'Theme',
@@ -4085,6 +4030,7 @@ const en = {
       organization: 'Organization',
       role: 'Role',
       expiresAt: 'Expires',
+      invitedBy: 'Invited by',
       accept: 'Accept invitation',
       accepted: 'Invitation accepted',
       acceptFailed: 'Failed to accept invitation',
@@ -4205,9 +4151,7 @@ const en = {
   publicForm: {
     submit: 'Submit',
     submitting: 'Submitting…',
-    submitAnother: 'Submit another response',
     poweredBy: 'Powered by ObjectStack',
-    secureNotice: 'Your information is transmitted securely and only used to respond to your request.',
     thankYouTitle: 'Thank you!',
     thankYouMessage: 'Your submission has been received successfully.',
     redirecting: 'Redirecting in {{seconds}} seconds…',
@@ -4215,19 +4159,12 @@ const en = {
     // pending (objectui#11071). `redirecting` above is the embeddable form's
     // countdown and carries a `{{seconds}}` hole this page has no value for.
     redirectPending: 'Redirecting…',
-    unavailableTitle: 'Form unavailable',
-    unavailableDescription:
-      'No public form is available at this URL. Make sure the underlying view has anonymous sharing enabled and matches this slug.',
-    tryDemo: 'Try the demo',
-    retry: 'Retry',
     loading: 'Loading form…',
     requiredHint: '* Required field',
     // The console form page's client-side refusal when required rows are empty
     // (objectui#11071). `{{fields}}` is the empty rows' labels joined with a
     // comma; the colon, its spacing and the order are the pack's.
     requiredFields: 'Required: {{fields}}',
-    consentLabelDefault: 'I agree to the privacy policy and consent to my data being processed for this request.',
-    consentLink: 'Privacy policy',
     consentRequired: 'Please accept the privacy policy to continue.',
     rateLimited: 'Please take a moment to review your answers before submitting.',
     redirectBlocked: 'Submission accepted, but the redirect URL was blocked for security.',
@@ -4632,7 +4569,7 @@ const en = {
       cancel: 'Cancel',
     },
     bound: {
-      title: 'Connected to ObjectStack Cloud',
+      title: 'Connected to ObjectOS Cloud',
       runtime: 'Runtime',
       organization: 'Organization',
       approvedBy: 'Approved by',
@@ -4735,13 +4672,13 @@ const en = {
       install: {
         dialogTitle: 'Install {{name}}',
         dialogDescCurrent: 'Install into this environment ({{host}}).',
-        dialogDescPicker: 'Choose an environment to install this app into. You need to be signed into ObjectStack Cloud.',
+        dialogDescPicker: 'Choose an environment to install this app into. You need to be signed into ObjectOS Cloud.',
         environment: 'Environment',
         environmentPlaceholder: 'Pick an environment',
         includeSampleData: 'Include sample data',
         noEnvs: 'No environments found in your active organization.',
         noPermission: 'You do not have permission to install apps in any environment. Only organization owners and admins can install — ask your organization admin.',
-        signInFirst: 'You need to sign into ObjectStack Cloud first. Click "Open on cloud" below.',
+        signInFirst: 'You need to sign into ObjectOS Cloud first. Click "Open on cloud" below.',
         success: 'Installed successfully. Open the environment to see the new app.',
         localSuccess: 'Installed v{{version}} to this runtime. "{{name}}" should now appear in the app switcher.',
         // objectui#12098 — the install answered `hotLoaded: false`: installed, and
@@ -4749,6 +4686,15 @@ const en = {
         // of it is served before the next restart.
         localLoadsAtRestart: 'Installed v{{version}} to this runtime. "{{name}}" loads when the runtime next restarts; it does not appear in the app switcher until then.',
         localManifestConflict: '{{message}}\nTip: a local app already owns this manifest_id. Remove it from objectstack.config.ts first.',
+        // ADR-0141 D2 — the install refusal DEPENDENCY_MISSING, one line per unmet entry.
+        dependencyMissing: {
+          heading: 'Install refused: a dependency this package declares is not satisfied in this environment, so nothing was installed.',
+          absent: 'Install {{dependency}} {{range}} first.',
+          outOfRange: 'Install {{dependency}} {{range}} first. Version {{installedVersion}} is installed.',
+          unreadableRange: '{{packageId}} declares {{dependency}} with the version range {{range}}, which cannot be read. Fix the range and republish the package.',
+          unreadableVersion: 'Install a release version of {{dependency}} inside {{range}}. The installed version {{installedVersion}} is not MAJOR.MINOR.PATCH.',
+          unreadableDeclaration: '{{packageId}} declares its dependencies in a shape install cannot read. Write them as a map from package ID to version range and republish the package.',
+        },
         localUnauthorized: 'Sign in to this runtime first, then try again.',
         localMarketplaceUnavailable: 'This runtime has no OS_CLOUD_URL configured, so the marketplace catalog is unreachable.',
         updateTo: 'Update → v{{version}}',
@@ -4779,7 +4725,7 @@ const en = {
       update: {
         dialogTitle: 'Update {{name}}',
         dialogDescCurrent: 'Update the copy installed in this environment ({{host}}).',
-        dialogDescPicker: 'Choose the environment whose installed copy to update. You need to be signed into ObjectStack Cloud.',
+        dialogDescPicker: 'Choose the environment whose installed copy to update. You need to be signed into ObjectOS Cloud.',
         majorNotice: 'This is a major version update (v{{fromMajor}} → v{{toMajor}}), which may include breaking changes.',
         releaseNotes: 'Read the v{{version}} release notes',
         success: 'Updated to v{{version}}.',
@@ -5491,6 +5437,18 @@ const en = {
     },
     map: {
       sourceUnresolved: 'This map’s data source could not be resolved',
+      // objectstack#25889 — the map view's own notices. Both style failures
+      // fill `{{reason}}` with MapLibre's message, or `styleFailedUnknownReason`
+      // when it gave none; the excluded count reads "Label: N" so no key needs
+      // a plural family.
+      invalidCoordinatesExcluded: 'Records excluded from the map for missing or invalid coordinates: {{excluded}}',
+      styleFailedConfigured: 'Map failed to load ({{reason}}). The records are listed below; check the map style URL set on this view.',
+      styleFailedDefault: 'Map failed to load ({{reason}}). The records are listed below; the public default map tiles could not be loaded here, so ask your administrator to set a map style for this view.',
+      styleFailedUnknownReason: 'the map style or tiles could not be loaded',
+      webgl2Unavailable: 'Map failed to load (this browser does not provide WebGL2, which the map needs). The records are listed below; turn on hardware acceleration or use a browser with WebGL2 to see the map.',
+      retry: 'Try the map again',
+      listLabel: 'Locations',
+      listEmpty: 'No locations to list.',
     },
     timeline: {
       sourceUnresolved: 'This timeline’s data source could not be resolved',

@@ -72,6 +72,7 @@ export interface AuthoringGateHost {
     readonly engine: ObjectStackProtocolImplementation['engine'];
     externalBindingSaveRefusal: ObjectStackProtocolImplementation['externalBindingSaveRefusal'];
     foldStoredCollection: ObjectStackProtocolImplementation['foldStoredCollection'];
+    hierarchyResolverMounted: ObjectStackProtocolImplementation['hierarchyResolverMounted'];
     isArtifactBacked: ObjectStackProtocolImplementation['isArtifactBacked'];
     orgWallEnforced: ObjectStackProtocolImplementation['orgWallEnforced'];
     refuseRestoredBodyTheSaveDoorRefuses: ObjectStackProtocolImplementation['refuseRestoredBodyTheSaveDoorRefuses'];
@@ -168,7 +169,7 @@ export async function runAuthoringGate(
 
 /** The body of `ObjectStackProtocolImplementation#assertRuntimeAuthoringRules`; the method's docblock there is its contract. */
 export async function assertRuntimeAuthoringRules(
-    this: Pick<AuthoringGateHost, 'authoringChannel' | 'engine' | 'foldStoredCollection' | 'orgWallEnforced' | 'resolveSduiManifest' | 'resolveWritePackageScope' | 'rlsMembershipResolverKeys' | 'tenancyPostureInForce'>,
+    this: Pick<AuthoringGateHost, 'authoringChannel' | 'engine' | 'foldStoredCollection' | 'hierarchyResolverMounted' | 'orgWallEnforced' | 'resolveSduiManifest' | 'resolveWritePackageScope' | 'rlsMembershipResolverKeys' | 'tenancyPostureInForce'>,
     evt: {
     type: string; name: string; state: 'draft' | 'active'; body: unknown; source?: string;
     /**
@@ -250,7 +251,21 @@ export async function assertRuntimeAuthoringRules(
     // proxy, which cost the ADR-0090 D11 object posture gate every
     // host-config deployment until #7674 finished the move.
     if (this.authoringChannel === 'package-author') return [];
-    if (evt.state !== 'active') return [];
+    if (evt.state !== 'active') {
+        // [#26188] D1: no rule gates a draft. The one finding a draft does hear
+        // is a hierarchy scope this runtime cannot enforce, as a warning on the
+        // 2xx; it needs no collection read, so the draft keeps paying none.
+        // A `migrate-stored` pass heals storage and hears nothing (see below).
+        if (evt.source === 'migrate-stored') return [];
+        const hierarchyResolverMounted = this.hierarchyResolverMounted();
+        return evaluateRuntimeAuthoringGate({
+            type: PLURAL_TO_SINGULAR[evt.type] ?? evt.type,
+            name: evt.name,
+            state: evt.state,
+            body: evt.body,
+            ...(hierarchyResolverMounted !== undefined ? { hierarchyResolverMounted } : {}),
+        }).advisories;
+    }
     // `os migrate meta --stored --apply` rewrites rows that ALREADY EXIST
     // into the current dialect. It is not an author publishing anything —
     // it is the platform healing its own storage — and #4463 D4 is explicit
@@ -372,6 +387,10 @@ export async function assertRuntimeAuthoringRules(
     // gate stays pure.
     const rlsMembershipResolverKeys = this.rlsMembershipResolverKeys();
 
+    // [#26188] Is a hierarchy resolver mounted — a host fact of the same kind,
+    // read here per publish and passed in so the gate stays pure.
+    const hierarchyResolverMounted = this.hierarchyResolverMounted();
+
     const verdict = evaluateRuntimeAuthoringGate({
         type: singular,
         name: evt.name,
@@ -398,6 +417,8 @@ export async function assertRuntimeAuthoringRules(
         // [#25234] The resolver's keys, read per publish; with them the
         // gate judges who owns each membership key.
         ...(rlsMembershipResolverKeys !== undefined ? { rlsMembershipResolverKeys } : {}),
+        // [#26188] With it the gate refuses a hierarchy scope no resolver enforces.
+        ...(hierarchyResolverMounted !== undefined ? { hierarchyResolverMounted } : {}),
     });
     if (verdict.error) throw verdict.error;
     return verdict.advisories;

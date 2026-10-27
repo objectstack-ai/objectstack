@@ -14,6 +14,8 @@ import { wizardDraftToAppSchema } from '@object-ui/types';
 import type { AppWizardDraft, ObjectSelection } from '@object-ui/types';
 import { useMetadata } from '@object-ui/react';
 import { useAdapter } from '@object-ui/react';
+// Declares the ObjectStackAdapter this page reads `getClient` off.
+import '../adapter-context-register';
 import { toast } from 'sonner';
 
 const DRAFT_STORAGE_KEY = 'objectui-app-wizard-draft';

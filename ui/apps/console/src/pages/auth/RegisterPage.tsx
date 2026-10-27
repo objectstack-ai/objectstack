@@ -23,6 +23,9 @@
  *    verification mail's link so it survives the inbox (objectui#10893).
  *  - Replays an `/oauth2/authorize` query string when the user landed
  *    here mid-SSO so the IdP can continue the flow post-signup.
+ *  - Draws `/login`'s footer under the form — the locale switch and the
+ *    privacy / terms links the server's auth config serves, from the same
+ *    reader (#25885): sign-up is where a visitor accepts the terms.
  */
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -44,6 +47,7 @@ import { followOauthAuthorize } from './followAuthorize';
 // implementation — objectui#4181. Behaviour here is unchanged.
 import { withConsoleBase, withConsoleBaseRootRelative } from '../../utils/consoleBase';
 import { ServerUnreachable } from './LoginPage';
+import { AuthFooter, readLegalLinks } from './AuthFooter';
 
 function isSafeRedirect(target: string | null): target is string {
   return !!target && target.startsWith('/') && !target.startsWith('//');
@@ -215,6 +219,7 @@ export function RegisterPage() {
   }
 
   const loginUrl = redirect ? `/login?redirect=${encodeURIComponent(redirect)}` : '/login';
+  const legalLinks = readLegalLinks(authConfig);
   // objectui#10893 — when the server gates sign-in on email verification, the
   // mail's link is the only road back, so it must carry `?redirect=` (e.g. the
   // invitation the user registered from). Only a safe in-app target is
@@ -257,10 +262,23 @@ export function RegisterPage() {
     <AuthLayout formWidth="md">
       <Card className="border-border/60 px-4 py-8 shadow-sm shadow-primary/5 backdrop-blur supports-[backdrop-filter]:bg-card/95">
       <RegisterForm
-        title={t('auth.register.title', { defaultValue: 'Create an account' })}
-        description={t('auth.register.description', {
-          defaultValue: 'Create your account to start building.',
-        })}
+        // #25886 — an invitee is told to register the invited address: the
+        // invitation is accepted only by the account that carries it.
+        title={
+          invitationRedirect
+            ? t('auth.register.invitationTitle', { defaultValue: 'Create an account to join' })
+            : t('auth.register.title', { defaultValue: 'Create an account' })
+        }
+        description={
+          invitationRedirect
+            ? t('auth.register.invitationDescription', {
+                defaultValue:
+                  'Register with the email address the invitation was sent to. The invitation can only be accepted with that address.',
+              })
+            : t('auth.register.description', {
+                defaultValue: 'Create your account to start building.',
+              })
+        }
         loginUrl={loginUrl}
         verificationCallbackURL={verificationCallbackURL}
         linkComponent={RouterLink}
@@ -305,6 +323,7 @@ export function RegisterPage() {
         }}
       />
       </Card>
+      <AuthFooter privacyUrl={legalLinks.privacyUrl} termsUrl={legalLinks.termsUrl} />
     </AuthLayout>
   );
 }

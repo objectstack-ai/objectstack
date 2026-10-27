@@ -30,8 +30,11 @@ describe('resolveFormViewLayout carries the authored modalSize (objectui#12803)'
     });
   });
 
-  it('the cases above are the whole spec enum', () => {
-    expect(FormViewSchema.shape.modalSize.unwrap().options).toEqual(['sm', 'default', 'lg', 'xl', 'full']);
+  it('every case above is a size the spec enum allows', () => {
+    // Membership, not the whole enum: a size the spec adds later is copied by
+    // the same pass-through and needs no edit here (#26238).
+    const allowed: readonly string[] = FormViewSchema.shape.modalSize.unwrap().options;
+    for (const size of ['sm', 'default', 'lg', 'xl', 'full']) expect(allowed).toContain(size);
   });
 
   it('copies modalSize beside sections, and from the legacy formViews.default', () => {

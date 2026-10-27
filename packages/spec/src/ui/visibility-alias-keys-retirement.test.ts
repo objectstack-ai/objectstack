@@ -250,6 +250,10 @@ describe('tree-scoped absence: nothing inside the declared radius still authors 
     'packages/spec/src/ui/component.test.ts',
     // The view write door's generic moved-key projection, modelled on the old fold.
     'packages/metadata-protocol/src/protocol.project-storable-view-body.test.ts',
+    // The SDUI parser tier's base-prop list (`SDUI_BASE_PROPS`) still accepts the
+    // deprecated `visibleOn` on every node; this pin gives each member a
+    // well-typed value (moved in from the renderer's copy by #25712).
+    'packages/sdui-parser/src/__tests__/base-props-one-list-11044.test.ts',
   ]);
   const EXCLUDED_PREFIXES = [
     // The D2 conversions' fixtures and the stored-row replay pins author the pre-18 shapes on purpose.

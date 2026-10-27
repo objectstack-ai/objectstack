@@ -44,7 +44,6 @@ function makeCtx(services: Record<string, unknown>) {
       info: (...a: unknown[]) => infos.push(a),
       warn: (...a: unknown[]) => warnings.push(a),
     },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any;
   return { ctx, warnings, infos };
 }

@@ -141,6 +141,68 @@
  * agreed to. It is printed loudly as an informational line so a reader is
  * never surprised by it. Widening it is a one-line maintainer decision.
  *
+ * ## The ENQUEUE leg — the maintainer's own enqueue IS the review (2026-10-26)
+ *
+ * The maintainer, on the phone, where the button is "Merge when ready" (an
+ * enqueue) and the queue guard then still wanted a separate Approve — verbatim
+ * and untranslated (#26066):
+ *
+ *   > 也就是说推送到我的手机上，以前都是需要我点一下核准，然后再点合并，以后我可以直接点合并是吗
+ *   > 大部分我还是希望入队，但是我想省掉 Approve
+ *
+ * and the logins behind that click: 「os-zhuang 或 hotlong」 — both already in
+ * `GOVERNED_APPROVERS`, which stays the single source and does not grow. So the
+ * `merge_group` leg passes a governed pull request iff EITHER an authorized
+ * account holds a latest-decisive APPROVED review (the 2026-09-04 predicate
+ * above, unchanged and read FIRST) OR the account that put this entry in the
+ * queue is an authorized one. Everything else stands: an enqueue by any other
+ * account still needs the approval, Tier S still lands on its record, a fork is
+ * still lifted by nothing, and the bypass-rules direct merge is still the other
+ * landing.
+ *
+ * ⭐ WHY THIS IS NOT THE ACTOR-FIELD ATTRIBUTION #11704 RETRACTED. That
+ * retraction refused to read "who pushed or merged" as a review. The ruling
+ * that founded this regime (2026-08-18, carried in `check-governed-merges.mjs`)
+ * already named the enqueue as the record — 「人工合并即人工审核:governed PR 的审核
+ * 记录 = 你按下合并/入队那个动作本身」 — and the identity concern behind the
+ * retraction is answered for this leg exactly as it is for the approval leg,
+ * normatively: ⛔ no agent seat enqueues or arms auto-merge on an unapproved
+ * governed PR, under ANY account (AGENTS.md Prime Directive #14). An entry an
+ * authorized account made can therefore only be the human's click, as an
+ * authorized approval can only be the human's review. With this leg that
+ * prohibition carries the same weight the approval-side one does: it is the
+ * ONLY thing between an agent seat holding an authorized account and a governed
+ * landing it cleared for itself, and the post-merge audit reads the enqueuer
+ * the way it reads the approver.
+ *
+ * ⭐ THE READING, MEASURED on this repository on 2026-10-26 (REST): the actor
+ * of the NEWEST `added_to_merge_queue` timeline event. "Merge when ready" with
+ * checks pending ARMS auto-merge and the platform enqueues later; the add
+ * event's actor is then the account that armed it (#26154, #26011). A direct
+ * enqueue leaves an add event and never sets `auto_merge` (#26166). The pull
+ * object's `auto_merge.enabled_by` therefore answers the first path only, is
+ * null on the second and after a merge, and is not read. The timeline route
+ * answers `X-Accepted-GitHub-Permissions: issues=read; pull_requests=read`, so
+ * the workflow's existing `pull-requests: read` covers it.
+ *
+ * ⛔ UNDETERMINED IS NEVER A PASS, and never a refusal of its own: no add event,
+ * an add with no actor, an unreadable or truncated timeline (the newest event is
+ * on the LAST page), and a newest queue event that is a REMOVAL — the entry this
+ * build judges not yet on the timeline, so the add before it is an entry that
+ * already left — all leave the approval leg to decide alone, on its own exit
+ * code. ⚖️ The accepted cost, stated where it is paid: as with an approval on
+ * any commit, a push made after the click and before the entry lands is not
+ * re-reviewed here; and the click counts for THAT entry only — a seat's
+ * re-enqueue after an ejection is a new entry by a seat account, which needs
+ * the approval or another such click.
+ *
+ * ⚖️ THE COST: one timeline read per governed pull request the approval did
+ * not satisfy — never for one it did (MONOTONE, read SECOND, and a Tier S
+ * record is consulted only after it). The SIZE leg follows the same predicate
+ * through the sibling's lift (`sizeLiftFrom`, which reads the enqueue reading
+ * handed to it beside the approval verdict); an oversized pull request the
+ * governed leg already read costs no second timeline read.
+ *
  * ## Ordering: the path test runs FIRST, and a clear diff costs zero API calls
  *
  * ⛔ Fail-open on an API error is WRONG in this file — this guard exists
@@ -429,12 +491,15 @@
  *
  *   0  CLEAR    — nothing governed in the diff (no API call was made), or every
  *                 governed PR carries an authorized APPROVED review (on ANY
- *                 commit — 2026-09-04), or this is the `pull_request`
+ *                 commit — 2026-09-04) or was enqueued by an authorized
+ *                 account (2026-10-26), or this is the `pull_request`
  *                 early-warning run.
  *   3  REFUSED  — governed, and at least one governed PR carries no authorized
  *                 APPROVED review (none at all, unauthorized account, dismissed
- *                 or superseded) — and, on the references tier, no review of
- *                 record on its current head either.
+ *                 or superseded) and was not enqueued by an authorized account
+ *                 (another account, or an UNDETERMINED enqueuer) — and, on the
+ *                 references tier, no review of record on its current head
+ *                 either.
  *                 Deliberately 3, the same code the sibling's `--test`
  *                 answers "GOVERNED" with, so the two tools agree on the number
  *                 that means "this diff is governed and unsatisfied".
@@ -456,7 +521,8 @@
  *                 `HUMAN_MERGE_LINE_THRESHOLD`, generated files included
  *                 (#19036, the 2026-09-18 ruling) — and NO authorized APPROVED
  *                 review lifts it (none, unauthorized, dismissed/superseded, or
- *                 the review list could not be read; 2026-09-27, #20153). The
+ *                 the review list could not be read; 2026-09-27, #20153), nor
+ *                 an enqueue by an authorized account (2026-10-26). The
  *                 SIZE leg, not the governed one; its remedies are an authorized
  *                 approval and then the owning seat's landing, or a human merge.
  *   9  REFUSED  — the SIZE leg could not READ a queued pull request's size (the
@@ -560,6 +626,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the per-row repository scope (ruling B2, 2026-10-13)': 14,
   '⭐ B′ with C: the record stands at the tier its FACE maps to, read off the committed paths': 8,
   'the CODEOWNERS mirror: every Tier H register row routes to every GOVERNED_APPROVERS account, nothing else is routed, and the file says so': 12,
+  '⭐ the 2026-10-26 ENQUEUE leg: an authorized enqueuer is the human review': 28,
+  '⭐ the cheap early-warning leg: commits and trees, toolchain on demand': 20,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -569,7 +637,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // Raised 23 → 24 with the queued pull-back battery: one battery, one row.
 // Raised 25 → 26 with the B′-with-C face battery (ruling record 6159870311): one battery, one row.
 // Raised 26 → 27 with the CODEOWNERS mirror battery: one battery, one row.
-const SELF_TEST_BATTERY_FLOOR = 27;
+// Raised 27 → 28 with the ENQUEUE leg battery (maintainer ruling 2026-10-26): one battery, one row.
+// Raised 28 → 29 with the cheap early-warning leg battery: one battery, one row.
+const SELF_TEST_BATTERY_FLOOR = 29;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1197,19 +1267,85 @@ export function unreadableApproval(reason) {
   return { state: 'unreadable', approvers: [], changesRequestedBy: [], reviewsRead: 0, reason: String(reason ?? 'unknown error') };
 }
 
+// ── the ENQUEUE leg (maintainer ruling 2026-10-26 — see the header) ────────
+
+/** The timeline events a queue entry starts and ends with. Measured on this repository, 2026-10-26. */
+export const ENQUEUE_EVENT = 'added_to_merge_queue';
+export const DEQUEUE_EVENT = 'removed_from_merge_queue';
+
+/**
+ * WHO put this pull request into the queue, read off its timeline. Pure; the
+ * array is expected in GitHub's chronological order, so last wins.
+ *
+ * The answer is the actor of the NEWEST `added_to_merge_queue` event, and only
+ * while no `removed_from_merge_queue` follows it. A newest queue event that is
+ * a REMOVAL means the timeline has not recorded the entry this build judges
+ * yet, and the add before it belongs to an entry that already left: reading
+ * its actor would carry an earlier enqueue (the maintainer's, say) onto a
+ * re-entry somebody else made. So that shape, no add at all, and an add whose
+ * actor names no login are all UNDETERMINED — never a reading.
+ */
+export function enqueuerFromTimeline(events) {
+  if (!Array.isArray(events)) return undeterminedEnqueue('the timeline was not a list of events');
+  let newest = null;
+  for (const event of events) {
+    const kind = String(event?.event ?? '');
+    if (kind === ENQUEUE_EVENT || kind === DEQUEUE_EVENT) newest = event;
+  }
+  if (newest === null) return undeterminedEnqueue(`the timeline carries no \`${ENQUEUE_EVENT}\` event`);
+  if (newest.event === DEQUEUE_EVENT) {
+    return undeterminedEnqueue(`the newest queue event on the timeline is \`${DEQUEUE_EVENT}\`, so the entry this build judges is not recorded there yet`);
+  }
+  const login = typeof newest.actor?.login === 'string' && newest.actor.login !== '' ? newest.actor.login : null;
+  if (login === null) return undeterminedEnqueue(`the newest \`${ENQUEUE_EVENT}\` event names no actor`);
+  return { state: 'read', login, at: typeof newest.created_at === 'string' ? newest.created_at : null };
+}
+
+/**
+ * The enqueue leg's verdict: was this queue entry made by an account in
+ * `GOVERNED_APPROVERS`? Pure. `authorized` satisfies a governed entry exactly
+ * as an authorized APPROVED review does; `unauthorized` and `undetermined`
+ * satisfy nothing and leave the approval leg to decide alone — an enqueuer
+ * that could not be read is never a pass, and never a refusal of its own.
+ */
+export function authorizedEnqueueVerdict(reading) {
+  if (reading?.state !== 'read') return undeterminedEnqueue(reading?.reason ?? 'no enqueuer reading was recorded');
+  return {
+    state: GOVERNED_APPROVERS.includes(reading.login) ? 'authorized' : 'unauthorized',
+    login: reading.login,
+    at: reading.at ?? null,
+  };
+}
+
+/** The enqueue reading a throw, an unusable timeline or a missing reader produces. Never a pass. */
+export function undeterminedEnqueue(reason) {
+  return { state: 'undetermined', login: null, at: null, reason: String(reason ?? 'unknown error') };
+}
+
 /**
  * Is this governed pull request SATISFIED?
  *
- * ⭐ The approval limb is first and is unchanged, which is what makes Tier S
- * MONOTONE: an entry the 2026-09-04 predicate already cleared is cleared here
- * by the same reading, at the same cost, in the same words. The tier limb can
- * only ADD a pass, and only on an entry whose `record` key exists — merge_group,
- * Tier S. ⛔ Never reorder these two: a record consulted ahead of an approval
- * would let a seat's own review displace a maintainer's.
+ * ⭐ The approval limb is first and is unchanged, which is what makes the two
+ * limbs after it MONOTONE: an entry the 2026-09-04 predicate already cleared is
+ * cleared here by the same reading, at the same cost, in the same words. The
+ * enqueue limb (2026-10-26) and the tier limb can only ADD a pass — the enqueue
+ * limb only on an entry whose `enqueue` key exists (merge_group), the tier limb
+ * only on one whose `record` key exists (merge_group, Tier S). ⛔ Never reorder
+ * them: a record consulted ahead of an approval or of the maintainer's own
+ * enqueue would let a seat's own review displace a maintainer's act.
  */
 export function entrySatisfied(entry) {
   if (entry?.approval?.state === 'approved') return true;
+  if (entry?.enqueue?.state === 'authorized') return true;
   return entry?.tier === TIER_S && entry?.record?.state === 'stands';
+}
+
+/** Which leg satisfied a satisfied entry, for the log and the size lift: `review`, `enqueue`, `record`, or null. Pure. */
+export function satisfiedBy(entry) {
+  if (entry?.approval?.state === 'approved') return 'review';
+  if (entry?.enqueue?.state === 'authorized') return 'enqueue';
+  if (entry?.tier === TIER_S && entry?.record?.state === 'stands') return 'record';
+  return null;
 }
 
 /**
@@ -1227,11 +1363,19 @@ export function entryUnreadable(entry) {
  * The verdict, as data. Pure — every branch of the decision is here, and the
  * renderer and the exit code both read it rather than re-deriving it.
  */
-export function guardVerdict({ event, repo, governed = [], unattributed = [], approvals = new Map(), records = new Map(), apiCalls = 0, headNotes = [], lifted = [] }) {
+export function guardVerdict({ event, repo, governed = [], unattributed = [], approvals = new Map(), enqueues = new Map(), records = new Map(), apiCalls = 0, headNotes = [], lifted = [] }) {
   assertGovernedRepo(repo, 'guardVerdict');
   const entries = governed.map((entry) => ({
     ...entry,
     approval: approvals.get(entry.pr) ?? unreadableApproval('no review reading was recorded for this pull request'),
+    // ⭐ The enqueue key EXISTS only on the queue leg (2026-10-26), and there
+    // only where the leg was consulted — an entry the authorized approval
+    // already cleared carries none, because none was read. The `pull_request`
+    // run has no queue entry at all, so its rendering stays free of the line by
+    // construction, the way the record key's does.
+    ...(event === EVENT_MERGE_GROUP && (enqueues.has(entry.pr) || approvals.get(entry.pr)?.state !== 'approved')
+      ? { enqueue: enqueues.get(entry.pr) ?? undeterminedEnqueue('no enqueuer reading was recorded for this pull request') }
+      : {}),
     // ⭐ The record key EXISTS only where the tier leg ran — merge_group, on a
     // Tier S entry. That is not a nicety: the `pull_request` leg's record
     // block is absent BY CONSTRUCTION, since the renderer can only print what
@@ -1387,6 +1531,15 @@ export function renderGuardVerdict(verdict) {
           '            re-review the push that moved the head; the post-merge audit is what reads that landing.',
         );
       }
+    } else if (entry.enqueue?.state === 'authorized') {
+      // ⭐ The ENQUEUE leg (2026-10-26): the log names the leg and the account,
+      // so the post-merge audit's "does the maintainer recognise every entry"
+      // reads the same fact this guard passed on.
+      lines.push(
+        `        ✅ enqueued by an authorized account: ${entry.enqueue.login} (\`${ENQUEUE_EVENT}\` at ${entry.enqueue.at ?? 'an undated event'}) —`,
+        '           the ENQUEUE leg (maintainer ruling 2026-10-26, 「大部分我还是希望入队，但是我想省掉 Approve」): the',
+        '           maintainer\'s own "Merge when ready" IS the human review, so no APPROVED review was owed.',
+      );
     } else if (entry.record?.state === 'stands') {
       lines.push(
         `        ✅ review of record on this head: comment ${entry.record.id ?? '(no readable id)'} ` +
@@ -1424,7 +1577,14 @@ export function renderGuardVerdict(verdict) {
     } else {
       lines.push(`        ⛔ NO approving review (${entry.approval.reviewsRead} review(s) read, none decisive-APPROVED)`);
     }
-    if (entry.record !== undefined && entry.record.state !== 'stands' && entry.approval.state !== 'approved') {
+    if (entry.enqueue !== undefined && !entrySatisfied(entry)) {
+      lines.push(
+        entry.enqueue.state === 'unauthorized'
+          ? `        ⛔ enqueued by ${entry.enqueue.login}, outside GOVERNED_APPROVERS — only an enqueue from an authorized account is the maintainer's hand (2026-10-26)`
+          : `        ⛔ enqueuer UNDETERMINED — ${entry.enqueue.reason}; never a pass, so the approval leg above decided alone`,
+      );
+    }
+    if (entry.record !== undefined && entry.record.state !== 'stands' && !entrySatisfied(entry)) {
       const served = entry.record.served ?? null;
       lines.push(
         ...(entry.record.state === 'absent'
@@ -1511,9 +1671,10 @@ export function renderGuardVerdict(verdict) {
         `      ✅ What a seat DOES do once an account in GOVERNED_APPROVERS (${GOVERNED_APPROVERS.join(', ')}) has APPROVED it,`,
         '         on ANY commit: the CLAIMING SEAT lands it — ruling C (#17971, maintainer 2026-09-13, verbatim',
         '         「C. approve 后不管后续改动都由席位落地:」), 「席位落地 = 过落地前检、清标、ready、',
-        '         auto-merge,踢出/变基同法。」 Unapproved, the maintainer\'s own direct merge (人工直合) is the',
-        '         only landing this pull request has, and it IS the Merge button\'s bypass-rules option —',
-        '         offered only while ruleset `main` configures a bypass actor (#19344).',
+        '         auto-merge,踢出/变基同法。」 Unapproved, its landings are the maintainer\'s own: "Merge when',
+        '         ready" from an account in GOVERNED_APPROVERS — that enqueue IS the review (2026-10-26) — or the',
+        '         direct merge (人工直合), the Merge button\'s bypass-rules option — offered only while ruleset',
+        '         `main` configures a bypass actor (#19344).',
       );
     }
     if (tierS.length > 0) {
@@ -1532,7 +1693,8 @@ export function renderGuardVerdict(verdict) {
     lines.push(
       '',
       '      If it IS enqueued anyway, the merge-queue run of this same check will REFUSE it unless every',
-      '      governed pull request above carries what its tier waits for by then — the approval, or the record.',
+      '      governed pull request above carries what its tier waits for by then — the approval, the maintainer\'s',
+      '      own enqueue from an account in GOVERNED_APPROVERS, or the record.',
     );
     return lines.join('\n');
   }
@@ -1542,7 +1704,23 @@ export function renderGuardVerdict(verdict) {
     // APPROVED review on EVERY governed pull request, so it is kept for exactly
     // the runs where that is true — byte-for-byte — and a clear reached through
     // the references tier says what actually satisfied it.
-    const viaRecord = verdict.entries.filter((e) => e.approval.state !== 'approved' && e.record?.state === 'stands');
+    const viaRecord = verdict.entries.filter((e) => satisfiedBy(e) === 'record');
+    // ⭐ The ENQUEUE clear (2026-10-26) is a third kind, and says so for the
+    // same reason: an entry the maintainer's own enqueue satisfied carries no
+    // APPROVED review, so the approval sentence below would be a false claim.
+    const viaEnqueue = verdict.entries.filter((e) => satisfiedBy(e) === 'enqueue');
+    const enqueueClear = [
+      `      The ENQUEUE leg satisfied ${viaEnqueue.length} of them: ${viaEnqueue.map((e) => `#${e.pr} (enqueued by ${e.enqueue.login})`).join(', ')} —`,
+      '      each was put in this queue by an account in GOVERNED_APPROVERS, and the maintainer\'s own "Merge when',
+      '      ready" IS the human review (maintainer ruling 2026-10-26, 「大部分我还是希望入队，但是我想省掉 Approve」).',
+      '      ⛔ No agent seat enqueues or arms auto-merge on an unapproved governed PR, under any account; the',
+      '      post-merge audit (`node scripts/pm/check-governed-merges.mjs`) lists these landings and the maintainer',
+      '      recognises each enqueuer, exactly as for an approver.',
+    ];
+    if (viaEnqueue.length > 0 && viaRecord.length === 0) {
+      lines.push('  ✅  CLEARED — and NOT every pull request below cleared on an approval.', ...enqueueClear);
+      return lines.join('\n');
+    }
     if (viaRecord.length > 0) {
       lines.push(
         '  ✅  CLEARED — and NOT every pull request below cleared on an approval. ⚖️ Tier S (#17950\'s references',
@@ -1554,6 +1732,7 @@ export function renderGuardVerdict(verdict) {
         '      precondition ① of the landing check and stays human. Every Tier H path still needs the authorized',
         '      approval; the post-merge audit (`node scripts/pm/check-governed-merges.mjs`) lists these landings',
         '      exactly as it always has, and a Tier S merge without a PASS record is that audit\'s finding.',
+        ...enqueueClear.slice(0, viaEnqueue.length > 0 ? enqueueClear.length : 0),
       );
       return lines.join('\n');
     }
@@ -1587,8 +1766,9 @@ export function renderGuardVerdict(verdict) {
     );
   } else {
     lines.push(
-      '      At least one governed pull request above carries NO authorized APPROVED review at all, and the',
-      '      merge queue would have been the entire review — the shape of #9550, #10580 and #9319.',
+      '      At least one governed pull request above carries NO authorized APPROVED review at all and was not',
+      '      enqueued from an account in GOVERNED_APPROVERS, so the merge queue would have been the entire',
+      '      review — the shape of #9550, #10580 and #9319.',
     );
   }
   lines.push(
@@ -1609,9 +1789,14 @@ export function renderGuardVerdict(verdict) {
     '           head sha, and a later push does not expire it (2026-09-04: 「只需要有人工批准记录就行，不需',
     '           要卡最新的提交。」); the authorized set is still the 2026-08-27 one (「os-zhuang hotlong 批准',
     '           算数」). ⛔ An agent seat never submits that approval, under any account — the post-merge audit',
-    '           reads the approver too. ⛔ Unapproved, the maintainer\'s own direct merge (人工直合) is the only',
-    '           landing this pull request has, and it IS the Merge button\'s bypass-rules option — offered only',
-    '           while ruleset `main` configures a bypass actor (#19344); the audit log records it.',
+    '           reads the approver too. Or the maintainer\'s own "Merge when ready" from an account in',
+    '           GOVERNED_APPROVERS: that enqueue IS the review (2026-10-26, 「大部分我还是希望入队，但是我想省掉',
+    '           Approve」), and the entry it makes clears here with no APPROVED review — ⛔ no seat enqueues or',
+    '           arms auto-merge under such an account in its place, and a seat\'s re-enqueue after an ejection is',
+    '           a new entry that needs the approval or another such click. ⛔ Otherwise, unapproved, the',
+    '           maintainer\'s own direct merge (人工直合) is the remaining landing, and it IS the',
+    '           Merge button\'s bypass-rules option — offered only while ruleset `main` configures a bypass actor',
+    '           (#19344); the audit log records it.',
   );
   if (verdict.entries.some((e) => e.record !== undefined)) {
     lines.push(
@@ -1649,12 +1834,13 @@ export function renderGuardVerdict(verdict) {
  * still governs everything the verdict is derived FROM; it never governed
  * things the verdict merely mentions.
  */
-export async function runGuard({ event, repo, rows, fetchReviews, fetchPull, fetchComments, loadRecognisers = loadRecordRecognisers, lifted = [], runGit = null, baseRef = null }) {
+export async function runGuard({ event, repo, rows, fetchReviews, fetchPull, fetchComments, fetchTimeline = null, loadRecognisers = loadRecordRecognisers, lifted = [], runGit = null, baseRef = null }) {
   const { governed, unattributed } = decomposeGovernedWork(rows, assertGovernedRepo(repo, 'runGuard'));
   if (governed.length === 0 && unattributed.length === 0) {
     return guardVerdict({ event, repo, governed, unattributed, apiCalls: 0, lifted });
   }
   const approvals = new Map();
+  const enqueues = new Map();
   const records = new Map();
   const heads = new Map();
   const pulls = new Map();
@@ -1697,6 +1883,26 @@ export async function runGuard({ event, repo, rows, fetchReviews, fetchPull, fet
     } catch (error) {
       approvals.set(entry.pr, unreadableApproval(String(error?.message ?? error).split('\n')[0]));
     }
+    // ── the ENQUEUE leg (2026-10-26): who put this entry in the queue ──────
+    //
+    // ⭐ SECOND, and only for what the approval did not satisfy — an unreadable
+    // review list included, since an authorized enqueue satisfies the entry on
+    // its own. So it is MONOTONE (it never reads, let alone decides, for an
+    // entry an authorized approval already cleared) and FREE on every such
+    // entry. A missing reader or a throw is UNDETERMINED: never a pass, and
+    // never a refusal of its own — the approval leg's verdict stands as it was.
+    if (event === EVENT_MERGE_GROUP && approvals.get(entry.pr)?.state !== 'approved') {
+      if (typeof fetchTimeline !== 'function') {
+        enqueues.set(entry.pr, undeterminedEnqueue('no timeline reader was supplied to the queue leg'));
+      } else {
+        try {
+          apiCalls += 1;
+          enqueues.set(entry.pr, authorizedEnqueueVerdict(enqueuerFromTimeline(await fetchTimeline(entry.pr))));
+        } catch (error) {
+          enqueues.set(entry.pr, undeterminedEnqueue(`the timeline could not be read (${String(error?.message ?? error).split('\n')[0]})`));
+        }
+      }
+    }
   }
   // ── Tier S: the record leg (#18020, generalised to the tier by #19133) ──
   //
@@ -1710,6 +1916,7 @@ export async function runGuard({ event, repo, rows, fetchReviews, fetchPull, fet
     for (const entry of governed) {
       if (entry.tier !== TIER_S) continue;
       if (approvals.get(entry.pr)?.state === 'approved') continue;
+      if (enqueues.get(entry.pr)?.state === 'authorized') continue;
       if (recognisers === null) {
         try {
           recognisers = await loadRecognisers();
@@ -1769,7 +1976,7 @@ export async function runGuard({ event, repo, rows, fetchReviews, fetchPull, fet
       records.set(entry.pr, recordVerdict({ pair, recognisers, cardNote }));
     }
   }
-  return guardVerdict({ event, repo, governed, unattributed, approvals, records, apiCalls, headNotes, lifted });
+  return guardVerdict({ event, repo, governed, unattributed, approvals, enqueues, records, apiCalls, headNotes, lifted });
 }
 
 // ── every queued pull request: the enumeration the SIZE leg reads ──────────
@@ -1894,7 +2101,7 @@ export function sizeGuardVerdict({ event, repo, pulls = [], readings = new Map()
  * count is printed and pinned. A throw is caught into an `unreadable` reading,
  * never a pass and never an escaping rejection.
  */
-export async function runSizeGuard({ event, repo, rows, namedPull = null, fetchPull, fetchReviews = null, approvals = new Map() }) {
+export async function runSizeGuard({ event, repo, rows, namedPull = null, fetchPull, fetchReviews = null, fetchTimeline = null, approvals = new Map() }) {
   assertGovernedRepo(repo, 'runSizeGuard');
   if (event !== EVENT_MERGE_GROUP) return sizeGuardVerdict({ event, repo });
   const pulls = queuedPullsInGroup(rows, namedPull);
@@ -1924,6 +2131,24 @@ export async function runSizeGuard({ event, repo, rows, namedPull = null, fetchP
               approval = unreadableApproval(String(error?.message ?? error).split('\n')[0]);
             }
           }
+        }
+        // ⭐ THE ENQUEUE LIFT (2026-10-26): no authorized approval, so who put
+        // this entry in the queue is asked — the reading the governed leg
+        // attached when it read this pull request, else one timeline read of
+        // this leg's own. Undetermined lifts nothing; the sibling decides.
+        if (approval.state !== 'approved' && approval.enqueue === undefined) {
+          let enqueue;
+          if (typeof fetchTimeline !== 'function') {
+            enqueue = undeterminedEnqueue('no timeline reader was supplied to the size leg');
+          } else {
+            try {
+              apiCalls += 1;
+              enqueue = authorizedEnqueueVerdict(enqueuerFromTimeline(await fetchTimeline(pr)));
+            } catch (error) {
+              enqueue = undeterminedEnqueue(`the timeline could not be read (${String(error?.message ?? error).split('\n')[0]})`);
+            }
+          }
+          approval = { ...approval, enqueue };
         }
         reading = sizeReading(pr, pull?.size ?? null, repo, approval);
       }
@@ -1972,9 +2197,10 @@ export function remedyPathVerdict({ remedy, ruleset }) {
  * threshold — on the clear path as much as on the refusal, so a queue log
  * always shows the number a landing was judged on. A lifted entry prints WHAT
  * LIFTED it — approver, commit, and the ruling's card (2026-09-27). The refusal
- * names the limb (SIZE), quotes both rulings untranslated, and names the TWO
+ * names the limb (SIZE), quotes the rulings untranslated, and names the
  * landings: an authorized APPROVED review and then the owning seat's landing,
- * or a human merge. ⛔ It does not advise making the diff smaller — a guard
+ * the maintainer's own enqueue from an authorized account (2026-10-26), or a
+ * human merge. ⛔ It does not advise making the diff smaller — a guard
  * that suggests how to get under its own line is a guard that gets routed
  * around.
  */
@@ -1988,11 +2214,18 @@ export function renderSizeVerdict(verdict) {
   const numbers = (e) => `${e.verdict.size.changedLines} changed line(s) (+${e.verdict.size.additions} / -${e.verdict.size.deletions})`;
   // Why an oversized entry was NOT lifted, off the approval verdict this leg
   // read (or reused): the four non-lift cases of the 2026-09-27 ruling, named.
+  // ...and the enqueue reading beside it (2026-10-26), named the same way.
+  const enqueueClause = (enqueue) =>
+    enqueue?.state === 'unauthorized'
+      ? `; enqueued by ${enqueue.login}, outside GOVERNED_APPROVERS — that enqueue is not the maintainer's hand`
+      : enqueue?.state === 'undetermined'
+        ? `; enqueuer UNDETERMINED (${enqueue.reason}) — never a lift`
+        : '';
   const noLift = (approval) => {
     if (!approval) return 'no review reading was recorded for this pull request';
-    if (approval.state === 'unreadable') return `the review list could NOT be read (${approval.reason ?? 'unknown error'}) — fail closed, no lift`;
+    if (approval.state === 'unreadable') return `the review list could NOT be read (${approval.reason ?? 'unknown error'}) — fail closed, no lift${enqueueClause(approval.enqueue)}`;
     const unauthorized = (approval.unauthorizedApprovers ?? []).length > 0 ? `; APPROVED only by account(s) outside GOVERNED_APPROVERS: ${approval.unauthorizedApprovers.join(', ')} — never counts` : '';
-    return `no authorized APPROVED review on record (${approval.reviewsRead ?? 0} review(s) read; authorized: ${GOVERNED_APPROVERS.join(', ')}; dismissed and superseded approvals never count)${unauthorized}`;
+    return `no authorized APPROVED review on record (${approval.reviewsRead ?? 0} review(s) read; authorized: ${GOVERNED_APPROVERS.join(', ')}; dismissed and superseded approvals never count)${unauthorized}${enqueueClause(approval.enqueue)}`;
   };
   for (const entry of verdict.entries) {
     if (entry.state === 'oversized') {
@@ -2000,7 +2233,16 @@ export function renderSizeVerdict(verdict) {
         '',
         `  #${entry.pr} — ⛔ ${numbers(entry)} EXCEEDS the human-merge line ${entry.verdict.size.threshold}`,
         '        (additions + deletions, generated files INCLUDED) — and nothing lifts it: ' + noLift(entry.approval) + '.',
-        '        This pull request lands by an authorized APPROVED review and then the OWNING seat, or by a HUMAN MERGE.',
+        '        This pull request lands by an authorized APPROVED review and then the OWNING seat, by the maintainer\'s',
+        '        own enqueue from an account in GOVERNED_APPROVERS, or by a HUMAN MERGE.',
+        `        read from: ${entry.verdict.size.source ?? '(source not recorded)'}`,
+      );
+    } else if (entry.state === 'lifted' && entry.verdict.size.lifted?.enqueuedBy) {
+      lines.push(
+        '',
+        `  #${entry.pr} — ✅ ${numbers(entry)} EXCEEDS the human-merge line ${entry.verdict.size.threshold}, LIFTED by the maintainer's own`,
+        `        enqueue from an authorized account: ${renderLiftApprovals(entry.verdict.size.lifted)} — ${entry.verdict.size.lifted.ruling},`,
+        '        verbatim 「大部分我还是希望入队，但是我想省掉 Approve」 — the enqueue IS the human review; no APPROVED review was owed.',
         `        read from: ${entry.verdict.size.source ?? '(source not recorded)'}`,
       );
     } else if (entry.state === 'lifted') {
@@ -2022,7 +2264,8 @@ export function renderSizeVerdict(verdict) {
     lines.push(
       '',
       `  ✅  CLEAR — no queued pull request is over the human-merge line (${HUMAN_MERGE_LINE_THRESHOLD} changed lines,`,
-      '      additions + deletions, generated files INCLUDED) without an authorized APPROVED review lifting it. The number',
+      '      additions + deletions, generated files INCLUDED) without an authorized APPROVED review, or an enqueue from an',
+      '      authorized account, lifting it. The number',
       '      is read off the pull object, per queued pull request; the threshold, the comparison and the lift are',
       '      scripts/pm/check-governed-merges.mjs\'s, imported.',
     );
@@ -2050,11 +2293,13 @@ export function renderSizeVerdict(verdict) {
       '      At least one queued pull request above is over the human-merge line — the SIZE limb, whatever',
       '      paths it touches (additions + deletions, generated files INCLUDED: no regen family, docs build or',
       '      revert is carved out, because the case that prompted the ruling, PR #18971, was exactly that) —',
-      '      and no authorized APPROVED review lifts it. The maintainer\'s rulings (verbatim, untranslated):',
+      '      and neither an authorized APPROVED review nor an enqueue from an authorized account lifts it. The',
+      '      maintainer\'s rulings (verbatim, untranslated):',
       '',
       '        2026-09-18 「修改代码量超过某个行数（比如5000）就应该人工审核」',
       '        2026-09-27 「所以阈值写死成 5000 行 , 维护者已经批准了就是可以合并。」 (objectstack#20153)',
       '        2026-10-09 「这种大额改动就应该人工审核,我还是建议5000行的人工审核门槛降到 3000,立卡。」',
+      '        2026-10-26 「大部分我还是希望入队，但是我想省掉 Approve」',
       '',
       '      landed as `HUMAN_MERGE_LINE_THRESHOLD` and the lift in scripts/pm/check-governed-merges.mjs, which',
       '      this leg IMPORTS — the number, the comparison, what counts and what lifts are that file\'s, never',
@@ -2071,7 +2316,7 @@ export function renderSizeVerdict(verdict) {
     '           it back to DRAFT, which disarms it so it does not re-enter once removed; then confirm from the',
     '           remote that it is in neither the queue nor `origin/main` — the pull-back of AGENTS.md Prime',
     '           Directive #14. Out of the queue and in draft is the SAFE state.',
-    '        2. Then ONE of the two landings — the same terminal a Tier H governed diff has: ACCEPT on the card,',
+    '        2. Then ONE of the landings — the same terminal a Tier H governed diff has: ACCEPT on the card,',
     '           `needs-user-decision` on the PR, a final 维护者速读, review requested from GOVERNED_APPROVERS',
     `           (${GOVERNED_APPROVERS.join(', ')}); and then EITHER`,
     '           (a) an APPROVED review by one of those accounts, on ANY commit (2026-09-27, objectstack#20153) —',
@@ -2082,7 +2327,11 @@ export function renderSizeVerdict(verdict) {
     '               only while ruleset `main` configures a bypass actor — ⛔ NOT a second Merge button: `main`',
     '               mandates the queue and requires this check, so with none configured every re-enqueue comes',
     '               back here (#19344). The audit log records the bypass and `check-governed-merges` lists such',
-    '               a landing on size, as it lists a lifted one.',
+    '               a landing on size, as it lists a lifted one;',
+    '           (c) OR the maintainer\'s own "Merge when ready" from an account in GOVERNED_APPROVERS (2026-10-26):',
+    '               that enqueue IS the human review, and this check passes on it with no APPROVED review. ⛔ No seat',
+    '               enqueues or arms auto-merge under such an account in its place; a seat\'s own re-enqueue after an',
+    '               ejection is a new entry and needs (a) or another such click.',
     '',
     '      When the governed-surface leg above ALSO refused, both limbs fired on this group: the exit code is',
     '      the governed leg\'s (precedence governed > size, pinned) and this limb stands regardless.',
@@ -2154,6 +2403,19 @@ export function enumerateRows(root, baseSha, headSha, fallbackPull = null) {
 }
 
 /**
+ * Does any row touch a register path the lift would RECOMPUTE? Pure, and THE
+ * one predicate for it: `liftGeneratedExceptions` consults the recompute iff
+ * this answers true, and the `pull_request` leg acquires the generator
+ * toolchain iff `--toolchain-needed` answers it true — so the workflow can
+ * never skip an install the lift was going to need. Membership is the
+ * register's own `generatedExceptionFor`; ⛔ never a path list restated here or
+ * in the YAML.
+ */
+export function toolchainNeededFor(rows) {
+  return (Array.isArray(rows) ? rows : []).some((row) => (row?.paths ?? []).some((p) => generatedExceptionFor(p) !== null));
+}
+
+/**
  * Drop a registered generated-artifact path from a row's path list when — and
  * only when — this build's own recomputation certifies it as a pure
  * regeneration. Everything else about the row is untouched, so a row that never
@@ -2182,7 +2444,7 @@ export function enumerateRows(root, baseSha, headSha, fallbackPull = null) {
 export async function liftGeneratedExceptions(root, baseSha, rows, notes, recompute = recomputeProvenanceFor, repo = undefined) {
   assertGovernedRepo(repo, 'liftGeneratedExceptions');
   const registered = (row) => row.paths.filter((p) => generatedExceptionFor(p) !== null);
-  if (!rows.some((row) => registered(row).length > 0)) return rows;
+  if (!toolchainNeededFor(rows)) return rows;
   const cache = new Map();
   const out = [];
   for (const row of rows) {
@@ -2270,6 +2532,10 @@ export function installStepAudit(source) {
     selfTestIndex === -1 || judgmentIndex === -1 ? [] : blocks.filter((_b, i) => i > selfTestIndex && i < judgmentIndex);
   return {
     steps: blocks.map(nameOf),
+    // Each step's own YAML with comment lines dropped: a comment above a step
+    // belongs to the block BEFORE it, so a pin on `if:` or `with:` text must
+    // never read prose.
+    stepBodies: blocks.map((b) => ({ name: nameOf(b), body: b.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n') })),
     selfTestIndex,
     judgmentIndex,
     installIndex,
@@ -2284,7 +2550,7 @@ export function installStepAudit(source) {
   };
 }
 
-// ── the GitHub reads (PR head + reviews — the only API surface) ─────────────
+// ── the GitHub reads (PR head, reviews, threads, timeline — the only API surface) ─
 
 function apiHeaders(token) {
   return {
@@ -2397,37 +2663,76 @@ export function makeCommentReader({ apiUrl, slug, token, fetchImpl = fetch, perP
   };
 }
 
+/**
+ * The pull request's TIMELINE, paginated — where the enqueue leg reads who put
+ * the entry in the queue (2026-10-26).
+ *
+ * Scope, measured the way the comment reader's was: `GET
+ * /repos/{o}/{r}/issues/{n}/timeline` answers `X-Accepted-GitHub-Permissions:
+ * issues=read; pull_requests=read` — alternative sets — so the workflow's
+ * existing `pull-requests: read` covers it and this leg widens NO scope.
+ * Measured 2026-10-26 against the live API on this repository.
+ *
+ * ⚠️ Truncation is fatal here in a way it is not for a review list: the
+ * timeline is oldest-first, so the event this leg reads is on the LAST page. A
+ * list cut at `maxPages` would answer an older enqueue as the newest, so it
+ * throws instead — the caller turns that into UNDETERMINED, never a pass.
+ */
+export function makeTimelineReader({ apiUrl, slug, token, fetchImpl = fetch, perPage = 100, maxPages = 10 }) {
+  return async function fetchTimeline(pull) {
+    const all = [];
+    for (let page = 1; page <= maxPages; page += 1) {
+      const url = `${apiUrl}/repos/${slug}/issues/${pull}/timeline?per_page=${perPage}&page=${page}`;
+      const res = await fetchImpl(url, { headers: apiHeaders(token) });
+      if (!res.ok) throw new Error(`GET /repos/${slug}/issues/${pull}/timeline answered HTTP ${res.status}`);
+      const batch = await res.json();
+      if (!Array.isArray(batch)) throw new Error(`the timeline endpoint answered a non-array body for #${pull}`);
+      all.push(...batch);
+      if (batch.length < perPage) return all;
+    }
+    throw new Error(`#${pull} has more than ${perPage * maxPages} timeline events — the newest is on a page this read never reached`);
+  };
+}
+
 // ── CLI ─────────────────────────────────────────────────────────────────────
 
-async function main() {
-  const env = process.env;
+/**
+ * The event, the repository and the diff's first-parent rows, read ONE way for
+ * both questions the CLI answers — the live judgment and `--toolchain-needed` —
+ * so the two can never disagree about which paths a diff touches. Synchronous:
+ * every read here is the event file or the local git object store, and none of
+ * them needs a file's CONTENT (commits and trees only), which is what lets the
+ * `pull_request` leg run on a blobless, sparse checkout. Returns
+ * `{ ok: true, context, where, mergeBase, rows }`, or `{ ok: false, message }`
+ * carrying the full ⛔ text the caller prints.
+ */
+function readEventDiff(env) {
   const eventName = env.GITHUB_EVENT_NAME;
   let payload;
   try {
     payload = JSON.parse(readFileSync(env.GITHUB_EVENT_PATH ?? '', 'utf8'));
   } catch (error) {
-    console.error(
-      `⛔ ${CHECK_CONTEXT_NAME}: could not read GITHUB_EVENT_PATH (${String(error?.message ?? error).split('\n')[0]}).\n` +
+    return {
+      ok: false,
+      message:
+        `⛔ ${CHECK_CONTEXT_NAME}: could not read GITHUB_EVENT_PATH (${String(error?.message ?? error).split('\n')[0]}).\n` +
         '   This guard reads the workflow event payload and nothing else; without it there is no diff to judge,\n' +
         '   and "could not look" must never exit 0 here.',
-    );
-    return EXIT_CANNOT_RUN;
+    };
   }
 
   const context = resolveEventContext({ eventName, payload });
-  if (!context.ok) {
-    console.error(`⛔ ${CHECK_CONTEXT_NAME}: ${context.reason}.`);
-    return EXIT_CANNOT_RUN;
-  }
+  if (!context.ok) return { ok: false, message: `⛔ ${CHECK_CONTEXT_NAME}: ${context.reason}.` };
 
   for (const rev of [context.baseSha, context.headSha]) {
     if (!hasRev(repoRoot, rev)) {
-      console.error(
-        `⛔ ${CHECK_CONTEXT_NAME}: ${rev} is not in this checkout, so the diff cannot be read.\n` +
+      return {
+        ok: false,
+        message:
+          `⛔ ${CHECK_CONTEXT_NAME}: ${rev} is not in this checkout, so the diff cannot be read.\n` +
           '   The job must check out with `fetch-depth: 0`; a truncated history answers a governed-surface\n' +
           '   question with silence, and silence reads as compliance (#9902).',
-      );
-      return EXIT_CANNOT_RUN;
+      };
     }
   }
 
@@ -2435,18 +2740,66 @@ async function main() {
   // read, because the lift step below already asks the register a scoped
   // question. A repository the register does not know is a refusal here.
   const where = guardRepository(env);
-  if (where.error) {
-    console.error(`⛔ ${CHECK_CONTEXT_NAME}: ${where.error}`);
+  if (where.error) return { ok: false, message: `⛔ ${CHECK_CONTEXT_NAME}: ${where.error}` };
+
+  try {
+    const mergeBase = git(repoRoot, ['merge-base', context.baseSha, context.headSha]).trim();
+    const rows = enumerateRows(repoRoot, mergeBase, context.headSha, context.namedPull);
+    return { ok: true, context, where, mergeBase, rows };
+  } catch (error) {
+    return { ok: false, message: `⛔ ${CHECK_CONTEXT_NAME}: could not read the diff (${String(error?.message ?? error).split('\n')[0]}).` };
+  }
+}
+
+/**
+ * `--toolchain-needed`: the `pull_request` leg's install gate, as a pure
+ * decision over what `readEventDiff` read. It decides an INSTALL, never a
+ * verdict, so the CLI always exits 0 on it. `false` only when the diff was READ
+ * on the `pull_request` leg and touches no register path the lift recomputes
+ * (`toolchainNeededFor`); every other answer is `true` — the queue leg always
+ * installs (the workflow does not even ask there), and a diff that could not be
+ * read keeps the install. The two errors are not symmetric: a wrong `true`
+ * costs the install time this gate exists to save, a wrong `false` would print
+ * a forecast of a refusal the queue will not make.
+ */
+export const TOOLCHAIN_NEEDED_FLAG = '--toolchain-needed';
+
+export function toolchainNeededAnswer({ eventName, read }) {
+  if (eventName !== EVENT_PULL_REQUEST) {
+    return { needed: true, why: `the ${eventName ?? '(none)'} leg always installs; only the ${EVENT_PULL_REQUEST} leg asks` };
+  }
+  if (!read?.ok) {
+    return { needed: true, why: `the diff could not be read, so the install is kept — ${String(read?.message ?? '(no reading)').split('\n')[0]}` };
+  }
+  if (toolchainNeededFor(read.rows)) {
+    const hits = [...new Set(read.rows.flatMap((r) => r.paths).filter((p) => generatedExceptionFor(p) !== null))];
+    return { needed: true, why: `the diff touches ${hits.length} register path(s) the lift recomputes: ${hits.join(', ')}` };
+  }
+  return { needed: false, why: `${read.rows.length} commit(s) in range touch no register path the lift recomputes` };
+}
+
+async function main() {
+  const env = process.env;
+  if (process.argv.includes(TOOLCHAIN_NEEDED_FLAG)) {
+    const { needed, why } = toolchainNeededAnswer({ eventName: env.GITHUB_EVENT_NAME, read: readEventDiff(env) });
+    // stdout carries ONLY the output line the workflow appends to $GITHUB_OUTPUT.
+    console.error(`${CHECK_CONTEXT_NAME} — generator toolchain ${needed ? 'NEEDED' : 'not needed'}: ${why}`);
+    console.log(`needed=${needed}`);
+    return EXIT_CLEAR;
+  }
+
+  const read = readEventDiff(env);
+  if (!read.ok) {
+    console.error(read.message);
     return EXIT_CANNOT_RUN;
   }
+  const { context, where, mergeBase } = read;
   const repo = where.repo;
 
   const notes = [];
-  let rows;
+  let rows = read.rows;
   let lifted = [];
   try {
-    const mergeBase = git(repoRoot, ['merge-base', context.baseSha, context.headSha]).trim();
-    rows = enumerateRows(repoRoot, mergeBase, context.headSha, context.namedPull);
     const beforeLift = rows;
     rows = await liftGeneratedExceptions(repoRoot, mergeBase, rows, notes, recomputeProvenanceFor, repo);
     lifted = liftedPathsBetween(beforeLift, rows);
@@ -2463,9 +2816,10 @@ async function main() {
   const fetchReviews = makeReviewReader(reader);
   const fetchPull = makePullReader(reader);
   const fetchComments = makeCommentReader(reader);
+  const fetchTimeline = makeTimelineReader(reader);
 
   const runGit = (args, input) => git(repoRoot, args, input);
-  const verdict = await runGuard({ event: context.event, repo, rows, fetchReviews, fetchPull, fetchComments, lifted, runGit, baseRef: context.baseSha ?? null });
+  const verdict = await runGuard({ event: context.event, repo, rows, fetchReviews, fetchPull, fetchComments, fetchTimeline, lifted, runGit, baseRef: context.baseSha ?? null });
   // The SIZE leg (#19036): every queued pull request, through the same pull
   // reader the governed leg reads heads with. `merge_group` only, '' on the
   // other leg, so the `pull_request` output is byte-identical to what it was.
@@ -2479,7 +2833,10 @@ async function main() {
     namedPull: context.namedPull,
     fetchPull,
     fetchReviews,
-    approvals: new Map(verdict.entries.map((e) => [e.pr, e.approval])),
+    fetchTimeline,
+    // The enqueue reading rides WITH the approval verdict it was read beside,
+    // so the size lift reads both off one object and never re-reads either.
+    approvals: new Map(verdict.entries.map((e) => [e.pr, e.enqueue === undefined ? e.approval : { ...e.approval, enqueue: e.enqueue }])),
   });
   const sizeBlock = renderSizeVerdict(size);
   const report = [
@@ -3677,8 +4034,9 @@ export async function selfTest() {
     text18971,
   );
   assert(
-    'and-an-oversized-entry-with-NO-authorized-approval-says-so-and-names-both-landings-on-its-own-line',
-    /and nothing lifts it: no authorized APPROVED review on record \(0 review\(s\) read/.test(text18971) && /lands by an authorized APPROVED review and then the OWNING seat, or by a HUMAN MERGE/.test(text18971),
+    'and-an-oversized-entry-with-NO-authorized-approval-says-so-and-names-every-landing-on-its-own-line',
+    /and nothing lifts it: no authorized APPROVED review on record \(0 review\(s\) read/.test(text18971) &&
+      /lands by an authorized APPROVED review and then the OWNING seat, by the maintainer's\s+own enqueue from an account in GOVERNED_APPROVERS, or by a HUMAN MERGE/.test(text18971),
     text18971,
   );
   assert('and-the-read-source-is-printed-so-a-log-shows-where-the-number-came-from', text18971.includes('read from: GET /repos/objectstack-ai/objectstack/pulls/18971'));
@@ -4037,6 +4395,106 @@ export async function selfTest() {
     );
   } catch (error) {
     assert('the-workflow-file-is-readable', false, String(error?.message ?? error).split('\n')[0]);
+  }
+
+  // ── ⭐ the cheap early-warning leg: commits and trees, toolchain on demand ─
+  //
+  // The `pull_request` leg re-fires on `ready_for_review`, which is the moment
+  // an approver taps merge, and a required context `in_progress` refuses that
+  // merge for the run's whole wall. So that leg checks out without blobs and
+  // installs only when the lift would recompute. Two halves are pinned: the
+  // ONE predicate the install gate and the lift share, and the YAML that wires
+  // it — a gate spelled `== 'true'` would skip the install whenever the
+  // question failed, and a queue-leg checkout that lost its tree would starve
+  // the refusing leg's recompute.
+  battery('⭐ the cheap early-warning leg: commits and trees, toolchain on demand');
+  {
+    const SAMPLES = ['skills/objectstack-ui/references/_index.md', 'skills/objectstack-ui/references/react-blocks.md'];
+    assert(
+      'the-samples-cover-every-register-row-so-a-new-row-without-one-reds-here',
+      GENERATED_SURFACE_EXCEPTIONS.every((e) => SAMPLES.some((p) => generatedExceptionFor(p) === e)),
+      JSON.stringify(GENERATED_SURFACE_EXCEPTIONS.map((e) => e.id)),
+    );
+    for (const p of SAMPLES) {
+      assert(`a-register-path-needs-the-toolchain: ${p}`, toolchainNeededFor([row(1, ['AGENTS.md', p])]) === true);
+    }
+    assert('no-rows-need-no-toolchain', toolchainNeededFor([]) === false && toolchainNeededFor(undefined) === false);
+    assert(
+      'a-governed-diff-with-no-register-path-needs-no-toolchain',
+      toolchainNeededFor([row(1, ['.github/workflows/governed-surface-guard.yml', 'AGENTS.md', 'skills/objectstack-ui/SKILL.md'])]) === false,
+    );
+    assert('a-register-path-in-a-LATER-row-still-needs-it', toolchainNeededFor([row(1, ['AGENTS.md']), row(2, [SAMPLES[0]])]) === true);
+    // The lift consults the recompute on exactly the diffs the gate installs
+    // for — measured with a spy, not read off the source.
+    let recomputeCalls = 0;
+    const countingRecompute = async (_root, hits) => {
+      recomputeCalls += 1;
+      return new Map([...hits.values()].flat().map((p) => [p, { pureRegeneration: false, reason: 'spy' }]));
+    };
+    await liftGeneratedExceptions('/w', 'base', [row(1, ['AGENTS.md'])], [], countingRecompute, REPO);
+    assert('⭐ the-lift-skips-the-recompute-exactly-where-the-gate-skips-the-install', recomputeCalls === 0, `${recomputeCalls} call(s)`);
+    await liftGeneratedExceptions('/w', 'base', [row(1, ['AGENTS.md', SAMPLES[0]])], [], countingRecompute, REPO);
+    assert('⭐ and-runs-it-exactly-where-the-gate-installs', recomputeCalls === 1, `${recomputeCalls} call(s)`);
+
+    const clearRead = { ok: true, rows: [row(1, ['AGENTS.md'])] };
+    assert('the-queue-leg-always-installs', toolchainNeededAnswer({ eventName: EVENT_MERGE_GROUP, read: clearRead }).needed === true);
+    assert('an-unknown-event-installs', toolchainNeededAnswer({ eventName: undefined, read: clearRead }).needed === true);
+    const unread = toolchainNeededAnswer({ eventName: EVENT_PULL_REQUEST, read: { ok: false, message: '⛔ x: could not read the diff (boom).\n   more' } });
+    assert('an-unreadable-diff-KEEPS-the-install-and-says-why', unread.needed === true && /could not be read/.test(unread.why) && !unread.why.includes('\n'), unread.why);
+    assert('a-read-diff-with-no-register-path-skips-it', toolchainNeededAnswer({ eventName: EVENT_PULL_REQUEST, read: clearRead }).needed === false);
+    const hit = toolchainNeededAnswer({ eventName: EVENT_PULL_REQUEST, read: { ok: true, rows: [row(1, ['AGENTS.md', SAMPLES[1]])] } });
+    assert('a-read-diff-with-a-register-path-installs-and-names-it', hit.needed === true && hit.why.includes(SAMPLES[1]), hit.why);
+
+    let wf = '';
+    try {
+      wf = readFileSync(join(repoRoot, '.github', 'workflows', CHECK_WORKFLOW), 'utf8');
+    } catch (error) {
+      assert('the-workflow-file-is-readable-for-the-cheap-leg-pins', false, String(error?.message ?? error).split('\n')[0]);
+    }
+    const { stepBodies } = installStepAudit(wf);
+    const checkouts = stepBodies.filter((s) => /^\s*uses:\s*actions\/checkout@/m.test(s.body));
+    assert('exactly-two-checkout-steps-one-per-leg', checkouts.length === 2, JSON.stringify(checkouts.map((s) => s.name)));
+    const queueCheckout = checkouts.find((s) => /^\s*if:\s*github\.event_name != 'pull_request'\s*$/m.test(s.body));
+    const prCheckout = checkouts.find((s) => /^\s*if:\s*github\.event_name == 'pull_request'\s*$/m.test(s.body));
+    assert(
+      'the-queue-leg-checkout-is-the-full-tree-at-full-history-unchanged',
+      queueCheckout !== undefined && /^\s*fetch-depth:\s*0\s*$/m.test(queueCheckout.body) && !/^\s*(filter|sparse-checkout):/m.test(queueCheckout.body),
+      queueCheckout?.body ?? '(no queue-leg checkout)',
+    );
+    assert(
+      'the-pull_request-leg-checkout-is-full-history-blobless-and-sparse-on-scripts-and-.github',
+      prCheckout !== undefined &&
+        /^\s*fetch-depth:\s*0\s*$/m.test(prCheckout.body) &&
+        /^\s*filter:\s*blob:none\s*$/m.test(prCheckout.body) &&
+        /sparse-checkout:\s*\|\n\s+scripts\n\s+\.github\s*$/m.test(prCheckout.body),
+      prCheckout?.body ?? '(no pull_request-leg checkout)',
+    );
+    const question = stepBodies.find((s) => /--toolchain-needed\b/.test(s.body));
+    assert(
+      'the-toolchain-question-runs-on-the-pull_request-leg-only-and-feeds-GITHUB_OUTPUT',
+      question !== undefined &&
+        /^\s*id:\s*toolchain\s*$/m.test(question.body) &&
+        /^\s*if:\s*github\.event_name == 'pull_request'\s*$/m.test(question.body) &&
+        /run: node scripts\/pm\/check-governed-queue-guard\.mjs --toolchain-needed >> "\$GITHUB_OUTPUT"\s*$/m.test(question.body),
+      question?.body ?? '(no toolchain question step)',
+    );
+    const gate = "steps.toolchain.outputs.needed != 'false'";
+    const installChain = stepBodies.filter((s) => /setup-pnpm|pnpm store path|actions\/cache@|pnpm install\b/.test(s.body));
+    assert(
+      '⭐ every-install-step-is-gated-on-NOT-FALSE-so-a-skipped-or-failed-question-installs',
+      installChain.length === 4 && installChain.every((s) => s.body.includes(`if: ${gate}`)) && !/outputs\.needed == 'true'/.test(wf),
+      JSON.stringify(installChain.map((s) => s.name)),
+    );
+    const restore = stepBodies.find((s) => /^\s*run:\s*git sparse-checkout disable\s*$/m.test(s.body));
+    assert(
+      'the-full-tree-is-restored-before-the-install-on-the-pull_request-leg-whenever-it-installs',
+      restore !== undefined &&
+        restore.body.includes(`if: github.event_name == 'pull_request' && ${gate}`) &&
+        stepBodies.indexOf(restore) < stepBodies.indexOf(installChain[0] ?? restore),
+      restore?.body ?? '(no restore step)',
+    );
+    const judgment = stepBodies.find((s) => /run: node scripts\/pm\/check-governed-queue-guard\.mjs\s*$/m.test(s.body));
+    assert('the-live-judgment-runs-on-both-legs-unconditionally', judgment !== undefined && !/^\s*if:/m.test(judgment.body), judgment?.body ?? '(no judgment step)');
   }
 
 
@@ -4628,6 +5086,117 @@ export async function selfTest() {
   assert('⭐ a-record-on-an-OLDER-head-CARRIES-when-the-head-moved-ONLY-on-prose-faces-outside-the-review-surface', proseCarried.exitCode === EXIT_CLEAR && proseCarried.entries[0].record.state === 'stands' && proseCarried.entries[0].record.carriedHops === 1, JSON.stringify(proseCarried.entries[0].record));
   const proseCode = await tierRun({ comments: onOldHead, runGit: qgit(qProseCode), baseRef: QBASE });
   assert('⛔ a-CODE-path-moved-beside-the-prose-REFUSES-exactly-as-an-uncarried-old-head-does', proseCode.exitCode === EXIT_REFUSED_UNAPPROVED && proseCode.entries[0].record.state === 'absent', JSON.stringify(proseCode.entries[0].record));
+  // ── the 2026-10-26 ENQUEUE leg: the maintainer's own enqueue IS the review ─
+  //
+  // 「大部分我还是希望入队，但是我想省掉 Approve」 — an entry an account in
+  // GOVERNED_APPROVERS put in the queue satisfies the governed leg (and lifts
+  // the size limb) the way an authorized APPROVED review does. The card's four
+  // fixtures first, then the shapes that would make the leg fail OPEN: a stale
+  // add carried onto a re-entry, a truncated timeline, an approval leg that
+  // stopped being read first.
+  battery('⭐ the 2026-10-26 ENQUEUE leg: an authorized enqueuer is the human review');
+  const SEAT = 'objectstack-fleet[bot]';
+  const added = (login, at = '2026-10-26T15:00:00Z') => ({ event: ENQUEUE_EVENT, actor: { login }, created_at: at });
+  const removed = (at = '2026-10-26T15:30:00Z') => ({ event: DEQUEUE_EVENT, actor: { login: 'github-merge-queue[bot]' }, created_at: at });
+  // The measured #26154 shape: armed by the seat, the platform enqueued later,
+  // and the add event's actor is the account that ARMED it.
+  const MEASURED_26154 = [
+    { event: 'ready_for_review', actor: { login: SEAT } },
+    { event: 'auto_merge_enabled', actor: { login: SEAT } },
+    added(SEAT, '2026-10-26T14:46:53Z'),
+  ];
+  assert('the-measured-armed-then-enqueued-shape-reads-the-arming-account', enqueuerFromTimeline(MEASURED_26154).login === SEAT && authorizedEnqueueVerdict(enqueuerFromTimeline(MEASURED_26154)).state === 'unauthorized');
+  for (const login of GOVERNED_APPROVERS) {
+    assert(`an-enqueue-by-an-authorized-account-is-AUTHORIZED: ${login}`, authorizedEnqueueVerdict(enqueuerFromTimeline([added(login)])).state === 'authorized');
+  }
+  assert('the-NEWEST-add-is-the-one-read', enqueuerFromTimeline([added(SEAT), removed(), added(GOVERNED_APPROVERS[1], '2026-10-26T16:00:00Z')]).login === GOVERNED_APPROVERS[1]);
+  const staleAdd = authorizedEnqueueVerdict(enqueuerFromTimeline([added(GOVERNED_APPROVERS[0]), removed()]));
+  assert('⛔ a-newest-queue-event-that-is-a-REMOVAL-is-UNDETERMINED-an-earlier-authorized-add-is-never-carried-onto-a-re-entry', staleAdd.state === 'undetermined' && /not recorded there yet/.test(staleAdd.reason), JSON.stringify(staleAdd));
+  assert('⛔ no-add-event-a-non-list-and-an-actorless-add-are-all-UNDETERMINED',
+    ['undetermined'].includes(authorizedEnqueueVerdict(enqueuerFromTimeline([])).state) &&
+      authorizedEnqueueVerdict(enqueuerFromTimeline({ message: 'Not Found' })).state === 'undetermined' &&
+      authorizedEnqueueVerdict(enqueuerFromTimeline([{ event: ENQUEUE_EVENT, actor: null }])).state === 'undetermined' &&
+      authorizedEnqueueVerdict(enqueuerFromTimeline([{ event: ENQUEUE_EVENT, actor: { login: '' } }])).state === 'undetermined');
+  assert('the-authorized-set-is-the-ONE-constant-an-account-outside-it-never-counts', authorizedEnqueueVerdict({ state: 'read', login: 'not-authorized' }).state === 'unauthorized' && authorizedEnqueueVerdict(null).state === 'undetermined');
+
+  const AGENTS_ROW = [row(26066, ['AGENTS.md'])];
+  const timelineOf = (events) => async () => events;
+  const noTimeline = async () => { throw new Error('the timeline must not be read when an authorized approval already satisfies the entry'); };
+  const enqueueRun = (fetchReviews, fetchTimeline, rows = AGENTS_ROW, event = EVENT_MERGE_GROUP, extra = {}) =>
+    runGuard({ repo: REPO, event, rows, fetchReviews, fetchPull: async () => pull(), fetchTimeline, ...extra });
+  // Card fixture 1: enqueued by an authorized account, no review at all.
+  const byMaintainer = await enqueueRun(async () => [], timelineOf([added(GOVERNED_APPROVERS[0])]));
+  const byMaintainerText = renderGuardVerdict(byMaintainer);
+  assert('⭐ FIXTURE-1 enqueued-by-an-authorized-account-with-NO-review-PASSES', byMaintainer.exitCode === EXIT_CLEAR && byMaintainer.conclusion === 'cleared' && satisfiedBy(byMaintainer.entries[0]) === 'enqueue', byMaintainerText);
+  assert('and-its-log-names-the-LEG-and-the-ACCOUNT-and-claims-no-approval',
+    byMaintainerText.includes(`enqueued by an authorized account: ${GOVERNED_APPROVERS[0]}`) && byMaintainerText.includes('The ENQUEUE leg satisfied 1 of them') &&
+      !byMaintainerText.includes('carries an APPROVED review by an') && byMaintainerText.includes('大部分我还是希望入队，但是我想省掉 Approve'), byMaintainerText);
+  // Card fixture 2: enqueued by a seat account, no review — today's refusal.
+  const bySeat = await enqueueRun(async () => [], timelineOf([added(SEAT)]));
+  const bySeatText = renderGuardVerdict(bySeat);
+  assert('⛔ FIXTURE-2 enqueued-by-a-seat-account-with-NO-review-is-REFUSED-on-3-with-todays-words',
+    bySeat.exitCode === EXIT_REFUSED_UNAPPROVED && bySeatText.includes('NO authorized APPROVED review on this pull request') &&
+      bySeatText.includes(`enqueued by ${SEAT}, outside GOVERNED_APPROVERS`), bySeatText);
+  // Card fixture 3: a seat enqueue with an authorized APPROVED review — today's leg, and the timeline is never read.
+  const seatApproved = await enqueueRun(async () => [approvedAt(GOVERNED_APPROVERS[1], OLD)], noTimeline);
+  assert('FIXTURE-3 a-seat-enqueue-with-an-authorized-approval-PASSES-on-the-REVIEW-leg-and-never-reads-the-timeline',
+    seatApproved.exitCode === EXIT_CLEAR && satisfiedBy(seatApproved.entries[0]) === 'review' && seatApproved.entries[0].enqueue === undefined && seatApproved.apiCalls === 2 &&
+      renderGuardVerdict(seatApproved).includes(`authorized APPROVED review, by: ${GOVERNED_APPROVERS[1]}`), renderGuardVerdict(seatApproved));
+  // Card fixture 4: the enqueuer cannot be read and there is no review.
+  const unreadEnqueuer = await enqueueRun(async () => [], async () => { throw new Error('HTTP 502'); });
+  const unreadEnqueuerText = renderGuardVerdict(unreadEnqueuer);
+  assert('⛔ FIXTURE-4 an-UNREADABLE-enqueuer-with-NO-review-is-REFUSED-on-the-approval-legs-code-and-names-UNDETERMINED',
+    unreadEnqueuer.exitCode === EXIT_REFUSED_UNAPPROVED && unreadEnqueuer.entries[0].enqueue.state === 'undetermined' &&
+      /enqueuer UNDETERMINED — the timeline could not be read \(HTTP 502\)/.test(unreadEnqueuerText), unreadEnqueuerText);
+  assert('⛔ a-STALE-authorized-add-before-a-removal-is-REFUSED', (await enqueueRun(async () => [], timelineOf([added(GOVERNED_APPROVERS[0]), removed()]))).exitCode === EXIT_REFUSED_UNAPPROVED);
+  assert('⛔ no-timeline-reader-at-all-is-UNDETERMINED-never-a-pass', (await enqueueRun(async () => [], undefined)).exitCode === EXIT_REFUSED_UNAPPROVED);
+  const reviewsDown = async () => { throw new Error('HTTP 503'); };
+  assert('an-authorized-enqueue-satisfies-ALONE-even-when-the-review-list-cannot-be-read', (await enqueueRun(reviewsDown, timelineOf([added(GOVERNED_APPROVERS[0])]))).exitCode === EXIT_CLEAR);
+  assert('⛔ and-a-seat-enqueue-beside-an-unreadable-review-list-still-refuses-on-4', (await enqueueRun(reviewsDown, timelineOf([added(SEAT)]))).exitCode === EXIT_REFUSED_UNREADABLE);
+  assert('the-timeline-read-is-COUNTED', bySeat.apiCalls === 3 && byMaintainerText.includes('3 API read(s)'), String(bySeat.apiCalls));
+  const enqueuePrLeg = await enqueueRun(async () => [], noTimeline, AGENTS_ROW, EVENT_PULL_REQUEST);
+  assert('the-pull_request-leg-reads-NO-timeline-and-carries-NO-enqueue-key', enqueuePrLeg.exitCode === EXIT_CLEAR && enqueuePrLeg.entries[0].enqueue === undefined && !/enqueuer|ENQUEUE leg/.test(renderGuardVerdict(enqueuePrLeg)));
+  assert('a-CLEAR-diff-reads-no-timeline-either', (await enqueueRun(noTimeline, noTimeline, [row(1, ['packages/core/src/x.ts'])])).apiCalls === 0);
+  const tierSEnqueued = await enqueueRun(async () => [], timelineOf([added(GOVERNED_APPROVERS[1])]), [row(7, ['.claude/agents/os-dev.md'])], EVENT_MERGE_GROUP, {
+    fetchComments: async () => { throw new Error('no record thread is read once the maintainer\'s enqueue satisfied the entry'); },
+    loadRecognisers: async () => { throw new Error('the recognisers must not be loaded once the maintainer\'s enqueue satisfied the entry'); },
+  });
+  assert('a-Tier-S-entry-the-maintainer-enqueued-clears-on-the-ENQUEUE-leg-without-reading-a-record',
+    tierSEnqueued.exitCode === EXIT_CLEAR && satisfiedBy(tierSEnqueued.entries[0]) === 'enqueue' && !renderGuardVerdict(tierSEnqueued).includes('could NOT be read'), renderGuardVerdict(tierSEnqueued));
+  assert('⛔ the-approval-limb-is-still-read-FIRST', satisfiedBy({ approval: { state: 'approved' }, enqueue: { state: 'authorized' } }) === 'review' && satisfiedBy({ approval: { state: 'unapproved' }, enqueue: { state: 'unauthorized' }, tier: TIER_S, record: { state: 'stands' } }) === 'record');
+
+  // The SIZE limb follows the same predicate — through the sibling's lift, never one spelled here.
+  const BIG = { additions: 6000, deletions: 1 };
+  const bigEnqueued = await runSizeGuard({ repo: REPO, event: EVENT_MERGE_GROUP, rows: [row(18971, ['packages/x.ts'])], fetchPull: async () => pull(HEAD, { size: BIG }), fetchReviews: async () => [], fetchTimeline: timelineOf([added(GOVERNED_APPROVERS[0])]) });
+  const bigEnqueuedText = renderSizeVerdict(bigEnqueued);
+  assert('⭐ an-oversized-PR-the-maintainer-ENQUEUED-is-LIFTED-and-the-log-names-the-enqueuer',
+    bigEnqueued.exitCode === EXIT_CLEAR && bigEnqueued.entries[0].state === 'lifted' && bigEnqueued.apiCalls === 3 &&
+      bigEnqueuedText.includes(`LIFTED by the maintainer's own`) && bigEnqueuedText.includes(`${GOVERNED_APPROVERS[0]} (enqueued it at 2026-10-26T15:00:00Z)`), bigEnqueuedText);
+  const bigSeat = await runSizeGuard({ repo: REPO, event: EVENT_MERGE_GROUP, rows: [row(18971, ['packages/x.ts'])], fetchPull: async () => pull(HEAD, { size: BIG }), fetchReviews: async () => [], fetchTimeline: timelineOf([added(SEAT)]) });
+  assert('⛔ an-oversized-PR-a-SEAT-enqueued-is-still-REFUSED-on-8-and-says-why', bigSeat.exitCode === EXIT_REFUSED_OVERSIZED && renderSizeVerdict(bigSeat).includes(`enqueued by ${SEAT}, outside GOVERNED_APPROVERS`), renderSizeVerdict(bigSeat));
+  // main()'s own wiring, reproduced: the governed leg's enqueue reading rides into the size leg and is NOT read twice.
+  let timelineReads = 0;
+  const countedTimeline = async () => { timelineReads += 1; return [added(GOVERNED_APPROVERS[1])]; };
+  const bigGovernedRows = [row(26066, ['AGENTS.md'])];
+  const bigGoverned = await runGuard({ repo: REPO, event: EVENT_MERGE_GROUP, rows: bigGovernedRows, fetchReviews: async () => [], fetchPull: async () => pull(HEAD, { size: BIG }), fetchTimeline: countedTimeline });
+  const bigGovernedSize = await runSizeGuard({
+    repo: REPO, event: EVENT_MERGE_GROUP, rows: bigGovernedRows, fetchPull: async () => pull(HEAD, { size: BIG }), fetchReviews: async () => [], fetchTimeline: countedTimeline,
+    approvals: new Map(bigGoverned.entries.map((e) => [e.pr, e.enqueue === undefined ? e.approval : { ...e.approval, enqueue: e.enqueue }])),
+  });
+  assert('⭐ a-governed-AND-oversized-PR-the-maintainer-enqueued-clears-BOTH-limbs-on-ONE-timeline-read',
+    groupExitCode({ governed: bigGoverned, size: bigGovernedSize }) === EXIT_CLEAR && timelineReads === 1 && bigGovernedSize.entries[0].state === 'lifted', String(timelineReads));
+  assert('and-main-spells-that-wiring-in-its-own-source', /e\.enqueue === undefined \? e\.approval : \{ \.\.\.e\.approval, enqueue: e\.enqueue \}/.test(readFileSync(fileURLToPath(import.meta.url), 'utf8')) && /fetchTimeline = makeTimelineReader\(reader\)/.test(readFileSync(fileURLToPath(import.meta.url), 'utf8')));
+
+  // The reader: the newest event is on the LAST page, so a truncated walk throws.
+  const urls = [];
+  const fakeFetch = (pages) => async (url) => { urls.push(url); const page = Number(new URL(url).searchParams.get('page')); return { ok: true, status: 200, json: async () => pages[page - 1] ?? [] }; };
+  const twoPages = await makeTimelineReader({ apiUrl: 'https://api.example', slug: 'o/r', token: null, fetchImpl: fakeFetch([[added(SEAT), removed()], [added(GOVERNED_APPROVERS[0])]]), perPage: 2 })(9);
+  assert('the-timeline-reader-walks-to-the-short-page-on-the-issues-timeline-route', twoPages.length === 3 && urls[0] === 'https://api.example/repos/o/r/issues/9/timeline?per_page=2&page=1' && enqueuerFromTimeline(twoPages).login === GOVERNED_APPROVERS[0], JSON.stringify(urls));
+  const truncated = await makeTimelineReader({ apiUrl: 'https://api.example', slug: 'o/r', token: null, fetchImpl: fakeFetch([[removed()], [added(GOVERNED_APPROVERS[0])]]), perPage: 1, maxPages: 1 })(9).then(() => null, (error) => error);
+  assert('⛔ a-TRUNCATED-timeline-THROWS-rather-than-answering-an-older-add-as-the-newest', truncated instanceof Error && /never reached/.test(truncated.message), String(truncated?.message));
+  const denied = await makeTimelineReader({ apiUrl: 'https://api.example', slug: 'o/r', token: null, fetchImpl: async () => ({ ok: false, status: 403, json: async () => ({}) }) })(9).then(() => null, (error) => error);
+  assert('⛔ a-non-2xx-THROWS-and-the-caller-reads-it-as-UNDETERMINED', denied instanceof Error && /HTTP 403/.test(denied.message));
+
   // ── the CODEOWNERS mirror ─────────────────────────────────────────────────
   //
   // The platform half of "both approvers are asked": `.github/CODEOWNERS` is a
@@ -4756,7 +5325,10 @@ export async function selfTest() {
       'drifting back to a bare click, and passing with the reading PRINTED when the field is unreadable — and the ' +
       'queued pull-back: every refusal kind on both legs sends the queued pull request to the maintainer\'s manual ' +
       'removal, disarms it and confirms from the remote, and no rendering claims a DRAFT conversion dequeues it, ' +
-      'with a detector control that fires on every listed spelling.',
+      'with a detector control that fires on every listed spelling — and the 2026-10-26 ENQUEUE leg: an entry an ' +
+      'account in GOVERNED_APPROVERS put in the queue clears with no APPROVED review and lifts the size limb through ' +
+      'the sibling, a seat enqueue still refuses, an UNDETERMINED enqueuer (no add, a removal newest, an unreadable or ' +
+      'truncated timeline) is never a pass, and the approval is still read first.',
   );
 
   selfTestReachedVerdict = true;

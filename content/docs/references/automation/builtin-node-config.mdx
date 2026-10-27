@@ -278,7 +278,7 @@ A value: a CEL value envelope `{ dialect: 'cel', source }` evaluated by the expr
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Field name (the flow variable the value binds to) — a name without a leading `$` (the `$` names are the flow engine's own), read as `{{ name }}` |
 | **label** | `string` | optional | Display label |
-| **type** | `string` | optional | Input type — an open widget hint (text, number, select, …); `file` renders the platform upload widget and the screen resumes with the uploaded file's id, which a later node writes into a `file` field |
+| **type** | `string` | optional | Input type — an open widget hint (text, number, select, …); `file` renders the platform upload widget and the screen resumes with the uploaded file's id, which a later node writes into a `file` field; `record_link` shows the `reference` record whose id `defaultValue` evaluates to, by its display name, as a link to its record page, and takes no input |
 | **required** | `boolean` | optional | Whether a value is required to submit |
 | **options** | `{ value: any; label: string }[]` | optional | Choices for a select-style field; option values must stay distinct when read as text |
 | **defaultValue** | `any` | optional | Prefilled value: a CEL value envelope `{ dialect: 'cel', source }` evaluated when the screen is served (the client receives the value, never the envelope), or a literal written as it is — a `{…}` template token is refused |
@@ -287,7 +287,7 @@ A value: a CEL value envelope `{ dialect: 'cel', source }` evaluated by the expr
 | **min** | `number` | optional | Minimum accepted value (numeric fields); enforced on resume |
 | **max** | `number` | optional | Maximum accepted value (numeric fields); enforced on resume |
 | **inlineHelpText** | `string` | optional | Help text displayed below the field |
-| **reference** | `string` | optional | Target object name (snake_case) whose records a `type: 'lookup'` field picks from; REQUIRED when `type` is `lookup` |
+| **reference** | `string` | optional | Target object name (snake_case) whose records a `type: 'lookup'` field picks from, or that a `type: 'record_link'` field's record belongs to; REQUIRED when `type` is `lookup` or `record_link` |
 
 
 ---
@@ -300,7 +300,7 @@ A value: a CEL value envelope `{ dialect: 'cel', source }` evaluated by the expr
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Field name (the flow variable the value binds to) — a name without a leading `$` (the `$` names are the flow engine's own), read as `{{ name }}` |
 | **label** | `string` | optional | Display label |
-| **type** | `string` | optional | Input type — an open widget hint (text, number, select, …); `file` renders the platform upload widget and the screen resumes with the uploaded file's id, which a later node writes into a `file` field |
+| **type** | `string` | optional | Input type — an open widget hint (text, number, select, …); `file` renders the platform upload widget and the screen resumes with the uploaded file's id, which a later node writes into a `file` field; `record_link` shows the `reference` record whose id `defaultValue` evaluates to, by its display name, as a link to its record page, and takes no input |
 | **required** | `boolean` | optional | Whether a value is required to submit |
 | **options** | `{ value: any; label: string }[]` | optional | Choices for a select-style field; option values must stay distinct when read as text |
 | **defaultValue** | `any` | optional | Prefilled value: a CEL value envelope `{ dialect: 'cel', source }` evaluated when the screen is served (the client receives the value, never the envelope), or a literal written as it is — a `{…}` template token is refused |
@@ -309,7 +309,7 @@ A value: a CEL value envelope `{ dialect: 'cel', source }` evaluated by the expr
 | **min** | `number` | optional | Minimum accepted value (numeric fields); enforced on resume |
 | **max** | `number` | optional | Maximum accepted value (numeric fields); enforced on resume |
 | **inlineHelpText** | `string` | optional | Help text displayed below the field |
-| **reference** | `string` | optional | Target object name (snake_case) whose records a `type: 'lookup'` field picks from; REQUIRED when `type` is `lookup` |
+| **reference** | `string` | optional | Target object name (snake_case) whose records a `type: 'lookup'` field picks from, or that a `type: 'record_link'` field's record belongs to; REQUIRED when `type` is `lookup` or `record_link` |
 
 ### Nested Shape: `ScreenFieldConfig.options[number]`
 

@@ -510,6 +510,8 @@
     "NonNumericValueForm (type)",
     "NormalizedFilter (type)",
     "NormalizedFilterSchema (const)",
+    "NowAnchor (type)",
+    "NowAnchorSchema (const)",
     "NumberComparandDoorCase (type)",
     "NumberComparandDoorDeferredCase (interface)",
     "NumberComparandDoorFieldMeta (interface)",

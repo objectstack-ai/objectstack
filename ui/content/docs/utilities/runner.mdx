@@ -543,7 +543,7 @@ with a Retry button instead of blanking the page — see
 [Architecture Overview](/docs/guide/architecture-overview).
 
 That inner boundary only exists once the component has been resolved. Everything
-`SchemaRenderer` does before that point — evaluating `visibleOn`, `disabled` and the
+`SchemaRenderer` does before that point — evaluating `visibleWhen`, `disabled` and the
 other dynamic expressions, then looking the component type up in the registry — runs
 outside it, so a throw there propagates past the inner boundary. Wrap `SchemaRenderer`
 itself to catch that class of failure:

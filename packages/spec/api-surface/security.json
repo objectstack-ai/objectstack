@@ -105,6 +105,7 @@
     "defineSharingRule (function)",
     "describeAnchorForbiddenBits (function)",
     "describeHighPrivilegeBits (function)",
+    "findHierarchyScopeGrants (function)",
     "judgePermissionSetOwnerBinding (function)",
     "normalizeTenancyPosture (function)",
     "objectPermissionGrants (function)",

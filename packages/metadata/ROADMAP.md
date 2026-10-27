@@ -238,4 +238,3 @@ artifact persistence (`artifacts/${projectId}/${commitId}.json`).
 - [Root ROADMAP](../../ROADMAP.md) — Full platform evolution (v3.0 → v5.0)
 - [Studio ROADMAP](../../apps/studio/ROADMAP.md) — Visual IDE development phases
 - [Metadata Service Protocol](../../content/docs/protocol/kernel/metadata-service.mdx) — Detailed protocol documentation
-- [DX ROADMAP](../../docs/DX_ROADMAP.md) — Developer experience improvements

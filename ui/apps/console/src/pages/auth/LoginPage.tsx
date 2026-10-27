@@ -26,6 +26,12 @@
  *    (objectui#11806). The sign-in request goes to the same server, so a
  *    live-looking form would only have deferred that news to the submit.
  *
+ * A visitor who arrived signed out from an invitation link
+ * (`?redirect=/accept-invitation/ID`) is greeted for that invitation instead
+ * of as a returning user, and, where sign-up is offered, gets app-shell's
+ * `InvitationSignUpPrompt` above the form in place of the small "Sign up"
+ * link — the same prompt `DefaultLoginPage` shows (#25886).
+ *
  * Layout (objectui#12600): one 400 px column — brand mark, the card, a footer.
  * The card carries this page's own two-line header, so `<LoginForm>` renders
  * with `hideHeader`. On a dev instance the card's last row offers a one-click
@@ -53,9 +59,10 @@ import {
   isInvitationRedirect,
   needsBootstrapProbe,
   useBootstrapStatus,
-  LocaleSwitcher,
+  InvitationSignUpPrompt,
 } from '@object-ui/app-shell';
 import { AuthLayout } from './AuthLayout';
+import { AuthFooter, readLegalLinks } from './AuthFooter';
 import { followOauthAuthorize } from './followAuthorize';
 // Was module-private here; lifted to a shared module so `SetupPage` (whose
 // first-run exits went without it) and `RegisterPage` (which had copied it)
@@ -71,32 +78,6 @@ function isSafeRedirect(target: string | null): target is string {
 interface DevSeedAdmin {
   email: string;
   password?: string;
-}
-
-/**
- * Accept a legal-link URL from the server only as an absolute http(s) URL or a
- * same-origin path. Anything else (a `javascript:` URL, a protocol-relative
- * `//host`, a non-string) renders no link.
- */
-function legalHref(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined;
-  const href = value.trim();
-  if (/^https?:\/\//i.test(href)) return href;
-  if (href.startsWith('/') && !href.startsWith('//')) return href;
-  return undefined;
-}
-
-/**
- * The legal links the server's public auth config serves: `features.termsUrl`
- * and `features.privacyUrl`, which the spec lists among its non-flag keys
- * (`PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS`) and the runtime defaults to its own
- * public pages, or omits when an operator blanks them. `AuthPublicConfig` does
- * not declare the two keys, so they are read here by name; nothing is
- * rendered for a key the server did not send.
- */
-function readLegalLinks(cfg: AuthPublicConfig | null): { privacyUrl?: string; termsUrl?: string } {
-  const features = cfg?.features as { privacyUrl?: unknown; termsUrl?: unknown } | undefined;
-  return { privacyUrl: legalHref(features?.privacyUrl), termsUrl: legalHref(features?.termsUrl) };
 }
 
 function RouterLink(props: { href: string; className?: string; children: React.ReactNode }) {
@@ -304,6 +285,7 @@ export function LoginPage() {
     ? `/register?redirect=${encodeURIComponent(redirect)}`
     : '/register';
   const legalLinks = readLegalLinks(authConfig);
+  const offerSignUp = configRead === 'known' && signUpOffer === 'form';
 
   return (
     <AuthLayout formWidth="base">
@@ -345,25 +327,35 @@ export function LoginPage() {
             <>
               <div className="mb-5">
                 <h1 className="text-xl font-semibold tracking-tight text-foreground">
-                  {t('auth.login.welcomeTitle', { defaultValue: 'Welcome back' })}
+                  {invitationRedirect
+                    ? t('auth.login.invitationTitle', { defaultValue: 'Accept your invitation' })
+                    : t('auth.login.welcomeTitle', { defaultValue: 'Welcome back' })}
                 </h1>
                 <p className="mt-1 text-[13px] text-muted-foreground">
-                  {t('auth.login.welcomeDescription', {
-                    defaultValue: 'Sign in to continue your work',
-                  })}
+                  {invitationRedirect
+                    ? t('auth.login.invitationDescription', {
+                        defaultValue: 'Use the email address the invitation was sent to.',
+                      })
+                    : t('auth.login.welcomeDescription', {
+                        defaultValue: 'Sign in to continue your work',
+                      })}
                 </p>
               </div>
+              {invitationRedirect && offerSignUp ? (
+                <div className="mb-5">
+                  <InvitationSignUpPrompt registerUrl={registerUrl} />
+                </div>
+              ) : null}
               <LoginFormCard
-                registerUrl={
-                  configRead === 'known' && signUpOffer === 'form' ? registerUrl : undefined
-                }
+                // An invitee's sign-up is the prompt above, not a second link.
+                registerUrl={offerSignUp && !invitationRedirect ? registerUrl : undefined}
                 redirect={redirect}
               />
               {devSeedAdmin ? <DevAdminRow seed={devSeedAdmin} /> : null}
             </>
           )}
         </Card>
-        <LoginFooter privacyUrl={legalLinks.privacyUrl} termsUrl={legalLinks.termsUrl} />
+        <AuthFooter privacyUrl={legalLinks.privacyUrl} termsUrl={legalLinks.termsUrl} />
       </div>
     </AuthLayout>
   );
@@ -444,44 +436,6 @@ function DevAdminRow({ seed }: { seed: DevSeedAdmin }) {
         <p role="alert" className="mt-2 text-xs text-destructive">
           {error}
         </p>
-      ) : null}
-    </div>
-  );
-}
-
-/**
- * Under the card: the locale switch at the left; at the right the privacy and
- * terms links, each only when the server's auth config serves its URL.
- *
- * No version or environment pill: the runtime config the preview badge reads
- * (`GET /api/v1/runtime/config`) carries the platform stage and no product
- * version or environment label, so there is nothing to print (objectui#12600).
- */
-function LoginFooter({ privacyUrl, termsUrl }: { privacyUrl?: string; termsUrl?: string }) {
-  const { t } = useObjectTranslation();
-  const linkClass =
-    'underline-offset-4 transition-colors hover:text-foreground hover:underline focus-visible:outline-none focus-visible:underline';
-  return (
-    <div
-      data-testid="auth-footer"
-      className="flex min-h-8 items-center justify-between gap-3 px-1 text-xs text-muted-foreground"
-    >
-      <div className="flex items-center">
-        <LocaleSwitcher />
-      </div>
-      {privacyUrl || termsUrl ? (
-        <span className="inline-flex items-center gap-2.5">
-          {privacyUrl ? (
-            <a href={privacyUrl} target="_blank" rel="noopener noreferrer" className={linkClass}>
-              {t('auth.login.footer.privacy', { defaultValue: 'Privacy' })}
-            </a>
-          ) : null}
-          {termsUrl ? (
-            <a href={termsUrl} target="_blank" rel="noopener noreferrer" className={linkClass}>
-              {t('auth.login.footer.terms', { defaultValue: 'Terms' })}
-            </a>
-          ) : null}
-        </span>
       ) : null}
     </div>
   );

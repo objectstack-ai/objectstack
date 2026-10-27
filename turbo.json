@@ -1,6 +1,6 @@
 {
   "$schema": "https://turbo.build/schema.json",
-  "globalDependencies": ["tsconfig.json", "tsup.config.ts"],
+  "globalDependencies": ["tsconfig.json", "tsconfig.base.json", "tsconfig.test.base.json", "tsup.config.ts"],
   "globalEnv": ["OS_SKIP_DTS"],
   "globalPassThroughEnv": ["VITEST_MAX_WORKERS"],
   "agentGuidance": false,
@@ -22,7 +22,7 @@
       "dependsOn": ["^build"],
       "outputs": [],
       "env": ["OS_TEST_TIERS", "OS_TEST_SHARD"],
-      "inputs": ["$TURBO_DEFAULT$", "!dist/**", "!coverage/**", "!.turbo/**"]
+      "inputs": ["$TURBO_DEFAULT$", "!dist/**", "!coverage/**", "!.turbo/**", "$TURBO_ROOT$/vitest.preset.mts"]
     },
     "test:repo": {
       "dependsOn": ["^build"],

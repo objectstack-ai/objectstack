@@ -153,6 +153,53 @@ describe('resolveFilterToken — context tokens', () => {
  * for (`FILTER_TOKEN_UNRESOLVED` / 400): the spelling is right, the context is
  * missing, and `token` names which context.
  */
+describe('[#25808] resolveFilterTokens — the `$now` anchor is pinned to the tree\'s instant', () => {
+  const ctx = filterTokenContextFrom({ userId: 'u1' } as any, NOW);
+
+  it('`$now: true` becomes the pinned ISO instant; the offset is kept as written', () => {
+    const where = { opened_at: { $lt: { $now: true, addDays: { $field: 'sla_days' } } }, due_on: { $gte: { $now: true, addDays: -30 } } };
+    expect(resolveFilterTokens(where, ctx)).toEqual({
+      opened_at: { $lt: { $now: NOW.toISOString(), addDays: { $field: 'sla_days' } } },
+      due_on: { $gte: { $now: NOW.toISOString(), addDays: -30 } },
+    });
+  });
+
+  it('the anchor and a placeholder in one tree resolve from ONE instant', () => {
+    const resolved = resolveFilterTokens({ $and: [{ a: { $gt: '{now}' } }, { b: { $lt: { $now: true, addDays: 0 } } }] }, ctx) as any;
+    expect(resolved.$and[0].a.$gt).toBe(NOW.toISOString());
+    expect(resolved.$and[1].b.$lt.$now).toBe(NOW.toISOString());
+  });
+
+  it('reaches an anchor under every combinator and in a list position', () => {
+    const resolved = resolveFilterTokens({ $or: [{ $not: { a: { $ne: { $now: true, addDays: 1 } } } }, { b: { $in: [{ $now: true, addDays: 2 }] } }] }, ctx) as any;
+    expect(resolved.$or[0].$not.a.$ne.$now).toBe(NOW.toISOString());
+    expect(resolved.$or[1].b.$in[0].$now).toBe(NOW.toISOString());
+  });
+
+  it('an already-pinned anchor is left alone, and a tree with no token returns by reference', () => {
+    const pinned = { a: { $lt: { $now: '2026-01-01T00:00:00.000Z', addDays: 1 } } };
+    expect(resolveFilterTokens(pinned, ctx)).toBe(pinned);
+    const plain = { a: { $lt: 1 } };
+    expect(resolveFilterTokens(plain, ctx)).toBe(plain);
+  });
+
+  it('an anchor without addDays is refused — INVALID_FILTER / 400, pointing at `{now}`', () => {
+    let err: any = null;
+    try { resolveFilterTokens({ a: { $lt: { $now: true } } }, ctx); } catch (e) { err = e; }
+    expect(err?.code).toBe('INVALID_FILTER');
+    expect(err?.status).toBe(400);
+    expect(err?.message).toContain('{now}');
+  });
+
+  it('a malformed offset is refused in addDays\' words', () => {
+    for (const bad of [1.5, '5', { days: 5 }, null]) {
+      let err: any = null;
+      try { resolveFilterTokens({ a: { $lt: { $now: true, addDays: bad } } }, ctx); } catch (e) { err = e; }
+      expect(err?.code, JSON.stringify(bad)).toBe('INVALID_FILTER');
+    }
+  });
+});
+
 describe('resolveFilterTokens — the record-context token refuses by name', () => {
   // A FULL context on purpose: the refusal must not depend on what the
   // request happens to carry.

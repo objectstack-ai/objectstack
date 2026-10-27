@@ -131,10 +131,12 @@ describe('exportOptions ↔ installed @objectstack/spec (objectui#4535)', () => 
     // Non-vacuity floor. Every assertion below reads through `specObjectBranch`,
     // and a spec refactor that moved the shape would otherwise turn each of them
     // into a comparison against `undefined` — which some would pass.
+    // Floors and named members, not the spec's arm and key counts (#26238):
+    // the parity cases below compare the full key sets, derived on both sides.
     expect(specExportOptions).toBeDefined();
-    expect(specUnion.options).toHaveLength(2);
+    expect(specUnion.options?.length).toBeGreaterThan(0);
     expect(specObjectBranch).toBeDefined();
-    expect(Object.keys(specObjectBranch?.shape ?? {}).length).toBe(5);
+    expect(Object.keys(specObjectBranch?.shape ?? {})).toContain('formats');
     expect(specFormatEnumValues().length).toBeGreaterThan(0);
   });
 
@@ -220,10 +222,15 @@ type _FaceCarriesStreaming = Expect<
   Equal< Exclude< ListViewExportFace, unknown[] >['streaming'], boolean | undefined >
 >;
 
-/** The array arm's vocabulary is the spec's three formats — `'pdf'` is not among them. */
-type _ArrayArmIsCsvXlsxJson = Expect<
-  Equal< Extract< ListViewExportFace, unknown[] >[number], 'csv' | 'xlsx' | 'json' >
->;
+/**
+ * The array arm's vocabulary carries the spec's three formats — `'pdf'` is not
+ * among them, and it is not `string`. Membership, not a closed list: nothing in
+ * ui is total over the formats, so a format the spec adds is not a red here.
+ */
+type ArrayArmFormat = Extract< ListViewExportFace, unknown[] >[number];
+type _ArrayArmIsCsvXlsxJson = Expect< Equal< Exclude< 'csv' | 'xlsx' | 'json', ArrayArmFormat >, never > >;
+type _ArrayArmHasNoPdf = Expect< Equal< 'pdf' extends ArrayArmFormat ? true : false, false > >;
+type _ArrayArmIsClosed = Expect< Equal< string extends ArrayArmFormat ? true : false, false > >;
 
 /** A minimal, valid `list-view` node — the envelope every parse below rides on. */
 const NODE = { type: 'list-view', objectName: 'accounts' } as const;

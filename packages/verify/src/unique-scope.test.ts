@@ -426,7 +426,6 @@ const attributionApp = {
       name: 'uqa_contact_dedupes_email',
       object: 'uqa_contact',
       events: ['beforeInsert', 'beforeUpdate'],
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       handler: async (ctx: { input: { email?: unknown; id?: unknown }; api: any }) => {
         const email = ctx.input.email;
         if (typeof email !== 'string') return;

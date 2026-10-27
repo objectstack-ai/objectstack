@@ -32,9 +32,8 @@ const ImportWizard = lazy(() =>
   import('@object-ui/plugin-grid').then((m) => ({ default: m.ImportWizard })),
 );
 import { ListView } from '@object-ui/plugin-list';
-import { ObjectView as PluginObjectView, ViewTabBar, ManageViewsDialog, deriveRecordSurface, overlayWidthFor } from '@object-ui/plugin-view';
+import { ObjectView as PluginObjectView, ViewTabBar, ManageViewsDialog } from '@object-ui/plugin-view';
 import type { ViewTabItem } from '@object-ui/plugin-view';
-import { RECORD_DRAWER_PARAM } from '../urlParams.js';
 // Plugin registration is handled by the host app (e.g. apps/console/src/main.tsx
 // uses ComponentRegistry.registerLazy so heavy plugins stay code-split).
 // Do NOT add eager `import '@object-ui/plugin-*'` side-effect imports here.
@@ -49,15 +48,14 @@ import {
   EmptyDescription,
   NavigationOverlay,
 } from '@object-ui/components';
-import { Plus, Upload, Table as TableIcon, Lock, MoreHorizontal, RotateCcw } from 'lucide-react';
+import { Plus, Upload, Lock, MoreHorizontal, RotateCcw } from 'lucide-react';
 import { FavoriteMenuItem, useObjectListFavorite } from '../layout/SidebarItemMenu.js';
 import { useMetaItemRefusal } from '../hooks/useMetaItemRefusal.js';
 import { useTenancyPosture } from '../hooks/useTenancyPosture.js';
 import { useServedViewItems } from '../hooks/useServedViewItems.js';
 import { viewTabLabel } from './viewTabLabel.js';
 import { getIcon } from '../utils/getIcon.js';
-import type { ActionBarSchema, DataSource, UIActionSchema, ListViewSchema, TreeViewConfig, ViewNavigationConfig } from '@object-ui/types';
-import { detectStatusField } from '@object-ui/types';
+import type { ActionBarSchema, DataSource, UIActionSchema, ListViewSchema, TreeViewConfig } from '@object-ui/types';
 import { MetadataPanel, useMetadataInspector } from './MetadataInspector.js';
 import { ViewConfigPanel } from './ViewConfigPanel.js';
 import { useMetadataClient } from './metadata-admin/useMetadata.js';
@@ -76,11 +74,10 @@ import { ManagedByBadge } from '../components/ManagedByBadge.js';
 import { isSetupAppSegment } from '../console/setupApp.js';
 import { RecordDetailView } from './RecordDetailView.js';
 import type { RowCrudPredicates } from '../utils/crudAffordances.js';
-import { createIdentityImportDataSource, IDENTITY_IMPORT_OBJECT, IDENTITY_IMPORT_WRITE_MODES, type IdentityPasswordPolicy } from './identityImport.js';
+import { IDENTITY_IMPORT_WRITE_MODES } from './identityImport.js';
 import { IdentityImportOptions, IdentityImportResultExtra, identityImportFields } from './IdentityImportPanels.js';
-import { ManagedUsersInviteLine, MANAGED_USERS_OBJECT, UnauthorizedUserMarker, UserGrantLoader, isManagedEnvironment } from './managedEnvironmentUsers.js';
+import { ManagedUsersInviteLine } from './managedEnvironmentUsers.js';
 import { importTargetFields } from './importTargetFields.js';
-import { useExpressionContext } from '../providers/ExpressionProvider.js';
 import { listToolbarDrawsAction, resolveManagedByEmptyState } from '../utils/managedByEmptyState.js';
 import { mayReadObject } from '../utils/navObjectReadGate.js';
 import { resolveViewId } from '../utils/resolveViewId.js';
@@ -90,8 +87,7 @@ import { useObjectActions } from '../hooks/useObjectActions.js';
 import { useObjectTranslation, useObjectLabel, useDisplayLocale, pickLocalized } from '@object-ui/i18n';
 import { usePermissions } from '@object-ui/permissions';
 import { useAuth, useWorkspaceAdminStatus } from '@object-ui/auth';
-import { useRealtimeSubscription, useConflictResolution } from '@object-ui/collaboration';
-import { ActionProvider, useNavigationOverlay, SchemaRenderer, useActionTextLocalizer, useRowPredicate, RelatedRecordActionsProvider, notifyDataChanged, useCapabilityGate, usePredicateScope, useMetadata } from '@object-ui/react';
+import { ActionProvider, SchemaRenderer, useActionTextLocalizer, useRowPredicate, RelatedRecordActionsProvider, notifyDataChanged, useCapabilityGate, usePredicateScope } from '@object-ui/react';
 import { toast } from 'sonner';
 import { useConsoleActionRuntime } from '../hooks/useConsoleActionRuntime.js';
 import { useOfferedNavRunAction } from '../hooks/useNavRunAction.js';
@@ -106,7 +102,6 @@ import {
     selectFilterParams,
     MOBILE_FAB_LIST_CLEARANCE,
 } from './objectViewHelpers.js';
-import { listRecordDetailUrl, listRecordActionsValue } from './objectViewRecordLinks.js';
 import {
     defaultListColumnsFromObject,
     bulkWiredActionNamesKey,
@@ -116,6 +111,20 @@ import {
     setDefaultViewPatches,
     buildViewConfigSaveBody,
 } from './objectViewTabs.js';
+import {
+    timelineViewOptions,
+    calendarViewOptions,
+    ganttViewOptions,
+    galleryViewOptions,
+    kanbanViewOptions,
+    storedLegacyOptions,
+    isSameOptionsValue,
+    dispatchViewPatches,
+} from './objectViewOptions.js';
+import { ObjectNotFoundState, useViewTabsFit, keepInlineEditModeForTheSession } from './objectViewChrome.js';
+import { useObjectViewLiveData } from './objectViewLiveData.js';
+import { useObjectViewIdentity } from './objectViewIdentity.js';
+import { useObjectViewRecordNavigation } from './objectViewRecordNavigation.js';
 
 // objectstack#25992 slice 1: these module-level helpers moved to the sibling
 // `objectView*.ts` modules above. Every name this file exported stays
@@ -133,462 +142,22 @@ export {
     buildViewConfigSaveBody,
 } from './objectViewTabs.js';
 
-/**
- * The `options.timeline` config this page hands to `ListView`.
- *
- * Deliberately does NOT resolve the date axis. `ListView.resolveTimelineDateBinding`
- * is the single read-site that decides which field a timeline buckets by, and it
- * reads the calendar binding when the view carries no timeline one. This face used
- * to fabricate `startDateField: 'due_date'` for every object view — a field name
- * the view never declared and most objects do not have — which both looked like a
- * real binding downstream and, because it is always present, shadowed the calendar
- * fallback entirely. The result on a calendar-bound view was a Timeline the
- * switcher offered and the renderer bucketed wholly into "No date" (objectui#3129).
- *
- * What stays here is the view's OWN declared config, floored at `'name'`. An
- * object-level `objectDef.titleField` leg used to sit in the middle of that
- * chain; it was removed in objectui#6557 because `@objectstack/spec`'s object
- * schema is a `strictObject` that REJECTS the key with `unrecognized_keys`, so
- * no legal object metadata could ever reach it (objectui#6531 established the
- * measurement, and dropped the twin read inside `getRecordDisplayName`).
- *
- * ⚠️ WHAT THE SIBLING BRANCHES BELOW ACTUALLY DO (`5f4514f7b`). The sentence
- * above used to end "— the same two-rung shape the calendar and gantt branches
- * below already use", and for gantt that was FALSE the whole time it stood: the
- * gantt branch floored `startDateField` / `endDateField` at `'start_date'` /
- * `'end_date'`, which is precisely the one-rung fabrication this note declares
- * retired. A note is the authority the next fixer consults, so it vouched for
- * the lines that were broken. Each branch is therefore stated as MEASURED, not
- * as a family:
- *
- *   - `calendarViewOptions` below — forwards a declared block or emits no
- *     `calendar` key at all; it never floors a date axis (objectui#7029).
- *   - `ganttViewOptions` below — forwards the declared block, title floored at
- *     `'name'`, and invents neither date field. Its `'start_date'` / `'end_date'`
- *     floors were deleted by `5f4514f7b`; that is what makes `ObjectGantt`'s
- *     own "Gantt configuration required" screen reachable from this route.
- *   - the TIMELINE axis at the two SIBLING FACES — `plugin-list/ListView.tsx`
- *     and `plugin-view/ObjectView.tsx`. Both floored `startDateField` at
- *     `'created_at'`, the very literal objectui#3129 retired HERE, and
- *     `ListView` carried it as a stated DECISION ("`created_at` stays the last
- *     resort for a view that declares no date axis anywhere") — two faces
- *     holding documented and OPPOSITE postures on one field name. That is what
- *     `5f4514f7b` routed to a single ruling instead of settling per-face, and
- *     the ruling (2026-09-01, 总监批 #28) answered it as house posture:
- *     日期轴永不虚构 — a date axis is never fabricated. Its step ③ deleted both
- *     floors, so all three faces now forward a declared axis or none, and
- *     `ObjectTimeline`'s own refusal screen (step ①, objectui#7459) is reachable
- *     from every one of them. This note no longer describes only THIS face.
- *
- * Exported for the regression suite.
- */
-export function timelineViewOptions(viewDef: any): Record<string, unknown> {
-    // The spec key only. objectui#6152 round 14 retired the pre-#2231
-    // `timeline.dateField` rung: every list-view door refuses the alias by name,
-    // and `ListView` no longer reads it either.
-    const declaredStart = viewDef?.timeline?.startDateField;
-    return {
-        // Spread the full view-defined timeline config first so the spec fields
-        // (startDateField/endDateField/groupByField/colorField/scale) survive.
-        ...(viewDef?.timeline || {}),
-        // Only ever restate a binding the view actually declared.
-        ...(declaredStart ? { startDateField: declaredStart } : {}),
-        titleField: viewDef?.timeline?.titleField || 'name',
-        // objectui#6152 round 12: no `descriptionField`. The spec's timeline block
-        // has no such member, the bag refuses it, and nothing drew it: it landed
-        // only in the generated node's nested block, which `ObjectTimeline` never
-        // reads for a description (measured on objectui#6152, report 6070437445).
-    };
-}
+// objectstack#25992 slice 2: the view-options family and `dispatchViewPatches`
+// moved to `./objectViewOptions.ts`; every name exported here before stays
+// exported from here.
+export {
+    timelineViewOptions,
+    calendarViewOptions,
+    ganttViewOptions,
+    galleryViewOptions,
+    kanbanViewOptions,
+    storedLegacyOptions,
+    dispatchViewPatches,
+} from './objectViewOptions.js';
 
-/**
- * The `options.calendar` config this page hands to `ListView` — or NOTHING.
- *
- * objectui#7029 (ruled on objectstack#13748, director batch #19, option A).
- * This face used to fabricate `startDateField: 'due_date'` and
- * `titleField: 'name'` for EVERY object view, declared or not. Downstream that
- * is indistinguishable from a real binding, and it is what made the calendar
- * renderer's own refusal screen ("Calendar configuration required…",
- * `ObjectCalendar.tsx`) unreachable from this route: the renderer decides by
- * asking whether a start-date binding is PRESENT, and this face always said
- * yes. Measured on hotcrm's `crm_leave_request` (real fields `start_date` /
- * `end_date`, no `calendar:` block): all nine records piled onto today's cell
- * with titles resolved through the display-name chain — a plausible, fully
- * wrong screen with zero signal to the author.
- *
- * The same fabrication also fed two gates that read this bag:
- * `ListView.availableViews` offered the Calendar toggle for every object view,
- * and `resolveTimelineDateBinding` accepts a calendar binding as a legitimate
- * timeline axis — so the invented name silently answered for the Timeline
- * switcher too.
- *
- * What stays is the view's OWN declared block, forwarded verbatim (spread, not
- * whitelisted, so every spec key survives), and `undefined` when the view
- * declared none. Exactly the shape the sibling faces already converged on:
- * `timelineViewOptions` above (objectui#3129 retired this very literal from the
- * timeline axis), the kanban branch's `detectStatusField` (ADR-0085, "never
- * invents a field the object doesn't have"), and `defaultCalendarFromObject`
- * in `InterfaceListPage` (a binding or `undefined`, never a guess).
- *
- * ⚠️ A view that carried no `calendar:` block and happened to sit on an object
- * with a real `due_date` field was rendering by luck; it now reaches the
- * refusal screen instead. That is the ruled loud-over-silent direction.
- *
- * Exported for the regression suite.
- */
-export function calendarViewOptions(viewDef: any): Record<string, unknown> | undefined {
-    const declared = viewDef?.calendar;
-    if (!declared || typeof declared !== 'object') return undefined;
-    // Forward what the author wrote — nothing invented, nothing floored.
-    return { ...declared };
-}
-
-/**
- * The `options.gantt` config this page hands to `ListView`.
- *
- * `5f4514f7b` — the same class objectui#7029 removed from the calendar branch,
- * reported separately by PR #7062 rather than fixed alongside it. This face used
- * to floor `startDateField` at `'start_date'` and `endDateField` at `'end_date'`
- * for EVERY object view, declared or not — field names no view had written and
- * most objects do not carry. Downstream that is indistinguishable from a real
- * binding, and it is what made `ObjectGantt`'s own refusal screen ("Gantt
- * configuration required. Please specify startDateField, endDateField, and
- * titleField.") unreachable from this route: `getGanttConfig` takes its flat
- * branch as soon as BOTH date props are present, and this face always supplied
- * both. It also answered the ADR-0047 capability gate in `ListView.availableViews`
- * (`schema.options?.gantt?.startDateField`), so the Gantt toggle was live on
- * every object view in the product.
- *
- * ⚠️ MEASURED BEFORE THE DELETION, because #7029's mechanic is only correct
- * where a refusal path exists: `ObjectGantt` REFUSES an absent binding — it does
- * not render empty and does not throw. Pinned as the seam in
- * `plugin-gantt/src/ObjectGantt.unconfiguredRefusal-7070.test.tsx`.
- *
- * What stays is the view's OWN declared block, spread whole so every spec key
- * the renderer reads survives (parentField/typeField for the summary→step
- * hierarchy, baseline*, groupByField, resourceView/assignee*, tooltipFields,
- * quickFilters, …) — a bare whitelist here once dropped every field past
- * colorField and flattened the chart. `titleField` keeps its `'name'` floor:
- * that is a display-name default, not a date axis, and it is the same rung
- * `timelineViewOptions` above carries.
- *
- * Exported for the regression suite.
- */
-export function ganttViewOptions(viewDef: any): Record<string, unknown> {
-    return {
-        ...(viewDef?.gantt || {}),
-        // Only ever restates what the view declared — no date field is floored.
-        titleField: viewDef?.gantt?.titleField || 'name',
-    };
-}
-
-/**
- * The `options.gallery` config this page hands to `ListView`.
- *
- * objectui#7547 — the last surviving member of the objectui#7029 / `5f4514f7b` /
- * #7500 class on this face. It floored `imageField` at `'image'` for EVERY
- * object view, declared or not: a cover binding no view had written, on a field
- * name most objects do not carry.
- *
- * ⚠️ WHAT THAT LITERAL ACTUALLY DID, which is not what it looks like. The
- * screen damage was small — `ObjectGallery` resolves the cover per record and
- * COLLAPSES the cover area when no record yields one, so an invented `'image'`
- * degraded to a gallery of coverless cards. The damage was to the GATE. This
- * bag feeds `ListView.availableViews`, whose gallery check reads
- * `schema.options?.gallery?.imageField`; a value that is always present makes
- * that check answer YES for every object view that whitelists `gallery`, so
- * ADR-0047's whitelist ∩ resolvable — the mechanism that exists to stop a
- * visualization being offered with nothing behind it — was answering about a
- * name this file wrote rather than one the author did. Gallery was offered
- * without a block, and stayed watchable only because the renderer happens to
- * degrade politely. That is a coincidence, not a design, and it is the same
- * second-order effect objectui#7029 measured for `calendar` and `5f4514f7b`
- * for `gantt`.
- *
- * ⚠️ MEASURED BEFORE THE DELETION, the discipline `5f4514f7b` wrote down:
- * #7029's mechanic — delete the literal, let the read site answer — is only
- * correct where the read site's answer is honest. `ObjectGallery` floors its
- * own `coverField` at `'image'` too, and that rung STAYS: it is the component's
- * own decision about an unconfigured record, and it is honest because the cover
- * area collapses when the guess yields nothing. What this face must not do is
- * pre-empt that decision and light the capability gate on the way past.
- *
- * What stays here is the view's OWN declared block, spread whole so every spec
- * key survives (`cardSize` / `visibleFields` / `coverFit` / …), the cover
- * binding under `coverField` BUT ONLY WHEN ONE WAS DECLARED, and the
- * `titleField` `'name'` floor — a display-name default, not a binding, exactly
- * as `ganttViewOptions` above keeps it.
- *
- * objectui#6152 round 12 (seat answer Q1 → A): the legacy `imageField` is no
- * longer written beside `coverField`. `@object-ui/types` judges this bag as the
- * spec's list overlay judges it, and that refuses `options.gallery.imageField`
- * by name. The gate the paragraph above describes learned
- * `options.gallery.coverField` in the same round, so the toggle still lights
- * from what this writes and still stays dark when the view declared no cover.
- *
- * objectui#6152 round 14: the legacy READ is retired too. The cover binding is
- * read from the spec's `coverField` alone, so a stored `gallery.imageField`
- * binds no cover here, offers no Gallery toggle, and leaves `ObjectGallery` on
- * its own `'image'` floor.
- *
- * Exported for the regression suite.
- */
-export function galleryViewOptions(viewDef: any): Record<string, unknown> {
-    const gallery = viewDef?.gallery;
-    // The cover binding goes out under the spec's `coverField` ONLY, read from
-    // `coverField` ONLY, and is never invented. objectui#6152 round 12 dropped the
-    // legacy `imageField` this used to cross-fill beside it, and round 14 retired
-    // the alias rung that still READ it.
-    const declaredCover = gallery?.coverField;
-    return {
-        ...(gallery || {}),
-        ...(declaredCover ? { coverField: declaredCover } : {}),
-        // Spelled through `viewDef` rather than the `gallery` local above, and
-        // that is load-bearing: `ObjectView.titleFieldConvergence.test.tsx`
-        // (objectui#6557) pins all six `titleField` / `labelField` seams to ONE
-        // expression shape — a chain of VIEW-declared rungs floored at 'name',
-        // with `viewDef` as the mechanical proxy for "view-declared". Reading
-        // the local here still resolves the same value but blinds that scan to
-        // the thing it hunts, so the seam keeps the family spelling.
-        titleField: viewDef?.gallery?.titleField || 'name',
-    };
-}
-
-/**
- * The view-level KANBAN block this face forwards — the fifth member of the
- * `timelineViewOptions` / `calendarViewOptions` / `ganttViewOptions` /
- * `galleryViewOptions` family above, and the last one still inlined as an
- * anonymous IIFE inside the schema literal (objectui#8193).
- *
- * ⭐ THE LANE KEY IS `groupByField`, THE SPEC'S OWN SPELLING. This used to emit
- * the legacy `groupField` alias instead — never the canonical key, even though
- * it already READ the canonical key first. The sibling producer
- * `defaultKanbanFromObject` (`InterfaceListPage.tsx`) had migrated already and
- * left the reasoning next to itself — "that read-site now prefers the spec key,
- * so one key is enough" — but this twin twelve hundred lines away was not
- * carried along, so ONE producer surface spoke two vocabularies for one concept
- * depending on which entry point you arrived through.
- *
- * ⚠️ objectui#8193 changed only what this face WRITES; the alias READS stayed
- * until objectui#6152 round 14 retired them here and in `ListView` alike. The
- * lane is read from `groupByField` alone now, so a stored `kanban.groupField`
- * no longer names it: the lane falls to the object's declared lifecycle, as for
- * a view that names none.
- *
- * ⚠️ WRITING THE CANONICAL KEY HERE REQUIRED THE GATE TO LEARN IT, and that is
- * the half a reader will not guess from this file. `ListView.availableViews`
- * consulted the `options.<kind>` bag for the LEGACY spelling only
- * (`schema.options?.kanban?.groupField`), so emitting `groupByField` alone made
- * the Kanban capability stop resolving and the toggle vanish from every object
- * view — measured, not reasoned: `{groupBy, groupField}` offered Kanban, and
- * `{groupBy, groupByField}` did not. The gate now reads both spellings out of
- * the bag, the same one-question-two-sites repair objectui#5042 made for `map`
- * and objectui#7544 for `chart`. Pinned in `ObjectView.kanbanLane-8193` here
- * and in `ListView.kanbanOptionsBagCanonical-8193` in `plugin-list`.
- *
- * ⭐ `groupBy` IS RETIRED HERE (objectui#8213) — the THIRD spelling of the one
- * concept this expression already writes canonically. Measured against
- * `@objectstack/spec` 17.3.0's strict `KanbanConfigSchema`, which declares
- * `groupByField` / `summarizeField` / `columns` and refuses `groupBy` BY NAME,
- * on a call where one control fires (`zzzBogusKey` is refused by name) and
- * another accepts (`groupByField` alone draws no `unrecognized_keys`). Upstream
- * knows the OTHER alias by name — probing `groupField` answers "Did you mean
- * `groupField` → `groupByField`?" — and knows nothing at all about `groupBy`.
- *
- * ⚠️ THE PRODUCER CENSUS THE CARD MADE A PRECONDITION, run before the deletion.
- * A structural scan of every tracked file for a bare `groupBy` inside a
- * view-level `kanban`/`calendar`/`gallery`/`timeline`/`gantt` object literal
- * found NO runtime producer but this one; the lit control on the same
- * instrument (`groupByField` in the same position) returned 58 sites, so the
- * empty reading is a reading. The only other authors are FIXTURES: the two arms
- * of `ListView.kanbanOptionsBagCanonical-8193` that pin this very bag, and one
- * stale metadata payload in `data-objectstack`'s `updateView.draft.test.ts`.
- * The sibling producer `defaultKanbanFromObject` emits `{ groupByField }` alone
- * and always has.
- *
- * ⚠️ WHY THE ONE READER WAS UNHARMED (as measured then). `ListView`'s two
- * projection/expand collectors listed `v.groupByField, v.groupField, v.groupBy`
- * as candidates for the same lane value, so `groupBy` did contribute a field
- * NAME to the query projection — and this same expression writes that
- * identical value under `groupByField`, which those collectors read first. The
- * capability gate never read `groupBy` at all, and neither did the render
- * branch. Since objectui#6152 round 14 the collectors, the gate and the render
- * branch read `groupByField` alone.
- *
- * ⚠️ WHAT THIS CLOSED AND WHAT IT DID NOT — and what has since closed the rest.
- * `ListView`'s kanban branch destructured
- * `columns`/`groupByField`/`groupField`/`cardFields`/`titleField` out of the
- * merged config and spread the REST *after* its own `groupBy: laneField`, so a
- * surviving `groupBy` overrode the lane it had just resolved. This deletion
- * removed the only producer in this repo that fed that override; the override
- * itself stayed reachable from an author-written `kanban.groupBy` riding this
- * repo's `.passthrough()` mirror, and was carried on its own card.
- * ⭐ THAT CARD HAS LANDED (objectui#8365, maintainer ruling of 2026-09-12 —
- * decision batch #117 item 5, option B): `groupBy` is now stripped in
- * `ListView`'s destructure, so the canonical lane wins, AND the view-level
- * `KanbanConfig` mirror (`@object-ui/types`, `zod/objectql.zod.ts`) declares it
- * as an alias refusal naming `groupByField`, so the key is refused BY NAME at
- * the read door instead of riding the passthrough. ⛔ Do not re-file it.
- *
- * ⭐ THE CARD FIELDS GO OUT AS `columns`, THE SPEC'S SPELLING (objectui#6152
- * round 12, seat answer Q1 → A). This wrote the legacy `cardFields` alias, which
- * objectui#8213 left as a known residual. `@object-ui/types` now judges this bag
- * as the spec's list overlay does and refuses `options.kanban.cardFields` by
- * name, and `ListView`'s kanban branch reads `columns` for the cards when no
- * `cardFields` is present: measured on objectui#6152 (report 6070437445), the
- * generated node and the `$select` are identical under either spelling.
- * `titleField` is a member of the spec's kanban block (measured on 17.7.0). Every key this
- * expression writes is therefore a spec key, and
- * `ObjectView.kanbanGroupByRetired-8213` pins that, so an undeclared key
- * reddens instead of joining them quietly.
- *
- * ADR-0085: when the view doesn't pick a lane field, the object's declared
- * lifecycle (`stageField`) decides — including the strict `stageField: false`
- * suppression (no default lanes; the status-shaped field is declared
- * non-linear) and the shared name/type heuristic, which never invents a field
- * the object doesn't have (the old hard-coded 'status' did).
- *
- * objectui#11629: `summarizeField` (the spec's "Field to sum at top of column")
- * is relayed only when the view declares it. This block is the only kanban
- * config `ListView` receives on this page when the stored row carries no
- * `options.kanban` bag. Without the relay, the key never reached `ListView`'s
- * projection or the board's column headers, so a view that declared it
- * rendered counts with no totals. Like the lane, an absent key stays absent:
- * no default field is invented.
- *
- * Exported for the pin test.
- */
-export function kanbanViewOptions(viewDef: any, objectDef: any): Record<string, unknown> {
-    const lane =
-        viewDef?.kanban?.groupByField ||
-        detectStatusField(objectDef as any) ||
-        undefined;
-    const summarizeField = viewDef?.kanban?.summarizeField;
-    return {
-        ...(lane ? { groupByField: lane } : {}),
-        titleField: viewDef?.kanban?.titleField || 'name',
-        // The spec's own spelling of the card fields (objectui#6152 round 12): the
-        // bag refuses the legacy `cardFields` this used to write, and `ListView`
-        // reads `columns` for the cards, so the board is unchanged.
-        columns: viewDef?.kanban?.columns,
-        ...(summarizeField ? { summarizeField } : {}),
-    };
-}
-
-/**
- * objectui#10380 — the stored row's legacy `options` bag, as this page hands it
- * to `ListView`. A row with no bag (or a bag that is not an object) gives `{}`.
- *
- * `@objectstack/spec`'s flattened list overlay declares this bag
- * (`ListViewOverlayOptionsSchema`). The view write door judges each
- * `options.KIND` block key by key with that kind's own block schema, refuses
- * an out-of-contract key by name, and stores what it accepts. The spec
- * describes the bag as an underlay: the top-level `KIND` block "wins per key
- * where both set one". The interface page has always forwarded the bag, so one
- * stored row rendered two ways. Ruling A on objectui#10380 (comment
- * 5824043998) keeps that forward ("what passes the door is legal"), so the
- * object page now forwards the bag too.
- *
- * The relay below does three things with it, and none of them merges keys:
- *   - `options` carries the bag. For each kind the bag carries, the bag's block
- *     REPLACES this page's synthesized block (`kanbanViewOptions` and its
- *     siblings). This is the rule `InterfaceListPage` applies to its `mapCfg`
- *     (`view.options.map ?? derived`). A synthesized block stands in only for a
- *     kind the bag does not carry, so a row with no bag is relayed exactly as
- *     before.
- *   - For each kind the bag carries, the view's own top-level block also goes
- *     out at the top level, where `InterfaceListPage` puts it as well.
- *   - `ListView` then lays the top-level block over the bag per key. That merge
- *     already exists in each render branch (`{ ...options.KIND, ...KIND }`),
- *     and it is the spec's precedence. ⛔ No second merge is written here.
- *
- * Exported for the pin test.
- */
-export function storedLegacyOptions(viewDef: unknown): Record<string, any> {
-    const bag = viewDef && typeof viewDef === 'object' ? (viewDef as { options?: unknown }).options : undefined;
-    return bag && typeof bag === 'object' && !Array.isArray(bag) ? (bag as Record<string, unknown>) : {};
-}
-
-/**
- * objectui#10046 — is `a` the same `options` bag as `b`, compared by VALUE?
- * (objectui#7237 holds the resolved `filter` through the same comparison.)
- *
- * `renderListView` rebuilds `fullSchema.options` as a fresh object literal on
- * every call, and `plugin-view`'s `ObjectView` calls it on every one of its
- * renders. `ListView` names `schema.options` BY IDENTITY in its fetch effect's
- * dependency list (objectui#4567 ruled that dependency correct and put
- * stabilisation at the PRODUCER), so each host re-render that changed nothing
- * re-issued the identical `dataSource.find`: one extra at mount (the record
- * count landing), two on opening a record and two on closing it.
- *
- * A copy of `plugin-view`'s `isStructurallyEqual` (`stableIdentity.ts`,
- * objectui#6460), kept module-local because that one is not exported and
- * exporting it would publish a new name. Same safety invariant: every
- * uncertainty (an unmodelled type — function, `Map`, class instance —, a
- * differing key count, a structure deeper than the bound) answers "not
- * equal", which hands `ListView` a new identity and therefore a refetch. It can
- * only ever remove a REDUNDANT query; it can never withhold a needed one.
- * ⛔ Not `JSON.stringify`: that calls `{ a: undefined }` and `{}` equal (a
- * missed refetch) and throws on a cycle.
- */
-function isSameOptionsValue(a: unknown, b: unknown, depth = 0): boolean {
-    if (Object.is(a, b)) return true;
-    if (depth >= 12) return false;
-    if (a instanceof Date || b instanceof Date) {
-        return a instanceof Date && b instanceof Date && a.getTime() === b.getTime();
-    }
-    if (Array.isArray(a) || Array.isArray(b)) {
-        if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
-        return a.every((item, i) => isSameOptionsValue(item, b[i], depth + 1));
-    }
-    const isPlain = (v: unknown): v is Record<string, unknown> => {
-        if (v === null || typeof v !== 'object') return false;
-        const proto = Object.getPrototypeOf(v);
-        return proto === Object.prototype || proto === null;
-    };
-    if (isPlain(a) && isPlain(b)) {
-        const keys = Object.keys(a);
-        if (keys.length !== Object.keys(b).length) return false;
-        return keys.every((k) => Object.prototype.hasOwnProperty.call(b, k) && isSameOptionsValue(a[k], b[k], depth + 1));
-    }
-    return false;
-}
-
-/**
- * Issue one `updateView` per patch — **as a method call on the adapter**
- * (objectui#4463).
- *
- * This exists to make one specific bug unwritable. `handleSetDefaultView` and
- * `handleReorderViews` both used to detach the method before calling it (the
- * reorder no longer writes a view at all since objectui#12418 — it is the
- * user's preference):
- *
- * ```ts
- * const updateView = (dataSource as any).updateView;   // detached
- * …
- * updateView(objectName, target, patch);               // `this` === undefined
- * ```
- *
- * The adapter's `updateView` opens with `await this.connect()`, so every write
- * in the list rejected with `TypeError: Cannot read properties of undefined
- * (reading 'connect')` **before any request was issued** — the user got a toast
- * and the server never heard about it. "Set as Default" was dead on every saved
- * view for exactly this reason, while rename and pin worked from the same menu:
- * `handlePinView` always called it as a method, which is the in-file convention
- * this restores.
- *
- * The call site routes through here, so there is a single place in the file
- * that calls `updateView` over a patch list — and it has no local to detach into.
- */
-export function dispatchViewPatches(
-    dataSource: any,
-    objectName: string,
-    patches: ReadonlyArray<{ viewId: string; patch: Record<string, any> }>,
-): Array<Promise<unknown>> {
-    return patches.map(
-        ({ viewId, patch }) => dataSource.updateView(objectName, viewId, patch),
-    );
-}
+// objectstack#25992 slice 3: `ObjectNotFoundState` moved to `./objectViewChrome.tsx`
+// and stays exported from here (`AppContent` imports it by this path).
+export { ObjectNotFoundState } from './objectViewChrome.js';
 
 /**
  * Props of the Console `ObjectView`, the route-level object surface
@@ -619,94 +188,6 @@ export interface ConsoleObjectViewProps {
      * view (for example a record saved in a form the host owns).
      */
     externalRefreshKey?: number;
-}
-
-/**
- * The "object not found" state the route draws for an object it has no
- * definition of. objectui#13052 — `packageDisabled`: the server answered that
- * the object exists and its package is disabled (`OBJECT_PACKAGE_DISABLED`),
- * so the description says that instead. The console route draws it for that
- * answer (`AppContent`); this module's `ObjectView` draws it for an absence.
- * Not part of the package entry.
- */
-export function ObjectNotFoundState({ objectName, packageDisabled = false }: { objectName: string | undefined; packageDisabled?: boolean }) {
-    const { t } = useObjectTranslation();
-    return (
-        <div className="h-full p-4 flex items-center justify-center">
-          <Empty data-testid={packageDisabled ? 'object-package-disabled' : 'object-not-found'}>
-            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
-              <TableIcon className="h-6 w-6 text-muted-foreground" />
-            </div>
-            <EmptyTitle>{t('console.objectView.objectNotFound')}</EmptyTitle>
-            <EmptyDescription>
-              {packageDisabled
-                ? t('console.objectView.objectPackageDisabled', { objectName })
-                : t('console.objectView.objectNotFoundDescription', { objectName })}
-              {' '}
-              {t('console.objectView.objectNotFoundHint')}
-            </EmptyDescription>
-          </Empty>
-        </div>
-    );
-}
-
-/**
- * The list toolbar's inline-edit toggle, as this page wires it: it writes
- * nothing (objectui#5144, triage's ruling E).
- *
- * The view's `inlineEdit` and `userActions.editInline` are the AUTHOR's
- * permission keys, and `normalizeListViewSchema` folds the first into the
- * second. `editInline` is on by default since the v18 ruling (objectstack#22605,
- * objectui#12086), so a view that declares neither key offers the toggle, and
- * `editInline: false` withdraws it. This toggle used to persist a USER's edit
- * mode into `inlineEdit` through `persistViewPatch`. After the fold, switching
- * it off stored `inlineEdit: false`, which reads as "not offered", so the
- * toggle was gone from the next load and nothing in the console could bring it
- * back.
- *
- * The edit mode is now session state. `ListView` keeps it, and seeds it from
- * the view's `inlineEdit` on each load. The callback stays wired because
- * `ListView` offers the wide toolbar toggle only to a host that wires one.
- *
- * Recorded costs: the edit mode is not remembered across loads, and an overlay
- * that already stores `inlineEdit: false` still reads off. That is existing
- * data, and the maintainer's ruling rejects migrating it. Declaring
- * `userActions.editInline: true` on such a view brings the toggle back.
- */
-/**
- * Tailwind's `sm` breakpoint (px): from here up the list page draws its
- * saved-view tabs in the list toolbar; below it the app bar's mobile view
- * switcher is the page's only view control (objectui#12440).
- */
-const VIEW_TABS_MIN_WIDTH = 640;
-
-/**
- * Is the viewport at least {@link VIEW_TABS_MIN_WIDTH} wide? The matchMedia
- * idiom of `useIsMobile` / `useIsWideViewport`, except the first answer is
- * read synchronously: the tab strip is the first thing on the page's list row,
- * and resolving it in an effect would draw the row once without it and then
- * jump. objectui#12440 — this decides whether the strip is HANDED to the list
- * at all, so below `sm` nothing is passed and nothing is drawn (the CSS
- * `hidden sm:block` it replaces only hid it).
- */
-function viewTabsFitNow(): boolean {
-    return typeof window !== 'undefined' && window.innerWidth >= VIEW_TABS_MIN_WIDTH;
-}
-
-function useViewTabsFit(): boolean {
-    const [fits, setFits] = useState<boolean>(viewTabsFitNow);
-    useEffect(() => {
-        if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
-        const mql = window.matchMedia(`(min-width: ${VIEW_TABS_MIN_WIDTH}px)`);
-        const onChange = () => setFits(viewTabsFitNow());
-        mql.addEventListener('change', onChange);
-        return () => mql.removeEventListener('change', onChange);
-    }, []);
-    return fits;
-}
-
-function keepInlineEditModeForTheSession(): void {
-    // Deliberately empty: see the docblock.
 }
 
 export function ObjectView({ dataSource, objects, onEdit, externalRefreshKey }: ConsoleObjectViewProps) {
@@ -1203,71 +684,16 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // Import wizard open/close state — toolbar entry triggers it.
     const [showImport, setShowImport] = useState(false);
 
-    // ─── Identity import (framework#2782) ────────────────────────────────
-    // sys_user's generic import affordance stays FALSE (a data-layer insert
-    // would bypass better-auth's hashing and never create a credential), but
-    // platform admins get the same wizard wired to the dedicated
-    // /api/v1/auth/admin/import-users pipeline. Gated on the deployment's
-    // admin surface (features.admin from /api/v1/auth/config) plus the
-    // caller being a workspace admin (the server re-checks, ADR-0068).
-    // objectui#13330 — and never on a managed environment
-    // (`features.cloudManaged`): there the server answers `admin/import-users`
-    // with 409 `RESOURCE_CONFLICT`, because people arrive from the hosting
-    // organisation through its identity provider.
-    const { features } = useExpressionContext();
-    const isIdentityImport = objectDef.name === IDENTITY_IMPORT_OBJECT;
-    const identityImportEnabled =
-        isIdentityImport && features?.admin === true && isAdmin && !isManagedEnvironment(features);
-
-    // ─── Setup → Users on a managed environment (objectui#13330) ─────────
-    // The line that says where people are invited, and the marker on a user
-    // who holds no permission set beyond the baseline. The marker reads the
-    // grant rows through one loader per list (`managedEnvironmentUsers.tsx`),
-    // rebuilt when the list refreshes, so a grant made elsewhere shows on the
-    // next load. The metadata store is read through a ref: its context value is
-    // rebuilt whenever any cached type settles (AGENTS.md #10).
-    const managedUsers = objectDef.name === MANAGED_USERS_OBJECT && isManagedEnvironment(features);
-    const metadataStore = useMetadata();
-    const metadataStoreRef = useRef(metadataStore);
-    metadataStoreRef.current = metadataStore;
-    const grantLoaderRef = useRef<{ refreshKey: number; source: unknown; loader: UserGrantLoader } | null>(null);
-    if (
-        managedUsers &&
-        dataSource &&
-        (grantLoaderRef.current?.refreshKey !== refreshKey || grantLoaderRef.current?.source !== dataSource)
-    ) {
-        grantLoaderRef.current = {
-            refreshKey,
-            source: dataSource,
-            loader: new UserGrantLoader(dataSource as any, {
-                ensureType: (type: string) => metadataStoreRef.current.ensureType(type),
-                getTypeStatus: (type: string) => metadataStoreRef.current.getTypeStatus?.(type) ?? 'ready',
-            }),
-        };
-    }
-    const grantLoader = managedUsers ? grantLoaderRef.current?.loader : undefined;
-    const managedUserMarker = useCallback(
-        (row: Record<string, unknown>) => {
-            const id = row?.id ?? row?._id;
-            if (!grantLoader || id === undefined || id === null || id === '') return null;
-            return <UnauthorizedUserMarker loader={grantLoader} userId={String(id)} t={t} />;
-        },
-        [grantLoader, t],
-    );
-    const [identityPasswordPolicy, setIdentityPasswordPolicy] = useState<IdentityPasswordPolicy>('auto');
-    const identityPolicyRef = useRef<IdentityPasswordPolicy>('auto');
-    identityPolicyRef.current = identityPasswordPolicy;
-    const identityDataSource = useMemo(
-      () => (identityImportEnabled
-        ? createIdentityImportDataSource({
-            base: dataSource,
-            authFetch: actionRuntime.authFetch,
-            baseUrl: import.meta.env.VITE_SERVER_URL || '',
-            getPasswordPolicy: () => identityPolicyRef.current,
-          })
-        : undefined),
-      [identityImportEnabled, dataSource, actionRuntime.authFetch],
-    );
+    // objectstack#25992 slice 5: identity import and the managed-environment Users
+    // marker moved to `./objectViewIdentity.tsx`.
+    const {
+        identityImportEnabled,
+        managedUsers,
+        managedUserMarker,
+        identityPasswordPolicy,
+        setIdentityPasswordPolicy,
+        identityDataSource,
+    } = useObjectViewIdentity({ objectDef, isAdmin, dataSource, refreshKey, t, actionRuntime });
 
     // ─── User-defined views (metadata overlay) ──────────────────────────
     // Saved views created via the ViewConfigPanel ("Add View") live in the
@@ -1967,93 +1393,28 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         onToast: toastHandler as (message: string, options?: { type?: string }) => void,
     });
 
-    // Real-time: auto-refresh when server reports data changes
-    const { lastMessage: realtimeMessage } = useRealtimeSubscription({
-        channel: `object:${objectDef.name}`,
+    // objectstack#25992 slice 4: the realtime refresh, conflict resolution and
+    // footer record count moved to `./objectViewLiveData.ts`; the count state stays here.
+    useObjectViewLiveData({ dataSource, objectDef, refreshData, refreshKey, setRecordCount });
+
+    // objectstack#25992 slice 6: the record navigation overlay (drawer state in the
+    // URL, row click, expand to page, record links) moved to `./objectViewRecordNavigation.ts`.
+    const { listRecordActions, navOverlay, handleDrawerClose, handleRowClick, handleExpandDrawer } = useObjectViewRecordNavigation({
+        activeView,
+        objectDef,
+        objects,
+        appName,
+        viewId,
+        searchParams,
+        setSearchParams,
+        location,
+        navigate,
+        routerRootHref,
+        servedViews,
+        viewLabel,
+        unlabelledViewText,
+        language,
     });
-
-    // Conflict resolution: detect and queue conflicts on reconnection
-    const conflictUserId = objectDef.name ? `user-${objectDef.name}` : 'current-user';
-    const { hasConflicts, resolveAllConflicts } = useConflictResolution(conflictUserId);
-
-    useEffect(() => {
-        if (realtimeMessage) {
-            // On reconnection data change, auto-resolve with server-wins strategy
-            if (hasConflicts) {
-                resolveAllConflicts('remote');
-            }
-            refreshData();
-        }
-    }, [realtimeMessage, hasConflicts, resolveAllConflicts, refreshData]);
-    
-    // Fetch record count for footer display.
-    //
-    // `$top: 0` IS the request: give me the total, send no rows. It was written
-    // `limit: 0`, which is not a `QueryParams` key — `convertQueryParams` copies
-    // exactly the `$`-prefixed keys the type declares — so the cap reached no
-    // branch and was dropped, and the platform's GET list route has no default
-    // page size. The effect therefore did the opposite of what it says: it
-    // downloaded EVERY row of the object, on every mount and every refresh of
-    // every list view, to read one integer off the envelope. The dead spelling
-    // type-checked because `QueryParams` then carried `[key: string]: any` for
-    // adapter-specific params; `object-ui/no-unprefixed-query-params` rejects it
-    // at write time now (objectui#5458), and the index signature itself is gone
-    // (objectui#7497), so `tsc` refuses it as well.
-    //
-    // `total` is the only field that can still answer the question, so the
-    // row-counting fallbacks are gone rather than repointed. Once we ask for
-    // zero rows an empty `data` means "you asked for none", not "the object is
-    // empty" — counting the response would report a confident `0` for any
-    // adapter that does not send a total. Leaving `recordCount` `undefined`
-    // omits the footer line instead of asserting a wrong number; the render is
-    // already guarded by `typeof recordCount === 'number'`.
-    useEffect(() => {
-        if (dataSource?.find && objectDef.name) {
-            dataSource.find(objectDef.name, { $top: 0 }).then((result: any) => {
-                if (typeof result?.total === 'number') {
-                    setRecordCount(result.total);
-                }
-            }).catch(() => {
-                // Silently ignore — record count is non-critical
-            });
-        }
-    }, [dataSource, objectDef.name, refreshKey]);
-
-    // Navigation overlay for record detail (supports drawer/modal/split/popover via config)
-    // Priority: activeView.navigation > objectDef.navigation > default drawer.
-    //
-    // Default mode = 'drawer'. Mirrors Linear / Notion / Airtable / Jira where
-    // record peek is the primary interaction and full-page is the upgrade.
-    // Direct URL access (`/record/:id`) still opens as a full page because
-    // RecordDetailView owns its own route — only same-page click navigation
-    // is drawer-by-default. Per-view config can still override (e.g. a heavy
-    // detail object can set `navigation.mode = 'page'`).
-    const detailNavigation: ViewNavigationConfig = useMemo(
-        () => {
-            const authored = activeView?.navigation ?? objectDef.navigation;
-            if (authored) {
-                // Authored config wins. For an overlay, resolve the `size`
-                // bucket (or 'auto') to a viewport-clamped width when no explicit
-                // width was given — objectstack-ai/objectstack#2578: a pixel width can't be authored blind.
-                if (authored.mode === 'page') return authored;
-                return {
-                    ...authored,
-                    width: authored.width ?? overlayWidthFor(
-                        (authored as { size?: 'auto' | 'sm' | 'md' | 'lg' | 'xl' | 'full' }).size,
-                        objectDef,
-                    ),
-                };
-            }
-            // objectstack-ai/objectstack#2578: derive surface + width from FIELD COUNT. Field-heavy → full
-            // page (cramped in a drawer); light → a drawer sized to the content
-            // and clamped to the viewport. Mobile always pages (in deriveRecordSurface).
-            return deriveRecordSurface(objectDef) === 'page'
-                ? { mode: 'page' }
-                : { mode: 'drawer', width: overlayWidthFor('auto', objectDef) };
-        },
-        [activeView?.navigation, objectDef]
-    );
-    const drawerRecordId = searchParams.get(RECORD_DRAWER_PARAM);
 
     /**
      * URL-derived equality filters in the form `?filter[<field>]=<value>`.
@@ -2126,130 +1487,6 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         },
         [setSearchParams],
     );
-    // Memoize onNavigate to prevent stale closure in useNavigationOverlay's handleClick
-    const handleNavOverlayNavigate = useCallback(
-        (recordId: string | number, action?: string) => {
-            if (action === 'new_window') {
-                // Open record detail in a new browser tab with Console-correct URL.
-                // Same builder the list's link column publishes as its href
-                // (objectui#4490) — one record-route shape for this surface.
-                window.open(listRecordDetailUrl(window.location.pathname, recordId), '_blank');
-                return;
-            }
-            // Default: navigate to record detail page.
-            // `action` is a navigation-MODE token — 'view' / 'page' / undefined
-            // — and every non-`new_window` value lands on the record detail
-            // route.
-            //
-            // ⛔ It is NOT a view name, and this comment used to say a custom
-            // one could arrive here "forwarded from `navigation.view` (e.g.
-            // 'detail_form')", resolved "by RecordDetailView from its own
-            // config". No layer ever resolved a view by that name — which is
-            // why `@objectstack/spec` 17.5.0 retired the key under ADR-0049,
-            // and why `useNavigationOverlay` stopped forwarding it
-            // (objectui#9874). Nothing here changes behaviour: this branch
-            // already treated the name and the token identically, which is
-            // exactly what made the substitution inaudible on this surface.
-            const originState = {
-              from: {
-                pathname: location.pathname + (location.search || ''),
-                label: viewTabLabel({ id: activeView?.id, name: activeView?.name, label: activeView?.label }, objectDef.name, servedViews, viewLabel, unlabelledViewText, language),
-              },
-            };
-            if (viewId) {
-                navigate(`../../record/${encodeURIComponent(String(recordId))}`, { relative: 'path', state: originState });
-            } else {
-                navigate(`record/${encodeURIComponent(String(recordId))}`, { state: originState });
-            }
-        },
-        [navigate, viewId, location.pathname, location.search, objectDef, activeView?.id, activeView?.name, activeView?.label, viewLabel, unlabelledViewText, servedViews, language]
-    );
-    /**
-     * The list surface's half of the record-link mechanism (objectui#4490):
-     * publish this page's record-URL builder so the grid's `link: true` column
-     * can render a real anchor instead of a click-only `span role="link"`.
-     * See {@link listRecordActionsValue} for what this does and does NOT claim.
-     *
-     * The record drawer/overlay below mounts `RecordDetailView`, which brings
-     * its own `RelatedRecordActionsBridge` around the whole detail body — that
-     * nearer provider keeps owning the detail surface, exactly as before.
-     */
-    const listRecordActions = useMemo(
-        () =>
-            listRecordActionsValue(objectDef.name, handleNavOverlayNavigate, undefined, {
-                appName,
-                objects,
-                navigate,
-                routerRootHref,
-            }),
-        [objectDef.name, handleNavOverlayNavigate, appName, objects, navigate, routerRootHref],
-    );
-    const navOverlay = useNavigationOverlay({
-        navigation: detailNavigation,
-        objectName: objectDef.name,
-        onNavigate: handleNavOverlayNavigate,
-    });
-    const handleDrawerClose = () => {
-        navOverlay.close();
-        const newParams = new URLSearchParams(searchParams);
-        newParams.delete(RECORD_DRAWER_PARAM);
-        setSearchParams(newParams);
-    };
-    /**
-     * Row-click handler used by all list/grid/gallery/kanban surfaces inside
-     * this object view. Wraps `navOverlay.handleClick` so that drawer-mode
-     * opens are URL-driven (writes `?recordId=…`) — making the drawer state
-     * shareable, refresh-safe, and respected by browser back/forward. The
-     * URL→state sync effect below handles actually opening the drawer.
-     */
-    const handleRowClick = useCallback(
-        (record: any, event?: React.MouseEvent | { metaKey?: boolean; ctrlKey?: boolean; button?: number }) => {
-            // Cmd/Ctrl/middle-click — let the hook open in a new tab (full page)
-            // regardless of configured mode. Matches browser link convention.
-            const isModifier = !!(
-                event && ((event as any).metaKey || (event as any).ctrlKey || (event as any).button === 1)
-            );
-            if (isModifier) {
-                navOverlay.handleClick(record, event as any);
-                return;
-            }
-            // Drawer mode → URL is the source of truth. Push `?recordId=…`
-            // and let the existing URL-sync effect open the overlay.
-            if (navOverlay.mode === 'drawer') {
-                const id = (record?.id ?? record?._id) as string | number | undefined;
-                if (id != null) {
-                    const next = new URLSearchParams(searchParams);
-                    next.set(RECORD_DRAWER_PARAM, String(id));
-                    setSearchParams(next);
-                    return;
-                }
-            }
-            // All other modes (page / modal / split / popover / new_window / none)
-            // — delegate to the hook.
-            navOverlay.handleClick(record, event as any);
-        },
-        [navOverlay, searchParams, setSearchParams]
-    );
-    /**
-     * "Expand to full page" — invoked from the drawer header chevron. Closes
-     * the drawer (which clears `?recordId=…`) and router-pushes to the
-     * dedicated `/record/:id` route. Mirrors Linear/Notion peek-to-page.
-     */
-    const handleExpandDrawer = useCallback(() => {
-        const rec = navOverlay.selectedRecord as Record<string, unknown> | null;
-        const id = rec && ((rec as any).id ?? (rec as any)._id);
-        if (id == null) return;
-        handleDrawerClose();
-        handleNavOverlayNavigate(id as string | number);
-    }, [navOverlay.selectedRecord, handleNavOverlayNavigate]);
-    // Sync URL-based recordId to overlay state
-    useEffect(() => {
-        if (drawerRecordId && !navOverlay.isOpen) {
-            navOverlay.open({ id: drawerRecordId });
-        } else if (!drawerRecordId && navOverlay.isOpen) {
-            navOverlay.close();
-        }
-    }, [drawerRecordId]);
 
     // objectui#10046 — the last `options` bag handed to `ListView`, so an
     // equal-content rebuild keeps its identity (see `isSameOptionsValue`).

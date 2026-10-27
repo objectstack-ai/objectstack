@@ -663,12 +663,12 @@ const SPEC_SCRIPTS_PRECEDENT = 'packages/spec/tsconfig.scripts.json';
 const TEST_ROOTDIR_PRECEDENT = '`packages/client/tsconfig.test.json` and `packages/cli/tsconfig.test.json`';
 const GENERATED_INCLUDE_ISSUE = 'https://github.com/objectstack-ai/objectstack/issues/10880';
 
-// A path in the root program whose edits move the `@objectstack/spec-monorepo`
-// count below, declared as a bare, whole-literal path so the dispatch
-// derivation can read it. It accounts for 29 of that entry's 80 -- the largest
-// single contributor, and the one an ordinary card actually edits. The note on
-// that entry carries the accounting and references this constant instead of
-// spelling the path inside its sentence.
+// A path in the root program, declared as a bare, whole-literal path so the
+// dispatch derivation can read it. It accounted for 29 of the
+// `@objectstack/spec-monorepo` DEBT entry's 80 errors, and for 1 of the 26 left
+// when that entry graduated (#26236). The root program is now type-checked by the
+// root's `typecheck:root` script, which lint.yml runs, and this is still the
+// root script an ordinary card edits.
 //
 // Why the SHAPE and not just the mention: scripts/pm/dispatch-gates.mjs scans
 // each gate's own module body for path literals and accepts one only when the
@@ -832,23 +832,17 @@ const ROOT_PROGRAM_COUPLED_SCRIPT = 'scripts/check-test-typecheck.mts';
 // fixed the test config showed 4 more (TS2883 on the `vi.fn()` fields of
 // `src/__mocks__/runtime.ts`, annotated `Mock`) that the build config never shows.
 // No cast, no `@ts-expect-error`, no `src` signature widened.
-const DEBT = {
-  '@objectstack/spec-monorepo': {
-    errors: 26,
-    compositionAt: 80,
-    note: 'the workspace root itself: code-tier 4 (TS2304 x2, TS2339 x2); config-tier 68 '
-      + '(TS2591 x28 / TS2584 x22 -- the root tsconfig still has no `types:["node"]` -- plus TS2307 x17 '
-      + 'and TS2550); noise 8 (TS7006 x7, TS6133). Re-measured 80 at 5ab08428, up from 50. This entry '
-      + 'drifts differently from a package: the root program is `scripts/` and the top-level configs '
-      + '(everything outside packages/apps/examples), so it grows whenever the repo gains a script -- '
-      + ROOT_PROGRAM_COUPLED_SCRIPT + ' alone accounts for 29 of the 80, and the analytics-reconcile '
-      + 'tree for 32. Almost all of it is one missing `types:["node"]`, not 80 defects. One wrinkle to '
-      + 'know before reading this number as "the root scripts": `exclude` only drops files from the '
-      + 'initial walk, so example sources IMPORTED by a script are still pulled into the program -- 4 of '
-      + 'the 80 are reported in examples/app-showcase/src, and this entry therefore moves with the '
-      + 'showcase as well as with scripts/.',
-  },
-};
+//
+// `@objectstack/spec-monorepo` -- the workspace ROOT itself -- GRADUATED from this
+// ledger (#26236; entry: 26 raw, repaired to 0). Its program is the root
+// `tsconfig.json`: `scripts/` and the top-level configs. 24 of the 26 were the
+// obsolete ADR-0021 analytics-reconcile harness, which was deleted (its imports hid
+// 31 more errors on keys the spec had removed). The other two were `Object.hasOwn`
+// under lib ES2020, fixed by giving the root program lib ES2022, and an unused
+// const in an example source a script imported. Graduated the root's way: a
+// `typecheck:root` script plus its step in .github/workflows/lint.yml, both of
+// which the root branch of `evaluate` requires.
+const DEBT = {};
 
 // Package name -> why running tsc over it is not applicable at all. An EXEMPT
 // entry is a statement about the package's nature, not about its debt; if the
@@ -1131,227 +1125,13 @@ const EXEMPT = {
 // Onboard by WIRING, not by widening the build config -- which is now the only
 // route the graduation message prescribes at all (#18953), so this record is
 // history and ⛔ not a second option anybody still has to weigh.
-const TEST_DEBT = {
-// ── #14710: `@objectstack/cli` GRADUATED, and it was not paid down ─────────
-//
-// `cli` (144) left this ledger on 2026-09-03, under the same shape as the five
-// above and for the same reason: it now has a `tsconfig.test.json` its
-// `typecheck` script NAMES, so `hidesTests` is false for it and this gate's
-// per-PACKAGE approximation has nothing left to approximate. ⛔ Read that first
-// — a deleted TEST_DEBT entry normally means the errors are gone, and here it
-// does not. Not one of the 144 was repaired: this change edits no test file.
-//
-// ⚠️ This package reached the hidden state by the OTHER SPELLING, which is the
-// reading worth carrying forward: its `tsconfig.json` has no `exclude` at all.
-// It declares `include: ["src"]`, and its 115 test files live in a sibling
-// `test/` tree that the glob simply never reaches. The exclude-shaped detector
-// this ledger's own note describes could not see it; only `hiddenTests` (which
-// walks the whole package rather than the include roots) could.
-//
-// The identical population is now held one level finer, per FILE and per
-// SIGNATURE, in `packages/cli/test-typecheck-debt.json`: **28 errors across 3
-// of the package's 115 test files**, measured at 5a5336b399 with the closure
-// built. The 144 -> 28 step is the config-tier subtraction this ledger's top
-// note describes, attributed in both directions with no remainder: -120 that
-// dissolve under the test program's vitest-matching module semantics (TS2835
-// x56 extension-less relative imports, the TS7006 x59 cascading above them,
-// TS2307 x3, TS18046 x2) and +4 that collapsing the cascade EXPOSED (TS18048
-// x4 in test/i18n-extract-action-description.test.ts, previously masked by an
-// `any` from two unresolved imports). The 24 TS2339 survive the move
-// unchanged, file for file and count for count. The 144 recorded here was
-// exact and stayed exact to the end — re-measured on the way out at
-// 5a5336b399, the raw program reports 144 class for class.
-//
-// ⚠️ Unlike the four packages above, this one's 115 hidden files sat OUTSIDE
-// the build config's `rootDir` (`src`), so the honest program needed
-// `rootDir` widened the way `packages/client`'s test config already does.
-// Measured: with `rootDir` inherited, the same program reports 116 additional
-// TS6059 — a config-tier pile that says nothing about any test.
-
-// ── #14917: `@objectstack/driver-mongodb` GRADUATED — and this one really is
-// at ZERO, which the six above are not ────────────────────────────────────────
-//
-// `driver-mongodb` (10) left this ledger on 2026-09-04, by the same route as
-// `runtime`, `cli`, `lint` and the three plugins: it now has a
-// `tsconfig.test.json` its `typecheck` script NAMES, so `hidesTests` is false
-// for it and this gate's per-PACKAGE approximation has nothing left to
-// approximate. ⛔ This change repairs no test file and edits none.
-//
-// ⭐ WHAT IS DIFFERENT HERE, and it is the whole reading: those six graduated
-// into a per-file `test-typecheck-debt.json` holding a residue. This one
-// graduates into NO LEDGER AT ALL. Measured at 6ed4b811af with the dependency
-// closure built, `tsc --noEmit -p tsconfig.test.json` reports **0 errors across
-// all 30 test files**. The recorded 10 was config-tier IN FULL — the same
-// dissolution measured for `lint`'s 16, but complete rather than partial.
-//
-// The attribution has no remainder in either direction. RECORDED here was
-// `TS1309 x7, TS2550 x3`; re-measured on the way out at 6ed4b811af by dropping
-// only the test glob (this gate's own `remeasureProject` shape), the raw
-// program reports those same 10, class for class and file for file. All 7
-// TS1309 are "cannot use `await` at the top level" — this package has no
-// `"type": "module"`, so NodeNext compiles as CJS the suites that await
-// `startMongod()` at module scope, which vitest executes as ESM. All 3 TS2550
-// are the same `Array.prototype.at` message in `mongodb-findone-options.test.ts`
-// against a `lib` older than es2022. Both classes are the CHECK being
-// misconfigured; neither is a defect in a test. Under vitest-matching module
-// semantics both dissolve and NOTHING is exposed behind them — there is no
-// `+n` term here, because there was no unresolved-import cascade to collapse.
-//
-// ⚠️ So the shrink-only guarantee did not merely move to a finer instrument
-// here, it STRENGTHENED twice over. All 30 files are unledgered, so any error
-// any one of them gains is red on arrival. And what the package's own
-// `typecheck` script reports about its test layer is now a PASS rather than a
-// NUMBER — which was this card's actual finding, once its false headline (that
-// the `Equals` / `IsAny` pins here were phantoms) had been corrected on the
-// thread. The pins were always real; they were read by THIS ratchet, and a
-// ratchet fails when a number moves, not when a type is wrong.
-//
-// ⚠️ PINS_CHECKED reported nothing for this package in either direction and
-// still does not: measured on the way out, its test layer holds ZERO
-// `@ts-expect-error` directives, so that half had no subject here either.
-
-// ── #12511: SEVEN packages GRADUATED at once, and not one of them was paid down
-//
-// `mcp` (53), `formula` (17), `platform-objects` (3), `connector-mcp` (5),
-// `connector-openapi` (5), `connector-rest` (1) and `service-sms` (1) left this
-// ledger on 2026-09-06, by the same route as `runtime`, `cli`, `lint`,
-// `driver-mongodb`, `verify` and the three plugins: each now has a
-// `tsconfig.test.json` its own `typecheck` script NAMES, so `hidesTests` is
-// false for it and this gate's per-PACKAGE approximation has nothing left to
-// approximate. ⛔ Read that first — a deleted TEST_DEBT entry normally means the
-// errors are gone, and here it does not. This change repairs no test file and
-// edits none.
-//
-// ⚠️ SEVEN IN ONE CHANGE IS NOT A BLANKET EDIT, and that distinction is the
-// whole reason the card ordering this refused one. Each sibling config was
-// written against its OWN measured hole and states its own reading in its own
-// header; the judgement genuinely diverged on both axes that matter here:
-//
-//   - MODULE SEMANTICS. `mcp` is `"type": "module"`, so NodeNext already reads
-//     its tests as ESM and is the STRICTER of the two readings — its sibling
-//     therefore changes module semantics NOT AT ALL, which is
-//     `packages/metadata-core`'s precedent rather than `packages/rest`'s. The
-//     other six are not `"type": "module"`, so NodeNext compiles as CJS what
-//     vitest executes as ESM, and their siblings carry `module: esnext` /
-//     `moduleResolution: bundler` for fidelity to the runtime.
-//   - THE MEASURED SUBTRACTION, which is ZERO for six of the seven. The
-//     remedy that "obviously" dissolves a config-tier pile dissolved one only
-//     where the pile was actually there, and 8 mechanical copies of any one of
-//     these configs would have been 8 configs nobody measured.
-//
-// The attribution has no remainder in either direction. RAW is re-measured on
-// the way out through this gate's own `remeasureProject` shape (extends the
-// package's `tsconfig.json`, drops ONLY the test glob) at 6a1e38244 with the
-// dependency closure built; LEDGER is what `tsconfig.test.json` reports at
-// 52a5a14e7 on that same closure. An error count taken against an unbuilt
-// closure is not a reading — unresolved-import cascades inflate it.
-//
-//   package             RECORDED  RAW  dissolve  exposed  LEDGER
-//   mcp                       53   53         0        0      53
-//   formula                   17   17        -2        0      15
-//   platform-objects           3    3         0        0       3
-//   connector-mcp              5    5         0        0       5
-//   connector-openapi          5    5         0        0       5
-//   connector-rest             1    1         0        0       1
-//   service-sms                1    1         0        0       1
-//
-// RECORDED equalled RAW for all seven, class for class and file for file, so
-// every number this ledger held was exact and stayed exact to the end. The
-// identical populations are now held one level finer, per FILE and per
-// SIGNATURE, in each package's own `test-typecheck-debt.json`.
-//
-// The single dissolution is `formula`'s TS1470 x2 ("`import.meta` is not
-// allowed in files which will build into CommonJS output",
-// `src/rls-predicate.test.ts` and `src/skill-catalog-sync.test.ts`), which goes
-// away under `module: esnext` because it was the CHECK being misconfigured and
-// never the tests. NOTHING was exposed behind it: there was no unresolved-import
-// cascade to collapse in any of the seven, so there is no `+n` term anywhere in
-// the table.
-//
-// ⚠️ ONE COMPOSITION CORRECTION, recorded because the next reader would
-// otherwise go looking for the wrong thing: `formula`'s deleted note attributed
-// its TS2591 x6 to «`process`». Measured here, all six are the bare module
-// specifiers of node builtins — `node:fs` x2, `node:path` x2, `node:url` x2, in
-// those same two files — and the TS2339 x2 beside them are `Property 'url' does
-// not exist on type 'ImportMeta'`. Both classes SURVIVE the move and are
-// ledgered: this package declares no `@types/node` and its tsconfig names no
-// `types`, so the node typings never reach its program. That is real debt with a
-// real repair, and ⛔ it is deliberately NOT repaired here — seeding the ledger
-// is the deliverable, and turning an onboarding into a cleanup is how it stops
-// landing at all.
-//
-// ⚠️ PINS_CHECKED reported nothing for any of the seven in either direction and
-// still does not: their test layers hold ZERO `@ts-expect-error` directives
-// (grepped with a positive control — the same grep hits `packages/spec/src`), so
-// that half had no subject here. What the gap cost was the other half: 83
-// diagnostics that no gate this repo runs had ever reported.
-//
-// ── #12511: `@objectstack/http-conformance` GRADUATED, and THIS LEDGER IS NOW
-// EMPTY ──────────────────────────────────────────────────────────────────────
-//
-// The eighth and last of the card, on 2026-09-17, by the same route as the
-// seven above and the six before them: it now has a `tsconfig.test.json` its
-// own `typecheck` script NAMES, so `hidesTests` is false for it and this gate's
-// per-PACKAGE approximation has nothing left to approximate. ⛔ Read that first
-// — a deleted TEST_DEBT entry normally means the errors are gone, and here it
-// does not. This change repairs no test file and edits none.
-//
-// ⭐ WHAT THIS ONE NEEDED THAT THE SEVEN DID NOT, because the deleted note said
-// the sibling route was unavailable and that reading was correct at the time:
-// `packages/qa/http-conformance/tsconfig.json` was one of the six package
-// configs that do NOT extend the repo root config, and the only one of those
-// that also declared no `skipLibCheck` — the sole reason its two third-party
-// declarations were checked at all. The note left the choice to the card
-// because it is a judgement about this repo's CONFIG POLICY and not about this
-// package. The director ruling of 2026-09-07 (decision batch #66, maintainer
-// verbatim: 「同意」) made it: the build config takes one `extends` line onto the
-// repo root, the way 73 of 79 packages already do, and the sibling then follows
-// unchanged. ⛔ No
-// per-package dialect, ⛔ no ratchet keyed on `.pnpm` content-hash paths that
-// move on an unrelated dependency bump, ⛔ no residual entry here.
-//
-// ⚠️ THE ATTRIBUTION HAS NO REMAINDER, and it does not run the way the other
-// thirteen graduations did — this is the first entry whose LEDGER is LARGER
-// than what it graduated with, so read the terms rather than the totals.
-// Measured on objectstack-ai/objectstack at f6c2eb7c865065943a474d1e49833d6184d76e32
-// with the dependency closure built (an error count taken against an unbuilt
-// closure is not a reading — unresolved-import cascades inflate it), each term
-// isolated by its own single-option probe rather than inferred from the ends:
-//
-//   RECORDED here                                                        2
-//   RAW — this gate's own `remeasureProject` shape against the
-//     UNCHANGED config (extends nothing, drops only the test glob):
-//     TS2307 x1, TS2304 x1, class for class and file for file            2
-//   dissolve — `skipLibCheck`, inherited from the root config. Both
-//     are inside `node_modules` `.d.ts` (@better-auth/core's
-//     `bun:sqlite` import, @better-fetch/fetch's `Timer`)               -2
-//   exposed — the root config DECLARES `lib`, which REPLACES the
-//     `lib.es2022.full` default that `target: ES2022` had been
-//     supplying, so `Response.json()` is read from @types/node's
-//     undici (`Promise<unknown>`) instead of from DOM
-//     (`Promise<any>`): TS18046 x14, TS2571 x6, TS2339 x5             +25
-//   exposed — the root config's `noUnusedParameters`: TS6133 x2        +2
-//   LEDGER, per file and per signature                                  27
-//
-// The `+25` is one idiom — `await res.json()` bound without a narrowing —
-// across three suites, which is `packages/mcp`'s population above almost
-// exactly (51 of its 53). It is NOT a config-tier artefact to be tuned away:
-// vitest runs this package with `environment: 'node'`, so the undici reading is
-// the one that matches the runtime and the DOM one was the fiction. The sibling
-// therefore declares `lib: ["ES2022"]` like all 31 of its siblings and ⛔ does
-// not re-add `DOM` to shrink its own ledger. Measured, not reasoned: with
-// `lib: ["ES2022", "DOM", "DOM.Iterable"]` the same program reports 2.
-//
-// ⚠️ PINS_CHECKED reported nothing for this package in either direction and
-// still does not: its test layer holds ZERO `@ts-expect-error` directives
-// (grepped with a positive control — the same grep hits 49 files under
-// `packages/spec/src`), so that half had no subject here either.
 //
 // ⛔ AN EMPTY LEDGER IS NOT A LICENCE TO REOPEN IT. TEST_DEBT is closed to new
 // entries exactly as it was while it held rows: a package whose tests sit
 // outside every tsc program onboards by WIRING a sibling config, never by
-// adding a row back here.
-};
+// adding a row back here. The per-graduation records that used to sit inside
+// this object are in git history: `git log -S GRADUATED -- scripts/check-type-check-coverage.mjs`.
+const TEST_DEBT = {};
 
 // Repo-relative path -> why this test file's `@ts-expect-error` directives are
 // still phantom. PINS_CHECKED's escape hatch, and the narrowest of the three

@@ -83,7 +83,7 @@ const LEDGER: Row[] = [
     reason: '"Save as view": the refusal is a toast with the door\'s message, and the dialog stays open (objectui#11578).',
   },
   {
-    file: 'ObjectView.tsx', symbol: 'dispatchViewPatches', callee: 'updateView', calls: 1,
+    file: 'objectViewOptions.ts', symbol: 'dispatchViewPatches', callee: 'updateView', calls: 1,
     kind: 'relays',
     reason: 'Issues one `updateView` per patch and hands every promise back; set-as-default and reorder await them and answer for the refusal.',
   },

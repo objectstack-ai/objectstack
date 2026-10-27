@@ -165,7 +165,7 @@ SELF-TEST PASSED — 10/10 cases
 ## 3. Instrument B — runtime behavioural probe on the real engine
 
 `scripts/audits/14744-before-update-per-row-value-probe.mjs`
-(`npx tsx … --out <path.json>`). It boots the real `ObjectQL` against a stub driver,
+(`npx tsx … --out <path.json>`; removed from the tree after this reading; held at commit `7111e14ac9`). It boots the real `ObjectQL` against a stub driver,
 dispatches handlers per row of a genuine `multi: true` update, and reads what actually
 reaches `driver.updateMany` — the one `SET` clause D3 gives N rows. **Four of its eight
 subjects are the shipped handlers themselves, imported and dispatched unmodified**; the

@@ -37,7 +37,6 @@ const SYS = { isSystem: true } as const;
 describe('showcase: a public form withdrawal at any metadata layer holds', () => {
   let stack: VerifyStack;
   let admin: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let ql: any;
   let published: Record<string, any>;
   let organizationId: string;

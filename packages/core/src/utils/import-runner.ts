@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { randomUUID } from 'node:crypto';
-import { coerceRow, type RefResolver, type RefMatch } from './import-coerce.js';
+import { coerceRow, type CoerceContext, type RefResolver, type RefMatch } from './import-coerce.js';
 import type { ExportFieldMeta } from './import-field-meta.js';
 import type { ValidationMessageTranslator } from '@objectstack/spec/system';
 import {
@@ -812,13 +812,15 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
   // record, or a sentinel: 'blank' (every key set has an empty field), 'none'
   // (no match), 'ambiguous' (>1 match — too risky to update); and the key set
   // the row was matched by.
-  const findExisting = async (
-    data: Record<string, any>,
-  ): Promise<{ match: Record<string, any> | 'blank' | 'none' | 'ambiguous'; keySet: string[] }> => {
-    const keySet = keySets.find((set) => set.every((f) => {
+  const keySetOf = (data: Record<string, any>): string[] | undefined =>
+    keySets.find((set) => set.every((f) => {
       const v = data[f];
       return !(v === undefined || v === null || v === '');
     }));
+  const findExisting = async (
+    data: Record<string, any>,
+  ): Promise<{ match: Record<string, any> | 'blank' | 'none' | 'ambiguous'; keySet: string[] }> => {
+    const keySet = keySetOf(data);
     if (!keySet) return { match: 'blank', keySet: [] };
     const filter: Record<string, any> = {};
     for (const f of keySet) filter[f] = data[f];
@@ -830,6 +832,71 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
     if (recs.length === 0) return { match: 'none', keySet };
     if (recs.length > 1) return { match: 'ambiguous', keySet };
     return { match: recs[0], keySet };
+  };
+
+  // One coercion context for every `coerceRow` call, so the key a row is
+  // grouped by below is the value its own coercion produces.
+  const coerceCtx: CoerceContext = {
+    trimWhitespace, nullValues, createMissingOptions, resolveRef,
+    // Cell-coercion failures land in the same row report as the engine's
+    // validation errors, so they speak the same language (#3957).
+    locale: context?.locale, translate: messageTranslator,
+    // [#8485] The clock an offset-free datetime cell is read in. Already
+    // on the resolved context beside `locale` (the localization cascade's
+    // `ExecutionContext.timezone`) — the SAME value the export renders
+    // cells in (#8373), which is what makes the round trip an inverse
+    // instead of a host-`TZ` lottery. Absent ⇒ UTC, as the export writes.
+    timezone: typeof context?.timezone === 'string' && context.timezone
+      ? String(context.timezone) : undefined,
+  };
+
+  /**
+   * [#26133] The rows of this import that share a match key, each mapped to
+   * the row numbers carrying that key and the key set it was read by. Asked
+   * once, before any row is written: every row of a shared key then fails with
+   * `DUPLICATE_MATCH_KEY` and none of them is written, on a dry run as on the
+   * write. Writing one of them would leave the rest to update it (a silent
+   * merge that hides which spreadsheet row was right) or, for a key no stored
+   * record carries yet, to create a second record that every later run
+   * answers `AMBIGUOUS_MATCH` for. Judged the same on every object, a unique
+   * index over the key included: the duplicate is a fact about the file, and
+   * the runner keeps no copy of the engine's uniqueness rules.
+   *
+   * A key is the key set a row is matched by ({@link keySetOf}) plus the
+   * values the matcher queries with, i.e. its COERCED key columns: `ISO 14001`
+   * (an option label) and `ISO14001` (its value) coerce to one option value,
+   * so they are one key. A row whose key columns fail coercion, or that is
+   * blank on every key set, has no key here; its own row report answers as
+   * before. Insert mode matches nothing, so it has no keys.
+   */
+  const rowsSharingKey = async (): Promise<Map<number, { rowNos: number[]; keySet: string[] }>> => {
+    const shared = new Map<number, { rowNos: number[]; keySet: string[] }>();
+    if (writeMode === 'insert') return shared;
+    const keyColumns = [...new Set(keySets.flat())];
+    const byKey = new Map<string, { at: number[]; keySet: string[] }>();
+    for (let i = 0; i < rows.length; i++) {
+      const cells: Record<string, unknown> = {};
+      for (const f of keyColumns) if (Object.prototype.hasOwnProperty.call(rows[i], f)) cells[f] = rows[i][f];
+      let data: Record<string, unknown>;
+      try {
+        const coerced = await coerceRow(cells, metaMap, coerceCtx);
+        if (coerced.errors.length > 0) continue;
+        data = coerced.data;
+      } catch { continue; /* the row's own pass reports the throw */ }
+      const keySet = keySetOf(data);
+      if (keySet) {
+        const key = JSON.stringify([keySets.indexOf(keySet), keySet.map((f) => data[f])]);
+        const group = byKey.get(key);
+        if (group) group.at.push(i); else byKey.set(key, { at: [i], keySet });
+      }
+      if ((i + 1) % progressEvery === 0) await yieldToEventLoop();
+    }
+    for (const { at, keySet } of byKey.values()) {
+      if (at.length < 2) continue;
+      const rowNos = at.map((i) => i + 1);
+      for (const i of at) shared.set(i, { rowNos, keySet });
+    }
+    return shared;
   };
 
   const writeCtx = {
@@ -1143,27 +1210,24 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
   };
 
   return (async () => {
+    const sharingKey = await rowsSharingKey();
     for (let i = 0; i < rows.length; i++) {
       const rowNo = i + 1;
       try {
         // 1. Coerce every cell to its storage value (+ resolve lookups).
-        const { data, errors, keptOptionValues } = await coerceRow(rows[i], metaMap, {
-          trimWhitespace, nullValues, createMissingOptions, resolveRef,
-          // Cell-coercion failures land in the same row report as the engine's
-          // validation errors, so they speak the same language (#3957).
-          locale: context?.locale, translate: messageTranslator,
-          // [#8485] The clock an offset-free datetime cell is read in. Already
-          // on the resolved context beside `locale` (the localization cascade's
-          // `ExecutionContext.timezone`) — the SAME value the export renders
-          // cells in (#8373), which is what makes the round trip an inverse
-          // instead of a host-`TZ` lottery. Absent ⇒ UTC, as the export writes.
-          timezone: typeof context?.timezone === 'string' && context.timezone
-            ? String(context.timezone) : undefined,
-        });
+        const { data, errors, keptOptionValues } = await coerceRow(rows[i], metaMap, coerceCtx);
+        const shared = sharingKey.get(i);
         if (errors.length > 0) {
           const first = errors[0];
           errCount++;
           results[i] = { row: rowNo, ok: false, action: 'failed', field: first.field, code: first.code, error: first.message };
+        } else if (shared) {
+          // [#26133] Another row of this import carries the same key.
+          errCount++;
+          results[i] = {
+            row: rowNo, ok: false, action: 'failed', code: 'DUPLICATE_MATCH_KEY',
+            error: `Rows ${shared.rowNos.join(', ')} of this import have the same match key (${shared.keySet.join(' + ')}), so none of them was written: keep one row per key and import again`,
+          };
         } else {
           // [#22183] This row's write context: the kept option values ride along.
           const rowCtx = writeCtxFor([keptOptionValues]);

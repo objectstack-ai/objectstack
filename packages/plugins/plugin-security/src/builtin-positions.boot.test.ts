@@ -387,7 +387,12 @@ async function grantsByPrincipal(engine: ObjectQL, posture: 'single' | 'isolated
     { context: { userId: 'usr_orgadmin', positions: [], permissions: ['qa_admin'], tenantId: ORG } } as any,
   );
 
-  const resolve = (userId: string) => resolveUserAuthzGrants(engine, userId, { tenantId: ORG });
+  // [#25799] The golden below was recorded before the resolver reported its
+  // channel split (`directPermissions`); it pins the grants, so the split is
+  // left out here and pinned where it was added
+  // (`resolve-authz-context.direct-permissions.test.ts`, core).
+  const resolve = (userId: string) => resolveUserAuthzGrants(engine, userId, { tenantId: ORG })
+    .then(({ directPermissions: _channel, ...grants }) => grants);
   const admin = await resolve('usr_admin');
   const orgAdmin = await resolve('usr_orgadmin');
   const member = await resolve('usr_member');

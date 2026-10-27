@@ -2223,7 +2223,10 @@ export function extractCheckInvocations(workflowText, workflowFile, { via = null
     // this card is about: a value that reaches the program only through
     // `process.env`, which no reader of the command line can see.
     const carriedEnv = envNamesNotSpelledInCommand(cmd, stepEnv);
-    for (const m of cmd.matchAll(/pnpm\s+(?:--filter\s+(\S+)\s+)?(?:run\s+)?(check:[\w:-]+)/g)) {
+    // `typecheck:root` is the one non-`check:` script read here: it is the ROOT
+    // program's only type check, and the root-program change kind names it, so it
+    // has to resolve to a family or that row renders STALE.
+    for (const m of cmd.matchAll(/pnpm\s+(?:--filter\s+(\S+)\s+)?(?:run\s+)?(check:[\w:-]+|typecheck:root(?![\w:-]))/g)) {
       out.push(withVia({ check: m[2], filter: m[1] ?? null, workflow: workflowFile, envVariables: carriedEnv }));
     }
     for (const m of cmd.matchAll(DIRECT_CHECK_INVOCATION)) {
@@ -5098,16 +5101,17 @@ const IDENTIFIER_TOKEN = /[A-Za-z_$][\w$]*/g;
  * destructured default puts braces in the SIGNATURE, and counting those closes
  * the body before it opens. `release-rehearsal-clone.mjs` writes two of them
  * among its fixture builders — and, the half this docblock asserted backwards
- * once, THREE self-test ENTRY POINTS in the `scripts/` tree carry one TODAY, so
+ * once, self-test ENTRY POINTS in the `scripts/` tree carry one TODAY, so
  * this repairs live files rather than guarding against a future spelling:
  *
  *   `scripts/check-test-completeness.mjs#selfTest`
- *   `scripts/measure-position-name-fold-census.mjs#selfTest`
- *       both `function selfTest({ quiet = false } = {})`
+ *       `function selfTest({ quiet = false } = {})`
  *   `scripts/workspace-enumerator.mjs#selfTest`
  *       `export function selfTest({ root = null } = {})`
  *
- * Measured at 6193e576d — bytes `maskSelfTests` changes in each file, this
+ * At 6193e576d there were three; the third, the position-name fold census
+ * (also `function selfTest({ quiet = false } = {})`), was deleted with the fold
+ * in #24757. Measured there — bytes `maskSelfTests` changes in each file, this
  * module against a staged copy of the one on `origin/main`: 30 -> 14848,
  * 30 -> 3961, 34 -> 6294. Thirty bytes is the destructured parameter and
  * nothing else; the entire self-test body was surviving the mask. The control
@@ -6006,7 +6010,8 @@ export function packageRootAnchoredHint(hint, base, tree, files) {
  * false: `node_modules`, `dist`, `coverage` and `.turbo` off
  * check-refd-timer-probe's skip set; `.changeset` twice — off
  * check-keyed-text-bounds' `SKIP_DIRS` and off the noise floor the card was
- * filed on; the two gate paths measurement-claim-triage declares it skips; and
+ * filed on; the two gate paths measurement-claim-triage declared it skips (that
+ * tool is removed from the tree, held at 7111e14ac9); and
  * `scripts/**`, `docs/adr/**` and `.changeset/**` off `DEFERRED_SURFACES`,
  * which is what the `DEFERRED` arm retired. The changeset pair is what a dev
  * actually saw when #15753 was filed: a card that has not written its
@@ -10777,8 +10782,9 @@ export function guardsADurabilityCriticalCall(path, readSource = readTrackedSour
 }
 
 /**
- * Is this path inside the ROOT package's tsc program — the population behind
- * the `@objectstack/spec-monorepo` entry of `check:type-check-debt`?
+ * Is this path inside the ROOT package's tsc program — the population the
+ * root's `typecheck:root` script checks (until the root graduated, the
+ * `@objectstack/spec-monorepo` entry of `check:type-check-debt`)?
  *
  * This is the one gate population in the tree that no path literal can ever
  * describe, in principle rather than by omission. The root program is declared

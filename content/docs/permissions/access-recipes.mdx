@@ -18,6 +18,7 @@ Pick the layer that matches the requirement:
 |---|---|---|
 | Can read/create/edit/delete an object type | Object CRUD | permission-set `objects.{allowCreate/Read/Edit/Delete}` |
 | Can see / edit a specific field | Field-level security (FLS) | permission-set `fields`, or field `requiredPermissions` |
+| Can no longer edit a field once a record reaches a stage, for some positions only | Row-conditioned FLS | permission-set `fields` entry with `when` ([recipe](#data-lock-fields-for-a-position-once-a-record-reaches-a-stage)) |
 | Which *rows* a user sees | Row-level security (RLS) | permission-set `rowLevelSecurity` (CEL `using` / depth `readScope`) |
 | A functional capability (export, approve, manage) | Capability | `systemPermissions` ↔ resource `requiredPermissions` |
 | Can open an app / nav entry / page | Surface access | `App.requiredPermissions`, `tabPermissions`, nav gating |
@@ -39,6 +40,51 @@ definePermissionSet({
 - **"My own"** vs **"my team's"** vs **"the org's"** is the RLS *depth* axis (`readScope` / `writeScope`: `own | own_and_reports | unit | unit_and_below | org`, ADR-0057). A manager set uses `unit`; a rep uses `own`. The hierarchy-relative scopes (`own_and_reports` / `unit` / `unit_and_below`) need the enterprise hierarchy resolver and **fail closed to `own`** without it — see [Access depth](/docs/permissions/permission-sets#access-depth--readscope--writescope-adr-0057-d1).
 - Grants combine **most-permissively** across a user's sets; the tenant-isolation policy `AND`s on top; the superuser bypass (`viewAllRecords` / `modifyAllRecords`) short-circuits RLS where the object's posture allows it (ADR-0066).
 - For genuinely sensitive objects, set `access: { default: 'private' }` so they are **not** covered by blanket wildcard grants — access needs an explicit grant.
+
+### Data: lock fields for a position once a record reaches a stage
+
+> Finance may edit a contract while it is a draft, but once it is approved the legal terms are frozen for finance. Legal still edits them.
+
+Every business app meets this shape: a contract's legal terms after approval, an order's amount after shipping, an invoice after posting, a purchase order's supplier after approval. The answer is a field permission with a **row condition**, `when`, on the permission set that should lose the edit.
+
+**In the permission-set editor** (Setup → Access Control → Permission Sets, then open the set):
+
+1. Expand the object (`clm_contract`) to show its field rows.
+2. On each field row to lock (`governing_law`, `liability_cap`), keep **Read** on and **Edit** off.
+3. In the row's **When (edit)** column, choose **Add condition** and write the stage condition: `status in ["approved", "signing", "active"]`. The editor lints it like a row-level security clause, and a condition the publish gate would refuse holds the save.
+
+**The same entries as metadata:**
+
+{/* os:check */}
+```ts
+import { definePermissionSet } from '@objectstack/spec';
+
+definePermissionSet({
+  name: 'finance',
+  objects: { clm_contract: { allowRead: true, allowEdit: true } },
+  fields: {
+    // Locked for finance from approval onward; a draft stays editable.
+    'clm_contract.governing_law': { readable: true, editable: false, when: 'status in ["approved", "signing", "active"]' },
+    'clm_contract.liability_cap': { readable: true, editable: false, when: 'status in ["approved", "signing", "active"]' },
+  },
+});
+```
+
+On a row the condition matches, the entry votes as declared (no edit). On every other row the entry is absent, as if the set had not named the field, so a draft stays editable under the object grant.
+
+**How to choose:**
+
+- The field must freeze for **everyone** at that stage → a [validation rule](/docs/data-modeling/validation) on the object. It refuses the write whoever sends it.
+- The field freezes depending on **who** is editing → a field permission with `when` on the sets that lose the edit, as above.
+
+**Boundaries:**
+
+- **Edit only, never read.** The condition narrows the edit vote; reads are judged row-blind. Keep `readable: true` on the entry: `readable: false` beside a `when` is refused at parse time.
+- **Same object only.** The condition names fields of the entry's own object (compared with a literal or a `current_user.*` value). A condition that reaches across a relation, or names a field the object lacks, is refused at authoring and publish.
+- **The record before the write.** On an update the condition reads the stored record, so a write cannot unlock itself by moving `status` back in the same request. On an insert it reads the record as sent.
+- **It locks, it does not grant.** Grants merge most-permissively: if the same user holds another set that grants the edit, that grant still wins and the field stays editable. Grant the edit only in the sets that should keep it. A subtractive deny layer is [not yet implemented](/docs/permissions/authorization#combination-semantics-the-fixed-order).
+
+Full semantics, including how a write with no judgeable row is treated: [Row-conditioned edit locks](/docs/permissions/field-level-security#row-conditioned-edit-locks-when).
 
 ### Automation: the run-identity is the safety decision
 

@@ -472,12 +472,12 @@ const useSafeFormTranslation = createSafeTranslation(
     'validation.pattern': '{{field}} format is invalid',
     'validation.email': 'Please enter a valid email address',
     'validation.url': 'Please enter a valid URL',
-    'validation.formInvalid': 'Please check the highlighted fields: {{fields}}',
     // objectstack#5407 — the joiner between the field names is a LOCALE
     // property, not a code constant. It used to be a hardcoded `、` (U+3001),
     // which is right for zh/ja and wrong everywhere else — including `en`,
-    // where the toast read "Subject、Account、Status". A locale that ships no
-    // entry falls back through i18next to `en`'s ", ".
+    // where the invalid-submit toast (since removed, objectstack#25874) read
+    // "Subject、Account、Status". A locale that ships no entry falls back
+    // through i18next to `en`'s ", ".
     'validation.formInvalidJoiner': ', ',
     'errors.forbidden': 'Access denied.',
     'form.noPermissionToSave': "You don't have permission to save this record.",
@@ -1594,8 +1594,8 @@ ComponentRegistry.register('form',
     } = schema;
 
     // The form-wide enablement verdict, and NOT `schema.disabled` beside it.
-    // `SchemaRenderer` evaluates the node's `disabled` / `disabledOn` — either
-    // may be a predicate STRING — strips the raw key from the props it spreads,
+    // `SchemaRenderer` evaluates the node's `disabled` — which may be a
+    // predicate STRING — strips the raw key from the props it spreads,
     // and forwards the answer as a real `disabled` prop. The raw value is truthy
     // HOWEVER it evaluates, so destructuring it off `schema` here greyed out
     // every field, the submit button and the cancel button on any form that
@@ -2484,11 +2484,13 @@ ComponentRegistry.register('form',
     // ruling on objectui#8070 (letter A) ports the naming half of the
     // objectui#6499 ruling to this surface: the user is told WHICH fields were
     // cleared and WHY. So a pass that empties anything raises one notice naming
-    // the cleared fields by the label the form draws (the source
-    // `validation.formInvalid` names them from), joined by the locale's own
-    // `validation.formInvalidJoiner`, under `outcomeToastId`. Sharing that id
-    // is what makes it retire like the form's other outcome messages: a later
-    // submit refusal replaces it, and the next accepted attempt dismisses it.
+    // the cleared fields by the label the form draws (`fieldLabelByName`),
+    // joined by the locale's own `validation.formInvalidJoiner`, under
+    // `outcomeToastId`. Sharing that id is what makes it retire like the form's
+    // other outcome messages: every later submit attempt takes it down. One
+    // that clears validation and a client-side refusal (whose report is the
+    // inline field messages, objectstack#25874) both dismiss the id, and the
+    // faulted-`visibleWhen` refusal dismisses it before raising its own.
     //
     // Only a field that held something is named. An empty list is rewritten
     // as itself, and `false` on a two-state control is that control's EMPTY
@@ -2843,13 +2845,16 @@ ComponentRegistry.register('form',
      * carries `data-field` (FormItem), so this reaches custom widgets that RHF's
      * own focus cannot (#2793).
      */
-    const revealField = (name: string) => {
+    const fieldWrapper = (name: string): HTMLElement | null => {
       const root: ParentNode = formRef.current ?? document;
       const escaped =
         typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
           ? CSS.escape(name)
           : name.replace(/["\\]/g, '\\$&');
-      const target = root.querySelector<HTMLElement>(`[data-field="${escaped}"]`);
+      return root.querySelector<HTMLElement>(`[data-field="${escaped}"]`);
+    };
+    const revealField = (name: string) => {
+      const target = fieldWrapper(name);
       if (target) {
         target.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
         const focusable = target.querySelector<HTMLElement>(
@@ -2860,54 +2865,64 @@ ComponentRegistry.register('form',
     };
 
     /**
-     * Tell the user WHICH fields are wrong, wherever the verdict came from.
+     * Point the user at the fields that are wrong, wherever the verdict came
+     * from: reveal and focus the FIRST of them (in declared/visual order, not
+     * the caller's key order), activating its tab first when it sits on a
+     * background one.
      *
-     * Toast naming the offending fields, then reveal the FIRST of them (in
-     * declared/visual order, not the caller's key order) — activating its tab
-     * first when it sits on a background one.
+     * No toast. Every field this reaches carries its own message under the
+     * input, so a toast naming the same fields only repeated them — truncated
+     * after three names, and drawn over the record dialog's title row, which it
+     * hid. Moving focus to the first offender is what makes a refused submit
+     * visible on a long form; the inline messages say the rest.
+     *
+     * Returns the rejected names that have NO drawn input — a field on a
+     * predicate-hidden tab (#6237) or section, or hidden by its own rule. Only
+     * the SERVER can reject those (their client rules are skipped with them),
+     * and nothing inline can carry the message, so the caller must say it at
+     * form level instead.
      *
      * Shared by the client-side invalid handler and the SERVER-rejection path:
      * the two failures are the same event as far as the person filling the form
      * is concerned; only the referee differs.
      */
-    const announceFieldErrors = (names: string[]) => {
-      if (names.length === 0) return;
+    const announceFieldErrors = (names: string[]): string[] => {
+      if (names.length === 0) return [];
       setRejectedFieldNames(names);
-      const labels = names.map((n) => fieldLabelByName[n] || n);
-      const MAX = 3;
-      const fieldsText =
-        labels.slice(0, MAX).join(t('validation.formInvalidJoiner')) +
-        (labels.length > MAX ? '…' : '');
-      toast.error(t('validation.formInvalid', { fields: fieldsText }), { id: outcomeToastId });
-
       const errored = new Set(names);
-      const firstName =
-        (fields as FormFieldConfig[])
+      const ordered = [
+        ...(fields as FormFieldConfig[])
           .map((f) => f?.name)
-          .find((n): n is string => Boolean(n) && errored.has(n as string)) ?? names[0];
+          .filter((n): n is string => Boolean(n) && errored.has(n as string)),
+        ...names.filter((n) => !(fields as FormFieldConfig[]).some((f) => f?.name === n)),
+      ];
+      // A field is drawn when its wrapper is in the DOM. A background tab's
+      // panel stays mounted (CSS-hidden), so its fields count as drawn and are
+      // reached below by activating the tab; a predicate-hidden tab's panel is
+      // not rendered at all, so its fields do not.
+      const undrawn = ordered.filter((n) => !fieldWrapper(n));
+      const firstName = ordered.find((n) => !undrawn.includes(n));
+      if (!firstName) return undrawn;
 
       // In a tabbed layout the offending field may sit on a tab the user is not
-      // looking at — naming it is useless if they can't see it. Activate its tab
-      // first, then reveal it once that panel has actually been painted (it is
-      // display:none until then, so scroll/focus would no-op).
-      //
-      // Unless the tab is predicate-HIDDEN (#6237): only the SERVER can reject
-      // a field there (its client rules are skipped with it), and there is no
-      // panel to activate or control to reveal — the toast above already names
-      // the field. Recording the activation as a pick anyway would yank the
-      // view to that tab whenever its predicate later re-admits it.
+      // looking at — the message under it is useless if they can't see it.
+      // Activate its tab first, then reveal it once that panel has actually
+      // been painted (it is display:none until then, so scroll/focus would
+      // no-op). A predicate-HIDDEN tab is never activated: recording that as a
+      // pick would yank the view to it whenever its predicate later re-admits
+      // it, and a drawn field it also claims is rendered in a visible panel.
       const tabKey = tabKeyByFieldName.get(firstName);
-      if (tabKey && hiddenFieldTabKeys.has(tabKey)) return;
-      if (tabKey && tabKey !== activeFieldTab) {
+      if (tabKey && !hiddenFieldTabKeys.has(tabKey) && tabKey !== activeFieldTab) {
         setPickedFieldTab(tabKey);
         if (typeof requestAnimationFrame === 'function') {
           requestAnimationFrame(() => revealField(firstName));
         } else {
           setTimeout(() => revealField(firstName), 0);
         }
-        return;
+        return undrawn;
       }
       revealField(firstName);
+      return undrawn;
     };
 
     // Handle form submission — react-hook-form's validation, then the write.
@@ -3008,11 +3023,14 @@ ComponentRegistry.register('form',
           // this form does not render, fall through: the top-level message
           // concatenates every field's reason, so the part the user cannot see
           // inline is still said out loud instead of silently dropped.
+          // The same holds for a rendered-schema field with no DRAWN input
+          // (a predicate-hidden tab or section): `announceFieldErrors` names
+          // those, and any one of them sends the failure down the same path.
           if (known.length > 0 && known.length === fieldErrors.length) {
-            announceFieldErrors(known.map((fe) => fe.field));
+            const undrawn = announceFieldErrors(known.map((fe) => fe.field));
             // A fully-attributed rejection is not a form-level failure — the
             // banner would just repeat what is now written under each input.
-            return;
+            if (undrawn.length === 0) return;
           }
         }
         // A rejected write used to be rendered verbatim, which put raw server
@@ -3055,8 +3073,18 @@ ComponentRegistry.register('form',
       // Client-side (react-hook-form) validation blocked the submit. The
       // per-field errors render inline, but in long forms the offending field
       // is often scrolled out of view — the user clicks 创建 and sees nothing
-      // happen. Surface a toast naming the fields so the feedback is visible
-      // regardless of scroll position (mirrors the server-error toast above).
+      // happen. Move focus to the first offender so the feedback is visible
+      // regardless of scroll position. Every name here has a drawn input:
+      // react-hook-form validates only mounted controls, and an undrawn field
+      // is unmounted, so the returned list is always empty on this path.
+      //
+      // This attempt's outcome is those inline messages, so whatever outcome
+      // the form showed before it — the previous attempt's banner and its toast
+      // twin, or a clear-on-hide notice (objectui#8070) — retires here, as it
+      // does at the start of an attempt that clears validation. The refusal
+      // toast used to do that by superseding the same id.
+      setSubmitError(null);
+      toast.dismiss(outcomeToastId);
       announceFieldErrors(Object.keys(validationErrors || {}));
     });
 
@@ -3458,8 +3486,9 @@ ComponentRegistry.register('form',
       // parents still read two ways (objectui#4026). The separator is a
       // property of the locale, so all of them now read
       // `validation.formInvalidJoiner`: the key objectstack#5407 added for the
-      // invalid-submit toast a few hundred lines up, which is the same class
-      // of truncated-name list, rather than a second gate-only twin that would
+      // invalid-submit field list (that toast is gone; the `visibleWhen`
+      // refusal a few hundred lines up still joins with it), which is the same
+      // class of name list, rather than a second gate-only twin that would
       // reintroduce the divergence.
       const gatedHint = optionGroupGated
         ? t('fields.options.selectFirst', {

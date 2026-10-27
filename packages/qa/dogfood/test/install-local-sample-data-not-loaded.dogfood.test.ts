@@ -61,9 +61,8 @@ const SEED_TOTAL = Object.values(SEEDED).reduce((a, b) => a + b, 0);
 /** One seed dataset per seeded object. */
 const CRM_DATASETS = Object.keys(SEEDED).length;
 
-type Answer = { status: number; body: any }; // eslint-disable-line @typescript-eslint/no-explicit-any
+type Answer = { status: number; body: any };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const rowsOf = (r: any): any[] => (Array.isArray(r) ? r : Array.isArray(r?.records) ? r.records : []);
 
 /** The install body `os package install <artifact>.json` sends. */
@@ -88,13 +87,13 @@ async function captureOutput<T>(run: () => Promise<T>): Promise<{ value: T; line
   const lines: string[] = [];
   const stdout = process.stdout.write.bind(process.stdout);
   const stderr = process.stderr.write.bind(process.stderr);
-  (process.stdout as any).write = (chunk: unknown, ...rest: any[]) => { lines.push(String(chunk)); return stdout(chunk as any, ...rest); }; // eslint-disable-line @typescript-eslint/no-explicit-any
-  (process.stderr as any).write = (chunk: unknown, ...rest: any[]) => { lines.push(String(chunk)); return stderr(chunk as any, ...rest); }; // eslint-disable-line @typescript-eslint/no-explicit-any
+  (process.stdout as any).write = (chunk: unknown, ...rest: any[]) => { lines.push(String(chunk)); return stdout(chunk as any, ...rest); };
+  (process.stderr as any).write = (chunk: unknown, ...rest: any[]) => { lines.push(String(chunk)); return stderr(chunk as any, ...rest); };
   try {
     return { value: await run(), lines };
   } finally {
-    (process.stdout as any).write = stdout; // eslint-disable-line @typescript-eslint/no-explicit-any
-    (process.stderr as any).write = stderr; // eslint-disable-line @typescript-eslint/no-explicit-any
+    (process.stdout as any).write = stdout;
+    (process.stderr as any).write = stderr;
   }
 }
 

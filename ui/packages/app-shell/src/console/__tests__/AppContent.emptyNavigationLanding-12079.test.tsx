@@ -28,7 +28,7 @@
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
 
 // AGENTS.md §测试纪律 — the lazy page modules are stubbed so no unbounded
@@ -160,8 +160,9 @@ describe('AppContent — an app with empty navigation lands on an empty state (o
 
     const emptyState = await screen.findByTestId('app-no-access-empty-state');
     expect(emptyState).toHaveTextContent('Nothing in HotCLM is available to you yet');
-    // The app root, not a redirect somewhere else.
-    expect(screen.getByTestId('pathname').textContent).toBe('/apps/clm');
+    // The app root, not a redirect somewhere else — on the app's package id,
+    // its one address (objectstack-ai/objectstack#26183).
+    await waitFor(() => expect(screen.getByTestId('pathname').textContent).toBe('/apps/app.objectstack.hotclm'));
     expect(screen.getByTestId('console-layout')).toHaveAttribute('data-active-app', 'clm');
   });
 
@@ -215,7 +216,9 @@ describe('AppContent — an app with empty navigation lands on an empty state (o
     renderConsoleAt('/apps/clm');
 
     expect(await screen.findByTestId('object-view')).toBeInTheDocument();
-    expect(screen.getByTestId('pathname').textContent).toBe('/apps/clm/contract');
+    await waitFor(() =>
+      expect(screen.getByTestId('pathname').textContent).toBe('/apps/app.objectstack.hotclm/contract'),
+    );
     expect(screen.queryByTestId('app-no-access-empty-state')).not.toBeInTheDocument();
   });
 

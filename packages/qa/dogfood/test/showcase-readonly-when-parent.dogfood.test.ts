@@ -44,7 +44,6 @@ describe('showcase: parent-scoped readonlyWhen is server-enforced (#4889)', () =
     stack = await getSharedShowcase();
     token = await stack.signIn(); // the issue's own principal: admin@objectos.ai
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ql = await stack.kernel.getServiceAsync<any>('objectql');
     const sys = { context: { isSystem: true } };
 

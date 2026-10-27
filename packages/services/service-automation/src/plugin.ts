@@ -132,7 +132,8 @@ export interface AutomationServicePluginOptions {
     /**
      * Max in-memory execution-log entries retained per process (ring buffer;
      * oldest evicted). The buffer is diagnostic-only and already bounded
-     * (launch-readiness.md P1-2); this just makes the window tunable. Defaults
+     * (launch-readiness P1-2, in `docs/launch-readiness.md` as of commit
+     * df8aac41); this just makes the window tunable. Defaults
      * to {@link DEFAULT_MAX_EXECUTION_LOG_SIZE} (1000).
      */
     maxLogSize?: number;

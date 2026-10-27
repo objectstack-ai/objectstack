@@ -7,41 +7,20 @@
  *
  * If you change a flag or command name, update both this test file AND the
  * docs in the same PR (Rule #2: Documentation Driven Development).
+ *
+ * This file holds the commands that write, refuse or validate. The read-only
+ * half (package identity, `--version`, `--help`, the documented flags) is in
+ * `cli-bin.surface.test.ts`. Both share `cliBin.ts`, which builds `dist/` once
+ * behind a lock (objectstack#25911).
  */
 import { describe, it, expect, beforeAll } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync, readFileSync } from 'node:fs';
-import { join, resolve, dirname, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 import { buildInitFiles } from '../commands/init.js';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const CLI_BIN = resolve(__dirname, '../../dist/cli.js');
-const PKG_PATH = resolve(__dirname, '../../package.json');
-
-/**
- * The commands the CLI declares. The enumeration pin below holds this list
- * equal to the built CLI's `--help`, both directions (objectui#11496). `add`
- * (objectui#11496) and `create`, `lint`, `test` and `studio` (objectui#11500)
- * are deliberately absent: they were retired, and the bin refuses each as an
- * unknown command. The CLI docs give each of these a `### objectui NAME`
- * heading; keep them in step by hand, because nothing in this file reads the
- * docs.
- */
-const SUBCOMMANDS = [
-  'serve',
-  'dev',
-  'build',
-  'start',
-  'init',
-  'generate',
-  'doctor',
-  'check',
-  'validate',
-  'analyze',
-] as const;
+import { CLI_BIN, PKG_PATH, PKG_ROOT, REPO_ROOT, ensureCliBuilt, run, tree } from './cliBin.js';
 
 /**
  * The environment a build SPAWNED BY THIS TEST runs in (objectui#8598).
@@ -77,196 +56,25 @@ const BUILD_ENV: NodeJS.ProcessEnv = (() => {
   return env;
 })();
 
-function run(args: string[], opts: { cwd?: string } = {}) {
-  const res = spawnSync('node', [CLI_BIN, ...args], {
-    cwd: opts.cwd ?? process.cwd(),
-    encoding: 'utf-8',
-  });
-  return {
-    code: res.status ?? -1,
-    stdout: res.stdout ?? '',
-    stderr: res.stderr ?? '',
-  };
-}
-
-/** Every path under `dir`, `/`-separated and sorted: what a run wrote there. */
-function tree(dir: string): string[] {
-  return (readdirSync(dir, { recursive: true }) as string[])
-    .map((p) => p.split(sep).join('/'))
-    .sort();
-}
-
-/**
- * The command names commander prints under `Commands:` in the root `--help`, in
- * order. An entry starts with exactly two spaces; a wrapped description line is
- * indented further, so it is not an entry. `generate|g` reads as `generate`.
- */
-function helpCommandNames(helpText: string): string[] {
-  const lines = helpText.split('\n');
-  const start = lines.findIndex((line) => line.trim() === 'Commands:');
-  if (start === -1) return [];
-  const names: string[] = [];
-  for (const line of lines.slice(start + 1)) {
-    if (line.trim() === '') break;
-    const entry = /^ {2}(\S+)/.exec(line);
-    if (entry) names.push(entry[1].split('|')[0]);
-  }
-  return names;
-}
-
 describe('@object-ui/cli bin', () => {
   beforeAll(() => {
-    // The CLI bin imports @object-ui/types/zod at runtime (validate command),
-    // so both the CLI bundle AND the types package must be built before we
-    // invoke `dist/cli.js` as a child process. `pnpm test:coverage` (root
-    // vitest) does NOT trigger turbo's `^build` deps, so we self-build here
-    // to keep the test runnable from any entry point (CI coverage, CI turbo,
-    // local watch, fresh clone).
-    const TYPES_ZOD = resolve(
-      __dirname,
-      '../../../types/dist/zod/index.zod.js',
-    );
-    const repoRoot = resolve(__dirname, '../../../..');
-
-    if (!existsSync(TYPES_ZOD)) {
-      const result = spawnSync(
-        'pnpm',
-        ['--filter', '@object-ui/types', 'run', 'build'],
-        { cwd: repoRoot, encoding: 'utf-8', stdio: 'pipe', env: BUILD_ENV },
-      );
-      if (result.status !== 0 || !existsSync(TYPES_ZOD)) {
-        throw new Error(
-          `Failed to build @object-ui/types for tests.\n` +
-            `Looked at: ${TYPES_ZOD}\n` +
-            `stdout: ${result.stdout}\nstderr: ${result.stderr}`,
-        );
-      }
-    }
-
-    if (!existsSync(CLI_BIN)) {
-      const pkgRoot = resolve(__dirname, '../..');
-      const result = spawnSync('pnpm', ['run', 'build'], {
-        cwd: pkgRoot,
-        encoding: 'utf-8',
-        stdio: 'pipe',
-        env: BUILD_ENV,
-      });
-      if (result.status !== 0 || !existsSync(CLI_BIN)) {
-        throw new Error(
-          `Failed to build @object-ui/cli for tests.\n` +
-            `Looked at: ${CLI_BIN}\n` +
-            `stdout: ${result.stdout}\nstderr: ${result.stderr}`,
-        );
-      }
-    }
+    ensureCliBuilt({
+      types: () =>
+        spawnSync('pnpm', ['--filter', '@object-ui/types', 'run', 'build'], {
+          cwd: REPO_ROOT,
+          encoding: 'utf-8',
+          stdio: 'pipe',
+          env: BUILD_ENV,
+        }),
+      cli: () =>
+        spawnSync('pnpm', ['run', 'build'], {
+          cwd: PKG_ROOT,
+          encoding: 'utf-8',
+          stdio: 'pipe',
+          env: BUILD_ENV,
+        }),
+    });
   }, 180_000);
-
-  describe('package metadata', () => {
-    it('package.json declares the standalone @object-ui/cli identity', () => {
-      const pkg = JSON.parse(readFileSync(PKG_PATH, 'utf-8'));
-      expect(pkg.name).toBe('@object-ui/cli');
-      expect(pkg.bin).toEqual({ objectui: './dist/cli.js' });
-      expect(pkg.oclif).toBeUndefined();
-      expect(pkg.dependencies?.['@oclif/core']).toBeUndefined();
-    });
-  });
-
-  describe('--version', () => {
-    it('matches the version in package.json', () => {
-      const pkg = JSON.parse(readFileSync(PKG_PATH, 'utf-8'));
-      const res = run(['--version']);
-      expect(res.code).toBe(0);
-      expect(res.stdout.trim()).toBe(pkg.version);
-    });
-  });
-
-  // objectui#11496. One enumeration over the built CLI's commands, so the next
-  // declared-but-unbuilt command cannot ship the way `add` did: a retired
-  // command that comes back, or a new one this list does not name, turns this
-  // red. It replaces a containment check that a retired command coming back
-  // would have passed.
-  describe('--help', () => {
-    it('lists exactly the declared commands, no more and no fewer', () => {
-      const res = run(['--help']);
-      expect(res.code, res.stderr).toBe(0);
-      const listed = helpCommandNames(res.stdout);
-      // Lit control: commander lists its own `help` command last, so reading it
-      // proves the parse ran to the end of the Commands section.
-      expect(listed[listed.length - 1]).toBe('help');
-      const declared = listed.filter((name) => name !== 'help');
-      expect([...declared].sort()).toEqual([...SUBCOMMANDS].sort());
-      expect(new Set(declared).size).toBe(declared.length);
-    });
-
-    it('uses the "objectui" bin name (not "os ui")', () => {
-      const res = run(['--help']);
-      expect(res.stdout).toMatch(/Usage:\s+objectui/);
-      expect(res.stdout).not.toContain('os ui');
-    });
-  });
-
-  describe.each(SUBCOMMANDS)('subcommand "%s"', (cmd) => {
-    it('exits 0 on --help', () => {
-      const res = run([cmd, '--help']);
-      expect(res.code, res.stderr || res.stdout).toBe(0);
-      expect(res.stdout).toContain(`objectui ${cmd}`);
-    });
-  });
-
-  // objectui#10524 — `check` is an advisory sweep, not a validator: a file whose
-  // root carries a structural key is recognised by that key and never parsed,
-  // and it exits non-zero only on unreadable JSON or on a `${…}` refused on a
-  // text key its node never evaluates (objectui#4795). Its help line used to read
-  // "Validate schema files". These assert the kind of claim and the command it
-  // names, not the wording.
-  describe('check --help does not present `check` as the validator (objectui#10524)', () => {
-    const checkDescription = () => {
-      const res = run(['check', '--help']);
-      expect(res.code, res.stderr || res.stdout).toBe(0);
-      // Commander prints `Usage: …`, a blank line, then the description paragraph.
-      return res.stdout.split(/\n\s*\n/)[1] ?? '';
-    };
-
-    it('does not describe `check` with the verb "validate"', () => {
-      expect(checkDescription()).not.toMatch(/^\s*validates?\b/i);
-    });
-
-    it('names `objectui validate` as the command that gives the verdict', () => {
-      expect(checkDescription()).toContain('objectui validate');
-    });
-  });
-
-  // objectui#11500. `doctor` was described as "Diagnose and fix common issues",
-  // and it fixes nothing: it reads the project and reports. Asserts the kind of
-  // claim, not the wording.
-  it('doctor --help does not claim to fix anything (objectui#11500)', () => {
-    const res = run(['doctor', '--help']);
-    expect(res.code, res.stderr || res.stdout).toBe(0);
-    // Commander prints `Usage: …`, a blank line, then the description paragraph.
-    const description = res.stdout.split(/\n\s*\n/)[1] ?? '';
-    // Lit control: the paragraph that was read is not empty.
-    expect(description.trim()).not.toBe('');
-    expect(description).not.toMatch(/\bfix/i);
-  });
-
-  describe('flag contracts (locked-in by docs)', () => {
-    const cases: Array<[string, RegExp[]]> = [
-      ['dev',      [/-p, --port <port>/, /-h, --host <host>/, /--no-open/]],
-      ['serve',    [/-p, --port <port>/, /-h, --host <host>/, /--no-open/]],
-      ['build',    [/-o, --out-dir <dir>/, /--clean/]],
-      ['start',    [/-p, --port <port>/, /-h, --host <host>/, /-d, --dir <dir>/]],
-      ['init',     [/-t, --template <template>/]],
-      ['generate', [/<type> <name>/]],
-      ['validate', [/\[schema\]/]],
-    ];
-    it.each(cases)('%s exposes the documented flags', (cmd, patterns) => {
-      const res = run([cmd, '--help']);
-      expect(res.code).toBe(0);
-      for (const re of patterns) {
-        expect(res.stdout).toMatch(re);
-      }
-    });
-  });
 
   // objectui#11476. `generate` used to declare `--output <dir>` (documented
   // default `schemas/`), but the action never read it: `generate(type, name)`
@@ -619,6 +427,53 @@ describe('@object-ui/cli bin', () => {
       // A spot check that the toolchain half is written too — the full anchor
       // judgement lives in `app-generator.test.ts`.
       expect(manifest.devDependencies.vite).not.toBe('^7.3.1');
+    });
+  });
+
+  // objectstack#25911. The two cli-bin files share one build behind a lock
+  // directory in `cliBin.ts`. A run killed while holding it never removes it,
+  // so the next run must read the holder's pid and take over a dead one at
+  // once, rather than wait out the hook timeout with nobody building. The
+  // control is the same lock held by a live pid, which is waited on. Both run
+  // after this file's `beforeAll`, so `dist/` is present and no build spawn may
+  // be called.
+  describe('the shared build lock (objectstack#25911)', () => {
+    const noBuild = {
+      types: (): never => {
+        throw new Error('dist/ is built by beforeAll; the types build must not run');
+      },
+      cli: (): never => {
+        throw new Error('dist/ is built by beforeAll; the cli build must not run');
+      },
+    };
+    const plantLock = (pid: number) => {
+      const lockDir = join(mkdtempSync(join(tmpdir(), 'objectui-cli-bin-lock-')), 'build.lock');
+      mkdirSync(lockDir);
+      writeFileSync(join(lockDir, 'pid'), String(pid));
+      return lockDir;
+    };
+
+    it('takes over a lock whose holder pid is dead, without waiting', () => {
+      // A child that has exited and been reaped: its pid names no process.
+      const dead = spawnSync(process.execPath, ['-e', '']);
+      expect(dead.status).toBe(0);
+      const lockDir = plantLock(dead.pid);
+
+      const started = Date.now();
+      ensureCliBuilt(noBuild, { lockDir, waitMs: 60_000 });
+      expect(Date.now() - started).toBeLessThan(5_000);
+      // Released on the way out, like any lock it acquired.
+      expect(existsSync(lockDir)).toBe(false);
+    });
+
+    it('control: waits on a lock whose holder pid is alive, and times out naming it', () => {
+      const lockDir = plantLock(process.pid);
+      expect(() => ensureCliBuilt(noBuild, { lockDir, waitMs: 600 })).toThrow(
+        new RegExp(`Timed out after 600 ms .* held by pid ${process.pid}\\.`),
+      );
+      // Not taken over: the live holder's lock is still there.
+      expect(existsSync(lockDir)).toBe(true);
+      rmSync(lockDir, { recursive: true, force: true });
     });
   });
 });

@@ -114,7 +114,8 @@ async function refusal(p: Promise<unknown>): Promise<any> {
 describe('DelegatedAdminGate — a position distributes what its definition declares', () => {
   it('a binding declared only on the definition is judged: a non-allowlisted set refuses the assignment', async () => {
     const err = await refusal(assign(gateOver(bindTestSecurityCatalog(makeQl(), CATALOG)), 'mixed'));
-    expect(err).toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+    // [#26189] A set off the caller's allowlist is a scope violation: its own code.
+    expect(err).toMatchObject({ code: 'DELEGATION_SCOPE_VIOLATION', statusCode: 403 });
     expect(String(err.message)).toMatch(/position 'mixed' distributes permission set 'finance_admin', which is not in the scope's allowlist/);
   });
 

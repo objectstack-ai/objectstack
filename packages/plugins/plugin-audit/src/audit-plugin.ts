@@ -1,8 +1,20 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
-import { effectiveTenancyPosture, resolveLocalizationContext, type TenancyPostureSource } from '@objectstack/core';
-import type { IDataEngine, II18nService, ISecurityService, ISharingService } from '@objectstack/spec/contracts';
+import {
+  effectiveTenancyPosture,
+  resolveLocalizationContext,
+  type TenancyPostureSource,
+  type TenancyServiceResolver,
+} from '@objectstack/core';
+import type {
+  IAuthService,
+  IDataEngine,
+  IHttpServer,
+  II18nService,
+  ISecurityService,
+  ISharingService,
+} from '@objectstack/spec/contracts';
 import { SysAuditLog, SysActivity, SysComment, SysCommentReaction } from './objects/index.js';
 // `sys_notification` was parked here "until that [ADR-0030] migration lands".
 // It has landed, so the contribution moved to @objectstack/service-messaging —
@@ -17,9 +29,16 @@ import { installAuditWriters, type AuditI18nSurface, type MessagingEmitSurface }
 import { installReadAuditWriter, type ReadAuditWriterHandle } from './read-audit.js';
 import { createAuthEventAuditSink } from './auth-event-audit.js';
 import { installCommentAccessHooks, installCommentReadVisibility } from './comment-access-hooks.js';
+import {
+  COMMENT_REACTION_REMOVE_ROUTE,
+  platformCallerResolver,
+  registerCommentReactionRoutes,
+  type CommentReactionEngine,
+} from './comment-reaction-routes.js';
 import { admitMentionRecipients } from './mention-recipient-gate.js';
 import { installActivityReadVisibility } from './activity-read-visibility.js';
 import { installActivityFieldRedaction } from './activity-field-redaction.js';
+import { installActivitySummaryLocale } from './activity-summary-message.js';
 import { installAuditLogFieldRedaction } from './audit-log-field-redaction.js';
 import { installAuditLogReadVisibility } from './audit-log-read-visibility.js';
 import type { FieldVisibilitySource } from './served-fields.js';
@@ -59,10 +78,11 @@ export interface AuditPluginOptions {
   /** [#8992] Record-view auditing. Off unless objects are named. */
   readAudit?: AuditPluginReadAuditOptions;
   /**
-   * Host locale resolver: the language this plugin writes its reader-facing
-   * text in — `sys_activity.summary`, and the title of the @mention
-   * notification it emits. Called with the write's organization (`tenantId`)
-   * and user (`userId`; for an @mention title, the mentioned recipient).
+   * Host locale resolver: the language this plugin writes the title of the
+   * @mention notification it emits in. Called with the write's organization
+   * (`tenantId`) and the mentioned recipient (`userId`). [#26167]
+   * `sys_activity.summary` is not written in it: the summary is stored in
+   * English and served in each reader's own locale.
    *
    * **Precedence: host first, settings second.** When given, this resolver is
    * asked first. When it answers nothing (`undefined`, `null` or a blank
@@ -327,6 +347,7 @@ export class AuditPlugin implements Plugin {
   }
 
   async start(ctx: PluginContext): Promise<void> {
+    this.mountUnreactDoor(ctx);
     // ObjectQL engine is only resolvable after the kernel is ready.
     ctx.hook('kernel:ready', async () => {
       let engine: IDataEngine | null = null;
@@ -357,9 +378,10 @@ export class AuditPlugin implements Plugin {
           return undefined;
         }
       };
-      // framework#3039 — localize activity summaries to the workspace default
-      // locale (ADR-0053 `localization.locale`). Both seams resolve lazily and
-      // tolerate absence: no i18n / no settings degrades to English summaries.
+      // framework#3039 — localize the collaboration notification titles to the
+      // workspace default locale (ADR-0053 `localization.locale`), and
+      // [#26167] activity summaries to each reader's. Both seams resolve
+      // lazily and tolerate absence: no i18n / no settings degrades to English.
       const getI18n = (): AuditI18nSurface | undefined => {
         try {
           return ctx.getService<AuditI18nSurface>('i18n');
@@ -566,6 +588,12 @@ export class AuditPlugin implements Plugin {
         };
         installActivityFieldRedaction(engine as any, getSecurity, ctx.logger);
         ctx.logger.info('AuditPlugin: sys_activity field redaction installed');
+        // [#26167] …and each kept row's summary is composed in the READER's
+        // language from the code the writer stored beside it. Registered after
+        // the redaction, so it runs inside it: the redaction judges the
+        // composed text by the same declared sources as the stored one.
+        installActivitySummaryLocale(engine as any, getI18n);
+        ctx.logger.info('AuditPlugin: sys_activity reader-language summaries installed');
         // [#21155] The compliance ledger's before/after snapshots take the same
         // narrowing, through the same answer and the same resolver: a ledger
         // reader is not field-unrestricted by default. An auditor who must see
@@ -752,6 +780,43 @@ export class AuditPlugin implements Plugin {
   }
 
   /**
+   * Mount the unreact door (`comment-reaction-routes.ts`) on the kernel's HTTP
+   * server: a member removes their own comment reaction, and only theirs,
+   * without an object-level `delete` grant (maintainer ruling 6422861164,
+   * letter A). Every service the door reads is read per request, so a provider
+   * that registers after this hook is still seen. A kernel with no HTTP server
+   * mounts nothing, and says so.
+   */
+  private mountUnreactDoor(ctx: PluginContext): void {
+    const optional = <T>(name: string): T | undefined => {
+      try {
+        return ctx.getService<T>(name) ?? undefined;
+      } catch {
+        return undefined;
+      }
+    };
+    // `http.server` is the canonical name; `http-server` the deprecated alias.
+    const http = optional<IHttpServer>('http.server') ?? optional<IHttpServer>('http-server');
+    if (!http) {
+      ctx.logger.warn(
+        `AuditPlugin: no HTTP server is registered, so the unreact door (DELETE ${COMMENT_REACTION_REMOVE_ROUTE}) ` +
+          'is not mounted, and a member whose grants carry no delete on sys_comment_reaction cannot remove their own reaction.',
+      );
+      return;
+    }
+    const getEngine = () => optional<IDataEngine>('objectql') ?? optional<IDataEngine>('data');
+    registerCommentReactionRoutes(http, {
+      getEngine: () => getEngine() as unknown as CommentReactionEngine | undefined,
+      resolveCaller: platformCallerResolver({
+        getEngine,
+        getAuth: () => optional<IAuthService>('auth'),
+        tenancy: tenancyServiceResolver(ctx),
+      }),
+    });
+    ctx.logger.info(`AuditPlugin: unreact door mounted at DELETE ${COMMENT_REACTION_REMOVE_ROUTE}`);
+  }
+
+  /**
    * [#8992] Flush the record-view tail on shutdown.
    *
    * Batching is what keeps the ledger write off the read path, and the price of
@@ -766,4 +831,20 @@ export class AuditPlugin implements Plugin {
     this.readAuditWriter = null;
     if (writer) await writer.stop();
   }
+}
+
+/**
+ * How the unreact door reaches the `tenancy` service: the kernel's async
+ * accessor, read per request and classified by the composition
+ * (`classifyAdmissionTenancyPosture`). A `tenancy` service never registered is
+ * a kernel with no organization wall; one that is registered and cannot answer
+ * is the outage the door answers. A host with no async accessor registers no
+ * `tenancy` service either, and no posture is read.
+ */
+function tenancyServiceResolver(ctx: PluginContext): TenancyServiceResolver | undefined {
+  const kernel = ctx.getKernel?.() as
+    | { getServiceAsync?: <T>(name: string, scopeId?: string) => Promise<T> }
+    | undefined;
+  if (!kernel || typeof kernel.getServiceAsync !== 'function') return undefined;
+  return () => kernel.getServiceAsync!<TenancyPostureSource>('tenancy');
 }

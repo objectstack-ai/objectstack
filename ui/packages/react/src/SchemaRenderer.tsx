@@ -356,12 +356,21 @@ function propsWithoutCanonicalKeys(
  * `HIDE` keys ask {@link hasDeclaredPredicate} instead, because their `true`
  * means *hidden* and the wider `!== undefined` test would vanish a node for
  * `hidden: ''` (objectui#3955). See {@link winningVisibilityKey}.
+ *
+ * Three legs, not five: the objectui dialects `visibleOn` and `hiddenOn` are
+ * RETIRED (`?: never` tombstones on `BaseSchema`, alias refusals on its zod
+ * mirror, ADR-0089 / ADR-0049). `visibleWhen` is the one show predicate and
+ * `hidden` the one hide predicate; `visible` stays because the spec declares
+ * it on the nodes that reach this chain (an action's `visible`, a nav entry's,
+ * `record:alert`'s hoisted `properties.visible`). A retired key that still
+ * reaches this component is not consulted: the authoring face refuses it by
+ * name, and the strip below keeps it out of the DOM.
  */
-const VISIBILITY_SHOW_KEYS = ['visibleWhen', 'visible', 'visibleOn'] as const;
-const VISIBILITY_HIDE_KEYS = ['hidden', 'hiddenOn'] as const;
+const VISIBILITY_SHOW_KEYS = ['visibleWhen', 'visible'] as const;
+const VISIBILITY_HIDE_KEYS = ['hidden'] as const;
 
 /**
- * The five legs, as ONE closed type — so a seventh cannot be added to the chain
+ * The three legs, as ONE closed type — so a fourth cannot be added to the chain
  * without also being classified below.
  */
 type VisibilityChainKey =
@@ -369,7 +378,7 @@ type VisibilityChainKey =
   | (typeof VISIBILITY_HIDE_KEYS)[number];
 
 /**
- * The same five legs as a lookup, so the config-bag evaluation loops below can
+ * The same three legs as a lookup, so the config-bag evaluation loops below can
  * ask "is this key a visibility predicate?" off the SAME declaration the chain
  * is built from rather than a second list that can drift from it.
  *
@@ -389,10 +398,14 @@ const VISIBILITY_CHAIN_KEYS: ReadonlySet<string> = new Set<string>([
  *
  * Split the way this file actually consults them, which is not a polarity split:
  *
- *   * {@link ENABLEMENT_NODE_GATE_KEYS} are the two legs
- *     {@link evaluateEnablementPredicate} consults HERE, in this precedence
- *     order, as one early-return chain — the enablement counterpart of
- *     `shouldHide`. Their `true` means DISABLED, un-negated.
+ *   * {@link ENABLEMENT_NODE_GATE_KEYS} is the one leg
+ *     {@link evaluateEnablementPredicate} consults HERE — the enablement
+ *     counterpart of `shouldHide`. Its `true` means DISABLED, un-negated. The
+ *     `disabledOn` dialect that used to follow it is RETIRED (a `?: never`
+ *     tombstone on `BaseSchema`, an alias refusal on its zod mirror): `disabled`
+ *     takes the same predicate string or envelope, so the second leg carried
+ *     nothing the first does not. The constant stays a list so the derived
+ *     guards below keep one shape.
  *   * {@link ENABLEMENT_RENDERER_KEYS} is the legacy, non-spec `enabled` alias.
  *     This component never evaluates it: the node gate does not consult it at
  *     all, and the action renderers (`action:button`, `action:icon`) read it one
@@ -406,7 +419,7 @@ const VISIBILITY_CHAIN_KEYS: ReadonlySet<string> = new Set<string>([
  * {@link VisibilityChainKey} exists "so a seventh cannot be added to the chain
  * without also being classified below", and {@link visibilityGateKind} is that
  * classification — it hands each leg the consequence copy for ITS polarity.
- * These three keys have neither property: they route through
+ * These two keys have neither property: `disabled` routes through
  * {@link evaluateEnablementPredicate}, which states `'enablement'` at its own
  * call site, and `enabled` is not consulted here at all. Adding them to
  * {@link VISIBILITY_SHOW_KEYS} / {@link VISIBILITY_HIDE_KEYS} to reach the
@@ -421,13 +434,13 @@ const VISIBILITY_CHAIN_KEYS: ReadonlySet<string> = new Set<string>([
  * a declared-test or a consequence, so the thing they genuinely share is only
  * the guard's question, and that is exactly what a derived union expresses.
  */
-const ENABLEMENT_NODE_GATE_KEYS = ['disabled', 'disabledOn'] as const;
+const ENABLEMENT_NODE_GATE_KEYS = ['disabled'] as const;
 const ENABLEMENT_RENDERER_KEYS = ['enabled'] as const;
 
 /**
- * The two legs the node gate itself consults, as ONE closed type — the
+ * The one leg the node gate itself consults, as ONE closed type — the
  * enablement counterpart of {@link VisibilityChainKey}, load-bearing for the
- * same reason: a third node-gate leg cannot be handed to
+ * same reason: a second node-gate leg cannot be handed to
  * {@link evaluateEnablementPredicate} without being declared above, which is
  * the same edit that puts it into the config-bag guard below.
  */
@@ -511,11 +524,11 @@ const isCelEnvelope = (value: unknown): boolean =>
  * `has(record.x) && …` throws — and the two polarities of the chain then fail
  * in OPPOSITE directions, both silently:
  *
- *   * on the three SHOW legs the fail-soft `true` is negated to "do not hide",
+ *   * on the SHOW legs the fail-soft `true` is negated to "do not hide",
  *     so a gate authored to conceal renders on every row — measured in a real
  *     browser against a real app instance (the card), where a duplicate-lead
  *     banner showed on 6 of 6 leads whose field was `null`;
- *   * on the two HIDE legs the same `true` sets `_hidden`, so the node is not
+ *   * on the HIDE leg the same `true` sets `_hidden`, so the node is not
  *     on screen at all.
  *
  * Neither is distinguishable from a predicate that said so on purpose. That is
@@ -536,14 +549,14 @@ const isCelEnvelope = (value: unknown): boolean =>
  *
  * ## The enablement chain carries the identical defect (objectui#9107)
  *
- * `disabled` / `disabledOn` / `enabled` sit in the same two bags and are
+ * `disabled` / `enabled` sit in the same two bags and are
  * flattened by the same two loops, but they are NOT visibility legs — they
  * route through {@link evaluateEnablementPredicate} and the action renderers'
  * own `useCondition` call. Measured on the pre-fix tree through this component,
  * with a CEL stdlib predicate authored at `properties` top level, and the two
  * halves fail in OPPOSITE directions just as the visibility polarities do:
  *
- *   * `disabled` / `disabledOn` — BOTH a holding and a failing predicate left
+ *   * `disabled` — BOTH a holding and a failing predicate left
  *     the control DISABLED. The flattened source faults on the legacy engine
  *     and `evaluateCondition`'s fail-soft `true` is un-negated here, so every
  *     CEL-authored enablement gate greyed its control out on every row, with
@@ -769,7 +782,7 @@ export function evaluateConfigBagInScope(
  * ## The defect this closes
  *
  * `evaluateCondition` answers an unevaluable predicate with `true` on every
- * path. On the three SHOW legs the chain negated that answer, so the node was
+ * path. On the SHOW legs the chain negated that answer, so the node was
  * SHOWN and the reporter's "the gate did NOT bite" was true (a declared SHOW
  * predicate now fails closed instead, see the last section). On the two HIDE
  * legs the chain returns it UN-negated (see `shouldHide` below), so the same
@@ -795,7 +808,7 @@ export function evaluateConfigBagInScope(
  * sentence written about a different polarity is now a TYPE error here, not a
  * line of false console copy.
  *
- * The `disabled` / `disabledOn` gate is deliberately not reachable from this
+ * The `disabled` gate is deliberately not reachable from this
  * function: those legs are not in the visibility chain and route through
  * `evaluateEnablementPredicate`, which states `'enablement'` at its own call
  * site.
@@ -810,14 +823,14 @@ export function evaluateConfigBagInScope(
  * a missing function used to draw the node for a viewer it was written to
  * exclude.
  *
- * - **SHOW legs** (`visibleWhen` / `visible` / `visibleOn`, negated by
+ * - **SHOW legs** (`visibleWhen` / `visible`, negated by
  *   `shouldHide`): a DECLARED predicate answers `false`, so the node is
  *   withheld, and the report prints the `'withholding'` consequence. A gate
  *   that declares nothing ({@link hasDeclaredPredicate} is false: `''`,
  *   whitespace, an empty-`source` envelope) keeps the fail-soft `true`, so it
  *   still means "no gate" and the node still shows, with the `'visibility'`
  *   copy, which is true of it.
- * - **HIDE legs** (`hidden` / `hiddenOn`, NOT negated): the fail-soft `true`
+ * - **HIDE leg** (`hidden`, NOT negated): the fail-soft `true`
  *   already means hidden, so the answer stays `true` and the copy stays
  *   `'concealment'`. They only reach the evaluator declared (`shouldHide`
  *   asks {@link hasDeclaredPredicate} first), so no blank case exists here.
@@ -1285,7 +1298,7 @@ export const SchemaRenderer: ForwardRefExoticComponent<
 
     // The ambient host scope, plus the roots this tier can answer itself.
     // `current_user` is aliased to `user` so both `user.email` and
-    // `current_user.email` resolve in component `visible`/`visibleOn`
+    // `current_user.email` resolve in component `visible`/`visibleWhen`
     // expressions. `page` exposes page-local state so predicates can gate on
     // `page.<var>` (e.g. a record picker's selection toggling another
     // component's visibility).
@@ -1354,7 +1367,7 @@ export const SchemaRenderer: ForwardRefExoticComponent<
      * "could not evaluate" from a value into a throw.
      *
      * Until objectui#13299 this helper reproduced that `true` on a fault, which
-     * drew a node behind a faulting `visibleWhen` / `visible` / `visibleOn` for
+     * drew a node behind a faulting `visibleWhen` / `visible` for
      * a viewer the predicate was written to exclude. Both branches now answer a
      * fault with {@link visibilityFaultOutcome}'s verdict instead: a DECLARED
      * predicate that faults leaves the node unrendered on every leg (the SHOW
@@ -1498,7 +1511,7 @@ export const SchemaRenderer: ForwardRefExoticComponent<
     };
 
     /**
-     * Evaluate ONE enablement predicate (`disabled` / `disabledOn`), and make an
+     * Evaluate ONE enablement predicate (`disabled`), and make an
      * unresolvable one LOUD (objectui#6445).
      *
      * ## Why this pair needed its own card at all
@@ -1545,7 +1558,7 @@ export const SchemaRenderer: ForwardRefExoticComponent<
      * objectui#6504: the 2026-08-22 ruling was scoped to the visibility gate,
      * and its message text ("a constant `false` hides the node on every row")
      * is not what a constant does to a `disabled` gate. The 2026-08-27 ruling
-     * answers both gaps: extend to `disabled` / `disabledOn`, dev-only exactly
+     * answers both gaps: extend to `disabled`, dev-only exactly
      * as the visibility leg is (⛔ always-on was excluded, outside the #5687
      * precedent), with its OWN copy — the constant-`true` direction, since on
      * THIS gate that is the polarity that greys the control out in silence.
@@ -1556,7 +1569,7 @@ export const SchemaRenderer: ForwardRefExoticComponent<
      * ## The `key` parameter is CLOSED (objectui#9107)
      *
      * Typed {@link EnablementNodeGateKey} rather than `string`, mirroring what
-     * {@link VisibilityChainKey} does for the sibling chain: the two legs this
+     * {@link VisibilityChainKey} does for the sibling chain: the leg this
      * function serves are declared in ONE place, and the config-bag guard
      * ({@link preservePredicateEnvelope}) reads that same declaration, so a
      * third leg cannot arrive here without the same edit also carrying its CEL
@@ -2028,7 +2041,7 @@ export const SchemaRenderer: ForwardRefExoticComponent<
       propsWithoutCanonicalKeys(newSchema.props, newSchema.properties),
     );
 
-    // Evaluate visibility: visibleWhen / visible / visibleOn / hidden / hiddenOn
+    // Evaluate visibility: visibleWhen / visible / hidden
     const shouldHide = (() => {
       // `visibleWhen` is the single canonical conditional-visibility predicate
       // across every layer since ADR-0089 (show-when-truthy), and it is the one
@@ -2054,16 +2067,14 @@ export const SchemaRenderer: ForwardRefExoticComponent<
         return !evaluateVisibilityPredicate(newSchema.visibleWhen, 'visibleWhen');
       }
       // `visible` — objectui's own `BaseSchema` tier (`@object-ui/types`), and
-      // the landing spot of a hoisted `properties.visible`. Kept ABOVE
-      // `BaseSchema`'s deprecated `visibleOn`: re-ranking it would move
-      // verdicts for raw metadata that objectui#5454 did not rule on.
+      // the landing spot of a hoisted `properties.visible`. The spec declares
+      // it on the nodes that reach this chain (an action's `visible`, a
+      // navigation entry's, `record:alert`'s), so it stays a leg. The
+      // objectui dialect `visibleOn` that used to follow it is RETIRED: a
+      // `?: never` tombstone on `BaseSchema`, refused by name on the zod
+      // mirror, and not consulted here.
       if (newSchema.visible !== undefined) {
         return !evaluateVisibilityPredicate(newSchema.visible, 'visible');
-      }
-      // `BaseSchema.visibleOn`, @deprecated ADR-0089 → `visibleWhen`.
-      // objectui's own node key; the spec's page component never declared it.
-      if (newSchema.visibleOn !== undefined) {
-        return !evaluateVisibilityPredicate(newSchema.visibleOn, 'visibleOn');
       }
       // Ask "is a `hidden` gate DECLARED?" — not "is the key present?"
       // (objectui#3955). These two legs are the only ones in this chain whose
@@ -2082,12 +2093,11 @@ export const SchemaRenderer: ForwardRefExoticComponent<
       // would have been the Nth dialect of one question. The verdict still reads
       // the RAW value; only the gate in front of it narrowed. Not an
       // equivalence, and pinned as a behaviour change: an UNDECLARED `hidden` no
-      // longer short-circuits, so a declared `hiddenOn` is finally consulted.
+      // longer short-circuits. The `hiddenOn` dialect that used to follow it is
+      // RETIRED (tombstoned on `BaseSchema`, refused by name on the zod mirror):
+      // `hidden` takes the same predicate, so this leg is the whole hide chain.
       if (hasDeclaredPredicate(newSchema.hidden)) {
         return evaluateVisibilityPredicate(newSchema.hidden, 'hidden');
-      }
-      if (hasDeclaredPredicate(newSchema.hiddenOn)) {
-        return evaluateVisibilityPredicate(newSchema.hiddenOn, 'hiddenOn');
       }
       return false;
     })();
@@ -2096,7 +2106,7 @@ export const SchemaRenderer: ForwardRefExoticComponent<
       newSchema._hidden = true;
     }
 
-    // Evaluate disabled: disabled / disabledOn
+    // Evaluate disabled: disabled
     //
     // Ask "is a `disabled` gate DECLARED?" — not "is the key present?"
     // (objectui#3862). `!== undefined` was the widest of the three spellings this
@@ -2110,11 +2120,11 @@ export const SchemaRenderer: ForwardRefExoticComponent<
     // as an internal flag either: `_disabled` is forwarded below as a real
     // `disabled` prop.
     //
-    // The `visible` / `visibleWhen` / `visibleOn` legs above keep
+    // The `visible` / `visibleWhen` legs above keep
     // `!== undefined` deliberately: their `true` is NEGATED, so an empty predicate
     // already lands on "shown", which is what "no gate" means anyway, and
     // narrowing them would change ALIAS PRECEDENCE rather than fix anything. The
-    // `hidden` / `hiddenOn` legs were the exception — not negated, so they carried
+    // `hidden` leg was the exception — not negated, so it carried
     // this same defect with the polarity that makes the node VANISH — and they now
     // read this same definition (objectui#3955).
     //
@@ -2125,10 +2135,12 @@ export const SchemaRenderer: ForwardRefExoticComponent<
     // been a fourth dialect of one question, which is what objectui#3842 /
     // objectui#3849 spent two PRs merging away. The verdict still reads the RAW
     // value, exactly as before — only the gate in front of it narrowed. An
-    // undeclared `disabled` now falls through to `disabledOn` instead of
-    // short-circuiting on an empty predicate.
+    // undeclared `disabled` is "no gate" instead of a short-circuit on an empty
+    // predicate. The `disabledOn` dialect that used to follow it is RETIRED
+    // (tombstoned on `BaseSchema`, refused by name on the zod mirror):
+    // `disabled` takes the same predicate, so this leg is the whole chain.
     //
-    // Both legs route through `evaluateEnablementPredicate` (objectui#6445), so
+    // The leg routes through `evaluateEnablementPredicate` (objectui#6445), so
     // a predicate that cannot be evaluated is reported instead of silently
     // greying the control out. The verdicts below are unchanged: that helper
     // returns `evaluateCondition`'s own answer, and an UNDECLARED gate never
@@ -2138,9 +2150,6 @@ export const SchemaRenderer: ForwardRefExoticComponent<
     const isDisabled = (() => {
       if (hasDeclaredPredicate(newSchema.disabled)) {
         return evaluateEnablementPredicate(newSchema.disabled, 'disabled');
-      }
-      if (hasDeclaredPredicate(newSchema.disabledOn)) {
-        return evaluateEnablementPredicate(newSchema.disabledOn, 'disabledOn');
       }
       return false;
     })();
@@ -2325,10 +2334,14 @@ export const SchemaRenderer: ForwardRefExoticComponent<
     schema: _schema,
     visible: _visible,
     visibleWhen: _visibleWhen,
-    visibleOn: _visibleOn,
     hidden: _hidden,
-    hiddenOn: _hiddenOn,
     disabled: _disabled,
+    // stripped: the RETIRED node-level dialects (`?: never` tombstones on
+    // `BaseSchema`, refused by name on the zod mirror). Nothing above reads
+    // them; they are held out of the spread so a stale document's value never
+    // lands in the DOM as an unknown attribute, exactly as `body` is.
+    visibleOn: _visibleOn,
+    hiddenOn: _hiddenOn,
     disabledOn: _disabledOn,
     // stripped: `PageComponentSchema.dataSource` is the spec's per-element data
     // BINDING (`{ object, view, filter, sort, limit }`) — schema metadata, like

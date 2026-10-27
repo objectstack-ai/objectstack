@@ -23,7 +23,17 @@ import {
   SelectValue,
   cn,
 } from '@object-ui/components';
-import { ChevronRight, Plus, Trash2, Shield, Lock, PanelTop, FlaskConical } from 'lucide-react';
+import {
+  ChevronRight,
+  Plus,
+  Trash2,
+  Shield,
+  Lock,
+  PanelTop,
+  FlaskConical,
+  Check,
+  Circle,
+} from 'lucide-react';
 import { CelPredicateField } from './CelPredicateField.js';
 import { CelTestRunDialog } from './CelTestRunDialog.js';
 import type { CelLintIssue } from './celAuthoring.js';
@@ -178,6 +188,82 @@ function asObject<T extends object = Record<string, unknown>>(v: unknown): T {
   return {} as T;
 }
 
+/** The object-permission flags a companion grant can require. */
+type CompanionFlag = 'allowRead' | 'allowCreate' | 'allowEdit' | 'allowDelete';
+
+/**
+ * One grant a delegated admin needs BESIDE the scope before they can act on it.
+ *
+ * A scope says what its holder may administer; it does not let the holder in.
+ * The holder is turned away at the Setup app without `setup.access`, the
+ * assignment form's lookups cannot list people and units without read on
+ * `sys_user` / `sys_business_unit` / `sys_business_unit_member`, and the
+ * assignment rows are `sys_user_position` writes. The server is right to refuse
+ * each of these; the scope block names them so an author does not have to find
+ * them one refusal at a time. The same five are the companion grants in the
+ * docs' authoring example (`permissions/delegated-administration`).
+ *
+ * Every grant lands in a key the set already has — `systemPermissions` or an
+ * `objects` row (`PermissionSetSchema`) — so nothing here is a new key.
+ */
+type CompanionGrant =
+  | { id: 'setup.access'; kind: 'capability'; labelKey: string }
+  | { id: string; kind: 'object'; flags: readonly CompanionFlag[]; labelKey: string };
+
+const READ_ONLY_FLAGS: readonly CompanionFlag[] = ['allowRead'];
+const CRUD_FLAGS: readonly CompanionFlag[] = ['allowCreate', 'allowRead', 'allowEdit', 'allowDelete'];
+
+const ADMIN_COMPANION_GRANTS: readonly CompanionGrant[] = [
+  { id: 'setup.access', kind: 'capability', labelKey: 'perm.admin.companions.setupAccess' },
+  { id: 'sys_user', kind: 'object', flags: READ_ONLY_FLAGS, labelKey: 'perm.admin.companions.read' },
+  { id: 'sys_business_unit', kind: 'object', flags: READ_ONLY_FLAGS, labelKey: 'perm.admin.companions.read' },
+  {
+    id: 'sys_business_unit_member',
+    kind: 'object',
+    flags: READ_ONLY_FLAGS,
+    labelKey: 'perm.admin.companions.read',
+  },
+  { id: 'sys_user_position', kind: 'object', flags: CRUD_FLAGS, labelKey: 'perm.admin.companions.crud' },
+];
+
+type ObjectRows = Record<string, Record<string, unknown>>;
+
+/** Whether the set as the draft holds it already carries `grant` — exactly, no inference. */
+function companionGranted(grant: CompanionGrant, systemPermissions: string[], objects: ObjectRows): boolean {
+  if (grant.kind === 'capability') return systemPermissions.includes(grant.id);
+  const row = asObject(objects[grant.id]);
+  return grant.flags.every((flag) => row[flag] === true);
+}
+
+/**
+ * The set's `systemPermissions` and `objects` with every missing companion
+ * grant added and nothing else changed — `null` when nothing is missing.
+ *
+ * It only ever turns a flag ON and only ever appends a capability: an existing
+ * row keeps every key it has (an extra Edit, a View All), and a row that
+ * already covers its grant is the same object.
+ */
+function companionGrantsAdded(
+  draft: Record<string, unknown>,
+): { systemPermissions: string[]; objects: ObjectRows } | null {
+  let systemPermissions = asArray<string>(draft.systemPermissions);
+  let objects = asObject<ObjectRows>(draft.objects);
+  let changed = false;
+  for (const grant of ADMIN_COMPANION_GRANTS) {
+    if (companionGranted(grant, systemPermissions, objects)) continue;
+    changed = true;
+    if (grant.kind === 'capability') {
+      systemPermissions = [...systemPermissions, grant.id];
+      continue;
+    }
+    const row = asObject(objects[grant.id]);
+    const added: Record<string, true> = {};
+    for (const flag of grant.flags) if (row[flag] !== true) added[flag] = true;
+    objects = { ...objects, [grant.id]: { ...row, ...added } };
+  }
+  return changed ? { systemPermissions, objects } : null;
+}
+
 /** The item a stored value none of a picker's options carries is shown by. */
 const OUTSIDE_OPTIONS = 'outside';
 
@@ -313,6 +399,18 @@ export interface PermissionAdvancedFacetsProps {
    * gate while its tab is not the open one. Omitted: the stacked collapsibles.
    */
   only?: 'rls' | 'tabs' | 'admin' | null;
+  /**
+   * Whether the set is edited under a package binding (the package door,
+   * ADR-0086 P0). There the draft holds, and Save writes, only the package's
+   * own objects, so the delegated-admin companion grants — Setup access and
+   * rows on platform objects — belong on an environment set: the scope block
+   * lists them without marking them and without the one-click grant.
+   *
+   * Omitted: read from `only`. The Studio Access pillar is the one host that
+   * sets `only`, and it always edits under a `packageId` (`AccessPillar`'s
+   * `packageId` is required); Setup's permission page sets neither.
+   */
+  packageBound?: boolean;
 }
 
 export function PermissionAdvancedFacets({
@@ -324,6 +422,7 @@ export function PermissionAdvancedFacets({
   onCelErrorsChange,
   t,
   only,
+  packageBound = only !== undefined,
 }: PermissionAdvancedFacetsProps) {
   const flatFor = (section: 'rls' | 'tabs' | 'admin') =>
     only === undefined ? undefined : { shown: only === section, testId: `perm-facet-${section}` };
@@ -443,6 +542,32 @@ export function PermissionAdvancedFacets({
   const scopeConfigured = Object.keys(scope).length > 0;
   /** The spec's own condition: keys present, `businessUnit` absent ⇒ refused. */
   const scopeBlocksSave = scopeConfigured && typeof scope.businessUnit !== 'string';
+
+  /**
+   * The companion grants, each with whether THIS set carries it. Shown behind
+   * the same gate as the scope's dependent controls (`scopeAnchored`): until a
+   * business unit is named there is no scope to companion.
+   */
+  const companions = React.useMemo(() => {
+    const systemPermissions = asArray<string>(draft.systemPermissions);
+    const objects = asObject<ObjectRows>(draft.objects);
+    return ADMIN_COMPANION_GRANTS.map((grant) => ({
+      grant,
+      granted: companionGranted(grant, systemPermissions, objects),
+    }));
+  }, [draft.systemPermissions, draft.objects]);
+  const companionsMissing = companions.some((c) => !c.granted);
+  /**
+   * Adds only the missing grants, as ONE draft edit the set's normal Save
+   * persists. Nothing is removed or narrowed (`companionGrantsAdded`).
+   */
+  const grantCompanions = () =>
+    setDraft((p) => {
+      const added = companionGrantsAdded(p);
+      if (!added) return p;
+      return { ...p, systemPermissions: added.systemPermissions, objects: added.objects };
+    });
+
   const setTabs = (next: TabPerms) => setDraft((p) => ({ ...p, tabPermissions: next }));
 
   const tabEntries = Object.entries(tabs);
@@ -754,6 +879,54 @@ export function PermissionAdvancedFacets({
               })}
             </div>
           </div>
+          {scopeAnchored && (
+            <div data-testid="admin-companions" className="space-y-2 rounded-md border bg-background p-3">
+              <div className="text-xs font-medium">{t('perm.admin.companions.title')}</div>
+              <p className="text-xs text-muted-foreground">{t('perm.admin.companions.help')}</p>
+              <ul className="space-y-1">
+                {companions.map(({ grant, granted }) => (
+                  <li
+                    key={grant.id}
+                    data-testid={`admin-companion-${grant.id}`}
+                    // Under a package the draft holds only the package's own
+                    // objects, so it cannot tell whether the stored set grants
+                    // a `sys_*` row: listed, not marked.
+                    data-granted={packageBound ? undefined : String(granted)}
+                    className="flex flex-wrap items-center gap-2 text-xs"
+                  >
+                    {!packageBound &&
+                      (granted ? (
+                        <Check className="h-3.5 w-3.5 text-primary" aria-hidden />
+                      ) : (
+                        <Circle className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
+                      ))}
+                    <code className="font-mono">{grant.id}</code>
+                    <span className="text-muted-foreground">{t(grant.labelKey)}</span>
+                    {!packageBound && (
+                      <Badge variant={granted ? 'secondary' : 'outline'} className="text-[10px]">
+                        {t(granted ? 'perm.admin.companions.granted' : 'perm.admin.companions.missing')}
+                      </Badge>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              {packageBound ? (
+                <p className="text-xs text-muted-foreground">{t('perm.admin.companions.packageNote')}</p>
+              ) : (
+                writable &&
+                companionsMissing && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    data-testid="admin-companions-grant"
+                    onClick={grantCompanions}
+                  >
+                    <Plus className="h-4 w-4 mr-1" /> {t('perm.admin.companions.grant')}
+                  </Button>
+                )
+              )}
+            </div>
+          )}
         </div>
       </FacetSection>
     </div>
