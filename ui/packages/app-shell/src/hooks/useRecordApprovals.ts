@@ -593,14 +593,10 @@ export function useRecordApprovals(
   // The record-lock read goes through the SDK (`client.approvals.getRecordLock`),
   // so it needs the adapter's client; with no adapter mounted it is skipped.
   const adapter = useAdapter();
-  const adapterRef = useRef(adapter);
-  adapterRef.current = adapter;
   const lockReader = useCallback(
     (object: string, id: string): RecordLockReader | null =>
-      adapterRef.current
-        ? () => adapterRef.current!.getClient().approvals.getRecordLock(object, id)
-        : null,
-    [],
+      adapter ? () => adapter.getClient().approvals.getRecordLock(object, id) : null,
+    [adapter],
   );
 
   const subscribe = useCallback((l: () => void) => subscribeKey(readKey, l), [readKey]);
