@@ -133,9 +133,9 @@
       ]
     },
     "qa-media-constraints": {
-      "title": "Scratch object qa_media carrying FIELD-level accept/maxSize (plus an extension-only accept field)",
+      "title": "Scratch object qamedia_media carrying FIELD-level accept/maxSize (plus an extension-only accept field)",
       "why": "The showcase declares accept/maxSize ONLY on action params (examples/app-showcase/src/ui/actions/index.ts#ActionParamGalleryAction, its p_cover and p_attachments params — the dialog-widget/ADR-0059 upload-guard lane), never on an object FIELD, so the server-side record-write re-enforcement (field-accept-maxsize-server-enforced) has no stock target: without this recipe every clause of that item is blocked(fixture) on every run. Landing one constrained field in the showcase seeds proper would retire this recipe.",
-      "provenance": "authored from source in the 2026-08-20 scoped scan-functionality sweep (claude/new-session-0pv25p); call shapes copied from qa-scratch-authz (#7670), constraint keys from the FieldSchema declaration. Proven live by QA run #24560 (framework 5b14b7f3, 2026-10-19): the sequence replayed cleanly and attachments-storage.field-accept-maxsize-server-enforced was scored on it",
+      "provenance": "authored from source in the 2026-08-20 scoped scan-functionality sweep (claude/new-session-0pv25p); call shapes copied from qa-scratch-authz (#7670), constraint keys from the FieldSchema declaration. Proven live by QA run #24560 (framework 5b14b7f3, 2026-10-19): the sequence replayed cleanly and attachments-storage.field-accept-maxsize-server-enforced was scored on it. #26876: replayed on a fresh stock showcase boot at main a51ba639 (REST only, 2026-10-27). As written (no namespace) step 1 answered 201 with the derived namespace 'media' and step 2 answered 422 NAMESPACE_PREFIX ('Rename it to media_qa_media'), so the object is now qamedia_media under the declared namespace 'qamedia'. Fixed, on one boot beside qa-scratch-authz steps 1-4 ('qa') and qa-feeds-disabled ('qafeeds'): step 1 answered 201 echoing namespace 'qamedia', step 2 answered 200 and the GET read back poster's accept/maxSize and doc's accept as authored; a second package declaring 'qa' answered 422 NAMESPACE_CONFLICT on the same boot; the teardown DELETE answered 200 and the object then read 404",
       "app": "showcase",
       "requires": [
         "an admin session that holds the `manage_metadata` capability — same gate as qa-scratch-authz (PUT /api/v1/meta/:type/:name is capability-gated per ADR-0066 D1, packages/rest/src/rest-route-ledger.ts)",
@@ -145,14 +145,14 @@
         {
           "step": 1,
           "call": "POST /api/v1/packages",
-          "body": { "manifest": { "id": "com.objectstack.qa.media", "name": "QA media-constraints fixture", "version": "1.0.0", "type": "app" }, "enableOnInstall": true },
-          "expect": "2xx with the installed package echoed back. The id is deliberately DISTINCT from qa-scratch-authz's com.objectstack.qa.attachments so the two recipes install and tear down independently. Re-run against a live DB 409s on the duplicate id — send `overwrite: true` deliberately, never by reflex.",
-          "source": "same grounding as qa-scratch-authz step 1: packages/rest/src/rest-route-ledger.ts note; body shape pinned in packages/client/src/client.test.ts"
+          "body": { "manifest": { "id": "com.objectstack.qa.media", "name": "QA media-constraints fixture", "version": "1.0.0", "type": "app", "namespace": "qamedia" }, "enableOnInstall": true },
+          "expect": "2xx with the installed package echoed back, manifest.namespace 'qamedia'. The namespace is DECLARED on purpose: every object a package defines must be named NS_SHORT, and a manifest that declares none gets one derived from the id's last segment ('media'), under which step 2 answers 422 NAMESPACE_PREFIX. It is NOT 'qa': qa-scratch-authz's package owns 'qa', and a namespace has one owner per boot, so a second 'qa' install answers NAMESPACE_CONFLICT. With 'qamedia' the two recipes (and qa-feeds-disabled's 'qafeeds') co-install on one boot, which is a supported run shape. The id is deliberately DISTINCT from qa-scratch-authz's com.objectstack.qa.attachments so the two recipes install and tear down independently. Re-run against a live DB 409s on the duplicate id — send `overwrite: true` deliberately, never by reflex.",
+          "source": "same grounding as qa-scratch-authz step 1: packages/rest/src/rest-route-ledger.ts note; body shape pinned in packages/client/src/client.test.ts. Namespace derivation and the prefix judge: packages/spec/src/kernel/namespace-prefix.ts#deriveNamespaceFromPackageId and #validateObjectNamespacePrefix; one owner per namespace: packages/objectql/src/registry.ts#NamespaceConflictError"
         },
         {
           "step": 2,
-          "call": "PUT /api/v1/meta/object/qa_media?package=com.objectstack.qa.media",
-          "body": { "name": "qa_media", "label": "QA Media", "sharingModel": "public_read_write", "fields": { "name": { "type": "text", "label": "Name", "required": true }, "poster": { "type": "image", "label": "Poster", "accept": ["image/png", "image/jpeg"], "maxSize": 1048576 }, "doc": { "type": "file", "label": "Doc", "accept": [".pdf"] } } },
+          "call": "PUT /api/v1/meta/object/qamedia_media?package=com.objectstack.qa.media",
+          "body": { "name": "qamedia_media", "label": "QA Media", "sharingModel": "public_read_write", "fields": { "name": { "type": "text", "label": "Name", "required": true }, "poster": { "type": "image", "label": "Poster", "accept": ["image/png", "image/jpeg"], "maxSize": 1048576 }, "doc": { "type": "file", "label": "Doc", "accept": [".pdf"] } } },
           "expect": "2xx. `poster` is the MIME-entry + maxSize probe; `doc` (accept = ['.pdf'] ONLY, no maxSize) is the extension-entry probe whose dotless-filename hole is a documented boundary of the enforcement. `enable.files` is deliberately ABSENT: field-owned files ride file-reference-lifecycle.ts (activeFileFields keys on file-class field types), not the #2727 sys_attachment opt-in gate, so the object needs no attachments enablement.",
           "source": "accept/maxSize are declared FieldSchema keys since ADR-0104 D3 wave 2 (packages/spec/src/data/field.zod.ts#shape — 'Offered to the file picker AND enforced on write'); authoring-call shape identical to qa-scratch-authz step 2 (packages/runtime/src/domains/meta.ts#handleMetadataRequest for ?package=); file-class field set is FILE_REFERENCE_TYPES = image/file/avatar/video/audio (packages/spec/src/data/field-value.zod.ts)"
         }
@@ -160,7 +160,7 @@
       "teardown": "DELETE /api/v1/packages/com.objectstack.qa.media — or discard the run's own file DB, the cheaper path a boot on its own port and DB makes free.",
       "knownGaps": [
         "Same SDK sharp edge as qa-scratch-authz: `meta.saveItem` drops `?package=` (packages/client/src/index.ts) — issue step 2 as raw HTTP or the object lands outside the package and the teardown misses it.",
-        "Unlike qa-scratch-authz this recipe has NOT yet been proven by a live run — it is derived from the same authoring path the proven recipe uses plus the FieldSchema declaration. If step 2 4xxs on the constraint keys, re-read field.zod.ts before assuming the recipe rotted; a parse-time strip of accept/maxSize would itself be a finding (the pre-#4001 silent-strip class)."
+        "Proven live (see provenance: QA run #24560, and the #26876 replay). If step 2 4xxs on the constraint keys, re-read field.zod.ts before assuming the recipe rotted; a parse-time strip of accept/maxSize would itself be a finding (the pre-#4001 silent-strip class)."
       ]
     }
   },
@@ -970,20 +970,20 @@
       "title": "A field's declared accept/maxSize is re-enforced SERVER-SIDE on record write — the control the client widget check explicitly is not — with the declared missing-metadata and dotless-extension holes scored as documented boundaries",
       "since": "v17",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai) — the check is a declaration constraint, not an authz gate: it binds every caller identically, so no restricted persona is needed"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "the qa_media scratch object with field-level accept/maxSize (see provisioning) — no stock showcase object declares either",
+          "the qamedia_media scratch object with field-level accept/maxSize (see provisioning) — no stock showcase object declares either",
           "the storage service live at the default base — presign/complete is how the probe sys_file rows are minted, and their mime_type/size are the DECLARED values the check reads (packages/services/service-storage/src/storage-routes.ts#registerStorageFamily: its POST /storage/upload/presigned handler persists the pending sys_file row with the declared mimeType and size)",
           "a system-write channel to CLEAR mime_type and size on one committed sys_file row for the missing-metadata clause — the presign door refuses a body without mimeType/size (400 INVALID_REQUEST, storage-routes.ts), so a metadata-less row cannot be minted through the API; without the system write that one clause is blocked(fixture)"
         ],
         "provisioning": {
           "use": "qa-media-constraints",
-          "why": "every clause of this item runs against qa_media.poster (MIME accept + maxSize) and qa_media.doc (extension-only accept). Without the recipe the ENTIRE item is blocked(fixture): the showcase's only accept/maxSize declarations sit on action params, which never reach this seam."
+          "why": "every clause of this item runs against qamedia_media.poster (MIME accept + maxSize) and qamedia_media.doc (extension-only accept). Without the recipe the ENTIRE item is blocked(fixture): the showcase's only accept/maxSize declarations sit on action params, which never reach this seam."
         },
         "knownGaps": [
           "FIXTURE GAP (why the recipe exists): the showcase declares accept/maxSize only on ACTION PARAMS (examples/app-showcase/src/ui/actions/index.ts#ActionParamGalleryAction, its p_cover and p_attachments params) — that lane feeds the dialog widget and the ADR-0059 Confirm-while-uploading guard pinned by records-forms.upload-guard-blocks-confirm, and never reaches assertFileConstraints, which fires on OBJECT-FIELD references at record write. No showcase object field carries either key, so on stock seeds this item cannot run at all. Landing one constrained field in the showcase seeds would retire the qa-media-constraints recipe.",
@@ -993,11 +993,11 @@
         ]
       },
       "steps": [
-        "replay the qa-media-constraints recipe (or verify qa_media already exists from this boot)",
+        "replay the qa-media-constraints recipe (or verify qamedia_media already exists from this boot)",
         "as admin, mint probe files via presign → PUT bytes → complete: (A) a small PDF declared mimeType 'application/pdf', size ~10KB; (B) a file declared mimeType 'image/png' with size 2097152 (> poster's 1048576 maxSize — size is the DECLARED value; the actual bytes need not be that large); (C) a compliant control declared 'image/png', size ~10KB; (D) filename 'README' (no dot), any mimeType; (E) filename 'report.txt', mimeType 'text/plain'",
-        "POST /api/v1/data/qa_media { name: 'accept-probe', poster: <A> } and capture the refusal; list qa_media where name='accept-probe' → must be empty; read sys_file A in stored form → ref_id must still be null (the throw lands before the claim)",
-        "POST /api/v1/data/qa_media { name: 'size-probe', poster: <B> } and capture the refusal + the empty re-list",
-        "POST /api/v1/data/qa_media { name: 'control', poster: <C> } → 2xx; read sys_file C: ref_object='qa_media', ref_field='poster', ref_id=<the record>",
+        "POST /api/v1/data/qamedia_media { name: 'accept-probe', poster: <A> } and capture the refusal; list qamedia_media where name='accept-probe' → must be empty; read sys_file A in stored form → ref_id must still be null (the throw lands before the claim)",
+        "POST /api/v1/data/qamedia_media { name: 'size-probe', poster: <B> } and capture the refusal + the empty re-list",
+        "POST /api/v1/data/qamedia_media { name: 'control', poster: <C> } → 2xx; read sys_file C: ref_object='qamedia_media', ref_field='poster', ref_id=<the record>",
         "update path: PUT/PATCH the 'control' record swapping poster to <A> → capture the refusal; re-read the record → poster unchanged (the check also rides beforeUpdate, file-reference-lifecycle.ts)",
         "capture the server log around each refusal: the FileConstraintError text names the field and the accept list ('not permitted by the accept list declared for...') or the byte counts ('exceeds the maximum size declared for...'); record the WIRE status + code each refusal actually surfaced with",
         "documented hole 1 (missing metadata): system-write one committed sys_file clearing mime_type AND size to null, then POST it into poster → the write SUCCEEDS (file-reference-lifecycle.ts — 'missing metadata is not evidence of a violation'; the maxSize guard and the mime read both require the value to be present)",
@@ -1006,9 +1006,9 @@
       ],
       "acceptance": [
         {
-          "clause": "a direct API write referencing a committed sys_file whose mime_type violates the field's declared accept is REFUSED and persists nothing: no qa_media row, and the sys_file row stays unclaimed (ref_id null) — the widget check is 'a convenience rather than a control — any caller talking to the API directly bypasses it' (file-reference-lifecycle.ts), and this server re-check is the control",
+          "clause": "a direct API write referencing a committed sys_file whose mime_type violates the field's declared accept is REFUSED and persists nothing: no qamedia_media row, and the sys_file row stays unclaimed (ref_id null) — the widget check is 'a convenience rather than a control — any caller talking to the API directly bypasses it' (file-reference-lifecycle.ts), and this server re-check is the control",
           "oracle": "api",
-          "verify": "the POST answers non-2xx; a scoped re-list of qa_media returns zero rows; the stored-form sys_file read shows ref_id still null",
+          "verify": "the POST answers non-2xx; a scoped re-list of qamedia_media returns zero rows; the stored-form sys_file read shows ref_id still null",
           "evidence": "the refusal body + the empty list + the sys_file read"
         },
         {
@@ -1030,7 +1030,7 @@
           "evidence": "the refusal + the re-read"
         },
         {
-          "clause": "the compliant control passes and is CLAIMED: a file satisfying both declarations writes normally and its sys_file row is stamped ref_object='qa_media'/ref_field='poster'/ref_id=<record> — without this positive side, every refusal above would be equally satisfied by a write path that is simply broken",
+          "clause": "the compliant control passes and is CLAIMED: a file satisfying both declarations writes normally and its sys_file row is stamped ref_object='qamedia_media'/ref_field='poster'/ref_id=<record> — without this positive side, every refusal above would be equally satisfied by a write path that is simply broken",
           "oracle": "api",
           "verify": "the control POST answers 2xx and the sys_file read shows the ownership stamp",
           "evidence": "the 2xx + the stamped row read"
@@ -1049,7 +1049,7 @@
         }
       ],
       "negative": [
-        "a qa_media row created holding the violating reference is THE fail this item exists for — it means the only guard is the client widget, the exact 'declared but not enforced' state ADR-0104 removes (file-reference-lifecycle.ts)",
+        "a qamedia_media row created holding the violating reference is THE fail this item exists for — it means the only guard is the client widget, the exact 'declared but not enforced' state ADR-0104 removes (file-reference-lifecycle.ts)",
         "a refusal that still claimed the file (sys_file ref_id stamped despite the non-2xx) is a FAIL — the rejection must be authoritative, not cosmetic (same rule as attach-requires-parent-edit)",
         "⛔ NOT failures: the missing-metadata pass (clause 5) and the dotless-extension pass (clause 6) — both are the source's own documented boundaries; and arbitrary BYTES passing under a compliant declared mimeType is the declaration-based content boundary in knownGaps, not a bypass",
         "⛔ NOT a violation probe: a random/unknown id token in the field passes untouched BY DESIGN — an id matching no sys_file row is treated as an external/legacy value and skipped before any constraint is read (file-reference-lifecycle.ts); probe with a REAL committed sys_file or the run measures nothing"
@@ -1068,7 +1068,8 @@
         { "revision": 2, "date": "2026-10-16", "change": "clause 3 and knownGaps WIRE-ENVELOPE expected, per an unmeasured source reading, the sanitized 500 INTERNAL_ERROR with the prose only in the server log, and told the next run to revise the clause if a 4xx appeared (#23878 checklist-accuracy finding). It did: re-measured on main c91af8ed6 with the qa-media-constraints recipe, the accept probe and the size probe both answer 400 ERR_FILE_CONSTRAINT with the field-naming message in the body (FileConstraintError now declares status 400), the compliant control answers 201, and the info-level log carries no line for the refusal (#23932 closed). The clause's oracle moves from log to api and scores status, code and the named field; the knownGap records the measured envelope", "ref": "#24036" },
         { "revision": 3, "date": "2026-10-20", "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). fixtures.requires[1] cited line 255 of storage-routes.ts, and fixtures.knownGaps[0] and source[5] line 337 of the showcase actions index.ts, in the comma-range spelling (authored in 8d74a57487 as the lists 241-243 and 255, and 334 and 337). At that commit line 255 was the mime_type of the pending sys_file row the presigned-upload route writes, and line 337 the accept/maxSize of the action gallery's p_attachments param; at this base both have moved. requires[1] now anchors storage-routes.ts#registerStorageFamily, whose POST /storage/upload/presigned handler writes that row, and knownGaps[0] and source[5] anchor index.ts#ActionParamGalleryAction. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed", "ref": "#24752" },
         { "revision": 4, "date": "2026-10-20", "change": "automated.ref adds clause 3, the update path — checklist-accuracy finding of QA run #24779 (wave anchor #24579 round 12). Read at base 307ce4c4b4: file-reference-lifecycle.test.ts's 'accept / maxSize enforcement' case 'refuses an UPDATE onto an oversize file with the same envelope, leaving the record and both files as they were' asserts the refused swap and the unchanged stored value at the same handler-direct level as the clauses the ref already names. No clause changed", "ref": "#24824" },
-        { "revision": 5, "date": "2026-10-20", "change": "automated removed, fixtures.knownGaps[3] added — checklist-accuracy finding of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4: the ref disclaims the wired lane), round 15 of wave anchor #24579. Re-read at base b1676441ba, after round 12 added the acceptance[3] update-path case: the one pin is handler-direct over a fake engine, and every clause scores the REST answer. By RUNNER rule 6 (a pin scores only the layer it drives) it scores none of them, round 12's update-path case included. automated is dropped (theme-B rule), and the knownGap carries what the pin asserts. No clause changed", "ref": "#24891" }
+        { "revision": 5, "date": "2026-10-20", "change": "automated removed, fixtures.knownGaps[3] added — checklist-accuracy finding of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4: the ref disclaims the wired lane), round 15 of wave anchor #24579. Re-read at base b1676441ba, after round 12 added the acceptance[3] update-path case: the one pin is handler-direct over a fake engine, and every clause scores the REST answer. By RUNNER rule 6 (a pin scores only the layer it drives) it scores none of them, round 12's update-path case included. automated is dropped (theme-B rule), and the knownGap carries what the pin asserts. No clause changed", "ref": "#24891" },
+        { "revision": 6, "date": "2026-10-27", "change": "the scratch object is renamed qa_media → qamedia_media in fixtures.requires[0], provisioning.why, steps, acceptance and negative, because the qa-media-constraints recipe now declares manifest.namespace 'qamedia' (#26876). Replayed on a fresh stock showcase boot at main a51ba639: as written, the install derived namespace 'media' and the object save answered 422 NAMESPACE_PREFIX, so a literal replay provisioned nothing and every clause of this item would have scored blocked(fixture). The recipe cannot declare 'qa': qa-scratch-authz owns it, and a second 'qa' package answers 422 NAMESPACE_CONFLICT. With 'qamedia', steps 1-2 answered 201/200 beside the qa and qafeeds packages on one boot. Only the object name changed; no clause's assertion, step order or oracle changed", "ref": "#26876" }
       ]
     },
     {

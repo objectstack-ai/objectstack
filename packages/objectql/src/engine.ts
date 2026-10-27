@@ -26,9 +26,6 @@ import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
 // engine is what `metadata-protocol.validateData` returns, so letting the two
 // drift would put a translation layer between a verdict and its contract.
 import type { ValidateDataResponse } from '@objectstack/spec/api';
-// [#22646] The ADR-0112 catalog — `rejectCredentialAggregation`'s refusal
-// envelope carries `INVALID_FIELD` from it rather than a bare `Error`.
-import { StandardErrorCode } from '@objectstack/spec/api';
 import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readAutonumberCounter, missingFieldValues, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, referenceCarrierOf, isCurrentUserDefaultToken, isNowDefaultToken, isMultiValueField, driverSupportsTransactions, AUDIT_PROVENANCE_FIELDS, resolveInjectedColumnProvenance } from '@objectstack/spec/data';
 // [#5158] Door 2's lowering sink — the SAME pair the protocol face (Door 1)
 // runs, so `FilterArray` has exactly one lowering in the product.
@@ -300,6 +297,10 @@ import {
   collectInternalReadFields,
   collectCredentialFields,
 } from './secret-fields.js';
+// [#25522 cut 18] `count` and `aggregate()`'s credential guard
+// (`rejectCredentialAggregation`); the methods of the same names below hand
+// each body the members it reads (`CountAggregateHost`).
+import { count, rejectCredentialAggregation } from './engine-count-aggregate.js';
 import { assertGroupByNamesNoJsonStoredField } from './group-by-structured-json-door.js';
 import { assertAggregationFieldTypesAccepted } from './aggregate-field-type-door.js';
 import { assertAggregatedColumnsAreDistinct, assertDateBucketTargetsAreTemporal } from './aggregate-query-shape-door.js';
@@ -599,7 +600,7 @@ export const HOOK_EVENT_DISPATCH_VOCABULARY = {
  * lowering (`sort` records, `populate` lists) that belongs to those layers, so
  * the engine deliberately does not fold them.
  */
-const ENGINE_WHERE_SLOTS: readonly QueryAliasSlot[] =
+export const ENGINE_WHERE_SLOTS: readonly QueryAliasSlot[] =
   RPC_QUERY_ALIAS_SLOTS.filter((slot) => slot.canonical === 'where');
 const ENGINE_QUERY_SLOTS: readonly QueryAliasSlot[] =
   RPC_QUERY_ALIAS_SLOTS.filter((slot) => slot.canonical === 'where' || slot.canonical === 'limit');
@@ -698,7 +699,7 @@ const ENGINE_DELETE_OPTION_KEYS: ReadonlySet<string> = new Set([
 // Before their schemas declared them they were refused here, and the wire paths
 // left them out: the unsearched groups answered, and a paged list's `total`
 // under a search was a page-local estimate (#22790).
-const ENGINE_COUNT_OPTION_KEYS: ReadonlySet<string> = new Set(['context', 'where', 'search', 'searchFields']);
+export const ENGINE_COUNT_OPTION_KEYS: ReadonlySet<string> = new Set(['context', 'where', 'search', 'searchFields']);
 const ENGINE_AGGREGATE_OPTION_KEYS: ReadonlySet<string> = new Set([
   'context', 'where', 'groupBy', 'aggregations', 'having', 'timezone',
   'search', 'searchFields',
@@ -795,9 +796,12 @@ export function writeFailureLogMeta(
 
 /**
  * [#24948] The refusal of a predicate (`multi`) delete of `sys_organization`:
- * the standard `DELETE_RESTRICTED`, saying to delete by id. Only the by-id
- * delete runs the referential pass that refuses an organization still owning
- * rows and keeps every row's reference to it.
+ * the standard `DELETE_RESTRICTED`, saying to delete by id. An organization is
+ * deleted one at a time, through plugin-auth's organization delete: its
+ * refusal of an organization that still owns records and its
+ * `beforeDeleteOrganization` clean-up of the organization's teams, team members
+ * and admin grants run there, once per organization. A delete matching
+ * organizations by a filter runs neither, and no caller needs one.
  */
 function organizationPredicateDeleteRefusal(): Error {
   const err: any = new Error(
@@ -805,9 +809,10 @@ function organizationPredicateDeleteRefusal(): Error {
       'Delete each organization by its id.',
   );
   err.developerMessage =
-    `A predicate delete of ${ORGANIZATION_OBJECT} is refused: it runs no referential pass, so it could neither ` +
-    'refuse an organization that still owns rows nor keep the rows naming it. Delete each organization by id ' +
-    `(engine.delete('${ORGANIZATION_OBJECT}', { where: { id } })).`;
+    `A predicate delete of ${ORGANIZATION_OBJECT} is refused: organizations are deleted one at a time, because ` +
+    "plugin-auth's organization delete refuses an organization that still owns records and removes its teams, " +
+    'team members and admin grants per organization, and a predicate delete runs neither. Delete each organization ' +
+    `by id (engine.delete('${ORGANIZATION_OBJECT}', { where: { id } })).`;
   err.code = 'DELETE_RESTRICTED';
   err.status = 409;
   err.httpStatus = 409;
@@ -907,7 +912,7 @@ export const ENGINE_OPTION_KEY_SETS: Readonly<Record<string, ReadonlySet<string>
  * (`cursor`/`distinct`) quote their tombstone. Everything else gets the legal
  * key set, so the error carries the fix.
  */
-function rejectUnknownEngineOptions(
+export function rejectUnknownEngineOptions(
   object: string,
   operation: string,
   bag: object | undefined,
@@ -949,7 +954,7 @@ function rejectUnknownEngineOptions(
  * shallow copy, because the bag belongs to the caller and may be reused (view
  * metadata, flow node config).
  */
-function foldEngineOptionAliases<T extends object | undefined>(
+export function foldEngineOptionAliases<T extends object | undefined>(
   object: string,
   operation: string,
   bag: T,
@@ -1107,7 +1112,7 @@ const UNAPPLIED_WHERE_CONSEQUENCE: Readonly<Record<string, string>> = {
  * common path allocates nothing), otherwise a shallow copy: the bag belongs to
  * the caller and may be reused (view metadata, flow node config).
  */
-function lowerWhereFilterArray<T extends object | undefined>(
+export function lowerWhereFilterArray<T extends object | undefined>(
   object: string,
   operation: string,
   bag: T,
@@ -1405,7 +1410,7 @@ function resolveThenLowerWhere<W>(
  * copies, and with them gone that reading would have dropped the whole-day
  * bound on every such read.
  */
-function declaredDatetimeLowering(schema: unknown): FilterLoweringOptions {
+export function declaredDatetimeLowering(schema: unknown): FilterLoweringOptions {
   const fields = (schema as { fields?: unknown } | undefined)?.fields;
   if (fields === null || typeof fields !== 'object') return {};
   return {
@@ -1796,6 +1801,8 @@ function planFormulaProjection(
  * on driver-sql (a projection is exactly the named columns — no `id` unless it
  * is named) and pinned against it in `engine-formula-projection-trim.test.ts`.
  * `id` is cut like any other widened column when the caller did not name it.
+ * [#26672] The `id` {@link withFileOwnerKey} adds for a file field's owner
+ * verdict is cut the same way.
  *
  * ## Where it runs, and why there
  *
@@ -1831,6 +1838,35 @@ function withoutFormulaWidening<T>(row: T, widened: ReadonlySet<string> | undefi
 function rowsWithoutFormulaWidening<T>(rows: T, widened: ReadonlySet<string> | undefined): T {
   if (!widened || !Array.isArray(rows)) return rows;
   return rows.map((row) => withoutFormulaWidening(row, widened)) as unknown as T;
+}
+
+/**
+ * [#26672] A projection that names a file field reads the record's `id` too,
+ * and the key is cut back off the answer like the formula widening is.
+ *
+ * File-reference hydration judges a reader refused `sys_file` read by the
+ * record that OWNS each file (#22637, `readParentDerivedFiles`), matched on
+ * that record's `id`. A projection that left `id` out handed it rows with no
+ * key, so a file the reader may read answered `{ id, metadataRefused: true }`
+ * to `select=<file field>` and the full value to `select=id,<file field>`. The
+ * verdict must not depend on whether the caller listed `id`, so the driver is
+ * asked for it here and {@link withoutFormulaWidening} trims it at the
+ * `return`: the caller still gets exactly the columns it named, and a reader
+ * the verdict refuses is still refused.
+ *
+ * Touches only an explicit projection that names a file field and not `id`;
+ * a projection the formula planner widened already carries `id`.
+ */
+function withFileOwnerKey(
+  schema: any,
+  requestedFields: string[] | undefined,
+  planned: { projected?: string[]; widened?: string[] },
+): { projected?: string[]; widened?: string[] } {
+  if (!schema?.fields || !Array.isArray(requestedFields) || requestedFields.length === 0) return planned;
+  const projected = planned.projected ?? requestedFields;
+  if (projected.includes('id')) return planned;
+  if (!requestedFields.some((f) => FILE_REFERENCE_TYPES.has((schema.fields as any)[f]?.type))) return planned;
+  return { projected: [...projected, 'id'], widened: [...(planned.widened ?? []), 'id'] };
 }
 
 /**
@@ -4056,7 +4092,7 @@ export function servedAsStored(served: unknown, stored: unknown, depth = 0): boo
 }
 
 /** Merge read-path execution context from the query and the trailing options. */
-function mergeReadContext(
+export function mergeReadContext(
   fromQuery?: ExecutionContext,
   fromOptions?: ExecutionContext,
 ): ExecutionContext | undefined {
@@ -12950,9 +12986,11 @@ export class ObjectQL implements IObjectQLEngine {
    * Returns, per allowed file id, the owning record's id and its servable row
    * — `null` when the row is owned and allowed but not servable, which the
    * caller reads as the bare id a `sys_file` reader would see. An id absent
-   * from the map keeps the refused marker. Unwired, no record ids (a
-   * projection that left out `id`), or a failure: an empty map — every id
-   * stays refused, the answer before this existed.
+   * from the map keeps the refused marker. Unwired, no record ids, or a
+   * failure: an empty map — every id stays refused, the answer before this
+   * existed. [#26672] `find` / `findOne` read `id` for any projection that
+   * names a file field ({@link withFileOwnerKey}), so a caller's projection
+   * that leaves `id` out does not land here.
    */
   private async readParentDerivedFiles(
     objectName: string,
@@ -13501,10 +13539,12 @@ export class ObjectQL implements IObjectQLEngine {
     // driver, where the #3821 ladder answered it with EVERY field.
     assertProjectionHasNoDottedPaths(object, 'find', _findSchema, ast.fields);
     const _findFormula = planFormulaProjection(_findSchema, ast.fields);
-    if (_findFormula.projected) ast.fields = _findFormula.projected;
+    // [#26672] …and a file field's owner key — see `withFileOwnerKey`.
+    const _findProjection = withFileOwnerKey(_findSchema, ast.fields, _findFormula);
+    if (_findProjection.projected) ast.fields = _findProjection.projected;
     // [#22300] The columns that widening added, cut back off the answer at the
     // `return` — see `withoutFormulaWidening`.
-    const _findWidened = _findFormula.widened ? new Set(_findFormula.widened) : undefined;
+    const _findWidened = _findProjection.widened ? new Set(_findProjection.widened) : undefined;
 
     // Drop any requested PLAIN field that doesn't exist on the schema.
     // Without this, drivers (notably SqlDriver) emit `SELECT unknown_col
@@ -13820,9 +13860,11 @@ export class ObjectQL implements IObjectQLEngine {
     // [#7642] Caller's own projection, before planning rewrites it — see `find`.
     const _findOneRequestedFields = Array.isArray(ast.fields) ? [...ast.fields] : undefined;
     const _findOneFormula = planFormulaProjection(_findOneSchema, ast.fields);
-    if (_findOneFormula.projected) ast.fields = _findOneFormula.projected;
+    // [#26672] Same as `find`: a file field's owner key is read too.
+    const _findOneProjection = withFileOwnerKey(_findOneSchema, ast.fields, _findOneFormula);
+    if (_findOneProjection.projected) ast.fields = _findOneProjection.projected;
     // [#22300] Same as `find`: what the widening added is cut at the `return`.
-    const _findOneWidened = _findOneFormula.widened ? new Set(_findOneFormula.widened) : undefined;
+    const _findOneWidened = _findOneProjection.widened ? new Set(_findOneProjection.widened) : undefined;
 
     // Drop unknown PLAIN fields — see the equivalent block in `find()` for
     // the rationale, and for why this tolerance is plain-columns-only ([#7589]
@@ -18168,8 +18210,9 @@ export class ObjectQL implements IObjectQLEngine {
    * required lookup that escalation is decided per ROW after the dependents
    * probe (#9688): a row that keeps another member takes the member removal,
    * a row the removal would EMPTY keeps the refusal, and the refusal counts
-   * only those rows. Only runs for single-id deletes — multi/predicate
-   * deletes skip cascade (logged).
+   * only those rows. A by-id delete runs it for its one record; a predicate
+   * delete (`multi: true`) runs it for every row it matched ([#26871], see
+   * `delete()`'s predicate arm).
    *
    * [#22305] Two phases, so the walk knows its own set before it judges
    * anything:
@@ -19573,11 +19616,11 @@ export class ObjectQL implements IObjectQLEngine {
       // update twin says why; for every pre-#11009 input the two spellings
       // agree.
       const isPredicatePath = !isByIdDelete && dispatch.kind === 'multi' && typeof driver.deleteMany === 'function';
-      // [#24948] An organization is deleted by id or not at all. The predicate
-      // arm runs no referential cascade, so it could neither refuse an
-      // organization that still owns rows nor keep a single row from naming a
-      // deleted one; any delete not by id is refused here, whatever the driver
-      // offers, before any hook or write.
+      // [#24948] An organization is deleted by id or not at all: plugin-auth's
+      // organization delete refuses one that still owns records and removes its
+      // auth structure per organization, which a predicate delete would skip
+      // (see `organizationPredicateDeleteRefusal`). Any delete not by id is
+      // refused here, whatever the driver offers, before any hook or write.
       if (!isByIdDelete && object === ORGANIZATION_OBJECT) {
         throw organizationPredicateDeleteRefusal();
       }
@@ -19785,7 +19828,64 @@ export class ObjectQL implements IObjectQLEngine {
                // [#2982] The AST asserted present and already used for the
                // pre-phase row read above.
                // `deleteMany` presence is part of the ladder verdict resolved above.
-               result = await driver.deleteMany!(object, opCtx.ast!, hookContext.input.options as any);
+               //
+               // [#26871] A predicate delete honours `deleteBehavior` as the
+               // by-id branch does: a `restrict` refuses, a `cascade` (a
+               // `master_detail` by default) deletes the dependents, a
+               // `set_null` clears them. This arm used to go straight to
+               // `deleteMany`, so a flow's `delete_record` with `multi: true`
+               // skipped every declared rule the same delete done record by
+               // record honours.
+               //
+               // `planCascadeAtomicity` is the by-id branch's own question:
+               // `'none'` means no relation of the delete family points at
+               // this object, so the walk could write nothing and the arm keeps
+               // its single `deleteMany`, no rows read and no transaction.
+               const plan = this.planCascadeAtomicity(object);
+               if (plan === 'none') {
+                 result = await driver.deleteMany!(object, opCtx.ast!, hookContext.input.options as any);
+               } else {
+                 // Otherwise: resolve the matched rows through the composed,
+                 // row-scoped AST, run `cascadeDeleteRelations` for each, then
+                 // delete exactly those rows by id. By id, not by re-running the
+                 // predicate: the walk's own writes (a `set_null` on a
+                 // self-reference) can move a row into or out of the predicate,
+                 // and the rows deleted must be the rows walked. The ids were
+                 // read under this caller's scope inside the same unit of work,
+                 // as the by-id branch deletes its id after reading its
+                 // pre-image under that scope. The unit of work is the by-id
+                 // branch's, for the same reasons (#7413).
+                 const runPredicateDelete = async (writeContext?: ExecutionContext): Promise<unknown> => {
+                   const writeOptions = this.buildDriverOptions(object, writeContext, hookContext.input.options as any);
+                   const matched = ((await driver.find(object, { ...opCtx.ast!, fields: ['id'] }, writeOptions)) ?? []) as Array<Record<string, unknown>>;
+                   const matchedIds = matched.map((row) => row?.id).filter((v): v is string | number => v != null);
+                   for (const matchedId of matchedIds) {
+                     await this.cascadeDeleteRelations(object, matchedId, writeContext);
+                   }
+                   // The id set rides an `$in`; batched so one statement never
+                   // outgrows a driver's bind-parameter limit.
+                   const batchSize = 500;
+                   let removed = 0;
+                   for (let i = 0; i < matchedIds.length; i += batchSize) {
+                     const batchAst: QueryAST = { object, where: { id: { $in: matchedIds.slice(i, i + batchSize) } } };
+                     const count = await driver.deleteMany!(object, batchAst, writeOptions);
+                     // A non-count answer goes back as the driver gave it, so
+                     // the `isDeleteResultShape` check below refuses it.
+                     if (typeof count !== 'number') return count;
+                     removed += count;
+                   }
+                   return removed;
+                 };
+                 if (plan === 'atomic') {
+                   result = await this.transaction(
+                     async (trxCtx: any) => await runPredicateDelete(trxCtx as ExecutionContext),
+                     opCtx.context,
+                   );
+                 } else {
+                   this.warnCascadeNotAtomic(object);
+                   result = await runPredicateDelete(opCtx.context);
+                 }
+               }
                isPredicateWrite = true;
           }
 
@@ -19894,64 +19994,22 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   async count(object: string, query?: EngineCountOptions, options?: EngineReadOptions): Promise<number> {
-     object = this.resolveObjectName(object);
-     // Fold the `filter` alias into `where` (#4346) — the AST below reads
-     // `query.where` only, so an unfolded `{ filter }` counted the whole table.
-     query = foldEngineOptionAliases(object, 'count', query, ENGINE_WHERE_SLOTS);
-     rejectUnknownEngineOptions(object, 'count', query, ENGINE_COUNT_OPTION_KEYS);
-     query = lowerWhereFilterArray(object, 'count', query, this._registry.getObject(object), this.relatedSchemaOf);
-     // [#22790] ADR-0061 `search` → the rows are searched before they are
-     // counted, by the one expander `find` runs, at the same point in the
-     // sequence — so the count is the number of rows `find` returns for the bag.
-     if (query) query = await this.expandSearchOnOptions(object, query, options);
-     const driver = this.getDriver(object);
-
-     // The AST must ride on the opCtx so the security/sharing middlewares can
-     // inject their read filters (RLS, OWD/sharing scope) into `ast.where` —
-     // exactly like find(). Building it locally inside the executor (#2737)
-     // discarded every injected filter: `total` counted the RAW table while
-     // `records` were scoped, leaking invisible-row counts and breaking
-     // pagination.
-     const opCtx: OperationContext = {
-       object,
-       operation: 'count',
-       ast: { object, where: query?.where },
-       options: query,
-       context: mergeReadContext(query?.context, options?.context),
-     };
-     // [ADR-0053 D-D1, amended — #5930] Resolve, then lower. [#20802] …with
-     // the nested-relation step between the two.
-     await this.resolveWhereTokens(
-       opCtx.ast as QueryAST,
-       opCtx.context,
-       declaredDatetimeLowering(this._registry.getObject(object)),
-       'where',
-       'count',
-     );
-     // The caller's own `where`, placeholders expanded — captured BEFORE the
-     // middleware chain scopes `opCtx.ast.where`, so the find() fallback below
-     // still passes the unscoped filter (find() applies the read filters itself).
-     const callerWhere = (opCtx.ast as QueryAST).where;
-
-     await this.executeWithMiddleware(opCtx, async () => {
-       const countOpts = this.buildDriverOptions(object, opCtx.context, undefined, { recordedVerdict: opCtx.tenantLayer0Verdict });
-       if (driver.count) {
-           // [ADR-0139 D2] The executor boundary, as in `find` (`count` has no
-           // before-hook): the AST is final once the chain has run. The
-           // `find()` fallback below composes at its own boundary.
-           return driver.count(
-             object,
-             await this.composeReadableIdsAtBoundary(object, 'count', opCtx.ast as QueryAST, opCtx.context),
-             countOpts,
-           );
-       }
-       // Fallback to find().length — find() applies the read filters itself,
-       // so pass the caller's original where, not the already-scoped ast.
-       const res = await this.find(object, { where: callerWhere, fields: ['id'], context: opCtx.context });
-       return res.length;
-     });
-
-     return opCtx.result as number;
+    // [#25522 cut 18] The body moved to `engine-count-aggregate.ts` (see `CountAggregateHost`).
+    const readRegistry = () => this._registry;
+    const readRelatedSchemaOf = () => this.relatedSchemaOf;
+    const host: ThisParameterType<typeof count> = {
+      resolveObjectName: (...a) => this.resolveObjectName(...a),
+      get _registry() { return readRegistry(); },
+      get relatedSchemaOf() { return readRelatedSchemaOf(); },
+      expandSearchOnOptions: (...a) => this.expandSearchOnOptions(...a),
+      getDriver: (...a) => this.getDriver(...a),
+      resolveWhereTokens: (...a) => this.resolveWhereTokens(...a),
+      executeWithMiddleware: (...a) => this.executeWithMiddleware(...a),
+      buildDriverOptions: (...a) => this.buildDriverOptions(...a),
+      composeReadableIdsAtBoundary: (...a) => this.composeReadableIdsAtBoundary(...a),
+      find: (...a) => this.find(...a),
+    };
+    return count.call(host, object, query, options);
   }
 
   /**
@@ -19996,44 +20054,12 @@ export class ObjectQL implements IObjectQLEngine {
    * case too, which shared the bare `Error`.
    */
   private rejectCredentialAggregation(object: string, query: EngineAggregateOptions): void {
-    const schema = this._registry.getObject(object);
-    // Deduped: one field can be reachable through both collectors (a `secret`
-    // column that is also flagged `internal`), and it must be named once.
-    const protectedFields = [
-      ...new Set([...collectCredentialFields(schema), ...collectInternalReadFields(schema)]),
-    ];
-    if (protectedFields.length === 0) return;
-
-    const referenced = new Set<string>();
-    for (const agg of query?.aggregations ?? []) {
-      const field = (agg as { field?: string })?.field;
-      if (field && field !== '*') referenced.add(field);
-    }
-    for (const g of query?.groupBy ?? []) {
-      const field = typeof g === 'string' ? g : g?.field;
-      if (field) referenced.add(field);
-    }
-
-    const hit = protectedFields.filter((f) => referenced.has(f));
-    if (hit.length > 0) {
-      const err = new Error(
-        `Cannot aggregate credential field(s) ${hit.map((f) => `"${object}.${f}"`).join(', ')}: `
-          + 'secret/password fields are masked on read and `internal: true` fields are omitted '
-          + 'outright, so the value never leaves the engine on the generic data path; aggregating '
-          + 'them (group-by, min/max, array_agg, …) would surface it. '
-          + 'Refusing (fail-closed) — see ADR-0100.',
-      ) as Error & { code?: string; status?: number; httpStatus?: number; field?: string; fields?: string[]; object?: string };
-      // ADR-0112 envelope, the same number under D5's two spellings — `status`
-      // for the HTTP doors, `httpStatus` for a consumer holding the thrown
-      // error (the CLI `--json` envelope).
-      err.code = StandardErrorCode.enum.INVALID_FIELD;
-      err.status = 400;
-      err.httpStatus = 400;
-      err.field = hit[0];
-      err.fields = hit;
-      err.object = object;
-      throw err;
-    }
+    // [#25522 cut 18] The body moved to `engine-count-aggregate.ts` (see `CountAggregateHost`).
+    const readRegistry = () => this._registry;
+    const host: ThisParameterType<typeof rejectCredentialAggregation> = {
+      get _registry() { return readRegistry(); },
+    };
+    return rejectCredentialAggregation.call(host, object, query);
   }
 
   async aggregate(object: string, query: EngineAggregateOptions, options?: EngineReadOptions): Promise<any[]> {

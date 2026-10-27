@@ -11,7 +11,8 @@
 //     UNIQUE_VIOLATION; the developerMessage names the object by its declared
 //     label and says no record was written; on the tenant-scoped (composite)
 //     index the user-facing `error` is the generic sentence, and on the
-//     single-column global index it names the field; neither carries a driver
+//     single-column global index it names the field by its label (#26867),
+//     while `field` keeps the API key; neither carries a driver
 //     prefix, the driver's statement or the bound value; the row count is
 //     unchanged.
 //   acceptance[1] — NULL-distinct: two rows with no sku both land.
@@ -93,8 +94,9 @@ describe('records-forms.field-unique-enforcement — the unique refusal at the R
 
   // The measured bodies. Bare `unique: true` is tenant-scoped, so its SQLite
   // index is composite and no single column is named; the global index is
-  // single-column, so the field is named (by its API key in `error` and
-  // `field`, by its label in `developerMessage`).
+  // single-column, so the field is named — by its label in `error` and
+  // `developerMessage` (one resolution, the engine's), by its API key on
+  // `field` (#26867).
   it.each([
     ['sku', 'FUE-SKU-0001', {
       error: 'A record with this value already exists',
@@ -103,7 +105,7 @@ describe('records-forms.field-unique-enforcement — the unique refusal at the R
       object: OBJ,
     }],
     ['gsku', 'FUE-GSKU-0001', {
-      error: 'A record with this gsku already exists',
+      error: 'A record with this Global SKU already exists',
       code: 'UNIQUE_VIOLATION',
       developerMessage: `Duplicate record refused on '${LABEL}': a unique constraint on 'Global SKU' already holds this value. No record was written.`,
       field: 'gsku',

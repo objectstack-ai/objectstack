@@ -340,11 +340,17 @@ const STUDIO_EN: Record<string, string> = {
   'designer.field.optMalformed.valueEmpty': 'Its `value` is empty.',
   'designer.field.optMalformed.labelNotText': 'Its `label` is not text.',
   'designer.field.optMalformed.colorNotText': 'Its `color` is not text.',
+  'designer.field.optMalformed.kindNotValid': 'Its `kind` is not open, won or lost.',
   'designer.field.optMalformedHint': 'It is kept exactly as authored. Repair it in the JSON source, or remove it here.',
   'designer.field.addValue': 'Add value',
   'designer.field.optValue': 'value',
   'designer.field.optLabel': 'Label',
   'designer.field.optColor': 'Color',
+  'designer.field.optKind': 'Lifecycle kind',
+  'designer.field.optKind.unset': 'No kind',
+  'designer.field.optKind.open': 'Open',
+  'designer.field.optKind.won': 'Won',
+  'designer.field.optKind.lost': 'Lost',
   'designer.field.moveUp': 'Move up',
   'designer.field.moveDown': 'Move down',
   'designer.field.removeValue': 'Remove',
@@ -352,6 +358,7 @@ const STUDIO_EN: Record<string, string> = {
   // object write guard refuses this field until it is filled in.
   'designer.field.hint.addOption': 'Add at least one option. Changes are saved once the field has one.',
   'designer.field.hint.pickTarget': 'Pick the object to link to. Changes are saved once the field has one.',
+  'designer.field.hint.stageKinds': 'This is the object’s lifecycle field: give every option a kind (Open for a step, Won or Lost for an end). The object is saved once every option has one.',
   'designer.field.relatedObject': 'Related object',
   'designer.field.objectNamePlaceholder': 'object_name',
   // Lookup "Picker config" advanced sub-panel
@@ -2431,6 +2438,13 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.access.explain.ruleKind.team': 'Team',
   'engine.studio.access.explain.ruleKind.territory': 'Territory',
   'engine.studio.access.explain.ruleKind.rls_policy': 'RLS policy',
+  // Access pillar: a create over a taken identifier, and the draft discard (objectstack#26836).
+  'engine.studio.access.createTaken': 'This package already has a permission set with the identifier “{name}”: {label}. Open it, or choose another identifier.',
+  'engine.studio.access.createTakenElsewhere': 'A permission set with the identifier “{name}” already exists outside this package: {label}. Choose another identifier.',
+  'engine.studio.access.openExisting': 'Open “{label}”',
+  'engine.studio.access.discardConfirm': 'Discard the pending draft of “{item}”? The published set stays as it is; only its unpublished changes are removed.',
+  'engine.studio.access.discardConfirmUnpublished': 'Discard “{item}”? It has never been published, so discarding its draft removes the set.',
+  'engine.studio.access.discardFailed': 'Could not discard the draft',
 };
 
 export default STUDIO_EN;

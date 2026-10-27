@@ -1418,6 +1418,18 @@ describe('[#26719] a list-view chart bound to a dataset over another object', ()
   }
 
   describe('at the runtime save door', () => {
+    // [#26847] The door also resolves the chart's `dimensions` / `values`
+    // against the bound dataset (`validateChartBindings`), so each probe
+    // selects names its dataset declares: the foreign object is the only
+    // thing wrong with it.
+    const OWN_SELECTION: Record<string, AnyRec> = {
+      duly_task_metrics: { dimensions: ['status'], values: ['task_count'] },
+      duly_person_metrics: { dimensions: ['name'], values: ['person_count'] },
+    };
+    const doorChart = (dataset: string, extra: AnyRec = {}): AnyRec => {
+      const view = chartOn(dataset, extra);
+      return { ...view, chart: { ...(view.chart as AnyRec), ...OWN_SELECTION[dataset] } };
+    };
     const SCOPE = { packageId: 'com.qa.gap', dependencies: [] as string[] };
     const owned = (o: AnyRec, pkg: string) => ({ ...o, _packageId: pkg });
     const objects = [owned(OBJECTS[0], 'com.qa.gap'), owned(OBJECTS[1], 'com.other.app')];
@@ -1427,7 +1439,7 @@ describe('[#26719] a list-view chart bound to a dataset over another object', ()
       object: 'duly_task',
       viewKind: 'list',
       label: 'By status',
-      config: chartOn(dataset),
+      config: doorChart(dataset),
     });
     const write = (dataset: string) =>
       runRuntimeAuthoringRules({ type: 'view', item: item(dataset), context: { objects, datasets }, packageScope: SCOPE });
@@ -1458,7 +1470,7 @@ describe('[#26719] a list-view chart bound to a dataset over another object', ()
     const writeObject = (dataset: string) =>
       runRuntimeAuthoringRules({
         type: 'object',
-        item: { ...doorTask, listViews: { by_status: chartOn(dataset, { data: undefined }) } },
+        item: { ...doorTask, listViews: { by_status: doorChart(dataset, { data: undefined }) } },
         context: { objects: [doorTask, objects[1]], datasets },
         packageScope: SCOPE,
       });

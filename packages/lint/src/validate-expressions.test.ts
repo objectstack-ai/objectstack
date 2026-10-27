@@ -7,7 +7,7 @@ import { describe, it, expect } from 'vitest';
 // the root the rule never saw.
 import { SCOPE_ROOTS, buildScope, ExpressionEngine } from '@objectstack/formula';
 import { EVALUATED_EXPRESSION_SOURCE_REQUIRED, ExpressionInputSchema, ObjectStackSchema } from '@objectstack/spec';
-import { FieldSchema, ObjectSchema, SelectOptionSchema } from '@objectstack/spec/data';
+import { FieldSchema, ObjectFieldGroupSchema, ObjectSchema, SelectOptionSchema } from '@objectstack/spec/data';
 import { EvalUserSchema } from '@objectstack/spec/identity';
 import { SharingRuleSchema } from '@objectstack/spec/security';
 import { BulkActionDefSchema } from '@objectstack/spec/ui';
@@ -3349,7 +3349,8 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
     // attachments, whose block names join the field index.
     // `listViews` joined with #24798: an object's own list views carry bulk
     // defs whose `confirmText` is judged.
-    expected: ['actions', 'attachedOnRead', 'fields', 'listViews', 'name', 'validations'],
+    // `fieldGroups` joined with #26646: each group's section predicate.
+    expected: ['actions', 'attachedOnRead', 'fieldGroups', 'fields', 'listViews', 'name', 'validations'],
     declaredBy: 'ObjectSchema',
     keys: () => Object.keys(ObjectSchema.shape),
   },
@@ -3434,6 +3435,14 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
     expected: ['value', 'visibleWhen'],
     declaredBy: 'SelectOptionSchema',
     keys: () => Object.keys(SelectOptionSchema.shape),
+  },
+  {
+    // [#26646] One `fieldGroups[]` entry: its section predicate, and its
+    // `key` for the location.
+    receiver: 'fieldGroup',
+    expected: ['key', 'visibleWhen'],
+    declaredBy: 'ObjectFieldGroupSchema',
+    keys: () => shapeKeysOf(ObjectFieldGroupSchema),
   },
   {
     // [#22228] A field's cell formatting rule — the list view's own rule

@@ -367,10 +367,12 @@ function findUniqueViolationColumn(error: unknown, depth: number): string | unde
  * caller's, not this module's: **an index name mistaken for a column is worse
  * than no answer at all.**
  *
- *  - `@objectstack/rest`'s import runner renders this into a form field —
- *    "A record with this `email` already exists." An index name there points
- *    the user at a field that does not exist on the object, so they cannot act
- *    on it; `undefined` degrades to generic copy, which is merely less helpful.
+ *  - the engine's unique envelope and the REST / import refusals report it as
+ *    the refusal's `field`, the key a form focuses its input by. An index name
+ *    there points the user at a field that does not exist on the object, so
+ *    they cannot act on it; `undefined` merely leaves `field` out. [#26867] The
+ *    column is the field's API key, so it is never the end user's sentence —
+ *    that names the field by the label the engine resolves from it.
  *  - #5495's autonumber-retry branch asks a yes/no question of the answer —
  *    "is the conflicting column the autonumber field?" — and an index name
  *    produces a *wrong retry decision*, not a vaguer one.
@@ -405,9 +407,11 @@ function findUniqueViolationColumn(error: unknown, depth: number): string | unde
  * @example
  * ```ts
  * const column = uniqueViolationColumn(error);
- * return column
- *   ? `A record with this ${column} already exists.`
- *   : 'A record with this value already exists.';
+ * return {
+ *   error: 'A record with this value already exists',
+ *   code: 'UNIQUE_VIOLATION',
+ *   ...(column ? { field: column } : {}),
+ * };
  * ```
  */
 export function uniqueViolationColumn(error: unknown): string | undefined {
