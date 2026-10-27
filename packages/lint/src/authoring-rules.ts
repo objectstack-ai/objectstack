@@ -733,6 +733,20 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // leaves are judged: the build and the door accept all 8, and refuse a
     // misspelt leaf.
     //
+    // [#26646] The field-group pass joins the build and the object door: every
+    // `fieldGroups[].visibleWhen`, the section predicate the form renderer
+    // gates the whole group on, fail-closed. It takes the field `visibleWhen`
+    // slot's verdict (the `record`-scoped check and the root verdict), located
+    // at the group's key. Before it no pass read the slot, so
+    // `record.no_such_field == 'x'` saved with a 200 while the same text on a
+    // field's `visibleWhen` or an action's `visible` was refused 422, and the
+    // group then vanished from every form. No entry-level change. MEASURED
+    // first: the repository ships 8 field groups on 4 objects (examples:
+    // app-showcase `contact` 4 and `semantic_zoo` 2; the `create-objectstack`
+    // blank template and the `os init` scaffold 1 each; platform objects
+    // none) and none carries a `visibleWhen` → 0 findings at either door,
+    // against a refusal at each for the card's body.
+    //
     // [#24677] The object pass also refuses a `lookup` / `master_detail`
     // whose `reference` is a stored-metadata-body table — the declaration the
     // #24316 hop refusal presupposes, which the engine never hydrates. No

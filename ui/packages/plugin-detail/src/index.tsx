@@ -192,6 +192,20 @@ export type {
   ObjectDefFieldLike,
   BuildPageOptions,
 } from './synth/buildDefaultPageSchema';
+// objectstack#26678 — the synthesized record page at two widths: the tier a
+// container takes, the page partitioned into its columns, and the columns.
+export {
+  RECORD_PAGE_THREE_COLUMN_MIN_WIDTH,
+  RECORD_PAGE_TWO_COLUMN_MIN_WIDTH,
+  recordPageTierFor,
+  recordPageColumnOfTab,
+  buildDefaultPageColumns,
+} from './synth/recordPageColumns';
+export type { RecordPageTier, RecordPageColumn, DefaultPageColumns } from './synth/recordPageColumns';
+export { useRecordPageTier } from './useRecordPageTier';
+export type { UseRecordPageTierOptions } from './useRecordPageTier';
+export { RecordPageColumns } from './RecordPageColumns';
+export type { RecordPageColumnsProps } from './RecordPageColumns';
 
 /**
  * The registry face of `detail-view` — objectui#5378 item 1.

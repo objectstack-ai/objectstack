@@ -1113,11 +1113,17 @@ function structuredCodeAnswer(
     // codes parse as `ErrorCode` — the reason) and §1 (`not.toHaveProperty`).
     //
     // **Two sentences — the `DELETE_RESTRICTED` split above.** `error` is the
-    // curated end-user sentence the #6250/#7821 arm has always produced: fixed
-    // text plus, at most, the bare column identifier the ENGINE resolved
-    // through `uniqueViolationColumn` (`field` is read off the envelope, not
-    // re-derived — the envelope is the contract). `developerMessage` is the
-    // engine's own sentence (`message`): it names the object and the column
+    // curated end-user sentence: fixed text plus, at most, the field's display
+    // name the ENGINE resolved — [#26867] its `fieldLabel`, the translation in
+    // the writer's locale or the declared `label`, the same one `message` names
+    // it by. It used to interpolate the API key (`field`), so the end user read
+    // `gsku` while `developerMessage` read `Global SKU`. A field with no label
+    // in hand answers the unnamed sentence: the API key is the programs' half
+    // and stays on `field`, which still names the column whenever the engine
+    // resolved one through `uniqueViolationColumn` (`field` and `fieldLabel`
+    // are read off the envelope, not re-derived — the envelope is the
+    // contract, and this module holds no schema to look a label up in).
+    // `developerMessage` is the engine's own sentence (`message`): it names the object and the column
     // and carries no value. The envelope's own `developerMessage` is
     // deliberately NOT relayed — it addresses the in-process caller of
     // `engine.insert` ("attached as `cause`", and the in-process spelling
@@ -1142,11 +1148,14 @@ function structuredCodeAnswer(
     if (error?.code === 'DUPLICATE_RECORD' && error?.name === 'DuplicateRecordError') {
         const field = typeof error?.field === 'string' && error.field.length > 0 ? error.field : undefined;
         const refused = typeof error?.object === 'string' && error.object.length > 0 ? error.object : object;
+        const label = field && typeof error?.fieldLabel === 'string' && error.fieldLabel.trim().length > 0
+            ? error.fieldLabel
+            : undefined;
         return {
             status: 409,
             body: {
-                error: field
-                    ? `A record with this ${field} already exists`
+                error: label
+                    ? `A record with this ${label} already exists`
                     : 'A record with this value already exists',
                 code: 'UNIQUE_VIOLATION',
                 ...(typeof error?.message === 'string' && error.message.length > 0
@@ -1728,9 +1737,9 @@ function classifyDataError(error: any, object?: string): { status: number; body:
     // defect #6250 is named for.
     //
     // **The body still says nothing the driver said.** The message is fixed
-    // text and the only interpolated values are the object name the ROUTE
-    // supplied and — since #7821 — the conflicting FIELD, and that second one
-    // is safe for the same reason the first is: it does not come from the
+    // text, and the only values the body carries are the object name the ROUTE
+    // supplied and — since #7821 — the conflicting FIELD on `field`, and that
+    // second one is safe for the same reason the first is: it does not come from the
     // driver's prose, it comes from `uniqueViolationColumn`, which hands back
     // only a bare `[A-Za-z_][A-Za-z0-9_$]*` identifier it could determine is a
     // COLUMN. The withholding this branch exists to enforce is unchanged:
@@ -1750,11 +1759,18 @@ function classifyDataError(error: any, object?: string): { status: number; body:
     // platform gave two different answers to one constraint depending only on
     // whether the write arrived one row at a time or in a batch, and a client
     // that wanted to render its own localized message could not name the field
-    // either, because the body carried no `field`. Both halves are fixed here:
-    // the wire gets `field`, and the default sentence reaches parity.
+    // either, because the body carried no `field`. Both halves were fixed here:
+    // the wire got `field`, and the default sentence reached parity.
     //
-    // ⚠️ The bulk path is deliberately NOT touched. Convergence is upward only:
-    // it already names the field and must keep naming it exactly as it does.
+    // [#26867] The parity holds, and the sentence half moved: what this branch
+    // holds is the column, which is the field's API KEY, never its label — a
+    // driver error that no engine door translated carries no schema to read a
+    // label from. The end user's sentence names a field only by its label
+    // (the envelope arm above, from the engine's `fieldLabel`), so with only the
+    // key in hand it is the unnamed sentence, and the key stays on `field` for
+    // the client that renders its own message. The import runner's
+    // `sanitizeRowError` (`@objectstack/core`) answers the same, so one
+    // constraint still gets one answer per door.
     //
     // **Passing the error OBJECT, not `error.message`, is the point.**
     // `sanitizeRowError` only ever holds a string, so it reads the message
@@ -1768,18 +1784,16 @@ function classifyDataError(error: any, object?: string): { status: number; body:
     // **When it cannot tell, it says nothing.** `uniqueViolationColumn` returns
     // `undefined` for an index name (MySQL's `for key 'idx_email_unique'`,
     // SQLite's `index 'x'`), for a composite key, and for any dialect it does
-    // not parse — and then this branch emits the unnamed sentence and NO `field`
-    // key at all. That degradation is the contract, not a fallback: a wrong
-    // field name is worse than none, because it sends the user to correct an
-    // input that was never the problem.
+    // not parse — and then this branch emits NO `field` key at all. That
+    // degradation is the contract, not a fallback: a wrong field name is worse
+    // than none, because it sends the user to correct an input that was never
+    // the problem.
     if (isUniqueViolationError(error)) {
         const field = uniqueViolationColumn(error);
         return {
             status: 409,
             body: {
-                error: field
-                    ? `A record with this ${field} already exists`
-                    : 'A record with this value already exists',
+                error: 'A record with this value already exists',
                 code: 'UNIQUE_VIOLATION',
                 ...(field ? { field } : {}),
                 ...(object ? { object } : {}),
