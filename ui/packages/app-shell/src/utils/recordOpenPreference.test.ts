@@ -15,7 +15,7 @@
  * else — no value, an unknown one, no storage, a storage that throws.
  */
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import {
   DEFAULT_RECORD_OPEN_PREFERENCE,
   RECORD_OPEN_PREFERENCE_KEY,
@@ -23,10 +23,6 @@ import {
 } from './recordOpenPreference';
 
 const storageWith = (value: string | null) => ({ getItem: (key: string) => (key === RECORD_OPEN_PREFERENCE_KEY ? value : null) });
-
-afterEach(() => {
-  window.localStorage.removeItem(RECORD_OPEN_PREFERENCE_KEY);
-});
 
 describe('readRecordOpenPreference (objectstack#26677)', () => {
   it('the key and the default are the ones the Display-menu control will write against', () => {
@@ -52,9 +48,10 @@ describe('readRecordOpenPreference (objectstack#26677)', () => {
     expect(readRecordOpenPreference(throwing)).toBe('drawer');
   });
 
-  it('reads the browser\'s own `localStorage` when no storage is handed in', () => {
+  it('with no `window` at all (SSR — this file runs in the node project), the default storage is absent: the drawer', () => {
+    // The browser's own `localStorage` is read by the console's object page;
+    // `ObjectView.recordOpenPreference-26677.test.tsx` drives that path.
+    expect(typeof window).toBe('undefined');
     expect(readRecordOpenPreference()).toBe('drawer');
-    window.localStorage.setItem(RECORD_OPEN_PREFERENCE_KEY, 'split');
-    expect(readRecordOpenPreference()).toBe('split');
   });
 });

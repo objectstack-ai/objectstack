@@ -519,13 +519,12 @@ describe('`object-tree.navigation` — the members decide what a row click opens
     await expectNothingOpened(open, 'absent key');
   });
 
-  it('with NO host navigator, `mode: "page"` and a block without `mode` have no record page to open, and open nothing', async () => {
+  it('with NO host navigator, `mode: "page"` has no record page to open, and opens nothing', async () => {
     const page = await clickRoot({ mode: 'page' });
     await expectNothingOpened(page.open, 'page');
-    cleanup();
-    // `size` alone, written to widen an overlay: the absent `mode` reads `page`.
-    const modeless = await clickRoot({ size: 'lg' });
-    await expectNothingOpened(modeless.open, 'mode-less block');
+    // A block without `mode` used to sit in this row (the absent `mode` read
+    // `page`); since objectstack#26677 it takes `drawer` and opens the drawer,
+    // pinned in its own row above.
   });
 });
 

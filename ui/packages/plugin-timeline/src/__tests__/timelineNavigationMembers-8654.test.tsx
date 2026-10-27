@@ -356,14 +356,22 @@ describe('on a timeline that names no `objectName` there is no record page to op
     expect(open).not.toHaveBeenCalled();
   });
 
-  it.each([
-    ['`mode: "page"`', { mode: 'page' }],
-    ['a block without `mode`', { size: 'lg' }],
-  ] as const)('%s opens nothing, even under a host that publishes its record navigator', async (why, navigation) => {
+  it('`mode: "page"` opens nothing, even under a host that publishes its record navigator', async () => {
     const { value, openRecord } = recordNavigatorHost();
-    const { open } = await clickObjectlessEntry(navigation, value);
-    await expectNothingOpened(open, String(why));
+    const { open } = await clickObjectlessEntry({ mode: 'page' }, value);
+    await expectNothingOpened(open, '`mode: "page"`');
     expect(openRecord).not.toHaveBeenCalled();
+  });
+
+  it('a block without `mode` takes the spec\'s `drawer` default and opens the entry\'s record, host or not (objectstack#26677)', async () => {
+    // FLIPPED: the mode-less block took the spec's `page` default until
+    // objectstack#26677 and so opened nothing here. It now opens the drawer —
+    // the drawer needs no object name, exactly like the LIT CONTROL.
+    const { value, openRecord } = recordNavigatorHost();
+    const { open } = await clickObjectlessEntry({ size: 'lg' }, value);
+    await waitFor(() => expect(dialog()).not.toBeNull());
+    expect(openRecord).not.toHaveBeenCalled();
+    expect(open).not.toHaveBeenCalled();
   });
 
   it.each([

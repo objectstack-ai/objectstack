@@ -494,15 +494,15 @@ describe('`object-map.navigation` — the members decide what a marker click ope
     await expectNothingOpened(open, 'parent handler');
   });
 
-  it('with NO host navigator, the key ABSENT, `page`, or a block without `mode` opens nothing — there is no record page to open', async () => {
+  it('with NO host navigator, the key ABSENT or `page` opens nothing — there is no record page to open', async () => {
     const absent = await clickMarker(undefined);
     await expectNothingOpened(absent.open, 'absent key');
     cleanup();
     const page = await clickMarker({ mode: 'page' });
     await expectNothingOpened(page.open, 'page');
-    cleanup();
-    const modeless = await clickMarker({ size: 'lg' });
-    await expectNothingOpened(modeless.open, 'mode-less block');
+    // A block without `mode` used to sit in this row (it took the spec's
+    // `page` default); since objectstack#26677 it takes `drawer` and opens the
+    // drawer, pinned in its own row above.
   });
 });
 
