@@ -18,7 +18,7 @@
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, within } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 const PKG = 'com.acme.app';
@@ -121,6 +121,14 @@ afterEach(() => {
   window.history.replaceState(null, '', '/');
 });
 
+/** The object the header names: its api-name chip. */
+async function openObjectIs(name: string): Promise<void> {
+  await waitFor(
+    () => expect(within(screen.getByTestId('data-object-header')).getByTestId('studio-item-api-name')).toHaveTextContent(name),
+    { timeout: 8000 },
+  );
+}
+
 async function openTask(): Promise<void> {
   // The shell's link guard reads the window's URL to skip a link to the page
   // already shown; `BrowserRouter` keeps the two equal, so this does too.
@@ -132,7 +140,7 @@ async function openTask(): Promise<void> {
       </Routes>
     </MemoryRouter>,
   );
-  await screen.findByTitle('API name: acme_task', undefined, { timeout: 8000 });
+  await openObjectIs('acme_task');
 }
 
 /** The card's repro: add a Picklist "Priority" with no option yet; the autosave holds it. */
@@ -182,7 +190,7 @@ describe('a held Data field guards every departure (objectstack#26705)', () => {
     fireEvent.click(railRow('Note'));
     expect(confirmSpy).toHaveBeenCalledTimes(1);
     expect(confirmSpy).toHaveBeenCalledWith(LEAVE_QUESTION);
-    expect(screen.getByTitle('API name: acme_task')).toBeInTheDocument();
+    await openObjectIs('acme_task');
     expect(screen.getByTestId('studio-held')).toBeInTheDocument();
 
     // Re-picking the open object drops nothing, so it asks nothing.
@@ -192,7 +200,7 @@ describe('a held Data field guards every departure (objectstack#26705)', () => {
     confirmSpy.mockReturnValueOnce(true);
     fireEvent.click(railRow('Note'));
     expect(confirmSpy).toHaveBeenCalledTimes(2);
-    await screen.findByTitle('API name: acme_note', undefined, { timeout: 8000 });
+    await openObjectIs('acme_note');
     expect(screen.queryByTestId('studio-held')).toBeNull();
   });
 
@@ -208,7 +216,7 @@ describe('a held Data field guards every departure (objectstack#26705)', () => {
     await openTask();
 
     fireEvent.click(railRow('Note'));
-    await screen.findByTitle('API name: acme_note', undefined, { timeout: 8000 });
+    await openObjectIs('acme_note');
     expect(reloadAsks()).toBe(false);
     fireEvent.click(pillarLink('Automations'));
     await screen.findByTestId('studio-rail-automations');
