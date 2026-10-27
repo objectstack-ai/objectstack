@@ -327,7 +327,7 @@ Grouped by dependency weight — atoms and fields stay light, heavy widgets live
 
 | Package | Description |
 |---------|-------------|
-| **[@object-ui/app-shell](./packages/app-shell)** | The Console's shell, views and Studio; a private workspace package since 18.2, no longer published to npm |
+| **[@object-ui/app-shell](./packages/app-shell)** | The Console's shell, views and Studio; a private workspace package, last published to npm as 18.2.0 |
 | **[@object-ui/providers](./packages/providers)** | The upload adapter context the file and image fields upload through |
 | **[@object-ui/auth](./packages/auth)** | `AuthProvider`, `useAuth`, `AuthGuard`, sign-in forms |
 | **[@object-ui/permissions](./packages/permissions)** | Object / field / row-level permission guards and hooks |

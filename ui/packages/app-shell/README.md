@@ -2,10 +2,10 @@
 
 **The ObjectOS Console's shell, views and Studio — a private workspace package**
 
-> **Not published since 18.2.** This package exists to serve the ObjectOS Console
+> **Not published after 18.2.0.** This package exists to serve the ObjectOS Console
 > (`apps/console`), and a customisable console for a third-party host has no business
 > demand today, so it is `private: true` and no longer released to npm. The last published
-> version is 18.1.x, which the maintainer deprecates on npm after 18.2. Inside this
+> version is 18.2.0, which the maintainer deprecates on npm after the 18.2 publish. Inside this
 > workspace `apps/console` and the `@object-ui/*` packages keep importing it as before.
 
 ## Purpose
