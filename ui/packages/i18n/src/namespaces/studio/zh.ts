@@ -1964,7 +1964,6 @@ const STUDIO_ZH: Record<string, string> = {
   // Data pillar
   'engine.studio.data.newFieldLabel': '新字段',
   'engine.studio.data.nameFieldLabel': '名称',
-  'engine.studio.data.idExists': '标识符 "{name}" 已存在',
   'engine.studio.data.fieldCount': '{count} 字段',
   'engine.studio.data.pickObject': '选择一个对象',
   'engine.studio.data.objects': '对象',
@@ -2196,10 +2195,17 @@ const STUDIO_ZH: Record<string, string> = {
   // Access pillar: a create over a taken identifier, and the draft discard (objectstack#26836).
   'engine.studio.access.createTaken': '此软件包已有标识为「{name}」的权限集：{label}。请打开它，或换一个标识。',
   'engine.studio.access.createTakenElsewhere': '此软件包之外已有标识为「{name}」的权限集：{label}。请换一个标识。',
-  'engine.studio.access.openExisting': '打开「{label}」',
   'engine.studio.access.discardConfirm': '放弃「{item}」的待发布草稿吗？已发布的权限集保持不变，只移除未发布的修改。',
   'engine.studio.access.discardConfirmUnpublished': '放弃「{item}」吗？它从未发布过，放弃草稿会移除这个权限集。',
   'engine.studio.access.discardFailed': '无法放弃草稿',
+  // Studio creates over a taken identifier: the Automations, App and Data creates
+  // (objectstack#26917), and the "Open" every create's refusal offers.
+  'engine.studio.create.openExisting': '打开「{label}」',
+  'engine.studio.auto.createTaken': '此软件包已有标识为「{name}」的自动化：{label}。请打开它，或换一个标识。',
+  'engine.studio.auto.createTakenElsewhere': '此软件包之外已有标识为「{name}」的自动化：{label}。请换一个标识。',
+  'engine.studio.app.createTaken': '已有标识为「{name}」的应用：{label}。请换一个标识。',
+  'engine.studio.data.createTaken': '此软件包已有标识为「{name}」的对象：{label}。请打开它，或换一个标识。',
+  'engine.studio.data.createTakenElsewhere': '此软件包之外已有标识为「{name}」的对象：{label}。请换一个标识。',
 };
 
 export default STUDIO_ZH;

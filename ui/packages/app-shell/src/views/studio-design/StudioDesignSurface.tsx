@@ -453,6 +453,71 @@ function confirmDropUnsavedWork(unsaved: boolean, locale: string): boolean {
 }
 
 /**
+ * objectstack#26836, objectstack#26917 — the item of `type` that already holds
+ * `name`, published or as a draft, in this package or any other; `null` when
+ * the identifier is free. Every Studio create reads it before its save and
+ * refuses a taken identifier, writing nothing.
+ *
+ * The create's first-write pin (`ifNoneMatch: '*'` with `mode: 'draft'`)
+ * asserts "no DRAFT row" only — the spec's `parentVersion: null` is
+ * lifecycle-scoped — so over a PUBLISHED item it would write the blank
+ * skeleton as that item's pending draft, and publishing the package would
+ * replace the live item with it. The pin stays on the save for a draft that
+ * lands between this read and the write; an item published in that window is
+ * not refused by it.
+ */
+async function findTakenIdentifier(
+  client: Pick<MetadataClient, 'list' | 'listDrafts'>,
+  type: string,
+  name: string,
+  locale: string,
+): Promise<{ name: string; label: string } | null> {
+  const [published, drafts] = await Promise.all([
+    client.list<Record<string, unknown>>(type),
+    client.listDrafts({ type }) as Promise<Array<{ name?: string; label?: I18nLabel | null }>>,
+  ]);
+  const publishedRow = (published ?? []).find((row) => row?.name === name);
+  const draftRow = (drafts ?? []).find((row) => row?.name === name);
+  if (!publishedRow && !draftRow) return null;
+  const label = navItemLabelText((publishedRow?.label as I18nLabel | undefined) ?? draftRow?.label ?? undefined, locale);
+  return { name, label: label.trim() || name };
+}
+
+/**
+ * A create refused over a taken identifier (`findTakenIdentifier`), in the
+ * create dialog: the sentence naming the item that holds it and, when that item
+ * is on the pillar's own rail, a way to open it instead.
+ */
+function CreateTakenNotice({
+  scope,
+  sentence,
+  openLabel,
+  onOpen,
+}: {
+  /** The pillar's test-id prefix: `${scope}-create-taken`. */
+  scope: string;
+  sentence: string;
+  openLabel?: string;
+  onOpen?: () => void;
+}): React.ReactElement {
+  return (
+    <div className="space-y-2" data-testid={`${scope}-create-taken`}>
+      <p className="text-sm text-destructive">{sentence}</p>
+      {onOpen && openLabel && (
+        <button
+          type="button"
+          data-testid={`${scope}-create-open-existing`}
+          onClick={onOpen}
+          className="text-sm font-medium text-primary underline-offset-4 hover:underline"
+        >
+          {openLabel}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
  * objectui#11786 — the line a pillar shows, in place of a refusal, while its
  * autosave holds an incomplete-but-normal edit: what the edit still needs, that
  * it is kept and not yet saved, and a "Show me" that opens the input when it is
@@ -1651,6 +1716,11 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
   const [appBusy, setAppBusy] = React.useState(false);
   const [appErr, setAppErr] = React.useState<string | null>(null);
   const [appDraftPending, setAppDraftPending] = React.useState<string | null>(null);
+  // objectstack#26917 — a create refused because an app already holds the
+  // identifier (published or as a draft, in any package): the app's label, for
+  // the dialog's sentence. Create app is offered only to a package with no app,
+  // so the holder is never one this package can open instead.
+  const [appTaken, setAppTaken] = React.useState<{ name: string; label: string } | null>(null);
   // Scaffold the new app's navigation from the package's objects (default on) —
   // otherwise a fresh app has zero menu items and every object must be wired by
   // hand in the Interfaces pillar (objectui#2262).
@@ -1684,10 +1754,21 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
       if (packageId === null) return;
       setAppBusy(true);
       setAppErr(null);
+      setAppTaken(null);
       try {
+        // A name an app already holds, published or as a draft, in any
+        // package, is refused here and nothing is written: over a published
+        // app the first-write pin below would write this skeleton as its
+        // pending draft (`findTakenIdentifier`).
+        const taken = await findTakenIdentifier(shellClient, 'app', name, locale);
+        if (taken) {
+          setAppTaken(taken);
+          return;
+        }
         const navObjects = appAddObjects ? await loadPackageObjects().catch(() => []) : [];
-        // objectui#11773 — a create is the first-write pin: refused where the
-        // name already holds a draft, instead of written over it.
+        // objectui#11773 — and the door refuses a draft row too (the
+        // first-write pin), for one that lands between the check above and
+        // this save.
         await shellClient.save(
           'app',
           name,
@@ -2263,7 +2344,10 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
 
         <CreateItemDialog
           open={appCreating}
-          onOpenChange={setAppCreating}
+          onOpenChange={(open) => {
+            setAppCreating(open);
+            if (!open) setAppTaken(null);
+          }}
           title={t('engine.studio.app.create', locale)}
           labelFieldLabel={t('engine.studio.app.nameLabel', locale)}
           labelPlaceholder={t('engine.studio.app.namePlaceholder', locale)}
@@ -2276,15 +2360,23 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
           locale={locale}
           onSubmit={({ label, name }) => void doCreateApp(label, name)}
           extra={
-            <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
-              <input
-                type="checkbox"
-                checked={appAddObjects}
-                onChange={(e) => setAppAddObjects(e.target.checked)}
-                className="h-3.5 w-3.5 accent-primary"
-              />
-              {t('engine.studio.app.scaffoldNav', locale)}
-            </label>
+            <>
+              {appTaken && (
+                <CreateTakenNotice
+                  scope="app"
+                  sentence={tFormat('engine.studio.app.createTaken', locale, { label: appTaken.label, name: appTaken.name })}
+                />
+              )}
+              <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={appAddObjects}
+                  onChange={(e) => setAppAddObjects(e.target.checked)}
+                  className="h-3.5 w-3.5 accent-primary"
+                />
+                {t('engine.studio.app.scaffoldNav', locale)}
+              </label>
+            </>
           }
         />
       </div>
@@ -5665,8 +5757,12 @@ export function DataPillar({
   // an effect on `creating` — the effect spelling re-renders the dialog a
   // second time on every open purely to undo a previous session's pick.
   const [createOwd, setCreateOwd] = React.useState<OwdCreateModel>(OWD_DEFAULT);
+  // objectstack#26917 — a create refused because the identifier is taken:
+  // which object holds it, and whether it is on this rail, so it can be opened.
+  const [createTaken, setCreateTaken] = React.useState<{ name: string; label: string; here: boolean } | null>(null);
   const openCreateDialog = React.useCallback(() => {
     setError(null);
+    setCreateTaken(null);
     setCreateOwd(OWD_DEFAULT);
     setCreating(true);
   }, []);
@@ -5989,16 +6085,28 @@ export function DataPillar({
       // Auto-prefix with the package namespace (framework#2694) so a prefix-less
       // object can't be authored; the rule lives in packages-io/spec.
       const name = prefixObjectName(rawName, namespace);
-      if (objects.some((o) => o.name === name)) {
-        setError({ message: tFormat('engine.studio.data.idExists', locale, { name }) });
-        return;
-      }
       setCreateBusy(true);
       setError(null);
+      setCreateTaken(null);
       try {
+        // A name an object already holds, published or as a draft, on this
+        // rail or in any other package, is refused here and nothing is
+        // written: over a published object the first-write pin below would
+        // write this blank skeleton as its pending draft
+        // (`findTakenIdentifier`). The namespace prefix makes a clash with
+        // another package's object rarer, not impossible.
+        const onRail = objects.find((o) => o.name === name);
+        const taken = onRail
+          ? { name, label: onRail.label || name }
+          : await findTakenIdentifier(client, 'object', name, locale);
+        if (taken) {
+          setCreateTaken({ ...taken, here: onRail !== undefined });
+          return;
+        }
         const body = buildObjectSkeleton(name, label, t('engine.studio.data.nameFieldLabel', locale), sharingModel);
-        // objectui#11773 — a create is the first-write pin: refused where the
-        // name already holds a draft, instead of written over it.
+        // objectui#11773 — and the door refuses a draft row too (the
+        // first-write pin), for one that lands between the check above and
+        // this save.
         await client.save('object', name, body, { mode: 'draft', packageId, ifNoneMatch: '*', surface: 'studio' });
         const surface: Surface = { type: 'object', name, label };
         setObjects((prev) => [...prev, surface]);
@@ -6067,6 +6175,17 @@ export function DataPillar({
   });
   // Only the open object's own buffer is held (objectui#11272).
   const objHeld = objLoaded ? objIncomplete : null;
+  // objectstack#26917 — the refusal's way out: the object holding the
+  // identifier is on this rail, so it opens instead of a second one being
+  // made. Asked as a rail row asks (objectstack#26705).
+  const openTakenObject = (name: string) => {
+    const object = objects.find((o) => o.name === name);
+    if (!object) return;
+    if (current?.name !== name && !confirmDropUnsavedWork(objHeld !== null, locale)) return;
+    setCreating(false);
+    setCreateTaken(null);
+    setCurrent(object);
+  };
   // objectui#12725 — the copilot's mark on the selected field: its key path is
   // `["fields", NAME]` in the object body, and only a `copilot` write answers.
   const fieldCopilotMark =
@@ -6898,34 +7017,48 @@ export function DataPillar({
         // shows `repairs_repair_ticket`, not the bare identifier.
         storedName={(identifier) => prefixObjectName(identifier, namespace)}
         extra={
-          /* Record sharing (OWD) — the third thing `New object` must ask for
-             (`7a90afdf9`). Without it the object saves as a draft happily and
-             is then REFUSED at Publish → Publish all by `security-owd-unset`, a
-             wall the author meets only after building the whole object. The
-             gloss is the SAME string the Settings tab shows for each model, so
-             the two surfaces cannot describe one baseline two ways.
+          <>
+            {createTaken && (
+              <CreateTakenNotice
+                scope="object"
+                sentence={tFormat(
+                  createTaken.here ? 'engine.studio.data.createTaken' : 'engine.studio.data.createTakenElsewhere',
+                  locale,
+                  { label: createTaken.label, name: createTaken.name },
+                )}
+                openLabel={tFormat('engine.studio.create.openExisting', locale, { label: createTaken.label })}
+                onOpen={createTaken.here ? () => openTakenObject(createTaken.name) : undefined}
+              />
+            )}
+            {/* Record sharing (OWD) — the third thing `New object` must ask for
+               (`7a90afdf9`). Without it the object saves as a draft happily and
+               is then REFUSED at Publish → Publish all by `security-owd-unset`, a
+               wall the author meets only after building the whole object. The
+               gloss is the SAME string the Settings tab shows for each model, so
+               the two surfaces cannot describe one baseline two ways.
 
-             `controlled_by_parent` is absent on purpose — see OWD_CREATE_MODELS:
-             a just-created object has no master-detail field for it to derive
-             access from. */
-          <label className="block">
-            <span className="mb-1 block text-[11px] text-muted-foreground">
-              {t('engine.studio.data.owdLabel', locale)}
-            </span>
-            <StudioPicker
-              value={createOwd}
-              options={OWD_CREATE_MODELS.map((m) => ({ value: m, label: t(OWD_OPTION_LABEL_KEY[m], locale) }))}
-              onPick={(m) => setCreateOwd(m as OwdCreateModel)}
-              className="h-auto rounded px-2 py-1 text-[12px]"
-              testId="create-object-owd"
-            />
-            <span className="mt-1 block text-[11px] text-muted-foreground">
-              {t(OWD_OPTION_DESC_KEY[createOwd], locale)}
-            </span>
-            <span className="mt-1 block text-[11px] text-muted-foreground">
-              {t('engine.studio.data.owdHint', locale)}
-            </span>
-          </label>
+               `controlled_by_parent` is absent on purpose — see OWD_CREATE_MODELS:
+               a just-created object has no master-detail field for it to derive
+               access from. */}
+            <label className="block">
+              <span className="mb-1 block text-[11px] text-muted-foreground">
+                {t('engine.studio.data.owdLabel', locale)}
+              </span>
+              <StudioPicker
+                value={createOwd}
+                options={OWD_CREATE_MODELS.map((m) => ({ value: m, label: t(OWD_OPTION_LABEL_KEY[m], locale) }))}
+                onPick={(m) => setCreateOwd(m as OwdCreateModel)}
+                className="h-auto rounded px-2 py-1 text-[12px]"
+                testId="create-object-owd"
+              />
+              <span className="mt-1 block text-[11px] text-muted-foreground">
+                {t(OWD_OPTION_DESC_KEY[createOwd], locale)}
+              </span>
+              <span className="mt-1 block text-[11px] text-muted-foreground">
+                {t('engine.studio.data.owdHint', locale)}
+              </span>
+            </label>
+          </>
         }
         onSubmit={({ label, name }) => void doCreateObject(label, name, createOwd)}
       />
@@ -7331,6 +7464,9 @@ export function AutomationsPillar({
   // shows while Create holds it.
   const [newChoice, setNewChoice] = React.useState<FlowPreset | 'advanced'>(FLOW_PRESETS[0]);
   const [newNeeds, setNewNeeds] = React.useState<string | null>(null);
+  // objectstack#26917 — a create refused because the identifier is taken:
+  // which flow holds it, and whether it is on this rail, so it can be opened.
+  const [createTaken, setCreateTaken] = React.useState<{ name: string; label: string; here: boolean } | null>(null);
   const newChoiceGroup = React.useId();
   // objectui#12303 — the read-only reason the header's status switch is described by.
   const toggleReadOnlyReasonId = React.useId();
@@ -7463,7 +7599,17 @@ export function AutomationsPillar({
     async (label: string, name: string, trigger: NewFlowTrigger | null) => {
       setCreateBusy(true);
       setError(null);
+      setCreateTaken(null);
       try {
+        // A name a flow already holds, published or as a draft, in this
+        // package or any other, is refused here and nothing is written: over
+        // a published flow the first-write pin below would write this blank
+        // skeleton as its pending draft (`findTakenIdentifier`).
+        const taken = await findTakenIdentifier(client, 'flow', name, locale);
+        if (taken) {
+          setCreateTaken({ ...taken, here: flows.some((f) => f.name === name) });
+          return;
+        }
         // Minimal valid, autolaunched skeleton: start → end. The designer fills in
         // the trigger + nodes; publishing it is a separate, user-initiated step.
         //
@@ -7486,8 +7632,9 @@ export function AutomationsPillar({
           },
           trigger,
         );
-        // objectui#11773 — a create is the first-write pin: refused where the
-        // name already holds a draft, instead of written over it.
+        // objectui#11773 — and the door refuses a draft row too (the
+        // first-write pin), for one that lands between the check above and
+        // this save.
         await client.save('flow', name, skeleton, { mode: 'draft', packageId: draftPackageId, ifNoneMatch: '*', surface: 'studio' });
         const item: Surface = { type: 'flow', name, label };
         setFlows((fs) => [...fs.filter((f) => f.name !== name), item]);
@@ -7505,7 +7652,7 @@ export function AutomationsPillar({
         setCreateBusy(false);
       }
     },
-    [client, draftPackageId, onDraftSaved, locale],
+    [client, draftPackageId, onDraftSaved, locale, flows],
   );
 
   React.useEffect(() => {
@@ -7672,9 +7819,21 @@ export function AutomationsPillar({
           setNewTriggerObject('');
           setNewChoice(FLOW_PRESETS[0]);
           setNewNeeds(null);
+          setCreateTaken(null);
           setCreating(true);
         }
       : undefined;
+  // objectstack#26917 — the refusal's way out: the flow holding the identifier
+  // is on this rail, so it opens instead of a second one being made. Asked as
+  // a rail row asks (objectstack#26705): its load replaces the open buffer.
+  const openTakenFlow = (name: string) => {
+    const flow = flows.find((f) => f.name === name);
+    if (!flow) return;
+    if (current?.name !== name && !confirmDropUnsavedWork(flowHeld !== null, locale)) return;
+    setCreating(false);
+    setCreateTaken(null);
+    setCurrent(flow);
+  };
   // objectui#12514 — a listed package with no flow: one centered block in the
   // content column, and no aside while there is nothing to select.
   const flowsEmpty = listed && !error && flows.length === 0;
@@ -8292,91 +8451,105 @@ export function AutomationsPillar({
              node's own Object field, and Create holds it until one is named.
              *Advanced* is the trigger form below, unchanged: it writes what
              it wrote. */
-          <fieldset className="space-y-2">
-            <legend className="mb-1 block text-sm font-medium">{t('engine.studio.auto.presets', locale)}</legend>
-            {FLOW_PRESETS.map((p) => (
-              <div key={p.id}>
+          <>
+            {createTaken && (
+              <CreateTakenNotice
+                scope="flow"
+                sentence={tFormat(
+                  createTaken.here ? 'engine.studio.auto.createTaken' : 'engine.studio.auto.createTakenElsewhere',
+                  locale,
+                  { label: createTaken.label, name: createTaken.name },
+                )}
+                openLabel={tFormat('engine.studio.create.openExisting', locale, { label: createTaken.label })}
+                onOpen={createTaken.here ? () => openTakenFlow(createTaken.name) : undefined}
+              />
+            )}
+            <fieldset className="space-y-2">
+              <legend className="mb-1 block text-sm font-medium">{t('engine.studio.auto.presets', locale)}</legend>
+              {FLOW_PRESETS.map((p) => (
+                <div key={p.id}>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="radio"
+                      name={newChoiceGroup}
+                      value={p.id}
+                      checked={newChoice === p}
+                      data-testid={`create-flow-preset-${p.id}`}
+                      onChange={() => {
+                        setNewChoice(p);
+                        setNewNeeds(null);
+                      }}
+                    />
+                    {t(p.labelKey, locale)}
+                  </label>
+                  {newChoice === p && startTrigger.object?.showWhen?.equals.includes(p.triggerType) && (
+                    <div className="ml-6 mt-1.5">
+                      <ObjectPicker
+                        label={startTrigger.object.label}
+                        value={newTriggerObject}
+                        onCommit={(v) => {
+                          setNewTriggerObject(v);
+                          setNewNeeds(null);
+                        }}
+                        locale={locale}
+                      />
+                    </div>
+                  )}
+                </div>
+              ))}
+              <div>
                 <label className="flex items-center gap-2 text-sm">
                   <input
                     type="radio"
                     name={newChoiceGroup}
-                    value={p.id}
-                    checked={newChoice === p}
-                    data-testid={`create-flow-preset-${p.id}`}
+                    value="advanced"
+                    checked={newChoice === 'advanced'}
+                    data-testid="create-flow-advanced"
                     onChange={() => {
-                      setNewChoice(p);
+                      setNewChoice('advanced');
                       setNewNeeds(null);
                     }}
                   />
-                  {t(p.labelKey, locale)}
+                  {/* The Validations and Actions menus' own word for the full form. */}
+                  {t('engine.studio.rules.advanced', locale)}
                 </label>
-                {newChoice === p && startTrigger.object?.showWhen?.equals.includes(p.triggerType) && (
-                  <div className="ml-6 mt-1.5">
-                    <ObjectPicker
-                      label={startTrigger.object.label}
-                      value={newTriggerObject}
-                      onCommit={(v) => {
-                        setNewTriggerObject(v);
-                        setNewNeeds(null);
-                      }}
-                      locale={locale}
-                    />
+                {/* objectui#11788 — the trigger, asked for here rather than found
+                    later inside the Start node. The choices, their labels and
+                    which of them watch an object are the Start node's own
+                    trigger field (`fieldsForNodeType('start')`), so the two can
+                    never offer different triggers; what is chosen is written
+                    where that field writes it. */}
+                {newChoice === 'advanced' && startTrigger.trigger && (
+                  <div className="ml-6 mt-1.5 space-y-3">
+                    <label className="block">
+                      <span className="mb-1 block text-sm font-medium">{startTrigger.trigger.label}</span>
+                      <StudioPicker
+                        value={newTrigger}
+                        options={[
+                          { value: '', label: t('engine.studio.newAutoTrigger.later', locale) },
+                          ...(startTrigger.trigger.options ?? []).map((o) => ({ value: o.value, label: o.label })),
+                        ]}
+                        onPick={setNewTrigger}
+                        className="h-auto rounded px-2 py-1.5 text-sm"
+                        testId="create-flow-trigger"
+                      />
+                    </label>
+                    {startTrigger.trigger.help && (
+                      <p className="-mt-2 text-[11px] text-muted-foreground">{startTrigger.trigger.help}</p>
+                    )}
+                    {startTrigger.object && newTrigger && startTrigger.object.showWhen?.equals.includes(newTrigger) && (
+                      <ObjectPicker
+                        label={startTrigger.object.label}
+                        value={newTriggerObject}
+                        onCommit={setNewTriggerObject}
+                        locale={locale}
+                      />
+                    )}
                   </div>
                 )}
               </div>
-            ))}
-            <div>
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="radio"
-                  name={newChoiceGroup}
-                  value="advanced"
-                  checked={newChoice === 'advanced'}
-                  data-testid="create-flow-advanced"
-                  onChange={() => {
-                    setNewChoice('advanced');
-                    setNewNeeds(null);
-                  }}
-                />
-                {/* The Validations and Actions menus' own word for the full form. */}
-                {t('engine.studio.rules.advanced', locale)}
-              </label>
-              {/* objectui#11788 — the trigger, asked for here rather than found
-                  later inside the Start node. The choices, their labels and
-                  which of them watch an object are the Start node's own
-                  trigger field (`fieldsForNodeType('start')`), so the two can
-                  never offer different triggers; what is chosen is written
-                  where that field writes it. */}
-              {newChoice === 'advanced' && startTrigger.trigger && (
-                <div className="ml-6 mt-1.5 space-y-3">
-                  <label className="block">
-                    <span className="mb-1 block text-sm font-medium">{startTrigger.trigger.label}</span>
-                    <StudioPicker
-                      value={newTrigger}
-                      options={[
-                        { value: '', label: t('engine.studio.newAutoTrigger.later', locale) },
-                        ...(startTrigger.trigger.options ?? []).map((o) => ({ value: o.value, label: o.label })),
-                      ]}
-                      onPick={setNewTrigger}
-                      className="h-auto rounded px-2 py-1.5 text-sm"
-                      testId="create-flow-trigger"
-                    />
-                  </label>
-                  {startTrigger.trigger.help && (
-                    <p className="-mt-2 text-[11px] text-muted-foreground">{startTrigger.trigger.help}</p>
-                  )}
-                  {startTrigger.object && newTrigger && startTrigger.object.showWhen?.equals.includes(newTrigger) && (
-                    <ObjectPicker
-                      label={startTrigger.object.label}
-                      value={newTriggerObject}
-                      onCommit={setNewTriggerObject}
-                      locale={locale}
-                    />
-                  )}
-                </div>
-              )}
-            </div>
-          </fieldset>
+            </fieldset>
+          </>
         }
         onSubmit={({ label, name }) => {
           if (newChoice === 'advanced') {
@@ -8607,27 +8780,12 @@ export function AccessPillar({
       setCreateTaken(null);
       try {
         // A name a permission set already holds, published or as a draft, in
-        // this package or any other, is refused here and nothing is written.
-        // The first-write pin below asserts "no DRAFT row" only (the spec's
-        // `parentVersion: null` is lifecycle-scoped), so over a published set
-        // it would write this blank skeleton as that set's pending draft, and
-        // publishing the package would replace the live set's grants with it.
-        const [published, drafts] = await Promise.all([
-          client.list<Record<string, unknown>>('permission'),
-          client.listDrafts({ type: 'permission' }) as Promise<Array<{ name?: string; label?: I18nLabel | null }>>,
-        ]);
-        const publishedRow = (published ?? []).find((row) => row?.name === name);
-        const draftRow = (drafts ?? []).find((row) => row?.name === name);
-        if (publishedRow || draftRow) {
-          const takenLabel = navItemLabelText(
-            (publishedRow?.label as I18nLabel | undefined) ?? draftRow?.label ?? undefined,
-            locale,
-          );
-          setCreateTaken({
-            name,
-            label: takenLabel.trim() || name,
-            here: perms.some((p) => p.name === name),
-          });
+        // this package or any other, is refused here and nothing is written:
+        // over a published set the first-write pin below would write this
+        // blank skeleton as its pending draft (`findTakenIdentifier`).
+        const taken = await findTakenIdentifier(client, 'permission', name, locale);
+        if (taken) {
+          setCreateTaken({ ...taken, here: perms.some((p) => p.name === name) });
           return;
         }
         // Package door → create as a DRAFT stamped with this package (D6/D7),
@@ -9038,25 +9196,16 @@ export function AccessPillar({
         locale={locale}
         extra={
           createTaken && (
-            <div className="space-y-2" data-testid="access-create-taken">
-              <p className="text-sm text-destructive">
-                {tFormat(
-                  createTaken.here ? 'engine.studio.access.createTaken' : 'engine.studio.access.createTakenElsewhere',
-                  locale,
-                  { label: createTaken.label, name: createTaken.name },
-                )}
-              </p>
-              {createTaken.here && (
-                <button
-                  type="button"
-                  data-testid="access-create-open-existing"
-                  onClick={() => openTakenSet(createTaken.name)}
-                  className="text-sm font-medium text-primary underline-offset-4 hover:underline"
-                >
-                  {tFormat('engine.studio.access.openExisting', locale, { label: createTaken.label })}
-                </button>
+            <CreateTakenNotice
+              scope="access"
+              sentence={tFormat(
+                createTaken.here ? 'engine.studio.access.createTaken' : 'engine.studio.access.createTakenElsewhere',
+                locale,
+                { label: createTaken.label, name: createTaken.name },
               )}
-            </div>
+              openLabel={tFormat('engine.studio.create.openExisting', locale, { label: createTaken.label })}
+              onOpen={createTaken.here ? () => openTakenSet(createTaken.name) : undefined}
+            />
           )
         }
         onSubmit={({ label, name }) => void doCreate(label, name)}
