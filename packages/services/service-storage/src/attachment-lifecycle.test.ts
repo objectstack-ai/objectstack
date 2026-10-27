@@ -579,6 +579,40 @@ describe('createSysFileReapGuard', () => {
     expect(confirmed).toEqual(['p1']);
   });
 
+  // [#26533] A pending file something holds is kept, on either surface, and
+  // stays pending — the guard writes nothing to it.
+  it.each([
+    ['its ref_* columns name an owner', { attachments: [] }, { ref_object: 'media', ref_id: 'm1', ref_field: 'poster' }],
+    ['a sys_attachment row holds it', { attachments: [{ id: 'a1', file_id: 'p1' }] }, {}],
+  ])('vetoes a held pending upload (%s): no byte delete, no write, one warning naming it', async (_label, seed, refs) => {
+    const engine = fakeEngine({ ...seed, files: [] });
+    const s = storage();
+    const logger = silentLogger();
+    const guard = createSysFileReapGuard(engine, () => s, logger);
+
+    const confirmed = await guard('sys_file', [{ id: 'p1', key: 'user/p1.bin', status: 'pending', ...refs }]);
+
+    expect(confirmed).toEqual([]);
+    expect(s.delete).not.toHaveBeenCalled();
+    expect(engine.updates).toEqual([]);
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(String(logger.warn.mock.calls[0][0])).toContain('sys_file p1');
+  });
+
+  it('vetoes a pending upload when the hold question cannot be answered (fail toward retention)', async () => {
+    const engine = fakeEngine({ attachments: [], files: [] });
+    engine.find = vi.fn(async () => { throw new Error('engine down'); });
+    const s = storage();
+    const logger = silentLogger();
+    const guard = createSysFileReapGuard(engine, () => s, logger);
+
+    const confirmed = await guard('sys_file', [{ id: 'p1', key: 'user/p1.bin', status: 'pending' }]);
+
+    expect(confirmed).toEqual([]);
+    expect(s.delete).not.toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+  });
+
   it('vetoes rows in any other state (fail toward retention)', async () => {
     const engine = fakeEngine({ attachments: [], files: [] });
     const guard = createSysFileReapGuard(engine, storage, silentLogger());
