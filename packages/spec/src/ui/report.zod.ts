@@ -565,8 +565,7 @@ export const ReportSchema = lazySchema(() => strictObject({
   /**
    * The report's period: a date window over ONE dataset date dimension, with
    * a default preset and an optional custom pick (ruling 6408567749 on
-   * #25873, letter B; #26548). Absent = no window, every period — exactly as
-   * a report has always rendered.
+   * #25873, letter B; #26548).
    *
    * `defaultRange` and `allowCustomRange` are the dashboard's
    * (`DashboardSchema.dateRange`) verbatim: the same preset table
@@ -596,6 +595,10 @@ export const ReportSchema = lazySchema(() => strictObject({
    * `dateGranularity` and the report's `rows` / `columns`.
    *
    * Refused on a `joined` report — see {@link JOINED_CONTAINER_DATE_RANGE_REFUSED}.
+   *
+   * Absent = no window, every period — exactly as a report has always
+   * rendered. The window selects which rows the table shows and grants
+   * nothing: what a viewer may read stays with the dataset object's access.
    */
   dateRange: strictObject({
     surface: 'this report date range',
