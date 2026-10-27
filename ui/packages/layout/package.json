@@ -46,7 +46,7 @@
     "react": "19.3.0",
     "react-router-dom": "^7.18.2",
     "vite": "^8.2.1",
-    "vite-plugin-dts": "^5.0.3",
+    "vite-plugin-dts": "^5.1.2",
     "vitest": "^4.1.10"
   },
   "description": "Layout components for Object UI — AppShell, PageHeader, SidebarNav and responsive containers with React Router integration",

@@ -201,8 +201,8 @@
     "publish": "vsce publish"
   },
   "devDependencies": {
-    "@types/node": "^26.2.0",
-    "@types/vscode": "^1.125.0",
+    "@types/node": "^26.6.5",
+    "@types/vscode": "^1.140.0",
     "@vscode/vsce": "^3.9.2",
     "tsup": "^8.5.1",
     "typescript": "^6.0.3",

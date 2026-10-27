@@ -37,7 +37,7 @@
     "@objectstack/lint": "workspace:*",
     "@objectstack/objectql": "workspace:*",
     "@objectstack/service-storage": "workspace:*",
-    "@types/node": "^26.6.3",
+    "@types/node": "^26.6.5",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"
   },

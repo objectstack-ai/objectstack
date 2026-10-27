@@ -47,7 +47,7 @@
     "@objectstack/plugin-email": "workspace:*",
     "@objectstack/service-automation": "workspace:*",
     "@objectstack/service-messaging": "workspace:*",
-    "@playwright/test": "^1.63.0",
+    "@playwright/test": "^1.64.1",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"
   }

@@ -29,7 +29,7 @@
     "@objectstack/spec": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "^26.6.3",
+    "@types/node": "^26.6.5",
     "hono": "^4.13.9",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"
