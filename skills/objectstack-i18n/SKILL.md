@@ -176,7 +176,8 @@ picklist inherits them), `dashboards`, `datasets`, `reports`, `pages`, `flows`, 
 Two keys sit deeper than their group's `label`: a `page:tabs` item at
 `pages.{page}.components.{tabs_id}.items.{value}.label` (by the item's `value`; an item without
 one has no key) and an approval step at `flows.{flow}.approvals.{node_id}.label`.
-`os i18n extract --no-objects-only` scaffolds every group above, both keys included.
+`os i18n extract --no-objects-only` scaffolds every group above but `messages` and
+`settingsCommon`, both keys included.
 `settings` is **platform-only** — it is keyed by a settings manifest's namespace and only
 the platform declares one, so an app bundle carrying it is refused by name.
 
@@ -400,7 +401,8 @@ the default locale is filled from schema labels, other locales follow `--fill`
 
 ⚠️ **`--objects-only` is on by DEFAULT**, so extract writes only the `objects` /
 `globalActions` subtree — while `os i18n check` also demands `app`, `navigation`,
-`dashboard`, `widget`, `page` and `flow` keys. Run the workflow as written and coverage
+`dashboard`, `widget`, `dataset`, `report`, `picklist`, `page`, `flow`, `position` and
+`permission` keys. Run the workflow as written and coverage
 reports gaps the extract never scaffolded. Pass `--no-objects-only` to include those
 groups, or author them by hand.
 
