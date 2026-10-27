@@ -192,7 +192,7 @@ export async function readAuthoredTranslationLayer(
     if (!locale) {
       logger?.warn?.(
         `[i18n] authored translation '${row?.name}' has no resolvable locale `
-        + "(set the top-level 'locale', or name the item after its BCP-47 locale) — skipped",
+        + "(set the top-level 'locale' to its BCP-47 tag, e.g. 'zh-CN') — skipped",
       );
       continue;
     }

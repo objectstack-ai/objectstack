@@ -2324,12 +2324,15 @@ export const TranslationItemSchema = lazySchema(() => strictObject({
   // Undeclared, they were stripped on every parse, so the metadata door quietly
   // discarded an item's own name on the way through.
   //
-  // Not snake_case-constrained the way `job.name` is: translation items are
-  // conventionally named after their locale (`zh-CN`), and the runtime sync
-  // reads `row.name` as a locale fallback for exactly that reason. Optional
-  // because `locale`, not `name`, is this type's required identity — that call
-  // was deliberate (a skipped item is invisible) and is not being reopened.
-  name: z.string().optional().describe('Item name — conventionally the locale code (`zh-CN`); the runtime sync falls back to it when `locale` is absent'),
+  // Named like every other metadata item: snake_case (`zh_cn`), with the BCP-47
+  // tag in `locale`. The save door's item-name grammar
+  // (`METADATA_ITEM_NAME_PATTERN`) refuses a tag-shaped name such as `zh-CN`,
+  // so this shape does not re-check it. The runtime sync still reads a
+  // tag-shaped `row.name` as a locale fallback, but only for rows stored before
+  // `locale` became required. Optional because `locale`, not `name`, is this
+  // type's required identity — that call was deliberate (a skipped item is
+  // invisible) and is not being reopened.
+  name: z.string().optional().describe('Item name — snake_case like every metadata item (e.g. `zh_cn`); the BCP-47 tag goes in `locale`'),
   label: z.string().optional().describe('Human-readable label shown in metadata lists'),
 
   // ADR-0010 — runtime protection envelope (internal — set by the loader).
