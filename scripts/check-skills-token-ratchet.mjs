@@ -431,7 +431,7 @@ export const CEILINGS = new Map([
   // decision tables at 487 lines.
   // 5833 -> 5828: A2′ — the release-stamp line left the count (see
   // STAMP_LINE_REPIN); the file's count fell by the same 5, headroom unchanged.
-  // 5828 -> 5997 (card #26302, the objectstack-platform row of the skills gap
+  // 5828 -> 5981 (card #26302, the objectstack-platform row of the skills gap
   // audit): the Seed Data section gains `demoStaff` against `devLogins` — a
   // seed deals records to people and cannot create one, so the people are
   // declared in `demoStaff` and `os dev` creates the accounts (position and
@@ -447,9 +447,15 @@ export const CEILINGS = new Map([
   // sequence's "(see Ports & networking)" aside and the two cheat-sheet port
   // comments (the Port resolution paragraph says both). Arithmetic in bytes:
   // on `origin/main` the priced text was 23294 bytes (5824 tokens, headroom 4);
-  // the cuts remove 309 bytes and the section adds 1000, so the LANDED priced
-  // text is 23985 bytes -> 5997 tokens: the 4 tokens of headroom are absorbed
-  // and the ceiling moves 5828 -> 5997 (+169). Pinned AT the measurement.
+  // the cuts remove 309 bytes and the section adds 939, so the LANDED priced
+  // text is 23924 bytes -> 5981 tokens: the 4 tokens of headroom are absorbed
+  // and the ceiling moves 5828 -> 5981 (+153). Pinned AT the measurement.
+  //   ceil(($(wc -c < skills/objectstack-platform/SKILL.md) - 20) / 4) == ceil(23924 / 4)
+  // 5981 -> 5997 (card #26302, the follow-up its contract review ordered): the
+  // section's opening reason reworded — a `sys_user` row written through
+  // `data` is not refused, it lands as a directory row with no account — +61
+  // bytes, so the priced text is 23924 -> 23985 bytes -> 5997 tokens, ceiling
+  // +16, pinned AT the measurement. Same ruling, same arithmetic rule as above.
   //   ceil(($(wc -c < skills/objectstack-platform/SKILL.md) - 20) / 4) == ceil(23985 / 4)
   ['skills/objectstack-platform/SKILL.md', 5997],
   // `skills/objectstack-pm-dispatch/SKILL.md` (9708) and its
@@ -760,15 +766,20 @@ export const CEILINGS = new Map([
   // is the whole addition; pinned AT the measurement, zero headroom. The
   // raising PR's body carries the same arithmetic.
   ['skills/objectstack-i18n/evals/bundles-locales-coverage.json', 1451],
-  // 1211 -> 1469 (card #26302): one eval for a demo whose seed names people —
+  // 1211 -> 1458 (card #26302): one eval for a demo whose seed names people —
   // expected: both in `demoStaff` with a declared `position` /
   // `permissionSets`, created by `os dev`; NO `role:` alias and NO platform
   // set such as `admin_full_access`. Same ruling as the `SKILL.md` row above
   // (2026-10-27, tap A: 「A:先削重复,余额按实测提高」); the file's six fixtures
   // share no sentence, so there was no duplicate to cut (0 bytes). On
   // `origin/main` the file was 4842 bytes (1211 tokens, headroom 0); the
-  // fixture adds +1031 bytes, so the LANDED file is 5873 bytes -> 1469 tokens,
-  // ceiling +258, pinned AT the measurement.
+  // fixture adds +989 bytes, so the LANDED file is 5831 bytes -> 1458 tokens,
+  // ceiling +247, pinned AT the measurement.
+  //   ceil($(wc -c < skills/objectstack-platform/evals/config-plugins-ops.json) / 4) == ceil(5831 / 4)
+  // 1458 -> 1469 (card #26302 follow-up): eval 7's expected output says what a
+  // seeded `sys_user` row becomes instead of "(refused)" — +42 bytes, so the
+  // file is 5831 -> 5873 bytes -> 1469 tokens, ceiling +11, pinned AT the
+  // measurement.
   //   ceil($(wc -c < skills/objectstack-platform/evals/config-plugins-ops.json) / 4) == ceil(5873 / 4)
   ['skills/objectstack-platform/evals/config-plugins-ops.json', 1469],
   ['skills/objectstack-query/evals/filters-pagination-search.json', 955],
