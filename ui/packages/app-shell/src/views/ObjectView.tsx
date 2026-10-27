@@ -9,7 +9,7 @@
  * - ListView delegation for non-grid view types (kanban, calendar, chart, etc.)
  */
 
-import { useMemo, useState, useCallback, useEffect, useRef, lazy, Suspense, createElement, type ReactNode } from 'react';
+import { useMemo, useState, useCallback, useEffect, useRef, lazy, Suspense, type ReactNode } from 'react';
 import { useParams, useSearchParams, useNavigate, useLocation, useHref } from 'react-router-dom';
 import { DENSITY_MODE_TO_ROW_HEIGHT, normalizeListViewSchema, resolveAffordance, type FilterTokenScope, type SchemaLike } from '@object-ui/core';
 import { buildListFilterKey, writeListFilterState } from './listFilterStorage.js';
@@ -27,20 +27,14 @@ import { ObjectView as PluginObjectView, ManageViewsDialog } from '@object-ui/pl
 // uses ComponentRegistry.registerLazy so heavy plugins stay code-split).
 // Do NOT add eager `import '@object-ui/plugin-*'` side-effect imports here.
 import {
-  Button,
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
   NavigationOverlay,
 } from '@object-ui/components';
-import { Plus, Upload, MoreHorizontal, RotateCcw } from 'lucide-react';
-import { FavoriteMenuItem, useObjectListFavorite } from '../layout/SidebarItemMenu.js';
+import { Plus } from 'lucide-react';
+import { useObjectListFavorite } from '../layout/SidebarItemMenu.js';
 import { useMetaItemRefusal } from '../hooks/useMetaItemRefusal.js';
 import { useTenancyPosture } from '../hooks/useTenancyPosture.js';
 import { useServedViewItems } from '../hooks/useServedViewItems.js';
 import { viewTabLabel } from './viewTabLabel.js';
-import { getIcon } from '../utils/getIcon.js';
 import type { DataSource, ListViewSchema, TreeViewConfig } from '@object-ui/types';
 import { MetadataPanel, useMetadataInspector } from './MetadataInspector.js';
 import { ViewConfigPanel } from './ViewConfigPanel.js';
@@ -53,10 +47,8 @@ import {
   PREVIEW_QUERY_FLAG,
   PREVIEW_QUERY_VALUE,
 } from '../preview/PreviewModeContext.js';
-import { PageHeader } from '../layout/PageHeader.js';
 import { useMobileViewSwitcherRegistration } from '../layout/MobileViewSwitcherContext.js';
 import type { MobileViewSwitcherItem } from '../layout/MobileViewSwitcherContext.js';
-import { ManagedByBadge } from '../components/ManagedByBadge.js';
 import { isSetupAppSegment } from '../console/setupApp.js';
 import { RecordDetailView } from './RecordDetailView.js';
 import { IDENTITY_IMPORT_WRITE_MODES } from './identityImport.js';
@@ -71,10 +63,9 @@ import { useObjectActions } from '../hooks/useObjectActions.js';
 import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
 import { usePermissions } from '@object-ui/permissions';
 import { useAuth, useWorkspaceAdminStatus } from '@object-ui/auth';
-import { ActionProvider, SchemaRenderer, useActionTextLocalizer, RelatedRecordActionsProvider, notifyDataChanged } from '@object-ui/react';
+import { ActionProvider, useActionTextLocalizer, RelatedRecordActionsProvider, notifyDataChanged } from '@object-ui/react';
 import { toast } from 'sonner';
 import { useConsoleActionRuntime } from '../hooks/useConsoleActionRuntime.js';
-import { EnvironmentListToolbar } from '../environment/EnvironmentListToolbar.js';
 import {
     VIEW_TYPE_ICONS,
     FALLBACK_USER,
@@ -108,6 +99,8 @@ import { useObjectViewListUrlState, useObjectViewUrlFilters } from './objectView
 import { useObjectViewTabBar } from './objectViewTabBar.js';
 import { useObjectViewPluginSchema } from './objectViewPluginSchema.js';
 import { useObjectViewHeaderChrome } from './objectViewHeaderChrome.js';
+import { ObjectViewPageHeader } from './objectViewPageHeader.js';
+import { ObjectViewRecordOverlay } from './objectViewRecordOverlay.js';
 
 // objectstack#25992 slice 1: these module-level helpers moved to the sibling
 // `objectView*.ts` modules above. Every name this file exported stays
@@ -1984,120 +1977,26 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                  chrome that real-app conventions (Gmail / Notion / Linear)
                  reclaim for content. The create / import / overflow
                  actions move to a floating action button (see below). */}
-             <div className="hidden sm:block">
-             <PageHeader
-                 // The page lists the object's records, so it is titled with
-                 // the plural, as the nav entry that opens it is
-                 // (objectui#11696); the record page keeps the singular.
-                 title={objectPluralLabel(objectDef)}
-                 // The kind chip, in the header's own slot after the title
-                 // (objectui#12606).
-                 badge={<ManagedByBadge managedBy={(objectDef as any)?.managedBy} />}
-                 subtitle={objectDef.description ? objectDesc(objectDef) : undefined}
-                 // `createElement`, not a JSX tag: the looked-up icon is a value,
-                 // which react-hooks/static-components refuses in tag position
-                 // (the convention ObjectDataPage set).
-                 icon={createElement(getIcon((objectDef as any)?.icon), { className: 'h-4 w-4' })}
-                 actions={
-                   <>
-                    {/* No favorite star here since objectui#12423: the one-row
-                        header is icon, title, description and these actions.
-                        The favorites entry is in the overflow menu at the end
-                        of this row (objectui#12427). */}
-
-                    {/* Primary action (see `createButton`). */}
-                    {createButton}
-
-                    {/* Data import — desktop only on phones. CSV imports
-                        are inherently a desk/laptop workflow; the button
-                        was eating header space on mobile next to the
-                        primary "+" action. */}
-                    {/* [#5142] `objectCanImport && importVisible` — the object-level
-                        verdict, then the toolbar-scope `visibleWhen` layer on top of
-                        it. Greyed, not gone, is the `disabledWhen` case below. */}
-                    {importShown && (
-                    <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setShowImport(true)}
-                        disabled={importDisabled}
-                        className="hidden sm:inline-flex shadow-none gap-1.5 sm:gap-2 h-8 sm:h-9"
-                        title={t('console.objectView.importTitle')}
-                        data-testid="object-view-import-button"
-                    >
-                        <Upload className="h-4 w-4" />
-                        <span className="hidden sm:inline">{t('console.objectView.import')}</span>
-                    </Button>
-                    )}
-
-                    {/* Schema-driven toolbar actions */}
-                    {listActions?.some((a: any) => a.locations?.includes('list_toolbar')) && (
-                      isEnvironmentList ? (
-                        <EnvironmentListToolbar
-                          actions={headerToolbarActions}
-                          entitlements={environmentEntitlements}
-                        />
-                      ) : (
-                      <SchemaRenderer schema={toolbarBar} />
-                      )
-                    )}
-
-                    {/* The page's overflow menu (objectui#12427), last in the
-                        row: the favorites entry that replaced the header star.
-                        Favorites is a once-and-forget act, so it lives behind
-                        the ⋯ rather than in the header's most prominent slot.
-                        "Reset view" (objectui#12418) is the same kind of act and
-                        lives beside it, so the one-row header keeps its shape
-                        as the user sorts. The ⋯ is drawn when either applies. */}
-                    {(listFavorite || activeViewHasPreference) && (
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="shadow-none h-8 sm:h-9 px-2"
-                            aria-label={t('detail.moreActions', { defaultValue: 'More actions' })}
-                            data-testid="object-view-more-actions"
-                          >
-                            <MoreHorizontal className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          {listFavorite && (
-                            <FavoriteMenuItem
-                              isFavorite={listFavorite.isFavorite}
-                              onToggle={listFavorite.toggle}
-                              testId="object-view-favorite"
-                            />
-                          )}
-                          {/* objectui#12418 — the user's own list state for
-                              this view (sort, filters, column layout) back to
-                              the view's. Only while they have stored some. */}
-                          {activeViewHasPreference && (
-                            <DropdownMenuItem
-                              onSelect={handleResetView}
-                              title={t('console.objectView.resetViewTitle')}
-                              data-testid="object-view-reset-view-button"
-                            >
-                              <RotateCcw className="h-4 w-4" />
-                              <span>{t('console.objectView.resetView')}</span>
-                            </DropdownMenuItem>
-                          )}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    )}
-
-                    {/*
-                       Design Tools dropdown removed — its items were redundant:
-                       - "Edit view"  → use chevron menu's "Edit view config"
-                       - "Add view"   → use the `+` button on the tab bar or the "Add new view" footer in Manage Views
-                       - "Metadata inspector" → still toggleable via the `?__debug` URL flag (see useMetadataInspector)
-                    */}
-                   </>
-                 }
-                 foldedActions={foldedHeaderActions}
+             {/* objectstack#25992 slice 10: the header moved to `./objectViewPageHeader.tsx`. */}
+             <ObjectViewPageHeader
+                 objectDef={objectDef}
+                 objectPluralLabel={objectPluralLabel}
+                 objectDesc={objectDesc}
+                 createButton={createButton}
+                 importShown={importShown}
+                 setShowImport={setShowImport}
+                 importDisabled={importDisabled}
+                 t={t}
+                 listActions={listActions}
+                 isEnvironmentList={isEnvironmentList}
+                 headerToolbarActions={headerToolbarActions}
+                 environmentEntitlements={environmentEntitlements}
+                 toolbarBar={toolbarBar}
+                 listFavorite={listFavorite}
+                 activeViewHasPreference={activeViewHasPreference}
+                 handleResetView={handleResetView}
+                 foldedHeaderActions={foldedHeaderActions}
              />
-             </div>
 
              {/* Floating "+" action button — phone-only counterpart to the
                  PageHeader's primary create action we just hid. Positioned
@@ -2344,28 +2243,18 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
 
              {/* Record Detail Overlay — navigation mode driven by objectDef.navigation */}
              {navOverlay.mode !== 'split' && (
-             <NavigationOverlay
-                 {...navOverlay}
-                 setIsOpen={(open: boolean) => { if (!open) handleDrawerClose(); }}
-                 title={objectLabel(objectDef)}
-                 onExpand={handleExpandDrawer}
-                 expandLabel={t('console.objectView.expandToPage', { defaultValue: 'Open as full page' })}
-                 storageKey={`drawer-width:${objectDef.name}`}
-             >
-                 {(record: Record<string, unknown>) => {
-                     const recordId = (record.id || record._id) as string;
-                     return (
-                         <RecordDetailView
-                             dataSource={dataSource}
-                             objects={objects}
-                             onEdit={onEdit}
-                             objectNameOverride={objectDef.name}
-                             recordIdOverride={recordId}
-                             embedded
-                         />
-                     );
-                 }}
-             </NavigationOverlay>
+             /* objectstack#25992 slice 10: the overlay moved to `./objectViewRecordOverlay.tsx`. */
+             <ObjectViewRecordOverlay
+                 navOverlay={navOverlay}
+                 handleDrawerClose={handleDrawerClose}
+                 objectLabel={objectLabel}
+                 objectDef={objectDef}
+                 handleExpandDrawer={handleExpandDrawer}
+                 t={t}
+                 dataSource={dataSource}
+                 objects={objects}
+                 onEdit={onEdit}
+             />
              )}
         </div>
         {actionRuntime.dialogs}
