@@ -1,11 +1,11 @@
 ---
-'@objectstack/metadata-protocol': patch
+'@objectstack/metadata-protocol': minor
 ---
 
 fix(metadata-protocol)!: the metadata save doors refuse an object whose `datasource` names a datasource that does not exist, instead of storing and publishing an object that never registers (#26724)
 
 Clause-②: no (narrowing) — `saveMetaItem` (draft and live), the draft promotion behind `publishMetaItem` and `publishPackageDrafts`, and the restore doors (`rollbackMetaItem`, `revertCommit`) refuse an `object` whose `datasource` names no registered driver, no declared or stored datasource and no pending datasource draft, which they stored before. Nothing is widened.
-Metadata-protocol: none
+Metadata-protocol: narrowed
 
 <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes: `ObjectSchema.datasource` already names a datasource ID, and the door now refuses an ID that names none, which never worked. A stored object that already holds such a binding keeps re-saving; there is nothing for a migration to rewrite. -->
 
