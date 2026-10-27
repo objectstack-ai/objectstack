@@ -215,7 +215,7 @@ const actionTranslationSchema = (surface: string) => strictObject({
   successMessage: z.string().optional().describe('Translated success toast/message'),
   // `ActionSchema.disabledReason` (#26619) — the display-only reason a greyed
   // action shows; overlaid by `translateAction` like the copy keys above.
-  disabledReason: z.string().optional().describe('Translated reason for a greyed action, for its hover title and accessible description while its `disabled` predicate is TRUE (no renderer shows it yet)'),
+  disabledReason: z.string().optional().describe('Translated reason a greyed action shows (hover title and accessible description) while its `disabled` predicate is TRUE'),
   // `ActionSchema.outcomeMessages` (#21095) — one translated message per
   // declared outcome, keyed by the same snake_case outcome name, so a bundle
   // key that could never match a handler's `outcome` is refused here rather

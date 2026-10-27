@@ -131,6 +131,7 @@ const InlineActionButton: React.FC<{
   // member's `loading` disable it without one. See `./disabled-reason`.
   const disabledReason = useDisabledReason(
     hasDeclaredVisibilityGate(action.disabled) && isDisabledPred,
+    action.disabledReason,
   );
 
   const Icon = resolveIcon(action.icon);
@@ -228,6 +229,7 @@ export const DropdownActionItem: React.FC<{
   // item's description. See `./disabled-reason`.
   const disabledReason = useDisabledReason(
     hasDeclaredVisibilityGate(action.disabled) && isDisabledPred,
+    action.disabledReason,
   );
   // Same declared-gate rule as `InlineActionButton` above — one action cannot be
   // hidden in one display mode and shown in the other (objectui#3812).
