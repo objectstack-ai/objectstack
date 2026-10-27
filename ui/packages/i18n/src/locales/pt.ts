@@ -1831,6 +1831,7 @@ const pt = {
       assistant: "Assistente",
       liveCanvas: "Pré-visualização ao vivo — {{app}} (rascunho)",
       liveCanvasUnlisted: "Aplicativo ao vivo — {{app}} (não listado até ser publicado)",
+      liveCanvasLive: "Aplicativo ao vivo — {{app}}",
       loadingAgents: "Carregando agentes…",
       askAnything: "Pergunte qualquer coisa…",
       askOrChangeApp: "Pergunte sobre seus dados ou peça para eu alterar este app…",
@@ -3788,7 +3789,7 @@ const pt = {
       unknownPhase: "Fase de criação desconhecida",
       nextStepsLead: "Em seguida, você pode dizer: {{steps}}",
       nextStepQuote: "“{{step}}”",
-      draftPosture: "As alterações seguintes ficam salvas como rascunho, e você as publica no Studio.",
+      draftPosture: "As alterações seguintes ficam salvas como rascunho; publique-as com «Publicar» aqui no chat.",
       checksPassed: "Verificações aprovadas {{passed}}/{{total}}",
     },
     changes: {

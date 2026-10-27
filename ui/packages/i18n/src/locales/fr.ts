@@ -1832,6 +1832,7 @@ const fr = {
       assistant: "Assistant",
       liveCanvas: "Aperçu en direct — {{app}} (brouillon)",
       liveCanvasUnlisted: "Application en direct — {{app}} (non répertoriée jusqu'à publication)",
+      liveCanvasLive: "Application en direct — {{app}}",
       loadingAgents: "Chargement des agents…",
       askAnything: "Posez n'importe quelle question…",
       askOrChangeApp: "Posez une question sur vos données ou demandez-moi de modifier cette app…",
@@ -3789,7 +3790,7 @@ const fr = {
       unknownPhase: "Phase de création inconnue",
       nextStepsLead: "Ensuite, vous pouvez dire : {{steps}}",
       nextStepQuote: "« {{step}} »",
-      draftPosture: "Les modifications suivantes sont enregistrées comme brouillons, et vous les publiez dans Studio.",
+      draftPosture: "Les modifications suivantes sont enregistrées comme brouillons ; publiez-les avec « Publier » ici, dans le chat.",
       checksPassed: "Vérifications réussies {{passed}}/{{total}}",
     },
     changes: {

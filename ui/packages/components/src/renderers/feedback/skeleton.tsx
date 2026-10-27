@@ -11,7 +11,7 @@ import type { SkeletonSchema } from '@object-ui/types';
 import { Skeleton } from '../../ui';
 
 ComponentRegistry.register('skeleton', 
-  ({ schema, className, ...props }: { schema: SkeletonSchema; className?: string; [key: string]: any }) => (
+  ({ schema, className, ...props }: { schema: SkeletonSchema; className?: string; [key: string]: unknown }) => (
     <Skeleton className={className} {...props} style={{ width: schema.width, height: schema.height }} />
   ),
   {

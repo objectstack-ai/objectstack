@@ -1789,6 +1789,7 @@ const ja = {
       assistant: "アシスタント",
       liveCanvas: "ライブプレビュー — {{app}}（ドラフト）",
       liveCanvasUnlisted: "ライブアプリ — {{app}}（公開するまで非掲載）",
+      liveCanvasLive: "ライブアプリ — {{app}}",
       loadingAgents: "エージェントを読み込んでいます…",
       askAnything: "何でも質問してください…",
       askOrChangeApp: "データについて質問するか、このアプリの変更を依頼…",
@@ -3722,7 +3723,7 @@ const ja = {
       unknownPhase: "不明なビルドフェーズ",
       nextStepsLead: "次はこう話しかけられます：{{steps}}",
       nextStepQuote: "「{{step}}」",
-      draftPosture: "以降の変更は下書きとして保存され、Studio で公開します。",
+      draftPosture: "以降の変更は下書きとして保存され、このチャットの「公開」で公開します。",
       checksPassed: "照合済み {{passed}}/{{total}}",
     },
     changes: {

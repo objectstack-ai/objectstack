@@ -229,7 +229,10 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '7. The selector: what must NOT count as a site': 7,
   '8. Line numbers: attached when they can be trusted, never guessed': 1,
   '9. Siblings on one job clock: what the census must and must NOT say': 13,
-  '10. The real repository -- the direction the fixtures cannot prove': 13,
+  // Battery 10 registers one ordinal case per real (workflow, job) holding a
+  // guarded step, so its floor tracks that population: 12 since #26445 retired
+  // coverage-nightly.yml, whose one guarded job was a member.
+  '10. The real repository -- the direction the fixtures cannot prove': 12,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as

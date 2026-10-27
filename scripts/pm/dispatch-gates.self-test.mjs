@@ -1020,10 +1020,12 @@ export function selfTest({ tier = 'full' } = {}) {
         .every((script) => valueBearing.some((i) => i.script === script)),
     );
     // The card named three; the third, `scripts/check-prerelease-pin-watch.mjs
-    // --verbose`, left with the objectui pin it watched (objectstack#25711).
+    // --verbose`, left with the objectui pin it watched (objectstack#25711), and
+    // `scripts/check-engine-split-ratio.mjs --days 90` left with the weekly
+    // workflow that ran it (objectstack#26445). Both stay as fixture rows above.
     t(
-      '⭐ …and the two the card called value-bearing that are really LITERAL render as runnable commands instead',
-      ['scripts/check-engine-split-ratio.mjs --days 90', 'scripts/check-required-contexts.mjs --verify-required-set']
+      '⭐ …and the one the card called value-bearing that is really LITERAL renders as a runnable command instead',
+      ['scripts/check-required-contexts.mjs --verify-required-set']
         .every((key) => direct.some((i) => i.check === key && i.argvVariables.length === 0)),
     );
     t(

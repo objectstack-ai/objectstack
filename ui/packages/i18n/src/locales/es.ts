@@ -1836,6 +1836,7 @@ const es = {
       assistant: "Asistente",
       liveCanvas: "Vista previa en vivo — {{app}} (borrador)",
       liveCanvasUnlisted: "Aplicación en vivo — {{app}} (no listada hasta su publicación)",
+      liveCanvasLive: "Aplicación en vivo — {{app}}",
       loadingAgents: "Cargando agentes…",
       askAnything: "Pregunte lo que quiera…",
       askOrChangeApp: "Pregunte por sus datos o pídame que cambie esta app…",
@@ -3793,7 +3794,7 @@ const es = {
       unknownPhase: "Fase de creación desconocida",
       nextStepsLead: "A continuación puede decir: {{steps}}",
       nextStepQuote: "«{{step}}»",
-      draftPosture: "Los cambios posteriores se guardan como borrador y usted los publica en Studio.",
+      draftPosture: "Los cambios posteriores se guardan como borrador; publíquelos con «Publicar» aquí en el chat.",
       checksPassed: "Comprobaciones superadas {{passed}}/{{total}}",
     },
     changes: {

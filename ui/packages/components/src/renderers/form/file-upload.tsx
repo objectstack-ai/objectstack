@@ -14,6 +14,7 @@ import { Upload, X, Rocket, CheckCircle2 } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import { cn } from '../../lib/utils';
 import { toFormControlDomProps } from '../../lib/form-control-dom-props';
+import type { RendererHostProps } from '../../lib/renderer-host-props';
 
 const useSafeFileUploadTranslation = createSafeTranslation(
   {
@@ -23,7 +24,7 @@ const useSafeFileUploadTranslation = createSafeTranslation(
 );
 
 ComponentRegistry.register('file-upload', 
-  ({ schema, className, value, onChange, ...props }: { schema: FileUploadSchema; className?: string; value?: File[]; onChange?: (files: File[]) => void; [key: string]: any }) => {
+  ({ schema, className, value, onChange, ...props }: { schema: FileUploadSchema; className?: string; value?: File[]; onChange?: (files: File[]) => void; [key: string]: unknown } & RendererHostProps) => {
     const { t } = useSafeFileUploadTranslation();
     const [files, setFiles] = useState<File[]>(value || []);
     const [isUploading, setIsUploading] = useState(false);

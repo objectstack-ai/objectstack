@@ -16,6 +16,7 @@ import {
   type CryptoAdapter,
   NoopCryptoAdapter,
   providesConfidentiality,
+  settingAuditDigest,
 } from './crypto-adapter.js';
 import {
   type SettingsActionHandler,
@@ -2425,7 +2426,8 @@ export class SettingsService {
           }
         } else {
           storedValue = rawValue;
-          digest = this.crypto.digest(stableStringify(rawValue));
+          // The declared SHA-256 (#26465), not the adapter's digest.
+          digest = settingAuditDigest(stableStringify(rawValue));
         }
       }
 
@@ -2443,7 +2445,7 @@ export class SettingsService {
         updated_at: new Date().toISOString(),
         updated_by: ctx.userId ?? null,
       };
-      const previousEnc = await this.upsertRow(rowForKey);
+      const { previousEnc, previous } = await this.upsertRow(rowForKey);
 
       // Destroy the ciphertext the row USED to name (#8030) — but only once a
       // re-read confirms the row really stopped naming it (#8262); "a new
@@ -2495,7 +2497,10 @@ export class SettingsService {
             // [ADR-0131 D3/D9] The organization whose value changed — the same
             // owner the settings row carries; none for a global value.
             ...(organizationId ? { organizationId } : {}),
-            oldHash: null,
+            // #26465: the previous value's digest, off the row the upsert
+            // already read. A secret write keeps no old fingerprint (its keyed
+            // digest path is unchanged), see `previousAuditDigest`.
+            oldHash: isEncrypted ? null : SettingsService.previousAuditDigest(previous),
             newHash: isNull ? null : digest,
             encrypted: isEncrypted,
             requestId: ctx.requestId,
@@ -3255,7 +3260,30 @@ export class SettingsService {
     return typeof value === 'string' && value !== '' ? value : null;
   }
 
-  private async upsertRow(row: SettingsRow): Promise<string | null> {
+  /**
+   * The `old_hash` of a non-secret write (#26465): the declared SHA-256 of
+   * the value the row held before it, or `null` when it held none (no row, or
+   * a reset row whose value is `null`).
+   *
+   * A row that held a SECRET also answers `null`: its value is ciphertext or a
+   * handle, and an unkeyed hash of the decrypted secret is exactly the
+   * fingerprint the audit trail must never carry (see `secretAuditDigest`).
+   */
+  private static previousAuditDigest(previous: SettingsRow | null): string | null {
+    if (!previous || previous.encrypted) return null;
+    if (previous.value === null || typeof previous.value === 'undefined') return null;
+    return settingAuditDigest(stableStringify(previous.value));
+  }
+
+  /**
+   * Insert or update the row at its identity, and report what that identity
+   * held BEFORE: `previousEnc` for the secret reaper (#8030), `previous` for
+   * the audit's `old_hash` (#26465). Both come off the existence probe the
+   * upsert makes anyway, so a write with no previous row costs no extra read.
+   */
+  private async upsertRow(
+    row: SettingsRow,
+  ): Promise<{ previousEnc: string | null; previous: SettingsRow | null }> {
     if (this.engine) {
       const { object, where, data } = this.rowIdentity(row);
       // All three engine calls carry the explicit system opt-in
@@ -3268,13 +3296,16 @@ export class SettingsService {
         context: SETTINGS_SYSTEM_CONTEXT,
       });
       if (existing[0]) {
-        const previousEnc = (existing[0] as { value_enc?: unknown }).value_enc;
+        // Snapshot BEFORE the update: an engine may hand back the stored
+        // object itself, which the update then rewrites in place.
+        const previous = { ...(existing[0] as SettingsRow) };
+        const previousEnc = SettingsService.handleOf(previous.value_enc);
         await this.engine.update(object, {
           where,
           data,
           context: SETTINGS_SYSTEM_CONTEXT,
         });
-        return SettingsService.handleOf(previousEnc);
+        return { previousEnc, previous };
       }
       // Under the opt-in the engine no longer checks that a user-scope row's
       // `user_id` names a user, so the service keeps that refusal before the
@@ -3294,16 +3325,16 @@ export class SettingsService {
         );
       }
       await this.engine.insert(object, data, { context: SETTINGS_SYSTEM_CONTEXT });
-      return null;
+      return { previousEnc: null, previous: null };
     }
     const idx = this.memoryIndexOf(row);
     if (idx >= 0) {
-      const previousEnc = this.memory[idx].value_enc;
+      const previous = this.memory[idx];
       this.memory[idx] = row;
-      return SettingsService.handleOf(previousEnc);
+      return { previousEnc: SettingsService.handleOf(previous.value_enc), previous };
     }
     this.memory.push(row);
-    return null;
+    return { previousEnc: null, previous: null };
   }
 
   /**

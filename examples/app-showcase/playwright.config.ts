@@ -12,7 +12,10 @@ declare const process: { env: Record<string, string | undefined> };
  * to run `playwright test`; locally it reuses an already-running :3000.
  *
  * Run:  pnpm --filter @objectstack/example-showcase exec playwright test
- *       (or via the ci/showcase-smoke workflow). Non-blocking by design.
+ *       (`pnpm test:smoke`). On CI it runs nightly, never on a pull request:
+ *       `test/showcase-smoke.live.test.ts` runs this config in the nightly
+ *       `live` tier (test-nightly-tiers.yml), whose report job files a card
+ *       when it is red.
  *
  * ## Where the server is, and which browser drives it
  *

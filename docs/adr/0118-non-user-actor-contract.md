@@ -1,6 +1,6 @@
 # ADR-0118: 非用户 actor 的平台契约 —— null 表示、fail-closed、显式 `isSystem`
 
-- **状态**: Accepted（2026-08-02，维护者按四轴框架裁决：平台长远合理性 / 防 AI 作者静默犯错 / 实际业务需求 / 创业阶段不扩边界）
+**Status**: Accepted（2026-08-02，维护者按四轴框架裁决：平台长远合理性 / 防 AI 作者静默犯错 / 实际业务需求 / 创业阶段不扩边界）
 - **日期**: 2026-08-02
 - **关联**: ADR-0049（enforce-or-remove）、ADR-0078（no-silently-inert-metadata）、
   ADR-0092（better-auth 身份写守卫）、ADR-0103（`managedBy` 写策略与引擎写守卫）

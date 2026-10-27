@@ -10,9 +10,10 @@ import { ComponentRegistry } from '@object-ui/core';
 import type { AspectRatioSchema } from '@object-ui/types';
 import { AspectRatio } from '../../ui/aspect-ratio';
 import { renderChildren } from '../../lib/utils';
+import type { RendererHostProps } from '../../lib/renderer-host-props';
 
 ComponentRegistry.register('aspect-ratio', 
-  ({ schema, ...props }: { schema: AspectRatioSchema; [key: string]: any }) => {
+  ({ schema, ...props }: { schema: AspectRatioSchema; [key: string]: unknown } & RendererHostProps) => {
     const { 
         'data-obj-id': dataObjId, 
         'data-obj-type': dataObjType,

@@ -1,6 +1,6 @@
 # ADR-0009: Execution-Pinned Metadata
 
-**Status:** Accepted
+**Status**: Accepted
 **Date:** 2026-05-22
 **Supersedes:** —
 **Builds on:** ADR-0008 (Metadata Repository & Change Log)

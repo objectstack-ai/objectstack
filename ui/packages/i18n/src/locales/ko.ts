@@ -1787,6 +1787,7 @@ const ko = {
       assistant: "어시스턴트",
       liveCanvas: "실시간 미리보기 — {{app}}(초안)",
       liveCanvasUnlisted: "실시간 앱 — {{app}}(게시 전까지 비공개)",
+      liveCanvasLive: "실시간 앱 — {{app}}",
       loadingAgents: "에이전트를 불러오는 중…",
       askAnything: "무엇이든 물어보세요…",
       askOrChangeApp: "데이터에 대해 묻거나 이 앱을 바꿔 달라고 요청하세요…",
@@ -3719,7 +3720,7 @@ const ko = {
       unknownPhase: "알 수 없는 빌드 단계",
       nextStepsLead: "다음으로 이렇게 말할 수 있습니다: {{steps}}",
       nextStepQuote: "“{{step}}”",
-      draftPosture: "이후 변경 사항은 초안으로 저장되며, Studio에서 직접 게시합니다.",
+      draftPosture: "이후 변경 사항은 초안으로 저장되며, 이 채팅의 「게시」로 게시합니다.",
       checksPassed: "검증 통과 {{passed}}/{{total}}",
     },
     changes: {
