@@ -14,6 +14,6 @@ Metadata-protocol: none
 
 - **Before.** `GET /api/v1/data/:object/:id?selct=name` answered `200` with every column on the dispatcher: the branch kept `select` and `expand` and silently dropped every other name. `RestServer` refused the same request `400 VALIDATION_ERROR`, so a typo was ignored on one host and refused on the other.
 - **Now.** The dispatcher asks the route's closed set, `DATA_RECORD_READ_PARAMS`, imported from `@objectstack/rest`, the same set `RestServer` asks, and refuses any other name `400 VALIDATION_ERROR` with `RestServer`'s sentence: it names each refused parameter and lists `expand, select`. The refusal comes before the read, so it is the same answer for an existing record, a missing id and a row the caller may not read.
-- **Unchanged.** `select` and `expand` are read as before. An object the API does not expose is refused that way first (`404 OBJECT_API_DISABLED`), before the query is judged, as on `RestServer`. The other `/data` routes are not touched.
+- **Unchanged.** `select` and `expand` are read as before. An object the API does not expose is answered its exposure refusal first, before the query is judged: the dispatcher's `404 OBJECT_API_DISABLED` with or without the unknown name, and `RestServer` likewise asks its closed set only after `enforceApiAccess`. The other `/data` routes are not touched.
 
 **The remedy.** Send only `select` and `expand` to the by-id read. `fields` and `populate` are not synonyms on this route (#8039): spell them `select` and `expand`.
