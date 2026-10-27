@@ -46,6 +46,8 @@
  * | `objects[].fields[].expression`        | `FieldSchema`                     |
  * | `objects[].fields[].options`           | `FieldSchema`                     |
  * | `options[].value` / `.visibleWhen`     | `SelectOptionSchema`              |
+ * | `objects[].fieldGroups`               | `ObjectSchema`                    |
+ * | `fieldGroups[].key` / `.visibleWhen`   | `ObjectFieldGroupSchema`          |
  * | `actions[].objectName`                 | the action schema                 |
  * | `sharingRules[].condition` / `.object` | `SharingRuleSchema`               |
  *
@@ -1033,7 +1035,15 @@ export function fieldRuleRootIssue(
   // message stays stable; anything else falls back to SCOPE_ROOTS order,
   // which is stable too — never AST walk order.
   const root = FIELD_RULE_USER_ROOTS.find((r) => kept.includes(r)) ?? kept[0]!;
-  const prescription = (FIELD_RULE_USER_ROOTS as readonly string[]).includes(root)
+  // [#26646] A field group has no options and is not a field: its user-root
+  // prescription keeps only the two answers that apply to it.
+  const userRoot = (FIELD_RULE_USER_ROOTS as readonly string[]).includes(root);
+  const prescription = userRoot && slot === FIELD_GROUP_VISIBLE_WHEN_SLOT
+    ? `To hide the group's fields by role, declare field-level security on a permission set ` +
+      `for each field in the group (\`fields: { 'OBJECT.FIELD': { readable: false } }\`), which ` +
+      `the server enforces. To gate the group on record state, rewrite the predicate against ` +
+      `\`record\`.`
+    : userRoot
     ? `To gate the CHOICES of a select by user, move the predicate to the option's own ` +
       `\`visibleWhen\` (\`options: [{ …, visibleWhen: … }]\`) — the rule validator evaluates ` +
       `that one against \`current_user\` and its ADR-0068 aliases on every write, so the gate ` +

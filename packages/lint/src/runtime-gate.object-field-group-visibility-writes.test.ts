@@ -149,6 +149,10 @@ describe('#26646 — the object door gives the build\'s field group `visibleWhen
     expect(errs, dump(errs)).toHaveLength(1);
     expect(errs[0]!.message).toMatch(/^`visibleWhen` reads `current_user`, but a field group's section predicate binds only `record`/);
     expect(errs[0]!.message).toContain('fails CLOSED');
+    // The prescription is the group's: field-level security or a `record`
+    // rewrite, never the select-option move a field's message offers.
+    expect(errs[0]!.message).toContain('field-level security');
+    expect(errs[0]!.message).not.toContain('CHOICES of a select');
   });
 
   it('a stored sibling\'s broken group is not this write\'s to answer for (the differential)', () => {
