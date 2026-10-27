@@ -766,7 +766,11 @@ describe('#8184 — the scoped kernel answers the same code as the host-config k
       ...(engine.registry as Record<string, unknown>),
       registerItem: () => {},
       registerObject: () => {},
-      listItems: () => [],
+      // [#26708] The code package's `showcase_task`, which `case_grid` binds: a
+      // save naming the installed package is judged against its closure.
+      listItems: (type: string) => (type === 'object'
+        ? [{ name: 'showcase_task', _packageId: READ_ONLY_PKG, _provenance: 'package', fields: { name: { type: 'text' } } }]
+        : []),
       getItem: () => undefined,
       getArtifactItem: (type: string, name: string) =>
         (type === 'object' && name === 'showcase_task')

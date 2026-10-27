@@ -178,6 +178,9 @@ function makeStubEngine() {
             // No declared package namespace → the ADR-0028 prefix check is
             // skipped (legacy-grandfathered path).
             getPackage: installedPackage,
+            // [#26708] The tenant object the views here bind: a save naming
+            // an installed package is judged against its closure.
+            listItems: (type: string) => (type === 'object' ? [{ name: 'customer', fields: { name: { type: 'text' } } }] : []),
         },
     };
     return { engine, rows, historyRows };

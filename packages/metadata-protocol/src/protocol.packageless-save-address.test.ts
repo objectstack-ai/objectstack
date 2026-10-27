@@ -160,7 +160,7 @@ function makeProtocol(artifacts: Array<{ type: string; item: Record<string, unkn
             // boot — or a save naming it is refused before any rule here.
             getPackage: (id: string) => (id === INSTALLED_READ_ONLY
                 ? { manifest: { id, scope: 'cloud' } }
-                : [WRITABLE, OTHER_WRITABLE, CODE_PACKAGE].includes(id) ? { manifest: { id } } : undefined),
+                : [WRITABLE, OTHER_WRITABLE, 'com.qa.thirdapp', CODE_PACKAGE].includes(id) ? { manifest: { id } } : undefined),
             isPackageDisabled: () => false,
             applyNavContributions: (app: unknown) => app,
         },
@@ -435,7 +435,12 @@ describe('an item a CODE package ships', () => {
 
     it('with an overlay row bound to the code package: the package-less save writes that row', async () => {
         const name = 'showcase_task_grid';
-        const { protocol, rows } = makeProtocol([packagedView(name)]);
+        // [#26708] The code package ships the object its view binds: a save
+        // naming the (installed) package is judged against its closure.
+        const { protocol, rows } = makeProtocol([
+            packagedView(name),
+            { type: 'object', item: { name: 'task', _packageId: CODE_PACKAGE, fields: { name: { type: 'text' } } } },
+        ]);
         // The overlay a save naming the package writes (ADR-0005: an overlay of
         // a code-shipped item names the package it customizes).
         await protocol.saveMetaItem({ type: 'view', name, item: viewBody(name, 'Named'), packageId: CODE_PACKAGE });

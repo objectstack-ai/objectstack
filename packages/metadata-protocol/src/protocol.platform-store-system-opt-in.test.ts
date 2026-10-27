@@ -169,7 +169,9 @@ function makeStubEngine() {
             registerItem: () => undefined,
             registerObject: () => undefined,
             unregisterItem: () => undefined,
-            listItems: () => [],
+            // [#26708] The tenant object the view here binds: a save naming an
+            // installed package is judged against its closure.
+            listItems: (type: string) => (type === 'object' ? [{ name: 'proj_task', fields: { title: { type: 'text' } } }] : []),
             getItem: () => undefined,
             getObject: () => undefined,
             getPackage: installedPackage,

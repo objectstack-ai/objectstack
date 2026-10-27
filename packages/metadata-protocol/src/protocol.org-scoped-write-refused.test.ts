@@ -69,6 +69,13 @@ const installedPackage = (id: string) => {
     return dependencies ? { manifest: { id, dependencies: Object.fromEntries(dependencies.map((d) => [d, '*'])) } } : undefined;
 };
 
+/** The `task` object the views here bind — tenant-authored, or owned by `owner`. */
+const taskObject = (owner?: string) => ({
+    name: 'task',
+    ...(owner ? { _packageId: owner, _provenance: 'package' } : {}),
+    fields: { name: { type: 'text' }, title: { type: 'text' } },
+});
+
 
 interface Row {
     id: string;
@@ -191,7 +198,10 @@ function makeStubEngine(artifacts: Array<{ type: string; name: string }> = []) {
         registry: {
             registerItem: () => {},
             registerObject: () => {},
-            listItems: () => [],
+            // [#26708] The `task` object every view here binds, tenant-authored
+            // (no package): a save naming an installed package is judged
+            // against its closure, which holds it.
+            listItems: (type: string) => (type === 'object' ? [taskObject()] : []),
             getItem: () => undefined,
             getObject: () => undefined,
             getPackage: installedPackage,
@@ -661,7 +671,8 @@ describe('each package\'s copy of a view container expands into its own package\
             },
             listItems: (type: string, packageId?: string) => (type === 'view'
                 ? [...entries.values()].filter((it) => !packageId || it._packageId === packageId)
-                : []),
+                // [#26708] The `task` object, owned by `owner` when a code package owns it.
+                : type === 'object' ? [taskObject(owner)] : []),
             getItem: (type: string, name: string, packageId?: string) => (type !== 'view'
                 ? undefined
                 : entries.get(name) ?? (packageId ? entries.get(`${packageId}:${name}`) : undefined) ?? composite(name)[0]),

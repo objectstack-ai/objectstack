@@ -359,6 +359,11 @@ function makeStubEngine(opts: { failAudit?: boolean } = {}): Harness {
         registry: {
             registerItem: () => {},
             registerObject: () => {},
+            // [#26708] The tenant object the views here bind: a save naming
+            // an installed package is judged against its closure.
+            listItems: (type: string) => (type === 'object'
+                ? [{ name: 'case', fields: { id: { type: 'text' }, title: { type: 'text' } } }]
+                : []),
             getPackage: installedPackage,
         },
     };
