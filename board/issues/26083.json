@@ -2,8 +2,8 @@
   "number": 26083,
   "kind": "issue",
   "title": "ci: the checkout → setup-node → setup-pnpm → store-cache → install sequence is hand-copied into about 41 jobs (58 hardcoded node \"22\" literals, 35 identical cache keys), and the pnpm store cache still post-saves on pull_request runs",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:devpath",
     "domain:devx",
-    "pm:dispatched",
     "priority:p2",
     "tooling"
   ],
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T11:22:53Z",
-  "updated_at": "2026-10-27T02:32:34Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-27T03:42:34Z",
+  "closed_at": "2026-10-27T03:41:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26083",
   "body": "Filing gate ③: a maintainer-directed task. Maintainer, 2026-10-26, verbatim: 「完整的评估本项目， 还有哪些可以优化的地方。包括 ci 和文档」 then 「使用 pm-dispatch 技能创建 issue，需要决策的立为决策卡。」 and 「低优先级的先不考虑」. Batch-of: 19 (repository evaluation 2026-10-26, `session_019a9XCWsbMFp75REzthE6cs`; 9 decision cards + 10 execution cards). ⛔ Filed bare: grading, `domain:*` and `area:*` are triage's. ⛔ Not a claim. Reader: the `domain:devx` execution seat, dispatch step — one os-dev, one or two PRs, all Tier H (`.github/**`). Dedupe: REST list (439 issues), grep `setup-node|composite|setup-pnpm|setup action` → 1 unrelated hit; #25452 (open, dispatched) cites the PR-side pnpm store saves as evidence but its change list is the Turbo seeds — this card takes the setup sequence and leaves the seeds to #25452; #22034 (on hold) owns the `fetch-depth: 0` cost and is NOT folded in here. **New.**\n\n**谁付代价（业务筛）:** every PR and queue entry pays the same five setup steps in every job (ci.yml median 15 min, p90 21 min over the last 50 completed runs; lint.yml 9 / 16), and every workflow edit has to be made in about 41 places. A PR that touches the lockfile saves multi-GB PR-scoped pnpm store entries into the same 10 GB Actions cache pool that #25452 measured as evicting main's seeds.\n\n## Measured (HEAD 0d83ee8f77, static read of `.github/`)\n\n- `.github/actions/` holds only `setup-pnpm` (Corepack store cache; its header says setup-node is \"Deliberately NOT in here\") and `half-state-patrol`.\n- Repeated by hand across `.github/workflows/*.yml`: `actions/setup-node@v7` with `node-version: '22'` 57 uses (58 literal `'22'`, while `.nvmrc` holds `22`); `setup-pnpm` 42; a \"Get pnpm store directory\" step 37 copies; `actions/cache` with the identical key `pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}` 35 copies; `pnpm install --frozen-lockfile` 41 copies. Example block: `lint.yml:462-484`, repeated in all 12 lint lanes.\n- The four `TURBO_*` env lines are copied verbatim into about 10 steps (`ci.yml:873-876`, `lint.yml:5773, 6036, 6111, 6244, 6277`).\n- The pnpm store uses plain `actions/cache` (restore + post-save) at 35 sites, on `pull_request` too, although Turbo seeds were moved to restore-only on PRs for exactly this pool-pressure reason (`ci.yml:677-684`).\n- One outlier: `showcase-smoke.yml:47-48` uses `pnpm/action-setup@v6` (tag-pinned) instead of `setup-pnpm`.\n\n## Wanted\n\n1. A `.github/actions/setup-workspace` composite action: node from `.nvmrc` (`node-version-file`), Corepack, the store path, `actions/cache/restore` always and `actions/cache/save` only when `github.event_name != 'pull_request'`, `pnpm install --frozen-lockfile`; an input for the few jobs that skip install. The existing `setup-pnpm` either becomes a step inside it or is retired.\n2. Replace the hand-copied sequence everywhere (`showcase-smoke.yml` included); keep per-job `TURBO_*` env where it differs, otherwise hoist to the composite's outputs or a job-level `env`.\n3. `dependabot.yml`: add `directories: [\"/\", \"/.github/actions/*\"]` so the actions inside composites are tracked.\n4. ⛔ Do not change `fetch-depth` (that is #22034's call) and do not change Turbo seed keys (that is #25452's).\n\n## Acceptance\n\n- `grep -c \"node-version: '22'\" .github/workflows/*.yml` → 0; one definition of the store cache key; `pnpm install --frozen-lockfile` appears only inside the composite (plus any job that documents why it differs).\n- On a `pull_request` run no step saves a `pnpm-store-*` cache entry (read the run's cache-save step output); on a `push` to main it still does.\n- All required contexts (`scripts/check-required-contexts.mjs`) unchanged and green on the PR.\n\n**Size:** M (mechanical, many files). **Clause-②:** no. **Metadata-protocol:** none. **Tier:** H (`.github/workflows/**`); the dev opens the PR draft and the seat requests the governed review.\n\n## Related\n\n#25452 (open, dispatched), #22034 (on hold), #25870 (open), #25374 (closed)."

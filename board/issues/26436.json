@@ -1,0 +1,38 @@
+{
+  "number": 26436,
+  "kind": "issue",
+  "title": "test(rest): execctx-consumer-census.test.ts hand-counts 62 sites / 145 mentions / 16-46-12 catch shapes and is re-typed on every split slice — derive the census or retire the measurement file",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p2",
+    "tech-debt"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T03:54:40Z",
+  "updated_at": "2026-10-27T07:09:40Z",
+  "closed_at": "2026-10-27T07:08:25Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26436",
+  "body": "Filing gate: ③ maintainer-directed. Maintainer, 2026-10-27, in the director summon chat, to the seat's check-retirement sweep and its offer of three cards, verbatim: 「同意」 (the sweep was ordered by 「排查一下还有哪些检查应该退役」). Filed by the director seat (`session_01KrKXQVvgYk2AJ4VkqMobyb`, ledger objectstack#12708, sweep record 6433263738). ⛔ Not a claim. Batch-of: 11 (director seat, 2026-10-27). Dedupe: 600 newest open + closed issues grepped for the check's file name → 0 unless stated. Part of #26431. Reader: `domain:server`.\n\n**Measured:** `packages/rest/src/execctx-consumer-census.test.ts` (header: *\"This is a MEASUREMENT file. It repairs nothing and proposes nothing\"*) pins at :848–873 `SITE_FILES` 18, `SITES` 62, 145 `resolveExecCtx` mentions, caught/bare/same-line 16/46/12 and \"moved registrars 4/4\"; its comments record a hand recount per `rest-server.ts` split slice; changed twice in the last 30 days for recounts. The question it answers (#13160: what an absent execution context means at each consumer) is a one-time reading, already recorded in the file's prose.\n\n**Wanted:** either (a) retire the file and move its findings into a docblock on `resolveExecCtx` (the reading stays, the pins go), or (b) keep one derived assertion — every `resolveExecCtx` call site is in a caught form — computed from the tree, with no literal counts. The lane picks; (a) is the seat's reading of ④. **Acceptance:** no literal site/mention count remains in the file or its replacement; `pnpm --filter @objectstack/rest test` green. **Size:** S. **Clause-②:** no. **Metadata-protocol:** none."
+}

@@ -1,0 +1,37 @@
+{
+  "number": 26438,
+  "kind": "issue",
+  "title": "test(i18n): objectView-config-keys-retired pins `SURVIVING_KEY_COUNT = 103` (and 229 total), so any legitimate key added to console.objectView reds it — pin the retired list only",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:ui",
+    "priority:p2",
+    "tech-debt"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T03:55:54Z",
+  "updated_at": "2026-10-27T06:35:56Z",
+  "closed_at": "2026-10-27T06:34:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26438",
+  "body": "Filing gate: ③ maintainer-directed. Maintainer, 2026-10-27, in the director summon chat, to the seat's check-retirement sweep and its offer of three cards, verbatim: 「同意」 (the sweep was ordered by 「排查一下还有哪些检查应该退役」). Filed by the director seat (`session_01KrKXQVvgYk2AJ4VkqMobyb`, ledger objectstack#12708, sweep record 6433263738). ⛔ Not a claim. Batch-of: 11 (director seat, 2026-10-27). Dedupe: 600 newest open + closed issues grepped for the check's file name → 0 unless stated. Part of #26431. Reader: `domain:ui` (i18n package).\n\n**Measured:** `ui/packages/i18n/src/__tests__/objectView-config-keys-retired-4730.test.ts:298` `SURVIVING_KEY_COUNT = 103`, :325 `RETIRED + SURVIVING == 229`, :349 `enKeys toHaveLength(SURVIVING_KEY_COUNT)`; the comment above it logs 104 → 105 → 103 as keys were added and retired (objectui#13052, #13330, objectstack#25921). The guarantee the test exists for (objectui#4730: the retired config-panel vocabulary never comes back) needs only the retired list.\n\n**Wanted:** keep `RETIRED_OBJECT_VIEW_KEYS` and the assertion that none of them is present in any pack; delete `SURVIVING_KEY_COUNT`, the 229 sum and the length pin (an anti-vacuity `enKeys.length > 0` may stay). **Acceptance:** adding a `console.objectView.*` key changes no test; retiring one still requires the list edit. **Size:** XS. **Clause-②:** no. **Metadata-protocol:** none."
+}

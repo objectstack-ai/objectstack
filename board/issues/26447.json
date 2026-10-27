@@ -1,0 +1,34 @@
+{
+  "number": 26447,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0142 Open items records the #26359 ruling — the `queue` column stays injected on every `ownership: 'user'` object",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T04:06:40Z",
+  "updated_at": "2026-10-27T05:07:46Z",
+  "closed_at": "2026-10-27T05:07:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-27T05:07:44Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26447",
+  "body": "Part of #25769 · the ADR line owed by PR #26337 (ownership queues, ADR-0142 phase 2)\n\nClause-②: no\nMetadata-protocol: none\nRuling-ref: https://github.com/objectstack-ai/objectstack/issues/26359#issuecomment-6429748166\n\nContract review tier: **H** — the diff is one line in `docs/adr/**`, a governed surface; it lands by the maintainer's approval (AGENTS.md Prime Directive 14), never by a seat's click.\n\n## 维护者速读\n\n- **改了什么：** ADR-0142「Open items」加第 6 条，一句话，照抄 #25769 上 dev 报告（6431771476）的 `adr_open_items_sentence`：`queue` 列是注入所有 `ownership: 'user'` 对象（D3 原案）还是改成按对象开关，已在 #26359 交你裁定，你确认 D3 原案（裁决 A，评论 6429748166）。\n- **为什么单独开 PR：** `docs/adr/**` 是受管目录，不能和 PR #26337 的代码混在一个 diff 里（SKILL.md:186 混合 diff 要拆）；dev 的卡线程只能推自己那条分支，所以由总监席开这一行。\n- **风险：** 无行为变更；只有文字。回滚 = revert。\n- **你要做的：** 批准（Tier H）。本席账号在 `GOVERNED_APPROVERS`，不投审核。\n\n## 席位核对\n\nDirector seat, `session_01KrKXQVvgYk2AJ4VkqMobyb` (ledger objectstack#12708). Text lifted verbatim from 6431771476; the bold lead \"Where the `queue` column is injected\" is the seat's, matching the list's style. Node-only ADR gates run on this tree: `check-adr-anchors`, `check-adr-links` (807 links resolve), `check-adr-symbol-anchors` (2664 anchors resolve) — all exit 0. No changeset (docs only, `skip-changeset`). Related: #26359 (the ruling), PR #26337 (the implementation; its pointer comment 6429770469 names the ruling), #25769 (parent).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01KrKXQVvgYk2AJ4VkqMobyb\n"
+}

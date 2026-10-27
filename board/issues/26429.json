@@ -1,0 +1,37 @@
+{
+  "number": 26429,
+  "kind": "issue",
+  "title": "docs(releases): write content/docs/releases/v18/18-2.mdx for the 18.2.0 cut — 221 changesets since 18.1.0, 53 with a BREAKING banner, grouped under the five release-notes headings",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "documentation",
+    "domain:devx",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T03:45:41Z",
+  "updated_at": "2026-10-27T07:48:29Z",
+  "closed_at": "2026-10-27T07:34:44Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26429",
+  "body": "Filing gate: ③ maintainer-directed task. Maintainer, 2026-10-27, in the director summon chat, verbatim: 「两个暗点：定时 Validate Dependencies 的 OSV 漏洞扫描连续两天红（10-26、10-27），没人读过；content/docs/releases/v18/18-2.mdx 还没写（规则是发版时集中写）。这两个问题创建高优先级卡片。」 Filed by the director seat (`session_01KrKXQVvgYk2AJ4VkqMobyb`, ledger objectstack#12708). ⛔ Not a claim. Reader: the lane that compiles release notes when asked (AGENTS.md Prime Directive 15 lists \"compiling release notes when asked\" as ordinary seat work; `content/docs/releases/**` is release-owned, so this card is the one place a seat may write it). Dedupe: 300 newest open + closed issues, grep `release notes|18-2.mdx|v18/18-2` → 0. **New.** Queued at p1 on the maintainer's word; triage re-grades if it disagrees.\n\n## 维护者速读\n\n18.2.0 的 Version Packages PR #25640 已经生成（版本号 18.2.0），但 `content/docs/releases/v18/18-2.mdx` 还没有。18.1 的先例是一页 793 行（`18-1.mdx`），结构固定：Highlights → Release facts, as measured → What's new（需手动处理 / 自动迁移 / 新增能力 / 语义变化 / 其他修复 五段，顺序与 GitHub Release 正文一致）→ New in Console (Studio) → Upgrade checklist。这张卡要在切版**之前**把页写好、挂进 `meta.json`，切版时只改「Release facts」里的提交号和日期。素材是 `.changeset/` 里 18.1.0 之后新增的 221 条（53 条带 BREAKING 横幅），Console 段读 ui 包的 changeset。\n\n## Measured (2026-10-27, `origin/main` `e677770a`)\n\n- `git diff --name-status <@objectstack/cli@18.1.0>..origin/main -- .changeset | grep ^A | wc -l` → **221** new changesets since the 18.1.0 tag (2026-10-24); `grep -il BREAKING` over them → **53**; `check-changeset-no-major` reports no `major` entry (the line stays 18.x per the maintainer: 「后续协议变更的也是 18.x」).\n- `content/docs/releases/v18/` holds `index.mdx`, `18-0.mdx` (713 lines), `18-1.mdx` (793 lines) and `meta.json` with pages `[\"index\", \"18-1\", \"18-0\"]`. No `18-2.mdx`.\n- `18-1.mdx` section skeleton (the precedent to mirror): `## Highlights — 18.1.0` · `## Release facts, as measured` · `## What's new in 18.1.0` with `### The version number is not the signal`, `### Breaking changes you must act on`, `### Converted for you by \\`os migrate meta\\``, `### New capabilities`, `### Semantic changes`, `### Notable fixes`, `### New in Console (Studio)`, `### Shipped in 18.0.0, listed first in 18.1.0's CHANGELOG` · `## Upgrade checklist`.\n- PR #25640 (`chore: version packages`) is open, `mergeable_state: dirty`, head 14 h behind `main`; it is refreshed by the maintainer (Actions → Release → `refresh_version_pr`) at cut time, so the page's \"Release facts\" are written last.\n\n## Governing text\n\n- `docs/releases-maintenance.md` §3 \"Platform layer\": the curated page leads with breaking changes + migration, then new capabilities, then notable fixes, with a Console (Studio) section; \"Release notes are grouped by what the reader must do\" — the five headings 需手动处理 / 自动迁移 / 新增能力 / 语义变化 / 其他修复, in that order, each placed by the changeset's own declarations (`Metadata-protocol:`, the `Clause-②:` arm, the BREAKING banner, the ADR-0087 marker); \"Sourcing the Console section\": from the `@object-ui/*` and `ui/apps/console` changesets.\n- AGENTS.md Documentation Guardrails: `content/docs/releases/` is release-owned; written centrally at release time; a code PR never edits it. This card is that central act.\n- The §3 \"Drift guard\" and `scripts/docs-audit` apply: every symbol or route the page names must exist at the version commit.\n\n## Wanted\n\n1. Write `content/docs/releases/v18/18-2.mdx` mirroring `18-1.mdx`'s skeleton; add `\"18-2\"` to `meta.json` after `\"index\"`; link it from `index.mdx` as 18-1 is.\n2. Populate the five headings from the 221 changesets by their declarations (`node scripts/release-github-releases.mjs` prints the grouping the GitHub Release body will use — use the same grouping so the two agree); every breaking entry names what the reader must do and, where an ADR-0087 conversion is `registered`, says `os migrate meta` does it.\n3. Console (Studio) section from the ui changesets of the same range (the objectui import #25752 and the `.objectui-sha` retirement are 18.2 facts: the Console now ships from `ui/apps/console` at the release commit).\n4. \"Release facts, as measured\" written with placeholders for the version commit and date, filled at cut; everything else final. Build: `pnpm --filter docs build` (or the docs app's check) green; `check-doc-links` green.\n\n⛔ Not here: editing any other release page; the GitHub Release body (generated at publish); the changesets themselves.\n\n## Acceptance\n\n- The page exists, is listed in `meta.json`, builds, and groups every one of the 221 changesets' entries under the five headings with none dropped (the regrouping script's count equals the page's count).\n- A reviewer who reads only this page can perform the 18.2.0 upgrade: each 需手动处理 entry has a concrete instruction.\n\n**Size:** M. **Clause-②:** no. **Metadata-protocol:** none.\n\n## Related\n\nPR #25640 (Version Packages, 18.2.0); #25807 (18.2.0 release test sweep anchor); `docs/releases-maintenance.md` §3; `18-1.mdx` (precedent, last touched 05e31a2011)."
+}

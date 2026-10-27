@@ -1,0 +1,37 @@
+{
+  "number": 26418,
+  "kind": "issue",
+  "title": "Toast placement with a right drawer on windows under ~1100px: the fallback clears only the drawer chrome, so the create-success toast covers the record header's 编辑 / ⋯ for its whole life (residual of objectui#11685)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "domain:ui",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T03:08:08Z",
+  "updated_at": "2026-10-27T04:03:22Z",
+  "closed_at": "2026-10-27T04:01:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26418",
+  "body": "Filing gate **① a reproduced UX defect** (class a, public door: creating a record). `reach:` local stack, objectui pin `6f629a7`, 1024×768 viewport, zh-CN, 2026-10-27. After 新建 → 创建 on a record form, the record drawer opens (width 720) and the success toast 「家装项目创建成功」 sits at x 644–1000, y 69–123 for its whole life. That **covers the record's 「编辑」 button** (rect 858–934 × 93–129) and the ⋯ menu beside it. Measured with `elementFromPoint`: the toast is topmost (z-index 999999999).\n\nBatch-of: 2 · 2026-10-27 follow-up to the 2026-10-25 desktop E2E (doubtful items re-measured). Filed at the maintainer's request: 「必要的合理的建议都可以立卡」 / 「有疑点的进一步确认」.\n\n**Business reason.** Right after creating a record, the next thing a user does is often fix something: they reach for 编辑. objectui#11685 set out to keep the toast off \"the record's own header with its Approve-style actions under it\". On any window narrower than about 1,100 px (small laptops, split screens, a browser beside a chat app), it still lands there for ~4 s.\n\n**Reader who acts.** The `domain:ui` seat: `ui/packages/app-shell/src/chrome/ConsoleToaster.tsx` (objectui was folded into this repository; objectstack#25854).\n\n## Where (measured on objectui pin `6f629a7`, which includes objectui#11685's fix `267b539f`; unchanged on objectstack `main` at `ui/packages/app-shell/src/chrome/ConsoleToaster.tsx:97-101`)\n- `ConsoleToaster.tsx:99-101`: `fitsBeside = innerWidth − drawerWidth ≥ TOAST_WIDTH + 2·gap`. Here 1024 − 720 = 304 < 356, so the fallback `{ top: headerBottom + VIEWPORT_GAP }` applies.\n- `headerBottom` (:97) is the dialog's top-level block holding the `aria-labelledby` title: the drawer **chrome** (「家装项目 / 家装项目 的记录详情浮层。」), bottom = 45 px. The record header with 编辑 / ⋯ is below it (93–129), so the fallback clears the chrome and lands on the actions. That is the case the module comment says it prevents.\n\n## Expected\nIn the fallback, the toast clears the record header's action row too. For example: measure to the bottom of the first actions row inside the dialog, or place the toast at the bottom-right of the drawer, away from both. Add a test at a 1024 px window.\n\n## Dedupe\n`gh api search/issues`, incl. closed, `toast drawer`: objectui 34 (0 open), objectstack 33 (QA runs / sweep).\n- objectui#11685 (closed; fix `267b539f` in this pin, `compare 267b539f...6f629a7310` = ahead) is the same goal. This is the narrow-window residual its fallback does not cover.\n- objectui#11723 (closed) is toast clickability under an open dialog, which is different."
+}

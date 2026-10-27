@@ -1,0 +1,37 @@
+{
+  "number": 26469,
+  "kind": "issue",
+  "title": "AI build page: the live preview header says 「home_renovation_management(未发布 · 仅自己可见)」 for a published build and never updates; the progress panel and footnote show machine names / Studio",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "bug",
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T04:27:08Z",
+  "updated_at": "2026-10-27T07:47:47Z",
+  "closed_at": "2026-10-27T07:46:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26469",
+  "body": "Filing gate **① a reproduced UX defect** (class a, public door: the AI build page). `reach:` one browser, local stack, cloud PR #3297 head `4e7ee6d5` + framework pin `6390fe52` (ui from `ui/`), zh-CN, 2026-10-27. On a first whole-app build:\n- The chat's result card says 「已搭建并上线 · 家装项目管理 · 核对通过 6/6」 and 「已发布 · Verified」.\n- The side preview's header says 「运行预览 · **home_renovation_management**(**未发布 · 仅自己可见**)」: the app's machine name, and a state that contradicts the card. It never updates.\n- During the build, the progress panel lists machine names (`u9ba_customer`, `u9ba_project.project_list`, …).\n- The finished card's footnote says 「之后的修改先存草稿，由你在 Studio 发布。」 while the page itself offers 发布.\n\nBatch-of: 5 · 2026-10-27 re-test of the 2026-10-25 desktop E2E after the fixes. Filed at the maintainer's request: 「完整的再测试一遍」 / 「必要的合理的建议都可以立卡」. Reviewed in-session before filing.\n\n**Business reason.** This is the first screen after the magic moment. Two parts of the same page disagree on whether the app is live, and the preview names it with an identifier the customer never typed. \"未发布 · 仅自己可见\" next to \"已上线\" makes the customer doubt the one thing the build was for: that their colleagues can use the app now.\n\n**Reader who acts.** The `domain:ui` seat: `ui/packages/app-shell/src/console/ai/` and `ui/packages/plugin-chatbot`. The cloud half (frames carry `label`; cloud posture strings) is the cloud card filed alongside.\n\n## Where (pin `6390fe52`; none of these files changed on objectstack `main` `6746140361`)\n- **Header state**: `app-shell/src/console/ai/LiveCanvas.tsx:34-41, 108-121`. 未发布 is keyed solely on `materialized` (string `i18n/src/locales/zh.ts:1951` / `en.ts:2343`, \"unlisted until published\", ADR-0045). `mapMessages.ts:1097` copies only `materialized`, never `appHidden`. This build's envelope has `\"materialized\":true,\"appHidden\":false` (listed = live). No publish signal reaches `canvasApp`, so it cannot change even after the chat's `buildIsLive` (`ChatbotEnhanced.tsx:4179-4184`) flips. The ADR-0045 copy predates the \"first build goes live at once\" posture (cloud#2924 / #2975).\n- **Header name**: `AiChatPage.tsx:1820, 1828-1833` passes the `app` artifact's machine `name` (fed from `ChatbotEnhanced.tsx:2464-2481`). The envelope's `checklist.app.label`, which the result card uses, is never passed.\n- **Progress items**: `plugin-chatbot/src/ChatbotEnhanced.tsx:5363-5366` renders `entry.display = it.name.replace(/_sample$/, '')` (list :5444-5478). `ChatBuildProgress.items` (:210) has no `label`.\n- **Footnote**: `i18n/src/locales/zh.ts:3905` / `en.ts:4474` `chatbot.build.draftPosture`, rendered at `ChatbotEnhanced.tsx:5577`.\n\n## Expected\n- The header derives its state from `appHidden` / `buildIsLive` and updates on publish. A listed, published app does not say 未发布.\n- The header shows `checklist.app.label` (家装项目管理).\n- Progress items render `label ?? name`.\n- `draftPosture` names the in-chat 发布.\n\n## Dedupe\n`gh api search/issues`, incl. closed:\n- objectstack `Live Canvas unlisted published header`: 2. #25943 (open Studio right slot) and #24579 (closed) are unrelated.\n- objectstack `运行预览 未发布`: 2, the same two.\n- objectstack `LiveCanvas`: 0.\n- cloud `运行预览 未发布 已发布`: 0.\n- objectstack `build progress panel label machine name`: 41, none relevant."
+}

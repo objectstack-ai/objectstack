@@ -2,8 +2,8 @@
   "number": 25765,
   "kind": "issue",
   "title": "pm-dispatch review: a PR touching published spec, skills or `docs/adr/**` owes an independent full review at CONTRACT_REVIEW_TIER before the seat's ACCEPT, not only the contract review",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,19 +13,24 @@
   "labels": [
     "area:devpath",
     "domain:skills",
-    "pm:queue",
     "priority:p2",
     "tooling"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-warren"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-25T09:27:23Z",
-  "updated_at": "2026-10-27T01:57:47Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-27T07:18:34Z",
+  "closed_at": "2026-10-27T06:52:10Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25765",
   "body": "Filing gate: ③ a task ordered directly by the project owner, quoted verbatim below.\nReader: `domain:skills` seat, next PR on `.claude/skills/pm-dispatch/references/contract-review.md` (〈复核归属与资格〉) plus the SKILL.md text that states who reviews a governed or published surface, and the brief template behind `node scripts/pm/record-recognisers.mjs --brief-template`.\nDedupe (open AND closed): \"contract review full review adr skills spec\" → 2 hits (#23201, #23426, neither about review depth); \"CONTRACT_REVIEW_TIER review docs/adr\" → 42 hits, nearest #25729 (dispatch tier for ADR drafting, open, the sibling of this card), #23578, #23692, #19544 (tier and face of the contract review, all closed); none asks for a full review beyond the contract review's ①②③.\n\n## The order\n\n田騏 (`marchtian`), 2026-10-25, in the project thread that drafts #25403 (PR #25717), verbatim and untranslated:\n\n> 整个 adr 是用 fable 些的吗？skills有这个规则吗？ (09:24:37Z)\n>\n> 或者至少 adr 都需要fable 完整的复核 (09:24:58Z)\n>\n> spec skills adr 都需要fable 完整的复核 (09:25:08Z)\n\nRead as (the filer's reading, for triage to confirm):\n- \"fable\" = the `CONTRACT_REVIEW_TIER` constant (the claim and record templates spell the constant, never a model id).\n- \"完整的复核\" = a full review of the substance: whether the change is right against the code it relies on and the scenario it is accepted against, read adversarially. It is more than today's contract review, whose items are ① derived judgments on the acceptance set, ② semver and changeset, ③ boundary flags, read from the diff and the card only.\n- \"spec\" = the published-schema face (`packages/spec/src/**`, non-test) and cards of the `domain:spec` lane; \"skills\" = `skills/**` and `.claude/skills/**`; \"adr\" = `docs/adr/**`.\n- 「或者至少」 = this review is the floor. It does not replace #25729 (ADR drafting dispatched at `CONTRACT_REVIEW_TIER`, effort `xhigh`); a change drafted at that tier still owes the review, by an agent other than its drafter.\n- Effort: the 2026-10-25T01:40Z order quoted on #25729 fixes `xhigh` for ADR work. This order names the tier only; `xhigh` for spec and skills reviews is the filer's reading, not the owner's word.\n\n## Why (measured on PR #25717)\n\nPR #25717 (ADR-0141, the inter-app dependency record) was re-drafted at `CONTRACT_REVIEW_TIER`, effort `xhigh`, and passed the contract review twice: PASS at `247fe2fa` (comment 6392433266) and a delta PASS at `fa733808` (comment 6392588282), followed by the seat's ACCEPT (comment 6392600749). The owner then asked for an independent full review at the same tier. It found three defects the contract review's shape does not ask about, each confirmed in the tree at `origin/main` `47af3dde42`:\n1. Judging a co-delivered dependency's version range would refuse a whole multi-package artifact after a major bump: the packages inside one artifact each carry their own `version` (`examples/app-multi-package/src/packages/core/index.ts`, `orders/index.ts`).\n2. The record's reason for reading the co-ownership relation from either end omitted the decisive case: without it, once a module is installed, an upgrade or reinstall of the app it depends on meets `NAMESPACE_CONFLICT` (`packages/objectql/src/registry.ts#installPackage`, the `getNamespaceOwners(...).find(...)` gate).\n3. Two sibling modules that declare the same parent and share its namespace refuse each other at that same gate, so the second standalone module cannot install, against the ruling's own goal 「而每个包可以独立安装」.\n\nIt also found a range-grammar gap (`packages/core/src/dependency-resolver.ts#SemanticVersionManager` rejects `6.x`, the ruling's own example) and two unstated gaps. The owner accepted all of it on 2026-10-25 (「全部照改」); the next head of #25717 carries the changes. A contract review reads the diff against its order; it was never meant to ask whether the design works for its first consumer. That question is what this order makes mandatory.\n\n## What to change\n\n1. **Depth.** For a PR whose committed tree touches any of the three surfaces above, the at-tier review owed before ACCEPT is a full review: the contract items ①②③ plus a judgment of the design against the code it cites and the scenario it is accepted against (for an ADR, its first consumer and its execution plan). Choose the carrier: a fourth item in the existing `## Contract review` record, or a separate record with its own heading and the same `Served-tier:` / head-sha / independence lines. The brief template gains the adversarial instruction for that item.\n2. **Independence.** The full review runs in an agent other than the drafter's, at `CONTRACT_REVIEW_TIER`, fed the card, the rulings, the PR and the cited code, ⛔ not the drafter's own conclusions (the contract review's existing feeding rule).\n3. **Faces.** Today the at-tier contract review is owed by the published-schema face and the governed-rules-text face. The PR states whether `skills/**` and `docs/adr/**` already fall under the governed-rules-text definition in SKILL.md, and adds what is missing so that all three surfaces in the order owe the full review.\n4. **Policy text.** The SKILL.md passage that states the review policy gains this order as a clause in the same edit, so `contract-review.md` stays its detail.\n\n## Boundary\n\n- This changes PM-lane rules (`.claude/**` is a governed surface, Tier S). Whether this order is enough to land it, or the maintainer's word is owed, is triage's and the director seat's call; ⛔ this card does not decide it.\n- Sibling: #25729 (who drafts ADR text, at which tier). This card is who reviews spec, skills and ADR changes, and how deep. Either can land first.\n- Not in scope: re-reviewing PRs that already merged.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

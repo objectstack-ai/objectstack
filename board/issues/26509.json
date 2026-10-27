@@ -1,0 +1,36 @@
+{
+  "number": 26509,
+  "kind": "pull_request",
+  "title": "test(spec): state the registered-type closure rule instead of pinning closed/total counts",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T05:54:58Z",
+  "updated_at": "2026-10-27T06:50:32Z",
+  "closed_at": "2026-10-27T06:50:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-27T06:50:30Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26509",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-support-ai\"} -->\n_Requested by **Yibo Wang** · [project thread](https://claude.ai/code/project/chan_01BVUyyPie8gHwoPM18iABwB?thread=cmsg_01BVUyyPie8gHwoPM18iABwB5sm8QBuDxvf14zMDnQes6X)_\n\nFixes #26437\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：`metadata-type-schemas.test.ts` 末尾两个手写计数（closed 27 / types 28）换成规则断言：从注册表算出「未闭合的类型集合」，必须恰好等于文件里具名的例外表 `STILL_STRIP`（今天只有 `view`）。计数的递增记录挪到文件头作为历史。\n- 为什么改：每加一种元数据类型就得手改这两个数，改数不证明任何事；规则断言只在真正违约时变红，并直接点名违约的类型。\n- 风险与回滚：只改一个测试文件，不发布任何东西；回滚就是 revert 这一个提交。\n- 先看：`packages/spec/src/kernel/metadata-type-schemas.test.ts` 的 `the open set, computed from the registry, IS STILL_STRIP` 用例（文件末尾），再看文件头新加的 History 节。\n- 两分钟验证：`pnpm --filter @objectstack/spec exec vitest run src/kernel/metadata-type-schemas.test.ts`，预期 134/134 通过。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n`packages/spec/src/kernel/metadata-type-schemas.test.ts` only.\n\n- The closure `describe` ended in `expect(closed.length).toBe(27)` and `expect(types.length).toBe(28)`, bumped by hand on every new metadata kind. That test is replaced by the rule the counts stood in for: the registered types whose top-level schema posture is not `strict`, computed from `listMetadataTypeSchemaTypes()` with the file's own `topLevelPosture` walker, must equal `STILL_STRIP` (today `['view']`). `types.length > 0` is kept.\n- The bump log (25 → 24 `validation`, 24 → 25 `api`, 25 → 26 `capability`, `api` closing, 26 → 27 `picklist`, 27 → 28 `sharing_rule`) moves to a `## History` section in the file header.\n- Two pieces of prose that still referred to the count are updated: the STILL_STRIP reverse-pin message no longer says \"and update the count\", and the `view` note no longer says \"24 of 25 are closed\".\n\n## Why\n\nPart of #26431 (retire the transcription pins). A hand-typed total is a transcription of the registry, not a check on it: adding a closed kind turned the suite red for no defect, and the fix was always to type the new number. The rule form fails only on a real breach (a new open kind, or an exception that closed) and names the offending types in the diff.\n\n## Tests\n\nRun at head `120bfb17`.\n\n- `pnpm --filter @objectstack/spec exec vitest run --maxWorkers=2 src/kernel/metadata-type-schemas.test.ts` under the verify lock: `Test Files 1 passed (1)`, `Tests 134 passed (134)`, `VERDICT command-exit 0`.\n- `pnpm --filter @objectstack/spec build && pnpm --filter @objectstack/spec typecheck`: `VERDICT command-exit 0`; `check:test-typecheck: OK` (test layer compiles under `tsconfig.test.json`, debt ledger held).\n\n<details><summary>Ablation: one closed type made non-strict reds the new assertion</summary>\n\nVia `scripts/ablation-replace.mjs` on `packages/spec/src/data/picklist.zod.ts`, anchor `export const PicklistSchema = lazySchema(() => strictObject({` replaced with `z.object({` (anchor x1 → x0, replacement x0 → x1, blob `56447b6a03a5` → `9ee381dbfaaf`). The test imports the registry by relative `src` path, so no build sits between the mutation and the run.\n\n```\nFAIL registered-type closure is derived, not tallied > the open set, computed from the registry, IS `STILL_STRIP` — no count to bump\nAssertionError: the registered types whose schema is not closed must be exactly STILL_STRIP: expected [ 'picklist', 'view' ] to deeply equal [ 'view' ]\nTests  4 failed | 130 passed (134)\n```\n\nThe other three reds are the pre-existing per-type pins on `picklist` (REJECTS unknown keys, and the two envelope pins, since `strictObject` is what spreads the envelope fields). Restore: blob after restore `56447b6a03a5` == HEAD, `git diff HEAD` empty.\n\n</details>\n\n## Acceptance notes\n\n- Adding a closed metadata kind changes no test: the new assertion derives both sides from the registry and the named list; nothing counts.\n- `git grep -n 'closed.length).toBe(' packages/spec` returns 0 hits (exit 1).\n- No changeset: the diff is a test file, outside every `files[]` entry `@objectstack/spec` publishes (`src/**/*.zod.ts`, `dist`, …). Built `dist` has zero hits for the new test's text; positive control `listMetadataTypeSchemaTypes` hits `dist/browser/kernel/index.js`. Labelled `skip-changeset`.\n\n## Verification\n\n<details><summary>Derived local gates: 73 derived, 69 run green, 4 not measured, 0 red</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands` at `120bfb17` derived 73 families for the one changed path. All 73 were run with exit codes recorded; `dispatch-gates --ran` reconciles: `73 derived famil(ies) accounted for — 69 run, 4 NOT-MEASURED (4 DERIVED from a recorded exit 3)`.\n\nNOT MEASURED (exit 3, prerequisite refusal, owned by CI):\n- `node scripts/check-plugin-teardown-shape.mjs --self-test`, reason: shallow clone cannot reach its pinned positive-control commit.\n- `pnpm --filter @objectstack/lint run check:doc-formula-expressions`, reason: `@objectstack/formula` and `@objectstack/lint` not built in this worktree.\n- `pnpm check:dual-build-cjs-loads`, reason: reads built output of packages this diff does not touch (no `dist/`).\n- `pnpm check:lean-entry-closure`, reason: `@objectstack/objectql` not built.\n\n`node scripts/check-nul-bytes.mjs`: exit 0. Repo-wide scans (`pnpm lint`) and the full test farm are CI's.\n\n</details>\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes. (CI's run is the reading.)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (Publishes nothing; `skip-changeset`.)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (Test file only; no artifact reads it.)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n\nDispatched by spec seat 1 (`session_01WGufzfhobWEgUUrjz4rrbh`); implemented in card thread `session_01WGufzgtamNuTZbD2fSuQ3Y`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01WGufzgtamNuTZbD2fSuQ3Y\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WGufzgtamNuTZbD2fSuQ3Y)_\n"
+}

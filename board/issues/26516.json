@@ -1,0 +1,36 @@
+{
+  "number": 26516,
+  "kind": "pull_request",
+  "title": "test(ui): read the Test UI shard width from ci.yml instead of spelling /16",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T06:10:53Z",
+  "updated_at": "2026-10-27T06:50:32Z",
+  "closed_at": "2026-10-27T06:50:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-27T06:50:30Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26516",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi92nQVkpVWAJTFvTHUJtyJt8)_\nPart of #26443\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 改了什么:两个 ui 选择器自测不再写死 `/16`,改为调用 `scripts/ci-shard-matrix.mjs` 的 `shardTotal(ci.yml, 'test-ui')` 读出 Test UI 的分片数。\n- 为什么改:分片数只该住在 ci.yml 一处;以后调整 Test UI 矩阵宽度,不必再去 ui 测试里找第二份 `16`。\n- 风险与回滚:仅测试文件,无发布面;ci.yml 只读不改。回滚即 revert 本 PR。\n- 先看:`ui/scripts/__tests__/select-affected-tests.test.ts`(宽度断言那一段)、`ui/scripts/__tests__/select-affected-tests-wiring.test.ts`(RUN_HEADER 与三处 `--shard=1/N`)。\n- 两分钟验证:`cd ui && pnpm exec vitest run scripts/__tests__/select-affected-tests-wiring.test.ts scripts/__tests__/select-affected-tests.test.ts`,预期 2 个文件 49 个用例全绿。\n- 需要你做的:无,席位落地。\n\n## What changes\nTest-only, two files under `ui/scripts/__tests__/` (both edits are the card's deliverable, no other test was forced to move):\n- `select-affected-tests-wiring.test.ts`: `RUN_HEADER` and the three `--shard=1/16` / `shard 1 of 16` expectations now use `SHARDS = shardTotal(ci.yml text, UI_JOBS.test)`. The workflow text is read once, before the header is built.\n- `select-affected-tests.test.ts` (\"keeps the matrix width and the full-suite command for the full battery\"): the literal `shard: [1, ..., 16]` list and the three `/16` spellings are replaced by `shardTotal(rootCi(), UI_JOBS.test)`; the run-step header is now asserted present (the old `job.indexOf(...)` slice silently fell back to the job's last character when the header was missing).\n\nBoth import the reader as `../../../scripts/ci-shard-matrix.mjs` and read ci.yml through the files' existing root resolution (`workspaceRoot()` / `rootCi()`). `.github/workflows/ci.yml` and `scripts/ci-shard-matrix.mjs` are untouched.\n\n## Tests\nAt head 9507724c: `pnpm exec vitest run` on the two files: `Test Files 2 passed (2)`, `Tests 49 passed (49)` (os-verify-lock VERDICT command-exit 0).\n\nAblation (on-disk ci.yml mutation through `scripts/ablation-replace.mjs`, restored by trap; blob back to HEAD b1014f87af2c and `git diff HEAD` empty after each leg):\n\n<details><summary>Leg A: test-ui matrix list alone resized to 12, /16 left in the name and run step</summary>\n\nNew tests: `Tests 1 failed | 38 passed`, both files red. The wiring file refuses at load: `ci.yml has no step headed \"- name: Run the ui tests (shard ${{ matrix.shard }}/12)\"`; the selector file fails \"keeps the matrix width...\". So the tests still require the run step to agree with the matrix.\n</details>\n\n<details><summary>Leg B: the whole test-ui job resized to 12 (list, all four /16, \"of 16.\")</summary>\n\n`node scripts/ci-shard-matrix.mjs --job test-ui` answers 12. New tests: `Test Files 2 passed`, `Tests 49 passed`: they follow the workflow. The origin/main versions of the same two files against the same mutated ci.yml: `Tests 1 failed | 38 passed`, both files red: they stayed pinned at 16.\n</details>\n\n## Acceptance notes\n- The ui `select-affected-tests` selector reaches a root `scripts/` change only through its always-on set; these two files live in `ui/scripts/__tests__/`, which that set covers, so a later change to `scripts/ci-shard-matrix.mjs` still re-runs them.\n- The prose \"the full sixteen-shard suite\" in the wiring file's header is history (what every PR ran before objectui#12214's fix) and is left as written.\n- The card's acceptance grep over these two files (`git grep -nE \"/(3|8|16)\\b\"`) has zero hits. Over all of `ui/scripts/__tests__/*.ts` the remaining shard-shaped hits are prose (`Test (shard N/16)` in the headers of check-eager-closure-budget, check-skill-examples and check-test-path-roots, which name objectui's retired job) and check-test-shard-results' own synthetic 8-shard roster, which reads no workflow. None copies a live ci.yml size, and all are outside this card's file surface.\n\n## Verification\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` at 9507724c derived 18 commands; all 18 run locally, exit codes recorded before any pipe. `--ran`: \"18 derived, 18 run, 0 NOT-MEASURED, 0 UNRUN\".\n\n<details><summary>Per-command exit codes</summary>\n\n17 of 18 exit 0: check-closing-keyword-parity (scan and --self-test), check-comment-mask-corpus, check:cross-package-test-inputs, check:driver-memory-census, check:engine-double-contract, check:gitlink-declared, check:nul-bytes, check:published-files, check:query-options-erasure, check:refd-timer-probe, check:tier-file-adoption, check:type-check-coverage, check:type-check-debt, check:undeclared-dep-imports, check:watch-hint-literal, check:where-matcher.\n\n`pnpm --dir ui exec vitest run scripts/` exit 1, not caused by this diff:\n- first run: 16 files red, every one `Cannot find package '@objectstack/spec/...'` (the container had not built the seven ui deps that CI's Test UI builds first);\n- after `turbo run build` of those seven closures (VERDICT command-exit 0): `Test Files 1 failed | 177 passed | 2 skipped`, `Tests 1 failed | 5096 passed`. The one red is a 15 s timeout in `check-i18n-dead-keys.test.ts` (\"keeps every key it makes reachable OUT of both tiers\") on the shared box; that file alone: `Tests 134 passed (134)`, VERDICT command-exit 0. Both changed files are green in that run.\n</details>\n\nCI check-runs: in progress at the time of writing; Test UI is the authority for the suite.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmRRgsu9coZffDuXRpz)_\n"
+}

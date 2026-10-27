@@ -1,0 +1,38 @@
+{
+  "number": 26433,
+  "kind": "issue",
+  "title": "test(rest): the registrar-file list's length is pinned as `toHaveLength(18)` in seven test files — drop the seven length pins, the list is the authority",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p2",
+    "tech-debt"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T03:53:57Z",
+  "updated_at": "2026-10-27T07:08:07Z",
+  "closed_at": "2026-10-27T07:06:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26433",
+  "body": "Filing gate: ③ maintainer-directed. Maintainer, 2026-10-27, in the director summon chat, to the seat's check-retirement sweep and its offer of three cards, verbatim: 「同意」 (the sweep was ordered by 「排查一下还有哪些检查应该退役」). Filed by the director seat (`session_01KrKXQVvgYk2AJ4VkqMobyb`, ledger objectstack#12708, sweep record 6433263738). ⛔ Not a claim. Batch-of: 11 (director seat, 2026-10-27). Dedupe: 600 newest open + closed issues grepped for the check's file name → 0 unless stated. Part of #26431. Reader: `domain:server` (packages/rest tests) and the dogfood owner for the one copy in `packages/qa/dogfood`.\n\n**Measured** (`origin/main` `e677770a`): `packages/rest/src/rest-server-registrar-files.ts:30` exports `REST_SERVER_REGISTRAR_FILES` (18 names) and its header says *\"⛔ Not a gate: nothing runs this list on its own, and a reader that imports it stays the authority\"*. Seven readers nonetheless pin the list's length to the literal 18: `ui-view-route-identity.measurement.test.ts:403`, `ui-view-route-tenancy.measurement.test.ts:1180`, `rest-server-canonical-query-ast.test.ts:428`, `rest-server-query-number-census.test.ts:358`, `meta-draft-read-door-census.test.ts:288` (also pins `SITES` 8), `rest-server-docblock-position.test.ts:298`, `packages/qa/dogfood/test/authz-conformance.test.ts:1642`. Moving one route module out of `rest-server.ts` reds all seven.\n\n**Wanted:** delete the seven `toHaveLength(18)` assertions (and the `SITES` 8 pin) — each file keeps iterating the list it imports; where a test needs an anti-vacuity guard, `expect(list.length).toBeGreaterThan(0)`. No other change. **Acceptance:** `git grep -n \"REGISTRAR_FILES).toHaveLength\"` → 0; the seven files pass. **Size:** XS. **Clause-②:** no. **Metadata-protocol:** none."
+}

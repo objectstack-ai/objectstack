@@ -1,0 +1,35 @@
+{
+  "number": 26496,
+  "kind": "pull_request",
+  "title": "fix(scripts): ADR-0087 gate reads an any index signature (D8 p4) and a src/index.tsx entry (D9)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T05:28:24Z",
+  "updated_at": "2026-10-27T06:10:25Z",
+  "closed_at": "2026-10-27T06:10:23Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-27T06:10:23Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26496",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9Ex6pB8edHJLnCCc1tgdXz5)_\n\nPart of #26220 (PR 2 of 2 for parts 3 and 4: the gate code for the ADR-0087 amendment that landed in #26455).\n\nClause-②: no\nMetadata-protocol: none\n\n## What changes\n\n`scripts/check-adr-0087-registration.mjs` only (+288 / −11).\n\n- **Part 3: predicate 4 reads an `any` index signature (D8, amended).** When the base surface is concrete, a bare `<path>#<Symbol>` naming an exported `interface`, or a `type` alias whose right-hand side is one object type literal, now goes through `indexSignatureLimb`. The limb holds when all three hold: (1) at the merge base an index signature's value type is `any`; (2) at HEAD at least one of those carries another value type, with `unknown` counted as narrowed here only; (3) the kind, the heritage (type parameters, `extends`) and every member are identical position by position on the comment-masked, normalised surface. Only the value types of base-`any` index signatures are set aside, so a re-typed non-`any` index signature is a moved member, which reads no wider than the ADR text. A dotted member path does not reach the limb. When the limb fails, the existing #6048 refusal now also prints why the limb did not hold, e.g. \"the member count moved (2 -> 1)\".\n- **Part 4: the D9 entry may be `src/index.tsx`.** `sourceEntryAt` maps `dist/index.d.ts` (or its twin) to the package's one source entry, `src/index.ts` or `src/index.tsx` (`SOURCE_ENTRY_NAMES`). Both present is refused as AMBIGUOUS by name. Neither present is refused as unmappable, as before. The build tool is never read.\n- New helpers, exported for the unit pins: `structuralDeclarationParts`, `readIndexSignature`, `indexSignatureLimb`. The member splitter does not treat the `>` of `=>` as a closer, so a nested literal's index signature is never read as a top-level one.\n\n## Battery rows\n\nNew battery `IX (#26220): predicate 4 reads an any index signature; the entry may be src/index.tsx`, 52 cases, roster floor 56 → 57:\n\n- Predicate 4, green: IX-G1 #26293's shape (`[key: string]: any` → `unknown` on a generic interface; the verdict names both sides) and IX-G2 an object-literal alias with a `readonly` index signature narrowed to `string`.\n- Predicate 4, red, each with predicate 4's FALSE refusal and the limb's reason:\n  - R1 a member removed beside the narrowed signature (the #6048 class);\n  - R2 a member re-typed;\n  - R3 a member made optional;\n  - R4 a type-parameter default changed;\n  - R5 an `extends` added;\n  - R6 a non-`any` base signature re-typed;\n  - R7 a base signature typed `unknown`;\n  - R8 still `any` at HEAD;\n  - R9 the signature's key changed;\n  - R10 an intersection alias;\n  - R11 a nested `any` signature behind an `=>`;\n  - R12 a dotted path.\n- Units: IX-U1–U4 (the index-signature reader, mapped and computed names refused, the compared parts, and the #6048 shape failing the limb).\n- D9: IX-T1 a `src/index.tsx`-only package retires an export (green; the verdict names `Gone.tsx`). IX-T2 both entries present is red as ambiguous; its `.ts` twin exports the same names, so only the refusal holds it red. IX-T3 neither entry is red as unmappable.\n\n## Ablations\n\nOne-time, on the committed fix, each restored with `git checkout HEAD --` (blob hash re-checked):\n\n| ablation | failures | turns red |\n| --- | --- | --- |\n| limb call off | 3 | IX-G1, G1b, G2 |\n| `=>` guard off in the splitter | 3 | IX-R11 goes green |\n| set aside every index signature, not only base-`any` | 6 | IX-R6, R7 go green |\n| heritage comparison off | 6 | IX-R4, R5 go green |\n| `src/index.tsx` dropped from the entry names | 4 | IX-T1, T1b, T2 |\n| ambiguity refusal off | 3 | IX-T2 goes green |\n| dotted exclusion off | 1 | IX-R12's message; it stays red because the limb reads no member path, so the exclusion is a stated guard rather than the only one |\n\n## Proof on the held PRs\n\nWith this branch's gate, `--base origin/main --head <their head>`:\n\n- **#26293 at `e349c832`: exit 0.** The verdict is `ui/packages/types/src/base.ts#ComponentRendererProps ([key: string]: any -> [key: string]: unknown)`. Main's gate refuses it at predicate 4.\n- **#26365 at `20d75f11`: exit 1, on a refusal the amendment does not cover.** Main's gate refused all three operands at the MERGE BASE as unmappable (`src/index.tsx`). With this branch the base side maps and reads. The new refusal is at HEAD: \"no workspace manifest at … is named `@object-ui/plugin-ai`\". #26365 deletes the whole package, and D9 predicate 1 reads \"absent at HEAD\" through a Program over the package's entry at each rev, which a deleted package does not have. Admitting a whole-package removal needs its own D9 wording (Tier H). Seat 1 has put that choice to the maintainer, and it is not in this PR.\n\n## Tests and gates\n\n- `node scripts/check-adr-0087-registration.mjs --self-test`: exit 0, \"627 assertions over real temp git repos\" (575 before this branch).\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`: 34 commands derived at this head (base `d0a7e748`). All 34 exit 0, including `--base origin/main` and `--self-test` of this gate, `check-scripts-symbol-anchors`, `check-declaration-mirrors`, `check-self-test-wired`, `pnpm check:changeset-gate-self-tests` and `pnpm check:pm-dispatch-gates`. `--ran`: 34 derived, 34 run, 0 NOT-MEASURED, 0 UNRUN.\n- No package is touched, so there is no build closure and no changeset (`skip-changeset`).\n\n## Acceptance notes\n\n- Part 3 and part 4 follow the amendment text of #26455 line by line. The one place this code reads narrower than the text is condition 3: only base-`any` index signatures have their value types set aside, so a non-`any` one that changes is a re-typed member. This is stated in the function's comment and pinned by IX-R6 and its ablation.\n- #26324 (predicate 2 cannot certify an operand named `default`) is a separate card and is not addressed here.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Am8eYNReiNP66D2JihPS1q\n"
+}

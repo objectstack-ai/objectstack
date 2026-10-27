@@ -1,0 +1,32 @@
+{
+  "number": 26439,
+  "kind": "issue",
+  "title": "pm(check-expected-skips): the roster of jobs allowed to skip is a hand copy of ci.yml's `if:` gates and reds on every new or renamed job — derive the roster from the workflow",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:skills",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T03:56:32Z",
+  "updated_at": "2026-10-27T05:11:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26439",
+  "body": "Filing gate: ③ maintainer-directed. Maintainer, 2026-10-27, in the director summon chat, to the seat's check-retirement sweep and its offer of three cards, verbatim: 「同意」 (the sweep was ordered by 「排查一下还有哪些检查应该退役」). Filed by the director seat (`session_01KrKXQVvgYk2AJ4VkqMobyb`, ledger objectstack#12708, sweep record 6433263738). ⛔ Not a claim. Batch-of: 11 (director seat, 2026-10-27). Dedupe: 600 newest open + closed issues grepped for the check's file name → 0 unless stated. Part of #26431. Reader: `domain:skills` / devx (`scripts/pm/**`, a seat-protocol surface). Dedupe: #26111 (closed — one instance of exactly this red, `Build UI Deps` missing from the roster) → the class, not the instance.\n\n**Measured:** `scripts/pm/check-expected-skips.mjs:264` `EXPECTED_SKIPS` lists job names that may report `skipped` and, per job, the kind of `if:` gate it carries; its self-test `auditRoster` (:402) re-reads ci.yml. The roster also hard-codes the shard sizes (/3, /8, /16 at :316, :330, :359). #26111 (2026-10-26): a job added in #25963 was missing, so every PR with an empty ui scope went red until the roster was edited. Wired at `lint.yml` repo-tooling (`check:pm-expected-skips`).\n\n**Wanted:** derive the roster from `ci.yml` itself — a job whose `if:` references the filter outputs or the two per-PR events is an expected skipper; matrix sizes read from the `matrix:` blocks — keeping the gate's real question (\"was this skip expected, or did a required job silently not run?\") and removing the hand list; the self-test proves the derivation on the live file. **Acceptance:** adding or renaming a gated job in ci.yml needs no edit in `scripts/pm`; `--self-test` green; `check:ci-filter-parity` and `check-required-contexts` unchanged. **Size:** S. **Clause-②:** no. **Metadata-protocol:** none."
+}

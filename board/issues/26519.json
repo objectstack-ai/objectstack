@@ -1,0 +1,36 @@
+{
+  "number": 26519,
+  "kind": "pull_request",
+  "title": "fix(plugin-detail): a related list's date column reads in one absolute face",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T06:20:26Z",
+  "updated_at": "2026-10-27T07:08:26Z",
+  "closed_at": "2026-10-27T07:08:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-27T07:08:24Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26519",
+  "body": "Fixes #26344\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 改了什么:记录页相关列表(RelatedList)自建的表格单元格,现在和列表网格一样带上 `inGridColumn`;未声明 `format` 的日期列整列只显示一种绝对日期,相对说法(\"昨天\"、\"逾期 3 天\")移到悬停提示里。\n- 为什么改:#26341 只修了网格,相关列表的日期列仍是\"Yesterday · 3 days ago · Sep 20, 2025\"混排,排序后看不出顺序;裁决同一条:可排序的列用绝对日期,相对说法至多作提示。\n- 风险与回滚:只改 `RelatedList.tsx` 一处单元格构建(加一个属性)、一个新 pin、一个旧 pin 改断言、一个 patch changeset。声明了 `format: 'relative'` 的字段照旧;手机宽度的卡片画廊、详情正文不受影响。回滚即 revert 本 PR。\n- 先看:`ui/packages/plugin-detail/src/RelatedList.tsx` 的 `makeCell` 末尾 `inGridColumn: true`;新 pin `RelatedList.dateColumnOneFace-26344.test.tsx` 的四条路径。\n- 两分钟验证:`cd ui && pnpm exec vitest run packages/plugin-detail/src/__tests__/RelatedList.dateColumnOneFace-26344.test.tsx packages/plugin-detail/src/__tests__/RelatedList.deadlineSettled-11815.test.tsx`,预期 2 个文件 6 个用例全绿。\n- 需要你做的:无;另请看 Acceptance notes 第一条(#25884 待发布说明里有一句会随本 PR 变得不准,是否改由你定)。\n\n## What changes\n- `ui/packages/plugin-detail/src/RelatedList.tsx`: the table cell builder (`makeCell`) passes `inGridColumn: true` on every cell it creates, the way `ObjectGrid` does since #26341. All three column sources reach that one builder (object `columns`, string `columns` and the object's `highlightFields` through `normalizeColumn`, and the field walk), so one line covers every table cell the list builds. An undeclared `date` column now reads in one absolute face, with the relative phrase as the cell's `title`; a declared `format` still wins (`DateCellRenderer` reads the flag only when the field declares none).\n- New pin `ui/packages/plugin-detail/src/__tests__/RelatedList.dateColumnOneFace-26344.test.tsx`, modelled on `ObjectGrid.dateColumnOneFace-25884`. It mounts the real list over the real data-table at desktop width and drives paths A (object `columns`), B (string `columns`), C (`highlightFields`) and D (the field walk). For each one it checks: one absolute face per date column (six rows at -1, -3, -6, +2, -40 and -400 days), the deadline's red kept with `Overdue 3d` / `In 2 days` as tooltip, `Yesterday` as the tooltip of an undeclared date, and the control: a field declaring `format: 'relative'` keeps `Yesterday` / `3 days ago`.\n- `RelatedList.deadlineSettled-11815.test.tsx`: its cell text expectations moved from the relative phrase to the absolute face plus the phrase as `title`. The per-row verdict it pins (open row red, settled row neutral) is unchanged.\n- Changeset `.changeset/26344-related-date-one-face.md` (`@object-ui/plugin-detail` patch), carrying both declaration lines.\n\n## Tests\n- Red first: at `548f25d0` (pin only, no fix) the new pin failed 4 of 4, each on `expected 'Yesterday' not to match /ago|yesterday|today|tomorrow|^in \\d|…/i`.\n- After the fix (`ca662813`), `pnpm exec vitest run packages/plugin-detail --maxWorkers=2` (from `ui/`, under the verify lock): 1 failed, the 11815 pin asserting the old relative text, as expected. That pin was updated in `d6a01e1d`.\n- `pnpm exec vitest run packages/plugin-detail --maxWorkers=2` on the tree of `d6a01e1d`: Test Files 309 passed, 1 skipped (310); Tests 2869 passed, 18 skipped (2887); lock VERDICT command-exit 0. The head `2811bbcc` differs from that tree only by restoring `.changeset/25884-grid-date-absolute.md` to its merge-base bytes.\n- `pnpm --filter @object-ui/plugin-detail type-check` (`tsc --noEmit && tsc -p tsconfig.test.json`): VERDICT command-exit 0. `tsc -p tsconfig.test.json --listFilesOnly` lists both touched test files (2 of 2).\n\n## Gates\nAt head `2811bbcc`: `node scripts/pm/dispatch-gates.mjs --commands` derived 34 families. All 34 ran with exit 0 and were reconciled with `--ran`: \"34 derived famil(ies) accounted for — 34 run, 0 NOT-MEASURED (a DERIVED zero)\". These include `check-sdui-manifest` (intact, 106 components; no registry contract changed, so no regeneration), `check-empty-changeset`, `check-adr-0087-registration`, `check:cross-package-test-inputs`, `check:test-source-alias`, `check:type-check-coverage`, `check:type-check-debt` and `pnpm --dir ui exec vitest run scripts/` (178 files passed, 2 skipped). Families CI runs outside the derived set are left to the PR's check-runs.\n\n## Acceptance notes\n- The pending release note `.changeset/25884-grid-date-absolute.md` (from #26341) lists \"a record page's related list\" among the surfaces that \"render `date` cells as before\". Once this PR lands, that sentence is false for the release that ships both notes. An earlier commit on this branch corrected it, and `check-empty-changeset` refused the edit: rewriting another PR's pending note is a decision about a release, not part of this diff. The note is therefore left byte-identical to `main`, and this PR's own note states the new behaviour. Whether to drop the four words from the #25884 note is left to a person.\n- `CellRendererProps.inGridColumn`'s doc comment in `ui/packages/fields/src/index.tsx` says `ObjectGrid` passes the flag. That is still true but no longer complete, because a related list's table passes it too. The file is outside this card's surface, so the comment is unchanged.\n- The Add picker (`RecordPickerDialog`, `cellRenderer={getCellRenderer}`) draws its own candidate table in `@object-ui/fields`, which is not one of the cells this list builds, so it is untouched. Whether its date columns mix faces was not measured.\n- On a phone-width viewport the list renders as a gallery, which does not use these cells, so it is unchanged.\n- In path A the object columns are authored as `{ field, label }`. An object column with no display text is deliberately left headerless (`RelatedList.columnHeaderLabel`).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01SMps7wq7rBTk53e8KTSEup)_\n"
+}

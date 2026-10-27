@@ -2,8 +2,8 @@
   "number": 26344,
   "kind": "issue",
   "title": "record page: a related list's date column still mixes relative and absolute faces (RelatedList builds its cells without inGridColumn, which #25884 added for grids)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:records",
     "bug",
     "domain:ui",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T21:57:49Z",
-  "updated_at": "2026-10-27T02:00:25Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-27T07:24:31Z",
+  "closed_at": "2026-10-27T07:08:26Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26344",
   "body": "Filing class: ① user-visible defect, the remainder of #25884 outside its claim. Found by the #25884 developer (os-dev-report 6428277761, PR #26341 Acceptance notes). The reach is read from the code and not measured in a browser.\n\n## What\nPR #26341 (#25884) gives `CellRendererProps` an `inGridColumn` flag. With it set, a `date` field with no declared `format` paints one absolute face down the column, and the relative phrase moves to the tooltip. `ObjectGrid` passes the flag on every column cell it builds. The record page's related lists draw their own table cells in `ui/packages/plugin-detail/src/RelatedList.tsx` (the cell builder around `:1654` on `main`) without the flag. So a related list's date column still shows \"Yesterday\" next to \"Sep 20, 2025\": the defect #25884 fixed for grids, and the same reasoning applies (absolute in a sortable column, relative at most as a tooltip).\n\n## Expected\nRelatedList's table cells pass `inGridColumn`, so an undeclared date column reads in one absolute face, with the relative phrase as its title. A declared `format` still wins. Pin it the way `ObjectGrid.dateColumnOneFace-25884` pins the grid.\n\n## Sequencing\nBlocked by #26341 (the flag must exist on `main`). `RelatedList.tsx` is on the plugin-detail landing line (#26055 → #26277 → #26325). Claim it after #26341 merges, and re-record `plugin-detail.json`.\n\nDedupe: \"related list date column relative\", \"RelatedList inGridColumn\", \"mixed date faces related\". None found."

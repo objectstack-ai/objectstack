@@ -2,8 +2,8 @@
   "number": 26318,
   "kind": "issue",
   "title": "dispatch-gates: a diff under ui/packages/PKG/src or skills/objectui derives no family for the 178 ui/scripts/__tests__ files, so a moved pin there is red only in CI Test UI",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:devpath",
     "domain:devx",
-    "pm:dispatched",
     "priority:p2",
     "tooling"
   ],
@@ -23,9 +22,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T20:49:58Z",
-  "updated_at": "2026-10-27T01:57:49Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-27T04:13:46Z",
+  "closed_at": "2026-10-27T04:12:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 4,
   "locked": false,

@@ -2,8 +2,8 @@
   "number": 25653,
   "kind": "issue",
   "title": "Security: a runAs system hook or an action script body reaches the four identity-assignment objects past the delegated-administration gate (the #25251 refusal requires flowRunId)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:identity",
     "bug",
     "domain:spec",
-    "pm:dispatched",
     "priority:p1",
     "security"
   ],
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-24T13:13:44Z",
-  "updated_at": "2026-10-27T01:45:56Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-27T04:45:08Z",
+  "closed_at": "2026-10-27T04:43:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 12,
+  "comments": 15,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25653",
   "body": "Filing gate: a maintainer ruling to act (Sales 「25251 同意」 = follow-up question 2, letter **A**, recorded on #25251). Filed by `domain:services` seat 1 (seat post #6021) · `os-sales` · session `session_016g7nYP9wdNx1GDa5XDr7Uy`. ⛔ Not a claim. Under the lane rule of 2026-10-24, this seat claims no new server cards, so the card waits in `pm:queue` for the next `domain:server` seat.\nReader: the `domain:server` lane: `packages/objectql` (declarative hook `runAs` derivation), `packages/runtime` (action script execution context) and `packages/plugins/plugin-security` (the #25251 refusal). The spec half goes to the `domain:spec` lane through a pointer on #6017.\nDedupe (open AND closed): \"hook runAs system identity assignment\", \"action script body elevated write sys_member\", and \"without flowRunId\". No hit. Parent: #25251 (closed; PR1 #25483, PR2 #25564, ADR amendment #25587). Precedent shape: #21520 → #21649 (run-time) + #21687 (save-time, hook half in `hook.zod.ts`).\nDisclosure: mechanism only. ⛔ No reproduction steps go on this card or its PRs.\ntype: Bug\n\n## What is wrong\n\n#25251's refusal (ruling `6354966423`) stops a `runAs: 'system'` **flow** from writing `sys_user_position`, `sys_user_permission_set`, `sys_invitation` and `sys_member`. Its predicate is `context.isSystem && context.flowRunId`. Two other app-authored elevation paths carry `isSystem: true` and **no** `flowRunId`, so the predicate does not see them. Both reach the four objects through the security middleware's `isSystem` short-circuit. They are found by reading `main`, not run:\n\n1. **A declarative hook with `runAs: 'system'`** fired by an ordinary user write. `withRunAs('system')` → `sudo()` = `{ ...triggering context, isSystem: true }` (`packages/objectql/src/engine.ts`, the `withRunAs` derivation). A hook fired under a system flow inherits that flow's `flowRunId`, and PR1 already refuses it. The gap is the user-triggered one.\n2. **An action script body** (`type: 'script'`, L1 expression or L2 sandbox). It runs under `buildActionExecutionContext(ec)` = `{ ...caller context, isSystem: true }` (`packages/runtime/src/action-execution.ts`). An L2 body also needs a declared write capability (`packages/runtime/src/sandbox/quickjs-runner.ts`).\n\nBoth are writable only with `manage_metadata`, the same reach as flows. Each such write lands with no `granted_by`, and the delegated-administration and invitation gates are skipped. Those are the same defects #25251 closed for flows.\n\n## Expected (ruled: the #25251 principle applies to the whole family)\n\nApp-authored automation does not use elevation to write the four governed identity objects, whether it is a flow, a hook or an action script.\n- **Run-time:** the same `PERMISSION_DENIED` refusal and prescription that PR1 gives: use `runAs: 'user'`, or the invitation / membership doors.\n- **Save-time:** a hook or action whose body literally names one of the four objects with system elevation is refused at registration. This mirrors #21687's hook half and is spec lane work.\n\n## Conditions on the executor (from the ruling)\n\n1. **Measure first.** Before any code, show on a local stack that each path above actually writes each of the four objects today. A path that does not write is reported as a fork on this card, not fixed.\n2. **The marker goes only where app-authored metadata is derived.** The provenance mark that lets the refusal see these writes is set in two places: the declarative hook's `runAs` derivation and the action body's execution-context builder. ⛔ It is never set on `sudo()` itself, because platform code uses the same function (better-auth sync, approval mirrors, seeding). A pin shows a platform `sudo()` write to the four objects still succeeds.\n3. **One predicate.** Extend `flow-system-identity-write-refusal.ts`'s predicate to recognise the new mark. Do not write a second refusal module. Each new `isSystem` read site gets its row on `content/docs/permissions/system-context.mdx` (`check-system-context-census`).\n4. **Pins:**\n   - each path is refused on each of the four objects, with the code and the prescription;\n   - the same path under `runAs: 'user'` takes the ordinary gates;\n   - a system flow is still refused exactly as PR1 does;\n   - platform `sudo()` writes still succeed.\n5. **Spec half.** The save-time refusal and its ADR-0087 D3 semantic entry belong to `domain:spec`: leave a pointer on #6017. The run-time PR ships first, or in the same release.\n6. A changeset is owed: a narrowing, with the `Clause-②` arm read against AGENTS.md at claim time.\n\n## Notes for the dispatcher\n\n- p1 · security, sized M–L: one run-time PR (objectql / runtime / plugin-security) plus one spec PR.\n- Census at claim time: no hook or action body on `main` writes the four objects (reading of the decision card). Re-run it, and name any shipped body that would start being refused.\n- #25251 stays closed (ruling: it is not reopened).\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

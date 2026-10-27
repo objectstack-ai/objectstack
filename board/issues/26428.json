@@ -1,0 +1,37 @@
+{
+  "number": 26428,
+  "kind": "issue",
+  "title": "ci(validate-deps): the scheduled OSV vulnerability audit has been red on main every day since 2026-10-21 and nobody has read it — read the finding, then fix the dependency or exempt it with an expiry before the 18.2.0 cut",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T03:45:18Z",
+  "updated_at": "2026-10-27T05:37:36Z",
+  "closed_at": "2026-10-27T05:35:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26428",
+  "body": "Filing gate: ③ maintainer-directed task. Maintainer, 2026-10-27, in the director summon chat, verbatim: 「两个暗点：定时 Validate Dependencies 的 OSV 漏洞扫描连续两天红（10-26、10-27），没人读过；content/docs/releases/v18/18-2.mdx 还没写（规则是发版时集中写）。这两个问题创建高优先级卡片。」 Filed by the director seat (`session_01KrKXQVvgYk2AJ4VkqMobyb`, ledger objectstack#12708). ⛔ Not a claim. Reader: the `domain:devx` lane (owner of `.github/workflows/validate-deps.yml`, `osv-scanner.toml`, `scripts/check-osv-exemptions.mjs`); a dependency bump lands in the package's own lane if the finding names a product package. Dedupe: 300 newest open + closed issues, grep `osv|vulnerab|validate dep` → 0. **New.** Queued at p1 on the maintainer's word; triage re-grades if it disagrees.\n\n## 维护者速读\n\n定时工作流 `Validate Dependencies`（每天 03:00Z）在 main 上从 **10-21 起连红 7 天**（10-20 还是绿），红的那一步是「Audit dependencies for known vulnerabilities (OSV-Scanner)」。这一步的日志在 GitHub 的 blob 存储上，本席的容器拉不到，所以**红的是什么漏洞还没人读过**。这张卡要的是：读出来，然后二选一——升级那个依赖，或者按 `osv-scanner.toml` 头部的规矩写一条带 `ignoreUntil` 和理由的豁免（单独一个带 `osv-exemption` 标签的 PR）。18.2.0 切版之前要有答案：发版门不读这个工作流，但带着未读的漏洞红发版是不该做的。\n\n## Measured (2026-10-27T03:5xZ, `origin/main` `e677770a`)\n\n- Scheduled runs on `main`, newest first (run id · conclusion · head): 40442115529 failure 10-27 `5507225e` · 40262393687 failure 10-26 `6e0597f2` · 40156805695 failure 10-25 `f3fea0a0` · 40056726910 failure 10-24 `e1e9022e` · 39892965360 failure 10-23 `5c9ba226` · 39714768704 failure 10-22 `6b44efa7` · **39536495453 failure 10-21 `3b3830ca` (first red)** · 39362274867 success 10-20 `0904d856`. One earlier isolated red on 10-16 (38843597390), green before and after.\n- In every red run the only failing job is `Validate Package Dependencies` and the only failing step is `Audit dependencies for known vulnerabilities (OSV-Scanner)` (`validate-deps.yml:177`, `google/osv-scanner-action` on `pnpm-lock.yaml`). The exemption self-check step before it (`:152`, `scripts/check-osv-exemptions.mjs`) passes.\n- The step's own annotation carries no advisory id; the job log (blob-storage URL from `GET /actions/jobs/{id}/logs`) is where the GHSA/CVE and the package are named. Not readable from this container; readable from any seat with GitHub Actions log access or the maintainer's browser.\n- `pnpm-lock.yaml` commits between the last green and the first red: none on 10-20/10-21 — the lockfile changed on 10-25 (#25774) and later, so the first red is most likely a **new advisory published against an existing pinned version**, not a dependency this repo added. The reading decides.\n- `osv-scanner.toml` exists at the root with no active exemption entries.\n\n## Governing text\n\n- `.github/workflows/validate-deps.yml:134–150`: the OSV step \"fails unconditionally on every branch (#2974)\"; an exemption lives only in `osv-scanner.toml` with `ignoreUntil` mandatory and a reason, landed by its own `osv-exemption`-labelled PR; `scripts/check-osv-exemptions.mjs` refuses a missing, quoted, expired or over-ceiling expiry. ⛔ Never lower the gate.\n- AGENTS.md Documentation Guardrails / release discipline: the release gate (`release.yml` `full-battery`) reads `CI` and `Lint & Type Check` only, so this red does not refuse a cut by itself — which is why it needs a human reading before 18.2.0.\n\n## Wanted\n\n1. Read run 39536495453 (first red) and 40442115529 (newest): name the advisory id(s), the package(s) and version(s), and which workspace package(s) pull them in (`pnpm why <pkg>`). Record it on this card.\n2. Then one of: (a) bump the dependency (its own PR in the owning lane, changeset as the lane's rules require, `pnpm validate:deps` green); or (b) if no fixed version exists or the advisory does not reach this code path, add the exemption to `osv-scanner.toml` with `ignoreUntil` and the reason, in an `osv-exemption`-labelled PR; `node scripts/check-osv-exemptions.mjs --self-test` and the real check green.\n3. The next scheduled `Validate Dependencies` run on `main` is green; link it here.\n\n⛔ Not here: changing the workflow's trigger, schedule or failure semantics; any other scanner.\n\n## Acceptance\n\n- The advisory and the affected package are named on this card with the run that showed them.\n- `Validate Dependencies` scheduled run on `main` green, linked, before the 18.2.0 Version Packages PR is merged (or the maintainer is told on this card why it cannot be, with the advisory named).\n\n**Size:** S (read + bump) or XS (read + exemption). **Clause-②:** no. **Metadata-protocol:** none.\n\n## Related\n\nRelease readiness reading in the director chat (2026-10-27); #25807 (18.2.0 release test sweep anchor); #2974 (the OSV gate's origin)."
+}

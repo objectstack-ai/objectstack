@@ -1,0 +1,26 @@
+{
+  "number": 26563,
+  "kind": "issue",
+  "title": "plugin-approvals: the approval request page's step rail lists one fixed path, so a request routed to the finance-only rung shows step 2 as the joint legal + finance rung",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T08:33:01Z",
+  "updated_at": "2026-10-27T08:33:01Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26563",
+  "body": "Filing gate: ① user-visible defect, reproduced in the browser on @objectstack 18.2.0 (found in the hotclm 18.2 upgrade pass, objectstack-ai/hotclm#155); also visible under 18.1 (hotclm regression screenshot r18-fin-approve-open.png).\n\n**Symptom.** hotclm's `contract_approval` flow has six approval nodes behind decisions: `manager_review` → (`legal_finance_joint` | `legal_only` | `finance_only` | none) → `executive_signoff`? → `gm_signoff`?. A 250,000 order routed `route_finance = true`, `route_legal_head = false`, so it goes manager → `finance_only`. On the request page the rail reads:\n\n1 直属上级 · 2 法务负责人 + 财务负责人（会签） · 3 分管领导 · 4 总经理\n\nwhile the current step header says 合同审批 · 财务负责人 and the slate waits on the finance controller. The rail names a rung this request is not on, and shows two rungs (分管领导, 总经理) the route flags say it will skip.\n\n**Expected.** The rail shows the steps this request takes or has taken: the decided branch, not the first branch of each decision; rungs a decision skips are left out or marked skipped.\n\n**Business reason.** An approver reads the rail to know who else signs; a finance controller is told legal co-signs with them and that two executive rungs follow, none of which is true for this contract.\n\n**Reader.** plugin-approvals / console approvals UI lane.\n\n**Duplicate search.** objectstack issues, all states, \"approval request step rail branch / path\": 0 direct hits; nearest #25501 and #24281 (step id vs label on the same page, closed)."
+}

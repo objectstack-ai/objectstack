@@ -1,0 +1,36 @@
+{
+  "number": 26504,
+  "kind": "pull_request",
+  "title": "fix(app-shell): a framed console (Live Canvas preview) no longer opens a second assistant dock",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T05:49:10Z",
+  "updated_at": "2026-10-27T06:16:02Z",
+  "closed_at": "2026-10-27T06:16:01Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-27T06:16:01Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26504",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi94WEaVGC3gCAgvKR4LWw1qE)_\nFixes #26470\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么:** 控制台被嵌在 iframe 里(实时画布的草稿预览)时，助手面板不再读写宿主页的「面板展开」状态：框内面板默认收起，开关只在框内生效。\n- **为什么改:** 让助手改应用时自动打开的预览框共享了标签页的 sessionStorage,框里又开了一个助手面板;1024 px 下两个 420 px 面板把列表挤到约 200 px。\n- **风险与回滚:** 低。只改 `chatDockState.ts` 的读写两个函数;顶层页面行为不变(对照测试钉住)。回滚即 revert 本 PR。\n- **先看:** `ui/packages/app-shell/src/layout/chatDockState.ts` 的 `isFramedConsole` 与读写函数开头的守卫;新测试文件。\n- **两分钟验证:** `pnpm --dir ui exec vitest run packages/app-shell/src/layout/__tests__/ConsoleLayout.previewFrameDock-26470.test.tsx`,预期 4 个测试全绿。\n- **需要你做的:** 无，席位落地。\n\n## What changes\n\n`ui/packages/app-shell/src/layout/chatDockState.ts`:\n\n- New `isFramedConsole()`: `window.self !== window.top`, and `true` when the parent refuses access.\n- `readStoredDockExpanded` returns its `fallback` inside a frame, so the framed console's dock starts from its own default (collapsed for the console rail) instead of the host page's `ai-chat-dock-expanded` flag.\n- `writeStoredDockExpanded` is a no-op inside a frame. `useChatDockState` keeps the frame's expanded state in React state only, so opening or closing the dock in the preview never writes the host's flag. `armChatDockExpanded` goes through the same writer.\n\nThe guard sits in the dock state module rather than in a `ConsoleLayout` special case, as the card asked. Every reader and writer of the flag passes through these two helpers, so `ConsoleLayout` is unchanged.\n\n### Frame signal: `window.self !== window.top`, not `?preview=draft`\n\nOne signal, chosen for these reasons:\n\n1. The query misses a case the card's defect covers. `LiveCanvas`'s `canvasSrc` drops `?preview=draft` once the app is materialized (the frame then loads the plain `/apps/SEGMENT`). That frame shares sessionStorage just the same and would still open a second dock.\n2. The query also matches a page that is not framed. A draft preview opened in its own tab is an ordinary console page; its dock is the only assistant on screen and should keep working as before.\n3. The frame test is the thing that actually causes the defect: sharing the tab's sessionStorage with a host page that has its own dock.\n\n## Tests\n\nNew `ui/packages/app-shell/src/layout/__tests__/ConsoleLayout.previewFrameDock-26470.test.tsx`. It renders the real `ConsoleLayout`, `AppShell`, `useChatDockState` and storage helpers; only the rail body is a stand-in. \"Framed\" is `window.top` answering a different window.\n\n1. Framed, host flag `'1'`: the dock does not mount; the launcher is there.\n2. Framed, host flag `'0'`: opening (launcher click) and closing (the keyboard toggle) the dock in the frame leaves the flag `'0'`.\n3. Framed, host flag unset: toggling leaves it unset.\n4. Control, top-level: flag `'1'` mounts the dock, and toggling writes `'0'` then `'1'` as before.\n\nNo existing test was edited.\n\n## Acceptance notes\n\n- The card's \"Expected\" also suggests that a framed console show no assistant launcher and arguably no sidebar or top bar. The seat's delta asked for a dock that starts closed and is scoped to the frame, so the launcher stays in the frame and the chrome is unchanged. Hiding preview chrome is a product call, listed in the report's open questions.\n- Any console in a frame now keeps its dock state per frame, not only the Live Canvas. A console embedded by some other host starts collapsed and does not carry the open dock across a full reload inside the frame; the dock still works there.\n- The rail WIDTH still persists through localStorage (`ai-chat-dock-width`) inside a frame, as it does across tabs. The card is about the expanded flag; width is a shared user preference, not a second dock.\n- `rememberDockReturnLocation` (the maximize-to-`/ai` origin) is not framed-scoped. Maximizing from inside a preview frame is out of this card's scope.\n\n## Verification\n\nAll runs on head `d368ab53`, worktree based on `origin/main` `00a4593a`.\n\n<details><summary>Targeted vitest (new file + the dock siblings)</summary>\n\n```\npnpm --dir ui exec vitest run (under os-verify-lock) \\\n  .../ConsoleLayout.previewFrameDock-26470.test.tsx .../chatDockState.test.ts \\\n  .../ConsoleLayout.fabYieldsToOpenDock-10899.test.tsx .../chatDockReturnLocation.test.tsx \\\n  .../ChatDock.test.tsx .../ConsoleLayout.dockBinding-10926.test.tsx\n Test Files  6 passed (6)\n      Tests  33 passed (33)\nos-verify-lock: VERDICT command-exit 0\n```\n</details>\n\n<details><summary>Ablation: source reverted to origin/main, new test re-run</summary>\n\n`chatDockState.ts` restored from `00a4593a` (tree only; `isFramedConsole` count on disk 0), new test file run, file restored with `git checkout HEAD --` (hash equals the HEAD blob, `git diff HEAD` empty).\n\n```\n     × inside a frame, the host page's EXPANDED flag does not mount a second dock\n     × opening and closing the dock inside a frame leaves the host page's flag as it was\n     × inside a frame, an unset host flag stays unset after the dock is toggled\n      Tests  3 failed | 1 passed (4)\nos-verify-lock: VERDICT command-exit 1\n```\n\nThe three framed cases go red and the top-level control stays green.\n</details>\n\n<details><summary>Type check and gates</summary>\n\n`pnpm exec turbo run build --filter='@object-ui/app-shell^...' --concurrency=2 && pnpm --filter @object-ui/app-shell type-check` (tsc --noEmit, then tsc -p tsconfig.test.json, which covers the new test): `os-verify-lock: VERDICT command-exit 0`.\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 35 commands; each ran with exit 0. `--ran` reconciliation: `35 derived, 35 run, 0 NOT-MEASURED, 0 UNRUN` (a derived zero: all 35 recorded an exit code).\n</details>\n\nThe full app-shell suite and the repo-wide farm are left to CI (`Test UI`, `Type Check UI`, `Lint UI`).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmPEQvCWPCD2sAQWd3D)_\n"
+}

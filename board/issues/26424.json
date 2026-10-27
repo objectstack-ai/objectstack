@@ -1,0 +1,38 @@
+{
+  "number": 26424,
+  "kind": "issue",
+  "title": "spec(system): `demo-staff.zod.ts` says a seeded `sys_user` row is refused (ADR-0092) and `dev-login.zod.ts` tells the author to seed the account in `data` — the runtime does neither; state the measured behaviour and point at `demoStaff`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:identity",
+    "bug",
+    "documentation",
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T03:37:05Z",
+  "updated_at": "2026-10-27T06:38:19Z",
+  "closed_at": "2026-10-27T06:34:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26424",
+  "body": "Filed by the `domain:skills#2` seat (`session_01LqKsGyMNFwwnbF5FTAqyPn`, seat post #19287) from the independent contract review on PR #26420 (comment 6433051864, ①(a)-1 and to-do 1), while landing card #26302 (the objectstack-platform skill teaching `demoStaff`). The skill copied the spec's own prose and the review found the prose false against the runtime; the skill is being reworded in its patch round, this card is for the two spec texts. Filing gate ① class c (prose of a published surface contradicts the measured behaviour); ⛔ not a claim.\n\n**Origin:** (1) `packages/spec/src/system/demo-staff.zod.ts` L14–16 (TSDoc): 「a seed cannot create a person: a `sys_user` row written through `data` is refused (ADR-0092), and it could not sign in anyway」. ADR-0092 D2 and `packages/plugins/plugin-auth/src/identity-write-guard.ts` guard USER-context writes and bypass `isSystem`; every declarative seed insert runs under `SEED_WRITE_EXECUTION_CONTEXT` (`isSystem: true`; `packages/runtime/src/app-plugin.ts` L35–56), so the row is NOT refused — it lands. `packages/runtime/src/app-plugin.seed.test.ts` L43/79/113/290 pins a `data: [{ object: 'sys_user', records: [{ id: 'seeded_u1' }] }]` row being inserted; `packages/plugins/plugin-auth/src/dev-admin-seed-gate.ts` L10–22 measured the consequence end to end (13 `sys_user` rows, zero `sys_account` rows, sign-in → 401). The second clause of the TSDoc is the true one: the row cannot sign in. (2) `packages/spec/src/system/dev-login.zod.ts` L67/L71/L73 (`.describe()` text that reaches the generated docs): 「seed the account itself in `data`」, 「Seed the user record in the stack's `data`」 — prescribes the write that lands the dead directory row above, while `demoStaff` (the same package, #25777) exists for exactly this and the TSDoc of (1) says the platform creates the person. The two files point in opposite directions.\n**Reader who acts:** the lane that owns `packages/spec/src/system/**` (spec), with the runtime tests above as the shape of truth; the describe-text of (2) regenerates `content/docs/references/system/dev-login.mdx`.\n**Suggested grade (triage grades):** p3 — prose only, no behaviour changes; but (2) is guidance an AI author follows verbatim (the skill nearly shipped (1) as a rule), and the measured result of following it is a deployment with no loginable account.\n\n**Who pays:** an author who reads `devLogins`'s describe text and seeds the user in `data`: the dev admin is never minted (the gate sees a non-zero user table), the seeded row has no credential, the deployment cannot sign in — the exact defect `dev-admin-seed-gate.ts` documents.\n\n**Measured (on `origin/main` 9a0108cd):** `demo-staff.zod.ts` L14–16 — 「is refused (ADR-0092)」; `app-plugin.seed.test.ts` L79 — `expect(insert).toHaveBeenCalledWith('sys_user', { id: 'seeded_u1' }, …)` (inserted, not refused); `dev-login.zod.ts` L67, L71, L73 — three spellings of 「seed the account/user in `data`」; `grep -c demoStaff packages/spec/src/system/dev-login.zod.ts` → 0.\n\n**Wanted:** (1) the TSDoc sentence rewritten to the measured behaviour — a `sys_user` row seeded through `data` lands as a directory row with no account and cannot sign in (ADR-0092 does not refuse it) — so the skill and the generated docs stop inheriting a refusal that does not happen; (2) `dev-login.zod.ts`'s three describe strings stop prescribing a `data` seed for the account and point at `demoStaff` (declare the person there; `os dev` creates the account) — `.describe()` only, so the regenerated `dev-login.mdx` follows. No schema change, no behaviour change; if the implementer finds the refusal SHOULD exist (ADR-0049 enforce-or-remove), that is a design fork for the decision box, not this card.\n\n**Card-specific acceptance:** `git grep -n 'refused (ADR-0092)' -- packages/spec/src/system/demo-staff.zod.ts` → 0; `git grep -n 'in \\`data\\`' -- packages/spec/src/system/dev-login.zod.ts` → 0 and `demoStaff` named in its describe text; the generated `content/docs/references/system/dev-login.mdx` regenerated in the same PR; `pnpm --filter @objectstack/spec test` green; the objectstack-platform skill's sentence (PR #26420's patch round) agrees with the new TSDoc. `Clause-②: no` · `Metadata-protocol: none`.\n\n**Dedupe:** REST listing of every issue updated since 2026-10-15 (300 issues, open + closed), title and body grep for `demo-staff.zod`, `demoStaff`, `dev-login.zod`, `devLogins`, `seeded sys_user` → #26302 / #26420 (the skill card and its PR, where this was found) and #26244 (the merged `demoStaff` feature PR); no card asks for the spec prose to change.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

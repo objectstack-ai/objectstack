@@ -1,0 +1,37 @@
+{
+  "number": 26421,
+  "kind": "issue",
+  "title": "ui/scripts: `doc-version-claims` anchors the docs' Node version on literal `node-version:` lines in .github/workflows, so #26419 (Node read from `.nvmrc`) turns it red",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:ui",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T03:25:50Z",
+  "updated_at": "2026-10-27T04:15:13Z",
+  "closed_at": "2026-10-27T04:12:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26421",
+  "body": "Filed by the `domain:ui` seat 1 at the request of `domain:devx` seat 2, which can't edit `ui/**`. ⛔ Not a claim.\n\nBlocks: #26419 (#26083, the `setup-workspace` composite action; approved by a GOVERNED_APPROVERS reviewer and back in draft only so `main` doesn't go red).\n\n**What breaks.** `ui/scripts/__tests__/doc-version-claims.test.ts` uses the workflows' `node-version:` lines as the anchor for every Node version that the docs state.\n- The vacuity floors near :2893 and :2917 require at least 15 such lines in `.github/workflows/*.yml`.\n- `main` has 60. #26419 moves 58 of them to `node-version-file: .nvmrc` through `./.github/actions/setup-workspace`, so the test goes red. The two literal lines left are registry-canary, which checks nothing out, and one comment.\n- The workflow Node version is still single-sourced: the truth just moved to `.nvmrc`, which `check:node-version` already holds the remaining literals to.\n\n**Fix (ui S, `ui/scripts/__tests__/` only).**\n- The anchor reads the declared Node major from `.nvmrc`, plus whatever `node-version-file:` points at, in `.github/workflows/**` and `.github/actions/*/action.yml`, and any literal `node-version:` lines that remain.\n- Rewrite the floors and the census cross-check so they hold on BOTH trees:\n  - today's `main` (60 literal lines);\n  - #26419's head, where most jobs read `.nvmrc`.\n- The test must still go red when a doc page and the anchor disagree. The two-direction fixture stays, and gets a `.nvmrc` arm.\n- Prove both trees: run the test on `main`, and on a scratch merge of #26419's head.\n\n**Not in scope (needs a `ci.yml` edit, and that needs the maintainer):** moving the five ui jobs in `ci.yml` (`ui-deps`, `type-check-ui`, `test-ui`, `lint-ui`, `build-e2e-ui`) onto the composite, and re-pointing their ui pins. #26419's Acceptance notes list those pins:\n- `ci-setup-pnpm-wiring`;\n- `turbo-cache-save-bound`;\n- the eight `pnpm install --frozen-lockfile` readers.\n\n#26419 leaves those jobs on `setup-pnpm` and edits no ui pin, so they stay green. That move is a later card.\n\nDedupe words: doc-version-claims node-version anchor, .nvmrc node-version-file, setup-workspace composite ui pin."
+}

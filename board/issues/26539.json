@@ -1,0 +1,36 @@
+{
+  "number": 26539,
+  "kind": "pull_request",
+  "title": "fix(plugin-chatbot): draft card Publish (N) refreshes after a publish it did not run",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T07:13:38Z",
+  "updated_at": "2026-10-27T07:46:47Z",
+  "closed_at": "2026-10-27T07:46:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-27T07:46:44Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26539",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9XwvMrbCPuSr6eHG5BxfkDf)_\nFixes #26471\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：AI 对话里草稿卡的「发布 (N)」现在会订阅控制台已有的元数据刷新脉冲，横幅或 Studio 发布之后卡片重新读待发布数，归零就显示「已发布」。\n- 为什么改：从对话横幅发布后，卡片还显示「发布 (5)」，客户分不清发布到底成功没有。\n- 风险与回滚：只加一个可选 prop 和两行接线，没有新的计数来源；不传该 prop 的宿主行为不变。回滚即撤销本 PR。\n- 先看：`ui/packages/plugin-chatbot/src/ChatbotEnhanced.tsx` 新增的订阅 effect；`ui/packages/app-shell/src/console/ai/AiChatPage.tsx` 的两行接线；新测试文件。\n- 两分钟验证：`cd ui && pnpm exec vitest run packages/plugin-chatbot/src/__tests__/ChatbotEnhanced.pendingCountPulse-26471.test.tsx`，预期 2 条全绿。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- `ChatbotEnhanced` (plugin-chatbot) takes a new optional prop `subscribeMetadataRefresh?: (listener) => unsubscribe`, the same signature as app-shell's assistant-bus `subscribeMetadataRefresh`. The draft card's pending-count block records every package a draft card is bound to; one effect subscribes to the pulse and, on each pulse, re-reads those packages through the existing `refreshPendingCount` / `fetchPendingDraftCount`. No second count source. The effect is keyed on the subscriber and the fetcher, so it subscribes once and unsubscribes on unmount; a re-render fetches nothing.\n- The 发布 (N) render is unchanged: a count of 0 already draws the Published badge, exactly as a first render with 0 pending does.\n- `AiChatPage.tsx` (app-shell), the only host that wires `fetchPendingDraftCount`, passes the bus's `subscribeMetadataRefresh` (2 lines: the existing assistantBus import and the prop at the `ChatbotEnhanced` mount).\n- Why a prop and not an import: the pulse lives in app-shell (`src/assistant/assistantBus.ts`), and app-shell depends on plugin-chatbot, so importing it from plugin-chatbot would be a dependency cycle. The seat widened the file surface to those 2 app-shell lines (option A).\n- Root changeset `26471-draft-card-pending-count-pulse.md`: patch for `@object-ui/plugin-chatbot` and `@object-ui/app-shell`.\n\n## Tests\n\n- New `ui/packages/plugin-chatbot/src/__tests__/ChatbotEnhanced.pendingCountPulse-26471.test.tsx`: (1) a card shows 发布 (2); a re-render fetches nothing; the pulse fires, the fetch now answers 0, and the card no longer offers 发布 (Published shown); (2) unmount unsubscribes, and a later pulse fetches nothing.\n- No existing test was edited.\n- Ablation (one-off, not kept): the subscription effect's guard was replaced with an unconditional return through `scripts/ablation-replace.mjs` (anchor 1 → 0, blob f6afd3b0aaa4 → 778b78f95853). Both new tests went red (\"expected vi.fn() to be called 2 times, but got 1 times\"; \"expected +0 to be 1\"). Restored: blob == HEAD and `git diff HEAD` empty.\n\n## Acceptance notes\n\n- The prop declaration (near :910) and its destructure (near :2090) sit outside the pending-count block named in the claim; a new prop cannot land without them. Both are away from #26469's regions (:755 / :2039).\n- #26469 had no PR when this opened. Per the seat, this PR lands second; whichever lands second merges origin/main first.\n\n## Verification\n\nAll on head `ecc34812`.\n\n<details><summary>Local runs</summary>\n\n- `cd ui && pnpm exec vitest run` new test + `ChatbotEnhanced.changeCardV2-12894` + `ChatbotEnhanced.draftPreviewAny-12968`: Test Files 3 passed, Tests 27 passed (lock VERDICT command-exit 0).\n- `pnpm --filter @object-ui/plugin-chatbot test --maxWorkers=2`: Test Files 85 passed, Tests 807 passed (VERDICT command-exit 0).\n- app-shell, narrowed to the 21 `console/ai/__tests__/AiChatPage.*` files: Test Files 21 passed, Tests 98 passed (VERDICT command-exit 0). The full app-shell suite is left to CI `Test UI`.\n- `pnpm --filter @object-ui/plugin-chatbot type-check`: exit 0. `pnpm --filter @object-ui/app-shell type-check`: exit 0 (after building `@object-ui/app-shell^...`).\n- `node scripts/pm/dispatch-gates.mjs --commands`: 35 families, every one run with exit 0; `--ran` reconciliation: 35 derived, 35 run, 0 NOT-MEASURED, 0 UNRUN (a derived zero, all exit codes recorded).\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmRirVxTgwfMT99xmtc)_\n"
+}

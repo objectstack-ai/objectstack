@@ -1,0 +1,37 @@
+{
+  "number": 26471,
+  "kind": "issue",
+  "title": "Draft card keeps 「发布 (N)」 after the chat banner publishes: the pending count never refreshes (no subscriber to the metadata-refresh pulse)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "bug",
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T04:28:12Z",
+  "updated_at": "2026-10-27T07:48:26Z",
+  "closed_at": "2026-10-27T07:46:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26471",
+  "body": "Filing gate **① a reproduced UX defect** (class a, public door: the in-app assistant). `reach:` one browser, local stack, cloud PR #3297 head `4e7ee6d5` + framework pin `6390fe52`, zh-CN, 2026-10-27. After a change to a live app was saved as a draft, I clicked the chat's banner 「有 5 项改动尚未发布 —— 发布」. The toast said 「全部待发布改动已生效。」 and the new table appeared in the nav. The tool card above it **still shows 「发布 (5)」**, a live publish button with the pre-publish count.\n\nBatch-of: 5 · 2026-10-27 re-test of the 2026-10-25 desktop E2E after the fixes. Filed at the maintainer's request: 「完整的再测试一遍」 / 「必要的合理的建议都可以立卡」. Reviewed in-session before filing.\n\n**Business reason.** After publishing, the screen still says five changes are waiting and offers to publish them again. The customer can't tell whether the publish worked, which is exactly the doubt the draft posture (cloud#2924 / objectui#12894) was meant to remove. It happens on every publish done through the banner while a draft card is on screen.\n\n**Reader who acts.** The `domain:ui` seat: `ui/packages/plugin-chatbot`. This is a follow-up owed by the objectui#12894 / cloud#2924 family, which added the count.\n\n## Where (pin `6390fe52`; unchanged on objectstack `main`)\n- `plugin-chatbot/src/ChatbotEnhanced.tsx:2221-2262`: the count is `pendingByPackage`, fetched once per `toolCallId` (`pendingFetchedRef`) via `fetchPendingDraftCount` (wired at `app-shell/.../AiChatPage.tsx:2724`). The button renders `` (${livePendingCount}) `` at :3108-3114.\n- It is refreshed only by the card's own publish (:2304) and discard (:2345).\n- The banner (`PendingDraftsBar.tsx`) publishes and calls `emitMetadataRefresh()` (:132). plugin-chatbot has no subscriber (`subscribeMetadataRefresh` / `metadataRefresh` in ChatbotEnhanced: 0 hits), so the card keeps the old count and still offers 发布.\n\n## Expected\nAfter any publish (card, banner, or Studio), the card re-reads its package's pending count: subscribe to the metadata-refresh pulse, or take a refresh-sequence prop. With 0 pending it shows 已发布, not 发布 (N).\n\n## Dedupe\n`gh api search/issues`, incl. closed:\n- objectstack `PendingDraftsBar`: 2 (#25943, #12038), unrelated.\n- objectstack `fetchPendingDraftCount`: 0.\n- objectstack `publish count card pending drafts bar refresh`: 12, QA runs and seats; none on this.\n- cloud `PendingDraftsBar`: 0."
+}

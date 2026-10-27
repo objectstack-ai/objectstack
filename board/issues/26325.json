@@ -2,9 +2,9 @@
   "number": 26325,
   "kind": "pull_request",
   "title": "fix(plugin-detail): reveal the inline-edit pencil on keyboard focus",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -21,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T21:08:54Z",
-  "updated_at": "2026-10-27T00:59:36Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 1,
+  "updated_at": "2026-10-27T03:41:31Z",
+  "closed_at": "2026-10-27T03:41:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-27T03:41:29Z",
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/26325",
   "body": "Part of #25883\nClause-②: no\nMetadata-protocol: none\n\nItem 1 of #25883: the record page's read-mode inline-edit pencil now shows on keyboard focus, not only on hover. Item 2 (remember the empty-field toggle) has an open storage-key choice and stays on the card; #25883 remains open.\n\n## What changed\n\n- `ui/packages/plugin-detail/src/DetailSection.tsx`, the details body: the pencil beside an editable field was `opacity-0 group-hover:opacity-100`. It is a real button, so a Tab stop landed on a control the user could not see, and the shared `Button` focus ring was drawn at opacity 0. It now also carries `group-focus-within:opacity-100 focus-visible:opacity-100`.\n- `ui/packages/plugin-detail/src/HeaderHighlight.tsx`, the highlights strip: the same pencil gets the same two utilities.\n- The spelling is the one `RowActionMenu` (plugin-grid) and `data-table` (components) already use for their hover-revealed row buttons. `focus-visible` reveals the pencil while it has keyboard focus. `group-focus-within` reveals it while anything in its own field has focus, for example a lookup's link in the value.\n- Unchanged: the hover reveal, the row's hover background and `title` hint, double-click to edit, the pencil's accessible name (`detail.editInlineHint`), and every locale pack.\n- `scripts/sdui-manifest.sources/plugin-detail.json` was re-recorded with `node scripts/gen-sdui-manifest-node.mjs` under the verify lock. The artefact is unchanged; only this package's record moved.\n- `.changeset/25883-pencil-focus-reveal.md`: `@object-ui/plugin-detail` patch.\n\n## Tests\n\nNew: `ui/packages/plugin-detail/src/__tests__/inlineEditPencil.focusReveal-25883.test.tsx`, 8 tests, covering both places.\n\njsdom has no layout and no CSS engine, so it cannot measure \"visible on focus\". The tests pin the contract a browser turns into visibility:\n- the pencil is an enabled, focusable `button` and takes focus;\n- it carries `focus-visible:opacity-100` and `group-focus-within:opacity-100` next to the unchanged `opacity-0 group-hover:opacity-100`;\n- the shared Button's `focus-visible:ring-2` survives the className merge;\n- the nearest `.group` ancestor is the pencil's own field, so focus in one field reveals only that field's pencil.\n\nActivation of the focused pencil, double-click on the value, and no pencil on computed or non-editable fields are asserted as behaviour. The pencil is found by its icon, not by its localized label.\n\n- **Red first, at base `2409c9c8d7` with the fix absent:** `Tests 2 failed | 6 passed (8)`. Both failures are at the `focus-visible:opacity-100` assertion, one for `DetailSection` and one for `HeaderHighlight`. Focusability, hover and double-click were already green there, which is the defect: a focusable but invisible control.\n- **Green, at head `76d5a63f`** (the fix, plus `origin/main` 6633075b merged in), from cwd `ui/` under `scripts/pm/os-verify-lock.sh`:\n  - `pnpm exec vitest run packages/plugin-detail --maxWorkers=2`: `Test Files 305 passed | 1 skipped (306)`, `Tests 2833 passed | 18 skipped (2851)`. All 306 test files under plugin-detail ran, the new one included. The same run on the pre-merge head `55fe5e19` read the same counts.\n  - `pnpm --filter @object-ui/plugin-detail run type-check` (both `tsc --noEmit` and `tsc -p tsconfig.test.json`, so the new test is compiled): exit 0.\n  - `node scripts/check-sdui-manifest.mjs`: exit 0. The artefact is unchanged, and 27 package records are current.\n\n## Gates\n\nDerived with `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` at head `76d5a63f`: 45 commands.\n- 44 run locally, each exit 0, including `node scripts/check-sdui-manifest.mjs`, `pnpm check:nul-bytes`, `pnpm check:cross-package-test-inputs`, `pnpm check:test-source-alias`, `pnpm check:type-check-coverage` and the changeset gates.\n- NOT-MEASURED: `pnpm check:type-check-debt`. Its re-measure waits on the shared verify lock for a closure build and then runs tsc over every package. It was still waiting on the lock at a 300 s cap on a contended box, so it is left to CI's `Lint & Repo Gates`.\n- `--ran` reconciliation: `45 derived famil(ies) accounted for — 44 run, 1 NOT-MEASURED`, exit 0.\n- CI runs every other family (lint, the type-check lanes, Build and E2E UI). This PR cites CI rather than re-running them locally.\n\n## Acceptance notes\n\n- **Copy button, same hover-only class, not changed here.** In `DetailSection.tsx` the copy button drawn beside a read-only, copyable field has the same `opacity-0 group-hover:opacity-100` and is also a Tab stop. The claim scopes this PR to the pencils, so it is reported to the seat rather than fixed here.\n- **The pencil's tooltip text.** The tooltip, which Radix opens on keyboard focus, reads `detail.editInlineHint` (\"Double-click to edit\"). A keyboard user activates the pencil with Enter or Space. Locale packs are out of this claim's scope; this is left as an open question to the seat.\n- **Touch.** The pencil is still not revealed on a coarse pointer. `RowActionMenu` adds `pointer-coarse:opacity-100` for that case. The mobile read row's missing edit path is out of this claim's scope.\n- **Landing order.** On the plugin-detail line this lands after #26055 and #26277. Neither touches `DetailSection.tsx` or `HeaderHighlight.tsx`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01SMps7wq7rBTk53e8KTSEup)_\n"

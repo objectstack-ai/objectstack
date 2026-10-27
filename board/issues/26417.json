@@ -1,0 +1,34 @@
+{
+  "number": 26417,
+  "kind": "issue",
+  "title": "Record highlight strip: chip captions render empty when the highlight fields arrive as bare names and the object has no i18n bundle — every AI-built record page shows 「陈静 | 周明轩」 unlabeled",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T03:07:19Z",
+  "updated_at": "2026-10-27T05:30:49Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26417",
+  "body": "Filing gate **① a reproduced UX defect** (class a, public door: a record page). `reach:` local stack, objectui pin `6f629a7` (cloud `main` `36b07fdf`), zh-CN. Measured 2026-10-25 and re-measured 2026-10-27. On an AI-built app's record drawer (家装项目), the highlight strip under the title shows 「陈静 | 周明轩」 (the owner and the 关联客户 lookup) with **no field labels**. In the DOM, each chip's label element is rendered **empty**: `<span class=\"text-xs font-medium text-muted-foreground\"></span>`. Same on every record of that object, for owner and member alike.\n\nBatch-of: 2 · 2026-10-27 follow-up to the 2026-10-25 desktop E2E (doubtful items re-measured). Filed at the maintainer's request: 「必要的合理的建议都可以立卡」 / 「有疑点的进一步确认」.\n\n**Business reason.** The strip is the record's at-a-glance summary. Two bare names side by side cannot be read: which is the owner and which is the customer? Every AI-built app, and any object whose fields have no entry in an i18n bundle, shows this on every record page. HotCRM does not, because it ships translations, which is why it went unnoticed.\n\n**Reader who acts.** The `domain:ui` seat: `ui/packages/plugin-detail` (objectui was folded into this repository; objectstack#25854).\n\n## Where (measured on objectui pin `6f629a7`; still present on objectstack `main`: `ui/packages/plugin-detail/src/HeaderHighlight.tsx:334`, `ui/packages/plugin-detail/src/renderers/record-highlights.tsx:127`)\n- The page builder passes highlight fields as **bare names** (`synth/buildDefaultPageSchema.ts:738`, from `deriveHighlightFields`).\n- `renderers/record-highlights.tsx:125-127` normalizes a string to `{ name }`, with no label.\n- `HeaderHighlight.tsx:323` renders `fieldLabel(objectName, field.name, field.label)`. Its fallback is `field.label`, which is `undefined` here.\n- The object definition's label is in hand two lines up (`objectDefField`, :137, already merged into `enrichedField` at :145) but is never used for the caption. With no i18n key for an AI-built object, `resolve(…, undefined)` yields nothing.\n\n## Expected\nThe caption falls back to the object definition's label: `fieldLabel(objectName, field.name, field.label ?? objectDefField?.label ?? enrichedField.label)`, so it reads 「所有者」 / 「关联客户」. Cover it with a test that mounts the strip from bare names on an object with no translation bundle.\n\n## Dedupe\n`gh api search/issues`, repos cloud / objectui, incl. closed:\n- `highlight label empty`: 10 / 98.\n- `HeaderHighlight label`: 1 / 57.\n- `highlights strip label missing`: 3 / 36.\n\nThe nearest are objectui#11684 and #12523 (closed, value truncation) and #12498 (closed, approvals page submitter). None is about an empty caption."
+}

@@ -1,0 +1,37 @@
+{
+  "number": 26445,
+  "kind": "issue",
+  "title": "[Decision] Three scheduled workflows nobody reads: retire Spec Coverage (nightly) and Engine Split Metric (weekly, report-only), and fold Showcase Smoke into Nightly Tiers — or keep them",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T03:59:47Z",
+  "updated_at": "2026-10-27T07:48:35Z",
+  "closed_at": "2026-10-27T07:46:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26445",
+  "body": "Ruled: 6433804956 · letter B · 2026-10-27T04:32Z\n\nFiling gate: ③ maintainer-directed. Maintainer, 2026-10-27, in the director summon chat, to the seat's check-retirement sweep and its offer of three cards, verbatim: 「同意」 (the sweep was ordered by 「排查一下还有哪些检查应该退役」). Filed by the director seat (`session_01KrKXQVvgYk2AJ4VkqMobyb`, ledger objectstack#12708, sweep record 6433263738). ⛔ Not a claim. Batch-of: 11 (director seat, 2026-10-27). Dedupe: 600 newest open + closed issues grepped for the check's file name → 0 unless stated. Filing gate ②: a maintainer-only decision (retiring a workflow is a governed-surface change under `.github/workflows/**`; the maintainer asked which checks to retire). Reader after the ruling: `domain:devx` (one Tier H PR).\n\n## 维护者速读\n\n三条定时工作流各有问题：`Spec Coverage`（每天 05:00，带覆盖率插桩跑 spec 全套）自己的文件头写着「趋势产物最多偶尔看一眼」；`Engine Split Metric`（每周一，ADR-0076 D7 引擎跨包提交比）只出报告、不设门，「阈值定了才设门」，没人在等这个阈值；`Showcase Smoke`（每天 07:00，showcase 每个导航面渲染健康）文件头说「稳定后升为 PR 门」，从未升，30 天 8 红 22 绿，红了也不开卡没人读，而 ui 并仓后 `Build & E2E UI` 已在每个 PR 上构建控制台。请裁：**A** 三条全退；**B** 退前两条，Showcase Smoke 并进 `Nightly Tiers`（它红了会开卡）；**C** 三条都留。\n\n## 一句话问题\n\n三条没有读者的定时检查每天花 runner 时间，红了也不会变成任何人的任务。\n\n## Governing text\n\n- `.github/workflows/coverage-nightly.yml` header: the instrumented spec suite \"added minutes of instrumentation overhead to every main push … for a trend artifact that is consulted occasionally at best\" — that is why it was moved off push; nothing reads the artifact since.\n- `.github/workflows/engine-split-metric.yml` header: \"Report-only — no gate until a threshold is agreed (~88% at ADR time)\"; ADR-0076 D7.\n- `.github/workflows/showcase-smoke.yml` header: \"Manual + nightly only; it never gates PRs. Promote to a PR gate once it has proven stable here.\"\n- `test-nightly-tiers.yml`: the nightly e2e/live tiers; its report job files one issue per failing file (maintainer direction 2026-09-07 「测试会不会太多，是否都是必要的」).\n- AGENTS.md Prime Directive 14: `.github/workflows/**` is Tier H.\n\n## Premises (re-check)\n\n- 30-day run history on `main` (`GET /actions/workflows/{id}/runs`): Spec Coverage 29 success / 1 failure; Engine Split Metric 5 success; Showcase Smoke 22 success / 8 failure (the failing step: \"Vendor the pinned Console SPA\"), last six green. None of the three writes an issue (`grep -c \"issues\" <file>` → 0 write paths).\n- No card in the 600 newest issues cites a coverage trend, the engine split ratio, or a showcase-smoke red.\n\n## Options × cost × effort\n\n| | What | Consequence | Effort |\n|---|---|---|---|\n| **A** retire all three | delete three workflow files, their `check:*` wiring and `scripts/ci/scheduled-full-run.mjs`'s knowledge of them if any | the showcase nav-surface render assertion is no longer run anywhere nightly; `Build & E2E UI` covers the Console build on PRs, not every showcase surface | devx · 1 Tier H PR · XS |\n| **B** retire two, fold the third | as A for Spec Coverage and Engine Split Metric; Showcase Smoke's assertion becomes a `*.live.test.*` under the nightly tiers so a red files a card | the assertion keeps running with a reader; one nightly job fewer | devx · 1 Tier H PR + one test move · S |\n| **C** keep | nothing | three jobs keep running unread | none |\n\n## 业务含义\n\nA：没人看的仪表盘拆掉；B：拆两块，第三块的指针接到会响的那块表上；C：维持现状。\n\n## 四轴\n\nos-decision-facets\n- ① 项目长远合理性：没有读者的检查不是检查；B 把唯一还有断言价值的那条接到有读者的夜跑上，缩小工作流数量而不丢断言。\n- ② 实际业务拉动：三条工作流 30 天 0 张卡、0 个读者；Showcase Smoke 8 次红无人处理。\n- ③ 防 AI 犯错：B 下 showcase 面渲染失败会开卡（响亮）；今天是静默红。\n- ④ 创业阶段不扩散：remove 优于 declare-and-maintain；A/B 都减文件，C 保留三份永久义务。\nPrior rulings read: coverage nightly · engine split · showcase smoke → ADR-0076 D7; maintainer 2026-09-07 「测试会不会太多」; thread: none.\n\n## 推荐 + 置信缺口\n\n**B**。只看①选 B；②③④ 是否翻转：否。不取 A（丢掉 showcase 每个导航面的渲染断言，而它在 ui 并仓后的 PR 门里没有等价物）；不取 C。缺口：Showcase Smoke 的断言搬进 nightly tiers 的成本未实测（它是 Playwright 对真实栈，nightly tiers 已跑 `*.live.test.*`，形状相同）。\n\n## 裁后执行\n\ndevx 席开一个 Tier H PR（删两条或三条工作流 + 搬断言），由你批准落地；本卡随 PR 关闭。\n"
+}

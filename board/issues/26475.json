@@ -1,0 +1,32 @@
+{
+  "number": 26475,
+  "kind": "issue",
+  "title": "skills(data,automation,platform): teach ownership queues and assignment rules (ADR-0142 phase 2, PR #26337) with eval prompts",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:workflow",
+    "documentation",
+    "domain:skills",
+    "pm:blocked",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T04:33:16Z",
+  "updated_at": "2026-10-27T05:03:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26475",
+  "body": "Filing class: ① — follow-up owed by landed work. PR #26337 (#25769, ADR-0142 phase 2) declares `Skills-docs: follow-up owed`. The seat files that follow-up here, as the pm-dispatch claim template requires: the seat files the owed card and rewrites the line to `#N`.\n\nreach: named producer. PR #26337 adds authorable surface to shipped faces: the `queue` and `assignment_rule` metadata types, the `queues` / `assignmentRules` stack keys, the reserved `queue` column, the claim / release / move verbs, the `queue` sharing recipient, and the re-admitted `queue` approver type. The shipped skills do not teach any of it, so an AI authoring an app from `skills/**` cannot route ownerless records except through app-level round-robin. ADR-0142 exists to retire that pattern.\n\n**Business reason.** An app such as HotCRM, under the D8 mapping, needs queues to park leads and cases and let a team claim them. Until the skills teach this, AI-written apps keep hand-rolling assignment, and the platform capability goes unused.\n\n**Who acts.** The `domain:skills` seat, after triage. Start once PR #26337 lands, because the files below describe its surface.\n\n## Files owed (from the dev's measured line in os-dev-report 6433798870 on #25769)\n\n- `skills/objectstack-data/SKILL.md` and `skills/objectstack-data/rules/security.md`: queues, the reserved `queue` column, claim, release and move, and the queue sharing recipient.\n- `skills/objectstack-automation/SKILL.md`: assignment rules.\n- `skills/objectstack-platform/SKILL.md`: the `queues` and `assignmentRules` keys are listed but not taught.\n- The evals of those three skills. No eval exercises the `queue` approver type, although `content/docs/automation/approvals.mdx` and the approver table in `skills/objectstack-automation/references/state-machines-and-approvals.md` already teach it in #26337.\n- `content/docs/permissions/sharing-rules.mdx`: the queue recipient.\n\nOut of scope here: the ownership-queue authoring guide, which is ADR-0142 Execution plan item 4 and stays open on #25769.\n\n## Dedupe\n\nThe query \"skills docs teach ownership queues assignment rules queue approver\" in objectstack issues returned 44 hits. The top ones are #25769 (the parent, open, which carries the authoring guide but not the skills rows), #26362 (the approval lock read, not queues) and #26359 (the D3 decision, closed). No card asks for queues or assignment rules to be taught in `skills/**`."
+}

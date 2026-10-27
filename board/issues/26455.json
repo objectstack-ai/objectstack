@@ -1,0 +1,36 @@
+{
+  "number": 26455,
+  "kind": "pull_request",
+  "title": "docs(adr-0087): amend D8 predicate 4 and D9 predicate 1 for ui packages",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T04:19:26Z",
+  "updated_at": "2026-10-27T04:53:12Z",
+  "closed_at": "2026-10-27T04:53:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-27T04:53:09Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26455",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9Ex6pB8edHJLnCCc1tgdXz5)_\n\nPart of #26220 (PR 1 of 2 for parts 3 and 4: the ADR wording. PR 2, the gate code, follows once this lands).\n\nClause-②: no\nMetadata-protocol: none\n\n**Governed (Tier H): `docs/adr/**`.** This PR stays a draft and is not queued or armed until a GOVERNED_APPROVERS account approves it.\n\n## 维护者速读(草稿)\n\n**改了什么:** 只改了 ADR-0087 一个文件,加了两条修订说明,状态行也记了一笔。\n- D8 谓词 4 加一个窄分支:接口除了 `any` 索引签名变成非 `any`(`unknown` 也算)以外,继承和所有成员逐字不变,就算收窄。\n- D9 谓词 1 的入口映射:除了 `src/index.ts`,也认 `src/index.tsx`。两个都有就判为歧义拒绝,都没有照旧拒绝。\n\n**为什么改:** 有两个 ui PR 走真实处置被门禁拒。#26293 把 `[key: string]: any` 改成 `unknown`,原文只认“整体是 any”。#26365(plugin-ai 退役)卡在入口映射上:38 个发布的 ui 包里有 21 个入口是 `src/index.tsx`。两处都只影响 TS 消费者,账本不是正确渠道。这是你在决策卡上选的方案 A。\n\n**风险与代价(含回滚):** 谓词 4 是 `type-surface-only` 豁免的唯一保险。新分支要求除索引签名外逐字相同,所以 #6048(删成员)的形状照样被拒,自测里的回归钉继续断言这一点。入口映射只按源文件名判断,不读构建配置。本 PR 只改文字;门禁代码在 PR 2,带电池行和消融。回滚:revert 本 PR;PR 2 落地后要一起 revert。\n\n**席位意见:** 同意合入（ui 席 1）。两条修订都只放宽到实测挡住的那一类，没有顺手扩大。D8 的新分支只放行「声明成员完全不变、只有 `any` 索引签名收窄」这一种情况；#6048 那种丢成员的情况照旧被拒，回归钉还在。D9 只多认 `src/index.tsx` 一个入口，两个入口同时存在时按有歧义拒绝。被挡的是 #26293（#25918）和 #26365（#25921 plugin-ai 下线）；PR 2 把检查脚本和测试补上后，会拿这两个 PR 证明 exit 0。\n\n**你要做的:** 读两条修订说明(D8 谓词 4 下、D9 不可映射段落下),同意就批准本 PR。批准后由席位入队,然后开 PR 2。\n\n## What changes\n\n`docs/adr/0087-metadata-protocol-upgrade-contract.md` only (+63 / −1):\n\n- **Status line:** one `**Amended** (2026-10-27, #26220 …)` entry pointing at the two notes.\n- **D8, under predicate 4: amendment note \"predicate 4 reads an `any` INDEX SIGNATURE\".** For a bare reference naming an exported `interface`, or a `type` alias whose right-hand side is an object type literal, predicate 4 also holds when (1) at base the member surface has at least one index signature typed `any`, (2) at HEAD at least one of them carries a non-`any` value type, with `unknown` counted as narrowed there only, and (3) heritage, type parameters and every member are otherwise identical, compared member by member on the masked, normalised surface. The note states why this is not a weakening: the #6048 shape (a member removed) fails condition 3 and keeps the founding-case refusal, and dotted member paths are untouched.\n- **D9, under the unmappable-entry paragraph: amendment note \"the source entry may be `src/index.tsx`\".** The declaration entry (`dist/index.d.ts` or its twins) maps to the package's one source entry, `src/index.ts` or `src/index.tsx`. Both present is refused as ambiguous, neither present is refused as before, and the build tool is never consulted.\n\n## Measured (main `83e9d718`)\n\n- 38 published `ui/` packages (46 manifests, 8 private). 21 have `src/index.tsx`, and all 21 name `./dist/index.d.ts` as their types entry; their builds are vite-plugin-dts with `insertTypesEntry: true`.\n- No workspace package has both `src/index.ts` and `src/index.tsx`.\n- `@objectstack/client-react` (one of D9's four measured unmappables) builds with `tsup src/index.tsx`, the same shape.\n- #26293's operand at its merge base: `{ schema: TSchema; [key: string]: any; }` → HEAD `{ schema: TSchema; [key: string]: unknown; }` (gate output at `e349c832`, predicate 4 refusal).\n\n## Gates\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derives 24 commands at `2494b54b` (base `83e9d718`). All 24 exit 0, including `node scripts/check-adr-0087-registration.mjs --base origin/main` and `--self-test`, `node scripts/check-adr-links.mjs`, `node scripts/check-adr-symbol-anchors.mjs`, `pnpm check:adr-anchors`, `pnpm check:doc-authoring` and `pnpm check:pm-governed-merges`. `pnpm --filter @objectstack/lint run check:doc-formula-expressions` first exited 3 (prerequisite: `@objectstack/formula` and `@objectstack/lint` dist not built); after `pnpm exec turbo run build --filter=@objectstack/formula --filter=@objectstack/lint` it exits 0. `--ran`: 24 derived, 24 run, 0 NOT-MEASURED, 0 UNRUN. No package or script is touched, so there is no build closure and no changeset (`skip-changeset`).\n\n## Acceptance notes\n\n- PR 2 (after this lands) carries the code in `scripts/check-adr-0087-registration.mjs`: the predicate-4 limb with red/green battery rows (#26293's shape green; a member removed beside the index signature, the #6048 pin, a non-`any` base index signature, and a dotted path all red), and the `src/index.tsx` mapping (green on a vite-plugin-dts-shaped fixture; both entries present red as ambiguous), each with an ablation. Its proof: `--base origin/main` exits 0 on #26293 and #26365.\n- #26324 (predicate 2 cannot certify an operand named `default`) is a separate card and is not addressed here.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Am8eYNReiNP66D2JihPS1q\n\n"
+}

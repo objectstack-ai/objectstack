@@ -2,8 +2,8 @@
   "number": 26329,
   "kind": "issue",
   "title": "record page: the read-only field copy button is a Tab stop that stays invisible (hover-only reveal), like the inline-edit pencil before #25883",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:records",
     "bug",
     "domain:ui",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T21:11:44Z",
-  "updated_at": "2026-10-27T01:59:53Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-27T06:24:58Z",
+  "closed_at": "2026-10-27T05:36:17Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26329",
   "body": "Filing class: ① a user-visible defect (class a, public door: any record page in desktop read mode). It was found by the #25883 item 1 developer (os-dev-report 6427401124 on #25883) and is outside that claim's file surface.\n\n## What\nIn `ui/packages/plugin-detail/src/DetailSection.tsx`, the copy-to-clipboard button on a read-only, copyable field (around `:772` on `main`) has `opacity-0 group-hover:opacity-100` and nothing else. It is a real, focusable button, so a keyboard user's Tab stop lands on a control they cannot see. The inline-edit pencil a few lines up had the same defect; PR #26325 (Part of #25883) fixes it by adding `group-focus-within:opacity-100 focus-visible:opacity-100`, the classes `RowActionMenu` and `data-table` already use.\n\n## Expected\nThe copy button is revealed on keyboard focus as well as on hover, in the same way. Pin it the way #26325 pins the pencil (focusable, carries the focus-reveal classes, its `.group` is its own field), since jsdom has no layout.\n\n## Sequencing\nThe same file as #26325, on the plugin-detail landing line (#26055 → #26277 → #26325). Claim it after #26325 merges.\n\n## Related, noted, not in this card\n- The pencil's aria-label and tooltip read \"Double-click to edit\", which does not match keyboard activation. Fixing that needs a new key in every locale pack.\n- On touch screens neither control is ever revealed (`pointer-coarse:opacity-100`). That belongs with the mobile read row's edit path."

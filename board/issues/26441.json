@@ -1,0 +1,38 @@
+{
+  "number": 26441,
+  "kind": "issue",
+  "title": "docs(gates): five gates exist only to hold a count re-typed in prose (lockstep \"110 packages\", route-ledger \"105 rows\", quick-reference \"N of M\", overlay-whitelist leg 3, spec-enumerations) — delete or generate the numbers, retire the holders",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "documentation",
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T03:57:10Z",
+  "updated_at": "2026-10-27T06:43:38Z",
+  "closed_at": "2026-10-27T06:42:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26441",
+  "body": "Filing gate: ③ maintainer-directed. Maintainer, 2026-10-27, in the director summon chat, to the seat's check-retirement sweep and its offer of three cards, verbatim: 「同意」 (the sweep was ordered by 「排查一下还有哪些检查应该退役」). Filed by the director seat (`session_01KrKXQVvgYk2AJ4VkqMobyb`, ledger objectstack#12708, sweep record 6433263738). ⛔ Not a claim. Batch-of: 11 (director seat, 2026-10-27). Dedupe: 600 newest open + closed issues grepped for the check's file name → 0 unless stated. Part of #26431. Reader: `domain:devx` (docs gates under `scripts/`; the prose lives in `content/docs/**` and two script headers).\n\n**Measured** (`origin/main` `e677770a`): `scripts/check-lockstep-package-count.mjs` holds the prose \"110 packages\" in `content/docs/protocol/backward-compatibility.mdx:199` and `scripts/publish-smoke-pack.mjs:36` to `.changeset/config.json` (the real invariant is `check-changeset-fixed.mjs`); `scripts/check-route-ledger-census.mjs` holds the sentence \"this list holds 105 rows\" at `packages/runtime/src/route-ledger.ts:280`; `scripts/check-quick-reference-counts.mjs` holds \"(N of M schemas)\" headings in `content/docs/getting-started/quick-reference.mdx` (changed 5× in 30 days); `scripts/check-overlay-whitelist-table.mjs` leg 3 holds two registry counts in `content/docs/concepts/metadata-lifecycle.mdx` (legs 1–2 compare the table itself and stay); `scripts/check-docs-spec-enumerations.mjs` holds hand lists of spec subpaths. All carry `--fix`, i.e. the prose is already treated as generated output.\n\n**Wanted:** for each — remove the number from the prose (a sentence that does not state a count cannot drift) or render it at build time from the authority; then retire the holder script, its `pnpm check:*` entry and its lint.yml step (Tier H for the workflow line: lands by the maintainer's approval). Legs 1–2 of the overlay-whitelist gate stay. **Acceptance:** none of the five counts appears as a literal in `content/docs` or a script header; the five `check:*` scripts are gone from `package.json` and `lint.yml`; `check-doc-links`, `docs-audit` green. **Size:** M (one PR, or one per gate). **Clause-②:** no. **Metadata-protocol:** none."
+}

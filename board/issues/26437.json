@@ -1,0 +1,37 @@
+{
+  "number": 26437,
+  "kind": "issue",
+  "title": "test(spec): metadata-type-schemas.test.ts pins the registry at `closed 27 / types 28` and is bumped on every new metadata kind — state the rule in words, drop the counts",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:spec",
+    "priority:p2",
+    "tech-debt"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T03:55:06Z",
+  "updated_at": "2026-10-27T06:51:35Z",
+  "closed_at": "2026-10-27T06:50:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26437",
+  "body": "Filing gate: ③ maintainer-directed. Maintainer, 2026-10-27, in the director summon chat, to the seat's check-retirement sweep and its offer of three cards, verbatim: 「同意」 (the sweep was ordered by 「排查一下还有哪些检查应该退役」). Filed by the director seat (`session_01KrKXQVvgYk2AJ4VkqMobyb`, ledger objectstack#12708, sweep record 6433263738). ⛔ Not a claim. Batch-of: 11 (director seat, 2026-10-27). Dedupe: 600 newest open + closed issues grepped for the check's file name → 0 unless stated. Part of #26431. Reader: `domain:spec`.\n\n**Measured:** `packages/spec/src/kernel/metadata-type-schemas.test.ts:656–657` — `expect(closed.length).toBe(27); expect(types.length).toBe(28);` with a comment log of each bump (25→26 picklist, 26→27, 27→28 sharing_rule on 2026-10-19). The invariant the file protects is stated two lines above the numbers: every registered type's authoring schema is closed (`.strict()`) except `view`.\n\n**Wanted:** replace the two counts with the rule — the set of types whose schema is not closed equals `['view']` (or whatever the file names), computed from the registry; keep `types.length > 0`. The bump log moves to the file header as history. **Acceptance:** adding a closed metadata kind changes no test; `git grep -n \"closed.length).toBe(\" packages/spec` → 0. **Size:** XS. **Clause-②:** no. **Metadata-protocol:** none."
+}

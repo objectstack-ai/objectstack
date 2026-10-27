@@ -2,8 +2,8 @@
   "number": 25458,
   "kind": "issue",
   "title": "spec(ui): onSuccess.navigate says an in-app path starts with '/', but the console's record route is app-qualified (/apps/APP/OBJECT/record/ID) and an app-relative path lands on the home page; say so, or declare an app-scoped form",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:workflow",
     "domain:spec",
     "enhancement",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-23T14:46:39Z",
-  "updated_at": "2026-10-27T01:56:50Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-27T04:55:15Z",
+  "closed_at": "2026-10-27T04:53:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25458",
   "body": "## 维护者速读\n\n- **事由：** 规范说 `onSuccess.navigate` 可以写「以 `/` 开头的应用内路径」，但控制台的记录路由必须带应用段（`/apps/<应用>/<对象>/record/<id>`）。照字面写 `/crm_opportunity/${result.id}`，实测落到首页。\n- **要做：** 改写这段说明，讲清路径要带应用段；或者在规范里给出「相对当前应用」的写法（例如 `${ctx.app}` 或 `{ object, recordId }` 目标）。\n- **完成标准：** 作者照规范写、不写应用 id，就能打开当前应用里的记录；文档与实际行为一致。\n\nFiling gate **③ a task the maintainer set**: the maintainer's ruling on objectstack-ai/hotcrm#2247, recorded there at comment `6367379843` (director batch #6 item 1, letter C): 「同意」, 2026-10-23T14:34:48Z. Its item 2(b) orders this spec card; item 2(a) orders the paired console card, **objectstack-ai/objectui#13379**. Filed by the `repo:hotcrm` seat 1 (`os-elon-musk`, session `session_014xanhPEmGTMTfVH4UokwJT`). ⛔ Not a claim.\n\n**Suggested grade: `priority:p3`** for the wording fix (the seat's reading; grade, `domain:*` and `area:*` are triage's). Wording and docs are outside the protocol class. If triage chooses a new authorable form (a `${ctx.app}` scope member or a `{ object, recordId }` target), that widens the accepted surface, and the filing gate's protocol clause then sets p1 and a `target:`.\n\n**Reader (who acts):** objectstack triage, then the `domain:spec` lane.\n\n## Governing text\n\n- The ruling above, item 2(b): 「ask for the wording to say so, or for a `${ctx.app}` scope member」.\n- AGENTS.md Prime Directive #12 (contract-first): the spec is the one contract between the metadata author and the console. A description that the console does not honour is the contract's problem to fix, in the spec.\n\n## Measured\n\nOn `@objectstack/*` 18.0.0, HotCRM `origin/main` `c14ffde`, in a real browser: `onSuccess: { navigate: '/crm_opportunity/${result.id}' }` becomes `/_console/crm_opportunity/<id>` under the console's react-router basename. No route matches it, so it redirects to `/_console/home`. The record route is `/_console/apps/<app segment>/<object>/record/<id>`. Console side: objectstack-ai/objectui#13379.\n\n## What the spec says (read on objectstack `origin/main` `2581efbcbd`)\n\n- `packages/spec/src/ui/action.zod.ts`, `onSuccess.navigate` `.describe()` (~:1763): \"an in-app path starting with / or ./ (an SPA route hop)\". The docblock above it (~:1698) repeats \"an in-app path that starts with `/`\".\n- The same docblock's example is app-qualified: `navigate: '/apps/crm/tasks/${result.id}'` (~:1689). That works only because the console's shorthand redirect turns `/apps/<app>/<object>/<id>` into `…/record/<id>`. The text never says that the app segment is required, or which value it takes (the app's route segment; HotCRM's is its package id `app.objectstack.hotcrm`).\n- `${ctx.*}` lists `origin/apiBase/user/org/recordId/selection`. It has no member for the current app, so an action shared by several apps cannot name \"the app I am in\".\n- The same scheme sentence is on a `type: 'url'` action's `target` (~:1053, ~:1060). Whatever the lane decides should cover both, or say why not.\n\n## Ask (the lane picks one)\n\n1. **Wording only:** say that an in-app path is a console route, give the record route's full shape `/apps/<app segment>/<object>/record/<id>`, and fix the example to it.\n2. **An app-relative form:** declare that a path without `/apps/` is resolved against the current app (the console half is objectui#13379), or add a `${ctx.app}` scope member, or a `{ object, recordId }` record target. Then fix the wording to match.\n\n## Done when\n\n- The `navigate` description and its example match what the console does.\n- If option 2: a declaration with no app id opens the record in the current app (with objectui#13379). objectstack-ai/hotcrm#2247's hard-coded `'/apps/app.objectstack.hotcrm/crm_opportunity/record/${result.id}'` can then be shortened (optional cleanup per the ruling).\n- `gen:schema && gen:docs` regenerated for the changed `.describe()`.\n\n**Size:** S (option 1), M (option 2, with the objectui half).\n\n## Dedupe\n\nMethod: every open objectstack-ai/objectstack issue (110) and every issue updated since 2026-10-09 (1631, any state), listed through the repo-scoped `issues` endpoint (paged by hand) on 2026-10-23, and matched case-insensitively on their titles; the search API is refused for this session. Words: `onSuccess`, `navigate`, `navigation`, `app-relative`, `current app`, `redirectUrl`, `result.id`. Nearest hits: #23010 and #23077 (closed, the scheme set for url targets and `onSuccess.navigate`), #22434 (closed, an app-relative path for connector providers, another surface). None on point. **New.**\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

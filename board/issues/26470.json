@@ -1,0 +1,37 @@
+{
+  "number": 26470,
+  "kind": "issue",
+  "title": "Draft preview iframe opens its own assistant dock (shared sessionStorage), so an iterate turn shows two assistants and squeezes the list to ~200px at 1024px",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "bug",
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T04:27:41Z",
+  "updated_at": "2026-10-27T06:17:09Z",
+  "closed_at": "2026-10-27T06:16:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26470",
+  "body": "Filing gate **① a reproduced UX defect** (class a, public door: the in-app assistant). `reach:` one browser at 1024×768, local stack, cloud PR #3297 head `4e7ee6d5` + framework pin `6390fe52`, zh-CN, 2026-10-27. On an app's list page with the 助手 dock open, I asked the assistant to add a table. A 「草稿预览」 pane opened automatically. It is an `<iframe>` of the full console, and inside it the app's **own 助手 dock was also open**. Result: two assistants on screen, three columns, the record list squeezed to ~200 px (the page title cut to 「装修…」).\n\nBatch-of: 5 · 2026-10-27 re-test of the 2026-10-25 desktop E2E after the fixes. Filed at the maintainer's request: 「完整的再测试一遍」 / 「必要的合理的建议都可以立卡」. Reviewed in-session before filing.\n\n**Business reason.** \"Ask the assistant to change my app\" is the second thing every customer does. At a common laptop width the preview that is meant to show the change instead shows a second copy of the chat, and the real page becomes unusable until the preview is closed.\n\n**Reader who acts.** The `domain:ui` seat: `ui/packages/app-shell/src/layout`.\n\n## Where (pin `6390fe52`; unchanged on objectstack `main`)\n- The dock's open state is `sessionStorage['ai-chat-dock-expanded']` (`app-shell/src/layout/chatDockState.ts:23`, read :82). A same-origin iframe shares the tab's sessionStorage.\n- `ConsoleLayout.tsx:158` reads it unconditionally, and :241-243 mounts `ChatDockPanel` whenever `dockEnabled && dock.expanded && !isMobile`. Nothing checks `?preview=draft` or `window.self !== window.top`.\n- `console/ai/LiveCanvas.tsx:65-70` iframes the full console at `/apps/<seg>?preview=draft`.\n- Arithmetic: parent dock 420 px (`DOCK_DEFAULT_WIDTH`, chatDockState.ts:35) + iframe dock 420 px leaves ≈ 200 px for the list at 1024 px, which matches the screen.\n\n## Expected\nA console rendered inside a `?preview=draft` iframe mounts no chat dock and no FAB, and arguably no sidebar/topbar chrome either. The preview shows the app, not the console around it.\n\n## Dedupe\n`gh api search/issues` on objectstack and cloud, incl. closed:\n- objectstack `preview iframe dock assistant`: 0.\n- objectstack `草稿预览 助手 iframe`: 0.\n- objectstack `ChatDock iframe`: 0.\n- objectstack `DOCK_EXPANDED_STORAGE_KEY`: 0.\n- cloud `草稿预览 两个助手`: 0."
+}

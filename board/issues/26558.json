@@ -1,0 +1,31 @@
+{
+  "number": 26558,
+  "kind": "issue",
+  "title": "release: `@object-ui/console@18.2.0` was readable on npm 55 min after changeset reported it published, so a complete publish read red, and the log cannot tell npm lag from loss",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T08:25:38Z",
+  "updated_at": "2026-10-27T08:25:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26558",
+  "body": "Filing-gate category: ③ maintainer-directed. The maintainer, in the devx project thread on 2026-10-27 (08:22Z), after the 18.2.0 release diagnosis: 「立卡，包括。」 (the card offered there: make the publish log carry npm's own answer, so the next \"reported published, not on npm\" can be diagnosed). It is also a ① tooling defect with a measured run: a red release run on a publish that turned out complete.\n\n## What happened (18.2.0, measured)\n\n- [Release 40458210871](https://github.com/objectstack-ai/objectstack/actions/runs/40458210871), job 122037220985, publish approved at the `release` environment 06:05Z, version commit `27f38ada`.\n- `changeset publish` listed `@object-ui/console@18.2.0` under \"Successfully published\" at 06:16:41Z and pushed its tag at 06:16:55Z. `@changesets/cli` 3.0.3 counts a package as published when `pnpm publish` exits 0 (`dist/getPublishPlan.mjs`, pnpm branch), and it prints none of pnpm's or npm's output.\n- The other 109 packages were readable 06:15:55Z–06:25:19Z (npm `time`). `@object-ui/console` stayed 404 (`/@object-ui/console/18.2.0`), and `scripts/release-verify-npm.mjs` failed at 06:52:58Z after 39 rounds over its 2100 s budget: \"publish ran but 1 of 110 package(s) are still not readable … @object-ui/console@18.2.0 — not on the registry\". The Releases, ADR-0087 D4 asset, dist-tag and Docker steps were skipped.\n- The maintainer dispatched the repair, [Release 40464600678](https://github.com/objectstack-ai/objectstack/actions/runs/40464600678) (`force: true`), approved 07:09Z. npm's own `time` for `@object-ui/console@18.2.0` is **07:11:04.711Z**, four minutes before that run's publish step started (07:15:42Z). So the first upload was not lost: npm made it readable about 55 minutes after `pnpm publish` returned. The repair only re-ran the verification and the skipped steps.\n- Size: `@object-ui/console@18.2.0` is 45.7 MB unpacked, 2418 files (18.1.0: 35.3 MB, 2311). `@objectstack/console@18.2.0` (46.8 MB, 2416 files) was readable inside the normal window, so size alone does not explain it.\n- Precedent: #24888 (closed) had the same shape on 18.0.0 (`@objectstack/console`, 42 MB, readable at +16m22s), which raised the budget from 15 to 35 minutes. This time the lag was longer than the raised budget.\n\n## Why it matters\n\nThe cost of a lag like this is a red release run, a `force` dispatch, a second human approval at `release`, and about an hour before the GitHub Releases and the image exist. The bigger cost is that nobody can tell lag from loss: the log says \"not on the registry\" for both, and the only fix the message offers is the `force` repair. Had npm actually dropped the tarball, the same log would have read the same way.\n\n## Ask (the dev decides the shape)\n\n1. Keep npm's own answer for each package. `pnpm publish` already gets a response from the registry, but `changeset publish` throws it away. The publish step should keep it, as a per-package result the verifier can read, so a missing package is named as \"npm accepted it (status, id)\" or \"npm refused it\". One possible shape: publish with `--json` / a reporter that keeps stdout, or a per-package `npm view` of the version's `dist.integrity` against the packed tarball.\n2. When the budget runs out on a package that npm accepted, `release-verify-npm.mjs` should say so (\"accepted by npm, not yet readable after Ns: registry lag\") and give the next step for that case (re-run the verification or the backfill later). It must still fail closed: an unreadable package is red, never a warning.\n3. Measure before re-tuning the budget: record the per-package spread for 18.0.0, 18.1.0 and 18.2.0 from npm `time` in the script header, the way #15321 and #24888 did. A bigger budget alone is not the ask.\n\n## Scope\n\n`scripts/release-publish.sh`, `scripts/release-verify-npm.mjs` and its self-test, maybe `.github/workflows/release.yml` (the publish step). The workflow is the one job that publishes, so read its header gating notes before touching it. ⛔ No change to who may publish or to the `release` environment gating.\n\nReader: the devx execution seat, on its next candidate pick (`domain:devx`, tooling).\n\nDedupe: searched objectstack issues for \"changeset publish reports success but package not on npm registry, log npm publish response\" and \"release-verify-npm partial publish\" (15 hits, open and closed). Nearest: #24888 (closed, same symptom on 18.0.0, budget raise), #15321 (closed, verifier race), #26552 (open, the duplicate-Release false red on the same repair run, a different defect). No open card covers this.\n\nBusiness rationale: whoever approves a release learns whether it shipped from this one log. A log that cannot tell \"npm is slow\" from \"npm lost a package\" costs that person an hour and a second approval every time the biggest tarball lags.\n\nClause-②: no\nMetadata-protocol: none\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 26443,
+  "kind": "issue",
+  "title": "ci(self-tests): the shard sizes /3, /8, /16 are copied into five self-tests and fixtures — read them from the workflow's matrix blocks",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T03:58:34Z",
+  "updated_at": "2026-10-27T06:52:49Z",
+  "closed_at": "2026-10-27T06:52:49Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26443",
+  "body": "Filing gate: ③ maintainer-directed. Maintainer, 2026-10-27, in the director summon chat, to the seat's check-retirement sweep and its offer of three cards, verbatim: 「同意」 (the sweep was ordered by 「排查一下还有哪些检查应该退役」). Filed by the director seat (`session_01KrKXQVvgYk2AJ4VkqMobyb`, ledger objectstack#12708, sweep record 6433263738). ⛔ Not a claim. Batch-of: 11 (director seat, 2026-10-27). Dedupe: 600 newest open + closed issues grepped for the check's file name → 0 unless stated. Part of #26431. Reader: `domain:devx` (ci scripts) and `domain:ui` for the two ui fixtures.\n\n**Measured:** shard-count literals live in `scripts/partition-test-shards.mjs:160`, `scripts/check-required-contexts.mjs:2068–2083` (self-test asserts ci.yml contains `Test Core (${{ matrix.shard }}/8)`), `scripts/check-shard-attestation.mjs:2257, 2821`, `scripts/pm/check-expected-skips.mjs:316, 330, 359` (the roster child handles these), `ui/scripts/__tests__/select-affected-tests-wiring.test.ts:54` and `select-affected-tests.test.ts:450` (/16). Changing a matrix size means editing every one; none of them is the authority (ci.yml's `matrix:` blocks are).\n\n**Wanted:** one small reader of ci.yml's matrix sizes (or the existing parser in `check-required-contexts`) that the self-tests and fixtures call, so the literal appears once — in the workflow. **Acceptance:** `git grep -nE \"/(3|8|16)\\b\" scripts/*.mjs scripts/pm/*.mjs ui/scripts/__tests__/*.ts` shows no shard-size literal outside the reader; all self-tests green. **Size:** S. **Clause-②:** no. **Metadata-protocol:** none."
+}

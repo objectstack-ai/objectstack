@@ -1,0 +1,32 @@
+{
+  "number": 26561,
+  "kind": "pull_request",
+  "title": "fix(plugin-detail): a related list whose read fails says so instead of showing no related records",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T08:26:27Z",
+  "updated_at": "2026-10-27T08:27:12Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26561",
+  "body": "Fixes #26415\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n改了什么：记录页上的相关列表读取失败时（被拒绝的读取、服务器 5xx、网络错误），卡片上不再显示「暂无相关记录」，而是显示一行「加载失败」：服务器给出原因时带上服务器的那句话，并有「重试」按钮。被拒绝的读取（403）沿用列表视图已有的无权限文案（「你没有访问权限……」），不显示服务器原文。两条读取路径（数据源适配器、旧的原始 URL）都改了。\n为什么改：读取失败时控制台只在 console 里记一条错误，读者被告知「没有相关记录」，而实际是读不到；#25895 的空列表折叠落地后，这样的列表还会被折进「空列表」那一行，更看不见。\n风险与回滚：只改显示，不加不删任何元数据键，不新增语言包键（复用 `list.*` 已有的 9 个键，十个语言包都已有）。读取成功的列表（有记录或为空）显示与以前完全相同。失败的列表对折叠报告「非空」，所以保留自己的一行，标题旁不再显示记录数。回滚 = revert 本 PR。\n先看：`ui/packages/plugin-detail/src/RelatedList.tsx` 中的 `RelatedListLoadFailed`、`rawUrlReadFailure` 和两条读取路径的 `catch`，然后看 `emptyAnswer` 那一行。\n两分钟验证：`cd ui && pnpm exec vitest run packages/plugin-detail/src/__tests__/RelatedList.readFailed-26415.test.tsx`，预期 10 个测试全过；把 `RelatedList.tsx` 换回 main 上的版本后同一命令 10 个全红。\n需要你做的：无。绿了即可落地。\n\n## What\n\nA related list whose read fails now draws one load-failed line on its card instead of its empty state.\n\n- **Both fetch paths keep the error.** The adapter path (`dataSource.find`) and the legacy raw-URL path (`fetch`) used to `console.error` the failure and leave the rows at `[]`, so the card said \"No related records found\". Each now stores the failure, clears the rows, and the card draws the line. On the raw-URL path a non-2xx answer is now a failed read: `fetch` resolves on every status, so the error body used to be parsed as a result with no rows. `rawUrlReadFailure` turns it into an error with `httpStatus`, `code`, `message` and `userMessage` read from the same two envelope spots `@objectstack/client` reads, so the shared classifier judges both paths the same way.\n- **Wording reuses the list view's keys.** The line is classified by the shared `classifyLoadError` (`@object-ui/react`). A refused read (`forbidden`) says `list.loadErrorForbiddenTitle` / `list.loadErrorForbiddenMessage`, the same sentence ListView's load-failed panel uses, and never shows the server text. `unauthorized` and `api-disabled` get their `list.*` sentences too. Any other failure says `list.loadErrorTitle` plus the server's sentence when the server answered (an error with a numeric status), else `list.loadErrorMessage`. A producer-marked `userMessage` wins, as everywhere else (`declaredUserMessage`). Retry is shown for every kind except `api-disabled`, as in ListView. No new i18n key: all nine `list.*` keys already exist in all ten packs. They are read with an inline `defaultValue` that is byte-identical to the `en` pack, so a host without a provider renders the same English.\n- **The fold leaves a failed list in its own row.** `onEmptyChange` answers `false` for a failed read, as it already does for a refused filter. The #25895 fold therefore never folds it into the empty-lists line. The header badge is hidden over a failed read, because \"0\" is the claim the line withdraws.\n- **Retry clears the failure and reads again.** It raises `loading` in the same batch, so no render in between reads as empty and answers `true` to the fold. Every re-run of the fetch effect (invalidation, a parent change, Retry) clears an earlier failure first. A failed window in server-paged mode keeps its page instead of stepping back.\n\n## Tests\n\nNew pin `ui/packages/plugin-detail/src/__tests__/RelatedList.readFailed-26415.test.tsx`, with 10 cases:\n- Adapter path: a 5xx shows the line with the server sentence, and `onEmptyChange` ends `false` and is never `true`. A 403 shows the shared no-access wording without the server text. A failure with no status shows the generic sentence. Retry recovers. Control: an empty answer still draws the empty state and answers `true`.\n- Raw-URL path: a non-2xx with a wrapped envelope shows the server sentence. A 403 shows the no-access wording. A network rejection shows the generic sentence. Retry recovers.\n- Fold: in a stack of `[Contacts (rows), Quotes (read fails), Leads (empty)]`, Leads folds and Quotes keeps its own visible row with the load-failed line.\n\nRed-first, measured at `ec34b1f7` under the verify lock, with `RelatedList.tsx` restored from base `f486e9c1`: `Tests 10 failed (10)`. With `HEAD` restored (blob hash checked equal): the whole plugin-detail suite passed with `Test Files 311 passed | 1 skipped (312)` and `Tests 2883 passed | 18 skipped (2901)`, and `pnpm --filter @object-ui/plugin-detail type-check` exited 0. Lock `VERDICT command-exit 0`. The head commit after that only wraps the control's last assertion in `waitFor`. The base run showed a timing-sensitive final `onEmptyChange` read there. The pin file was re-run on the final head (see the report).\n\n## Acceptance notes\n\n- File surface: `RelatedList.tsx`, the new pin, and the root changeset. No locale pack, `RelatedListEmptyFold.tsx` or `useDetailTranslation.ts` edit.\n- The raw-URL path asks `res.ok === false` rather than `!res.ok`, because existing raw-URL test doubles in five sibling test files answer a bare `{ json }` with no `ok`. A real `Response` always carries a boolean `ok`, so the two spellings agree on every real answer.\n- With `onEmptyChange(false)` for a failure, a stack such as `[failed, empty]` now folds the empty list (the rule needs one non-empty member), where before both drew as empty. The card allows `false`. A distinct \"failed\" answer would need a change to the fold contract in `RelatedListEmptyFold.tsx`, which is outside this card's surface.\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01SMps7wq7rBTk53e8KTSEup)_\n"
+}

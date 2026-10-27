@@ -1,0 +1,36 @@
+{
+  "number": 26487,
+  "kind": "pull_request",
+  "title": "fix(plugin-detail): reveal the read-only field copy button on keyboard focus",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T04:58:29Z",
+  "updated_at": "2026-10-27T05:36:18Z",
+  "closed_at": "2026-10-27T05:36:16Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-27T05:36:16Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26487",
+  "body": "Fixes #26329\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：记录详情页（桌面阅读模式）只读字段旁的「复制」按钮，除了鼠标悬停，现在键盘 Tab 聚焦到它或它所在的字段时也会显示。只改了一个 className，另加一个测试和一个 patch changeset。\n- 为什么改：这个按钮是真实可聚焦的按钮，但之前只在悬停时显示，键盘用户按 Tab 会停在一个看不见的控件上。旁边的编辑铅笔已在 #26325 用同样写法处理，这次是它的复制按钮同类项。\n- 风险与回滚：只加了两个 Tailwind 显示类，悬停、点击复制、按钮名称都不变。回滚就是 revert 这一行。\n- 先看：`ui/packages/plugin-detail/src/DetailSection.tsx` 复制按钮的 className（与上方铅笔按钮写法一致）。\n- 两分钟验证：打开任意记录详情页，用 Tab 键在只读字段间移动，复制图标应随焦点出现；鼠标悬停行为与之前相同。\n- 需要你做的：无。不涉及受管面，CI 绿后由席位按常规合并队列落地。\n\n## What changed\n\n- `ui/packages/plugin-detail/src/DetailSection.tsx`: the copy-to-clipboard button drawn beside a read-only, copyable field in desktop read mode was `opacity-0 group-hover:opacity-100`. It is a real button, so a keyboard Tab stop landed on a control the user could not see, and the shared `Button` focus ring was painted at opacity 0. It now also carries `group-focus-within:opacity-100 focus-visible:opacity-100`, the spelling the inline-edit pencil a few lines above already uses (PR #26325), as do `RowActionMenu` (plugin-grid) and `data-table` (components).\n- `focus-visible` reveals the button while it has keyboard focus. `group-focus-within` reveals it while anything in its own field has focus, which includes the field's own click-to-copy row (itself a Tab stop with `role=\"button\"`).\n- Unchanged: the hover reveal, click-to-copy on the row and on the button, the button's accessible name (`detail.copyToClipboard`), the copied-state icon, the mobile grouped-inset row, and every locale pack.\n- `.changeset/26329-copy-button-focus-reveal.md`: `@object-ui/plugin-detail` patch.\n- No sdui record is written; `node scripts/check-sdui-manifest.mjs` exits 0 and no registry component contract changed.\n\n## Tests\n\nNew: `ui/packages/plugin-detail/src/__tests__/copyButton.focusReveal-26329.test.tsx`, 4 tests, modelled on the pencil's pin `inlineEditPencil.focusReveal-25883.test.tsx`.\n\njsdom has no layout and no CSS engine, so it cannot measure \"visible on focus\". The tests pin the contract a browser turns into visibility:\n- the copy button is an enabled, focusable `button` and takes focus;\n- it carries `focus-visible:opacity-100` and `group-focus-within:opacity-100` next to the unchanged `opacity-0 group-hover:opacity-100`;\n- the shared Button's `focus-visible:ring-2` survives the className merge;\n- the nearest `.group` ancestor is the button's own field, so focus in one field reveals only that field's button;\n- the field's click-to-copy row is a Tab stop inside that same group.\n\nActivating the focused button copies its own field's value (`navigator.clipboard.writeText` receives `Paris`), an empty field offers no copy button, and an editable field draws the pencil instead. The button is found by its icon, not by its localized label.\n\n- **Red first, at `df130cf0` (the pin committed, the fix absent):** `Tests 1 failed | 3 passed (4)`. The failure is at the `focus-visible:opacity-100` assertion; focusability and the hover reveal were already green there, which is the defect: a focusable but invisible control.\n- **Green, at head `2f49b3e0`**, from cwd `ui/` under `scripts/pm/os-verify-lock.sh`:\n  - `pnpm exec vitest run packages/plugin-detail --maxWorkers=2`: `Test Files 307 passed | 1 skipped (308)`, `Tests 2857 passed | 18 skipped (2875)`. The new file alone: `Tests 4 passed (4)`.\n  - `pnpm --filter @object-ui/plugin-detail run type-check` (both `tsc --noEmit` and `tsc -p tsconfig.test.json`, so the new test is compiled): exit 0.\n- The plugin-detail dependency closure was built first, under the lock: `pnpm --filter '@object-ui/plugin-detail^...' build`, VERDICT command-exit 0.\n\n## Gates\n\nDerived with `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` at head `2f49b3e0`: 34 commands, each run locally, each exit 0. They include `node scripts/check-sdui-manifest.mjs` (and its `--self-test`), `pnpm check:nul-bytes`, `pnpm check:cross-package-test-inputs`, `pnpm check:test-source-alias`, `pnpm check:type-check-coverage`, `pnpm check:type-check-debt` (re-measure under the lock: 0 raw tsc errors), `pnpm --dir ui exec vitest run scripts/` (`Tests 5097 passed | 2 skipped`) and the changeset gates.\n\n`--ran` reconciliation with exit codes recorded: `34 derived famil(ies) accounted for — 34 run, 0 NOT-MEASURED (a DERIVED zero)`, exit 0.\n\nCI runs every other family (lint, the type-check lanes, Build and E2E UI); this PR cites CI rather than re-running them locally.\n\n## Acceptance notes\n\n- **Touch.** Neither the copy button nor the pencil is revealed on a coarse pointer (`RowActionMenu` adds `pointer-coarse:opacity-100`). That belongs with the mobile read row's edit path and is out of this claim's file surface.\n- **The pencil's tooltip text** (\"Double-click to edit\") is unchanged here; it needs a new key in every locale pack and stays with #25883.\n- **Landing order.** This is the same file as #25883 item 2, which the seat holds behind this card.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01SMps7wq7rBTk53e8KTSEup)_\n"
+}

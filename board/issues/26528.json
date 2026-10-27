@@ -1,0 +1,34 @@
+{
+  "number": 26528,
+  "kind": "pull_request",
+  "title": "fix(app-shell): the full-page record form save toast names the saved record",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T06:36:29Z",
+  "updated_at": "2026-10-27T07:10:10Z",
+  "closed_at": "2026-10-27T07:10:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-27T07:10:08Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26528",
+  "body": "Fixes #26461\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 改了什么:整页记录表单(`/new`、`/edit` 路由)保存成功提示改为点名记录标题,如 `Task \"Quarterly review\" updated`;复用弹窗路径同一解析器、同一无名兜底、同两个文案键,不新增文案。\n- 为什么改:弹窗路径(#26202)已按裁决 C 点名记录,整页路由仍只显示「Task updated successfully」,本单补齐这一半。\n- 风险与代价(含回滚):只改一个视图的提示文字,无标题记录仍显示原对象名提示;新测试先红后绿,10 个相关测试文件 62/62 通过;回滚即还原本 PR。\n- 席位意见:\n- 你要做的:无需决策;CI 绿后按常规评审落地。\n\n## What\n\nThe full-page record form (`RecordFormPage`, the `/new` and `/record/ID/edit` routes used by objects whose form opens as a page) now names the saved record in its success toast. It works the same way as the dialog paths that PR #26202 changed in `ui/packages/app-shell/src/console/AppContent.tsx` (`recordSaveMessage`):\n\n- The name is `getRecordDisplayName` from `@object-ui/core` (ADR-0079), read through this page's object, so it follows the object's declared `nameField`.\n- The floor is the same. The resolver's `Record #ID` answer, or an empty answer for a row with no id, is not a name, so the page falls back to `form.createSuccess` / `form.updateSuccess` (`Task created successfully`). The page also falls back when `onSuccess` receives no record.\n- The keys are the same: `form.createdNamed` / `form.updatedNamed`. They are already in all ten packs, so no locale file changes and no wording is added. As with every other `t()` in this file, the keys are passed without an inline `defaultValue`.\n- `ObjectForm` already hands the write's result to `schema.onSuccess(result)` in every layout (simple, tabbed, wizard, split), the same contract `ModalForm` serves to the dialog path. `handleSuccess` now reads that argument.\n\nFiles:\n- `ui/packages/app-shell/src/views/RecordFormPage.tsx`: `handleSuccess(saved)` builds the named or fallback toast.\n- `ui/packages/app-shell/src/views/RecordFormPage.saveToastNamesRecord-26461.test.tsx` (new): six cells. Create and update with a name, create and update at the `Record #ID` floor, update with no record handed back, and one zh cell.\n- `ui/packages/app-shell/src/views/RecordFormPage.i18n.test.tsx`: the two named keys join the page's bare-keys list, which is pinned present in all ten packs.\n- `.changeset/26461-record-form-page-toast.md`: patch, `@object-ui/app-shell`.\n\n## Tests\n\nAll runs are at head `4a0094b9`, under `scripts/pm/os-verify-lock.sh`.\n\n- Red first: the test commit's page (`RecordFormPage.tsx` restored tree-only to the base `00a4593a`, with `getRecordDisplayName` count 0) gave **3 failed / 3 passed**. The three \"names the record\" cells failed (`expected 'Task created successfully' to be 'Task \"Quarterly review\" created'`, the update cell the same, and zh `expected 'Task更新成功' ...`). The three no-name cells passed. This matches the direction written in the test header before the run. Restore: `git checkout HEAD -- RecordFormPage.tsx`, then the blob equals HEAD (`4442d066`) and `git status` is clean.\n- Green: the ten app-shell test files that import `RecordFormPage` (the nine that exist plus the new one) gave **Test Files 10 passed (10), Tests 62 passed (62)**.\n- `pnpm --filter @object-ui/app-shell type-check`: exit 0. Its `tsconfig.test.json` includes `src/**/*.test.tsx`, so the new file is compiled.\n- The dependency closure was built first: `pnpm --filter '@object-ui/app-shell^...' build`, VERDICT command-exit 0.\n\nNarrowed on purpose: the whole app-shell suite is left to CI `Build & E2E UI` / `Test Core`.\n\n## Gates\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 34 families. All 34 were run locally after the last commit, and `--ran` accounted for 34 of 34.\n\n- 33 exited 0, including `node scripts/check-sdui-manifest.mjs` (present and intact, 106 components) and its `--self-test`, and `pnpm --dir ui exec vitest run scripts/` (178 files passed, 2 skipped; 5097 tests passed).\n- `pnpm check:type-check-debt` exited **3 (PREREQUISITE NOT MET)**. This is NOT MEASURED, not a pass and not a finding. It is a repo-wide `--re-measure` that needs a full package build behind the shared lock. CI's `Lint & Repo Gates` run is the reading of record.\n- No registry component contract changed, so `sdui.manifest.json` was not regenerated.\n\n## Acceptance notes\n\n- On an edit, the name is read off what the save returned. This is the same caveat PR #26202 recorded for the dialog path: the toast can name the record only if the write's response carries the name field. A live server was not booted for this PR.\n- `recordSaveMessage` in `AppContent.tsx` and `handleSuccess` here now repeat the same resolver-and-floor steps (about six lines). Extracting one shared builder would change `AppContent.tsx`, which is outside this card's file surface, so it is not done here.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01SMps7wq7rBTk53e8KTSEup)_\n"
+}

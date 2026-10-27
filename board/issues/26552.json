@@ -1,0 +1,32 @@
+{
+  "number": 26552,
+  "kind": "issue",
+  "title": "release-github-releases: the duplicate-Release audit counts one Release twice when the list shifts between pages",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T08:01:25Z",
+  "updated_at": "2026-10-27T08:26:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26552",
+  "body": "## What happened\n\nOn the 18.2.0 repair run ([Release 40464600678](https://github.com/objectstack-ai/objectstack/actions/runs/40464600678), job 122058101982, os-zhuang's `force: true` dispatch, 2026-10-27 07:01Z), the step \"Create GitHub Releases (bodies truncated to the API limit)\" exited 1:\n\n```\n110 created, 0 updated (0 after a concurrent writer's create), 0 failed, 1 duplicated by this run\n##[error]@object-ui/fields@18.2.0 has 2 GitHub Releases: 425135424 (no assets), 425135424 (no assets). … the other(s), , are the surplus. This run created 425135424, 425135424 …\n##[error]1 tag(s) carry more than one GitHub Release after this run's creates (named above). Nothing was deleted.\n##[warning]the duplicate-Release audit read 3 page(s) of the Releases list and 1 tag(s) this run released never appeared in it (@object-ui/types@18.2.0) …\n```\n\nBoth \"duplicates\" have the same id. There is one Release on that tag, and the \"surplus\" list is empty. The publish itself was complete: 110 of 110 on npm, Releases created, Docker image pushed. The red check was a false alarm.\n\n## Cause\n\n`auditDuplicateReleases` in `scripts/release-github-releases.mjs` (around line 917) walks `GET /releases?page=N` with offset pagination. It pushes every row whose `tag_name` matches into `byTag`, without keying on `rel.id`. The list is newest-first, and this run was still creating Releases while it read the pages. When a new Release lands at the head of the list between two page reads, every row shifts down by one. The row at the bottom of page N is then served again at the top of page N+1, so the same id is pushed twice. The same shift can also skip a row entirely, which is the `@object-ui/types@18.2.0` \"never appeared\" warning on the same run.\n\n## Ask\n\n1. Dedupe by id: a tag is a duplicate only when `new Set(ids).size >= 2`. The same id seen twice is one Release.\n2. Have `describeDuplicates` never print an empty surplus list. With (1) in place that case can't happen, but a self-test row should pin it.\n3. Optional: re-read an `unseen` tag via `findByTag` before calling it UNVERIFIED, since the shift that duplicates one row also hides another.\n4. Add self-test rows to the existing stub client (`seed` / `forTag`, around line 1174): a `listPage` that shifts by one between pages must yield 0 duplicates and 0 unseen.\n\n## Scope\n\n`scripts/release-github-releases.mjs` and its `--self-test` only (gate family `check:release-body`). No workflow edit. Not Tier H.\n\nClause-②: no\nMetadata-protocol: none"
+}

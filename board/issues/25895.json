@@ -2,8 +2,8 @@
   "number": 25895,
   "kind": "issue",
   "title": "record page: the Related tab gives an empty related list (\"客户 0 暂无相关记录\") a full row, and record:path squeezes two terminal stages (\"× 已取消 客户未到\") into one cell at the right edge",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-steve",
@@ -14,7 +14,6 @@
     "area:records",
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-25T10:56:00Z",
-  "updated_at": "2026-10-27T00:55:52Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-27T05:03:30Z",
+  "closed_at": "2026-10-27T04:31:52Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25895",
   "body": "Filing gate **① a user-visible defect with a named landing site**; two record-page polish items from one pass, split if triage prefers. Batch-of: 2026-10-25 browser pass on @objectstack/* 18.1.0 (23 cards: hotcrm 10, objectui 10, objectstack 3). Filed by the maintainer's account (`os-steve`) from the HotCRM pass driven in session `session_01AwpXhq2nFKU6J7GmbCEmZu`; ⛔ not a claim. Grade and routing are objectui triage's.\n\n## What is seen (HotCRM on `@objectstack/console` 18.1.0, 1440×900)\n\n1. **Related tab, account Acme Corporation.** Between 报价单 (2) and 活动 (7) sits a full-height row 「客户 0 · 暂无相关记录 · + 新建」 (child accounts), and after 活动 another 「线索 0 · 暂无相关记录 · + 新建」. With 26 related records in nine lists, two of the rows a reader scrolls past are empty. [50-account-related.png](https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/shots/50-account-related.png). Expected: empty lists fold to a one-line footer (「其他 2 个为空：客户、线索」) or sort last, keeping their 新建 action.\n2. **record:path on an event.** The stage bar has three stages 已计划 / 已举行 / 已取消 plus the terminal 客户未到; the last segment reads `× 已取消  客户未到` in one narrow cell at the right edge while the first two stages take the width. [60-event-tall.png](https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/shots/60-event-tall.png). The opportunity bar does the same with 成交 / × 失败, less visibly because it has seven stages. Expected: terminal states share the width equally or wrap, so each label is legible.\n\n`reach:` the public UI, measured once as the dev admin.\n\n## Dedupe\n\nMCP `search_issues` objectui \"related tab empty related list with zero records still takes a row\" → 6 hits (#13063, objectstack-ai/objectui#12870, objectstack-ai/objectui#12930, objectstack-ai/objectui#12245, objectstack-ai/objectui#11768, objectstack-ai/objectui#11613), none about empty-list layout; \"record path stage bar terminal states cancelled no-show overlap cramped at the right\" → 3 hits (#12965, objectstack-ai/objectui#5957, objectstack-ai/objectui#5916 — accessibility of the path, closed). Report: [REPORT.md](https://github.com/objectstack-ai/hotcrm/blob/03c2ad1573fb93cf1318ab50ae22f9ba770c4166/qa/2026-10-25-browser-pass/REPORT.md) §4.2, §4.5."

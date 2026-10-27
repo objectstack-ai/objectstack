@@ -1,0 +1,33 @@
+{
+  "number": 26431,
+  "kind": "issue",
+  "title": "ci(gates): retire the transcription pins — tests and gates that hold a hand-typed count or table equal to the tree and red on every unrelated move (parent of eight)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "pm:epic",
+    "priority:p2",
+    "tech-debt",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T03:52:54Z",
+  "updated_at": "2026-10-27T05:15:42Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26431",
+  "body": "Filing gate: ③ maintainer-directed. Maintainer, 2026-10-27, in the director summon chat, to the seat's check-retirement sweep and its offer of three cards, verbatim: 「同意」 (the sweep was ordered by 「排查一下还有哪些检查应该退役」). Filed by the director seat (`session_01KrKXQVvgYk2AJ4VkqMobyb`, ledger objectstack#12708, sweep record 6433263738). ⛔ Not a claim. Batch-of: 11 (director seat, 2026-10-27). Dedupe: 600 newest open + closed issues grepped for the check's file name → 0 unless stated. Reader: this is a ④ coordination parent; each child names its own lane. Done-when: every child closed; nothing lands on this card.\n\n## 维护者速读\n\n这组检查共同点：钉的是**树的转录**（一个清单的长度、一次手数的数字、散文里重述的计数），不是不变量；它们的红史全是「有人正常改了代码，数字没跟着改」——#26410 那份权限普查钉是同类里最贵的一个，你已裁 C。这里把其余八个按文件各立一张子单：退役钉本身，或者把数字改成从树推导，让它永远不能和树不一致。父单只收账，不派发。\n\n## Children (one lane each; filed in the same batch)\n\n- #26433 — registrar-file length pinned in seven test files (`domain:server`)\n- #26436 — `execctx-consumer-census.test.ts` hand counts (`domain:server`)\n- #26437 — `metadata-type-schemas.test.ts` closed 27 / types 28 (`domain:spec`)\n- #26438 — `SURVIVING_KEY_COUNT = 103` in the i18n retired-keys test (`domain:ui`)\n- #26439 — `check-expected-skips` hand roster (`domain:skills`)\n- #26441 — five prose-count holder gates: lockstep, route-ledger, quick-reference, overlay leg 3, spec-enumerations (`domain:devx`)\n- #26442 — `system-context.mdx` hand census (`domain:devx`)\n- #26443 — shard-size literals in five self-tests (`domain:devx`)\n\nSiblings filed in the same batch, not children: #26444 (floors and two-sided baselines, loosened) and #26445 (decision: the three unread scheduled workflows).\n## Rule the children follow\n\n- A pin is retired, not loosened, when the thing it pins already has an authority (a list, a registry, a generated file): the authority stays, the retyped number goes.\n- A number in prose is deleted or generated; it is never \"held\" by a gate (the `--fix` gates in this batch exist only because the prose restates a count).\n- A test that must stay keeps the rule in words (\"every registered type is closed except `view`\"), never the count of today.\n- ⛔ No new gate, no new ledger; each child is one PR in its lane; Tier S/H per the paths it touches.\n\n## Related\n\n#26410 (the authz census pin, ruled C — the archetype); PR #26367 (SDUI manifest records retired — the pattern); PR #26343 (had to bump five package-count floors to delete one package).\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 26413,
+  "kind": "issue",
+  "title": "engine(filter): `NowAnchorSchema` is declared closed, but a direct `find()` `where` tolerates an extra key on a `$now` anchor while `aggregate()` and metadata filters refuse it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T03:00:12Z",
+  "updated_at": "2026-10-27T07:37:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26413",
+  "body": "Filed by the `domain:skills#2` seat (`session_01LqKsGyMNFwwnbF5FTAqyPn`, seat post #19287) from the independent contract review on PR #26407 (comment 6432578572, ① (a) \"any extra key\" clause and ③ card candidate), while landing card #26301 (teaching `$now` + `addDays` in `objectstack-query`). An engine enforcement gap noticed while checking the skill's sentence against the code; ⛔ not a claim, and not a defect of PR #26407 — the skill's sentence is true of the spec as declared.\n\n**Origin:** `packages/spec/src/data/filter.zod.ts` `NowAnchorSchema` is `closedObject(z.object({ $now, addDays }))` — closed by declaration — and `packages/spec/src/data/filter.test.ts` (\"is closed: an extra key is refused — there is no subDays\") pins that `{ $now: true, addDays: 1, subDays: 1 }` and `{ …, note: 'x' }` fail to parse. The engine's object-form `where` door in `packages/objectql/src/engine.ts` (the non-array branch: `assertListComparandShapes` → `narrowNumberComparands` → `normalizeFilterComparandTypes`) never runs the zod declaration; `packages/spec/src/data/filter-comparand-type.ts` `isWellFormedNowAnchor` reads only `addDays` (integer or `{ $field }`) and keeps the node. Downstream every reader goes by shape: the resolver in `packages/core/src/utils/filter-tokens.ts` (`resolveNowAnchor`) spreads the node, `packages/drivers/driver-sql/src/sql-driver.ts` `nowAnchorOf` reads `$now` + `addDays`, and `packages/formula/src/matches-filter-now-anchor.test.ts` pins the tolerance as intended for the in-memory evaluator (\"the anchor is read by SHAPE: an extra key does not disqualify it\"). `aggregate()` options and metadata filters are zod-parsed, so there the same anchor is refused (`packages/objectql/src/engine-now-anchor.test.ts` \"a malformed anchor is refused by its declaration\").\n**Reader who acts:** the lane that owns the filter doors (`packages/objectql/src/engine.ts` Door 2 and `packages/spec/src/data/filter-comparand-type.ts`), with ADR-0049 (no unenforced declared properties: enforce or remove) as the rule.\n**Suggested grade (triage grades):** p3 — the answer is still the `addDays` answer, so no wrong row is returned; but a public door silently accepting an undeclared key (`subDays: 7` is ignored, not refused) is the class ADR-0049 names, and two doors of one engine answer one input differently.\n\n**Who pays:** an author who writes `{ $now: true, addDays: -30, subDays: 7 }` (or misspells `addDays`'s sibling) in `engine.find()` / the REST `where`: the query runs with the `addDays` reading alone and no error, while the same comparand in an `aggregate()` filter is `INVALID_FILTER` / 400. The skill (`skills/objectstack-query/rules/filters.md`, from #26407) teaches \"any extra key is refused\", which is true at the declaration door only.\n\n**Measured (on `origin/main` 57ab06bd):**\n- `NowAnchorSchema.safeParse({ $now: true, addDays: 1, subDays: 1 }).success` → `false` (pinned by `filter.test.ts`).\n- `isWellFormedNowAnchor({ $now: true, addDays: 1, subDays: 1 })` → `true` (reads `addDays` only), so `normalizeFilterComparandTypes` answers `keep` and `find()` proceeds.\n- `matchesFilter` with `{ completed_on: { $eq: { $now: true, addDays: 0, note: 'x' } } }` → matches (pinned by `matches-filter-now-anchor.test.ts` as the intended shape read).\n- `engine.aggregate('ticket', { aggregations: [{ …, filter: { opened_at: { $lt: { $now: true } } } }] })` → `INVALID_FILTER` by declaration (`engine-now-anchor.test.ts`); no test exercises an extra key through `find()`'s object-form `where`.\n\n**Wanted:** one answer at every door, per ADR-0049 — either (a) `isWellFormedNowAnchor` (or the comparand-type door's anchor arm) refuses any key beyond `$now` / `addDays` with the existing `malformedNowAnchorRefusal` wording extended (\"carries an undeclared key … — the anchor takes `$now` and `addDays` only\"), and the in-memory evaluator's \"read by SHAPE\" test is retired or narrowed to match; or (b) the declaration is opened (`passthrough`) and `filter.test.ts`'s closed-shape pin and the skill sentence are rewritten — (a) is the shape the spec, the docblock and the skill already promise.\n\n**Card-specific acceptance:** `engine-now-anchor.test.ts` gains a `find()` object-form case with an extra key that answers the same as the `aggregate()` declaration door; `filter.test.ts`'s closed pin, `matches-filter-now-anchor.test.ts` and `filter-comparand-type` tests agree; `pnpm --filter @objectstack/spec test`, `pnpm --filter @objectstack/objectql test`, `pnpm --filter @objectstack/formula test` green. If the answer changes the taught sentence, `Skills-docs:` names `skills/objectstack-query/rules/filters.md` L57–81 (the refusal list) and eval 6 of `evals/filters-pagination-search.json`. `Clause-②: no` · `Metadata-protocol: none` unless (b) is chosen — then the protocol kind is the implementer's to declare.\n\n**Dedupe:** REST listing of every issue updated since 2026-10-15 (300 issues, open + closed), title and body grep for `NowAnchorSchema`, `$now extra key`, `strict find parseFilterAST`, `subDays` → one hit, #26301 (the teaching card, closed by #26407), which does not ask for enforcement; #25808 (the `addDays` ruling) does not either.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}
