@@ -88,7 +88,7 @@ const SOURCES = new Map<string, string>(SITE_FILES.map((file) => [
 const siteKey = (file: string, line: number) => `${file}:${line}`;
 
 /**
- * The frames in `rest-server.ts` that are NOT consumers: the host literal each
+ * The frames in `rest-server.ts` that are NOT consumers: each host literal a
  * moved registrar's body is handed forwards the seam to the server with
  * `resolveExecCtx: (...a) => this.resolveExecCtx(...a),`, so a moved site's
  * stack shows that forwarder above the site itself. The site is the first
@@ -663,7 +663,8 @@ describe('[#13160] §6 the boundary of this census', () => {
 //
 //    Added after contract review found this file asserting, in prose, that
 //    "every site now passes `rethrowAuthzStoreUnavailable`" while the
-//    continuation-layout sites still passed `() => undefined`. Prose cannot rot loudly; this can.
+//    continuation-layout sites still passed `() => undefined`. Prose cannot
+//    rot loudly; this can.
 //
 //    Why the sibling ledger did not catch it: that check is PRESENCE-based
 //    (does the file mention the guard at all), so one converted site satisfies
@@ -737,17 +738,17 @@ describe('[#13279] §7 every caught resolveExecCtx site re-raises the outage', (
 //
 //    ⚠️ The site lines are DERIVED from §7, never transcribed. This file's own
 //    history is that hardcoded line numbers in it went stale and hid
-//    sites; a literal here would be the same mistake in the test that exists
+//    sites from it; a literal here would be the same mistake in the test that exists
 //    to catch it.
 //
 //    ⛔ REACH OF THIS SECTION, measured by ablation rather than assumed — read
 //    it before trusting §8 as the tripwire for a single site. Reverting ONE of
-//    the continuation sites to `() => undefined` turns §7 red and leaves §8 GREEN. That
-//    is not a gap in the assertion, it is the shape of the handlers: the
-//    `${metaPath}/:type` handler registered at line 4332 runs to 4794 and
-//    resolves the context THREE times (the continuation site, then two guarded
-//    single-line sites), so under the TOTAL outage this section drives, a later
-//    site still throws and the door still refuses. §8 therefore pins what a
+//    the continuation sites to `() => undefined` turns §7 red and leaves §8
+//    GREEN. That is not a gap in the assertion, it is the shape of the
+//    handlers: the `${metaPath}/:type` handler registered at line 4332 runs to
+//    4794 and resolves the context THREE times (the continuation site, then two
+//    guarded single-line sites), so under the TOTAL outage this section drives,
+//    a later site still throws and the door still refuses. §8 therefore pins what a
 //    door ANSWERS; §7 pins what each SITE spells. Only §7 fails on one reverted
 //    site, and that is the division of labour to keep.
 //
