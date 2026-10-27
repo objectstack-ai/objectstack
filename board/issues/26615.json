@@ -1,0 +1,32 @@
+{
+  "number": 26615,
+  "kind": "issue",
+  "title": "`os dev` refuses an old dev database (ADR-0131 boot guard), promises an in-place upgrade, and exits with 「The upgrade did not run to a report」 and no cause",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T10:22:39Z",
+  "updated_at": "2026-10-27T11:09:14Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26615",
+  "body": "## Source\n\nRead on 2026-10-27 starting HotCRM `1f3f8880` (platform 18.2.0) on a dev database last used on 2026-10-16: the organization-ownership boot guard refused (`sys_flow_credential`, `sys_secret` still carry a physical `organization_id` column), `os dev` printed 「⟳ … os dev upgrades it in place, keeping a copy first…」 and then 「✗ The upgrade did not run to a report. The database as it was before the upgrade is copied to …/backups/organization-ownership-2026-10-27T10-08-08-349Z … Run `os migrate organization-ownership --dev` (review its plan), then the same command with --apply --plan-file FILE --backup-taken」. Exit code 1, no reason why the in-place upgrade stopped. A developer who last ran the app eleven days ago cannot start it without learning the ceremony.\n\n## Target\n\n1. The in-place upgrade either completes (and prints the report path) or prints the first refusal it hit, in the same words the ceremony's own `--out PLAN` would; 「did not run to a report」 without a cause is not an exit.\n2. The two columns it names here (`sys_flow_credential.organization_id`, `sys_secret.organization_id`: objects that no longer declare the column) are a case the ceremony handles in dev mode, dropping or renaming them as the plan says, so the common 「I pulled main after a week」 path needs no manual command.\n3. A test: a dev database with a stale `organization_id` column on an object that retired it starts under `os dev` after the automatic upgrade.\n\n## File surface\n\n`packages/cli/src/commands/dev.ts` (the auto-upgrade branch), `packages/runtime` (the boot guard), the ceremony in `packages/cli/src/commands/migrate/organization-ownership*`, tests beside.\n\n## Acceptance\n\n1. The test; the log of `os dev` on the backed-up HotCRM database (`.objectstack/data/backups/organization-ownership-2026-10-27T10-08-08-349Z`) shows the upgrade completing or the cause.\n\n<sub>Filed by the epic PM session `session_cdb7a717-def7-4e71-9988-f089fbaa18ff` from the 2026-10-27 fifth review: objectstack main `f9867020c6` (Object UI now under `ui/`), HotCRM `1f3f8880` on platform 18.2.0 (the published console at `/_console`, a fresh dev database), the maintainer's browser pane at 955 × 452 (zh-CN), plus cloud staging (the control-plane home and the test1016 tenant's build chat). The maintainer asked for every finding to be filed by where the fix lands, verbatim: 「全部立卡，按落点分仓；#25943 让车道正常派发。」</sub>"
+}

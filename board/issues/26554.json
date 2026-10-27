@@ -2,7 +2,7 @@
   "number": 26554,
   "kind": "pull_request",
   "title": "feat(ui): the signed-out invitation landing names the inviter and the organization from the invitation preview",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -22,10 +22,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T08:05:14Z",
-  "updated_at": "2026-10-27T08:24:29Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-27T08:46:03Z",
+  "closed_at": "2026-10-27T08:46:01Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-27T08:46:01Z",
   "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/26554",

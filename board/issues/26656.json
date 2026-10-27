@@ -1,0 +1,36 @@
+{
+  "number": 26656,
+  "kind": "pull_request",
+  "title": "fix(app-shell): a screen-flow wizard step toasts \"Saved — next step\" only when it saved a record",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T11:36:51Z",
+  "updated_at": "2026-10-27T12:01:44Z",
+  "closed_at": "2026-10-27T12:01:41Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-27T12:01:41Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26656",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbJSZXnd6faVLEnwoaLHNWWh)_\n\nPart of #26578. This lands the toast half; the step-button half stays open on the card, because it needs a signal the wire does not carry (see Acceptance notes).\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**:屏幕流向导里,纯字段步骤之间不再弹「已保存 — 下一步」;只有 `object-form` 步骤(它真的保存了一条记录)还弹。流程结束时的提示不变。\n- **为什么改**:hotclm 的发起合同向导在第 3 步才建记录,第 1、2 步却都提示「已保存」,用户误以为已经提交。\n- **风险与回滚**:只动 `FlowRunner.tsx` 的一个分支,纯前端文案行为;回滚即 revert 本 PR。\n- **先看**:`ui/packages/app-shell/src/views/FlowRunner.tsx`(`resumeWith` 的 `savedRecord` 参数与 paused 分支),`FlowRunner.betweenStepsToast-26578.test.tsx`,`FlowRunner.actionSuccessMessage-12234.test.tsx` 的改动。\n- **两分钟验证**:`pnpm --dir ui exec vitest run packages/app-shell/src/views/__tests__/FlowRunner`,预期 15 个文件、94 个测试全绿。\n- **需要你做的**:无,席位落地。\n\n## What changes\n\n- `FlowRunner`'s `resumeWith` takes a `savedRecord` flag. The flat-field Submit passes `false`; the `object-form` save callback passes `true`.\n- When the resume answers `paused`, the `flowRunner.nextStep` toast (\"Saved — next step\") fires only when `savedRecord` is true. A flat step that only collected variables now advances to the next screen with no toast. An `object-form` step keeps it: `ObjectForm` calls `onSuccess` only after its write lands, and passing `onSuccess` silences the form's own confirmation, so this toast is the user's only one.\n- Terminal toasts (the action's `successMessage`, the flow's, the catalog sentence), the refused and failed paths, and the step button are unchanged.\n- The FlowRunner header gains a section stating the rule and the measured limit on the button label.\n\n## Why\n\nReported on hotclm's five-step contract wizard: every step toasted 「已保存 — 下一步」, including steps that saved nothing, so a requester believed the contract was submitted on step 1.\n\n## Tests\n\n- New `FlowRunner.betweenStepsToast-26578.test.tsx`: a flat step that pauses again toasts nothing; an `object-form` step that pauses again toasts exactly `Saved — next step` (full call list); a flat step that ends the run still gets the completion toast.\n- `FlowRunner.actionSuccessMessage-12234.test.tsx`: its multi-step pin asserted the old between-steps toast on flat screens; it now asserts the action message alone, and its docblock says why.\n\n## Acceptance notes\n\n- **The step button still reads Submit on every flat step. This is a measured limit, not a choice.** Showing \"Next\" on a step that is not the last needs to know which step is the last. Measured on origin/main: the paused screen (`ScreenSpec` in `packages/spec/src/contracts/automation-service.ts`) carries `nodeId`, `title`, `description`, `fields`, `kind`, `objectName`, `mode`, `recordId`, `defaults` and `idVariable`, and no final-step or step-count member. The engine's screen executor (`packages/services/service-automation/src/builtin/screen-nodes.ts`) emits exactly those. A flow can branch after any screen, so only the engine could answer it, from the graph. The only client-side signal is after the fact: a resume that answers `paused` proves the previous step was not the last.\n- The same gap keeps a step counter out: the run never knows a total.\n- Closing the button half needs a server-computed wire member on `ScreenSpec` (for example, whether any screen node is reachable downstream of this one). That is a contract addition in `packages/spec`, so it is reported to the seat rather than built here. An author-declared button label would be a protocol addition, which triage ruled goes back to triage first.\n\n## Verification\n\nHead `a746e566`.\n\n<details><summary>FlowRunner suites (ui root, under os-verify-lock)</summary>\n\n`pnpm exec vitest run --maxWorkers=2 packages/app-shell/src/views/__tests__/FlowRunner` → `Test Files 15 passed (15)`, `Tests 94 passed (94)`, `VERDICT command-exit 0`.\n</details>\n\n<details><summary>Type-check</summary>\n\n`pnpm --filter @object-ui/app-shell type-check` (runs `tsc --noEmit` and `tsc -p tsconfig.test.json`, the latter covering `__tests__`) → `VERDICT command-exit 0`.\n</details>\n\n<details><summary>Ablation (one, on the changed behaviour)</summary>\n\nThrough `scripts/ablation-replace.mjs`: anchor `if (savedRecord) toast.success(` replaced by `if (savedRecord || true) toast.success(` (anchor 1 → 0, blob `1ed20f953095` → `244560514f7f`). Running the new pin file and the 12234 file: `Tests 2 failed | 10 passed`. The flat-step pin fails on `toast.success` called once; the 12234 multi-step pin fails with `[['已保存 — 下一步'], ['工单已升级']]` against `[['工单已升级']]`. Restored: blob equals HEAD and `git diff HEAD` is empty. A first attempt used an undeclared identifier in the replacement, which threw instead of toasting; it was discarded as invalid.\n</details>\n\n<details><summary>Derived gates</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`: 34 commands, each run with its exit code recorded. `--ran` at `a746e566`: `34 derived, 34 run, 0 NOT-MEASURED, 0 UNRUN`; every exit code 0. The ui `scripts/` suite in that list: `Test Files 178 passed | 2 skipped (180)`. `pnpm check:new-line-citations` (ui): `0 new citation(s)`.\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jQzKBjxZXgyVnom2V3)_\n"
+}

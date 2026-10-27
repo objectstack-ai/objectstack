@@ -1,0 +1,35 @@
+{
+  "number": 26698,
+  "kind": "issue",
+  "title": "security: the security plugin does not pick up some runtime metadata changes until a restart (detail withheld pending maintainer)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T13:16:26Z",
+  "updated_at": "2026-10-27T13:17:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26698",
+  "body": "Filing gate: ① product defect, reproduced three times, landing site named and code-confirmed. Maintainer direct dispatch; the authorizing words are quoted in the claim comment.\n\n## Summary\n\nAfter a runtime metadata publish, `packages/plugins/plugin-security` keeps serving some authorization decisions computed from the metadata as it stood before. This lasts until a server restart.\n\n- Measured 2026-10-27 on a server built from `3fcafcd3`; the code is unchanged on `origin/main` `898703f9`.\n- Each reproduction had a control that behaved correctly.\n- #26596 is a fail-closed face of the same cause, and the two are fixed together on one branch.\n\nThe symptoms, reproduction and code location are **withheld pending maintainer**, per the maintainer's instruction for security defects that are not to be disclosed. The implementer receives them privately.\n\n## Acceptance (public part)\n\n- Authorization verdicts follow a published metadata change with no restart, measured over HTTP.\n- A pin changes metadata at runtime and asserts the new verdict.\n- #26596's acceptance holds through the same fix.\n\n## Filing facts\n\n- Business reason: admins change access after go-live and rely on the change taking effect at once.\n- Reader who acts: an `os-dev` implementer, dispatched directly by this PM session together with #26596.\n- Dedupe: semantic search `security plugin metadata cache not invalidated after publish watch MetadataManager restart required` on objectstack-ai/objectstack → 1 hit (closed #5148, a different path: the dev watcher rebuilding dist). No duplicate.\n- Source: Studio QA run, 2026-10-27, coordinator session `session_01J8VVAkZns5rNnK2rtszzbQ`."
+}

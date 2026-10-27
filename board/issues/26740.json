@@ -1,0 +1,29 @@
+{
+  "number": 26740,
+  "kind": "issue",
+  "title": "Studio Interfaces: the navigation-item inspector cannot author `visible` (shown read-only), `viewName`, `recordId` / `recordMode`, `filters`, `badge` / `badgeVariant`, `requires*` or `order` — the Setup AppNavInspector has them",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T14:03:02Z",
+  "updated_at": "2026-10-27T14:03:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26740",
+  "body": "Filing gate: ① product defect, reproduced, landing site named.\nBatch-of: studio-qa-2026-10-27 — 39 cards from one Studio QA run (coordinator session `session_01J8VVAkZns5rNnK2rtszzbQ`; tested at `3fcafcd3`; `origin/main` was `43731031` at filing, so the implementer re-checks the landing site on current main). The run record is the `qa-run` issue filed with this batch.\n\n## Symptom\n\nA builder can add a nav entry in Studio but cannot point it at a specific view or record, gate it, badge it or order it; those keys are live at runtime (API-written they all work).\n\n## Reproduction\n\n1. Interfaces › an app › a nav item → inspector shows \"visible when\" as display-only text and no controls for the other keys.\n2. `PUT /api/v1/meta/app/…?mode=draft` with `visible`, `viewName`, `recordId`, `filters`, `badge`, `requiresObject` on an entry → publish → each takes effect in the console (L3 pass).\n\n## Expected\n\nStudio's nav inspector offers the same keys as `metadata-admin` AppNavInspector.\n\n## Suspected landing site (the implementer verifies)\n\n`StudioNavItemInspector` (ui/packages/app-shell/src/views/studio-design/) vs `metadata-admin` AppNavInspector.\n\n## Filing facts\n\n- reach: Studio UI, measured by the Interfaces QA card.\n- Business reason: Navigation is the app's front door; builders must drop to Setup or JSON for common needs.\n- Reader who acts: the triage seat (first touch: domain, area, level), then that lane's `os-dev` implementer. QA suggestion only: `domain:ui`, `area:studio`, p2.\n- Dedupe: semantic search `Studio nav item inspector cannot edit visible viewName recordId filters badge requiresObject` on objectstack-ai/objectstack → 1 hit (closed #16875, a docblock).\n- QA id: U11"
+}

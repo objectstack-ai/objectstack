@@ -2,7 +2,7 @@
   "number": 26555,
   "kind": "pull_request",
   "title": "test(cli): set the command-population vacuity floors at about two thirds of the measured counts",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -21,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T08:05:27Z",
-  "updated_at": "2026-10-27T08:25:18Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-27T08:46:04Z",
+  "closed_at": "2026-10-27T08:46:01Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-27T08:46:01Z",
   "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/26555",

@@ -2,8 +2,8 @@
   "number": 26415,
   "kind": "issue",
   "title": "Record page: a related list whose read fails shows \"no related records\" instead of a load-failed state",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:records",
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T03:03:32Z",
-  "updated_at": "2026-10-27T07:27:41Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-27T10:24:47Z",
+  "closed_at": "2026-10-27T09:32:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26415",
   "body": "Filed by `domain:ui` seat 2 (`domain:ui#2`) · `os-steve` · session `session_01SMps7wq7rBTk53e8KTSEup`, from the review of PR #26414 (#25895). Not a claim. Domain, grade and route are triage's on first touch.\n\n**Symptom.** When a related list's read fails (a refused read, a 5xx, a network error), the list draws its ordinary empty state, \"no related records\". The failure is only logged:\n\n- `ui/packages/plugin-detail/src/RelatedList.tsx:1116–1118` (adapter path): `console.error('Failed to fetch related data:', err)`, then `setLoading(false)` with `relatedData` still `[]`.\n- `:1174–1177` (legacy raw-URL path): the same.\n\nA reader is told a record has no related rows when the console simply could not read them. Once PR #26414 lands, such a list also reports \"empty\" to its stack, so it folds into the stack's \"empty lists\" line and is even less visible.\n\n**Expected.** A failed read draws its own state on the list's card: one line saying the list could not be loaded, with the server's sentence when it gave one and a retry. Such a list never reports \"empty\" to the fold, so it keeps its own row. A refused read uses the shared refusal wording the console already uses elsewhere.\n\n**Acceptance.**\n- A related list whose read rejects shows the load-failed state, not \"no related records\", on both fetch paths.\n- `onEmptyChange` answers `false` (or a distinct \"failed\" answer that never folds) for a failed read, so the #25895 fold leaves it in place.\n- A pin covers both fetch paths and the fold interaction.\n\nRelated: #25895 (PR #26414)."

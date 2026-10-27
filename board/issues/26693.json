@@ -1,0 +1,36 @@
+{
+  "number": 26693,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): the director seat stops presenting governed drafts in a ruling batch",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T13:08:11Z",
+  "updated_at": "2026-10-27T14:16:04Z",
+  "closed_at": "2026-10-27T14:16:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-27T14:16:02Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26693",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9KtT2goQEmcLve8BQ7enWSn)_\nFixes #26671\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：总监席不再把受管草稿 PR 编进决裁批「一 PR 一行」呈给你、也不再要你在聊天里回「同意」；改为一条核对职责：PR 等你批之前，席位核齐四件（席位记录、维护者速读、经中继请你审核、head 全绿），缺的补上。\n- 为什么改：你的原话「pr 你交给我批的价值是什么，我说同意你能合并吗」「所以总监席你呈给我完全没必要啊」——聊天里的「同意」落不进门禁，又和 PR 正文的速读重复。\n- 风险与回滚：只删两份 pm-dispatch 参考文档里的规则行（净 −2 行），不动 AGENTS.md、GOVERNED_APPROVERS 与入队守卫；回滚即 revert 本 PR。\n- 先看：`.claude/skills/pm-dispatch/references/lanes/director.md` 第 57–58 行（新的四件核对）；`.claude/skills/pm-dispatch/references/decision-analysis.md` 原第 13 行（删除的例外）。\n- 两分钟验证：`git grep -n 受管草稿 .claude/skills/pm-dispatch` 应无输出。\n- 需要你做的：批准本 PR（GOVERNED_APPROVERS）；席位已请总监契约复核，批准后席位落地。\n\n## What changes\n\n- `.claude/skills/pm-dispatch/references/decision-analysis.md`: the governed-draft batch exception (one row per PR in a ruling batch) is deleted.\n- `.claude/skills/pm-dispatch/references/lanes/director.md`: the three governed-draft batch lines (the draft list diff, the batch of at most five rows, recording batch replies per PR) become one duty in two lines: before a governed PR waits on the maintainer the seat checks four pieces (seat record, 维护者速读, review requested through the relay `pr_request_reviewers`, green head), fills the missing ones, never puts the PR into a batch and never asks for a chat 「同意」; approval and merge stay the maintainer's click.\n- Line count: decision-analysis.md 50 to 49, director.md 88 to 87 (3 lines out, 2 in). The new duty takes two lines, not one, because the 120-byte line cap cannot hold the four pieces plus both prohibitions on one line.\n\n## Tests\n\nNo test edits; no forced test edit. Docs-only diff on a governed `.claude/**` surface.\n\n## Acceptance notes\n\n- `git grep -n 受管草稿 .claude/skills/pm-dispatch` now prints nothing (exit 1); before, it printed decision-analysis.md:13 and director.md:57.\n- Surviving homes for the retired text: \"approval and merge stay the maintainer's click\" is kept in the new line and in director.md 职责一 (到合并 = 推进到就绪并点名等待); the review request through the relay is also SKILL.md 复核 (缺口经中继 `pr_request_reviewers` 补).\n- director.md 33–34 (enumerating landed governed PRs for review quality) is untouched, as the card delta requires.\n- AGENTS.md Prime Directive 14 still says \"the director seat requests the word as ONE batch of at most five rows\". The card forbids an AGENTS.md change here, so that sentence now disagrees with the skill line and AGENTS.md wins conflicts. It needs its own Tier H follow-up for the maintainer; named in the os-dev-report for the seat.\n- The two ratchet ceilings (50 and 88) are left as they are, so each file now has 1 line of headroom; the ratchet script is outside this card's file surface.\n\n## Verification\n\nHead `eac0bda1`, local gate set from `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`, run after the last commit:\n\n<details><summary>17 derived families, all exit 0; --ran reconciliation</summary>\n\n```\nnode scripts/check-closing-keyword-parity.mjs :: exit 0\nnode scripts/check-closing-keyword-parity.mjs --self-test :: exit 0\nnode scripts/check-comment-mask-corpus.mjs :: exit 0\nnode scripts/pm/check-harness-current.mjs --self-test :: exit 0\npnpm --filter @objectstack/lint run check:doc-formula-expressions :: exit 0   (first run exit 3 prerequisite; built formula+lint under os-verify-lock, VERDICT command-exit 0, rerun exit 0)\npnpm check:agent-test-spelling :: exit 0\npnpm check:cross-package-test-inputs :: exit 0\npnpm check:doc-authoring :: exit 0\npnpm check:driver-memory-census :: exit 0\npnpm check:gitlink-declared :: exit 0\npnpm check:nul-bytes :: exit 0\npnpm check:pm-governed-merges :: exit 0\npnpm check:pm-skill-id-lint :: exit 0\npnpm check:pm-skill-ratchet :: exit 0\npnpm check:refd-timer-probe :: exit 0\npnpm check:skill-frame-sync :: exit 0\npnpm check:watch-hint-literal :: exit 0\n\nRun reconciliation — 17 derived, 17 run, 0 NOT-MEASURED, 0 UNRUN.\n✓ dispatch-gates --ran: 17 derived famil(ies) accounted for — 17 run, 0 NOT-MEASURED (a DERIVED zero — all 17 recorded an exit code and none of them is 3).\n```\n\n```\n✓ check-skill-line-ratchet: .claude/skills/pm-dispatch/references/decision-analysis.md is 49 lines (ceiling 50; headroom 1).\n✓ check-skill-line-ratchet: .claude/skills/pm-dispatch/references/lanes/director.md is 87 lines (ceiling 88; headroom 1).\n✓ check-skill-id-lint: 104 file(s) clean (pattern /#[0-9]{3,}/g).\n```\n\n</details>\n\nTier S governed surface: this PR stays draft; the seat asks the director for the contract review.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ADHkmRU8xsrP6izdDAuZvx\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmRU8xsrP6izdDAuZvx)_\n"
+}

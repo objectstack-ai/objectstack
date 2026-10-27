@@ -1,0 +1,38 @@
+{
+  "number": 26583,
+  "kind": "issue",
+  "title": "service-print: print a record on a named print page, so an app need not make its everyday record page the printed document (hotcrm REQ-0008 quote print)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:server",
+    "enhancement",
+    "priority:p1",
+    "repo:hotcrm"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T08:53:19Z",
+  "updated_at": "2026-10-27T12:47:33Z",
+  "closed_at": "2026-10-27T12:46:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26583",
+  "body": "Ruled: 6439306670 · letter A · 2026-10-27T10:21Z\n\nFiling gate **② a decision only the maintainer can make** (a new capability: which page a record prints on). Filed by the `repo:hotcrm` seat (`huangyiirene`, session `session_01J8VVAnPkgK6CWrJa6t7Fk5`) at the maintainer's request in the HotCRM project thread: she chose 「等平台支持打印指定页」 over shipping the quote print on the default page, then asked 「那是否应该给平台提功能建议决策卡」 (2026-10-27).\n\n## 维护者速读\n\n**One-line problem.** To print a quote today, HotCRM must turn the quote's everyday record page into the printed document. Reps then lose the status path, the highlights, the Details/Related tabs and the activity feed on every quote, every day, for the sake of one button.\n\n**Recommendation: A**, letting `service-print` print a record on a named print page of its object through the console's named record-page route. That route already shipped in 18.2.0 and refuses a wrong name with a visible not-found state. Only the server half is missing.\n\n## Background\n\n- `service-print` (#23811, `b15f8a199`) renders `CONSOLE/apps/APP/OBJECT/record/ID` and refuses any page that is not the object's default record page (`packages/services/service-print/src/print-service.ts`, `refuseUnlessPrintPage`). The reason given at the time was that \"no URL renders a named, non-default page for a record\". The PR body names the missing surface as \"(objectui): a route that renders a named print page for a record\".\n- That surface has since landed. objectui#12715 added `RECORD_NAMED_PAGE_ROUTE` = `:objectName/record/:recordId/page/:pageName` (`ui/packages/app-shell/src/console/AppContent.tsx:280`). It is honoured only for a record page of that object, with no fallback, and its comment says \"a print of this URL can never put a different document on paper\" (`RecordDetailView.tsx` around line 769). It arrived with the `ui/` import `fd4083141`, which is an ancestor of the 18.2.0 version commit `27f38ada4`.\n- A print page may hold only the printable block subset (ruling 「8346 B′」, `packages/spec/src/ui/page.zod.ts` \"The print page\" section). So a default page that prints cannot also be the working view.\n\n**Governing text:** `content/docs/ui/print-pages.mdx` currently says \"The server prints a record on the page the console renders it on, which is the object's **default record page** … A print page that is not the default is refused.\" Option A rewrites that sentence. No ADR found (`grep -rln \"8346\" docs/adr` finds only an unrelated mention).\n**Protocol:** no spec key changes. `print` and `isDefault` keep their meaning. The request body already carries `page`.\n\n## Premise (re-check)\n\n- `git show origin/main:packages/services/service-print/src/print-service.ts | grep -n \"is not the default record page\"` → one hit (the refusal is still on main).\n- `git grep -n RECORD_NAMED_PAGE_ROUTE origin/main -- ui/` → the route exists.\n- Measured in hotcrm by the #2312 thread on 18.1.0: converting `crm_quote`'s default record page to a print page removed the title, the highlights strip, the status path, the Details/Related/Attachments tabs and the Discussion/Activity feed from QTE-0004. Edit, the header actions and the attachments panel remained. The print itself works (201 in about 3.9 s, a 2-page PDF archived).\n\n## Options\n\n| | What changes | What the customer sees | Work |\n|---|---|---|---|\n| **A** | `service-print` accepts any record page of the object that declares `print`, and renders `…/record/ID/page/PAGE` (the record route stays for the default page). The refusal narrows to \"not a record page of this object\" and \"declares no `print`\". Docs and tests follow. | A quote, invoice or contract keeps its working page and gains a separate \"document\" page. An app can ship several documents per object. | `domain:server`, 1 PR, small: one check, one URL and its tests. The console half has landed. No measured precedent of this exact size; #23811 built the whole service (+4074/−68). |\n| **B** | Keep the default-page rule. | Every app that prints an object gives up that object's working page, so HotCRM's quote print stays parked. | none |\n| **C** | Let the default page print while hiding its non-printable blocks on paper. | One page serves both uses, but the document layout (terms, letterhead) shows on screen and the working blocks shape the paper. | Larger: it reopens ruling 8346 B′'s printable subset. |\n\n**In business terms:** A is \"the quote has a print template\", like Salesforce Quote Templates, Odoo QWeb reports or Dynamics Word templates, all of which are separate from the record layout. B is \"printing costs you the record screen\". C is \"the screen is the paper\".\n\n<!-- os-decision-facets -->\nos-decision-facets\n- ① 长远合理性：A 缩小特例。打印页和工作页各司其职，与主流 CRM 的「打印模板独立于记录布局」一致，复用已发布的具名记录页路由，不新增契约。\n- ② 业务拉动：今天就撞上。hotcrm #2312（REQ-0008 报价打印第一期）已做完并实测，被这条规则挡住，维护者选择等平台；合同打印（第二期）会再撞一次。\n- ③ 防 AI 犯错：A 仍是响亮拒绝。页名不属于该对象、或页面没声明 `print` 都回 400；控制台的具名路由对错误页名显示「找不到页面」，不会退回默认页，不会印错文档。\n- ④ 不扩散：A 不新增任何键，只放宽一条服务端检查并改一个 URL；B 让每个应用各自牺牲工作页，C 会重开 8346 B′ 的可打印子集。\n\nPrior rulings read: `8346`, `print page`, `default record page`, `named record page` → #22158, #22269, #22270, #23985 (all closed, all the #8346 chain), objectui#12715 landed; ADR none; thread: the HotCRM project thread above.\n\n**Recommendation: A.** Judged on ① alone, A is where printing should end up in two years: documents are pages of their own, as in every mainstream CRM. ②③④ do not flip it. The confidence gap is that A's size is estimated, not measured. Self-check: \"on ① alone, A; do ②③④ flip it: no\".\n\n**After the ruling:** for A, triage routes it to `domain:server`; one PR changes `refuseUnlessPrintPage`, builds the URL from `req.page` when it is not the default, updates `print-pages.mdx` (en and translations) and adds a dogfood print of a non-default page. hotcrm #2312 unblocks on the npm release that carries it. For B or C, hotcrm #2312 is re-decided by the maintainer in the HotCRM thread.\n\n**The reader who acts:** the objectstack `domain:server` seat (service-print), then the `repo:hotcrm` seat to land #2312.\n**Dedupe:** semantic searches on objectstack issues (\"print a record on a named print page that is not the default record page\"; \"service-print print page separate from record page quote document template\"; \"service-print render named record page route\") gave 3, 4 and 7 hits. All are closed, and none asks for this.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_\n"
+}

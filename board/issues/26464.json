@@ -2,8 +2,8 @@
   "number": 26464,
   "kind": "issue",
   "title": "mcp: bridge the authoring ToolRegistry through the hosted HTTP MCP runtime behind a `metadata:write` OAuth scope — today `handleHttpRequest` exposes only data/action tools, so a hosted environment can be read and run over MCP but never built",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:ai",
     "domain:spec",
     "enhancement",
-    "pm:dispatched",
     "priority:p1",
     "security"
   ],
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T04:22:35Z",
-  "updated_at": "2026-10-27T06:40:06Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-27T09:50:54Z",
+  "closed_at": "2026-10-27T09:49:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26464",
   "body": "Filing gate: **③ a task on the maintainer's word** (batch 1 · MCP build, platform half; the cloud half is the cloud consumer card (filed right after this one in objectstack-ai/cloud)).\n\n## Context\n\n`packages/mcp/src/mcp-server-runtime.ts` `handleHttpRequest` (the runtime cloud mounts at `/api/v1/mcp`) lists the data and action tools only: `list_objects`, `describe_object`, `validate_expression`, `query_records` / `get_record` / `create_record` / `update_record` / `delete_record`, `list_actions`, `run_action`, `resume_run`, plus the skill prompts (`mcp-http-tools.ts`, read at `main` 2026-10-27). The authoring `ToolRegistry` is bridged only by the local stdio path (`os dev`), on purpose. `packages/spec/src/ai/mcp.zod.ts` declares the OAuth scopes `data:read`, `data:write`, `actions:execute` — no metadata scope exists, so a token cannot even ask for authoring.\n\nThe maintainer ruled 2026-10-27 that a developer driving Claude Code over MCP builds apps and metadata in a hosted environment with their own model and tokens, landing drafts that a human publishes in the UI (verbatim in Provenance below). cloud's handlers already serve the in-UI doors; what is missing is the HTTP door into them.\n\n## The change\n\n1. `packages/spec/src/ai/mcp.zod.ts`: add the scope `metadata:write` (and the consent copy the hosted OAuth screen renders), with its first reader in the same PR (cross-repo rule 2: a new spec key ships with its reader).\n2. `mcp-server-runtime.ts`: `handleHttpRequest` accepts an injected authoring `ToolRegistry` from the host. Its tools appear in `tools/list` only when the token carries `metadata:write`; `tools/call` on one without the scope returns the scope refusal the data tools already use for `data:write`.\n3. Every call into the injected registry carries the door provenance (`door: 'mcp'`, the token's principal and the environment) in the tool context, so the host's access check and tier mapping read it from the context, never from a request header.\n4. The runtime stays door-agnostic: which tools the host injects (cloud decides to inject no publish / discard tool, the cloud consumer card (filed right after this one in objectstack-ai/cloud)) and what version of the whitelist they answer (objectstack-ai/cloud#3299) are the host's business.\n5. The served skill prompt (`skill-md.ts`) names the authoring tools when the scope is present, so the client model learns the build loop (create → verify_build → draft, publish in the UI) from the same source as today's data loop.\n\n## Why\n\nWithout this bridge the developer path to a hosted environment is `os build` → `os package publish` → Marketplace install (`content/docs/getting-started/deploy.mdx`), which is a release cycle, not a build loop. Beneficiary: every developer with a hosted environment and an MCP-capable agent; cloud, which gets the build door without a second MCP server.\n\n## Reader\n\nobjectstack triage routes (the file surface is `packages/mcp` + one scope key in `packages/spec`). Downstream consumer: the cloud consumer card (filed right after this one in objectstack-ai/cloud) (`repo:cloud` lane, seat 2), which carries `Blocked-by:` on this card. M.\n\n## Acceptance\n\n- `tools/list` over HTTP with a `metadata:write` token lists the injected authoring tools; without the scope it lists none and `tools/call` on one is refused by scope.\n- A tool call through the bridge reaches the injected handler with `door: 'mcp'` in its context.\n- The stdio path and the existing data/action tools are byte-identical in behaviour (existing tests green).\n\nDedup: objectstack issues for \"mcp authoring tools http bridge metadata scope\" → 0 hits (open or closed); objectstack#20791 was the only related hit and does not ask for the bridge.\n\n## Provenance\n\nFiled by the cloud project thread 「评估云端 build 支持 automation 元数据」 (session `session_01MLe2jYCJNnaCwcEAbA7BBW`) on the maintainer's order, 2026-10-27. Sam (`os-zhuang`), in that thread, verbatim: 「真审批 + MCP build」 (03:55Z, choosing the two lines to push); 「开发 / 预览环境可直写，生产环境走发包，这个本身没有意义，现在生产环境再界面上开发是否也算一种元数据开发」 (03:57Z, ruling the MCP landing posture); 「MCP build 花的不是开发者自己的token吗？」 (04:06Z, ruling that Free is not excluded for token-cost reasons); 「同意」 (04:07Z) to the filing plan: batch 0 foundation cards now, batch 1 MCP build cards plus an ADR-0112 amendment, batch 2 in-UI real approvals as `pm:blocked`. The evaluation and the batch plan: https://claude.ai/artifact/3ErDZw2FzAnb1keGYcZn5c (section 「执行计划」).\n\nGoverning text: `docs/adr/0112-cloud-ai-build-lite-boundary.md` (D1 one whitelist, D2 version road, D3 repository-only classes, D5 Free/paid differences, D6 single source); `packages/service-ai-studio/src/authoring-whitelist.ts` (the single declaration, cloud#1956)."

@@ -2,24 +2,35 @@
   "number": 26562,
   "kind": "issue",
   "title": "Setup → Positions under zh-CN lists the built-in positions in English (Platform Admin, Organization Owner, Everyone, Guest …) while the built-in permission sets are translated",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
-  "assignees": [],
+  "labels": [
+    "area:i18n",
+    "bug",
+    "domain:server",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T08:32:33Z",
-  "updated_at": "2026-10-27T08:32:33Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-27T10:49:39Z",
+  "closed_at": "2026-10-27T10:47:56Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26562",
   "body": "Filing gate: ① user-visible defect, reproduced in the browser on @objectstack 18.2.0 (found in the hotclm 18.2 upgrade pass, objectstack-ai/hotclm#155), zh-CN console as the dev admin.\n\n**Symptom.** `/_console/apps/setup/metadata/position` lists 14 positions. The app's seven render in Chinese (18.2 made position label/description translatable). The platform's own seven render label and description in English: Platform Admin, Organization Owner, Organization Admin, Organization Member, Organization External Member, Everyone, Guest (e.g. \"Built-in audience anchor: every authenticated member holds this position implicitly…\").\n\nThe sibling page `/_console/apps/setup/metadata/permission` renders every built-in permission set in Chinese (管理员 — 完全访问, 成员 — 标准访问, 外部成员 — 仅本人记录 …), so the bundle exists for sets and is missing for positions.\n\n**Expected.** The built-in positions carry zh-CN (and the other shipped locales') `positions.<name>.label` / `.description` in the platform bundle, like the built-in permission sets.\n\n**Business reason.** Setup → Positions is where a Chinese-speaking administrator assigns people; half the list, including the two audience anchors every grant is reasoned about (Everyone, Guest), is English.\n\n**Reader.** The platform lane that owns the built-in position declarations and their translation bundle (plugin-security / platform-objects i18n).\n\n**Duplicate search.** objectstack issues, all states, \"built-in positions untranslated zh-CN\": 0 direct hits; nearest #25893 (Setup pages English under zh-CN, closed, other pages), #25909 (Positions list Description column, closed)."

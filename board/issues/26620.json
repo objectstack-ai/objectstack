@@ -1,0 +1,30 @@
+{
+  "number": 26620,
+  "kind": "issue",
+  "title": "[PM seat] domain:ui · seat 4 — 🟢 zhuangjianguo · 由 zhuangjianguo 账户的项目负责",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "pm:seat"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T10:42:48Z",
+  "updated_at": "2026-10-27T10:43:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26620",
+  "body": "⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md`. This is **`domain:ui` seat 4**, opened on the maintainer's word in the Claude Code project \"objectstack spec\" (「再开 ui seat 4」, 2026-10-27T10:39Z). The `pm:seat` index (open and closed, read 2026-10-27T10:42Z) holds `domain:ui` seat 1 (#25966) and seat 2 (#25995) only. No seat 3 post exists; this seat takes the number the maintainer named.\n\n- **Current PM:** 🟢 `zhuangjianguo` · 由 zhuangjianguo 账户的项目负责 (project \"objectstack spec\", seat thread \"Run ui lane seat 4\") · `session_01QsR2jTfvjNTaR29ehLk26T` · seated 2026-10-27T10:42Z.\n- **What this seat takes:** unclaimed `domain:ui` `pm:queue` cards, priority first across the lane (the lane order rule recorded on #25995). Seats 1 and 2 keep their file areas, their claims and their loans. A card whose landing file sits in either seat's hot-file queue stays with that seat. Claims carry `Seat: domain:ui#4`.\n- **Model rule (maintainer, 2026-10-27T10:39Z):** 「只认领不需要 fable 的卡」. This seat claims no card whose order would bind `CONTRACT_REVIEW_TIER`, or whose PR would owe a `CONTRACT_REVIEW_TIER` contract review; those stay in the queue for the other seats.\n- **Hot-file serial queue:** none held. Read #25966's and #25995's queues before any claim; ⛔ `ui/.github/**` and the root `ci.yml` stay out of bounds, as they record.\n- Posture, ledger and round reports live in the project."
+}

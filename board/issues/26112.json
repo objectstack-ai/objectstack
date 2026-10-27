@@ -14,18 +14,20 @@
     "area:i18n",
     "bug",
     "domain:spec",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T12:43:48Z",
-  "updated_at": "2026-10-27T00:41:18Z",
+  "updated_at": "2026-10-27T13:16:38Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26112",
   "body": "Filing gate: ① a user-visible defect with a named location and a named real producer. Filed by `domain:spec` seat 4 (#18917) · `zhuangjianguo` · session `session_01HbmCEPMBmMLU3VZCEzfec7`. ⛔ Not a claim.\n\n**Business reason.** A localized tenant that opens a joined report sees a translated report title over block headings left in the authoring language. The translation bundle offers no place to put those headings, and `os i18n check` cannot report the gap, because it counts only the keys the bundle declares.\n\n**Reader who acts.** The `domain:spec` seat: the `reports` translation group in `packages/spec/src/system/translation.zod.ts` and its resolver, then the console renderer.\n\n## Measured (reading of `main` `0a694821`; not run in a browser)\n\n- #25788 (landed as #25826) made a report translatable at `reports.<report_name>.label` / `.description` only.\n- A joined report's block declares a `label` and a `description` (`packages/spec/src/ui/report.zod.ts`: `label: I18nLabelSchema.optional()`, \"Human label shown above the block\"). The renderer prints it at `ui/packages/plugin-report/src/DatasetReportRenderer.tsx` (`resolveText(block.label, …)` in the joined branch).\n- reach, a named real producer: `examples/app-showcase/src/ui/reports/index.ts` `showcase_task_overview` declares blocks `open_block` (\"Open Tasks\") and `done_block` (\"Completed Tasks\"). The showcase's zh-CN bundle (`examples/app-showcase/src/system/translations/index.ts`) translates the report itself (「任务概览（联合）」) and has no slot for either block.\n- An inline locale map on `label` (`{ en, 'zh-CN' }`) works today. But it is the second of two conventions (`i18n.zod.ts`), and the bundle is the one the coverage gate reads.\n\n## Expected\n\n- The bundle declares `reports.<report_name>.blocks.<block_name>.label` / `.description` (shape is the seat's to settle), the resolver applies it, and the joined renderer shows it.\n- `os i18n extract` / `check` count the block keys the way #25788 made them count the report's.\n- A pin: the showcase's joined report renders both block headings translated under zh-CN.\n\n## Source\n\nThe independent review of PR #25826 (item ③.3, comment `6400225090`) called this \"should be a card, not a blocker\". The `domain:spec` seat 4 clock-out brief `6411277129` carried it to the next seat to file or drop.\n\n## Dedupe\n\n`search_issues` (objectstack, open and closed) for \"joined report block label translation key bundle\": 9 hits, all closed. Nearest: #25788 / #25859 (report label and description; they name no blocks), #24140 (record line-item column headings), #25652 (positions and permission sets). Control: #25788 is the expected hit and was returned. No card covers block labels."

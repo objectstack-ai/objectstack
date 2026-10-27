@@ -1,0 +1,38 @@
+{
+  "number": 26579,
+  "kind": "issue",
+  "title": "Screen flow fields: a date field is the browser's native input (mm/dd/yyyy under zh-CN), and a boolean is a bare checkbox under its label",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:workflow",
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T08:48:44Z",
+  "updated_at": "2026-10-27T14:09:13Z",
+  "closed_at": "2026-10-27T14:09:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26579",
+  "body": "Filing class: ① user-visible defect — reach: public door, measured in a browser on the 18.1.0 Console with objectstack-ai/hotclm `main`, code read on objectstack `main` `1c632311`. **Reader:** the UI lane, `ui/packages/app-shell/src/views/ScreenView.tsx` (`ScreenFieldInput`).\n\n## Business reason\nRecord forms moved to the platform date picker (objectui#12622) and action dialogs, list filters and inline editors followed (objectui#12642, #12664, #12743, objectstack#25875). Flow screens did not. So the first form a new user meets in hotclm — the 发起合同 wizard — is the one that still looks unfinished.\n\n## Measured (hotclm wizard step 「合同信息」, zh-CN)\n1. **生效日期 / 到期日期** show `mm/dd/yyyy` with the browser's calendar icon. `ScreenView.tsx:546` maps `kind === 'date'` to `<Input type=\"date\">`.\n2. **金额为估算值** (and **立即提交** on the last step) render as the label on one line and a lone round checkbox on the next, with nothing beside it. It reads like an empty radio button. `ScreenView.tsx:540` draws a bare `<Checkbox>` under the generic `<Label>`. `ActionParamDialog` draws the same field type as an inline checkbox row with the label beside the control.\n\n## Expected\n- A `date` / `datetime` screen field uses the same platform picker as the record form, in the app locale's format.\n- A `boolean` screen field uses the same inline row as `ActionParamDialog` (or the record form's switch), with the label beside the control.\n\nDedupe: objectstack issues (2,000 most recent, all states) and archived objectui issues grepped for `native`, `mm/dd`, `date picker`, `ScreenView`, `boolean` + `screen` — the date-picker series above lists record forms, action-param and bulk dialogs, inline editors and filters; none lists flow screens.\n\n---\n_Filed from the hotclm UI/UX review (2026-10-27); maintainer: 「平台的问题应该提交issue到平台」._"
+}

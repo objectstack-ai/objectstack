@@ -2,8 +2,8 @@
   "number": 25678,
   "kind": "issue",
   "title": "tooling(monorepo): 在试验分支上把 objectui 并入 `ui/` workspace（subtree add、单 lockfile、turbo 构建图），交冲突清单、必改脚本清单与各类 PR 的 CI 时长读数 — 不落 main（父单 1/6）",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,22 +13,23 @@
   "labels": [
     "area:devpath",
     "domain:devx",
-    "pm:dispatched",
     "pm:epic",
     "priority:p1",
     "tooling"
   ],
-  "assignees": [
-    "os-tesla"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-24T15:10:52Z",
-  "updated_at": "2026-10-24T16:06:42Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-27T14:10:48Z",
+  "closed_at": "2026-10-27T14:10:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25678",
   "body": "Filing gate ④：父单 #25677 的子单 1/6。Part of #25677。⛔ 不是认领。\n\n**动手的读者：** `domain:spec` 席（按 SKILL.md 锚定规则，根 `scripts/` 与 `.github/workflows` 归本域；车道标签由分诊定）。产出是一份报告评论和一条不合并的分支，不碰受管面。\n\n## 要做\n\n在 `claude/issue-<n>-ui-workspace-spike` 分支上：\n1. `git subtree add --prefix=ui https://github.com/objectstack-ai/objectui.git main --squash` 与不 `--squash` 各试一次，记录仓体积与 `git log` 可读性；最终形态按保留历史（不 squash）准备。\n2. `pnpm-workspace.yaml` 加入 `ui/packages/*`、`ui/apps/*`；`turbo.json` 接入 `ui/` 的 build / typecheck / test 任务；根 `tsconfig` 不吞并 `ui/` 的 tsconfig 树。\n3. 单 lockfile：删 `ui/pnpm-lock.yaml`，`pnpm install` 后记录每个版本冲突（重点 zod 单实例、vite、react、vitest、eslint），以及为过 `check:lockfile-*` 门禁需要的 override。\n4. `ui/` 包对 `@objectstack/*` 保持 npm 范围（`^18.1.0`），通过根 `pnpm.overrides` 指到 workspace；objectui 的 `scripts/objectstack-pin.mjs`、`.objectstack-sha`、`preinstall` 钩子在分支上移除。\n5. 跑一次：`pnpm typecheck`、`pnpm test`（含 `ui/` 的分片）、`pnpm --filter @object-ui/console build` 用本仓 spec；记录每步墙钟时间。\n6. 交报告评论：冲突清单（文件、原因、建议处置）；必改脚本清单（对照父单子单 2–4，逐个确认或删减）；三类 PR 的 CI 时长估计（只改 `ui/`、只改 `packages/spec`、两者都改）；`build-console.sh` 的注入逻辑哪些可以直接删、哪些要搬进 `ui/apps/console` 的 vite 配置。\n\n## Done when\n\n- 分支推到 origin（不开 PR 或只开 draft 并标注「不合并」），报告评论贴在本卡。\n- 报告回答父单子单 2–4 需要的每个读数；无法测的项目写明原因。\n- 本卡不改 main 上的任何文件。\n\n**Size:** M（一个席位一到两天）。\n\n## Dedupe\n\n同父单 #25677 的查重；本卡是其子单，无独立重复。"

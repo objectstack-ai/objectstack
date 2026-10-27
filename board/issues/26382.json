@@ -2,8 +2,8 @@
   "number": 26382,
   "kind": "issue",
   "title": "components: the `filter-builder` renderer calls `onChange` with a `{ target: { name, value } }` event, but `FilterBuilderSchema.onChange` declares `(filter: FilterGroup) => void`",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:records",
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T01:17:36Z",
-  "updated_at": "2026-10-27T08:19:03Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-27T12:03:05Z",
+  "closed_at": "2026-10-27T10:22:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26382",
   "body": "Filed by the `domain:ui` seat 1 from an out-of-scope finding in the #26348 os-dev-report (comment 6431261263, PR #26380). The #26348 claim kept the signature out of bounds. ⛔ Not a claim.\n\n**What disagrees (read on `origin/main` 6390fe52):**\n- `ui/packages/types/src/complex.ts:641`: `FilterBuilderSchema.onChange?: (filter: FilterGroup) => void`. The docblock at :638 says the `filter-builder` renderer calls it as `props.onChange`.\n- `ui/packages/components/src/renderers/complex/filter-builder.tsx:23-30`: the renderer types its own `onChange` as `(event: any) => void` and calls it with `{ target: { name, value } }`.\n\n**Effect:** a host that writes a handler typed from the schema reads `.logic` / `.conditions` off an event object and gets `undefined`. The compiler can't catch it, because the renderer's `any` hides the mismatch. Class b (a named producer), as the dev measured it on #26380's head.\n\n**Seam:** `types:FilterBuilderSchema.onChange` → `renderer:filter-builder`.\n\n**Open choice for triage:** which side is the contract? Either the renderer passes the `FilterGroup` it already holds, or the schema declares the event shape it actually gets. Search the in-repo hosts of a `filter-builder` node's `onChange` before choosing; the choice sets Clause-②.\n\nDedupe words: FilterBuilderSchema onChange signature, filter-builder renderer target event, onChange FilterGroup."

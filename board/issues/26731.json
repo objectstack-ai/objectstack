@@ -1,0 +1,29 @@
+{
+  "number": 26731,
+  "kind": "issue",
+  "title": "Studio Data › Validations: new state_machine / format / json_schema rules save immediately with `field: created_at` and an empty message (an empty transition row persists and publishes); the conditional rule's `when` is captioned as a fail condition",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T13:50:25Z",
+  "updated_at": "2026-10-27T13:50:25Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26731",
+  "body": "Filing gate: ① product defect, reproduced, landing site named.\nBatch-of: studio-qa-2026-10-27 — 39 cards from one Studio QA run (coordinator session `session_01J8VVAkZns5rNnK2rtszzbQ`; tested at `3fcafcd3`; `origin/main` was `43731031` at filing, so the implementer re-checks the landing site on current main). The run record is the `qa-run` issue filed with this batch.\n\n## Symptom\n\nAdding a rule creates a live-looking rule against a system field with no message, before the builder has chosen anything; and the conditional rule tells the builder the opposite of what `when` means.\n\n## Reproduction\n\n1. Validations › Add rule › State machine (also Format, JSON schema) → the draft immediately holds `field: \"created_at\"`, `message: \"\"`; an empty transition row is stored as `\"\": []` and publishes.\n2. Add a Conditional rule → the `when` input is captioned \"Fail condition (CEL) — when true, the save is rejected\", which is wrong for conditional (when = when the inner rule applies).\n\n## Expected\n\nA new rule is held until its field and message are set, empty rows are not stored, and the conditional caption describes `when` correctly.\n\n## Suspected landing site (the implementer verifies)\n\n`ObjectValidationsPanel.tsx` addRule defaults and the conditional caption (~608-622).\n\n## Filing facts\n\n- reach: Studio UI, measured by the Data QA card.\n- Business reason: Builders publish half-made rules by accident and misread conditional rules.\n- Reader who acts: the triage seat (first touch: domain, area, level), then that lane's `os-dev` implementer. QA suggestion only: `domain:ui`, `area:studio`, p3.\n- Dedupe: semantic search `new validation rule saved with field created_at and empty message, conditional rule when caption wrong` on objectstack-ai/objectstack → 6 hits, none about Studio rule defaults or the caption (nearest closed #24512 runtime evaluation).\n- QA id: U5"
+}

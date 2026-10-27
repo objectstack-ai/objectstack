@@ -1,0 +1,36 @@
+{
+  "number": 26567,
+  "kind": "pull_request",
+  "title": "qa(checklist-test): writes through the pm-dispatch doors, every defect filed in the run, auth/authz fixes dispatched at once",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T08:40:16Z",
+  "updated_at": "2026-10-27T11:11:34Z",
+  "closed_at": "2026-10-27T11:11:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-27T11:11:31Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26567",
+  "body": "Refs #25807\n\n## 维护者速读\n\n- **改了什么：** checklist-test 技能和它的协议孪生 RUNNER.md 写进了你在 18.2.0 第二轮测试里定的四条：QA 运行不走车道认领；GitHub 写入只走 pm-dispatch 写入门；测试中遇到的每个产品问题同一轮立 issue；认证/授权类问题立不含细节的卡并立即派 os-dev 修复、不等维护者。另外把清单项 records-forms.record-discussion-mentions 补成 #26497 修复后的口径（被 @ 的人要能读评论本身）。\n- **为什么改：** 这一轮 5 个云卡跑完后写入被拦、安全问题等裁决，规则不写进技能下一轮还会重演；清单项不改，下一轮跑这一项会按旧口径误判。\n- **风险与回滚：** 只改内部技能文本、QA 协议文档和一条清单项，不改任何产品代码或发布包；回滚即 revert 本 PR。\n- **先看：** `.claude/skills/checklist-test/SKILL.md` 的 §2 新 bullet、§4 写入门段、Guardrails 两条；`RUNNER.md` 规则 2 的 carve-out 段。\n- **两分钟验证：** `node scripts/check-platform-checklist.mjs` 绿；`node scripts/check-doc-authoring.mjs`、`node scripts/pm/check-skill-id-lint.mjs` 绿。\n- **需要你做的：** `.claude/**` 是受管面（Tier S），这是 PM 自己的工具 PR，按约定留给你审阅合并。\n\n## What changes\n\n- `.claude/skills/checklist-test/SKILL.md`\n  - §2: a QA run is not a lane card; runners (subagents, or one cloud session per card) are dispatched directly by the session that starts the round.\n  - §4: every GitHub write of a run goes through the `scripts/pm/` doors (`issue-create`, `post-stamped`, `close-cards`, behind `write-pace`; the fleet relay in a cloud container); a refused write is not worked around — the texts go to files and are posted in order once cleared.\n  - Guardrails: every product defect a run meets is filed in the same run; an auth/authz finding gets a withheld-detail card and its fix is dispatched at once through pm-dispatch (in-seat `os-dev`, reproduction only in the dispatch prompt).\n- `docs/qa/platform-checklist/RUNNER.md`: rule 2's carve-out and the extraction clause carry the same rule (one rule, both places).\n- `docs/qa/platform-checklist/areas/records-forms.json`: `records-forms.record-discussion-mentions` rev 7 → 8 — the mention target must read `sys_comment` as well as the record (the gate fixed in #26497); acceptance[9] and negative[6] name both reads.\n\n## Why\n\nMaintainer rulings in the 18.2.0 wave-2 session, recorded verbatim on #25807 (comment 6433562861): 「你是跑测试啊，和车道有什么关系」, 「你应该使用 pm-dispatch 技能写入」, 「测试结果怎样，测试中遇到的问题应该创建 issue」, 「如果有安全问题不能写issue的，直接派卡修复」, 「以上应该写入你的 checklist skills」. The ledger edit to `records-forms.record-discussion-mentions` needs no ruling (checklist-test §3: a run's checklist edit is an ordinary edit; #26453's Landed comment 6435471336 names it as the follow-up owed after #26497); the maintainer agreed to it in this session (「同意」), which is not recorded on the card.\n\n## Verification\n\n- `node scripts/check-platform-checklist.mjs` → OK (16 areas, 329 items).\n- `node scripts/check-doc-authoring.mjs` → exit 0.\n- `node scripts/check-skill-identifier-liveness.mjs` → OK; `node scripts/pm/check-skill-id-lint.mjs` → clean.\n\n## Line ratchet\n\n`.claude/skills/checklist-test/SKILL.md` grows 238 → 246 lines (+8, measured), and its `CEILINGS` row in `scripts/pm/check-skill-line-ratchet.mjs` moves by exactly that delta. Ruling of record that orders the text: comment 6433562861 on #25807 (the maintainer's 「以上应该写入你的 checklist skills」, with the four rulings it orders quoted verbatim). Every new line is under the 120-byte budget.\n\nClause-②: no\nMetadata-protocol: none\n\nNo package publishes from this diff (internal skill, QA docs, ledger), so it carries `skip-changeset`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_012YjcDon6BvR9MN93ZsFq3U\n\n\n"
+}

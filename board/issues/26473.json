@@ -2,8 +2,8 @@
   "number": 26473,
   "kind": "issue",
   "title": "Invitation landing never reads the signed-out invitation preview (#26020 landed server-only): login/register still cannot name the organization or inviter",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:identity",
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T04:28:45Z",
-  "updated_at": "2026-10-27T08:06:27Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-27T09:03:57Z",
+  "closed_at": "2026-10-27T08:46:03Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26473",
   "body": "Filing gate **① a follow-up owed by landed work** (class a, public door: the invitation link). `reach:` one browser, local stack, cloud PR #3297 head `4e7ee6d5` + framework pin `6390fe52`, zh-CN, 2026-10-27. Signed out, opening an invitation link shows 「接受邀请 · 请使用收到邀请的邮箱。 · 注册并加入」, and 注册并加入 shows 「注册账号并加入」. **Neither page names the inviting organization or the inviter, and the email is not prefilled.** The server read built for exactly this works anonymously on the same stack: `GET /api/v1/auth/organization/invitation-preview?id=EKPx8…` → `{\"organizationName\":\"晓林装饰工作室\",\"inviterName\":\"林晓\",\"email\":\"z***@example.com\"}` (unknown id → 404).\n\nBatch-of: 5 · 2026-10-27 re-test of the 2026-10-25 desktop E2E after the fixes. Filed at the maintainer's request: 「完整的再测试一遍」 / 「必要的合理的建议都可以立卡」. Reviewed in-session before filing.\n\n**Business reason.** Every seat after the first arrives through this page. The point of #25886 and #26020 was that an invitee sees \"林晓 invited you to 晓林装饰工作室\" before being asked for anything. That read exists now, but nothing displays it. The ui read fell between two closes: #26020's body says \"After it lands, the ui seat reads the new route in LoginPage.tsx / AcceptInvitationPage.tsx under #25886, which stays open for that\". But #25886 closed COMPLETED (2026-10-26T16:55Z, \"the server half was split to #26020\"), and #26020 closed on PR #26151, which touched no `ui/` file.\n\n**Reader who acts.** The `domain:ui` seat: `ui/packages/auth` (client method) and `ui/packages/app-shell/src/console/auth` + `organizations/manage`.\n\n## Where (pin `6390fe52`; no ui consumer on objectstack `main` either)\n- No reader: `git grep -l \"invitation-preview|invitationPreview\" -- ui/` finds nothing. The ui auth client has only the session-gated `getInvitation` (`ui/packages/auth/src/createAuthClient.ts:1005`).\n- The server route: `packages/plugins/plugin-auth/src/invitation-preview.ts`, ledgered in `auth-route-ledger.ts:261` (closed query set `{ id }`, masked email, uniform 404, per-address rate limit).\n- Pages that should read it:\n  - `app-shell/src/console/auth/LoginPage.tsx:121-134, 196-208` (generic invitation title/description)\n  - `RegisterPage.tsx:230-233`\n  - `invitationArrival.tsx:48`\n  - `ui/apps/console/src/pages/auth/LoginPage.tsx:330-341`\n  - `organizations/manage/AcceptInvitationPage.tsx:25-32, 211-240` (names org/inviter only when signed in, via get-invitation)\n\n## Expected\n- On an `/accept-invitation/<id>` redirect, login, register and accept read the preview and say 「林晓 邀请你加入 晓林装饰工作室」.\n- Register shows the masked address as the expected one and warns when the typed address doesn't match its pattern. Full prefill isn't possible from a masked value.\n- An unknown or expired id falls back to today's generic copy.\n- Optional: the environment-host login's 「欢迎回来」 on a member's first visit could greet \"from ObjectOS Cloud\" now that PR cloud#3286 carries an entry identity. Taste; take it only if trivial.\n\n## Dedupe\n`gh api search/issues`, incl. closed:\n- objectstack `invitation-preview login prefill`: 3 (#25886 closed, #26020 closed, #6015 seat).\n- objectstack `invitation preview ui organization inviter signed-out`: 3, the same.\n- cloud `invitation preview login organization`: 3 (#2914, #3139, #2777), unrelated."

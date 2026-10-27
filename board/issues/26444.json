@@ -2,8 +2,8 @@
   "number": 26444,
   "kind": "issue",
   "title": "test(floors): floors set at today's measured value and two-sided baselines red on every legitimate deletion — ui package counts in ~8 places, CLI command counts, catalog entries pinned 4×, slot-lookup-class baselines that fail on a decrease",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,22 +13,23 @@
   "labels": [
     "area:devpath",
     "domain:devx",
-    "pm:dispatched",
     "priority:p2",
     "tech-debt",
     "tooling"
   ],
-  "assignees": [
-    "os-steve"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T03:59:01Z",
-  "updated_at": "2026-10-27T08:11:12Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-27T11:09:55Z",
+  "closed_at": "2026-10-27T11:09:55Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26444",
   "body": "Filing gate: ③ maintainer-directed. Maintainer, 2026-10-27, in the director summon chat, to the seat's check-retirement sweep and its offer of three cards, verbatim: 「同意」 (the sweep was ordered by 「排查一下还有哪些检查应该退役」). Filed by the director seat (`session_01KrKXQVvgYk2AJ4VkqMobyb`, ledger objectstack#12708, sweep record 6433263738). ⛔ Not a claim. Batch-of: 11 (director seat, 2026-10-27). Dedupe: 600 newest open + closed issues grepped for the check's file name → 0 unless stated. Reader: `domain:ui` for the ui floors, `domain:server`/cli for the CLI floors, `domain:devx` for the baselines. One PR per lane; `Part of` lines point here. Not a child of the transcription-pin parent: these are ratchets that should stay, loosened.\n\n## 维护者速读\n\n这些不是转录钉，是「防空值」底线和单向棘轮，该留；问题是底线被设在**今天的实测值**上（删一个包、一个命令、一个目录条目就红），以及一批基线**减少也红**（删个文件得跑 `--update`）。#26343 删一个 ui 包就改了五处底线。改法只有一条：底线取防空值（先例 `vite-dts-wiring-ratchet`：实测 22，底线 15），基线减少直接通过。\n\n## Measured (`origin/main` `e677770a`)\n\n- ui published-package population appears in about eight places: `ui/QUICK_REFERENCE.md:90` \"36 published packages\" (asserted by `quick-reference-commands-4149.test.ts:339–365`); `package-files-exist.test.ts:236–237, 448, 811–812` floors ≥38/150/37/36/130 \"just under the measured values\"; `side-effects-declaration-consistency.test.ts:1081–1083` ≥28/11/17; `check-dist-completeness.test.ts:272` ≥11; `zero-test-member-exclusion-9106.test.ts:211, 222` and `check-doc-links.test.ts:519, 524` (looser); `check-node-esm-load.mjs:163` and `check-published-dist-tooling.mjs:158` `MIN_PACKAGES = 30` twice.\n- Floors equal to the measured value: `packages/cli/test/exit-signal.pin.test.ts:489–492` (65/131/46), `refusal-renders-once.test.ts:226–228` (60/50/3), `packages/spec/scripts/liveness/tombstoned-row-status.test.ts:90` (40); `ui/examples/schema-catalog` entry floor pinned in four tests with two different values (≥431 ×3, ≥423 ×1).\n- Two-sided baselines (a decrease also fails until `--update`): `scripts/slot-lookup-baseline.json`, `query-options-erasure-baseline.json`, `role-word-baseline.json`, `i18n-coverage-baseline.json`, `corpus-claim-drift-baseline.json`, `objectql-double-limit`, `where-matcher-conformance`, `optional-error-sink-contract`, `durability-*`, `published-readme-exports` and their `check-*-ratchet.mjs` readers (lint.yml :4504, :4387, :2326, :2356, :2333, :3891, :3867; typecheck-consumers :6575).\n\n## Wanted\n\n1. Every anti-vacuity floor moves to roughly two thirds of today's value (the vite-dts precedent) and is written once per population: the ui package count in one shared constant read by the eight sites; the `QUICK_REFERENCE.md` prose number deleted (the test already derives the count).\n2. The schema-catalog floor lives in one place with one value.\n3. Two-sided baselines become one-sided: a decrease passes and is reported, an increase fails; `--update` stays for the report. The eslint-ignore couplings of slot-lookup and query-options are re-read in the same PR.\n⛔ Not here: any shrink-only ceiling or policy budget (skills tokens, skill lines, type-check debt, exemption ceilings) — those are rulings, not floors.\n\n## Acceptance\n\nDeleting one ui package, one CLI command or one catalog entry reds no floor; deleting a file listed in a baseline reds no ratchet; every remaining floor is below its measured value by a stated margin named in the PR body. **Size:** M across three lanes. **Clause-②:** no. **Metadata-protocol:** none.\n\n## Related\n\nPR #26343 (five floor bumps for one deletion); #26410 (the census pin, ruled C); parent #26431 (the transcription pins, a different class)."

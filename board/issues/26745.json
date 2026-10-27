@@ -1,0 +1,29 @@
+{
+  "number": 26745,
+  "kind": "issue",
+  "title": "Studio Interfaces: dashboard widget types differ between the Add menu (11), the Type picker (10, no scatter) and the spec (20); the page block picker lacks 8 of 34 standard blocks; widget dataset help mentions a nonexistent \"inline object query\"",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T14:09:57Z",
+  "updated_at": "2026-10-27T14:09:57Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26745",
+  "body": "Filing gate: ① product defect, reproduced, landing site named.\nBatch-of: studio-qa-2026-10-27 — 39 cards from one Studio QA run (coordinator session `session_01J8VVAkZns5rNnK2rtszzbQ`; tested at `3fcafcd3`; `origin/main` was `43731031` at filing, so the implementer re-checks the landing site on current main). The run record is the `qa-run` issue filed with this batch.\n\n## Symptom\n\nNine renderable widget types (column, treemap, sankey, combo, gauge, solid-gauge, kpi, bullet, radar) have no Studio entry although all 20 render when written through the API; eight standard blocks cannot be placed from Studio.\n\n## Reproduction\n\n1. Dashboard › Add widget menu → 11 types; select a widget › Type → 10 (no scatter).\n2. Write each of the 20 spec widget types via `PUT /api/v1/meta/dashboard/…` → all render.\n3. Page designer block picker lacks record:chatter, record:approval_decision, record:approvals, record:attachments, app:launcher, global:notifications, element:record_picker, element:text_input.\n4. Widget dataset field help text refers to an \"inline object query above\" that does not exist.\n\n## Expected\n\nOne source of truth for widget and block types in Studio, matching the spec; help text describes real controls.\n\n## Suspected landing site (the implementer verifies)\n\nStudio dashboard widget menus and page block palette under `ui/packages/app-shell/src/views/studio-design/`.\n\n## Filing facts\n\n- reach: Studio UI, measured by the Interfaces QA card.\n- Business reason: Builders cannot use half the chart types the platform ships.\n- Reader who acts: the triage seat (first touch: domain, area, level), then that lane's `os-dev` implementer. QA suggestion only: `domain:ui`, `area:studio`, p3.\n- Dedupe: semantic search `dashboard widget Add menu and Type picker list different widget types, block picker missing standard blocks` on objectstack-ai/objectstack → 0 hits.\n- QA id: U13"
+}

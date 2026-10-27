@@ -1,7 +1,7 @@
 {
   "number": 18549,
   "kind": "issue",
-  "title": "[PM seat] domain:spec · seat 2 — 🟢 zhuangjianguo · 由 zhuangjianguo 账户的项目负责",
+  "title": "[PM seat] domain:spec · seat 2 — ⏳ vacant",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,18 +13,16 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [
-    "zhuangjianguo"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-17T00:45:41Z",
-  "updated_at": "2026-10-26T06:26:04Z",
+  "updated_at": "2026-10-27T11:29:19Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 130,
+  "comments": 132,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18549",
-  "body": "os-pm-seat-post — `domain:spec` seat 2.\n\n**This post is the seat.** Only the sitting PM edits the body, and the body is authoritative; the title and the assignee are views derived from it. Current values live here, never in `references/lanes/spec.md`. This is a project seat's stub (`seat-lifecycle.md`): posture, ledger and round reports live in the project. The archive of record for the shift before this one is the body revision before this edit (`sunhaolin` · `session_01PC4NPXPgPmpDRG9DdDnyXT`, off duty 2026-10-25T15:26Z, closing note `6399492692`, postscript `6406692244`).\n\n## Current PM\n\n- 🟢 **`zhuangjianguo`** · `session_01RyMY3prh9GRva1Tt37Di3i` · seated 2026-10-26T06:24Z on the maintainer's summons in a project thread. The mutex readings and touch shas are in this shift's round-open marker (the newest \"Seat taken\" comment below).\n- 由 `zhuangjianguo` 账户的项目负责 (this lane seat is run by the `zhuangjianguo` account's fleet project). Writes go through the relay as `objectstack-fleet[bot]`.\n- **Posture:** set by the maintainer for this session; the value lives in the project thread (姿态台账住项目). Default `label:pm:queue`. Dispatch back ends per `execution-duties.md`: S mechanical ⇒ `mode:subagent`; M and above, p1 and `security` ⇒ `mode:thread` (card threads opened by the project's coordinator).\n- **Wake:** PR subscriptions of this session and the maintainer's thread. **Seat Routine:** none.\n- **Charter:** `.claude/skills/pm-dispatch/references/lanes/spec.md`.\n\n## Handover ledger\n\nInherited from the previous shift: nothing in hand (closing note `6399492692`: no claim, no open PR, no `pm:dispatched` card). Its postscript `6406692244` names three open items for the next PM; they are re-derived from the cards at dispatch, ⛔ not carried as rulings. State per card lives in its `Claim:` comment and the PR's `## 席位核对`; this section is only the index.\n\n## Hot-file serial queue\n\nRe-derived at each dispatch from open-PR file lists and live claim comments. ⛔ It is never carried forward.\n\n| file / region | holder | next |\n|:--|:--|:--|\n| — | none | — |\n\n## 说明\n\n- **Other live `domain:spec` seats:** #6017 (seat 1), #18883 (seat 3), #18917 (seat 4), #19357 (seat 5). ⛔ No liveness judgement on them.\n- 姿态台账住项目 (posture and round ledger live in the project thread).\n"
+  "body": "os-pm-seat-post — `domain:spec` seat 2.\n\n**This post is the seat.** Only the sitting PM edits the body, and the body is authoritative; the title and the assignee are views derived from it. Current values live here, never in `references/lanes/spec.md`. This is a project seat's stub (`seat-lifecycle.md`): posture, ledger and round reports live in the project. The archive of record for the shift before this one is the body revision before this edit (`zhuangjianguo` · `session_01RyMY3prh9GRva1Tt37Di3i`, seated 2026-10-26T06:24Z, off duty 2026-10-27T11:27Z; the clock-out brief is the newest comment below).\n\n## Current PM\n\n- ⏳ **vacant** since 2026-10-27T11:27Z. The maintainer stopped new dispatch on this seat (no Fable-tier cards for this account) and opens the next spec PM elsewhere.\n- Successor: `/pm-dispatch 接手`, then read this post and the clock-out brief below. ⛔ No tail stays with the previous PM: no open PR, no `pm:dispatched` card and no queued write is held by `session_01RyMY3prh9GRva1Tt37Di3i`.\n- **Seat Routine:** none.\n- **Charter:** `.claude/skills/pm-dispatch/references/lanes/spec.md`.\n\n## Handover ledger\n\n`node scripts/pm/check-handover.mjs --session=session_01RyMY3prh9GRva1Tt37Di3i --account=zhuangjianguo` exited 0: no unreleased claim and no decision outside the inbox. Every card this shift claimed landed (index in the brief); state per card lives on the card and its PR.\n\nQueue snapshot at 2026-10-27T11:27Z, open `domain:spec` issues (re-derive at dispatch, ⛔ never carry as rulings):\n\n| label | count | cards |\n|:--|:--|:--|\n| `pm:queue` | 10 | #26616 #26608 #26602 #26463 #26324 #26170 #26142 #26128 #26112 #25923 |\n| `pm:dispatched` | 5 | #26601 #26548 (`os-support-ai`), #26220 (`os-steve`), #25785 #25769 (seat 4, #18917) — none of them this seat's |\n| `pm:blocked` | 1 | #25794 |\n| `needs-user-decision` | 1 | #26619 |\n\n## Hot-file serial queue\n\nRe-derived at each dispatch from open-PR file lists and live claim comments. ⛔ It is never carried forward.\n\n| file / region | holder | next |\n|:--|:--|:--|\n| — | none | — |\n\n## 说明\n\n- **Other live `domain:spec` seats:** #6017 (seat 1), #18883 (seat 3), #18917 (seat 4), #19357 (seat 5). ⛔ No liveness judgement on them.\n- **Knock 6426007066** (`domain:ui` seat 1, #26304): read at clock-out; moot, since ui seat 1 took the card over as an unowned blocker (claim 6428185086) and it is closed.\n- 留守登记: none.\n"
 }

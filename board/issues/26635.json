@@ -1,0 +1,35 @@
+{
+  "number": 26635,
+  "kind": "pull_request",
+  "title": "fix(pm): one reading of the 席位核对 record for fleet-roster and H69",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T11:08:50Z",
+  "updated_at": "2026-10-27T11:36:41Z",
+  "closed_at": "2026-10-27T11:36:40Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-27T11:36:39Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26635",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9WXrD8j89X92edJ7iXHVEhk)_\nFixes #26335\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:车队总表(fleet-roster)判断 PR 是否带落地结论时,和 H69 巡查判断有没有席位记录时,现在读同一条 `## 席位核对` 规则;标题行内写 `— ACCEPT` 的记录也算 ACCEPT。\n- 为什么改:席位实际发的记录是 `## 席位核对 — ACCEPT · …`,H69 认得,总表却认不得,导致总表把已 ACCEPT 的 PR 报成\"无结论\"。\n- 风险与回滚:只动 PM 工具脚本、不发布任何包;总表与 H69 都是只报告不拦截。回滚 = revert 本 PR。\n- 先看:`scripts/pm/seat-record.mjs`(新的共享规则),`scripts/pm/fleet-roster.mjs` 的 `hasLandingVerdict`,`scripts/pm/check-half-states.mjs` 的 `SEAT_RECORD_MARKER` 导入处。\n- 两分钟验证:`node scripts/pm/fleet-roster.mjs --self-test && node scripts/pm/check-half-states.mjs --self-test`,预期两行 ✓(78 例 / 5034 例全过)。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- New `scripts/pm/seat-record.mjs`, no imports and no I/O: `SEAT_RECORD_MARKER` (moved verbatim from `check-half-states.mjs`), `SEAT_RECORD_VERDICTS` (`ACCEPT`, `REWORK`, `REJECT`), `seatRecordOf(body)` and `seatRecordAccepts(body)`. The verdict is read inline on the heading line first (`## 席位核对 — ACCEPT · …`), else from the first line below the heading that opens with a verdict word (`**ACCEPT** · …`). Only `ACCEPT` lands a pull.\n- `fleet-roster.mjs` `hasLandingVerdict`: the 席位核对 arm is now `seatRecordAccepts(body)`. The `## Contract review` PASS arm is unchanged.\n- `check-half-states.mjs`: `SEAT_RECORD_MARKER` is imported from the shared module and re-exported under its old name. H69's reading is byte-identical: the same regex object source, still read through `latestMarkedComment`.\n- The module is a sibling of its two readers, not under `scripts/pm/lib/`. A multi-segment import specifier counts as a dispatch-gates watch hint, and gate files that import one lose the hint (measured on an earlier card). The card's hypothesis allowed either place.\n\nBehaviour changes in the roster read, all intended:\n1. The inline `— ACCEPT` heading counts (the defect).\n2. A blockquoted record (`> ## 席位核对`) counts, as H69 already read it.\n3. The verdict must sit on the heading or below it. A line-initial `ACCEPT` above the heading no longer counts, and an inline `REWORK` is never overridden by a later `ACCEPT` line.\n\n## Tests\n\n- `fleet-roster.mjs --self-test`: 5 new cases (inline ACCEPT, inline REWORK, blockquoted record, ACCEPT above the heading, and the three measured bodies read through the imported marker). 73 → 78 cases, 8 batteries.\n- `check-half-states.mjs --self-test`: 4 new cases in the H69 battery (the marker reads the inline heading; H69 is clean on an inline record newer than the head; the three measured bodies read record/ACCEPT as `true/true`, `true/true`, `false/false`; inline REWORK and REJECT below are records that never accept). H69 66 → 70 cases (floor 40), 5030 → 5034 total.\n- No forced test edits: every existing case passes unchanged.\n\n## Acceptance notes\n\n- The card asks that \"the two recognisers answer the same on the three measured bodies\". They ask different questions: H69 asks whether a record is there, and the roster asks whether the pull may land. So the shared question, the seat record and its ACCEPT, is pinned in both self-tests. On the `## Contract review` PASS body both read \"no seat record\". The roster still answers `true` there through its separate Contract review arm, which is correct.\n- H69 reads the marker through `markerMatches`, which also undecorates bold or backtick-wrapped lines. The roster tests the raw body. A decorated heading such as `**## 席位核对**` would still read differently. No live record has that shape. It is noted here and not widened, because `markerMatches` lives inside `check-half-states.mjs`.\n- No pm-dispatch skill text changed: `.claude/skills/pm-dispatch/SKILL.md` is held by another card, so this PR is not on a governed surface. Whether the skill needs a sentence stating the heading spelling is listed in the report's open questions.\n\n## Verification\n\nAll readings on head `f9a39c24` (the last commit), local.\n\n<details><summary>Self-tests and reverse verification</summary>\n\n- `node scripts/pm/fleet-roster.mjs --self-test`: `✓ fleet-roster self-test: 78 cases in 8 batteries pass.` (main `7c34e5dc`: 73 cases)\n- `node scripts/pm/check-half-states.mjs --self-test`: `✓ check-half-states self-test: 5034 cases pass.`, H69 battery `70/40` (main: 5030, `66/40`)\n- Reverse verification, after the fix was committed: with the old bare-heading regex put back in `hasLandingVerdict` on disk, the roster self-test exits 1 with 4 failures (inline ACCEPT, blockquoted record, ACCEPT above the heading, the three measured bodies). Restored with `git checkout HEAD --`; `git diff HEAD` is empty, and the self-test is green again.\n\n</details>\n\n<details><summary>dispatch-gates: 47 derived, 47 run, all exit 0</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 47 commands for the three paths. Every one exited 0, captured before any pipe. `--ran` with `COMMAND :: exit CODE` lines: `Run reconciliation — 47 derived, 47 run, 0 NOT-MEASURED, 0 UNRUN.` and `47 of 47 recorded an exit code and none of them is 3`. Among them: `pnpm check:pm-dispatch-gates`, `pnpm check:pm-half-states`, `pnpm check:self-test-wired`, `pnpm check:watch-hint-literal`, `pnpm check:scripts-symbol-anchors`, `pnpm check:nul-bytes`. Families outside the derived total are CI's.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmPquMegy4jNfKiBsAf)_\n"
+}

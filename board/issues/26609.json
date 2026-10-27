@@ -1,0 +1,37 @@
+{
+  "number": 26609,
+  "kind": "issue",
+  "title": "pm-dispatch: the director seat takes no patrol routine in any form — project-forms.md:31–32, SKILL.md:71 and director.md:23 still give a project-run director an hourly routine",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:skills",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T10:14:37Z",
+  "updated_at": "2026-10-27T12:50:19Z",
+  "closed_at": "2026-10-27T12:46:03Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26609",
+  "body": "Filing-gate class ③ — maintainer-directed. The maintainer's words, in the director seat's project thread at 2026-10-27T10:12Z, after the seat (summon #52, ledger objectstack#12708, opening mark 6439011997) reported the conflict below and had built an hourly patrol task under the project-seat form: 「总监不需要巡查 routine，立卡更新 skills」. The task was deleted in the same act (trig_01UNFB4T86moT354jN3um6ud, never fired).\n\n**What disagrees (read on `origin/main` `500bc9d5`):**\n\n- `.claude/skills/pm-dispatch/references/lanes/director.md:7` — 「授权面 = 人工召唤,任一项目可召;… 直连 ⛔ 无 Routine/cron。」 and `:23` — 「分诊席默认与本席同项目召唤,小时轮可与收件箱扫描共用一轮」 (an hourly round the director is assumed to run).\n- `.claude/skills/pm-dispatch/references/project-forms.md:31–32` — 「首次坐席自建本项目的 routine:巡逻默认每小时;总监席加每日摘要与每小时收件箱扫描。」「分诊席加每小时裸卡轮;总监与分诊同在一个项目时两者可共用一个 routine。」\n- `.claude/skills/pm-dispatch/SKILL.md:71` — 「项目席唤醒 = PR 订阅 + 每项目一个自建自绑的巡查 routine,默认每小时;⛔ 无 `send_later` 链。」 — stated for every project seat, which today includes a director seat sitting in a project.\n- `.claude/skills/pm-dispatch/references/seat-post-protocol.md:66` — 「项目席巡查默认每小时,放宽须有理由并写座位贴」.\n\n`director.md:7` already says summon-only; the three project-form lines were written for lane seats and swept the director seat in. SKILL.md's own conflict rule (「两条细则冲突 ⇒ 按更严的一条行动并立卡」) is what this card is.\n\n**Rule to encode (the maintainer's word above):** the director seat is summon-only in every form, the project-seat form included — no patrol routine, no inbox-scan routine, no daily-digest routine. It wakes on the maintainer's summon in its project thread and on the PR subscriptions it holds. Lane seats' hourly patrol and the triage seat's hourly Routine are untouched.\n\n**Edit (one PR, skills lane, Tier S `.claude/**`, no package publishes):**\n\n- `project-forms.md:31` — drop 「总监席加每日摘要与每小时收件箱扫描」; say the director seat builds none (「总监席不建:人工召唤,见 `lanes/director.md`」).\n- `project-forms.md:32` — drop 「总监与分诊同在一个项目时两者可共用一个 routine」 (nothing to share).\n- `director.md:23` — drop 「小时轮可与收件箱扫描共用一轮」; keep the triage pointer.\n- `SKILL.md:71` — add the exception on the same line (「总监席除外」), paid for by a deletion elsewhere under `check-skill-line-ratchet.mjs` (the ratchet refuses a net line, and a re-wrap does not pay).\n- `seat-post-protocol.md:66` — add 「总监席无巡查」 to the same line.\n- The daily digest and inbox scan of `director.md` duty 2 and duty 4 stay as duties run **within a summon**, not as a schedule; no wording change needed there beyond `:23`.\n\n**Who reads it:** the skills seat (#7623 / #19287) on its next pick, as one Tier S PR landed on a seat contract-review record; the next director summon reads the edited text. **Business reason:** the maintainer's own operating rule for the seat he summons; a routine that fires an unsummoned director spends tokens and writes ledger blocks nobody asked for.\n\n**Dedupe** (REST list of `domain:skills` open + closed, 116 cards, grepped for director / 总监 / routine / 巡查): no open card on this subject. Closed #25991 (a project seat creates its own patrol schedule) and #25412 (project forms) are the cards that wrote the lines above; neither carves the director out.\n\nClause-②: no\nMetadata-protocol: none"
+}

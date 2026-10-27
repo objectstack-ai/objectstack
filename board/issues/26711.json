@@ -1,0 +1,32 @@
+{
+  "number": 26711,
+  "kind": "issue",
+  "title": "spec: the view save door silently strips unknown top-level keys from the view envelope (200, not stored) while object, page and dashboard bodies refuse them 422 unrecognized_keys",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "bug",
+    "domain:spec",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T13:35:01Z",
+  "updated_at": "2026-10-27T14:20:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26711",
+  "body": "Filing gate: ① product defect, reproduced, landing site named.\nBatch-of: studio-qa-2026-10-27 — 39 cards from one Studio QA run (coordinator session `session_01J8VVAkZns5rNnK2rtszzbQ`; tested at `3fcafcd3`; `origin/main` was `43731031` at filing, so the implementer re-checks the landing site on current main). The run record is the `qa-run` issue filed with this batch.\n\n## Symptom\n\nAn author who sends a misspelt or retired key on a view gets success and the key is silently discarded. The same key on an object, page or dashboard body is refused.\n\n## Reproduction\n\n1. `PUT /api/v1/meta/view/showcase_task.qa_rk_view?mode=draft` with a valid view body plus top-level `\"zzz_junk_key\": true` (or a retired list key such as `\"striped\": true`) → 200 `{success:true,state:\"draft\"}`.\n2. `GET …?state=draft` → the key is absent.\n3. Same junk key at the top of a dashboard / object / page body → 422 INVALID_METADATA `<root>` unrecognized_keys.\n\n## Expected\n\nThe view envelope refuses unknown top-level keys like every other type (422 unrecognized_keys, with the retirement guidance for retired keys).\n\n## Suspected landing site (the implementer verifies)\n\n`packages/spec/src/ui/view.zod.ts`: `ViewMetadataSchema = z.preprocess(stripViewConsoleDecorations) → z.union(members)`; the envelope member strips instead of refusing.\n\n## Filing facts\n\n- reach: `PUT /api/v1/meta/view/…` measured once by the coordinator.\n- Business reason: Silent tolerance hides AI and human authoring mistakes; the protocol rule is to refuse loudly.\n- Reader who acts: the triage seat (first touch: domain, area, level), then that lane's `os-dev` implementer. QA suggestion only: `domain:spec`, `area:studio`, p2.\n- Dedupe: semantic search `view save silently strips unknown top-level keys instead of unrecognized_keys refusal` on objectstack-ai/objectstack → 2 hits (#20249, #6619, both closed and unrelated); related open #25923 is the objectui mirror layer, not this door.\n- QA id: S1"
+}

@@ -1,0 +1,29 @@
+{
+  "number": 26713,
+  "kind": "issue",
+  "title": "runtime: `POST /api/v1/packages/:id/publish-drafts?dryRun=true` ignores the unknown query parameter and performs a real publish",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T13:37:05Z",
+  "updated_at": "2026-10-27T13:37:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26713",
+  "body": "Filing gate: ① product defect, reproduced, landing site named.\nBatch-of: studio-qa-2026-10-27 — 39 cards from one Studio QA run (coordinator session `session_01J8VVAkZns5rNnK2rtszzbQ`; tested at `3fcafcd3`; `origin/main` was `43731031` at filing, so the implementer re-checks the landing site on current main). The run record is the `qa-run` issue filed with this batch.\n\n## Symptom\n\nA caller asking for a dry run gets a real, irreversible publish; the door has no closed query set.\n\n## Reproduction\n\n1. Create a package with one pending draft.\n2. `POST /api/v1/packages/<id>/publish-drafts?dryRun=true` with `{}` → 200 `outcome:\"published\"`; the draft is live.\n\n## Expected\n\nAn unknown query parameter is refused (closed query set, AGENTS rule), or `dryRun` is implemented as a real dry run.\n\n## Suspected landing site (the implementer verifies)\n\n`packages/runtime/src/domains/packages.ts` publish-drafts handler.\n\n## Filing facts\n\n- reach: HTTP, measured by the Interfaces QA card; coordinator re-verified.\n- Business reason: Tools and AI agents that expect a preview publish for real.\n- Reader who acts: the triage seat (first touch: domain, area, level), then that lane's `os-dev` implementer. QA suggestion only: `domain:server`, `area:studio`, p3.\n- Dedupe: semantic search `publish-drafts dryRun query parameter ignored performs real publish` on objectstack-ai/objectstack → 15 hits, none about dryRun or the query set (nearest closed #10219, #25484).\n- QA id: S3"
+}

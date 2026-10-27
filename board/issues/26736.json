@@ -1,0 +1,29 @@
+{
+  "number": 26736,
+  "kind": "issue",
+  "title": "Studio Data › Actions: switching what an action does (or its Type) leaves an invalid draft that blocks every later save of the object with no message; Body Shape is a free-text box that writes an invalid value",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T13:54:58Z",
+  "updated_at": "2026-10-27T13:54:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26736",
+  "body": "Filing gate: ① product defect, reproduced, landing site named.\nBatch-of: studio-qa-2026-10-27 — 39 cards from one Studio QA run (coordinator session `session_01J8VVAkZns5rNnK2rtszzbQ`; tested at `3fcafcd3`; `origin/main` was `43731031` at filing, so the implementer re-checks the landing site on current main). The run record is the `qa-run` issue filed with this batch.\n\n## Symptom\n\nAfter a kind switch every subsequent object autosave is refused 422 and the UI shows nothing; a reload reverts the action. Typing the documented `{wrap}` form into Body Shape also bricks saves.\n\n## Reproduction\n\n1. What it does → \"Run a script\" → saves `body: {language}` without `source` → 422 `actions.N.body.source`.\n2. Type a body, then Type → API → `body` is kept → 422 \"`body` only runs for `type: 'script'`\"; all following endpoint/method edits are refused; reload reverts to \"Update fields\" (three attempts on `call_api`).\n3. Body Shape: type `{\"wrap\":\"payload\"}` → 422 `actions.N.bodyShape` invalid_union, later saves fail until reload; a stored `{wrap:\"payload\"}` displays as \"payload\" and would re-save as an invalid string.\n\n## Expected\n\nA kind/type switch drops keys the new kind does not accept and holds incomplete required keys; a refused save is shown at the action; Body Shape is a Flat / Wrap(key) control.\n\n## Suspected landing site (the implementer verifies)\n\n`ActionDefaultInspector.tsx` kind/type switch and the bodyShape control.\n\n## Filing facts\n\n- reach: Studio UI, measured by the data gap-fill card.\n- Business reason: The editor silently stops saving the whole object; builders lose subsequent work.\n- Reader who acts: the triage seat (first touch: domain, area, level), then that lane's `os-dev` implementer. QA suggestion only: `domain:ui`, `area:studio`, p2.\n- Dedupe: semantic search `switching action type in Studio leaves invalid draft body only runs for type script, bodyShape text input invalid_union` on objectstack-ai/objectstack → 5 hits, all closed (#6938 bodyShape renderer forwarding, #4352 runtime gate; none about the Studio switch).\n- QA id: G4"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 26588,
+  "kind": "pull_request",
+  "title": "docs(permissions): name declared membershipKeys in the RLS guide's context variables",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T09:16:26Z",
+  "updated_at": "2026-10-27T09:49:32Z",
+  "closed_at": "2026-10-27T09:49:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-27T09:49:30Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26588",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8FiD8VYiNjD9zPG48Gh7MbM)_\n\nFixes #26423\n\n## 维护者速读\n\n- 改了什么:RLS 指南「Context variables」表新增 `current_user.KEY` 一行(链到参考页「Where a membership key comes from」),并重写表后的收尾段:先讲在名册对象上声明 `membershipKeys`,附一个经类型检查的门户示例,再讲部署侧注册 membership resolver 作为扩展。\n- 为什么改:做门户/合作伙伴访问的作者先读这页指南,旧文只说「部署可注入成员集合」,把他们引向写插件或逐行写策略,而一条 `membershipKeys` 声明就能解决;参考页与 data 技能早已写明,只缺指南。\n- 风险与回滚:仅改一个手写文档文件,不发布任何包、不动运行时;回滚即 revert 本 PR。\n- 先看:`content/docs/permissions/rls.mdx` 的 Context variables 一节(新表行与收尾段、示例代码块)。\n- 两分钟验证:`grep -c membershipKeys content/docs/permissions/rls.mdx`,预期 3;`pnpm check:doc-anchors`,预期全部片段链接解析通过。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n`content/docs/permissions/rls.mdx`, section `## Context variables` only:\n\n- The table gains a `current_user.KEY` row: a set a roster object declares under `membershipKeys`, linked to [`/docs/references/security/rls#where-a-membership-key-comes-from`](https://github.com/objectstack-ai/objectstack/blob/main/content/docs/references/security/rls.mdx).\n- The closing paragraph (\"Deployments can inject additional membership sets ...\") is rewritten to name both sources in the order `packages/spec/src/security/rls.zod.ts` gives them: a declared key first (`userField`, `valueField`, optional `filter` on the roster object), with one checked example (an `account_member` roster plus a portal permission set reading `account in current_user.portal_account_ids`), then a registered membership resolver as the deployment-side extension. It also carries the runtime facts the spec states: read once per request as a system read in the caller's organization, no read on the roster needed, whoever writes roster rows grants the key, a key both sources claim resolves from neither, and an unsupplied key or one over 1,000 values matches no rows.\n\nShape of truth: `MembershipKeySchema` / `MembershipKeysSchema` and the module docblock's \"Where a membership key comes from\" in `packages/spec/src/security/rls.zod.ts`, and `ObjectSchema.membershipKeys` in `packages/spec/src/data/object.zod.ts`. The example mirrors the one `skills/objectstack-data/rules/security.md` already type-checks.\n\n## Why\n\nThe guide is the page an author reads first; it sent them to a deployment-side resolver for what one declared key does. On `origin/main` 1080f074 the guide had 0 `membershipKeys` hits while the reference page carried the key.\n\n## Tests\n\nDocs-only. The new example carries the `os:check` marker, so `check:skill-examples` type-checks it against the built `@objectstack/spec` declarations.\n\n## Acceptance notes\n\n- Card acceptance: the table carries the `current_user.KEY` row with the link; `grep -c membershipKeys content/docs/permissions/rls.mdx` = 3; the anchor resolves (`check:doc-anchors` green). The docs build is CI's `Build Docs` job (not run locally).\n- Observed, not fixed (outside the card's surface): the guide's kernel rows list five values, while `rls.zod.ts` names a sixth the kernel resolves, `accessible_org_ids`. Noted only.\n\n## Verification\n\nAll gates run at head `c03a2d59` (the only commit; base `1080f074`).\n\n<details><summary>Derived gate set: 45 derived, 45 run, all exit 0</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 45 commands from the one-path change set; every one ran with exit 0. `check:skill-examples` first answered exit 3 (PREREQUISITE NOT MET: `packages/client-react/dist` unbuilt); after building `@objectstack/client-react` and its dependencies it answered exit 0 with \"266 prose examples type-check across 3 surface(s)\". `check:doc-anchors`: \"621 internal #fragment link(s) across 430 source file(s) all resolve to a real heading\". `check:role-word`, `check:doc-authoring`, `check:docs-spec-enumerations`, `check:nul-bytes`: exit 0. Reconciliation (`--ran`): \"45 derived famil(ies) accounted for — 45 run, 0 NOT-MEASURED\".\n\n</details>\n\nNot measured locally, left to CI: `Build Docs`, the type-check lanes, `Plan Test Core shards`.\n\nClause-②: no\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes. (no linted source touched; repo-wide lint is CI's)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (publishes nothing: `skip-changeset`)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01JQwxbaFpnMwgpCgneKe2qS\n"
+}

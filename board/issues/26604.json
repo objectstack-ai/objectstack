@@ -1,0 +1,37 @@
+{
+  "number": 26604,
+  "kind": "pull_request",
+  "title": "fix(app-showcase): record-action success toasts name the record",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T09:53:32Z",
+  "updated_at": "2026-10-27T10:42:12Z",
+  "closed_at": "2026-10-27T10:42:10Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-27T10:42:10Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26604",
+  "body": "Fixes #26459\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**:showcase 的五个记录级动作(Mark Done、Recalculate Estimate、Recalculate Selection、Archive、Submit for Sign-off)的成功提示现在点名被改的记录,例如 \"PII access review marked done.\",发票用发票号 \"INV-1002 submitted for finance + legal sign-off.\"。只改了 `examples/app-showcase/src/ui/actions/index.ts` 里的 successMessage 文案,外加一个钉住提示原文的测试和一个 changeset。\n- **为什么改**:用户连续标记多条任务完成时,每次都只看到 \"Task marked done.\",分不清改的是哪一条;裁决 C(#25849)要求记录级写操作点名记录(标题)或数量。\n- **风险与回滚**:风险低,只动示例应用的文案。若某个列表行没带出 title 列,文案自动退回原来的对象措辞(如 \"Task marked done.\"),不会出现空引号或原样的占位符。回滚即还原这一个提交。\n- **先看**:`examples/app-showcase/src/ui/actions/index.ts` 的五处 successMessage,以及新测试 `examples/app-showcase/test/record-action-success-names-record.test.ts`。\n- **两分钟验证**:`pnpm --filter @objectstack/example-showcase exec vitest run test/record-action-success-names-record.test.ts`,10 条全绿;或启动 showcase,打开一条 done 为 false 的任务,点 Mark Done,提示应为该任务标题加 \"marked done.\"。\n- **需要你做的**:无须操作即可合入。可选:中文语言包里这几条 successMessage 仍是不带记录名的旧译文(本单按认领禁改语言包),是否另开卡由你定。\n\n## What\n\nThe showcase's record-level actions now name the record they changed in their success toast:\n\n| Action | Before | After (record carries its title) | After (no title bound) |\n|---|---|---|---|\n| Mark Done | Task marked done. | PII access review marked done. | Task marked done. |\n| Recalculate Estimate | Estimate recalculated. | Estimate recalculated for PII access review. | Estimate recalculated for the task. |\n| Recalculate Selection | Estimates recalculated for the whole selection. | Estimates recalculated for PII access review. | Estimates recalculated for the whole selection. |\n| Archive | Task archived (demo — no data changed). | PII access review archived (demo — no data changed). | Task archived (demo — no data changed). |\n| Submit for Sign-off | Invoice submitted for finance + legal sign-off. | INV-1002 submitted for finance + legal sign-off. | Invoice submitted for finance + legal sign-off. |\n\n## Why\n\nRuling C on #25849: a record-level write names the record (its title) or the count. The console renders an authored `successMessage` verbatim, so the fix is the showcase's own copy, not the runner.\n\n## How the hole binds (read from the runner, not changed)\n\n`ActionRunner.composeSuccessMessage` (objectui core) shows a `successMessage` as written unless it carries a template hole; then `fillTemplateHoles` fills it through `@objectstack/formula`'s `templateEngine` over exactly two roots: `result` (the handler's payload) and `record` (the dispatch's record: the clicked row's `_rowRecord`, else the page's record). So the record.title hole names a task and the record.name hole names an invoice (its \"Invoice Number\" field).\n\nAn unbound path prints EMPTY. A list row whose view does not project `title` would therefore have read as a sentence with a hole-shaped gap, so every message pipes the hole through the engine's `default` formatter, and falls back to the object wording the toast used before. No sentence can render a raw hole or an empty quoted name.\n\nThe count is not reachable from this copy: the copy's holes bind `record` and `result`, never the selection (`ctx.selection` is a target-interpolation scope only). It is also not needed. On the selection bar the aggregate dispatch runs with the success toast off (`ObjectGrid.runBulkActionAggregate` passes `showOnSuccess: false`), and the bulk dialog reports its own count (\"Succeeded N / M\"). The only placement where Recalculate Selection's toast shows is its declared `record_more` entry, a single-record dispatch, so it names that record and keeps \"the whole selection\" as the fallback.\n\n## Tests\n\nAll at head `6399091d` (after merging `origin/main`, closure rebuilt under the verify lock):\n\n- Red first, at `f9e79460` (pin only, copy unchanged): `vitest run test/record-action-success-names-record.test.ts`, 6 failed / 4 passed (10). The 4 that passed are the fallback cases, which equal today's wording by design. Example: `Expected: \"PII access review marked done.\" Received: \"Task marked done.\"`.\n- Green: the same file, 10/10 passed.\n- `pnpm --filter @objectstack/example-showcase test`: Test Files 40 passed (40), Tests 494 passed (494).\n- `pnpm --filter @objectstack/example-showcase typecheck`: exit 0.\n- `pnpm --filter @objectstack/example-showcase validate` (`objectstack validate`, which judges action copy templates): Validation passed.\n\n## Gates\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` at `6399091d`: 50 derived; 49 ran with exit 0. `pnpm check:dual-build-cjs-loads` exited 3, PREREQUISITE NOT MET (it needs every package's `dist/`, and this card builds only the showcase closure), so it is NOT MEASURED locally and is left to CI's build. `--ran` reconciliation: 50 accounted, 49 run, 1 NOT-MEASURED. `node scripts/check-sdui-manifest.mjs`: exit 0.\n\n## Acceptance notes\n\n- The zh-CN pack in `examples/app-showcase/src/system/translations/index.ts` still carries the old record-less wording for these actions (e.g. 任务已标记为完成。). Locale packs are outside this card's claimed file surface, so a zh-CN viewer still sees no record name.\n- `docs/qa/platform-checklist/areas/ux-conventions.json` quotes the old Mark Done string in its variant text. It is the QA ledger's evidence prose, left to the QA seat.\n- `GenerateInvoicePdfAction` (\"The PDF is attached to the invoice.\") is also record-level copy, but the card does not name it, so it is unchanged.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01SMps7wq7rBTk53e8KTSEup)_\n"
+}

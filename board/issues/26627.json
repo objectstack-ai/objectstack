@@ -1,0 +1,36 @@
+{
+  "number": 26627,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): read mergeable_state on every look at a watched PR",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T10:57:37Z",
+  "updated_at": "2026-10-27T12:46:02Z",
+  "closed_at": "2026-10-27T12:46:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-27T12:46:01Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26627",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoUNHdbnxosZ6e5sg2uZhGxc)_\n\nNo card: the maintainer authorized this `.claude/` tooling PR directly in the project chat, replying 「同意」 to the proposal \"update the pm-dispatch skill so any agent watching or landing a PR checks mergeable state on every look, not only CI checks, merges main itself when conflicted, and never reports nothing-needed-from-you without confirming mergeability\".\n\n## 维护者速读\n\n- 改了什么:pm-dispatch 看护 PR 时,每看一眼都同时读 CI 与 `mergeable_state`;冲突(`dirty`)当即合 main;未确认可合并不报「无需你做」。\n- 为什么改:一个 PR 冲突了好几个小时,线程只看 CI、一直说「在等 CI」,冲突通知没到,是你先发现的。\n- 风险与回滚:只改四个 `.claude/` 文件的规则文字,每个文件行数不变;回滚 = revert 本 PR。\n- 先看:`landing-operations.md` B 节新增两行,`coordinator.md` 第七节新增一行。\n- 两分钟验证:读 diff 的 5 行增改;`pnpm check:pm-skill-ratchet` 绿。\n- 需要你做的:os-zhuang 批准即可,批准后由本线程合入。\n\n## What changes\n\n- `references/landing-operations.md` §B (the watch from PR open to MERGED) gains two rules:\n  - every look at a PR (event wake, patrol, before a report) reads `mergeable_state` beside the checks, and `unknown` is re-read;\n  - `dirty` ⇒ merge `origin/main` and push a new commit at once, without waiting for a conflict notice; no \"nothing needed from you\" report without a settled non-`dirty` reading.\n- `references/coordinator.md` §七: before relaying a thread's \"this PR needs nothing from you\", the coordinator reads that PR's `mergeable_state` itself; `dirty` ⇒ send it back to the thread to merge main instead of relaying.\n- `references/dispatch-runbook.md` card-thread section: the thread drives CI **and mergeability**.\n- `references/execution-duties.md` collect section: the subscribe-on-report line now points at landing-operations §B for how the watch reads a PR.\n\n`behind` is deliberately left alone: `platform-readings.md` already rules that a PR behind `main` still enters the queue and owes no `pr_update_branch`, so only `dirty` asks for a merge.\n\n## Why\n\nA cleanup PR sat in merge conflict while its thread said it was watching CI. Two PRs had landed on `main` that edited the same skill files. Conflict notices are best effort and often never arrive, and the existing `mergeable_state` reads in the skill fire only at arming time and when an enqueue fails. The maintainer noticed the conflict before any agent did.\n\n## Ratchet funding (line-neutral per file, no ceiling moved)\n\nEvery file sits at headroom 0, so each added line is paid by deleting a line whose content another text already carries:\n\n- `landing-operations.md` −「信任 suite/check 事件前先重读 PR 对象取 head…」: carried by `platform-readings.md`'s last queue-section line (`check_suite.completed` names a stale head ⇒ re-read the current head before use).\n- `landing-operations.md` −「确认 MERGED 要两个读数…」: carried by AGENTS.md Multi-agent §7 (\"Always read *two* things: the queue branch **and** `origin/main`\") and `platform-readings.md` (「落地检查恒两个读数」).\n- `coordinator.md` −「按派发令所写的 model 与 effort 开线程…」: carried by `dispatch-runbook.md`'s card-thread section (「档位与 effort 席位自推导 ⛔ 不等维护者原话」 and 「派发令写两者与推导…协调者照令开线程;常设原话有则作 `reason:`」).\n- `dispatch-runbook.md` and `execution-duties.md`: edited in place, same line count, every line ≤ 120 bytes.\n\n## Verification\n\nDerived gate list (`node scripts/pm/dispatch-gates.mjs --commands`, 17 commands) run on head 08225fc1; results are in the review comment below.\n\nClause-②: no\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (n/a, no spec change)\n- [x] 2. Every name I added uses the casing for its kind. (n/a)\n- [x] 3. No formatter ran (markdown-only diff; eslint reads none of these files).\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset. (publishes nothing: `skip-changeset`)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (n/a)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English (the 维护者速读 block and the verbatim ruling quotes excepted, per AGENTS.md Communication).\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L9qibvepenMLGwN7rQgFH4\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L9qibvepenMLGwN7rQgFH4)_\n"
+}

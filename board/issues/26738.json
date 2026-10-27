@@ -1,0 +1,29 @@
+{
+  "number": 26738,
+  "kind": "issue",
+  "title": "Studio Interfaces: the list-view inspector's Filter \"Add filter\" adds no row — no list-view filter can be authored in Studio",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T14:00:30Z",
+  "updated_at": "2026-10-27T14:00:30Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26738",
+  "body": "Filing gate: ① product defect, reproduced, landing site named.\nBatch-of: studio-qa-2026-10-27 — 39 cards from one Studio QA run (coordinator session `session_01J8VVAkZns5rNnK2rtszzbQ`; tested at `3fcafcd3`; `origin/main` was `43731031` at filing, so the implementer re-checks the landing site on current main). The run record is the `qa-run` issue filed with this batch.\n\n## Symptom\n\nThe filter section is visible and the button responds, but nothing is added, so list views can only be filtered through the API.\n\n## Reproduction\n\n1. `/_console/studio/<pkg>/interfaces?surface=object:<obj>&nav=<nav>` → list-view inspector › Filter \"+ Add filter…\" → \"Add filter\" → no row (twice). Draft unchanged.\n2. The same filter written via `PUT /api/v1/meta/view/…` works end to end (L3 pass).\n\n## Expected\n\n\"Add filter\" adds an editable condition row, held until complete.\n\n## Suspected landing site (the implementer verifies)\n\n`FilterBuilderField` in `ui/packages/app-shell/src/views/studio-design/widgets.tsx`; `ui/packages/app-shell/src/views/viewFilterFold.ts` (~210) `foldFilterGroupToSpecRules` drops the blank row before it can be edited. Possibly a regression around the filter-fold work in closed #26306 / #26348.\n\n## Filing facts\n\n- reach: Studio UI, measured twice by the view gap-fill card.\n- Business reason: Filtering a list view is one of the most common authoring tasks; a designer that cannot do it fails the \"designer must author what the protocol declares\" rule (p1).\n- Reader who acts: the triage seat (first touch: domain, area, level), then that lane's `os-dev` implementer. QA suggestion only: `domain:ui`, `area:studio`, p1.\n- Dedupe: semantic search `list view inspector Add filter adds no row, filter cannot be authored in Studio` on objectstack-ai/objectstack → 2 hits (open #26703 page-designer list block has no inspector fields — different surface; closed #24640).\n- QA id: U10"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 26619,
+  "kind": "issue",
+  "title": "[Decision] A greyed-out record action can only say 对此记录不可用 — re-ask for an authored disabled reason now that a second app needs it (re-file per #24034 B′)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T10:36:21Z",
+  "updated_at": "2026-10-27T14:21:32Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26619",
+  "body": "Ruled: 6442737825 · letter A · 2026-10-27T13:13Z\n\nFiling gate: ② a decision only the maintainer can make — a spec widening that ruling B′ on #24034 closed as not planned (#24018), with the re-file condition it named: \"Re-file after GA when a second page needs it, on a measured ask.\" 18.0.0 went GA on 2026-10-20; the measured ask is below.\n\n> ⚠️ Drafted on the session's default model because the Fable quota was exhausted (HTTP 429, 2026-10-27 ~10:20Z); the maintainer chose 「现在用当前模型起草」 in the hotclm project thread. **Pending Fable re-review before ruling** (maintainer rule 2026-10-25 「决策卡应该使用fable」).\n\n**Reader who acts:** the maintainer rules; on A, `domain:spec` then the console (`ui/`).\n\n### 维护者速读\n\n- **一句话问题：** 按钮因为条件不满足被置灰后，用户只能看到「对此记录不可用」，看不出缺的是什么（比如「需要一条通过的法务审查」）。上次（#24034 B′）因为只有一个使用方没做，说好 GA 后有第二个使用方、有实测需求再提。现在两个条件都满足了。\n- **谁撞上：** hotclm（合同管理）的法务和档案岗。hotclm#169 要把「送审 / 发起签署 / 生效」在条件不满足时置灰，现在这三个按钮是点了才报错（实测：送审 → `422`，提示 \"An approved legal review is required before the contract enters approval.\"）。置灰之后，如果不能写原因，用户只看到「对此记录不可用」。第一个使用方仍是 cloud#2910 的「唯一所有者不能退出组织」。\n- **选项：**\n\n| 选项 | 做什么 | 用户看到 | 工作量 |\n|---|---|---|---|\n| **A 加原因键（推荐）** | `ActionSchema` 在 `disabled` 旁加一个可翻译的原因键（I18nLabel），声明即生效；控制台的悬停提示和无障碍描述读它，缺省时仍是「对此记录不可用」；i18n extract 生成翻译键 | 「需要一条通过的法务审查后才能送审」 | spec 1 个 PR + 控制台 1 个 PR。先例：#25643 给流程加 `requiredPermissions`（spec + 运行时各个入口 + lint），+753 −74，34 个文件。这次只是一个展示用的键，预计明显更小 |\n| **B 维持 B′** | 不加键 | 「对此记录不可用」；用户要靠猜，或者去问法务 | 0 |\n\n- **业务含义：** A 相当于 Salesforce 的按钮置灰时附带说明（Dynamic Actions 的提示）；B 是灰按钮不给理由。\n- **推荐 A。** 有实测需求，而且来自两个不同的应用（cloud、hotclm）。这个键只是展示文案，不参与权限判断，所以扩散面小。\n- **请回：** `A / B`。\n\n### 选项细节\n\n- **A 的契约：** 原因键只负责展示，不改变 `disabled` 的求值结果，也不进入服务端判断（动作被拒的依据仍是 hook / 权限）；空字符串会被拒绝。翻译位放在 `objects.<object>._actions.<action>` 下，跟 `confirmText` / `successMessage` 同一组。\n- **为什么不在应用里绕开：** hotclm 可以把原因写进按钮的 `description`，或者在页面上加一个「下一步缺什么」的字段，但这等于在应用里复刻平台的置灰机制；pm-dispatch 应用仓推荐序规定不荐绕行。\n\n### 四维\n\n- **长远合理性：** 「按钮为什么不能用」是所有业务平台的标配（Salesforce、ServiceNow 的 UI Action 都有条件加说明）。两年后平台一定会有这个能力，现在加的是终态形状，不是过渡。\n- **业务拉动：** 两个真实使用方，都有实测（cloud#2910 的唯一所有者；hotclm#169 的三个流程按钮）。\n- **防 AI 犯错：** 原因写错时，用户看到一句错的提示，但服务端照样拒绝，不会漏数据。会有人误以为原因键能控制权限吗？契约写明它只用于展示，lint 也不把它当作判断条件。\n- **不扩散：** 新增一个永久的 spec 键。只用于展示、有翻译位、旁边已有 `disabled`，维护面小。\n\n只看①选 A；②③④ 是否翻转：否。\n\n<!-- os-decision-facets -->\nos-decision-facets\n- ① 项目长远合理性：缩小特例。灰按钮必须给理由是终态形状；没有这个键，每个应用都会各自想办法绕开。\n- ② 实际业务拉动：两个使用方都有实测（cloud#2910、hotclm#169），今天就会撞上。\n- ③ 防 AI 犯错：原因只用于展示，不参与判断；拒绝仍由服务端响亮地给出，写错原因不会造成静默泄露。\n- ④ 创业阶段不扩散：新增一个永久键（I18nLabel），这是代价；它跟 `disabled` 成对、语义闭合。\n\nPrior rulings read: disabledReason, \"disabled reason\", 24018, 24034 → 2 hits (#24018 not_planned, #24034 Ruled B′ 6228318638); ADR none; thread: none.\n\n### 裁后执行\n\n- **A：** reopen #24018，或由本卡转成执行卡：`domain:spec`，p2；控制台跟进卡；hotclm#169 先只用 `disabled` 落地，原因键发布后再补一行文案。\n- **B：** 关闭本卡，`not_planned`，引用本次裁决；hotclm#169 照常只做置灰。\n\n**Duplicate search:** objectstack issues, all states, \"action disabled predicate reason tooltip why button is disabled\" → 2 hits (#24018 closed not_planned, #8990 unrelated).\n"
+}

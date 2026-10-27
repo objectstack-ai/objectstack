@@ -1,0 +1,29 @@
+{
+  "number": 26726,
+  "kind": "issue",
+  "title": "Studio hooks: a hook cannot be granted `capabilities` in the Studio editor, and a hook refused for a missing capability answers the client 500 INTERNAL_ERROR instead of a located 4xx",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T13:46:38Z",
+  "updated_at": "2026-10-27T13:46:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26726",
+  "body": "Filing gate: ① product defect, reproduced, landing site named.\nBatch-of: studio-qa-2026-10-27 — 39 cards from one Studio QA run (coordinator session `session_01J8VVAkZns5rNnK2rtszzbQ`; tested at `3fcafcd3`; `origin/main` was `43731031` at filing, so the implementer re-checks the landing site on current main). The run record is the `qa-run` issue filed with this batch.\n\n## Symptom\n\nA Studio-authored hook that calls `ctx.api` fails with \"capability 'api.read' not granted\". The editor has no capabilities control, so the only fix is the API. With `onError: abort` the user's save gets a bare 500; with `onError: log` a log-capability error is swallowed.\n\n## Reproduction\n\n1. Data › Hooks › New hook, body uses `ctx.api.find(…)`, onError abort → save a record → 500 INTERNAL_ERROR (hooks 4 and 5).\n2. Hook 2 with onError log and `ctx.log` → no log, error suppressed.\n3. Add `body.capabilities: [\"api.read\"]` via `PUT /api/v1/meta/hook/…` → works.\n\n## Expected\n\nStudio offers a capabilities control (or derives it from the body), and a capability refusal surfaces as a coded 4xx naming the hook and capability.\n\n## Suspected landing site (the implementer verifies)\n\nStudio hook inspector (`ui/packages/app-shell/src/views/studio-design/` hooks tab); server hook runner error mapping for capability refusals.\n\n## Filing facts\n\n- reach: Studio + `/api/v1/data` writes, measured by the data gap-fill card.\n- Business reason: Hooks that read data are the common case; builders hit an opaque 500 with no Studio path to fix it.\n- Reader who acts: the triage seat (first touch: domain, area, level), then that lane's `os-dev` implementer. QA suggestion only: `domain:ui`, `area:workflow`, p3.\n- Dedupe: semantic search `hook capability api.read not granted returns 500 INTERNAL_ERROR, Studio hook editor has no capabilities` on objectstack-ai/objectstack → 4 hits, all closed and about other refusal-to-500 paths (#24662, #24561, #22718, #17265).\n- QA id: G11"
+}

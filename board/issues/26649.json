@@ -1,0 +1,32 @@
+{
+  "number": 26649,
+  "kind": "issue",
+  "title": "Setup → Email Template: a template carried in two locales lists as two rows, but both rows open the same locale, so the other language cannot be opened or edited from Setup",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "area:studio",
+    "bug",
+    "domain:ui",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T11:28:34Z",
+  "updated_at": "2026-10-27T14:19:35Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26649",
+  "body": "Ruled: 6444406836 · letter A · 2026-10-27T14:18Z\n\nFiling gate: ① product defect, user-visible, reproduced in Setup (`@objectstack/*` 18.2.0).\n\n## Reproduce\n\n1. Boot any app whose stack declares an `email_template` bundle in two locales. Measured with objectstack-ai/duly `main` at `c20d397` (`pnpm demo`), which ships `duly.task_overdue` as `en` and `zh-CN`. The platform's own `auth.*` bundles carry several locales too.\n2. Open Setup → Email Template (`/_console/apps/setup/metadata/email_template?scope=environment`). `duly.task_overdue` shows as **two rows**, \"任务逾期升级提醒 — 负责人\" and \"Task overdue escalation — owner\". The list has no locale column.\n3. Click either row. Both navigate to the same URL, `/_console/apps/com.objectstack.setup/metadata/email_template/duly.task_overdue?scope=environment`, and both open the **same** member. Measured: an en-US browser and UI opened `zh-CN` from both rows, with Locale `zh-CN` and label 任务逾期升级提醒 — 负责人.\n\nSo one language of every multi-locale template can be listed but never opened, previewed or edited from Setup.\n\n## The server already supports it\n\n`GET /api/v1/meta/email_template/duly.task_overdue?member=en` returns the `en` row, and `?member=zh-CN` returns the `zh-CN` row. That is ruling `6116165299` letter A, and #23073 made the draft list and commit timeline carry `member`. The Setup list → detail path does not carry it: the row link is built from `name` alone, and the detail read sends no `member`.\n\nLanding point (read, not yet changed): `ui/packages/app-shell/src/views/metadata-admin/ResourceListPage.tsx` (row navigation) and `ResourceRouter.tsx` (detail read), both in `domain:ui`.\n\n## Expected\n\n- Each row opens its own member, with the member in the route or query, e.g. `?member=en`.\n- The list shows which member a row is, for example a Locale column for a member-discriminated type.\n\n## Business reason\n\nWho benefits: an administrator customizing outbound wording, which is the template-app path (\"change the words without code\"). The scenario: an operator wants to adjust the English reminder text and can only ever reach the Chinese one. Without the fix, a second language is read-only in Setup, and the only way to it is the REST door with a query parameter the UI never shows.\n\n## Reader\n\n`domain:ui` execution seat, after central triage.\n\n## Duplicate check\n\nThese queries in objectstack-ai/objectstack:\n- `Setup email template list two locales same name both rows open the same locale editor route keyed by name`\n- `metadata resource list email_template member link detail page does not pass member selector second language`\n\nThey returned 10 and 1 hits, all closed. The closest is #23073 (closed): the lists carry `member` for drafts and commits, and Studio's half was objectui#12271 (the draft panel and commit timeline). Neither covers the Setup resource list → detail route.\n"
+}

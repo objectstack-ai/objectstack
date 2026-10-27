@@ -1,0 +1,36 @@
+{
+  "number": 26584,
+  "kind": "pull_request",
+  "title": "fix(console): the standalone /forms route shows select option labels in the language the user chose",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T08:57:05Z",
+  "updated_at": "2026-10-27T09:35:22Z",
+  "closed_at": "2026-10-27T09:35:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-27T09:35:20Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26584",
+  "body": "Fixes #26452\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 改了什么:独立表单路由 `/forms/:name`(及 `/apps/:appName/forms/:name`)改走控制台已认证的 fetch 读写 API,下拉选项标签随用户所选语言显示。\n- 为什么改:该路由用裸 `fetch` 读对象 schema,服务端按浏览器的 `Accept-Language` 本地化选项;应用内弹窗表单走的通道带会话语言,所以同一会话两处语言不一致(p1,发版扫描 FAIL)。\n- 风险与代价(含回滚):内部路由的请求从此带上 Bearer、`X-Tenant-ID`、`Accept-Language`,与弹窗表单一致;公开表单 `/f/:slug` 不变。回滚即 revert 本 PR。\n- 席位意见:\n- 你要做的:无需操作;席位复核后按常规入队。\n\n## Summary\n\nOn the standalone internal form route, a user whose chosen language differs from the browser's saw field labels in their language and every select option in the browser's. The in-app overlay form (`?form=ID`) in the same session showed the options translated.\n\n## Root cause\n\nThe overlay (`ModalForm` → `ObjectForm`) does not translate option labels on the client. Its field builder (`fromObjectSchema` in `@object-ui/plugin-form`) hands `field.options` to the widget as served. The translation happens on the server: the object schema is read over the console's authenticated fetch (`createAuthenticatedFetch`, published to the renderers as `SchemaRendererContext.apiFetch`). That fetch stamps `Accept-Language` with the session's UI language (the `lang` attribute of the html element), and the server localizes `/meta/object`, option labels included, in that language.\n\n`FormPage` read `/meta/view`, `/meta/object` and the record with a bare `fetch`, so the request carried the browser's language. Field labels still came out translated because they resolve on the client through the bundle (`fieldLabel`); options have no client lookup on either form surface, so they followed the browser. This matches the card's Control 2: a zh-CN browser already got Chinese options on this route.\n\n## Fix\n\n`ui/apps/console/src/components/FormPage.tsx`: in internal mode, every API request (the form view, object schema and record reads, and the create/update submit) goes through `SchemaRendererContext.apiFetch`, the host's authenticated fetch the console shell publishes. With no provider above the route it falls back to the bare `fetch`, as before. The public anonymous route `/f/:slug` keeps the bare `fetch`.\n\nNo option-label translator is added. The route now takes the channel the overlay takes, so the server's one resolver answers both surfaces. An option the bundle does not translate keeps its authored label, because that is the server's fallback.\n\n`InternalFormRoute.tsx` is unchanged: both internal mounts (`InternalFormRoute` and `InAppFormRoute`) render `FormPage mode=\"internal\"` inside the console shell's `SchemaRendererProvider`.\n\n## Tests\n\nNew pin `ui/apps/console/src/components/FormPage.optionLabelLocale-26452.test.tsx`. It mounts `/forms/:name` in edit mode inside a `SchemaRendererProvider` whose `apiFetch` is the real `createAuthenticatedFetch({ sameOriginOnly: true })`, with the html element's `lang` set to `zh-CN` and a stub server that localizes `/meta/object` by the request's `Accept-Language`.\n\n- Leg 1: the status and priority comboboxes read the zh option labels (`评审中`, `高`), and the schema read carried `zh-CN`.\n- Leg 2: an option with no zh translation (`urgent`) keeps its authored label `Urgent`.\n\nRed first, at `1768fd79` (pin only, no fix): 2 of 2 failed, `AssertionError: expected 'In Review' to contain '评审中'` and `expected 'Done' to contain '已完成'`. Green at `ff64ab6a` (fix): 2 of 2 passed.\n\nAt head `f0294fa8` (after merging `origin/main`), under the shared verify lock (`VERDICT command-exit 0`):\n\n- closure build `pnpm --filter \"@object-ui/console^...\" build`: ok;\n- every console test file that imports `FormPage` or `InternalFormRoute` (`FormPage.*`, `formPageRequiredMarker`, `internalFormShell`, `formViewFeaturesRootRefused`, `App.homePermissions`, `App.docsPortalLazy`, `App.uploadAltitude`, `createdRecordPath`, `submitRedirect`, `OAuthConsentPage.agent-scopes`): Test Files 42 passed (42), Tests 415 passed (415);\n- `pnpm --filter @object-ui/console type-check`: exit 0. The console tsconfig includes `src`, so the new test is type-checked.\n\nLive showcase reproduction: NOT MEASURED. Booting the showcase plus a console build and a browser on the shared box was not cheap under the verify-lock queue. The pin models the server's measured behaviour (the card's Control 2) with the real host fetch.\n\n## Gates\n\nLocal, at `f0294fa8`: `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --ran` reports 33 derived, 33 run, 0 NOT-MEASURED, and every one exited 0. That includes `node scripts/check-sdui-manifest.mjs` (intact, 106 components; no registry contract changed, so it was not regenerated) and `pnpm --dir ui exec vitest run scripts/` (178 passed, 2 skipped). CI runs the rest.\n\n## Acceptance notes\n\n- The public route `/f/:slug` still reads over the bare `fetch`. For an anonymous visitor the UI language is the detected browser language, so nothing diverges. A signed-in visitor who chose another language would still see options in the browser's language there. Moving that route onto a session-carrying channel changes what the anonymous resolver and submit see, so it is left out of this change.\n- The card's two related notes (the route's English-only refusal and missing-recordId messages, and `?form=UNKNOWN_ID` opening a blank edit form) are not addressed here.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01SMps7wq7rBTk53e8KTSEup)_\n"
+}

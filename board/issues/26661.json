@@ -1,0 +1,36 @@
+{
+  "number": 26661,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): the director seat takes no patrol routine in any form",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T11:56:08Z",
+  "updated_at": "2026-10-27T12:46:04Z",
+  "closed_at": "2026-10-27T12:46:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-27T12:46:02Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26661",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9AJUWdwsTm21mKPdLivF1uR)_\nFixes #26609\n\nClause-②: no\nMetadata-protocol: none\n\nThe director seat takes no patrol routine in any form, the project-seat form included: no patrol routine, no inbox-scan routine, no daily-digest routine. It wakes on the maintainer's summon and on the PR subscriptions it holds; the daily digest and the inbox scan stay duties run within a summon. Lane seats' hourly patrol and the triage seat's hourly round are untouched. Maintainer ruling (director seat's project thread, 2026-10-27T10:12Z): 「总监不需要巡查 routine，立卡更新 skills」.\n\n## 维护者速读\n\n- 改了什么:pm-dispatch 技能四个文件五行各同行改写,写明总监席不建任何巡查、收件箱扫描或每日摘要 routine,只靠你的召唤与它持有的 PR 订阅唤醒。\n- 为什么改:你 10-27 裁定「总监不需要巡查 routine」,而旧文本仍让总监席首次坐席自建每日摘要与每小时收件箱扫描,并可与分诊共用一条 routine。\n- 风险与回滚:只动四行协议文本,无代码、无发布面;回滚即 revert 本 PR。\n- 先看:`references/project-forms.md` 31–32 行(规则主体),`SKILL.md` 71 行,`references/lanes/director.md` 23 行。\n- 两分钟验证:`git grep -n \"总监席加每日摘要\\|两者可共用一个 routine\\|小时轮可与收件箱扫描\" .claude/` 应无输出;`pnpm check:pm-skill-ratchet` 绿。\n- 需要你做的:无;Tier S(`.claude/**`)draft,等 skills 席位的契约复核记录 PASS 后由席位落地。\n\n## What changes\n\nFive same-line edits in four files under `.claude/skills/pm-dispatch/`. No file gains or loses a line (all four sit at line-ceiling headroom 0 in `check-skill-line-ratchet`), and every edited line stays under that gate's 120-byte line budget.\n\n| file:line | before | after |\n|---|---|---|\n| `SKILL.md:71` | project-seat wake = PR subscriptions + one self-built patrol routine per project, hourly by default | same with `(总监席除外)`; the `默认每小时` clause moved out to pay for the 17 added bytes (the original line was exactly 120 B). The hourly default survives at `project-forms.md:31` and `seat-post-protocol.md:66`. |\n| `references/project-forms.md:31–32` | first seating builds the routine; the director adds a daily digest and an hourly inbox scan; director and triage in one project may share one routine | first seating builds the routine, triage adds its hourly bare-card round, the director builds none; the director wakes only on the maintainer's summon and its PR subscriptions, digest and inbox scan run within a summon; pointer to `lanes/director.md`. |\n| `references/lanes/director.md:16` | the absent-maintainer line (「未回字 = 不在 = 停」) ended with 「例外 = `../project-forms.md` 例行」 | the exception is dropped (second commit, at the seat's call): with project-forms granting the director no routine it named an empty set, and the card's rule is no routine in any form. |\n| `references/lanes/director.md:23` | triage defaults to the director's project; the hourly round may share the inbox scan | the seat is summon-only in every form with no routine of any kind; the triage pointer stays. |\n| `references/seat-post-protocol.md:66` | project-seat patrol defaults to hourly; the protocol never copies the current value, the seat post is the current state | adds `(总监席无巡查)`; the trailing `座位贴即现状` folds into the same line's `协议 ⛔ 不复制当前值` (its home stays in every lane file's line 3, 「现值状态恒在座位贴」). |\n\nTwo trims beyond the card's literal \"add on the same line\" were forced by the 120-byte budget: a line over it reds the gate, and wrapping would add a line into zero headroom. Each trimmed clause has a surviving home, named above.\n\nNot touched: `references/seat-lifecycle.md:69` still routes project-seat health indicators into the director seat's daily digest, which remains a duty run within a summon, so it stays true.\n\n## Tests\n\nNo test edits and no code; the gates below are the verification.\n\n## Acceptance notes\n\n- `git grep -n \"总监席加每日摘要\\|两者可共用一个 routine\\|小时轮可与收件箱扫描\" .claude/` prints nothing (exit 1).\n- Line counts unchanged: SKILL.md 319, project-forms.md 54, director.md 88, seat-post-protocol.md 91.\n- Edited line widths: 118 B, 112 B and 118 B, 82 B and 113 B, 119 B.\n- No changeset: the diff is `.claude/**` only and publishes nothing (`skip-changeset` declared on the create).\n\n## Verification (heads df627315 and 25cc3508)\n\n- `pnpm check:pm-skill-ratchet`: exit 0 (self-test and gate). `pnpm check:pm-skill-id-lint`: exit 0, 104 files clean.\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 20 commands at df627315; all 20 were run with their exit codes recorded, and `--ran` reconciled: 20 derived families accounted for, 20 run, 0 NOT-MEASURED, 0 UNRUN (every exit code 0).\n- At 25cc3508 (the director.md:16 commit, one line in a file already in the set): `pnpm check:pm-skill-ratchet`, `pnpm check:pm-skill-id-lint` and `pnpm check:pm-governed-prose` exit 0, and `dispatch-gates --commands` derives the same 20 commands as at df627315.\n- `check:doc-formula-expressions` needed `@objectstack/formula` and `@objectstack/lint` built first (exit 3, prerequisite); rerun after the build: exit 0.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmReVogkwua4SJWZkFW)_\n"
+}

@@ -1,0 +1,38 @@
+{
+  "number": 26637,
+  "kind": "issue",
+  "title": "Display menu: the layout row's five segments (表格 / 看板 / 日历 / 时间线 …) wrap their labels inside the 240 px popover; the row folds to icons with tooltips or the popover widens",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T11:15:12Z",
+  "updated_at": "2026-10-27T14:25:53Z",
+  "closed_at": "2026-10-27T14:25:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26637",
+  "body": "## Source\n\nWalked on 2026-10-27 on the HotCRM opportunity list (`/crm_opportunity`, zh-CN, 1149 px): the Display popover's first row is now a segmented control 「布局 | 表格 | 看板 | 日历 | 时间线」 (the layouts the object offers). In the 240 px popover the five icon + label segments do not fit: 「表格」「看板」「日历」「时间线」 each break onto two lines and the row is twice its height; in en the labels are longer still.\n\n## Target\n\n1. The layout row shows icons only when the segments would wrap (a measured fold, not a count), each with a tooltip and an accessible name; the active segment keeps its label.\n2. Or the popover is 300 px wide on the list surfaces that offer four or more layouts; the card picks one and says why.\n3. A test with five layouts asserts no segment label wraps at the popover's width.\n\n## File surface\n\n`ui/packages/plugin-list/src/components/ViewSettingsPopover.tsx` (the layout row), tests beside.\n\n## Acceptance\n\n1. Screenshots of the Display popover on an object with five layouts, zh-CN and en.\n2. `pnpm --filter @object-ui/plugin-list test` green.\n\n\n<sub>Filed by the epic PM session `session_cdb7a717-def7-4e71-9988-f089fbaa18ff` from the 2026-10-27 supplementary pass on objectstack main `f9867020c6` (the source console at :5180 against HotCRM 18.2.0, the maintainer's browser pane at 1149 × 507, zh-CN and en, dark and light). The maintainer asked, verbatim: 「补测的前 3 项立卡到 objectstack，只立不派。」— the first of the three (the Data pillar's 高级 dropdown) turned out to be the 2026-10-15 ruling B as designed (it flattens from a 1000 px content column), so two cards are filed.</sub>"
+}

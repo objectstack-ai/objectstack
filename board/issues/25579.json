@@ -2,8 +2,8 @@
   "number": 25579,
   "kind": "issue",
   "title": "Declarative \"at most one row per parent where X\" (conditional unique) — summary-based guards miss rows in the same bulk insert",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,20 +12,25 @@
   },
   "labels": [
     "area:records",
-    "domain:spec",
+    "domain:server",
     "enhancement",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-24T01:29:59Z",
-  "updated_at": "2026-10-24T01:29:59Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-27T14:17:20Z",
+  "closed_at": "2026-10-27T14:15:43Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25579",
   "body": "Ruled: 6377847361 · batch #9 item 4 · letter C · 2026-10-24T00:43:45Z (proposal 3: batch-aware summary, in-memory per batch; proposals 1 and 2 not now)\n\n## Context\n\nhotsrm needs \"each supplier has at most one primary contact\" (`srm_supplier_contact.is_primary`). It must hold for UI edits and for the spreadsheet import, metadata only.\n\n## What we tried\n\n- `indexes[].partial` is retired, and a unique index on `['supplier', 'is_primary']` would also forbid two non-primary contacts.\n- A summary on the parent (`primary_contact_count`, count with `filter: { is_primary: true }`) plus a `script` rule on the child: `record.is_primary == true && record.supplier.primary_contact_count > 0`. This catches a second primary when the first already exists, **but not two primary rows created in the same import batch**: the import runner batches creates through `createManyData` / `insertManyData`, and the parent summary is not recomputed between the rows of one batch, so both rows pass.\n\nReproduction: import `供应商,姓名,邮箱,主联系人` with two rows for a new supplier, both `是` → both created, `primary_contact_count = 2`.\n\n## Proposal\n\nOne of:\n\n1. ~~Conditional unique index: `{ fields: ['supplier'], unique: 'organization', where: { is_primary: true } }` (partial index on SQL drivers, emulated on memory).~~ (not now — re-opens the key retired in #5248; its entry stays #5248's enforce-first condition, on a second app or a real incident; ruling 6377847361)\n2. ~~A declarative cross-row rule type (`type: 'unique_where'` or similar) that is judged per row inside bulk writes.~~ (not chosen; ruling 6377847361)\n3. At minimum: evaluate child `script` rules that read a parent summary against a summary that includes earlier rows of the same batch, or document that they do not.\n\n## Workaround in hotsrm (temporary)\n\nThe summary-based guard stays (it covers single writes and later imports), and a list view \"主联系人重复\" (`primary_contact_count > 1`) surfaces the batch case for manual repair during review.\n\nLinked: objectstack-ai/hotsrm#10\n\n---\n\nRe-filed as `objectstack-fleet[bot]` from #25477, same body and labels. #25477 was written off the fleet relay, under the maintainer's personal account, by a project-thread session through GitHub MCP; pm-dispatch allows content writes only through the relay. #25477's thread (triage, ruling, comments) stays there for reference; this card replaces it in the queue.\nSession: `session_018fnREjMeK9XQeHDwkJXKMW`"

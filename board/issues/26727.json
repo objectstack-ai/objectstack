@@ -1,0 +1,29 @@
+{
+  "number": 26727,
+  "kind": "issue",
+  "title": "spec liveness ledger drift: `field.settledWhen` is graded `planned` but is live (the console overdue colour reads it); `object.tenancy` has no ledger row",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T13:47:33Z",
+  "updated_at": "2026-10-27T13:47:33Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26727",
+  "body": "Filing gate: ① product defect, reproduced, landing site named.\nBatch-of: studio-qa-2026-10-27 — 39 cards from one Studio QA run (coordinator session `session_01J8VVAkZns5rNnK2rtszzbQ`; tested at `3fcafcd3`; `origin/main` was `43731031` at filing, so the implementer re-checks the landing site on current main). The run record is the `qa-run` issue filed with this batch.\n\n## Symptom\n\nThe ledger is what tells authors and agents whether a key does anything; two rows disagree with the measured runtime.\n\n## Reproduction\n\n1. A date field with `dueLike` and a `settledWhen` predicate: the predicate controls whether the overdue colour is shown in the console (measured by the data gap-fill card). The ledger row says `planned`.\n2. `packages/spec/liveness/object.json` has no `tenancy` row although `tenancy: {enabled:false}` removes the `organization_id` column.\n\n## Expected\n\n`settledWhen` graded live with its consumer named; `tenancy` given a row.\n\n## Suspected landing site (the implementer verifies)\n\n`packages/spec/liveness/field.json`, `packages/spec/liveness/object.json`.\n\n## Filing facts\n\n- reach: Console UI + ledger read, measured by the data gap-fill card.\n- Business reason: A planned verdict on a live key makes agents treat it as inert.\n- Reader who acts: the triage seat (first touch: domain, area, level), then that lane's `os-dev` implementer. QA suggestion only: `domain:spec`, `area:devpath`, p3.\n- Dedupe: semantic search `liveness ledger settledWhen graded planned but live, tenancy has no ledger row` on objectstack-ai/objectstack → 16 hits, none for these two rows (nearest closed #26146, #16362).\n- QA id: L1"
+}

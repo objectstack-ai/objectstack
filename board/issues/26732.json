@@ -1,0 +1,29 @@
+{
+  "number": 26732,
+  "kind": "issue",
+  "title": "Studio a11y: several inputs have no accessible name — form designer group title, field inspector Description and Help text, Interfaces nav inspector \"Link to object\" combobox and \"Label\"",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T13:50:56Z",
+  "updated_at": "2026-10-27T13:50:56Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26732",
+  "body": "Filing gate: ① product defect, reproduced, landing site named.\nBatch-of: studio-qa-2026-10-27 — 39 cards from one Studio QA run (coordinator session `session_01J8VVAkZns5rNnK2rtszzbQ`; tested at `3fcafcd3`; `origin/main` was `43731031` at filing, so the implementer re-checks the landing site on current main). The run record is the `qa-run` issue filed with this batch.\n\n## Symptom\n\nScreen-reader users hear unnamed edit fields; automated a11y checks fail on these controls.\n\n## Reproduction\n\n1. Data › Form designer › a group title input → no `aria-label` / `<label for>` (ObjectFormDesigner.tsx ~483).\n2. Field inspector › Description / Help text (ObjectFieldInspector.tsx ~1050 / ~1067) → unnamed.\n3. Interfaces › a nav item inspector › \"Link to object\" combobox and \"Label\" input → visual labels not associated.\n\n## Expected\n\nEach input has an associated label or aria-label.\n\n## Suspected landing site (the implementer verifies)\n\nThe files named above under `ui/packages/app-shell/src/views/`.\n\n## Filing facts\n\n- reach: Studio UI, measured by the Data and Interfaces QA cards (accessibility tree read).\n- Business reason: Accessibility of the builder itself; cheap fixes.\n- Reader who acts: the triage seat (first touch: domain, area, level), then that lane's `os-dev` implementer. QA suggestion only: `domain:ui`, `area:studio`, p3.\n- Dedupe: semantic search `Studio inspector inputs without accessible name label a11y` on objectstack-ai/objectstack → 3 hits, none about these inputs (closed #7973, #5084, #5417).\n- QA id: U7"
+}

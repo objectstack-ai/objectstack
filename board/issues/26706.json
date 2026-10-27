@@ -1,0 +1,35 @@
+{
+  "number": 26706,
+  "kind": "issue",
+  "title": "Studio Access pillar: a delegated-admin scope control shows a different value from what the runtime enforces when the key is unset (detail withheld pending maintainer)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2",
+    "security"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T13:28:54Z",
+  "updated_at": "2026-10-27T13:33:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26706",
+  "body": "Filing gate: ① product defect, reproduced, landing site named. Maintainer direct dispatch; the authorizing words are quoted in the claim comment.\n\n## Summary\n\nIn Studio › Access › a permission set › Delegated admin, one scope control displays a state for an unset key that disagrees with the default the delegated-admin gate enforces. An admin who reads the screen misjudges the scope they are delegating.\n\n- Measured 2026-10-27 at `3fcafcd3` by the Studio QA Access card. The PM read both sides of the code.\n- The exact control, the direction and the reproduction are **withheld pending maintainer**, per the maintainer's instruction for security defects that are not to be disclosed. The implementer receives them privately.\n\n## Acceptance (public part)\n\n- For an unset key, the control shows exactly what the gate enforces, and a save does not change the effective scope unless the admin changed the control.\n- A pin covers the unset case on the display side, tied to the spec default.\n\n## Filing facts\n\n- Business reason: delegated administration is how larger customers hand out admin power safely; the screen must state the delegated scope truthfully.\n- Reader who acts: an `os-dev` implementer, dispatched directly by this PM session (`domain:ui`).\n- Dedupe: semantic search `delegated admin include subtree shows off when unset but runtime defaults true` on objectstack-ai/objectstack → 3 hits (#26189, #21057, #9730), all closed and none about this display.\n- Source: Studio QA run, 2026-10-27, coordinator session `session_01J8VVAkZns5rNnK2rtszzbQ`."
+}

@@ -1,0 +1,37 @@
+{
+  "number": 26671,
+  "kind": "issue",
+  "title": "pm-dispatch(director): the director seat stops presenting governed draft PRs to the maintainer — the PR's own 维护者速读 and the GitHub review request are the digest; the seat only verifies the review is requested",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T12:23:31Z",
+  "updated_at": "2026-10-27T14:17:14Z",
+  "closed_at": "2026-10-27T14:16:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26671",
+  "body": "Filing gate: ③ maintainer-directed (a pm-rule change, filed only on the maintainer's word). Maintainer, 2026-10-27, in the director summon chat, on the seat's relay of cloud PR #3315, verbatim: 「pr 你交给我批的价值是什么，我说同意你能合并吗」 then 「所以总监席你呈给我完全没必要啊」. Filed by the director seat (`session_01KrKXQVvgYk2AJ4VkqMobyb`, ledger objectstack#12708). ⛔ Not a claim. Reader: `domain:skills` (one Tier H PR on `.claude/skills/pm-dispatch/**`, lands by the maintainer's GitHub approval). Dedupe: 600 newest issues grepped `governed draft|受管草稿|director.*PR` → 0 cards (the rule lives only in the skill).\n\n## 维护者速读\n\n受管 PR（`docs/adr/**`、`skills/**`、`.claude/**`、`AGENTS.md`、workflows）只能由你在 GitHub 上 Approve 才能落地；总监席在决裁批里再呈一遍「一 PR 一行」并要你回「同意」，既落不进门禁，也和 PR 正文已有的「维护者速读」重复。本卡退役这条呈递规则：席位只保证审核已请到你（中继 `pr_request_reviewers`）、PR 正文速读与席位核对齐全；你从 GitHub 审核队列直接批。总监席的决裁批从此只呈决策卡。\n\n## What changes (the rule text)\n\n- `.claude/skills/pm-dispatch/references/decision-analysis.md` 〈常设决裁批流程〉: delete the line 「受管草稿批例外：一 PR 一行(改了什么/为什么/席位意见/一个动作),⛔ 不套六项;速读住 PR。」 and any sibling that puts a PR into a ruling batch.\n- `.claude/skills/pm-dispatch/references/lanes/director.md`: wherever the director's duties name presenting governed drafts (\"the four pieces complete\", \"governed-draft line\"), replace with one duty: *before a governed PR waits on the maintainer, the seat verifies the four pieces (seat record, 维护者速读, review requested from the maintainer through the relay, green head) and fills the missing ones; it does not present the PR in a batch and does not ask for a chat 「同意」.* The maintainer's GitHub approval is the only act; the owning seat readies and enqueues after it.\n- Ledger/brief vocabulary: \"governed-draft lines\" leave the batch counts.\n- ⛔ No change to AGENTS.md Prime Directive 14, `GOVERNED_APPROVERS`, or the queue guard: the human approval stays the gate; this card removes a duplicated relay, not the door.\n\n## Acceptance\n\n- `git grep -n \"受管草稿\" .claude/skills/pm-dispatch` → 0 lines that put a PR into a ruling batch; the director duties name the four-pieces check instead.\n- `pnpm check:pm-skill-ratchet` (line ceilings) green; the skill line ratchet is satisfied by deleting more than adding.\n\n**Size:** XS. **Clause-②:** no. **Metadata-protocol:** none.\n\n## Related\n\nobjectstack#12708 (director ledger; blocks J–V count the lines this card retires); cloud PR #3315 (the relay that prompted the maintainer's question); AGENTS.md Prime Directive 14."
+}

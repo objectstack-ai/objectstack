@@ -1,0 +1,29 @@
+{
+  "number": 26734,
+  "kind": "issue",
+  "title": "Studio Data › Actions: a \"Run a script\" action is saved without `type`, so the console treats it as not executable — clicking it sends no request",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T13:52:39Z",
+  "updated_at": "2026-10-27T13:52:39Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26734",
+  "body": "Filing gate: ① product defect, reproduced, landing site named.\nBatch-of: studio-qa-2026-10-27 — 39 cards from one Studio QA run (coordinator session `session_01J8VVAkZns5rNnK2rtszzbQ`; tested at `3fcafcd3`; `origin/main` was `43731031` at filing, so the implementer re-checks the landing site on current main). The run record is the `qa-run` issue filed with this batch.\n\n## Symptom\n\nThe builder writes a script action, publishes, and the button in the app does nothing (or shows its error toast / \"not executable: no handler is registered…\"). The server endpoint works; only the stored shape is incomplete.\n\n## Reproduction\n\n1. Data › Actions › New › Advanced › New action → What it does \"Run a script\" → write a body. Draft: `{name:\"run_script\", body:{…}}`, no `type`.\n2. Publish; in the app click it → no request; toast is the action's errorMessage, or for `gated` \"Action \\\"gated\\\" is not executable: no handler is registered under that name and it declares no api, endpoint, navigate, redirect or onClick.\"\n3. `POST /api/v1/actions/gapdata_item/run_script` → 200. Adding `type: \"script\"` via the API makes the button work.\n\n## Expected\n\nStudio writes `type: \"script\"` when the builder chooses a script.\n\n## Suspected landing site (the implementer verifies)\n\n`ui/packages/app-shell/src/views/metadata-admin/inspectors/ActionDefaultInspector.tsx` (the Type select shows Script as its default but never commits it).\n\n## Filing facts\n\n- reach: Studio + console, measured twice by the data gap-fill card.\n- Business reason: Script actions are the common custom action; Studio-made ones are dead on arrival.\n- Reader who acts: the triage seat (first touch: domain, area, level), then that lane's `os-dev` implementer. QA suggestion only: `domain:ui`, `area:studio`, p2.\n- Dedupe: semantic search `Studio script action saved without type, console says not executable no handler registered` on objectstack-ai/objectstack → 4 hits, all closed and about other paths (#21321, #14145, #4343, #3915).\n- QA id: G2"
+}
