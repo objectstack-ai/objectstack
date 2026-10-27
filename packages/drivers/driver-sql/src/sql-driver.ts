@@ -137,7 +137,6 @@ import {
   formatAttribute,
   type UndeliveredAttribute,
 } from './builtin-column-collision.js';
-import { recoverUnencodedJsonText } from './unencoded-json-text.js';
 import { withUpsertConflictClause } from './upsert-conflict-clause.js';
 // [#25521 cut 1] The catalog-introspection helpers (`introspectColumnOrder`,
 // `introspectColumns` and the foreign-key, primary-key and unique-constraint reads),
@@ -181,7 +180,9 @@ import {
 // (`applyNullSafeUniquePreflight`, `syncDeclaredIndexes`, `createNullSafeUniqueIndex`).
 // [#25521 cut 10] And the drift pipeline that drives them (`detectTableDrift`, `detectTableIndexDrift`,
 // `detectManagedDrift`, `planMediaColumnMove`, `reconcileAndWarnDrift`, `applyMigrationEntries`).
-import { applyDriftOpInPlace, applyIndexDriftOp, applyMigrationEntries, applyNullSafeUniquePreflight, createNullSafeUniqueIndex, detectManagedDrift, detectTableDrift, detectTableIndexDrift, planMediaColumnMove, rebuildSqliteTablePatched, reconcileAndWarnDrift, restoreBareIndexAfterFailedTighten, syncDeclaredIndexes } from './sql-driver-schema-sync.js';
+// [#25521 cut 12] And the canonical-encoding convergence schema sync runs at init (the SQLite
+// backfills, and the MySQL widening's column reads and ALTER runner, `runWideningAlters`).
+import { applyDriftOpInPlace, applyIndexDriftOp, applyMigrationEntries, applyNullSafeUniquePreflight, backfillCanonicalDatetimes, backfillCanonicalJsonEncoding, backfillCanonicalTimes, convergeJsonColumn, countNonTemporalTextRows, createNullSafeUniqueIndex, detectManagedDrift, detectTableDrift, detectTableIndexDrift, legacyMysqlTimeColumns, legacyMysqlTimestampColumns, planMediaColumnMove, rebuildSqliteTablePatched, reconcileAndWarnDrift, restoreBareIndexAfterFailedTighten, runWideningAlters, syncDeclaredIndexes } from './sql-driver-schema-sync.js';
 // [#25521 cut 11] The autonumber sequence path (`getNextSequenceValue`, `fillAutoNumberFields`,
 // `issueAutonumbers`, `maxAutonumberCounter`, and the #5495 collision re-seed `collidingAutoNumberReservations`
 // and `resyncSequenceToDataMax`); the methods of the same names below hand each body the members it reads
@@ -454,7 +455,7 @@ const NUMERIC_SCALAR_TYPES = new Set<string>([
  * as that same canonical instant text by {@link presentAuditTimestampOutput}
  * ([ADR-0053 D-F1], #13973).
  */
-const AUDIT_TIMESTAMP_COLUMNS = ['created_at', 'updated_at'] as const;
+export const AUDIT_TIMESTAMP_COLUMNS = ['created_at', 'updated_at'] as const;
 
 /**
  * [#21241] The fractional-seconds precision of every MySQL `DATETIME` column
@@ -760,21 +761,14 @@ function canonicalTimeOfDay(value: unknown): unknown {
  * reference — the binding count a caller must supply per use of the expression.
  * (1 `typeof` + 3 per `strftime` CASE branch pair × 2 + 1 `coalesce` fallback.)
  */
-const SQLITE_TIME_EXPR_REFS = 8;
+export const SQLITE_TIME_EXPR_REFS = 8;
 
 /**
  * How many times {@link SqlDriver.sqliteNonTemporalTextSql} spells its column
  * reference — the binding count a caller must supply per use of the predicate.
  * (1 `typeof` + 2 `instr` + 1 `julianday`.)
  */
-const SQLITE_NON_TEMPORAL_TEXT_REFS = 4;
-
-/**
- * How many candidate cells {@link SqlDriver.backfillCanonicalJsonEncoding}
- * reads per page. It bounds the memory one column's pass holds, never how much
- * of the column one pass converges: the pass walks every page.
- */
-const SQLITE_JSON_BACKFILL_PAGE_SIZE = 500;
+export const SQLITE_NON_TEMPORAL_TEXT_REFS = 4;
 
 /**
  * [#4436] A filter this driver cannot COMPILE — the caller sent an operator (or
@@ -1248,149 +1242,13 @@ function insertedRowsNotReadBackError(object: string, missingIds: unknown[], wri
   return err;
 }
 
-/**
- * [#9354] How long a widening ALTER waits for a metadata lock, in seconds.
- *
- * Named for the seam it arrived on; since commit 8bbf45947 it governs BOTH callers of
- * {@link SqlDriver.runWideningAlters} — the deferred-DDL flush and boot
- * schema-sync.
- *
- * MySQL's own default for `lock_wait_timeout` is **31,536,000 — one year**. A
- * widening `ALTER … MODIFY COLUMN` needs an exclusive metadata lock on the
- * table, so a single long-running transaction elsewhere (an open REPEATABLE
- * READ snapshot, a forgotten `BEGIN` in a psql-style shell, a stuck report
- * query) parks the ALTER in `Waiting for table metadata lock` for that long.
- * Nothing prints. `os migrate apply` looks like it hung, and no operator can
- * tell that from a crash — which is the condition this bound exists to end.
- *
- * # Why 120 seconds
- *
- * The bound is a diagnosis deadline, not a capacity knob: its job is to end the
- * silence, not to decide how patient a migration may be. So it is chosen as the
- * shortest wait that still clears the legitimate blockers, and no longer.
- *
- *   - **Above the noise.** Normal OLTP transactions on a table being migrated
- *     hold their metadata lock for milliseconds. Two minutes is three orders of
- *     magnitude above that, so an ordinary busy table never trips it — the bound
- *     does not convert a working migration into a failing one.
- *   - **Below an operator's patience.** A command that has printed nothing for
- *     two minutes is still within the window where the operator is watching it.
- *     At ten minutes they have already reached for `SHOW PROCESSLIST` or killed
- *     it, so a bound that fires later than that arrives after the diagnosis it
- *     was supposed to provide.
- *   - **Minutes-scale, per the ruling**, and deliberately at the low end of it:
- *     failing fast is cheap here. `os migrate apply` is re-runnable and the
- *     widening is idempotent (`migrateMysqlDatetimeColumns` re-reads
- *     `information_schema` and does nothing when the column is already
- *     `DATETIME(3)`), so the cost of a bound that fires too eagerly is one
- *     re-run once the blocker is gone — against an unbounded hang as the cost of
- *     one that never fires.
- *
- * # The same number on boot (commit 8bbf45947)
- *
- * Boot schema-sync arms this bound too, at the same value rather than a longer
- * one. Everything above is reasoning about how long a legitimate metadata-lock
- * holder can plausibly hold it — a property of the lock, not of who is waiting
- * on it. Boot's difference from the flush is what happens when the bound fires
- * (boot reports at `error` and carries on; the flush refuses), never how long
- * it waits.
- *
- * ⛔ Deliberately NOT configurable, and deliberately NOT retried — the 2026-08-17
- * ruling's explicit minimality. Both wait for measured demand. A knob added now
- * would have to be supported forever on the evidence of one CI stall.
- */
-const DEFERRED_DDL_LOCK_WAIT_TIMEOUT_SECONDS = 120;
-
-/**
- * [#9354] MySQL's lock-wait timeout, as it arrives through mysql2 and knex.
- *
- * `ER_LOCK_WAIT_TIMEOUT` (**errno 1205**) is what BOTH lock waits raise — the
- * InnoDB row-lock timeout (`innodb_lock_wait_timeout`) and the metadata-lock
- * timeout (`lock_wait_timeout`) this bound arms. The ALTER path can only be
- * blocked by the second, so on this seam 1205 means the metadata lock.
- *
- * Both spellings are checked because the two layers carry different ones:
- * mysql2 sets a string `code` (`'ER_LOCK_WAIT_TIMEOUT'`) alongside the numeric
- * `errno`, and a wrapper that rebuilds the error commonly keeps one and drops
- * the other. `cause` is followed because knex re-throws the driver error with
- * the original attached — the same cause-chaining
- * {@link backendStatementFaultError} relies on, and the reason a recognizer
- * that inspected only the top-level error would go quietly blind.
- *
- * ⛔ Message text is NOT sniffed. MySQL and MariaDB word this differently and
- * both translate it, so a prose match is a recognizer that fails in another
- * locale — silently, back to the year-long hang.
- */
-function isMysqlLockWaitTimeout(err: unknown, depth = 0): boolean {
-  if (!err || typeof err !== 'object' || depth > 4) return false;
-  const e = err as { errno?: unknown; code?: unknown; cause?: unknown };
-  if (Number(e.errno) === 1205) return true;
-  if (e.code === 'ER_LOCK_WAIT_TIMEOUT') return true;
-  return isMysqlLockWaitTimeout(e.cause, depth + 1);
-}
-
 /** [#9354] Marks the enveloped refusal below, so the flush's own catch can tell
  *  it from every other failure without re-running the recognizer on a wrapper. */
-const LOCK_WAIT_REFUSAL = Symbol.for('objectstack.driver-sql.deferredDdlLockWaitRefusal');
+export const LOCK_WAIT_REFUSAL = Symbol.for('objectstack.driver-sql.deferredDdlLockWaitRefusal');
 
 /** [#9354] True only for the refusal {@link deferredDdlLockWaitError} built. */
 function isDeferredDdlLockWaitRefusal(err: unknown): boolean {
   return Boolean(err && typeof err === 'object' && (err as Record<symbol, unknown>)[LOCK_WAIT_REFUSAL]);
-}
-
-/**
- * [#9354] The refusal a blocked deferred-DDL widening ALTER fails with.
- *
- * # Why this is thrown at all, when every sibling here is swallowed
- *
- * {@link SqlDriver.migrateMysqlDatetimeColumns} logs and swallows its failures
- * on purpose: correctness never depends on the widening having run, and a
- * migration must not take boot down. That policy is right for boot and wrong
- * for the flush. `os migrate apply` is a command an operator RAN, whose whole
- * contract is to report what it did; a swallowed lock wait there prints
- * "Applied 0 change(s)" and reports success while the widening silently did not
- * happen. So the escape is scoped exactly to this condition on exactly that
- * path — every other failure keeps the swallow it has today.
- *
- * # `DATABASE_ERROR` / 500
- *
- * The 2026-08-17 ruling requires a code from the CLOSED standard vocabulary
- * (ADR-0112), from the `DATABASE_ERROR` family, naming the lock wait. That is
- * the catalog's own "database operation failed", and it is the same pair
- * {@link backendStatementFaultError} answers with one refusal over — so this
- * mints nothing and adds no code to the catalog. 500 rather than 4xx: nothing
- * about the operator's request is at fault. The blocker is another session.
- *
- * # The message carries the diagnosis, because it is the only thing shown
- *
- * `os migrate apply` prints `error.message` and exits 1 — `code` and `status`
- * reach programmatic consumers, but the operator reads this sentence and
- * nothing else. So it names the lock wait, the table, the bound it hit, and the
- * one thing that resolves it. The table name is the operator's own schema
- * (the line beside it already logs it), so naming it discloses nothing new —
- * and unlike the query-refusal envelope there is no caller-bound literal here
- * to leak: the statement's only bindings are the table and column.
- */
-function deferredDdlLockWaitError(table: string, seconds: number, cause: unknown): Error {
-  const err = new Error(
-    `Migration of table '${table}' timed out after ${seconds}s waiting for a MySQL metadata ` +
-      'lock (lock_wait_timeout). Another session is holding a lock on the table — a long-running ' +
-      'transaction or an open, uncommitted session. No schema change was made. Identify the ' +
-      "holder with `SHOW PROCESSLIST` or by querying `performance_schema.metadata_locks`, end " +
-      'it, then re-run `os migrate apply` — the widening is idempotent, so re-running is safe.',
-  ) as Error & { code?: string; status?: number };
-  err.code = StandardErrorCode.enum.DATABASE_ERROR;
-  err.status = 500;
-  Object.defineProperty(err, LOCK_WAIT_REFUSAL, { value: true, enumerable: false });
-  // Non-enumerable, like every sibling refusal in this file: the carrier must be
-  // readable by cause-following predicates and invisible to `JSON.stringify`.
-  Object.defineProperty(err, 'cause', {
-    value: cause,
-    enumerable: false,
-    writable: true,
-    configurable: true,
-  });
-  return err;
 }
 
 /**
@@ -2076,7 +1934,7 @@ function isDeclaredFieldType(field: { type?: unknown }): boolean {
  * 'string'`, the driver-internal alias default) and two spellings of that
  * default is how the drift this fixes started.
  */
-function isMultiValuedColumn(type: string, field: { multiple?: unknown } | null | undefined): boolean {
+export function isMultiValuedColumn(type: string, field: { multiple?: unknown } | null | undefined): boolean {
   return isMultiValueField({ type, multiple: field?.multiple === true });
 }
 
@@ -13061,67 +12919,24 @@ export class SqlDriver implements IDataDriver {
    * #6009 probe runs BEFORE the `UPDATE` for the same reason: a gate that could
    * not be measured must stop the write, not wave it through.
    */
-  protected async backfillCanonicalDatetimes(table: string, tableExisted: boolean): Promise<void> {
-    const fields = this.datetimeFields[table];
-    if (!this.isSqlite || !fields || fields.size === 0) return;
-
-    const clean = (this.canonicalDatetimeFields[table] ??= new Set<string>());
-    // A table created by this very call is empty, so every datetime column in it
-    // is canonical without a single row being read.
-    if (!tableExisted) {
-      for (const field of fields) clean.add(field);
-      return;
-    }
-
-    const canonical = this.sqliteCanonicalDatetimeSql('??');
-    // The expression spells `??` 4×, and the statement uses it twice (the SET
-    // value and the WHERE guard) — hence the column name repeated per use.
-    const exprBindings = (field: string) => [field, field, field, field];
-    // #6009: the rows whose only reading is the julian-day limb.
-    const guard = this.sqliteNonTemporalTextSql('??');
-    const guardBindings = (field: string): string[] =>
-      Array(SQLITE_NON_TEMPORAL_TEXT_REFS).fill(field);
-    for (const field of fields) {
-      try {
-        const withheld = await this.countNonTemporalTextRows(table, field, canonical, exprBindings(field));
-        const res = await this.knex.raw(
-          `update ?? set ?? = ${canonical} where ?? is not null and ?? is not ${canonical} and not ${guard}`,
-          [
-            table, field, ...exprBindings(field),
-            field, field, ...exprBindings(field), ...guardBindings(field),
-          ],
-        );
-        const converted = (res as any)?.changes ?? 0;
-        if (converted) {
-          this.logger.info?.(
-            `[sql-driver] canonicalised datetime storage for ${table}.${field}: every value is now one ` +
-              `UTC ISO-8601 text form, so filters and sorts compare instants rather than mixed encodings`,
-            { rowsConverted: converted },
-          );
-        }
-        if (withheld > 0) {
-          // #6009 — the tracker id stays in this comment, never in the string:
-          // an operator reading the log has no way to resolve one.
-          this.logger.warn(
-            `[sql-driver] left ${withheld} row(s) of ${table}.${field} unconverted: ` +
-            `their stored value is a bare number, which SQLite's date functions read as a ` +
-            `JULIAN DAY, so canonicalising them would overwrite the original bytes with a ` +
-            `date nobody wrote. Reads are unchanged — the column keeps its (unindexed) ` +
-            `read-side repair until the values are corrected or cleared at the source`,
-            { table, field, rowsWithheld: withheld },
-          );
-          continue;
-        }
-        clean.add(field);
-      } catch (err) {
-        // Correctness does not depend on this succeeding — only performance does.
-        this.logger.warn(
-          `[sql-driver] could not canonicalise datetime storage for ${table}.${field}; ` +
-          `queries stay correct via the read-side repair`,
-          { error: err instanceof Error ? err.message : String(err) },
-        );
-      }
-    }
+  protected backfillCanonicalDatetimes(table: string, tableExisted: boolean): Promise<void> {
+    // [#25521 cut 12] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const readCanonicalDatetimeFields = () => this.canonicalDatetimeFields;
+    const readDatetimeFields = () => this.datetimeFields;
+    const readIsSqlite = () => this.isSqlite;
+    const readKnex = () => this.knex;
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof backfillCanonicalDatetimes> = {
+      get canonicalDatetimeFields() { return readCanonicalDatetimeFields(); },
+      countNonTemporalTextRows: (...a) => this.countNonTemporalTextRows(...a),
+      get datetimeFields() { return readDatetimeFields(); },
+      get isSqlite() { return readIsSqlite(); },
+      get knex() { return readKnex(); },
+      get logger() { return readLogger(); },
+      sqliteCanonicalDatetimeSql: (...a) => this.sqliteCanonicalDatetimeSql(...a),
+      sqliteNonTemporalTextSql: (...a) => this.sqliteNonTemporalTextSql(...a),
+    };
+    return backfillCanonicalDatetimes.call(host, table, tableExisted);
   }
 
   /**
@@ -13140,21 +12955,19 @@ export class SqlDriver implements IDataDriver {
    * @param canonicalSql the caller's canonical expression, spelling `??`
    * @param exprBindings one binding per `??` in `canonicalSql`
    */
-  protected async countNonTemporalTextRows(
+  protected countNonTemporalTextRows(
     table: string,
     field: string,
     canonicalSql: string,
     exprBindings: string[],
   ): Promise<number> {
-    const guard = this.sqliteNonTemporalTextSql('??');
-    const res: any = await this.knex.raw(
-      `select count(*) as n from ?? where ?? is not null and ?? is not ${canonicalSql} and ${guard}`,
-      [
-        table, field, field, ...exprBindings,
-        ...Array(SQLITE_NON_TEMPORAL_TEXT_REFS).fill(field),
-      ],
-    );
-    return Number((Array.isArray(res) ? res[0] : res)?.n ?? 0);
+    // [#25521 cut 12] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const readKnex = () => this.knex;
+    const host: ThisParameterType<typeof countNonTemporalTextRows> = {
+      get knex() { return readKnex(); },
+      sqliteNonTemporalTextSql: (...a) => this.sqliteNonTemporalTextSql(...a),
+    };
+    return countNonTemporalTextRows.call(host, table, field, canonicalSql, exprBindings);
   }
 
   /**
@@ -13258,44 +13071,18 @@ export class SqlDriver implements IDataDriver {
    * and the rest legacy — each cell reads the same either way, so nothing is
    * lost and `warn` is the level (AGENTS.md, degradation log levels).
    */
-  protected async backfillCanonicalJsonEncoding(table: string, tableExisted: boolean): Promise<void> {
-    const fields = this.jsonFields[table];
-    if (!this.isSqlite || !fields || fields.length === 0) return;
-    // A table created by this very call is empty, so every json column in it is
-    // canonical without a single row being read.
-    if (!tableExisted) return;
-
-    for (const field of fields) {
-      const tally = { converted: 0, withheld: 0 };
-      try {
-        await this.convergeJsonColumn(table, field, tally);
-      } catch (err) {
-        // Correctness does not depend on this succeeding: `formatOutput` keeps
-        // its parse fallback precisely so an un-migrated row still reads back
-        // as the string it is.
-        this.logger.warn(
-          `[sql-driver] could not canonicalise json storage for ${table}.${field}; ` +
-          `reads stay correct via formatOutput's parse fallback`,
-          { error: err instanceof Error ? err.message : String(err), rowsConverted: tally.converted },
-        );
-        continue;
-      }
-      if (tally.converted) {
-        this.logger.info?.(
-          `[sql-driver] canonicalised json storage for ${table}.${field}: plain-text cells are now ` +
-            `JSON-encoded strings, the one encoding a json column holds on every dialect`,
-          { rowsConverted: tally.converted },
-        );
-      }
-      if (tally.withheld) {
-        this.logger.info?.(
-          `[sql-driver] left ${tally.withheld} json cell(s) of ${table}.${field} as stored: ` +
-          `SQLite's json_valid() rejects them but they parse as JSON (e.g. nested past ` +
-          `SQLite's JSON depth limit), so they already read back as the value they encode`,
-          { rowsWithheld: tally.withheld },
-        );
-      }
-    }
+  protected backfillCanonicalJsonEncoding(table: string, tableExisted: boolean): Promise<void> {
+    // [#25521 cut 12] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const readIsSqlite = () => this.isSqlite;
+    const readJsonFields = () => this.jsonFields;
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof backfillCanonicalJsonEncoding> = {
+      convergeJsonColumn: (...a) => this.convergeJsonColumn(...a),
+      get isSqlite() { return readIsSqlite(); },
+      get jsonFields() { return readJsonFields(); },
+      get logger() { return readLogger(); },
+    };
+    return backfillCanonicalJsonEncoding.call(host, table, tableExisted);
   }
 
   /**
@@ -13305,48 +13092,17 @@ export class SqlDriver implements IDataDriver {
    * it rewrites. Throws on a failed statement; `tally` then holds what the
    * committed pages did.
    */
-  private async convergeJsonColumn(
+  private convergeJsonColumn(
     table: string,
     field: string,
     tally: { converted: number; withheld: number },
   ): Promise<void> {
-    let cursor: number | undefined;
-    for (;;) {
-      const page = this.knex(table)
-        .select(this.knex.raw('rowid as ??', ['rid']), this.knex.raw('?? as ??', [field, 'val']))
-        .whereRaw(`typeof(??) = 'text' and json_valid(??) = 0`, [field, field]);
-      if (cursor !== undefined) page.andWhereRaw('rowid > ?', [cursor]);
-      const rows = (await page.orderByRaw('rowid').limit(SQLITE_JSON_BACKFILL_PAGE_SIZE)) as Array<{
-        rid: number;
-        val: unknown;
-      }>;
-
-      const writes: Array<{ rid: number; stored: string; next: string }> = [];
-      for (const row of rows) {
-        const next = typeof row.val === 'string' ? recoverUnencodedJsonText(row.val) : null;
-        if (next === null) tally.withheld++;
-        else writes.push({ rid: row.rid, stored: row.val as string, next });
-      }
-      if (writes.length > 0) {
-        tally.converted += await this.knex.transaction(async (trx) => {
-          let changed = 0;
-          for (const w of writes) {
-            changed += await trx(table)
-              .whereRaw(`rowid = ? and typeof(??) = 'text' and ?? = ?`, [w.rid, field, field, w.stored])
-              .update({ [field]: w.next });
-          }
-          return changed;
-        });
-      }
-
-      if (rows.length < SQLITE_JSON_BACKFILL_PAGE_SIZE) return;
-      const last = rows[rows.length - 1].rid;
-      // The cursor must advance, or the same page would be read forever. A
-      // rowid past 2^53 comes back rounded and can stall it; the rest of the
-      // column then stays legacy, which reads the same.
-      if (cursor !== undefined && !(last > cursor)) return;
-      cursor = last;
-    }
+    // [#25521 cut 12] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const readKnex = () => this.knex;
+    const host: ThisParameterType<typeof convergeJsonColumn> = {
+      get knex() { return readKnex(); },
+    };
+    return convergeJsonColumn.call(host, table, field, tally);
   }
 
   /**
@@ -13379,62 +13135,24 @@ export class SqlDriver implements IDataDriver {
    * filter paths keep their repair expression, and queries stay correct (just
    * unindexed). A migration must never take boot down.
    */
-  protected async backfillCanonicalTimes(table: string, tableExisted: boolean): Promise<void> {
-    const fields = this.timeFields[table];
-    if (!this.isSqlite || !fields || fields.size === 0) return;
-
-    const clean = (this.canonicalTimeFields[table] ??= new Set<string>());
-    if (!tableExisted) {
-      for (const field of fields) clean.add(field);
-      return;
-    }
-
-    const canonical = this.sqliteCanonicalTimeSql('??');
-    const exprBindings = (field: string) => Array(SQLITE_TIME_EXPR_REFS).fill(field);
-    // #6009: the rows whose only reading is the julian-day limb.
-    const guard = this.sqliteNonTemporalTextSql('??');
-    const guardBindings = (field: string): string[] =>
-      Array(SQLITE_NON_TEMPORAL_TEXT_REFS).fill(field);
-    for (const field of fields) {
-      try {
-        const withheld = await this.countNonTemporalTextRows(table, field, canonical, exprBindings(field));
-        const res = await this.knex.raw(
-          `update ?? set ?? = ${canonical} where ?? is not null and ?? is not ${canonical} and not ${guard}`,
-          [
-            table, field, ...exprBindings(field),
-            field, field, ...exprBindings(field), ...guardBindings(field),
-          ],
-        );
-        const converted = (res as any)?.changes ?? 0;
-        if (converted) {
-          this.logger.info?.(
-            `[sql-driver] canonicalised time-of-day storage for ${table}.${field}: every value is now one ` +
-              `HH:MM:SS[.sss] text form, so filters and sorts compare times rather than mixed encodings`,
-            { rowsConverted: converted },
-          );
-        }
-        if (withheld > 0) {
-          // #6009 — the tracker id stays in this comment, never in the string:
-          // an operator reading the log has no way to resolve one.
-          this.logger.warn(
-            `[sql-driver] left ${withheld} row(s) of ${table}.${field} unconverted: ` +
-            `their stored value is a bare number, which SQLite's date functions read as a ` +
-            `JULIAN DAY, so canonicalising them would overwrite the original bytes with a ` +
-            `time nobody wrote. Reads are unchanged — the column keeps its (unindexed) ` +
-            `read-side repair until the values are corrected or cleared at the source`,
-            { table, field, rowsWithheld: withheld },
-          );
-          continue;
-        }
-        clean.add(field);
-      } catch (err) {
-        this.logger.warn(
-          `[sql-driver] could not canonicalise time storage for ${table}.${field}; ` +
-          `queries stay correct via the read-side repair`,
-          { error: err instanceof Error ? err.message : String(err) },
-        );
-      }
-    }
+  protected backfillCanonicalTimes(table: string, tableExisted: boolean): Promise<void> {
+    // [#25521 cut 12] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const readCanonicalTimeFields = () => this.canonicalTimeFields;
+    const readIsSqlite = () => this.isSqlite;
+    const readKnex = () => this.knex;
+    const readLogger = () => this.logger;
+    const readTimeFields = () => this.timeFields;
+    const host: ThisParameterType<typeof backfillCanonicalTimes> = {
+      get canonicalTimeFields() { return readCanonicalTimeFields(); },
+      countNonTemporalTextRows: (...a) => this.countNonTemporalTextRows(...a),
+      get isSqlite() { return readIsSqlite(); },
+      get knex() { return readKnex(); },
+      get logger() { return readLogger(); },
+      sqliteCanonicalTimeSql: (...a) => this.sqliteCanonicalTimeSql(...a),
+      sqliteNonTemporalTextSql: (...a) => this.sqliteNonTemporalTextSql(...a),
+      get timeFields() { return readTimeFields(); },
+    };
+    return backfillCanonicalTimes.call(host, table, tableExisted);
   }
 
   /**
@@ -13448,30 +13166,18 @@ export class SqlDriver implements IDataDriver {
    *
    * `[]` on any dialect but MySQL, and on a table declaring no datetime column.
    */
-  protected async legacyMysqlTimestampColumns(
+  protected legacyMysqlTimestampColumns(
     table: string,
     fields: Record<string, any>,
   ): Promise<Array<{ name: string; nullable: boolean }>> {
-    if (!this.isMysql) return [];
-    const candidates = new Set<string>(AUDIT_TIMESTAMP_COLUMNS);
-    for (const [name, field] of Object.entries(fields)) {
-      if ((field?.type ?? 'string') === 'datetime' && !isMultiValuedColumn('datetime', field)) candidates.add(name);
-    }
-    if (candidates.size === 0) return [];
-
-    const res: any = await this.knex.raw(
-      `select column_name, is_nullable from information_schema.columns
-       where table_schema = database() and table_name = ? and data_type = 'timestamp'`,
-      [table],
-    );
-    // mysql2 returns [rows, fields]; column names vary in case by server.
-    const rows: any[] = Array.isArray(res?.[0]) ? res[0] : (res?.rows ?? res ?? []);
-    return rows
-      .map((r) => ({
-        name: String(r.COLUMN_NAME ?? r.column_name ?? ''),
-        nullable: String(r.IS_NULLABLE ?? r.is_nullable ?? 'YES').toUpperCase() !== 'NO',
-      }))
-      .filter((c) => c.name && candidates.has(c.name));
+    // [#25521 cut 12] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const readIsMysql = () => this.isMysql;
+    const readKnex = () => this.knex;
+    const host: ThisParameterType<typeof legacyMysqlTimestampColumns> = {
+      get isMysql() { return readIsMysql(); },
+      get knex() { return readKnex(); },
+    };
+    return legacyMysqlTimestampColumns.call(host, table, fields);
   }
 
   /**
@@ -13539,50 +13245,21 @@ export class SqlDriver implements IDataDriver {
    * same one. `this.isMysql` is therefore the only early return left; no other
    * dialect takes this lock, and `lock_wait_timeout` is MySQL's variable.
    */
-  protected async runWideningAlters(
+  protected runWideningAlters(
     table: string,
     statements: ReadonlyArray<{ sql: string; bindings: unknown[] }>,
   ): Promise<void> {
-    if (!this.isMysql) {
-      for (const s of statements) await this.knex.raw(s.sql, s.bindings as any);
-      return;
-    }
-    await this.withPinnedSession(async (run) => {
-      let prior: unknown;
-      try {
-        const res: any = await run('select @@session.lock_wait_timeout as v');
-        const rows = Array.isArray(res?.[0]) ? res[0] : (res?.rows ?? res ?? []);
-        prior = (rows?.[0] as any)?.v;
-      } catch {
-        // Unreadable prior value only costs the restore below; it must not stop
-        // the bound from being armed, which is the point of the whole seam.
-      }
-      await run('set session lock_wait_timeout = ?', [DEFERRED_DDL_LOCK_WAIT_TIMEOUT_SECONDS]);
-      try {
-        for (const s of statements) {
-          try {
-            await run(s.sql, s.bindings);
-          } catch (err) {
-            // Commit 8bbf45947: the bound is armed on both callers, the ESCAPE is not.
-            // Off the flush this rethrows the server's own error, which the
-            // widening's catch reports and swallows — boot's policy
-            // unchanged, now reached by a wait that ends.
-            if (this.flushingDeferredDdl && isMysqlLockWaitTimeout(err)) {
-              throw deferredDdlLockWaitError(table, DEFERRED_DDL_LOCK_WAIT_TIMEOUT_SECONDS, err);
-            }
-            throw err;
-          }
-        }
-      } finally {
-        if (prior !== undefined && prior !== null) {
-          try {
-            await run('set session lock_wait_timeout = ?', [Number(prior)]);
-          } catch {
-            // Best-effort: never mask the refusal being thrown past this block.
-          }
-        }
-      }
-    });
+    // [#25521 cut 12] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const readFlushingDeferredDdl = () => this.flushingDeferredDdl;
+    const readIsMysql = () => this.isMysql;
+    const readKnex = () => this.knex;
+    const host: ThisParameterType<typeof runWideningAlters> = {
+      get flushingDeferredDdl() { return readFlushingDeferredDdl(); },
+      get isMysql() { return readIsMysql(); },
+      get knex() { return readKnex(); },
+      withPinnedSession: (...a) => this.withPinnedSession(...a),
+    };
+    return runWideningAlters.call(host, table, statements);
   }
 
   /**
@@ -13663,30 +13340,18 @@ export class SqlDriver implements IDataDriver {
    * {@link migrateMysqlTimeColumns} and {@link previewTimeConvergence} — the
    * plan and the migration are the same set by construction (#3954 pattern).
    */
-  protected async legacyMysqlTimeColumns(
+  protected legacyMysqlTimeColumns(
     table: string,
     fields: Record<string, any>,
   ): Promise<Array<{ name: string; nullable: boolean }>> {
-    if (!this.isMysql) return [];
-    const candidates = new Set<string>();
-    for (const [name, field] of Object.entries(fields)) {
-      if ((field?.type ?? 'string') === 'time' && !isMultiValuedColumn('time', field)) candidates.add(name);
-    }
-    if (candidates.size === 0) return [];
-
-    const res: any = await this.knex.raw(
-      `select column_name, is_nullable from information_schema.columns
-       where table_schema = database() and table_name = ? and data_type = 'time'
-         and coalesce(datetime_precision, 0) = 0`,
-      [table],
-    );
-    const rows: any[] = Array.isArray(res) ? res[0] : (res?.rows ?? []);
-    return rows
-      .map((r) => ({
-        name: String(r.COLUMN_NAME ?? r.column_name ?? ''),
-        nullable: String(r.IS_NULLABLE ?? r.is_nullable ?? 'YES').toUpperCase() !== 'NO',
-      }))
-      .filter((c) => c.name && candidates.has(c.name));
+    // [#25521 cut 12] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const readIsMysql = () => this.isMysql;
+    const readKnex = () => this.knex;
+    const host: ThisParameterType<typeof legacyMysqlTimeColumns> = {
+      get isMysql() { return readIsMysql(); },
+      get knex() { return readKnex(); },
+    };
+    return legacyMysqlTimeColumns.call(host, table, fields);
   }
 
   /**

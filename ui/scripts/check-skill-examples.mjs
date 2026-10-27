@@ -542,7 +542,14 @@ export const MARKED_FLOOR = new Map([
   // json/jsonc fences in the corpus now parses under its own tag and carries
   // the marker. Raising the number is the ADD direction this list documents:
   // the population measured 39 marked / 46 parsing before, 70 / 70 after.
-  ['json', 70],
+  // 70 -> 69 (objectstack#25926): the "Data-dependent" `json` fence in
+  // `skills/objectui/guides/schema-expressions.md` was DELETED, not unmarked.
+  // It was a `hidden` template example (`"hidden": "${!data.items || …}"`)
+  // that duplicated the syntax block above it, and the guide's token ceiling
+  // (scripts/check-skills-token-ratchet.mjs) had no room for both once that
+  // block was rewritten for the retired `visibleOn` / `hiddenOn` / `disabledOn`
+  // spellings. The fence was green at deletion; nothing here routes around a red.
+  ['json', 69],
 ]);
 
 /**

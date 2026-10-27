@@ -45,15 +45,13 @@
  *     array, an `ast`-only envelope) → DISABLED since objectui#11358, reported:
  *     a declared gate that cannot be evaluated faults, and a faulting
  *     `disabled` greys the control out (it failed open, as "no gate", before).
- *   • `disabledOn` in each of those directions → the alias reads the same
- *     definition, not a copy of it.
- *   • precedence: an EMPTY `disabled` no longer short-circuits the chain, so a
- *     declared `disabledOn` is finally consulted. This case is the one that would
- *     stay green if someone "fixed" the defect by deleting the `disabled` leg.
+ *   • an EMPTY `disabled` no longer short-circuits the chain: it is "no gate",
+ *     and since the `disabledOn` spelling was retired (a `?: never` tombstone,
+ *     refused by name) there is no second spelling left to consult.
  *   • the `visible` chain, unchanged: it keeps `!== undefined` (its alias
  *     precedence is load-bearing and its `true` is benign), so `visible: ''`
  *     still renders and `visible: false` still hides.
- *   • the `hidden` / `hiddenOn` legs of that same chain, which are NOT negated
+ *   • the `hidden` leg of that same chain, which is NOT negated
  *     and therefore HAD this defect with the polarity that makes the node
  *     VANISH. Measured while writing the equivalence cases, out of this ruling's
  *     scope, filed as objectui#3955 and pinned here as a documented divergence
@@ -65,10 +63,9 @@
  *
  * ## Reverse verification (direction predicted before running)
  *
- * Restoring `newSchema.disabled !== undefined` / `disabledOn !== undefined` must
- * turn RED exactly the seven empty-shape cases on each key (`disabled`,
- * `disabledOn`), their forwarding cases, the `0` junk case and the precedence
- * case — and leave every `true` / `false` / expression / `visible` case GREEN.
+ * Restoring `newSchema.disabled !== undefined` must turn RED exactly the seven
+ * empty-shape cases on `disabled`, their forwarding cases, the `0` junk case and
+ * the empty-`disabled` case — and leave every `true` / `false` / expression / `visible` case GREEN.
  * Nothing here can go red in the other direction: the change only ever removes a
  * `disabled` prop, never adds one.
  *
@@ -77,7 +74,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, cleanup } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
 import { ComponentRegistry } from '@object-ui/core';
@@ -158,11 +155,6 @@ describe('SchemaRenderer `disabled` — an empty predicate is not a declared gat
     expect(disabledProp()).toBe('absent');
   });
 
-  it.each(EMPTY_SHAPES)('disabledOn: $label → not disabled either (the alias reads the same definition)', ({ value }) => {
-    renderNode({ disabledOn: value });
-    expect(disabledProp()).toBe('absent');
-  });
-
   // objectui#11358: junk is a DECLARED gate that cannot be evaluated, not "no
   // gate". It reaches `evaluateEnablementPredicate`, which reports the fault
   // and returns the evaluator's fail-soft `true` — on this key, DISABLED, as
@@ -219,10 +211,6 @@ describe('SchemaRenderer `disabled` — an empty predicate is not a declared gat
     expect(disabledProp()).toBe('absent');
   });
 
-  it('an expression-valued `disabledOn` keeps its verdict', () => {
-    renderNode({ disabledOn: '${data.readOnly}' });
-    expect(disabledProp()).toBe('true');
-  });
 });
 
 describe('SchemaRenderer `disabled` chain precedence (objectui#3862)', () => {
@@ -233,21 +221,16 @@ describe('SchemaRenderer `disabled` chain precedence (objectui#3862)', () => {
     ComponentRegistry.unregister?.('probe-3862');
   });
 
-  it('an EMPTY `disabled` no longer short-circuits — a declared `disabledOn` is consulted', () => {
+  it('an EMPTY `disabled` is "no gate" — the control stays usable, and nothing else decides', () => {
     // Before: `'' !== undefined` won the chain, `evaluateCondition('')` was
-    // `true`, and the node was disabled for a reason no key stated. Now the
-    // empty leg is not a gate, so the declared alias decides.
-    renderNode({ disabled: '', disabledOn: '${data.readOnly}' });
-    expect(disabledProp()).toBe('true');
-  });
-
-  it('… and the alias verdict is honoured in the other direction too', () => {
-    renderNode({ disabled: { dialect: 'cel', source: '' }, disabledOn: '${data.unlocked}' });
+    // `true`, and the node was disabled for a reason no key stated. The
+    // `disabledOn` dialect this fall-through once reached is RETIRED (a
+    // `?: never` tombstone, refused by name on the zod mirror), so an empty
+    // `disabled` is simply not a gate.
+    renderNode({ disabled: '' });
     expect(disabledProp()).toBe('absent');
-  });
-
-  it('a DECLARED `disabled` still wins over `disabledOn`', () => {
-    renderNode({ disabled: false, disabledOn: true });
+    cleanup();
+    renderNode({ disabled: { dialect: 'cel', source: '' } });
     expect(disabledProp()).toBe('absent');
   });
 });

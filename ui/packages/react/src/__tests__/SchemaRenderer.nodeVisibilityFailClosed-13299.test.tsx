@@ -18,8 +18,8 @@
  *      the development branch (`throwOnError`); that line names no navigation
  *      surface (objectui#13303);
  *  (b) every other leg with a faulting declared predicate is not rendered:
- *      `visible`, `visibleOn` (SHOW legs, negated) and `hidden`, `hiddenOn`
- *      (HIDE legs, not negated — their fail-soft `true` already hid);
+ *      `visible` (a SHOW leg, negated) and `hidden`
+ *      (the HIDE leg, not negated — its fail-soft `true` already hid);
  *  (c) CONTROLS — true shows, false hides, absent shows, blank (declares
  *      nothing) shows, and none of them is withheld by a fault;
  *  (d) an over-budget CEL source on a node is withheld, while the same shape
@@ -195,9 +195,7 @@ describe('objectui#13299 (a) — a faulting `visibleWhen` withholds its node, re
 describe('objectui#13299 (b) — every other leg with a faulting declared predicate is not rendered', () => {
   const LEGS = [
     ['visible', WITHHELD],
-    ['visibleOn', WITHHELD],
     ['hidden', 'REMOVED the node'],
-    ['hiddenOn', 'REMOVED the node'],
   ] as const;
   for (const [build, run] of BUILDS) {
     it.each(LEGS)(`${build}: \`%s\` faulting withholds the node`, async (key, consequence) => {

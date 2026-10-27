@@ -125,8 +125,8 @@ export function isBlankPredicateText(value: unknown): boolean {
  * nothing for it: a declared gate always goes on to an evaluation, and two
  * reports for one fault is the noise objectstack-ai/objectstack#5149 removed.
  * On every action `visible` leg that direction is CLOSED (objectui#11212), on
- * every `disabled` leg too (objectui#11242), and the hide-polarity `hidden` /
- * `hiddenOn` legs of `SchemaRenderer` answer "hidden". The keys whose fault
+ * every `disabled` leg too (objectui#11242), and the hide-polarity `hidden`
+ * leg of `SchemaRenderer` answers "hidden". The keys whose fault
  * direction is OPEN keep it — a `condition` still lets the action run, a
  * legacy `enabled` leaves the control enabled, an action param's `visible`
  * still shows the param — now diagnosed rather than silent.
@@ -183,13 +183,13 @@ export function isBlankPredicateText(value: unknown): boolean {
  * definition with one scope replaces all three:
  * `components/renderers/action/visibility-gate.ts` re-exports this function
  * under its historic name `hasDeclaredVisibilityGate` (the five member-action
- * renderer call sites are unchanged), `SchemaRenderer`'s `disabled` /
- * `disabledOn` chain reads it, and `ActionRunner`'s two gates read it instead of
+ * renderer call sites are unchanged), `SchemaRenderer`'s `disabled`
+ * gate reads it, and `ActionRunner`'s two gates read it instead of
  * a private twin.
  *
  * Two more consumers joined afterwards, and with them the last two places that
  * answered this question with a range of their own:
- * `SchemaRenderer`'s `hidden` / `hiddenOn` legs, whose verdict is NOT negated so
+ * `SchemaRenderer`'s `hidden` leg, whose verdict is NOT negated so
  * an empty predicate made the node VANISH (objectui#3955), and
  * `ActionEngine.getActionsForLocation`'s `visible` filter, which folded some
  * empty spellings by hand and coerced the rest with `Boolean(raw)`, so
