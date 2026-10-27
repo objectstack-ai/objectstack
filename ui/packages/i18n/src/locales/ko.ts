@@ -786,6 +786,9 @@ const ko = {
     addRecord: "레코드 추가",
     // objectui#12703 — the compact list's footer link to the object's list or the block's view.
     viewAll: "모두 보기",
+    viewAllCount: "전체 {{count}}개 보기",
+    viewAllCount_one: "전체 {{count}}개 보기",
+    viewAllCount_other: "전체 {{count}}개 보기",
     tabs: "탭",
     allRecords: "전체 레코드",
     userFilters: {
@@ -2888,6 +2891,7 @@ const ko = {
     build: {
       title: "앱 만들기",
       noCapability: "이 시스템에서는 앱 만들기를 사용할 수 없습니다 — ‘메타데이터 관리’ 권한이 필요하지만 계정에 해당 권한이 없습니다.",
+      inStudio: "Studio에서 새로 만들기",
     },
     template: {
       title: "템플릿으로 시작",

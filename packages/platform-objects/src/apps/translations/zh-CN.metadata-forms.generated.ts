@@ -1895,6 +1895,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       filter_and_chart: {
         label: "筛选与图表",
         description: "条件与图表展示"
+      },
+      period_and_export: {
+        label: "时间段与导出",
+        description: "报表的默认时间段，以及其表格可下载的格式"
       }
     },
     fields: {
@@ -1983,6 +1987,14 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       chart: {
         label: "图表",
         helpText: "图表类型与配置"
+      },
+      dateRange: {
+        label: "日期范围",
+        helpText: "默认时间段与自定义范围开关。维度必须是数据集的日期维度；数据集只有一个日期维度时可留空"
+      },
+      exportOptions: {
+        label: "导出选项",
+        helpText: "下载格式（csv、xlsx）与文件名。谁可以下载由数据集对象上的导出权限决定"
       }
     }
   },

@@ -1895,6 +1895,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       filter_and_chart: {
         label: "Filter & chart",
         description: "Render-time scope filter and chart presentation."
+      },
+      period_and_export: {
+        label: "Period & export",
+        description: "The default period of the report and the formats its table can be downloaded in."
       }
     },
     fields: {
@@ -1983,6 +1987,14 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       chart: {
         label: "Chart",
         helpText: "Chart config (type, legend, colors)"
+      },
+      dateRange: {
+        label: "Date Range",
+        helpText: "Default period and custom-range switch. The dimension must be a date dimension of the dataset; leave it empty when the dataset has exactly one."
+      },
+      exportOptions: {
+        label: "Export Options",
+        helpText: "Download formats (csv, xlsx) and file name. Who may download is the export permission on the dataset object."
       }
     }
   },

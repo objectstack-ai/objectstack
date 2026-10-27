@@ -67,6 +67,8 @@ const result = JoinedReportBlockSchema.parse(data);
 | **order** | `{ by: string; direction?: Enum<'asc' \| 'desc'> }[]` | optional | Result ordering, most significant key first |
 | **drilldown** | `boolean` | optional (default: `true`) | Click-through to underlying records |
 | **chart** | `{ type: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| …>; title?: string \| Record<string, string>; subtitle?: string \| Record<string, string>; description?: string \| Record<string, string>; … }` | optional | Embedded chart configuration (refused on a joined report, which draws tables only) |
+| **dateRange** | `{ dimension?: string; defaultRange?: Enum<'today' \| 'yesterday' \| 'this_week' \| 'last_week' \| 'this_month' \| 'last_month' \| …>; allowCustomRange?: boolean }` | optional | Report date range: a window over one dataset date dimension (refused on a joined report) |
+| **exportOptions** | `{ formats?: Enum<'csv' \| 'xlsx'>[]; includeHeaders?: boolean; fileNamePrefix?: string }` | optional | Report export control: `{ formats?, includeHeaders?, fileNamePrefix? }`, csv / xlsx, on by default; who may export is the base object's export permission (refused on a joined report) |
 | **blocks** | `{ name: string; label?: string \| Record<string, string>; description?: string \| Record<string, string>; type?: Enum<'tabular' \| 'summary' \| 'matrix'>; … }[]` | optional | Sub-reports for type=joined |
 | **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this report. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
@@ -102,6 +104,22 @@ const result = JoinedReportBlockSchema.parse(data);
 | **annotations** | `{ type?: Enum<'line' \| 'region'>; axis?: Enum<'x' \| 'y'>; value: number \| string; endValue?: number \| string; … }[]` | optional | Reference lines/bands drawn over the plot: `{ type: "line" \| "region", axis: "x" \| "y", value, endValue?, color?, label?, style? }` |
 | **interaction** | `{ tooltips?: boolean; brush?: boolean }` | optional | Interaction toggles: `{ tooltips?, brush? }` |
 | **aria** | `never` | optional | [REMOVED] `ChartConfig.aria` — authored as `dashboard.widgets[].chartConfig.aria`, `report.chart.aria` and `report.blocks[].chart.aria` — was removed in @objectstack/spec 17 (ADR-0049 D2). No chart renderer ever applied it: the chart implementation declares no `aria` prop, the presentation lowering names it nowhere, and the react `<ObjectChart>` block never published it, so ARIA attributes declared here parsed and then silently did not reach the DOM. Delete the key. The accessible name that IS applied on this same chart config is its sibling `description`, which the chart renderer lowers onto the chart graphic as `role="img"` plus `aria-label`. The shared `AriaProps` shape is NOT gone — `ariaLabel` / `ariaDescribedBy` / `role` stay live in the `aria` block on `page.aria`, `page.components[].aria` and the list view `aria`. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
+
+### Nested Shape: `Report.dateRange`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **dimension** | `string` | optional | Dataset dimension (declared `type: 'date'`) the window applies to; omitted = the dataset's one date dimension |
+| **defaultRange** | `Enum<'today' \| 'yesterday' \| 'this_week' \| 'last_week' \| 'this_month' \| 'last_month' \| …>` | optional (default: `"this_month"`) | Default date range preset |
+| **allowCustomRange** | `boolean` | optional (default: `true`) | Allow users to pick a custom date range |
+
+### Nested Shape: `Report.exportOptions`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **formats** | `Enum<'csv' \| 'xlsx'>[]` | optional | Formats the report's export control offers (default: ['csv', 'xlsx']); an empty list turns the control off |
+| **includeHeaders** | `boolean` | optional | Include column headers in the exported file (default true) |
+| **fileNamePrefix** | `string` | optional | Download file name prefix — replaces the report label in the generated file name |
 
 ### Nested Shape: `Report.blocks[number]`
 
