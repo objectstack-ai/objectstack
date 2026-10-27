@@ -1702,6 +1702,19 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'whether each respelled index was really meant installation-wide is the author\'s call.',
   },
   {
+    id: 'dependency-unread-spellings-retired',
+    order: 110,
+    text:
+      'It also states the fates ADR-0141 D8 left to a measured reader count for the two dependency '
+      + 'spellings beside the record the pre-install check reads (ADR-0049 enforce-or-remove): '
+      + '`PackageDependency.optional`, which promised a missing dependency would only warn though the '
+      + 'record has no optional arm and every entry is required, and `AppManifest.dependencies`, a '
+      + 'bare-id list without a range. Neither had a reader or a writer outside `packages/spec`, here or '
+      + 'in HotCRM, so both are tombstoned and `manifest.dependencies` is the one way to declare a '
+      + 'dependency. There is no D2 conversion, because neither shape is a stack collection member; the '
+      + 'D3 record is the semantic entry `dependency-unread-spellings-retired`.',
+  },
+  {
     id: 'deployment-plumbing-organization-columns-retired',
     order: 86,
     text:
