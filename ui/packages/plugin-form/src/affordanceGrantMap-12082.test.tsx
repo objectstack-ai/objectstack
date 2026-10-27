@@ -121,10 +121,12 @@ const EXPECTED_GRANT: Record<string, Grant> = {
   kanbanCardMove: 'update',
   // The record feed's writes (the census backlog's leg B), each asked of the
   // object it writes: a comment or reply, a reaction added or taken back, and
-  // a reaction on the column store.
+  // a reaction on the column store. The take-back removes the caller's own
+  // row through the unreact door, which needs no delete grant, so it asks the
+  // grant the reaction was added under (objectstack#26346).
   feedComment: 'create',
   feedReactionAdd: 'create',
-  feedReactionRemove: 'delete',
+  feedReactionRemove: 'create',
   feedReactionColumn: 'update',
   // objectui#12268: the author's Edit and Delete on their own feed comment,
   // asked of `sys_comment`.
@@ -695,8 +697,6 @@ const WRITE_SITES: Record<string, WriteSite> = {
     mapped(['feedReactionColumn'], RECORD_PAGE),
   'packages/app-shell/src/views/RecordDetailView.tsx :: RecordDetailView > handleToggleReaction > write :: create':
     mapped(['feedReactionAdd'], RECORD_PAGE),
-  'packages/app-shell/src/views/RecordDetailView.tsx :: RecordDetailView > handleToggleReaction > write :: delete':
-    mapped(['feedReactionRemove'], RECORD_PAGE),
   'packages/app-shell/src/views/RecordDetailView.tsx :: RecordDetailView > onClick :: delete':
     mapped(['recordDelete'], RECORD_PAGE),
   'packages/app-shell/src/views/RelatedRecordActionsBridge.tsx :: RelatedRecordActionsBridge > value > resolve :: delete':
