@@ -22,7 +22,7 @@ const optionsOf = (field: 'recipient_type' | 'access_level'): Option[] =>
 describe('sys_sharing_rule select options', () => {
   it('recipient_type keeps its stored values', () => {
     expect(optionsOf('recipient_type').map((o) => o.value)).toEqual(
-      ['user', 'team', 'business_unit', 'position', 'unit_and_subordinates', 'field'],
+      ['user', 'team', 'business_unit', 'position', 'unit_and_subordinates', 'queue', 'field'],
     );
   });
 

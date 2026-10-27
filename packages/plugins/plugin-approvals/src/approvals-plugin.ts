@@ -7,6 +7,7 @@ import type {
   IJobService,
   IObjectQLEngine,
 } from '@objectstack/spec/contracts';
+import { OWNERSHIP_QUEUE_SERVICE } from '@objectstack/spec/contracts';
 import { SysApprovalRequest } from './sys-approval-request.object.js';
 import { SysApprovalAction } from './sys-approval-action.object.js';
 import { SysApprovalApprover } from './sys-approval-approver.object.js';
@@ -22,6 +23,7 @@ import {
   ESCALATION_SCAN_INTERVAL_MS,
   type ApprovalEngine,
   type ApprovalMessagingSurface,
+  type ApproverQueueSource,
   type ObjectReadAdmission,
 } from './approval-service.js';
 import {
@@ -271,6 +273,17 @@ export class ApprovalsServicePlugin implements Plugin {
       // object labels in the reader's locale (`reader-locale-labels.ts`).
       // Without one, the door serves the labels as stored.
       i18nServiceSource: i18nService,
+      // [ADR-0142 D6] The queue service a `queue` approver expands through.
+      // Resolved LAZILY for the reason the providers above are: plugin-sharing
+      // registers it and may start after this one. Absent, a queue approver
+      // expands to nobody and the warning says why.
+      ownershipQueues: () => {
+        try {
+          return ctx.getService<ApproverQueueSource>(OWNERSHIP_QUEUE_SERVICE);
+        } catch {
+          return undefined;
+        }
+      },
     });
 
     // [#10749] Field-visibility authority for payload-snapshot redaction.

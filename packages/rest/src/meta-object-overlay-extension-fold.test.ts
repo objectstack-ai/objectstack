@@ -141,7 +141,7 @@ function fieldNamesOf(item: unknown): string[] {
  */
 const PLATFORM_COLUMNS: readonly string[] = [
     'id', 'created_at', 'created_by', 'updated_at', 'updated_by',
-    'organization_id', 'owner_id', 'owning_business_unit_id',
+    'organization_id', 'owner_id', 'owning_business_unit_id', 'queue',
 ];
 
 /** Served field names minus {@link PLATFORM_COLUMNS}. */

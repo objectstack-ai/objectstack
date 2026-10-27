@@ -3339,6 +3339,8 @@ const ar = {
     recordAccessDeniedDescription: "ليس لديك إذن لعرض السجلات من هذا النوع. تواصل مع المسؤول إذا كنت تعتقد أنه يجب أن يكون لديك وصول.",
     recordLoadFailed: "تعذّر تحميل هذا السجل",
     recordLoadFailedDescription: "حدث خطأ أثناء التحميل. تحقق من اتصالك وحاول مرة أخرى.",
+    recordAccessEnded: "تم تسجيل القرار",
+    recordAccessEndedDescription: "اكتملت خطوة الموافقة الخاصة بك، لذا انتهى وصولك إلى هذا السجل.",
   },
   actionDialog: {
     title: "معامِلات الإجراء",

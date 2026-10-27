@@ -147,6 +147,15 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     covers: ['security/sharing.zod.ts:CriteriaSharingRuleSchema.condition'],
     proof: 'packages/plugins/plugin-sharing/src/sharing-rule.test.ts',
   },
+  {
+    id: 'assignment-load',
+    summary: 'assignment-rule entry `load` → the filter a `least_loaded` member\'s open rows are counted by (ADR-0142 D5)',
+    dialect: 'cel', mode: 'compile', state: 'enforced', failPolicy: 'fail-closed',
+    enforcement: 'objectql/assignment-rules.ts route → @objectstack/formula compileCelToFilter, ANDed with the member\'s owner_id and the row\'s organization_id in the engine count',
+    covers: ['automation/assignment-rule.zod.ts:AssignmentRuleEntrySchema.load'],
+    proof: 'packages/objectql/src/ownership-queue.test.ts',
+    note: 'Not a security surface: it decides who is handed a row, never who may read one. It is COMPILE because the count is a pushdown query, and `fail-closed` describes what a `load` the compiler cannot lower does: the row parks in the queue with a warning, never a count over every row. Nothing before the runtime asks whether the compiler can lower it (the schema only requires `load` beside `least_loaded`).',
+  },
 
   // ── INTERPRET (per-record) — classified, fail-soft per ADR-0058 D5 ──
   {
@@ -162,6 +171,14 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     dialect: 'cel', mode: 'interpret', state: 'enforced', failPolicy: 'fail-soft-log',
     enforcement: '@objectstack/formula celEngine (interpret) via the hook runner',
     covers: ['data/hook.zod.ts:HookSchema.condition'],
+  },
+  {
+    id: 'cel-assignment-criteria',
+    summary: 'assignment-rule entry `criteria`, matched against the row being inserted (ADR-0142 D5)',
+    dialect: 'cel', mode: 'interpret', state: 'enforced', failPolicy: 'fail-soft-log',
+    enforcement: '@objectstack/formula ExpressionEngine.evaluate (interpret) over `record`, in objectql/assignment-rules.ts matches; a fault is warned once per entry and the entry does not match',
+    covers: ['automation/assignment-rule.zod.ts:AssignmentRuleEntrySchema.criteria'],
+    proof: 'packages/objectql/src/ownership-queue.test.ts',
   },
   {
     id: 'cel-formula',
