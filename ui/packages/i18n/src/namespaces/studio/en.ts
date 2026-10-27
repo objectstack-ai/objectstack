@@ -952,6 +952,12 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.action.scriptBody': 'Script body',
   'engine.inspector.action.scriptBodyHint': 'Runs in the sandbox as {signature}.',
   'engine.inspector.action.method': 'Method',
+  // objectstack#26736 — Body Shape as the spec's two shapes.
+  'engine.inspector.action.bodyShape': 'Body shape',
+  'engine.inspector.action.bodyShape.flat': 'Flat — inputs at the top level',
+  'engine.inspector.action.bodyShape.wrap': 'Wrap — inputs nested under a key',
+  'engine.inspector.action.bodyShapeKey': 'Wrap key',
+  'engine.inspector.action.bodyShapeHint': 'How the collected inputs are sent in the request body. Wrap is saved once it has a key.',
   'engine.inspector.action.inputs': 'Inputs',
   'engine.inspector.action.inputsHint': 'Collected from the user in a dialog before the action runs.',
   'engine.inspector.action.inputsEmpty': 'No inputs — the action runs immediately on click.',
@@ -992,6 +998,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.action.aiDescription': 'Tool description (required, ≥40 chars)',
   'engine.inspector.action.aiDescriptionPlaceholder': 'When and why an agent should call this action…',
   'engine.inspector.action.aiDescriptionTooShort': 'A ≥40-character description is required while exposed.',
+  // objectstack#26736 — the Data pillar's refusal strip and held line, for an action.
+  'engine.studio.refusal.action': 'the action “{action}”',
+  'engine.studio.refusal.actionInput': '{input} on the action “{action}”',
+  'engine.studio.held.actionNeedsInput': '{input} on the action “{action}” needs a value',
   'engine.inspector.action.moreFieldsHint': 'Advanced / rarely-used properties.',
   // Dataset default (home) inspector (objectui#10586). Option labels are keyed
   // by the stored value; `{…}` tokens in a sentence are slots the inspector
