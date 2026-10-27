@@ -25,6 +25,9 @@ const RECORD_PAGE: ActionContext = {
 };
 
 const TARGET = '/api/v1/data/gapdata_item/${ctx.recordId}';
+// A url target under `/api/` leaves through `window.location`, not the host's
+// navigation handler, so the url control uses a route path with the same token.
+const URL_TARGET = '/gapdata_item/${ctx.recordId}';
 
 function recordingApiHandler() {
   const seen: ActionDef[] = [];
@@ -62,10 +65,10 @@ describe('api targets interpolate before a registered api handler (objectstack#2
     runner.setNavigationHandler(navigate);
 
     await runner.execute({ type: 'api', name: 'call_api', target: TARGET, method: 'PATCH' });
-    await runner.execute({ type: 'url', name: 'open', target: TARGET });
+    await runner.execute({ type: 'url', name: 'open', target: URL_TARGET });
 
     expect(seen[0].target).toBe('/api/v1/data/gapdata_item/a%2Fb%20c');
-    expect(navigate.mock.calls[0][0]).toContain('/api/v1/data/gapdata_item/a%2Fb%20c');
+    expect(navigate.mock.calls[0][0]).toBe('/gapdata_item/a%2Fb%20c');
   });
 
   it('the built-in executor sends the same resolved path', async () => {
@@ -86,12 +89,11 @@ describe('api targets interpolate before a registered api handler (objectstack#2
     const navigate = vi.fn();
     runner.setNavigationHandler(navigate);
 
-    const result = await runner.execute({ type: 'url', name: 'open', target: TARGET });
+    const result = await runner.execute({ type: 'url', name: 'open', target: URL_TARGET });
 
     expect(result.success).toBe(true);
     expect(navigate).toHaveBeenCalledTimes(1);
-    expect(navigate.mock.calls[0][0]).toContain('/api/v1/data/gapdata_item/gd_001');
-    expect(navigate.mock.calls[0][0]).not.toContain('${');
+    expect(navigate.mock.calls[0][0]).toBe('/gapdata_item/gd_001');
   });
 
   it('a registered non-api handler still receives its target as authored', async () => {
