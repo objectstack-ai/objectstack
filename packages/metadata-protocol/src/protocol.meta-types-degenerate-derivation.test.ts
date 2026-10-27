@@ -326,11 +326,13 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
      * 12 → 13 the same way when it gained `permissionSets` (ADR-0131 D3/D4,
      * the sets a position distributes). `flow` moved 23 → 24 the same way
      * when it gained `requiredPermissions` (who may start the flow, checked at
-     * every start door).
+     * every start door). `report` moved 21 → 23 the same way when it gained
+     * `dateRange` and `exportOptions` (#26548, the report's period and the
+     * download of its table).
      */
     const CARD_PROPERTY_COUNTS: Record<string, number> = {
         agent: 26, app: 30, dashboard: 22, dataset: 16, field: 80, flow: 24,
-        hook: 22, object: 48, page: 26, position: 13, report: 21, skill: 17, tool: 14,
+        hook: 22, object: 48, page: 26, position: 13, report: 23, skill: 17, tool: 14,
     };
 
     it.each(Object.entries(CARD_PROPERTY_COUNTS))(

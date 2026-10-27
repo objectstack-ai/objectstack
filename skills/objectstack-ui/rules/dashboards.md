@@ -398,9 +398,9 @@ export const PipelineCoverageReport = defineReport({
   columns: ['close_date'],       // across axis (ADR-0021 D2) — matrix pivots rows × columns
   values: ['amount_sum'],        // measures placed in the cells
   runtimeFilter: { stage: { $ne: 'closed_lost' } },
-  // Period: a window on ONE `type: 'date'` dataset dimension (dashboard presets).
+  // Period: ONE `type: 'date'` dataset dimension, not a dashboard-style raw `field`.
   dateRange: { dimension: 'close_date', defaultRange: 'this_year' },
-  order: [{ by: 'amount_sum', direction: 'desc' }],
+  order: [{ by: 'amount_sum', direction: 'desc' }], // by measure; dates default to chronological
   chart: { type: 'bar', xAxis: 'forecast_category', yAxis: 'amount_sum' },
 });
 ```
