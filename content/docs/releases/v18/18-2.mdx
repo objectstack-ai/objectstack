@@ -1,0 +1,1014 @@
+---
+title: 18.2.0
+description: "Release notes and upgrade checklist for 18.2.0, the first release that ships the Console and the @object-ui packages from this repository. A minor that carries breaking changes: one access rule for file references, app automation refused identity writes under elevation, installs that check declared dependencies, action copy refused at publish, and six narrowings that os migrate meta converts."
+---
+
+<Callout type="info">
+**How this page was compiled.** From the 227 changesets added to `.changeset/`
+between the 18.1.0 tag and `main` at `f9e871a1c4`, each placed by
+`classifyReleaseBullet` in `scripts/release-github-releases.mjs`, the function
+that groups the GitHub Release body. The five sections below use its five
+headings, in its order, and its counts: **52** need you to act, **6** are
+converted for you, **41** add capabilities, **3** declare a semantic change,
+and **125** are other fixes. Every changeset is listed once, under its
+section. A version pass rehearsed in a throwaway clone wrote an `## 18.2.0`
+section into 111 CHANGELOGs, and the same function placed each of their
+distinct entries in the section this page lists it under. Each package's
+Release also carries an `Updated dependencies` bullet under 其他修复, which this
+page does not repeat. Changesets merged after `f9e871a1c4` and before the
+version commit are not on this page. The
+[upgrade checklist](#upgrade-checklist) is compiled from the changesets and
+has not been walked.
+</Callout>
+
+## Highlights — 18.2.0
+
+- **The Console and `@object-ui/*` ship from this repository.** objectui became
+  the `ui/` workspace of this repository (`fd40831`, #25825, for #25752), and
+  `@objectstack/console` is built from `ui/apps/console` at the commit it
+  releases (`2a61f08`, #25745). There is no objectui pin any more:
+  `dist/.objectui-sha` and `dist/.objectstack-injection.json` leave the
+  Console tarball. The 37 public `@object-ui/*` packages join the
+  `@objectstack/*` fixed group, so 18.2.0 is the first release in which both
+  scopes publish at one version. See [Console (Studio)](#console).
+- ⚠️ **A minor that breaks.** 58 of the 227 changesets are declared breaking:
+  14 graded `minor` because they narrow the metadata protocol, and 44 graded
+  `patch` under the level rule (#25105, ruling A). 52 of them need you to act;
+  6 are converted by `os migrate meta`. Read
+  [the version number](#the-version-number-is-not-the-signal).
+- **One access rule for a file reference.** A record write claims or copies
+  only a file its caller may read, and is refused at the field when it names
+  one it may not (`3761710`, `7e4af20`). An unclaimed file is served only
+  inside its organization (`3b8ea15`), a released file keeps its record's rule
+  (`d9e6ac2`), and no anonymous write carries a file (`e2b40a2`, `b4199c9`).
+  A seed can now ship a file with `seedFile(path)` (`2163e80`).
+- **App automation cannot write identity rows under elevation.** A
+  `runAs: 'system'` hook, an action body, an inherited system context and
+  `ctx.api.sudo()` are refused writes to position holdings, permission-set
+  grants, invitations and memberships, as a system flow already was
+  (`073f08b`, `6a6ebff`). A permission set that only shares a position's name
+  is no longer granted to its holders (`733b3c8`): name it in the position's
+  `permissionSets`. An environment that runs HotCRM takes HotCRM `v6.0.0` or
+  later first.
+- **Installs check what a package declares.** An install whose
+  `manifest.dependencies` the environment does not satisfy is refused
+  `422 DEPENDENCY_MISSING` (`3446d43`), and a module that declares its app
+  may share the app's namespace (`be78977`).
+- **Action copy is judged at publish.** An action's `confirmText`,
+  `successMessage` and `errorMessage` are `template` slots (`384bb7b`), and a
+  blank sentence, an unbound root or a `${…}` token the runner shows raw now
+  fails `os validate`, `os build` and the publish gate (`0c81694`, `d727348`).
+- **Pinned means pinned.** `@objectstack/cli`, `@objectstack/hono` and
+  `@objectstack/plugin-dev` publish their `@objectstack/*` dependencies at
+  exactly their own version (`f4860da`), so the override the 18.1.0 checklist
+  added is no longer needed.
+- **`kind: 'react'` pages are off unless the deployment turns them on** with
+  `OS_PAGE_REACT_ENABLED=true` (`5e7cf63`), and the Console document carries a
+  nonce-based content-security-policy (`3c30afd`).
+- **New to author:** a field permission `when` (`c8cb510`),
+  `controlledByParent.ownerMayEdit` (`5e113b3`), a flow's
+  `requiredPermissions` (`f1ddace`), `demoStaff` (`f00e8d5`), duration
+  measures (`d1663ba`), the `$now` comparand (`be531f6`), and translation keys
+  for positions, permission sets, reports and form entries.
+
+---
+
+## Release facts, as measured
+
+Read before the cut, from `main` at `f9e871a1c4`, a version pass rehearsed in
+a throwaway clone, and `npm view` on 2026-10-27:
+
+| | Measured |
+| :--- | :--- |
+| Version commit | `__VERSION_COMMIT__` (to be filled at the cut) |
+| Published | `__PUBLISH_DATE__` (to be filled at the cut) |
+| Packages | 110 publish at 18.2.0: 72 `@objectstack/*`, `create-objectstack`, and 37 `@object-ui/*`. The VS Code extension (`object-ui`) takes the version and is private |
+| `@object-ui/*` before this release | every one of the 37 reads `latest` `18.1.0` on npm, published from the objectui repository |
+| `@object-ui/sdui-parser` | not released. It is deleted from the workspace (`80f267d`, #26343); its 18.1 line on npm is its last. Use `@objectstack/sdui-parser` |
+| `next` | `18.0.0-next.5` on `@objectstack/cli` and `@objectstack/console`, **older** than `latest`. ⛔ Never install `@next` for 18 |
+| `rc` | `17.0.0-rc.6` |
+| CLI dependencies | the 49 `@objectstack/*` dependencies of `@objectstack/cli` are declared `workspace:*` and publish as exact versions. At 18.1.0, eight were `workspace:^` and published as caret ranges |
+
+Two notes for reading the 18.2.0 CHANGELOGs:
+
+- **Each entry names its own commit.** In the rehearsed version pass every
+  bullet opened with the commit that added its changeset, as the generator
+  has done since #25804. This page cites the same commits.
+- **objectui's last 65 changesets are one entry.** The changes objectui made
+  between its 18.1.0 release and the import came across under
+  `ui/.changeset/`, which `changeset version` does not read. One changeset
+  carries them into this release (`9a0af4e`, #26068), and each of the 65 files
+  stays in `ui/.changeset/` as the full record.
+
+The Docker image was not read for this page.
+
+---
+
+## What's new in 18.2.0
+
+### The version number is not the signal
+
+Every package still versions in lockstep, and now that includes the
+`@object-ui/*` scope. The level of a release says whether **the metadata
+protocol** moved, and nothing else:
+
+| Kind of change | Level |
+| :--- | :--- |
+| Added to the metadata protocol: a new authorable key, accepted value or metadata type | `minor` |
+| Narrowed or retired: a key removed or tombstoned, a value refused, a requirement tightened | `minor` |
+| Semantic: the meaning or default of an authorable key changes | `minor` |
+| Everything else: REST, drivers, services, the CLI, the Console, `feat:` and `fix!:` alike | `patch` |
+
+So 18.2.0 carries 44 changesets graded `patch` that say **BREAKING**, beside
+14 graded `minor`. Of all 227, 37 are graded `minor` and 190 `patch`; none is
+`major`. Pin exact versions of both scopes, and read the release notes for
+every version you cross.
+
+### 需手动处理 — breaking changes you must act on [#action-required]
+
+The 52 entries that are breaking and carry no ADR-0087 conversion. Each line
+names what you do; the CHANGELOG entry carries the full before and after.
+
+#### Security, identity and administration
+
+- **A permission set that shares a held position's name is no longer granted**
+  (`733b3c8`, #26064). A holder of position `sales_manager` is granted only the
+  sets the position's definition lists in `permissionSets`; the
+  `position_name_fold_grant` warning now logs `granted: false`. Fix: write
+  `permissionSets: ['sales_manager']` on the position. An environment that runs
+  HotCRM must be on HotCRM `v6.0.0` or later before it takes 18.2.0. Code that
+  builds `UserAuthzGrants` or `ResolvedAuthzContext` from `@objectstack/core`
+  by hand sets the new `directPermissions` (`[]` with no grant rows).
+- **A `runAs: 'system'` hook and an action body are refused writes to
+  `sys_user_position`, `sys_user_permission_set`, `sys_invitation` and
+  `sys_member`** (`073f08b`, #25954), with `403 PERMISSION_DENIED`, and nothing
+  is written. Fix: set the hook's `runAs` to `'user'`; move an action body's
+  grant into a `runAs: 'user'` flow; change invitations and memberships through
+  the organization endpoints, such as
+  `POST /api/v1/auth/organization/invite-member`, `cancel-invitation` and
+  `remove-member`.
+- **The same refusal reaches a hook that inherits a system context, a hook's
+  `ctx.api.sudo()`, and an action reached through `execute()`** (`6a6ebff`,
+  #25982). Fix: declare `runAs: 'user'` on the hook and leave `sudo()` out, or
+  use the organization endpoints. A hook a plugin registers in code with
+  `engine.registerHook` is not affected.
+- **On a runtime with no hierarchy resolver, a permission set that grants
+  `own_and_reports`, `unit` or `unit_and_below` is refused on publish**
+  (`b029c90`, #26305): `422 INVALID_METADATA` under the rule
+  `hierarchy-scope-capability-required`, and a warning on a draft save. Fix: set
+  the grant's `readScope` / `writeScope` to `own` or `org`, or run it where the
+  enterprise `hierarchy-security` resolver is mounted.
+- **A delegated admin's write outside their own scope answers
+  `403 DELEGATION_SCOPE_VIOLATION`**, not `403 PERMISSION_DENIED` (`495fa07`,
+  #26320). Fix: a client that matched `PERMISSION_DENIED` for these refusals
+  matches the new code too; its message is safe to show.
+- **Under a walled posture, `POST /api/v1/auth/admin/create-user` adds the new
+  user to the administrator's current organization**, and refuses
+  `400 NO_ACTIVE_ORGANIZATION` when there is none (`17f8217`, #25626). Fix:
+  switch to the organization the user belongs to, then create them.
+- **Admin create-user refuses a password outside the deployment's length
+  range** with `400 INVALID_REQUEST`, and a too-long one no longer answers
+  `PASSWORD_TOO_LONG` (`1d2a246`, #25927). Fix: send a password inside
+  `minPasswordLength` / `maxPasswordLength`, or `generatePassword: true`; match
+  `INVALID_REQUEST` instead of `PASSWORD_TOO_LONG`.
+- **`IdentityImportDeps.getAuthContext()` is required** (`e3e936e`, #26018), so
+  admin import-users sizes a temporary password to the deployment's range. Fix:
+  a host that calls `runAdminImportUsers` itself passes `getAuthContext`, for
+  example `AuthManager.getAuthContext()`. The `AuthPlugin` route is already
+  wired.
+- **The built-in `auth.invitation` mail requires `expiresAt`** (`d284ff3`,
+  #26072); a send without it is refused `MISSING_VARIABLES: expiresAt`. Fix:
+  code that sends `auth.invitation` itself adds the invitation's expiry instant
+  to the send's `data` as `expiresAt`.
+
+#### Files and storage
+
+- **An anonymous public-form submission carries no file** (`e2b40a2`, #25682).
+  `POST /api/v1/forms/:slug/submit` refuses a value in a `file`, `image`,
+  `avatar`, `video` or `audio` field with `400 VALIDATION_FAILED`. Fix: take the
+  file field off the guest-facing form, or leave it for the visitor to leave
+  empty; a visitor who must provide a file registers and signs in.
+- **A form open to anonymous intake that declares a file field fails the
+  build and the publish gate** (`6ad226a`, #25737), under the rule
+  `public-form-file-field`. Fix (one line): take the file field off the public
+  form. A stored view keeps serving until its next save.
+- **Every anonymous write is refused a file value**, not only the public form
+  door (`b4199c9`, #26036). Fix: leave file fields empty in an anonymous write;
+  a signed-in caller provides the file through the authenticated upload doors.
+- **A record write claims or copies only a file its caller may read**
+  (`3761710`, #25951), under the download door's own rule. Fix: reference a
+  file as a caller who may read it, or upload it again; a server-side copy
+  between records runs as a system write.
+- **An unclaimed file is served only within its organization** under the
+  `isolated` and `group` postures (`3b8ea15`, #25704); anyone else gets
+  `403 FILE_DOWNLOAD_DENIED`. Fix: download it while acting in its
+  organization, have a record claim it, or mark it `acl: 'public_read'`.
+- **A record write naming a file its caller may not read is refused at the
+  field** with `400 VALIDATION_FAILED` and `invalid_value` (`7e4af20`, #26237);
+  so is an id that names no file of the organization. Fix: name a file the
+  caller may read, or leave the field empty.
+- **A file its record lets go keeps that record's read rule** until it is
+  claimed again or collected (`d9e6ac2`, #26144). `sys_file` gains
+  `released_ref_object` and `released_ref_id`, which schema sync adds. Fix:
+  read or claim such a file as a reader of that record.
+- **A seed record's file field holding an id that names no stored file is
+  refused, by row** (`2163e80`, #26244). Fix: replace the value with
+  `seedFile('<path in the package>')`, imported from `@objectstack/spec/data`,
+  or remove it. The same change adds `seedFile`: `os build` writes the bytes
+  into the artifact and the seed loader stores them.
+- **A flow screen field typed `file` collects an upload, and the resume
+  refuses any value that is not a file id** with `400 INVALID_SCREEN_INPUT`
+  (`6d9d3ef`, #26134). Fix: a caller that resumes the run itself uploads first
+  and posts the `sys_file` id; a field not meant for an upload takes another
+  `type`.
+
+#### Metadata the build and the save doors now refuse
+
+- **An approval node refuses `excludeSubmitter: true` beside
+  `onEmptyApprovers: 'auto_approve'`** (`4bcc4df`, #25700). Fix: choose
+  `'admin_rescue'` (the default), `'fail'`, or `'fallback'` with
+  `fallbackApprovers`. `excludeSubmitter` is new in this release, so no
+  released source holds the pair.
+- **An action's `confirmText`, `successMessage` or `errorMessage` finding is
+  an error, not a warning** (`0c81694`, #25702): a blank sentence, a hole over
+  a root the key does not bind, a single-brace `{x}` token, logic in a hole, or
+  a `${…}` token the runner shows raw. `os validate` and `os build` fail, and
+  an active save answers `422 INVALID_METADATA`. Fix: write the hole the
+  finding prescribes (`Delete {{ record.name }}?`), name a root the key binds,
+  double a single brace, move logic out of the hole, or delete a blank key.
+- **The holeless `${record.*}` `confirmText` and `${result.*}`
+  `successMessage` are refused too** (`d727348`, #25989): the Console's runner
+  shows them as written. Fix: `Delete ${record.name}?` becomes
+  `Delete {{ record.name }}?`, and `Invitation sent to ${result.email}` becomes
+  `Invitation sent to {{ result.email }}`.
+- **A code package's action is stored as its `ActionSchema` parse**
+  (`e44a1ff`, #25699), so a body the schema refuses fails registration with
+  `422 INVALID_METADATA`, and `requiresFeature` now takes effect on bound
+  actions. Fix: correct the action as `issues[]` describes; one that passes
+  `os validate` is unaffected.
+- **An object's own actions are parsed the same way** (`a4eae06`, #25981): a
+  raw manifest's object whose action fails `ActionSchema` is refused, and
+  nothing of it is stored. Fix: correct the action at `actions.N.KEY` as
+  `issues[]` describes.
+
+#### Flows and notifications
+
+- **A `notify` node mails the address in an email field of the trigger
+  record, and refuses a computed address no user holds** (`d1e329e`, #25721).
+  In a node whose `channels` include `email`, a recipient an expression
+  evaluates to an address must belong to a user, or the node fails. One
+  address receives at most 5 email-field sends per hour. Fix: give that
+  address its own node with `recipients: { emailField: 'FIELD' }` and
+  `channels: 'email'`, or give the person a user.
+  `@objectstack/service-automation` now depends on `@objectstack/plugin-auth`.
+- **A `notify` node that does not name `email` fails on an address no user
+  holds**, written out or computed, instead of reporting success (`b0384f3`,
+  #25964). Fix: add `email` to the node's `channels` to mail a written-out
+  address, or name a user (a user id, an audience selector such as `team:ID`,
+  or the address the user holds).
+- **The flow trigger doors refuse a `params` that is not a JSON object** with
+  `400 VALIDATION_FAILED` naming `params` (`e12d3f3`, #25974). Fix: send
+  `params` as an object (`{"params":{"ownerId":"u1"}}`), or leave the key out.
+- **The action door refuses a body or `params` that is not an object, and the
+  trigger door a body that is not one** (`3821ec8`, #26034). Fix: send each as
+  an object, for example `{"recordId":"…","params":{"note":"x"}}`, or leave it
+  out.
+
+#### REST, MCP, imports and analytics
+
+- **Eight doors answer an unknown resource `404 RESOURCE_NOT_FOUND`**
+  (`0dc4b5d`, #25628): `POST /api/v1/packages/:id/publish-drafts` and
+  `discard-drafts`, `GET /api/v1/packages/:id/commits`,
+  `GET /api/v1/automation/:name/runs`, `DELETE /api/v1/automation/:name`, and
+  `PATCH`, `DELETE` and `migrate-credential` on `/api/v1/datasources/:name`.
+  Fix: `packages.publishDrafts`, `discardDrafts`, `listCommits`,
+  `automation.listRuns` and `automation.delete` on `ObjectStackClient` now
+  reject for an unknown id; treat that as "no such resource".
+- **An inline import mapping entry's `transform`, `defaultValue` and
+  `required` are applied** (`50af6fa`, #25540), on `POST
+  /api/v1/data/:object/import`, the async job and the admin user import.
+  `transform: 'date_format'` is refused `400 UNSUPPORTED_TRANSFORM`, and a
+  blank required cell `400 MISSING_REQUIRED_FIELD`. Fix: drop `date_format`
+  (a date field still parses the cell), and fill a required column or give it
+  a `defaultValue`.
+- **An `update` / `upsert` import refuses its own rows that share a match
+  key**, before any write, with `DUPLICATE_MATCH_KEY` (`617f27e`, #26250).
+  Fix: keep one row per key and import again.
+- **`GET` and `DELETE` on `/api/v1/mcp` answer `405` with `Allow: POST`**
+  (`bb85f5f`, #25774). An MCP client stops re-opening the stream by itself.
+  Fix: a probe or health check that read `GET /api/v1/mcp` as `200` sends a
+  `POST` `initialize` instead.
+- **A NOT NULL refusal on a declared field answers `400 VALIDATION_FAILED` at
+  every door**, named by the field's label (`48e84a9`, #26026); the dispatcher
+  `/data` doors answered `500`. Fix: a TypeScript caller moves from
+  `notNullRefusalSite(answer)` to `notNullViolationSite(error)` in
+  `@objectstack/types`, and drops `relabelNotNullRefusal`; a client reads the
+  validator's envelope.
+- **A NOT NULL refusal on a column no field declares answers the same `400`
+  body at the dispatcher `/data` and actions doors** (`1af2cea`, #26171),
+  where they answered `500 INTERNAL_ERROR` and `400 VALIDATION_ERROR`. Fix: read
+  `error.code` and `error.details`; the driver's text no longer reaches the
+  wire. `@objectstack/types` adds `driverNotNullRefusalAnswer`.
+- **The analytics admission bridge answers `503 SERVICE_UNAVAILABLE` when the
+  `security` service is missing or cannot be used** (`2e6d446`, #25673), not
+  `403`. Fix: treat `503` as a server-side fault, and register a `security`
+  service (for example `plugin-security`) where analytics should answer.
+- **An analytics read gate that could not decide answers `503
+  SERVICE_UNAVAILABLE`** (`f1d6be0`, #25595): a provider that threw, field
+  permissions or the API exposure declaration that could not be resolved.
+  Real denials keep `403`. Fix: retry once the resolver is healthy, and do not
+  show it as a missing grant.
+- **A filtered measure asked as `CUBE.MEASURE` applies its filter**
+  (`3117289`, #26007), as the bare name did, and the read gate judges the
+  filter's fields. Fix: nothing for a caller that wanted the measure as
+  declared; one that relied on the unfiltered total asks an unfiltered
+  measure.
+- **A `driver-sql` `upsert` with nothing left to merge is a plain `INSERT`**
+  (`88f22e0`, #26015), so a collision raises the unique-violation error instead
+  of merging every column. Fix: catch the unique violation, or use `update()`
+  to change a stored row.
+
+#### Packages and installs
+
+- **An install checks the package's declared `dependencies` first**
+  (`3446d43`, #25986), at `POST /api/v1/packages`, the in-process
+  `installPackage` and `POST /api/v1/marketplace/install-local`; an unmet
+  entry refuses the whole install `422 DEPENDENCY_MISSING`, naming each one.
+  Fix: install the dependencies, at versions inside the declared ranges,
+  first.
+- **A package that declares an installed app in `manifest.dependencies` may
+  share its namespace** (`be78977`, #26054), and a boot hydrates installed
+  packages in dependency order. A multi-package artifact's wrapper id no longer
+  counts as delivered, and `DeclaredDependencyCheck.deliveredIds` is removed.
+  Fix: a module that uses its app's namespace declares the app in
+  `manifest.dependencies`.
+
+#### Deployment
+
+- **`kind: 'react'` pages are off unless the deployment turns them on**
+  (`5e7cf63`, #25789). With the tier off, a react page shows a notice and the
+  Console's policy drops `'unsafe-eval'`. Fix: set
+  `OS_PAGE_REACT_ENABLED=true` on a deployment that serves react pages;
+  `OS_PAGE_REACT=on` is still read, with a deprecation warning. Stored pages
+  need no change.
+
+#### Code against the published `@objectstack/*` packages
+
+| Removed or changed | Use instead |
+| :--- | :--- |
+| `renderTemplate` from `@objectstack/plugin-email` (`92a0073`, #26399) | an `email_template` item, rendered by `services.email` through `renderTemplate({ template, data, locale })` or `sendTemplate` |
+| `ResolveLocalizationInput.tenantId` of `resolveLocalizationContext` in `@objectstack/core` (`65145d3`, #26078) | `organizationId`, the organization's id; never an environment id. A spread object that still carries `tenantId` is ignored, so search for it |
+| `@objectstack/sdui-parser`'s `validateTree` judges the nodes in a manifest entry's `slots` (`8faba89`, #26211) | nothing for the save gate's manifest, which carries no `slots`. `SchemaNode` and `ValidationResult` are deprecated aliases of `ParsedSchemaNode` and `ManifestValidationResult` |
+| a template's formatter locale read from a root named `locale` (`14b5597`, #26282) | the evaluate context's `locale`: `templateEngine.evaluate(expr, { extra: roots, locale })`, or `fillTemplateHoles(source, roots, locale)` |
+
+#### Console and the `@object-ui/*` packages
+
+- **objectui's own breaking changes from its 18.1.0 to the import** arrive as
+  one entry (`9a0af4e`, #26068). Five retirements, each with its migration in
+  `ui/.changeset/`: the raw `html` node (`13449-retire-html-renderer.md`), the
+  `module` widget source (`13450-retire-widget-module-source.md`), nine
+  zero-consumer modules with `@object-ui/runner` made private (the four
+  `13453-*` files on modules, hooks, `LiveCursors` and test helpers), the
+  `@object-ui/providers` trio (`13453-providers-retire-trio.md`), and nine
+  duration keys that now end in `Ms` or `Seconds`
+  (`25762-duration-keys-carry-unit.md`). Also: the `react` / `react-dom` peer is
+  `^19.0.0`, so a React 18 host is no longer supported, and the `react-pages`
+  capability defaults off in `@object-ui/core`. Fix: follow each file's table,
+  and move a host to React 19.
+- **The renderer runs `@objectstack/sdui-parser`, and `@object-ui/sdui-parser`
+  is deleted** (`80f267d`, #26343). An html-tier page whose attribute does not
+  fit its declared type now shows the compile-error block instead of dropping
+  the value. Fix: depend on `@objectstack/sdui-parser`, and write the value in
+  its declared type (`columns={['name','amount']}`).
+- **`useAdapter()` and `AdapterCtx` from `@object-ui/react` are typed by
+  `DataSource`** (`ef025fe`, #26292), and the package no longer depends on
+  `@object-ui/data-objectstack`. Fix: declare your adapter once with a
+  `declare module '@object-ui/react'` augmentation of
+  `AdapterContextRegister` (`adapter: ObjectStackAdapter`), or narrow where you
+  read an ObjectStack-only member. A host that imports `@object-ui/app-shell`
+  keeps today's type.
+- **54 root exports of `@object-ui/app-shell` are retired** (`aec5f7b`,
+  #26219). Fix: derive a retired type from the name the entry still exports
+  (`UseUrlOverlayOptions` becomes `Parameters<typeof useUrlOverlay>[1]`), as
+  the CHANGELOG's FROM → TO list gives for each; the rest have no
+  replacement.
+- **The node-level `visibleOn`, `hiddenOn` and `disabledOn` are retired**
+  (`e843b5b`, #26274), with no alias window. Fix: rename the key and keep the
+  value: `visibleWhen`, `hidden`, `disabled`. A form field's
+  `fields[].visibleOn` is a different slot and is unchanged.
+- **The Console stops offering New, Edit and Delete when `/me/permissions`
+  omits the bit** (`b727956`, #26273), because the server refuses them. Fix:
+  nothing, unless a user should have those actions: grant the bit in a
+  permission set.
+- **`FilterBuilderRow.value` is the spec rule's value: optional, and may be
+  `null`** (`0489214`, #26338). Fix: code that reads `row.value` handles
+  `undefined` and `null` first.
+- **A `FilterBuilderRow` list value holds strings and numbers only**
+  (`57ab06b`, #26380). Fix: write a boolean entry as its string spelling, or
+  keep the boolean as a scalar under `equals`.
+
+### 自动迁移 — converted for you by `os migrate meta` [#migrated-for-you]
+
+Six narrowings carry an ADR-0087 registration on the protocol-18 step, and
+`os migrate meta` does each one: it converts what has one meaning and lists
+the rest for you. A live author is refused at parse, with the prescription.
+`os migrate meta --from 17` lists the edits for your sources (`--write`
+applies the ones it can trace to one literal), and `os migrate meta --stored`
+lists and rewrites a deployment's stored rows.
+
+| Change | ADR-0087 id | What `os migrate meta` does, and what is left to you |
+| :--- | :--- | :--- |
+| A permission set can no longer declare `allowDelete: false` beside `modifyAllRecords: true`; an omitted `allowDelete` beside it now parses to `true` (`f6ba134`, #25707) | `permission-modify-all-allow-delete-false-to-true`, `permission-modify-all-allow-delete-false-refused` | converts a stored row or built artifact to `allowDelete: true`, which changes no access decision. A source that declares the pair is refused: delete `allowDelete`, or, for "edit every record, delete none", drop `modifyAllRecords` and add a `criteria` sharing rule with `accessLevel: 'edit'` (`os explain security-modify-all-delete-withheld`) |
+| An SLA escalation's `escalateTo` naming a `team:`, `department:` or `org_membership_level:` address, or the prefix ADR-0090 D3 retired, is refused (`9993165`, #26154) | `approval-escalation-dead-target-refused` | lists each one; no conversion, because only you know who was meant. Write a position name, `position:NAME`, a user id or an email; the retired prefix becomes `position:` |
+| The package upgrade model leaves `@objectstack/spec`: `UpgradePlanSchema` and its family, `IPackageService.planUpgrade` / `upgrade` / `rollback` / `getSnapshot`, and `PackageUpgradeResponse.data.plan` (`557973d`, #25757) | `kernel-package-upgrade-family-retired` | lists it; nothing ever read or produced these shapes. Delete the imports. A new version over an installed package is `POST /api/v1/packages` with `overwrite: true`; the package rollback served is `POST /api/v1/packages/:id/rollback` with a `commitId` |
+| `PackageDependency.optional` and `AppManifest.dependencies` are tombstones (`436d284`, #26401) | `dependency-unread-spellings-retired` | lists it; nothing read either key. Delete the key, and declare each dependency with its range in `manifest.dependencies` |
+| A locale must be a BCP-47 tag: `zh_CN`, a padded value or a language name is refused (`39a78b1`, #25983) | `translation-locale-tag-canonicalized`, `translation-locale-non-tag-refused` | rewrites `zh_CN` to `zh-CN` and trims whitespace, in stored rows and with `--from 17 --write` in sources; any other value is reported as a TODO. Replace a language name with its tag |
+| `PositionGrantVia` loses `'name'`, and Setup → Positions drops its "(by name)" badge (`9494dd8`, #26398) | `position-grant-via-name-retired` | lists it; no server serves the value. Delete a branch that compares with `'name'`, and name the set in the position's `permissionSets` |
+
+### 新增能力 — new capabilities [#new-capabilities]
+
+#### Access and approvals
+
+- **A field permission entry can carry a row condition, `when`, on its edit
+  vote** (`c8cb510`, #25980), in the CEL of `rowLevelSecurity[].using`
+  (`status == 'approved'`), and the Studio permission-set form offers it as
+  **When (edit)** (`7111e14`, #26010).
+- **`sharing.controlledByParent.ownerMayEdit: true`** lets the owner of a
+  `controlled_by_parent` detail row update it with read access to the master
+  (`5e113b3`, #26005).
+- **A flow declares who may start it** with `requiredPermissions`, checked at
+  the trigger route, a `type: 'flow'` action and a flow endpoint (`f1ddace`,
+  #25643).
+- **An approval step's `excludeSubmitter`** keeps the submitter off the slate
+  its approvers resolve to (`49653f9`, #25632); the engine honours it in this
+  release (see other fixes).
+- **A record-anchored approval lock read** answers `{ locked }` to every
+  caller who can read the record, at
+  `GET /api/v1/approvals/records/:object/:recordId/lock` (`6a2866a`, #26361).
+- **An administrator who is not the approver sees one status line and one
+  override menu** on a record under approval (`054652b`, #26053).
+- **A delegated admin's out-of-scope save shows the server's reason** in the
+  Console (`0e7be7e`, #26363).
+- **A member takes back their own comment reaction** through
+  `DELETE /api/v1/comments/reactions/:id`, with no object delete grant
+  (`1a298dd`, #26345).
+- **A free-text `search` resolves only over the fields the caller may
+  query** (`5874d25`, #25705), so a user or owner picker no longer fails
+  `403` for a non-admin member.
+
+#### Organizations, sign-in and demo data
+
+- **A single-organization deployment can rename its organization**
+  (`a0fac02`, #25661), and `PUBLIC_AUTH_FEATURES` books Rename Organization
+  under the organization capability (`a0fac02`, #25661).
+- **The platform OIDC provider emits the standard `locale` claim** at
+  userinfo (`431f065`, #26012).
+- **An invitee who opens the link signed out is greeted for the invitation**
+  and offered "Create an account and join" first (`326a559`, #26158).
+- **`demoStaff`** declares the demo accounts a development boot creates and
+  the seed deals its rows to (`f00e8d5`, #25830).
+
+#### Flows and actions
+
+- **A `notify` recipient can be the address in an email field of the trigger
+  record**, `{ emailField: 'applicant_email' }` (`6021b5e`, #25645).
+- **An `api` flow's start node may name its inbound hook secret,
+  `config.secretRef`**, instead of carrying it (`fa44dd2`, #25703).
+- **A `type: 'flow'` action may declare `onSuccess`**, and the Console
+  navigates after a run that completes (`dc71845`, #26011).
+- **A read-only `record_link` screen field** shows a record the run created,
+  as a link to its page (`4548ba3`, #26355).
+- **A hook body reads `ctx.provenance`**, so a guard that tells a flow's write
+  from a user's ships as metadata (`1ee1d1b`, #25952).
+- **An action's `confirmText`, `successMessage` and `errorMessage` are
+  `template` slots** over the roots the Console's runner binds (`384bb7b`,
+  #25637). The refusals that follow from it are under
+  [需手动处理](#action-required).
+
+#### Data, imports, seeds and analytics
+
+- **An import column can be written only when its row is created
+  (`applyOn`), and `matchFields` takes ordered key sets** (`b77bb37`,
+  #25664).
+- **A seed dataset column can be written only on create**,
+  `columns.FIELD.applyOn: 'create'` (`493a6c4`, #25813).
+- **A package's action can launch a flow, and its widget bind a dataset, that
+  another package of the same artifact ships**, through
+  `defineStack(config, { artifactFlows })` (`cc10e74`, #25617).
+- **A dataset measure can aggregate the time between two datetime fields**,
+  `duration: { from, to, unit }` (`d1663ba`, #25903).
+- **A filter can compare a datetime column against now shifted by days held
+  on the record**, `{ $now: true, addDays }` (`be531f6`, #26261).
+- **A list-view grouping level can order its groups by another field**,
+  `grouping.fields[].orderBy` (`b00fc55`, #25828).
+- **Object-level `composite` / `repeater` are documented as untyped JSON**,
+  and a typed list points to a child object (`4034f47`, #25755).
+
+#### Translations
+
+- **A form section entry's `label`, `placeholder` and `helpText`** are
+  translatable at `objects.<object>._sections.<section>.fields.<field>`
+  (`42d9fe8`, #25620).
+- **Positions and permission sets**, as `positions.<name>` and
+  `permissions.<name>` (`47af3dd`, #25701).
+- **Reports**, as `reports.<name>` (`dd5e355`, #25826).
+- **The System Overview's tile captions and column headers** in every shipped
+  locale (`db5fca7`, #26008).
+- **92 message keys nothing read** are deleted from the ten Console locale
+  packs (`326a559`, #26158).
+
+#### Boot and serving
+
+- **The pinyin search companion pass no longer holds readiness**, and an
+  unchanged restart reads no rows (`f9a1e93`, #25690).
+- **`GET /meta/app` judges its navigation on the protocol's execution face**,
+  `getMetaItemsForExecution`, instead of parsing every object on each read
+  (`1ac2bb5`, #25941).
+
+#### Console
+
+- **A kanban board dims the lanes a dragged card's `state_machine` closes**,
+  and refuses a drop into one (`c14e910`, #26253).
+- **An edit form's `state_machine` select offers only the moves the server
+  accepts** (`4f48d2b`, #26033).
+- **The record activity timeline folds consecutive updates by one actor** into
+  one row with a count (`0b76a1f`, #26055).
+- **A related list's "View all" opens the rows the list showed**, its own
+  `filter` included, or is not offered (`4f7e041`, #26060).
+- **The `@object-ui/types/zod` mirrors keep an unknown key** instead of
+  dropping it (`1bbb7bf`, #26019).
+- **The Console document's `connect-src` names the store the server presigns
+  browser uploads to**, so S3, R2 and MinIO uploads work under the policy
+  (`69aa630`, #26281).
+
+### 语义变化 — semantic changes [#semantic-changes]
+
+- **`hideEmpty: false` on an all-empty `record:details` section** renders, in
+  read mode, the heading and one fold row instead of a column of empty rows
+  (`2af790f`, #25612). Edit mode is unchanged, and no authored metadata needs
+  a change.
+- **A `notify` node's `recipients`**: an address written out is an author
+  constant, sent as written; a computed address on an email-channel node must
+  be a user's; `{ emailField }` is delivered (`52f3f51`, #25739). The
+  `describe()` text says so; the refusal itself is under
+  [需手动处理](#action-required).
+- **`actions: []` on a `record:related_list` also hides the built-in New**
+  (`f02e644`, #26277). A page that wrote `actions: []` and still wants New
+  deletes the key.
+
+Three entries the Release body files elsewhere declare `Metadata-protocol:
+semantic` too. The flow screen field typed `file` (#26134) is breaking, so it
+is listed under 需手动处理. The action copy `template` slots (#25637) and
+object-level `composite` / `repeater` (#25755) declare a `Clause-②: yes`
+widening, so they are new capabilities.
+
+### 其他修复 — other fixes [#other-fixes]
+
+The 125 entries that declare no breaking change and no protocol kind. The
+ones that touch an upgrade come first.
+
+#### Packaging and module formats
+
+- `@objectstack/cli`, `@objectstack/hono` and `@objectstack/plugin-dev` depend
+  on the other `@objectstack/*` packages at exactly their own version; remove
+  the overrides you added to hold them (`f4860da`, #25662).
+- The bundled blank template of `create-objectstack` pins every
+  `@objectstack/*` dependency at the exact release version (`dc6c7ee`,
+  #25665).
+- The declared `zod` floor moves to `^4.6.6`, past GHSA-mrhx-c7xc-m3w5, and
+  `postal-mime` and `nodemailer` move to their patched releases (`7cd2ebf`,
+  #25657).
+- Every entry point of `@objectstack/spec` shares one module graph, so a schema
+  two entries reach ships once (`3a2d38c`, #25748).
+- The 14 published packages that had no LICENSE ship one (`2409c9c`, #26260).
+- Publishing metadata: per-format types in `exports`, declared `sideEffects`,
+  and a README for the 18 published packages without one (`8061f33`, #26198).
+- `@objectstack/core` serves both module formats from one declaration, so each
+  export condition gets its own `types` (`876aa27`, #26279).
+- The ESM-only subpaths of `metadata-core`, `service-cluster` and
+  `create-objectstack` declare their types under `import` (`40f5c6e`, #26321).
+- The `@objectstack/cli` README says its three code subpaths are ESM
+  (`e2129cb`, #26352).
+- TypeScript's legacy `node10` module resolution is documented as unsupported
+  for packages with subpath exports (`3b480e0`, #26378).
+
+#### CLI and the development boot
+
+- `os dev` compiles the config before it boots, so the served connector
+  `baseUrl` is the one dispatch calls (`8b7253c`, #26240).
+- A direct `os serve --dev` compiles the config the same way (`6294157`,
+  #26289).
+- `os dev -p N` and `os serve --port N` export the port as `OS_PORT` / `PORT`
+  to the config (`9888008`, #26268), and so does `os dev` when it shifts off a
+  busy port (`583b024`, #26330).
+- `os create plugin NAME --in-repo` scaffolds extend `tsconfig.base.json`
+  (`a8e7393`, #26331), and pass their own `typecheck` and `build`
+  (`13e5c0e`, #26395).
+- `objectstack build` lowers a hook handler that reads `ctx.provenance`
+  instead of bundling it (`1ee1d1b`, #25952).
+- `os i18n check` reads a field's `inlineHelpText` as the default-locale text
+  of its `help` key (`1252db9`, #25720).
+- The Console drift warning and refusal name `pnpm console:build`, not the
+  retired `pnpm objectui:build` (`8fcdf52`, #26063).
+- The verify README says how a local stack arms scheduled flows (`9657318`,
+  #25659).
+
+#### The Console package and its policy
+
+- `@objectstack/console` is built in this workspace from `ui/apps/console`,
+  `dist/.objectui-sha` and `dist/.objectstack-injection.json` leave the
+  tarball, and the `@object-ui/*` packages join the fixed group (`2a61f08`,
+  #25745). See [Console (Studio)](#console).
+- The last objectui pin refresh, to `b41ed7f68956`: among others the first
+  page load no longer downloads the chat UI, and `html` and `richtext` values
+  are sanitized with `rehype-sanitize` (`f871670`, #25735).
+- The Console document is served with a nonce-based content-security-policy;
+  list another map or tile host in `OS_CONSOLE_CSP_CONNECT_SRC` (`3c30afd`,
+  #25569).
+- `OS_CONSOLE_MAP_STYLE_URL` names a deployment's default map style, served as
+  `mapStyleUrl` on `GET /api/v1/runtime/config` and allowed by the policy
+  (`21075ce`, #26162).
+
+#### Approvals
+
+- An approval step's `excludeSubmitter: true` keeps the submitter from
+  approving their own request (`888d686`, #25722).
+- An SLA escalation that reassigns to a target resolving to no one keeps the
+  request on its approvers and notifies them (`2351c8d`, #25600).
+- The approver a pending step waits on can read the record the request is
+  about (`b7b04e5`, #26397).
+- An approval notification names the record by its title (`c51aed4`,
+  #26389).
+- The note an `admin_rescue` request writes on its timeline reads in the
+  reader's language (`ca80f05`, #25627).
+
+#### Flows and messaging
+
+- A refusal a flow's write node meets is worded in the language of the person
+  who started the run (`de2b7e0`, #25929).
+- A `notify` node naming `email` and another channel mails an address no user
+  holds, and writes no inbox row addressed to it (`d12b0c1`, #26039).
+- The automation run doors answer another flow's run as an unknown one
+  (`9ca36b1`, #25944).
+- A sandboxed hook's or action's business refusal is logged once, at info,
+  without a stack (`1d3ad39`, #26249).
+
+#### Data, imports and analytics
+
+- A cell an import declares null through `nullValues` stays blank whatever
+  case `transform` its entry declares (`f123f75`, #25646).
+- An aggregate query that would answer a wrong table is refused `400`, and an
+  empty aggregate list is answered (`7a04ba2`, #25935).
+- A dataset filter key that names an object field filters that field, even
+  when a dimension shares its name (`1cce9d8`, #26009).
+- An all-NULL `sum` group sorts and pages as the `0` it answers, on SQLite and
+  PostgreSQL alike (`d5f4c2a`, #25953).
+- `GET /i18n/translations/:locale` carries an `ETag` and answers a matching
+  `If-None-Match` with `304` (`69fa23d`, #25956).
+- Served metadata lists parse each unchanged document once (`1ac2bb5`,
+  #25941).
+
+#### Organizations, security and sharing
+
+- The seed-ownership claims re-own row by row when a stored expression reads
+  `owner_id` (`43edf90`, #25724).
+- A new organization takes its default currency from its creator's language
+  or region (`e8de8a7`, #25621), and the `single` posture's Default
+  Organization from its first owner's (`5cf1b9d`, #25706).
+- A signed-out invitation preview read lets the landing page name the
+  inviting organization and the inviter (`83a26c3`, #26151).
+- The sharing-rule pass note and the `ISharingService.grant` contract say what
+  a share on a public object does (`8654435`, #25603).
+- `@objectstack/spec/ui` exports `anonymousFormObjectName`, which the
+  public-form file rule and the doors share (`6e47e16`, #25979).
+
+#### Platform objects and labels
+
+- The team-side Add Member action is booked under the `organization` feature
+  gate (`fc4ac58`, #25670), and, opened from a team, binds that team
+  (`fc4ac58`, #25670).
+- The zh-CN label for an organization's logo reads 「徽标」 (`6444288`,
+  #26069).
+- A business unit membership is titled by the person's and the unit's names
+  (`1f40201`, #26300).
+- Every built-in permission set says who holds it, in English, Chinese,
+  Japanese and Spanish (`f6c6193`, #26090), and its name is shown in Chinese,
+  Japanese and Spanish (`07bdecd`, #26145).
+- The hosted product reads "ObjectOS Cloud" everywhere a user reads it, and the
+  Community Console carries "Powered by ObjectStack" (`f00cbe3`, #26215); the
+  AI 501 remedy and the AI and knowledge settings hints say so too (`af13616`,
+  #26342).
+
+#### Audit and activity
+
+- An activity entry for an update that moves no `trackHistory` field names the
+  fields that changed (`ef1fc78`, #25958).
+- An activity summary reads in the reader's language (`c496886`, #26258).
+
+#### Spec and lint internals
+
+- The shipped liveness ledger cites the automation seam modules that hold the
+  moved engine bodies (`e2a4b6a`, #25796).
+- Three comments in `@objectstack/spec` describe the shared-chunk bundle
+  layout (`f0b33ee`, #25975).
+- The liveness author warnings read ledger rows at every depth of `children`
+  (`13136f7`, #26379).
+
+#### Skills
+
+- `objectstack-automation`: a declared webhook or auto-launched flow is
+  refused without its `requires` pair (`f3d0eab`, #25689), and the
+  inbound-hook table names `config.secretRef` (`d0eac35`, #25708).
+- `objectstack-platform`: the bootstrap example pins every `@objectstack/*`
+  dependency to one exact version (`061cc94`, #25667), and the stack-config
+  example declares `engines: { protocol: '^18' }` (`992a7e1`, #25688).
+- Object-level `composite` / `repeater` are untyped JSON; a typed list is a
+  child object (`8f35ffc`, #25741).
+- Every published package declares exactly one anchor-safe
+  `isDefault: true` permission set (`d65cbb6`, #25930).
+- The `objectui` skill joins the published catalog, so `@objectstack/skills`
+  ships the `@object-ui/*` authoring skill (`a8f2afa`, #26097).
+
+#### Console (Studio): records, lists and forms
+
+- A lookup's option subtitle no longer repeats the record name (`dfaad4d`,
+  #26062).
+- A refused submit moves focus to the first invalid field, and no longer
+  toasts the field list over the dialog's title (`326a559`, #26158).
+- The record page's inline-edit pencil shows on keyboard focus (`411fc00`,
+  #26325).
+- A grid's `date` column reads in one absolute face when its field declares
+  no `format` (`9c3097e`, #26341).
+- The record page's read mode wraps a text value instead of cutting it
+  (`d98d3e2`, #25998).
+- An empty list tells "no records you can see" and "nothing of yours yet"
+  apart from "no records" (`cc378e9`, #25987).
+- A grouped grid orders a level's groups by its `grouping.fields[].orderBy`
+  (`62ba5ef`, #25977).
+- A `{ group }` form section no longer warns about `collapsible` the author
+  never wrote (`3993793`, #26042).
+- A `user` field's person object is always `sys_user` (`9598405`, #26050).
+- The record create and update toasts name the saved record (`b3ed6c8`,
+  #26202).
+- On a narrow window, a toast beside the record drawer no longer covers its
+  Edit and ⋯ buttons (`26e7c75`, #26426).
+- A record locked by an approval is shown locked to a reader outside it
+  (`9a0108c`, #26402).
+- Empty related lists fold into one line after the lists with records, and
+  `record:path` terminal stages share the rail's width (`775a000`, #26414).
+- A bulk action's `confirmText` fills its `{{ count }}` hole with the number
+  of records the run covers (`6676991`, #26030), each param hole with the
+  param's display value (`ef5d0a4`, #26217), and formats numbers and dates in
+  the viewer's locale (`6390fe5`, #26358).
+- A `compareTo` KPI tile shows its number under All time (`4391c50`,
+  #26027).
+- A map whose style or tiles fail to load shows the record list with a
+  translated notice (`326a559`, #26158), and a map view with no style draws
+  the deployment's default before the public demo style (`9f16f16`, #26326).
+- A list view or page whose `label` is an inline locale map is named in the
+  viewer's language (`416e96f`, #25997).
+
+#### Console (Studio): Setup and administration
+
+- Setup → Positions shows each position's description (`04148ac`, #26100),
+  shows read-only what each named permission set grants (`77a52cf`, #26360),
+  and lists a position created from New right after Save (`d613fdc`,
+  #26269).
+- The permission matrix sets and shows each object's read and write record
+  scope (`5cb1c1a`, #26284).
+- The Delegated Admin Scope block lists the companion grants a delegate needs,
+  and grants the missing ones in one click (`e14d9ce`, #26340), and the
+  permission editor tells it whether it edits under a package (`71c620a`,
+  #26372).
+- The audit log's From and To filters use the platform date picker
+  (`9753d16`, #26061).
+- The Console draws `DEPENDENCY_MISSING` in the author's terms, one line per
+  unmet dependency (`934810c`, #26123).
+- Browse Marketplace says the catalog could not be reached when the runtime
+  cannot reach it (`b239a01`, #26213).
+- In the field type picker, Enter after a search picks the type it names
+  (`586a7ed`, #26259).
+- A member takes back their own comment reaction through the unreact door
+  (`48a9d9d`, #26384).
+
+#### Console (Studio): Studio, flows and AI
+
+- A whole-app build approved from the proposed plan draws its result card,
+  live and after a reload (`712770b`, #26037).
+- Pending changes folds what the platform wrote into one collapsed line
+  (`7bbc0b9`, #25984).
+- The Studio no longer warns for every navigation `visible` predicate of the
+  apps it lists (`b981324`, #26105).
+- The Console no longer sends two requests it knows will be refused
+  (`6d15aca`, #26056).
+- The notify node's recipients editor writes and keeps a
+  `{ emailField }` recipient (`3518664`, #25996).
+- A failed flow run reads the refusal its write node met the way a record save
+  reads it (`f20a491`, #25985).
+- The flow inspector's list field shows a stored string as one entry
+  (`a52cfaf`, #26038).
+- One app opens under one address: a name-alias route moves onto the package
+  id (`61ba04f`, #26262).
+- The code editor loads Monaco from the Console's own build, never from
+  cdn.jsdelivr.net (`56a2346`, #25993).
+
+#### Console (Studio): sign-in, navigation and language
+
+- The sign-up form shows a password mismatch under the confirm field, and the
+  register page links privacy and terms (`ff91895`, #26291).
+- The Chinese account menu's sign-out item reads 「退出登录」 (`c7aa9cd`,
+  #26045).
+- A collapsed sidebar navigation group shows how many entries it holds
+  (`679fc7c`, #26103).
+- The last English literals on the data table, the chart view, react pages,
+  the References sheet and Flow Runs read the user's language (`c86c823`,
+  #25978).
+- The "nothing in this app is available to you" screen (`fbb7599`, #26166)
+  and the draft preview's failure pane (`601c773`, #26135) are drawn by the
+  shared empty and error states.
+
+#### Console (Studio): refactors, tests and build
+
+- The Console `ObjectView` is split into sibling modules and hooks: leaf
+  pieces (`e638193`, #26310), header toolbar and list URL state (`e677770`,
+  #26396), module-level helpers (`d00215f`, #26152), identity import and
+  record navigation (`3db7bbf`, #26353), realtime refresh and record count
+  (`b9cd980`, #26336), view options (`96635f5`, #26233), tab strip and header
+  chrome (`08ed7e2`, #26412), and toolbar affordances (`3acbeff`, #26374).
+- `ObjectGrid`'s module-level helpers (`7158025`, #26323) and its host-facing
+  props types (`222755e`, #26354) move into sibling modules.
+- Five Interfaces rail label tests share one Studio harness (`697a307`,
+  #26255).
+- The Console's build-identity define no longer leaks into the other ui test
+  projects (`f143cd8`, #26197).
+- The build's chunk-membership report attributes only objectui's own packages
+  (`823d0f6`, #26225).
+- Every ui package whose `test` script calls `vitest` declares it as a
+  devDependency (`6ea429d`, #26290).
+
+### Console (Studio) — objectui joins the repository [#console]
+
+18.1.0 bundled objectui at a pinned commit. 18.2.0 is the first release built
+the other way: objectui became the `ui/` workspace of this repository, a
+subtree import at its frozen tip `9e1fe03286` (`fd40831`, #25825, for #25752),
+and `@objectstack/console` is built from `ui/apps/console` at the commit being
+released (`2a61f08`, #25745).
+
+- **No pin to read.** `dist/.objectui-sha`, which named the objectui commit a
+  Console was built from, and `dist/.objectstack-injection.json` leave the
+  `@objectstack/console` tarball. The Console's version is the framework's
+  version. Installing `@objectstack/console` is unchanged.
+- **One version for both scopes.** The 37 public `@object-ui/*` packages join
+  the `@objectstack/*` fixed group and move from `18.1.0`, the last release the
+  objectui repository published, to `18.2.0`. Pin them with the
+  `@objectstack/*` packages, at the same exact version.
+- **One SDUI parser.** `@object-ui/sdui-parser` is deleted and not released;
+  the renderer and the save gate both run `@objectstack/sdui-parser`
+  (`80f267d`, #26343).
+- **React 19.** Every `@object-ui/*` package's `react` / `react-dom` peer is
+  `^19.0.0` (`9a0af4e`, #26068).
+- **In a framework checkout,** run `pnpm console:build` where you ran
+  `pnpm objectui:build`: it builds `ui/apps/console` and copies its `dist/` into
+  `packages/console`. The CLI's drift warning names it (`8fcdf52`, #26063).
+- **The `objectui` authoring skill** ships in `@objectstack/skills`
+  (`a8f2afa`, #26097).
+
+Every Console change is listed once, in its section above. 87 of the 227
+changesets touch an `@object-ui/*` package: 10 under
+[需手动处理](#action-required) (most under "Console and the `@object-ui/*`
+packages"), 1 under [自动迁移](#migrated-for-you) (the "(by name)" badge), 14
+under [新增能力](#new-capabilities), 1 under
+[语义变化](#semantic-changes), and 61 under [其他修复](#other-fixes), where the
+"Console (Studio)" groups hold them. What a Console user notices first:
+
+- **Approvals.** An administrator who is not the approver sees one status line
+  and one override menu (`054652b`), and a record locked by an approval reads
+  as locked to everyone who can read it (`6a2866a`, `9a0108c`).
+- **Records and boards.** A kanban board refuses a drop its `state_machine`
+  closes (`c14e910`), an edit form offers only the moves the server accepts
+  (`4f48d2b`), the activity timeline folds repeated updates (`0b76a1f`), and
+  New, Edit and Delete are offered only where the server allows them
+  (`b727956`).
+- **Invitations.** A signed-out invitee is greeted for the invitation and
+  offered sign-up first (`326a559`).
+- **The document policy.** The Console is served with a content-security-policy
+  (`3c30afd`), loads Monaco from its own build (`56a2346`), and allows the
+  presigned upload store (`69aa630`) and the deployment's map style
+  (`21075ce`, `9f16f16`).
+
+---
+
+## Upgrade checklist
+
+⚠️ For an 18.1.0 app. From 18.0.0, walk the
+[18.1.0 checklist](/docs/releases/v18/18-1#upgrade-checklist) first, and from
+17.x the [18.0.0 checklist](/docs/releases/v18/18-0#upgrade-checklist) before
+it.
+
+### 18.2.0
+
+<Callout type="warn">
+**How far this list has been walked.** Not at all. It is compiled from the
+changesets before the cut, and no app has been moved from 18.1.0 to 18.2.0 for
+this page. Each step names the entry it comes from; read that entry above for
+the exact refusal.
+</Callout>
+
+#### 1. Move the pins
+
+- **Move every `@objectstack/*` dependency, and every `@object-ui/*` one, to
+  `18.2.0` together**, with `@objectstack/skills` and `create-objectstack`
+  where you use them. Pin the exact version: a caret range takes every later
+  18.x by itself, and a patch can break a non-protocol surface.
+- **Drop the override the 18.1.0 checklist added** for the eight packages
+  `@objectstack/cli` ranged. From 18.2.0 the CLI, `@objectstack/hono` and
+  `@objectstack/plugin-dev` publish their `@objectstack/*` dependencies exact
+  (`f4860da`, #25662), so an exact pin holds the tree. If you keep the
+  override, move it with the pins.
+- **Replace `@object-ui/sdui-parser` with `@objectstack/sdui-parser`**, and
+  move a React host to React 19 (`80f267d`, `9a0af4e`).
+- **On an environment that runs HotCRM, move HotCRM to `v6.0.0` or later
+  first** (`733b3c8`).
+
+#### 2. Before the first boot
+
+- **A deployment that serves `kind: 'react'` pages sets
+  `OS_PAGE_REACT_ENABLED=true`** (`5e7cf63`). Without it, each react page shows
+  a notice instead of running.
+- **List every host a map view or its tiles load from in
+  `OS_CONSOLE_CSP_CONNECT_SRC`**, space-separated, or the Console's policy
+  refuses it (`3c30afd`). Name the deployment's own map style in
+  `OS_CONSOLE_MAP_STYLE_URL` (`21075ce`). A malformed value of either stops the
+  boot, naming it.
+- **In a framework checkout, build the Console with `pnpm console:build`**
+  (`2a61f08`).
+
+#### 3. Run the build, and fix what it refuses
+
+```bash
+os validate
+os build
+os migrate meta --from 17     # the protocol-18 step, with this release's six conversions
+```
+
+Fix each refusal with its line in [需手动处理](#action-required) or
+[自动迁移](#migrated-for-you). The ones an app is most likely to meet:
+
+- an action `confirmText` or `successMessage` that writes `${record.name}` or
+  `${result.email}`: write `{{ record.name }}` and `{{ result.email }}`
+  (`0c81694`, `d727348`);
+- a form open to anonymous intake that declares a file field (`6ad226a`);
+- `excludeSubmitter: true` beside `onEmptyApprovers: 'auto_approve'`
+  (`4bcc4df`);
+- an `escalateTo` written as `team:`, `department:`, `org_membership_level:` or
+  the prefix ADR-0090 D3 retired (`9993165`);
+- `allowDelete: false` beside `modifyAllRecords: true` (`f6ba134`);
+- a locale that is not a BCP-47 tag, such as `zh_CN` (`39a78b1`);
+- `visibleOn`, `hiddenOn` or `disabledOn` on a page node (`e843b5b`);
+- `optional` on a marketplace dependency entry, or `dependencies` on an app
+  install manifest (`436d284`).
+
+A TypeScript project also meets the retired exports at compile time: the
+package upgrade model of `@objectstack/spec` (`557973d`), `PositionGrantVia`'s
+`'name'` (`9494dd8`), `renderTemplate` of `@objectstack/plugin-email`
+(`92a0073`), `tenantId` on `resolveLocalizationContext` (`65145d3`),
+`notNullRefusalSite` and `relabelNotNullRefusal` (`48e84a9`), the 54
+`@object-ui/app-shell` exports (`aec5f7b`), `useAdapter()`'s type (`ef025fe`),
+and `FilterBuilderRow.value` (`0489214`, `57ab06b`).
+
+#### 4. After the boot
+
+- **Run `os migrate meta --stored`** to list and rewrite the stored rows the
+  conversions touch: permission sets that store `allowDelete: false` beside
+  `modifyAllRecords: true`, and `translation` rows under `zh_CN`-style locales.
+- **Name each permission set a position should grant in its
+  `permissionSets`.** The `position_name_fold_grant` warning, now logged with
+  `granted: false`, names each position whose same-named set is no longer
+  granted (`733b3c8`).
+- **Move identity writes out of elevated automation.** A `runAs: 'system'`
+  hook, an action body, a hook that inherits a system context or calls
+  `ctx.api.sudo()` is refused writes to positions, permission-set grants,
+  invitations and memberships (`073f08b`, `6a6ebff`).
+- **Check each `notify` node that mails a computed address, or names an
+  address no user holds** (`d1e329e`, `b0384f3`): use `{ emailField }`, add
+  the `email` channel, or name a user.
+- **On a walled deployment, check who downloads unclaimed files** from outside
+  their organization (`3b8ea15`), and that a public form or an anonymous
+  endpoint no longer carries files (`e2b40a2`, `b4199c9`).
+- **Publish a hierarchy-scope permission set only where the
+  `hierarchy-security` resolver is mounted** (`b029c90`).
+- **Install a package's declared dependencies before it** (`3446d43`), and
+  declare the app in `manifest.dependencies` of a module that shares its
+  namespace (`be78977`).
+- **Update API clients for the changed answers:** `404 RESOURCE_NOT_FOUND`
+  from eight doors (`0dc4b5d`); `405` on `GET /api/v1/mcp` (`bb85f5f`);
+  `503 SERVICE_UNAVAILABLE` from analytics (`2e6d446`, `f1d6be0`);
+  `400 VALIDATION_FAILED` for a NOT NULL refusal (`48e84a9`, `1af2cea`) and for
+  a non-object body or `params` (`e12d3f3`, `3821ec8`);
+  `403 DELEGATION_SCOPE_VIOLATION` (`495fa07`); `INVALID_REQUEST` for an admin
+  password out of range (`1d2a246`); and the import refusals
+  `UNSUPPORTED_TRANSFORM`, `MISSING_REQUIRED_FIELD` and `DUPLICATE_MATCH_KEY`
+  (`50af6fa`, `617f27e`).
+- **Code that sends `auth.invitation` itself passes `expiresAt`** (`d284ff3`),
+  and a host that calls `runAdminImportUsers` passes `getAuthContext`
+  (`e3e936e`).
