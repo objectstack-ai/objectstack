@@ -13,7 +13,7 @@ Guide for modeling relationships between objects using `lookup`, `master_detail`
 | Type | Lifecycle | Required | Sharing | Roll-ups | Use Case |
 |:-----|:----------|:---------|:--------|:---------|:---------|
 | `lookup` | Independent | Optional by default | Independent | Supported via `summary` | "Related to" |
-| `master_detail` | Coupled (cascade delete) | Forced only under `controlled_by_parent`; else lint-warned | Inherits parent | Supported via `summary` | "Owned by" |
+| `master_detail` | Coupled (cascade delete) | Forced only under `controlled_by_parent`; else lint-warned | Inherits parent; owner opt-in `ownerMayEdit` (below) | Supported via `summary` | "Owned by" |
 | `tree` | Self-reference | Optional — and so is `reference`, which when written must name this object itself; any other object is refused at parse, not lint-warned | N/A | Not available | Hierarchical |
 
 ## When to Use lookup vs master_detail
@@ -91,6 +91,23 @@ export default ObjectSchema.create({
   }
 });
 ```
+
+#### Owner edits under `controlled_by_parent` — `ownerMayEdit`
+
+A `controlled_by_parent` detail inherits the master's access: reads are scoped
+to accessible masters and **every write needs edit access on the master**. To
+let a detail row's owner (`owner_id`) update that row with only *read* access
+to the master, opt in on the detail:
+
+```typescript
+sharingModel: 'controlled_by_parent',
+sharing: { controlledByParent: { ownerMayEdit: true } },   // by-id update only
+```
+
+Nothing else widens — insert, delete, predicate (`multi: true`) updates and
+on-behalf-of writes still need master edit; the detail's own row policies
+still AND in. Refused at parse under any other `sharingModel` (the owner
+already writes there) and one level up (`sharing.ownerMayEdit`).
 
 ### Many-to-Many: Junction Object
 
