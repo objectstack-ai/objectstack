@@ -982,7 +982,7 @@ export const DetailView: React.FC<DetailViewProps> = ({
    */
   const systemActions = React.useMemo<ActionSchema[]>(() => {
     // System action items use a UI-local shape (`type: 'script'`,
-    // `variant: 'destructive'`, `onClick`) that doesn't perfectly conform
+    // `variant: 'danger'`, `onClick`) that doesn't perfectly conform
     // to the canonical ActionSchema discriminated union. Cast at the
     // boundary so call sites can keep treating them as ActionSchema[].
     const items: any[] = [];
@@ -1037,7 +1037,7 @@ export const DetailView: React.FC<DetailViewProps> = ({
         label: t('detail.delete'),
         icon: 'trash',
         type: 'script',
-        variant: 'destructive',
+        variant: 'danger',
         tags: ['separator-before'],
         // `delete.disabledWhen` — kebab symmetry, same rule as Edit above.
         ...(deleteDisabled ? { disabled: true } : null),

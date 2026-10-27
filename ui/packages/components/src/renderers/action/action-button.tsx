@@ -31,7 +31,7 @@ import { resolveIcon } from './resolve-icon';
 import { hasDeclaredVisibilityGate } from './visibility-gate';
 import { useAutoTriggerOnce } from './auto-trigger';
 import { readStaticParamValues } from './static-params';
-import { toRunnerVariant } from './runner-variant';
+import { toButtonVariant, toRunnerVariant } from './runner-variant';
 import { DisabledReasonTrigger, describedByWithReason, useDisabledReason } from './disabled-reason';
 import type { RendererHostProps } from '../../lib/renderer-host-props';
 
@@ -204,8 +204,9 @@ const ActionButtonRenderer = forwardRef<
     // Resolve icon
     const Icon = resolveIcon(schema.icon);
 
-    // Map schema variant to Shadcn button variant
-    const variant = schema.variant === 'primary' ? 'default' : (schema.variant || 'default');
+    // Map schema variant to Shadcn button variant: `danger` draws the
+    // primitive's `destructive` (objectstack#26779). See `./runner-variant`.
+    const variant = toButtonVariant(schema.variant, 'default');
     const size = schema.size === 'md' ? 'default' : (schema.size || 'default');
 
     const handleClick = useCallback(async () => {
@@ -326,9 +327,9 @@ const ActionButtonRenderer = forwardRef<
           // objectui#12941.
           operation: schema.operation,
           confirmText: schema.confirmText,
-          // The block's `variant`, in the runner's dialect: a `destructive`
-          // button confirms through the destructive button, as a `danger`
-          // action does (objectstack#26665). See `./runner-variant`.
+          // The block's `variant`, forwarded: a `danger` button confirms
+          // through the destructive button, as a `danger` action does
+          // (objectstack#26665, objectstack#26779). See `./runner-variant`.
           variant: toRunnerVariant(schema.variant),
           successMessage: schema.successMessage,
           // Success copy per handler outcome (spec 17.6.0, objectui#11344): the
@@ -525,7 +526,7 @@ ComponentRegistry.register('button', ActionButtonRenderer, {
     {
       name: 'variant',
       type: 'enum',
-      enum: ['default', 'primary', 'secondary', 'destructive', 'outline', 'ghost'],
+      enum: ['default', 'primary', 'secondary', 'danger', 'outline', 'ghost'],
     },
     // objectui#11168 slice 2 — the five sizes the spec row declares, each
     // measured through the real `SchemaRenderer`: `default`, `sm`, `lg` and

@@ -3579,7 +3579,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         icon: 'trash',
         type: 'script',
         locations: ['record_header'],
-        variant: 'destructive',
+        variant: 'danger',
         order: 120,
         component: 'action:menu',
         // objectui#4213 — `delete.disabledWhen` greys the overflow entry, the

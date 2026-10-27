@@ -34,7 +34,7 @@ import { resolveIcon } from './resolve-icon';
 import { hasDeclaredVisibilityGate } from './visibility-gate';
 import { useAutoTriggerOnce } from './auto-trigger';
 import { readActionEntryParamValues } from './static-params';
-import { toRunnerVariant } from './runner-variant';
+import { toButtonVariant, toRunnerVariant } from './runner-variant';
 import { DisabledReasonMenuLabel, menuItemReasonAria, useDisabledReason } from './disabled-reason';
 import type { RendererHostProps } from '../../lib/renderer-host-props';
 
@@ -151,7 +151,7 @@ export const ActionMenuItem: React.FC<{
         onExecute(action);
       }}
       className={cn(
-        (action.variant as string) === 'destructive' && 'text-destructive focus:text-destructive',
+        action.variant === 'danger' && 'text-destructive focus:text-destructive',
         action.className,
       )}
     >
@@ -247,7 +247,7 @@ const ActionMenuRenderer = forwardRef<HTMLButtonElement, { schema: ActionMenuSch
     });
 
     const TriggerIcon = resolveIcon(schema.icon) || MoreHorizontal;
-    const variant = schema.variant || 'ghost';
+    const variant = toButtonVariant(schema.variant as UIActionSchema['variant'], 'ghost');
     const size = schema.size || 'icon';
 
     const handleExecute = useCallback(
