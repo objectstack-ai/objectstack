@@ -1,22 +1,24 @@
 ---
 title: 18.2.0
-description: "Release notes and upgrade checklist for 18.2.0, the first release that ships the Console and the @object-ui packages from this repository. A minor that carries breaking changes: one access rule for file references, app automation refused identity writes under elevation, installs that check declared dependencies, action copy refused at publish, and eight breaking changes that os migrate meta carries."
+description: "Release notes and upgrade checklist for 18.2.0, the first release that ships the Console and the @object-ui packages from this repository. A minor that carries breaking changes: one access rule for file references, app automation refused identity writes under elevation, installs that check declared dependencies, action copy refused at publish, and seven breaking changes that os migrate meta carries."
 ---
 
 <Callout type="info">
-**How this page was compiled.** From the 232 changesets added to `.changeset/`
-between the 18.1.0 tag and `main` at `00a4593ad7`, each placed by
-`classifyReleaseBullet` in `scripts/release-github-releases.mjs`, the function
-that groups the GitHub Release body. The five sections below use its five
-headings, in its order, and its counts: **52** need you to act, **8** are
-converted for you, **41** add capabilities, **3** declare a semantic change,
-and **128** are other fixes. Every changeset is listed once, under its
-section. A version pass rehearsed in a throwaway clone wrote an `## 18.2.0`
-section into 111 CHANGELOGs, and the same function placed each of their
-distinct entries in the section this page lists it under. Each package's
+**How this page was compiled.** From the 231 changesets the version commit
+`27f38ada49` (#25640) consumed, each placed by `classifyReleaseBullet` in
+`scripts/release-github-releases.mjs`, the function that groups the GitHub
+Release body. The five sections below use its five headings, in its order, and
+its counts: **52** need you to act, **7** are converted for you, **41** add
+capabilities, **3** declare a semantic change, and **128** are other fixes.
+Every changeset is listed once, under its section. The version commit wrote an
+`## 18.2.0` section into 111 CHANGELOGs, and the same function places each of
+their distinct entries in the section this page lists it under. Each package's
 Release also carries an `Updated dependencies` bullet under 其他修复, which this
-page does not repeat. Changesets merged after `00a4593ad7` and before the
-version commit are not on this page. The
+page does not repeat. Four changesets merged while the version pull request
+was open are not in 18.2.0 and wait in `.changeset/` for the next release:
+the navigation group default (#26427), missed scheduled runs (#26485), every
+cell error of an import row (#26454), and the copy button on keyboard focus
+(#26487). The
 [upgrade checklist](#upgrade-checklist) is compiled from the changesets and
 has not been walked.
 </Callout>
@@ -31,10 +33,10 @@ has not been walked.
   Console tarball. The 37 public `@object-ui/*` packages join the
   `@objectstack/*` fixed group, so 18.2.0 is the first release in which both
   scopes publish at one version. See [Console (Studio)](#console).
-- ⚠️ **A minor that breaks.** 60 of the 232 changesets are declared breaking:
-  16 graded `minor` because they narrow the metadata protocol, and 44 graded
+- ⚠️ **A minor that breaks.** 59 of the 231 changesets are declared breaking:
+  15 graded `minor` because they narrow the metadata protocol, and 44 graded
   `patch` under the level rule (#25105, ruling A). 52 of them need you to act;
-  8 are converted by `os migrate meta`. Read
+  7 are converted by `os migrate meta`. Read
   [the version number](#the-version-number-is-not-the-signal).
 - **One access rule for a file reference.** A record write claims or copies
   only a file its caller may read, and is refused at the field when it names
@@ -76,13 +78,13 @@ has not been walked.
 
 ## Release facts, as measured
 
-Read before the cut, from `main` at `00a4593ad7`, a version pass rehearsed in
-a throwaway clone, and `npm view` on 2026-10-27:
+Read from the version commit `27f38ada49`, its CHANGELOGs, and `npm view` on
+2026-10-27:
 
 | | Measured |
 | :--- | :--- |
-| Version commit | `__VERSION_COMMIT__` (to be filled at the cut) |
-| Published | `__PUBLISH_DATE__` (to be filled at the cut) |
+| Version commit | `27f38ada49` (#25640) |
+| Published | 2026-10-27 |
 | Packages | 110 publish at 18.2.0: 72 `@objectstack/*`, `create-objectstack`, and 37 `@object-ui/*`. The VS Code extension (`object-ui`) takes the version and is private |
 | `@object-ui/*` before this release | every one of the 37 reads `latest` `18.1.0` on npm, published from the objectui repository |
 | `@object-ui/sdui-parser` | not released. It is deleted from the workspace (`80f267d`, #26343); its 18.1 line on npm is its last. Use `@objectstack/sdui-parser` |
@@ -92,8 +94,7 @@ a throwaway clone, and `npm view` on 2026-10-27:
 
 Two notes for reading the 18.2.0 CHANGELOGs:
 
-- **Each entry names its own commit.** In the rehearsed version pass every
-  bullet opened with the commit that added its changeset, as the generator
+- **Each entry names its own commit.** Every 18.2.0 CHANGELOG bullet opens with the commit that added its changeset, as the generator
   has done since #25804. This page cites the same commits.
 - **objectui's last 65 changesets are one entry.** The changes objectui made
   between its 18.1.0 release and the import came across under
@@ -121,7 +122,7 @@ protocol** moved, and nothing else:
 | Everything else: REST, drivers, services, the CLI, the Console, `feat:` and `fix!:` alike | `patch` |
 
 So 18.2.0 carries 44 changesets graded `patch` that say **BREAKING**, beside
-16 graded `minor`. Of all 232, 39 are graded `minor` and 193 `patch`; none is
+15 graded `minor`. Of all 231, 38 are graded `minor` and 193 `patch`; none is
 `major`. Pin exact versions of both scopes, and read the release notes for
 every version you cross.
 
@@ -410,7 +411,7 @@ names what you do; the CHANGELOG entry carries the full before and after.
 
 ### 自动迁移 — converted for you by `os migrate meta` [#migrated-for-you]
 
-Eight breaking changes carry an ADR-0087 registration on the protocol-18 step, and
+Seven breaking changes carry an ADR-0087 registration on the protocol-18 step, and
 `os migrate meta` does each one: it converts what has one meaning and lists
 the rest for you. A live author of a narrowing is refused at parse, with the
 prescription.
@@ -426,7 +427,6 @@ lists and rewrites a deployment's stored rows.
 | `PackageDependency.optional` and `AppManifest.dependencies` are tombstones (`436d284`, #26401) | `dependency-unread-spellings-retired` | lists it; nothing read either key. Delete the key, and declare each dependency with its range in `manifest.dependencies` |
 | A locale must be a BCP-47 tag: `zh_CN`, a padded value or a language name is refused (`39a78b1`, #25983) | `translation-locale-tag-canonicalized`, `translation-locale-non-tag-refused` | rewrites `zh_CN` to `zh-CN` and trims whitespace, in stored rows and with `--from 17 --write` in sources; any other value is reported as a TODO. Replace a language name with its tag |
 | A `runAs: 'system'` hook or a `type: 'script'` action whose sandboxed JS body writes `sys_user_position`, `sys_user_permission_set`, `sys_invitation` or `sys_member` is refused at save, not only when it runs (`07586f5`, #26430) | `hook-action-body-system-identity-assignment-write-refused` | lists each one; no conversion, because the route is your choice. Set the hook's `runAs` to `'user'`, or move an action's grant into a `runAs: 'user'` flow; use the organization endpoints for invitations and memberships |
-| `GroupNavItem.expanded` defaults to `true`, so a navigation group that says nothing opens on first view (`21a13f1`, #26427) | `ui-nav-group-expanded-default-open` | lists it. A group meant to start collapsed writes `expanded: false`; recompile an `os compile` artifact, which still carries the old written `false` |
 | `PositionGrantVia` loses `'name'`, and Setup → Positions drops its "(by name)" badge (`9494dd8`, #26398) | `position-grant-via-name-retired` | lists it; no server serves the value. Delete a branch that compares with `'name'`, and name the set in the position's `permissionSets` |
 
 ### 新增能力 — new capabilities [#new-capabilities]
@@ -560,10 +560,9 @@ lists and rewrites a deployment's stored rows.
   (`f02e644`, #26277). A page that wrote `actions: []` and still wants New
   deletes the key.
 
-Four entries the Release body files elsewhere declare `Metadata-protocol:
+Three entries the Release body files elsewhere declare `Metadata-protocol:
 semantic` too. The flow screen field typed `file` (#26134) is breaking, so it
-is listed under 需手动处理, and the navigation group default (#26427) is
-breaking with a registration, so it is listed under 自动迁移. The action copy `template` slots (#25637) and
+is listed under 需手动处理. The action copy `template` slots (#25637) and
 object-level `composite` / `repeater` (#25755) declare a `Clause-②: yes`
 widening, so they are new capabilities.
 
@@ -883,7 +882,7 @@ released (`2a61f08`, #25745).
 - **The `objectui` authoring skill** ships in `@objectstack/skills`
   (`a8f2afa`, #26097).
 
-Every Console change is listed once, in its section above. 89 of the 232
+Every Console change is listed once, in its section above. 89 of the 231
 changesets touch an `@object-ui/*` package: 10 under
 [需手动处理](#action-required) (most under "Console and the `@object-ui/*`
 packages"), 1 under [自动迁移](#migrated-for-you) (the "(by name)" badge), 14
@@ -919,7 +918,7 @@ it.
 
 <Callout type="warn">
 **How far this list has been walked.** Not at all. It is compiled from the
-changesets before the cut, and no app has been moved from 18.1.0 to 18.2.0 for
+changesets, and no app has been moved from 18.1.0 to 18.2.0 for
 this page. Each step names the entry it comes from; read that entry above for
 the exact refusal.
 </Callout>
@@ -958,7 +957,7 @@ the exact refusal.
 ```bash
 os validate
 os build
-os migrate meta --from 17     # the protocol-18 step, with this release's eight entries
+os migrate meta --from 17     # the protocol-18 step, with this release's seven entries
 ```
 
 Fix each refusal with its line in [需手动处理](#action-required) or
@@ -993,8 +992,6 @@ and `FilterBuilderRow.value` (`0489214`, `57ab06b`).
 - **Run `os migrate meta --stored`** to list and rewrite the stored rows the
   conversions touch: permission sets that store `allowDelete: false` beside
   `modifyAllRecords: true`, and `translation` rows under `zh_CN`-style locales.
-- **Write `expanded: false` on each navigation group that should start
-  collapsed**; a group that says nothing now opens (`21a13f1`).
 - **Name each permission set a position should grant in its
   `permissionSets`.** The `position_name_fold_grant` warning, now logged with
   `granted: false`, names each position whose same-named set is no longer
