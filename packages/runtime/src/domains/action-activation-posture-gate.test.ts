@@ -350,7 +350,7 @@ describe('the activation door\'s own contract', () => {
         const res = await h.dispatcher.handleActions(`/_activation/${OBJECT}/${ACTION}`, 'POST', {}, TENANT_ADMIN());
 
         expect(statusOf(res)).toBe(200);
-        expect(h.setActionActive).toHaveBeenCalledWith({ name: ACTION, packageId: 'crm', active: true });
+        expect(h.setActionActive).toHaveBeenCalledWith({ name: ACTION, packageId: 'crm', active: true }, expect.anything());
     });
 
     it('an UNDECLARED action is 404, and writes no row', async () => {
