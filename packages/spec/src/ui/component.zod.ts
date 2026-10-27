@@ -3429,9 +3429,49 @@ const actionCondition = () =>
     error: (issue) => evaluatedExpressionUnionRefusal(issue.input),
   });
 
-/** objectui's `Button` primitive vocabulary (its read point is recorded in `liveness/page.json`, row `regions`). */
-const BUTTON_PRIMITIVE_VARIANTS = ['default', 'destructive', 'outline', 'secondary', 'ghost', 'link'] as const;
+/**
+ * The action blocks' variant vocabulary: objectui's `Button` primitive's
+ * (its read point is recorded in `liveness/page.json`, row `regions`), with
+ * its destructive arm spelled `danger`, the word `ActionSchema.variant` and
+ * the action runner use.
+ *
+ * Until protocol 18 the four blocks spelled that arm `destructive`, the
+ * primitive's own word, so one destructive action was `danger` as a
+ * declaration and `destructive` as a block, and each block renderer mapped
+ * between the two at its forward to the runner (#26665, #26779). The blocks
+ * now speak the action dialect: `danger` draws the primitive's destructive
+ * button and makes the runner's confirm button destructive. `destructive` is
+ * refused with the rename ({@link refuseActionBlockDestructiveVariant}); the
+ * ADR-0087 D2 conversion `page-action-block-variant-destructive-to-danger`
+ * (`conversions/registry.ts`) rewrites stored rows and sources.
+ */
+const ACTION_BLOCK_VARIANTS = ['default', 'danger', 'outline', 'secondary', 'ghost', 'link'] as const;
 const BUTTON_PRIMITIVE_SIZES = ['default', 'sm', 'lg', 'icon'] as const;
+
+/**
+ * An action block's `variant` enum, with the `destructive` refusal in the
+ * enum's own error map — keyed on `issue.input`, so only the value that used
+ * to be legal gets the rename, and every other miss keeps the enum's message.
+ * `subject` names the key the author wrote, so the prescription points at it.
+ */
+function actionBlockVariant<const E extends readonly string[]>(subject: string, extra: E) {
+  return z.enum([...ACTION_BLOCK_VARIANTS, ...extra], {
+    error: (issue) => (issue.input === 'destructive' ? refuseActionBlockDestructiveVariant(subject) : undefined),
+  });
+}
+
+/**
+ * The prescription for `variant: 'destructive'` on an action block: the rename
+ * onto `'danger'`, which is lossless — the block draws the same destructive
+ * button, and since `danger` is the runner's own word the confirm button is
+ * destructive too.
+ */
+function refuseActionBlockDestructiveVariant(subject: string): string {
+  return `${subject} \`variant: 'destructive'\` was renamed \`'danger'\` in @objectstack/spec 18: an action has one `
+    + 'spelling for a destructive variant, the one `ActionSchema.variant` and the action runner use. Write '
+    + "`variant: 'danger'`: it draws the same destructive button, and the confirm question asks through the "
+    + 'destructive confirm button. Run `os migrate meta --from 17 --write` to rewrite existing sources.';
+}
 
 /**
  * The action-row aliases shared by `action:button` and `action:icon`.
@@ -3898,8 +3938,8 @@ export const ActionButtonPropsSchema = lazySchema(() => strictObject({
     .describe('Lucide icon name drawn left of the label, resolved through the shared action-icon resolver (an unknown name draws no icon)'),
   actionType: z.string().optional()
     .describe('Executor the action runner dispatches to — built in: `script`, `url`, `modal`, `flow`, `api`, `form`; a handler registered under another name is dispatched too. `navigation`, the runner\'s alias of `url`, is refused: write `url`. Write it here, not as `type`: on a page component `type` is the component itself'),
-  variant: z.enum([...BUTTON_PRIMITIVE_VARIANTS, 'primary']).optional()
-    .describe('Button variant — the Button primitive\'s vocabulary, plus `primary`, which renders as `default` (renderer default: `default`)'),
+  variant: actionBlockVariant("An `action:button`'s", ['primary']).optional()
+    .describe('Button variant — the Button primitive\'s vocabulary with its destructive arm spelled `danger`, the action runner\'s word, plus `primary`, which renders as `default` (renderer default: `default`). `danger` draws the destructive button and asks a `confirmText` question through the destructive confirm button'),
   size: z.enum([...BUTTON_PRIMITIVE_SIZES, 'md']).optional()
     .describe('Button size — the Button primitive\'s vocabulary, plus `md`, which renders as `default` (renderer default: `default`)'),
   visible: actionCondition().optional()
@@ -4000,8 +4040,8 @@ export const ActionIconPropsSchema = lazySchema(() => strictObject({
     .describe('Lucide icon name, resolved through the shared action-icon resolver (renderer registration default `play`)'),
   actionType: z.string().optional()
     .describe('Executor the action runner dispatches to — built in: `script`, `url`, `modal`, `flow`, `api`, `form`; a handler registered under another name is dispatched too. `navigation`, the runner\'s alias of `url`, is refused: write `url`. Write it here, not as `type`'),
-  variant: z.enum([...BUTTON_PRIMITIVE_VARIANTS, 'primary']).optional()
-    .describe('Button variant — the Button primitive\'s vocabulary, plus `primary`, which renders as `default` (renderer default: `ghost`)'),
+  variant: actionBlockVariant("An `action:icon`'s", ['primary']).optional()
+    .describe('Button variant — the Button primitive\'s vocabulary with its destructive arm spelled `danger`, the action runner\'s word, plus `primary`, which renders as `default` (renderer default: `ghost`). `danger` draws the destructive button and asks a `confirmText` question through the destructive confirm button'),
   visible: actionCondition().optional()
     .describe('Visibility predicate — a boolean, a CEL string, or a `{ dialect, source }` envelope, evaluated against the row the host binds; the icon is not rendered when it is FALSE. Omit for always-visible'),
   disabled: actionCondition().optional()
@@ -4148,8 +4188,8 @@ function actionContainerMemberShape() {
       .describe('Lucide icon name drawn before the label, resolved through the shared action-icon resolver (an unknown name draws no icon)'),
     type: z.string().optional()
       .describe('Executor the action runner dispatches to — built in: `script`, `url`, `modal`, `flow`, `api`, `form`; a handler registered under another name is dispatched too. `navigation`, the runner\'s alias of `url`, is refused: write `url`. A member is an action entry, so its executor is `type` (on an `action:button` node it is `actionType`)'),
-    variant: z.enum([...BUTTON_PRIMITIVE_VARIANTS, 'primary']).optional()
-      .describe('Item variant — the Button primitive\'s vocabulary, plus `primary` (drawn as `default`). An inline `action:group` button draws it (falling back to the group\'s `variant`); a dropdown or `action:menu` item draws `destructive` red and every other variant plainly'),
+    variant: actionBlockVariant("An `action:group` / `action:menu` member's", ['primary']).optional()
+      .describe('Item variant — the Button primitive\'s vocabulary with its destructive arm spelled `danger`, the action runner\'s word, plus `primary` (drawn as `default`). An inline `action:group` button draws it (falling back to the group\'s `variant`); a dropdown or `action:menu` item draws `danger` red and every other variant plainly. `danger` asks a `confirmText` question through the destructive confirm button'),
     visible: actionCondition().optional()
       .describe('Visibility predicate — a boolean, a CEL string, or a `{ dialect, source }` envelope, evaluated against the row the host binds; the item is not drawn when it is FALSE, and a predicate that fails to evaluate hides it. Omit for always-visible'),
     disabled: actionCondition().optional()
@@ -4363,8 +4403,8 @@ export const ActionGroupPropsSchema = lazySchema(() => strictObject({
     .describe('Dropdown trigger text (renderer default: `Actions`). Inline mode renders no group label. A literal string — localize through the translation bundle entry for this component id'),
   icon: z.string().optional()
     .describe('Lucide icon name on the dropdown trigger. Inline mode renders no group icon'),
-  variant: z.enum(BUTTON_PRIMITIVE_VARIANTS).optional()
-    .describe('Button variant for the dropdown trigger and for every inline member that sets none — the Button primitive\'s vocabulary (renderer default: `outline`)'),
+  variant: actionBlockVariant("An `action:group`'s", []).optional()
+    .describe('Button variant for the dropdown trigger and for every inline member that sets none — the Button primitive\'s vocabulary with its destructive arm spelled `danger`, the action runner\'s word (renderer default: `outline`)'),
   size: z.enum(BUTTON_PRIMITIVE_SIZES).optional()
     .describe('Button size for the dropdown trigger and for every inline member that sets none — the Button primitive\'s vocabulary'),
   visible: actionCondition().optional()
@@ -4418,8 +4458,8 @@ export const ActionMenuPropsSchema = lazySchema(() => strictObject({
     .describe('Trigger text and accessible label; omit for an icon-only trigger labelled "More actions". A literal string — localize through the translation bundle entry for this component id'),
   icon: z.string().optional()
     .describe('Lucide icon name on the trigger (renderer default: the horizontal ellipsis)'),
-  variant: z.enum(BUTTON_PRIMITIVE_VARIANTS).optional()
-    .describe('Trigger button variant — the Button primitive\'s vocabulary (renderer default: `ghost`)'),
+  variant: actionBlockVariant("An `action:menu`'s", []).optional()
+    .describe('Trigger button variant — the Button primitive\'s vocabulary with its destructive arm spelled `danger`, the action runner\'s word (renderer default: `ghost`)'),
   size: z.enum(BUTTON_PRIMITIVE_SIZES).optional()
     .describe('Trigger button size — the Button primitive\'s vocabulary (renderer default: `icon`)'),
   visible: actionCondition().optional()
