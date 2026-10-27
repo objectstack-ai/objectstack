@@ -836,6 +836,11 @@ const ru = {
     addRecord: "Добавить запись",
     // objectui#12703 — the compact list's footer link to the object's list or the block's view.
     viewAll: "Показать все",
+    viewAllCount: "Показать все записи: {{count}}",
+    viewAllCount_one: "Показать {{count}} запись",
+    viewAllCount_few: "Показать все {{count}} записи",
+    viewAllCount_many: "Показать все {{count}} записей",
+    viewAllCount_other: "Показать все {{count}} записи",
     tabs: "Вкладки",
     allRecords: "Все записи",
     userFilters: {
@@ -3001,6 +3006,7 @@ const ru = {
     build: {
       title: "Создать приложение",
       noCapability: "Создание приложений недоступно в этой системе — для этого нужно разрешение «Управление метаданными», которого нет у вашей учётной записи.",
+      inStudio: "Создать в Studio",
     },
     template: {
       title: "Начать с шаблона",
@@ -3227,6 +3233,8 @@ const ru = {
     recordAccessDeniedDescription: "У вас нет прав на просмотр записей этого типа. Обратитесь к администратору, если считаете, что доступ вам нужен.",
     recordLoadFailed: "Не удалось загрузить эту запись",
     recordLoadFailedDescription: "При загрузке произошла ошибка. Проверьте соединение и попробуйте снова.",
+    recordAccessEnded: "Решение записано",
+    recordAccessEndedDescription: "Ваш этап согласования завершён, поэтому доступ к этой записи прекращён.",
   },
   actionDialog: {
     title: "Параметры действия",

@@ -3772,28 +3772,79 @@ describe('ApprovalService — listActions attachments mapping (#3266)', () => {
   });
 });
 
-// #3508: `queue` is declared-but-unenforced — resolveApproverSpec has no queue
-// branch, so the spec value falls through to the dead `queue:<id>` literal.
-// The engine must at least WARN so operators can see the silent dead slot;
-// the spec marks the type non-authorable so designers stop offering it.
-describe('ApprovalService — queue approver is unresolved (#3508)', () => {
-  it('falls back to the dead literal and warns', async () => {
-    const engine = makeFakeEngine();
+// [ADR-0142 D6] `queue` approvers are re-admitted: the slate is the queue's
+// members at node entry, read through the `ownership-queue` service on the
+// ADDRESSING purpose; an empty expansion warns as a graph type does and adds no
+// slot, as a person type does — the `queue:<name>` literal is never written.
+describe('ApprovalService — a queue approver routes to the queue\'s members (ADR-0142 D6)', () => {
+  const svcWith = (engine: any, queues?: Record<string, Record<string, string[]>>) => {
     const warnings: any[] = [];
+    const asked: unknown[] = [];
     let n = 0;
     const svc = new ApprovalService({
-      engine: engine as any,
+      engine,
       clock: { now: () => new Date(1757000000000 + (n++) * 1000) },
       logger: { warn: (msg: any, meta: any) => warnings.push([msg, meta]) },
+      ownershipQueues: queues
+        ? () => ({
+          expandMembers: async (name: string, org: string | null, options?: { purpose?: string }) => {
+            asked.push([name, org, options]);
+            return queues[String(org)]?.[name] ?? [];
+          },
+        })
+        : undefined,
     });
+    return { svc, warnings, asked };
+  };
+  const queueInput = (value: string) => ({
+    ...openInput([]),
+    config: { approvers: [{ type: 'queue' as const, value }], behavior: 'first_response' as const, lockRecord: false },
+  });
+
+  it('opens on the queue\'s members in the request\'s organization, asked for ADDRESSING', async () => {
+    const engine = makeFakeEngine();
+    const { svc, warnings, asked } = svcWith(engine, { t1: { billing: ['u7', 'u8'] }, t2: { billing: ['u_other'] } });
+    const req = await svc.openNodeRequest(queueInput('billing'), CTX) as any;
+
+    expect(req.pending_approvers).toEqual(['u7', 'u8']);
+    expect(asked).toEqual([['billing', 't1', { purpose: 'addressing' }]]);
+    expect(warnings.filter(([msg]) => String(msg).includes('expanded to nobody'))).toEqual([]);
+    // A member decides it under their own id.
+    const decided = await svc.decideNode(req.id, { decision: 'approve', actorId: 'u8' }, SYS);
+    expect(decided.finalized).toBe(true);
+  });
+
+  it('an empty queue adds NO slot — never the `queue:<name>` literal — and warns', async () => {
+    const engine = makeFakeEngine();
+    const { svc, warnings } = svcWith(engine, { t1: { billing: [] } });
+    const req = await svc.openNodeRequest(queueInput('billing'), CTX) as any;
+
+    expect(req.pending_approvers).not.toContain('queue:billing');
+    expect(req.pending_approvers.filter((s: string) => s.startsWith('queue:'))).toEqual([]);
+    const hit = warnings.find(([msg]) => String(msg).includes("approver 'queue:billing' expanded to nobody"));
+    expect(hit, 'no warning for the empty queue').toBeTruthy();
+    expect(String(hit[0])).toContain('onEmptyApprovers');
+    expect(hit[1]).toMatchObject({ type: 'queue', value: 'billing', organizationId: 't1' });
+  });
+
+  it('beside a person, the queue adds nothing and the person carries the request', async () => {
+    const engine = makeFakeEngine();
+    const { svc } = svcWith(engine, { t1: {} });
     const req = await svc.openNodeRequest(
-      { ...openInput([]), config: { approvers: [{ type: 'queue', value: 'q_west' }], behavior: 'first_response', lockRecord: false } },
+      { ...openInput([]), config: { approvers: [{ type: 'queue', value: 'nowhere' }, { type: 'user', value: 'u5' }], behavior: 'first_response', lockRecord: false } },
       CTX,
-    );
-    // No queue expansion exists: the slot is the raw `type:value` literal,
-    // which matches no real user id — the request routes to nobody.
-    expect(req.pending_approvers).toEqual(['queue:q_west']);
-    expect(warnings.some(([msg]) => String(msg).includes("'queue'") && String(msg).includes('no ownership queue to expand it from'))).toBe(true);
+    ) as any;
+    expect(req.pending_approvers).toEqual(['u5']);
+  });
+
+  it('with no ownership-queue service registered, the warning names that as the cause', async () => {
+    const engine = makeFakeEngine();
+    const { svc, warnings } = svcWith(engine);
+    const req = await svc.openNodeRequest(queueInput('billing'), CTX) as any;
+
+    expect(req.pending_approvers.filter((s: string) => s.startsWith('queue:'))).toEqual([]);
+    const hit = warnings.find(([msg]) => String(msg).includes("approver 'queue:billing' expanded to nobody"));
+    expect(String(hit?.[0])).toContain('no ownership-queue service is registered');
   });
 });
 

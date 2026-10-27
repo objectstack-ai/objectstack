@@ -169,11 +169,11 @@ export const SysSharingRule = ObjectSchema.create({
     }),
 
     recipient_type: Field.select(
-      // `queue` was removed: it is declared-but-unenforced (the evaluator returns
-      // no users for it), so offering it would author a silently-inert rule
-      // (ADR-0078). The six values below are the ones the evaluator expands —
+      // `queue` returned with the queue entity (ADR-0142 D7): the evaluator
+      // expands it to the queue's members through the ownership-queue
+      // service. The seven values below are the ones the evaluator expands —
       // `field` (#15072, the record-relative recipient ruled on #14103) per
-      // matched record, the other five once per rule. The list is held equal to
+      // matched record, the other six once per rule. The list is held equal to
       // the authorable `ShareRecipientType` by `field-recipient.test.ts`, so a
       // stored row of any authorable kind is never refused at this select.
       // Each option carries its label: the bare-string shorthand would show
@@ -186,6 +186,7 @@ export const SysSharingRule = ObjectSchema.create({
           { value: 'business_unit', label: 'Business unit' },
           { value: 'position', label: 'Position' },
           { value: 'unit_and_subordinates', label: 'Business unit and subordinates' },
+          { value: 'queue', label: 'Queue' },
           { value: 'field', label: 'Field' },
         ],
         label: 'Recipient Type',
@@ -193,7 +194,7 @@ export const SysSharingRule = ObjectSchema.create({
         defaultValue: 'business_unit',
         // The engine detail this used to spell out (which tree is walked, which
         // expansion is flat, the ADRs behind each) lives in the class doc above.
-        description: 'Who receives access. Picking a team, business unit or position gives access to everyone in it. "Business unit and subordinates" also covers every unit below the one you pick. "Field" shares each record with the user or users held in one of its own fields — name that field as the recipient.',
+        description: 'Who receives access. Picking a team, business unit, position or queue gives access to everyone in it. "Business unit and subordinates" also covers every unit below the one you pick. "Field" shares each record with the user or users held in one of its own fields — name that field as the recipient.',
         group: 'Recipient',
       },
     ),
@@ -222,13 +223,13 @@ export const SysSharingRule = ObjectSchema.create({
       // input in silence.
       widget: 'recipient-picker',
       dependsOn: ['recipient_type', 'object_name'],
-      description: 'The specific user, team, business unit or position that receives access — or, for the "Field" recipient type, the name of the record field that holds the user or users to share with.',
+      description: 'The specific user, team, business unit, position or queue that receives access — or, for the "Field" recipient type, the name of the record field that holds the user or users to share with.',
       group: 'Recipient',
     }),
 
     access_level: Field.select(
-      // `full` was removed for the same reason as `queue` above: it was
-      // declared-but-unenforced. Labelled "Full Access (Transfer, Share,
+      // `full` was removed because it was declared-but-unenforced (the reason
+      // `queue` was off the recipient list until ADR-0142 D7 enforced it). Labelled "Full Access (Transfer, Share,
       // Delete)", it was matched only as `access_level in ('edit','full')` by
       // the two enforcement sites, so it granted exactly what `edit` grants —
       // offering it told an admin they had granted delete rights they had not

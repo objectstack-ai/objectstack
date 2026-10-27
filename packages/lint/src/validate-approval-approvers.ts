@@ -81,21 +81,25 @@ const RESERVED_OUTPUT_KEYS = new Set(['decision', 'requestId']);
  * be empty (an unstaffed position, an empty team/department). When EVERY
  * approver on a node is one of these, the node can resolve to an empty slate at
  * runtime — the framework#3424 dead-end. Individually-routed types
- * (`user`/`field`/`manager`), the guaranteed-staffed `org_membership_level`
- * tiers, and the opaque `queue` are deliberately excluded: any of them present
- * signals the author has a non-group route, so the node isn't purely
- * group-gated.
+ * (`user`/`field`/`manager`) and the guaranteed-staffed `org_membership_level`
+ * tiers are deliberately excluded: any of them present signals the author has
+ * a non-group route, so the node isn't purely group-gated.
+ *
+ * `queue` is IN (ADR-0142 D6): a queue's members are runtime data — its
+ * positions' holders, or an organization's `sys_queue_member` rows — and an
+ * empty queue adds no slot, so a queue-only node reaches the same empty slate a
+ * position-only one does.
  *
  * ⛔ `manager` stays OUT of this set and is judged by its own arm below
  * ({@link MANAGER_ONLY_FIX}), for two reasons that are not interchangeable:
- * the group message ("routes to a group (position/team/department)") would be
+ * the group message ("routes to a group (position/team/department/queue)") would be
  * false about it, and the REMEDY differs — an unstaffed position is staffed
  * in-product, an unset `sys_user.manager_id` is not (#16748). Folding `manager`
  * in here would also change a `position` verdict this package pins: a
  * `[position, manager]` node is silent today, and that pin is the existing
  * arm's contract, not an oversight to sweep up.
  */
-const GROUP_ROUTED_TYPES = new Set(['position', 'team', 'department']);
+const GROUP_ROUTED_TYPES = new Set(['position', 'team', 'department', 'queue']);
 
 /**
  * [#22161] The closing clause both empty-slate verdicts share under the
@@ -491,9 +495,7 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
               `approver type '${type}' is declared but not implemented by the runtime: it was deprecated ` +
               `rather than built, and is no longer offered for authoring — the slot resolves to nobody and ` +
               `the request stalls.`,
-            hint:
-              `Route to people the engine can expand: { type: 'team' | 'department' | 'position', ... }. ` +
-              `Queue approvers need a real ownership-queue implementation before they take effect.`,
+            hint: `Route to people the engine can expand: { type: 'team' | 'department' | 'position' | 'queue', ... }.`,
           });
         }
 
@@ -518,7 +520,7 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
               `'organization: ${declaredOrg}' has no effect (ADR-0105 D9) — the runtime refuses it.`,
             hint:
               `Drop 'organization' here. Cross-organization targeting applies to ` +
-              `'position', 'org_membership_level', 'department' and 'expression' approvers.`,
+              `'position', 'org_membership_level', 'department', 'queue' and 'expression' approvers.`,
           });
         }
       }
@@ -547,7 +549,7 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
           // [#22161] One verdict sentence; why staffing is unreadable here and
           // who decides an empty slate is `os explain` text.
           message:
-            `every approver on this node routes to a group (position/team/department), so if ` +
+            `every approver on this node routes to a group (position/team/department/queue), so if ` +
             `none is staffed the request opens on the organization's administrators` +
             (locks ? STAYS_LOCKED : ''),
           hint: GROUP_ONLY_FIX,
