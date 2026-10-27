@@ -216,6 +216,7 @@ import {
     decorateMetadataItem,
     decorateMetadataItems,
     type MetadataDiagnostics,
+    withPublishVerdict,
 } from './metadata-diagnostics.js';
 // [#8154] The per-type read-path redaction seam. `decorateMetadataItem` already
 // composes `redactMetadataItem` (see its ordering note), which covers the
@@ -359,6 +360,7 @@ import {
 // [#25467 cut 8] The runtime authoring gate and the restored-body doors.
 import {
     assertRuntimeAuthoringRules,
+    draftPublishVerdict,
     refuseRestoredBodyTheSaveDoorRefuses,
     restoredBodyDerivation,
     restoredBodyWriter,
@@ -7108,6 +7110,52 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#26707] What publishing a stored draft would answer from the runtime
+     * authoring gate, without publishing it: the refusal's `issues` (rule id,
+     * path, message, exactly as the publish 422 carries them), or `[]` when
+     * the publish would pass the gate.
+     *
+     * The draft save stays ungated (#4463 D1): a draft may be half-finished and
+     * is stored as before. What changes is what its READ says about it. The
+     * draft's `_diagnostics` used to be the schema parse alone, so a draft the
+     * publish refuses (`expression-invalid` on a flow edge, a summary field
+     * with no operations, …) read `valid: true` in every editor until the
+     * author pressed Publish, and in a package publish it rolled back every
+     * other draft with it.
+     *
+     * One judgement, never a second copy of the rules: this reads
+     * `judgeRuntimeAuthoringRules`, the function the publish gate
+     * ({@link assertRuntimeAuthoringRules}) throws from, with the arguments the
+     * draft→active promotion states — the draft row's package (whose other
+     * drafts are the closure "Publish all" judges it against, read by the
+     * batch door's own collector) and the credential channel's held positions.
+     * Computed on every draft read rather than stored at save: the verdict
+     * depends on the live universe and the package's other drafts, which a
+     * stored verdict would not see change.
+     */
+    private draftPublishVerdict(draft: {
+        type: string; name: string; body: unknown; packageId: string | null;
+    }): Promise<RuntimeAuthoringIssue[]> {
+        const readAuthoringChannel = () => this.authoringChannel;
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof draftPublishVerdict> = {
+            get authoringChannel() { return readAuthoringChannel(); },
+            get engine() { return readEngine(); },
+            collectBatchPendingDeclarations: (...a) => this.collectBatchPendingDeclarations(...a),
+            credentialChannelFor: (...a) => this.credentialChannelFor(...a),
+            foldStoredCollection: (...a) => this.foldStoredCollection(...a),
+            getOverlayRepo: (...a) => this.getOverlayRepo(...a),
+            hierarchyResolverMounted: (...a) => this.hierarchyResolverMounted(...a),
+            orgWallEnforced: (...a) => this.orgWallEnforced(...a),
+            resolveSduiManifest: (...a) => this.resolveSduiManifest(...a),
+            resolveWritePackageScope: (...a) => this.resolveWritePackageScope(...a),
+            rlsMembershipResolverKeys: (...a) => this.rlsMembershipResolverKeys(...a),
+            tenancyPostureInForce: (...a) => this.tenancyPostureInForce(...a),
+        };
+        return draftPublishVerdict.call(host, draft);
+    }
+
+    /**
      * [#15950] Fold the STORED half of a resolution universe onto the registry
      * half {@link assertRuntimeAuthoringRules} gathers.
      *
@@ -10701,6 +10749,25 @@ export class ObjectStackProtocolImplementation implements
         // Every read of `execution` below is one of those exits.
         const execution = opts.face === 'execution';
         const serveItem = <T>(resolved: T): T => (execution ? resolved : decorateMetadataItem(request.type, resolved));
+        // [#26707] A served DRAFT is decorated as above and then told what its
+        // publish would refuse: the runtime gate's verdict on the stored draft
+        // body ({@link draftPublishVerdict}), folded into `_diagnostics`
+        // ({@link withPublishVerdict}). Judged on the row as stored — the body
+        // the promotion judges — never on the governed, converted or redacted
+        // copy this read serves. The execution face serves no `_diagnostics`.
+        const serveDraft = async <T>(resolved: T, row: { metadata?: unknown; package_id?: string | null }): Promise<T> => {
+            const served = serveItem(resolved);
+            if (execution || !served || typeof served !== 'object') return served;
+            const issues = await this.draftPublishVerdict({
+                type: request.type,
+                name: request.name,
+                body: storedRowDocument(row),
+                packageId: row.package_id ?? null,
+            });
+            const before = (served as { _diagnostics?: MetadataDiagnostics })._diagnostics;
+            const after = withPublishVerdict(request.type, request.name, before, issues);
+            return after === before ? served : { ...served, _diagnostics: after };
+        };
         // ── [#20946, #20761 ruling rule 1, ADR-0126 §2 / §3] A shipped FLOW name ──
         //
         // `flow` is Regime C: the packaged base is locked, "⛔ Never silent
@@ -10848,7 +10915,7 @@ export class ObjectStackProtocolImplementation implements
                     return {
                         type: request.type,
                         name: request.name,
-                        item: serveItem(this.governServedObject(request.type, draftItem)),
+                        item: await serveDraft(this.governServedObject(request.type, draftItem), draftRec),
                     };
                 }
             } catch (error) {
@@ -10874,6 +10941,8 @@ export class ObjectStackProtocolImplementation implements
         // [#24395] The served draft row's per-key provenance — read off the
         // row this read serves, so it can never describe another body.
         let draftChanges: ReturnType<typeof storedDraftChanges>;
+        // [#26707] The draft row this read serves, for its publish verdict.
+        let servedDraftRow: { metadata?: unknown; package_id?: string | null } | undefined;
         try {
             let record = (await this.findServedOverlayRow({
                 type: request.type,
@@ -10909,7 +10978,10 @@ export class ObjectStackProtocolImplementation implements
                 if (recPkg && item && typeof item === 'object' && (item as any)._packageId === undefined) {
                     (item as any)._packageId = recPkg;
                 }
-                if (readState === 'draft') draftChanges = storedDraftChanges((record as { draft_changes?: unknown }).draft_changes);
+                if (readState === 'draft') {
+                    draftChanges = storedDraftChanges((record as { draft_changes?: unknown }).draft_changes);
+                    servedDraftRow = record as { metadata?: unknown; package_id?: string | null };
+                }
             }
         } catch (error) {
             // [#5532] THE site this issue was raised on. Falling through to the
@@ -10929,10 +11001,11 @@ export class ObjectStackProtocolImplementation implements
         // envelope shape. See ADR-0005 §draft-lifecycle.
         if (readState === 'draft') {
             if (item === undefined) throw noPendingDraftError(request.type, request.name);
+            const governedDraft = this.governServedObject(request.type, item);
             return {
                 type: request.type,
                 name: request.name,
-                item: serveItem(this.governServedObject(request.type, item)),
+                item: servedDraftRow ? await serveDraft(governedDraft, servedDraftRow) : serveItem(governedDraft),
                 // [#22114] The draft row's version token — the one a draft save
                 // (`?mode=draft`) at this address accepts as `If-Match`.
                 // [#22877] The member's own row's, as a save of that member's

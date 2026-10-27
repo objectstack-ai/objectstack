@@ -37,6 +37,11 @@ import { zodIssuesToMetadataIssues } from './protocol.js';
 // landed by #8300). Composed into `decorateMetadataItem` below — see the
 // ordering note there for why it is not applied per read exit.
 import { redactMetadataItem } from './metadata-redaction.js';
+// [#26707] The snapshot key a write type's findings are spelled under — the
+// runtime gate's own answer, so the publish verdict below is re-spelled
+// against the same prefix the gate wrote it with.
+import { stackKeyForType } from '@objectstack/lint/runtime';
+import type { RuntimeAuthoringIssue } from '@objectstack/spec/api';
 
 /**
  * Re-export the canonical validation-result type so callers in this
@@ -314,6 +319,64 @@ export function decorateMetadataItem<T>(type: string, item: T): T {
 export function decorateMetadataItems<T>(type: string, items: T[]): T[] {
     if (!Array.isArray(items)) return items;
     return items.map((item) => decorateMetadataItem(type, item));
+}
+
+// ---------------------------------------------------------------------------
+// [#26707] The publish verdict on a draft's `_diagnostics`
+// ---------------------------------------------------------------------------
+
+/**
+ * A runtime-gate finding's path, re-spelled relative to the item it was found
+ * on: the gate spells it inside its private per-write snapshot
+ * (`flows[0].edges[1].condition`, `objects.invoice.fields.total`), and
+ * `_diagnostics` paths are dotted and item-relative (`edges.1.condition`), the
+ * spelling Studio's inline errors and canvas badges resolve. A path that does
+ * not start at the written item (a finding located on a sibling, or a `where`-
+ * style locator) is kept as the gate wrote it.
+ */
+function itemRelativeIssuePath(type: string, name: string, path: string): string {
+    const stackKey = stackKeyForType(PLURAL_TO_SINGULAR[type] ?? type);
+    if (!stackKey) return path;
+    let rest: string | undefined;
+    for (const prefix of [`${stackKey}[0]`, `${stackKey}.${name}`]) {
+        if (path === prefix || path.startsWith(`${prefix}.`) || path.startsWith(`${prefix}[`)) {
+            rest = path.slice(prefix.length);
+            break;
+        }
+    }
+    if (rest === undefined) return path;
+    return rest.replace(/\[(\d+)\]/g, '.$1').replace(/^\./, '');
+}
+
+/**
+ * Fold what publishing a draft would refuse into the draft's `_diagnostics`.
+ *
+ * `issues` are the runtime authoring gate's refusal for the draft body —
+ * `ObjectStackProtocolImplementation#draftPublishVerdict`, the judgement the
+ * publish door enforces — and each becomes one `errors[]` entry carrying the
+ * publish's own `message`, with its `rule` id as the entry's `code`. Any of
+ * them makes the verdict `valid: false`: the draft is still stored, but it does
+ * not say it is valid while the publish says it is not. No issues: the schema
+ * verdict is returned as it was. A type with no schema verdict (`undefined`)
+ * gets one only when there is something to report.
+ */
+export function withPublishVerdict(
+    type: string,
+    name: string,
+    diagnostics: MetadataDiagnostics | undefined,
+    issues: readonly RuntimeAuthoringIssue[],
+): MetadataDiagnostics | undefined {
+    if (issues.length === 0) return diagnostics;
+    const refusals = issues.map((issue) => ({
+        path: itemRelativeIssuePath(type, name, issue.path),
+        message: issue.message,
+        code: issue.rule,
+    }));
+    return {
+        ...diagnostics,
+        valid: false,
+        errors: [...(diagnostics?.errors ?? []), ...refusals],
+    };
 }
 
 // ---------------------------------------------------------------------------
