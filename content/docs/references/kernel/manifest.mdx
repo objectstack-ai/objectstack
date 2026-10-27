@@ -102,6 +102,7 @@ Install mode: managed (registered as code, upgradeable, sealed) | unmanaged (cop
 | **env** | `Enum<'prod' \| 'dev' \| 'test'>[]` | optional (default: `["prod","dev","test"]`) | Applicable environments |
 | **locale** | `string[]` | optional | Applicable locales (BCP-47 tags); omitted applies to every locale. The publish and install paths do not filter by locale — they load every dataset and warn |
 | **records** | `Record<string, any>[]` | ✅ | Data records |
+| **files** | `Record<string, { contentType: string; size: integer; sha256: string; data: string }>` | optional | Bytes of the package files the records name with `seedFile(path)`, keyed by path. Written by `os build`, which reads each path relative to the package root; the loader stores each one as a file the written record owns. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
