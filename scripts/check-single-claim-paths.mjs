@@ -299,7 +299,7 @@ const ROOT = new URL('..', import.meta.url).pathname;
 const SELF_PATH = fileURLToPath(import.meta.url);
 
 /** The wiring that gives this gate a PR to judge. */
-const WIRING_WORKFLOW = '.github/workflows/single-claim-path-guard.yml';
+const WIRING_WORKFLOW = '.github/workflows/pr-body-guards.yml';
 
 export const EXIT_CLEAN = 0;
 export const EXIT_CONFLICT = 1;
@@ -924,11 +924,17 @@ function selfTest() {
     t('the guard job invokes no package manager (it needs node and nothing else)', /\b(pnpm|corepack|yarn|npm)\b/.test(wiringLines), false);
 
     // --- The older gate must still be there, unweakened. This gate ADDS a
-    // second question; it does not replace the card-keyed one.
-    const siblingPath = join(ROOT, '.github/workflows/duplicate-fix-guard.yml');
+    // second question; it does not replace the card-keyed one. Since #26071 the
+    // card-keyed gate is a step of the SAME workflow, so this reads the same
+    // file as the wiring battery above and looks for that step's name.
+    const siblingPath = join(ROOT, '.github/workflows/pr-body-guards.yml');
     const sibling = existsSync(siblingPath) ? readFileSync(siblingPath, 'utf8') : '';
+    // Comment-stripped for the same reason as the permission reads above: that
+    // file's header quotes the step name in prose, and prose must not satisfy
+    // a pin on an executable `name:` line.
+    const siblingLines = sibling.split('\n').filter((line) => !/^\s*#/.test(line)).join('\n');
     t('the card-keyed duplicate gate still exists', sibling !== '', true);
-    t('...and still asks its own question', sibling.includes('No other open PR may claim the same issue'), true);
+    t('...and still asks its own question, as a step of that file', siblingLines.includes('No other open PR may claim the same issue'), true);
 
     // --- A transport failure is a PREREQUISITE, never the accusation this
     // gate reserves for a real earlier claim. The live read is the only part

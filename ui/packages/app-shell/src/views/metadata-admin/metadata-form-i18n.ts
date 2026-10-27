@@ -38,7 +38,7 @@
  *
  * These entries live beside `./i18n.ts`'s `engine.*` table and share its
  * documented posture (see that file's header and `packages/i18n/README.md`,
- * "Scope — the `engine.*` carve-out"): the metadata designer ships `en` and
+ * "Scope — the Studio designer strings"): the metadata designer ships `en` and
  * `zh`, and the other eight shipped locales render the producer's English.
  * `en` is deliberately ABSENT rather than a copy of the spec's sentences — an
  * English console falls through to the producer's own text instead of reading

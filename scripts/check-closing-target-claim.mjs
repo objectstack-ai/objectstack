@@ -403,14 +403,16 @@ function batteryFloorFailures() {
 const ROOT = new URL('..', import.meta.url).pathname;
 
 /** The wiring that gives this gate a pull request to judge. */
-const WIRING_WORKFLOW = '.github/workflows/closing-target-claim-guard.yml';
+const WIRING_WORKFLOW = '.github/workflows/pr-body-guards.yml';
 
 /**
- * ⚠️ THIS LITERAL IS THE CHECK-RUN NAME branch protection would pin, and it is
- * duplicated in the workflow's `name:` — deliberately, and pinned in both
- * directions by the self-test below. Renaming a job silently detaches a
- * required context, and this is the cheap half of the two-step that makes that
- * impossible to do by accident.
+ * ⚠️ THIS LITERAL IS THE GATE STEP'S `name:` in the wiring workflow — the name
+ * its job carried as a check run until the four PR-body guards became the four
+ * steps of one job (#26071) — duplicated there deliberately, and pinned in both
+ * directions by the self-test below. The check-run name branch protection
+ * would pin is now that one job's, shared by all four guards; renaming either
+ * silently detaches a required context, and this is the cheap half of the
+ * two-step that makes that impossible to do by accident.
  */
 export const CHECK_CONTEXT_NAME = 'The card this PR closes must claim this branch';
 
@@ -1245,14 +1247,17 @@ async function selfTest() {
   const wiring = existsSync(wiringPath) ? readFileSync(wiringPath, 'utf8') : '';
   t('the wiring workflow exists', wiring !== '', true);
   t('the wiring workflow runs this script', wiring.includes('node scripts/check-closing-target-claim.mjs'), true);
-  t('the wiring declares the check-run name this file pins', wiring.includes(CHECK_CONTEXT_NAME), true);
+  // Comment-stripped, deliberately: the one-job workflow's header QUOTES every
+  // step name in prose, so a raw-text read would stay green with the step
+  // renamed — a phantom pin. Only an executable `name:` line satisfies this.
+  const wiringCommands = wiring.split('\n').filter((line) => !/^\s*#/.test(line)).join('\n');
+  t('the wiring names the gate step as this file pins it (the retired check-run name), on an executable line', wiringCommands.includes(CHECK_CONTEXT_NAME), true);
   t('the wiring subscribes to body edits, so dropping the keyword can go green', /types:\s*\[[^\]]*\bedited\b[^\]]*\]/.test(wiring), true);
   t('the wiring subscribes to `synchronize`, so a re-pushed branch is re-judged', /types:\s*\[[^\]]*\bsynchronize\b[^\]]*\]/.test(wiring), true);
   t('the wiring takes the merge_group leg — the queue claim is wiring, not prose', /^\s{2}merge_group:\s*$/m.test(wiring), true);
   t('the wiring passes the head ref, without which nothing can be judged', /PR_HEAD_REF:/.test(wiring), true);
   t('the wiring passes the merge-queue head ref', /MERGE_GROUP_HEAD_REF:/.test(wiring), true);
   t('everything reaches the script through `env:`, never through shell interpolation', /env:[\s\S]{0,400}?PR_BODY:/.test(wiring), true);
-  const wiringCommands = wiring.split('\n').filter((line) => !/^\s*#/.test(line)).join('\n');
   t('the guard job invokes no package manager (it needs node and nothing else)', /\b(pnpm|corepack|yarn|npm)\b/.test(wiringCommands), false);
 
   // --- A claim its own session later YIELDED is not the card's claim. The

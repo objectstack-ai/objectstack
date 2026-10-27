@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 
 import {
   ANALYSED_PACK_OBJECT_IMPORTERS,
+  DESIGNER_NAMESPACE_HOMES,
+  DESIGNER_NAMESPACE_SPECIFIER,
   DESIGNER_TABLE,
   collectDesignerKeys,
   collectIndirectTemplateHeads,
@@ -789,6 +791,62 @@ describe('collectDesignerKeys() — the optional second argument', () => {
     expect(() => collectDesignerKeys(spread, { withValues: true, require: false })).toThrow(
       /unsupported property form/,
     );
+  });
+});
+
+/**
+ * objectstack#25922 — the table's second home, the `studio` namespace. Its
+ * catalogues are read as members of the table they belong to, but only when the
+ * table module imports the namespace: the edge the runtime follows.
+ */
+describe('collectDesignerKeys() — the namespace homes', () => {
+  const [EN_HOME, ZH_HOME] = DESIGNER_NAMESPACE_HOMES;
+  const IMPORTING_TABLE = `import { studioString } from '${DESIGNER_NAMESPACE_SPECIFIER}';\n${DESIGNER_TABLE_FIXTURE}`;
+  const homes = (en: string, zh: string) => ({
+    [EN_HOME.file]: `const ${EN_HOME.decl}: Record<string, string> = { ${en} };\nexport default ${EN_HOME.decl};\n`,
+    [ZH_HOME.file]: `const ${ZH_HOME.decl}: Record<string, string> = { ${zh} };\nexport default ${ZH_HOME.decl};\n`,
+  });
+  const MOVED = homes("'designer.fx.moved': 'Moved'", "'designer.fx.moved': '已迁移'");
+
+  it('merges a home into its table when the table imports the namespace', () => {
+    const { tables, values } = collectDesignerKeys(designerRoot({ [DESIGNER_TABLE]: IMPORTING_TABLE, ...MOVED }), {
+      withValues: true,
+    });
+    expect(tables.get('ENGINE_STRINGS_EN')!.size).toBe(10);
+    expect(tables.get('ENGINE_STRINGS_ZH')!.has('designer.fx.moved')).toBe(true);
+    expect(values!.get('ENGINE_STRINGS_ZH')!.get('designer.fx.moved')).toBe('已迁移');
+  });
+
+  it('reads no home when the table does not import the namespace, even if the files exist', () => {
+    const { tables } = collectDesignerKeys(designerRoot(MOVED));
+    expect(tables.get('ENGINE_STRINGS_EN')!.has('designer.fx.moved')).toBe(false);
+  });
+
+  it('throws when the table imports the namespace and a home cannot be read', () => {
+    expect(() => collectDesignerKeys(designerRoot({ [DESIGNER_TABLE]: IMPORTING_TABLE }))).toThrow(/cannot be read/);
+  });
+
+  it('throws on a key in both homes', () => {
+    const root = designerRoot({
+      [DESIGNER_TABLE]: IMPORTING_TABLE,
+      ...homes("'engine.fx.dead': 'Copy'", "'engine.fx.dead': '副本'"),
+    });
+    expect(() => collectDesignerKeys(root)).toThrow(/exactly one home/);
+  });
+
+  it('a caller that passes `source` reads homes through `readHome`, or throws', () => {
+    const root = designerRoot(MOVED);
+    expect(() => collectDesignerKeys(root, { source: IMPORTING_TABLE })).toThrow(/readHome/);
+    const read = collectDesignerKeys(root, {
+      source: IMPORTING_TABLE,
+      readHome: (file: string) => fs.readFileSync(path.join(root, file), 'utf8'),
+    });
+    expect(read.corpus.has('designer.fx.moved')).toBe(true);
+  });
+
+  it("the dead-keys sweep does not read a home's own literal as a reader of its keys", () => {
+    const result = sweepDesignerTable(designerRoot({ [DESIGNER_TABLE]: IMPORTING_TABLE, ...MOVED }));
+    expect(keysOf(result.confirmed)).toContain('designer.fx.moved');
   });
 });
 

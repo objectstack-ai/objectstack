@@ -1612,7 +1612,8 @@ export function selfTest({ tier = 'full' } = {}) {
 
   // ── The step's `env:` is the OTHER carrier of a workflow value (#15761) ────
   //
-  // `partof-closing-keyword-guard.yml` passes the whole input through `env:`
+  // `pr-body-guards.yml` (the Part-of closing-keyword guard's step; formerly
+  // `partof-closing-keyword-guard.yml`) passes the whole input through `env:`
   // and leaves the argv bare, so the argv-shaped classifier scored
   // `node scripts/check-partof-closing-keyword.mjs` as a command a dev can
   // paste — one whose only possible outcome here is the gate's own exit 2
@@ -1648,7 +1649,7 @@ export function selfTest({ tier = 'full' } = {}) {
     '            NESTED: ${{ github.sha }}',
     '        run: node scripts/check-nested-env.mjs',
   ].join('\n');
-  const envInvs = extractCheckInvocations(envWf, 'partof-closing-keyword-guard.yml');
+  const envInvs = extractCheckInvocations(envWf, 'pr-body-guards.yml');
   const envOf = (name) => (envInvs.find((i) => i.script === name)?.envVariables ?? null);
   // (a) The specimen: the step's `env:` names ride the invocation, in order.
   t(
@@ -13761,7 +13762,7 @@ export function selfTest({ tier = 'full' } = {}) {
   // a runnable command, and running it here exits 2 with the gate's own
   // "NOT WIRED" refusal.
   {
-    const envLive = runCli(['--commands', '.github/workflows/partof-closing-keyword-guard.yml']);
+    const envLive = runCli(['--commands', '.github/workflows/pr-body-guards.yml']);
     const envLiveOut = (envLive.stdout ?? '').split('\n');
     const envLiveErr = envLive.stderr ?? '';
     t(

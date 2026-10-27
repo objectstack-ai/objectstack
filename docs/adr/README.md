@@ -17,13 +17,13 @@
 
 | Status | Records |
 |---|---|
-| Accepted | 108 |
-| Proposed | 22 |
+| Accepted | 112 |
+| Proposed | 17 |
 | Superseded | 4 |
 | Draft | 3 |
+| Deferred | 2 |
 | Withdrawn | 2 |
 | Amended | 1 |
-| Deferred | 1 |
 | Partially implemented | 1 |
 | Revised | 1 |
 | **Total** | **143** |
@@ -46,14 +46,14 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 
 | Cite as | File | Title | Status | Date |
 |---|---|---|---|---|
-| `ADR-0010-metadata-protection-model` | [0010-metadata-protection-model.md](./0010-metadata-protection-model.md) | Metadata Protection Model | Proposed | 2026-05-29 |
+| `ADR-0010-metadata-protection-model` | [0010-metadata-protection-model.md](./0010-metadata-protection-model.md) | Metadata Protection Model | Accepted — 2026-10-27 (ruled on objectstack#26553, ADR batch 1; proposed 2… | 2026-05-29 |
 | `ADR-0010-nl-to-flow-authoring` | [0010-nl-to-flow-authoring.md](./0010-nl-to-flow-authoring.md) | Natural-Language → Flow Authoring (Platform Capability) | Draft — 2026-05-24 | 2026-05-24 |
 
 ### ADR-0019 — 2 unrelated decisions — a collision
 
 | Cite as | File | Title | Status | Date |
 |---|---|---|---|---|
-| `ADR-0019-app-as-consumer-unit` | [0019-app-as-consumer-unit.md](./0019-app-as-consumer-unit.md) | App as the Consumer-Facing Unit | Proposed — v3 — narrowed to the consumer-surface decision | 2026-05-31 |
+| `ADR-0019-app-as-consumer-unit` | [0019-app-as-consumer-unit.md](./0019-app-as-consumer-unit.md) | App as the Consumer-Facing Unit | Accepted — 2026-10-27 (ruled on objectstack#26553, ADR batch 1; proposed 2… | 2026-05-31 |
 | `ADR-0019-approval-as-flow-node` | [0019-approval-as-flow-node.md](./0019-approval-as-flow-node.md) | Collapse Approval into Flow — one engine, approval as a durable-pause node | Accepted — 2026-05-31 — fully implemented (A1–A5) | 2026-05-31 |
 
 ### ADR-0057 — 2 unrelated decisions — a collision
@@ -78,7 +78,7 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0007](./0007-settings-manifest-and-kv-store.md) | Settings — Manifest + K/V Store + Resolver (Apple-style) | Accepted — backend implemented; UI pending (objectui) (proposed 2026-05-20… | 2026-05-20 | — | — |
 | [ADR-0008](./0008-metadata-repository-and-change-log.md) | Metadata Repository, Change Log & Subscription (M0 → M4) | Accepted — 2026-05-22 · Amended 2026-04-13 — branch concept removed (see §… | 2026-05-22 | *ad-hoc HMR wiring in `packages/metadata…* | — |
 | [ADR-0009](./0009-execution-pinned-metadata.md) | Execution-Pinned Metadata | Accepted | 2026-05-22 | — | — |
-| [ADR-0010-metadata-protection-model](./0010-metadata-protection-model.md) | Metadata Protection Model | Proposed | 2026-05-29 | — | — |
+| [ADR-0010-metadata-protection-model](./0010-metadata-protection-model.md) | Metadata Protection Model | Accepted — 2026-10-27 (ruled on objectstack#26553, ADR batch 1; proposed 2… | 2026-05-29 | — | — |
 | [ADR-0010-nl-to-flow-authoring](./0010-nl-to-flow-authoring.md) | Natural-Language → Flow Authoring (Platform Capability) | Draft — 2026-05-24 | 2026-05-24 | — | — |
 | [ADR-0011](./0011-actions-as-ai-tools.md) | Actions as AI Tools (Operational Parity) | Accepted — implemented (2026-06-04) | 2026-06-04 | — | — |
 | [ADR-0012](./0012-notification-platform.md) | Messaging Platform — Outbound Notifications on a Generalized Outbox | Draft — 2026-05-25 · scope-revised 2026-05-26 · Superseded by ADR-0030… | 2026-05-25 | — | ADR-0030 |
@@ -88,16 +88,16 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0016](./0016-studio-package-authoring-and-publish.md) | Studio Package Authoring & One-Click Publish | Partially implemented — revised 2026-05-30 | 2026-05-30 | — | — |
 | [ADR-0017](./0017-object-has-many-view.md) | Object has-many View (Independent View Entities) | Accepted — · Implemented Phases 1–4 (2026-05-30) · Phase 5 (Studio designe… | 2026-05-30 | — | — |
 | [ADR-0018](./0018-unified-node-action-registry.md) | Unified Node/Action Registry across Flow, Workflow-Rule & Approval | Accepted — 2026-05-31 — M1–M3 implemented; M4 framework-side complete (des… | 2026-05-31 | — | — |
-| [ADR-0019-app-as-consumer-unit](./0019-app-as-consumer-unit.md) | App as the Consumer-Facing Unit | Proposed — v3 — narrowed to the consumer-surface decision | 2026-05-31 | — | — |
+| [ADR-0019-app-as-consumer-unit](./0019-app-as-consumer-unit.md) | App as the Consumer-Facing Unit | Accepted — 2026-10-27 (ruled on objectstack#26553, ADR batch 1; proposed 2… | 2026-05-31 | — | — |
 | [ADR-0019-approval-as-flow-node](./0019-approval-as-flow-node.md) | Collapse Approval into Flow — one engine, approval as a durable-pause node | Accepted — 2026-05-31 — fully implemented (A1–A5) | 2026-05-31 | — | — |
 | [ADR-0020](./0020-state-machine-converge-and-enforce.md) | State Machine — converge three declaration forms to one enforced `statemachine` | Accepted — Implemented (2026-05-31) | 2026-05-31 | — | — |
 | [ADR-0021](./0021-analytics-dataset-semantic-layer.md) | Analytics — one semantic `dataset` layer, `report` / `dashboard` become pure presentation | Accepted — & shipped — Phase 2 closed 2026-06-10. The author-surface conve… | 2026-06-10 | — | — |
-| [ADR-0022](./0022-connectors-vs-messaging-channels.md) | Connectors vs Messaging Channels — Where "Push to Slack" Lives | Proposed — 2026-05-31 — routing decision recorded; both substrates now exi… | 2026-05-31 | — | — |
+| [ADR-0022](./0022-connectors-vs-messaging-channels.md) | Connectors vs Messaging Channels — Where "Push to Slack" Lives | Accepted — 2026-10-27 (ruled on objectstack#26553, ADR batch 1; proposed 2… | 2026-10-27 | — | — |
 | [ADR-0023](./0023-openapi-to-connector-generator.md) | OpenAPI → Connector Generator — Bulk Connectors From Declarative API Specs | Accepted — library implemented; CLI + examples pending (proposed 2026-06-0… | 2026-06-01 | — | — |
 | [ADR-0024](./0024-mcp-connectors.md) | MCP Servers as Connectors — Adopting an Open, Vendor-Neutral Tool Protocol | Accepted — library implemented; examples pending (proposed 2026-06-01 · ca… | 2026-06-01 | — | — |
 | [ADR-0025](./0025-plugin-package-distribution.md) | Plugin Package Distribution (Code + Dependencies) | Proposed — partially implemented (2026-09-12 audit, superseding 2026-07-16… | 2026-09-12 | — | — |
-| [ADR-0026](./0026-client-ui-plugin-distribution.md) | Client-Side UI Plugin Distribution | Proposed | — | — | — |
-| [ADR-0027](./0027-metadata-authoring-lifecycle.md) | `@objectstack/metadata-authoring` — Staged Authoring, Publish & Promotion Lifecycle | Proposed — 2026-06-01 | 2026-06-01 | — | — |
+| [ADR-0026](./0026-client-ui-plugin-distribution.md) | Client-Side UI Plugin Distribution | Deferred — 2026-10-27 (ruled on objectstack#26553, ADR batch 1; proposed 2… | 2026-10-27 | — | — |
+| [ADR-0027](./0027-metadata-authoring-lifecycle.md) | `@objectstack/metadata-authoring` — Staged Authoring, Publish & Promotion Lifecycle | Accepted — 2026-10-27 (ruled on objectstack#26553, ADR batch 1; proposed 2… | 2026-10-27 | — | — |
 | [ADR-0028](./0028-metadata-naming-and-namespace-isolation.md) | Metadata Naming & Namespace Isolation — Derived Physical Names, Namespace-Scoped Identity, and a Single Kerne… | Deferred — 2026-07-16; proposed 2026-06-01 — the target model (namespace a… | 2026-07-16 | ADR-0129 | — |
 | [ADR-0029](./0029-kernel-object-ownership-and-platform-objects-decomposition.md) | Kernel Object Ownership — First-Party Capabilities as Plugins That Own Their Data, and Decomposing the `platf… | Accepted — K0/K1/K2/D7 implemented; K3 (pending ADR-0030/storage) + K4 cle… | 2026-06-01 | — | — |
 | [ADR-0030](./0030-notification-platform-convergence.md) | Notification Platform Convergence (single ingress, layered pipeline) | Accepted — 2026-06-01 — P0–P3b2 shipped (P3b-2 digest collapse landed); cr… | 2026-06-01 | ADR-0012 | — |

@@ -260,7 +260,7 @@ describe('References panel — error ≠ empty ≠ loading (#5110)', () => {
   /**
    * The designer table carries `en` and `zh` in one file and is deliberately
    * out of reach of the pack gates (see `metadata-admin/i18n.ts`'s header and
-   * `packages/i18n/README.md`, "Scope — the `engine.*` carve-out"), so a new
+   * `packages/i18n/README.md`, "Scope — the Studio designer strings"), so a new
    * key added to only one of the two tables fails nowhere. This is that file's
    * parity check for the three keys this card adds.
    *

@@ -13,28 +13,66 @@ import { useDisplayLocale } from '@object-ui/i18n';
 // use of it): this repo has its OWN `resolveKeyedI18nLabel` over a DIFFERENT
 // vocabulary, and neither resolver accepts the other's shape. `schema.label` is
 // the spec's INLINE locale map — see `BaseSchema.label` (objectui#4580).
-import { resolveI18nLabel as resolveInlineI18nLabel } from '@objectstack/spec/ui';
-import { FilterBuilder } from '../../custom/filter-builder';
+import { resolveI18nLabel as resolveInlineI18nLabel, VIEW_FILTER_OPERATORS } from '@objectstack/spec/ui';
+import { FilterBuilder, type FilterBuilderRowGroup } from '../../custom/filter-builder';
 import type { RendererHostProps } from '../../lib/renderer-host-props';
+
+const PROTOCOL_OPERATOR_IDS: ReadonlySet<string> = new Set(VIEW_FILTER_OPERATORS);
+
+/**
+ * Is every row of the builder's group on the protocol's operator vocabulary,
+ * i.e. is it the `FilterGroup` that `FilterBuilderSchema.onChange` declares?
+ *
+ * The builder's own row also admits the opt-in `exists` / `notExists`, which a
+ * `FilterGroup` cannot carry. This node never grants them: `FilterBuilderSchema`
+ * declares no `extraOperators`, and the renderer below keeps a host's
+ * `extraOperators` out of the builder. Its `value` is a `FilterGroup`, whose zod
+ * mirror refuses an operator outside the protocol. A group that fails here
+ * therefore came from a stored `value` that skipped that validation.
+ */
+function isAuthoredFilterGroup(group: FilterBuilderRowGroup): group is FilterBuilderRowGroup & FilterGroup {
+  return group.conditions.every((condition) => PROTOCOL_OPERATOR_IDS.has(condition.operator));
+}
 
 ComponentRegistry.register('filter-builder',
   // `value` is declared because it is read by name: a host that binds the node
   // (a form field) forwards the group it holds, the same authored `FilterGroup`
   // the node's own `value` is.
-  ({ schema, className, onChange, ...props }: { schema: FilterBuilderSchema; className?: string; onChange?: (event: any) => void; value?: FilterGroup; [key: string]: unknown } & RendererHostProps) => {
+  //
+  // `onChange` is typed by the schema's own declaration and is called with the
+  // group (#26382). It was typed `(event: any) => void` and called with a
+  // form-style `{ target: { name, value } }` event, so a handler written from
+  // `FilterBuilderSchema.onChange` read `.logic` / `.conditions` off the event
+  // and got `undefined`, and the `any` kept the compiler from saying so.
+  //
+  // `extraOperators` is taken out of the host spread and never reaches
+  // `FilterBuilder`. It is the builder's only operator-granting prop, and what
+  // it grants (`exists` / `notExists`) is outside the `FilterGroup` that
+  // `onChange` declares. `FilterBuilderSchema` declares no such key, so a host
+  // that forwards one is off contract, and the builder offers only protocol
+  // operators.
+  ({ schema, className, onChange, extraOperators: _refusedExtraOperators, ...props }: { schema: FilterBuilderSchema; className?: string; onChange?: FilterBuilderSchema['onChange']; value?: FilterGroup; [key: string]: unknown } & RendererHostProps) => {
     // Read-time resolution against the display locale (objectui#4580 revised
     // Q1-A). `BaseSchema.label` accepts `string | I18nLabel`; rendering the map
     // straight into a text node THREW "Objects are not valid as a React child".
     const locale = useDisplayLocale();
-    const handleChange = (value: any) => {
-      if (onChange) {
-        onChange({
-          target: {
-            name: schema.name,
-            value: value,
-          },
-        });
+    const handleChange = (group: FilterBuilderRowGroup) => {
+      if (!onChange) return;
+      // No dropdown on this node offers an operator outside the protocol, so
+      // only a stored `value` that skipped its zod validation reaches this
+      // branch. Handing the group on would make the declared `FilterGroup`
+      // false, and a throw here would crash a click in the user's hands, so the
+      // emit is skipped and the console names the operator.
+      if (!isAuthoredFilterGroup(group)) {
+        const offending = group.conditions.find((condition) => !PROTOCOL_OPERATOR_IDS.has(condition.operator));
+        console.error(
+          `filter-builder: onChange not called. A row holds the operator "${offending?.operator}", which is ` +
+            "outside the protocol's view-filter operators, so the FilterGroup that onChange hands over cannot carry it. " +
+            'Fix the stored filter value.',
+        );
+        return;
       }
+      onChange(group);
     };
 
     return (

@@ -130,15 +130,50 @@ export const MCP_OAUTH_SCOPE_DATA_READ = 'data:read';
 export const MCP_OAUTH_SCOPE_DATA_WRITE = 'data:write';
 /** Business-action tools: `list_actions`, `run_action`. */
 export const MCP_OAUTH_SCOPE_ACTIONS = 'actions:execute';
+/**
+ * Authoring-family tools: the authoring `ToolRegistry` a host injects into the
+ * HTTP MCP runtime (`@objectstack/mcp` `handleHttpRequest`, its first reader).
+ * With this scope a developer driving an MCP client builds and changes the
+ * environment's metadata as DRAFTS; a human publishes them in the UI (the
+ * maintainer's 2026-10-27 ruling, cloud ADR-0112). Which tools the host
+ * injects is the host's business; the scope decides only whether they are
+ * served at all. It is a tool-surface grant, not a data grant: it maps to no
+ * data-layer ceiling set (see `scopesToAgentPermissionSets`), and every
+ * authoring call is still checked against the caller's own metadata
+ * permission — the scope is never a bypass.
+ */
+export const MCP_OAUTH_SCOPE_METADATA_WRITE = 'metadata:write';
 
 /** All MCP tool-family scopes, in the order they are advertised. */
 export const MCP_OAUTH_SCOPES = [
   MCP_OAUTH_SCOPE_DATA_READ,
   MCP_OAUTH_SCOPE_DATA_WRITE,
   MCP_OAUTH_SCOPE_ACTIONS,
+  MCP_OAUTH_SCOPE_METADATA_WRITE,
 ] as const;
 
 export type McpOauthScope = (typeof MCP_OAUTH_SCOPES)[number];
+
+/**
+ * The one-sentence consent copy an OAuth consent screen renders for each MCP
+ * scope — what the human reads before handing an agent the grant.
+ *
+ * Declared beside the scopes so a consent screen (the hosted one, the OSS
+ * Console) renders the same sentence for the same scope, and so a new scope
+ * ships with its copy in the same change: a scope with no sentence reaches the
+ * user as its raw spelling, which says nothing about what they are granting.
+ * Each sentence carries the bound the server enforces — the agent acts within
+ * the consenting user's own permissions, and a scope never grants more than
+ * that user could do. Keyed by {@link McpOauthScope}, so adding a scope
+ * without its sentence fails to compile.
+ */
+export const MCP_OAUTH_SCOPE_CONSENT_COPY: Readonly<Record<McpOauthScope, string>> = {
+  [MCP_OAUTH_SCOPE_DATA_READ]: 'Read records, within your own permissions',
+  [MCP_OAUTH_SCOPE_DATA_WRITE]: 'Create, change and delete records, within your own permissions',
+  [MCP_OAUTH_SCOPE_ACTIONS]: 'Run actions on your behalf, within your own permissions',
+  [MCP_OAUTH_SCOPE_METADATA_WRITE]:
+    'Build and change this app\'s metadata as drafts, within your own permissions — a person publishes them',
+};
 
 /**
  * [ADR-0090 D10] Built-in permission sets that express an MCP agent's
@@ -181,8 +216,10 @@ export const MCP_AGENT_PERMISSION_SETS = [
  * [ADR-0090 D10] Map the OAuth scopes on an MCP token to the agent's ceiling
  * permission set(s). `data:write` (a superset — its set also grants read) wins
  * over `data:read`; a token with neither data scope (e.g. `actions:execute`
- * only) gets the no-object-access floor. Always returns at least one set so the
- * agent principal is never empty (which would fail OPEN in the middleware).
+ * only, or `metadata:write` only — authoring is a tool-surface grant, not a
+ * data grant) gets the no-object-access floor. Always returns at least one set
+ * so the agent principal is never empty (which would fail OPEN in the
+ * middleware).
  */
 export function scopesToAgentPermissionSets(scopes: readonly string[] | undefined): string[] {
   const s = new Set(scopes ?? []);

@@ -179,6 +179,17 @@ variables: [
 > dedicated `runAs: 'system'` flow and call it from a `subflow` node — raising
 > the whole flow silently elevates every other write in it.
 >
+> **Elevation stops at identity assignment.** A `runAs: 'system'` flow's
+> insert, update, delete, transfer, restore or purge of `sys_user_position`,
+> `sys_user_permission_set`, `sys_invitation` or `sys_member` is refused with
+> `PERMISSION_DENIED`, and moving that step into a dedicated `runAs: 'system'`
+> subflow does not lift it: a governed identity write is judged by a door that
+> judges a person. Grant positions and permission sets from a flow whose
+> `runAs` is `'user'` — the delegated-administration gate then judges the user
+> the run acts for and records them as the grant's `granted_by`. Invitations
+> and memberships change through the organization endpoints (row 1b,
+> https://objectstack.ai/docs/permissions/system-context#1-authorization-and-scoping).
+>
 > **A `runAs: 'system'` sweep must pin its organization.** System context has no
 > trigger user, so nothing narrows the query: a scan or rollup with no
 > organization predicate reads and writes across every tenant. The tenant column

@@ -377,47 +377,49 @@ same limbs, and deliberately stop short of `pickLocalized`'s display-only
 fallbacks, so an author editing in `fr` while shown the `en` string can neither
 overwrite nor delete English.
 
-## Scope — the `engine.*` carve-out (metadata-admin / Studio)
+## Scope — the Studio designer strings (the `studio` namespace)
 
-Not every user-facing string in this repository resolves through these packs.
-The metadata-admin (Studio) surface — the metadata directory, the inspectors,
-package management, the flow designer and their refusal messages — resolves its
-`engine.*` keys through a module-local **two-locale** table in
-[`packages/app-shell/src/views/metadata-admin/i18n.ts`](../app-shell/src/views/metadata-admin/i18n.ts):
-a plain `Record` lookup over `en-US` and `zh-CN`, not an i18next namespace.
-Roughly 1,300 keys per locale live there, and **no `engine.*` key exists in any
-of the ten packs.**
+The metadata-admin / Studio surface — the metadata directory, the inspectors,
+package management, the flow designer and their refusal messages — does not
+resolve its strings through the ten packs. Its keys (`engine.*`, `designer.*`,
+`perm.*`) are a **two-locale** set, `en` and `zh`, read through app-shell's
+`t()` / `tFormat()` / `tOptional()` with the designer's own `{token}`
+placeholders.
 
-That is design, not drift — the file's header records it as "Phase 3f". The
-server holds the primary path: the engine consumes `label` from the
-`/meta/types` response, sourced from the platform's metadata-type registry. The
-module-local table is a **fallback** for deployments with no translation bundles
-configured, and the interim source of truth for Chinese until the platform's
-`setup.translation.ts` ships zh-CN coverage. Copying the namespace into the
-packs would duplicate strings whose primary source is a server response.
+**Where they live is changing.** objectui#4662 kept them in a module-local table
+in `packages/app-shell/src/views/metadata-admin/i18n.ts` and recorded that as a
+carve-out. The maintainer reopened it on objectstack#25922: ruling
+6431032267 (Q2 = A) and the re-ruling 6431234244, which keeps Q2 and makes the
+move dispatchable once app-shell stopped publishing. The table becomes this
+package's **`studio` namespace**,
+[`src/namespaces/studio/`](./src/namespaces/studio/index.ts), reached through the
+`@object-ui/i18n/namespaces/studio` subpath:
 
-Two consequences follow, and both are accepted rather than outstanding work:
-
-- **Only `en` and `zh` are covered.** On an `ar` / `de` / `es` / `fr` / `ja` /
-  `ko` / `pt` / `ru` console, `engine.*` strings render English. That is the
-  price of the carve-out, not a backfill someone forgot.
-- **The i18n gates cannot see this namespace, by construction.** Key parity
+- **One lazy namespace, two catalogues.** `en` is resident (it is the fallback);
+  `zh` is its own chunk, fetched the first time a Chinese lookup asks for it.
+- **Every other language falls back to `en`.** On an `ar` / `de` / `es` / `fr` /
+  `ja` / `ko` / `pt` / `ru` console these strings render English. No
+  translation is invented for them; a language gains Studio coverage by adding
+  a catalogue to the namespace, not by copying keys into its pack.
+- **Not in the eager console catalogue.** `locales/en.ts` gains no key: the
+  namespace's `en` loads with the designer code that reads it.
+- **Outside the pack gates by construction.** Key parity
   ([`src/__tests__/all-locales-key-parity.test.ts`](./src/__tests__/all-locales-key-parity.test.ts))
-  compares pack against pack, and `engine.*` is in no pack — so it is not an
-  *exception* to that test, it is outside its subject. The call-site gate
-  ([`scripts/check-i18n-call-site-keys.mjs`](../../scripts/check-i18n-call-site-keys.mjs))
-  skips these call sites **by declaration**: the module is registered in its
-  `EXCLUDED_TRANSLATORS` list with a reason, and an imported `t` from any
-  unregistered module is a hard error there — so a second local table cannot
-  appear silently, and this carve-out cannot quietly widen.
+  iterates `builtInLocales`, the ten packs; the namespace's catalogues are not
+  packs and not members of it, so the namespace is outside that test's subject
+  rather than an exception to it. Its own parity — every `en` key has a `zh`
+  row with the same `{placeholders}` — is held by
+  [`src/__tests__/studio-namespace.test.ts`](./src/__tests__/studio-namespace.test.ts)
+  and, while the move is in progress, by `pnpm check:i18n-designer-parity`
+  over both homes together.
 
-**When to revisit.** Migrating the namespace into the packs is mechanical but
-wide (~1,300 keys × 8 further locales) and argues against the server-driven
-design above, so it is not worth doing speculatively. The condition to reopen it
-is concrete: a stated demand for an admin console in a language other than `en`
-or `zh` — not a general wish for broader locale coverage, which the packs
-already serve on every other surface. See objectui#4662 for the measurement and
-the ruling.
+The move runs in slices. Until the last one a key lives in exactly one home —
+the app-shell table or the namespace — and app-shell's lookup asks the table
+first and the namespace second, so no call site changes. The call-site gate
+([`scripts/check-i18n-call-site-keys.mjs`](../../scripts/check-i18n-call-site-keys.mjs))
+still skips app-shell's translator **by declaration** (its `EXCLUDED_TRANSLATORS`
+entry), so a second local table cannot appear silently. The last slice deletes
+the app-shell table and retires `check:i18n-designer-parity` with it.
 
 ## Links
 

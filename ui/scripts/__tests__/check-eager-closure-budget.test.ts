@@ -495,6 +495,11 @@ describe('chunk attribution (objectui#7399)', () => {
   const LOCALE_MODULE = moduleId('packages/i18n/src/locales/zh.ts');
   const RESIDENT_LOCALE_MODULE = moduleId('packages/i18n/src/locales/en.ts');
   const I18N_RUNTIME_MODULE = moduleId('packages/i18n/src/provider.tsx');
+  // objectstack#25922: the Studio designer namespace's two catalogues. The lazy
+  // one must not fall to the eager `i18n-runtime` group, whose test matches
+  // every file under `packages/i18n`.
+  const STUDIO_LAZY_MODULE = moduleId('packages/i18n/src/namespaces/studio/zh.ts');
+  const STUDIO_RESIDENT_MODULE = moduleId('packages/i18n/src/namespaces/studio/en.ts');
   const DATA_MODULE = moduleId('packages/data-objectstack/src/index.ts');
   const CORE_MODULE = moduleId('packages/core/src/index.ts');
   // objectui#10065's pair: a validator that must leave the eager line, and the
@@ -558,6 +563,8 @@ describe('chunk attribution (objectui#7399)', () => {
       ['the lazy locale catalogue', LOCALE_MODULE, 'i18n-locale-zh'],
       ['the resident locale catalogue', RESIDENT_LOCALE_MODULE, 'i18n-locale-en'],
       ['the i18n runtime', I18N_RUNTIME_MODULE, 'i18n-runtime'],
+      ['the lazy studio namespace catalogue', STUDIO_LAZY_MODULE, 'i18n-ns-studio-zh'],
+      ['the resident studio namespace catalogue', STUDIO_RESIDENT_MODULE, 'i18n-ns-studio-en'],
       ['the ObjectStack data adapter', DATA_MODULE, 'data-adapter'],
       ['the zod validators', ZOD_MODULE, 'types-zod'],
       ['the record-form date picker', DATE_PICKER_MODULE, 'fields-date-picker'],

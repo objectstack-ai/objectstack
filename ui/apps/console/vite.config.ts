@@ -1156,6 +1156,18 @@ export default defineConfig({
             { name: 'i18n-locale-ru', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]locales[\\/]ru\.ts$/, priority: 84 },
             { name: 'i18n-locale-ar', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]locales[\\/]ar\.ts$/, priority: 84 },
             //
+            // The Studio designer's `studio` namespace (objectstack#25922): the
+            // same one-group-per-catalogue rule, for the same reason. Its `zh`
+            // catalogue is `import()`ed on demand by
+            // `packages/i18n/src/namespaces/studio/index.ts`; without a group of
+            // its own it would fall to `i18n-runtime` below, which is eager, and
+            // the laziness would be real in the source and absent in the bundle.
+            // `en` is the namespace's resident fallback and gets its own chunk so
+            // its bytes are named in `eager-closure.json` instead of hiding in
+            // the runtime's.
+            { name: 'i18n-ns-studio-en', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]studio[\\/]en\.ts$/, priority: 84 },
+            { name: 'i18n-ns-studio-zh', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]studio[\\/]zh\.ts$/, priority: 84 },
+            //
             // ⛔ `i18n-runtime` takes `includeDependenciesRecursively: false`
             // for the reason `data-adapter` below does (objectui#9345, read out
             // there in full): it outranks `framework` (83 over 80), and since

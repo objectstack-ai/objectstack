@@ -91,6 +91,11 @@ import { ObjectFieldInspector } from './ObjectFieldInspector';
 import { ObjectDefaultInspector } from './ObjectDefaultInspector';
 import { InspectorShell, InspectorSelectField, flagUnknownValue } from './_shared';
 import { InspectorComboField } from './InspectorComboField';
+// The designer's `designer.*` / `perm.*` rows live in `@object-ui/i18n`'s `studio`
+// namespace, whose `zh` catalogue is fetched on demand (objectstack#25922).
+// Resident before any case, so the zh rows below read synchronously.
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+await loadStudioCatalogue('zh');
 
 /** Each fixture starts from the same catalog, fields and held set. */
 function resetState() {

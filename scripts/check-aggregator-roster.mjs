@@ -10,11 +10,12 @@
  *
  * ## The gap this closes
  *
- * Four of this repo's required contexts are aggregator jobs standing in for a
+ * Five of this repo's required contexts are aggregator jobs standing in for a
  * set of real jobs, each deciding its verdict from what it lists in `needs:`:
  * `test-gate` / `Test Core` and `dogfood-gate` / `Dogfood Regression Gate` in
  * ci.yml, and `typecheck` / `TypeScript Type Check` and, since #22991,
- * `lint` / `Lint & Repo Gates` in lint.yml.
+ * `lint` / `Lint & Repo Gates` in lint.yml, and, since #26460, ci.yml's
+ * `test-ui-gate` / `Test UI`.
  *
  * Nothing held those rosters to anything. The failure mode is one forgotten
  * line:
@@ -68,7 +69,7 @@
  *
  * Discovery is by declaration, so a NEW aggregator that adds the two keys is
  * covered without editing this file. `REQUIRED_AGGREGATORS` is the floor
- * underneath that: the four jobs that carry a branch-protection-required
+ * underneath that: the five jobs that carry a branch-protection-required
  * context must each be found AND declared, so deleting the declaration to make
  * a red go away is itself red.
  *
@@ -110,6 +111,8 @@ export const REQUIRED_AGGREGATORS = [
   { workflow: 'lint.yml', job: 'typecheck', context: 'TypeScript Type Check' },
   // #22991: the single 193-step job became an aggregate over eight lanes.
   { workflow: 'lint.yml', job: 'lint', context: 'Lint & Repo Gates' },
+  // #26460: the `Test UI` aggregate over the 16 `test-ui` shards.
+  { workflow: 'ci.yml', job: 'test-ui-gate', context: 'Test UI' },
 ];
 
 /** A legal GitHub Actions job id. A comma or a stray quote fails here. */
@@ -507,6 +510,7 @@ async function selfTest() {
       from: '    needs: [dogfood, dogfood-verify, filter]\n',
       to: '    needs: [dogfood, filter]\n',
     },
+    { label: 'test-ui-gate loses its matrix from needs:', file: 'ci.yml', member: 'test-ui', from: '    needs: [test-ui, filter]\n', to: '    needs: [filter]\n' },
   ];
   for (const scenario of dropped) {
     const verdict = fixture(scenario.label, scenario.file, (s) => s.replace(scenario.from, scenario.to));
@@ -536,6 +540,7 @@ async function selfTest() {
       to: '    needs: [dogfood, dogfood-verify, filter, dogfood-ghost]\n',
       ghost: 'dogfood-ghost',
     },
+    { label: 'test-ui-gate needs a job that was deleted', file: 'ci.yml', from: '    needs: [test-ui, filter]\n', to: '    needs: [test-ui, filter, test-ui-ghost]\n', ghost: 'test-ui-ghost' },
   ];
   for (const scenario of phantom) {
     const verdict = fixture(scenario.label, scenario.file, (s) => s.replace(scenario.from, scenario.to));
