@@ -958,6 +958,10 @@ import { dirname, join } from 'node:path';
 import ts from 'typescript';
 import type { z } from 'zod';
 import type { WithoutCatchall } from './zod-catchall-type';
+// The spec-only-key census (objectstack#25923) walks the WHOLE spec/ui surface to
+// pair each mirror with its same-name spec schema — the namespace import is its
+// instrument, read at runtime only, a sanctioned importer (#3090 tripwire).
+// eslint-disable-next-line no-restricted-imports
 import * as SpecUi from '@objectstack/spec/ui';
 import * as SpecData from '@objectstack/spec/data';
 import * as ZodBarrel from '../zod/index.zod.js';
