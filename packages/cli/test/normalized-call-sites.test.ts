@@ -414,6 +414,10 @@ const READS: Readonly<Record<string, ReadRow>> = {
     ],
     why: 'the doors hand it the parsed union, and `os lint` the lowered copy of its folded stack. `scaffold-validate.ts` hands it one scaffold\'s own stack, which has no `packages[]`.',
   },
+  'utils/bundle-seed-files.ts :: stack.data': {
+    reads: 'top-level',
+    why: 'the top level\'s own datasets; the same walk reads `manifest.data` and each `packages[i].manifest` body\'s `data` too, by position, because `placeSeedFiles` writes the bytes into those very dataset objects (#25779). Pinned on a package body in `bundle-seed-files.test.ts`.',
+  },
   'utils/collect-docs.ts :: stack.docs': {
     reads: 'top-level',
     why: 'the artifact\'s own top-level `docs`; the same function reads each package\'s docs off its body (`bodyDocsOf(stack.packages, …)`) and lints them against that package.',
