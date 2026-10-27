@@ -11133,8 +11133,6 @@ export function selfTest({ tier = 'full' } = {}) {
   t('and with no inputs to narrow by it keeps everything and reads ignored as NOT MEASURED (null), never as an empty array',
     narrowToDerivationInputs(['a', 'b'], null).changed.join() === 'a,b' && narrowToDerivationInputs(['a', 'b'], null).ignored === null
       && narrowToDerivationInputs(['a'], undefined).changed.join() === 'a' && narrowToDerivationInputs(['a'], undefined).ignored === null);
-  t('liveDerivationInputs on this tree answers the measured set itself, never a degraded null',
-    liveDerivationInputs() === live);
   // The MEASURED set, read off this tree's own discovery: the narrowing is
   // only honest if the set it narrows by is closed under the answer, so these
   // pin the members that closure needs — the manifest, every workflow, every
@@ -11143,6 +11141,8 @@ export function selfTest({ tier = 'full' } = {}) {
   // not vacuous. The last case pins the live specimen: the generated SDUI
   // manifest record, which moves on ui landings and which no family opens.
   const live = derivationInputs();
+  t('liveDerivationInputs on this tree answers the measured set itself, never a degraded null',
+    liveDerivationInputs() === live);
   const trackedNow = new Set(trackedFiles());
   const workflowFiles = readdirSync(nodePath.join(ROOT, '.github/workflows')).filter((f) => /\.ya?ml$/.test(f));
   t('LIVE: every measured derivation input is a tracked file — no fabricated path', live.size > 0 && [...live].every((rel) => trackedNow.has(rel)));
