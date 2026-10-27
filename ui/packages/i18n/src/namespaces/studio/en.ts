@@ -730,6 +730,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.pageBlock.field.list-view.object': 'Object',
   'engine.inspector.pageBlock.field.list-view.view': 'View',
   'engine.inspector.pageBlock.field.list-view.limit': 'Row limit',
+  // The add-block picker's name for the block whose panel the three rows above
+  // label; its sibling `engine.pageBlockCanvas.type.*` rows are still in the
+  // designer table, app-shell `views/metadata-admin/i18n.ts` (objectstack#26794).
+  'engine.pageBlockCanvas.type.listView': 'List view',
   'engine.inspector.pageBlock.field.grid.columns': 'Columns',
   'engine.inspector.pageBlock.field.grid.gap': 'Gap',
   'engine.inspector.pageBlock.field.element:text.content': 'Content',
