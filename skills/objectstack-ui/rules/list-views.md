@@ -1,7 +1,7 @@
 # List, Kanban & Gantt Views
 
 - [Configuring a List View](#configuring-a-list-view) · [The `defineView` container](#the-defineview-container-viewts-file-shape) · [Data Source](#data-source-data)
-- [Columns](#columns) · [Column Features](#column-features) · [Filtering](#filtering) · [Sorting](#sorting)
+- [Columns](#columns) · [Column Features](#column-features) · [Filtering](#filtering) · [Sorting](#sorting) · [Grouping](#grouping)
 - [End-User Quick Filters](#end-user-quick-filters-userfilters-adr-0047) · [Toolbar Search](#toolbar-search-searchablefields-adr-0061)
 - [Configuring Kanban Views](#configuring-kanban-views)
 - [Configuring Gantt Views](#configuring-gantt-views)
@@ -190,10 +190,7 @@ export const CaseViews = defineView({
 | declares `searchableFields` | **that list, verbatim** — whatever the field types are |
 | declares nothing | the auto-default: the name field + the text-like columns (`text` / `email` / `phone` / `url` / `autonumber` / `textarea` / `markdown` / `select` / `status`) |
 
-Field **type** therefore decides only in the second row: where the object
-declares the set, a lookup in it is scanned and a `text` column outside it is
-refused. Judge every entry against the object's allowed set, never the type
-list. Modelling side: **objectstack-data → Search Fields**. Query side
+Modelling side: **objectstack-data → Search Fields**. Query side
 (`search.fields` over the API): **objectstack-query → Full-Text Search**.
 
 #### ⛔ One bad entry 400s EVERY search on that list
@@ -233,12 +230,8 @@ export const AuditViews = defineView({
 });
 ```
 
-**Searching by a related record's title:** never reach for a dotted path. The
-search axis resolves no traversal, so `account_id.name` is refused rather than
-silently dropped. Mirror the parent's title into a **stored** field on this
-object and narrow to that. The prescription — the mirror field, the two hooks
-that maintain it, and why a `formula` field cannot be the mirror — lives in
-**objectstack-data → Search Fields (`searchableFields`)**.
+**Searching by a related record's title:** mirror it into a **stored** field
+and narrow to that — **objectstack-data → Search Fields (`searchableFields`)**.
 
 ### Sorting
 
@@ -248,6 +241,21 @@ sort: [
   { field: 'priority', order: 'desc' },
   { field: 'created_at', order: 'asc' },
 ]
+```
+
+### Grouping
+
+`grouping.fields[]` nests levels, outermost first. A `select` level keeps its
+option order (declare stages in pipeline order); others sort by label.
+`orderBy` orders a level's groups by a number, date or boolean field of the
+same object instead — text or a select is refused
+(`list-view-group-order-unorderable`):
+
+```typescript
+grouping: { fields: [
+  { field: 'stage' },
+  { field: 'period_label', orderBy: 'period_start', order: 'desc' },  // newest first
+] },
 ```
 
 ---

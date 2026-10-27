@@ -50,6 +50,36 @@
         "must_contain": ["function:", "outputVariable", "type: 'fault'", "timeoutMs", "update_record", "dialect: 'cel'"],
         "must_not_contain": ["label: 'error'", "query_record", "{recalc"]
       }
+    },
+    {
+      "id": 6,
+      "prompt": "When a `job_application` is approved, email the applicant. Applicants are not users; the address is in the record's `applicant_email` field.",
+      "expected_output": "`notify` with `recipients: { emailField: 'applicant_email' }` (the fourth recipient form: an `email`-typed field of the trigger record) and `channels: 'email'` alone — never a CEL envelope over `record.applicant_email`, which must yield user ids and fails the node for an address no user holds.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["notify", "emailField", "applicant_email", "'email'"],
+        "must_not_contain": ["source: 'record.applicant_email'", "channels: ['inbox']"]
+      }
+    },
+    {
+      "id": 7,
+      "prompt": "An expense approval only holders of the `expense.approve_request` capability may start; route to the `finance_manager` position, and the submitter must never approve their own expense.",
+      "expected_output": "Flow-level `requiredPermissions: ['expense.approve_request']` (checked at every door that starts the flow, not a `current_user.positions` check inside it); the `approval` node sets `excludeSubmitter: true`, and its `onEmptyApprovers` is anything but `auto_approve`, which is refused beside it.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["requiredPermissions", "excludeSubmitter: true", "type: 'position'"],
+        "must_not_contain": ["onEmptyApprovers: 'auto_approve'", "current_user.positions"]
+      }
+    },
+    {
+      "id": 8,
+      "prompt": "A screen flow: the user uploads the signed contract PDF on the last step, then the flow creates the `contract` record with the file in its `signed_copy` field.",
+      "expected_output": "A `screen` field `{ name: 'signed_copy', type: 'file', required: true }`; the screen resumes with the uploaded `sys_file` id bound to `signed_copy`, and a `create_record` after the last screen writes `fields: { signed_copy: { dialect: 'cel', source: 'signed_copy' } }`, which claims the file for the record.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["type: 'screen'", "type: 'file'", "create_record", "signed_copy"],
+        "must_not_contain": ["type: 'upload'", "type: 'attachment'"]
+      }
     }
   ]
 }

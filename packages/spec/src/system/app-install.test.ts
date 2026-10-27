@@ -22,7 +22,6 @@ describe('AppManifestSchema', () => {
       views: ['project_board', 'task_list'],
       flows: ['auto_assign', 'notify_on_complete'],
       hasSeedData: true,
-      dependencies: ['core_crm'],
     };
     const parsed = AppManifestSchema.parse(manifest);
     expect(parsed.name).toBe('project_management');
@@ -42,7 +41,8 @@ describe('AppManifestSchema', () => {
     expect(parsed.flows).toEqual([]);
     expect(parsed.hasSeedData).toBe(false);
     expect(parsed.seedData).toEqual([]);
-    expect(parsed.dependencies).toEqual([]);
+    // `dependencies` is a retired tombstone (ADR-0141 D8): it materializes nothing.
+    expect(parsed).not.toHaveProperty('dependencies');
   });
 
   it('should enforce snake_case name', () => {

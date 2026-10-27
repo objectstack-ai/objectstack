@@ -52,6 +52,7 @@
   "src/integration/connector-triggers-retirement.test.ts",
   "src/kernel/metadata-type-registry-allow-org-override-absence.test.ts",
   "src/kernel/package-upgrade-family-retirement.test.ts",
+  "src/marketplace/dependency-spellings-retirement.test.ts",
   "src/qa/requires-plugins-retirement.test.ts",
   "src/security/admin-scope-binding-authoring-retirement.test.ts",
   "src/security/permission-set-managed-by-retirement.test.ts",

@@ -80,7 +80,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version-file: .nvmrc
 
       # The body reaches the script through `env:`, never through `${{ }}`
       # inside the `run:` script. An expression interpolated into a shell line
