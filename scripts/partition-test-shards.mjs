@@ -113,7 +113,7 @@ import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 
 import { isEntrypoint } from './invoked-as.mjs';
-import { liveShardTotal } from './lib/ci-shard-matrix.mjs';
+import { liveShardTotal } from './ci-shard-matrix.mjs';
 import { maskCommentsAndLiterals } from './js-comment-mask.mjs';
 import { samplesFromSummary } from './measure-test-shard-timings.mjs';
 import { packageListDocument } from './nightly-tiers.mjs';
@@ -123,7 +123,7 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..
 const TIMINGS_PATH = path.join(REPO_ROOT, 'scripts', 'test-shard-timings.json');
 
 // The Test Core shard count, READ from ci.yml's `test` matrix (its
-// full-roster fallback; scripts/lib/ci-shard-matrix.mjs), and the ONLY place
+// full-roster fallback; scripts/ci-shard-matrix.mjs), and the ONLY place
 // it is reasoned about. The number lives in the workflow alone: a partitioner
 // splitting into a different number of bins than the matrix declares is not a
 // red step anywhere -- it is packages that no shard runs -- so this module
@@ -1958,7 +1958,7 @@ function selfTest() {
   //    there is silent: a partitioner cutting six bins for a five-job matrix
   //    simply loses a sixth of the workspace, with every step green.
   //    SHARD_COUNT is the matrix itself (read above, through
-  //    scripts/lib/ci-shard-matrix.mjs, whose own self-test refuses an
+  //    scripts/ci-shard-matrix.mjs, whose own self-test refuses an
   //    unreadable matrix), so what is left to read back is the two other
   //    spellings: the partitioner's `--shard N/M` and the attestation's
   //    `--total`.

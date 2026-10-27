@@ -227,7 +227,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
-import { readShardMatrix, shardTotal } from './lib/ci-shard-matrix.mjs';
+import { readShardMatrix, shardTotal } from './ci-shard-matrix.mjs';
 
 /** Artifact-name prefix shared by every shard credential. */
 const ARTIFACT_PREFIX = 'shard-attest-';
@@ -2255,7 +2255,7 @@ async function selfTest() {
   // which #25376 widened to eight, so they are read against the live workflow
   // with the shard name as it stood then. The live names are pinned on their own
   // at the end of this battery, at the sizes the live matrices declare (read
-  // through scripts/lib/ci-shard-matrix.mjs, so no size is copied here).
+  // through scripts/ci-shard-matrix.mjs, so no size is copied here).
   const LIVE_TEST_TOTAL = shardTotal(CI_TEXT, 'test');
   const LIVE_DOGFOOD_TOTAL = shardTotal(CI_TEXT, 'dogfood');
   const LIVE_TEST_NAME = `name: Test Core (\${{ matrix.shard }}/${LIVE_TEST_TOTAL})`;

@@ -194,7 +194,7 @@ import { fileURLToPath } from 'node:url';
 // the same narrow reading for the same defect one flag over (#10889).
 import { invokes, shellCommands } from './check-shard-attestation.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
-import { shardTotal } from './lib/ci-shard-matrix.mjs';
+import { shardTotal } from './ci-shard-matrix.mjs';
 
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
 //
@@ -2070,7 +2070,7 @@ async function selfTest() {
   // and its aggregate gate is named `Test Core`. Dropping the suffix makes two
   // jobs publish one context, and the surviving conclusion is whichever
   // finished last — a shard could satisfy the aggregate's required gate. N is
-  // the matrix's own size, read from the workflow (scripts/lib/ci-shard-matrix.mjs),
+  // the matrix's own size, read from the workflow (scripts/ci-shard-matrix.mjs),
   // so a resized matrix moves this anchor with it.
   battery('(9) the shadowing collision, on the live specimen');
   const TEST_CORE_SHARD_NAME = `name: Test Core (\${{ matrix.shard }}/${shardTotal(sources['ci.yml'], 'test')})`;

@@ -4,9 +4,9 @@
 /**
  * ci-shard-matrix -- the ONE reader of ci.yml's shard-matrix sizes.
  *
- *   node scripts/lib/ci-shard-matrix.mjs              # every sharded job in ci.yml, with its size
- *   node scripts/lib/ci-shard-matrix.mjs --job test   # one job's size, alone on stdout
- *   node scripts/lib/ci-shard-matrix.mjs --self-test
+ *   node scripts/ci-shard-matrix.mjs              # every sharded job in ci.yml, with its size
+ *   node scripts/ci-shard-matrix.mjs --job test   # one job's size, alone on stdout
+ *   node scripts/ci-shard-matrix.mjs --self-test
  *
  * ## Why this exists
  *
@@ -47,9 +47,9 @@ import { dirname, join, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
-import { isEntrypoint } from '../invoked-as.mjs';
+import { isEntrypoint } from './invoked-as.mjs';
 
-const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 /** The workflow whose matrices this module reads, repo-relative. */
 export const CI_WORKFLOW = '.github/workflows/ci.yml';
