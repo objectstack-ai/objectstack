@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>记录页 v2 · 抽屉档（列表上打开）</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#ffffff}
+:root{--bg:#ffffff;--fg:#0f172a;--muted:#f1f5f9;--muted-fg:#64748b;--border:#e2e8f0;--sidebar:#fafafa;--primary-soft:#eef2ff;--primary-fg:#ffffff;--amber:#b45309;--amber-soft:#fef3c7;--green:#15803d;--green-soft:#dcfce7;--red:#b91c1c;--red-soft:#fee2e2;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+*{box-sizing:border-box}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+a{color:var(--primary);text-decoration:none}
+.btn-primary{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 12px;border-radius:8px;background:var(--primary);color:var(--primary-fg);font-size:12.5px;font-weight:500}
+.btn-outline{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);font-size:12.5px;font-weight:500;color:var(--fg)}
+.iconbtn{display:inline-flex;width:28px;height:28px;align-items:center;justify-content:center;border-radius:6px;color:var(--muted-fg)}
+.chip{display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 7px;border-radius:5px;background:var(--muted);color:var(--fg);font-size:11.5px}
+.chip.soft{background:var(--primary-soft);color:var(--primary)}
+.chip.ok{background:var(--green-soft);color:var(--green)}
+.chip.warn{background:var(--amber-soft);color:var(--amber)}
+.k{font-family:var(--mono);font-size:11px;color:var(--muted-fg)}
+.nav{display:flex;align-items:center;gap:10px;height:34px;padding:0 10px;border-radius:6px;font-size:13px;color:var(--fg)}
+.nav.on{background:var(--primary-soft);color:var(--primary);font-weight:500}
+table{border-collapse:collapse;width:100%;font-size:12.5px}
+th{text-align:left;font-weight:500;color:var(--muted-fg);font-size:11.5px;height:36px;padding:0 10px;border-bottom:1px solid var(--border);background:var(--sidebar);white-space:nowrap}
+td{height:40px;padding:0 10px;border-bottom:1px solid var(--border);white-space:nowrap}
+tr.sel td{background:var(--primary-soft)}
+td.a{color:var(--primary)}
+.tab{height:36px;display:inline-flex;align-items:center;gap:6px;padding:0 2px;margin-right:16px;font-size:13px;color:var(--muted-fg);border-bottom:2px solid transparent}
+.tab.on{color:var(--fg);border-bottom-color:var(--primary);font-weight:500}
+.hl{display:flex;flex-direction:column;gap:2px;min-width:0}
+.hl .l{font-size:11px;color:var(--muted-fg)}
+.hl .v{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sect{display:flex;align-items:center;justify-content:space-between;height:36px;font-size:12.5px;font-weight:600}
+.fld{display:flex;flex-direction:column;gap:2px;min-width:0}
+.fld .l{font-size:10.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted-fg)}
+.fld .v{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stage{display:flex;gap:4px;align-items:center}
+.stage span{flex:1;height:6px;border-radius:3px;background:var(--muted)}
+.stage span.done{background:var(--green)}
+.stage span.cur{background:var(--primary)}
+.tl{display:flex;gap:10px;padding:8px 0;border-top:1px solid var(--border);font-size:12.5px}
+.tl .ic{display:inline-flex;width:22px;height:22px;align-items:center;justify-content:center;border-radius:11px;background:var(--muted);color:var(--muted-fg);flex:none;font-size:11px}
+</style>
+</helmet>
+<div style="width:100%;min-height:820px;display:grid;grid-template-rows:48px 1fr;background:var(--bg);color:var(--fg);font-family:Inter,ui-sans-serif,system-ui,sans-serif;font-size:13px;line-height:1.45;--primary:{{accent}}">
+
+  <header style="display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:12px;padding:0 16px;border-bottom:1px solid var(--border)">
+    <div style="display:flex;align-items:center;gap:8px"><button type="button" class="iconbtn" aria-label="切换侧边栏"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/></svg></button><span style="display:inline-flex;width:26px;height:26px;align-items:center;justify-content:center;border-radius:7px;background:var(--primary);color:#fff"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 2 2 7l10 5 10-5-10-5Z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/></svg></span><span style="color:var(--muted-fg)">/</span><button type="button" style="display:inline-flex;align-items:center;gap:8px;height:30px;padding:0 10px 0 6px;border-radius:8px;border:1px solid var(--border)"><span style="display:inline-flex;width:20px;height:20px;align-items:center;justify-content:center;border-radius:5px;background:#f97316;color:#fff;font-size:11px;font-weight:700">H</span><span style="font-weight:600">HotCRM</span></button><span class="chip" style="font-size:10px;letter-spacing:.04em">预览版</span></div>
+    <button type="button" style="display:inline-flex;align-items:center;gap:8px;width:300px;height:32px;padding:0 10px;border:1px solid var(--border);border-radius:8px;background:var(--sidebar);color:var(--muted-fg);font-size:13px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><span style="flex:1;text-align:left">搜索…</span><kbd class="k" style="padding:1px 5px;border:1px solid var(--border);border-radius:4px">⌘K</kbd></button>
+    <div style="display:flex;align-items:center;justify-content:flex-end;gap:4px"><button type="button" class="iconbtn" aria-label="通知"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></button><button type="button" class="iconbtn" aria-label="帮助"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg></button><button type="button" aria-label="账户" style="display:inline-flex;width:28px;height:28px;margin-left:6px;align-items:center;justify-content:center;border-radius:14px;background:var(--primary);color:#fff;font-size:11px;font-weight:600">DA</button></div>
+  </header>
+
+  <div style="position:relative;display:grid;grid-template-columns:200px 1fr;min-height:0;overflow:hidden">
+    <aside style="border-right:1px solid var(--border);background:var(--sidebar);padding:12px 8px;display:flex;flex-direction:column;gap:2px">
+      <div class="nav">首页</div><div class="nav">销售主页</div>
+      <div style="padding:10px 10px 4px;font-size:11px;color:var(--muted-fg)">销售</div>
+      <div class="nav on">线索</div><div class="nav">客户</div><div class="nav">联系人</div><div class="nav">商机</div><div class="nav">报价</div>
+      <div style="padding:10px 10px 4px;font-size:11px;color:var(--muted-fg)">我的工作</div>
+      <div class="nav">我的任务</div><div class="nav">我的商机</div>
+    </aside>
+
+    <!-- list page; the right 560 px is covered by the drawer -->
+    <section style="min-width:0;display:flex;flex-direction:column">
+      <div style="display:flex;align-items:center;justify-content:space-between;height:56px;padding:0 20px;border-bottom:1px solid var(--border)">
+        <div style="display:flex;align-items:center;gap:10px"><span style="display:inline-flex;width:28px;height:28px;align-items:center;justify-content:center;border-radius:7px;background:var(--primary-soft);color:var(--primary)">👤</span><span style="font-size:17px;font-weight:600">线索</span><span style="color:var(--muted-fg)">尚未确认的潜在客户</span></div>
+        <div style="display:flex;gap:6px"><button type="button" class="btn-primary">＋ 新建</button><button type="button" class="btn-outline">导入</button><button type="button" class="iconbtn" aria-label="更多">⋯</button></div>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;height:44px;padding:0 20px;border-bottom:1px solid var(--border)">
+        <div style="display:flex;align-items:center"><span class="tab on">全部线索</span><span class="tab">我的线索</span><span class="tab">🔥 高热度线索</span><span class="tab">高优先级</span><span class="tab" style="color:var(--muted-fg)">还有 4 个 ▾</span></div>
+        <div style="display:flex;align-items:center;gap:6px"><span class="chip soft" style="height:26px;padding:0 10px">筛选 2 ×</span><span class="chip soft" style="height:26px;padding:0 10px">排序 1 ×</span><button type="button" class="iconbtn" aria-label="显示">⚙</button><button type="button" class="iconbtn" aria-label="搜索">🔍</button></div>
+      </div>
+      <table>
+        <thead><tr><th style="width:36px"></th><th>全名</th><th>公司</th><th>邮箱</th><th>状态</th><th>评分</th><th>负责人</th></tr></thead>
+        <tbody>
+          <tr class="sel"><td><span class="k" title="展开为整页">↗</span></td><td class="a">Mira Costa</td><td>Atlas Construction</td><td class="a">mira.costa@atlasconstruction…</td><td><span class="chip warn">已联系</span></td><td>★★★★★</td><td>Dev Admin</td></tr>
+          <tr><td></td><td class="a">Kai Watanabe</td><td>Coral Reef Hotels</td><td class="a">kai.watanabe@coralreefhotels…</td><td><span class="chip">新建</span></td><td>★★★☆☆</td><td>Dev Admin</td></tr>
+          <tr><td></td><td class="a">Lena Fischer</td><td>Granite Insurance</td><td class="a">lena.fischer@graniteinsurance…</td><td><span class="chip" style="background:var(--red-soft);color:var(--red)">未通过</span></td><td>★★★☆☆</td><td>Dev Admin</td></tr>
+          <tr><td></td><td class="a">Hugo Dubois</td><td>Nimbus Aerospace</td><td class="a">hugo.dubois@nimbusaerospace…</td><td><span class="chip ok">已确认</span></td><td>★★★★☆</td><td>Dev Admin</td></tr>
+          <tr><td></td><td class="a">Wren Garcia</td><td>Maple Bakery Group</td><td class="a">wren.garcia@maplebakerygroup…</td><td><span class="chip warn">已联系</span></td><td>★★★★☆</td><td>Dev Admin</td></tr>
+          <tr><td></td><td class="a">Theo Park</td><td>Skyline Media</td><td class="a">theo.park@skylinemedia…</td><td><span class="chip">新建</span></td><td>★★★★★</td><td>Dev Admin</td></tr>
+          <tr><td></td><td class="a">Owen Becker</td><td>Northwind Energy</td><td class="a">owen.becker@northwindenergy…</td><td><span class="chip ok">已确认</span></td><td>★★★★★</td><td>Dev Admin</td></tr>
+        </tbody>
+      </table>
+      <div style="margin-top:auto;height:36px;display:flex;align-items:center;padding:0 20px;border-top:1px solid var(--border);font-size:12px;color:var(--muted-fg)">21 条记录</div>
+    </section>
+
+    <!-- the drawer: the SAME record page at its narrow tier (560 px) -->
+    <div aria-hidden="true" style="position:absolute;inset:0 0 0 200px;background:rgba(15,23,42,.12)"></div>
+    <aside style="position:absolute;top:0;right:0;bottom:0;width:560px;display:grid;grid-template-rows:auto auto auto 1fr;background:var(--bg);border-left:1px solid var(--border);box-shadow:-12px 0 32px rgba(15,23,42,.14)">
+      <!-- drawer bar -->
+      <div style="display:flex;align-items:center;justify-content:space-between;height:40px;padding:0 8px 0 12px;border-bottom:1px solid var(--border);font-size:11.5px;color:var(--muted-fg)">
+        <span>线索 · 3 / 21</span>
+        <span style="display:inline-flex;gap:2px"><button type="button" class="iconbtn" aria-label="上一条" style="width:24px;height:24px">↑</button><button type="button" class="iconbtn" aria-label="下一条" style="width:24px;height:24px">↓</button><button type="button" class="btn-outline" style="height:26px;padding:0 8px;font-size:12px;margin:0 4px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M21 14v7H3V3h7"/></svg>展开为整页</button><button type="button" class="iconbtn" aria-label="关闭" style="width:24px;height:24px">✕</button></span>
+      </div>
+      <!-- header: same as the page's -->
+      <div style="padding:14px 16px 10px;border-bottom:1px solid var(--border)">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
+          <div style="min-width:0"><div style="display:flex;align-items:center;gap:8px"><span style="font-size:18px;font-weight:600">Mira Costa</span><span class="chip">线索</span></div><div style="color:var(--muted-fg)">Atlas Construction · Director of Sales</div></div>
+          <div style="display:flex;gap:6px;flex:none"><button type="button" class="btn-primary">转化线索</button><button type="button" class="btn-outline">编辑</button><button type="button" class="iconbtn" aria-label="更多">⋯</button></div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:12px">
+          <div class="hl"><span class="l">状态</span><span class="v"><span class="chip warn">已联系</span></span></div>
+          <div class="hl"><span class="l">线索评分</span><span class="v">★★★★★</span></div>
+          <div class="hl"><span class="l">来源</span><span class="v">陌生拜访</span></div>
+          <div class="hl"><span class="l">负责人</span><span class="v" style="color:var(--primary)">Dev Admin</span></div>
+        </div>
+        <div style="margin-top:12px"><div class="stage"><span class="done"></span><span class="cur"></span><span></span><span></span></div><div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted-fg);margin-top:4px"><span style="color:var(--green)">✓ 新建</span><span style="color:var(--fg);font-weight:500">已联系</span><span>已确认</span><span>已转化</span></div><div style="margin-top:4px;font-size:11px;color:var(--muted-fg)">终止态：<span class="chip" style="height:18px;background:var(--red-soft);color:var(--red)">✗ 未通过</span></div></div>
+      </div>
+      <!-- narrow tier: the three columns become tabs -->
+      <div style="display:flex;align-items:center;padding:0 16px;border-bottom:1px solid var(--border)"><span class="tab on">详情</span><span class="tab">时间线 <span class="chip" style="height:16px;padding:0 5px">6</span></span><span class="tab">关联 <span class="chip" style="height:16px;padding:0 5px">3</span></span><span class="tab">审批</span></div>
+      <div style="overflow:auto;padding:4px 16px 16px">
+        <div class="sect">身份信息<button type="button" class="k">收起</button></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 16px"><div class="fld"><span class="l">名</span><span class="v">Mira</span></div><div class="fld"><span class="l">姓</span><span class="v">Costa</span></div><div class="fld"><span class="l">邮箱</span><span class="v" style="color:var(--primary)">mira.costa@atlasconstruction.example.com</span></div><div class="fld"><span class="l">电话</span><span class="v" style="color:var(--primary)">+1-555-0117-1119</span></div></div>
+        <div class="sect" style="margin-top:8px">公司信息</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 16px"><div class="fld"><span class="l">公司</span><span class="v">Atlas Construction</span></div><div class="fld"><span class="l">职位</span><span class="v">Director of Sales</span></div><div class="fld"><span class="l">行业</span><span class="v">其他</span></div><div class="fld"><span class="l">网站</span><span class="v" style="color:var(--primary)">atlasconstruction.example.com</span></div></div>
+        <div class="sect" style="margin-top:8px">资格评估 <span class="k">显示 4 个空字段</span></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 16px"><div class="fld"><span class="l">转化审批</span><span class="v">无需审批</span></div><div class="fld"><span class="l">最近联系</span><span class="v">2026/5/5</span></div></div>
+        <div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--border);font-size:11.5px;color:var(--muted-fg)">创建于 1 分钟前 · 更新于 1 分钟前 · Dev Admin</div>
+      </div>
+    </aside>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#4f46e5","options":["#4f46e5","#2563eb","#0f766e","#0f172a"]},"$preview":{"width":1280,"height":820}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { accent: this.props.accent ?? '#4f46e5' };
+  }
+}
+</script>
+</body>
+</html>

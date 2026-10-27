@@ -1,0 +1,396 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><title>记录页与列表页原型</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<style>
+/* layout: 48px app bar · 200px nav · content column; a record opens as a 560px drawer over the list (default), as a split pane (personal preference), or as the same page at full width */
+:root{--bg:#ffffff;--fg:#0f172a;--muted:#f1f5f9;--muted-fg:#64748b;--border:#e2e8f0;--sidebar:#fafafa;--primary:#4f46e5;--primary-soft:#eef2ff;--primary-fg:#ffffff;--amber:#b45309;--amber-soft:#fef3c7;--green:#15803d;--green-soft:#dcfce7;--red:#b91c1c;--red-soft:#fee2e2;--shadow:rgba(15,23,42,.16);--overlay:rgba(15,23,42,.14);--font:Inter,ui-sans-serif,system-ui,-apple-system,"PingFang SC","Noto Sans SC",sans-serif;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0b1220;--fg:#e6eaf2;--muted:#1b2538;--muted-fg:#94a3b8;--border:#243049;--sidebar:#0f172a;--primary:#8b93ff;--primary-soft:#232a5c;--primary-fg:#0b1220;--amber:#fbbf24;--amber-soft:#3b2a08;--green:#4ade80;--green-soft:#0f2e1a;--red:#f87171;--red-soft:#3b1111;--shadow:rgba(0,0,0,.55);--overlay:rgba(0,0,0,.45);color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0b1220;--fg:#e6eaf2;--muted:#1b2538;--muted-fg:#94a3b8;--border:#243049;--sidebar:#0f172a;--primary:#8b93ff;--primary-soft:#232a5c;--primary-fg:#0b1220;--amber:#fbbf24;--amber-soft:#3b2a08;--green:#4ade80;--green-soft:#0f2e1a;--red:#f87171;--red-soft:#3b1111;--shadow:rgba(0,0,0,.55);--overlay:rgba(0,0,0,.45);color-scheme:dark}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 var(--font);overflow:hidden}
+*{box-sizing:border-box}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;border-radius:6px}
+button:focus-visible,input:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--primary);outline-offset:1px}
+input{font:inherit;color:inherit}
+a{color:var(--primary);text-decoration:none}
+.app{height:100%;display:grid;grid-template-rows:48px 1fr}
+.top{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:12px;padding:0 max(16px,env(safe-area-inset-left,0px)) 0 max(16px,env(safe-area-inset-right,0px));border-bottom:1px solid var(--border)}
+.top .l,.top .r{display:flex;align-items:center;gap:8px;min-width:0}
+.top .r{justify-content:flex-end;gap:4px}
+.logo{display:inline-flex;width:26px;height:26px;align-items:center;justify-content:center;border-radius:7px;background:var(--primary);color:var(--primary-fg);flex:none}
+.appchip{display:inline-flex;align-items:center;gap:8px;height:30px;padding:0 10px 0 6px;border-radius:8px;border:1px solid var(--border);font-weight:600}
+.appchip i{display:inline-flex;width:20px;height:20px;align-items:center;justify-content:center;border-radius:5px;background:#f97316;color:#fff;font-size:11px;font-style:normal;font-weight:700}
+.search{display:inline-flex;align-items:center;gap:8px;width:min(300px,38vw);height:32px;padding:0 10px;border:1px solid var(--border);border-radius:8px;background:var(--sidebar);color:var(--muted-fg)}
+.search span{flex:1;text-align:left}
+kbd{font-family:var(--mono);font-size:11px;color:var(--muted-fg);padding:1px 5px;border:1px solid var(--border);border-radius:4px}
+.ib{display:inline-flex;width:28px;height:28px;align-items:center;justify-content:center;border-radius:6px;color:var(--muted-fg);flex:none}
+.ib:hover{background:var(--muted);color:var(--fg)}
+.ib.on{background:var(--primary-soft);color:var(--primary)}
+.avatar{display:inline-flex;width:28px;height:28px;align-items:center;justify-content:center;border-radius:14px;background:var(--primary);color:var(--primary-fg);font-size:11px;font-weight:600;margin-left:6px}
+.body{display:grid;grid-template-columns:200px minmax(0,1fr);min-height:0;position:relative}
+.body.split{grid-template-columns:200px minmax(0,1fr) minmax(360px,34%)}
+.side{border-right:1px solid var(--border);background:var(--sidebar);padding:12px 8px;display:flex;flex-direction:column;gap:2px;overflow:auto}
+.side .grp{padding:10px 10px 4px;font-size:11px;color:var(--muted-fg)}
+.nav{display:flex;align-items:center;gap:8px;height:34px;padding:0 10px;border-radius:6px;text-align:left;width:100%}
+.nav:hover{background:var(--muted)}
+.nav.on{background:var(--primary-soft);color:var(--primary);font-weight:500}
+.nav small{margin-left:auto;font-size:10px;color:var(--muted-fg);font-weight:400}
+@media (max-width:900px){.body,.body.split{grid-template-columns:minmax(0,1fr)}.side{display:none}.overlay{left:0!important}}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);font-size:12.5px;font-weight:500;white-space:nowrap}
+.btn:hover{background:var(--muted)}
+.btn.p{background:var(--primary);color:var(--primary-fg);border-color:var(--primary)}
+.btn.p:hover{filter:brightness(1.08)}
+.btn.sm{height:26px;padding:0 8px;font-size:12px}
+.chip{display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 7px;border-radius:5px;background:var(--muted);color:var(--fg);font-size:11.5px;white-space:nowrap}
+.chip.soft{background:var(--primary-soft);color:var(--primary)}
+.chip.ok{background:var(--green-soft);color:var(--green)}
+.chip.warn{background:var(--amber-soft);color:var(--amber)}
+.chip.bad{background:var(--red-soft);color:var(--red)}
+.chip.x{cursor:pointer}
+.chip.x:hover{filter:brightness(.95)}
+.k{font-family:var(--mono);font-size:11px;color:var(--muted-fg)}
+/* list page */
+.list{display:flex;flex-direction:column;min-width:0;min-height:0}
+.ttl{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:56px;padding:8px 20px;border-bottom:1px solid var(--border);flex-wrap:wrap}
+.ttl .l{display:flex;align-items:center;gap:10px;min-width:0}
+.oicon{display:inline-flex;width:28px;height:28px;align-items:center;justify-content:center;border-radius:7px;background:var(--primary-soft);color:var(--primary);flex:none}
+.ttl h1{margin:0;font-size:17px;font-weight:600}
+.ttl .d{color:var(--muted-fg)}
+.ttl .r{display:flex;gap:6px;align-items:center}
+.bar{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:44px;padding:0 20px;border-bottom:1px solid var(--border);position:relative;flex-wrap:wrap}
+.tabs{display:flex;align-items:center;min-width:0;overflow:auto}
+.tab{height:44px;display:inline-flex;align-items:center;gap:6px;padding:0 2px;margin-right:16px;font-size:13px;color:var(--muted-fg);border-bottom:2px solid transparent;white-space:nowrap;border-radius:0}
+.tab.on{color:var(--fg);border-bottom-color:var(--primary);font-weight:500}
+.tab:hover{color:var(--fg)}
+.tools{display:flex;align-items:center;gap:6px;flex:none}
+.qin{height:28px;width:180px;padding:0 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg)}
+.tablewrap{overflow:auto;flex:1;min-height:0}
+table{border-collapse:collapse;width:100%;font-size:12.5px;font-variant-numeric:tabular-nums}
+th{text-align:left;font-weight:500;color:var(--muted-fg);font-size:11.5px;height:36px;padding:0 10px;border-bottom:1px solid var(--border);background:var(--sidebar);white-space:nowrap;position:sticky;top:0;cursor:pointer;user-select:none}
+th:hover{color:var(--fg)}
+th.on{color:var(--fg)}
+td{height:40px;padding:0 10px;border-bottom:1px solid var(--border);white-space:nowrap;max-width:260px;overflow:hidden;text-overflow:ellipsis}
+.compact td{height:32px}
+tr.row{cursor:pointer}
+tr.row:hover td{background:var(--muted)}
+tr.row.sel td,tr.row.open td{background:var(--primary-soft)}
+td.a,td.a a{color:var(--primary)}
+td.ck,th.ck{width:36px;padding:0 0 0 14px}
+td .go{opacity:0;color:var(--muted-fg);padding:2px 4px}
+tr.row:hover td .go{opacity:1}
+td .go:hover{color:var(--primary)}
+input[type=checkbox]{accent-color:var(--primary);margin:0;width:14px;height:14px;vertical-align:middle}
+.foot{min-height:36px;display:flex;align-items:center;gap:12px;padding:0 20px;border-top:1px solid var(--border);font-size:12px;color:var(--muted-fg)}
+.bulk{display:flex;align-items:center;gap:8px;padding:0 20px;min-height:44px;background:var(--primary-soft);border-bottom:1px solid var(--border);flex-wrap:wrap}
+.bulk b{font-weight:600;color:var(--primary)}
+.empty{padding:60px 20px;text-align:center;color:var(--muted-fg)}
+/* popover */
+.pop{position:absolute;top:44px;right:20px;z-index:20;width:280px;background:var(--bg);border:1px solid var(--border);border-radius:10px;box-shadow:0 12px 32px var(--shadow);padding:8px}
+.pop h4{margin:6px 8px 4px;font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted-fg)}
+.pop .it{display:flex;align-items:center;gap:8px;width:100%;height:32px;padding:0 8px;border-radius:6px;text-align:left}
+.pop .it:hover{background:var(--muted)}
+.pop .it.on{color:var(--primary)}
+.pop .it small{margin-left:auto;color:var(--muted-fg)}
+.pop .seg{display:flex;gap:4px;padding:4px 8px}
+.pop .seg button{flex:1;height:28px;border:1px solid var(--border);border-radius:6px;font-size:12px}
+.pop .seg button.on{background:var(--primary-soft);color:var(--primary);border-color:transparent}
+.pop .note{margin:4px 8px 6px;font-size:11.5px;color:var(--muted-fg)}
+.help{position:absolute;top:44px;right:12px;z-index:30;width:min(360px,calc(100% - 24px));background:var(--bg);border:1px solid var(--border);border-radius:10px;box-shadow:0 12px 32px var(--shadow);padding:14px 16px;font-size:12.5px}
+.help h3{margin:0 0 8px;font-size:14px}
+.help ol{margin:0;padding-left:18px;display:grid;gap:4px}
+/* record page shared */
+.rh{padding:14px 16px 10px;border-bottom:1px solid var(--border)}
+.page .rh{padding:16px 24px 12px}
+.rh-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.rh-name{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.rh-name .nm{font-size:18px;font-weight:600}
+.page .rh-name .nm{font-size:22px}
+.rh-sub{color:var(--muted-fg)}
+.rh-acts{display:flex;gap:6px;flex:none;flex-wrap:wrap}
+.rh-hl{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:12px}
+.page .rh-hl{display:flex;gap:28px;flex-wrap:wrap}
+.hl{display:flex;flex-direction:column;gap:2px;min-width:0}
+.hl .l{font-size:11px;color:var(--muted-fg)}
+.hl .v{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stage{display:flex;gap:4px;margin-top:12px}
+.stage button{flex:1;height:6px;border-radius:3px;background:var(--muted);padding:0}
+.stage button:hover{filter:brightness(.9)}
+.stage button.done{background:var(--green)}
+.stage button.cur{background:var(--primary)}
+.stage-l{display:flex;justify-content:space-between;font-size:11px;color:var(--muted-fg);margin-top:4px;gap:6px}
+.stage-l span.cur{color:var(--fg);font-weight:500}
+.stage-l span.done{color:var(--green)}
+.stage-t{margin-top:6px;font-size:11px;color:var(--muted-fg);display:flex;align-items:center;gap:6px}
+.rtabs{display:flex;align-items:center;padding:0 16px;border-bottom:1px solid var(--border);overflow:auto}
+.rtabs .tab{height:38px}
+.sect{display:flex;align-items:center;justify-content:space-between;min-height:36px;font-size:12.5px;font-weight:600;margin-top:4px}
+.sect .k{font-weight:400;cursor:pointer}
+.sect .k:hover{color:var(--primary)}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 16px}
+.fld{display:flex;flex-direction:column;gap:2px;min-width:0}
+.fld .l{font-size:10.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted-fg)}
+.fld .v{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-height:19px;border-radius:4px;padding:0 2px;margin:0 -2px}
+.fld .v.ed{cursor:text}
+.fld .v.ed:hover{background:var(--muted);box-shadow:inset 0 0 0 1px var(--border)}
+.fld .v.e{color:var(--muted-fg)}
+.fld input{width:100%;height:24px;padding:0 4px;border:1px solid var(--primary);border-radius:4px;background:var(--bg)}
+.meta{margin-top:14px;padding-top:10px;border-top:1px solid var(--border);font-size:11.5px;color:var(--muted-fg)}
+.tlf{display:inline-flex;gap:4px}
+.compose{display:flex;gap:8px;align-items:center;height:40px;padding:0 10px;border:1px solid var(--border);border-radius:10px;margin-top:8px}
+.compose input{flex:1;border:0;background:none;min-width:0}
+.compose input:focus{outline:none}
+.tl{display:flex;gap:10px;padding:10px 0;border-top:1px solid var(--border);font-size:12.5px}
+.tl:first-of-type{border-top:0}
+.tl .ic{display:inline-flex;width:24px;height:24px;align-items:center;justify-content:center;border-radius:12px;background:var(--muted);color:var(--muted-fg);flex:none;font-size:11px}
+.tl .m{font-size:11.5px;color:var(--muted-fg)}
+.tl .b{min-width:0;overflow-wrap:anywhere}
+.rel{border:1px solid var(--border);border-radius:10px;margin-bottom:10px}
+.rel .h{display:flex;align-items:center;gap:6px;height:36px;padding:0 12px;font-size:12.5px;font-weight:600}
+.rel .h .ib{margin-left:auto;width:24px;height:24px}
+.rel .r{display:flex;align-items:center;justify-content:space-between;gap:8px;height:34px;padding:0 12px;border-top:1px solid var(--border);font-size:12.5px}
+.rel .r.row:hover{background:var(--muted)}
+.rel.dash{border-style:dashed}
+.rel.dash .h{color:var(--muted-fg);font-weight:500}
+/* drawer / split panel */
+.overlay{position:absolute;inset:0;left:200px;background:var(--overlay);z-index:5}
+.drawer{position:absolute;top:0;right:0;bottom:0;width:min(560px,100%);display:grid;grid-template-rows:auto auto auto minmax(0,1fr);background:var(--bg);border-left:1px solid var(--border);box-shadow:-12px 0 32px var(--shadow);z-index:6}
+.grip{position:absolute;top:0;bottom:0;left:-3px;width:7px;cursor:col-resize;z-index:8;border-radius:3px}.grip:hover,.grip.on{background:var(--primary);opacity:.45}
+.panel{position:relative;display:grid;grid-template-rows:auto auto auto minmax(0,1fr);background:var(--bg);border-left:1px solid var(--border);min-width:0;min-height:0}
+.dbar{display:flex;align-items:center;justify-content:space-between;height:40px;padding:0 8px 0 12px;border-bottom:1px solid var(--border);font-size:11.5px;color:var(--muted-fg)}
+.dbar .r{display:inline-flex;align-items:center;gap:2px}
+.dbody{overflow:auto;padding:4px 16px 16px}
+/* full page */
+.page{display:flex;flex-direction:column;min-width:0;min-height:0;container-type:inline-size}
+.crumb{display:flex;align-items:center;gap:6px;height:36px;padding:0 24px;font-size:12px;color:var(--muted-fg);border-bottom:1px solid var(--border)}
+.crumb a{cursor:pointer}
+.crumb .r{margin-left:auto;display:inline-flex;align-items:center;gap:2px}
+.cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.1fr) 300px;gap:24px;padding:4px 24px 24px;overflow:auto;min-height:0}
+.col{display:flex;flex-direction:column;min-width:0}
+.coltitle{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:40px;font-size:13px;font-weight:600;flex-wrap:wrap}
+@container (max-width:1180px){.cols{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.col.rel-col{grid-column:1/-1}.col.rel-col .rels{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px}.col.rel-col .rel{margin:0}}
+@container (max-width:760px){.cols{grid-template-columns:minmax(0,1fr)}}
+.tier{font-size:11px;color:var(--muted-fg)}
+.toast{position:fixed;left:50%;bottom:max(24px,env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:8px 14px;border-radius:8px;font-size:12.5px;z-index:50;box-shadow:0 8px 24px var(--shadow);max-width:calc(100% - 32px)}
+</style>
+<div id="app" class="app"></div>
+<script>
+(function(){
+const h=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const FIRST=['Mira','Kai','Lena','Hugo','Wren','Theo','Owen','Ava','Noah','Ines','Luca','Sana','Emil','Zoe','Ravi','Nora','Jude','Yara','Omar','Elin','Max'];
+const LAST=['Costa','Watanabe','Fischer','Dubois','Garcia','Park','Becker','Lind','Haas','Moreau','Rossi','Iqbal','Novak','Chen','Mehta','Berg','Okafor','Silva','Haddad','Sato','Weber'];
+const CO=['Atlas Construction','Coral Reef Hotels','Granite Insurance','Nimbus Aerospace','Maple Bakery Group','Skyline Media','Northwind Energy','Harbor Logistics','Pinecrest Clinics','Vertex Robotics','Juniper Retail','Summit Legal','Delta Foods','Orion Software','Blue Fin Marine','Cedar Education','Quartz Labs','Lumen Optics','Tidal Fintech','Aurora Textiles','Ridge Mining'];
+const TITLE=['Director of Sales','VP Operations','Head of Procurement','CTO','Marketing Lead','COO','IT Manager'];
+const IND=['建筑','酒店','保险','航空','食品','媒体','能源','物流','医疗','机器人','零售'];
+const SRC=['陌生拜访','网站表单','展会','转介绍','广告'];
+const USERS=['Dev Admin','Dev Admin','JIANGUO Zhuang','Lin Wei','Sara Cole'];
+const LSTAT=['新建','已联系','已联系','已确认','新建','已转化','未通过'];
+const OSTAGE=['资格确认','需求分析','方案报价','谈判','赢单'];
+const PROD=['CRM 标准版','CRM 企业版','服务云','营销自动化','数据集成'];
+const TSUBJ=['跟进报价','发送案例资料','电话回访','安排演示','确认预算','发合同草案','收集需求','内部评审'];
+
+function leads(){return FIRST.map((f,i)=>{const co=CO[i];return{id:'L-'+(1001+i),first:f,last:LAST[i],name:f+' '+LAST[i],company:co,title:TITLE[i%7],email:(f+'.'+LAST[i]).toLowerCase()+'@'+co.toLowerCase().replace(/\s+/g,'')+'.example.com',phone:'+1-555-01'+String(17+i).padStart(2,'0')+'-'+String(1100+i*7),industry:IND[i%11],website:co.toLowerCase().replace(/\s+/g,'')+'.example.com',revenue:(i%4===3)?'':'$'+(12+i*5.3).toFixed(1)+'M',employees:(i%5===4)?'':String(120+i*113),status:LSTAT[i%7],rating:1+((i*5)%5),source:SRC[i%5],owner:USERS[i%5],approval:'无需审批',lastContact:i%3?'2026/10/'+String(1+i).padStart(2,'0'):'',street:'',city:i%6===0?'Boston':'',country:'',convertedAccount:LSTAT[i%7]==='已转化'?co:'',convertedOpp:'',created:'10月'+(2+i%14)+'日',tl:mkTl(i)};});}
+function opps(){return CO.slice(0,14).map((co,i)=>{const amt=(80+i*47)*1000;return{id:'O-'+(2001+i),name:co+' · '+PROD[i%5],account:co,amount:'¥'+amt.toLocaleString('zh-CN'),stage:OSTAGE[i%5],prob:[20,40,60,80,100][i%5]+'%',close:'2026/1'+(1+i%2)+'/'+String(3+i).padStart(2,'0'),owner:USERS[i%5],type:i%3?'新客户':'增购',source:SRC[(i+2)%5],contact:FIRST[i]+' '+LAST[i],nextStep:i%2?'下周发正式报价':'',competitor:i%4===0?'Salesforce':'',lost:'',created:'9月'+(5+i)+'日',tl:mkTl(i+3)};});}
+function tasks(L,O){const out=[];let n=0;const add=(p,pk,pname,k)=>{out.push({id:'T-'+(3001+n),name:TSUBJ[(n+k)%8],parentObj:pk,parentId:p.id,parent:pname,due:n%3===0?'明天':n%3===1?'10月30日':'已逾期 2 天',status:n%4===3?'已完成':n%4===1?'进行中':'待办',priority:n%3===0?'高':'普通',owner:USERS[n%5],note:n%2?'对方要求先看同行业案例。':'',created:'10月'+(10+n%10)+'日',tl:mkTl(n+5)});n++;};
+ L.forEach((r,i)=>{if(i%2===0)add(r,'lead',r.name,0);if(i%3===0)add(r,'lead',r.name,1);});O.forEach((r,i)=>{if(i%2===1)add(r,'opportunity',r.name,2);if(i%4===0)add(r,'opportunity',r.name,3);});return out;}
+function mkTl(i){const base=[{t:'created',w:'10月'+(2+i%14)+'日',who:USERS[i%5]}];if(i%7!==4)base.unshift({t:'change',f:'新建',to:'已联系',w:'昨天 16:05',who:'Dev Admin'});if(i%3===0)base.unshift({t:'call',x:'讨论价格区间，下周给方案',w:'今天 10:20',who:'Dev Admin'});if(i%2===0)base.unshift({t:'meeting',x:'发现会议 · 与对方采购的初次沟通',w:'10月24日 14:00 · 30 分钟',who:'Dev Admin'});if(i%4===1)base.unshift({t:'comment',x:'@Dev Admin 这家在评估 CRM 替代表格，预算季度内定。',w:'10月23日',who:'JIANGUO Zhuang'});return base;}
+
+const L=leads(),O=opps(),T=tasks(L,O);
+const OBJ={
+ lead:{key:'lead',label:'线索',nameLabel:'全名',icon:'👤',desc:'尚未确认的潜在客户',open:'drawer',primary:'转化线索',secondary:['安排跟进','记录通话'],
+  stageField:'status',stages:['新建','已联系','已确认','已转化'],terminal:'未通过',highlights:['status','rating','source','owner'],
+  sub:r=>r.company+' · '+r.title,
+  fields:[{k:'first',l:'名',s:'身份信息'},{k:'last',l:'姓',s:'身份信息'},{k:'email',l:'邮箱',t:'link',s:'身份信息'},{k:'phone',l:'电话',t:'link',s:'身份信息'},
+   {k:'company',l:'公司',s:'公司信息'},{k:'title',l:'职位',s:'公司信息'},{k:'industry',l:'行业',s:'公司信息'},{k:'website',l:'网站',t:'link',s:'公司信息'},{k:'revenue',l:'年营收',s:'公司信息'},{k:'employees',l:'员工数',s:'公司信息'},
+   {k:'status',l:'状态',t:'status',s:'资格评估'},{k:'rating',l:'线索评分',t:'rating',s:'资格评估'},{k:'source',l:'来源',s:'资格评估'},{k:'owner',l:'负责人',t:'user',s:'资格评估'},{k:'approval',l:'转化审批',s:'资格评估'},{k:'lastContact',l:'最近联系',s:'资格评估'},
+   {k:'street',l:'街道',s:'地址'},{k:'city',l:'城市',s:'地址'},{k:'country',l:'国家',s:'地址'},{k:'convertedAccount',l:'转化客户',s:'转化'},{k:'convertedOpp',l:'转化商机',s:'转化'}],
+  columns:['name','company','email','status','rating','owner','source','lastContact'],defaultCols:['name','company','email','status','rating','owner'],
+  views:[{n:'全部线索',f:()=>true},{n:'我的线索',f:r=>r.owner==='Dev Admin'},{n:'🔥 高热度线索',f:r=>r.rating>=4},{n:'高优先级',f:r=>r.rating>=4&&r.status!=='未通过'},{n:'本周新建',f:r=>r.status==='新建'},{n:'已转化',f:r=>r.status==='已转化'},{n:'未通过',f:r=>r.status==='未通过'},{n:'待我跟进',f:r=>r.owner==='Dev Admin'&&r.status==='已联系'}],
+  quick:[{l:'状态 = 已联系',f:r=>r.status==='已联系'},{l:'评分 ≥ 4',f:r=>r.rating>=4},{l:'负责人 = 我',f:r=>r.owner==='Dev Admin'},{l:'来源 = 展会',f:r=>r.source==='展会'}],
+  related:r=>[{t:'任务',child:'task',rows:T.filter(t=>t.parentId===r.id)},{t:'活动',rows:[['发现会议','10月24日','']]},{t:'营销活动',rows:[['CPG-0004 开发者内容','已响应','ok']]}],
+  after:'转化后：客户 · 联系人 · 商机',records:L},
+ opportunity:{key:'opportunity',label:'商机',nameLabel:'商机名称',icon:'💼',desc:'进行中的销售机会',open:'page',primary:'标记赢单',secondary:['生成报价','安排演示'],
+  stageField:'stage',stages:OSTAGE,terminal:'丢单',highlights:['stage','amount','prob','close'],
+  sub:r=>r.account+' · '+r.type,
+  fields:[{k:'account',l:'客户',s:'基本信息'},{k:'amount',l:'金额',s:'基本信息'},{k:'close',l:'预计成交',s:'基本信息'},{k:'type',l:'类型',s:'基本信息'},{k:'source',l:'来源',s:'基本信息'},
+   {k:'stage',l:'阶段',t:'status',s:'推进'},{k:'prob',l:'赢率',s:'推进'},{k:'owner',l:'负责人',t:'user',s:'推进'},{k:'nextStep',l:'下一步',s:'推进'},{k:'contact',l:'主要联系人',s:'推进'},{k:'competitor',l:'竞争对手',s:'竞争'},{k:'lost',l:'丢单原因',s:'竞争'}],
+  columns:['name','account','amount','stage','prob','close','owner'],defaultCols:['name','account','amount','stage','prob','close','owner'],
+  views:[{n:'全部商机',f:()=>true},{n:'我的商机',f:r=>r.owner==='Dev Admin'},{n:'本季度成交',f:r=>r.close.startsWith('2026/11')||r.close.startsWith('2026/12')},{n:'大额 ≥ 50 万',f:r=>parseInt(r.amount.replace(/\D/g,''),10)>=500000},{n:'谈判中',f:r=>r.stage==='谈判'}],
+  quick:[{l:'阶段 = 谈判',f:r=>r.stage==='谈判'},{l:'负责人 = 我',f:r=>r.owner==='Dev Admin'},{l:'类型 = 增购',f:r=>r.type==='增购'}],
+  related:r=>[{t:'任务',child:'task',rows:T.filter(t=>t.parentId===r.id)},{t:'产品明细',rows:[['CRM 企业版 × 40 席','¥320,000',''],['实施服务','¥60,000','']]},{t:'联系人',rows:[['采购负责人','决策者','soft']]},{t:'报价',rows:[['Q-0192 v2','待审批','warn']]}],
+  after:'赢单后：合同 · 订单',records:O},
+ task:{key:'task',label:'任务',nameLabel:'主题',icon:'☑',desc:'跟进动作与待办',open:'drawer',primary:'标记完成',secondary:['改期','转派'],
+  stageField:'status',stages:['待办','进行中','已完成'],terminal:'已取消',highlights:['status','due','priority','owner'],
+  sub:r=>'关联：'+r.parent,
+  fields:[{k:'name',l:'主题',s:'任务'},{k:'parent',l:'关联记录',t:'ref',s:'任务'},{k:'due',l:'截止',s:'任务'},{k:'priority',l:'优先级',s:'任务'},{k:'status',l:'状态',t:'status',s:'进度'},{k:'owner',l:'负责人',t:'user',s:'进度'},{k:'note',l:'备注',s:'进度'}],
+  columns:['name','parent','due','status','priority','owner'],defaultCols:['name','parent','due','status','priority','owner'],
+  views:[{n:'全部任务',f:()=>true},{n:'我的任务',f:r=>r.owner==='Dev Admin'},{n:'逾期',f:r=>r.due.startsWith('已逾期')},{n:'已完成',f:r=>r.status==='已完成'}],
+  quick:[{l:'状态 = 待办',f:r=>r.status==='待办'},{l:'优先级 = 高',f:r=>r.priority==='高'},{l:'负责人 = 我',f:r=>r.owner==='Dev Admin'}],
+  related:()=>[],after:'',records:T}
+};
+const parentOf=t=>t.parentObj?{obj:t.parentObj,id:t.parentId}:null;
+const rec=(obj,id)=>OBJ[obj].records.find(r=>r.id===id);
+
+/* state: the list (obj/view/filters), the page host, the drawer record and its in-place trail */
+const S={obj:'lead',view:0,filters:[],sort:null,q:'',search:false,sel:new Set(),from:null,host:null,hostTrail:[],open:null,stack:[],tab:'details',tlf:'all',showEmpty:new Set(),pop:null,help:false,pref:{open:'drawer',density:'comfortable',cols:{}},toast:null};
+try{const p=JSON.parse(localStorage.getItem('proto-pref')||'null');if(p&&p.open)S.pref=p;}catch(e){}
+function savePref(){try{localStorage.setItem('proto-pref',JSON.stringify(S.pref));}catch(e){}}
+const o=()=>OBJ[S.obj];
+const pw=()=>Math.max(420,Math.min(S.pref.w||560,Math.round((app.clientWidth||1280)*0.8)));
+function cols(){const c=S.pref.cols[S.obj];return c||o().defaultCols;}
+function fl(k,ob=o()){if(k==='name')return ob.nameLabel;const f=ob.fields.find(f=>f.k===k);return f?f.l:k;}
+function ft(k,ob=o()){const f=ob.fields.find(f=>f.k===k);return f&&f.t;}
+function stClass(v,ob=o()){if(v===ob.terminal)return 'bad';const i=ob.stages.indexOf(v);if(i<0)return '';if(i===ob.stages.length-1)return 'soft';return i===0?'':i===ob.stages.length-2?'ok':'warn';}
+function val(r,k,ob=o()){const v=r[k];const t=ft(k,ob);if(v==null||v==='')return '<span class="e">—</span>';if(t==='status')return '<span class="chip '+stClass(v,ob)+'">'+h(v)+'</span>';if(t==='rating')return '★'.repeat(v)+'<span style="color:var(--muted-fg)">'+'★'.repeat(5-v)+'</span>';if(t==='ref'&&parentOf(r))return '<a data-act="openref" data-obj="'+parentOf(r).obj+'" data-v="'+parentOf(r).id+'">'+h(v)+'</a>';if(t==='link'||t==='user')return '<a>'+h(v)+'</a>';return h(v);}
+function rows(){const ob=o();let rs=ob.records.filter(ob.views[S.view].f);for(const f of S.filters)rs=rs.filter(f.f);if(S.q){const q=S.q.toLowerCase();rs=rs.filter(r=>(r.name+' '+(r.company||r.account||r.parent)).toLowerCase().includes(q));}if(S.sort){const{k,d}=S.sort;rs=rs.slice().sort((a,b)=>{const x=a[k]==null?'':a[k],y=b[k]==null?'':b[k];const c=typeof x==='number'&&typeof y==='number'?x-y:String(x).localeCompare(String(y),'zh');return d==='asc'?c:-c;});}return rs;}
+/* the record currently being shown in the drawer (or the page when no drawer) */
+const cur=()=>S.open||S.host;
+const co=()=>OBJ[cur().obj];
+const cr=()=>rec(cur().obj,cur().id);
+function siblings(){const c=cur();const parent=S.open?(S.stack.length?S.stack[S.stack.length-1]:(S.host&&S.host.obj!==c.obj?S.host:null)):null;if(parent)return T.filter(t=>t.parentId===parent.id).map(t=>({obj:'task',id:t.id}));if(c.obj===S.obj)return rows().map(r=>({obj:c.obj,id:r.id}));return [c];}
+function toast(m){S.toast=m;render();clearTimeout(toast.t);toast.t=setTimeout(()=>{S.toast=null;render();},2200);}
+
+/* ---------- views ---------- */
+function shell(){
+ const split=!S.host&&S.open&&S.pref.open==='split'&&o().open!=='page';
+ return '<header class="top"><div class="l"><button class="ib" aria-label="切换侧边栏">☰</button><span class="logo">◆</span><span style="color:var(--muted-fg)">/</span><button class="appchip"><i>H</i>HotCRM</button><span class="chip" style="font-size:10px">原型</span></div><button class="search">🔍<span>搜索…</span><kbd>⌘K</kbd></button><div class="r"><button class="ib '+(S.help?'on':'')+'" data-act="help" aria-label="原型说明">?</button><button class="ib" aria-label="通知">🔔</button><span class="avatar">DA</span></div></header>'
+ +'<div class="body '+(split?'split':'')+'"'+(split?' style="grid-template-columns:200px minmax(0,1fr) '+pw()+'px"':'')+'>'+side()+(S.host?page():list())+(S.open?(split?panel('panel'):'<div class="overlay" data-act="close"></div>'+panel('drawer')):'')+(S.help?help():'')+'</div>'
+ +(S.toast?'<div class="toast" role="status">'+h(S.toast)+'</div>':'');
+}
+function side(){const nav=(k,label,extra)=>'<button class="nav '+(S.obj===k&&!S.host?'on':'')+'" data-act="nav" data-v="'+k+'">'+OBJ[k].icon+' '+h(label)+'<small>'+(OBJ[k].open==='page'?'整页':'抽屉')+'</small></button>';
+ return '<aside class="side"><button class="nav">首页</button><button class="nav">销售主页</button><div class="grp">销售</div>'+nav('lead','线索')+nav('opportunity','商机')+'<button class="nav">客户</button><button class="nav">联系人</button><button class="nav">报价</button><div class="grp">我的工作</div>'+nav('task','任务')+'<button class="nav">我的商机</button></aside>';}
+function help(){return '<div class="help"><h3>可以点什么</h3><ol><li>「线索」行点击 → 抽屉；「商机」对象声明了整页，行点击直接进整页。</li><li>抽屉顶部：↑↓ 换上一条/下一条，⤢ 展开为整页，✕ 或 Esc 关闭；左边缘可以拖宽，宽度作为个人偏好记住（分屏同样）。</li><li>关联卡片里的任务行可点：在同一个抽屉里原地前进，顶栏出现「←」和路径；在整页里点则在整页上方开抽屉。任务的「关联记录」字段反向可点。</li><li>「查看全部 N 条 →」进任务列表页，带「关联 = 某记录」筛选芯片和「← 回到」。</li><li>阶段条可点推进状态；详情字段值可点改（回车保存）；时间线立即记一条。</li><li>列表：视图页签、筛选 / 排序芯片的 ×、表头排序、⚙ 显示菜单（列、密度、打开方式偏好）、🔍 搜索、勾选出现批量条。</li></ol></div>';}
+function list(){
+ const ob=o();const rs=rows();const cs=cols();const all=rs.length&&rs.every(r=>S.sel.has(r.id));
+ const vt=ob.views.slice(0,4).map((v,i)=>'<button class="tab '+(S.view===i?'on':'')+'" data-act="view" data-v="'+i+'">'+h(v.n)+'</button>').join('')+(ob.views.length>4?'<button class="tab '+(S.view>=4?'on':'')+'" data-act="pop" data-v="views">'+(S.view>=4?h(ob.views[S.view].n):'还有 '+(ob.views.length-4)+' 个')+' ▾</button>':'');
+ const fchips=S.filters.map((f,i)=>'<span class="chip soft x" data-act="frm" data-v="'+i+'" title="移除筛选">'+h(f.l)+' ×</span>').join('')+(S.sort?'<span class="chip soft x" data-act="srm" title="移除排序">'+h(fl(S.sort.k))+' '+(S.sort.d==='asc'?'↑':'↓')+' ×</span>':'');
+ const from=S.from?'<a class="tier" data-act="openref" data-obj="'+S.from.obj+'" data-v="'+S.from.id+'" style="cursor:pointer">← 回到 '+h(OBJ[S.from.obj].label)+' '+h(rec(S.from.obj,S.from.id).name)+'</a>':'<span class="tier">打开方式：'+(ob.open==='page'?'整页（对象声明）':'抽屉（默认）· 个人偏好可改')+'</span>';
+ return '<section class="list"><div class="ttl"><div class="l"><span class="oicon">'+ob.icon+'</span><h1>'+h(ob.label)+'</h1><span class="d">'+h(ob.desc)+'</span>'+from+'</div><div class="r"><button class="btn p" data-act="toast" data-v="新建'+h(ob.label)+(S.from?'（关联记录已预填 '+h(rec(S.from.obj,S.from.id).name)+'）':'')+'（原型未做表单）">＋ 新建</button><button class="btn" data-act="toast" data-v="导入向导（原型未做）">导入</button><button class="ib" data-act="toast" data-v="更多：导出 / 合并重复 / 字段设置">⋯</button></div></div>'
+ +'<div class="bar"><div class="tabs">'+vt+'</div><div class="tools">'+fchips+'<button class="ib '+(S.pop==='filter'?'on':'')+'" data-act="pop" data-v="filter" title="筛选">⏷</button><button class="ib '+(S.pop==='display'?'on':'')+'" data-act="pop" data-v="display" title="显示">⚙</button>'+(S.search?'<input id="q" class="qin" placeholder="搜索名称 / 公司" value="'+h(S.q)+'">':'')+'<button class="ib '+(S.search?'on':'')+'" data-act="search" title="搜索">🔍</button></div>'+pop()+'</div>'
+ +(S.sel.size?'<div class="bulk"><b>已选 '+S.sel.size+' 条</b><button class="btn sm" data-act="bulk" data-v="更改负责人">更改负责人</button><button class="btn sm" data-act="bulk" data-v="更改'+h(fl(ob.stageField))+'">更改'+h(fl(ob.stageField))+'</button><button class="btn sm" data-act="bulk" data-v="添加到营销活动">添加到营销活动</button><button class="btn sm" data-act="bulk" data-v="删除">删除</button><button class="btn sm" data-act="selclear" style="margin-left:auto">取消选择</button></div>':'')
+ +'<div class="tablewrap '+(S.pref.density==='compact'?'compact':'')+'">'+(rs.length?'<table><thead><tr><th class="ck"><input type="checkbox" data-act="selall" '+(all?'checked':'')+' aria-label="全选"></th>'+cs.map(k=>'<th class="'+(S.sort&&S.sort.k===k?'on':'')+'" data-act="sort" data-v="'+k+'">'+h(fl(k))+(S.sort&&S.sort.k===k?(S.sort.d==='asc'?' ↑':' ↓'):'')+'</th>').join('')+'</tr></thead><tbody>'+rs.map(r=>'<tr class="row '+(S.sel.has(r.id)?'sel':'')+' '+(S.open&&S.open.id===r.id?'open':'')+'" data-act="row" data-v="'+r.id+'"><td class="ck"><input type="checkbox" data-act="sel" data-v="'+r.id+'" '+(S.sel.has(r.id)?'checked':'')+' aria-label="选择"></td>'+cs.map(k=>'<td class="'+(k==='name'||ft(k)==='link'||ft(k)==='user'||ft(k)==='ref'?'a':'')+'">'+(k==='name'?h(r.name)+'<button class="go" data-act="rowpage" data-v="'+r.id+'" title="整页打开">↗</button>':val(r,k))+'</td>').join('')+'</tr>').join('')+'</tbody></table>':'<div class="empty">当前视图和筛选下没有'+h(ob.label)+'。<br><button class="btn sm" style="margin-top:10px" data-act="fclear">清除筛选</button></div>')+'</div>'
+ +'<div class="foot"><span>'+ob.records.length+' 条记录'+(rs.length!==ob.records.length?' · 当前显示 '+rs.length+' 条':'')+'</span>'+(S.sort?'<span>按 '+h(fl(S.sort.k))+' 排序</span>':'')+'<span style="margin-left:auto">'+(S.pref.density==='compact'?'紧凑':'舒适')+'行高</span></div></section>';
+}
+function pop(){
+ const ob=o();if(!S.pop)return '';
+ if(S.pop==='views')return '<div class="pop" style="right:auto;left:20px">'+ob.views.map((v,i)=>'<button class="it '+(S.view===i?'on':'')+'" data-act="view" data-v="'+i+'">'+h(v.n)+'<small>'+ob.records.filter(v.f).length+'</small></button>').join('')+'</div>';
+ if(S.pop==='filter')return '<div class="pop"><h4>添加筛选</h4>'+ob.quick.map((q,i)=>'<button class="it" data-act="fadd" data-v="'+i+'">'+h(q.l)+'<small>'+ob.records.filter(q.f).length+'</small></button>').join('')+'<div class="note">原型只放常用条件；真实版本是字段 + 运算符 + 值。</div></div>';
+ const cs=cols();
+ return '<div class="pop"><h4>打开记录</h4>'+(ob.open==='page'?'<div class="note">此对象声明了 recordAction: page，行点击直接整页打开，不受个人偏好影响。</div>':'<div class="seg"><button class="'+(S.pref.open==='drawer'?'on':'')+'" data-act="pref" data-v="drawer">抽屉</button><button class="'+(S.pref.open==='split'?'on':'')+'" data-act="pref" data-v="split">分屏</button></div><div class="note">个人偏好，不进对象声明；两种都带 ⤢ 展开为整页，宽度可拖。</div>')+'<h4>密度</h4><div class="seg"><button class="'+(S.pref.density==='comfortable'?'on':'')+'" data-act="density" data-v="comfortable">舒适</button><button class="'+(S.pref.density==='compact'?'on':'')+'" data-act="density" data-v="compact">紧凑</button></div><h4>列</h4>'+ob.columns.map(k=>'<button class="it '+(cs.includes(k)?'on':'')+'" data-act="col" data-v="'+k+'" '+(k==='name'?'disabled':'')+'>'+(cs.includes(k)?'☑':'☐')+' '+h(fl(k))+'</button>').join('')+'<button class="it" data-act="colreset" style="color:var(--muted-fg)">重置为视图默认</button></div>';
+}
+function header(ctx){
+ const ob=co(),r=cr();
+ const hl=ob.highlights.map(k=>'<div class="hl"><span class="l">'+h(fl(k,ob))+'</span><span class="v">'+val(r,k,ob)+'</span></div>').join('');
+ const v=r[ob.stageField];const ci=ob.stages.indexOf(v);const term=v===ob.terminal;
+ const seg=ob.stages.map((s,i)=>'<button class="'+(!term&&i<ci?'done':'')+' '+(!term&&i===ci?'cur':'')+'" data-act="stage" data-v="'+h(s)+'" title="设为「'+h(s)+'」"></button>').join('');
+ const lab=ob.stages.map((s,i)=>'<span class="'+(!term&&i<ci?'done':'')+' '+(!term&&i===ci?'cur':'')+'">'+(!term&&i<ci?'✓ ':'')+h(s)+(!term&&i===ci&&ctx==='page'?' · 第 3 天':'')+'</span>').join('');
+ return '<div class="rh rh-'+ctx+'"><div class="rh-top"><div style="min-width:0"><div class="rh-name"><span class="nm">'+h(r.name)+'</span><span class="chip">'+h(ob.label)+'</span>'+(ctx==='page'?'<button class="ib" style="width:22px;height:22px" data-act="copy" data-v="'+r.id+'" title="复制记录 ID">⧉</button>':'')+'</div><div class="rh-sub">'+(ob.key==='task'?'关联：'+val(r,'parent',ob):h(ob.sub(r)))+'</div></div>'
+ +'<div class="rh-acts"><button class="btn p" data-act="toast" data-v="'+h(ob.primary)+'（原型：弹出向导）">'+h(ob.primary)+'</button>'+(ctx==='page'?ob.secondary.map(a=>'<button class="btn" data-act="toast" data-v="'+h(a)+'（原型）">'+h(a)+'</button>').join(''):'')+'<button class="btn" data-act="toast" data-v="编辑：原型里直接点字段值就能改">编辑</button><button class="ib" data-act="toast" data-v="更多：克隆 / 共享 / 删除">⋯</button></div></div>'
+ +'<div class="rh-hl">'+hl+'</div><div class="stage">'+seg+'</div><div class="stage-l">'+lab+'</div><div class="stage-t">终止态：<button class="chip '+(term?'bad':'')+' x" data-act="stage" data-v="'+h(ob.terminal)+'">'+(term?'✗ ':'')+h(ob.terminal)+'</button>'+(term?'<span>· 点阶段条任意一段可恢复</span>':'')+'</div></div>';
+}
+function details(){
+ const ob=co(),r=cr();const secs=[];const by={};for(const f of ob.fields){(by[f.s]=by[f.s]||[]).push(f);if(!secs.includes(f.s))secs.push(f.s);}
+ const emptySecs=[];let out='';const fld=f=>'<div class="fld"><span class="l">'+h(f.l)+'</span><span class="v '+(f.t==='status'||f.t==='rating'||f.t==='ref'?'':'ed')+'" data-act="'+(f.t==='status'||f.t==='rating'||f.t==='ref'?'':'edit')+'" data-k="'+f.k+'">'+val(r,f.k,ob)+'</span></div>';
+ for(const s of secs){const fs=by[s];const filled=fs.filter(f=>r[f.k]!==''&&r[f.k]!=null);const empty=fs.length-filled.length;if(!filled.length){emptySecs.push(s);continue;}
+  const show=S.showEmpty.has(s);out+='<div class="sect">'+h(s)+(empty?'<span class="k" data-act="showempty" data-v="'+h(s)+'">'+(show?'隐藏空字段':'显示 '+empty+' 个空字段')+'</span>':'')+'</div><div class="grid2">'+(show?fs:filled).map(fld).join('')+'</div>';}
+ if(emptySecs.length)out+='<div class="sect" style="color:var(--muted-fg)">'+h(emptySecs.join(' · '))+'<span class="k" data-act="showall">'+emptySecs.length+' 个空分区 · 展开</span></div>'+(S.showEmpty.has('*')?emptySecs.map(s=>'<div class="grid2" style="margin-bottom:8px">'+by[s].map(fld).join('')+'</div>').join(''):'');
+ return out+'<div class="meta">创建于 '+h(r.created)+' · 更新于 刚刚 · '+h(r.owner)+' · <span class="k">'+h(r.id)+'</span></div>';
+}
+const TLI={created:'＋',change:'✎',call:'☎',meeting:'📅',comment:'💬',edit:'✎'};
+function timeline(ctx){
+ const ob=co(),r=cr();const kind=e=>e.t==='comment'?'discussion':(e.t==='change'||e.t==='edit')?'change':'activity';
+ const es=r.tl.filter(e=>S.tlf==='all'||kind(e)===S.tlf);
+ const line=e=>e.t==='created'?'创建了'+h(ob.label):e.t==='change'?h(fl(ob.stageField,ob))+' <span class="chip '+stClass(e.f,ob)+'">'+h(e.f)+'</span> → <span class="chip '+stClass(e.to,ob)+'">'+h(e.to)+'</span>':e.t==='edit'?'更新了 <b style="font-weight:500">'+h(e.k)+'</b>：'+h(e.f||'—')+' → '+h(e.to||'—'):e.t==='call'?'<b style="font-weight:500">记录通话</b> · '+h(e.x):e.t==='meeting'?'<b style="font-weight:500">'+h(e.x)+'</b>':h(e.x);
+ return '<div class="coltitle">'+(ctx==='page'?'时间线':'')+'<span class="tlf">'+[['all','全部'],['activity','活动'],['discussion','讨论'],['change','变更']].map(([k,l])=>'<button class="chip '+(S.tlf===k?'soft':'')+' x" data-act="tlf" data-v="'+k+'">'+l+'</button>').join('')+'</span></div><div class="compose"><input id="cmt" placeholder="留下评论… @ 提到同事" aria-label="评论"><kbd>Enter</kbd></div><div style="margin-top:8px">'+(es.length?es.map(e=>'<div class="tl"><span class="ic">'+TLI[e.t]+'</span><div class="b"><div>'+line(e)+'</div><div class="m">'+h(e.who)+' · '+h(e.w)+'</div></div></div>').join(''):'<div class="tl" style="color:var(--muted-fg)">这一类还没有记录。</div>')+'</div>';
+}
+function related(ctx){
+ const ob=co(),r=cr();const gs=ob.related(r);
+ const group=g=>{const rows=g.child?g.rows.slice(0,3).map(t=>'<div class="r row" data-act="openref" data-obj="task" data-v="'+t.id+'" style="cursor:pointer"><a>'+h(t.name)+'</a><span class="chip '+(t.due.startsWith('已逾期')?'bad':t.due==='明天'?'warn':'')+'">'+h(t.due)+'</span></div>').join(''):g.rows.map(([a,b,c])=>'<div class="r"><span>'+h(a)+'</span>'+(c?'<span class="chip '+c+'">'+h(b)+'</span>':'<span class="k">'+h(b)+'</span>')+'</div>').join('');
+  const more=g.child?'<div class="r"><a data-act="childlist" data-obj="'+g.child+'" style="cursor:pointer">'+(g.rows.length>3?'查看全部 '+g.rows.length+' 条 →':g.rows.length?'在列表中查看 →':'还没有任务 · 新建第一条')+'</a></div>':'';
+  return '<div class="rel"><div class="h">'+h(g.t)+' <span class="chip">'+g.rows.length+'</span><button class="ib" data-act="toast" data-v="新建'+h(g.t)+'（关联记录预填 '+h(r.name)+'）" title="新建">＋</button></div>'+rows+more+'</div>';};
+ return (ctx==='page'?'<div class="coltitle">关联</div>':'')+'<div class="rels">'+(gs.length?gs.map(group).join(''):'<div class="rel dash"><div class="h">这个对象没有子表</div></div>')+(ob.after?'<div class="rel dash"><div class="h">'+h(ob.after)+'</div></div>':'')+'</div>'+(ctx==='page'?'<div class="meta" style="margin-top:6px">审批：无需 · 附件：0</div>':'');
+}
+function approvals(){return '<div class="sect">审批</div><div style="color:var(--muted-fg)">这个对象没有配置审批流程。需要审批的动作（如转化、折扣）会在这里列出历史与当前节点。</div>';}
+function trail(items){return items.map(x=>'<a data-act="openref" data-obj="'+x.obj+'" data-v="'+x.id+'" style="cursor:pointer">'+h(OBJ[x.obj].label)+' '+h(rec(x.obj,x.id).name)+'</a>').join('<span> › </span>');}
+function panel(cls){
+ const ob=co();const sib=siblings();const idx=sib.findIndex(x=>x.id===cur().id);const r=cr();
+ const tabs=[['details','详情'],['timeline','时间线',r.tl.length],['related','关联',ob.related(r).reduce((n,g)=>n+g.rows.length,0)],['approvals','审批']];
+ const body=S.tab==='details'?details():S.tab==='timeline'?timeline('drawer'):S.tab==='related'?related('drawer'):approvals();
+ const where=S.stack.length?'<button class="ib" style="width:24px;height:24px;margin-right:4px" data-act="back" title="返回上一层 Esc">←</button><span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+trail(S.stack)+'<span> › </span>'+h(ob.label)+'</span>':'';
+ return '<aside class="'+cls+'" role="dialog" aria-label="记录"'+(cls==='drawer'?' style="width:min('+pw()+'px,100%)"':'')+'><div class="grip" data-grip title="拖动调整宽度"></div><div class="dbar"><span style="display:inline-flex;align-items:center;min-width:0">'+where+'</span><span class="r"><button class="ib" style="width:24px;height:24px" data-act="prev" title="上一条 ↑" '+(idx<=0?'disabled':'')+'>↑</button><button class="ib" style="width:24px;height:24px" data-act="next" title="下一条 ↓" '+(idx>=sib.length-1?'disabled':'')+'>↓</button><button class="ib" style="width:24px;height:24px;margin:0 4px" data-act="expand" title="展开为整页" aria-label="展开为整页">⤢</button><button class="ib" style="width:24px;height:24px" data-act="close" title="关闭 Esc">✕</button></span></div>'
+ +header('drawer')+'<div class="rtabs">'+tabs.map(([k,l,n])=>'<button class="tab '+(S.tab===k?'on':'')+'" data-act="tab" data-v="'+k+'">'+l+(n!=null?' <span class="chip" style="height:16px;padding:0 5px">'+n+'</span>':'')+'</button>').join('')+'</div><div class="dbody">'+body+'</div></aside>';
+}
+function page(){
+ const ob=OBJ[S.host.obj];const r=rec(S.host.obj,S.host.id);const sib=S.hostTrail.length?T.filter(t=>t.parentId===S.hostTrail[S.hostTrail.length-1].id).map(t=>({obj:'task',id:t.id})):(S.host.obj===S.obj?rows().map(x=>({obj:S.obj,id:x.id})):[S.host]);const idx=sib.findIndex(x=>x.id===r.id);
+ const saveOpen=S.open;S.open=null;
+ const out='<main class="page"><div class="crumb"><a data-act="backlist">'+h(o().label)+'</a><span>/</span><span>'+h(o().views[S.view].n)+'</span>'+(S.hostTrail.length?'<span>/</span>'+trail(S.hostTrail).replace(/<span> › <\/span>/g,'<span>/</span>'):'')+'<span>/</span><span style="color:var(--fg)">'+h(r.name)+'</span><span class="r"><button class="ib" style="width:24px;height:24px" data-act="prev" title="上一条 ↑" '+(idx<=0?'disabled':'')+'>↑</button><button class="ib" style="width:24px;height:24px" data-act="next" title="下一条 ↓" '+(idx>=sib.length-1?'disabled':'')+'>↓</button>'+(ob.open!=='page'?'<button class="ib" style="width:24px;height:24px" data-act="collapse" title="收为抽屉" aria-label="收为抽屉">⤡</button>':'')+'</span></div>'
+ +header('page')+'<div class="cols"><div class="col"><div class="coltitle">详情<span class="k" data-act="showall">'+(S.showEmpty.has('*')?'收起空字段':'全部展开')+'</span></div>'+details()+'</div><div class="col">'+timeline('page')+'</div><div class="col rel-col">'+related('page')+'</div></div></main>';
+ S.open=saveOpen;return out;
+}
+
+/* ---------- actions ---------- */
+function resetRec(){S.tab='details';S.showEmpty=new Set();}
+function openRow(id,how){const ob=o();S.stack=[];resetRec();if(how==='page'||ob.open==='page'){S.host={obj:ob.key,id};S.hostTrail=[];S.open=null;}else{S.open={obj:ob.key,id};}S.pop=null;render();}
+function openRef(obj,id){resetRec();const target={obj,id};
+ if(S.host&&S.host.obj===obj&&S.host.id===id){S.open=null;S.stack=[];render();return;}
+ if(OBJ[obj].open==='page'&&!S.open){S.host=target;S.hostTrail=[];render();return;}
+ if(S.open){S.stack.push(S.open);}else if(S.host){S.stack=[S.host];}else{S.stack=[];}
+ S.open=target;render();}
+function back(){if(!S.stack.length){S.open=null;render();return;}const p=S.stack.pop();if(S.host&&p.obj===S.host.obj&&p.id===S.host.id){S.open=null;}else{S.open=p;}resetRec();render();}
+function move(d){const sib=siblings();const i=sib.findIndex(x=>x.id===cur().id)+d;if(i<0||i>=sib.length)return;if(S.open)S.open=sib[i];else S.host=sib[i];S.showEmpty=new Set();render();}
+function setStage(v){const ob=co(),r=cr();const k=ob.stageField;if(r[k]===v)return;r.tl.unshift({t:'change',f:r[k],to:v,w:'刚刚',who:'Dev Admin'});r[k]=v;toast(fl(k,ob)+' 已改为「'+v+'」');}
+function startEdit(el,k){const ob=co(),r=cr();const inp=document.createElement('input');inp.value=r[k]==null?'':r[k];el.replaceWith(inp);inp.focus();inp.select();let done=false;const commit=()=>{if(done)return;done=true;const v=inp.value.trim();if(v!==String(r[k]==null?'':r[k])){r.tl.unshift({t:'edit',k:fl(k,ob),f:String(r[k]==null?'':r[k]),to:v,w:'刚刚',who:'Dev Admin'});r[k]=v;toast('已保存「'+fl(k,ob)+'」');}else render();};inp.addEventListener('keydown',e=>{if(e.key==='Enter')commit();if(e.key==='Escape'){done=true;render();}});inp.addEventListener('blur',commit);}
+
+const app=document.getElementById('app');
+function render(){const q=document.getElementById('q');const qf=q&&document.activeElement===q;const qs=q?q.selectionStart:0;app.innerHTML=shell();if(qf){const n=document.getElementById('q');if(n){n.focus();n.setSelectionRange(qs,qs);}}}
+app.addEventListener('click',e=>{
+ const t=e.target.closest('[data-act]');if(!t)return;const a=t.dataset.act,v=t.dataset.v;
+ if(t.tagName==='INPUT'&&t.type==='checkbox'){e.stopPropagation();if(a==='sel'){S.sel.has(v)?S.sel.delete(v):S.sel.add(v);}else if(a==='selall'){const rs=rows();if(rs.every(r=>S.sel.has(r.id)))rs.forEach(r=>S.sel.delete(r.id));else rs.forEach(r=>S.sel.add(r.id));}render();return;}
+ if(!['pop','view','fadd','pref','density','col','colreset'].includes(a))S.pop=null;
+ if(a!=='help')S.help=false;
+ switch(a){
+  case 'nav':S.obj=v;S.view=0;S.filters=[];S.sort=null;S.q='';S.search=false;S.sel=new Set();S.from=null;S.open=null;S.host=null;S.stack=[];break;
+  case 'view':S.view=+v;S.pop=null;S.sel=new Set();break;
+  case 'pop':S.pop=S.pop===v?null:v;break;
+  case 'fadd':S.filters.push(o().quick[+v]);S.pop=null;break;
+  case 'frm':{const f=S.filters.splice(+v,1)[0];if(f&&f.from)S.from=null;break;}
+  case 'fclear':S.filters=[];S.q='';S.from=null;break;
+  case 'srm':S.sort=null;break;
+  case 'sort':S.sort=S.sort&&S.sort.k===v?(S.sort.d==='asc'?{k:v,d:'desc'}:null):{k:v,d:'asc'};break;
+  case 'search':S.search=!S.search;if(!S.search)S.q='';render();if(S.search){const n=document.getElementById('q');n&&n.focus();}return;
+  case 'pref':S.pref.open=v;savePref();break;
+  case 'density':S.pref.density=v;savePref();break;
+  case 'col':{const cs=cols().slice();const i=cs.indexOf(v);if(i>=0)cs.splice(i,1);else cs.push(v);S.pref.cols[S.obj]=o().columns.filter(k=>cs.includes(k));savePref();break;}
+  case 'colreset':delete S.pref.cols[S.obj];savePref();break;
+  case 'selclear':S.sel=new Set();break;
+  case 'bulk':{const n=S.sel.size;S.sel=new Set();toast(v+'：对 '+n+' 条记录（原型只演示入口）');return;}
+  case 'row':if(e.target.closest('.go'))return;openRow(v);return;
+  case 'rowpage':e.stopPropagation();openRow(v,'page');return;
+  case 'openref':e.stopPropagation();openRef(t.dataset.obj,v);return;
+  case 'childlist':{const p=cur();const pr=cr();S.obj=t.dataset.obj;S.view=0;S.sort=null;S.q='';S.search=false;S.sel=new Set();S.open=null;S.host=null;S.stack=[];S.from=p;S.filters=[{l:'关联 = '+pr.name,f:r=>r.parentId===p.id,from:true}];break;}
+  case 'close':S.open=null;S.stack=[];break;
+  case 'back':back();return;
+  case 'expand':S.host=S.open;S.hostTrail=S.stack.slice();S.open=null;S.stack=[];break;
+  case 'collapse':S.open=S.host;S.stack=S.hostTrail.slice();S.host=null;S.hostTrail=[];break;
+  case 'backlist':S.open=null;S.host=null;S.stack=[];S.hostTrail=[];break;
+  case 'prev':move(-1);return;
+  case 'next':move(1);return;
+  case 'tab':S.tab=v;break;
+  case 'tlf':S.tlf=v;break;
+  case 'stage':setStage(v);return;
+  case 'showempty':S.showEmpty.has(v)?S.showEmpty.delete(v):S.showEmpty.add(v);break;
+  case 'showall':S.showEmpty.has('*')?S.showEmpty.clear():(co().fields.forEach(f=>S.showEmpty.add(f.s)),S.showEmpty.add('*'));break;
+  case 'edit':startEdit(t,t.dataset.k);return;
+  case 'copy':try{navigator.clipboard.writeText(v).then(()=>toast('已复制 '+v),()=>toast(v));}catch(x){toast(v);}return;
+  case 'help':S.help=!S.help;break;
+  case 'toast':toast(v);return;
+ }
+ render();
+});
+app.addEventListener('pointerdown',e=>{const g=e.target.closest('[data-grip]');if(!g)return;e.preventDefault();const host=g.parentElement,body=app.querySelector('.body'),isSplit=host.classList.contains('panel');const startX=e.clientX,startW=host.getBoundingClientRect().width,max=Math.round(body.getBoundingClientRect().width*0.8);g.classList.add('on');g.setPointerCapture(e.pointerId);const mv=ev=>{const w=Math.max(420,Math.min(max,Math.round(startW+(startX-ev.clientX))));S.pref.w=w;if(isSplit)body.style.gridTemplateColumns='200px minmax(0,1fr) '+w+'px';else host.style.width='min('+w+'px,100%)';};const up=()=>{g.removeEventListener('pointermove',mv);g.removeEventListener('pointerup',up);g.classList.remove('on');savePref();render();};g.addEventListener('pointermove',mv);g.addEventListener('pointerup',up);});
+app.addEventListener('input',e=>{if(e.target.id==='q'){S.q=e.target.value;render();}});
+app.addEventListener('keydown',e=>{if(e.target.id==='cmt'&&e.key==='Enter'&&e.target.value.trim()){cr().tl.unshift({t:'comment',x:e.target.value.trim(),w:'刚刚',who:'Dev Admin'});S.tlf='all';toast('评论已发布');}});
+document.addEventListener('keydown',e=>{if(e.target.tagName==='INPUT')return;if(e.key==='Escape'){if(S.pop||S.help){S.pop=null;S.help=false;render();return;}if(S.open){back();return;}if(S.host){S.host=null;S.hostTrail=[];render();}}else if((S.open||S.host)&&(e.key==='ArrowDown'||e.key==='j')){e.preventDefault();move(1);}else if((S.open||S.host)&&(e.key==='ArrowUp'||e.key==='k')){e.preventDefault();move(-1);}});
+document.addEventListener('click',e=>{if(S.pop&&!e.target.closest('.pop')&&!e.target.closest('[data-act="pop"]')){S.pop=null;render();}if(S.help&&!e.target.closest('.help')&&!e.target.closest('[data-act="help"]')){S.help=false;render();}});
+render();
+})();
+</script>
+</body></html>
