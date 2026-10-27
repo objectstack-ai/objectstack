@@ -1,5 +1,181 @@
 # @objectstack/plugin-approvals
 
+## 18.2.0
+
+### Minor Changes
+
+- 384bb7b: feat(spec,lint): an action's `confirmText`, `successMessage` and `errorMessage` are `template` slots over the roots the console's runner binds
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  
+  - **Before.** On the page action rows (`action:button`, `action:icon`, an `action:group` / `action:menu` member) the three copy keys were plain `z.string()`s, and on a registered action `confirmText` / `successMessage` were `I18nLabel`s. None declared a hole. The console filled `${…}` in them (`${record.name}` in a confirm, `${result.email}` in a success toast), and the platform's own sentences were written that way.
+  - **Now.** Each is an ADR-0032 `template` slot (Decisions 2–3), the same mechanism as a bulk action's `confirmText`. A bare string is shorthand for `{ dialect: 'template', source }`, and the envelope is accepted too. Holes are `{{ path }}` and `{{ path | formatter[:arg] }}`, with formatters from the template engine's whitelist and no logic inside a hole. They read a closed scope, the one the console's action runner binds, declared in `@objectstack/spec/ui`:
+    - `confirmText`: `record`, the record the action runs against, and `params` only when the action's `params` is an object of static values (`actionConfirmTemplateRoots(action)`). An input list binds nothing, because its values are collected after the confirmation.
+    - `successMessage`: `result`, the payload the handler answered, then `record` (`ACTION_SUCCESS_TEMPLATE_ROOTS`).
+    - `errorMessage`, on the rows only: no root (`ACTION_ERROR_TEMPLATE_ROOTS`). The runner shows it as written.
+  - **Parsed shape.** A parsed copy key is now the `{ dialect: 'template', source }` envelope rather than a string. A reader of the parsed or served definition takes the text from `source` (`templateSlotSource` in `@objectstack/spec/automation` reads both forms). The console pinned by this release reads both. A registered action keeps its inline locale map, and a blank string still parses as itself.
+  - **Judged at the doors, as warnings.** `objectstack validate`, `objectstack compile` and the publish gate (on `action`, `object` and now `page` writes) judge every sentence through `closedScopeTemplateRefusal`, the template judge's closed-scope entry, then compile it as a template. A hole over a root the runner does not bind, a `${…}` or single-brace `{x}` token, a hole holding logic or an unknown formatter, and a blank sentence are each named. Each locale of an inline map is judged on its own. Every finding is a **warning**, an advisory at the publish gate and never a refusal, so no command's exit code changes: each of these texts parsed while the keys were plain strings.
+  - **`${…}` is prescribed its hole.** The judge reads a `${…}` token with its `$`, so `Delete ${record.name}?` is told to become `Delete {{ record.name }}?`. It no longer says `Delete ${{ record.name }}?`. A slot with no root names every hole and token in it as literal text.
+  - **The platform's sentences.** The `invite_user` success toast on `sys_invitation`, `sys_member`, `sys_organization` and `sys_user` (`Invitation sent to {{ result.email }}`) and the nine `sys_approval_request` decision toasts (`Approved "{{ result.request.record_title }}"`, …) now use `{{ }}` holes, in every shipped locale. The console fills them the same way.
+  - **Translation and extraction.** `translateAction` answers the authored envelope when no translation applies, and a translated sentence as a string. `os i18n extract` seeds an envelope-form `confirmText` / `successMessage` exactly like the bare string.
+  - **Unchanged.** `ActionSchema.errorMessage` and `outcomeMessages` are untouched (`outcomeMessages` still reads `${result.*}`), and so are `emptyText` and every other key. Producers measured at `e649c2d91e`: 13 authored copy sentences carried `${…}` (the 13 above) and none carried `{{`. After this change none carries `${…}`, and none in `examples/**`.
+
+### Patch Changes
+
+- 888d686: feat(plugin-approvals): an approval step's `excludeSubmitter: true` keeps the submitter from approving their own request
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** `excludeSubmitter` was declared on the approval node config and its describe opened with `[PLANNED — not yet enforced]`: the approval engine parsed it and read nothing, so a category manager who submitted their own admission was step 1's `field` approver and approved it.
+  - **At the open.** The submitter (the run's trigger user, `sys_approval_request.submitter_id`) is taken off the resolved slate, whatever approver type produced them, by their user id or their account's email, an out-of-office hop that lands on them included. Everyone else stays on it, per_group tags included. A slate this empties takes the node's `onEmptyApprovers` route: the organization's administrators by default, the declared `fallbackApprovers` under `'fallback'`, or the `NO_APPROVERS` refusal under `'fail'`, which now names the exclusion. The fallback slate and the administrators' slate are screened the same way, so an organization whose only administrator is the submitter opens the request on the slate that names no one.
+  - **On the record.** A request whose slate lost its submitter carries a system note on its timeline naming the route it took (the remaining approvers, the fallback approvers, the administrators, or no one), rendered in the reader's language by the approvals door. The administrators' routing note says the only approver was the submitter instead of "no approver resolved to a person".
+  - **After the open.** An approval decided by the submitter is refused with `FORBIDDEN`, the privileged override included; their rejection stands. A reassign to the submitter, or to a position only they hold, is refused with `VALIDATION_FAILED`. An SLA escalation that reassigns leaves them off the new slate, and one whose only target is the submitter is not applied: the pending approvers keep the request and are told the SLA lapsed.
+  - **Spec.** The describe drops the `[PLANNED — not yet enforced]` marker and its last sentence; nothing else in the schema changes.
+  - **Unchanged.** With the option off or omitted (the default), every slate, timeline, decision, reassign and escalation behaves as before.
+  
+  What to do: nothing to migrate. A step that set `excludeSubmitter: true` now enforces it; an `expression` approver or validation rule added by hand to keep the submitter off can be removed.
+- ca80f05: Clause-②: no
+  Metadata-protocol: none
+  
+  The note an `admin_rescue` approval request writes on its own timeline ("Routed to this organization's administrators because the approver slate named no one: …") is now read in the reader's language. The request's node-config snapshot stores the note as a code and its parameters (`__adminRescueNote`: the timeline row it explains, the abandoned approver slots, and why a declared `fallback` did not help), and `listActions` (`GET /api/v1/approvals/requests/:id/actions`) renders that row's `comment` through the plugin's `messages` catalog at the caller's locale, the way the approvals door already localizes a request's flow, step and object labels. The sentence and its clauses ship in `en`, `zh-CN`, `ja-JP` and `es-ES`.
+  
+  The stored `comment` is unchanged: it is still the English sentence, which a reader with no locale, an `en` reader, the generic data door and the action-history list views are served as before. Requests opened before this release carry no snapshot entry, so their note keeps showing its stored English; no migration is needed.
+- 2351c8d: fix(plugin-approvals): an SLA escalation that reassigns to a target resolving to no one keeps the request on its approvers and notifies them, instead of stranding it on a slate nobody can decide
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An approval node's `escalation: { action: 'reassign', escalateTo }` expands `escalateTo` to the holders of that position, and when nobody holds it falls back to the value itself, so a config naming a specific user id keeps working. That fallback is now judged by the same rule the reassign door applies: a user id or email an account carries (and not a user of other organizations only), or `position:<name>` for a position someone in the request's organization holds.
+  
+  - **A target that resolves** reassigns exactly as before.
+  - **A target that does not** (an unstaffed or mistyped position name, a user id with no account, a `team:` / `department:` / `org_membership_level:` / `role:` literal) no longer replaces the slate. The pending approvers are kept and receive `approval.sla_breached`, and the `escalate` audit row records `reassign → <target> — not applied: <why>`. The escalation still fires once.
+  - **The submitter's escalation notice** now names the action actually taken (`notify` when the reassign was not applied, or when no `escalateTo` was set), not the configured one.
+  - A directory read that fails during the sweep leaves the request untouched and unmarked, so the next sweep retries it.
+  
+  Nothing an author writes is refused that was accepted before. To have an overdue request move, name a staffed position or a person in the request's organization in `escalateTo`.
+- 8061f33: chore(packages): publishing metadata — per-format types in `exports`, declared `sideEffects`, and a README for the 18 published packages without one
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Measured on a fresh `origin/main` build of all 73 published packages outside `ui/`, each staged as `npm pack` would ship it, with publint 0.3.25 and @arethetypeswrong/cli 0.18.5. Before: 73 of 73 packages carried at least one publint message and 48 carried an attw problem. After: 3 packages carry a publint message and 16 carry an attw problem, each remaining class needing a change this one deliberately does not make — an export-map shape change, or a dual-build fix in `@objectstack/core`.
+  
+  - **Types per module format.** On 38 manifests one `types` entry served both formats, so a TypeScript consumer importing the ESM build was handed the CJS declarations — every one of attw's 38 `FalseCJS`. Each `{types, import, require}` entry becomes `{import: {types, default}, require: {types, default}}` pointing at the declaration file the same tsup run already emits for that format. No subpath is added or removed, and no JavaScript target moves. `@objectstack/core` keeps its single `types` entry: its `.d.ts` and `.d.cts` declare the same classes with private members, so serving them per format gives a consumer that reaches `core` through both resolution modes two incompatible `ObjectKernel` types, which is `@objectstack/plugin-dev`'s declaration build (it awaits `import('@objectstack/objectql')` inside a CommonJS build). Its `FalseESM` therefore stays, measured and unfixed here.
+  - **`sideEffects` on the 72 manifests that declared none**, read per package rather than set in bulk: `@objectstack/service-cluster-redis` registers its `redis` cluster driver at module load and `create-objectstack`'s bin reaches its program through a bare import, so both declare their entry files side-effectful; everything else is `false`.
+  - **`publishConfig: { access: 'public' }`** on the 17 that had none, the value the other 56 already declare.
+  - **`type`** on the 39 that shipped `.js` without declaring a format — every `.js` under their `dist/` was read first and is CommonJS, which is what the absent field already meant — **`engines.node >= 22.0.0`** on the 22 that had no `engines`, and **`repository.url`** as the full `git+https://` git URL on 71.
+  - **A README for 18 published packages that had none**: one paragraph, the first import a reader writes, and a link to the package's docs page. They are the pages npm renders, and for these 18 npm rendered nothing.
+- b7b04e5: fix(plugin-approvals,plugin-sharing): the approver a pending step waits on can read the record the request is about
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An approver was asked to decide on a record they could not open. Unless the app happened to grant them read of that exact row, the request page showed only the snapshot and the record card read "unable to open this record", so a contract was approved without its document being read.
+  
+  - **Who reads.** While an approval request is pending, each person on its current step's slate (a slot naming their user id, or the email their own account carries) and the override holder (the administrator who may decide any pending request of their organization) may READ the one record the request is about. A slot left as a `position:` or `team:` literal names no person and grants no read.
+  - **How far.** Read only: the write gates never read this grant, so the approver still cannot edit or delete the record. Only the record itself, as a reader of it reads it: attachments follow the record read, as they do for any reader. Only while the step is pending: a decision that resolves the step, or advances the request to its next step, ends the grant at the next read. Never across organizations, the platform administrator's override included. An on-behalf-of (agent) principal gets no approval grant.
+  - **Where it is decided.** `@objectstack/plugin-approvals` derives the records from the slate it already resolves (`ApprovalService.pendingApproverReadGrants`, one indexed read of the pending-approver index per request context, plus one request read per object, memoized per request and retired by any write). `@objectstack/plugin-sharing` ORs those record ids into its read filter beside the caller's record shares, so every read door that composes the sharing filter serves them; it grants nothing when the approvals service is absent or its read fails.
+  - **Explain.** `@objectstack/plugin-security`'s access explanation names the grant on the sharing layer as a read share "via approval request N".
+  
+  The grant is the row-level reach of a read share; the approver still needs read on the object itself. Nothing is declared: no metadata key, no app setting.
+  
+  What to do: nothing. An app that wrote sharing rules mirroring its approval routing only so approvers could open the record may drop them.
+- c51aed4: fix(plugin-approvals): an approval notification names the record by its title, as the recipient may read it
+  
+  Every approval notification body named its record by the object's label and the record id (`Your Contract C8Mp7TjRYta8mOWx was approved.`), so a recipient could not tell which record it was without opening it. Each notification is delivered to one named recipient, so it now names the record by its display title (ADR-0079 `nameField`) as that recipient may read it: the inbox's own rule (the record read under the system context, the title picked from it as served to the reader, narrowed by field-level security), asked as the recipient, whose envelope is resolved through `resolveUserAuthzGrants` in the request's organization. It falls back to the record id when the title is empty, when the recipient may not read the title field or is served it masked, and when anything on the way fails. A notification that names one record to several recipients goes out once per name they read, so no recipient is handed another recipient's title. The message templates keep their `{{object}} {{record}}` shape. The token-bearing one-tap action pages keep naming the record by its id: they have no reader to narrow for.
+  
+  Clause-②: no
+  Metadata-protocol: none
+- 6a2866a: feat(plugin-approvals,rest,client): a record-anchored approval lock read, `{ locked }` for every caller who can read the record
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A member who could read and edit a record but was not on its approval was offered an edit the server then refused with `409 RECORD_LOCKED`. The lock's only carrier was the request row's `lock_record`, and that row is rightly not served to a non-participant unless the object turns on `approvalsVisibleToReaders`. The lock now has a carrier of its own.
+  
+  - **`@objectstack/spec`.** `IApprovalService` gains the optional member `getRecordLock(object, recordId, context)`, which answers `{ locked: boolean }`, or `null` when the caller cannot read the record. No exported schema or type is added.
+  - **`@objectstack/plugin-approvals`.** `ApprovalService.getRecordLock` reads the record as the caller. A record the caller cannot read answers `null`, the same answer as an id that does not exist. A caller with no read on the object is refused for every id, whether it exists or not. `locked` is `true` while a pending request's node has `lockRecord` other than `false`. The lock judgement is now one function, `nodeConfigLocksRecord` (not exported from the package), and the record-lock hook, the request row's `lock_record` and the new read all call it. Request content stays behind `approvalsVisibleToReaders`: the answer carries no request id, node, approvers or `pending` flag.
+  - **`@objectstack/rest`.** New route `GET /api/v1/approvals/records/:object/:recordId/lock`. It answers `{ success: true, data: { locked } }`. A `null` answers `404 RECORD_NOT_FOUND` with one body, whether the record is unreadable or missing. A service without the member answers `501`. The route's closed query-parameter set is empty, so any query parameter is refused with a `400`. The route is ledgered as `sdk`.
+  - **`@objectstack/client`.** `client.approvals.getRecordLock(object, recordId)` calls that route.
+- Updated dependencies [733b3c8]
+- Updated dependencies [48e84a9]
+- Updated dependencies [384bb7b]
+- Updated dependencies [fc4ac58]
+- Updated dependencies [fc4ac58]
+- Updated dependencies [a0fac02]
+- Updated dependencies [a0fac02]
+- Updated dependencies [ab0bc89]
+- Updated dependencies [42d9fe8]
+- Updated dependencies [2af790f]
+- Updated dependencies [cc10e74]
+- Updated dependencies [8654435]
+- Updated dependencies [65145d3]
+- Updated dependencies [888d686]
+- Updated dependencies [f6ba134]
+- Updated dependencies [b77bb37]
+- Updated dependencies [f1ddace]
+- Updated dependencies [9993165]
+- Updated dependencies [557973d]
+- Updated dependencies [49653f9]
+- Updated dependencies [6021b5e]
+- Updated dependencies [6444288]
+- Updated dependencies [7cd2ebf]
+- Updated dependencies [4bcc4df]
+- Updated dependencies [47af3dd]
+- Updated dependencies [073f08b]
+- Updated dependencies [07586f5]
+- Updated dependencies [fa44dd2]
+- Updated dependencies [0c81694]
+- Updated dependencies [4034f47]
+- Updated dependencies [52f3f51]
+- Updated dependencies [d727348]
+- Updated dependencies [5e113b3]
+- Updated dependencies [493a6c4]
+- Updated dependencies [d65cbb6]
+- Updated dependencies [f00e8d5]
+- Updated dependencies [d1663ba]
+- Updated dependencies [2163e80]
+- Updated dependencies [b00fc55]
+- Updated dependencies [dd5e355]
+- Updated dependencies [e2a4b6a]
+- Updated dependencies [be78977]
+- Updated dependencies [3446d43]
+- Updated dependencies [436d284]
+- Updated dependencies [dc71845]
+- Updated dependencies [6d9d3ef]
+- Updated dependencies [be531f6]
+- Updated dependencies [f0b33ee]
+- Updated dependencies [9ca36b1]
+- Updated dependencies [39a78b1]
+- Updated dependencies [c8cb510]
+- Updated dependencies [db5fca7]
+- Updated dependencies [9494dd8]
+- Updated dependencies [1af2cea]
+- Updated dependencies [8061f33]
+- Updated dependencies [617f27e]
+- Updated dependencies [b029c90]
+- Updated dependencies [495fa07]
+- Updated dependencies [876aa27]
+- Updated dependencies [40f5c6e]
+- Updated dependencies [3b480e0]
+- Updated dependencies [af13616]
+- Updated dependencies [14b5597]
+- Updated dependencies [4548ba3]
+- Updated dependencies [6a2866a]
+- Updated dependencies [3a2d38c]
+- Updated dependencies [1f40201]
+- Updated dependencies [17f8217]
+- Updated dependencies [5e7cf63]
+- Updated dependencies [6e47e16]
+  - @objectstack/core@18.2.0
+  - @objectstack/types@18.2.0
+  - @objectstack/spec@18.2.0
+  - @objectstack/platform-objects@18.2.0
+  - @objectstack/metadata-core@18.2.0
+  - @objectstack/formula@18.2.0
+
 ## 18.1.0
 
 ### Minor Changes

@@ -1,6 +1,6 @@
 {
   "name": "@object-ui/types",
-  "version": "18.1.0",
+  "version": "18.2.0",
   "description": "Pure TypeScript type definitions for Object UI - The Protocol Layer",
   "type": "module",
   "sideEffects": false,

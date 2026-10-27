@@ -122,6 +122,54 @@ function replayConflict(name: string, decision: Extract<ReplayGuardDecision, { a
   return err;
 }
 
+/**
+ * A job's arming as its `sys_job` row records it — see
+ * {@link DbJobAdapter.readArming}.
+ */
+export interface JobArming {
+  /** Scheduled and never cancelled since. */
+  readonly active: boolean;
+  /** The schedule the row was armed with; `null` when the row cannot be read back as one. */
+  readonly schedule: JobSchedule | null;
+  /**
+   * The last instant the row's holder is known to have been alive for this
+   * job (ISO-8601): the row's last write, which is its arming or the settle
+   * of its last fire, whichever came later. `null` when the row carries none.
+   */
+  readonly lastAliveAt: string | null;
+}
+
+/**
+ * The {@link JobSchedule} a `sys_job` row was written from — the inverse of
+ * `upsertJobRow`'s `schedule_expression` folding (cron expression, interval
+ * milliseconds as a string, or the one-shot ISO instant).
+ */
+function scheduleFromJobRow(row: Record<string, any>): JobSchedule | null {
+  const expression = typeof row.schedule_expression === 'string' ? row.schedule_expression : null;
+  if (!expression) return null;
+  if (row.schedule_type === 'cron') {
+    return typeof row.timezone === 'string' && row.timezone
+      ? { type: 'cron', expression, timezone: row.timezone }
+      : { type: 'cron', expression };
+  }
+  if (row.schedule_type === 'interval') {
+    const intervalMs = Number(expression);
+    return Number.isFinite(intervalMs) && intervalMs > 0 ? { type: 'interval', intervalMs } : null;
+  }
+  if (row.schedule_type === 'once') return { type: 'once', at: expression };
+  return null;
+}
+
+/** The first argument that reads as an instant, as ISO-8601. */
+function firstInstant(...values: unknown[]): string | null {
+  for (const value of values) {
+    if (value == null || value === '') continue;
+    const ms = value instanceof Date ? value.getTime() : new Date(value as string | number).getTime();
+    if (Number.isFinite(ms)) return new Date(ms).toISOString();
+  }
+  return null;
+}
+
 function uid(prefix: string): string {
   const g: any = globalThis as any;
   if (g.crypto?.randomUUID) return `${prefix}_${g.crypto.randomUUID()}`;
@@ -294,6 +342,41 @@ export class DbJobAdapter implements IJobService {
   setReplayGuard(name: string, guard: ReplayGuard | null): void {
     if (guard) this.replayGuards.set(name, guard);
     else this.replayGuards.delete(name);
+  }
+
+  /**
+   * How the job's `sys_job` row stands right now — read BEFORE this kernel
+   * schedules the job, it is how the PREVIOUS holder left it. `null` when the
+   * job was never scheduled here (no row).
+   *
+   * This is what tells "the kernel was not ticking" apart from "the job was
+   * not armed". A kernel that stops ticking — evicted, crashed, restarted —
+   * never cancels its jobs: {@link destroy} releases the timers and leaves
+   * every row `active`. A deliberate unbind (a flow disabled, republished or
+   * withdrawn) goes through {@link cancel}, which clears `active`. So a row
+   * still `active` when the next kernel arrives was armed and then stopped
+   * ticking, and its last-alive instant is where the silence began.
+   *
+   * Like {@link setReplayGuard}, NOT part of `IJobService`: the scheduled-flow
+   * trigger asks for it structurally, and a job service without it simply has
+   * no reading to give.
+   *
+   * ⛔ Not caught here. A read that fails is not a row that says "inactive",
+   * and answering one would hide a silence the caller exists to report.
+   */
+  async readArming(name: string): Promise<JobArming | null> {
+    const rows = await this.engine.find(JOB_TABLE, {
+      where: { name },
+      limit: 1,
+      context: SYSTEM_CTX,
+    });
+    const row = rows?.[0];
+    if (!row) return null;
+    return {
+      active: row.active === true || row.active === 1,
+      schedule: scheduleFromJobRow(row),
+      lastAliveAt: firstInstant(row.updated_at, row.last_run_at, row.created_at),
+    };
   }
 
   /**

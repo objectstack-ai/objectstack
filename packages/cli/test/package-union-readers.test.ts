@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 50 — spawns the real producer once per single-cause fixture: nine CLI spawns across three beforeAll hooks, each a distinct triple (`os build`, `os validate`, `os lint --strict`, `os i18n check`, `os i18n extract` over five fixtures); slowest CI reading 32.22 s (run 40447801748) of the three scheduled CI runs after the oclif test manifest (PR #26256: 40392443783, 40424746941, 40447801748), x 1.25, rounded up
 
 /**
  * #22238 / #22189 — the CLI readers that judged only a multi-package

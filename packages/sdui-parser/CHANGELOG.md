@@ -1,5 +1,80 @@
 # @objectstack/sdui-parser
 
+## 18.2.0
+
+### Patch Changes
+
+- 8faba89: feat(sdui-parser)!: one parser body: the renderer copy's additions join `@objectstack/sdui-parser` (#25712)
+  
+  Clause-②: yes (narrowing: `validateTree` now also judges the nodes held in a manifest entry's declared `slots`, so a caller whose manifest carries `slots` gets diagnostics on slot-held nodes it did not get before)
+  Metadata-protocol: none
+  
+  Two copies of this parser existed: this package, which the save gate runs, and `@object-ui/sdui-parser`, which the renderer runs. `check:sdui-lockstep` held them to one grammar and one code set, and they drifted everywhere else. This change makes this package the one body. The renderer moves onto it and the second copy is deleted in follow-up changes under the same card.
+  
+  **Added (from the renderer's copy).**
+  
+  - Node-slot validation (objectui#11170). `ManifestComponent.slots` lists the positions besides `children` where a renderer reads nodes, such as `trigger`, `items[].content` and `regions[].components`. `validateTree` descends each one the way it descends `children`. `manifestFromConfigs` gains a `slotsFor` option that writes the list, and a manifest built without it carries none, so the walk follows `children` alone.
+  - The retired `body` child-list key (objectui#6771). Before, `body` drew the bare `unknown-prop`. Now the message names `children`. A `body` child list under a component that takes no children draws `not-a-container`, the code the `children` spelling draws. Both remain warnings. Exported as `checkRetiredBodyDialect` and `RETIRED_CHILD_LIST_KEY`.
+  - html-tier provenance (objectui#4000). `parseJsx` stamps every element it builds with an enumerable symbol-keyed marker, `Symbol.for('@object-ui/sdui-parser.html-tier-node')`. `JSON.stringify` and `Object.keys` do not see it. Exported as `HTML_TIER_NODE`, `isHtmlTierNode` and `markHtmlTierNode`. The registry key keeps its original package name on purpose, so a node either copy stamped reads the same.
+  - More exports:
+    - `acceptsChildren`, `CHILD_LIST_KEY`, `SDUI_BASE_PROPS`, `SduiBaseProp` and `SduiBasePropScope`;
+    - `assertFullyLoaded`, the manifest generators' guard against lazy stubs, with `RegistryConfigLike.lazy`;
+    - `NodeSlotDeclarationLike`.
+  - The generated `.d.ts` header gains `/* eslint-disable */` and names this package.
+  
+  **Renamed, with the old names kept.** `ParsedSchemaNode` is the parsed node and `ManifestValidationResult` is `validateTree`'s result. These are the names the renderer's copy took so it would not collide with `@object-ui/types`' `SchemaNode` or the spec's `ValidationResult` (objectui#6349, objectui#3161). `SchemaNode` and `ValidationResult` stay exported as `@deprecated` aliases of them, so nothing exported is removed.
+  
+  **Unchanged.**
+  
+  - Every `type-mismatch` and `member-type-mismatch` is still an `error`. The renderer's copy graded them `error` only beside an `enum` arm; this package's rule is the one kept.
+  - `unconsumed-widget-option` is still emitted as an inline literal.
+  - The grammar, the 25 diagnostic codes and the containment predicate.
+  
+  **BREAKING** (a narrowing of `validateTree` for a manifest that carries `slots`), shipped as `patch` because no metadata protocol kind moves. The save gate's verdicts do not move, and that was measured: the manifest that `objectstack validate`, `build`, `lint` and `serve` read is the tracked `sdui.manifest.json`, which `@objectstack/console` ships. It carries `slots` on 0 of its 106 entries, because its generator calls `manifestFromConfigs` without `slotsFor`. So no save that was accepted before is refused now. The walk has work only for a caller that builds its manifest with `slotsFor`, and today that is the renderer, whose own copy already walks the slots.
+  
+  Migration, for a TypeScript caller: none is required. To move off the deprecated names, change `SchemaNode` to `ParsedSchemaNode` and `ValidationResult` to `ManifestValidationResult`.
+  
+  `body-dialect.ts` and `provenance.ts` moved in from the MIT-licensed `@object-ui/sdui-parser` and keep that licence. Each carries the notice, and the package now ships `LICENSE-MIT`.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition, stored row or stored shape is added, removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is `validateTree`, a function of this library, for a manifest that carries the new `slots` key: nodes held in those positions are now judged. No manifest the save gate reads carries that key (the tracked `sdui.manifest.json`: 0 of 106 entries), so no stored or authored page changes verdict there. A caller who builds a slotted manifest gets diagnostics on slot-held nodes, and the repair is the page author's per diagnostic, which no ledger entry can derive. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed, since the two renamed types stay exported as deprecated aliases (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+- e843b5b: feat(types,react,sdui-parser,app-shell)!: the node-level `visibleOn` / `hiddenOn` / `disabledOn` spellings are retired; `visibleWhen` / `hidden` / `disabled` are the one predicate each
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: not-required (no-migration-prescription) The three keys are `@object-ui/types` schema members on objectui's own node face, not an `@objectstack/spec` key, object definition, stored row or stored shape: the spec declares `visibleWhen` as the one conditional-visibility predicate at every layer (ADR-0089) and never declared a `*On` suffix on a page component, so the ADR-0087 registries in `packages/spec` have no entry to write and `objectstack migrate meta` has nothing to rewrite. Each old spelling is refused by name on both faces (the TypeScript compiler, the Zod mirror behind `objectui validate`), and the refusal names the surviving key; that is the same disposition the objectui retirements took when the package merged into this repository (maintainer ruling 28 = B on objectstack#25831). The guidance below is for the author of a page, not for a metadata upgrader. The other categories are closed on facts: the four packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and what narrows is a declared schema key on a published metadata face, not a runtime-only interface, a type annotation or a runtime export (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  `@objectstack/spec` declares exactly one conditional-visibility predicate at every layer, `visibleWhen`, and objectui carried three spellings of its own beside it: `visibleOn` beside `visibleWhen`, `hiddenOn` beside `hidden`, `disabledOn` beside `disabled`. Each pair was evaluated by the same code with the same polarity, so the second spelling added a dialect and nothing else. The three are retired, with no alias window.
+  
+  - **`@object-ui/types`**: `BaseSchema.visibleOn`, `hiddenOn` and `disabledOn` are `never` on the TypeScript face and alias refusals on the Zod mirror. A document that writes one is refused at that key, and the message names the key that survives (`visibleWhen`, `hidden`, `disabled`), says the polarity is the same, and says the value is unchanged. `objectui validate` reads the same mirror, so it prints the same refusal. The `object-view` table slot's refusal of the same three keys now names the surviving node key too (write `visibleWhen` / `hidden` / `disabled` on the object-view node itself) instead of sending the author to a retired spelling. Boolean `visible` stays: the spec declares it on actions, navigation entries, tabs, alerts and settings, and the renderer keeps evaluating it.
+  - **`@object-ui/react`**: `SchemaRenderer`'s visibility chain has three legs, `visibleWhen` and `visible` (shown when truthy) and `hidden` (hidden when truthy), and the enablement gate has one, `disabled`. A stale retired key that reaches the renderer unvalidated is not consulted and is held out of the component's props, so it neither gates the node nor lands in the DOM.
+  - **`@objectstack/sdui-parser`**: the three keys are no longer base props. `validateTree` reports each as an `unknown-prop` diagnostic that names the surviving key, so a TSX tree is told the same thing a JSON document is. `checkRetiredVisibilityDialect` and `RETIRED_VISIBILITY_DIALECTS` are exported for that reading.
+  - **`@object-ui/app-shell`**: the command palette reads a navigation entry's `visible` only; the `visibleOn` fallback it carried read a key `NavigationItem` never declared.
+  
+  **BREAKING** (an accept-set narrowing) for any page, view or component document that writes `visibleOn`, `hiddenOn` or `disabledOn` on a node. No shipped example, fixture or skill example in this repository wrote one; the ones in the documentation and the `objectui` skill are rewritten in this change.
+  
+  - **Before.** The three keys parsed, were evaluated beside their canonical twin, and the docs taught both spellings.
+  - **Now.** Each is refused by name on `objectui validate`, on the Zod mirror, by the TypeScript compiler and by the SDUI parser, and the renderer does not read it.
+  - **Fix.** Rename the key and keep the value: `visibleOn` becomes `visibleWhen`, `hiddenOn` becomes `hidden`, `disabledOn` becomes `disabled`. A form field's `fields[].visibleOn` is a different, view-level slot and is unchanged.
+- 2409c9c: chore(packages): ship a LICENSE in the 14 published packages that had none
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  npm packs a package's own `LICENSE` whatever its `files` says, and nothing in the release tooling copies the repository's root `LICENSE` into a package, so these 14 published tarballs carried no licence text at all while declaring `"license": "Apache-2.0"`. Each now carries a byte-for-byte copy of the root `LICENSE`, the same file the other 59 published packages already ship. With this, every one of the 73 published packages outside `ui/` ships a LICENSE and a README.
+- 8061f33: chore(packages): publishing metadata — per-format types in `exports`, declared `sideEffects`, and a README for the 18 published packages without one
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Measured on a fresh `origin/main` build of all 73 published packages outside `ui/`, each staged as `npm pack` would ship it, with publint 0.3.25 and @arethetypeswrong/cli 0.18.5. Before: 73 of 73 packages carried at least one publint message and 48 carried an attw problem. After: 3 packages carry a publint message and 16 carry an attw problem, each remaining class needing a change this one deliberately does not make — an export-map shape change, or a dual-build fix in `@objectstack/core`.
+  
+  - **Types per module format.** On 38 manifests one `types` entry served both formats, so a TypeScript consumer importing the ESM build was handed the CJS declarations — every one of attw's 38 `FalseCJS`. Each `{types, import, require}` entry becomes `{import: {types, default}, require: {types, default}}` pointing at the declaration file the same tsup run already emits for that format. No subpath is added or removed, and no JavaScript target moves. `@objectstack/core` keeps its single `types` entry: its `.d.ts` and `.d.cts` declare the same classes with private members, so serving them per format gives a consumer that reaches `core` through both resolution modes two incompatible `ObjectKernel` types, which is `@objectstack/plugin-dev`'s declaration build (it awaits `import('@objectstack/objectql')` inside a CommonJS build). Its `FalseESM` therefore stays, measured and unfixed here.
+  - **`sideEffects` on the 72 manifests that declared none**, read per package rather than set in bulk: `@objectstack/service-cluster-redis` registers its `redis` cluster driver at module load and `create-objectstack`'s bin reaches its program through a bare import, so both declare their entry files side-effectful; everything else is `false`.
+  - **`publishConfig: { access: 'public' }`** on the 17 that had none, the value the other 56 already declare.
+  - **`type`** on the 39 that shipped `.js` without declaring a format — every `.js` under their `dist/` was read first and is CommonJS, which is what the absent field already meant — **`engines.node >= 22.0.0`** on the 22 that had no `engines`, and **`repository.url`** as the full `git+https://` git URL on 71.
+  - **A README for 18 published packages that had none**: one paragraph, the first import a reader writes, and a link to the package's docs page. They are the pages npm renders, and for these 18 npm rendered nothing.
+
 ## 18.1.0
 
 No changes in this release.
