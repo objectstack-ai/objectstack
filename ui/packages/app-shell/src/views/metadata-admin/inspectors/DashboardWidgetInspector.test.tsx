@@ -31,6 +31,11 @@ vi.mock('../previews/useDatasetCatalog', () => ({
 }));
 
 import { DashboardWidgetInspector } from './DashboardWidgetInspector';
+// The inspector's `engine.inspector.*` rows live in `@object-ui/i18n`'s `studio`
+// namespace, whose `zh` catalogue is fetched on demand (objectstack#25922).
+// Resident before any case, so the zh rows below read synchronously.
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+await loadStudioCatalogue('zh');
 
 afterEach(cleanup);
 
