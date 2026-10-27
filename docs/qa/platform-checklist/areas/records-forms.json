@@ -58,6 +58,126 @@
         "The recipe lands the OBJECT only. Each probe inserts its own throwaway qa_nofeeds record inline (it needs that record's id in the thread_id), exactly as attachments-storage's clause 5 does with qa_nofiles — no standing rows here.",
         "This recipe provisions the SERVER-side probe target. The `feeds:false must HIDE the panel` half of the negative is a console/objectui assertion: to score it, navigate to the qa_nofeeds record detail and confirm no discussion panel mounts and no sys_comment fetch is issued. If the console has no route for a scratch object in the running build, record that half blocked(fixture) and score the two API clauses — do not infer the UI half from the API refusal."
       ]
+    },
+    "qaact-placement-specimen": {
+      "title": "Packaged action placement specimen (namespace qaact): a control action, an action whose `visible` throws at evaluation, and an action with no `locations` key, all bound to showcase_task and installed through the package loader",
+      "why": "records-forms.action-location-matrix scored two halves blocked(fixture) in both 18.2.0 waves (QA runs #23163 and #26456): acceptance[3]'s fail-closed half (a throwing `visible` hides, never shows) and acceptance[4] half (a), the locations-LESS probe. Both need an action the console actually renders, and the stock showcase ships neither shape: a `locations`-less action is what packages/lint's action-no-placement rule warns about, and no stock action carries a throwing predicate. A runtime-authored action is no substitute: it is listed under /meta/action but never joined into the served object's actions[] (QA run #23163), and authoring now refuses a throwing `visible` (QA run #26456). An action shipped by a CODE package and bound by `objectName` IS joined at read time, so the install-local door's inline manifest provides all three shapes on a stock boot.",
+      "provenance": "#26625: driven once on a fresh stock showcase boot (single posture) at main 1708115e2f on 2026-10-27, with the console served from ui/ at the same commit by its port-5180 dev server: step 1 answered 200 with hotLoaded true and no refusal of the throwing predicate; step 2 served showcase_task with 13 actions (10 stock + the three, qaact_no_locations with no `locations` key) and /meta/action listed all three; step 3's DOM reads are the evidence the two halves were scored on; after the teardown showcase_task served its 10 stock actions again and the ledger directory was empty.",
+      "app": "showcase",
+      "requires": [
+        "an admin session holding `manage_metadata` — the install-local routes require it outright (packages/cloud-connection/src/marketplace-install-local-plugin.ts#MarketplaceInstallLocalPlugin, the module note)",
+        "a stock showcase boot on its own port and file DB (dogfood §0): `pnpm dev -- --fresh -p PORT`, with the marketplace plugins mounted (the showcase composes MarketplaceInstallLocalPlugin only while resolveCloudUrl() answers a URL, so ⛔ not under OS_CLOUD_URL=off; the inline-manifest branch fetches nothing)",
+        "a console over that boot. A worktree without packages/console/dist serves no /_console, so run the console dev server from the repo root: `DEV_PROXY_TARGET=http://localhost:PORT pnpm --filter @object-ui/console dev` (Vite on port 5180, `/api` proxied to the boot, ui/apps/console/vite.config.ts) and sign in as the seeded admin",
+        "⚠️ the install ledger is written into the PROJECT tree, examples/app-showcase/.objectstack/installed-packages/ (gitignored), not into the --fresh tempdir, so the next boot rehydrates the package. The teardown DELETE is mandatory"
+      ],
+      "sequence": [
+        {
+          "step": 1,
+          "call": "POST /api/v1/marketplace/install-local",
+          "body": {
+            "manifest": {
+              "id": "com.objectstack.qaact.specimen",
+              "namespace": "qaact",
+              "name": "QA action placement specimen",
+              "version": "1.0.0",
+              "type": "app",
+              "actions": [
+                {
+                  "name": "qaact_control",
+                  "label": "QA Control",
+                  "objectName": "showcase_task",
+                  "type": "url",
+                  "target": "https://example.test/qaact-control",
+                  "locations": [
+                    "list_item",
+                    "record_header"
+                  ]
+                },
+                {
+                  "name": "qaact_visible_throws",
+                  "label": "QA Visible Throws",
+                  "objectName": "showcase_task",
+                  "type": "url",
+                  "target": "https://example.test/qaact-throws",
+                  "locations": [
+                    "list_item",
+                    "record_header"
+                  ],
+                  "visible": "qaact_undeclared_root.flag == true"
+                },
+                {
+                  "name": "qaact_no_locations",
+                  "label": "QA No Locations",
+                  "objectName": "showcase_task",
+                  "type": "url",
+                  "target": "https://example.test/qaact-none"
+                }
+              ]
+            }
+          },
+          "expect": "200 {success: true, data: {manifestId: 'com.objectstack.qaact.specimen', hotLoaded: true, …}}. The `visible` names a root variable no predicate scope binds, so it parses and then throws `Unknown variable` at evaluation; the install door does not judge it. qaact_control declares the same locations and no predicate, so it is the positive control for both halves: wherever it renders, the package's actions reach that surface. A re-run over a live ledger is a managed RE-install: run the teardown first",
+          "source": "packages/cloud-connection/src/marketplace-install-local-plugin.ts#MarketplaceInstallLocalPlugin (the inline-manifest branch, registered through the kernel's `manifest` service as marketplace code)"
+        },
+        {
+          "step": 2,
+          "call": "GET /api/v1/meta/object/showcase_task, then GET /api/v1/meta/action",
+          "expect": "the object's actions[] ends with qaact_control [list_item, record_header], qaact_visible_throws [list_item, record_header] with visible {dialect: 'cel', source: 'qaact_undeclared_root.flag == true'}, and qaact_no_locations with NO `locations` key; /meta/action lists the three. If the object does not carry them, nothing later measures anything (the runtime-authored failure shape)",
+          "source": "packages/objectql/src/registry.ts#attachBoundActions (a code package's standalone action whose objectName is this object is attached to every served read of it)"
+        },
+        {
+          "step": 3,
+          "call": "host check in the console, before scoring either half: open the showcase_task list and a row's ⋯ menu (data-testid row-action-trigger), then a project's Project Detail → Related tab (?tab=related) and a Tasks row's Row actions menu",
+          "expect": "both menus list QA Control (data-testid row-action-qaact_control) and neither lists QA Visible Throws or QA No Locations, and the browser console carries `[object-ui] A conditional predicate failed to evaluate (qaact_visible_throws) and was treated as its safe default … Unknown variable: qaact_undeclared_root` — the warning is what makes the absence the THROW path rather than a false predicate. QA Control absent from a menu means that surface does not host the package's actions, and nothing absent there is evidence",
+          "source": "ui/packages/react/src/hooks/useExpression.ts#useCondition (the throwOnError leg every action `visible` takes: a throwing predicate hides and warns once)"
+        }
+      ],
+      "teardown": "DELETE /api/v1/marketplace/install-local/com.objectstack.qaact.specimen → 200 with a cleanups list; showcase_task serves its stock actions again. Mandatory even on a throwaway DB (requires[3]); then stop the boot and the console dev server by their recorded PIDs",
+      "knownGaps": [
+        "Task Detail's page:header, its ⋯ overflow and its quick-actions bar render the action ids the page lists (examples/app-showcase/src/ui/pages/task-detail.page.ts), so no bound action reaches them: QA Control is absent there too (measured, #26625), and those three surfaces are no evidence for either half. The specimen's evidence comes from the list row menu and the Project Detail Related-tab row menus, where QA Control renders. The list toolbar showed none of the three, but the control declares no list_toolbar placement, so that surface has no positive control in this recipe",
+        "Proven by one live run (#26625, main 1708115e2f). The action names carry the namespace prefix (qaact_); an unprefixed name was not measured"
+      ]
+    },
+    "qa-crm-import-console": {
+      "title": "app-crm boot + the console dev server + env, so ui/e2e/import-console/import-console-undo.spec.ts runs UNMODIFIED on its own defaults (crm_app / crm_lead, console on port 5180)",
+      "why": "records-forms.import-job-undo-cancel names two objectui specs as its automation, and neither runs on the stock showcase boot as written: the console spec defaults to LIVE_IMPORT_APP crm_app and LIVE_IMPORT_OBJECT crm_lead, and its goto path has no /_console mount, so a showcase run needed a scratch copy of the spec plus a scratch qa_lead object (fixtures.requires[2], runs #21845 and #23949) or was hand-driven instead (QA runs #24616 and #26450). crm_lead carries the spec's name, email and status columns, so on an app-crm boot behind the console dev server the spec runs as committed. The harness twin has no door at all (knownGaps[0])",
+      "provenance": "#26625: driven at main 1708115e2f on 2026-10-27 after a full `pnpm exec turbo run build`: step 3 passed (1 passed, 35.9 s) on the third run; the first two failed on Playwright's default 30 s test timeout (31.1 s) at different steps, both after the import had landed. The item's API half (steps[1]-[4]) was replayed on the same boot against crm_lead and passed every clause.",
+      "app": "app-crm (examples/app-crm) — its own boot, not the item's showcase boot",
+      "requires": [
+        "a fully built worktree: `pnpm dev` and `pnpm dev:crm` refuse an unbuilt workspace (check-dev-prereqs)",
+        "Playwright's Chromium for the ui/ tree (`pnpm exec playwright test` from ui/)",
+        "the seeded dev admin (admin@objectos.ai / admin123) — the credentials ui/e2e/live/global-setup.ts signs in with by default"
+      ],
+      "sequence": [
+        {
+          "step": 1,
+          "call": "pnpm dev:crm -- --fresh -p PORT",
+          "expect": "`✓ Server is ready` and the seeded dev admin; GET /api/v1/data/import/jobs answers (the spec skips itself on a 404 there). A --fresh boot seeds 5 leads, which matters for the spec's page-bounded count (knownGaps[1])",
+          "source": "examples/app-crm/src/objects/lead.object.ts#Lead (crm_lead: name required, email, status default 'new', notes for a marker)"
+        },
+        {
+          "step": 2,
+          "call": "DEV_PROXY_TARGET=http://localhost:PORT pnpm --filter @object-ui/console dev",
+          "expect": "Vite ready on http://localhost:5180/ — the spec's LIVE_APP_URL default — with `/api` proxied to the boot (ui/apps/console/vite.config.ts). The workspace console already resolves the in-tree @objectstack/client, so the OBJECTSTACK_CLIENT_DIST alias and the port-3002 backend named in the config's header are not needed (measured: no alias set, the job create answered 201)",
+          "source": "ui/playwright.import-console.config.ts (the spec's own prerequisites, header note)"
+        },
+        {
+          "step": 3,
+          "call": "from ui/: IMPORT_CONSOLE_LIVE=1 LIVE_API_URL=http://localhost:PORT pnpm exec playwright test --config=playwright.import-console.config.ts --timeout=120000",
+          "expect": "`1 passed`. The global setup prints `[live-e2e] authenticated as admin@objectos.ai`. `--timeout=120000` is a run flag, not a spec edit: the dev server compiles on demand, and a cold first pass runs past Playwright's default 30 s. A skip means IMPORT_CONSOLE_LIVE was unset or the boot has no job route, never a result. A failed run leaves its three RC rows behind (no undo ran), which a --fresh boot discards",
+          "source": "ui/e2e/live/global-setup.ts#globalSetup (signs in at LIVE_API_URL and writes the storageState the config hands the spec)"
+        },
+        {
+          "step": 4,
+          "call": "the item's API half (steps[1]-[4]) against crm_lead with a marker-tagged CSV: columns name,email,status,notes, the marker in notes, counted with GET /api/v1/data/crm_lead?notes=MARKER",
+          "expect": "the job reaches succeeded with per-row results, undo returns the marker count to its pre-import value, and the job list shows revertedAt only after the undo. app-crm imports fast: a 400-row job completed in about a second, before the cancel landed, so cancel a 4000-row job once the first rows are counted (measured: cancelled at 1400 of 4000)",
+          "source": "packages/rest/src/data-action-routes.ts (POST /data/:object/import/jobs and the /data/import/jobs/:jobId routes)"
+        }
+      ],
+      "teardown": "stop the boot and the console dev server by their recorded PIDs (--fresh discards the DB), then delete ui/e2e/live/.auth/ — its state.json holds a live bearer token — and ui/test-results/",
+      "knownGaps": [
+        "The harness twin ui/e2e/import-harness/import-undo.spec.ts has NO door in this tree. ui/playwright.import-harness.config.ts says to serve the harness with packages/plugin-grid/demo/vite.live.config.ts at http://localhost:5200/live.html, and neither file exists (ui/packages/plugin-grid/demo holds index.html and bulk-actions.html only). Its CSV (first_name,last_name,email) also has no column for crm_lead's required name. It stays a self-skip, which is the control and never a result; reported on #26625 for its own card",
+        "The spec counts rows with an unfiltered, page-bounded GET /api/v1/data/crm_lead and reads records.length (the item's automated.ref). On an accumulated DB whose leads overflow that page the count stops moving and the spec fails without a defect, so run it on a --fresh boot"
+      ]
     }
   },
   "items": [
@@ -1857,7 +1977,7 @@
       "title": "Action buttons surface at exactly their declared locations — list toolbar, list row, record header/more/related/section — and each dispatches for real",
       "since": "v15",
       "status": "active",
-      "revision": 15,
+      "revision": 16,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -1869,10 +1989,14 @@
           "the per-location action fleet on showcase_task (examples/app-showcase/src/ui/actions/index.ts): showcase_bulk_reassign (list_item+list_toolbar, flow), showcase_quick_view (list_item, modal), showcase_mark_done (list_item+record_header+record_section, script, visible '!record.done'), showcase_log_time (record_header+record_related+record_section, form), showcase_open_docs (record_more, url), showcase_recalc_selection (record_more, api — declares record_more ONLY, which is what keeps it off the toolbar; objectui#3142), showcase_new_task (locations: [] — the fleet's headless specimen, read by the empty-locations probe)",
           "seeded tasks in both done and not-done states for the CEL visibility both-sides check"
         ],
+        "provisioning": {
+          "use": "qaact-placement-specimen",
+          "why": "unblocks acceptance[3]'s fail-closed half and acceptance[4] half (a), both blocked(fixture) on stock in the 18.2.0 waves. The recipe installs a packaged control, a throwing-`visible` action and a locations-less action on showcase_task through the package loader, the one door whose actions the served object carries. Without it the fail-closed half has no throwing predicate to observe and half (a) has no packaged locations-less specimen, so both score blocked(fixture) again"
+        },
         "knownGaps": [
           "NO PIN COVERS A FULL CLAUSE — `automated` was dropped at revision 13, so this P1 item is hand-driven (Tier 2). The two objectui live specs it cited are adjacent: e2e/live/list-row-action-cel.spec.ts opens the first task row's menu and asserts only that at most one Mark Done renders (not both sides of acceptance[3], nor its fail-closed half), and e2e/live/action-modal.spec.ts only that the host's row Edit opens and closes a modal (one dispatch kind of acceptance[2], on no declared action). Tier 1 run #24598 scored every clause not-run on them. Re-add `automated` only with a pin that asserts a full clause.",
           "[CLOSED by #22030 (PR #22036, 60ccda5a24), lifted by #22039 — the gap text is rewritten to say where each location now lives] a stock showcase boot hosts all six locations on showcase_task, including the three this gap used to block. record_header and record_more: Task Detail (showcase_task_detail, the record page the console opens for any task), whose first node is a page:header. That header renders the action ids it lists, each placed by its own locations, followed by the host's Edit / Share / Delete. Inline (record_header) on a desktop viewport, where the header's default inline budget is 3 (1 on mobile; a record_header action past the budget folds into ⋯): showcase_mark_done (script, shown only while the task is not done), showcase_log_time (form) and showcase_archive_task (script, disabled until the task is done). Under the ⋯ overflow (record_more without record_header): showcase_open_docs (url), showcase_recalc_estimate (api) and showcase_recalc_selection (api). The Task Detail quick-actions bar (record_section) names its actions explicitly (actionNames: mark_done, log_time and archive_task, in examples/app-showcase/src/ui/pages/task-detail.page.ts), so showcase_recalc_estimate, which declares record_section too, is absent there by page authoring, not a missing placement (run #25817). record_related: Project Detail (showcase_project_detail, the record page for any project) → the Related tab (?tab=related), which holds the Tasks related list, a record:related_list for showcase_task through its project FK; open a project that has tasks. It is an authored node, not the synthesizer's strip: the page's tabs override still replaces that strip, and this tab puts the list back with no actions key, so its rows carry showcase_log_time beside the task's list_item actions, and its header renders the list_toolbar action (Reassign…), as in 18.1 (run #25817): that list's own toolbar placement, not an extra one. The Tasks tab beside it is the record:line_items grid, which hosts no record_related action. An expected action missing from one of these hosts is a missing placement, never blocked(fixture). The hosts were read from objectui source at pin a58626c88dc8 and from the served metadata, not from a browser render, so the first run against them is their first browser evidence",
-          "acceptance[4] half (a), the locations-LESS probe, is BLOCKED(fixture) on stock (QA run #23163 A4, objectstack 36b2889c). A runtime-authored action (a scratch or writable package) is not joined into the served object's actions[] — the run's positive control, the same probe WITH a declared location, was invisible too — so a runtime probe sees nothing on any surface and proves nothing. The half needs a PACKAGED specimen with no `locations` key, as showcase_new_task is the packaged `locations: []` one. The stock showcase ships none: that shape is exactly what packages/lint's action-no-placement rule warns about. Score half (a) blocked(fixture) and half (b) on showcase_new_task as before"
+          "CLOSED by the qaact-placement-specimen recipe (#26625) for acceptance[4] half (a) and acceptance[3]'s fail-closed half. A runtime-authored action is still not joined into the served object's actions[] (QA run #23163 A4: its positive control, the same probe with a location, rendered nowhere), and authoring refuses a throwing `visible` (QA run #26456), so ⛔ do not author either probe at runtime. The recipe installs both specimens through the package loader, whose actions the served object does carry. Score half (a) on qaact_no_locations and the fail-closed half on qaact_visible_throws, each only on a surface where the recipe's qaact_control renders: the list row menu and the Project Detail Related-tab row menus. Task Detail's header, ⋯ overflow and quick-actions bar list their action ids, so the control is absent there and they are no evidence for either half (the recipe's knownGaps[0]). Half (b) stays on showcase_new_task as before. steps[6] and acceptance[4].verify still say no packaged locations-less specimen exists on stock; the recipe is that specimen"
         ]
       },
       "variants": [
@@ -2032,6 +2156,12 @@
           "date": "2026-10-26",
           "change": "From manual-set run #25817 (6679644a, pin b41ed7f68956), re-read on main cc378e93. (1) knownGaps[1] says the Project Detail Related tab's Tasks list header renders the list_toolbar Reassign…, as in 18.1, so a run reads it as that list's toolbar placement. (2) steps[1] scopes the ⋯ click to `main`, because the sidebar's 'More actions' shares the header ⋯'s accessible name. (3) knownGaps[1] says the Task Detail quick-actions bar names its actions explicitly (task-detail.page.ts actionNames), so showcase_recalc_estimate, which declares record_section too, is absent there by page authoring. No clause changed",
           "ref": "#25846"
+        },
+        {
+          "revision": 16,
+          "date": "2026-10-27",
+          "change": "fixtures.provisioning opts into the new area recipe qaact-placement-specimen and knownGaps[2] says it closes the gap (#26625, maintainer-directed 「补测试数据配方。立卡」). The recipe installs, through POST /api/v1/marketplace/install-local, a package whose three url actions bind to showcase_task: a control and an action whose `visible` throws at evaluation, both on list_item and record_header, and one with no `locations` key. Re-driven once at main 1708115e2f on a fresh stock boot, console from ui/ on port 5180. acceptance[3] fail-closed half PASS: the throwing action was absent from the list row menus (3 rows) and the Project Detail Related-tab row menus (2 rows) where QA Control rendered, and the console warned that its predicate failed to evaluate (Unknown variable) and was treated as its safe default. acceptance[4] half (a) PASS: QA No Locations rendered on none of the list toolbar, the list row menus, the Task Detail header and its ⋯ overflow, or the Related-tab rows. Task Detail's header, overflow and quick-actions bar list their action ids, so QA Control was absent there too and those reads carry no weight. steps[6] and acceptance[4].verify still describe the stock shape without the recipe. No clause changed",
+          "ref": "#26625"
         }
       ],
       "enumSource": {
@@ -2880,7 +3010,7 @@
       "title": "Record discussion: an @mention comment reconciles optimistically, persists to sys_comment, interleaves with activity, pings the mentioned user's bell — and the feed filter shows exactly each mode's subset without dropping author-extended activity",
       "since": "v16",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -2892,7 +3022,7 @@
         "requires": [
           "a showcase object with feeds enabled (default — enable.feeds !== false) so the discussion panel mounts and sys_comment writes are accepted (packages/spec/src/data/object.zod.ts feeds default true; plugin-audit enforceFeedsCapability)",
           "a record to comment on (e.g. a seeded showcase_task or showcase_account)",
-          "for the recipient read-gate clause (acceptance[9]) on a stock `single` boot: the knownGaps[0] second user, a member of the same organization, and two admin-owned records — a showcase_private_note (sharingModel 'private', owner-only, examples/app-showcase/src/data/objects/private-note.object.ts), which the member cannot read, and a showcase_account (public_read_write), which the member can. The cross-organization leg needs a walled boot (RUNNER.md 'A walled boot is a fixture of its own') holding two organizations, with the comment's record in one and the mentioned user a member of the other only"
+          "for the recipient read-gate clause (acceptance[9]) on a stock `single` boot: the knownGaps[0] second user, a member of the same organization, and two admin-owned records — a showcase_private_note (sharingModel 'private', owner-only, examples/app-showcase/src/data/objects/private-note.object.ts), which the member cannot read, and a showcase_account (public_read_write), which the member can. The cross-organization leg needs its OWN boot under the group posture, separate from the stock `single` boot: `OS_TENANCY_POSTURE=group OS_PLATFORM_OWNER_EMAIL=admin@objectos.ai OS_AUTH_MEMBERSHIP_POLICY=invite-only pnpm dev -- --fresh -p PORT` (each variable answers a measured boot refusal: RUNNER.md 'A walled boot is a fixture of its own'), on which steps[13]'s walled sequence places the comment's record in organization A and the mentioned user in organization B only. That user must hold read on sys_comment: no showcase permission set grants it, so a minted member's GET /api/v1/data/sys_comment answers 403 PERMISSION_DENIED and every mention of them is withheld `cannot_read_thread` whatever the record (measured, #26625); the walled sequence binds a scratch set that grants it"
         ],
         "provisioning": {
           "use": "qa-feeds-disabled",
@@ -2901,7 +3031,7 @@
         "knownGaps": [
           "the @mention TARGET and the bell/notification clauses need a SECOND user. A stock showcase boot is invite_only, so POST /api/v1/auth/sign-up/email answers 403 SELF_REGISTRATION_CLOSED: the admin mints the user with POST /api/v1/auth/admin/create-user, which answers mustChangePassword true, and the user calls POST /api/v1/auth/change-password and signs in again before it drives anything (steps[13]; RUNNER.md, 'A stock showcase boot refuses self-registration'). ⛔ Do not record those clauses blocked(fixture) on the 403: the refusal is the posture working, and the admin door mints the user on the same boot. The optimistic-reconcile, sys_comment and activity-interleave clauses need only the author",
           "CLOSED by the qa-feeds-disabled recipe (#12118) for the two FEEDS_DISABLED clauses: before it, no showcase object declared enable.feeds:false and there was no scratch recipe for this area, so the code appeared only in `negative`. Fall back to the pinned engine/API suites named in `automated` ONLY if the recipe cannot be replayed on the boot under test — and when you do, record WHICH of the two the verdict rests on, because the pins run against their own fixtures (cmt_nofeeds / lead_walled) and not against the showcase surface this item otherwise drives.",
-          "acceptance[9]'s cross-organization leg runs live only on a walled boot (isolated or group), which the stock showcase does not provision. A run without one records that leg blocked(fixture) citing RUNNER.md's walled entry. Its pin (automated.ref, packages/plugins/plugin-audit/src/mention-recipient-gate.integration.test.ts) reaches the ENGINE layer, not HTTP: a real kernel, ObjectQL engine and SQLite driver with AuditPlugin and the real core grant resolver, while plugin-security's read layer is played by one middleware composing the posture's tenant clause and an owner-only rule, and messaging is played by an emit() recorder. Under RUNNER rule 6 the pin scores the clause partial at most, naming the HTTP layer and the real plugin-security as missing; the stock `single` leg is driven live"
+          "acceptance[9]'s cross-organization leg runs live on its own group-posture boot (fixtures.requires[2]) through steps[13]'s walled sequence, which #26625 wrote and drove once at main 1708115e2f: the control mention in organization B notified the user, and both mentions on organization A's account (by id, by email) were withheld cannot_read_source. A run that cannot boot the posture records that leg blocked(fixture) citing RUNNER.md's walled entry. Its pin (automated.ref, packages/plugins/plugin-audit/src/mention-recipient-gate.integration.test.ts) reaches the ENGINE layer, not HTTP: a real kernel, ObjectQL engine and SQLite driver with AuditPlugin and the real core grant resolver, while plugin-security's read layer is played by one middleware composing the posture's tenant clause and an owner-only rule, and messaging is played by an emit() recorder. Under RUNNER rule 6 the pin scores the clause partial at most, naming the HTTP layer and the real plugin-security as missing; both live legs, the stock `single` one and the walled one, are driven live"
         ]
       },
       "steps": [
@@ -2918,7 +3048,7 @@
         "control for both probes — repeat the same two calls against a feeds-ENABLED parent (the seeded showcase record used above) and confirm they SUCCEED. A 403 that also fires on the enabled parent is measuring access, not the capability gate, and neither clause may be scored from it",
         "FEED FILTER — on a record whose feed now holds at least one comment (posted above) and one field-change activity (the attributable edit above), cycle the filter control through all four FeedFilterMode values, screenshotting each state before reading the rendered rows",
         "OPEN-VOCABULARY probe — plant an author-EXTENDED activity type: sys_activity narrows apiMethods to ['get','list'] (sys-activity.object.ts), so a direct POST is refused BY DESIGN — the sanctioned channel is a scratch object declaring activityMilestones[].type with a custom value (ADR-0052 §5b.2, forwarded verbatim) whose milestone the run then triggers; if that authoring is unavailable on the boot under test, score the clause from the objectui pin (recordActivityFeed.test.ts) and record the substitution",
-        "RECIPIENT READ GATE (acceptance[9]) — on a stock `single` boot with fixtures.requires[2]. The stock boot's audience posture is invite_only, so POST /api/v1/auth/sign-up/email answers 403 SELF_REGISTRATION_CLOSED: the admin mints the member with POST /api/v1/auth/admin/create-user (it lands in the default organization with mustChangePassword true), and the member signs in, calls POST /api/v1/auth/change-password and signs in again. First prove the member's access as the member (GET /api/v1/data/showcase_private_note/ID answers 404, GET /api/v1/data/showcase_account/ID answers 200) and read the member's and the admin's GET /api/v1/notifications. As admin, POST /api/v1/data/sys_comment on the note's thread (thread_id 'showcase_private_note:ID') with mentions naming the member by user id, then a second comment there naming the member by email, then one on the account's thread naming the member by user id and the admin itself. Re-read both inboxes and count the rows of type collab.mention per comment (each row's body is the comment's preview). On a walled boot, repeat the note-shaped leg with the record in organization A and the mentioned user a member of organization B only"
+        "RECIPIENT READ GATE (acceptance[9]) — on a stock `single` boot with fixtures.requires[2]. The stock boot's audience posture is invite_only, so POST /api/v1/auth/sign-up/email answers 403 SELF_REGISTRATION_CLOSED: the admin mints the member with POST /api/v1/auth/admin/create-user (it lands in the default organization with mustChangePassword true), and the member signs in, calls POST /api/v1/auth/change-password and signs in again. First prove the member's access as the member (GET /api/v1/data/showcase_private_note/ID answers 404, GET /api/v1/data/showcase_account/ID answers 200) and read the member's and the admin's GET /api/v1/notifications. As admin, POST /api/v1/data/sys_comment on the note's thread (thread_id 'showcase_private_note:ID') with mentions naming the member by user id, then a second comment there naming the member by email, then one on the account's thread naming the member by user id and the admin itself. Re-read both inboxes and count the rows of type collab.mention per comment (each row's body is the comment's preview). WALLED LEG, on the group-posture boot of fixtures.requires[2] (#26625), as the seeded admin, the platform owner: (1) POST /api/v1/auth/sign-in/email and keep the session's activeOrganizationId, organization A; (2) POST /api/v1/auth/organization/create {name: 'QA Mention Org B', slug: a fresh one per run} → organization B, then POST /api/v1/auth/organization/set-active {organizationId: B}; (3) POST /api/v1/auth/admin/create-user {email, password, name} → the user lands in B as member with mustChangePassword true; (4) grant the user read on sys_comment: POST /api/v1/packages {manifest: {id: 'com.objectstack.qamention.walled', name: 'QA walled mention fixture', version: '1.0.0', type: 'app', namespace: 'qamention'}, enableOnInstall: true} (201), PUT /api/v1/meta/permission/qamention_comment_reader?package=com.objectstack.qamention.walled {name: 'qamention_comment_reader', label: 'QA mention comment reader', objects: {sys_comment: {allowRead: true}}} (200, saved env-wide), POST /api/v1/data/sys_user_permission_set {user_id, permission_set: 'qamention_comment_reader'} (201); (5) the user signs in, calls POST /api/v1/auth/change-password, signs in again, and proves the grant: GET /api/v1/data/sys_comment answers 200; (6) CONTROL in B: as admin, POST /api/v1/data/showcase_account {name} (organization_id B), confirm the user reads it (200), then POST /api/v1/data/sys_comment on its thread with mentions naming the user by id: the user's inbox gains exactly one collab.mention whose actionUrl names that account. A control that gains nothing means the user cannot read comments and the leg below measures nothing; (7) set-active A, POST /api/v1/data/showcase_account {name} (organization_id A), confirm the user's read of it answers 404 RECORD_NOT_FOUND, then post one comment on its thread naming the user by id and one naming them by email; (8) re-read the user's and the admin's inboxes: no new collab.mention for either comment, and the boot log carries '[audit] mention notification withheld' with reason cannot_read_source, the user id and each comment's id. Teardown: stop the boot (--fresh discards its DB; no repo file is touched)"
       ],
       "acceptance": [
         {
@@ -3077,6 +3207,12 @@
           "date": "2026-10-27",
           "change": "automated.ref says acceptance[9]'s REST-door pin waits on #26625 and its cross-organization leg stays a live leg until then (#26573 Done-when). No clause changed",
           "ref": "#26573"
+        },
+        {
+          "revision": 10,
+          "date": "2026-10-27",
+          "change": "acceptance[9]'s walled leg is written out (#26625, maintainer-directed 「补测试数据配方。立卡」). steps[13] now carries the literal walled sequence, fixtures.requires[2] names the group-posture boot and its three variables, and knownGaps[2] says the leg is driven live. The sequence lives on the item because fixtures.provisioning takes one recipe, and this item already uses qa-feeds-disabled. The mention target holds sys_comment read through a scratch permission set (namespace qamention). No showcase set grants it, and a minted member was refused 403 PERMISSION_DENIED and withheld cannot_read_thread. Re-driven once on a group-posture boot at main 1708115e2f: acceptance[9] walled leg PASS. The control mention on organization B's account notified the user (one collab.mention, actionUrl /showcase_account/ID). The user's read of organization A's account answered 404. Both mentions on that account, by id and by email, were withheld cannot_read_source, and neither inbox gained a row. automated.ref's last sentence still says the leg waits on #26625. No clause changed",
+          "ref": "#26625"
         }
       ]
     },
@@ -3614,7 +3750,7 @@
       "title": "Async import job: terminal state + per-row results, undo removes exactly the imported rows, cancel mid-job leaves a coherent partial",
       "since": "v17",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -3627,8 +3763,12 @@
           "the objectui import specs (ui/e2e/import-console and ui/e2e/import-harness in this checkout), which self-gate on IMPORT_CONSOLE_LIVE=1 (console) or a reachable import harness /live.html",
           "RUNTIME FIXTURE — the live-gated console spec (proved by run #21845; nothing committed in either repo): from ui/ in this checkout, run e2e/import-console/import-console-undo.spec.ts under its own config (playwright.import-console.config.ts) with IMPORT_CONSOLE_LIVE=1 against the booted showcase, from a SCRATCH COPY of the spec whose page goto path is the console-mounted /_console/apps/{app}/{object} (the spec's own path does not carry the /_console mount the framework serves the console under). The spec imports a name,email,status CSV and counts rows on LIVE_IMPORT_OBJECT, and NO showcase object carries those three fields — author a scratch object first (e.g. qa_lead with name / email / status text fields and a declared sharingModel, in a writable package, published) and run with LIVE_IMPORT_APP=showcase_app LIVE_IMPORT_OBJECT=qa_lead, as QA run #23949 did"
         ],
+        "provisioning": {
+          "use": "qa-crm-import-console",
+          "why": "lets the console spec run as committed instead of from a scratch copy: on an app-crm boot behind the console dev server it meets its own defaults (crm_app / crm_lead, port 5180), and the API half replays against crm_lead on the same boot. Without the recipe a run either rebuilds requires[2]'s scratch copy and qa_lead object on showcase or hand-drives the console route (knownGaps[2]), as both 18.2.0 waves did"
+        },
         "knownGaps": [
-          "CLOSED for runs by the live-gated console spec in requires (#21845): e2e/import-console/import-console-undo.spec.ts skips unless IMPORT_CONSOLE_LIVE=1, and its goto path needs the /_console mount — with both supplied it runs against the stock console. A skip without the gate is the control, never a result. The harness twin e2e/import-harness/import-undo.spec.ts still skips unless the harness origin serves /live.html; it is optional evidence, and the API half below needs no gate at all",
+          "CLOSED for runs by the qa-crm-import-console recipe (#26625): on an app-crm boot behind the console dev server, e2e/import-console/import-console-undo.spec.ts runs UNMODIFIED with IMPORT_CONSOLE_LIVE=1 and LIVE_API_URL set (passed at main 1708115e2f). The showcase route in requires[2] (a scratch copy with the /_console goto path and a scratch qa_lead object, #21845) still works and is no longer needed. A skip without the gate is the control, never a result. The harness twin e2e/import-harness/import-undo.spec.ts has NO door in this tree: the harness its config names (packages/plugin-grid/demo/vite.live.config.ts serving /live.html) does not exist, and its CSV has no column for crm_lead's required name (the recipe's knownGaps[0], reported on #26625). It is optional evidence; the API half below needs no gate at all",
           "AUTOMATION LIVES IN THE objectui TREE, WHICH IS ui/ IN THIS CHECKOUT — `automated.ref` names objectui specs exclusively, by objectui-relative paths that resolve under ui/ (a unit suite at ui/packages/…, a Playwright spec at ui/e2e/…). They run from that tree: a unit suite with cwd ui/ (pnpm exec vitest run FILE), a live spec only against a booted stack serving a console built by pnpm console:build. Drive the item by hand in the browser and score it as a manual run, OR run the pin from ui/ and cite its output naming the framework commit it ran at. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact, whose 'none of those specs exist here' predates the ui/ import.",
           "HAND-DRIVEN CONSOLE ROUTE, measured by QA run #24616 without the gated spec: on showcase_task's list, Import → Preview → tick 'Import in the background (runs as an undoable job)' → import → History → 'Undo import'. The Undo asks a NATIVE window.confirm (objectui plugin-grid ImportWizard.tsx), which Playwright dismisses by default, so an unhandled dialog makes Undo a silent no-op (automation-input): accept it (page.on('dialog', d => d.accept())). showcase_contact's list shows no Import button (it sits in the header's overflow menu there); showcase_task's does"
         ]
@@ -3728,6 +3868,12 @@
           "date": "2026-10-26",
           "change": "From Tier 1 run #25815 (6679644a, pin b41ed7f68956), re-read at ui/e2e/import-console/import-console-undo.spec.ts and ui/e2e/import-harness/import-undo.spec.ts on main cc378e93. (1) acceptance[3]: the specs read the job list once, before undo, and confirm the revert through a UI testid, so revertedAt is never read off GET /import/jobs; the ref no longer says they cover it. (2) acceptance[1]: they count with an unfiltered GET and records.length, a page-bounded length, not the marker-filter count; the ref and acceptance[1].verify say so. (3) The ref says a self-skip or the crm_app / crm_lead default scores nothing. fixtures.knownGaps[1], the objectui-pinned-automation note, said the objectui specs live in a separate repo and none exist here; they are under ui/ in this checkout since the import, so it says where they resolve and how they run (devx seat 2's direction, carried for #26035). Re-read on main cc378e93; fixtures.requires[1] and [2] name the specs under ui/ for the same reason. No clause changed",
           "ref": "#25846"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-27",
+          "change": "fixtures.provisioning opts into the new area recipe qa-crm-import-console and knownGaps[0] is rewritten (#26625, maintainer-directed 「补测试数据配方。立卡」). On an app-crm boot (`pnpm dev:crm -- --fresh -p PORT`) behind the console dev server (`DEV_PROXY_TARGET=… pnpm --filter @object-ui/console dev`), ui/e2e/import-console/import-console-undo.spec.ts ran unmodified at main 1708115e2f with IMPORT_CONSOLE_LIVE=1, LIVE_API_URL and --timeout=120000: 1 passed. The API half was re-driven on crm_lead on the same boot: acceptance[0] PASS (20-row job succeeded, 20 per-row results), acceptance[1] PASS (marker count 0 → 20 → 0 after undo, deleted 20; unfiltered total unchanged), acceptance[2] PASS (a 4000-row job cancelled at 1400: status cancelled, the marker count equals processed, every row read back whole), acceptance[3] PASS (revertedAt absent before the undo, present with undoable false after). The harness twin e2e/import-harness/import-undo.spec.ts has no door in this tree: the harness its config names is absent and its CSV does not fit crm_lead. It stays a self-skip and is reported on #26625. No clause changed",
+          "ref": "#26625"
         }
       ]
     },
