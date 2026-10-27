@@ -186,8 +186,8 @@ describe('(c) every declared won option is a terminus (objectstack#26612)', () =
 });
 
 describe('(d) the spelling fallback warns in a dev build, naming the field (objectstack#26612)', () => {
-  const pathWarnings = (spy: ReturnType<typeof vi.spyOn>) =>
-    spy.mock.calls.map((c) => String(c[0])).filter((m) => m.startsWith('record:path'));
+  const pathWarnings = (spy: { mock: { calls: unknown[][] } }): string[] =>
+    spy.mock.calls.map((c: unknown[]) => String(c[0])).filter((m: string) => m.startsWith('record:path'));
 
   it('no kind on any option: the guess still lays the path out, and warns once', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
