@@ -82,7 +82,7 @@
 // authorization RUNG off the execution context, which is where "platform
 // operator, NOT a tenant user role" (ADR-0068 D2) still means that. The
 // built-in identity NAME is deliberately no longer imported: see the doc block.
-import { effectiveTenancyPosture, AuthzStoreUnavailableError } from '@objectstack/core';
+import { effectiveTenancyPosture, AuthzStoreUnavailableError, type MetadataActivationWriteContext } from '@objectstack/core';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps } from '../domain-handler-registry.js';
@@ -424,4 +424,25 @@ export function refuseUngrantedActivationAuthoring(
             { code: ACTIVATION_DENY_CODE },
         ),
     };
+}
+
+/**
+ * [ADR-0126 §4] The context an activation door's ledger WRITE runs under: the
+ * caller's own execution context, elevated — `{ ...callerContext, isSystem: true }`.
+ *
+ * Called only after both gates above admitted the caller, so the elevation
+ * grants nothing the door has not already judged: the ledger object is
+ * engine-owned and writable only elevated. What the caller's context adds is
+ * the NAME — the engine stamps `created_by` / `updated_by` from its `userId`,
+ * and the audit plugin records `user_id` / `actor` from the same session — so
+ * the record of an install-wide switch says which administrator threw it. A
+ * bare system context, which the store falls back to, names nobody.
+ *
+ * Shared by every door that writes a `sys_metadata_activation` row for a
+ * caller, so the doors cannot disagree about who a row names.
+ */
+export function activationWriteContext(context: HttpProtocolContext): MetadataActivationWriteContext {
+    const ec: unknown = context?.executionContext;
+    const caller = ec && typeof ec === 'object' ? (ec as Record<string, unknown>) : {};
+    return { ...caller, isSystem: true };
 }

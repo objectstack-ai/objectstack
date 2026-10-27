@@ -7,7 +7,7 @@
  */
 
 import { createContext } from 'react';
-import type { AuthUser, AuthClientSession, PreviewModeOptions, AuthOrganization, AuthOrganizationMember, AuthInvitation, AuthPublicConfig, SignInWithProviderOptions, DelegableScope } from './types.js';
+import type { AuthUser, AuthClientSession, PreviewModeOptions, AuthOrganization, AuthOrganizationMember, AuthInvitation, AuthInvitationPreview, AuthPublicConfig, SignInWithProviderOptions, DelegableScope } from './types.js';
 
 export interface AuthContextValue {
   /** Current authenticated user */
@@ -190,6 +190,11 @@ export interface AuthContextValue {
   cancelInvitation: (invitationId: string) => Promise<void>;
   /** Get invitation details by id */
   getInvitation: (invitationId: string) => Promise<AuthInvitation>;
+  /**
+   * The signed-out invitation preview: `null` when the server does not know
+   * the id (or it is no longer pending); rejects on any other failure.
+   */
+  getInvitationPreview: (invitationId: string) => Promise<AuthInvitationPreview | null>;
   /** Accept an invitation as the current user */
   acceptInvitation: (invitationId: string) => Promise<void>;
   /** Reject an invitation as the current user */

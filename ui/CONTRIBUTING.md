@@ -99,10 +99,6 @@ git checkout -b feature/your-feature-name
 # including the visual designer, which mounts here rather than in a demo of its own)
 pnpm dev
 
-# Run an example app (console-starter and byo-backend-console are the two that ship
-# a dev server; hello-world has none, and schema-catalog is a data package)
-pnpm --filter @object-ui/example-console-starter dev
-
 # Run the documentation site
 pnpm site:dev
 ```

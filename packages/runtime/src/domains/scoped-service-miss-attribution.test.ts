@@ -402,7 +402,7 @@ describe('[#16402] a scope with no instance manufactures no outage — all four 
         const res = responseOf(await flip(dispatcher, tenantAdmin(SCOPE_EMPTY)));
 
         expect(res.status).toBe(200);
-        expect(setActionActive).toHaveBeenCalledWith({ name: ACTION, packageId: 'crm', active: false });
+        expect(setActionActive).toHaveBeenCalledWith({ name: ACTION, packageId: 'crm', active: false }, expect.anything());
     });
 
     it('door 3 · POST /automation/:name/toggle — TOGGLES instead of answering 503', async () => {

@@ -57,6 +57,7 @@ import {
     packagelessAddressAmbiguityRefusal,
     resetEnvWritableMetadataTypes,
     unboundItemDraftAddress,
+    versionNotFoundError,
     type SysMetadataEngine,
 } from './sys-metadata-repository.js';
 import { managedItemSealedSentence, packagedBaseRegimeRow, packagedBaseRegimeSentence } from './packaged-base-regime.js';
@@ -27162,7 +27163,8 @@ export class ObjectStackProtocolImplementation implements
      * earlier history row whose body differs from the to side's by this
      * diff's own equality, a body-less (delete) row comparing as `{}`, and
      * absent (`null`) when no earlier row differs. An explicit version on
-     * either side is used as named. Returns `{ added, removed, changed }`
+     * either side is used as named, and must have a history row of this
+     * item (a delete tombstone counts, compared as `{}`). Returns `{ added, removed, changed }`
      * keyed by JSON pointer-style paths for primitive leaves; nested
      * objects/arrays are reported as a single change record.
      *
@@ -27179,13 +27181,22 @@ export class ObjectStackProtocolImplementation implements
      *         application refusal in the author's own words, classified at the
      *         producer and NOT the 503 below. See {@link
      *         metadataReadFailureError}.
+     * @throws {@link versionNotFoundError} — 404 / `VERSION_NOT_FOUND`
+     *         (#26462), when an explicit `fromVersion` or `toVersion` has no
+     *         history row of this item, an item with no history at all
+     *         included: the rollback door's refusal of the same number. A
+     *         missing side compared as empty answered "no change" or
+     *         "everything removed" (ADR-0110 D3). The default range is
+     *         never refused.
      * @throws {@link metadataStoreUnavailableError} — 503 /
      *         `SERVICE_UNAVAILABLE` (#8833), when the `sys_metadata_history`
      *         read failed for any reason other than the table not being
      *         provisioned yet, carrying the driver error on `cause`. The one
      *         non-throwing failure is that unprovisioned table, where "no
      *         history rows" is the truth rather than an unknown, so a minimal
-     *         deployment still gets its benign empty diff. Without that
+     *         deployment still gets its benign answer: the default range's
+     *         empty diff, and for a named version the 404 miss above, as
+     *         for any item with no history. Without that
      *         asymmetry an outage would be indistinguishable from "these two
      *         versions are identical" (ADR-0110 D3).
      */
@@ -27352,7 +27363,19 @@ export class ObjectStackProtocolImplementation implements
 
         if (request.toVersion !== undefined) {
             toVersion = request.toVersion;
-            toBody = byVersion.get(request.toVersion) ?? null;
+            // [#26462] ADR-0110 D3 — a named version with no row is a MISS,
+            // never an empty side: compared as `{}` it answered "no change"
+            // (both missing, or an item with no history at all) or
+            // "everything removed" with a 200. Refused as the rollback door
+            // refuses the same number. The read is keyed by (type, name), so
+            // another item's version is this item's miss too. A delete
+            // tombstone HAS a row (a `null` body, not `undefined`) and stays
+            // served.
+            const named = byVersion.get(request.toVersion);
+            if (named === undefined) {
+                throw versionNotFoundError({ type: singularType, name: request.name }, request.toVersion);
+            }
+            toBody = named;
         } else {
             // [#20397] The default `to` side is the CURRENT ACTIVE ROW, and ONE
             // read of that row supplies both of its facts: the body compared and
@@ -27398,7 +27421,12 @@ export class ObjectStackProtocolImplementation implements
         }
         if (request.fromVersion !== undefined) {
             fromVersion = request.fromVersion;
-            fromBody = byVersion.get(request.fromVersion) ?? null;
+            // [#26462] The same miss on the from side — see the to side above.
+            const named = byVersion.get(request.fromVersion);
+            if (named === undefined) {
+                throw versionNotFoundError({ type: singularType, name: request.name }, request.fromVersion);
+            }
+            fromBody = named;
         } else if (toVersion !== null) {
             // [#20451] The default from side is the NEAREST EARLIER history row
             // whose body DIFFERS from the to side's, not the row immediately

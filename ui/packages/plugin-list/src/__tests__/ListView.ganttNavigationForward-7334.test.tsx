@@ -211,9 +211,9 @@ describe('ListView forwards an authored `navigation` down the gantt view-schema 
       gantt: { startDateField: 'start_date', endDateField: 'end_date', titleField: 'name' },
     });
     expect(node.type).toBe('object-gantt');
-    expect(node.startDateField).toBe('start_date');
-    expect(node.endDateField).toBe('end_date');
-    expect(node.titleField).toBe('name');
+    // objectstack#25923 — the binding rides the node's own `gantt` block now.
+    expect(node.gantt).toEqual({ startDateField: 'start_date', endDateField: 'end_date', titleField: 'name' });
+    expect(node).not.toHaveProperty('startDateField');
     expect(node.objectName).toBe('crm_leave_request');
     expect(typeof node.onRowClick).toBe('function');
   });

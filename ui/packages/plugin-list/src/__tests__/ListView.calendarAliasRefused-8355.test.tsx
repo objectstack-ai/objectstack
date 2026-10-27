@@ -109,6 +109,13 @@ async function generatedCalendarNode(view: Record<string, unknown>) {
  * captured: an authored block carrying the retired spellings and no canonical
  * one, which used to emit a node with a flat `dateField` and NO `startDateField`.
  */
+/**
+ * The emitted binding. objectstack#25923: the five canonical keys go out as the
+ * node's own `calendar` block, never flat (the spec refuses them flat on
+ * `object-calendar`), so the rows below read them there.
+ */
+const bindingOf = (node: Record<string, any>): Record<string, any> => node.calendar ?? {};
+
 const ALIASED_VIEW = {
   type: 'list-view',
   objectName: OBJECT,
@@ -153,6 +160,8 @@ describe('objectui#8355 · half 1 — the generated node carries the canonical k
     // where the renderer's alias ladder read them.
     expect(Object.keys(node)).not.toContain('dateField');
     expect(Object.keys(node)).not.toContain('endField');
+    expect(Object.keys(bindingOf(node))).not.toContain('dateField');
+    expect(Object.keys(bindingOf(node))).not.toContain('endField');
   });
 
   it('…and no canonical binding is invented from them either', async () => {
@@ -162,17 +171,17 @@ describe('objectui#8355 · half 1 — the generated node carries the canonical k
     // view produces NO date binding — and the author has already been told why
     // by half 2 below.
     const node = await generatedCalendarNode(ALIASED_VIEW);
-    expect(node.startDateField).toBeUndefined();
-    expect(node.endDateField).toBeUndefined();
+    expect(bindingOf(node).startDateField).toBeUndefined();
+    expect(bindingOf(node).endDateField).toBeUndefined();
   });
 
   it('CONTROL: the canonical block still reaches the node intact', async () => {
     // Without this row, "the aliases do not reach the node" is satisfied by a
     // branch that forwards nothing at all.
     const node = await generatedCalendarNode(CANONICAL_VIEW);
-    expect(node.startDateField).toBe('kickoff');
-    expect(node.endDateField).toBe('wrapup');
-    expect(node.titleField).toBe('name');
+    expect(bindingOf(node).startDateField).toBe('kickoff');
+    expect(bindingOf(node).endDateField).toBe('wrapup');
+    expect(bindingOf(node).titleField).toBe('name');
   });
 
   it('CONTROL: the block\'s other DECLARED keys still reach the node; an undeclared one does not (objectui#6152 round 14)', async () => {
@@ -184,8 +193,9 @@ describe('objectui#8355 · half 1 — the generated node carries the canonical k
     const node = await generatedCalendarNode({
       calendar: { startDateField: 'kickoff', allDayField: 'is_all_day', defaultView: 'week' },
     });
-    expect(node.allDayField).toBe('is_all_day');
+    expect(bindingOf(node).allDayField).toBe('is_all_day');
     expect(node).not.toHaveProperty('defaultView');
+    expect(bindingOf(node)).not.toHaveProperty('defaultView');
   });
 
   it('CONTROL: the LEGACY `options.calendar` nesting is stripped on the same path', async () => {
@@ -195,7 +205,7 @@ describe('objectui#8355 · half 1 — the generated node carries the canonical k
       options: { calendar: { dateField: 'kickoff', titleField: 'name' } },
     });
     expect(Object.keys(node)).not.toContain('dateField');
-    expect(node.startDateField).toBeUndefined();
+    expect(bindingOf(node).startDateField).toBeUndefined();
   });
 });
 

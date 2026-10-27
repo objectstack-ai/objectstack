@@ -6,8 +6,8 @@
  * routing tree behind a config object. In practice every real project wants to
  * edit the routes directly (add /billing, tweak AuthGuard behaviour, reorder
  * providers), so we now export the pieces and let consumers write ~40 lines of
- * JSX in App.tsx. See examples/console-starter/src/App.tsx for a minimal example,
- * apps/console/src/App.tsx for one with custom system routes + CreateApp.
+ * JSX in App.tsx. See apps/console/src/App.tsx, with custom system routes +
+ * CreateApp.
  */
 
 import { Suspense, useEffect, useRef, useState, type ReactNode } from 'react';

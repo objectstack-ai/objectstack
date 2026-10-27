@@ -94,6 +94,7 @@ import {
     type MetadataActivationRow,
     type MetadataActivationStore,
     type MetadataActivationStoreEngine,
+    type MetadataActivationWriteOptions,
 } from '@objectstack/core';
 
 /**
@@ -141,6 +142,13 @@ export type ActionActivationStore = MetadataActivationStore;
  * what is used keeps every test double honest about that.
  */
 export type ActionActivationStoreEngine = MetadataActivationStoreEngine;
+
+/**
+ * Options for one flip: the caller it is made on behalf of, elevated — the
+ * shared ledger's write options, so the row and its audit row name who switched
+ * the action (`@objectstack/core`'s `MetadataActivationWriteContext`).
+ */
+export type ActionActivationWriteOptions = MetadataActivationWriteOptions;
 
 /**
  * In-memory {@link ActionActivationStore} — process-lifetime only, for tests
@@ -253,8 +261,11 @@ export class ActionActivationProjection {
      * it is a deployment whose ledger table was never registered or synced.
      * Reporting a durable install-wide switch that did not persist is the exact
      * failure ADR-0126 §6 wall 3 exists to close, so this throws instead.
+     *
+     * `options` reaches the store unchanged: the door that asked names its
+     * caller there, and the store writes on that caller's behalf.
      */
-    async setActive(row: ActionActivationRow): Promise<void> {
+    async setActive(row: ActionActivationRow, options?: ActionActivationWriteOptions): Promise<void> {
         if (!this.store) {
             throw Object.assign(
                 new Error(
@@ -269,7 +280,7 @@ export class ActionActivationProjection {
                 { code: 'SERVICE_UNAVAILABLE', status: 503 },
             );
         }
-        await this.store.setActive(row);
+        await this.store.setActive(row, options);
         if (row.active) this.disabled.delete(row.name);
         else this.disabled.add(row.name);
     }
