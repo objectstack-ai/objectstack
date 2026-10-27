@@ -3373,7 +3373,8 @@ function withItems(raw: unknown, items: any[]): unknown {
  *    organization, or `null` when no count is a fact for this caller (see
  *    `PositionGrantSummary.holderCount`);
  *  - `_grantedPermissionSets` — the sets it grants its holders, in force, each
- *    with `via: 'definition' | 'name'` (`name`: the position-name fold).
+ *    with `via: 'definition'` (a set that only shares the position's name is
+ *    not granted, so it is not listed).
  *
  * Both are the security service's answer (`describePositionGrants`), which reads
  * them where the resolver enforces them — this step only places them, so the

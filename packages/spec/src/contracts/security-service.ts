@@ -121,13 +121,14 @@ export interface DelegableScope {
  * {@link PositionGrantSummary}:
  *
  * - `definition` — the position's definition names it in `permissionSets`
- *   (ADR-0131 D3/D4), the binding the spec declares;
- * - `name` — it shares the position's NAME and the definition does not list
- *   it: the resolver's position-name fold grants it anyway. That grant is
- *   deprecated (the runtime warns `position_name_fold_grant`); it is reported so
- *   that what a position is shown to grant is what it is enforced to grant.
+ *   (ADR-0131 D3/D4), the binding the spec declares and the only one the
+ *   resolver grants by.
+ *
+ * A set that merely shares the position's name is not granted, so it is never
+ * listed: the position-name fold is retired, and with it the `name` member
+ * (ADR-0087 D3 entry `position-grant-via-name-retired`).
  */
-export type PositionGrantVia = 'definition' | 'name';
+export type PositionGrantVia = 'definition';
 
 /** One position, as {@link ISecurityService.describePositionGrants} describes it. */
 export interface PositionGrantSummary {
