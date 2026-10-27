@@ -65,7 +65,7 @@
  * probe beside the engine operation it describes.
  */
 
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeAll, afterAll, vi } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -178,7 +178,11 @@ afterEach(async () => {
   }
 });
 
-async function boot(posture: Posture, options: { sharing?: Record<string, unknown> } = {}) {
+/**
+ * `lifetime: 'describe'` is for a stack several `it`s share: its caller's
+ * `afterAll` destroys it, so the per-test `afterEach` above must not.
+ */
+async function boot(posture: Posture, options: { sharing?: Record<string, unknown>; lifetime?: 'test' | 'describe' } = {}) {
   const engine = new ObjectQL();
   engine.registerDriver(
     new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true } as never) as never,
@@ -202,7 +206,7 @@ async function boot(posture: Posture, options: { sharing?: Record<string, unknow
   // store built before 18.x (ADR-0131 D1 makes a fresh tenant column NOT
   // NULL): that table is this store's.
   await relaxTenantColumns(engine as never, ['sys_permission_set']);
-  engines.push(engine);
+  if (options.lifetime !== 'describe') engines.push(engine);
 
   for (const id of [ORG_A, ORG_C, ORG_D]) {
     await engine.insert('sys_organization', { id, name: id, slug: id }, { context: SYS_CTX } as never);
@@ -644,34 +648,78 @@ describe('[#25107] what the rule leaves alone in the probes', () => {
 });
 
 describe('[#25107 · ADR-0090 D10] parity: each probe agrees with the engine operation it describes', () => {
+  // [#26754] One booted stack per posture, shared by its three operations, and
+  // each operation asks only the probes it pins. This was one `it` per posture
+  // that asked every probe on every cell, and under CI shard load it crossed
+  // vitest's 5 s default. Measured alone, the boot and seed were a tenth of
+  // that `it`; the five probes it asked and never asserted (the four field
+  // projections and the update probe, pinned per context in the two describes
+  // above) were a third. Sharing is sound: a cell here pins WHETHER an
+  // operation is refused, never the rows a find returns, and the one operation
+  // that writes runs last, so no read below sees a parity row.
+  const parityContexts = (): Record<string, Record<string, unknown>> => ({
+    'delegated in org_d': operator(ORG_D),
+    'delegated in org_a': operator(ORG_A),
+    'undelegated in org_d': operator(ORG_D, false),
+  });
+
   for (const posture of ['group', 'isolated'] as const) {
-    it(`\`${posture}\`: refused by the engine ⇔ the probe refuses, for a read, an insert and an export`, async () => {
-      const b = await boot(posture);
-      await seedForReads(b.engine);
-      const contexts: Record<string, Record<string, unknown>> = {
-        'delegated in org_d': operator(ORG_D),
-        'delegated in org_a': operator(ORG_A),
-        'undelegated in org_d': operator(ORG_D, false),
-      };
-      const refused: string[] = [];
-      let n = 0;
-      for (const [label, context] of Object.entries(contexts)) {
-        for (const object of PROVIDER_OBJECTS) {
-          const cell = `${label} · ${object}`;
-          const found = await attempt(() => b.engine.find(object, { context: { ...context } } as never));
-          const row = { id: `parity_${++n}`, name: 'parity' };
-          const inserted = await attempt(() => b.engine.insert(object, { ...row }, { context: { ...context } } as never));
-          const answers = await probeAnswers(b, object, context);
-          if (!found.ok) refused.push(cell);
-          expect(answers.canReadObject, `${cell}: canReadObject ⇔ find`).toBe(found.ok);
-          expect(answers.canExport, `${cell}: canExport ⇔ find (an export reads as a find)`).toBe(found.ok);
-          expect(answers.explained.allowed, `${cell}: explain read ⇔ find`).toBe(found.ok);
-          expect(answers.canWriteInsert, `${cell}: canWriteObject insert ⇔ insert`).toBe(inserted.ok);
+    describe(`\`${posture}\`: refused by the engine ⇔ the probe refuses`, () => {
+      let b: Booted;
+      beforeAll(async () => {
+        b = await boot(posture, { lifetime: 'describe' });
+        await seedForReads(b.engine);
+      });
+      afterAll(async () => { await b?.engine.destroy(); });
+
+      it('for a read: canReadObject and the read explanation', async () => {
+        const refused: string[] = [];
+        for (const [label, context] of Object.entries(parityContexts())) {
+          for (const object of PROVIDER_OBJECTS) {
+            const cell = `${label} · ${object}`;
+            const found = await attempt(() => b.engine.find(object, { context: { ...context } } as never));
+            const answers = {
+              explained: await b.plugin.explainAccessForCaller({ object, operation: 'read' }, { ...context }),
+              canReadObject: await b.plugin.canReadObject(object, { ...context }),
+            };
+            if (!found.ok) refused.push(cell);
+            expect(answers.canReadObject, `${cell}: canReadObject ⇔ find`).toBe(found.ok);
+            expect(answers.explained.allowed, `${cell}: explain read ⇔ find`).toBe(found.ok);
+          }
         }
-      }
-      // Not vacuous on either side: the engine refuses exactly the delegated
-      // context the delegator's membership does not back.
-      expect(refused).toEqual(PROVIDER_OBJECTS.map((object) => `delegated in org_d · ${object}`));
+        // Not vacuous on either side: the engine refuses exactly the delegated
+        // context the delegator's membership does not back.
+        expect(refused).toEqual(PROVIDER_OBJECTS.map((object) => `delegated in org_d · ${object}`));
+      });
+
+      it('for an export: canExport (an export reads as a find)', async () => {
+        const refused: string[] = [];
+        for (const [label, context] of Object.entries(parityContexts())) {
+          for (const object of PROVIDER_OBJECTS) {
+            const cell = `${label} · ${object}`;
+            const found = await attempt(() => b.engine.find(object, { context: { ...context } } as never));
+            const answers = { canExport: await b.plugin.canExport(object, { ...context }) };
+            if (!found.ok) refused.push(cell);
+            expect(answers.canExport, `${cell}: canExport ⇔ find (an export reads as a find)`).toBe(found.ok);
+          }
+        }
+        // The same pin as the read's, so this `it` is not vacuous on its own.
+        expect(refused).toEqual(PROVIDER_OBJECTS.map((object) => `delegated in org_d · ${object}`));
+      });
+
+      // Last: the one operation here that writes.
+      it('for an insert: canWriteObject insert', async () => {
+        let n = 0;
+        for (const [label, context] of Object.entries(parityContexts())) {
+          for (const object of PROVIDER_OBJECTS) {
+            const cell = `${label} · ${object}`;
+            const row = { id: `parity_${++n}`, name: 'parity' };
+            const inserted = await attempt(() => b.engine.insert(object, { ...row }, { context: { ...context } } as never));
+            const answers = { canWriteInsert: await b.plugin.canWriteObject(object, 'insert', { ...context }, { id: 'probe', name: 'probe' }) };
+            expect(answers.canWriteInsert, `${cell}: canWriteObject insert ⇔ insert`).toBe(inserted.ok);
+          }
+        }
+      });
     });
   }
 });

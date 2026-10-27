@@ -68,6 +68,7 @@ describe('the refused-shape list — registered against the migration chain', ()
       'flow-value-slot-template-dialect-refused',
       'object-external-binding-managed-datasource-refused',
       'visibility-predicate-has-argument-refused',
+      'object-duplicate-action-name-refused',
     ]);
   });
 
@@ -659,5 +660,45 @@ describe('#25281 — a stored page or view whose visibleWhen hands `has()` an ar
     // belongs to `visibility-predicate-has-argument` at the save door and in
     // `os validate` (pinned beside that rule, `@objectstack/lint`).
     expect(PageSchema.safeParse(hasPage('has(status)')).success).toBe(true);
+  });
+});
+
+// ── #26725 ────────────────────────────────────────────────────────────────
+
+const dupAct = (name: string, label: string) => ({ name, label, type: 'script', target: 'noop' });
+const dupRow = (actions: unknown[]) => ({
+  name: 'crm_deal',
+  label: 'Deal',
+  sharingModel: 'private',
+  fields: { title: { type: 'text', label: 'Title' } },
+  actions,
+});
+const dupActionIssue = (row: unknown) => {
+  const parsed = ObjectSchema.safeParse(row);
+  return parsed.success
+    ? undefined
+    : parsed.error.issues.find((i) => i.path[0] === 'actions' && /declares the action/.test(i.message));
+};
+
+describe('#26725 — a stored object that declares one action name twice is listed by object', () => {
+  it('one TODO at the second declaration, naming the name and both indexes; the row is not rewritten', () => {
+    const row = dupRow([dupAct('approve', 'Approve A'), dupAct('approve', 'Approve B')]);
+    const { item, todos } = storedTodos('object', row);
+    expect(item).toEqual(row);
+    expect(todos).toHaveLength(1);
+    const todo = todos[0]!;
+    expect(todo.conversionId).toBe('object-duplicate-action-name-refused');
+    expect(todo.path).toBe('objects[0].actions[1]');
+    expect(todo.reason).toMatch(/^No lossless rewrite: which declaration keeps the name/);
+    expect(todo.reason).toContain("Object 'crm_deal' declares the action 'approve' twice in actions: actions[0] and actions[1].");
+    expect(JSON.parse(todo.from)).toEqual({ name: 'approve', indexes: [0, 1] });
+    // The listing and the parse refuse ONE set: the stored row still fails the parse, at the same site.
+    expect(dupActionIssue(item)?.path).toEqual(['actions', 1]);
+  });
+
+  it('distinct names are not listed — and the parse accepts them', () => {
+    const row = dupRow([dupAct('approve', 'Approve'), dupAct('reject', 'Reject')]);
+    expect(storedTodos('object', row).todos).toEqual([]);
+    expect(dupActionIssue(row)).toBeUndefined();
   });
 });

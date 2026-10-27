@@ -4,7 +4,7 @@ import { describe, it, expect } from 'vitest';
 // The contract the object branch's coverage is pinned against (#13835) — see
 // the coverage describe block at the foot of this file. `@objectstack/spec` is
 // already a runtime dependency of this package, so the pin adds no edge.
-import { FLOW_TERMINAL_MESSAGE_KEYS, ObjectTranslationDataSchema, TranslationDataSchema } from '@objectstack/spec/system';
+import { FLOW_TERMINAL_MESSAGE_KEYS, ObjectTranslationDataSchema, TranslationDataSchema, deriveImplicitPackageBook } from '@objectstack/spec/system';
 // The schema the #18441 fold is SIZED against — see the surface pin in that
 // block. Same package, already a runtime dependency, so no new edge either.
 import { ObjectExtensionSchema } from '@objectstack/spec/data';
@@ -4511,5 +4511,65 @@ describe('validateTranslationReferences — reports', () => {
       { packages: [{ manifest: { reports: [{ name: 'leads_by_source', label: '线索来源', type: 'summary', dataset: 'leads', values: ['n'] }] } }] },
     ));
     expect(findings).toEqual([]);
+  });
+});
+
+describe('validateTranslationReferences — doc books (#26690)', () => {
+  const stack = (data: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
+    books: [{
+      name: 'crm_manual',
+      label: 'User Manual',
+      groups: [
+        { key: 'start', label: 'Getting started', include: 'crm_start_*' },
+        { key: 'pipeline', label: 'Pipeline', include: 'crm_pipe_*' },
+      ],
+    }],
+    ...extra,
+    translations: [{ en: data }],
+  });
+
+  it('a declared book and its declared group keys are clean', () => {
+    expect(validateTranslationReferences(stack({
+      books: { crm_manual: { label: '使用手册', description: '说明', groups: { start: { label: '快速上手' }, pipeline: { label: '销售管道' } } } },
+    }))).toEqual([]);
+  });
+
+  it('a book name no package declares is translation-target-unknown, at error', () => {
+    const findings = validateTranslationReferences(stack({ books: { crm_manaul: { label: 'x' } } }));
+    expect(findings.map((f) => [f.rule, f.severity, f.path, f.where])).toEqual([
+      [TRANSLATION_TARGET_UNKNOWN, 'error', 'translations[0].en.books.crm_manaul', 'locale "en" · book "crm_manaul"'],
+    ]);
+    expect(findings[0].message).toContain('Did you mean "crm_manual"?');
+  });
+
+  it('a group key the book does not declare is translation-target-unknown, even when it is a group LABEL', () => {
+    const findings = validateTranslationReferences(stack({
+      books: { crm_manual: { groups: { start: { label: 'ok' }, strat: { label: 'x' }, Pipeline: { label: 'y' } } } },
+    }));
+    expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+      [TRANSLATION_TARGET_UNKNOWN, 'error', 'translations[0].en.books.crm_manual.groups.strat'],
+      [TRANSLATION_TARGET_UNKNOWN, 'error', 'translations[0].en.books.crm_manual.groups.Pipeline'],
+    ]);
+    expect(findings[0].message).toContain('Did you mean "start"?');
+  });
+
+  it('resolves a book a sibling package of the artifact declares, with its group keys', () => {
+    expect(validateTranslationReferences(stack(
+      { books: { ops_guide: { label: '运维指南', groups: { deploy: { label: '部署' } } } } },
+      { packages: [{ manifest: { id: 'com.example.ops', books: [{ name: 'ops_guide', groups: [{ key: 'deploy', label: 'Deploy', include: '*' }] }] } }] },
+    ))).toEqual([]);
+  });
+
+  it("resolves the implicit per-package book: the package id, and its one group's key", () => {
+    const implicitKey = deriveImplicitPackageBook('com.example.crm').groups[0].key;
+    expect(validateTranslationReferences(stack(
+      { books: { 'com.example.crm': { label: '帮助', groups: { [implicitKey]: { label: '全部文档' } } } } },
+      { manifest: { id: 'com.example.crm' } },
+    ))).toEqual([]);
+    // … and a group key the implicit book does not carry is still an orphan.
+    expect(validateTranslationReferences(stack(
+      { books: { 'com.example.crm': { groups: { start: { label: 'x' } } } } },
+      { manifest: { id: 'com.example.crm' } },
+    )).map((f) => f.path)).toEqual(['translations[0].en.books.com.example.crm.groups.start']);
   });
 });
