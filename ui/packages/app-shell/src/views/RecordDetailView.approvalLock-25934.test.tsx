@@ -252,7 +252,7 @@ afterEach(() => {
 
 /** The `console.error` lines that name the record-lock read. */
 const lockErrorLines = () =>
-  consoleError.mock.calls.filter((args) => args.some((a) => String(a).includes(LOCK_PATH)));
+  consoleError.mock.calls.filter((args: unknown[]) => args.some((a) => String(a).includes(LOCK_PATH)));
 
 describe('record page lock for a reader outside the approval (objectstack#25934)', () => {
   it('a non-participant on a record held by a locking approval is offered no inline edit', async () => {
