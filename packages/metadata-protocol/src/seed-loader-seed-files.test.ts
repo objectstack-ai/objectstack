@@ -498,7 +498,7 @@ describe('a seed of many files yields to waiting requests (#26670)', () => {
     // A request read on the I/O phase, as a sign-in's user lookup is.
     setImmediate(() => {
       const issuedAt = { stored: stored.length, claims: claims.length };
-      void engine.find('sys_user', { where: { email: 'admin@example.com' } } as any).then(() => {
+      void engine.find('sys_user', { where: { email: 'admin@example.com' } }).then(() => {
         readAt = { stored: stored.length - issuedAt.stored, claims: claims.length - issuedAt.claims };
       });
     });
