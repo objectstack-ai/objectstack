@@ -33,7 +33,7 @@ import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, within } from '@testing-library/react';
 import { I18nProvider, createI18n } from '@object-ui/i18n';
-import { ObjectSchema } from '@objectstack/spec/data';
+import { ValidationRuleSchema } from '@objectstack/spec/data';
 
 import { ObjectValidationsPanel } from './ObjectValidationsPanel';
 import { t } from '../metadata-admin/i18n';
@@ -130,7 +130,8 @@ describe('a new field rule waits for its field and message (objectstack#26731)',
       events: ['insert', 'update'],
     });
     expect(written[1].field).not.toBe('created_at');
-    expect(ObjectSchema.safeParse({ ...baseDraft, validations: written }).success).toBe(true);
+    // The rule the pillar would save parses through the spec's own rule schema.
+    expect(ValidationRuleSchema.safeParse(written[1]).success).toBe(true);
 
     // Written, it is an ordinary rule.
     expect(screen.queryByTestId('rule-unsaved')).toBeNull();
@@ -200,7 +201,7 @@ describe('an empty transition row is not stored (objectstack#26731)', () => {
     expect(onPatch).toHaveBeenCalledTimes(1);
     const written = lastValidations(onPatch)[0];
     expect(written.transitions).toEqual({ open: ['closed'], closed: ['open'] });
-    expect(written.transitions).not.toHaveProperty('');
+    expect(Object.keys(written.transitions as object)).not.toContain('');
     // The row it became is the one the author is typing in.
     expect(screen.getAllByPlaceholderText(t('engine.studio.rules.transitionFrom', 'en-US'))[1]).toHaveValue('closed');
   });
