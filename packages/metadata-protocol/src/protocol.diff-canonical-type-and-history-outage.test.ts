@@ -278,8 +278,12 @@ describe('#8868 — diffMetaItem folds its type at the request boundary', () => 
     it('does NOT refuse a spelling that reaches for no declared type — the refusal stays narrow', async () => {
         // A plugin-registered runtime kind must never be refused by a static
         // rule. `fieldz` is not a plural of anything declared, so the boundary
-        // is silent and the request is served (with no rows, truthfully).
-        const { engine } = makeStubEngine();
+        // is silent and the request is served.
+        // [#26462] Served from rows of its own: with none, the two named
+        // versions are a 404 `VERSION_NOT_FOUND` miss, which a weakened
+        // assertion here could not tell from a boundary refusal.
+        const { engine, tables } = makeStubEngine();
+        seedTwoVersions(tables, PLUGIN_SHAPED_SPELLING, 'x');
         const protocol = new ObjectStackProtocolImplementation(engine);
 
         const res: any = await protocol.diffMetaItem({
@@ -290,7 +294,7 @@ describe('#8868 — diffMetaItem folds its type at the request boundary', () => 
         });
 
         expect(res.type).toBe(PLUGIN_SHAPED_SPELLING);
-        expect(res.changed).toEqual([]);
+        expect(res).toMatchObject(REAL_DIFF_BODY);
     });
 });
 
