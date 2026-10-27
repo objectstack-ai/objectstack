@@ -4088,7 +4088,7 @@ function collectDemoStaffErrors(config: ObjectStackDefinition): string[] {
         'address.',
     );
   }
-  errors.push(...collectDemoStaffManagerErrors(staff, indicesByName, indicesByEmail));
+  errors.push(...collectDemoStaffManagerErrors(staff, indicesByEmail));
   return errors;
 }
 
@@ -4100,7 +4100,6 @@ function collectDemoStaffErrors(config: ObjectStackDefinition): string[] {
  */
 function collectDemoStaffManagerErrors(
   staff: readonly unknown[],
-  indicesByName: ReadonlyMap<string, number[]>,
   indicesByEmail: ReadonlyMap<string, number[]>,
 ): string[] {
   const errors: string[] = [];
@@ -4121,14 +4120,10 @@ function collectDemoStaffManagerErrors(
       continue;
     }
     if (target === undefined) {
-      const byName = indicesByName.get(entry.manager.trim());
       errors.push(
         `Demo account '${String(entry.name)}' (${where}) names manager '${entry.manager}', which is the address ` +
-          'of no demoStaff entry. A manager must be another demo account of this stack, named by its email' +
-          (byName
-            ? `; '${entry.manager.trim()}' is the name of stack.demoStaff[${byName[0]}], so write its email ` +
-              'instead.'
-            : '. Declare that person in demoStaff, or correct the address.'),
+          'of no demoStaff entry. A manager must be another demo account of this stack; declare that person in ' +
+          'demoStaff, or correct the address.',
       );
       continue;
     }

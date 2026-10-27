@@ -137,7 +137,10 @@ export const DemoStaffSchema = lazySchema(() => strictObject(
      * is left as it is. The stack refuses a manager that names no entry, the
      * entry itself, or a chain that loops back on itself.
      */
-    manager: z.string().email().optional().describe('Line manager of the demo account: the email of another demoStaff entry, written as its manager_id by the development boot'),
+    manager: z
+      .string()
+      .email('A demo account\'s manager is named by the email of another demoStaff entry, not by its name')
+      .optional().describe('Line manager of the demo account: the email of another demoStaff entry, written as its manager_id by the development boot'),
   },
 ));
 

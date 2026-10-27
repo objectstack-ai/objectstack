@@ -199,9 +199,13 @@ describe('manager — an entry names another entry of the same list by its email
     expect(verdict).toBeUndefined();
   });
 
-  it('refuses a manager that is not an address, at the entry`s path', () => {
+  it('refuses a manager named by display name, at the entry`s path, saying it takes an address', () => {
     const verdict = parse({ ...base(), demoStaff: [{ ...counsel(1), manager: 'Legal Lead' }, lead] });
     expect(issuesOf(verdict).some((i) => i.endsWith('@ demoStaff.0.manager'))).toBe(true);
+    if (verdict.success) return;
+    expect(verdict.error.issues.find((i) => i.path.join('.') === 'demoStaff.0.manager')?.message).toContain(
+      'named by the email of another demoStaff entry',
+    );
   });
 
   it('refuses `reportsTo` and `managerEmail` with the canonical key, not a distance guess', () => {
