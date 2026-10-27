@@ -1006,6 +1006,19 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.refusal.action': 'the action “{action}”',
   'engine.studio.refusal.actionInput': '{input} on the action “{action}”',
   'engine.studio.held.actionNeedsInput': '{input} on the action “{action}” needs a value',
+  // objectstack#26730 — the Interfaces pillar's refusal strip, for a dashboard
+  // widget and a report's properties; a refused publish kept on its Pending
+  // changes entry, and the toast that announces it.
+  'engine.studio.refusal.widget': 'the widget “{widget}”',
+  'engine.studio.refusal.widgetInput': '{input} on the widget “{widget}”',
+  'engine.studio.refusal.reportInput': '“{input}” in the report’s properties',
+  'engine.studio.refusal.publishIssue': 'Not published. Check {where} — {problem}',
+  'engine.studio.refusal.publishWhere': 'Not published. Check {where}: Details say what to change.',
+  'engine.studio.refusal.publishUnlocated': 'Not published: the server refused this draft. Details say why.',
+  'engine.studio.refusal.publishPlain': 'Not published: {reason}',
+  'engine.studio.publishRefused': 'Not published: {count} items need a change. Pending changes keeps each reason until it is fixed.',
+  'engine.studio.publishRefusedOne': 'Not published: {count} item needs a change. Pending changes keeps the reason until it is fixed.',
+  'engine.studio.publishRefusedBatch': 'Nothing went live: the package publishes as one batch, so its other drafts wait for this fix.',
   'engine.inspector.action.moreFieldsHint': 'Advanced / rarely-used properties.',
   // Dataset default (home) inspector (objectui#10586). Option labels are keyed
   // by the stored value; `{…}` tokens in a sentence are slots the inspector

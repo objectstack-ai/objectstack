@@ -946,6 +946,14 @@ export interface DraftChangesPanelProps {
    * publishes).
    */
   posture?: DraftChangesPosture;
+  /**
+   * objectstack#26730 — the host's note on one entry, shown under its row
+   * whether or not the row is expanded: Studio keeps a refused publish's
+   * reason here until it is resolved. Rendered by the host, so the reader that
+   * words it stays off this panel's eager graph. `null` for an entry with
+   * nothing to say.
+   */
+  renderEntryNote?: (entry: DraftChangeEntry) => ReactNode;
 }
 
 export type DraftChangesPosture = 'review' | 'confirm';
@@ -958,6 +966,7 @@ export function DraftChangesPanel({
   onPublish,
   publishing = false,
   posture = 'review',
+  renderEntryNote,
 }: DraftChangesPanelProps) {
   const { t, language } = useObjectTranslation();
   const [entries, setEntries] = useState<DraftChangeEntry[] | null>(null);
@@ -1268,6 +1277,7 @@ export function DraftChangesPanel({
                     // secondary text, or is the row's text when there is no
                     // label.
                     const labelText = resolveI18nLabel(entry.label, language)?.trim() ?? '';
+                    const note = renderEntryNote?.(entry);
                     return (
                       <li key={key} className="rounded-md border text-sm">
                         <button
@@ -1336,6 +1346,11 @@ export function DraftChangesPanel({
                             </Badge>
                           ) : null}
                         </button>
+                        {note ? (
+                          <div className="border-t px-2.5 py-2" data-testid="draft-entry-note">
+                            {note}
+                          </div>
+                        ) : null}
                         {isExpanded && (
                           <div className="border-t bg-muted/20">
                             <EntryDetail

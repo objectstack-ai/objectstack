@@ -31,8 +31,9 @@ import {
   readDraftChanges,
   type DraftChange,
 } from '@object-ui/data-objectstack';
-import type { MetadataClient } from '@object-ui/data-objectstack';
+import type { MetadataClient, MetadataError } from '@object-ui/data-objectstack';
 import type { FlowRuntimeState as SpecFlowRuntimeState } from '@objectstack/spec/contracts';
+import { canonicalMetaUrlType } from '@objectstack/spec/shared';
 import { resolveI18nLabel, type I18nLabel } from '@objectstack/spec/ui';
 import { StudioChatDock, type StudioCopilotStatus, type StudioSurfaceLabel } from './StudioAiCopilot.js';
 import { StudioRightSlot } from './StudioRightSlot.js';
@@ -236,15 +237,18 @@ import { fetchPendingDrafts, usePendingDrafts } from '../../preview/usePendingDr
 import { emitMetadataRefresh, subscribeMetadataRefresh } from '../../assistant/assistantBus.js';
 import { STUDIO_CHANGES_PARAM, STUDIO_CHANGES_REVIEW } from './studioChangesLink.js';
 import {
+  BATCH_ABORTED_CODE,
+  causalPublishFailures,
   dashboardHeldEdit,
   flowHeldEdit,
   flowSaveRefusal,
-  formatPublishFailures,
   issueRefusal,
+  leafIssueLocator,
   navEntryLocator,
   objectHeldEdit,
   objectSaveRefusal,
   plainRefusal,
+  publishRefusal,
   type PublishFailure,
   type StudioHeld,
   type StudioRefusal,
@@ -342,6 +346,7 @@ import { getIcon } from '../../utils/getIcon.js';
 import { fetchPackages, prefixObjectName, type PkgEntry } from './packages-io.js';
 import {
   DraftChangesPanel,
+  type DraftChangeEntry,
   type DraftChangesPosture,
   type DraftPublishOptions,
 } from '../../preview/DraftChangesPanel.js';
@@ -546,12 +551,16 @@ export function StudioRefusalStrip({
 }: {
   refusal: StudioRefusal;
   locale: string;
-  /** Opens the target's input in the pillar that raised the refusal. */
-  onShow?: (target: MetadataSelection) => void;
+  /**
+   * Opens the target's input in the pillar that raised the refusal, and
+   * (objectstack#26730) puts the focus on it: `input` is the inspector's
+   * label of that input, when the refusal names one.
+   */
+  onShow?: (target: MetadataSelection | null, input?: string) => void;
   /** Spacing and type size, which differ by pillar. */
   className?: string;
 }): React.ReactElement {
-  const { message, target, detail } = refusal;
+  const { message, target, input, detail } = refusal;
   return (
     <div
       data-testid="studio-refusal"
@@ -561,10 +570,10 @@ export function StudioRefusalStrip({
         <p data-testid="studio-refusal-message" className="min-w-0 flex-1 whitespace-pre-line">
           {message}
         </p>
-        {target && onShow && (
+        {target !== undefined && onShow && (
           <button
             type="button"
-            onClick={() => onShow(target)}
+            onClick={() => onShow(target, input)}
             className="shrink-0 rounded border border-destructive/40 px-1.5 py-0.5 font-medium hover:bg-destructive/10"
           >
             {t('engine.studio.refusal.show', locale)}
@@ -579,6 +588,113 @@ export function StudioRefusalStrip({
       )}
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// objectstack#26730 — "Show me" ends ON the input a refusal names.
+//
+// A strip's "Show me" used to select its target and stop there: the inspector
+// opened, and the focus stayed on the button, so the author still had to find
+// the input. The pillar now asks for that input once the selection is open:
+// the control the inspector labels with the refusal's `input` (the label the
+// sentence names), or, when the refusal names none, the inspector's first.
+// ---------------------------------------------------------------------------
+
+/** A control the author types into or picks from. */
+const SHOW_FORM_CONTROL = 'input:not([type="hidden"]), textarea, select, [role="combobox"]';
+
+/** How long a request waits for the inspector to draw the input it names. */
+const SHOW_FOCUS_WAIT_MS = 3000;
+
+/** The first enabled match of `selector` in `scope`, outside anything hidden from the author. */
+function enabledControlIn(scope: Element, selector: string): HTMLElement | null {
+  for (const el of scope.querySelectorAll<HTMLElement>(selector)) {
+    if ((el as HTMLInputElement).disabled || el.closest('[aria-hidden="true"]')) continue;
+    return el;
+  }
+  return null;
+}
+
+/** A label's text as the author reads it: without the visual-only required marker. */
+function readLabelText(label: Element): string {
+  const copy = label.cloneNode(true) as Element;
+  copy.querySelectorAll('[aria-hidden="true"]').forEach((node) => node.remove());
+  return (copy.textContent ?? '').trim();
+}
+
+/**
+ * The control `input` names in `root`: the one its label is for, else the
+ * first control of the nearest block around the label (an editor whose label
+ * heads a list of rows, or whose only control adds the first row). With no
+ * `input`, the root's first control. `null` while the inspector has not drawn it.
+ */
+function showTargetControl(root: Element, input: string | undefined): HTMLElement | null {
+  const first = (scope: Element) => enabledControlIn(scope, SHOW_FORM_CONTROL) ?? enabledControlIn(scope, 'button');
+  if (input === undefined) return first(root);
+  for (const label of root.querySelectorAll('label')) {
+    if (readLabelText(label) !== input) continue;
+    const own = (label as HTMLLabelElement).control;
+    if (own instanceof HTMLElement && !(own as HTMLInputElement).disabled) return own;
+    for (let block = label.parentElement; block && root.contains(block); block = block.parentElement) {
+      const found = first(block);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+/**
+ * objectstack#26730 — the focus half of a pillar's "Show me". The returned
+ * function asks for the input inside `rootRef`'s element (the pillar's
+ * inspector); call it beside the selection that opens the target. The request
+ * is answered after that commit, or as soon as the inspector draws the input
+ * (a registered inspector settling), and dropped after
+ * {@link SHOW_FOCUS_WAIT_MS}: an input the inspector never draws for this
+ * target is left unfocused, never swapped for another.
+ */
+function useShowInputFocus(rootRef: React.RefObject<HTMLElement | null>): (input: string | undefined) => void {
+  const [request, setRequest] = React.useState<{ id: number; input: string | undefined } | null>(null);
+  React.useEffect(() => {
+    if (!request) return;
+    const attempt = (): boolean => {
+      const root = rootRef.current;
+      const control = root ? showTargetControl(root, request.input) : null;
+      if (!control) return false;
+      control.focus();
+      return true;
+    };
+    if (attempt()) return;
+    const observer = new MutationObserver(() => {
+      if (attempt()) stop();
+    });
+    const timer = window.setTimeout(() => stop(), SHOW_FOCUS_WAIT_MS);
+    function stop(): void {
+      observer.disconnect();
+      window.clearTimeout(timer);
+    }
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true });
+    return stop;
+  }, [request, rootRef]);
+  return React.useCallback((input: string | undefined) => {
+    setRequest((prev) => ({ id: (prev?.id ?? 0) + 1, input }));
+  }, []);
+}
+
+/**
+ * objectstack#26730 — which Pending changes entry a kept publish refusal
+ * belongs to: the draft's canonical type and name. The `_drafts` feed and
+ * `failed[]` may spell a type either way; the panel's entries are folded.
+ */
+function publishRefusalKey(type: string, name: string): string {
+  return `${canonicalMetaUrlType(type)}/${name}`;
+}
+
+const NO_PUBLISH_REFUSALS: ReadonlyMap<string, StudioRefusal> = new Map();
+
+/** The draft a pillar's save wrote, as it reports it to `onDraftSaved`. */
+interface StudioSavedDraft {
+  type: string;
+  name: string;
 }
 
 /** Top-bar package switcher: list app packages (writable base vs read-only
@@ -1417,6 +1533,11 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
   const [publishing, setPublishing] = React.useState(false);
   const [publishNonce, setPublishNonce] = React.useState(0); // ↑ → pillars re-read the published baseline
   const [draftNonce, setDraftNonce] = React.useState(0); // ↑ → a draft save landed (`onDraftSaved`)
+  // objectstack#26730 — what the last publish refused, by draft
+  // (`publishRefusalKey`), each shown on its Pending changes entry until it is
+  // resolved: the draft saved again, a publish that lets it through, or the
+  // draft no longer pending. A toast alone was gone in four seconds.
+  const [publishRefusals, setPublishRefusals] = React.useState(NO_PUBLISH_REFUSALS);
 
   // objectui#5801 — the shared pending-drafts source: same fetch, same count,
   // and the assistant bus's metadata-refresh pulse keeps this topbar in step
@@ -1444,6 +1565,14 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
   React.useLayoutEffect(() => {
     refreshPendingRef.current = refreshPending;
   });
+  // A kept refusal whose draft the ledger no longer lists has nothing left to
+  // fix (discarded, or published from another surface), so it is not shown.
+  // Read only off a known ledger: an unknown one (`feedCount === null`) lists nothing.
+  const listedPublishRefusals = React.useMemo(() => {
+    if (feedCount === null || publishRefusals.size === 0) return publishRefusals;
+    const listed = new Set(pendingEntries.map((e) => publishRefusalKey(e.type, e.name)));
+    return new Map([...publishRefusals].filter(([key]) => listed.has(key)));
+  }, [feedCount, pendingEntries, publishRefusals]);
 
   // `options` is the review sheet's (objectui#12929): its checked backfill
   // choices, or nothing. Only the package batch door below carries it; the
@@ -1454,6 +1583,33 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
       return;
     }
     setPublishing(true);
+    // objectstack#26730 — a refusal is kept on each causal draft's entry, read
+    // by the refused-save reader against the draft the publish judged, and the
+    // toast says so. ⛔ It names no engine text: that stays under Details.
+    const keepRefusals = async (failed: PublishFailure[]): Promise<void> => {
+      const kept = await Promise.all(
+        causalPublishFailures(failed).map(async (f) => {
+          const type = canonicalMetaUrlType(f.type);
+          // Only an issue has a place to point at; the read is best-effort.
+          const body =
+            Array.isArray(f.issues) && f.issues.length > 0
+              ? await shellClient
+                  .getDraft<Record<string, unknown>>(f.type, f.name, packageId !== null ? { packageId } : {})
+                  .then((resp) => extractDraftBody(resp) as Record<string, unknown> | null, () => null)
+              : null;
+          return [publishRefusalKey(type, f.name), f.name, publishRefusal(f, type, body, locale)] as const;
+        }),
+      );
+      setPublishRefusals(new Map(kept.map(([key, , refusal]) => [key, refusal])));
+      const lines = kept.map(([, name, refusal]) => `${name}: ${refusal.message}`);
+      if (failed.some((f) => f.code === BATCH_ABORTED_CODE)) lines.unshift(t('engine.studio.publishRefusedBatch', locale));
+      toast.error(
+        tFormat(kept.length === 1 ? 'engine.studio.publishRefusedOne' : 'engine.studio.publishRefused', locale, {
+          count: kept.length,
+        }),
+        { description: lines.join('\n') },
+      );
+    };
     try {
       if (packageId === null) {
         // objectui#11553 — the package-less scope has no package to publish
@@ -1469,13 +1625,18 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
           try {
             await shellClient.publishDraft('flow', d.name);
           } catch (e) {
-            failed.push({ type: 'flow', name: d.name, error: formatMetadataError(e) });
+            failed.push({
+              type: 'flow',
+              name: d.name,
+              error: formatMetadataError(e),
+              issues: (e as Partial<MetadataError> | null)?.issues,
+            });
           }
         }
         if (failed.length > 0) {
           // Not all-or-nothing: the drafts that went live stay live, and the
-          // ones that did not are named with the server's own reason.
-          toast.error(formatPublishFailures(failed));
+          // ones that did not keep their reason on their entries.
+          await keepRefusals(failed);
         } else if (pending.length === 0) {
           // objectui#11807 — nothing was pending by the time this read ran, so
           // nothing went live: said as such, never as a success.
@@ -1484,6 +1645,7 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
         } else {
           // objectui#11807 — how many went live: every draft read above, as
           // none failed.
+          setPublishRefusals(NO_PUBLISH_REFUSALS);
           toast.success(
             tFormat(
               pending.length === 1 ? 'engine.studio.publishedAllFlowsOne' : 'engine.studio.publishedAllFlows',
@@ -1537,6 +1699,7 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
         // (`PublishPackageDraftsResponseSchema`), so it is neither the failure
         // below nor a success.
         toast.info(t('engine.studio.publishNoneTitle', locale));
+        setPublishRefusals(NO_PUBLISH_REFUSALS);
         setChangesOpen(false);
       } else if (failed.length > 0) {
         // Partial publish: some drafts did NOT go live. The server returns 200
@@ -1549,7 +1712,7 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
         // since objectui#10039 moved this call onto the client, which unwraps
         // the dispatcher's envelope and so hands back the batch's own
         // `success`), every refusal reached the author as "Action failed".
-        toast.error(formatPublishFailures(failed));
+        await keepRefusals(failed);
       } else if (payload?.success === false) {
         // The status is no longer in hand — a non-2xx threw above — so the
         // last rung is a sentence rather than "HTTP 200".
@@ -1568,6 +1731,7 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
         // own `published[]` (every promoted draft, a draft that changed
         // nothing included). A runtime that answers without it gets the
         // sentence that names no number.
+        setPublishRefusals(NO_PUBLISH_REFUSALS);
         const published = payload?.published;
         const title = Array.isArray(published)
           ? tFormat(
@@ -1609,10 +1773,32 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
   // header stops saying "No drafts pending publish" in the same render that
   // shows an item's "Unpublished draft" chip, both being set by the save that
   // landed. Pinned by `StudioDesignSurface.changesCount-11787.test.tsx`.
-  const onDraftSaved = React.useCallback(() => {
+  //
+  // objectstack#26730 — `saved` names the draft the save wrote, and a refusal
+  // its last publish left is dropped: the author has changed what was judged.
+  const onDraftSaved = React.useCallback((saved?: StudioSavedDraft) => {
+    if (saved) {
+      const key = publishRefusalKey(saved.type, saved.name);
+      setPublishRefusals((prev) => {
+        if (!prev.has(key)) return prev;
+        const next = new Map(prev);
+        next.delete(key);
+        return next;
+      });
+    }
     setDraftNonce((n) => n + 1);
     void refreshPendingRef.current({ afterSave: true });
   }, []);
+  // objectstack#26730 — the refusal kept for an entry, under its row in the
+  // sheet. No "Show me" there: the sheet's way to an item is its own link, and
+  // the strip's opens an input only in the pillar that holds the item.
+  const renderPublishRefusal = React.useCallback(
+    (entry: DraftChangeEntry) => {
+      const refusal = listedPublishRefusals.get(publishRefusalKey(entry.type, entry.name));
+      return refusal ? <StudioRefusalStrip refusal={refusal} locale={locale} className="px-2 py-1.5 text-xs" /> : null;
+    },
+    [listedPublishRefusals, locale],
+  );
   const shownPendingCount = behindSave ? Math.max(pendingCount ?? 0, 1) : pendingCount;
   const hasPending = (shownPendingCount ?? 0) > 0;
   // objectui#12725 — the same ledger and number, for the pillars' item headers
@@ -2259,6 +2445,7 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
           onPublish={readOnly ? undefined : doPublish}
           publishing={publishing}
           posture={changesPosture}
+          renderEntryNote={renderPublishRefusal}
         />
 
         <CreateItemDialog
@@ -3232,7 +3419,7 @@ export function InterfacesPillar({
   /** Bumped when a draft is saved elsewhere (e.g. the header's create-app flow) — a
    * re-resolve signal so a just-created app appears without a reload. */
   draftNonce?: number;
-  onDraftSaved?: () => void;
+  onDraftSaved?: (saved?: StudioSavedDraft) => void;
   /** Invoked from the empty state when this package has no app, to open the
    * header's create-app flow (single source of truth for app creation). */
   onCreateApp?: () => void;
@@ -3542,6 +3729,21 @@ export function InterfacesPillar({
     setSelection(null);
     setNavSel(null);
   }, [setSelection]);
+  // objectstack#26730 — a leaf refusal's "Show me": the widget it names, or the
+  // leaf's own properties when it names no selection (a report's), opened in
+  // the inspector with the focus on the input the sentence names.
+  const inspectorBodyRef = React.useRef<HTMLDivElement>(null);
+  const focusInspectorInput = useShowInputFocus(inspectorBodyRef);
+  const showLeafRefusal = React.useCallback(
+    (target: MetadataSelection | null, input?: string) => {
+      setNavSel(null);
+      setSelection(target);
+      showSlotProps?.();
+      setInspectorCollapsed(false);
+      focusInspectorInput(input);
+    },
+    [setSelection, showSlotProps, focusInspectorInput],
+  );
   React.useEffect(() => {
     if (!inspectorTargetKey) return;
     const onKey = (e: KeyboardEvent) => {
@@ -3969,20 +4171,22 @@ export function InterfacesPillar({
     // pillars' do: a refusal is about the body its save sent, so it goes when
     // a later save is sent, and a save refused again shows its own.
     setError(null);
+    const body = interfacesSaveBody(current.type, draft);
     try {
-      const outcome = await saveLeafDraft(current.type, current.name, interfacesSaveBody(current.type, draft), { mode: 'draft', packageId, surface: 'studio' });
+      const outcome = await saveLeafDraft(current.type, current.name, body, { mode: 'draft', packageId, surface: 'studio' });
       // objectui#11773 — the author chose the saved version; the load replaces the buffer.
       if (outcome === 'reloaded') return;
       setHasDraft(true);
       setLeafSavedAt({ key: leafKeyOf(current), at: new Date() });
       // objectui#11204 — clean only if nothing was edited while it was in flight.
       if (sent.unmoved()) setIfDirty(false);
-      onDraftSaved?.();
+      onDraftSaved?.({ type: current.type, name: current.name });
     } catch (e) {
-      // objectui#11785 — no locator: a leaf's issue paths (page blocks,
-      // dashboard widgets) name no input this pillar can open, so the sentence
-      // says the draft was refused and Details keep every path.
-      setError(issueRefusal(e, locale));
+      // objectui#11785 — a page's issue paths (its blocks) name no input this
+      // pillar can open, so the sentence says the draft was refused and
+      // Details keep every path. objectstack#26730 — a dashboard's widget and
+      // a report's own properties are placed (`leafIssueLocator`).
+      setError(issueRefusal(e, locale, leafIssueLocator(current.type, body, locale)));
     } finally {
       setSaving(false);
     }
@@ -4118,7 +4322,7 @@ export function InterfacesPillar({
       // and a clean buffer would let the re-read this save signals install the
       // served draft over it. Binding it is the edit that sends it.
       if (sent.unmoved() && !leftOut) setNavDirty(false);
-      onDraftSaved?.();
+      onDraftSaved?.({ type: 'app', name: appName });
     } catch (e) {
       setNavError(
         issueRefusal(
@@ -4680,12 +4884,15 @@ export function InterfacesPillar({
               each cleared by what settles it, the same failure shown once.
               objectui#11785 — each as a refusal strip; the nav editor's "Show
               me" opens nav editing on the entry it names. */}
-          {error && <StudioRefusalStrip refusal={error} locale={locale} className="px-3 py-2 text-xs" />}
+          {error && (
+            <StudioRefusalStrip refusal={error} locale={locale} onShow={showLeafRefusal} className="px-3 py-2 text-xs" />
+          )}
           {navError && !(error && error.message === navError.message && error.detail === navError.detail) && (
             <StudioRefusalStrip
               refusal={navError}
               locale={locale}
               onShow={(target) => {
+                if (!target) return;
                 setEditNav(true);
                 setNavSel({ kind: target.kind, id: target.id });
               }}
@@ -4982,7 +5189,9 @@ export function InterfacesPillar({
       footer={readOnly ? null : t('engine.studio.inspector.draftFooter', locale)}
       bodyClassName="flex min-h-0 flex-1 flex-col"
     >
-      {inspectorBodyEl}
+      <div ref={inspectorBodyRef} className="contents">
+        {inspectorBodyEl}
+      </div>
     </StudioInspector>
   );
   // objectui#12725 — 查看定义: a source page's code editor (where its 源码 tab
@@ -5467,7 +5676,7 @@ export function DataPillar({
 }: {
   packageId: string;
   publishNonce?: number;
-  onDraftSaved?: () => void;
+  onDraftSaved?: (saved?: StudioSavedDraft) => void;
   /** Courtesy gate: hide/disable metadata-authoring affordances (records stay usable). */
   readOnly?: boolean;
   /** objectui#11786 — the clause of the edit the autosave holds unsent, for the surface's Publish. */
@@ -5593,6 +5802,17 @@ export function DataPillar({
       return;
     }
     setFieldSel({ kind: target.kind, id: target.id });
+  };
+  // objectstack#26730 — a refusal's "Show me" also ends on the input it names:
+  // in the field inspector, or in the actions panel for an action.
+  const fieldInspectorBodyRef = React.useRef<HTMLDivElement>(null);
+  const actionsPanelRef = React.useRef<HTMLDivElement>(null);
+  const focusFieldInput = useShowInputFocus(fieldInspectorBodyRef);
+  const focusActionInput = useShowInputFocus(actionsPanelRef);
+  const showObjRefusal = (target: MetadataSelection | null, input?: string) => {
+    if (!target) return;
+    showObjTarget(target);
+    (target.kind === 'action' ? focusActionInput : focusFieldInput)(input);
   };
   // objectui#11781 — Escape closes it too, but only an Escape nothing else
   // took: a layer that answers Escape itself (a Radix menu, select or dialog,
@@ -6038,7 +6258,7 @@ export function DataPillar({
       setSavedAt(new Date());
       // No success toast: with auto-save (objectui#5813) it would fire after
       // every editing pause — the quiet last-saved hint is the affordance.
-      onDraftSaved?.();
+      onDraftSaved?.({ type: 'object', name: current.name });
     } catch (e) {
       setError(objectSaveRefusal(e, body, locale));
     } finally {
@@ -6163,7 +6383,7 @@ export function DataPillar({
         if (outcome === 'reloaded') return;
         setHasDraft(true);
         if (sent.unmoved()) setDirty(false);
-        onDraftSaved?.();
+        onDraftSaved?.({ type: 'object', name: current.name });
         setGridVer((v) => v + 1); // remount so the grid reflects the new (draft) order
       } catch (e) {
         setError(objectSaveRefusal(e, wire, locale));
@@ -6484,8 +6704,9 @@ export function DataPillar({
                   refusal={error}
                   locale={locale}
                   // objectui#11785 — "Show me" opens the named field's inspector,
-                  // or (objectstack#26736) the named action.
-                  onShow={showObjTarget}
+                  // or (objectstack#26736) the named action, and (objectstack#26730)
+                  // focuses the input the sentence names.
+                  onShow={showObjRefusal}
                   className={cn('mb-2 px-3 py-1.5 text-[11px]', bodyFlush && 'mx-6 mt-3')}
                 />
               )}
@@ -6536,14 +6757,16 @@ export function DataPillar({
                   onDraftSaved={onDraftSaved}
                 />
               ) : viewMode === 'actions' ? (
-                <ObjectActionsPanel
-                  draft={objDraft}
-                  onPatch={onPatch}
-                  disabled={readOnly}
-                  focus={actionFocus}
-                  actionSchema={typeSchemas.action}
-                  onBlockingIssuesChange={reportPanelBlocking}
-                />
+                <div ref={actionsPanelRef} className="contents">
+                  <ObjectActionsPanel
+                    draft={objDraft}
+                    onPatch={onPatch}
+                    disabled={readOnly}
+                    focus={actionFocus}
+                    actionSchema={typeSchemas.action}
+                    onBlockingIssuesChange={reportPanelBlocking}
+                  />
+                </div>
               ) : viewMode === 'api' ? (
                 <ObjectApiPanel name={current.name} draft={objDraft} />
               ) : viewMode === 'grid' && !hasBaseline ? (
@@ -6821,83 +7044,85 @@ export function DataPillar({
             footer={readOnly ? null : t('engine.studio.inspector.draftFooter', locale)}
             bodyClassName="flex min-h-0 flex-1 flex-col"
           >
-            {(() => {
-              const fieldRailContent = fieldSel.kind === 'group' ? (
-                <ObjectGroupInspector
-                  draft={objDraft}
-                  groupKey={fieldSel.id}
-                  onPatch={onPatch}
-                  onClose={() => setFieldSel(null)}
-                  readOnly={readOnly}
-                  locale={locale}
-                />
-              ) : inspector ? (
-                React.createElement(inspector, {
-                  type: 'object',
-                  name: current.name,
-                  draft: objDraft,
-                  selection: fieldSel,
-                  onPatch,
-                  onClearSelection: () => setFieldSel(null),
-                  onSelectionChange: setFieldSel,
-                  onBlockingIssuesChange: (count: number) =>
-                    setBlockingReport({ key: fieldSelKey, count }),
-                  readOnly,
-                  locale,
-                })
-              ) : (
-                /* No field inspector registered. ⛔ Not "loading…": the read
-                 * is observed (objectui#11939), so a late registration does
-                 * replace this note with the inspector, but nothing here knows
-                 * one is on its way. State the fact. */
-                <div className="flex flex-col items-center gap-2 px-2 py-10 text-center text-xs text-muted-foreground">
-                  <Ban className="h-5 w-5" />
-                  {t('engine.studio.data.fieldInspectorMissing', locale)}
-                </div>
-              );
-              // objectui#12725 — the 来源 line under the field's properties.
-              const railContent = fieldCopilotMark ? (
-                <>
-                  {fieldRailContent}
-                  <DraftSourceLine at={fieldCopilotMark.at} locale={locale} className="mt-4 border-t pt-3" />
-                </>
-              ) : (
-                fieldRailContent
-              );
-              if (!readOnly) return <div className="min-h-0 flex-1 overflow-auto p-3">{railContent}</div>;
-              // objectui#12303 — on a read-only package every input and the
-              // Remove button in this rail are disabled for one reason, the
-              // package's. It rides the record page's Archive pattern
-              // (`DeclaredActionsBar`, objectui#11811) on the rail body: the
-              // body is the tooltip trigger, so hovering any disabled control
-              // in it shows the reason, and a tab stop described by an
-              // `sr-only` copy of it, so a keyboard or screen-reader user
-              // reaches it too (a disabled input takes neither hover nor
-              // focus, and Tab skipped the whole rail). One trigger for the
-              // rail rather than one per control: the reason is the same for
-              // all of them, and the controls are the shared inspector's.
-              const reason = t('engine.studio.pkg.readonlyHint', locale);
-              return (
-                <TooltipProvider delayDuration={200}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <div
-                        role="group"
-                        aria-labelledby={fieldRailTitleId}
-                        tabIndex={0}
-                        aria-describedby={fieldRailReasonId}
-                        data-disabled-reason=""
-                        className="min-h-0 flex-1 overflow-auto p-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-                      >
-                        {railContent}
-                        <span id={fieldRailReasonId} className="sr-only">{reason}</span>
-                      </div>
-                    </TooltipTrigger>
-                    <TooltipContent side="left" align="start">{reason}</TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              );
-            })()}
+            <div ref={fieldInspectorBodyRef} className="contents">
+              {(() => {
+                const fieldRailContent = fieldSel.kind === 'group' ? (
+                  <ObjectGroupInspector
+                    draft={objDraft}
+                    groupKey={fieldSel.id}
+                    onPatch={onPatch}
+                    onClose={() => setFieldSel(null)}
+                    readOnly={readOnly}
+                    locale={locale}
+                  />
+                ) : inspector ? (
+                  React.createElement(inspector, {
+                    type: 'object',
+                    name: current.name,
+                    draft: objDraft,
+                    selection: fieldSel,
+                    onPatch,
+                    onClearSelection: () => setFieldSel(null),
+                    onSelectionChange: setFieldSel,
+                    onBlockingIssuesChange: (count: number) =>
+                      setBlockingReport({ key: fieldSelKey, count }),
+                    readOnly,
+                    locale,
+                  })
+                ) : (
+                  /* No field inspector registered. ⛔ Not "loading…": the read
+                   * is observed (objectui#11939), so a late registration does
+                   * replace this note with the inspector, but nothing here knows
+                   * one is on its way. State the fact. */
+                  <div className="flex flex-col items-center gap-2 px-2 py-10 text-center text-xs text-muted-foreground">
+                    <Ban className="h-5 w-5" />
+                    {t('engine.studio.data.fieldInspectorMissing', locale)}
+                  </div>
+                );
+                // objectui#12725 — the 来源 line under the field's properties.
+                const railContent = fieldCopilotMark ? (
+                  <>
+                    {fieldRailContent}
+                    <DraftSourceLine at={fieldCopilotMark.at} locale={locale} className="mt-4 border-t pt-3" />
+                  </>
+                ) : (
+                  fieldRailContent
+                );
+                if (!readOnly) return <div className="min-h-0 flex-1 overflow-auto p-3">{railContent}</div>;
+                // objectui#12303 — on a read-only package every input and the
+                // Remove button in this rail are disabled for one reason, the
+                // package's. It rides the record page's Archive pattern
+                // (`DeclaredActionsBar`, objectui#11811) on the rail body: the
+                // body is the tooltip trigger, so hovering any disabled control
+                // in it shows the reason, and a tab stop described by an
+                // `sr-only` copy of it, so a keyboard or screen-reader user
+                // reaches it too (a disabled input takes neither hover nor
+                // focus, and Tab skipped the whole rail). One trigger for the
+                // rail rather than one per control: the reason is the same for
+                // all of them, and the controls are the shared inspector's.
+                const reason = t('engine.studio.pkg.readonlyHint', locale);
+                return (
+                  <TooltipProvider delayDuration={200}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <div
+                          role="group"
+                          aria-labelledby={fieldRailTitleId}
+                          tabIndex={0}
+                          aria-describedby={fieldRailReasonId}
+                          data-disabled-reason=""
+                          className="min-h-0 flex-1 overflow-auto p-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                        >
+                          {railContent}
+                          <span id={fieldRailReasonId} className="sr-only">{reason}</span>
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent side="left" align="start">{reason}</TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                );
+              })()}
+            </div>
           </StudioInspector>
         )}
       </div>
@@ -7267,7 +7492,7 @@ export function AutomationsPillar({
    */
   objectOrder?: readonly string[];
   publishNonce?: number;
-  onDraftSaved?: () => void;
+  onDraftSaved?: (saved?: StudioSavedDraft) => void;
   /** Courtesy gate: hide/disable flow-authoring affordances. */
   readOnly?: boolean;
   /** objectui#11786 — the clause of the edit the autosave holds unsent, for the surface's Publish. */
@@ -7596,7 +7821,7 @@ export function AutomationsPillar({
       setHasDraft(true);
       // objectui#11204 — clean only if nothing was edited while it was in flight.
       if (sent.unmoved()) setAutoDirty(false);
-      onDraftSaved?.();
+      onDraftSaved?.({ type: 'flow', name: current.name });
     } catch (e) {
       // objectui#11785 — read against `draft`, the body this save sent.
       setError(flowSaveRefusal(e, draft, locale));
@@ -7663,7 +7888,7 @@ export function AutomationsPillar({
       // objectui#11773 — a reload replaced the buffer the flip was taken on.
       if ((await saveFlowDraft('flow', flowName, nextDraft, { mode: 'draft', packageId: draftPackageId, surface: 'studio' })) === 'reloaded') return;
       setHasDraft(true);
-      onDraftSaved?.();
+      onDraftSaved?.({ type: 'flow', name: flowName });
       toast.success(next ? t('engine.studio.auto.enabledToast', locale) : t('engine.studio.auto.disabledToast', locale));
     } catch (e) {
       // objectui#11124 — the save was refused, so roll the optimistic flip
@@ -7735,22 +7960,27 @@ export function AutomationsPillar({
   }, [inSlot, flowSelectionKey]);
 
   // The Configuration's body, in the aside beside the canvas or, on a folded
-  // row, in the drawer over it (objectui#11795).
+  // row, in the drawer over it (objectui#11795). objectstack#26730 — the ref
+  // is where a refusal's "Show me" looks for the input it names.
+  const configBodyRef = React.useRef<HTMLDivElement>(null);
+  const focusConfigInput = useShowInputFocus(configBodyRef);
   const configBodyEl =
     selection && inspector && current && flowLoaded ? (
-      React.createElement(inspector, {
-        type: 'flow',
-        name: current.name,
-        draft,
-        selection,
-        onPatch,
-        onClearSelection: () => setSelection(null),
-        onSelectionChange: setSelection,
-        // objectui#11124 — the pillar's real flag, threaded exactly as
-        // the Data pillar threads it (objectui#2259).
-        readOnly,
-        locale,
-      })
+      <div ref={configBodyRef} className="contents">
+        {React.createElement(inspector, {
+          type: 'flow',
+          name: current.name,
+          draft,
+          selection,
+          onPatch,
+          onClearSelection: () => setSelection(null),
+          onSelectionChange: setSelection,
+          // objectui#11124 — the pillar's real flag, threaded exactly as
+          // the Data pillar threads it (objectui#2259).
+          readOnly,
+          locale,
+        })}
+      </div>
     ) : designersUnregistered ? (
       <div className="flex flex-col items-center gap-2 px-2 py-10 text-center text-xs text-muted-foreground">
         <Ban className="h-5 w-5" />
@@ -8131,8 +8361,13 @@ export function AutomationsPillar({
                     refusal={error}
                     locale={locale}
                     // objectui#11785 — "Show me" selects the named step, which opens
-                    // its inspector in the right rail.
-                    onShow={(target) => setSelection({ kind: target.kind, id: target.id })}
+                    // its inspector in the right rail, and (objectstack#26730)
+                    // focuses the input the sentence names.
+                    onShow={(target, input) => {
+                      if (!target) return;
+                      setSelection({ kind: target.kind, id: target.id });
+                      focusConfigInput(input);
+                    }}
                     className="shrink-0 px-3 py-2 text-xs"
                   />
                 )}

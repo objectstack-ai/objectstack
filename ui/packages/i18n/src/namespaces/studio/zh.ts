@@ -893,6 +893,18 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.refusal.action': '操作「{action}」',
   'engine.studio.refusal.actionInput': '操作「{action}」的「{input}」',
   'engine.studio.held.actionNeedsInput': '操作「{action}」的「{input}」需要填写',
+  // objectstack#26730 — the Interfaces pillar's refusal strip, a refused publish
+  // kept on its Pending changes entry, and the toast that announces it.
+  'engine.studio.refusal.widget': '组件「{widget}」',
+  'engine.studio.refusal.widgetInput': '组件「{widget}」的「{input}」',
+  'engine.studio.refusal.reportInput': '报表属性中的「{input}」',
+  'engine.studio.refusal.publishIssue': '未发布。请检查{where} —— {problem}',
+  'engine.studio.refusal.publishWhere': '未发布。请检查{where}：详情中说明了需要修改的内容。',
+  'engine.studio.refusal.publishUnlocated': '未发布：服务端拒绝了此草稿。详情中说明了原因。',
+  'engine.studio.refusal.publishPlain': '未发布：{reason}',
+  'engine.studio.publishRefused': '未发布：{count} 项需要修改。「待发布的变更」会保留每项原因，直到修复为止。',
+  'engine.studio.publishRefusedOne': '未发布：{count} 项需要修改。「待发布的变更」会保留原因，直到修复为止。',
+  'engine.studio.publishRefusedBatch': '没有内容生效：软件包作为一个整体发布，其余草稿会等待这项修复。',
   'engine.inspector.action.moreFieldsHint': '高级 / 不常用的属性。',
   // Dataset default (home) inspector (objectui#10586). zh has one plural form,
   // so each `…One` / `…Other` pair carries the same row.
