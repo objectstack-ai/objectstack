@@ -21,10 +21,7 @@
 import type { HierarchyScope } from '@objectstack/spec/contracts';
 import { objectPermissionGrants, type ObjectAccessScope } from '@objectstack/spec/security';
 
-// A type alias, not an interface: a row is handed to the spec's
-// `objectPermissionGrants` (objectstack#26597), whose input is an open record,
-// and only an alias carries the implicit index signature that accepts.
-export type ObjectPerm = {
+export interface ObjectPerm {
   allowCreate?: boolean;
   allowRead?: boolean;
   allowEdit?: boolean;
@@ -63,7 +60,7 @@ export type ObjectPerm = {
    */
   readScope?: ObjectAccessScope;
   writeScope?: ObjectAccessScope;
-};
+}
 
 /** The boolean columns of a row — every {@link ObjectPerm} key but the two scopes. */
 export type ObjectPermFlag = Exclude<keyof ObjectPerm, 'readScope' | 'writeScope'>;
@@ -150,8 +147,12 @@ export interface FieldRuleCell {
 }
 
 export function fieldRuleCell(entry: FieldPerm | undefined, objectPerm: ObjectPerm | undefined): FieldRuleCell {
-  const objectRead = objectPermissionGrants(objectPerm, 'allowRead');
-  const objectEdit = objectPermissionGrants(objectPerm, 'allowEdit');
+  // The spec fold takes an open record; an interface carries no implicit index
+  // signature (and `check:designer-field-key-parity` reads `ObjectPerm` as an
+  // interface), so the row is handed over as a shallow copy.
+  const row = objectPerm ? { ...objectPerm } : undefined;
+  const objectRead = objectPermissionGrants(row, 'allowRead');
+  const objectEdit = objectPermissionGrants(row, 'allowEdit');
   if (!entry) {
     return { inherited: true, readable: objectRead, editable: objectEdit, readCapped: false, editCapped: false };
   }
