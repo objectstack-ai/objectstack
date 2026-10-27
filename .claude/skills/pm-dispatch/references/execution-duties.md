@@ -5,7 +5,7 @@
 ## 候选与批次
 
 - 整车道一次读全,本地求交:`list_issues` 带 `labels: [domain:X]` + 最小字段拿回全车道 open 集。
-- 候选 = open、未 assign、无 `needs-user-decision`、无 `pm:retriage`;⛔ 排除三门皆无的 `tooling` 卡。
+- 候选 = open、未 assign、无 `needs-user-decision`、无 `pm:retriage`、不涉 cloud;⛔ 排除三门皆无的 `tooling` 卡。
 - 席改标:卡余项实测路径整落本席包树 ⇒ 本席改 `domain:*`,审计评论列路径与新旧标同笔。
 - 席改标限未派发卡;带 `needs-user-decision`、open `Blocked-by:` 或 `security` 的 ⛔ 不改,仍问分诊。
 - 无分诊审计评论即非候选;例外:sub-issue 承父卡首触,main-red 锚卡见 `landing-operations.md`。
@@ -175,7 +175,7 @@
 
 - 你是记录在案的复核人:对 GitHub 核验,⛔ 不对报告的自述核验。
 - 逐项判据展开在 `references/review-checklist.md`,每份报告对着它过。
-- 报告 `open_questions`/`out_of_scope_findings` 涉 cloud 车道者,按 `cross-repo-coordination.md` 立 cloud 卡。
+- 报告或复核所见涉 cloud ⇒ 整卡 `Release:` 加 `pm:retriage` 请分诊转 cloud 车道,已测读点留卡;⛔ 不拆半边、不停放等读数。
 - 改到已有 `.changeset/*.md` 的 PR ⛔ 不打 `skip-changeset`;确认取同 head 达档 PASS 或维护者原话。
 - 报告在草稿 PR 时点到达,CI 收敛读数只属于复核侧:gate `in_progress` 是诚实读数。
 - 绿色输出≠ 该绿证明了被测风险:拒收断言、全绿方向与时序、pin 翻转、边界后收益。
