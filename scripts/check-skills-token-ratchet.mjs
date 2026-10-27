@@ -391,7 +391,23 @@ export const CEILINGS = new Map([
   // 6004: +233 net, 9 absorbed by headroom, ceiling +224. Maintainer ruling
   // 2026-10-27 on the skills-lane decision card 「skills 修复卡的教学和 eval 都撞
   // token 天花板,怎么付?」, verbatim and untranslated: 「A:先削重复,余额按实测提高」.
-  ['skills/objectstack-automation/SKILL.md', 6004],
+  // 6004 -> 6164 (card #26347, the skills half of the `record_link` screen
+  // field): the `screen` node row teaches the read-only `type: 'record_link'`
+  // field — it shows the `reference` record whose id `defaultValue` evaluates
+  // to, both keys required, the five input keys refused, the resume refuses a
+  // value under its name — with the one result-screen example over a
+  // `create_record` `outputVariable`, and the two workarounds an author
+  // otherwise reaches for (a completed `end` `message`, a markdown link in a
+  // screen `description`). Paid down first: the Filter operands bullet
+  // restated Valid-but-silently-wrong item 1's refusal detail
+  // (`expression-invalid`, "with its envelope") and was cut to the bare
+  // refusal (-41 bytes). Arithmetic in priced bytes (stamp line excluded):
+  // 24014 -> 24654 (+681 added, -41 cut, +640 net) -> ceil(24654 / 4) = 6164;
+  // headroom was 2 bytes, 0 tokens, so the ceiling moves +160, pinned AT the
+  // measurement. Maintainer ruling 2026-10-27 on the seat's decision card
+  // 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」, tap A verbatim and
+  // untranslated: 「A:先削重复,余额按实测提高」.
+  ['skills/objectstack-automation/SKILL.md', 6164],
   // 13783 -> 13892 (2026-08-31 app-repo-principles raise, see the block above).
   // The invariant-vs-transition-gate choice, placed in the field-conditional-rule
   // bullet list where the tool is actually picked. Both wrong picks are silent:
@@ -737,7 +753,16 @@ export const CEILINGS = new Map([
   // +568 tokens, nothing in the file to delete, zero headroom, ceiling +568.
   // Same maintainer ruling as the SKILL.md row above (2026-10-27, verbatim and
   // untranslated): 「A:先削重复,余额按实测提高」.
-  ['skills/objectstack-automation/evals/flows-triggers-approvals.json', 1823],
+  // 1823 -> 2141 (card #26347): one eval prompt for the `record_link` result
+  // screen — a `convert_lead` screen flow that creates an account and a contact
+  // and ends on a screen linking both, the ideal answer written so it never
+  // spells the negated `type: 'record'`. Paid down first: the file's eight
+  // fixtures share no sentence, nothing to cut (0 bytes). 7289 -> 8561 bytes
+  // (+1272) -> ceil(8561 / 4) = 2141; headroom was 3 bytes, 0 tokens, so the
+  // ceiling moves +318, pinned AT the measurement. Same maintainer ruling as
+  // the SKILL.md row above (2026-10-27, verbatim and untranslated):
+  // 「A:先削重复,余额按实测提高」.
+  ['skills/objectstack-automation/evals/flows-triggers-approvals.json', 2141],
   // 894 -> 1095 (#26179): one regression case for the field permission `when`
   // (the contract prompt: lock the legal terms for finance from approval on,
   // legal keeps the edit) — expected: `when` on the finance set's entries with
