@@ -5649,7 +5649,10 @@ const FORM_OVERLAY_WIRE_SURFACE: StrictObjectOptions = {
  * not recurse any more than `.strip()` did, and the console's row ids are
  * still removed before the parse by {@link stripViewConsoleDecorations}.
  */
-function closeWireMember<T extends z.ZodObject>(member: T, options: StrictObjectOptions) {
+function closeWireMember<Shape extends z.core.$ZodShape, Config extends z.core.$ZodObjectConfig>(
+  member: z.ZodObject<Shape, Config>,
+  options: StrictObjectOptions,
+): z.ZodObject<Shape, z.core.$strict> {
   const strict = member.strict();
   const def = strict._zod.def;
   return closedObject(strict.clone({ ...def, error: strictObjectError(options, def.shape) }));
