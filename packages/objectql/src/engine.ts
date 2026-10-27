@@ -1796,6 +1796,8 @@ function planFormulaProjection(
  * on driver-sql (a projection is exactly the named columns — no `id` unless it
  * is named) and pinned against it in `engine-formula-projection-trim.test.ts`.
  * `id` is cut like any other widened column when the caller did not name it.
+ * [#26672] The `id` {@link withFileOwnerKey} adds for a file field's owner
+ * verdict is cut the same way.
  *
  * ## Where it runs, and why there
  *
@@ -1831,6 +1833,35 @@ function withoutFormulaWidening<T>(row: T, widened: ReadonlySet<string> | undefi
 function rowsWithoutFormulaWidening<T>(rows: T, widened: ReadonlySet<string> | undefined): T {
   if (!widened || !Array.isArray(rows)) return rows;
   return rows.map((row) => withoutFormulaWidening(row, widened)) as unknown as T;
+}
+
+/**
+ * [#26672] A projection that names a file field reads the record's `id` too,
+ * and the key is cut back off the answer like the formula widening is.
+ *
+ * File-reference hydration judges a reader refused `sys_file` read by the
+ * record that OWNS each file (#22637, `readParentDerivedFiles`), matched on
+ * that record's `id`. A projection that left `id` out handed it rows with no
+ * key, so a file the reader may read answered `{ id, metadataRefused: true }`
+ * to `select=<file field>` and the full value to `select=id,<file field>`. The
+ * verdict must not depend on whether the caller listed `id`, so the driver is
+ * asked for it here and {@link withoutFormulaWidening} trims it at the
+ * `return`: the caller still gets exactly the columns it named, and a reader
+ * the verdict refuses is still refused.
+ *
+ * Touches only an explicit projection that names a file field and not `id`;
+ * a projection the formula planner widened already carries `id`.
+ */
+function withFileOwnerKey(
+  schema: any,
+  requestedFields: string[] | undefined,
+  planned: { projected?: string[]; widened?: string[] },
+): { projected?: string[]; widened?: string[] } {
+  if (!schema?.fields || !Array.isArray(requestedFields) || requestedFields.length === 0) return planned;
+  const projected = planned.projected ?? requestedFields;
+  if (projected.includes('id')) return planned;
+  if (!requestedFields.some((f) => FILE_REFERENCE_TYPES.has((schema.fields as any)[f]?.type))) return planned;
+  return { projected: [...projected, 'id'], widened: [...(planned.widened ?? []), 'id'] };
 }
 
 /**
@@ -12950,9 +12981,11 @@ export class ObjectQL implements IObjectQLEngine {
    * Returns, per allowed file id, the owning record's id and its servable row
    * — `null` when the row is owned and allowed but not servable, which the
    * caller reads as the bare id a `sys_file` reader would see. An id absent
-   * from the map keeps the refused marker. Unwired, no record ids (a
-   * projection that left out `id`), or a failure: an empty map — every id
-   * stays refused, the answer before this existed.
+   * from the map keeps the refused marker. Unwired, no record ids, or a
+   * failure: an empty map — every id stays refused, the answer before this
+   * existed. [#26672] `find` / `findOne` read `id` for any projection that
+   * names a file field ({@link withFileOwnerKey}), so a caller's projection
+   * that leaves `id` out does not land here.
    */
   private async readParentDerivedFiles(
     objectName: string,
@@ -13501,10 +13534,12 @@ export class ObjectQL implements IObjectQLEngine {
     // driver, where the #3821 ladder answered it with EVERY field.
     assertProjectionHasNoDottedPaths(object, 'find', _findSchema, ast.fields);
     const _findFormula = planFormulaProjection(_findSchema, ast.fields);
-    if (_findFormula.projected) ast.fields = _findFormula.projected;
+    // [#26672] …and a file field's owner key — see `withFileOwnerKey`.
+    const _findProjection = withFileOwnerKey(_findSchema, ast.fields, _findFormula);
+    if (_findProjection.projected) ast.fields = _findProjection.projected;
     // [#22300] The columns that widening added, cut back off the answer at the
     // `return` — see `withoutFormulaWidening`.
-    const _findWidened = _findFormula.widened ? new Set(_findFormula.widened) : undefined;
+    const _findWidened = _findProjection.widened ? new Set(_findProjection.widened) : undefined;
 
     // Drop any requested PLAIN field that doesn't exist on the schema.
     // Without this, drivers (notably SqlDriver) emit `SELECT unknown_col
@@ -13820,9 +13855,11 @@ export class ObjectQL implements IObjectQLEngine {
     // [#7642] Caller's own projection, before planning rewrites it — see `find`.
     const _findOneRequestedFields = Array.isArray(ast.fields) ? [...ast.fields] : undefined;
     const _findOneFormula = planFormulaProjection(_findOneSchema, ast.fields);
-    if (_findOneFormula.projected) ast.fields = _findOneFormula.projected;
+    // [#26672] Same as `find`: a file field's owner key is read too.
+    const _findOneProjection = withFileOwnerKey(_findOneSchema, ast.fields, _findOneFormula);
+    if (_findOneProjection.projected) ast.fields = _findOneProjection.projected;
     // [#22300] Same as `find`: what the widening added is cut at the `return`.
-    const _findOneWidened = _findOneFormula.widened ? new Set(_findOneFormula.widened) : undefined;
+    const _findOneWidened = _findOneProjection.widened ? new Set(_findOneProjection.widened) : undefined;
 
     // Drop unknown PLAIN fields — see the equivalent block in `find()` for
     // the rationale, and for why this tolerance is plain-columns-only ([#7589]
