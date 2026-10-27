@@ -4512,3 +4512,60 @@ describe('validateTranslationReferences — reports', () => {
     expect(findings).toEqual([]);
   });
 });
+
+describe('validateTranslationReferences — hook refusals (#26170)', () => {
+  const creditStack = {
+    hooks: [
+      {
+        name: 'credit_guard',
+        object: 'order',
+        events: ['beforeInsert'],
+        body: { language: 'js', source: "throw Object.assign(new Error('x'), { code: 'CREDIT_LIMIT' });" },
+        refusals: { CREDIT_LIMIT: { message: 'Over the credit limit.' } },
+      },
+      { name: 'stamp', object: 'order', events: ['beforeInsert'], handler: 'stamp' },
+    ],
+  };
+  const bundle = (hooks: unknown) => ({ ...creditStack, translations: [{ 'zh-CN': { hooks } }] });
+
+  it('reports nothing for a translation of a declared code', () => {
+    expect(
+      validateTranslationReferences(bundle({ credit_guard: { refusals: { CREDIT_LIMIT: { message: '超出信用额度。' } } } })),
+    ).toEqual([]);
+  });
+
+  it('refuses a code the hook does not declare, with the nearest declared code offered', () => {
+    const findings = validateTranslationReferences(bundle({ credit_guard: { refusals: { CREDIT_LIMT: { message: 'x' } } } }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(TRANSLATION_TARGET_UNKNOWN);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].path).toBe('translations[0]["zh-CN"].hooks.credit_guard.refusals.CREDIT_LIMT');
+    expect(findings[0].message).toContain('a code hook "credit_guard" does not declare under `refusals`');
+    expect(findings[0].message).toContain('Did you mean "CREDIT_LIMIT"?');
+  });
+
+  it('refuses a refusal key on a hook that declares no catalogue', () => {
+    const findings = validateTranslationReferences(bundle({ stamp: { refusals: { ANY: { message: 'x' } } } }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].path).toBe('translations[0]["zh-CN"].hooks.stamp.refusals.ANY');
+    expect(findings[0].message).toContain('hook "stamp" declares no `refusals`');
+  });
+
+  it('refuses a hook the stack does not define, at the hook level', () => {
+    const findings = validateTranslationReferences(bundle({ credit_gaurd: { refusals: { CREDIT_LIMIT: { message: 'x' } } } }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].path).toBe('translations[0]["zh-CN"].hooks.credit_gaurd');
+    expect(findings[0].message).toContain('hook "credit_gaurd", which this stack does not define');
+    expect(findings[0].message).toContain('Did you mean "credit_guard"?');
+  });
+
+  it('reads a sibling package\'s hooks through the artifact carrier', () => {
+    const { hooks: _own, ...rest } = creditStack;
+    const findings = validateTranslationReferences({
+      ...rest,
+      packages: [{ manifest: { hooks: creditStack.hooks } }],
+      translations: [{ 'zh-CN': { hooks: { credit_guard: { refusals: { CREDIT_LIMIT: { message: '超出信用额度。' } } } } } }],
+    });
+    expect(findings).toEqual([]);
+  });
+});

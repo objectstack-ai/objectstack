@@ -113,6 +113,9 @@ const myHook = defineHook({
   // Optional: Error handling strategy
   onError: 'abort',  // 'abort' | 'log'
 
+  // Optional: Declared refusal catalogue (sandboxed `body` refuses by code)
+  // refusals: { CREDIT_LIMIT: { message: 'Over the credit limit.', status: 422 } },
+
   // Optional: Execution timeout (ms)
   timeoutMs: 5000,
 
@@ -975,6 +978,50 @@ handler: async (ctx) => {
   }
 }
 ```
+
+### Declared refusals (`refusals`) — coded, translatable refusals
+
+A hook can declare its refusal catalogue: one entry per code, each with the
+sentence the user reads and an optional 4xx `status` (default `400`). The body
+then refuses **by code only** — it throws an error carrying a declared `code`,
+and the runtime answers with the entry's message and status:
+
+```typescript
+defineHook({
+  name: 'credit_guard',
+  object: 'order',
+  events: ['beforeInsert'],
+  refusals: {
+    CREDIT_LIMIT: { message: 'This order exceeds the customer credit limit.' },
+    ACCOUNT_ON_HOLD: { message: 'The account is on hold.', status: 409 },
+  },
+  body: {
+    language: 'js',
+    source: `
+      if (ctx.input.amount > 100000) {
+        throw Object.assign(new Error('over limit'), { code: 'CREDIT_LIMIT' });
+      }
+    `,
+  },
+});
+```
+
+- **Codes** are SCREAMING_SNAKE (`CREDIT_LIMIT`); the caller's error envelope
+  carries the code, so a client can branch on it.
+- **The message is translated** through
+  `hooks.<hook>.refusals.<CODE>.message` in the caller's locale; `os i18n
+  extract` scaffolds one key per declared entry and `os i18n check` counts them.
+  The message is plain text — no `{{ }}` holes are filled. The body's own
+  `Error` text and `status` are not what the caller reads.
+- **An undeclared code is refused loudly.** A code the body throws literally
+  (`{ code: 'X' }`, or `e.code = 'X'; throw e`) that the catalogue does not
+  declare fails the save at `body.source`. Any other undeclared code — or a
+  throw with no code — is a `500` fault at run time, naming the hook and the
+  code. So once a hook declares `refusals`, every refusal it makes is one of them.
+- An error a `ctx.api` call raised that the body lets leave unchanged, and a
+  crash (`TypeError`), pass through as before; they are not the body's refusal.
+- The catalogue is read for a sandboxed `body`. An inline `handler` keeps
+  throwing its own errors.
 
 ---
 

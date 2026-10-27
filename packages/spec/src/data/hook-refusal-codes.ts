@@ -44,35 +44,57 @@ const CODE_ASSIGNMENT = new RegExp(
 );
 
 /**
- * The text of each `throw` statement in `source`: from the keyword to the end
- * of its expression — a `;` or a line break outside every bracket and string,
- * or the close of the block that holds it.
+ * `source` with every comment blanked and every string literal's contents
+ * blanked, keeping each offset where it was — except a string that holds
+ * nothing but a refusal code, which is the literal the reading looks for.
  *
- * Read, never parsed or run, so a body that does not parse still answers; the
- * scan skips over strings, template literals and comments so a `;` or a
- * bracket inside one does not end or extend the expression.
+ * So a `throw`, a `code:` or a bracket written inside a comment or inside a
+ * longer string is never read as code.
  */
-function throwStatements(source: string): string[] {
+function maskedSource(source: string): string {
+  const out = source.split('');
+  const blank = (from: number, to: number) => {
+    for (let k = from; k < to; k++) if (out[k] !== '\n') out[k] = ' ';
+  };
+  for (let i = 0; i < source.length; i++) {
+    const ch = source[i];
+    if (ch === '"' || ch === "'" || ch === '`') {
+      const close = skipString(source, i);
+      if (!HOOK_REFUSAL_CODE_PATTERN.test(source.slice(i + 1, close))) blank(i + 1, close);
+      i = close;
+    } else if (ch === '/' && source[i + 1] === '/') {
+      const nl = source.indexOf('\n', i);
+      const end = nl === -1 ? source.length : nl;
+      blank(i, end);
+      i = end - 1;
+    } else if (ch === '/' && source[i + 1] === '*') {
+      const close = source.indexOf('*/', i + 2);
+      const end = close === -1 ? source.length : close + 2;
+      blank(i, end);
+      i = end - 1;
+    }
+  }
+  return out.join('');
+}
+
+/**
+ * The text of each `throw` statement in a masked source ({@link maskedSource}):
+ * from the keyword to the end of its expression — a `;` or a line break
+ * outside every bracket, or the close of the block that holds it.
+ *
+ * Read, never parsed or run, so a body that does not parse still answers.
+ */
+function throwStatements(masked: string): string[] {
   const found: string[] = [];
   const keyword = /(?<![\w$.])throw\b/g;
-  for (const match of source.matchAll(keyword)) {
+  for (const match of masked.matchAll(keyword)) {
     const start = (match.index ?? 0) + match[0].length;
     let depth = 0;
-    let end = source.length;
-    for (let i = start; i < source.length; i++) {
-      const ch = source[i];
+    let end = masked.length;
+    for (let i = start; i < masked.length; i++) {
+      const ch = masked[i];
       if (ch === '"' || ch === "'" || ch === '`') {
-        i = skipString(source, i);
-        continue;
-      }
-      if (ch === '/' && source[i + 1] === '/') {
-        const nl = source.indexOf('\n', i);
-        i = nl === -1 ? source.length : nl - 1;
-        continue;
-      }
-      if (ch === '/' && source[i + 1] === '*') {
-        const close = source.indexOf('*/', i + 2);
-        i = close === -1 ? source.length : close + 1;
+        i = skipString(masked, i);
         continue;
       }
       if (ch === '(' || ch === '[' || ch === '{') depth++;
@@ -82,12 +104,12 @@ function throwStatements(source: string): string[] {
           break;
         }
         depth--;
-      } else if (depth === 0 && (ch === ';' || ch === '\n') && source.slice(start, i).trim().length > 0) {
+      } else if (depth === 0 && (ch === ';' || ch === '\n') && masked.slice(start, i).trim().length > 0) {
         end = i;
         break;
       }
     }
-    found.push(source.slice(start, end));
+    found.push(masked.slice(start, end));
   }
   return found;
 }
@@ -128,12 +150,13 @@ function thrownBinding(statement: string): string | undefined {
 export function hookRefusalCodesThrownIn(source: string): string[] {
   const codes = new Set<string>();
   const thrownNames = new Set<string>();
-  for (const statement of throwStatements(source)) {
+  const masked = maskedSource(source);
+  for (const statement of throwStatements(masked)) {
     for (const m of statement.matchAll(CODE_PROPERTY)) codes.add(m.groups!.code);
     const binding = thrownBinding(statement);
     if (binding) thrownNames.add(binding);
   }
-  for (const m of source.matchAll(CODE_ASSIGNMENT)) {
+  for (const m of masked.matchAll(CODE_ASSIGNMENT)) {
     if (thrownNames.has(m.groups!.binding)) codes.add(m.groups!.code);
   }
   return [...codes];
