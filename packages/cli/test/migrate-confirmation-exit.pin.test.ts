@@ -241,6 +241,7 @@ const ROSTER: Record<string, Member> = {
     arrange: arrangeApply,
     writes: () => [seams.flushSchemaDdl, seams.applyMigrationEntries],
   },
+  'audit-key-material': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
   'audit-mail-bodies': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
   'audit-metadata-bodies': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
   'comment-parent-pair': { argv: ['--apply'], confirm: '--yes', writes: BOOT },

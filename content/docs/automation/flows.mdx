@@ -1326,6 +1326,48 @@ producer), and `'service'` when the decision to continue belongs to your service
 rather than to whoever holds the run id. Declaring neither leaves your pauses
 refused on the generic route, and the engine warns about it at registration.
 
+### A paused screen says whether another one follows — Next, Submit and the step counter
+
+A paused screen carries `progress`, which the engine reads off the flow graph
+when the screen pauses; the client never walks the graph itself. It is absent
+when the engine has no graph to read (a run started with no flow name, a node
+that is not a `screen` of the registered flow, a flow with no start node), on a
+screen inside a `subflow` whose own flow shows no further screen (below), and
+from a server that predates it. With no `progress` the runner keeps its
+**Submit** label and draws no counter.
+
+```json
+"screen": {
+  "nodeId": "contract_details",
+  "fields": [ … ],
+  "progress": { "nextScreen": "certain", "step": 1, "stepCount": 3 }
+}
+```
+
+| `nextScreen` | means | the Console's flow runner |
+|---|---|---|
+| `none` | no path out of this screen reaches another one: the last step | **Submit** |
+| `certain` | every path pauses on another screen first | **Next** |
+| `possible` | something after this screen decides: a branch, a fault edge, a loop back, a pause that serves no screen (an approval, a wait) or a `subflow` | **Next** |
+
+`step` (1-based) and `stepCount` appear only when **every** path agrees on them,
+and the runner draws "Step 1 of 3" only when both are there. A `decision`
+whose branches pause on different numbers of screens drops `stepCount` for the
+screens before it, and `step` for a screen where those branches meet again; a
+loop through a screen, a parallel fan-out or a `subflow` drops both. The engine
+never guesses which branch the run will take.
+
+What counts as "another screen": a `screen` node that pauses (it declares
+fields, sets `waitForInput: true`, or names an `objectName`). A field-less
+screen that passes through does not count, and a screen the caller may already
+have answered ([below](#a-screen-the-caller-already-answered-does-not-pause))
+counts as possible, never certain. A screen inside a `subflow` carries only
+`nextScreen`, and only when its own flow shows another screen after it: the
+parent may continue with screens of its own.
+
+So a wizard that should read Next, Next, Submit and count "Step N of 3" keeps
+its screens on one straight path, and branches only after its last screen.
+
 ### A screen the caller already answered does not pause
 
 A `screen` node exists to collect input. When the run's **caller already supplied

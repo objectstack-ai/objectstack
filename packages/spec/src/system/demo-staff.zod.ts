@@ -32,7 +32,9 @@ import { strictObject } from '../shared/strict-object';
  * declared position and permission sets, and the application's seed then runs
  * with these accounts already present, so an `owner_id` naming one of them
  * resolves on the first boot. Idempotent: an entry whose address already has an account is
- * left as it is, and only its missing assignments are added.
+ * left as it is, and only its missing assignments are added. Once every entry
+ * has its account, each declared `manager` is linked, unless that account
+ * already has a manager.
  *
  * ## Development only — the security boundary
  *
@@ -70,6 +72,10 @@ export const DemoStaffSchema = lazySchema(() => strictObject(
       positions: 'position',
       permissions: 'permissionSets',
       permissionSet: 'permissionSets',
+      managerEmail: 'manager',
+      managerId: 'manager',
+      reportsTo: 'manager',
+      supervisor: 'manager',
     },
     guidance: {
       password:
@@ -112,6 +118,30 @@ export const DemoStaffSchema = lazySchema(() => strictObject(
      * capability its application did not declare.
      */
     permissionSets: z.array(z.string().min(1)).optional().describe('Permission sets this application declares in `permissions`, granted to the demo account'),
+
+    /**
+     * The account's line manager: the `email` of ANOTHER entry of the same
+     * `demoStaff` list, compared without regard to case.
+     *
+     * Named by address, not by display name, because the address is what
+     * identifies an account everywhere the platform provisions one: the
+     * provisioning finds each entry's account by it, and the admin bulk import
+     * resolves its manager column by it too. A display name is a label a person
+     * can edit on their own profile.
+     *
+     * The development boot writes it as `sys_user.manager_id` after every entry
+     * has its account and before the seed runs, through the same checks as
+     * Setup → Users → Set Manager, so an approval's `manager` rung reaches a
+     * person on the first boot. A manager someone already set on that account
+     * is left as it is; one someone cleared is written again on the next boot.
+     * The stack refuses a manager that names no entry, the entry itself, or a
+     * chain that loops back on itself.
+     */
+    manager: z
+      .string()
+      .email('A demo account\'s manager is named by the email of another demoStaff entry, not by its name')
+      .optional()
+      .describe('Line manager of the demo account: the email of another demoStaff entry, written as its manager_id by the development boot'),
   },
 ));
 

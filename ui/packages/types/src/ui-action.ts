@@ -879,8 +879,20 @@ export interface UIActionSchema {
   
   // === Styling ===
   
-  /** Button variant */
-  variant?: 'default' | 'primary' | 'secondary' | 'destructive' | 'outline' | 'ghost';
+  /**
+   * Button variant — the vocabulary `@objectstack/spec`'s action block rows
+   * declare, by reference: the Button primitive's `default`, `destructive`,
+   * `outline`, `secondary`, `ghost` and `link`, plus `primary`, which renders
+   * as `default`.
+   *
+   * objectstack#26665: this is the BLOCK dialect, not the one `ActionSchema`
+   * speaks (`primary | secondary | danger | ghost | link`). The block rows
+   * refuse `danger`, so this type does too; the four block renderers translate
+   * at their forward to the runner, where `destructive` becomes `danger`
+   * (`toRunnerVariant` in `@object-ui/components`). `link` was missing here
+   * while the rows declared it: aligned, not widened.
+   */
+  variant?: SpecActionButtonProps['variant'];
   
   /**
    * Button size — the vocabulary `@objectstack/spec`'s `action:button` row
