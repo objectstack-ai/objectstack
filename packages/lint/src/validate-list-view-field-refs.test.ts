@@ -1442,6 +1442,37 @@ describe('[#26719] a list-view chart bound to a dataset over another object', ()
       const result = write('duly_task_metrics');
       expect(result.errors).toEqual([]);
     });
+
+    // The `object` door: an object's built-in list views ride the object write.
+    // A minimal object the object door's own rules admit, so the control's
+    // empty `errors` speaks for this rule alone.
+    const doorTask = owned({
+      name: 'duly_task',
+      label: 'Task',
+      sharingModel: 'private',
+      fields: [
+        { name: 'title', type: 'text', label: 'Title' },
+        { name: 'status', type: 'text', label: 'Status' },
+      ],
+    }, 'com.qa.gap');
+    const writeObject = (dataset: string) =>
+      runRuntimeAuthoringRules({
+        type: 'object',
+        item: { ...doorTask, listViews: { by_status: chartOn(dataset, { data: undefined }) } },
+        context: { objects: [doorTask, objects[1]], datasets },
+        packageScope: SCOPE,
+      });
+
+    it('REFUSES an object write whose built-in list view charts a dataset over another package\'s object', () => {
+      const result = writeObject('duly_person_metrics');
+      expect(rulesOf(result.errors)).toEqual([LIST_VIEW_CHART_DATASET_FOREIGN_OBJECT]);
+      expect(result.errors[0].path).toMatch(/listViews\.by_status\.chart\.dataset$/);
+    });
+
+    it('CONTROL — the same object write charting a dataset over itself is admitted', () => {
+      const result = writeObject('duly_task_metrics');
+      expect(result.errors).toEqual([]);
+    });
   });
 
   it('`os explain` carries the reasoning, the relationship answer included', () => {
