@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, expect, it, vi } from 'vitest';
-import { createChromiumDriver, type ChromiumLauncher } from './chromium-driver.js';
+import { createChromiumDriver, STABLE_POLLS, type ChromiumLauncher } from './chromium-driver.js';
 import type { PrintSessionCookie } from './principal-session.js';
 
 /**
@@ -200,5 +200,65 @@ describe('the cleanup after the deadline is bounded, and nothing opened late is 
     await new Promise((r2) => setTimeout(r2, 50));
     expect(closed.browser).toBe(1);
     expect(browser.newContext).not.toHaveBeenCalled();
+  });
+});
+
+describe('the ready wait hands the page a function, never a string', () => {
+  /**
+   * playwright-core evaluates a string predicate with `eval` in the page on
+   * EVERY poll, from a timer the page's CSP governs: under the console's
+   * default `script-src` (no `'unsafe-eval'`) the second poll throws EvalError
+   * and every print fails. CI has no Chromium for the render tests, so this is
+   * the guard it runs.
+   */
+  async function readyWait() {
+    const { launcher, page } = stagedLauncher({});
+    const driver = createChromiumDriver({ placement: 'remote', target: 'ws://127.0.0.1:9222/x', consoleUrl: 'x' }, launcher);
+    await driver.renderPdf({ url: URL_, cookie: COOKIE, timeoutMs: 5_000 });
+    expect(page.waitForFunction).toHaveBeenCalledTimes(1);
+    const [predicate, arg, options] = page.waitForFunction.mock.calls[0] as unknown as [unknown, unknown, { timeout: number; polling: number }];
+    return { predicate, arg, options };
+  }
+
+  it('waitForFunction receives a function and the stable-poll count as its argument, polling every 100 ms within the budget', async () => {
+    const { predicate, arg, options } = await readyWait();
+    expect(typeof predicate).toBe('function');
+    expect(arg).toBe(STABLE_POLLS);
+    expect(options.polling).toBe(100);
+    expect(options.timeout).toBeGreaterThan(0);
+    expect(options.timeout).toBeLessThanOrEqual(5_000);
+  });
+
+  it('the function means what the wait meant: a data-print-page root AND an idle console, held for STABLE_POLLS polls in a row', async () => {
+    const { predicate, arg } = await readyWait();
+    const poll = predicate as (stablePolls: unknown) => boolean;
+    const g = globalThis as unknown as Record<string, unknown>;
+    const saved = { document: g.document, __objectui: g.__objectui, stable: g.__objectstackPrintStable };
+    let root: unknown = null;
+    g.document = { querySelector: (selector: string) => (selector === '[data-print-page]' ? root : null) };
+    try {
+      // No console yet, then a console that is idle before any print root exists.
+      expect(poll(arg)).toBe(false);
+      g.__objectui = { idle: true };
+      expect(poll(arg)).toBe(false);
+      // The root appears, but a request is in flight.
+      root = {};
+      g.__objectui = { idle: false };
+      expect(poll(arg)).toBe(false);
+      g.__objectui = { idle: true };
+      const run = Array.from({ length: STABLE_POLLS }, () => poll(arg));
+      expect(run).toEqual([...Array(STABLE_POLLS - 1).fill(false), true]);
+      // A not-ready poll resets the run.
+      g.__objectui = { idle: false };
+      expect(poll(arg)).toBe(false);
+      g.__objectui = { idle: true };
+      expect(Array.from({ length: STABLE_POLLS }, () => poll(arg)).at(-1)).toBe(true);
+      expect(poll(arg)).toBe(true);
+    } finally {
+      for (const [key, value] of [['document', saved.document], ['__objectui', saved.__objectui], ['__objectstackPrintStable', saved.stable]] as const) {
+        if (value === undefined) delete g[key];
+        else g[key] = value;
+      }
+    }
   });
 });
