@@ -405,9 +405,11 @@ export interface ScreenSpec {
      * counter only from {@link ScreenProgressSpec.stepCount}.
      *
      * Absent when the engine cannot answer at all — a server that predates
-     * this member, or a screen inside a child run whose own graph shows no
-     * further screen (the parent may still have some) — and a runner then
-     * keeps the label it drew before this member existed.
+     * this member; a run with no flow name, a node that is not a `screen` of
+     * the registered flow, or a flow with no start node (no graph to read);
+     * or a screen inside a child run whose own graph shows no further screen
+     * (the parent may still have some) — and a runner then keeps the label
+     * it drew before this member existed.
      */
     progress?: ScreenProgressSpec;
 }

@@ -1328,8 +1328,13 @@ refused on the generic route, and the engine warns about it at registration.
 
 ### A paused screen says whether another one follows — Next, Submit and the step counter
 
-Every paused screen carries `progress`, which the engine reads off the flow
-graph when the screen pauses; the client never walks the graph itself.
+A paused screen carries `progress`, which the engine reads off the flow graph
+when the screen pauses; the client never walks the graph itself. It is absent
+when the engine has no graph to read (a run started with no flow name, a node
+that is not a `screen` of the registered flow, a flow with no start node), on a
+screen inside a `subflow` whose own flow shows no further screen (below), and
+from a server that predates it. With no `progress` the runner keeps its
+**Submit** label and draws no counter.
 
 ```json
 "screen": {
