@@ -27,7 +27,7 @@
  * `rest-approvals-wire-codes.test.ts`, so these pins assert the thrown code.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { AutomationEngine, InMemorySuspendedRunStore } from '@objectstack/service-automation';
 import { ApprovalService } from './approval-service.js';
 import { registerApprovalNode } from './approval-node.js';
@@ -178,6 +178,15 @@ describe('a decision on a run whose flow is gone is refused before it is recorde
     expect(err?.message).toMatch(/^RESUME_TARGET_LOST/);
     expect(err?.message).toContain('no longer exists');
     await expectNothingRecorded();
+  });
+
+  it('a probe that cannot read the store fails OPEN, as the existence check does: the decision proceeds', async () => {
+    vi.spyOn(automation, 'unresumableSuspensionCause').mockRejectedValue(new Error('store connection reset'));
+
+    const out = await service.decide(requestId, { decision: 'approve', actorId: 'u1' }, SYSTEM_CTX);
+
+    expect(out).toMatchObject({ finalized: true, decision: 'approve', resumed: true });
+    expect(marks).toEqual(['on_approved']);
   });
 
   it('the refusal\'s remedy holds: a recall releases the request and settles the orphaned run', async () => {
