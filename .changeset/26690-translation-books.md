@@ -3,6 +3,8 @@
 '@objectstack/rest': minor
 '@objectstack/runtime': minor
 '@objectstack/cli': minor
+'@objectstack/lint': minor
+'@object-ui/i18n': minor
 ---
 
 feat(spec,rest,cli): a doc book's title and section titles are translatable — `books.<name>` in the translation bundle
@@ -16,6 +18,8 @@ A package that ships its docs in two languages showed a half-translated manual: 
 - **`@objectstack/rest`:** `GET /meta/book/:name/tree` translates the book it resolves through the same dispatch before rendering the spine, so the tree, the book list and the console's docs sidebar agree. `MetaBookTreeSources` gains `resolveI18nService()`, which both transports supply.
 - **`@objectstack/runtime`:** the dispatcher's book-tree route supplies the same i18n service, so it answers the localized tree `RestServer` answers.
 - **`@objectstack/cli`:** `os i18n extract` scaffolds `books.<name>.label` / `.description` and `books.<name>.groups.<key>.label` from the stack's `books[]`, and `os i18n check` / `os lint` coverage report an untranslated one as `i18n/missing-book`.
+- **`@objectstack/lint`:** `translation-target-unknown` resolves `books.<name>` against the declared books (a sibling package's included, and a package id for its implicit book) and `books.<name>.groups.<key>` against that book's group `key`s, so a mistyped book name or group key is an error instead of a translation nothing reads.
+- **`@object-ui/i18n`:** the console's language loader recognises `books` as a translation group, so a served document that carries only book translations is namespaced like any other.
 
 Example (`zh-CN` bundle of an English-authored package):
 
