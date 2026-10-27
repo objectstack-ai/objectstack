@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+import { actingAddresses } from './approver-address.js';
 
 /**
  * [#26180 · ruling 6429330267, letter A] The records a caller may READ because
@@ -189,8 +190,9 @@ export class PendingApproverReadGrantSource {
   private async slateRequestIds(context: ExecutionContext, org: string | null): Promise<readonly string[] | null> {
     if (this.deps.isOverrideActor(context, org)) return null;
     const userId = String(context.userId);
-    const email = await this.deps.accountEmail(userId);
-    const persons = email ? [userId, email] : [userId];
+    // The caller's acting addresses with no positions: the user id and the
+    // account email, the two `slateNamesAPerson` calls a person.
+    const persons = actingAddresses({ userId, email: await this.deps.accountEmail(userId), positions: [] });
     const rows = await this.deps.engine.find('sys_approval_approver', {
       where: { approver: persons.length === 1 ? persons[0] : { $in: persons }, ...organizationFence(org) },
       fields: ['request_id'],
