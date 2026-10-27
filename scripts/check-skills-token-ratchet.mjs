@@ -486,29 +486,30 @@ export const CEILINGS = new Map([
   // bytes, so the priced text is 23924 -> 23985 bytes -> 5997 tokens, ceiling
   // +16, pinned AT the measurement. Same ruling, same arithmetic rule as above.
   //   ceil(($(wc -c < skills/objectstack-platform/SKILL.md) - 20) / 4) == ceil(23985 / 4)
-  // 5997 -> 5966 (card #26764, the follow-up PR #26763 owed this file): the
+  // 5997 -> 5996 (card #26764, the follow-up PR #26763 owed this file): the
   // Demo accounts example names a line manager (`manager`, another entry's
   // `email`) and the prose says what the key does — the development boot
-  // writes `sys_user.manager_id` itself once every account exists and keeps
-  // one set by hand, so no seed hook writes it; a display name, an address no
-  // entry has, the entry itself or a loop is refused at load. Triage
-  // 6448202744 ordered the room made inside the package; the spec seat's note
-  // 6445537040 names the payment path, the standing ruling on this row
+  // writes `manager_id` itself once every account exists and keeps one set by
+  // hand, so no seed hook writes it; a display name, an address no entry has,
+  // the entry itself or a loop is refused at load. Triage 6448202744 ordered
+  // the room made inside the package; the spec seat's note 6445537040 names
+  // the payment path, the standing ruling on this row
   // 「A:先削重复,余额按实测提高」. PAID DOWN FIRST — four restatements cut, each
-  // rule keeping its other home in the file: the phantom-key paragraph and
-  // its sample refusal (the "Refused" posture bullet says the top level
-  // refuses and names the key), the `sys_metadata` clause of the config-
-  // generation sentence (the Compile Artifact paragraph says the runtime
-  // never reads metadata through its business database), the "bad platform
-  // default" bullet (the "fix is upstream" bullet of the same list), and the
-  // driver-wiring parenthetical "(memory in dev, SQL in prod)" (step 4 of the
-  // boot sequence). Arithmetic in bytes: on `origin/main` the priced text was
-  // 23980 bytes (5995 tokens, headroom 2); the cuts remove 458 and the
-  // addition is 341, so the LANDED priced text is 23863 bytes -> 5966 tokens.
-  // The remainder is negative, so nothing is raised: the row follows the
-  // measurement DOWN, the ratchet's ordinary direction, pinned AT it.
-  //   ceil(($(wc -c < skills/objectstack-platform/SKILL.md) - 20) / 4) == ceil(23863 / 4)
-  ['skills/objectstack-platform/SKILL.md', 5966],
+  // rule keeping its other home in the file: the sample refusal output under
+  // the phantom-key sentence (the sentence stays — `check:skill-top-level-keys`
+  // quotes it as the page's contract — and the "Refused" posture bullet says
+  // the top level refuses and names the key), the `sys_metadata` clause of
+  // the config-generation sentence (the Compile Artifact paragraph says the
+  // runtime never reads metadata through its business database), the "bad
+  // platform default" bullet (the "fix is upstream" bullet of the same list),
+  // and the driver-wiring parenthetical "(memory in dev, SQL in prod)" (step
+  // 4 of the boot sequence). Arithmetic in bytes: on `origin/main` the priced
+  // text was 23980 bytes (5995 tokens, headroom 2); the cuts remove 331 and
+  // the addition is 332, so the LANDED priced text is 23981 bytes -> 5996
+  // tokens. The remainder (+1 byte) sits inside the 2 tokens of headroom, so
+  // nothing is raised: the row follows the measurement, pinned AT it.
+  //   ceil(($(wc -c < skills/objectstack-platform/SKILL.md) - 20) / 4) == ceil(23981 / 4)
+  ['skills/objectstack-platform/SKILL.md', 5996],
   // `skills/objectstack-pm-dispatch/SKILL.md` (9708) and its
   // `rules/dev-template.md` (1838) left this table on 2026-09-10 with the files:
   // the maintainer deleted the published PM skill whole (verbatim:

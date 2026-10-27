@@ -51,6 +51,8 @@ are `manifest`, `packages`, `objects`, `objectExtensions`, `picklists`,
 There is deliberately **no** top-level `workflows` or `approvals` collection:
 an approval is a flow with Approval nodes, and record
 state machines are a `state_machine` validation rule on each object.
+A phantom key like `roles:` or `policies:` is **not** a silent
+no-op — the top level refuses it and the stack fails to load.
 
 Undeclared keys are handled per surface, and the two postures are worth
 keeping straight:
@@ -447,10 +449,10 @@ demoStaff: [
 `name` is what a seed reference resolves by; `position` / `permissionSets`
 name only what this stack declares (a platform set such as
 `admin_full_access` is refused); `manager` is another entry's `email` — the
-boot writes `sys_user.manager_id` itself once every account exists and keeps
-one set by hand, so no seed hook writes it; a display name, an address no
-entry has, the entry itself or a loop is refused at load; `os build` drops
-the key and a non-dev boot creates nothing. `devLogins` creates and grants nothing — it only prints an
+boot writes `manager_id` itself once every account exists and keeps one set
+by hand, so no seed hook writes it; a display name, an address no entry
+has, the entry itself or a loop is refused at load; `os build` drops the
+key and a non-dev boot creates nothing. `devLogins` creates and grants nothing — it only prints an
 existing account on the boot banner. Pick `demoStaff` whenever the demo
 needs an account to exist.
 
