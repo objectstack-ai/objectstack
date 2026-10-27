@@ -389,7 +389,6 @@ export const TYPE_SCOPED_KEYS: ReadonlyArray<{ key: string; types: ReadonlySet<s
  * The inspector's "too short" line and the untick below read it; the AI test
  * pins it against the spec.
  */
-// eslint-disable-next-line react-refresh/only-export-components -- see above
 export const AI_DESCRIPTION_MIN = 40;
 
 /**
