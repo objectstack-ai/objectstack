@@ -431,7 +431,27 @@ export const CEILINGS = new Map([
   // decision tables at 487 lines.
   // 5833 -> 5828: A2′ — the release-stamp line left the count (see
   // STAMP_LINE_REPIN); the file's count fell by the same 5, headroom unchanged.
-  ['skills/objectstack-platform/SKILL.md', 5828],
+  // 5828 -> 5981 (card #26302, the objectstack-platform row of the skills gap
+  // audit): the Seed Data section gains `demoStaff` against `devLogins` — a
+  // seed deals records to people and cannot create one, so the people are
+  // declared in `demoStaff` and `os dev` creates the accounts (position and
+  // permission sets from the stack's own declarations, the seed password, never
+  // in the built artifact), while `devLogins` is banner text that creates and
+  // grants nothing. Maintainer ruling 2026-10-27 on the seat's decision card
+  // 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」, his tap verbatim
+  // and untranslated: 「A:先削重复,余额按实测提高」. Paid down first, as the
+  // ruling asks — four restatements cut, each with a surviving home in the
+  // file: the `defineStack()` intro (the opening paragraph and the project
+  // tree say it), the "read the source for the exact shape" paragraph (the
+  // References section keeps the rule; one pointer line stays), the boot
+  // sequence's "(see Ports & networking)" aside and the two cheat-sheet port
+  // comments (the Port resolution paragraph says both). Arithmetic in bytes:
+  // on `origin/main` the priced text was 23294 bytes (5824 tokens, headroom 4);
+  // the cuts remove 309 bytes and the section adds 939, so the LANDED priced
+  // text is 23924 bytes -> 5981 tokens: the 4 tokens of headroom are absorbed
+  // and the ceiling moves 5828 -> 5981 (+153). Pinned AT the measurement.
+  //   ceil(($(wc -c < skills/objectstack-platform/SKILL.md) - 20) / 4) == ceil(23924 / 4)
+  ['skills/objectstack-platform/SKILL.md', 5981],
   // `skills/objectstack-pm-dispatch/SKILL.md` (9708) and its
   // `rules/dev-template.md` (1838) left this table on 2026-09-10 with the files:
   // the maintainer deleted the published PM skill whole (verbatim:
@@ -740,7 +760,17 @@ export const CEILINGS = new Map([
   // is the whole addition; pinned AT the measurement, zero headroom. The
   // raising PR's body carries the same arithmetic.
   ['skills/objectstack-i18n/evals/bundles-locales-coverage.json', 1451],
-  ['skills/objectstack-platform/evals/config-plugins-ops.json', 1211],
+  // 1211 -> 1458 (card #26302): one eval for a demo whose seed names people —
+  // expected: both in `demoStaff` with a declared `position` /
+  // `permissionSets`, created by `os dev`; NO `role:` alias and NO platform
+  // set such as `admin_full_access`. Same ruling as the `SKILL.md` row above
+  // (2026-10-27, tap A: 「A:先削重复,余额按实测提高」); the file's six fixtures
+  // share no sentence, so there was no duplicate to cut (0 bytes). On
+  // `origin/main` the file was 4842 bytes (1211 tokens, headroom 0); the
+  // fixture adds +989 bytes, so the LANDED file is 5831 bytes -> 1458 tokens,
+  // ceiling +247, pinned AT the measurement.
+  //   ceil($(wc -c < skills/objectstack-platform/evals/config-plugins-ops.json) / 4) == ceil(5831 / 4)
+  ['skills/objectstack-platform/evals/config-plugins-ops.json', 1458],
   ['skills/objectstack-query/evals/filters-pagination-search.json', 955],
   // 1505 -> 1789 (#26295): two eval prompts — list grouping with `orderBy`, and the copy hole
   // + `onSuccess` pair — +284 tokens in the file's shape; fixtures, nothing to delete, the

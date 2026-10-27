@@ -56,6 +56,10 @@
 # written. The separation is kept anyway, because the callers' own pins are
 # already in place and moving them buys nothing -- ⛔ it is no longer a
 # constraint, and a future composition is free to hold one.
+#
+# `.github/actions/setup-workspace` is that composition: it runs setup-node,
+# then this action, then the pnpm store and the install. Most jobs call it;
+# the ones that still call this action directly are named in its header.
 
 name: Setup pnpm
 description: >-

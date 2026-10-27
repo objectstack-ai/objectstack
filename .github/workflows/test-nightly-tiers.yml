@@ -160,33 +160,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      # Kept as this job's own step rather than folded into the composite
-      # below. ⛔ No longer because a gate cannot see it:
-      # `scripts/check-node-version.mjs` reads `.github/actions/**` too since
-      # #19229, so its census follows a setup-node step wherever it is written.
-      # Kept because the pin is already here and moving it buys nothing.
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-
-      - name: Setup pnpm
-        uses: ./.github/actions/setup-pnpm
-
-      - name: Get pnpm store directory
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
       # Restore-only: scheduled runs read main's store cache; the per-push
       # workflows own saving it.
-      - name: Restore pnpm cache
-        uses: actions/cache/restore@v6
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
         with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-v3-
+          save-store: 'false'
 
       # Restore-only, from Build Core's namespace: that job builds the whole
       # workspace on every main push, so its entries replay every `build` task
@@ -202,9 +181,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-turbo-build-core-${{ github.ref_name }}-
             ${{ runner.os }}-turbo-build-core-
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
 
       # Two readings before a single test runs, both loud on failure:
       #
@@ -362,7 +338,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version-file: .nvmrc
 
       # No `pnpm install`: `scripts/nightly-tiers.mjs --failing-files` imports
       # `node:` builtins and two repo-local helpers only, so installing the
