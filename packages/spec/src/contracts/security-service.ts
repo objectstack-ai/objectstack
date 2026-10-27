@@ -121,13 +121,14 @@ export interface DelegableScope {
  * {@link PositionGrantSummary}:
  *
  * - `definition` — the position's definition names it in `permissionSets`
- *   (ADR-0131 D3/D4), the binding the spec declares;
- * - `name` — it shares the position's NAME and the definition does not list
- *   it: the resolver's position-name fold grants it anyway. That grant is
- *   deprecated (the runtime warns `position_name_fold_grant`); it is reported so
- *   that what a position is shown to grant is what it is enforced to grant.
+ *   (ADR-0131 D3/D4), the binding the spec declares and the only one the
+ *   resolver grants by.
+ *
+ * A set that merely shares the position's name is not granted, so it is never
+ * listed: the position-name fold is retired, and with it the `name` member
+ * (ADR-0087 D3 entry `position-grant-via-name-retired`).
  */
-export type PositionGrantVia = 'definition' | 'name';
+export type PositionGrantVia = 'definition';
 
 /** One position, as {@link ISecurityService.describePositionGrants} describes it. */
 export interface PositionGrantSummary {
@@ -727,8 +728,8 @@ export interface ISecurityService {
    * get?" from the enforcement path rather than from a second copy of it.
    *
    * Answers one {@link PositionGrantSummary} per name, in input order. A name
-   * that names no position is described like any other: no holders, and only
-   * what the position-name fold would grant a holder of that name.
+   * that names no position is described like any other: no holders and no
+   * permission sets.
    *
    * **THROWS on a read failure** — a holder count or a grant that could not be
    * read is never reported as `0` or as none.
