@@ -74,6 +74,12 @@ vi.mock('./i18n', async (importOriginal) => ({
 }));
 
 import { MetadataResourceEditPage } from './ResourceEditPage';
+// The read-only banner (`engine.edit.readOnlyTypeBanner`) lives in
+// `@object-ui/i18n`'s `studio` namespace, whose `zh` catalogue is fetched on
+// demand. Resident before any case, so the zh banner is read after the
+// catalogue lands, never racing it (objectstack#26863).
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+await loadStudioCatalogue('zh');
 
 /** An item a code package ships, as the layered read serves it. */
 function packagedItem() {

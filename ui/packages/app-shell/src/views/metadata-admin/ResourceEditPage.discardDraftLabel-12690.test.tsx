@@ -103,6 +103,12 @@ import { MetadataResourceEditPage } from './ResourceEditPage';
 import { registerDefaultMetadataSchemas } from './default-schemas';
 import { registerBuiltinPreviews } from './previews';
 import { tFormat } from './i18n';
+// The `engine.edit.*` rows this suite reads in zh (the `丢弃草稿` button, the
+// confirm and the toast) live in `@object-ui/i18n`'s `studio` namespace, whose
+// `zh` catalogue is fetched on demand. Resident before any case, so the zh rows
+// are read after the catalogue lands, never racing it (objectstack#26863).
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+await loadStudioCatalogue('zh');
 
 const DOC_JSON_SCHEMA = z.toJSONSchema(DocSchema as unknown as z.ZodType) as Record<string, unknown>;
 client.current = new MetadataClient({ baseUrl: '', fetch: vi.fn(serve) as unknown as typeof fetch });
