@@ -439,11 +439,12 @@ const KNOWN_LICENSE_TEXT_MISSING: Record<string, { issue: string }> = {};
 
 describe('published packages that declare a license ship its text (objectui#3696)', () => {
   it('discovers the packages that owe license text (guard cannot pass by finding nothing)', () => {
-    // Same anti-vacuity floor as the guard above, sitting just under the 39
-    // measured on main@3e601773e. A predicate that quietly matches nothing —
+    // Same anti-vacuity floor as the guard above, sitting just under the 37
+    // measured once `@object-ui/plugin-ai` retired (objectstack#25921; 39 on
+    // main@3e601773e). A predicate that quietly matches nothing —
     // a renamed `license` field, a lost workspace root, a `private` default
     // flipped — would otherwise report success over an empty set.
-    expect(owingPackages.length).toBeGreaterThanOrEqual(38);
+    expect(owingPackages.length).toBeGreaterThanOrEqual(36);
 
     // The two packages objectui#3696 fixed must be in scope BY NAME. If either
     // drops out of the population, this guard has stopped watching the exact
