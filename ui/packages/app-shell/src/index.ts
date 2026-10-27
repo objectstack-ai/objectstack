@@ -68,7 +68,7 @@ export type {
 } from './hooks/useRecentItems.js';
 
 // Console building blocks — compose these in your App.tsx to build the console
-// routing tree. See examples/console-starter/src/App.tsx for a minimal example.
+// routing tree. See apps/console/src/App.tsx.
 export {
   ConsoleShell,
   ConnectedShell,

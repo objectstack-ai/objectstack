@@ -1,8 +1,12 @@
 # @object-ui/app-shell
 
-**Minimal Application Shell for ObjectUI**
+**The ObjectOS Console's shell, views and Studio — a private workspace package**
 
-A lightweight, framework-agnostic rendering engine that enables third-party systems to integrate ObjectUI components without inheriting the full console infrastructure.
+> **Not published since 18.2.** This package exists to serve the ObjectOS Console
+> (`apps/console`), and a customisable console for a third-party host has no business
+> demand today, so it is `private: true` and no longer released to npm. The last published
+> version is 18.1.x, which the maintainer deprecates on npm after 18.2. Inside this
+> workspace `apps/console` and the `@object-ui/*` packages keep importing it as before.
 
 ## Purpose
 
@@ -15,9 +19,8 @@ This package provides the essential building blocks for rendering ObjectUI schem
 
 ## Installation
 
-```bash
-pnpm add @object-ui/app-shell
-```
+There is nothing to install from npm: the package is private (see above). Workspace
+consumers declare it as `"@object-ui/app-shell": "workspace:*"`.
 
 ## Requires a bundler — plain Node cannot import this package
 
@@ -196,7 +199,7 @@ reads as off, so a self-hosted admin's page load issues no request and logs no
 ## Default auth pages and the sign-up offer
 
 `DefaultLoginPage` and `DefaultRegisterPage` are the sign-in and sign-up pages
-a host mounts at `/login` and `/register` (`examples/console-starter` does).
+a host mounts at `/login` and `/register` (`apps/console` mounts its own pages there).
 They offer a generic sign-up only where the server would accept one. The
 server states that rule in two keys of `GET /api/v1/auth/config`:
 `emailPassword.disableSignUp` (the hard off switch) and
@@ -1095,15 +1098,6 @@ Third-Party App
 | App Management | No | Create/Edit Apps |
 | Data Source | Any | ObjectStack |
 | Customization | Full control | Limited |
-
-## Examples
-
-See `examples/byo-backend-console` for a complete working example that demonstrates:
-- Custom routing with React Router
-- Custom data adapter (not ObjectStack)
-- Custom authentication
-- Cherry-picking only needed components
-- Building a console in ~100 lines of code
 
 ## Record create/edit modes
 
