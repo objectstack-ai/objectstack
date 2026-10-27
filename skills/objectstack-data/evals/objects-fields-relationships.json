@@ -13,12 +13,12 @@
     },
     {
       "id": 2,
-      "prompt": "Model invoices with line items, and let invoices be tagged with many tags where each tagging records who added it and when.",
-      "expected_output": "Line items: `invoice_line` with a `master_detail` field to `invoice`, `required: true`, `deleteBehavior: 'cascade'` (or `'restrict'` — `set_null` is refused on master_detail), `inlineEdit` on that relationship, and a `summary` roll-up field on the parent. Tagging carries attributes, so it is a junction object (`invoice_tag`) with two `lookup` fields plus `added_by` / `added_at` — not a `multiple: true` lookup (an array of ids) and not a `many_to_many` type, which does not exist.",
+      "prompt": "Model invoices with line items, and let invoices be tagged with many tags where each tagging records who added it and when. A rep who owns a line item but can only read the invoice may still correct that line.",
+      "expected_output": "Line items: `invoice_line` with a `master_detail` field to `invoice`, `required: true`, `deleteBehavior: 'cascade'` (or `'restrict'` — `set_null` is refused on master_detail), `inlineEdit` on that relationship, and a `summary` roll-up field on the parent. Tagging carries attributes, so it is a junction object (`invoice_tag`) with two `lookup` fields plus `added_by` / `added_at` — not a `multiple: true` lookup (an array of ids) and not a `many_to_many` type, which does not exist. The line object is `sharingModel: 'controlled_by_parent'` with `sharing: { controlledByParent: { ownerMayEdit: true } }` (by-id update only; every other write still needs master edit). `added_by` is `type: 'user'` — never a `lookup` to a `user` object, which does not exist.",
       "files": [],
       "assertions": {
-        "must_contain": ["master_detail", "deleteBehavior", "inlineEdit", "summary", "lookup"],
-        "must_not_contain": ["many_to_many", "deleteBehavior: 'set_null'"]
+        "must_contain": ["master_detail", "deleteBehavior", "inlineEdit", "summary", "lookup", "ownerMayEdit", "type: 'user'"],
+        "must_not_contain": ["many_to_many", "deleteBehavior: 'set_null'", "reference: 'user'"]
       }
     },
     {
