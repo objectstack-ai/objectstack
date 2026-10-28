@@ -3022,10 +3022,6 @@ const MEMBER_PINS: Record<string, MemberPin> = {
     file: LIST_VIEW_PIN_FILE,
     pins: 'The `mode` member: `drawer` opens the clicked row\'s record in a dialog headed by the list\'s `label`, and the same node with no `navigation` opens none (objectui#13047).',
   },
-  'list-view.options': {
-    file: LIST_VIEW_PIN_FILE,
-    pins: 'The per-kind bag: `options.kanban.groupByField: \'owner\'` lanes the board on `owner` and its `columns` become the card fields, read off the `object-kanban` node `ListView` builds, against a CONTROL bare kanban node that lanes on a field the list derives itself (not `owner`), so the row reads the bag and not the default (objectui#13047).',
-  },
   'list-view.pagination': {
     file: LIST_VIEW_PIN_FILE,
     pins: 'The `pageSize` member caps the query (`$top`), and the same node with no `pagination` sends the default page (objectui#13047).',

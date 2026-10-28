@@ -33,7 +33,6 @@ import {
     ganttViewOptions,
     galleryViewOptions,
     kanbanViewOptions,
-    storedLegacyOptions,
     isSameOptionsValue,
 } from './objectViewOptions.js';
 import { keepInlineEditModeForTheSession } from './objectViewChrome.js';
@@ -142,12 +141,13 @@ export function useObjectViewListRenderer({
     // A boolean, so the relay keys on a value (AGENTS.md #10).
     const activeViewIsSaved = !!baseView && isSavedViewId(savedViews, baseView.id);
 
-    // objectui#10046 — the last `options` bag handed to `ListView`, so an
-    // equal-content rebuild keeps its identity (see `isSameOptionsValue`).
+    // objectui#10046 — the last per-kind blocks handed to `ListView` (the
+    // `options` bag until #25923), so an equal-content rebuild keeps their
+    // identities (see `isSameOptionsValue`).
     // A ref, not a `useMemo`: React may discard a memo cache and hand back a
     // fresh object (AGENTS.md #10); a ref survives every re-render, and the
     // value comparison — not the ref — is what decides a real change.
-    const heldListOptions = useRef<unknown>(undefined);
+    const heldListOptions = useRef<Record<string, unknown>>({});
     // objectui#7237 — the same hold for the resolved `filter`, same reason:
     // token substitution hands back a NEW array of identical content on every
     // call, and `ListView` names `schema.filter` by identity in its fetch
@@ -327,9 +327,6 @@ export function useObjectViewListRenderer({
 
         // objectui#7029: present only when the view actually declared one.
         const calendarOptions = calendarViewOptions(viewDef);
-        // objectui#10380: the stored row's judged legacy `options` bag. See
-        // `storedLegacyOptions` for how the relay below layers it.
-        const legacyOptions = storedLegacyOptions(viewDef);
 
         /**
          * objectui#12474 — the Hide Fields popover's choice is the USER's: it
@@ -402,6 +399,17 @@ export function useObjectViewListRenderer({
          * ledger is not a place to record a rung you did not feel like adding:
          * the kinds carry evidence, and each one is checked.
          */
+        // objectui#10046 — equal content keeps the identity `ListView`'s fetch
+        // effect names for each per-kind block (it names each one by key); a
+        // real change (any differing value) still hands over the new block and
+        // still refetches. Pinned by `ObjectView.hostRerenderRefetch-10046.test.tsx`.
+        const heldKindBlocks = heldListOptions.current;
+        const holdBlock = <T,>(kind: string, block: T): T => {
+            if (isSameOptionsValue(heldKindBlocks[kind], block)) return heldKindBlocks[kind] as T;
+            heldKindBlocks[kind] = block;
+            return block;
+        };
+
         const fullSchema: ListViewSchema = {
             ...listSchema,
             // objectui#10035 — the refresh signal, in place of the remount the
@@ -709,135 +717,110 @@ export function useObjectViewListRenderer({
             // URL-carried sort first, this spread overrode it on every view
             // that declares a sort, so a link's sort reached the address bar
             // and never the query. The rung is the one `sort` write.
-            // objectui#10380 — for each kind the stored row's legacy `options`
-            // bag carries, the view's own top-level block goes out at the top
-            // level, as `InterfaceListPage` sends it. `ListView` then lays it
-            // over the bag per key: the top-level block wins where both set a
-            // key, which is the precedence the spec declares for the bag. A kind
-            // the bag does not carry is relayed only through `options` below,
-            // exactly as before. See `storedLegacyOptions`.
-            ...(legacyOptions.kanban !== undefined ? { kanban: viewDef.kanban } : {}),
-            ...(legacyOptions.calendar !== undefined ? { calendar: viewDef.calendar } : {}),
-            ...(legacyOptions.timeline !== undefined ? { timeline: viewDef.timeline } : {}),
-            ...(legacyOptions.map !== undefined ? { map: viewDef.map } : {}),
-            ...(legacyOptions.gallery !== undefined ? { gallery: viewDef.gallery } : {}),
-            ...(legacyOptions.gantt !== undefined ? { gantt: viewDef.gantt } : {}),
-            ...(legacyOptions.tree !== undefined ? { tree: viewDef.tree } : {}),
-            ...(legacyOptions.chart !== undefined ? { chart: viewDef.chart } : {}),
-            options: {
-                // objectui#10380 — the stored row's judged legacy bag, forwarded
-                // as the interface page forwards it. For each kind the bag
-                // carries, its block REPLACES this page's synthesized block below
-                // (the `mapCfg` rule of `InterfaceListPage`). Each synthesized
-                // block stands in only for a kind the bag does not carry.
-                ...legacyOptions,
-                // The lane key is the spec's `groupByField`, not the legacy
-                // `groupField` this used to write. See `kanbanViewOptions`.
-                kanban: legacyOptions.kanban ?? kanbanViewOptions(viewDef, objectDef),
-                // The calendar config the view DECLARED, or no calendar key at
-                // all — never an invented field name (objectui#7029). With the
-                // key absent, ListView's capability gate stops offering the
-                // Calendar toggle for a view that configured none, and a view
-                // forced onto the calendar renderer reaches its refusal screen.
-                ...((legacyOptions.calendar ?? calendarOptions)
-                    ? { calendar: legacyOptions.calendar ?? calendarOptions }
-                    : {}),
-                // The date axis is resolved once, in ListView — this face only
-                // forwards what the view declared, floored at 'name'
-                // (objectui#3129, objectui#6557). See `timelineViewOptions`.
-                timeline: legacyOptions.timeline ?? timelineViewOptions(viewDef),
-                map: legacyOptions.map ?? {
-                    locationField: viewDef.map?.locationField,
-                    titleField: viewDef.map?.titleField || 'name',
-                    latitudeField: viewDef.map?.latitudeField,
-                    longitudeField: viewDef.map?.longitudeField,
-                    zoom: viewDef.map?.zoom,
-                    center: viewDef.map?.center,
-                },
-                // The gallery config the view DECLARED, title floored at
-                // 'name', and no invented cover field (objectui#7547). With no
-                // cover binding to forward, ListView's capability gate stops
-                // offering the Gallery toggle to a view that configured none.
-                // See `galleryViewOptions`.
-                gallery: legacyOptions.gallery ?? galleryViewOptions(viewDef),
-                // The gantt config the view DECLARED, title floored at 'name' —
-                // never an invented date field (`5f4514f7b`). With no date
-                // binding to forward, ListView's capability gate stops offering
-                // the Gantt toggle to a view that configured none, and a view
-                // forced onto the gantt renderer reaches its refusal screen.
-                // See `ganttViewOptions`.
-                gantt: legacyOptions.gantt ?? ganttViewOptions(viewDef),
-                tree: legacyOptions.tree ?? {
-                    // Self-referencing tree-grid config (plugin-tree). Spread the
-                    // full view-defined tree first so parentField/fields/
-                    // defaultExpandedDepth survive; labelField is floored at
-                    // 'name'. parentField auto-detects when omitted.
-                    //
-                    // Read AS `TreeViewConfig` (`@object-ui/types`, objectui#8253):
-                    // `viewDef` is `Record<string, any>`, so the canonical rung
-                    // below was an `any` property access and a misspelling was
-                    // invisible. This is the half of objectui#7559 a declaration CAN
-                    // close, on the one block that now has a declaration to close it
-                    // with — it does NOT make a missing rung visible, which is what
-                    // the census pin (`ObjectView.relayRungCensus-7559.test.ts`) is
-                    // for.
-                    //
-                    // ⚠️ The cast is repeated per rung rather than hoisted into a
-                    // local: objectui#6557's convergence pin reads these seam lines
-                    // out of this file and requires each to name `viewDef` itself.
-                    //
-                    // ⛔ No `titleField` rung (objectui#6152 round 14). `TreeViewConfig`
-                    // is the spec's `ListView.tree` block, which refuses `titleField`
-                    // by name (objectui#8841); the undeclared fallback that still
-                    // read it is retired here and in `ListView` alike, so a stored
-                    // `tree.titleField` labels nothing and the tree falls to 'name'.
-                    ...((viewDef.tree as TreeViewConfig | undefined) || {}),
-                    labelField: (viewDef.tree as TreeViewConfig | undefined)?.labelField || 'name',
-                },
-                // The chart block the view DECLARED, forwarded WHOLE — a
-                // pointer, not a copy of its key set (objectui#7823).
+            // [#25923] The eight per-kind blocks go out at the TOP level, the
+            // one place `ListView` reads them. They rode the legacy `options`
+            // bag until the spec retired it; a stored row's own bag is folded
+            // onto its top-level blocks by the server before it reaches this
+            // page (the spec's D2 conversion `list-view-options-bag-folded`), so
+            // `viewDef` is the row's whole declaration. All eight keys are set,
+            // so a block `listSchema` carries for the host `views` entry never
+            // outranks what this page relays (it never did through the bag).
+            // The lane key is the spec's `groupByField`, not the legacy
+            // `groupField` this used to write. See `kanbanViewOptions`.
+            kanban: holdBlock('kanban', kanbanViewOptions(viewDef, objectDef)),
+            // The calendar config the view DECLARED, or `undefined` — never
+            // an invented field name (objectui#7029). With no block,
+            // ListView's capability gate stops offering the
+            // Calendar toggle for a view that configured none, and a view
+            // forced onto the calendar renderer reaches its refusal screen.
+            calendar: holdBlock('calendar', calendarOptions),
+            // The date axis is resolved once, in ListView — this face only
+            // forwards what the view declared, floored at 'name'
+            // (objectui#3129, objectui#6557). See `timelineViewOptions`.
+            timeline: holdBlock('timeline', timelineViewOptions(viewDef)),
+            map: holdBlock('map', {
+                locationField: viewDef.map?.locationField,
+                titleField: viewDef.map?.titleField || 'name',
+                latitudeField: viewDef.map?.latitudeField,
+                longitudeField: viewDef.map?.longitudeField,
+                zoom: viewDef.map?.zoom,
+                center: viewDef.map?.center,
+            }),
+            // The gallery config the view DECLARED, title floored at
+            // 'name', and no invented cover field (objectui#7547). With no
+            // cover binding to forward, ListView's capability gate stops
+            // offering the Gallery toggle to a view that configured none.
+            // See `galleryViewOptions`.
+            gallery: holdBlock('gallery', galleryViewOptions(viewDef)),
+            // The gantt config the view DECLARED, title floored at 'name' —
+            // never an invented date field (`5f4514f7b`). With no date
+            // binding to forward, ListView's capability gate stops offering
+            // the Gantt toggle to a view that configured none, and a view
+            // forced onto the gantt renderer reaches its refusal screen.
+            // See `ganttViewOptions`.
+            gantt: holdBlock('gantt', ganttViewOptions(viewDef)),
+            tree: holdBlock('tree', {
+                // Self-referencing tree-grid config (plugin-tree). Spread the
+                // full view-defined tree first so parentField/fields/
+                // defaultExpandedDepth survive; labelField is floored at
+                // 'name'. parentField auto-detects when omitted.
                 //
-                // This was a hand-listed projection of six keys (`chartType` /
-                // `xAxisField` / `yAxisFields` / `aggregation` / `series` /
-                // `config`): the PRE-ADR-0021 set, frozen. The whole ADR-0021
-                // (objectstack-ai/objectstack#1890) authoring shape (`dataset` / `dimensions` / `values`)
-                // and the legacy `categoryField` / `valueField` spelling had no
-                // rung here, so an author who declared them reached `ListView`
-                // with the binding stripped. Once objectui#7544 gave
-                // `ListView.availableViews` a chart capability check, that gate
-                // was handed six `undefined` keys and correctly answered
-                // "nothing declared" about a view whose author declared
-                // everything — the Chart toggle stayed hidden, with no
-                // diagnostic, while the legacy `xAxisField` spelling (which the
-                // projection did carry) went on resolving.
+                // Read AS `TreeViewConfig` (`@object-ui/types`, objectui#8253):
+                // `viewDef` is `Record<string, any>`, so the canonical rung
+                // below was an `any` property access and a misspelling was
+                // invisible. This is the half of objectui#7559 a declaration CAN
+                // close, on the one block that now has a declaration to close it
+                // with — it does NOT make a missing rung visible, which is what
+                // the census pin (`ObjectView.relayRungCensus-7559.test.ts`) is
+                // for.
                 //
-                // ⛔ NOT widened to nine keys. A hand-listed projection is a
-                // COPY of a schema's key set and copies rot silently: three more
-                // keys would buy this ADR's correctness and re-arm the identical
-                // trap for the next block key, with nothing to fire — `viewDef`
-                // is `Record<string, any>`, so a missing rung is invisible to
-                // tsc (objectui#7559 owns that mechanism and disclaims the
-                // census this belongs to).
+                // ⚠️ The cast is repeated per rung rather than hoisted into a
+                // local: objectui#6557's convergence pin reads these seam lines
+                // out of this file and requires each to name `viewDef` itself.
                 //
-                // Forwarding whole is safe because `ListView` never SPREADS this
-                // block — `resolveListChartBinding` and `case 'chart'` both read
-                // it BY NAME — so keys it does not consult are ignored exactly
-                // as they are for the `gantt` / `timeline` / `tree` blocks above,
-                // which are already relayed whole. Undeclared stays `undefined`
-                // rather than the old permanently-truthy husk, which is what
-                // keeps the gate from offering a chart nobody configured.
-                chart: legacyOptions.chart ?? viewDef.chart,
-            },
+                // ⛔ No `titleField` rung (objectui#6152 round 14). `TreeViewConfig`
+                // is the spec's `ListView.tree` block, which refuses `titleField`
+                // by name (objectui#8841); the undeclared fallback that still
+                // read it is retired here and in `ListView` alike, so a stored
+                // `tree.titleField` labels nothing and the tree falls to 'name'.
+                ...((viewDef.tree as TreeViewConfig | undefined) || {}),
+                labelField: (viewDef.tree as TreeViewConfig | undefined)?.labelField || 'name',
+            }),
+            // The chart block the view DECLARED, forwarded WHOLE — a
+            // pointer, not a copy of its key set (objectui#7823).
+            //
+            // This was a hand-listed projection of six keys (`chartType` /
+            // `xAxisField` / `yAxisFields` / `aggregation` / `series` /
+            // `config`): the PRE-ADR-0021 set, frozen. The whole ADR-0021
+            // (objectstack-ai/objectstack#1890) authoring shape (`dataset` / `dimensions` / `values`)
+            // and the legacy `categoryField` / `valueField` spelling had no
+            // rung here, so an author who declared them reached `ListView`
+            // with the binding stripped. Once objectui#7544 gave
+            // `ListView.availableViews` a chart capability check, that gate
+            // was handed six `undefined` keys and correctly answered
+            // "nothing declared" about a view whose author declared
+            // everything — the Chart toggle stayed hidden, with no
+            // diagnostic, while the legacy `xAxisField` spelling (which the
+            // projection did carry) went on resolving.
+            //
+            // ⛔ NOT widened to nine keys. A hand-listed projection is a
+            // COPY of a schema's key set and copies rot silently: three more
+            // keys would buy this ADR's correctness and re-arm the identical
+            // trap for the next block key, with nothing to fire — `viewDef`
+            // is `Record<string, any>`, so a missing rung is invisible to
+            // tsc (objectui#7559 owns that mechanism and disclaims the
+            // census this belongs to).
+            //
+            // Forwarding whole is safe because `ListView` never SPREADS this
+            // block — `resolveListChartBinding` and `case 'chart'` both read
+            // it BY NAME — so keys it does not consult are ignored exactly
+            // as they are for the `gantt` / `timeline` / `tree` blocks above,
+            // which are already relayed whole. Undeclared stays `undefined`
+            // rather than the old permanently-truthy husk, which is what
+            // keeps the gate from offering a chart nobody configured.
+            chart: holdBlock('chart', viewDef.chart),
+
         };
-        // objectui#10046 — equal content keeps the identity `ListView`'s fetch
-        // effect names; a real change (any differing value) still hands over
-        // the new bag and still refetches. Pinned by
-        // `ObjectView.hostRerenderRefetch-10046.test.tsx`.
-        if (isSameOptionsValue(heldListOptions.current, fullSchema.options)) {
-            fullSchema.options = heldListOptions.current as ListViewSchema['options'];
-        } else {
-            heldListOptions.current = fullSchema.options;
-        }
 
         return (
             <ListView

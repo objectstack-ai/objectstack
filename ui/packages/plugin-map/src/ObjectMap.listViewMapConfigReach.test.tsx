@@ -188,21 +188,44 @@ describe('a view-level `map` block reaches getMapConfig through ListView (object
     expect(fitBoundsOptions).toEqual({ padding: FIT_PADDING_PX, maxZoom: FIT_MAX_ZOOM });
   });
 
-  it('CONTROL: the legacy `options.map` bag still reaches the same reads', async () => {
-    await renderListViewMap({ options: { map: { locationField: 'location', titleField: 'title' } } });
+  it('RETIRED (objectstack#25923): a legacy `options.map` bag reaches none of the reads — no binding, no markers', async () => {
+    // This was the bag's CONTROL. A stored bag is folded onto the view's `map`
+    // block by the server before the row is served, and `ListView` reads the
+    // block alone, so a bag that still reaches it binds nothing.
+    // Mounted directly: `renderListViewMap` waits for the map canvas, which an
+    // unbound map never draws.
+    capturedProps = null;
+    const dataSource = makeDataSource() as any;
+    render(
+      <SchemaRendererProvider dataSource={dataSource}>
+        <ListView
+          schema={
+            {
+              type: 'list-view',
+              objectName: 'showcase_task',
+              viewType: 'map',
+              columns: ['title'],
+              options: { map: { locationField: 'location', titleField: 'title' } },
+            } as never
+          }
+          dataSource={dataSource}
+        />
+      </SchemaRendererProvider>,
+    );
 
-    await waitFor(() => expect(screen.getAllByTestId('map-marker').length).toBe(2));
-    fireEvent.click(screen.getAllByTestId('map-marker')[0]);
-    await waitFor(() => expect(screen.queryByTestId('map-popup')).not.toBeNull());
-    expect(screen.getByText('Install rooftop unit')).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText(/Map configuration required/)).not.toBeNull());
+    expect(screen.queryAllByTestId('map-marker')).toHaveLength(0);
+    expect(capturedProps).toBeNull();
   });
 
-  it('precedence: the view-level block wins over the bag at the READ site', async () => {
+  it('precedence: the view-level block is the one source at the READ site, a bag beside it adds nothing', async () => {
     // Both name a marker-title field; the records carry distinct values, so the
-    // rendered popup says which config actually drove the read.
+    // rendered popup says which config actually drove the read. The block also
+    // carries the coordinate binding now: the per-key merge that let the bag
+    // supply it is the server fold's (objectstack#25923).
     await renderListViewMap({
       options: { map: { locationField: 'location', titleField: 'blurb' } },
-      map: { titleField: 'title' },
+      map: { locationField: 'location', titleField: 'title' },
     });
 
     await waitFor(() => expect(screen.getAllByTestId('map-marker').length).toBe(2));
@@ -210,9 +233,5 @@ describe('a view-level `map` block reaches getMapConfig through ListView (object
     await waitFor(() => expect(screen.queryByTestId('map-popup')).not.toBeNull());
 
     expect(screen.getByText('Install rooftop unit')).toBeTruthy();
-    // …and the coordinate binding the bag alone supplied still worked, which is
-    // what makes this a per-key merge rather than a replacement: markers exist
-    // at all only because `locationField` survived from the bag.
-    expect(screen.getAllByTestId('map-marker').length).toBe(2);
   });
 });

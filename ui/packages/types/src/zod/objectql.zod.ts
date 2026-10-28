@@ -77,8 +77,8 @@ import {
   // below takes it by reference too.
   EmptyStateSchema as SpecEmptyStateSchema,
   // objectui#6152 round 12 — the view write door's members, read for ONE member:
-  // the flattened list overlay's legacy `options` bag (`ListViewOptionsBag`
-  // below, by reference). The bag's own schema is module-private in the spec.
+  // the flattened list overlay's `options`, by reference. Since #25923 it is the
+  // spec's retired-key tombstone (`ListViewSchema.options` below).
   VIEW_METADATA_MEMBERS as SpecViewMetadataMembers,
   checkListViewCalendarVisualization,
   // objectui#12670 — the spec list view's chart-binding check. On the flat
@@ -1587,9 +1587,8 @@ const LIST_VIEW_LOCAL_OVERRIDES = [
 // block), and the three earlier arms (`kanban.groupBy`, objectui#8365;
 // `calendar.dateField` / `endField`, objectui#8355). The spec slot refuses every
 // one of them already; the arm keeps a message that names what to write instead.
-// Since objectui#6152 round 12 the legacy `options` bag nests these same four
-// blocks (`ListViewOptionsBag` below), so each arm gives one message in both
-// nestings.
+// (objectui#6152 round 12 nested these same four blocks in the legacy `options`
+// bag too; #25923 retired the bag, so the top-level block is their one nesting.)
 //
 // `.partial()` stays on KANBAN and TIMELINE only, for a MEASURED reason: app-shell
 // installs derived defaults on a `list-view` node's declared slots that leave out
@@ -1740,14 +1739,14 @@ const KanbanStrayGroupByRefusal = aliasKeyRefusal(
 /**
  * WHERE THIS ARM IS INSTALLED — TWO ROUTES, THREE NESTINGS, ONE STRING.
  *
- * `ListView` merges `{ ...schema.options?.kanban, ...schema.kanban }` before it
- * reads anything, so a stored view can carry the stray key under EITHER. The
+ * `ListView` merged `{ ...schema.options?.kanban, ...schema.kanban }` before it
+ * read anything, so a stored view could carry the stray key under EITHER. Since
+ * #25923 it reads `schema.kanban` alone, and a stored bag is folded onto that
+ * block on read, so the stray key lands in the declared slot. The
  * declared `kanban` slot takes this arm as a DECLARED MEMBER (`invalid_type` at
  * `kanban.groupBy`, and `groupBy?: never` on the inferred TypeScript face).
- * The legacy `options` bag takes the SAME block since objectui#6152 round 12
- * (`ListViewOptionsBag` below), so the arm is a declared member there too
- * (`invalid_type` at `options.kanban.groupBy`). Until that round the bag was a
- * record that could declare no member, and the arm rode it as a `custom` check.
+ * (The legacy `options` bag took the same block from objectui#6152 round 12
+ * until #25923 retired the bag; `options` is the spec's tombstone now.)
  *
  * The second route is a named view on an `object-view` document, whose
  * `listViews` is the protocol's strict record by reference (objectui#7928), so
@@ -1762,8 +1761,10 @@ const KanbanStrayGroupByRefusal = aliasKeyRefusal(
  * ⚠️ Covering the legacy nesting is not optional politeness: the retired
  * producer (`app-shell`'s `kanbanViewOptions`, objectui#8213) wrote into
  * `options.kanban`, so that is where the stored views this ruling is ABOUT carry
- * the key. Refusing only the declared nesting would leave exactly that
+ * the key. Refusing only the declared nesting would have left exactly that
  * population re-grouped in silence — option A, which the ruling did not take.
+ * (Since #25923 that population is folded onto the declared slot on read, so
+ * the declared arm is what reaches it.)
  *
  * ⛔ Every channel takes ONE string, read off this arm's own `.description`,
  * so the message an author meets at the key cannot depend on which of those
@@ -2113,60 +2114,6 @@ const TimelineConfig = stripImportedDefaults(SpecListViewSchema).shape.timeline.
   dateField: TimelineDateFieldRefusal,
 });
 
-/**
- * THE LEGACY `options` BAG, BY REFERENCE (objectui#6152 round 12).
- *
- * `@objectstack/spec`'s authoring `ListViewSchema` declares no `options`. The
- * bag's one home is the flattened LIST OVERLAY on the view write door
- * (`VIEW_METADATA_MEMBERS.listOverlay`, the door objectui#10380 ruled A on): a
- * strict object of the eight kinds that name a block, each kind judged by its
- * own list-view slot with every key optional
- * (`ListViewShapeSchema.shape.KIND.unwrap().partial()`), because the renderer
- * reads the bag as a per-key UNDERLAY of the top-level block. objectui#8327
- * forbids accepting what that door refuses, so this is that member's own
- * `options`, unwrapped from its `optional`: the bag's closed key set, and its
- * unknown-key message, which names `options.grid` with the spec's guidance (a
- * grid has no per-kind block). ⛔ No member is hand-copied here.
- *
- * What objectui changes is the same as on the top-level blocks, and only that:
- * `kanban`, `calendar`, `gallery` and `timeline` are this file's round-11
- * blocks, so each named refusal arm (`kanban.groupField` / `cardFields` /
- * `groupBy`, `calendar.defaultView` / `dateField` / `endField`,
- * `gallery.imageField`, `timeline.dateField`) gives ONE message in both
- * nestings, as `invalid_type` at the key's own path. `.partial()` makes the
- * calendar's required `startDateField` optional here, as the bag does; the
- * other three blocks require nothing on this face already. `gantt`, `map`,
- * `chart` and `tree` stay the spec's own, as the top-level blocks of those
- * names do. `stripImportedDefaults` keeps a parse from writing the slots'
- * defaults (the chart block's `chartType`) into a bag that did not carry them.
- *
- * ⚠️ THE READERS MOVED SECOND (objectui#6152 round 14). `ListView` still merges
- * each `options.KIND` under the top-level block, but it reads each kind's
- * declared keys only: the alias rungs, the `options.grid` spread and the spreads
- * of the rest of a block onto the node it builds are retired. `chart` followed
- * in round 15: its legacy axes (`xAxisField` / `categoryField`, `yAxisFields` /
- * `valueField`, `aggregation`) are read by no route, so a chart block that names
- * no `dataset` binds nothing and `ObjectChart` refuses it on screen. The render path
- * parses nothing, so a row stored before the view write door judged the bag
- * (`@objectstack/spec` 17.5.0) still renders, without what a refused key used to
- * bind. This mirror is the door an author meets. The writers moved with it in
- * round 12: app-shell's relay writes `kanban.columns` and no `gallery.imageField`
- * or `timeline.descriptionField` (`ObjectView.tsx`), and the `@object-ui/plugin-list`
- * README authors the top-level blocks instead of the bag.
- *
- * ⚠️ THE MEASUREMENT THIS RESTS ON was taken once and is not re-derived by any
- * instrument (AGENTS.md #9): the census on objectui#6152 (round 12, report
- * 6070437445) read no other writer of a key this bag refuses, across the authored
- * corpus, app-shell's producers and the view designer; only test fixtures wrote
- * one. The verdict-equality pin is `../__tests__/list-view-options-bag-6152.test.ts`.
- */
-const ListViewOptionsBag = stripImportedDefaults(SpecViewMetadataMembers.listOverlay.shape.options.unwrap()).extend({
-  kanban: KanbanConfig.optional(),
-  calendar: CalendarConfig.partial().optional(),
-  gallery: GalleryConfig.optional(),
-  timeline: TimelineConfig.optional(),
-});
-
 // View-kind enum reused from spec (unwrap its `.default('grid')`) so it cannot drift.
 const ViewKindEnum = SpecListViewSchema.shape.type.removeDefault();
 
@@ -2242,10 +2189,11 @@ const datasetChartViewFilterRefusal = (key: 'filter' | 'filters'): string =>
  * and the `chart` block (`ListChartConfigSchema`, whose `dataset` is required).
  * The CONDITION is not: on this node the view kind rides as objectui's
  * `viewType` (the spec's `type` is spent here on the component discriminator),
- * and two objectui-owned spellings reach the same render branch — the legacy
- * `filters` alias (folded into `filter` by `normalizeListViewSchema`) and the
- * legacy `options.chart` bag (read by `resolveListChartBinding` when no `chart`
- * block is declared). A spec-door check reads none of the three; that is the
+ * and an objectui-owned spelling reaches the same render branch — the legacy
+ * `filters` alias (folded into `filter` by `normalizeListViewSchema`). (The
+ * legacy `options.chart` bag was the second until #25923 retired it: the bag is
+ * refused whole at `options`, and `resolveListChartBinding` reads `chart`
+ * alone.) A spec-door check reads neither; that is the
  * reason `checkListViewPageMount` was not attachable here (objectui#7715). So
  * this node's refusal is objectui's. A stored `view` row spelled `type: 'chart'`
  * passes the SPEC's door, which is a second door and not this one.
@@ -2254,9 +2202,8 @@ const datasetChartViewFilterRefusal = (key: 'filter' | 'filters'): string =>
  *
  *   - view kind: `viewType === 'chart'`, the value `ListView`'s `currentView`
  *     starts from;
- *   - binding: the effective chart block — `chart` WHOLESALE, else
- *     `options.chart`, `resolveListChartBinding`'s precedence — names a
- *     `dataset`;
+ *   - binding: the `chart` block, the one `resolveListChartBinding` reads,
+ *     names a `dataset`;
  *   - filter: `filter`, and the legacy `filters`, each a non-empty array. An
  *     empty array is no filter and passes.
  *
@@ -2266,14 +2213,11 @@ const datasetChartViewFilterRefusal = (key: 'filter' | 'filters'): string =>
  * authored on, so refusing it would refuse a working grid.
  */
 function checkListViewDatasetChartFilter(
-  view: { viewType?: unknown; chart?: unknown; options?: unknown; filter?: unknown; filters?: unknown },
+  view: { viewType?: unknown; chart?: unknown; filter?: unknown; filters?: unknown },
   ctx: z.RefinementCtx,
 ): void {
   if (view.viewType !== 'chart') return;
-  const legacyBag = view.options && typeof view.options === 'object'
-    ? (view.options as Record<string, unknown>).chart
-    : undefined;
-  const block = view.chart || legacyBag;
+  const block = view.chart;
   if (!block || typeof block !== 'object' || !(block as Record<string, unknown>).dataset) return;
   for (const key of ['filter', 'filters'] as const) {
     const written = view[key];
@@ -2287,7 +2231,7 @@ const LIST_VIEW_NEITHER_CHANNEL = neitherContentChannelGuidance(
   'list-view',
   'its registration (`plugin-list:list-view`) reads the node as `ListViewSchema` itself',
   'the records of `objectName` in the visualization `viewType` names, shaped by `columns`, `filter`, '
-    + '`sort` and `options`',
+    + '`sort` and the per-kind blocks (`kanban`, `calendar`, `gallery`, `timeline`, `gantt`, `map`, `tree`, `chart`)',
 );
 
 export const ListViewSchema = BaseSchema
@@ -2373,11 +2317,13 @@ export const ListViewSchema = BaseSchema
     addRecordViaForm: z.boolean().optional().describe('Add records via form dialog'),
     addDeleteRecordsInline: z.boolean().optional().describe('Enable inline add/delete'),
     collapseAllByDefault: z.boolean().optional().describe('Collapse all groups by default'),
-    // THE LEGACY BAG, by reference since objectui#6152 round 12: the list
-    // overlay's own `options`, with the four round-11 blocks' named refusals
-    // (objectui#8365 `kanban.groupBy`, objectui#8355 `calendar.dateField` /
-    // `endField` among them). See {@link ListViewOptionsBag}.
-    options: ListViewOptionsBag.optional().describe('Component overrides (legacy)'),
+    // [#25923] THE RETIRED BAG, by reference: the list overlay's own `options`,
+    // the spec's retired-key tombstone. Each per-kind block is a top-level key
+    // of the view (`kanban`, `calendar`, …), and no renderer reads the bag; a
+    // stored bag is folded onto the blocks by the spec's ADR-0087 D2
+    // conversion `list-view-options-bag-folded` before a row is served. The
+    // tombstone carries no default, so the boundary hands back the member itself.
+    options: stripImportedDefaults(SpecViewMetadataMembers.listOverlay.shape.options),
     operations: z.looseObject({
       create: z.boolean().optional(),
       read: z.boolean().optional(),
@@ -5389,7 +5335,7 @@ const LIST_VIEW_PAGE_VIEW_TYPE_RETIRED =
  * reads as `viewType` on the flat mirror. The same check, the same messages.
  */
 function checkListViewBagDatasetChartFilter(
-  bag: { type?: unknown; chart?: unknown; options?: unknown; filter?: unknown; filters?: unknown },
+  bag: { type?: unknown; chart?: unknown; filter?: unknown; filters?: unknown },
   ctx: z.RefinementCtx,
 ): void {
   checkListViewDatasetChartFilter({ ...bag, viewType: bag.type }, ctx);
@@ -5407,7 +5353,7 @@ function checkListViewBagDatasetChartFilter(
  * members ARE the spec's list view members by reference (`specFieldsExcept`
  * over the spec's `ListViewSchema`), with objectui's local overrides on top —
  * `columns` optional, the `kanban` / `calendar` / `gallery` / `timeline` blocks
- * with their named refusals, the legacy `options` bag, the toolbar flags. One
+ * with their named refusals, the retired `options` bag's tombstone, the toolbar flags. One
  * list view therefore has one set of property names wherever it is embedded,
  * as ruling C says: the bag accepts what the `ListView` component's
  * `ListViewSchema` props accept, except the two spellings the ruling renames.
@@ -5472,7 +5418,7 @@ const LIST_VIEW_BLOCK_NEITHER_CHANNEL = neitherContentChannelGuidance(
   'its registration (`plugin-list:list-view`) hands the node, its `properties` hoisted, to `ListViewBlock`, '
     + 'which renders `ListView`',
   'the records of `properties.data` in the list kind `properties.type` names, shaped by `columns`, `filter`, '
-    + '`sort` and `options`',
+    + '`sort` and the per-kind blocks (`kanban`, `calendar`, `gallery`, `timeline`, `gantt`, `map`, `tree`, `chart`)',
 );
 
 /**

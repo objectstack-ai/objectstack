@@ -3656,7 +3656,7 @@ export interface ObjectMapSchema extends BaseSchema {
    * Field containing location data (or lat/long pair).
    *
    * INTERNAL FORM. This is the flat spelling ObjectView / ListView produce when
-   * they flatten `options.map`; it predates the `map` block and stays declared
+   * they flatten the view's `map` block; it predates that block and stays declared
    * only so that already-published authoring keeps type-checking. New authoring
    * belongs in `map.locationField`, which wins when both are present
    * (objectui#5018).

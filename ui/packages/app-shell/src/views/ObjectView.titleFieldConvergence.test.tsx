@@ -196,9 +196,10 @@ async function resolveSeams(objects: any[]) {
     </ExpressionProvider>,
   );
   await waitFor(() => {
-    expect(captured?.options).toBeTruthy();
+    expect(captured?.kanban).toBeTruthy();
   });
-  const o = captured.options;
+  // The per-kind blocks ride the list schema's top level since #25923.
+  const o = captured;
   return {
     timeline: o.timeline?.titleField,
     kanban: o.kanban?.titleField,
@@ -243,7 +244,7 @@ describe('ObjectView view-config `titleField` — the middle rung is gone (objec
       gallery: 'name',
       tree: 'name',
       // objectui#7029: the calendar seam no longer exists — an undeclared view
-      // gets no `options.calendar` bag, so there is no title to floor.
+      // gets no `calendar` block, so there is no title to floor.
       calendar: undefined,
       gantt: 'name',
     });
@@ -259,7 +260,7 @@ describe('ObjectView view-config `titleField` — the middle rung is gone (objec
       gallery: 'name',
       tree: 'name',
       // objectui#7029: the calendar seam no longer exists — an undeclared view
-      // gets no `options.calendar` bag, so there is no title to floor.
+      // gets no `calendar` block, so there is no title to floor.
       calendar: undefined,
       gantt: 'name',
     });

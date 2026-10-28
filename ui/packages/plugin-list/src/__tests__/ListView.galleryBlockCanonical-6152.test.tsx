@@ -27,8 +27,15 @@
  * retirement was its own round: objectui#6152 round 14 removed the alias rungs,
  * and the legacy-bag CONTROL below was re-judged into a refusal arm then.
  *
- * Both directions are pinned: the canonical-bag arms answer YES, and the arms at
- * the bottom answer NO for a bag with no cover binding, so the rung cannot
+ * objectstack#25923 retired the bag: a stored `options.gallery` is folded onto
+ * the view's `gallery` block by the server before the row is served, and the
+ * gate reads the block alone. So the arms below are the same bindings written
+ * where they live now, the top-level `gallery` block (renamed from
+ * `ListView.galleryOptionsBagCanonical-6152`), plus one arm pinning that a bag
+ * no longer resolves the capability.
+ *
+ * Both directions are pinned: the canonical arms answer YES, and the arms at
+ * the bottom answer NO for a block with no cover binding, so the rung cannot
  * degrade into "offer the gallery whenever it is whitelisted".
  */
 
@@ -66,8 +73,8 @@ const renderSwitcher = (view: Record<string, unknown>) => {
   render(
     <SchemaRendererProvider dataSource={dataSource}>
       {/* `as never`: some arms carry the legacy `imageField`, which the typed
-          bag refuses by name; a stored row may still carry it, and this file
-          pins how the gate answers for it. */}
+          block refuses by name, or the retired `options` bag; this file pins
+          how the gate answers for them. */}
       <ListView schema={{ ...WIDE_TOOLBAR, ...BASE, ...view } as never} dataSource={dataSource} showViewSwitcher />
     </SchemaRendererProvider>,
   );
@@ -75,7 +82,7 @@ const renderSwitcher = (view: Record<string, unknown>) => {
   if (trigger) fireEvent.click(trigger);
 };
 
-/** Mirrors the helper in `ListView.kanbanOptionsBagCanonical-8193.test.tsx`. */
+/** Mirrors the helper in `ListView.kanbanBlockCanonical-8193.test.tsx`. */
 const queryViewOption = (name: string) =>
   screen.queryByRole('tab', { name }) ?? screen.queryByRole('button', { name });
 
@@ -85,26 +92,28 @@ const galleryOffered = (view: Record<string, unknown>) => {
   return Boolean(queryViewOption('Gallery'));
 };
 
-describe('the capability gate resolves gallery from the CANONICAL key in the options bag (objectui#6152 round 12)', () => {
-  // THE DISCRIMINATING ARM. This read `false` before the rung existed.
-  it('offers Gallery for `options.gallery.coverField`', () => {
-    expect(galleryOffered({ options: { gallery: { coverField: 'logo' } } })).toBe(true);
+describe('the capability gate resolves gallery from the CANONICAL key of the `gallery` block (objectui#6152 round 12, objectstack#25923)', () => {
+  // THE DISCRIMINATING ARM of round 12, written where the binding lives now.
+  it('offers Gallery for `gallery.coverField`', () => {
+    expect(galleryOffered({ gallery: { coverField: 'logo' } })).toBe(true);
   });
 
-  it('offers Gallery for the bag app-shell\'s ObjectView now writes', () => {
+  it('offers Gallery for the block app-shell\'s ObjectView now writes', () => {
     // ⛔ One `galleryOffered` per test: it renders into the shared screen.
-    expect(galleryOffered({ options: { gallery: { coverField: 'logo', titleField: 'name' } } })).toBe(true);
+    expect(galleryOffered({ gallery: { coverField: 'logo', titleField: 'name' } })).toBe(true);
   });
 
-  it('does NOT offer Gallery for the retired LEGACY `options.gallery.imageField` (objectui#6152 round 14)', () => {
+  it('does NOT offer Gallery for the retired LEGACY `gallery.imageField` (objectui#6152 round 14)', () => {
     // Round 12's CONTROL here proved its change ADDED a rung. Round 14 retired
     // the alias rung itself: a stored `imageField` binds no cover, so the gate
     // must not offer a gallery for it.
-    expect(galleryOffered({ options: { gallery: { imageField: 'logo' } } })).toBe(false);
+    expect(galleryOffered({ gallery: { imageField: 'logo' } })).toBe(false);
   });
 
-  it('CONTROL: still offers Gallery for the declared `gallery.coverField`', () => {
-    expect(galleryOffered({ gallery: { coverField: 'logo' } })).toBe(true);
+  it('RETIRED (objectstack#25923): does NOT offer Gallery for a cover bound in the legacy `options.gallery` bag', () => {
+    // The bag was this file's subject. It is folded onto `gallery` before a
+    // stored row is served, so one that still reaches the gate binds nothing.
+    expect(galleryOffered({ options: { gallery: { coverField: 'logo' } } })).toBe(false);
   });
 
   // THE OTHER HALF.
@@ -112,11 +121,11 @@ describe('the capability gate resolves gallery from the CANONICAL key in the opt
     expect(galleryOffered({})).toBe(false);
   });
 
-  it('does NOT offer Gallery for an options bag carrying no cover binding', () => {
-    expect(galleryOffered({ options: { gallery: { titleField: 'name' } } })).toBe(false);
+  it('does NOT offer Gallery for a gallery block carrying no cover binding', () => {
+    expect(galleryOffered({ gallery: { titleField: 'name' } })).toBe(false);
   });
 
-  it('does NOT offer Gallery for an empty bag block', () => {
-    expect(galleryOffered({ options: { gallery: {} } })).toBe(false);
+  it('does NOT offer Gallery for an empty gallery block', () => {
+    expect(galleryOffered({ gallery: {} })).toBe(false);
   });
 });

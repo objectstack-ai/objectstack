@@ -75,7 +75,7 @@ const VIEW = {
   viewType: 'kanban',
   columns: [{ field: 'name' }, { field: 'account' }, { field: 'stage' }, { field: 'amount' }, { field: 'probability' }],
   pagination: { pageSize: 25, pageSizeOptions: [25, 50] },
-  options: { kanban: { groupByField: 'stage', titleField: 'name' } },
+  kanban: { groupByField: 'stage', titleField: 'name' },
 };
 
 let lastKanbanProps: any = null;
@@ -152,7 +152,7 @@ describe('a list view hands its board the query, not a page (objectui#12619)', (
 
   it('the kanban block\'s own `columns` is the author\'s card list, every one of it', async () => {
     const ds = makeDataSource();
-    renderList(ds, { ...VIEW, options: { kanban: { groupByField: 'stage', columns: ['amount', 'probability', 'account'] } } });
+    renderList(ds, { ...VIEW, kanban: { groupByField: 'stage', columns: ['amount', 'probability', 'account'] } });
     const props = await boardProps();
 
     expect(props.schema.cardFields).toEqual(['amount', 'probability', 'account']);
