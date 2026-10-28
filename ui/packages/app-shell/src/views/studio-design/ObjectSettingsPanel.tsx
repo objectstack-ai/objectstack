@@ -51,7 +51,7 @@ import {
 } from '@object-ui/components';
 import { useRegisteredMetadataDefaultInspector } from '../metadata-admin/default-inspector-registry.js';
 import { readFields, type FieldEntry } from '../metadata-admin/previews/object-fields-io.js';
-import { t, tFormat, type SupportedLocale } from '../metadata-admin/i18n.js';
+import { t, type SupportedLocale } from '../metadata-admin/i18n.js';
 import { cbpMasterRefusal, requireCbpMasterDetails } from './owd-sharing.js';
 import { HighlightFieldsEditor } from './HighlightFieldsEditor.js';
 
