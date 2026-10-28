@@ -57,8 +57,9 @@ function Badges({ named, locale }: { named: readonly DerivedRelatedList[]; local
   );
 }
 
+/** A row's label; none for an entry that names no relationship (its spelling is all it has). */
 function entryLabel(entry: string, named: readonly DerivedRelatedList[]): string {
-  if (named.length === 0) return entry;
+  if (named.length === 0) return '';
   // A bare child name stands for every list of that child: name the child.
   return entry.includes('.') ? relationshipLabel(named[0]) : named[0].childLabel;
 }
@@ -128,7 +129,7 @@ export function RelatedListsEditor({
         renderRow={(entry) => (
           <span className={unmatched.includes(entry) ? 'text-destructive' : undefined}>
             {entryLabel(entry, named(entry))}
-            <span className="ml-1 font-mono text-[10px] text-muted-foreground">{entry}</span>
+            <span className={unmatched.includes(entry) ? 'font-mono text-[10px]' : 'ml-1 font-mono text-[10px] text-muted-foreground'}>{entry}</span>
             <Badges named={named(entry)} locale={locale} />
           </span>
         )}
