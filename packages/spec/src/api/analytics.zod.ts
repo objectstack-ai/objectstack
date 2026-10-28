@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { AnalyticsQuerySchema } from '../data/analytics.zod';
 import { FilterConditionSchema } from '../data/filter.zod';
 import { AggregationFunction, DateGranularity } from '../data/query.zod';
+import { DatasetMeasurePolarity } from '../ui/dataset.zod';
 import { strictObject } from '../shared/strict-object';
 import { BaseResponseSchema } from './contract.zod';
 
@@ -134,6 +135,15 @@ export const AnalyticsResultResponseSchema = lazySchema(() => BaseResponseSchema
         + 'under it instead of its own default. Set only on a dimension column of a dataset answer '
         + '(`POST /analytics/dataset/query`) whose dimension declares one; absent on measure columns '
         + 'and on a cube query answer. Display copy only: grouping is unchanged.',
+      ),
+      polarity: DatasetMeasurePolarity.optional().describe(
+        'Which direction of change is good news for a measure column: the dataset measure\'s '
+        + '`polarity` (`higher` / `lower` / `neutral`), relayed as declared. A renderer colours a '
+        + 'period-over-period delta by it: `lower` draws a rise as bad, `neutral` draws no good or '
+        + 'bad colour. Set on a measure column of a dataset answer (`POST /analytics/dataset/query`, '
+        + 'the live query and the draft-data preview alike) whose measure declares one, its '
+        + '`__compare` column included; absent otherwise, on dimension columns, and on a cube query '
+        + 'answer. Absent means a rise is drawn as good.',
       ),
     })).describe('Column metadata'),
     sql: z.string().optional().describe('Executed SQL (if debug enabled)'),

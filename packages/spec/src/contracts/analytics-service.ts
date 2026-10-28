@@ -6,7 +6,7 @@ import type { FilterCondition } from '../data/filter.zod.js';
 import type { AggregationFunction } from '../data/query.zod.js';
 import type { PercentScale } from '../data/percent-scale.js';
 import type { ExecutionContext } from '../kernel/execution-context.zod.js';
-import type { Dataset } from '../ui/dataset.zod.js';
+import type { Dataset, DatasetMeasurePolarity } from '../ui/dataset.zod.js';
 
 /**
  * IAnalyticsService - Analytics / BI Service Contract
@@ -149,6 +149,20 @@ export interface AnalyticsResult {
          * Display copy only: it never changes which rows fall in the bucket.
          */
         nullLabel?: string;
+        /**
+         * [#26602] Which direction of change is good news for a MEASURE column:
+         * the dataset measure's `polarity` (`DatasetMeasureSchema`), relayed as
+         * declared by the column-description seam, the measure's `__compare`
+         * column included. A renderer colours a period-over-period delta by
+         * it: `higher` draws a rise good and a fall bad, `lower` the reverse,
+         * `neutral` neither.
+         *
+         * Present only on a measure column of a `queryDataset` answer whose
+         * dataset measure declares one; absent otherwise, on every dimension
+         * column, and on a `query` (cube) answer. Absent reads as a rise drawn
+         * good, the colouring every delta had before the key existed.
+         */
+        polarity?: DatasetMeasurePolarity;
     }>;
     /** Generated SQL (if available) */
     sql?: string;

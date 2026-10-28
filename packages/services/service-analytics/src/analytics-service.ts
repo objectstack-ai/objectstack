@@ -3046,7 +3046,7 @@ export class AnalyticsService implements IAnalyticsService {
 
   /**
    * ADR-0021 — describe the result's COLUMNS from the dataset's own authored
-   * definition: a measure's `label` / `format` / `currency` / `percentScale` /
+   * definition: a measure's `label` / `format` / `polarity` / `currency` / `percentScale` /
    * `builtinAggregate` / `aggregate` and the `type` its aggregate really
    * returns, then a dimension column's header `label`.
    *
@@ -3145,6 +3145,12 @@ export class AnalyticsService implements IAnalyticsService {
         // its `of` measures, so that `aggregate` describes nothing on the wire.
         if (f.aggregate == null && !m.derived && m.aggregate) f.aggregate = m.aggregate;
         if (f.format == null && m.format) f.format = m.format;
+        // [#26602] The measure's polarity, relayed as declared, so a renderer
+        // colours the period-over-period delta by which direction is good news.
+        // The `__compare` column gets it too (it is the same measure over the
+        // shifted window). Undeclared stays absent: nothing here guesses one
+        // from the measure's name or unit.
+        if (f.polarity == null && m.polarity) f.polarity = m.polarity;
         // Currency chain. A MONETARY measure resolves its display currency
         // from: explicit measure `currency` → the source field's FIXED
         // currency (`sourceFieldMeta().defaultCurrency`, relayed only under
