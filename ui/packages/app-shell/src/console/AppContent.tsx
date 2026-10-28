@@ -33,6 +33,7 @@ import {
 import { buildExpressionUser } from '../providers/expressionUser.js';
 import { useTrackRouteAsRecent } from '../hooks/useTrackRouteAsRecent.js';
 import { useHomePath } from '../hooks/useHomePath.js';
+import { useLauncherApps } from '../hooks/useLauncherApps.js';
 import { useSignedInUserLocale } from '../hooks/useUserLocale.js';
 import { resolveRecordFormTarget, resolveRecordFormModalLayout, resolveFormViewChrome, selectRecordFormView, resolveNavigateCreateUrl, resolveNavigateEditUrl, resolvePostCreateTarget, recordFormCreateValues, readRecordFormCreateValues, RECORD_FORM_CREATE_VALUES_STATE } from '../utils/recordFormNavigation.js';
 import { deriveRecordSurface, deriveRecordFlowSurface } from '@object-ui/plugin-view';
@@ -336,8 +337,11 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // ⛔ `hidden` only — never `_unpublished` (objectstack#6955 / objectstack-ai/objectstack#4829 A1). The
   // publish gate is enforced server-side; duplicating it here would strand a
   // builder on their own unpublished app.
-  const activeApps = apps.filter((a: any) => a.active !== false);
-  const launcherApps = activeApps.filter((a: any) => a.hidden !== true);
+  //
+  // objectstack#26838 — and, like Home's tiles and the switcher, never on an
+  // app the user's permission sets hide (`tabPermissions: hidden`, the
+  // `/me/apps` answer); the route lookup below still finds such an app.
+  const { apps: launcherApps } = useLauncherApps(apps);
   // ADR-0048 (A) — the route segment is the package id; resolve by it,
   // falling back to the app name (legacy/alias URL).
   // Built-in pseudo-routes under /apps/* that are NOT metadata apps (create-app,
