@@ -343,8 +343,9 @@ unit. Counts stay plain cardinalities and percentages carry their own `%`, so
 `count_unique` on a currency column reads `Unique: 3`, not `$3.00`.
 
 The unit comes from the column's `type`, or its object field's. Every other
-formatting hint (`currency`, `defaultCurrency`, `currencyConfig`, `precision`,
-`scale` and `max`) is read off the object field only, the way the list cell
+formatting hint (`currency`, `currencyConfig` with its `defaultCurrency`, which is
+read only under `currencyMode: 'fixed'`, then `precision`, `scale` and `max`) is read off
+the object field only, the way the list cell
 reads it. `ListColumnSchema` declares none of them, so a column that carries one
 does not change the footer (objectui#11588).
 
