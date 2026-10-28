@@ -17531,7 +17531,7 @@ export class ObjectQL implements IObjectQLEngine {
                if (summaryKeyColumns.length > 0) {
                    const previous = priorRowsRead
                      ? ((await readPriorRows()) ?? [])
-                     : (((await driver.find(object, { ...ast, fields: summaryKeyColumns }, hookContext.input.options as any)) ?? []) as Record<string, unknown>[]);
+                     : (((await driver.find(object, { ...ast, fields: summaryKeyColumns }, hookContext.input.options as Parameters<IDataDriver['find']>[2])) ?? []) as Record<string, unknown>[]);
                    const payload = hookContext.input.data as Record<string, unknown>;
                    summaryRows = { previous, next: previous.map((row) => ({ ...row, ...payload })) };
                }
@@ -19897,7 +19897,7 @@ export class ObjectQL implements IObjectQLEngine {
                if (plan === 'none') {
                  if (summaryKeyColumns.length > 0) {
                    summaryPriorRows = predicateMatchedRows
-                     ?? (((await driver.find(object, { ...opCtx.ast!, fields: summaryKeyColumns }, hookContext.input.options as any)) ?? []) as Record<string, unknown>[]);
+                     ?? (((await driver.find(object, { ...opCtx.ast!, fields: summaryKeyColumns }, hookContext.input.options as Parameters<IDataDriver['find']>[2])) ?? []) as Record<string, unknown>[]);
                  }
                  result = await driver.deleteMany!(object, opCtx.ast!, hookContext.input.options as any);
                } else {
