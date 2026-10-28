@@ -283,6 +283,35 @@ describe('report export control (exportOptions, #25873)', () => {
     expect(downloads[0].fileName).toMatch(/^by_stage_quarter-/);
   });
 
+  it('a matrix across-axis value opening with a formula character is guarded in the CSV header', async () => {
+    const result = {
+      rows: [
+        { stage: 'A', quarter: '=HYPERLINK("x")', amount: 1 },
+        { stage: 'A', quarter: 'Q2', amount: 2 },
+      ],
+      fields: [
+        { name: 'stage', type: 'string', label: 'Stage' },
+        { name: 'quarter', type: 'string', label: 'Quarter' },
+        { name: 'amount', type: 'number', label: 'Amount' },
+      ],
+      object: OBJECT,
+    };
+    renderReport(
+      { name: 'by_stage_quarter', type: 'matrix', dataset: 'opportunity_metrics', rows: ['stage'], columns: ['quarter'], values: ['amount'] },
+      { result },
+    );
+    await screen.findByTestId('dataset-matrix');
+    await openMenu();
+    fireEvent.click(await screen.findByTestId('report-export-csv'));
+    await waitFor(() => expect(downloads).toHaveLength(1));
+    const header = parseCsv(await blobText(downloads[0].blob))[0];
+    expect(drawnTable()[0]).toContain('=HYPERLINK("x")');
+    expect(header).toContain('\t=HYPERLINK("x")');
+    expect(header).not.toContain('=HYPERLINK("x")');
+    // Authored labels pass through unchanged.
+    expect(header[0]).toBe('Stage');
+  });
+
   it('a joined report draws no export control', async () => {
     renderReport({
       name: 'joined_one',

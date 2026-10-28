@@ -123,7 +123,9 @@ function csvField(text: string): string {
 /** The CSV text of a snapshot (CRLF rows, RFC 4180 quoting). */
 export function buildReportCsv(snapshot: ReportTableSnapshot, includeHeaders: boolean): string {
   const lines: string[] = [];
-  if (includeHeaders) lines.push(snapshot.header.map(csvField).join(','));
+  // A matrix's across-axis headers ARE dimension values from the data, so every
+  // header cell takes the guard (an authored label never opens with = + - @ |).
+  if (includeHeaders) lines.push(snapshot.header.map((h) => csvField(guardFormula({ text: h, fromData: true }))).join(','));
   for (const row of snapshot.rows) lines.push(row.map((c) => csvField(guardFormula(c))).join(','));
   return lines.join('\r\n');
 }
