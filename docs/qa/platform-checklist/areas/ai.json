@@ -133,7 +133,7 @@
       "title": "MCP HTTP transport (/mcp) and the public /mcp/skill endpoint gate exactly as documented: 404 when opted out, 501 when unimplemented, 401 anonymous, 403 scopeless-OAuth, full tool list when keyed",
       "since": "v15",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "api",
       "fixtures": {
@@ -146,7 +146,7 @@
       "variants": [
         "OAuth scope data:read → read-family tools: list_objects, describe_object, validate_expression, query_records, get_record, and aggregate_records where the bridge implements aggregate (packages/mcp/src/mcp-http-tools.ts canRead block; packages/spec/src/ai/mcp.zod.ts MCP_OAUTH_SCOPE_DATA_READ)",
         "OAuth scope data:write → write-family tools: create_record, update_record, delete_record",
-        "OAuth scope actions:execute → list_actions, run_action",
+        "OAuth scope actions:execute → list_actions, run_action, and resume_run where the host can resume runs (the same scope grants all three: packages/mcp/src/mcp-http-tools.ts registerActionTools, canResume)",
         "OAuth scope metadata:write → the authoring tools the host injects (packages/mcp/src/mcp-server-runtime.ts registerAuthoringTools; packages/spec/src/ai/mcp.zod.ts MCP_OAUTH_SCOPE_METADATA_WRITE), served only to an OAuth grant naming metadata:write — a key or a session is served none"
       ],
       "steps": [
@@ -201,7 +201,7 @@
         "reading the 501 'MCP server is not available' as 'MCP is disabled' (or vice versa) is a recording error — the two refusals separate config-off from implementation-missing and the run record must name which one it saw"
       ],
       "traps": ["dispatcher-vs-hono-route"],
-      "automated": { "kind": "e2e", "ref": "packages/qa/dogfood/test/showcase-mcp-http-identity.dogfood.test.ts + packages/runtime/src/http-dispatcher.mcp.test.ts + packages/runtime/src/http-dispatcher.mcp-oauth.test.ts + packages/runtime/src/mcp-anonymous-first.hono.integration.test.ts + packages/runtime/src/mcp-skill-method-not-allowed.hono.integration.test.ts + packages/mcp/src/mcp-http-tools.scopes.test.ts. Layers per clause (RUNNER rule 6), none of which scores a clause pass alone: the dogfood file boots the showcase in-process and answers over HTTP, but for acceptance[3] it asserts the 401 status only (not the 'Unauthorized: a valid API key is required' wording, not either WWW-Authenticate form), and for acceptance[4] its tool-discovery case sends a session bearer token rather than an osk_ key, skips initialize, and checks two names (query_records, describe_object), not the documented twelve; it fully scores negative[0]. The two http-dispatcher files are dispatcher units over stub services: the opted-out 404 and no-service 501 by status (acceptance[0]; neither message is asserted), anonymous-first 401, GET /mcp/skill as text/markdown with cache-control no-store and the environment's own /api/v1/mcp URL (acceptance[1]; content-disposition is not asserted), the 405 with Allow: GET (acceptance[2]), the two 401 header forms (acceptance[3]), and a scopeless OAuth token answered 403 with insufficient_scope in WWW-Authenticate (acceptance[5]; the body text and the scope list are not asserted). The two hono integration files answer over a real Hono socket with fake services: the anonymous-first 401 with or without the resource_metadata pointer and the signed-in 404/501 codes (acceptance[0], [3]), and the 405 envelope with 'Method not allowed — use GET' (acceptance[2]). mcp-http-tools.scopes.test.ts narrows tools/list per granted scope at plugin-unit layer (acceptance[5]'s variants half)" },
+      "automated": { "kind": "e2e", "ref": "packages/qa/dogfood/test/showcase-mcp-http-identity.dogfood.test.ts + packages/runtime/src/http-dispatcher.mcp.test.ts + packages/runtime/src/http-dispatcher.mcp-oauth.test.ts + packages/runtime/src/mcp-anonymous-first.hono.integration.test.ts + packages/runtime/src/mcp-skill-method-not-allowed.hono.integration.test.ts + packages/mcp/src/mcp-http-tools.scopes.test.ts. Layers per clause (RUNNER rule 6); only mcp-skill-method-not-allowed.hono.integration.test.ts scores a clause pass alone (acceptance[2], below): the dogfood file boots the showcase in-process and answers over HTTP, but for acceptance[3] it asserts the 401 status only (not the 'Unauthorized: a valid API key is required' wording, not either WWW-Authenticate form), and for acceptance[4] its tool-discovery case sends a session bearer token rather than an osk_ key, skips initialize, and checks two names (query_records, describe_object), not the documented twelve; it fully scores negative[0]. The two http-dispatcher files are dispatcher units over stub services: the opted-out 404 and no-service 501 by status (acceptance[0]; neither message is asserted), anonymous-first 401, GET /mcp/skill as text/markdown with cache-control no-store and the environment's own /api/v1/mcp URL (acceptance[1]; content-disposition is not asserted), the 405 with Allow: GET (acceptance[2]), the two 401 header forms (acceptance[3]), and a scopeless OAuth token answered 403 with insufficient_scope in WWW-Authenticate (acceptance[5]; the body text and the scope list are not asserted). The two hono integration files answer over a real Hono socket with fake services: the anonymous-first 401 with or without the resource_metadata pointer and the signed-in 404/501 codes (acceptance[0], [3]), and the 405 envelope with 'Method not allowed — use GET' (acceptance[2]). The 405 file asserts the status, the Allow: GET header and the exact envelope message over a real Hono socket with the real dispatcher, and a 405 never reaches the faked services, so it scores acceptance[2] pass at the api layer. mcp-http-tools.scopes.test.ts narrows tools/list per granted scope at plugin-unit layer (acceptance[5]'s variants half); its fake bridge implements no resumeRun, so its sets carry 11 tools and never resume_run. Corroborating, not in the list above: packages/cli/test/serve-mcp-capability-collision.e2e.test.ts spawns a live server (nightly tier), mints an osk_ key, runs initialize + tools/list (a non-empty list, not the documented twelve) and reads GET /mcp/skill 200, so it corroborates acceptance[1] and [4] without scoring either" },
       "source": [
         "packages/runtime/src/domains/mcp.ts (404/501/401/403/405 branches, exact messages)",
         "packages/spec/src/ai/mcp.zod.ts#MCP_OAUTH_SCOPES (MCP_OAUTH_SCOPES + scopesToAgentPermissionSets, ADR-0090 D10)",
@@ -217,7 +217,13 @@
         { "revision": 3, "date": "2026-10-16", "change": "clause 5's tool list omitted resume_run (#23878 checklist-accuracy finding). Re-measured on main c91af8ed6 with an admin osk_ key: tools/list returns twelve tools, resume_run among them; mcp-http-tools.ts registers it only when the bridge exposes resumeRun, the same optional shape as aggregate_records, so the verify now names that degradation too", "ref": "#24036" },
         { "revision": 4, "date": "2026-10-19", "change": "variants[0] and steps[5] corrected — checklist-accuracy findings of the 18.0 QA sweep (QA run #24540, ai.mcp-http-surface; wave anchor #24579 §3). The data:read family also serves aggregate_records and validate_expression (both read-only), and a local OAuth leg needs a native client. Re-derived at base 9a7838edf5 (mcp-http-tools.ts registers validate_expression and, when the bridge exposes aggregate, aggregate_records inside the canRead gate; the oauth-provider DCR rule in the installed @better-auth/oauth-provider 1.7.3). No clause changed", "ref": "#24649" },
         { "revision": 5, "date": "2026-10-26", "change": "automated.ref extended and annotated per clause — checklist-accuracy findings of the 18.2.0 sweep, Tier 1 record #25815 at 6679644a (wave anchor #25807): the one-file ref left acceptance[0]–[2] and [5] with no named pin, and the pin asserts acceptance[3]'s status only and acceptance[4] with a session bearer, no initialize and two tool names. Re-read on main at b4199c96: the record's 'no pin at any layer' for acceptance[0]–[2] and [5] no longer holds, since dispatcher-unit and Hono-integration pins in packages/runtime and the scope-narrowing unit in packages/mcp assert parts of them; they join the ref with the layer each reaches and what each leaves unasserted. No clause changed, no status changed", "ref": "#25836" },
-        { "revision": 6, "date": "2026-10-27", "change": "acceptance[5] clause and verify, steps[5] and variants follow the fourth MCP scope, metadata:write: the scopeless 403 names all four scopes in its body and in its WWW-Authenticate scope list (packages/runtime/src/domains/mcp.ts joins MCP_OAUTH_SCOPES), and the variants matrix gains the metadata:write row (the host-injected authoring tools, served only to an OAuth grant naming the scope). Re-read on main at c739de75. No status changed", "ref": "#26587" }
+        { "revision": 6, "date": "2026-10-27", "change": "acceptance[5] clause and verify, steps[5] and variants follow the fourth MCP scope, metadata:write: the scopeless 403 names all four scopes in its body and in its WWW-Authenticate scope list (packages/runtime/src/domains/mcp.ts joins MCP_OAUTH_SCOPES), and the variants matrix gains the metadata:write row (the host-injected authoring tools, served only to an OAuth grant naming the scope). Re-read on main at c739de75. No status changed", "ref": "#26587" },
+        {
+          "revision": 7,
+          "date": "2026-10-28",
+          "change": "automated.ref and variants[2] corrected. Checklist-accuracy findings of the 18.2.0 wave 2 (QA run #26468, Tier 1 half A, at 756220c4; wave anchor #25807, slice B). (1) The ref said no named file scores a clause alone, but mcp-skill-method-not-allowed.hono.integration.test.ts asserts acceptance[2] in full (status, Allow: GET, the exact envelope message) over a real Hono socket and the real dispatcher, and a 405 never reaches the faked services; the ref now says it scores that clause. (2) The ref gains packages/cli/test/serve-mcp-capability-collision.e2e.test.ts as corroboration (spawned server, osk_ key, initialize + tools/list, /mcp/skill 200) and says the scopes test's fake bridge has no resumeRun, so it counts 11 tools. (3) variants[2] omitted resume_run, which the same actions:execute scope grants. Re-read at base fd246c22: packages/mcp/src/mcp-http-tools.ts registerActionTools (canResume, 'the same actions:execute scope grants both'), mcp-http-tools.scopes.test.ts ACTION_TOOLS. No clause changed",
+          "ref": "#25807"
+        }
       ]
     },
     {
@@ -225,7 +231,7 @@
       "title": "MCP stdio auto-start fails closed without OS_MCP_STDIO_API_KEY; with a member-bound key, reads AND aggregates honor RLS/FLS and revocation bites on the next call",
       "since": "v16",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P0",
       "surface": "cli",
       "personas": ["restricted member API key (for the RLS half — on showcase, a contributor-bound member)", "a second restricted member API key for the FLS half (on showcase, a client_liaison-bound member — see fixtures.requires)", "admin API key (for the full-row comparison)"],
@@ -246,7 +252,7 @@
         "start again with OS_MCP_STDIO_API_KEY=osk_unknown (a key that resolves to nothing); capture that failure",
         "start with the restricted member's valid key, adding `--log-level info` to `os start`; capture the principal-bound startup log line. The line is logged at INFO and `os start` defaults to `warn` (packages/cli/src/commands/start.ts, the log-level flag), so a default-level boot log does not carry it",
         "over MCP stdio, query_records the OWD-private object and get_record a row owned by the OTHER user; record row sets and field sets. query_records caps `limit` at 50 (packages/mcp/src/mcp-http-tools.ts, DEFAULT_MAX_LIMIT; a larger limit is refused by the tool's input schema), so give the REST read of the next step the same limit or page through both before comparing",
-        "run the same two reads over REST as the same member (Bearer the same key) and as the admin key; compare",
+        "run the same two reads over REST as the same member (Bearer the same key) and as the admin key; compare. On `os start` the stdio transport answers tool calls before the HTTP listener is up, so poll GET /api/v1/health until 200 before the first REST leg; a refused connection there is the boot still coming up, not a result",
         "aggregate parity: over MCP stdio as the member, aggregate_records the OWD-private object with a count grouped by a readable field ({ aggregations: [{ function: 'count', alias: 'n' }], groupBy: ['<readable field>'] }); run the SAME aggregate over REST as the member and as the admin; compare the per-group counts",
         "FLS aggregate fail-closed: over MCP stdio as the member, aggregate_records with an aggregation (or a groupBy) naming the field the member cannot read (the masked field above); capture the refusal and confirm no numeric result is returned",
         "revoke the member key while the stdio session is up (as the admin, PATCH /api/v1/data/sys_api_key/<key id> {\"revoked\": true}); issue one more read on the SAME session; capture the tool result and parse its error envelope (code and status, not only the prose)",
@@ -311,7 +317,7 @@
         "a post-revocation read that serves any row is a P0 FAIL (stale authority); a post-revocation refusal that carries no API_KEY_REVOKED code is a FAIL of the #23367 contract — a client branches on the code, never on prose"
       ],
       "traps": ["wrong-persona"],
-      "automated": { "kind": "unit", "ref": "packages/mcp/src/__tests__/plugin.test.ts — plugin unit over a mocked ctx (no process, no transport, no log capture), so it corroborates and never scores a live leg. acceptance[0]: it asserts plugin.start rejects with /OS_MCP_STDIO_API_KEY/, the variable name only — neither the remedy text nor that the process does not serve, which stay with the live `os start` leg. acceptance[1]: the unknown-key arm only (/did not resolve to a valid identity/). No test in packages/mcp asserts the API_KEY_REVOKED lifecycle arm (#23367) — not acceptance[1]'s second half, not acceptance[6], not negative[4]; those, and every other clause here, are live cli/api/log legs driven by hand" },
+      "automated": { "kind": "unit", "ref": "packages/mcp/src/__tests__/plugin.test.ts — plugin unit over a mocked ctx (no process, no transport, no log capture), so it corroborates and never scores a live leg. acceptance[0]: it asserts plugin.start rejects with /OS_MCP_STDIO_API_KEY/, the variable name only — neither the remedy text nor that the process does not serve, which stay with the live `os start` leg. acceptance[1]: the unknown-key arm only (/did not resolve to a valid identity/). Corroborating only, not scoring: plugin.test.ts's own '[MCP] Transport not auto-started' cases (the last step's clean boot, at unit layer with a mocked logger) and packages/mcp/src/__tests__/plugin-execution-context.test.ts (per-call identity re-resolution, asserting the generic /no longer valid/ refusal, the pre-#23367 arm rather than the coded one). No test in packages/mcp asserts the API_KEY_REVOKED lifecycle arm (#23367) — not acceptance[1]'s second half, not acceptance[6], not negative[4]; those, and every other clause here, are live cli/api/log legs driven by hand" },
       "source": [
         "packages/mcp/src/plugin.ts (the three refusal strings + per-call re-resolution, ADR-0101)",
         "packages/core/src/security/api-key.ts#lifecycleRefusalOf (#23367 — the API_KEY_REVOKED / API_KEY_EXPIRED / API_KEY_INACTIVE refusals, 403, and the located message naming the key's prefix; raised as ApiKeyLifecycleRefusalError out of the stdio door's per-call resolvePrincipal and its up-front admission)",
@@ -345,7 +351,13 @@
           "change": "runner note on minting the fixture keys on the os start boot (residual from the #23878 close-out, after PR #24000): measured on main c91af8ed6, os start answers a sign-in that carries a Cookie header and no Origin with 403 MISSING_OR_NULL_ORIGIN while os dev answers it 200; a cookie-less sign-in without Origin, and POST /api/v1/keys by session cookie or bearer without Origin, answer 200/201 on both. The fixture line now says so. No step, request or oracle changed",
           "ref": "#24036"
         },
-        { "revision": 7, "date": "2026-10-26", "change": "steps[2], [3] and [9], acceptance[7].verify and the automated.ref prose corrected — checklist-accuracy findings of the 18.2.0 sweep (wave anchor #25807). From P0 record #25812 (at 6679644a): the principal-bound and not-auto-started lines are INFO and need `--log-level info` on `os start`, whose default level is warn; query_records caps limit at 50. From Tier 1 record #25815 (at 6679644a): the pin checks the variable name only for acceptance[0] and carries no API_KEY_REVOKED case for acceptance[1], [6] and negative[4]. Re-read on main at b4199c96: start.ts still defaults the level to warn, mcp-http-tools.ts DEFAULT_MAX_LIMIT is still 50, and no packages/mcp test names API_KEY_REVOKED. No clause changed, no status changed", "ref": "#25836" }
+        { "revision": 7, "date": "2026-10-26", "change": "steps[2], [3] and [9], acceptance[7].verify and the automated.ref prose corrected — checklist-accuracy findings of the 18.2.0 sweep (wave anchor #25807). From P0 record #25812 (at 6679644a): the principal-bound and not-auto-started lines are INFO and need `--log-level info` on `os start`, whose default level is warn; query_records caps limit at 50. From Tier 1 record #25815 (at 6679644a): the pin checks the variable name only for acceptance[0] and carries no API_KEY_REVOKED case for acceptance[1], [6] and negative[4]. Re-read on main at b4199c96: start.ts still defaults the level to warn, mcp-http-tools.ts DEFAULT_MAX_LIMIT is still 50, and no packages/mcp test names API_KEY_REVOKED. No clause changed, no status changed", "ref": "#25836" },
+        {
+          "revision": 8,
+          "date": "2026-10-28",
+          "change": "steps[4] waits for the HTTP listener, and automated.ref names two corroborating files. Checklist-accuracy findings of the 18.2.0 wave 2 (QA runs #26481, priority:P0, and #26468, Tier 1 half A, both at 756220c4; wave anchor #25807, slice B). (1) #26481: on `os start` stdio answered tool calls before the HTTP listener was up, so the REST comparison leg met a refused connection; the step now polls health 200 first. (2) #26468: plugin.test.ts's 'Transport not auto-started' cases and plugin-execution-context.test.ts (generic 'no longer valid' refusal) corroborate without scoring; the ref names both, and its statement that no packages/mcp test asserts API_KEY_REVOKED still holds. Re-read at base fd246c22 (grep API_KEY_REVOKED over packages/mcp/src: no hit; plugin-execution-context.test.ts:260). No clause changed",
+          "ref": "#25807"
+        }
       ]
     },
     {
@@ -353,7 +365,7 @@
       "title": "MCP run_action requires ai.exposed (fail-closed with the prescription), filters list_actions to exposed+permitted, refuses system objects, and logs the trusted-elevation audit line",
       "since": "v15.1",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "fixtures": {
@@ -383,7 +395,7 @@
         {
           "clause": "list_actions returns ONLY actions that are both ai-exposed and permitted to the caller — showcase_portfolio_snapshot present, showcase_mark_done absent",
           "oracle": "api",
-          "verify": "the list_actions payload against the fixture's declared ai blocks (mcp-http-tools.ts: 'actions that are BOTH declared ai-exposed and that the caller is permitted to run')",
+          "verify": "the list_actions payload against the fixture's declared ai blocks (mcp-http-tools.ts: 'actions that are BOTH declared ai-exposed and that the caller is permitted to run'). On the stock showcase only the ai-exposed half discriminates: showcase_portfolio_snapshot is the one exposed action and no persona lacks a permission it needs, so no exposed-but-unpermitted action exists to be held back. Score the permitted half not-run(fixture) unless the run stages such an action",
           "evidence": "the list_actions response"
         },
         {
@@ -420,7 +432,13 @@
         { "revision": 1, "date": "2026-08-07", "change": "initial import from the 15.1 plan §A9", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 3, "date": "2026-10-16", "change": "step 1 called list_actions with objectName: 'showcase_task' as a second form (#23878 checklist-accuracy finding). list_actions takes no arguments: re-measured on main c91af8ed6 the objectName call answers isError with MCP error -32602 'Unrecognized key(s) … objectName', while the no-argument call returns [showcase_portfolio_snapshot]. Re-run of the item's clauses on that boot: showcase_mark_done refused with the actionAiExposureError prescription and the task unchanged; showcase_portfolio_snapshot returns accounts 14 / projects 5 / invoices 12, equal to the REST totals; the [action-audit] MCP run_action line names the caller; a sys_* object is refused", "ref": "#24036" },
-        { "revision": 4, "date": "2026-10-19", "change": "acceptance[4].clause quotes both live spellings of the guard — checklist-accuracy finding of the 18.0 QA sweep (QA run #24540, ai.mcp-run-action-exposure-gate clause 4; wave anchor #24579 §3): the clause's quote matched only the runtime guard's. Re-derived at base 9a7838edf5 (packages/mcp/src/mcp-http-tools.ts and packages/runtime/src/action-execution.ts)", "ref": "#24649" }
+        { "revision": 4, "date": "2026-10-19", "change": "acceptance[4].clause quotes both live spellings of the guard — checklist-accuracy finding of the 18.0 QA sweep (QA run #24540, ai.mcp-run-action-exposure-gate clause 4; wave anchor #24579 §3): the clause's quote matched only the runtime guard's. Re-derived at base 9a7838edf5 (packages/mcp/src/mcp-http-tools.ts and packages/runtime/src/action-execution.ts)", "ref": "#24649" },
+        {
+          "revision": 5,
+          "date": "2026-10-28",
+          "change": "acceptance[1].verify says which half the stock fixture discriminates. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26476, manual api set, at 756220c4; wave anchor #25807, slice B): the clause's 'permitted' filter was not discriminated, because no stock action pairs ai.exposed with a permission gate a persona lacks. Re-read at base fd246c22: examples/app-showcase/src/ui/actions/index.ts carries one ai: { exposed: true } block (showcase_portfolio_snapshot). The clause is unchanged; the verify names the fixture gap",
+          "ref": "#25807"
+        }
       ]
     },
     {
@@ -428,7 +446,7 @@
       "title": "MCP validate_expression returns build-accurate errors/warnings/inferred type + in-scope context for every site variant, and fail-closes on unknown/system objects",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "api",
       "fixtures": {
@@ -441,7 +459,7 @@
       "variants": [
         "site: formula (record.<field> bound; inferred type returned)",
         "site: validation (record-scoped predicate)",
-        "site: flow_condition (fields bound BARE — a record.-prefixed ref is the error here)",
+        "site: flow_condition (fields bound BARE; the scope roots are bound too, as untyped maps, so a record.-prefixed ref is accepted here, not an error — packages/formula/src/cel-engine.ts buildTypedEnv, the 'flattened' scope; packages/mcp/src/mcp-http-tools.ts VALIDATE_SITE_MAP flow_condition = predicate/flattened). A predicate site returns no inferredType; only the formula role does",
         "site: template"
       ],
       "steps": [
@@ -481,7 +499,7 @@
       "negative": [
         "a validation verdict that DIFFERS from the build gate for the same expression is a FAIL — the tool's one job is build-accuracy (api-backend.formula-gates is the same engine)"
       ],
-      "automated": { "kind": "unit", "ref": "packages/mcp/src/mcp-validate-expression.test.ts — MCPServerRuntime.handleHttpRequest over a fake McpDataBridge whose describeObject returns a crm_opportunity schema: a plugin unit, not the served MCP door the api oracle names, so it corroborates acceptance[0], [1] and [3] and never scores them pass (RUNNER rule 6); acceptance[2] is not pinned (see its verify)" },
+      "automated": { "kind": "unit", "ref": "packages/mcp/src/mcp-validate-expression.test.ts — MCPServerRuntime.handleHttpRequest over a fake McpDataBridge whose describeObject returns a crm_opportunity schema: a plugin unit, not the served MCP door the api oracle names, so it corroborates acceptance[0], [1] and [3] and never scores them pass (RUNNER rule 6). Its sound-formula case asserts ok, errors, warnings and inScope only, never inferredType, so acceptance[0]'s inferredType half has no pin at any layer; acceptance[2] is not pinned (see its verify)" },
       "source": [
         "packages/mcp/src/mcp-http-tools.ts#VALIDATE_SITE_MAP (validate_expression registration: input schema incl. the 4-value site enum, VALIDATE_SITE_MAP, response shape)",
         "packages/mcp/src/mcp-validate-expression.test.ts (tier pins: error vs warning vs ok, unknown object, system-object guard)",
@@ -491,7 +509,13 @@
         { "revision": 1, "date": "2026-08-07", "change": "initial import from #3358 §9", "ref": "#3358" },
         { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 3, "date": "2026-10-16", "change": "the probe field is showcase_task.estimate_hours, not est_hours (#23878 checklist-accuracy finding): est_hours answers ok:false with unknown-field est_hours, so every step built on it measured a typo, not the validator. Re-run on main c91af8ed6 over MCP HTTP: record.estimate_hours * 1.1 ok:true inferredType number, inScope.fields includes estimate_hours; the bare formula ref is a bare-reference error; estimate_hourz is unknown-field with did-you-mean estimate_hours; record.title * 2 is a type-mismatch WARNING; 'estimate_hours > 8' is clean under flow_condition and a bare-reference error under formula; an unknown object and sys_user are refused", "ref": "#24036" },
-        { "revision": 4, "date": "2026-10-26", "change": "acceptance[2].verify and the automated.ref prose corrected — checklist-accuracy findings of the 18.2.0 sweep, Tier 1 record #25815 at 6679644a (wave anchor #25807): the pin never runs the same expression under both sites, and its harness is a fake describeObject bridge, not the served door. Re-read on main at b4199c96: unchanged. No clause changed, no status changed", "ref": "#25836" }
+        { "revision": 4, "date": "2026-10-26", "change": "acceptance[2].verify and the automated.ref prose corrected — checklist-accuracy findings of the 18.2.0 sweep, Tier 1 record #25815 at 6679644a (wave anchor #25807): the pin never runs the same expression under both sites, and its harness is a fake describeObject bridge, not the served door. Re-read on main at b4199c96: unchanged. No clause changed, no status changed", "ref": "#25836" },
+        {
+          "revision": 5,
+          "date": "2026-10-28",
+          "change": "variants[2] and automated.ref corrected. Checklist-accuracy findings of the 18.2.0 wave 2 (QA run #26468, Tier 1 half A, at 756220c4; wave anchor #25807, slice B). (1) variants[2] said a record.-prefixed ref is an error under flow_condition; live, 'record.estimate_hours > 8' there answered ok:true with no errors, because the flattened scope binds the scope roots as maps beside the bare fields. Acceptance[2] is unaffected: it compares the bare form across the two sites. (2) The pin's sound-formula case never checks inferredType, so the ref now says acceptance[0]'s inferredType half is unpinned. Re-read at base fd246c22: packages/formula/src/cel-engine.ts buildTypedEnv (flattened: SCOPE_ROOTS registered as map), packages/mcp/src/mcp-http-tools.ts VALIDATE_SITE_MAP, packages/mcp/src/mcp-validate-expression.test.ts 'accepts a sound formula'. No clause changed",
+          "ref": "#25807"
+        }
       ]
     },
     {
@@ -743,13 +767,13 @@
       "title": "the MCP OAuth transport rule is judged on the DEPLOYMENT's own host: a private / link-local plain-HTTP deployment serves the OAuth track and logs the accepted-transport warning; a public plain-HTTP one is still refused, fail-closed, and logs its own public-plaintext warning",
       "since": "v17",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "fixtures": {
         "app": "any",
         "requires": [
-          "THREE boots of the same build, differing only in the deployment base URL: (a) a PRIVATE address the host actually holds — a LAN address under `os dev`, e.g. http://192.168.x.x:PORT or http://10.x.x.x:PORT; (b) a PUBLIC host spelling — http://example.com or an http:// public IP literal, which needs no reachability because every clause here is about what the deployment ADVERTISES; (c) loopback (http://localhost:PORT), the unchanged control",
+          "THREE boots of the same build, differing only in the deployment base URL: (a) a PRIVATE address the host actually holds — a LAN address under `os dev`, e.g. http://192.168.x.x:PORT or http://10.x.x.x:PORT; (b) a PUBLIC host spelling — http://example.com or an http:// public IP literal, which needs no reachability because every clause here is about what the deployment ADVERTISES; (c) loopback (http://localhost:PORT), the unchanged control. The deployment base URL is set with OS_AUTH_URL (BETTER_AUTH_URL and OS_BASE_URL are read too, in that order: packages/cli/src/commands/serve.ts AUTH_BASE_URL_ENV_NAMES). A host that holds no RFC 1918 or link-local address cannot stage boot (a): record its clauses blocked(fixture). An address outside the eligible blocks, such as 192.0.2.2 (TEST-NET-1), is PUBLIC to the rule (auth-manager.ts PLAIN_HTTP_ELIGIBLE_IPV4_CIDRS), so it serves boot (b)",
           "the MCP HTTP surface at its default (on — served unless OS_MCP_SERVER_ENABLED=false) and the embedded AS at its default (follows the MCP surface — packages/plugins/plugin-auth/src/auth-manager.ts#resolveOidcProviderEnabled)",
           "the boot log of each boot, captured from the first line — the transport warning is emitted ONCE at discovery-route mount and is not repeated per request",
           "a second machine (or container) on the same private network for the (a) boot, if the run also drives a real MCP client end to end"
@@ -768,7 +792,7 @@
         "if a second machine is available, drive a real MCP client from it against boot (a) over http:// and record whether the client completes the OAuth flow, refuses the scheme up front, or fails elsewhere — RECORD WHICH, because a client-side scheme refusal changes what this compatibility is worth",
         "boot (b) on a PUBLIC host spelling over plain http; capture the boot log and GET both protected-resource paths; record status and body — and record separately whether the public-plaintext warning `OAuth discovery is served over PUBLIC plain HTTP` appears and how many times",
         "boot (c) on loopback with --log-level info (its accepted-transport line is logged at INFO there, so a default warn-level boot log does not carry it); capture the boot log and the same two GETs",
-        "re-boot (a) with an https base URL (a self-signed terminator is enough — no client needs to trust it, only the deployment's own base URL has to be https); capture the boot log and record the ABSENCE of BOTH plain-HTTP warnings"
+        "re-boot (a) with an https base URL (a self-signed terminator is enough — no client needs to trust it, only the deployment's own base URL has to be https: OS_AUTH_URL=https://… behind a TLS terminator, or `os dev --cert/--key`); capture the boot log and record the ABSENCE of BOTH plain-HTTP warnings"
       ],
       "acceptance": [
         {
@@ -843,7 +867,13 @@
           "change": "the accepted-transport line `OAuth is served UNENCRYPTED` is logged at INFO when the issuer's host is loopback and stays WARN on a private or link-local one (triage ruling on #22073), so boot (c)'s line no longer shows at the default warn level. steps[5] boots (c) with --log-level info; acceptance[2]'s clause and verify name the level per boot. D1 is unchanged: the same sentence is still emitted on every accepted plain-HTTP boot",
           "ref": "#22073"
         },
-        { "revision": 4, "date": "2026-10-26", "change": "automated.ref annotated — checklist-accuracy findings of the 18.2.0 sweep, Tier 1 record #25815 at 6679644a (wave anchor #25807): the item is api/log-oracle throughout, but its only pin is a unit test of isOAuthEligibleBaseUrl and the AuthManager getters, with no booted server and no log capture, so it scores no clause; its env-variable case covers acceptance[4]'s predicate half only. Re-read on main at b4199c96, where mcp-oauth-plaintext-notice.test.ts also pins the mount-time sentences at plugin-unit layer; it joins the ref as corroboration of acceptance[2]. No clause changed, no status changed", "ref": "#25836" }
+        { "revision": 4, "date": "2026-10-26", "change": "automated.ref annotated — checklist-accuracy findings of the 18.2.0 sweep, Tier 1 record #25815 at 6679644a (wave anchor #25807): the item is api/log-oracle throughout, but its only pin is a unit test of isOAuthEligibleBaseUrl and the AuthManager getters, with no booted server and no log capture, so it scores no clause; its env-variable case covers acceptance[4]'s predicate half only. Re-read on main at b4199c96, where mcp-oauth-plaintext-notice.test.ts also pins the mount-time sentences at plugin-unit layer; it joins the ref as corroboration of acceptance[2]. No clause changed, no status changed", "ref": "#25836" },
+        {
+          "revision": 5,
+          "date": "2026-10-28",
+          "change": "fixtures.requires[0] and steps[6] name the base-URL door and the no-private-address case. Checklist-accuracy findings of the 18.2.0 wave 2 (QA run #26468, Tier 1 half A, at 756220c4; wave anchor #25807, slice B): the item never said how to set the deployment base URL, which is OS_AUTH_URL (then BETTER_AUTH_URL, OS_BASE_URL), nor how to stage the https re-boot (OS_AUTH_URL=https://… behind a terminator, or os dev --cert/--key); and the runner's container held only 127.0.0.1 and 192.0.2.2, which cannot stage boot (a) but, being outside the eligible CIDR list, stages boot (b). Re-read at base fd246c22: packages/cli/src/commands/serve.ts AUTH_BASE_URL_ENV_NAMES, packages/cli/src/commands/dev.ts cert/key flags, packages/plugins/plugin-auth/src/auth-manager.ts PLAIN_HTTP_ELIGIBLE_IPV4_CIDRS. The run's missing-clause note (the AS metadata issuer should equal authorization_servers[0]) is not added here: it is the open product defect #26472, whose fix owns that clause. No clause changed",
+          "ref": "#25807"
+        }
       ]
     },
     {
