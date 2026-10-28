@@ -19,10 +19,12 @@
  *
  *  - the bag queries its `objectName` with its own `filter` and `sort`, and
  *    hands the chart one task per returned row, titled by its `gantt` block;
- *  - the flat spellings code still composes — the `gantt` block on the node,
- *    and the flattened `GanttConfig` keys `ObjectView` writes — make the
- *    identical call and hand the chart the same tasks: `SchemaRenderer` hoists
- *    the bag onto the node before `ObjectGantt` reads it;
+ *  - the flat spelling code still composes — the props on the node, with the
+ *    `gantt` block — makes the identical call and hands the chart the same
+ *    tasks: `SchemaRenderer` hoists the bag onto the node before `ObjectGantt`
+ *    reads it (the flattened `GanttConfig` keys `ObjectView` once wrote are
+ *    not read since objectstack#25923; `ObjectGantt.blockPrecedence.test.tsx`
+ *    pins their refusal);
  *  - a bag bound through the node's `dataSource` queries the bound object;
  *  - a bag on inline rows draws them without a host query;
  *  - control: a bag naming a different object queries that object and never
@@ -87,8 +89,6 @@ const ROWS = [
 const BAG: ObjectGanttBlockNode = { type: 'object-gantt', properties: { objectName: 'task', gantt: GANTT, filter: FILTER, sort: SORT } };
 /** The same props written flat, with the `gantt` block — what a code composer can build. */
 const FLAT: DeclaredNode = { type: 'object-gantt', objectName: 'task', gantt: GANTT, filter: FILTER, sort: SORT };
-/** The flattened `GanttConfig` keys `ObjectView` writes onto the node it composes. */
-const FLAT_CONFIG: DeclaredNode = { type: 'object-gantt', objectName: 'task', ...GANTT, filter: FILTER, sort: SORT };
 /** The bag with its object supplied by the node's binding instead. */
 const BOUND_BAG: DeclaredNode = { type: 'object-gantt', dataSource: { object: 'task' }, properties: { gantt: GANTT } };
 /** The bag on inline rows. */
@@ -147,7 +147,6 @@ describe('object-gantt renders from its `properties` bag (objectui#10859 batch 6
     expect(safeValidateSchema(BOUND_BAG).success).toBe(true);
     expect(safeValidateSchema(INLINE_BAG).success).toBe(true);
     expect(safeValidateSchema(FLAT).success).toBe(false);
-    expect(safeValidateSchema(FLAT_CONFIG).success).toBe(false);
   });
 
   it('the bag queries its object with its own filter and sort, and hands the chart one task per row', async () => {
@@ -161,10 +160,8 @@ describe('object-gantt renders from its `properties` bag (objectui#10859 batch 6
     expect(tasks.map((task) => task.title).sort()).toEqual(['Build', 'Design']);
   });
 
-  it.each([
-    ['the `gantt` block on the node', FLAT],
-    ['the flattened `GanttConfig` keys', FLAT_CONFIG],
-  ] as const)('the flat spelling a composer builds (%s) makes the identical call and hands the chart the same tasks', async (_label, flatNode) => {
+  it('the flat spelling a composer builds (the `gantt` block on the node) makes the identical call and hands the chart the same tasks', async () => {
+    const flatNode = FLAT;
     const bag = renderNode(BAG);
     await waitFor(() => expect(bag.adapter.find).toHaveBeenCalled());
     const bagTasks = await tasksOf(bag.container, ROWS.length);

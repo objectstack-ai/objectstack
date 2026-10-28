@@ -145,8 +145,10 @@ describe('ObjectCalendar refusal screen — the remedy it states (objectui#8170)
           {
             type: 'object-calendar',
             objectName: 'crm_leave_request',
-            startDateField: 'start_date',
-            titleField: 'name',
+            calendar: {
+              startDateField: 'start_date',
+              titleField: 'name',
+            },
           } as any
         }
         dataSource={makeDataSource()}
@@ -168,7 +170,9 @@ describe('ObjectCalendar refusal screen — the remedy it states (objectui#8170)
           {
             type: 'object-calendar',
             objectName: 'crm_leave_request',
-            startDateField: 'start_date',
+            calendar: {
+              startDateField: 'start_date',
+            },
           } as any
         }
         dataSource={makeDataSource()}

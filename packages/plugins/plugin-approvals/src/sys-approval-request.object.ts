@@ -114,6 +114,9 @@ export const SysApprovalRequest = ObjectSchema.create({
   // reads them as stored and never re-derives a label from flow metadata or
   // resolves an approver address itself; `process_name`, `current_step` and
   // `pending_approvers` keep the machine values every query and decision reads.
+  // [#27041] A reader with a locale is served `process_label` and
+  // `current_step_label` from the app's language pack where it carries them,
+  // overlaid on the read and never stored (`reader-locale-labels-middleware.ts`).
   //
   // The target is the `record_id` column alone. It is the pointer's id half,
   // so the console draws the target record (its object's icon and name) and

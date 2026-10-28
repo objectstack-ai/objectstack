@@ -33,7 +33,6 @@
     "user-state-persistence",
     "objectos-integration",
     "troubleshooting",
-    "ci-cd-pipeline",
     "deployment",
     "release-notes"
   ]

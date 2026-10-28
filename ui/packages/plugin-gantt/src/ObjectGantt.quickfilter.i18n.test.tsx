@@ -36,16 +36,18 @@ const INLINE = [
 
 const SCHEMA: any = {
   type: 'gantt',
-  startDateField: 'start',
-  endDateField: 'end',
-  titleField: 'name',
+  gantt: {
+    startDateField: 'start',
+    endDateField: 'end',
+    titleField: 'name',
+    quickFilters: [
+      { field: 'status', label: 'Status', options: ['todo', 'doing', 'done'] },
+      // No `options`, and no record carries `owner` → resolves to zero options,
+      // which is the only way to render the `empty` placeholder.
+      { field: 'owner', label: 'Owner' },
+    ],
+  },
   data: { provider: 'value', items: INLINE },
-  quickFilters: [
-    { field: 'status', label: 'Status', options: ['todo', 'doing', 'done'] },
-    // No `options`, and no record carries `owner` → resolves to zero options,
-    // which is the only way to render the `empty` placeholder.
-    { field: 'owner', label: 'Owner' },
-  ],
 };
 
 /**

@@ -44,9 +44,10 @@
  * take that on trust. A `check:*` name would invite the next sweep to wire it
  * into a workflow, which objectui#8875 explicitly reserved.
  *
- * It also keeps a second obligation out of the way: objectui#3653 pins
- * `content/docs/guide/ci-cd-pipeline.md`'s table BY COMMAND, so a CI step here
- * would owe a matching documentation row for a gate nobody has decided to have.
+ * It also kept a second obligation out of the way: objectui#3653 pinned
+ * objectui's CI guide page's table BY COMMAND, so a CI step here would have
+ * owed a matching documentation row for a gate nobody had decided to have.
+ * objectstack#26944 deleted that page.
  *
  * ## What counts as a citation -- five syntaxes, and why each is here
  *

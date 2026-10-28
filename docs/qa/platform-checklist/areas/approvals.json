@@ -379,7 +379,7 @@
       "title": "A submitter who is not an approver sees no approver buttons",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "browser",
       "personas": ["submitter holding NO approver position on their own pending request"],
@@ -396,17 +396,17 @@
       "steps": [
         "provision a sign-in account for the no-position submitter persona (Mei Phone) or an equivalent fixture user; sign in as that persona",
         "open the inbox through the account app's Approvals nav entry (/_console/apps/com.objectstack.account/component/approvals/inbox) — the 我发起的 tab must list her pending EXP-2001 request; the bare /system/approvals route stays supported but is not the user path being tested here (#7234)",
-        "open the request drawer; screenshot the rendered action set",
+        "open the request from its 我发起的 row — it navigates to the request's served record page, /apps/APP/sys_approval_request/record/ID (the side drawer is retired) — and screenshot the action set its decision panel renders",
         "GET /api/v1/approvals/requests/:id as this persona and record the viewer flags (can_act, is_submitter) and pending_approvers",
         "forge the gate: as this persona POST /api/v1/approvals/requests/:id/approve directly with an approve body",
         "re-read the request and its /actions timeline after the forged call"
       ],
       "acceptance": [
         {
-          "clause": "the drawer omits approve/reject for the submitter while still rendering the submitter-side affordances (remind / recall)",
+          "clause": "the request page's decision panel omits every approver lever for the submitter while still rendering the submitter-side ones (Send reminder / Recall)",
           "oracle": "screenshot",
-          "verify": "drawer screenshot as the submitter: no approver decision buttons; remind/recall present on the own-request",
-          "evidence": "drawer screenshot"
+          "verify": "decision-panel screenshot as the submitter on her own pending request: no Approve, Reject, Reassign, Send back or Request info (each is visible only on record.viewer.can_act, Approve / Reject / Reassign also on record.viewer.can_override), and Send reminder plus Recall present (approval_remind is visible on a pending request whose record.viewer.is_submitter is true; approval_recall on a pending or returned one). The panel draws sys_approval_request's own declared actions at record_section by those visible predicates (packages/plugins/plugin-approvals/src/sys-approval-request.object.ts)",
+          "evidence": "decision-panel screenshot"
         },
         {
           "clause": "the server's viewer flags say why: can_act=false, is_submitter=true — the rendered absence is metadata, not a client guess",
@@ -442,15 +442,16 @@
         { "revision": 3, "date": "2026-08-10", "change": "entry path refreshed to the account app's Approvals nav entry (component route) after #7213/#7234", "ref": "#7331" },
         { "revision": 4, "date": "2026-08-11", "change": "knownGaps records the better-auth issuer=local:credential provisioning detail — with it, Mei's sign-in is provisionable at runtime and this item's standing fixture blocker becomes payable instead of permanent", "ref": "#7530" },
         { "revision": 5, "date": "2026-08-18", "change": "UNBLOCKED. The showcase provisions Mei's better-auth credential account at boot, so the submitter persona this item is built around is a real, stock login and `blocked(fixture)` is removed. knownGaps rewritten as closed-by-fixture rather than deleted, and the one gap that is NOT closed (stock requests route to the admin, so the persona choice is still load-bearing) is restated so it does not get read as closed by association", "ref": "#9308" },
-        { "revision": 6, "date": "2026-09-19", "change": "same re-anchoring as the sibling items: the retired plugin-auth backfill citation is replaced by the retirement's migration entry in packages/spec, the reason is kept, and the two falsified clauses are withdrawn — the showcase no longer derives the issuer from the dev admin's row, and the dogfood test no longer pins an issuer (it pins the account under the key sign-in resolves on and asserts nothing still writes the retired field)", "ref": "#17453" }
+        { "revision": 6, "date": "2026-09-19", "change": "same re-anchoring as the sibling items: the retired plugin-auth backfill citation is replaced by the retirement's migration entry in packages/spec, the reason is kept, and the two falsified clauses are withdrawn — the showcase no longer derives the issuer from the dev admin's row, and the dogfood test no longer pins an issuer (it pins the account under the key sign-in resolves on and asserts nothing still writes the retired field)", "ref": "#17453" },
+        { "revision": 7, "date": "2026-10-28", "change": "steps[2] and acceptance[0] read the request page, not the retired request drawer. The inbox opens a request by navigating to its served record page, /apps/APP/sys_approval_request/record/ID (ui/apps/console/src/pages/system/ApprovalsInboxPage.tsx requestPagePath); objectui#12484 deleted the inbox's side sheet (ruling C on objectui#12438); it came into this tree with the ui/ import, PR #25825. That page's decision panel (record:approval_decision, packages/plugins/plugin-approvals/src/sys-approval-request.page.ts) draws sys_approval_request's declared actions by their visible predicates over record.viewer (sys-approval-request.object.ts), so the clause now names the levers by their declared labels: Send reminder and Recall for the submitter, none of the five approver levers. The assertion is unchanged: no approver lever, the submitter's two present. Read from source at base f2fdac5d, not driven live. Wave anchor #25807, slice C; lead from slice B's report 6457925443", "ref": "#25807" }
       ]
     },
     {
       "id": "approvals.notification-deep-link",
-      "title": "An approval notification deep-links straight into the request drawer",
+      "title": "An approval notification deep-links straight onto the request's page",
       "since": "v16",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P2",
       "surface": "browser",
       "personas": ["any pending approver"],
@@ -462,11 +463,11 @@
         "boot the showcase on its own port and DB (dogfood §0); sign in as the dev admin (a pending approver on the seeded requests)",
         "mint the notification: open a fresh request the admin approves (the opening emits approval.requested to each concrete approver on its slate, PR #22625) — or POST /api/v1/approvals/requests/:id/reassign {to: <self>} on a pending request. Not /remind: it is submitter-only and answers the admin 403 'FORBIDDEN: only the submitter may send reminders' on the seeded requests, which a run must not score as a deep-link FAIL",
         "read the resulting notification row and record its actionUrl — it must carry /system/approvals?request=<id> (#2678 P1.5; ApprovalService.notify rewrites the bare /system/approvals into the deep link centrally, so every emitting topic inherits it)",
-        "cold-load that exact URL in a fresh page (no prior navigation); wait for settle; capture the drawer that opens",
-        "GET /api/v1/approvals/requests/:id and cross-check the drawer's request identity and status against the read",
+        "cold-load that exact URL in a fresh page (no prior navigation); wait for settle; record the URL it lands on — the inbox route replaces itself in history with the request's served record page, /apps/APP/sys_approval_request/record/ID (APP is setup on the bare /system/approvals route) — and capture that page",
+        "GET /api/v1/approvals/requests/:id and cross-check the page's request identity and status against the read",
         "repeat the cold load a second time on a fresh page (the hydration-race counter)",
         "negative probe: cold-load /system/approvals?request=<nonexistent-id> and screenshot the result",
-        "route-parity probe (#7213): cold-load the SAME ?request=<id> on the component route the account app's Approvals entry uses — /_console/apps/com.objectstack.account/component/approvals/inbox?request=<id> — and screenshot; both routes must open the same drawer"
+        "route-parity probe (#7213): cold-load the SAME ?request=<id> on the component route the account app's Approvals entry uses — /_console/apps/com.objectstack.account/component/approvals/inbox?request=<id> — record the URL it lands on and screenshot; both routes must land on that request's record page"
       ],
       "acceptance": [
         {
@@ -476,38 +477,38 @@
           "evidence": "notification row read"
         },
         {
-          "clause": "the ?request= URL opens the request drawer directly on a cold load — verified twice on fresh loads",
+          "clause": "the ?request= URL lands on that request's page directly on a cold load — verified twice on fresh loads",
           "oracle": "screenshot",
-          "verify": "fresh navigation renders the drawer for that exact request both times. Identify WHICH request the drawer resolved to by field-matching it against GET /api/v1/approvals/requests/:id (identity, status, pending slate) — NOT by reading the address bar: the console CONSUMES the query param, so by the time the drawer is open and capturable the URL no longer shows it",
-          "evidence": "two drawer captures, each paired with the API read of the id it was cold-loaded with"
+          "verify": "each fresh navigation lands on /apps/APP/sys_approval_request/record/ID for the id it was cold-loaded with (ApprovalsInboxPage Navigates, replacing the deep link in history, to requestPagePath) and the page draws that request. The landing URL keeps the id, but identify WHICH request the page drew by field-matching it against GET /api/v1/approvals/requests/:id (identity, status, pending slate) — a URL is not a render",
+          "evidence": "two landing URLs and page captures, each paired with the API read of the id it was cold-loaded with"
         },
         {
-          "clause": "the drawer shows the SAME request the API returns for that id — identity, status, pending slate",
+          "clause": "the page shows the SAME request the API returns for that id — identity, status, pending slate",
           "oracle": "api",
-          "verify": "field-match the drawer against GET /api/v1/approvals/requests/:id — a drawer that opened on the wrong request also 'renders a drawer'",
-          "evidence": "request read + drawer screenshot"
+          "verify": "field-match the page (its title, the highlights strip's status and step, the decision panel's pending approvers) against GET /api/v1/approvals/requests/:id — a page that opened on the wrong request also 'renders a page'",
+          "evidence": "request read + page screenshot"
         },
         {
-          "clause": "the SAME ?request= deep link opens the drawer on BOTH routes — the /system/approvals route notification and email links carry, and the component route the account app's Approvals entry mounts (#7213 entry convergence)",
+          "clause": "the SAME ?request= deep link lands on the request's page from BOTH routes — the /system/approvals route notification and email links carry, and the component route the account app's Approvals entry mounts (#7213 entry convergence)",
           "oracle": "screenshot",
-          "verify": "cold-load the same request id on /system/approvals?request= and on /apps/<appId>/component/approvals/inbox?request=; both render the drawer for that id. The /system/approvals route MUST keep working — it is what already-delivered notifications and emails carry, so a component-route-only deep link is a FAIL",
-          "evidence": "one screenshot per route, same request id visible"
+          "verify": "cold-load the same request id on /system/approvals?request= and on /apps/<appId>/component/approvals/inbox?request=; both land on that request's record page (the app segment differs: setup on the bare route, the account app on the component route) and draw that request. The /system/approvals route MUST keep working — it is what already-delivered notifications and emails carry, so a component-route-only deep link is a FAIL",
+          "evidence": "one landing URL + screenshot per route, same request id"
         },
         {
-          "clause": "an unknown ?request id degrades to the inbox without a drawer (or an explicit not-found state) — never someone else's request",
+          "clause": "an unknown ?request id lands on that id's record page in its not-found state — never someone else's request",
           "oracle": "screenshot",
-          "verify": "the nonexistent-id load renders the inbox list with no drawer or a not-found notice; assert no drawer carrying a different request id",
-          "evidence": "screenshot of the degraded state"
+          "verify": "the nonexistent-id load lands on /apps/APP/sys_approval_request/record/<nonexistent-id> and renders the record page's not-found state (RecordDetailView's 'Record not found'); assert no request content for a different id is drawn",
+          "evidence": "the landing URL + a screenshot of the not-found state"
         }
       ],
       "negative": [
-        "a deep link that lands on the inbox with the WRONG request (or none) selected while the run records 'drawer rendered' is a FAIL — the clause is the exact request id, not the drawer's existence"
+        "a deep link that lands on the WRONG request's page (or on the queue with no request open) while the run records 'page rendered' is a FAIL — the clause is the exact request id, not a page's existence"
       ],
       "traps": ["hydration-race", "shared-browser-tab"],
       "source": [
         "#3358 §1",
         "#7213", "#7233",
-        "objectui apps/console/src/pages/system/ApprovalsInboxPage.tsx (#2678 P1.5 — 'notifications carry /system/approvals?request=<id>')",
+        "ui/apps/console/src/pages/system/ApprovalsInboxPage.tsx#ApprovalsInboxPage (#2678 P1.5 — 'notifications carry /system/approvals?request=<id>'; the route Navigates, replace, to requestPagePath, the request's served record page — objectui#12484 deleted the side sheet), ui/apps/console/src/pages/system/ApprovalsInboxPage.opensServedPage-12484.test.tsx (a unit pin that the deep link lands on the served page; it boots no stack, so it scores no clause here)",
         "packages/plugins/plugin-approvals/src/approval-service.ts#ApprovalService (ApprovalService.notify — the central /system/approvals → ?request=<id> rewrite; the emitting topic set — approval.requested on open since PR #22625, beside reminder / reassigned / returned / request_info / comment / ooo_substituted / ooo_skipped / escalated / sla_breached — every member inherits the deep link)"
       ],
       "history": [
@@ -517,7 +518,8 @@
         { "revision": 4, "date": "2026-08-11", "change": "fixtures re-anchored on the remind/reassign path — the old requires rested on a request's OPEN notifying somebody, and no approval.opened topic exists; and the cold-load clause's evidence restated observably (drawer field-matched against the API instead of 'screenshots with the URL visible', which the console's consumption of the query param makes unmeetable)", "ref": "#7530" },
         { "revision": 5, "date": "2026-10-10", "change": "the open-time gap is closed: since PR #22625 (#22607) openNodeRequest publishes approval.requested to each concrete approver on the slate the request opens on, through the same notify() deep-link rewrite — the knownGaps entry that said opening notifies nobody is removed, the source note names the topic, step 2 and the fixture note say the opening is a second source; the fixtures stay on remind/reassign (deterministic on demand) and the revision-4 row stands as history", "ref": "#22631" },
         { "revision": 6, "date": "2026-10-13", "change": "fixtures.requires[0] and steps[1] stop sending the admin through /remind (assertion defect, #23163 A0; parked on #23121, carried by #23169). ApprovalService.remind refuses every caller but the request's submitter, 'FORBIDDEN: only the submitter may send reminders', and the dev admin is an approver on the seeded requests. QA run #23163 met the 403 and minted the notification through the opening path instead, then passed every clause. The opening path (PR #22625) and /reassign are the two notification sources an approver can drive", "ref": "#23169" },
-        { "revision": 7, "date": "2026-10-20", "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed", "ref": "#25003" }
+        { "revision": 7, "date": "2026-10-20", "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed", "ref": "#25003" },
+        { "revision": 8, "date": "2026-10-28", "change": "the retired request drawer is replaced by the request's served record page: title, steps[3], [4], [7], acceptance[1]–[4], negative[0] and source[3]. A cold-loaded /system/approvals?request=ID, or the account app's component route with the same query, Navigates, replacing itself in history, to /apps/APP/sys_approval_request/record/ID (ApprovalsInboxPage, requestPagePath); objectui#12484 deleted the inbox's side sheet (ruling C on objectui#12438); it came into this tree with the ui/ import, PR #25825. Two readings change with the surface: acceptance[1] may read the landing URL, which keeps the id (revision 4's 'the console consumes the query param' described the drawer), and acceptance[4]'s unknown id lands on that id's record page in its not-found state instead of the inbox with no drawer. Both are read from source at base f2fdac5d, not driven live, so a prior verdict on acceptance[1]–[4] does not carry. acceptance[0] is unchanged: ApprovalService.notify still rewrites /system/approvals to ?request=ID. Wave anchor #25807, slice C; lead from slice B's report 6457925443", "ref": "#25807" }
       ]
     },
     {
@@ -682,7 +684,7 @@
       "title": "An approval-parked run cannot be resumed through the generic automation route — decisions go through the approvals service only",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": ["dev admin (holds finance + legal, so the seeded unanimous request is decidable)"],
@@ -690,7 +692,7 @@
         "app": "showcase",
         "requires": ["showcase_invoice_signoff parked at its aggregating approval node (the seeded invoice request, or a fresh one via PATCHing an invoice draft→sent)"],
         "knownGaps": [
-          "no pin drives this item's doors, so it carries no automated ref (RUNNER rule 6, a pin scores only the layer it drives). packages/services/service-automation/src/resume-authority-gate.test.ts drives AutomationEngine.resume over an InMemorySuspendedRunStore, with a stand-in 'gated_pause' node declaring resumeAuthority 'service' in the approval node's place: an engine unit, with no HTTP route and no approvals API. It holds that a raw resume of a service-gated pause is refused PERMISSION_DENIED and consumes nothing, and that an 'any' pause (the screen / wait stand-in) resumes — evidence of that layer only, beside acceptance[0], [1] and [3]. Every clause's oracle is the api (the route's status, the run and /:id/actions reads, the approvals-API decision), so every clause is driven live. QA run #24840 scored revision 1 pass from this pin before rule 6 landed. automated may return when a pin drives the generic resume route and the approvals API on a booted stack"
+          "no pin drives this item's doors, so it carries no automated ref (RUNNER rule 6, a pin scores only the layer it drives). Searched for one at base f2fdac5d: the tree holds three kinds of layer pin and none spans the doors. (1) packages/services/service-automation/src/resume-authority-gate.test.ts drives AutomationEngine.resume over an InMemorySuspendedRunStore, with a stand-in 'gated_pause' node declaring resumeAuthority 'service' in the approval node's place: a raw resume of a service-gated pause is refused PERMISSION_DENIED and consumes nothing, and an 'any' pause (the screen / wait stand-in) resumes. (2) packages/plugins/plugin-approvals/src/approval-node.test.ts drives the real ApprovalService and AutomationEngine in process: a raw engine resume of an approval pause answers PERMISSION_DENIED and leaves the request pending with only its submit action and the run parked, and ApprovalService.decide resumes it — no HTTP route. (3) packages/runtime/src/http-dispatcher.test.ts and packages/runtime/src/domains/automation-resume-caller-gate.test.ts drive the generic resume route's dispatcher over a MOCKED automation service that returns the engine's PERMISSION_DENIED, pinning only that the route answers it as 403 — no engine, no approval node. Each is evidence of its own layer beside acceptance[0]–[3]; every clause's oracle is the api (the route's status, the run and /:id/actions reads, the approvals-API decision), so every clause is driven live. QA run #24840 scored revision 1 pass from the first pin before rule 6 landed. automated may return when one pin drives the generic resume route and the approvals API on a booted stack — packages/qa/dogfood/test/flow-durable-suspend.dogfood.test.ts already drives the generic resume route over HTTP, for a non-approval pause only"
         ]
       },
       "steps": [
@@ -745,6 +747,12 @@
           "date": "2026-10-28",
           "change": "steps[5] names the doors that pause and resume the contrast run. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26476, manual api set, at 756220c4; wave anchor #25807, slice B): the run paused the wizard through POST /api/v1/actions/showcase_task/showcase_bulk_reassign/RECORD and resumed it with {inputs:{new_assignee}}. Re-read at base fd246c22: examples/app-showcase/src/ui/actions/index.ts BulkReassignAction (type flow, target showcase_reassign_wizard), examples/app-showcase/src/automation/flows/index.ts (new_assignee input), packages/runtime/src/domains/automation-resume-envelope.test.ts (the resume body's inputs key). No clause changed; the item still has no pin (fixtures.knownGaps[0])",
           "ref": "#25807"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-28",
+          "change": "fixtures.knownGaps[0] re-measured for a pin; none found, gap kept, `automated` stays absent. Searched at base f2fdac5d for a test that drives the generic resume route and the approvals API on a booted stack: none. The gap now names the two further layer pins the search found — approval-node.test.ts (real ApprovalService and AutomationEngine in process, no route; its resume-gate tests, 5 passed when run here) and the dispatcher pins http-dispatcher.test.ts and automation-resume-caller-gate.test.ts (the route over a mocked service) — and where such a pin could land. Wave anchor #25807, slice C; lead from slice B's report 6457925443 ('needs a pin or a live run'). No clause changed",
+          "ref": "#25807"
         }
       ]
     },
@@ -753,7 +761,7 @@
       "title": "A decision's typed outputs route the next stage: expression approvers resolve from the previous decision at node entry",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["dev admin (org-membership owner — the stage-1 approver of the dynamic-approval demo)"],
@@ -771,7 +779,7 @@
         "boot the showcase on its own port and DB (dogfood §0); sign in as the dev admin",
         "PATCH a showcase_announcement's title over /api/v1/data — showcase_dynamic_approval opens its stage-1 Lead Review request routed at the org owner",
         "GET /api/v1/approvals/requests/:id — record status and the declared decisionOutputs contract on the request/node",
-        "open the request drawer; screenshot the decision dialog's next_reviewers control — it must be a sys_user MULTI-SELECT picker, not a free-text box",
+        "open the request's page (its inbox row navigates to /apps/APP/sys_approval_request/record/ID) and click Approve in its decision panel; screenshot the decision dialog's next_reviewers control — it must be a sys_user MULTI-SELECT picker, not a free-text box",
         "gate probe: attempt to approve WITHOUT filling next_reviewers; record the refusal",
         "approve WITH next_reviewers=[the admin] via the dialog; capture the decision POST body",
         "GET the requests list again — the stage-2 co-sign request must now exist; read its pending_approvers",
@@ -818,12 +826,14 @@
         "examples/app-showcase/src/automation/flows/dynamic-approval.flow.ts (#3447 P2)",
         "packages/spec/src/automation/approval.zod.ts#DecisionOutputDefSchema (DecisionOutputDefSchema — typed pickers, required-to-approve objectui#2955; expression approvers + resolveAs)",
         "examples/app-showcase/src/automation/flows/approver-bindings.flow.ts (#3508 — the degraded-to-free-text failure the typed control fixes)",
-        "packages/services/service-automation/src/engine.ts#recordLog (the two `status: 'paused'` recordLog calls — the suspend path records no variables, which is why the vars clause needs a functional oracle)"
+        "packages/services/service-automation/src/engine.ts#recordLog (the two `status: 'paused'` recordLog calls — the suspend path records no variables, which is why the vars clause needs a functional oracle)",
+        "ui/packages/app-shell/src/utils/decisionOutputParams.ts (the one place a node's decisionOutputs become decision dialog params — the request page's decision panel, DeclaredActionsBar, and the record header alike; a typed output renders the same picker in both, objectui#2955)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial — covers the #3447 dynamic-routing chain (typed decision outputs → vars → expression approvers) with the required-output gate", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 2, "date": "2026-08-11", "change": "the vars clause now names an oracle that is actually readable: stage-2 pending_approvers cardinality + order across a 1-pick and a 2-pick run, instead of 'the outputs present in the run variables snapshot' — a paused run's detail carries no variables key at all (structural), which was the sole reason #7517 scored this item PARTIAL. Gap recorded in knownGaps rather than left to be rediscovered", "ref": "#7530" },
-        { "revision": 3, "date": "2026-10-20", "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed", "ref": "#25003" }
+        { "revision": 3, "date": "2026-10-20", "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed", "ref": "#25003" },
+        { "revision": 4, "date": "2026-10-28", "change": "steps[3] opens the stage-1 decision on the request's served record page, not the retired request drawer: the inbox row navigates to /apps/APP/sys_approval_request/record/ID (ui/apps/console/src/pages/system/ApprovalsInboxPage.tsx requestPagePath; objectui#12484 deleted the inbox's side sheet (ruling C on objectui#12438); it came into this tree with the ui/ import, PR #25825), and that page's decision panel draws Approve through DeclaredActionsBar, whose dialog takes the node's typed outputs from decisionOutputParams (source[4], added). Read from source at base f2fdac5d. Wave anchor #25807, slice C; lead from slice B's report 6457925443. No clause changed", "ref": "#25807" }
       ]
     },
     {
@@ -1419,7 +1429,7 @@
       "title": "Every approver type resolves the slate it declares — department includes all descendants, deprecated role warns and resolves, and a slate with no concrete person takes the declared onEmptyApprovers fork, never a fake approval",
       "since": "v16",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "api",
       "personas": ["dev admin (authors the scratch flows; org owner)", "Ada Auditor / Mei Phone (real logins since #9308 — directory rows the graph legs resolve to)"],
@@ -1437,7 +1447,7 @@
         ]
       },
       "enumSource": { "file": "packages/spec/src/automation/approval.zod.ts", "export": "ApproverType", "expect": 10 },
-      "variants": ["manager", "position", "department (+ ALL descendant units)", "team", "field (multi-value fan-out)", "expression", "org_membership_level", "role (deprecated → org_membership_level: warn + resolve)", "user", "queue (dead slot, #3508)"],
+      "variants": ["manager", "position", "department (+ ALL descendant units)", "team", "field (multi-value fan-out)", "expression", "org_membership_level", "role (deprecated → org_membership_level: warn + resolve)", "user", "queue (the queue's members at node entry, ADR-0142 D6)"],
       "steps": [
         "boot the showcase on its own port and DB (dogfood §0); sign in as the dev admin; provision the directory rows — BU memberships over the data API, a team and its members through the organization team doors, a manager chain through set-user-manager (fixtures.requires names each door) — and record their ids",
         "author + register the scratch flows through POST /api/v1/automation (fixtures.requires: a record trigger on a stock object, no writable package); per leg: trigger the flow by creating one record of its trigger object, GET /api/v1/approvals/requests?status=pending, GET /:id and read pending_approvers (and pending_approver_names); deregister the flow before the next leg",
@@ -1445,7 +1455,7 @@
         "field leg: a multi-select user field naming two users — two slots, in order, never one 'u1,u2' literal",
         "manager leg: the submitter's manager_id resolves; user leg: the literal id resolves",
         "role leg: author {type:'role', value:'owner'} (it still parses for the deprecation window); read the boot/trigger log for the ADR-0090 D3 deprecation warn naming the canonical spelling, and assert the slate equals what {type:'org_membership_level', value:'owner'} resolves on the same org",
-        "queue leg: a stored flow carrying {type:'queue'} (author it directly through the metadata channel if the designer refuses — the designer withholding it IS the xEnumDeprecated contract) — trigger: the slot resolves to nobody and the log carries the #3508 'not implemented — the slot resolves to nobody' warn; the slate then names no one, so the default admin_rescue opens the request on the organization's administrators (#22824) — pending_approvers holds the administrators' ids and NOT the literal queue:<value> slot, which is kept as the abandoned slate in node_config_json.__resolvedFrom['admin_rescue:abandoned'] (read node_config_json through GET /api/v1/data/sys_approval_request/ID as the admin — GET /api/v1/approvals/requests/:id projects no node_config_json, packages/plugins/plugin-approvals/src/approval-service.ts rowFromRequest) — and the request stays pending",
+        "queue leg (ADR-0142 D6): provision a queue in the request organization — as the admin, POST /api/v1/data/sys_queue {name, label} and, per member, POST /api/v1/data/sys_queue_member {queue: <name>, recipient_type: 'user', recipient_id: <a non-administrator member's user id>} (both objects are admin-authored config, plugin-sharing) — then a scratch flow whose approver is {type:'queue', value:<name>}; trigger: pending_approvers equals the queue's members and holds no queue:<name> slot. Empty arm: point the approver at a queue with no members (or a name with no sys_queue row) and trigger again — the log carries the \"approver 'queue:<value>' expanded to nobody\" warn and the queue adds NO slot; the slate then names no one, so the default admin_rescue opens the request on the organization's administrators (#22824) — pending_approvers holds the administrators' ids and no queue:<value> entry, and node_config_json.__resolvedFrom['admin_rescue:abandoned'] is [] beside 'admin_rescue:reason' 'no approver on the node resolved to a person' (read node_config_json through GET /api/v1/data/sys_approval_request/ID as the admin — GET /api/v1/approvals/requests/:id projects no node_config_json, packages/plugins/plugin-approvals/src/approval-service.ts rowFromRequest) — and the request stays pending",
         "empty-slate forks, one scratch flow per policy over an UNSTAFFED position: onEmptyApprovers absent/admin_rescue → the request opens on the request organization's ADMINISTRATORS as ordinary approvers (#22824): first read who they are — the organization's sys_member rows whose grants hold organization_admin or organization_admin_no_bypass (on stock showcase, the dev admin as the org owner) — then read the request: pending_approvers equals exactly those ids, the abandoned position:<p> literal and its reason sit in node_config_json.__resolvedFrom ('admin_rescue:abandoned', 'admin_rescue:reason') — on the data door's row (GET /api/v1/data/sys_approval_request/ID as the admin), since the approvals request read omits node_config_json — GET /:id/actions carries one system comment (no actor) 'Routed to this organization's administrators because the approver slate named no one: position '<p>' has no holder.', the request stays pending, and the WARN '… resolved to no concrete approver (…) — opening on this organization's administrators per onEmptyApprovers: 'admin_rescue'' lands; 'fail' → the run fails with NO_APPROVERS and no request row; 'auto_approve' → NO request row, the run continues down the approve edge with output.autoApproved=true and the auto-approve warn lands; 'fallback' (fallbackApprovers naming a STAFFED target, e.g. {type:'user', value: <a non-administrator member's user id>} — not org_membership_level 'owner', which on stock resolves to the dev admin alone, the organization's sole administrator, so a fallback that silently degraded to admin_rescue would open on the same slate and the leg could not tell the two apart) → the request opens on the fallback slate — pending_approvers holds the fallback's resolved ids, no literal slot — and the 'opening on the declared fallbackApprovers' warn lands; a fallback that itself resolves to nobody degrades to admin_rescue with its own 'resolved to nobody either' warn, and so opens on the organization's administrators too",
         "throughout: read the trigger-time log — every graph expansion to nobody must carry the #3807 'expanded to nobody' warn naming type and value"
       ],
@@ -1481,10 +1491,10 @@
           "evidence": "per-policy request/run reads (pending_approvers, node_config_json.__resolvedFrom, the request's actions) + log lines + the administrator read"
         },
         {
-          "clause": "queue is a dead slot that stays LOUD, never a fake approval: it resolves to nobody and warns #3508; its slate naming no one, the default admin_rescue opens the request on the organization's administrators (#22824) — the literal queue:<value> slot is the abandoned slate, never a pending approver — and the request waits for an administrator's decision rather than passing",
-          "oracle": "log",
-          "verify": "the 'approver type 'queue' is not implemented — the slot resolves to nobody' warn (#3508, approval-service.ts resolveApproverSpec) + the request read: status still pending, pending_approvers equals the organization's administrators with no queue:<value> entry, node_config_json.__resolvedFrom['admin_rescue:abandoned'] is ['queue:<value>'] (on the data door's row, as acceptance[4] reads it), and the routed-to-administrators comment is on its actions",
-          "evidence": "warn line + request read + its actions"
+          "clause": "a queue approver routes to the queue's members at node entry (ADR-0142 D6), and an empty queue stays LOUD, never a fake approval: it warns that it expanded to nobody and adds NO slot — the queue:<value> literal is never written — so a slate it leaves naming no one goes to the default admin_rescue, which opens the request on the organization's administrators (#22824), and the request waits for an administrator's decision rather than passing",
+          "oracle": "api",
+          "verify": "staffed arm: the request read's pending_approvers equals the user ids of the sys_queue_member rows planted for the queue, with no queue:<value> entry. Empty arm: the warn \"[approvals] approver 'queue:<value>' expanded to nobody — … It adds no slot to this request; …\" (approval-service.ts resolveApproverSpec — match the queue:<value> name and 'expanded to nobody', not the whole sentence; a warn whose cause reads 'no ownership-queue service is registered' means the boot lacks plugin-sharing's queue service, so score the leg blocked(fixture), not a pass) + the request read: status still pending, pending_approvers equals the organization's administrators with no queue:<value> entry, node_config_json.__resolvedFrom['admin_rescue:abandoned'] is [] and 'admin_rescue:reason' is 'no approver on the node resolved to a person' (on the data door's row, as acceptance[4] reads it), and the routed-to-administrators comment is on its actions. approval-service.test.ts's ADR-0142 D6 queue describe pins this at the service layer only, with no HTTP door, so it scores no clause here",
+          "evidence": "the staffed request read vs the planted queue rows + the warn line + the empty-arm request read + its actions"
         }
       ],
       "negative": [
@@ -1496,8 +1506,8 @@
       ],
       "traps": ["seed-data-thin", "wrong-persona"],
       "source": [
-        "packages/spec/src/automation/approval.zod.ts#ApproverType (ApproverType, 10 members incl. deprecated role + dead queue), (DEPRECATED_APPROVER_TYPES role→org_membership_level + canonicalApproverType), (NON_AUTHORABLE_APPROVER_TYPES), (onEmptyApprovers admin_rescue|fail|auto_approve|fallback, default admin_rescue), (fallbackApprovers — same shape as approvers, required iff 'fallback' and refused under any other policy: checkFallbackApproversPairing)",
-        "packages/plugins/plugin-approvals/src/approval-service.ts#expandApprovers (expandApprovers — per-spec group tagging; expression resolved outside the flat contract), (resolveApproverSpec — role warn, per-type branches, queue warn, #3807 expanded-to-nobody warn, literal type:value fallback), (expandBusinessUnitUsers — active-descendant BFS + membership union), (the empty-slate fork: 'empty' = no concrete person, NO_APPROVERS / autoApproved / fallbackApprovers re-expansion / admin_rescue warn)",
+        "packages/spec/src/automation/approval.zod.ts#ApproverType (ApproverType, 10 members incl. deprecated role + queue, live since ADR-0142 D6), (DEPRECATED_APPROVER_TYPES role→org_membership_level + canonicalApproverType), (NON_AUTHORABLE_APPROVER_TYPES), (onEmptyApprovers admin_rescue|fail|auto_approve|fallback, default admin_rescue), (fallbackApprovers — same shape as approvers, required iff 'fallback' and refused under any other policy: checkFallbackApproversPairing)",
+        "packages/plugins/plugin-approvals/src/approval-service.ts#expandApprovers (expandApprovers — per-spec group tagging; expression resolved outside the flat contract), (resolveApproverSpec — role warn, per-type branches, queue branch over the ownership-queue service and its expanded-to-nobody warn, ADR-0142 D6, #3807 expanded-to-nobody warn, literal type:value fallback), (expandBusinessUnitUsers — active-descendant BFS + membership union), (the empty-slate fork: 'empty' = no concrete person, NO_APPROVERS / autoApproved / fallbackApprovers re-expansion / admin_rescue warn)",
         "packages/plugins/plugin-approvals/src/approval-service.ts#organizationAdministrators (#22824 — the slate an empty admin_rescue request opens on: the request organization's members holding its TENANT_ADMIN rung, the authority the override's tenant arm trusts; platform administrators are not added for being one; no administrator ⇒ the nameless request and its loud WARN), (emptySlateReason — the reason kept in __resolvedFrom and the routed-to-administrators timeline comment)",
         "packages/plugins/plugin-approvals/src/admin-rescue-named-slate.integration.test.ts (the #22824 pin: the administrators' slate, each one's queue and bell, an ordinary approval rather than an override, the reason on the request, and the fallback / auto_approve / fail / no-administrator controls)",
         "examples/app-showcase/src/automation/flows/approver-bindings.flow.ts (the #3508 DESIGNER specimen — draft, empty values, its docblock is the evidence the runtime legs need scratch flows)",
@@ -1541,6 +1551,12 @@
           "revision": 8,
           "date": "2026-10-28",
           "change": "the auto_approve marker names a real field. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26476, manual api set, at 756220c4; wave anchor #25807, slice B): the marker update_record needed a field the zoo declares; f_textarea works and f_text does not exist. Re-read at base fd246c22 (field-zoo.object.ts). Two other lines of that run are not edits here: the item already identifies administrators by their grants, as approval-service.ts organizationAdministrators does (holdsTenantAdminRung over resolveUserAuthzGrants, the membership role being only the provisioning source), and the stale 'the request stalls' wording of the approval-approver-type-unsupported lint advisory is product copy in packages/lint, outside this ledger. No clause changed",
+          "ref": "#25807"
+        },
+        {
+          "revision": 9,
+          "date": "2026-10-28",
+          "change": "steps[6], acceptance[5], variants[9] and the queue notes in source[0] and source[1] follow the queue approver to ADR-0142 D6 (PR #26337). A queue approver now expands to the queue's members at node entry through the ownership-queue service (approval-service.ts resolveApproverSpec, expandQueueUsers), and a queue that expands to nobody warns \"approver 'queue:VALUE' expanded to nobody\" and adds NO slot. The #3508 'not implemented' warn and the queue:VALUE literal slot are gone, so on an empty queue the admin_rescue request's abandoned slate is [] with the reason 'no approver on the node resolved to a person', not ['queue:VALUE']. The leg gains a staffed arm (planted sys_queue and sys_queue_member rows), steps[6] drops the designer note (queue is no longer xEnumDeprecated), and acceptance[5]'s oracle is the api; the clause changed meaning, so a prior verdict on it does not carry. Re-measured at base f2fdac5d: the service code read, and its service-layer pin run — approval-service.test.ts, describe 'a queue approver routes to the queue's members (ADR-0142 D6)', 4 passed; not driven live. Wave anchor #25807, slice C; lead from slice B's report 6457925443",
           "ref": "#25807"
         }
       ]
@@ -1635,10 +1651,10 @@
     },
     {
       "id": "approvals.inbox-keyboard-flow",
-      "title": "Inbox keyboard flow: j/k and arrows move focus, Enter opens, x selects, ←/→ walk the drawer — and a/r quick-decide through the SAME server transition as the buttons, gated by quick-decidability",
+      "title": "Inbox keyboard flow: j/k and arrows move focus, Enter opens the request's page, x selects — and a/r quick-decide through the SAME server transition as the buttons, gated by quick-decidability",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "browser",
       "personas": ["dev admin (pending approver on the seeded demo requests — several quick-decidable rows plus the dynamic-approval stage-1 row as the NOT-quick-decidable contrast)"],
@@ -1651,20 +1667,19 @@
       },
       "steps": [
         "boot the showcase on its own port and DB (dogfood §0); sign in as the dev admin; open the inbox via the account app's Approvals entry; confirm the hint bar renders ('Keyboard: j/k move · Enter open · x select · a approve · r reject')",
-        "press j/j/k and ArrowDown/ArrowUp — the focus ring walks the FILTERED list order; press Enter — the focused row's drawer opens (verify the drawer's request identity against GET /api/v1/approvals/requests/:id, not the highlight)",
-        "with the drawer OPEN press ArrowLeft/ArrowRight — the drawer walks to the previous/next visible row without returning to the list; close the drawer",
+        "press j/j/k and ArrowDown/ArrowUp — the focus ring walks the FILTERED list order; press Enter — the focused row's request page opens (/apps/APP/sys_approval_request/record/ID; verify the page's request identity against GET /api/v1/approvals/requests/:id, not the highlight); go Back to the queue",
         "focus a quick-decidable row and press r — the shared confirm dialog opens (nothing posted yet); confirm — capture POST /api/v1/approvals/requests/:id/reject and re-read the request + /:id/actions",
         "press a on another quick-decidable row — approve dialog → confirm → POST /:id/approve; re-read",
-        "ownership guards: click into the search input and type j/k/a — the list focus does not move and nothing decides; with a confirm dialog open press j/Enter — inert; the same while the drawer sheet is open (the list handler yields to selectedId)",
-        "gating: focus the dynamic-approval stage-1 row (declared decisionOutputs) and press a and r — NOTHING happens: no dialog, no POST (those decisions need the drawer's typed-output dialog)",
+        "ownership guards: click into the search input and type j/k/a — the list focus does not move and nothing decides; with a confirm dialog open press j/Enter — inert (the list handler yields while a decide dialog or any alertdialog is up)",
+        "gating: focus the dynamic-approval stage-1 row (declared decisionOutputs) and press a and r — NOTHING happens: no dialog, no POST (those decisions need the typed-output dialog on the request's page)",
         "press x and space on a focused row in the 待我审批 tab — selection toggles and feeds the bulk bar; switch to the 我发起的 tab and press x — inert (selection is pending-tab-only)"
       ],
       "acceptance": [
         {
-          "clause": "j/k and ArrowDown/Up move a visible focus ring over the filtered list, clamped at both ends, and Enter opens exactly the FOCUSED row's drawer",
+          "clause": "j/k and ArrowDown/Up move a visible focus ring over the filtered list, clamped at both ends, and Enter opens exactly the FOCUSED row's request page",
           "oracle": "dom",
-          "verify": "after a screenshot confirms the list rendered: the focused row carries the ring classes; Enter's drawer field-matches GET /:id for the row the ring was on — identity by API read, never by highlight",
-          "evidence": "screenshots of the moving ring + the drawer/API identity pair"
+          "verify": "after a screenshot confirms the list rendered: the focused row carries the ring classes; Enter lands on /apps/APP/sys_approval_request/record/ID and the page field-matches GET /:id for the row the ring was on — identity by API read, never by highlight",
+          "evidence": "screenshots of the moving ring + the page/API identity pair"
         },
         {
           "clause": "a and r on a quick-decidable row open the SAME confirm dialog the row buttons use, and the confirmed decision executes the SAME server transition: one POST to /api/v1/approvals/requests/:id/(approve|reject), the timeline row lands, the badge and list refresh",
@@ -1673,38 +1688,39 @@
           "evidence": "the network trace + before/after request/actions reads"
         },
         {
-          "clause": "keyboard ownership is guarded on every side: keys are inert while an input/textarea/select/contenteditable is focused, while the drawer sheet or a decide dialog is open (the list handler), and while an alertdialog is up — typing never leaks into navigation or decisions",
+          "clause": "keyboard ownership is guarded on every side: keys are inert while an input/textarea/select/contenteditable is focused, while a decide dialog is open (the list handler), and while an alertdialog is up — typing never leaks into navigation or decisions",
           "oracle": "dom",
           "verify": "each guard exercised: focus state read from the DOM before the keypress, then assert no focus movement / no dialog / no network call followed",
           "evidence": "per-guard screenshot + the absence of any decision POST in the trace"
         },
         {
-          "clause": "a/r are gated by quick-decidability: a pending row that declares decisionOutputs never quick-decides from the keyboard (nor from the row buttons) — the drawer's typed-output dialog is the only path, so a required output can never be skipped by a hotkey",
+          "clause": "a/r are gated by quick-decidability: a pending row that declares decisionOutputs never quick-decides from the keyboard (nor from the row buttons) — the typed-output dialog in the request page's decision panel is the only path, so a required output can never be skipped by a hotkey",
           "oracle": "network",
           "verify": "a and r on the dynamic-approval stage-1 row produce no dialog and no POST (quickDecidable = isActionable AND no declared outputs, #2829 — a quick approve would hand the flow nothing and the next stage's expression approver would resolve an empty slate)",
           "evidence": "the inert keypress capture + the empty network trace"
         },
         {
-          "clause": "with the drawer open, ←/→ walk the filtered list order directly drawer-to-drawer, and x/space toggle selection only on the pending tab",
+          "clause": "x/space toggle selection only on the pending tab",
           "oracle": "dom",
-          "verify": "arrow keys swap the drawer to the adjacent row's request (identity via API read each hop); x on 待我审批 toggles the row into the bulk bar's actionable set, x on 我发起的 does nothing",
-          "evidence": "drawer-hop identity reads + selection screenshots per tab"
+          "verify": "x on 待我审批 toggles the row into the bulk bar's actionable set, x on 我发起的 does nothing",
+          "evidence": "selection screenshots per tab"
         }
       ],
       "negative": [
         "an a/r that POSTs a decision with NO confirm dialog is a FAIL — the dialog is the misfire guard between a stray keypress and a recorded decision",
         "a keyboard decision landing on a different request than the focused row is a FAIL — verify identity by API read, not by which row looks highlighted",
         "j/k/a/r firing while the search input (or any dialog) owns the keyboard is a FAIL of the ownership guards",
-        "a hotkey quick-decide succeeding on a row with declared decisionOutputs is a FAIL — it would skip a REQUIRED output the drawer dialog exists to collect"
+        "a hotkey quick-decide succeeding on a row with declared decisionOutputs is a FAIL — it would skip a REQUIRED output the request page's decision dialog exists to collect"
       ],
       "traps": ["automation-input", "hydration-race"],
       "source": [
-        "objectui apps/console/src/pages/system/ApprovalsInboxPage.tsx (the list keyboard effect — j/k/arrows/Enter/x/space/a/r; ownership guards: selectedId/dialog yield, INPUT/TEXTAREA/SELECT/contentEditable, [role=alertdialog]), (drawer ←/→ walk), (quickDecidable = isActionable AND no declared decision outputs, #2829), (inlineApprove/inlineReject → approvalsApi.approve/reject — the same routes as the buttons), (the focus ring classes), (the hint bar copy), (the file's own keyboard contract docblock)",
+        "ui/apps/console/src/pages/system/ApprovalsInboxPage.tsx (the list keyboard effect — j/k/ArrowDown/ArrowUp/Enter/x/space/a/r; ownership guards: decide-dialog yield, INPUT/TEXTAREA/SELECT/contentEditable, [role=alertdialog]), (Enter → openRequest → requestPagePath, the request's record page; objectui#12484 deleted the side sheet and its ←/→ walk), (quickDecidable = isActionable AND no declared decision outputs, #2829), (inlineApprove/inlineReject → approvalsApi.approve/reject — the same routes as the buttons), (the focus ring classes), (the hint bar copy), (the file's own keyboard contract docblock)",
         "examples/app-showcase/src/automation/flows/dynamic-approval.flow.ts#decisionOutputs (the stock decisionOutputs row the gating contrast rides)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-30", "change": "initial — the inbox's keyboard surface (documented in the page's own header and advertised by its hint bar) had no checklist coverage; the load-bearing halves are that r/a land the same server transition as the buttons and that quick-decidability gates hotkeys off rows whose decisions require typed outputs", "ref": "#sweep-2026-08-30" },
-        { "revision": 2, "date": "2026-10-20", "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed", "ref": "#25003" }
+        { "revision": 2, "date": "2026-10-20", "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed", "ref": "#25003" },
+        { "revision": 3, "date": "2026-10-28", "change": "the retired request drawer took two of this item's behaviours with it: the ←/→ drawer-to-drawer walk and the list handler's yield to an open drawer sheet. objectui#12484 deleted the inbox's side sheet (ruling C on objectui#12438); it came into this tree with the ui/ import, PR #25825; Enter, a row click and ?request= now navigate to the request's served record page, /apps/APP/sys_approval_request/record/ID, and the keyboard effect in ui/apps/console/src/pages/system/ApprovalsInboxPage.tsx has no ArrowLeft/ArrowRight branch and yields only to a decide dialog, a focused input and an alertdialog. Dropped: revision 2's steps[2] (the drawer walk), the drawer-sheet guard in steps[5] and acceptance[2], and acceptance[4]'s ←/→ half (its x/space half stays). Rewritten to the request page: title, steps[1], steps[6], acceptance[0], acceptance[3], negative[3] and source[0]. acceptance[0] and [4] changed meaning, so a prior verdict on them does not carry. Read from source at base f2fdac5d, not driven live. Wave anchor #25807, slice C; lead from slice B's report 6457925443", "ref": "#25807" }
       ]
     },
     {

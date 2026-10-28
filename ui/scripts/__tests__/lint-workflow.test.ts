@@ -58,8 +58,7 @@ import { globMatches, jobBlock, repoPath, rootCi, triggerBlock, uiFilterGlobs, U
  *
  * ## The doc page, and the two matcher gaps it exposed (objectui#3782)
  *
- * `content/docs/guide/ci-cd-pipeline.md` argued from the same facts a fourth
- * time. It was the one surface that had never hand-*counted* — its main clause
+ * objectui's CI guide page argued from the same facts a fourth time. It was the one surface that had never hand-*counted* — its main clause
  * was already the evergreen phrasing — but it closed on a parenthesised source
  * list that named a rule outright. Adding it to `SURFACES` was meant to be one
  * entry; it was not, because both assertions were blind to it as written:
@@ -81,6 +80,10 @@ import { globMatches, jobBlock, repoPath, rootCi, triggerBlock, uiFilterGlobs, U
  * A reference cannot drift out of step with its target; a copy of its contents
  * is the thing that had already gone stale three times.
  *
+ * The page left `SURFACES` with objectstack#26944, which deleted it: it
+ * described objectui's workflows, which run nowhere under the monorepo. Both
+ * matcher repairs stay, because the two surfaces left can be written either way.
+ *
  * ## The workflow is the root's now (objectstack#25712)
  *
  * GitHub runs only the repository root's `.github/workflows/`, and
@@ -99,12 +102,10 @@ const read = (relative: string): string => fs.readFileSync(path.join(repoRoot, r
 /** Repo-relative, so the same string labels the surface in failure messages. */
 const WORKFLOW = `ci.yml (${UI_JOBS.lint})`;
 const COVERAGE_SCRIPT = 'scripts/check-lint-coverage.mjs';
-const DOC = 'content/docs/guide/ci-cd-pipeline.md';
 
 const ci = rootCi();
 const workflow = jobBlock(ci, UI_JOBS.lint);
 const coverageScript = read(COVERAGE_SCRIPT);
-const doc = read(DOC);
 
 type FlatConfigEntry = { rules?: Record<string, unknown>; files?: string[] };
 
@@ -172,25 +173,6 @@ function unwrap(block: string, marker: RegExp): string {
   return block.replace(marker, '').replace(/\s+/g, ' ').trim();
 }
 
-/** Markdown prose has no line-leading comment marker to strip. */
-const NO_COMMENT_MARKER = /(?!)/g;
-
-/**
- * One `## …` section of a markdown page, from its heading to the next one. The
- * markdown equivalent of the two scoping helpers above, and load-bearing for the
- * same reason: elsewhere on that page `vitest.setup.dom.tsx` "side-effect-imports
- * four `@object-ui/*` packages", a count of *packages* the count pattern would
- * otherwise report as a rule count — exactly the trap the coverage script's
- * `Known gaps` comment sets.
- */
-function markdownSection(source: string, heading: string, label: string): string {
-  const start = source.indexOf(`\n${heading}\n`);
-  expect(start, `${label} must still have a \`${heading}\` section`).toBeGreaterThan(-1);
-  const rest = source.slice(start + 1 + heading.length);
-  const next = rest.indexOf('\n## ');
-  return next === -1 ? rest : rest.slice(0, next);
-}
-
 /**
  * The prose surfaces that argue from the `object-ui/*` error ratchets. Both
  * explain a gate in terms of those rules, so both are held to the same two
@@ -209,11 +191,6 @@ const SURFACES: ProseSurface[] = [
     label: COVERAGE_SCRIPT,
     text: coverageScript,
     prose: () => unwrap(leadingDocblock(coverageScript, COVERAGE_SCRIPT), /^[ \t]*\*[ \t]?/gm),
-  },
-  {
-    label: DOC,
-    text: doc,
-    prose: () => unwrap(markdownSection(doc, '## Lint (`lint.yml`)', DOC), NO_COMMENT_MARKER),
   },
 ];
 
@@ -258,8 +235,7 @@ for (const surface of SURFACES) {
           `copy months later (objectui#3279). A stale count reads exactly as ` +
           `authoritative as a fresh one to the next person deciding what this gate ` +
           `covers. Say "the \`object-ui/*\` rules \`eslint.config.js\` sets to \`error\`" ` +
-          `instead — always true, never maintained. ` +
-          `content/docs/guide/ci-cd-pipeline.md phrases it that way for the same reason.`,
+          `instead — always true, never maintained.`,
       ).toEqual([]);
     });
 
@@ -268,7 +244,7 @@ for (const surface of SURFACES) {
       // maintained in lockstep with the config, and nothing makes anyone do it.
       //
       // BOTH spellings count. Prose names a rule bare, without the plugin
-      // prefix the config keys it by: ci-cd-pipeline.md wrote
+      // prefix the config keys it by: objectui's CI guide page wrote
       // `no-dynamic-import-in-test-hook`, never `object-ui/no-dynamic-import-
       // in-test-hook`. Matching only the config key would have added that page
       // to this list and passed on the very enumeration it was added for — a

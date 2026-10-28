@@ -46,7 +46,7 @@
  * `Decide whether this change needs a full run` step in `ci.yml`, with a twin in
  * `lint.yml`, and its exclusion list is that `push` filter unchanged — markdown
  * and `.changeset/**` included, held identical to it by
- * `scripts/__tests__/merge-queue-reporting.test.ts`. So on a changeset-only PR
+ * `scripts/__tests__/merge-queue-reporting.test.ts` (retired since). So on a changeset-only PR
  * both workflows start, report, and skip every expensive step: no gate inside
  * either of them ever reads the changeset. The conclusion survives its premise —
  * `changeset-guard.yml` runs outside that in-job switch, with no install and no

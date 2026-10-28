@@ -23,7 +23,7 @@
  */
 
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import type { ObjectCalendarSchema, ObjectCalendarBlockConfig, DataSource, CalendarConfig } from '@object-ui/types';
+import type { ObjectCalendarSchema, DataSource, CalendarConfig } from '@object-ui/types';
 import { CalendarView, type CalendarViewEvent } from './CalendarView';
 import { getVisibleDateRange } from './visibleDays';
 import { usePullToRefresh } from '@object-ui/mobile';
@@ -132,26 +132,6 @@ import {
  */
 
 /**
- * The five field-name keys written FLAT on the node: the package-local
- * hand-off spelling (objectstack#25923, ui/AGENTS.md Commandment #0.1).
- *
- * `@objectstack/spec` refuses all five on `object-calendar` and prescribes the
- * `calendar` block, so the published {@link ObjectCalendarSchema} declares
- * none of them, and both producers in this tree (`ListView`, and
- * `ObjectView`'s `generateViewSchema`) emit the block. `getCalendarConfig`
- * still reads the flat five when a node carries no block, so a host that mounts
- * `<ObjectCalendar schema={…}>` with them keeps its calendar; this type is that
- * read, kept here, beside the one consumer, and off the authoring face.
- * DERIVED from the block's own type, so the two spellings cannot fork.
- */
-export type ObjectCalendarFlatFields = Partial<
-  Pick<ObjectCalendarBlockConfig, 'startDateField' | 'endDateField' | 'titleField' | 'colorField' | 'allDayField'>
->;
-
-/** The node `ObjectCalendar` reads: the published schema plus {@link ObjectCalendarFlatFields}. */
-export type ObjectCalendarHandoff = ObjectCalendarSchema & ObjectCalendarFlatFields;
-
-/**
  * Props of the `ObjectCalendar` React component.
  *
  * Renamed off the bare `ObjectCalendarProps` (objectui#4650): from 17.0.0
@@ -168,7 +148,7 @@ export type ObjectCalendarHandoff = ObjectCalendarSchema & ObjectCalendarFlatFie
  * no importer breaks. Tripwire: `__tests__/spec-symbol-4650.test.ts`.
  */
 export interface ObjectCalendarComponentProps {
-  schema: ObjectCalendarHandoff;
+  schema: ObjectCalendarSchema;
   dataSource?: DataSource;
   className?: string;
   /** Pre-fetched records passed by a parent (e.g. ObjectView). When provided, skips internal data fetching. */
@@ -321,7 +301,7 @@ type ObjectCalendarConfig = CalendarConfig & {
  * ⇒ the ruling lands the removal TOGETHER WITH the refusal that makes the same
  * document fail loudly instead: `@object-ui/types` declares both spellings as
  * `aliasKeyRefusal()` arms on the view-level calendar block, on this element's
- * own `calendar` container, and on the FLAT node face this function reads — so
+ * own `calendar` container, and on the FLAT node face — so
  * an author writing `dateField` is refused BY NAME at the key path, pointed at
  * `startDateField`, on every surface. `ListView`'s calendar branch stops
  * flattening the two onto the node in the same change. ⛔ Never remove one half
@@ -339,36 +319,20 @@ type ObjectCalendarConfig = CalendarConfig & {
  * `calendar-date-alias-refusal-8355.test.ts` and `plugin-list`'s
  * `ListView.calendarAliasRefused-8355.test.tsx`.
  */
-function getCalendarConfig(schema: ObjectCalendarHandoff): ObjectCalendarConfig | null {
-  // The declared configuration container — read FIRST, as the spec declares it.
-  if (schema.calendar) {
-    return schema.calendar as ObjectCalendarConfig;
-  }
-
-  // The flat spelling — the package-local hand-off (`ObjectCalendarFlatFields`).
-  // No producer in this tree emits it since objectstack#25923 (`ListView` and
-  // `ObjectView` hand the view's block on as `calendar`), and the spec refuses
-  // it on an authored node; a host that mounts this component with it is the
-  // reader this branch keeps working.
+function getCalendarConfig(schema: ObjectCalendarSchema): ObjectCalendarConfig | null {
+  // The declared configuration container — the one place the binding is read,
+  // as the spec declares it.
   //
-  // ⛔ The two alias rungs are spelled as a cast ON `schema` at each read site,
-  // never through a renamed local. The repo's read census (objectui#6576's
-  // `schemaReads`, used by
-  // `types/src/__tests__/calendar-flat-color-allday-8466.test.ts` and by this
-  // card's own pin) matches `schema.KEY` and `(schema as T).KEY` — a local alias
-  // would hide these two reads from the very instrument meant to enumerate them,
-  // which is the same class of blindness that produced the false census above.
-  if (schema.startDateField) {
-      return {
-          startDateField: schema.startDateField,
-          endDateField: schema.endDateField,
-          titleField: schema.titleField,
-          colorField: schema.colorField,
-          allDayField: schema.allDayField
-      } as ObjectCalendarConfig;
-  }
-
-  return null;
+  // ⛔ No flat fallback (objectstack#25923). The five field-name keys written
+  // FLAT on the node (`startDateField`, `endDateField`, `titleField`,
+  // `colorField`, `allDayField`) are not read: `@objectstack/spec` refuses all
+  // five on `object-calendar` and prescribes this block, `@object-ui/types`
+  // declares none of them, and both producers in this tree (`ListView`, and
+  // `ObjectView`'s `generateViewSchema`) hand the view's block on as
+  // `calendar`. A node that carries them and no block reaches the "Calendar
+  // configuration required" refusal screen, whose hint names the block. The
+  // stored-row census taken before the read retired found no stored flat row.
+  return schema.calendar ? (schema.calendar as ObjectCalendarConfig) : null;
 }
 
 /**
@@ -670,47 +634,25 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
     schema.staticData,
     schema.objectName,
   ]);
-  // Every key `getCalendarConfig` reads, and nothing it does not.
+  // Every key `getCalendarConfig` reads, and nothing it does not: since
+  // objectstack#25923 that is the `calendar` block alone.
   //
   // `schema.filter` used to head this list, because the function used to read
   // `schema.filter.calendar` (objectui#7711). With that arm retired, keeping
   // `filter` here would say the calendar's CONFIGURATION depends on the query
-  // filter — the very claim this card removes — and would recompute on every
-  // filter change for nothing.
-  //
-  // Dropping it also removes an accidental co-trigger, so the three flat keys
-  // the function reads but this list never named were added in the same edit:
-  // `startDateField`, `endDateField` and `allDayField`. Before that change a
-  // simultaneous `filter` change could recompute the memo and pick those up by
-  // luck; that luck is now gone, so the list has to be honest. Pinned in
+  // filter — the very claim that card removed — and would recompute on every
+  // filter change for nothing. Pinned in
   // `__tests__/ObjectCalendar.filterIsNotAConfigSlot-7711.test.tsx`.
   //
-  // ⚠️ The two retired alias rungs are NO LONGER listed, and the direction
-  // matters: this list is exactly what `getCalendarConfig` reads, in BOTH
-  // directions, so an entry for a key that function no longer reads would be
-  // as wrong as a missing one. A cut of objectui#8651 dropped them alongside a
-  // retirement that broke a live authoring path and they came back; objectui#8355
-  // retires the rungs FOR REAL — together with the by-name refusal that makes an
-  // authored alias loud instead of inert — so they leave here with them.
-  //
-  // ⭐ objectui#8026 — `allDayField` is now LOAD-BEARING here, not merely
-  // honest. When #7711 named it, nothing read the key, so the dependency could
-  // only ever cost a recompute; the events pass below now reads it, so a change
-  // to the authored `allDayField` genuinely changes what is drawn and this
-  // entry is what makes that reach the screen. ⚠️ Measured while doing so: the
-  // #7711 file named above pins `startDateField`'s recompute and `filter`'s
-  // NON-recompute and mentions neither `allDayField` nor `colorField` — the
-  // dependency itself has never had an assertion on it. The behaviour rows that
-  // now depend on this entry live in
+  // ⚠️ The direction matters: this list is exactly what `getCalendarConfig`
+  // reads, in BOTH directions, so an entry for a key that function no longer
+  // reads would be as wrong as a missing one. The two pre-#2231 alias rungs
+  // left it with objectui#8355, and the five flat field-name keys left it with
+  // the flat fallback read (objectstack#25923). A key inside the block — the
+  // load-bearing `allDayField` of objectui#8026 among them — reaches the
+  // memo through the block's identity. The behaviour rows live in
   // `__tests__/ObjectCalendar.allDayFieldIsHonoured-8026.test.tsx`.
-  const calendarConfig = useMemo(() => getCalendarConfig(schema), [
-    schema.calendar,
-    schema.startDateField,
-    schema.endDateField,
-    schema.titleField,
-    schema.colorField,
-    schema.allDayField
-  ]);
+  const calendarConfig = useMemo(() => getCalendarConfig(schema), [schema.calendar]);
   const hasInlineData = dataConfig?.provider === 'value';
   /**
    * The record-fetch effect below used to key on `dataConfig` itself — the

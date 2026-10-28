@@ -103,26 +103,25 @@ describe('ObjectCalendar — an unconfigured view reaches the refusal screen (ob
     await waitFor(() => expect(screen.getByText(REFUSAL)).toBeTruthy());
   });
 
-  it('CONTROL: a correctly configured calendar is completely unaffected', async () => {
-    // The declared binding renders its events exactly as before — same fields,
-    // same records, no refusal. Without this case a fix that refused
-    // EVERYTHING would look identical to the fix that was ruled.
+  it('REFUSES a binding written FLAT on the node — the hint names the block (objectstack#25923)', async () => {
+    // The retired fallback. This node used to draw: `getCalendarConfig` read
+    // the five field-name keys flat when no `calendar` block was present. The
+    // spec refuses them on the node, no producer emits them, and the stored-row
+    // census found no stored flat row, so the read is gone and the node lands
+    // on the refusal screen, whose hint names where the binding belongs. The
+    // CONTROL below draws the same binding written in the block.
     render(
       <ObjectCalendar
         schema={
-          {
-            type: 'object-calendar',
-            objectName: 'crm_leave_request',
-            startDateField: 'start_date',
-            titleField: 'name',
-          } as any
+          { type: 'object-calendar', objectName: 'crm_leave_request', startDateField: 'start_date', titleField: 'name' } as any
         }
         dataSource={makeDataSource()}
       />,
     );
-    await waitFor(() => expect(screen.getByText('Ada out')).toBeTruthy());
-    expect(screen.getByText('Grace out')).toBeTruthy();
-    expect(screen.queryByText(REFUSAL)).toBeNull();
+    await waitFor(() => expect(screen.getByText(REFUSAL)).toBeTruthy());
+    expect(screen.getByText(/calendar block/)).toBeTruthy();
+    expect(screen.queryByText('Ada out')).toBeNull();
+    expect(screen.queryByText('Grace out')).toBeNull();
   });
 
   it('CONTROL: the nested spec `calendar` block still configures the renderer', async () => {

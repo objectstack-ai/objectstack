@@ -25,6 +25,7 @@ import {
   DataEngineVectorFindRequestSchema,
   DataEngineRequestSchema,
   DroppedFieldsEventSchema,
+  QueryTransportParamsSchema,
 } from './data-engine.zod';
 import { QuerySchema } from './query.zod';
 
@@ -1241,4 +1242,105 @@ describe('DroppedFieldsEventSchema.reason — why a write dropped submitted fiel
     expect(issue?.code).toBe('invalid_value');
     expect(issue?.path).toEqual(['reason']);
   });
+});
+
+describe('the engine-side projection declarations admit exactly what their transport siblings admit', () => {
+  /**
+   * [#26954] `EngineQueryOptionsSchema.fields` and the RPC request's
+   * deprecated `select` (`DataEngineFindRequestSchema.query`, and so
+   * `DataEngineFindOneRequestSchema` and the `DataEngineRequestSchema` union)
+   * take the projection's array arm from the one declaration their transport
+   * siblings use: at least one name, none blank. `fields` shares
+   * `FieldNodeSchema` with `$select`; `select` shares `z.string()` with the
+   * bare `select`. So each refusal reads exactly as its sibling's does.
+   */
+  const REFUSED: ReadonlyArray<readonly [string, string[], ReadonlyArray<string | number>]> = [
+    ['an empty list', [], []],
+    ['a list with a blank name', ['name', ''], [1]],
+    ['a list with a whitespace name', ['name', '  '], [1]],
+  ];
+  const KEPT: ReadonlyArray<readonly [string, string[]]> = [
+    ['one name', ['name']],
+    ['two names', ['name', 'email']],
+  ];
+
+  /** The first issue's message and path when `value` sits under `key` of a transport bag. */
+  const sibling = (key: 'select' | '$select', value: unknown) => {
+    const parsed = QueryTransportParamsSchema.safeParse({ [key]: value });
+    expect(parsed.success, `${key} sibling refuses ${JSON.stringify(value)}`).toBe(false);
+    return parsed.success ? undefined : parsed.error.issues[0];
+  };
+
+  it.each(REFUSED)('EngineQueryOptionsSchema.fields refuses %s, naming the path, as `$select` does', (_name, value, tail) => {
+    const parsed = EngineQueryOptionsSchema.safeParse({ fields: value });
+    expect(parsed.success).toBe(false);
+    const issue = parsed.success ? undefined : parsed.error.issues[0];
+    expect(issue?.path).toEqual(['fields', ...tail]);
+    const twin = sibling('$select', value);
+    expect(issue?.message).toBe(twin?.message);
+    expect(twin?.path).toEqual(['$select', ...tail]);
+  });
+
+  it.each(KEPT)('EngineQueryOptionsSchema.fields keeps %s, unchanged', (_name, value) => {
+    expect(EngineQueryOptionsSchema.parse({ fields: value }).fields).toEqual(value);
+  });
+
+  for (const [label, schema, method] of [
+    ['DataEngineFindRequestSchema', DataEngineFindRequestSchema, 'find'],
+    ['DataEngineFindOneRequestSchema', DataEngineFindOneRequestSchema, 'findOne'],
+    ['DataEngineRequestSchema', DataEngineRequestSchema, 'find'],
+  ] as const) {
+    it.each(REFUSED)(`${label}: query.select refuses %s, naming the path, as the bare \`select\` does`, (_name, value, tail) => {
+      const parsed = schema.safeParse({ method, object: 'account', query: { select: value } });
+      expect(parsed.success).toBe(false);
+      const issue = parsed.success ? undefined : parsed.error.issues[0];
+      expect(issue?.path).toEqual(['query', 'select', ...tail]);
+      expect(issue?.message).toBe(sibling('select', value)?.message);
+    });
+
+    it.each(REFUSED)(`${label}: query.fields refuses %s, naming the path`, (_name, value, tail) => {
+      const parsed = schema.safeParse({ method, object: 'account', query: { fields: value } });
+      expect(parsed.success).toBe(false);
+      const issue = parsed.success ? undefined : parsed.error.issues[0];
+      expect(issue?.path).toEqual(['query', 'fields', ...tail]);
+      expect(issue?.message).toBe(sibling('$select', value)?.message);
+    });
+
+    it.each(KEPT)(`${label}: query.select keeps %s, folded onto \`fields\``, (_name, value) => {
+      const parsed = schema.parse({ method, object: 'account', query: { select: value } }) as { query?: Record<string, unknown> };
+      expect(parsed.query).toEqual({ fields: value });
+    });
+  }
+
+  // The legacy options bag's `select` and the vector-find request's `fields`
+  // are `z.string()` lists, so their sibling is the bare `select`.
+  it.each(REFUSED)('DataEngineQueryOptionsSchema.select refuses %s, naming the path, as the bare `select` does', (_name, value, tail) => {
+    const parsed = DataEngineQueryOptionsSchema.safeParse({ select: value });
+    expect(parsed.success).toBe(false);
+    const issue = parsed.success ? undefined : parsed.error.issues[0];
+    expect(issue?.path).toEqual(['select', ...tail]);
+    expect(issue?.message).toBe(sibling('select', value)?.message);
+  });
+
+  it.each(KEPT)('DataEngineQueryOptionsSchema.select keeps %s, unchanged', (_name, value) => {
+    expect(DataEngineQueryOptionsSchema.parse({ select: value }).select).toEqual(value);
+  });
+
+  for (const [label, schema] of [
+    ['DataEngineVectorFindRequestSchema', DataEngineVectorFindRequestSchema],
+    ['DataEngineRequestSchema', DataEngineRequestSchema],
+  ] as const) {
+    it.each(REFUSED)(`${label}: vectorFind fields refuses %s, naming the path, as the bare \`select\` does`, (_name, value, tail) => {
+      const parsed = schema.safeParse({ method: 'vectorFind', object: 'doc', vector: [0.1, 0.2], fields: value });
+      expect(parsed.success).toBe(false);
+      const issue = parsed.success ? undefined : parsed.error.issues[0];
+      expect(issue?.path).toEqual(['fields', ...tail]);
+      expect(issue?.message).toBe(sibling('select', value)?.message);
+    });
+
+    it.each(KEPT)(`${label}: vectorFind fields keeps %s, unchanged`, (_name, value) => {
+      const parsed = schema.parse({ method: 'vectorFind', object: 'doc', vector: [0.1, 0.2], fields: value }) as { fields?: string[] };
+      expect(parsed.fields).toEqual(value);
+    });
+  }
 });

@@ -217,11 +217,13 @@ describe('objectui#7711 — a legitimate filter on a field NAMED `calendar` stay
 });
 
 describe('objectui#7711 — the `calendarConfig` memo depends on every key the config can come from', () => {
-  it('recomputes when only `startDateField` changes', async () => {
+  it('recomputes when only the block\'s `startDateField` changes', async () => {
+    // Since objectstack#25923 the `calendar` block is the one key the config
+    // comes from, so a changed binding arrives as a new block.
     const dataSource = makeDataSource();
-    const base = { type: 'object-calendar', objectName: OBJECT, titleField: 'name' };
-    const schemaA: any = { ...base, startDateField: 'starts_at' };
-    const schemaB: any = { ...base, startDateField: 'other_at' };
+    const base = { type: 'object-calendar', objectName: OBJECT };
+    const schemaA: any = { ...base, calendar: { titleField: 'name', startDateField: 'starts_at' } };
+    const schemaB: any = { ...base, calendar: { titleField: 'name', startDateField: 'other_at' } };
 
     const { rerender } = render(<ObjectCalendar schema={schemaA} dataSource={dataSource} />);
     await waitFor(() => expect(screen.getByTestId('calendar-view')).toBeTruthy());
