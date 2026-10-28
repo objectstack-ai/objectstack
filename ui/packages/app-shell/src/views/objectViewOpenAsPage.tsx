@@ -13,9 +13,10 @@
  *
  * A row of an object that opens its records in the drawer opens the drawer
  * (or the pane beside the list, by the reader's preference); the record page
- * itself is one ↗ away. It is drawn beside the row's title through the grid's
- * host channel (`rowAdornment`), and only for a drawer-mode object: a row of a
- * `page` object already opens the page, and a `none` list opens nothing.
+ * itself is one ↗ away. It is drawn after the row's record link — the name the
+ * row opens from — through the grid's host channel (`recordLinkAdornment`),
+ * and only for a drawer-mode object: a row of a `page` object already opens
+ * the page, and a `none` list opens nothing.
  *
  * **The URL is not built here.** The list page publishes its record builder on
  * `RelatedRecordActionsContext` (`listRecordActionsValue`): `recordHref` is the
@@ -29,7 +30,6 @@
  * pointer, which has no hover, always shows it.
  */
 
-import * as React from 'react';
 import { ArrowUpRight } from 'lucide-react';
 import { useRelatedRecordActions } from '@object-ui/react';
 
@@ -82,30 +82,3 @@ export function OpenAsPageLink({
     );
 }
 
-/** A row's primary key, as the grid's own link cell reads it (`rowRecordId`). */
-function rowId(row: Record<string, unknown>): string | number | null {
-    const id = row?.id ?? row?._id;
-    return (typeof id === 'string' && id !== '') || typeof id === 'number' ? id : null;
-}
-
-/**
- * The row adornment the list hands the grid: the ↗ for a drawer-mode object,
- * after any adornment the page already draws (the managed-environment Users
- * marker). `undefined` when there is nothing to draw on any row, so the grid
- * keeps its title cells exactly as they were.
- */
-export function composeRowAdornment(
-    own: ((row: Record<string, unknown>) => React.ReactNode) | undefined,
-    openAsPage: { objectName: string; label: string } | null,
-): ((row: Record<string, unknown>) => React.ReactNode) | undefined {
-    if (!openAsPage) return own;
-    return (row) => {
-        const id = rowId(row);
-        const link = id === null
-            ? null
-            : <OpenAsPageLink objectName={openAsPage.objectName} recordId={id} label={openAsPage.label} />;
-        const before = own ? own(row) : null;
-        if (before === null || before === undefined || before === false) return link;
-        return <>{before}{link}</>;
-    };
-}

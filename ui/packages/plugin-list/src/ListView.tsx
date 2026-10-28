@@ -414,6 +414,17 @@ export interface ListViewProps {
    */
   rowAdornment?: (record: Record<string, unknown>) => React.ReactNode;
   /**
+   * A host-drawn node beside each row's record LINK in the grid
+   * (objectstack#26681), handed to `ObjectGrid`'s `recordLinkAdornment`: after
+   * the link cell the row's record opens from, never inside it. Called with
+   * the row record; `null` draws nothing. The console's object list passes an
+   * "open as full page" arrow for a row that opens the drawer.
+   *
+   * A HOST prop, never a schema key, for the reason `rowAdornment` is one.
+   * Only the grid is handed it. Absent ⇒ every row is exactly what it was.
+   */
+  recordLinkAdornment?: (record: Record<string, unknown>) => React.ReactNode;
+  /**
    * The VIEW'S OWN hidden fields and row height, for a host that lays the
    * user's own preference over them in `schema` (objectui#12949). The Display
    * control's trigger count and its "Reset to view default" compare these two
@@ -1528,6 +1539,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   toolbarLeading,
   defaultRowNumbers = true,
   rowAdornment,
+  recordLinkAdornment,
   compact = false,
   capped = false,
   onTotalChange,
@@ -6474,6 +6486,11 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               // objectui#13330 — the host's node beside each row's title, on
               // the grid's host channel (a React prop, never a node key).
               ? { rowAdornment }
+              : {})}
+            {...(viewComponentSchema.type === 'object-grid' && recordLinkAdornment
+              // objectstack#26681 — the host's node beside each row's record
+              // link, on the grid's host channel (a React prop, never a node key).
+              ? { recordLinkAdornment }
               : {})}
             // [objectui#12081] A windowed calendar keeps drawing while the
             // next window loads (the refresh bar above says so), and shows its

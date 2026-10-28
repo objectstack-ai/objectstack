@@ -35,7 +35,7 @@ type QueryInputs = ReturnType<typeof useObjectGridQueryInputs>;
 export function useObjectGridGenerateColumns({
   schema, dataSource, data, dataConfig, hasInlineData, objectName, objectSchema, objectFields,
   objectTypesPending, schemaFields, schemaColumns, perms, navigation, executeAction, predicateScope,
-  resolveFieldLabel, translateOptions, uiLanguage,
+  resolveFieldLabel, translateOptions, uiLanguage, recordLinkAdornment,
 }: {
   schema: ObjectGridSchema;
   dataSource: DataSource | undefined;
@@ -55,6 +55,8 @@ export function useObjectGridGenerateColumns({
   resolveFieldLabel: ReturnType<typeof useSafeFieldLabel>['fieldLabel'];
   translateOptions: ReturnType<typeof useSafeFieldLabel>['translateOptions'];
   uiLanguage: ReturnType<typeof useGridTranslation>['language'];
+  /** objectstack#26681 — the host's node beside a row's record link (`ObjectGrid`'s prop). */
+  recordLinkAdornment?: (record: any) => React.ReactNode;
 }) {
   const generateColumns = useCallback((): ObjectGridColumnDraft[] => {
     // objectui#11815 — the host's verdict on a declared deadline's
@@ -255,7 +257,7 @@ export function useObjectGridGenerateColumns({
         return (cols as ListColumn[])
           .filter((col) => resolvesToDataColumn(col))
           .filter((col) => passesFieldGate(col))
-          .map((col, colIndex) => {
+          .map((col, colIndex, shown) => {
             // The column's own `label` is the spec's "Display label override"
             // (`ListColumnSchema`), so when the author wrote one it IS the
             // header, and the field-label lookup is not consulted
@@ -380,6 +382,13 @@ export function useObjectGridGenerateColumns({
             // Auto-link primary field (first column) to record detail (Airtable-style)
             const isPrimaryField = colIndex === 0 && !col.link && !col.action;
             const isLinked = col.link || isPrimaryField;
+            // objectstack#26681 — the host's `recordLinkAdornment` goes beside
+            // ONE link per row: the first column the author linked
+            // (`link: true`), else the auto-linked primary field. A view that
+            // links its name column keeps the node off the first column's
+            // auto-link (an avatar, a status).
+            const firstAuthoredLink = shown.findIndex((c) => !!c.link);
+            const adornsLink = firstAuthoredLink === -1 ? isPrimaryField : colIndex === firstAuthoredLink;
             // The face the value takes INSIDE the link: never an anchor of its
             // own (objectui#11817, `linkCellRenderer`).
             const LinkContentRenderer = linkCellRenderer(inferredType, CellRenderer);
@@ -400,6 +409,7 @@ export function useObjectGridGenerateColumns({
                     objectName={schema.objectName}
                     recordId={rowRecordId(row)}
                     wrap={col.wrap}
+                    trailing={adornsLink ? recordLinkAdornment?.(row) : undefined}
                   >
                     {displayContent}
                   </LinkCell>
@@ -418,6 +428,7 @@ export function useObjectGridGenerateColumns({
                     objectName={schema.objectName}
                     recordId={rowRecordId(row)}
                     wrap={col.wrap}
+                    trailing={adornsLink ? recordLinkAdornment?.(row) : undefined}
                   >
                     {displayContent}
                   </LinkCell>
@@ -637,6 +648,7 @@ export function useObjectGridGenerateColumns({
                   onActivate={() => navigation.handleClick(row)}
                   objectName={schema.objectName}
                   recordId={rowRecordId(row)}
+                  trailing={recordLinkAdornment?.(row)}
                 >
                   {displayContent}
                 </LinkCell>
@@ -649,6 +661,7 @@ export function useObjectGridGenerateColumns({
                 onActivate={() => navigation.handleClick(row)}
                 objectName={schema.objectName}
                 recordId={rowRecordId(row)}
+                trailing={recordLinkAdornment?.(row)}
               >
                 {value != null && value !== '' ? String(value) : <EmptyValue />}
               </LinkCell>
@@ -933,7 +946,7 @@ export function useObjectGridGenerateColumns({
     });
 
     return generatedColumns;
-  }, [objectSchema, objectFields, objectTypesPending, schemaFields, schemaColumns, dataConfig, hasInlineData, objectName, navigation.handleClick, executeAction, data, resolveFieldLabel, translateOptions, schema.objectName, perms, uiLanguage, dataSource, predicateScope]);
+  }, [objectSchema, objectFields, objectTypesPending, schemaFields, schemaColumns, dataConfig, hasInlineData, objectName, navigation.handleClick, executeAction, data, resolveFieldLabel, translateOptions, schema.objectName, perms, uiLanguage, dataSource, predicateScope, recordLinkAdornment]);
 
   return { generateColumns };
 }

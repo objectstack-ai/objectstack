@@ -37,7 +37,7 @@ import {
     isSameOptionsValue,
 } from './objectViewOptions.js';
 import { keepInlineEditModeForTheSession } from './objectViewChrome.js';
-import { composeRowAdornment } from './objectViewOpenAsPage.js';
+import { OpenAsPageLink } from './objectViewOpenAsPage.js';
 import type { useObjectViewIdentity } from './objectViewIdentity.js';
 import type { useObjectViewRecordNavigation } from './objectViewRecordNavigation.js';
 import type { useObjectViewToolbarAffordances } from './objectViewToolbarAffordances.js';
@@ -912,10 +912,17 @@ export function useObjectViewListRenderer({
                 // objectui#13330 — on a managed environment, the Users list
                 // marks a user who holds nothing beyond the baseline. A host
                 // prop the grid draws beside the row's title.
-                //
-                // objectstack#26681 — and, for a row that opens the drawer, the
-                // ↗ that opens its record as the full page (after the marker).
-                rowAdornment={composeRowAdornment(managedUsers ? managedUserMarker : undefined, openAsPage)}
+                rowAdornment={managedUsers ? managedUserMarker : undefined}
+                // objectstack#26681 — for a row that opens the drawer, the ↗
+                // beside its record link that opens the record as the full page.
+                recordLinkAdornment={openAsPage
+                    ? (row: Record<string, unknown>) => {
+                        const id = row?.id ?? row?._id;
+                        return (typeof id === 'string' && id !== '') || typeof id === 'number'
+                            ? <OpenAsPageLink objectName={openAsPage.objectName} recordId={id} label={openAsPage.label} />
+                            : null;
+                    }
+                    : undefined}
                 // objectstack#26681 — the Display menu's Open records section.
                 recordOpen={recordOpen}
                 dataSource={ds}

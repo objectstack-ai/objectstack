@@ -20,7 +20,7 @@
  *     footer and the pane's close control) — no reload, no remount;
  *   - a view that declares `page`: the read-only line, no segments, and no ↗
  *     (its rows already open the page);
- *   - the ↗ beside a drawer row's title is a real anchor to the record route,
+ *   - the ↗ beside a drawer row's record link is a real anchor to the record route,
  *     and a plain click on it lands there, leaving the preference as it was.
  *
  * The record body is not what this file reads, so `RecordDetailView` is a
@@ -213,6 +213,10 @@ describe('objectstack#26681 — Open records in the Display menu', () => {
     expect(arrow.getAttribute('href')).toBe(`/apps/demo/${OBJECT_NAME}/record/r1`);
     expect(arrow.getAttribute('aria-label')).toBe('Open as full page');
     expect(arrow.getAttribute('title')).toBe('Open as full page');
+    // Beside the row's record link, never inside it.
+    const pair = arrow.closest('[data-testid="link-cell-trailing"]') as HTMLElement;
+    expect(pair.querySelector('[data-testid="primary-field-link"]')).not.toBeNull();
+    expect(arrow.parentElement?.closest('a')).toBeNull();
 
     fireEvent.click(arrow);
     expect(await screen.findByTestId('record-page-route')).toBeTruthy();
