@@ -81,7 +81,20 @@ const OBJECTS = [
     managedBy: 'platform',
     // History is on for this object, so the synthesized page carries it.
     enable: { trackHistory: true },
-    fields: BASE_FIELDS,
+    // A worked object — its status options declare lifecycle kinds — so the
+    // reader's timeline switch defaults on and the wide tier is three
+    // columns (objectstack#27052; owning the tasks below does not count).
+    fields: {
+      ...BASE_FIELDS,
+      status: {
+        type: 'select',
+        label: 'Status',
+        options: [
+          { value: 'active', label: 'Active', kind: 'open' },
+          { value: 'done', label: 'Done', kind: 'won' },
+        ],
+      },
+    },
   },
   {
     name: 'showcase_task',
