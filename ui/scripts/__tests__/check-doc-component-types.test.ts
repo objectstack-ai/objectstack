@@ -1793,10 +1793,12 @@ describe('the three snippets this gate found on its first run stay fixed', () =>
   // ordinary docs edit.
   const read = (rel: string) => fs.readFileSync(path.join(repoRoot, rel), 'utf8');
 
-  it('`heading` is gone from the two page schemas that taught it', () => {
+  it('`heading` is gone from the page schema that taught it', () => {
     // Nothing registers `heading`. `h1` is registered by `html-elements.tsx`'s
-    // TAGS loop and renders `schema.children`, which is what both snippets want.
-    for (const file of ['content/docs/utilities/runner.mdx', 'content/docs/utilities/vscode-extension.mdx']) {
+    // TAGS loop and renders `schema.children`, which is what the snippet wants.
+    // The second page that taught it, the VS Code extension's, was deleted with
+    // that package (objectstack#25910).
+    for (const file of ['content/docs/utilities/runner.mdx']) {
       const body = read(file);
       expect(body, `${file} still teaches the unregistered \`heading\` type`).not.toContain('"type": "heading"');
       expect(body).toContain('"type": "h1"');

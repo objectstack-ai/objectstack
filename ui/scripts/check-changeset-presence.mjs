@@ -665,9 +665,10 @@ export function readReleaseConfig(root) {
  * produce two different guarded surfaces.
  *
  * A package with NO `files` field publishes its whole directory. That is not read
- * as "everything counts": the one such package here (`packages/vscode-extension`)
- * is `private: true` and reaches no registry, and taking the absent field as a
- * blanket would guard every tsconfig and doc page in it. Absent means clause (c)
+ * as "everything counts": such a package that is `private: true` reaches no
+ * registry (the VS Code extension was the case here until objectstack#25910
+ * removed it), and taking the absent field as a blanket would guard every
+ * tsconfig and doc page in it. Absent means clause (c)
  * matches nothing, and clauses (a) and (b) still apply.
  */
 function publishedEntries(manifest) {
