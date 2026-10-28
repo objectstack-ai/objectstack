@@ -497,6 +497,7 @@
     "GetPublishedMetaItemResponseParsed (type)",
     "GetPublishedMetaItemResponseSchema (const)",
     "GetRecordFieldAccessResponse (type)",
+    "GetRecordFieldAccessResponseParsed (type)",
     "GetRecordFieldAccessResponseSchema (const)",
     "GetRunRequest (type)",
     "GetRunRequestSchema (const)",

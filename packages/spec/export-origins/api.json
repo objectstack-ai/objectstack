@@ -477,6 +477,7 @@
     "GetPublishedMetaItemResponseParsed": "src/api/protocol.zod.ts#GetPublishedMetaItemResponseParsed (type)",
     "GetPublishedMetaItemResponseSchema": "src/api/protocol.zod.ts#GetPublishedMetaItemResponseSchema (const)",
     "GetRecordFieldAccessResponse": "src/api/protocol.zod.ts#GetRecordFieldAccessResponse (type)",
+    "GetRecordFieldAccessResponseParsed": "src/api/protocol.zod.ts#GetRecordFieldAccessResponseParsed (type)",
     "GetRecordFieldAccessResponseSchema": "src/api/protocol.zod.ts#GetRecordFieldAccessResponseSchema (const)",
     "GetRunRequest": "src/api/automation-api.zod.ts#GetRunRequest (type)",
     "GetRunRequestSchema": "src/api/automation-api.zod.ts#GetRunRequestSchema (const)",

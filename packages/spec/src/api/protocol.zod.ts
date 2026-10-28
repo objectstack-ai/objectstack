@@ -3936,6 +3936,7 @@ export type GetObjectPermissionsResponseParsed = z.infer<typeof GetObjectPermiss
 export type GetEffectivePermissionsRequest = z.input<typeof GetEffectivePermissionsRequestSchema>;
 export type GetEffectivePermissionsResponse = z.input<typeof GetEffectivePermissionsResponseSchema>;
 export type GetRecordFieldAccessResponse = z.input<typeof GetRecordFieldAccessResponseSchema>;
+export type GetRecordFieldAccessResponseParsed = z.infer<typeof GetRecordFieldAccessResponseSchema>;
 
 // Workflow Types — removed with the schemas (#4451, v17); see the block comment
 // at "Workflow Operations — REMOVED" above.
