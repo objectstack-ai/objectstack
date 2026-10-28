@@ -502,7 +502,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.widget.dataset': 'Dataset',
   'engine.inspector.widget.datasetPlaceholder': 'e.g. sales_pipeline',
   'engine.inspector.widget.datasetHint':
-    'Bind a governed dataset. When set, it takes precedence over the inline object query above and the widget renders via the dataset (consistent, cross-object, RLS-enforced).',
+    'Pick the governed dataset this widget draws from, then choose its dimensions and measures below. Dataset numbers stay consistent across objects, and row-level security applies.',
   'engine.inspector.widget.dimensions': 'Dimensions',
   'engine.inspector.widget.dimensionsPlaceholder': 'e.g. stage, region (comma-separated)',
   'engine.inspector.widget.dimensionsHint':
@@ -531,6 +531,31 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.widget.type.funnel': 'Funnel',
   'engine.inspector.widget.type.table': 'Table',
   'engine.inspector.widget.type.pivot': 'Pivot Table',
+  // objectstack#26745 — the rest of the spec's widget types, now that the Type
+  // select reads the one widget registry (`previews/widget-types`).
+  'engine.inspector.widget.type.column': 'Column Chart',
+  'engine.inspector.widget.type.scatter': 'Scatter Plot',
+  'engine.inspector.widget.type.treemap': 'Treemap',
+  'engine.inspector.widget.type.sankey': 'Sankey Diagram',
+  'engine.inspector.widget.type.combo': 'Combo Chart',
+  'engine.inspector.widget.type.gauge': 'Gauge',
+  'engine.inspector.widget.type.solidGauge': 'Solid Gauge',
+  'engine.inspector.widget.type.kpi': 'KPI',
+  'engine.inspector.widget.type.bullet': 'Bullet Chart',
+  'engine.inspector.widget.type.radar': 'Radar Chart',
+  // objectstack#26745 — the Add-widget menu's names for the spec widget types it
+  // did not offer before. The family's other rows still sit in the app-shell
+  // designer table (objectstack#25922 moves them); each en row is the type's
+  // English `label` in `previews/widget-types`, word for word.
+  'engine.widgetPicker.type.column': 'Column chart',
+  'engine.widgetPicker.type.treemap': 'Treemap',
+  'engine.widgetPicker.type.sankey': 'Sankey diagram',
+  'engine.widgetPicker.type.combo': 'Combo chart',
+  'engine.widgetPicker.type.gauge': 'Gauge',
+  'engine.widgetPicker.type.solidGauge': 'Solid gauge',
+  'engine.widgetPicker.type.kpi': 'KPI',
+  'engine.widgetPicker.type.bullet': 'Bullet chart',
+  'engine.widgetPicker.type.radar': 'Radar chart',
   'engine.inspector.widget.untitledN': 'Widget {n}',
   'engine.inspector.widget.unsupportedSelection': 'Unsupported selection kind: {kind}',
   'engine.inspector.widget.removed': 'The selected widget was removed from the draft.',
@@ -649,6 +674,20 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.appNav.docHint': 'Choose a doc page, a book, or both.',
   'engine.inspector.appNav.groupHint': 'A group is a titled section of the menu. Items are not nested under it from this editor.',
   'engine.inspector.appNav.separatorHint': 'A separator is a divider: it has no label and opens nothing.',
+  // objectstack#26740 — the Studio nav inspector's fields for the keys the
+  // spec's shared base declares and the rows above did not carry: the badge
+  // and its variant, the order, and the `visible` condition's hints.
+  'engine.inspector.appNav.badge': 'Badge',
+  'engine.inspector.appNav.badgeHint': 'Text or a count shown beside the entry in the menu. Leave it empty for none.',
+  'engine.inspector.appNav.badgeVariant': 'Badge style',
+  'engine.inspector.appNav.badgeVariant.default': 'Default',
+  'engine.inspector.appNav.badgeVariant.secondary': 'Subtle',
+  'engine.inspector.appNav.badgeVariant.destructive': 'Alert',
+  'engine.inspector.appNav.badgeVariant.outline': 'Outline',
+  'engine.inspector.appNav.order': 'Order',
+  'engine.inspector.appNav.orderHint': 'Entries with a lower number come first in the menu; an entry without one counts as 0.',
+  'engine.inspector.appNav.visibleHint': 'Shows this entry only to people for whom the condition is true. Leave it empty to show it to everyone.',
+  'engine.inspector.appNav.visibleNotSaved': 'Not saved yet: the entry keeps its previous condition until this one has no errors.',
   // Page block inspector
   'engine.inspector.pageBlock.kind': 'Block',
   'engine.inspector.pageBlock.close': 'Close block',
@@ -1008,6 +1047,19 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.refusal.action': 'the action “{action}”',
   'engine.studio.refusal.actionInput': '{input} on the action “{action}”',
   'engine.studio.held.actionNeedsInput': '{input} on the action “{action}” needs a value',
+  // objectstack#26730 — the Interfaces pillar's refusal strip, for a dashboard
+  // widget and a report's properties; a refused publish kept on its Pending
+  // changes entry, and the toast that announces it.
+  'engine.studio.refusal.widget': 'the widget “{widget}”',
+  'engine.studio.refusal.widgetInput': '{input} on the widget “{widget}”',
+  'engine.studio.refusal.reportInput': '“{input}” in the report’s properties',
+  'engine.studio.refusal.publishIssue': 'Not published. Check {where} — {problem}',
+  'engine.studio.refusal.publishWhere': 'Not published. Check {where}: Details say what to change.',
+  'engine.studio.refusal.publishUnlocated': 'Not published: the server refused this draft. Details say why.',
+  'engine.studio.refusal.publishPlain': 'Not published: {reason}',
+  'engine.studio.publishRefused': 'Not published: {count} items need a change. Pending changes keeps each reason until it is fixed.',
+  'engine.studio.publishRefusedOne': 'Not published: {count} item needs a change. Pending changes keeps the reason until it is fixed.',
+  'engine.studio.publishRefusedBatch': 'Nothing went live: the package publishes as one batch, so its other drafts wait for this fix.',
   'engine.inspector.action.moreFieldsHint': 'Advanced / rarely-used properties.',
   // Dataset default (home) inspector (objectui#10586). Option labels are keyed
   // by the stored value; `{…}` tokens in a sentence are slots the inspector
@@ -2193,7 +2245,6 @@ const STUDIO_EN: Record<string, string> = {
   // Data pillar
   'engine.studio.data.newFieldLabel': 'New field',
   'engine.studio.data.nameFieldLabel': 'Name',
-  'engine.studio.data.idExists': 'Identifier “{name}” already exists',
   'engine.studio.data.fieldCount': '{count} fields',
   'engine.studio.data.pickObject': 'Select an object',
   'engine.studio.data.objects': 'Objects',
@@ -2449,10 +2500,17 @@ const STUDIO_EN: Record<string, string> = {
   // Access pillar: a create over a taken identifier, and the draft discard (objectstack#26836).
   'engine.studio.access.createTaken': 'This package already has a permission set with the identifier “{name}”: {label}. Open it, or choose another identifier.',
   'engine.studio.access.createTakenElsewhere': 'A permission set with the identifier “{name}” already exists outside this package: {label}. Choose another identifier.',
-  'engine.studio.access.openExisting': 'Open “{label}”',
   'engine.studio.access.discardConfirm': 'Discard the pending draft of “{item}”? The published set stays as it is; only its unpublished changes are removed.',
   'engine.studio.access.discardConfirmUnpublished': 'Discard “{item}”? It has never been published, so discarding its draft removes the set.',
   'engine.studio.access.discardFailed': 'Could not discard the draft',
+  // Studio creates over a taken identifier: the Automations, App and Data creates
+  // (objectstack#26917), and the "Open" every create's refusal offers.
+  'engine.studio.create.openExisting': 'Open “{label}”',
+  'engine.studio.auto.createTaken': 'This package already has an automation with the identifier “{name}”: {label}. Open it, or choose another identifier.',
+  'engine.studio.auto.createTakenElsewhere': 'An automation with the identifier “{name}” already exists outside this package: {label}. Choose another identifier.',
+  'engine.studio.app.createTaken': 'An app with the identifier “{name}” already exists: {label}. Choose another identifier.',
+  'engine.studio.data.createTaken': 'This package already has an object with the identifier “{name}”: {label}. Open it, or choose another identifier.',
+  'engine.studio.data.createTakenElsewhere': 'An object with the identifier “{name}” already exists outside this package: {label}. Choose another identifier.',
   // The rest of engine.studio.* (all but engine.studio.inspector) and the
   // metadata preview panes (engine.*Preview, engine.previewShell; the doc, book,
   // flow, page-block and translation previews excepted) (#25922 slice S5).

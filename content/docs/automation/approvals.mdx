@@ -873,6 +873,29 @@ It is computed from the open-time approver snapshot (OOO substitution applied),
 so it reflects who **actually** still needs to sign — the console renders it as
 per-group tick badges or a "2 of 3 · finance pending" count.
 
+The same read serves the request's own **route**, `flow_route`, which both
+approval step lines draw (the record's approvals panel and the request page):
+
+```jsonc
+// getRequest, for a contract a gateway routed from the manager to finance:
+"flow_route": {
+  "steps": [
+    { "id": "manager_review", "label": "Manager", "state": "done" },
+    { "id": "finance_only",   "label": "Finance", "state": "current" }
+  ],
+  "ahead": "undecided"                 // a gateway follows: nothing past it is listed
+}
+```
+
+`done` steps come from the run's own request rows (earlier requests of the same
+run, approved), never from the flow graph. Steps `upcoming` are listed only for
+a pending request, and only as far as the graph decides them when each step
+approves: the walk stops at a `decision`, a conditioned edge, several
+out-edges, a loop back or a `subflow` / `map` / `loop` node, and `ahead` reads
+`undecided`. `ahead` is `end` when the walk reached the flow's end, and
+`decided` for a request already decided. The older `flow_steps` member is the
+graph's first branch at every decision, not the route; nothing draws it.
+
 Approval **notifications deep-link into the request**: `notify()` rewrites the
 inbox action URL to `/system/approvals?request=<id>`, so clicking the bell opens
 that request's drawer directly instead of a generic list.
