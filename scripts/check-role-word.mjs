@@ -127,7 +127,7 @@ const SKIP_DIRS = new Set(['node_modules', '.git', 'dist']);
 // justifies the entry above is what decides it rather than weighing against it:
 // the reserved word emitted into a page by its generator is a REAL finding whose
 // remedy is that generator. Naming the generated tree is how the gate is told
-// where to send such a finding, and exactly two trees under these roots have a
+// where to send such a finding, and exactly three trees under these roots have a
 // fix site this gate cannot otherwise reach:
 //
 //   content/docs/references/        generated from spec by
@@ -138,6 +138,11 @@ const SKIP_DIRS = new Set(['node_modules', '.git', 'dist']);
 //                                   `gen:upgrade-guide` from the ADR-0087
 //                                   conversion and migration registries; the
 //                                   fix site is the registry `.ts`
+//   content/docs/ui/components/     the component reference, rendered whole
+//                                   from `sdui.manifest.json` by
+//                                   scripts/gen-sdui-reference.mjs; the fix
+//                                   site is the input description in the
+//                                   component's registration under `ui/`
 //
 // The second tree is also UNTRACKED: gitignored, written on demand by the
 // `@objectstack/docs` build, never committed, so CI's checkout never holds it.
@@ -157,7 +162,7 @@ const SKIP_DIRS = new Set(['node_modules', '.git', 'dist']);
 // scripts/regen-artifacts.mjs — the one register of untracked generator output —
 // and runs this gate as a child process over a fixture page inside each skipped
 // tree, with the same page outside it as the control.
-const SKIP_SUBTREES = new Set(['content/docs/references', 'content/docs/protocol-upgrade']);
+const SKIP_SUBTREES = new Set(['content/docs/references', 'content/docs/protocol-upgrade', 'content/docs/ui/components']);
 const EXTENSIONS = new Set(['.mdx', '.md']);
 const BASELINE_PATH = 'scripts/role-word-baseline.json';
 const WORD = /\brole(?:s)?\b/gi;
