@@ -795,7 +795,7 @@ describe('RestServer', () => {
       (rest as any).securityServiceProvider = async () => ({
         resolvePermissionSetNames: async () => ['member_default', 'crm_admin'],
       });
-  rest.registerRoutes();
+      rest.registerRoutes();
       const route = getMetaRoute(rest, 'GET', '/api/v1/meta/book/:name/tree');
       for (const [name, own] of [['org_book', 'org_intro'], ['gated_book', 'gated_setup']]) {
         const res = mockRes();
