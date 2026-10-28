@@ -11,9 +11,15 @@
 // pin the record-scoped projection (`GET /data/:object/:id/field-access`): it
 // answers what the gate does, row by row and field by field, and never more
 // than the record read discloses.
+//
+// [#27175] …and for the row as a whole: `writable` says whether an update of
+// the record passes the gate at all (sharing, ownership, row-level security,
+// the object grant), judged by running the gate over that update without
+// performing it — so a form stops offering an edit the gate refuses whole.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { AuditPlugin } from '@objectstack/plugin-audit';
 import { GetRecordFieldAccessResponseSchema } from '@objectstack/spec/api';
 import {
   recordFieldAccessFixtureStack,
@@ -34,7 +40,12 @@ describe('a row-conditioned field lock, on the record the form edits', () => {
   let othersNoticeId: string;
 
   beforeAll(async () => {
-    stack = await bootStack(recordFieldAccessFixtureStack, { security: recordFieldAccessFixtureSecurity() });
+    // The audit plugin is here for the probe's no-side-effect leg: it records
+    // every update the engine performs, so a probe that wrote would show.
+    stack = await bootStack(recordFieldAccessFixtureStack, {
+      security: recordFieldAccessFixtureSecurity(),
+      extraPlugins: [new AuditPlugin()],
+    });
     await stack.signIn();
     memberTok = await stack.signUp(MEMBER);
     ql = await stack.kernel.getServiceAsync('objectql');
@@ -121,21 +132,60 @@ describe('a row-conditioned field lock, on the record the form edits', () => {
     }
   }, 60_000);
 
-  it('measure — a row the caller may read but not write: the projection is field-level only, the PATCH refuses the row', async () => {
-    // The row-level write scope (sharing, row-level security, ownership) is
-    // declared outside `editable`: the projection lists the fields
-    // field-level security admits, and the write is refused for the row as a
-    // whole. A reader ANDs this answer with the record's own write scope; the
-    // console's edit dialog has never gated on that scope, so the server's
-    // 403 on save is its answer there, before this card and after it.
+  it('a row the caller may read but not write answers writable: false, and the PATCH refuses the row whole', async () => {
+    // `editable` stays field-level (field-level security admits both fields);
+    // `writable` is the row's own verdict, and the edit form ANDs the two.
     const read = await stack.apiAs(memberTok, 'GET', `/data/rfa_notice/${othersNoticeId}`);
     expect(read.status, await read.clone().text()).toBe(200);
     const { status, body } = await fieldAccess('rfa_notice', othersNoticeId);
     expect(status).toBe(200);
     const access = GetRecordFieldAccessResponseSchema.parse(body.data);
     expect(access.editable).toEqual(expect.arrayContaining(['title', 'summary']));
-    const patch = await stack.apiAs(memberTok, 'PATCH', `/data/rfa_notice/${othersNoticeId}`, { title: 'N' });
-    expect(patch.status, await patch.clone().text()).toBe(403);
+    expect(access.writable).toBe(false);
+    for (const patchBody of [{ title: 'N' }, { summary: 'S' }]) {
+      const patch = await stack.apiAs(memberTok, 'PATCH', `/data/rfa_notice/${othersNoticeId}`, patchBody);
+      expect(patch.status, await patch.clone().text()).toBe(403);
+    }
+  }, 60_000);
+
+  it('a row the caller may write answers writable: true, and the PATCH admits it — on each side of the field lock', async () => {
+    for (const id of [draftId, approvedId]) {
+      const access = GetRecordFieldAccessResponseSchema.parse((await fieldAccess('rfa_contract', id)).body.data);
+      expect(access.writable, id).toBe(true);
+      const patch = await stack.apiAs(memberTok, 'PATCH', `/data/rfa_contract/${id}`, { title: (await stored(id)).title });
+      expect(patch.status, await patch.clone().text()).toBe(200);
+    }
+    // The member's own notice: the same object that refused the row above
+    // admits a row inside the member's write scope.
+    const created = await stack.apiAs(memberTok, 'POST', '/data/rfa_notice', { title: 'mine' });
+    expect(created.status, await created.clone().text()).toBeLessThan(300);
+    const ownId = ((await created.json()) as any)?.data?.id;
+    expect(ownId, 'own notice id').toBeTruthy();
+    const own = GetRecordFieldAccessResponseSchema.parse((await fieldAccess('rfa_notice', ownId)).body.data);
+    expect(own.writable).toBe(true);
+    const patch = await stack.apiAs(memberTok, 'PATCH', `/data/rfa_notice/${ownId}`, { title: 'mine' });
+    expect(patch.status, await patch.clone().text()).toBe(200);
+  }, 60_000);
+
+  it('the verdict performs no write: the row is left as stored and no audit row appears, while a real save leaves one', async () => {
+    const audit = async () =>
+      (await ql.find('sys_audit_log', { where: { object_name: 'rfa_contract', record_id: draftId, action: 'update' }, limit: 200 }, { context: SYS })) as any[];
+    const before = await stored(draftId);
+    const auditBefore = (await audit()).length;
+    for (let i = 0; i < 3; i++) {
+      const access = GetRecordFieldAccessResponseSchema.parse((await fieldAccess('rfa_contract', draftId)).body.data);
+      expect(access.writable).toBe(true);
+    }
+    expect(await stored(draftId)).toEqual(before);
+    // Positive control: one real save is recorded, and it is the only new row.
+    const patch = await stack.apiAs(memberTok, 'PATCH', `/data/rfa_contract/${draftId}`, { title: 'saved' });
+    expect(patch.status, await patch.clone().text()).toBe(200);
+    let rows: any[] = [];
+    for (let i = 0; i < 50 && rows.length <= auditBefore; i++) {
+      rows = await audit();
+      if (rows.length <= auditBefore) await new Promise((r) => setTimeout(r, 100));
+    }
+    expect(rows.length).toBe(auditBefore + 1);
   }, 60_000);
 
   it('the row-less reader still answers as before, and the route takes no query parameter', async () => {

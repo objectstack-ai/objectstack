@@ -64,11 +64,15 @@ fields: {
   an update of the stored row. So a lock that applies from a stage onward
   disables the field only on the rows its condition names — this is the
   answer a record's edit form reads. A row that is absent or that the caller
-  cannot read answers the record read's `404`. The answer is field-level
+  cannot read answers the record read's `404`. `editable` is field-level
   only: the object grant and the record's row-level write scope (sharing,
-  row-level security, ownership) are not part of it, so on a row the caller
-  may read but not write it still lists fields as editable, and the update
-  is refused as a whole.
+  row-level security, ownership) are not part of it. Those are `writable`,
+  the row's own verdict: `false` on a row the caller may read but not write,
+  where an update is refused as a whole, so a client need not offer the
+  edit at all. It comes from the write gate too, run over an update of the
+  row without performing it. `true` does not promise a save succeeds: a
+  pending approval's record lock and rules judged on the values sent
+  (conditional read-only, validation) still apply when the record is saved.
 - **Union without deny is unchanged.** A matched conditioned lock is still
   out-voted by another set's unconditioned `editable: true`; an entry
   without `when` votes on every row, as before (ADR-0066 ⑧, note of

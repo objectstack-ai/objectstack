@@ -825,6 +825,7 @@
     "api/GetRecordFieldAccessResponse:object",
     "api/GetRecordFieldAccessResponse:readable",
     "api/GetRecordFieldAccessResponse:recordId",
+    "api/GetRecordFieldAccessResponse:writable",
     "api/GetRunRequest:name",
     "api/GetRunRequest:runId",
     "api/GetRunResponse:data",
