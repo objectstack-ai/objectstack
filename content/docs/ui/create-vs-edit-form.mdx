@@ -127,6 +127,7 @@ import { ObjectSchema } from '@objectstack/spec/data';
 export const Account = ObjectSchema.create({
   name: 'account',
   label: 'Account',
+  sharingModel: 'private',
   editMode: 'page', // 'modal' (the Console's default) | 'page'
   fields: { name: { type: 'text', label: 'Name', required: true } },
 });
