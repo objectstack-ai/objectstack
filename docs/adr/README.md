@@ -17,8 +17,8 @@
 
 | Status | Records |
 |---|---|
-| Accepted | 124 |
-| Proposed | 6 |
+| Accepted | 125 |
+| Proposed | 5 |
 | Superseded | 4 |
 | Draft | 3 |
 | Deferred | 2 |
@@ -95,7 +95,7 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0022](./0022-connectors-vs-messaging-channels.md) | Connectors vs Messaging Channels — Where "Push to Slack" Lives | Accepted — 2026-10-27 (ruled on objectstack#26553, ADR batch 1; proposed 2… | 2026-10-27 | — | — |
 | [ADR-0023](./0023-openapi-to-connector-generator.md) | OpenAPI → Connector Generator — Bulk Connectors From Declarative API Specs | Accepted — library implemented; CLI + examples pending (proposed 2026-06-0… | 2026-06-01 | — | — |
 | [ADR-0024](./0024-mcp-connectors.md) | MCP Servers as Connectors — Adopting an Open, Vendor-Neutral Tool Protocol | Accepted — library implemented; examples pending (proposed 2026-06-01 · ca… | 2026-06-01 | — | — |
-| [ADR-0025](./0025-plugin-package-distribution.md) | Plugin Package Distribution (Code + Dependencies) | Proposed — partially implemented (2026-09-12 audit, superseding 2026-07-16… | 2026-09-12 | — | — |
+| [ADR-0025](./0025-plugin-package-distribution.md) | Plugin Package Distribution (Code + Dependencies) | Accepted — 2026-10-28 (ruled on objectstack#26553, ADR batch 4; proposed 2… | 2026-10-28 | — | — |
 | [ADR-0026](./0026-client-ui-plugin-distribution.md) | Client-Side UI Plugin Distribution | Deferred — 2026-10-27 (ruled on objectstack#26553, ADR batch 1; proposed 2… | 2026-10-27 | — | — |
 | [ADR-0027](./0027-metadata-authoring-lifecycle.md) | `@objectstack/metadata-authoring` — Staged Authoring, Publish & Promotion Lifecycle | Accepted — 2026-10-27 (ruled on objectstack#26553, ADR batch 1; proposed 2… | 2026-10-27 | — | — |
 | [ADR-0028](./0028-metadata-naming-and-namespace-isolation.md) | Metadata Naming & Namespace Isolation — Derived Physical Names, Namespace-Scoped Identity, and a Single Kerne… | Deferred — 2026-07-16; proposed 2026-06-01 — the target model (namespace a… | 2026-07-16 | ADR-0129 | — |
