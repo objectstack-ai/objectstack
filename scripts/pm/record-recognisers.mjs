@@ -1747,6 +1747,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ letter B: a declared NARROWING is a face of its own at CONTRACT_REVIEW_TIER — keyed on the `Clause-②:` line, exact': 17,
   '⭐ the `Contract-review-handoff:` line — names the current head ⇒ triage\'s review; head moved ⇒ stale; absent ⇒ the seat\'s own': 13,
   '⭐ the mailbox doorbell: the seven first-line keys read — kind, numbers, sha, login, time — and anything else refused': 21,
+  '⭐ the signature line: the reader reads LANE#N · ACCOUNT · SESSION exactly, and one leading signature changes no first-line reading': 22,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1762,7 +1763,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // Raised 12 → 13 with the hand-off battery (the maintainer's exhausted-tier rule): one battery, one row.
 // Raised 13 → 14 with the mailbox doorbell battery (the maintainer's per-seat mailbox and its closed
 // vocabulary): one battery, one row.
-const SELF_TEST_BATTERY_FLOOR = 14;
+// Raised 14 → 15 with the signature-line battery (the maintainer's signed-post rule): one battery, one row.
+const SELF_TEST_BATTERY_FLOOR = 15;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -2189,6 +2191,75 @@ export async function selfTest() {
   t('a thread that is not an array is a read that could not be made, never an empty one', mailboxEvents(null).state === 'unreadable' && mailboxEvents([]).state === 'read' && mailboxEvents([]).events.length === 0);
   t('⛔ no gate reads it: the queue guard\'s record reading is untouched — a doorbell comment beside a record on this head still reads FOUND', (() => { const r = locateReviewOfRecord(pairOf({ prComments: [RECORD_ON_9AF9, DB_ROW(DB.nc, 5104)] })); return r.state === 'found' && r.id === 3301; })());
   t('the roster: seven keys, unique ids, each of the two kinds, the byte cap the text states', MAILBOX_KEYS.length === 7 && new Set(MAILBOX_KEYS.map((k) => k.id)).size === 7 && MAILBOX_KEYS.every((k) => ['Request', 'Notify'].includes(k.kind) && k.template.startsWith(`${k.kind}: ${k.key}`)) && MAILBOX_LINE_MAX_BYTES === 200);
+
+  // -- the signature line (#27113) ----------------------------------------------
+  //
+  // Every seat-authored body now opens with `LANE#N · ACCOUNT · SESSION`, so every recogniser that keys
+  // on a body's FIRST line must read the same thing with that line above it. These cases read the
+  // reader's own shape, pin its session half to the relay envelope's, and then drive each recogniser
+  // the card names twice — the fixture as it is, and the same fixture signed — asserting the reading
+  // is positive AND identical. Readers that live in other modules are imported here, in the self-test
+  // body, so the module the queue guard loads lazily gains no edge.
+  battery('⭐ the signature line: the reader reads LANE#N · ACCOUNT · SESSION exactly, and one leading signature changes no first-line reading');
+  {
+    const hs = await import('./check-half-states.mjs');
+    const { SESSION_SHAPE } = await import('./fleet-write/ops.mjs');
+    const { SEAT_RECORD_MARKER } = await import('./seat-record.mjs');
+    const { classifyRulingComment } = await import('./check-prior-rulings.mjs');
+    const SIG = 'domain:skills#2 · os-justin · session_01QSeKYmhU5KEj1nukYhp1Tg';
+    const signed = (body) => `${SIG}\n${body}`;
+    const J = (v) => JSON.stringify(v, (k, x) => (x instanceof Set ? [...x] : x));
+    const same = (read, body) => J(read(body)) === J(read(signed(body)));
+
+    // The reader's own shape.
+    t('the four parts read: lane, seat number, account, session', J(hs.readSignatureLine(SIG)) === J({ lane: 'domain:skills', seat: 2, account: 'os-justin', session: 'session_01QSeKYmhU5KEj1nukYhp1Tg', line: SIG }));
+    t('every lane the role table names reads — a hyphenated lane, a repo seat, an epic, triage, director, coordinator', ['domain:engine-core#1', 'repo:cloud#2', 'epic:#26000#1', 'triage#1', 'director#1', 'coordinator#3'].every((lane) => hs.readSignatureLine(`${lane} · os-zhuang · session_01JQwxbZeBv2y91towxasSUT`)?.lane === lane.replace(/#[0-9]+$/u, '')));
+    t('a container-derived session (`cse_` tail) reads: the relay envelope\'s shape, not only the desktop one', hs.readSignatureLine('triage#1 · huangyiirene · session_01ABCDEFGHJKMNPQRSTVWXYZ')?.session === 'session_01ABCDEFGHJKMNPQRSTVWXYZ');
+    t('⛔ the near misses are NOT signatures: no seat number, seat 0, a bare lane, a capital, hyphens or doubled spaces for the dot, a short session, bold wrapping, trailing words', [
+      'triage · os-justin · session_01QSeKYmhU5KEj1nukYhp1Tg',
+      'triage#0 · os-justin · session_01QSeKYmhU5KEj1nukYhp1Tg',
+      'skills#2 · os-justin · session_01QSeKYmhU5KEj1nukYhp1Tg',
+      'domain:Skills#2 · os-justin · session_01QSeKYmhU5KEj1nukYhp1Tg',
+      'domain:skills#2 - os-justin - session_01QSeKYmhU5KEj1nukYhp1Tg',
+      'domain:skills#2  ·  os-justin · session_01QSeKYmhU5KEj1nukYhp1Tg',
+      'domain:skills#2 · os-justin · session_x',
+      '**domain:skills#2 · os-justin · session_01QSeKYmhU5KEj1nukYhp1Tg**',
+      'domain:skills#2 · os-justin · session_01QSeKYmhU5KEj1nukYhp1Tg · round 3',
+    ].every((line) => hs.readSignatureLine(line) === null));
+    t('the FIRST non-empty line decides: blank lines above it and a CRLF read; a signature on line two does not', hs.readSignatureLine(`\n\n${SIG}\r\nbody`) !== null && hs.readSignatureLine(`body\n${SIG}`) === null && hs.readSignatureLine('') === null);
+    t('⭐ the session half IS the relay envelope\'s `SESSION_SHAPE` (fleet-write/ops.mjs) — mirrored, held equal here', SESSION_SHAPE.source === `^${hs.SEAT_SIGNATURE_SESSION_SOURCE}$`);
+    t('the separator is the doorbell\'s dot, exactly: one space, U+00B7, one space', hs.SEAT_SIGNATURE_SEPARATOR === ' · ' && hs.SEAT_SIGNATURE_SEPARATOR.split(MAILBOX_SEPARATOR).length === 2);
+    t('`stripSignatureLine` leaves an unsigned body byte-identical, leading blank lines and all', ['', '\n\nClaim: x\n', 'os-dev-report\n{}', `body\n${SIG}`].every((b) => hs.stripSignatureLine(b) === b));
+    t('…removes ONE signature line and the blank lines after it, and only one', hs.stripSignatureLine(`${SIG}\n\n\nClaim: x`) === 'Claim: x' && hs.stripSignatureLine(`${SIG}\n${SIG}\nClaim: x`) === `${SIG}\nClaim: x` && hs.stripSignatureLine(SIG) === '');
+
+    // Each named recogniser, unsigned and signed.
+    const rec = RECORD_ON_9AF9;
+    const recSigned = { ...rec, body: signed(rec.body) };
+    const found = locateReviewOfRecord(pairOf({ prComments: [recSigned] }));
+    t('`## Contract review`: the signed record on this head reads FOUND with the same id and head span; its `Served-tier:` and `Local-runs:` read the same', found.state === 'found' && J([found.id, found.sha]) === J([onPr.id, onPr.sha]) && same(readServedTier, rec.body) && same(readLocalRuns, `${rec.body}\n- **Local-runs:** none`));
+    const report = 'os-dev-report\n```json\n{"issue": 1}\n```';
+    t('`os-dev-report`: the marker reads with and without, and the newest report is found on a signed thread', hs.OS_DEV_REPORT_MARKER.test(report) && hs.OS_DEV_REPORT_MARKER.test(signed(report)) && hs.latestMarkedComment([{ body: signed(report), created_at: '2026-10-28T09:00:00Z' }], hs.OS_DEV_REPORT_MARKER) !== null);
+    t('⛔ …while a marker on a LATER line, below anything but one signature, is still no report', hs.OS_DEV_REPORT_MARKER.test(`${SIG}\n## PM review\n\nos-dev-report\n`) === false && hs.OS_DEV_REPORT_MARKER.test(`${SIG}\n${SIG}\nos-dev-report\n`) === false);
+    t('`Contract-review-handoff:` reads the same newest-line verdict on a signed thread', (() => { const a = contractReviewHandoff([HO_ROW(HO_LINE())], HO_HEAD); const b = contractReviewHandoff([{ ...HO_ROW(HO_LINE()), body: signed(HO_ROW(HO_LINE()).body) }], HO_HEAD); return a.state === 'triage' && J(a) === J(b); })());
+    const claim = 'Claim: PM loop round 1 · 2026-10-28T12:44Z\nSession: `session_01QSeKYmhU5KEj1nukYhp1Tg`\nSeat: `domain:skills#2`\nBranch: `claude/issue-1-x`';
+    t('claim lines: the `Claim:` marker and the seat number read the same signed', hs.markerMatches(hs.CLAIM_COMMENT_MARKER, signed(claim)) && same(hs.claimSeatNumber, claim) && hs.claimSeatNumber(signed(claim)) === 2);
+    t('release lines: the `Release:` marker reads the same signed', hs.markerMatches(hs.RELEASE_COMMENT_MARKER, 'Release: session_x · reason · back to pm:queue') && hs.markerMatches(hs.RELEASE_COMMENT_MARKER, signed('Release: session_x · reason · back to pm:queue')));
+    const YL = 'session_01TsiNYHjuek413vNgFHqcAm';
+    const yRows = (yieldBody) => [
+      { id: 1, created_at: '2026-10-25T09:47:34Z', body: 'Claim: a · 2026-10-25T09:47Z\nSession: `session_014FZ3TJucS1L7BdMe5DAzXC`' },
+      { id: 2, created_at: '2026-10-25T09:54:58Z', body: `Claim: b · 2026-10-25T09:54Z\nSession: \`${YL}\`` },
+      { id: 3, created_at: '2026-10-25T10:01:06Z', body: yieldBody },
+    ];
+    const YIELD = `already claimed — yielding · \`domain:skills#2\` · \`${YL}\` · 2026-10-25T10:00Z\n\nThe earlier claim decides.`;
+    t('a claim\'s yield line: the yielded claim is the same one under a signed yield', J(hs.yieldedClaimIndexes(yRows(YIELD))) === J([1]) && J(hs.yieldedClaimIndexes(yRows(signed(YIELD)))) === J([1]));
+    const ROUNDS = ['**Round-open marker** · triage seat · `session_01x` · **R+236** · fire 2026-09-15T14:51Z', 'R+12 open · triage', '分诊轮收尾 · R+234 · `session_01x`', '# 🔻 收班简报 · 分诊席 · `session_01x` · **R+220 → R+234**'];
+    t('round records: every round-artefact headline is the same line signed, and its shape still matches', ROUNDS.every((r) => same(hs.h65Headline, `${r}\n\nbody`) && hs.H65_ROUND_ARTEFACT_SHAPES.some((shape) => shape.re.test(hs.h65Headline(signed(`${r}\n\nbody`))))));
+    t('`## 席位核对`: the seat-record heading reads the same signed', SEAT_RECORD_MARKER.test('## 席位核对\n- ① ok') && SEAT_RECORD_MARKER.test(signed('## 席位核对\n- ① ok')));
+    t('⭐ the mailbox doorbell: all seven keys read IDENTICALLY signed — the signature is neither the key nor a second line', Object.values(DB).every((line) => readMailboxLine(line).state === 'read' && same(readMailboxLine, line)) && readMailboxLine(signed(`${DB.ut}\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_`)).state === 'read');
+    t('⛔ …a signature with no key under it is refused, and so is a key under a near-miss signature or under two', readMailboxLine(SIG).state === 'refused' && readMailboxLine(`domain:skills#2 - os-justin - session_01QSeKYmhU5KEj1nukYhp1Tg\n${DB.ut}`).state === 'refused' && readMailboxLine(`${SIG}\n${SIG}\n${DB.ut}`).state === 'refused');
+    t('triage rulings and director rulings: the first-line shape reads the same signed', ['Triage: lands in domain:skills', '**Grading (skills seat):** p2'].every((r) => hs.isTriageRulingComment(r) && same(hs.isTriageRulingComment, r)) && classifyRulingComment('Ruling: batch #9 item 2 · letter A') !== null && same(classifyRulingComment, 'Ruling: batch #9 item 2 · letter A'));
+    t('the act\'s OPENING-line stamp (H56, which post-stamped\'s positional refusal imports) is the same reading under a signature', hs.h56StampedReadings('Claim: x · 2026-10-28T12:44Z\nbody').length === 1 && same(hs.h56StampedReadings, 'Claim: x · 2026-10-28T12:44Z\nbody'));
+  }
 
   // -- #18042: the copyable record TEMPLATE ----------------------------------
   //

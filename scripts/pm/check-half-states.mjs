@@ -1358,7 +1358,8 @@ export function signatureRefusal(body) {
   const lines = String(body ?? '').split(/\r?\n/);
   const at = firstNonBlankIndex(lines);
   const line = at < 0 ? '(the body is empty)' : lines[at].trim();
-  const near = at >= 0 && /·/u.test(line) && /\bsession_/u.test(line);
+  // A line naming a seat number AND a session id is a signature typed wrong — named as such, so the fix is the spelling.
+  const near = at >= 0 && /#[1-9]/u.test(line) && /\bsession_/u.test(line);
   return {
     line: line.length > 160 ? `${line.slice(0, 160)}…` : line,
     why: near
