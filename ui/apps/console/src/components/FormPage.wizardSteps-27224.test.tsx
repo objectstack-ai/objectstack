@@ -147,9 +147,15 @@ describe('FormPage draws a wizard form view as steps (#27224)', () => {
     expect(step('main')!.getAttribute('data-state')).toBe('complete');
     await userEvent.click(button('Back')!);
     expect(isCurrent('main')).toBe(true);
-    // A completed step stays open from the indicator.
+    // A step left by Back before its Next passed is not completed, so it does
+    // not open from the indicator (the app's wizard rule); a completed one does.
+    expect(step('more')!.disabled).toBe(true);
+    await userEvent.click(button('Next')!);
+    await userEvent.click(button('Next')!);
+    await userEvent.click(step('main')!);
     expect(step('more')!.disabled).toBe(false);
     await userEvent.click(step('more')!);
+    expect(isCurrent('more')).toBe(true);
     await userEvent.click(button('Next')!);
     expect(isCurrent('routing')).toBe(true);
     expect(button('Next')).toBeNull();
