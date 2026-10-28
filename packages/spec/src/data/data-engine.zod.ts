@@ -75,6 +75,39 @@ export const BaseEngineOptionsSchema = lazySchema(() => z.object({
   context: ExecutionContextSchema.partial().optional(),
 }));
 
+/**
+ * [#26909] The projection's accept set — the `select` / `$select` spellings
+ * of `fields` — as the doors that read it judge it (`projectionFieldsValue` in
+ * `@objectstack/metadata-protocol`, shared by the list's `findData` and the
+ * by-id `getData`). A comma string is split, trimmed and emptied of blank
+ * members there, and a value naming NO field is refused with a 400: absent
+ * means "every column", so an empty projection read as absent is a widening.
+ *
+ * The string arm is that rule as a pattern: `[^\s,]` holds iff some comma
+ * segment has a non-whitespace character, and `\s` is exactly the set
+ * `trim()` strips. A pattern, not a refinement, so the published JSON Schema
+ * states it too. The array arm is not split: the door keeps every member,
+ * refuses `[]`, and checks every member against the object's fields, where a
+ * blank name is never one.
+ *
+ * `HttpFindQueryParamsSchema.select` and `GetDataRequestSchema.select`
+ * (`../api/protocol.zod.ts`) read these arms off the `QueryTransportParamsSchema`
+ * members rather than restating them, so the three declarations of one door
+ * rule cannot drift apart.
+ *
+ * [#26954] The engine-side declarations of the same projection —
+ * `EngineQueryOptionsSchema.fields` and `RpcQueryOptionsSchema.select` — take
+ * the array arm from here too. It is declared ahead of both because
+ * `RpcQueryOptionsSchema` extends `EngineQueryOptionsSchema` at module load,
+ * which runs the lazy factory before any later `const` exists.
+ */
+const PROJECTION_NAMES_NO_FIELD = 'Name at least one field';
+const TransportProjectionStringSchema = z.string().regex(/[^\s,]/, PROJECTION_NAMES_NO_FIELD);
+const transportProjectionArray = <T extends z.ZodString>(member: T) =>
+  z.array(member.regex(/\S/, 'A field name cannot be blank')).min(1, PROJECTION_NAMES_NO_FIELD);
+const PROJECTION_ACCEPT_SET = 'at least one field name; a value naming no field (blank, only commas and spaces, '
+  + 'an empty list, or a list with a blank name) is refused';
+
 // ==========================================================================
 // 2. method: FIND (QueryAST-aligned)
 // ==========================================================================
@@ -101,8 +134,8 @@ export const EngineQueryOptionsSchema = lazySchema(() => BaseEngineOptionsSchema
   /** Filter conditions (WHERE) — standard QueryAST `where` */
   where: z.union([z.record(z.string(), z.unknown()), FilterConditionSchema]).optional(),
 
-  /** Fields to retrieve (SELECT) — standard QueryAST `fields` */
-  fields: z.array(FieldNodeSchema).optional(),
+  /** Fields to retrieve (SELECT) — standard QueryAST `fields`; at least one, none blank (#26954) */
+  fields: transportProjectionArray(FieldNodeSchema).optional(),
 
   /** Sorting instructions (ORDER BY) — standard QueryAST `orderBy` */
   orderBy: z.array(SortNodeSchema).optional(),
@@ -774,8 +807,8 @@ function foldRpcQueryOptions(input: object, ctx: z.core.$RefinementCtx): EngineQ
  */
 const RpcQueryOptionsSchema = EngineQueryOptionsSchema.extend({
   ...RpcLegacyFilterMixin,
-  /** @deprecated Use `fields` */
-  select: z.array(z.string()).optional(),
+  /** @deprecated Use `fields` — the same projection rule (#26954) */
+  select: transportProjectionArray(z.string()).optional(),
   /** @deprecated Use `orderBy` */
   sort: DataEngineSortSchema.optional(),
   /** @deprecated Use `offset` */
@@ -906,33 +939,6 @@ const TransportFilterValueSchema = lazySchema(() => z.union([FilterArraySchema, 
  * unlowered `'false'` reads as "count anyway".
  */
 const TransportCountValueSchema = lazySchema(() => z.union([z.boolean(), z.enum(['true', 'false'])]));
-
-/**
- * [#26909] The projection's accept set — the `select` / `$select` spellings
- * of `fields` — as the doors that read it judge it (`projectionFieldsValue` in
- * `@objectstack/metadata-protocol`, shared by the list's `findData` and the
- * by-id `getData`). A comma string is split, trimmed and emptied of blank
- * members there, and a value naming NO field is refused with a 400: absent
- * means "every column", so an empty projection read as absent is a widening.
- *
- * The string arm is that rule as a pattern: `[^\s,]` holds iff some comma
- * segment has a non-whitespace character, and `\s` is exactly the set
- * `trim()` strips. A pattern, not a refinement, so the published JSON Schema
- * states it too. The array arm is not split: the door keeps every member,
- * refuses `[]`, and checks every member against the object's fields, where a
- * blank name is never one.
- *
- * `HttpFindQueryParamsSchema.select` and `GetDataRequestSchema.select`
- * (`../api/protocol.zod.ts`) read these arms off the members below rather
- * than restating them, so the three declarations of one door rule cannot
- * drift apart.
- */
-const PROJECTION_NAMES_NO_FIELD = 'Name at least one field';
-const TransportProjectionStringSchema = z.string().regex(/[^\s,]/, PROJECTION_NAMES_NO_FIELD);
-const transportProjectionArray = <T extends z.ZodString>(member: T) =>
-  z.array(member.regex(/\S/, 'A field name cannot be blank')).min(1, PROJECTION_NAMES_NO_FIELD);
-const PROJECTION_ACCEPT_SET = 'at least one field name; a value naming no field (blank, only commas and spaces, '
-  + 'an empty list, or a list with a blank name) is refused';
 
 /**
  * [#25269] The page window — `limit` / `offset` and every spelling that folds
