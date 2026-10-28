@@ -846,7 +846,7 @@
       "title": "Setup Organization page resolves the active org and drives member/invitation/team management through the better-auth org endpoints — non-admins refused server-side",
       "since": "v17",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["tenant admin / org owner", "a target org member", "a non-admin org member (forger)"],
@@ -921,7 +921,7 @@
       "traps": ["wrong-persona", "dispatcher-vs-hono-route", "hydration-race"],
       "source": [
         "packages/platform-objects/src/apps/setup-nav.contributions.ts#nav_organization (nav_organization recordId {current_org_id}, cloud ADR-0081 D3; Teams/Invitations always mounted per cloud ADR-0081 D1)",
-        "packages/platform-objects/src/pages/sys-organization.page.ts#SysOrganizationDetailPage (WHERE THE THREE TABS COME FROM: a kind: 'slotted' record page whose slots.tabs override replaces the synthesized tab strip outright, giving exactly Members / Invitations / Teams with Members at index 0. Handed to the runtime by plugin-auth's pages: [...]. NOT the Field.relatedList: 'primary' prominence key — no identity object declares that key, and it would not move this page while the tabs slot is present. A grader who finds a Details + stacked Related strip instead is looking at the synthesized default, i.e. this page failed to load)",
+        "packages/platform-objects/src/pages/sys-organization.page.ts#SysOrganizationDetailPage (WHERE THE THREE TABS COME FROM: a kind: 'full' record page that authors its own page:tabs strip, drawn as authored with no synthesized strip, giving exactly Members / Invitations / Teams with Members at index 0 (a kind: 'slotted' page whose slots.tabs override replaced the synthesized strip until that slot retired, #27053). Handed to the runtime by plugin-auth's pages: [...]. NOT the Field.relatedList: 'primary' prominence key — no identity object declares that key, and it would not move this full page. A grader who finds a Details + stacked Related strip instead is looking at the synthesized default, i.e. this page failed to load)",
         "packages/plugins/plugin-auth/src/auth-route-ledger.ts (organization family: update-member-role, remove-member, update, create-team, add-team-member, list-members/teams/invitations, get-active-member, get-full-organization)",
         "packages/spec/src/identity/membership-role.ts#BUILTIN_MEMBERSHIP_ROLES (BUILTIN_MEMBERSHIP_ROLES / BUILTIN_MEMBERSHIP_ROLE_OPTIONS — THE role vocabulary: owner/admin/delegated_admin/member, ADR-0108; 'nothing widens these at boot any more')",
         "docs/adr/0108-membership-grade-is-not-a-capability-channel.md (why the list is closed: a grade decides what you can REACH, never a bundle of what you may do)",
@@ -939,7 +939,8 @@
           "date": "2026-10-19",
           "change": "steps[5] and acceptance[3].clause corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24538, identity-auth.org-membership-team-management; wave anchor #24579 §3): after a rename the step expected the nav label to follow, but nav_organization's label is the static 'Organization' (setup-nav.contributions.ts); what follows is the organization record page's title, which the run observed. Not a loosening: the persisted name and the page title must both show the rename",
           "ref": "#24632"
-        }
+        },
+        { "revision": 6, "date": "2026-10-28", "change": "PROVENANCE, no clause change: the record page's tabs slot retired (#27053), so SysOrganizationDetailPage moved from kind: 'slotted' with a slots.tabs override to kind: 'full', rebuilt as the header, highlights, the same Members / Invitations / Teams strip and the discussion the slotted page rendered. source[1] now names the full page; the tab order, steps, acceptance clauses, oracles and negatives are unchanged (ADR-0133 carries the matching amendment)", "ref": "#27053" }
     ]
     },
     {

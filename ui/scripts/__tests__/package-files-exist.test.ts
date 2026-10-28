@@ -373,8 +373,8 @@ describe('package.json `files` entries exist on disk (objectui#3663)', () => {
  *
  * `!private && license` — the two conditions that together turn "MIT" from a
  * label into an obligation. A private package makes no distribution and owes no
- * text (`object-ui`, the vscode-extension, is exactly that case and is excluded
- * on purpose). A package declaring no license at all is a different defect that
+ * text (`@object-ui/test-support` is exactly that case and is excluded on
+ * purpose). A package declaring no license at all is a different defect that
  * this guard deliberately does not invent a verdict about.
  *
  * The population is DERIVED from the same workspace scan as the guard above, so
@@ -479,7 +479,7 @@ describe('published packages that declare a license ship its text (objectui#3696
         '  cp LICENSE <package-dir>/LICENSE      # all 38 are byte-identical, blob cf2ca285',
         '',
         'If the package should NOT be published, mark it `"private": true` instead — that is the',
-        'other true direction, and it is why `object-ui` (the vscode-extension) is not listed here.',
+        'other true direction, and it is why `@object-ui/test-support` is not listed here.',
         '',
         ...violations,
       ].join('\n'),
@@ -562,8 +562,8 @@ describe('published packages that declare a license ship its text (objectui#3696
     // The `private` limb only means something while some private package would
     // otherwise be reported. Asserting the specimen set is NON-EMPTY first is
     // what keeps this from becoming a test that passes because it examines
-    // nothing — today it is `object-ui` (packages/vscode-extension), which
-    // declares "MIT" and has no LICENSE file.
+    // nothing — today it is `@object-ui/test-support`, which declares "MIT"
+    // and has no LICENSE file.
     const privateOwingIfPublished = packages.filter(
       (p) => p.private && p.license !== undefined && licenseTextFiles(p).length === 0,
     );

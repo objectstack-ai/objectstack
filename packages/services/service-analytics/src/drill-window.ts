@@ -25,10 +25,12 @@
  *    the shared `dateRange` conformance kit: a preset through
  *    `resolveAnalyticsDateRangeString` at the reference time zone, an explicit
  *    `[a, b]` through `explicitDateRangeWindow`, untouched.
- * 2. The `{ $gte, $lt }` / `{ $gte, $lte }` pair both strategies build from
- *    that window, through {@link normalizeDateRangeWindow}, the shared
- *    lowering. Its whole-day rule turns a bare-day `$lte` into `$lt` the next
- *    day. It is applied as for a `datetime` column on every column, which
+ * 2. The pair both strategies build from that window,
+ *    {@link dateRangeWindowBounds}: a resolved preset's instants, or on a
+ *    `date` column the calendar days it covers in the reference zone (#27172);
+ *    an explicit window's own bounds. Then {@link normalizeDateRangeWindow},
+ *    the shared lowering. Its whole-day rule turns a bare-day `$lte` into
+ *    `$lt` the next day. It is applied as for a `datetime` column on every column, which
  *    `calendar-day.ts` records is order-equivalent to `<= day` on a `date`
  *    column, so one `[gte, lt)` shape serves both.
  * 3. `temporalStorageForm`, the rule the engine reads every temporal
@@ -42,7 +44,7 @@
  */
 
 import { temporalStorageForm } from '@objectstack/core';
-import { lowerDatasetCompareDateRange } from './dataset-executor.js';
+import { dateRangeWindowBounds, lowerDatasetCompareDateRange } from './dataset-executor.js';
 import { normalizeDateRangeWindow, type NormalizedFilterNode } from './strategies/filter-normalizer.js';
 
 /** How a drill bound is spelled: the storage form of the window's column. */
@@ -74,9 +76,7 @@ export function drillWindowBounds(
   form: DrillBoundForm,
 ): DrillWindowBounds | undefined {
   const window = lowerDatasetCompareDateRange(dateRange, timezone);
-  const bounds = window.endExclusive
-    ? { $gte: window.start, $lt: window.end }
-    : { $gte: window.start, $lte: window.end };
+  const bounds = dateRangeWindowBounds(window, timezone, form === 'date');
   const node = normalizeDateRangeWindow(MEMBER, bounds, WHOLE_DAY);
   const leaves: NormalizedFilterNode[] = node?.kind === 'and' ? node.children : node ? [node] : [];
   let gte: unknown;

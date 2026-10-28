@@ -94,7 +94,6 @@
       "@object-ui/layout",
       "@object-ui/mobile",
       "@object-ui/permissions",
-      "@object-ui/plugin-ai",
       "@object-ui/plugin-calendar",
       "@object-ui/plugin-charts",
       "@object-ui/plugin-chatbot",
@@ -116,8 +115,7 @@
       "@object-ui/providers",
       "@object-ui/react",
       "@object-ui/react-runtime",
-      "@object-ui/types",
-      "object-ui"
+      "@object-ui/types"
     ]
   ],
   "linked": [],

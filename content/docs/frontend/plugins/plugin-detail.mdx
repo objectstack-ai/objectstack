@@ -1,0 +1,604 @@
+---
+title: "Plugin Detail — Feed & Chatter"
+---
+
+Record-level discussion, activity timeline, and collaboration components for enterprise CRUD interfaces.
+
+## Installation
+
+```bash
+npm install @object-ui/plugin-detail
+```
+
+## Overview
+
+The Feed & Chatter system provides Airtable-style record-level collaboration. It includes components for threaded discussions, field change history, @mentions, emoji reactions, and notification subscriptions — all driven by `FeedItem[]` data.
+
+### Key Components
+
+| Component | Purpose |
+|-----------|---------|
+| `RecordChatterPanel` | Main wrapper panel (bottom/right/left positioning, collapsible) |
+| `RecordActivityTimeline` | Core activity feed renderer (filter, pagination, actor display) |
+| `FieldChangeItem` | Field change history display (old → new values) |
+| `ReactionPicker` | Emoji reaction selector |
+| `ThreadedReplies` | Collapsible reply threading |
+| `SubscriptionToggle` | Bell notification toggle |
+
+## Usage
+
+### Basic RecordChatterPanel
+
+```tsx
+import { RecordChatterPanel } from '@object-ui/plugin-detail';
+import type { FeedItem, RecordSubscription } from '@object-ui/types';
+
+const items: FeedItem[] = [
+  {
+    id: '1',
+    type: 'comment',
+    actor: 'Alice',
+    body: 'Updated the deal stage to Negotiation.',
+    createdAt: '2026-02-25T10:00:00Z',
+    reactions: [{ emoji: '👍', count: 2, reacted: true }],
+  },
+  {
+    id: '2',
+    type: 'field_change',
+    actor: 'System',
+    createdAt: '2026-02-24T15:30:00Z',
+    fieldChanges: [
+      { field: 'stage', oldValue: 'Qualification', newValue: 'Negotiation' },
+    ],
+  },
+];
+
+<RecordChatterPanel
+  config={{
+    position: 'bottom',
+    collapsible: true,
+    defaultCollapsed: false,
+    feed: {
+      enableReactions: true,
+      enableThreading: true,
+      showCommentInput: true,
+    },
+  }}
+  items={items}
+  onAddComment={(text) => console.log('Comment:', text)}
+  onAddReply={(parentId, text) => console.log('Reply:', parentId, text)}
+  onToggleReaction={(itemId, emoji) => console.log('Reaction:', itemId, emoji)}
+/>
+```
+
+### RecordActivityTimeline
+
+```tsx
+import { RecordActivityTimeline } from '@object-ui/plugin-detail';
+import type { FeedItem } from '@object-ui/types';
+
+declare const items: FeedItem[];
+
+<RecordActivityTimeline
+  items={items}
+  config={{
+    types: ['comment', 'field_change'],
+    filterMode: 'all',
+    showFilterToggle: true,
+    showCommentInput: true,
+    enableReactions: true,
+    enableThreading: true,
+    enableMentions: true,
+    showSubscriptionToggle: true,
+  }}
+  filterMode="all"
+  onFilterChange={(mode) => console.log('Filter:', mode)}
+  hasMore={false}
+  loading={false}
+/>
+```
+
+### Console Integration
+
+In the Console app, `RecordChatterPanel` is integrated with record detail views. Comments are fetched from the `sys_comment` object using a thread ID pattern of `{objectName}:{recordId}`:
+
+```tsx
+import type { DataSource, FeedItem } from '@object-ui/types';
+
+// The record being viewed, and the host's data source.
+declare const objectName: string;
+declare const recordId: string;
+declare const dataSource: DataSource;
+
+// Thread ID format
+const threadId = `${objectName}:${recordId}`;
+
+// Fetch comments — `find` resolves to a `QueryResult`, so the rows are `.data`.
+const comments = await dataSource.find('sys_comment', {
+  $filter: { threadId },
+  $orderby: 'createdAt asc',
+});
+
+// Map to FeedItem[]
+const feedItems: FeedItem[] = comments.data.map((c) => ({
+  id: c._id,
+  type: 'comment',
+  actor: c.author,
+  body: c.body,
+  createdAt: c.createdAt,
+  reactions: c.reactions ?? [],
+}));
+```
+
+**Full-page detail view** renders the panel non-collapsible at the bottom:
+
+```tsx
+import { RecordChatterPanel } from '@object-ui/plugin-detail';
+import type { FeedItem } from '@object-ui/types';
+
+declare const feedItems: FeedItem[];
+declare const handleAddComment: (text: string) => void;
+
+<RecordChatterPanel
+  config={{ position: 'bottom', collapsible: false }}
+  items={feedItems}
+  onAddComment={handleAddComment}
+/>
+```
+
+**Drawer overlay** renders the panel collapsible and default-collapsed:
+
+```tsx
+import { RecordChatterPanel } from '@object-ui/plugin-detail';
+import type { FeedItem } from '@object-ui/types';
+
+declare const feedItems: FeedItem[];
+declare const handleAddComment: (text: string) => void;
+
+<RecordChatterPanel
+  config={{ position: 'bottom', collapsible: true, defaultCollapsed: true }}
+  items={feedItems}
+  onAddComment={handleAddComment}
+/>
+```
+
+## Features
+
+- **Threaded Discussions**: Nested comment replies with collapsible threading
+- **Activity Timeline**: Unified view of comments, field changes, tasks, and system events
+- **Filter Modes**: Filter by `all`, `comments_only`, `changes_only`, or `tasks_only`
+- **@Mentions**: Autocomplete dropdown for mentioning users
+- **Emoji Reactions**: Toggle emoji reactions on comments. A reaction is stored on the comment (`sys_comment`), so only a `comment` row offers the reaction control
+- **Subscription Toggle**: Bell icon to subscribe/unsubscribe from record notifications
+- **Field Change History**: Visual old → new value display for field changes
+- **Pagination**: Load more items with `hasMore` / `onLoadMore` pattern
+- **Positioning**: Panel can be placed at `bottom`, `right`, or `left` of the record view
+- **Collapsible**: Optional collapse/expand with configurable default state
+
+## The `record:activity` block
+
+`RecordActivityTimeline` is a presenter: you hand it `items`. The SDUI block
+`record:activity` is the schema-authored form of the same panel, and it finds
+its own feed. Drop it anywhere inside a record page; its inputs go in the node's
+`properties` bag, as `@objectstack/spec` declares them (the strict page component
+refuses them written flat on the node):
+
+```json
+{
+  "type": "page:tabs",
+  "properties": {
+    "items": [
+      {
+        "label": "Activity",
+        "value": "activity",
+        "children": [
+          { "type": "record:activity", "properties": { "limit": 20, "showCompleted": false } }
+        ]
+      }
+    ]
+  }
+}
+```
+
+### Where the feed comes from
+
+Three sources, in precedence order:
+
+1. **`items` on the node** — a host that already owns the feed passes it in
+   (the same convention `record:history` uses for `entries`). The host does
+   this in code, on a node it composes and renders. `items` and its paired
+   `loading` flag are not schema keys: a JSON document that writes either one,
+   on the node or in `properties`, is refused, and on the node the refusal
+   names it as the host's feed slot.
+2. **A mounted discussion context** — the console's record page wraps the
+   record body in one, carrying the merged `sys_comment` + `sys_activity` feed
+   *and* the comment / reply / reaction handlers. When it is present the block
+   presents that feed instead of fetching a second, poorer copy. The record page
+   hands each handler over only where the caller may make that write
+   (objectui#12082): the composer and the reply input need the **create** grant
+   on `sys_comment`; the reaction control needs the **create** grant on
+   `sys_comment_reaction`, and taking the caller's own reaction back needs the
+   same grant: it goes through the unreact door
+   (`DELETE /api/v1/comments/reactions/:id`), which removes only the caller's
+   own row and asks no **delete** grant. On a
+   deployment with no `sys_comment_reaction` the control needs the **update**
+   grant on `sys_comment`. These are the `feedComment`, `feedReactionAdd`,
+   `feedReactionRemove` and `feedReactionColumn` rows of the affordance-to-grant
+   map in `@object-ui/core`, which also read each object's policy and effective
+   API operation set. With no permission provider mounted they read open.
+3. **Self-fetch** — otherwise the block reads `sys_activity` scoped to the
+   record it is bound to (`object_name` + `record_id`), newest first, `limit`
+   rows per page. This is what makes it work on a hand-authored record page
+   with no host feeding it.
+
+### When the read is refused
+
+A refused read is not an empty feed. When the server refuses the feed's read
+(401, 403, or a permission envelope), the panel shows a no-permission state, a
+lock and "You don't have permission to view activity on this record.", in place
+of "No activity recorded". If some rows did load (the comments were readable and
+the activity was not, or the other way round), the rows stay and the notice
+above them names the half that is withheld. The console's record page applies
+the same rule to both of its reads, `sys_activity` and `sys_comment`.
+
+Everything else keeps the empty state: a read that answers with zero rows, a 404
+(`sys_activity` on a deployment without the audit plugin), and any other
+failure, such as a 500. A refusal is not retried. `isRefusedFeedRead`, exported
+from this package, is the verdict both surfaces use.
+
+`sys_activity` rows map to feed items like this:
+`created` / `updated` / `deleted` / `assigned` / `shared` → `field_change`,
+`completed` → `task`, `scheduled` → `event`, `system` → `system`.
+`commented` / `mentioned` are skipped (their content lives in `sys_comment`),
+and `login` / `logout` are account events, not record activity.
+
+`scheduled` and `completed` are the two branches the same producer writes for a
+meeting, and both show by default: a not-yet-held meeting is `scheduled` →
+`event`, because an upcoming meeting is the part of a timeline you still act on;
+a held meeting is `completed` → `task`, and shows because it is a logged
+interaction (see below).
+
+A milestone is the exception to the `completed` rule. When an object's
+`activityMilestones` entry fires, plugin-audit writes the row with the type the
+declaration names and stamps `metadata.kind: 'milestone'` on it. A milestone is
+not a completed activity, so a `completed` row with that marker renders as a
+`system` item and shows whatever `showCompleted` says. That covers "Case
+resolved" on a case, and a task's own "Task completed" on that task's page. A
+`completed` row without the marker is still a `task` item. It is hidden by
+default unless it is a logged interaction: a call, meeting or email an app logs
+on the record writes the record it logged first (an event, a `sys_email` row)
+and points at it from the activity row through `source_object` / `source_id`
+(ADR-0052). A `task` item that carries that pointer shows whatever
+`showCompleted` says, and it is the same item the timeline gives a **View
+source** link. It stays a `task` item, so `types: ['task']` and
+`filterMode: 'tasks_only'` still list it. A `completed` row with neither the
+marker nor a pointer is hidden by default. That includes a finished task, every
+row a runtime from before the marker serves, a row an app inserts itself
+without a pointer, and a milestone row served to a reader who may not read a
+field the milestone watches (the server leaves the marker off for that reader).
+
+A row whose `type` is in neither list is **not dropped**: it renders through the
+generic `system` presentation and logs one `console.warn` naming the type.
+`sys_activity.type` is author-extensible and is not validated on write, so a
+value this map has never seen is real record activity a producer stored, not a
+mistake to discard. The warning therefore reports a **missing decision**, not
+lost data — the row is on the timeline; what it lacks is the icon and colour a
+mapped type gets. Give it one by adding the type to `ACTIVITY_TYPE_TO_FEED_TYPE`
+in `@object-ui/plugin-detail`.
+
+Each item names who acted. The row's `actor_name`, the name recorded when the
+action happened, wins when it is present. A row without one is named by its
+`actor_id`, a lookup to `sys_user`: the block's read expands it, so each user's
+record comes back with the page in the same request and the item shows that
+user's `name`. A row with neither, or whose user the viewer may not read, shows
+"System". `record:history` names the entries of its own `sys_activity` read the
+same way, and falls back to "Unknown user".
+
+The rows that really are dropped are the four the map lists as non-activity —
+`commented` / `mentioned` / `login` / `logout` — and they go silently on
+purpose: each is a decision already taken, and a warning about a decision
+teaches authors to ignore the channel.
+
+Both surfaces map rows through the same `activityRowToFeedItem`: the console's
+own record page imports it from this package rather than mapping the rows
+itself, so everything above describes that page too.
+
+### Which inputs do what
+
+| Input | Effect | Needs |
+|---|---|---|
+| `types` | Allow-list of feed item types. Recognised entries narrow the feed; unrecognised ones are dropped and named in one `console.warn`. A list that keeps nothing — `types: []`, or one whose every entry is unrecognised — filters to **nothing** and the panel renders an empty timeline, rather than widening back to every kind. Omit `types` for no filter; that is the only value that means it. A recognised entry that **no producer emits** is honoured but named too — see [Feed kinds with no producer](#feed-kinds-with-no-producer). | — |
+| `filterMode` | Which slice the filter dropdown opens on (`all` / `comments_only` / `changes_only` / `tasks_only`). The user can still change it. An unrecognised value falls back to `all`. | — |
+| `showFilterToggle` | Shows/hides that dropdown. | — |
+| `limit` | Items per page; also caps the scoped `sys_activity` read. "Load more" grows the window by this much and re-reads. Must be a positive integer **number**: any other value (a string such as `"5"`, a boolean, a fraction, zero or a negative) is ignored, the block uses its default of 20, and one `console.warn` names the value. The same rule applies to `feed.limit` on `record:chatter` / `record:discussion` and to `limit` on `record:history` (default 50). | — |
+| `showCompleted` | Include completed activities (`sys_activity.type = 'completed'`, which surfaces as a `task` item). Off by default, per spec. A milestone row (`metadata.kind: 'milestone'`) is not a completed activity: it surfaces as a `system` item and shows either way. A logged interaction (a `task` item that points at its source record through `source_object` / `source_id`, such as a logged call, meeting or email) stays a `task` item and also shows either way. | — |
+| `unifiedTimeline` | Default `true` mixes field changes and comments in one timeline (Airtable style). `false` un-mixes them: the panel becomes a discussion stream and field changes stay in `record:history`. | — |
+| `showCommentInput` | Shows the composer. | A host discussion context to persist the comment. Without one the feed is read-only and no composer is rendered. |
+| `enableMentions` | Offers @-mention autocomplete in the composer. `false` withholds the suggestions. | The host context's user list. |
+| `enableReactions` | Shows emoji reactions on feed items. Existing reactions still render without a host; toggling one needs the host handler. Only a `comment` row offers Add reaction and clickable chips, because a reaction is stored on the comment (`sys_comment`). Any other row, such as a field change read from `sys_activity`, shows its reactions as chips that cannot be clicked. | A host `onToggleReaction`. |
+| `enableThreading` | Groups replies under their parent comment. A reply whose parent the feed does not hold (deleted, or older than the loaded page) shows as a row of its own. Posting a reply needs the host handler. | A host `onAddReply`. |
+| `showSubscriptionToggle` | **Not implemented.** | — |
+
+**Editing and deleting your own comment needs no input.** `sys_comment` is
+`managedBy: 'platform'`, which already declares the generic Edit / Delete
+affordances, so the feed offers them wherever its host does: on a `comment`
+row (or a reply) whose `authoredByViewer` the host set, with the host's
+`onEditComment` / `onDeleteComment`. The console's record page marks each row
+with `@object-ui/collaboration`'s `isCommentAuthor`, the rule `CommentThread`
+uses, and hands each handler over under the caller's update or delete grant on
+`sys_comment`. Edit opens the text in place; Delete asks through the console's
+destructive-action confirm. The server still decides the write, and a refusal
+shows as an error with the comment unchanged. An edited comment reads as
+edited (`is_edited` on the row).
+
+> **Known gap — `showSubscriptionToggle`.** It renders nothing, whatever you set
+> it to. The bell needs a `RecordSubscription` value and somewhere to persist
+> it, and the platform has no record-subscription object to read or write one
+> from. The input stays declared only because `@objectstack/spec` declares it —
+> it is recorded as a known gap here and in the block's registration rather than
+> left looking configurable (objectui#3165).
+
+### Feed kinds with no producer
+
+`FeedItemType` publishes thirteen kinds. ObjectUI produces **five** of them:
+
+| kind | produced by |
+|---|---|
+| `field_change` | `sys_activity` types `created` / `updated` / `deleted` / `assigned` / `shared` |
+| `task` | `sys_activity` type `completed`, except a milestone row |
+| `event` | `sys_activity` type `scheduled` |
+| `system` | `sys_activity` type `system`, **and** any author-extended type the map has never seen (it renders through the generic presentation rather than vanishing), **and** a `completed` row a milestone fired (`metadata.kind: 'milestone'`) |
+| `comment` | `sys_comment` rows, merged in by the console's record page and handed to the block through the discussion context |
+
+The other eight — `email`, `call`, `note`, `file`, `record_create`,
+`record_delete`, `approval`, `sharing` — have no producer on any ObjectUI
+surface. Authoring `types: ['approval']` is legal, typechecks, builds, and
+renders a **permanently empty** timeline. Since objectui#5877 it also emits one
+`console.warn` per distinct kind, so the emptiness is diagnosable instead of
+looking like "a working feature with no data yet".
+
+The diagnostic separates two reasons a kind has no producer, because reporting a
+decision as a defect is how a warning channel gets ignored:
+
+- `record_create`, `record_delete` and `sharing` are **deliberately not
+  adopted**. Those rows are mapped to `field_change` on purpose — the record page
+  and this block have to agree about what a `created` row *is* before either can
+  move to the richer kind, so adopting them is a change to a shared map rather
+  than to one block.
+- The rest simply have **no producer**. Whether that is a gap or a decision
+  nobody wrote down is not recorded anywhere the renderer can read, so the
+  warning reports the measurement and stops there.
+
+<Callout type="info">
+  The census is over **ObjectUI's own** producers. If your host supplies the feed
+  itself — `items` on the node, or a discussion context you mount — it can
+  produce kinds this list cannot see, and the warning does not apply to them.
+</Callout>
+
+## Schema API
+
+### RecordChatterPanel Config
+
+```plaintext
+{
+  position?: 'bottom' | 'right' | 'left',    // Panel placement
+  width?: string,                              // CSS width (e.g., '400px')
+  collapsible?: boolean,                       // Enable collapse toggle
+  defaultCollapsed?: boolean,                  // Start collapsed
+  feed?: RecordActivityComponentProps,         // Activity feed config
+  aria?: RecordComponentAriaProps              // Accessibility props
+}
+```
+
+<Callout type="info">
+  `feed` is the **same shape as `record:activity`** — `@objectstack/spec`
+  declares `RecordChatterProps.feed` as `RecordActivityProps` — and since
+  objectui#8934 an **authored `record:chatter` / `record:discussion` block**,
+  and every synthesized default page (which emits `record:discussion`), applies
+  it with the same pipeline `record:activity` uses. Its **defaults** come with
+  it: `showCompleted` is `false`, so completed activities other than logged
+  interactions are hidden unless asked for, and an unauthored `limit` is `20`,
+  so a longer feed pages with **Load more** rather than rendering whole.
+
+  Since objectui#8968 the remaining two members are read here too.
+  `filterMode` seeds which slice the panel opens on, normalized by the same
+  function `record:activity` uses, so an unrecognised value opens on `all`
+  rather than on a filter nothing matches; it seeds component **state**, so the
+  dropdown stays usable instead of freezing on the authored value.
+  `enableMentions: false` withholds the composer's @-autocomplete; the
+  protocol's default is on, so an unauthored member keeps the affordance.
+  Both values were accepted and discarded before, so a schema that already
+  authored either one changes behaviour on upgrade — unless what it authored
+  is what this path already did: `filterMode: 'all'` and
+  `enableMentions: true` both land on the same feed as before. The case worth
+  auditing is `showFilterToggle: false` alongside a `filterMode` other than
+  `all` — that slice is now **pinned** where the panel used to show
+  everything, and the dropdown that would widen it is not on screen.
+
+  There is no third path left to disagree with: the host used to auto-append a
+  panel below any page that omitted a discussion block, and objectui#7298
+  retired that append — a record page shows a discussion panel if and only if it
+  composes one. Every panel a user sees is therefore an authored or synthesized
+  block running this pipeline. The object's `enable.feeds: false` still
+  outranks the page and suppresses the panel either way.
+
+  `feed.aria` is read too (objectui#11083), the way `record:activity` reads its
+  own `aria`: it lands on a `div` around the embedded timeline, and a declared
+  `ariaLabel` (a plain string or an inline locale map) names that `div` as a
+  `region`. The timeline keeps its heading as its own name, and the block's
+  top-level `aria` still names the block's own container, so the two bags name
+  two different regions.
+</Callout>
+
+### RecordActivityTimeline Config
+
+```plaintext
+{
+  types?: string[],                // Feed item types to show
+  filterMode?: string,             // Default filter mode
+  showFilterToggle?: boolean,      // Show filter mode buttons
+  limit?: number,                  // Items per page
+  showCompleted?: boolean,         // Include completed activities
+  unifiedTimeline?: boolean,       // Unified timeline view
+  showCommentInput?: boolean,      // Show comment input
+  enableMentions?: boolean,        // Enable @mentions
+  enableReactions?: boolean,       // Enable emoji reactions
+  enableThreading?: boolean,       // Enable threaded replies
+  showSubscriptionToggle?: boolean // Show subscription toggle
+}
+```
+
+### FeedItem
+
+```plaintext
+{
+  id: string | number,
+  type: 'comment' | 'field_change' | 'task' | 'event' | 'system' | 'email' | 'call',
+  actor: string,                   // Author display name
+  actorAvatarUrl?: string,         // Author avatar URL
+  body?: string,                   // Comment/event body text
+  createdAt: string,               // ISO 8601 timestamp
+  updatedAt?: string,              // Last edit timestamp
+  source?: string,                 // Origin source
+  parentId?: string | number,      // Parent item for threading
+  replyCount?: number,             // Number of replies
+  fieldChanges?: FieldChangeEntry[], // For field_change type
+  mentions?: Mention[],            // @mention references
+  reactions?: Reaction[],          // Emoji reactions
+  pinned?: boolean,                // Pinned comment
+  edited?: boolean,                // Edited flag
+  authoredByViewer?: boolean       // The viewer wrote it (set by the host); gates Edit / Delete
+}
+```
+
+### RecordSubscription
+
+```plaintext
+{
+  recordId: string,
+  subscribed: boolean,
+  channels?: Array<'in_app' | 'email' | 'push'>
+}
+```
+
+## Properties
+
+### RecordChatterPanel
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `config` | `RecordChatterComponentProps` | `{}` | Panel configuration (position, collapsible, feed) |
+| `items` | `FeedItem[]` | required | Feed items to display |
+| `hasMore` | `boolean` | `false` | Whether more items can be loaded |
+| `onLoadMore` | `() => void` | — | Callback to load next page |
+| `loading` | `boolean` | `false` | Loading state indicator |
+| `onAddComment` | `(text: string) => void` | — | New comment callback |
+| `onAddReply` | `(parentId, text) => void` | — | Reply to comment callback |
+| `onToggleReaction` | `(itemId, emoji) => void` | — | Toggle emoji reaction callback. Called only for a `comment` row |
+| `onEditComment` | `(itemId, text) => void \| Promise<void>` | — | Stores a comment's new text. Offered only on a `comment` row (or reply) whose `authoredByViewer` is `true`; a rejection keeps the editor's draft |
+| `onDeleteComment` | `(itemId) => void \| Promise<void>` | — | Deletes a comment, on the same rows. The host confirms first |
+| `subscription` | `RecordSubscription` | — | Current subscription state |
+| `onToggleSubscription` | `(subscribed: boolean) => void` | — | Toggle subscription callback |
+| `filterMode` | `FeedFilterMode` | `'all'` | Active filter mode |
+| `onFilterChange` | `(mode: FeedFilterMode) => void` | — | Filter mode change callback |
+| `className` | `string` | `''` | Additional CSS classes |
+
+### RecordActivityTimeline
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `items` | `FeedItem[]` | required | Feed items to display |
+| `config` | `RecordActivityComponentProps` | `{}` | Timeline configuration |
+| `filterMode` | `FeedFilterMode` | `'all'` | Active filter mode |
+| `onFilterChange` | `(mode) => void` | — | Filter mode change callback |
+| `hasMore` | `boolean` | `false` | Whether more items can be loaded |
+| `onLoadMore` | `() => void` | — | Callback to load next page |
+| `loading` | `boolean` | `false` | Loading state indicator |
+| `onAddComment` | `(text: string) => void` | — | New comment callback |
+| `onAddReply` | `(parentId, text) => void` | — | Reply to comment callback |
+| `onToggleReaction` | `(itemId, emoji) => void` | — | Toggle emoji reaction callback. Called only for a `comment` row |
+| `onEditComment` | `(itemId, text) => void \| Promise<void>` | — | Stores a comment's new text. Offered only on a `comment` row (or reply) whose `authoredByViewer` is `true`; a rejection keeps the editor's draft |
+| `onDeleteComment` | `(itemId) => void \| Promise<void>` | — | Deletes a comment, on the same rows. The host confirms first |
+| `subscription` | `RecordSubscription` | — | Current subscription state |
+| `onToggleSubscription` | `(subscribed: boolean) => void` | — | Toggle subscription callback |
+| `className` | `string` | `''` | Additional CSS classes |
+
+### ReactionPicker
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `reactions` | `Reaction[]` | required | Current reactions |
+| `onToggleReaction` | `(emoji: string) => void` | — | Toggle reaction callback |
+| `emojiOptions` | `string[]` | default set | Available emoji options |
+| `className` | `string` | `''` | Additional CSS classes |
+
+### ThreadedReplies
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `parentItem` | `FeedItem` | required | Parent comment item |
+| `replies` | `FeedItem[]` | required | Reply items |
+| `onAddReply` | `(parentId, text) => void` | — | Add reply callback |
+| `showReplyInput` | `boolean` | `false` | Show reply input |
+| `onEditComment` | `(itemId, text) => void \| Promise<void>` | — | Edit on a reply whose `authoredByViewer` is `true` |
+| `onDeleteComment` | `(itemId) => void \| Promise<void>` | — | Delete on the same replies |
+| `className` | `string` | `''` | Additional CSS classes |
+
+### SubscriptionToggle
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `subscription` | `RecordSubscription` | required | Current subscription state |
+| `onToggle` | `(subscribed: boolean) => void` | — | Toggle callback |
+| `className` | `string` | `''` | Additional CSS classes |
+
+## Filter Modes
+
+```tsx
+import { RecordChatterPanel } from '@object-ui/plugin-detail';
+import type { FeedFilterMode } from '@object-ui/plugin-detail';
+import type { FeedItem } from '@object-ui/types';
+
+// The four modes, restated against the declared union rather than beside it:
+// a typo or a retired member fails here.
+const filterModes: FeedFilterMode[] = ['all', 'comments_only', 'changes_only', 'tasks_only'];
+
+declare const items: FeedItem[];
+declare const setFilterMode: (mode: FeedFilterMode) => void;
+
+// Example: Filter to comments only
+<RecordChatterPanel
+  items={items}
+  filterMode="comments_only"
+  onFilterChange={(mode) => setFilterMode(mode)}
+/>
+```
+
+## TypeScript Support
+
+```tsx
+import type {
+  FeedItem,
+  FeedItemType,
+  FieldChangeEntry,
+  Mention,
+  Reaction,
+  RecordSubscription,
+} from '@object-ui/types';
+
+import type {
+  RecordChatterPanelProps,
+  RecordActivityTimelineProps,
+  FieldChangeItemProps,
+  ReactionPickerProps,
+  ThreadedRepliesProps,
+  SubscriptionToggleProps,
+  FeedFilterMode,
+} from '@object-ui/plugin-detail';
+```
+
+## Related Documentation
+
+- [Plugin System Overview](/docs/frontend/plugins)
+- [Detail View Plugin](/docs/frontend/plugins/plugin-view)
+- [Package README](https://github.com/objectstack-ai/objectstack/tree/main/ui/packages/plugin-detail)

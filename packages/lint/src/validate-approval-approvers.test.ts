@@ -784,9 +784,29 @@ describe('[#22161] one-line verdicts — approval-approvers-may-resolve-empty, a
       stackWithApprovers([{ type: 'org_membership_level', value: 'sales_manager' }]),
     );
     expect(finding.message).toBe(
-      "approver { type: 'org_membership_level', value: 'sales_manager' } names no org-membership tier " +
-        `(${BUILTIN_MEMBERSHIP_ROLES.join('/')}), so it matches nobody and the request stalls`,
+      "approver { type: 'org_membership_level', value: 'sales_manager' } names no membership tier " +
+        `(${BUILTIN_MEMBERSHIP_ROLES.join('/')}), so it matches nobody; onEmptyApprovers decides an empty slate`,
     );
+  });
+
+  it('the membership-tier verdict names no empty-slate outcome, so no onEmptyApprovers policy makes it false', () => {
+    // The slot is the verdict's subject; the request's fate is the node's
+    // policy, whose default the verdict must not restate.
+    for (const onEmptyApprovers of [undefined, 'admin_rescue', 'fail', 'auto_approve']) {
+      const [finding] = validateApprovalApprovers({
+        flows: [{
+          name: 'expense_approval',
+          nodes: [{
+            id: 'step1',
+            type: 'approval',
+            config: { approvers: [{ type: 'org_membership_level', value: 'sales_manager' }], onEmptyApprovers },
+          }],
+          edges: [],
+        }],
+      });
+      expect(finding.rule, String(onEmptyApprovers)).toBe(APPROVAL_APPROVER_NOT_MEMBERSHIP_TIER);
+      expect(finding.message, String(onEmptyApprovers)).not.toMatch(/stall|administrators|auto-approv|fails/);
+    }
   });
 
   it('`os explain` carries what the verdicts no longer say', () => {

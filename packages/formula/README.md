@@ -6,4 +6,4 @@ Canonical expression engine for ObjectStack.
 - **Dialect: `js`** — sandboxed L2 hook bodies (delegated).
 - **Dialect: `cron`** — job schedules (delegated).
 
-See `content/docs/concepts/north-star.mdx` §8 "No private expression DSL" and `ROADMAP.md` M9.
+See ADR-0032 (`docs/adr/0032-unified-expression-layer.md`, "one CEL language") and `ROADMAP.md` M9.

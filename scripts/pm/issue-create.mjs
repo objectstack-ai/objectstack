@@ -34,7 +34,13 @@
  *   - a repo not shaped `owner/name` (the default is the board the sweep
  *     tooling resolves, so a card never lands on a repo nobody named);
  *   - a body carrying `{{NOW}}` / `{{WAS:…}}` — those are `post-stamped.mjs`'s
- *     contract for comments and body EDITS; a new card is dated by the platform.
+ *     contract for comments and body EDITS; a new card is dated by the platform;
+ *   - a body whose first non-empty line is not the seat's signature,
+ *     `LANE#N · ACCOUNT · SESSION` (#27113) — read by `signatureRefusal`
+ *     (`check-half-states.mjs`, whose banner carries the shape and the ruling),
+ *     listed beside the token refusal when both apply. Every card this door
+ *     creates is seat-authored: the workflow-generated cards are written by
+ *     their workflows, never through here.
  *
  * ## The transport — `OS_FLEET_TRANSPORT` direct | dispatch | auto
  *
@@ -87,7 +93,7 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from '../invoked-as.mjs';
-import { EXIT_PREREQUISITE_NOT_MET, PROXY_FLAG, proxyRearmPlan, resolveSweepRepo } from './check-half-states.mjs';
+import { EXIT_PREREQUISITE_NOT_MET, PROXY_FLAG, SEAT_SIGNATURE_SHAPE, proxyRearmPlan, resolveSweepRepo, signatureRefusal } from './check-half-states.mjs';
 import { EXIT_UNCONFIRMED, exitForResult, matchRunAnnotations, packRequest, parseRelayAnnotation, relayAnnotationMessage, resolveRoute, sendFleetWrite, unconfirmedText } from './fleet-write/dispatch.mjs';
 import { refusalText as relayRefusalText } from './fleet-write/validate.mjs';
 import { classifyHttp } from './label-write.mjs';
@@ -200,7 +206,12 @@ export function planFrom(opts, { read = (p) => readFileSync(p, 'utf8'), env = pr
   if (body !== null) {
     body = String(body).replace(/\r\n/g, '\n').trim();
     if (!body) errors.push('the body is empty — a card names its evidence');
-    else if (STAMP_TOKEN.test(body)) errors.push('the body carries a {{NOW}} / {{WAS:…}} token — those are post-stamped.mjs\'s contract for comments; a new card is dated by the platform');
+    else {
+      if (STAMP_TOKEN.test(body)) errors.push('the body carries a {{NOW}} / {{WAS:…}} token — those are post-stamped.mjs\'s contract for comments; a new card is dated by the platform');
+      // The signature (#27113), judged beside the token rule so a body breaking both hears both.
+      const unsigned = signatureRefusal(body);
+      if (unsigned !== null) errors.push(`the body carries no signature line — ${unsigned.why}; its first line reads \`${unsigned.line}\`. Write ${SEAT_SIGNATURE_SHAPE} as the FIRST line; nothing inserts it for you`);
+    }
   }
 
   const labels = dedupe(opts.labels);
@@ -421,13 +432,14 @@ export async function relayMissProbe({ route, send, pace }) {
 const SELF_TEST_BATTERIES = Object.freeze({
   'the arguments: files not argv for prose, exactly one title source, a repo shape': 10,
   'the payload: title trimmed to one line, labels and assignees de-duplicated, nothing invented': 5,
+  "the signature: a card body opens with the seat's signature line, or the plan is refused before any request": 8,
   'the transport: a fake platform, and what each answer does to the exit code': 9,
   'dry-run: no request leaves, and the plan is printed': 3,
   'the wiring: both halves around the one POST, on the write verb only': 4,
   'the relay transport: ONE dispatch carrying the create, the card found by title since the dispatch, and an accepted dispatch with no run UNCONFIRMED under auto too — never the direct POST': 9,
   "the relay annotation: the number the relay run's annotation carries is read first — the card read back at it with NO list; absent, the title finds it as before; the read-back still judges the annotated card": 5,
 });
-const SELF_TEST_BATTERY_FLOOR = 7;
+const SELF_TEST_BATTERY_FLOOR = 8;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -450,7 +462,18 @@ export async function selfTest() {
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
 
-  const files = { 'title.txt': '  A card with `backticks` and $HOME in it \n', 'body.md': 'Evidence: a repro.\n\n- step one\n', 'empty.md': '   \n', 'stamped.md': 'Reading time {{NOW}}\n' };
+  // Every body a seat hands this door opens with the seat's signature (#27113), so the fixtures that must plan do too.
+  const SIG = 'domain:skills#2 · os-justin · session_01ABCDEFGHJKMNPQRSTVWXYZ';
+  const files = {
+    'title.txt': '  A card with `backticks` and $HOME in it \n',
+    'body.md': `${SIG}\nEvidence: a repro.\n\n- step one\n`,
+    'empty.md': '   \n',
+    'stamped.md': `${SIG}\nReading time {{NOW}}\n`,
+    'unsigned.md': 'Evidence: a repro.\n\n- step one\n',
+    'unsigned-stamped.md': 'Reading time {{NOW}}\n',
+    'near-miss.md': 'domain:skills#2 - os-justin - session_01ABCDEFGHJKMNPQRSTVWXYZ\nEvidence.\n',
+    'second-line.md': 'Evidence: a repro.\n\ndomain:skills#2 · os-justin · session_01ABCDEFGHJKMNPQRSTVWXYZ\n',
+  };
   const read = (p) => {
     if (!(p in files)) throw new Error('ENOENT');
     return files[p];
@@ -484,6 +507,32 @@ export async function selfTest() {
     t('no labels ⇒ no labels key at all, nothing invented', 'labels' in planFrom(parseArgs(['--title', 'x', '--body-file', 'body.md']), { read, env }).payload, false);
     t('an empty body is refused', planFrom(parseArgs(['--title', 'x', '--body-file', 'empty.md']), { read, env }).errors.some((e) => e.includes('body is empty')));
     t('a body carrying a stamp token is refused — that is post-stamped\'s contract', planFrom(parseArgs(['--title', 'x', '--body-file', 'stamped.md']), { read, env }).errors.some((e) => e.includes('{{NOW}}')));
+  }
+
+  // ── the signature ─────────────────────────────────────────────────────────
+  battery('the signature: a card body opens with the seat\'s signature line, or the plan is refused before any request');
+  {
+    const plan = (file) => planFrom(parseArgs(['--title', 'x', '--body-file', file]), { read, env });
+    const unsigned = plan('unsigned.md');
+    t('an unsigned body is refused — the plan is not ok', unsigned.ok, false);
+    t('…and the refusal names the shape to write and the line it read', unsigned.errors.some((e) => e.includes('no signature line') && e.includes('LANE#N · ACCOUNT · SESSION') && e.includes('`Evidence: a repro.`')));
+    t('a signed body plans, and the signature is SENT as written — nothing stripped, nothing inserted', [plan('body.md').ok, plan('body.md').payload.body.split('\n')[0]], [true, SIG]);
+    t('a near miss (hyphens for the ` · ` separator) is refused, and named as one', plan('near-miss.md').errors.some((e) => e.includes('reads like a signature and is not one')));
+    t('⛔ a signature on a LATER line is not a signature: the first non-empty line decides', plan('second-line.md').ok, false);
+    const both = plan('unsigned-stamped.md').errors;
+    t('a body breaking BOTH rules hears both, in one refusal', [both.some((e) => e.includes('{{NOW}}')), both.some((e) => e.includes('no signature line'))], [true, true]);
+    t('an empty body is told it is empty, once — not also unsigned', plan('empty.md').errors.filter((e) => e.includes('body is empty') || e.includes('signature')).length, 1);
+    const dir2 = mkdtempSync(join(tmpdir(), 'issue-create-sig-'));
+    try {
+      writeFileSync(join(dir2, 'u.md'), 'A body.\n', 'utf8');
+      const cli = spawnSync(process.execPath, [SELF_PATH, '--dry-run', '--repo', 'o/r', '--title', 'Dry', '--body-file', join(dir2, 'u.md')], {
+        encoding: 'utf8',
+        env: { ...process.env, OS_PM_WRITE_PACE_FILE: join(dir2, 'pace.jsonl'), GITHUB_TOKEN: 'ghs_FixtureTokenNotRealAtAll0000000000000', GH_TOKEN: '', HTTPS_PROXY: '', https_proxy: '' },
+      });
+      t('⛔ the CLI refuses an unsigned body on a DRY RUN too — usage, nothing printed as sent, nothing paced', [cli.status, cli.stdout.includes('NOTHING was sent'), existsSync(join(dir2, 'pace.jsonl'))], [EXIT_USAGE, false, false], cli.stderr.slice(-300));
+    } finally {
+      rmSync(dir2, { recursive: true, force: true });
+    }
   }
 
   const dir = mkdtempSync(join(tmpdir(), 'issue-create-'));
@@ -556,7 +605,7 @@ export async function selfTest() {
     // ── dry-run ─────────────────────────────────────────────────────────────
     battery('dry-run: no request leaves, and the plan is printed');
     {
-      writeFileSync(join(dir, 'b.md'), 'A body.\n', 'utf8');
+      writeFileSync(join(dir, 'b.md'), `${SIG}\nA body.\n`, 'utf8');
       const spawned = spawnSync(process.execPath, [SELF_PATH, '--dry-run', '--repo', 'o/r', '--title', 'Dry', '--body-file', join(dir, 'b.md')], {
         encoding: 'utf8',
         env: { ...process.env, OS_PM_WRITE_PACE_FILE: join(dir, 'dry-pace.jsonl'), GITHUB_TOKEN: TOKEN_FIXTURE, GH_TOKEN: '', HTTPS_PROXY: '', https_proxy: '' },

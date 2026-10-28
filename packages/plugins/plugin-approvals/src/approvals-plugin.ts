@@ -145,11 +145,11 @@ export class ApprovalsServicePlugin implements Plugin {
       defaultDatasource: 'cloud',
       namespace: 'sys',
       objects: [SysApprovalRequest, SysApprovalAction, SysApprovalApprover, SysApprovalToken, SysApprovalDelegation],
-      // The request's record-detail page (a slotted page, default for every
+      // The request's record-detail page (a full page, default for every
       // sys_approval_request record): the decision panel, the request's
       // fields, and its timeline. This plugin owns the object, so it ships its
       // page too — the shape plugin-auth ships sys_user's. The page and its
-      // slot map are documented on `SysApprovalRequestDetailPage`.
+      // body are documented on `SysApprovalRequestDetailPage`.
       pages: [SysApprovalRequestDetailPage],
       // ADR-0029 D7 — contribute the Approvals entries into the Setup app's
       // `group_approvals` slot. This plugin owns these objects (K2.b), so it

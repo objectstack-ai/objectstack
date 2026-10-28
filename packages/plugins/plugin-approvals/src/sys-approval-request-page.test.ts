@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * `sys_approval_request`'s record-detail page — the slotted page this plugin
+ * `sys_approval_request`'s record-detail page — the full page this plugin
  * serves through its manifest `pages` (maintainer ruling 乙 on objectui#12045,
  * `6079807016`: the page is metadata in plugin-approvals; objectui registers
  * renderers and mounts `RecordDetailView`).
@@ -11,7 +11,9 @@
  *
  *   1. the plugin's manifest carries the page, so the registry — and the
  *      metadata API reading it — has it;
- *   2. the slot map is the one the ruling's build list names: one
+ *   2. the page body is the one the ruling's build list names (a slotted page
+ *      until the `tabs` slot retired, objectstack#27053; rebuilt as the same
+ *      nodes in a `kind: 'full'` page): a header, one
  *      `record:approval_decision` node, `record:details`, `sys_approval_action`
  *      as the related list, no discussion thread, and a highlights strip that
  *      leaves `record_id` to the details grid (the seat's choice on the ui
@@ -44,8 +46,12 @@ import { approvalsPageTranslations } from './translations/pages.js';
 type AnyRec = Record<string, any>;
 
 const PAGE = SysApprovalRequestDetailPage as AnyRec;
-const SLOTS = (PAGE.slots ?? {}) as AnyRec;
-const TAB_ITEMS = (SLOTS.tabs?.properties?.items ?? []) as AnyRec[];
+const COMPONENTS = (PAGE.regions?.[0]?.components ?? []) as AnyRec[];
+const nodeOf = (type: string): AnyRec | undefined => COMPONENTS.find((c) => c.type === type);
+const HIGHLIGHTS = (nodeOf('record:highlights') ?? {}) as AnyRec;
+const TAB_ITEMS = (nodeOf('page:tabs')?.properties?.items ?? []) as AnyRec[];
+/** Where the decision panel sits in the region: after the header, before the highlights. */
+const DECISION_AT = COMPONENTS.findIndex((c) => c.type === 'record:approval_decision');
 
 /** The plugin's one manifest, as `init` registers it. */
 async function registeredManifest(): Promise<AnyRec> {
@@ -60,7 +66,7 @@ async function registeredManifest(): Promise<AnyRec> {
   return registered[0];
 }
 
-/** Every component node under the page, slots and tab children included. */
+/** Every component node under the page, tab children included. */
 function nodesOf(value: unknown, out: AnyRec[] = []): AnyRec[] {
   if (Array.isArray(value)) {
     for (const v of value) nodesOf(v, out);
@@ -103,7 +109,10 @@ function pageBuildFindings(page: AnyRec) {
 }
 
 /** The page with its decision node replaced. */
-const withDecisionNode = (node: AnyRec): AnyRec => ({ ...PAGE, slots: { ...SLOTS, actions: [node] } });
+const withDecisionNode = (node: AnyRec): AnyRec => ({
+  ...PAGE,
+  regions: [{ ...PAGE.regions[0], components: COMPONENTS.map((c, i) => (i === DECISION_AT ? node : c)) }],
+});
 
 describe('sys_approval_request detail page — served through the manifest', () => {
   it('the plugin manifest carries the page in `pages`', async () => {
@@ -111,12 +120,12 @@ describe('sys_approval_request detail page — served through the manifest', () 
     expect(manifest.pages).toEqual([SysApprovalRequestDetailPage]);
   });
 
-  it('is the default slotted record page of sys_approval_request', () => {
+  it('is the default full record page of sys_approval_request', () => {
     expect(PAGE).toMatchObject({
       name: 'sys_approval_request_detail',
       type: 'record',
       object: 'sys_approval_request',
-      kind: 'slotted',
+      kind: 'full',
       isDefault: true,
     });
     const parsed = PageSchema.safeParse(PAGE);
@@ -124,18 +133,20 @@ describe('sys_approval_request detail page — served through the manifest', () 
   });
 });
 
-describe('sys_approval_request detail page — the slot map', () => {
-  it('authors exactly the decision panel, the highlights, the tabs and an empty discussion', () => {
-    // No `details` slot: the console builds the tab strip from `tabs` when both
-    // are present, so the details body lives in the first tab. No header: it
-    // falls through to the synthesizer.
-    expect(Object.keys(SLOTS).sort()).toEqual(['actions', 'discussion', 'highlights', 'tabs']);
+describe('sys_approval_request detail page — the page body', () => {
+  it('authors exactly the header, the decision panel, the highlights and the tabs, in the slotted order', () => {
+    // The nodes the slotted page rendered, in the synthesizer's order: the
+    // header it fell through to, its `actions` slot, its `highlights` slot and
+    // its tab strip, whose first tab is the details body. Its `discussion`
+    // slot was empty, so there is no discussion node.
+    expect(COMPONENTS.map((c) => c.type)).toEqual(['page:header', 'record:approval_decision', 'record:highlights', 'page:tabs']);
+    expect(nodeOf('page:header')).toEqual({ type: 'page:header' });
   });
 
   it('holds ONE record:approval_decision node, with no properties (its props row is empty and strict)', () => {
-    const decision = nodesOf(SLOTS).filter((n) => n.type === 'record:approval_decision');
+    const decision = nodesOf(COMPONENTS).filter((n) => n.type === 'record:approval_decision');
     expect(decision).toHaveLength(1);
-    expect(SLOTS.actions).toEqual([{ type: 'record:approval_decision' }]);
+    expect(COMPONENTS[DECISION_AT]).toEqual({ type: 'record:approval_decision' });
   });
 
   it('highlights the object\'s highlightFields minus record_id, which the object itself keeps', () => {
@@ -145,8 +156,8 @@ describe('sys_approval_request detail page — the slot map', () => {
     // pair), and the object's `highlightFields` keeps it.
     const declared = SysApprovalRequest.highlightFields ?? [];
     expect(declared).toContain('record_id');
-    expect(SLOTS.highlights?.type).toBe('record:highlights');
-    expect(SLOTS.highlights.properties.fields).toEqual(declared.filter((f: string) => f !== 'record_id'));
+    expect(HIGHLIGHTS.type).toBe('record:highlights');
+    expect(HIGHLIGHTS.properties.fields).toEqual(declared.filter((f: string) => f !== 'record_id'));
     expect((SysApprovalRequest.fields as AnyRec).record_id?.referenceVia).toBe('object_name');
   });
 
@@ -156,7 +167,7 @@ describe('sys_approval_request detail page — the slot map', () => {
     // list moves with the strip: the Details tab's bare `record:details` node
     // draws the object's `highlightFields` minus the strip, so a strip-only
     // change would put `process_name` in that tab.
-    const strip = SLOTS.highlights.properties.fields as string[];
+    const strip = HIGHLIGHTS.properties.fields as string[];
     const declared = SysApprovalRequest.highlightFields ?? [];
     expect(strip[0]).toBe('process_label');
     expect(declared[0]).toBe('process_label');
@@ -170,7 +181,7 @@ describe('sys_approval_request detail page — the slot map', () => {
     // `current_step_label` is the step's label, a declared field the approvals
     // get serves under that name (`approval-service.test.ts` pins the get). The
     // object's list moves with the strip for the reason the flow chip's does.
-    const strip = SLOTS.highlights.properties.fields as string[];
+    const strip = HIGHLIGHTS.properties.fields as string[];
     const declared = SysApprovalRequest.highlightFields ?? [];
     const fields = SysApprovalRequest.fields as AnyRec;
     expect({ strip: strip.includes('current_step_label'), declared: declared.includes('current_step_label') })
@@ -191,7 +202,7 @@ describe('sys_approval_request detail page — the slot map', () => {
     // record with its object's label. The object's list moves with the strip
     // for the reason the flow chip's does: dropped from the strip alone,
     // `object_name` would be drawn as a row in that tab.
-    const strip = SLOTS.highlights.properties.fields as string[];
+    const strip = HIGHLIGHTS.properties.fields as string[];
     const declared = SysApprovalRequest.highlightFields ?? [];
     const fields = SysApprovalRequest.fields as AnyRec;
     expect({ strip: strip.includes('object_name'), declared: declared.includes('object_name') })
@@ -239,7 +250,7 @@ describe('sys_approval_request detail page — the slot map', () => {
     const actionFields = Object.keys(SysApprovalAction.fields);
     const [timeline] = TAB_ITEMS[1].children as AnyRec[];
     const missing = [
-      ...(SLOTS.highlights.properties.fields as string[]).filter((f) => !requestFields.includes(f)).map((f) => `request.${f}`),
+      ...(HIGHLIGHTS.properties.fields as string[]).filter((f) => !requestFields.includes(f)).map((f) => `request.${f}`),
       ...(timeline.properties.columns as string[]).filter((f) => !actionFields.includes(f)).map((f) => `action.${f}`),
       ...(timeline.properties.sort as AnyRec[]).map((s) => s.field).filter((f) => !actionFields.includes(f)).map((f) => `action.${f}`),
     ];
@@ -247,8 +258,7 @@ describe('sys_approval_request detail page — the slot map', () => {
   });
 
   it('has no discussion thread anywhere — the reply is the declared approval_comment action', () => {
-    expect(SLOTS.discussion).toEqual([]);
-    expect(nodesOf(SLOTS).map((n) => n.type).filter((t) => t === 'record:discussion' || t === 'record:chatter')).toEqual([]);
+    expect(nodesOf(PAGE).map((n) => n.type).filter((t) => t === 'record:discussion' || t === 'record:chatter')).toEqual([]);
     const actions = (SysApprovalRequest.actions ?? []) as AnyRec[];
     expect(actions.find((a) => a.name === 'approval_comment')?.locations).toEqual(['record_section']);
   });
@@ -261,7 +271,7 @@ describe('sys_approval_request detail page — what `os validate` judges a page 
 
   it('control: a misspelled decision-panel type is refused by the same call', () => {
     const findings = validateComponentTypes({ pages: [withDecisionNode({ type: 'record:approval_decison' })] });
-    expect(findings.map((f) => [f.rule, f.path])).toEqual([[COMPONENT_TYPE_UNKNOWN, 'pages[0].slots.actions[0].type']]);
+    expect(findings.map((f) => [f.rule, f.path])).toEqual([[COMPONENT_TYPE_UNKNOWN, `pages[0].regions[0].components[${DECISION_AT}].type`]]);
   });
 
   it('every node\'s props are inside its declared props row', () => {

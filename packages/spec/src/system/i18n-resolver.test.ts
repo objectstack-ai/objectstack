@@ -2260,7 +2260,9 @@ describe('walkAddressedPageComponents — the one addressed-component walk, shar
       regions: [],
       slots: {
         highlights: { id: 'path', type: 'record:path', properties: {} },
-        tabs: {
+        // A `page:tabs` node under a live slot (the `tabs` slot retired,
+        // #27053): the walk reads every slot the same way.
+        details: {
           id: 'tabs',
           type: 'page:tabs',
           properties: {
@@ -2546,7 +2548,9 @@ describe('translatePage — slotted page roots and tab panels', () => {
    * The measured shape, rebuilt as a minimal fixture rather than restated
    * from the card: a `kind: 'slotted'` record page authoring `regions: []`,
    * its header / path / details under `slots.*`, and a `page:tabs` under
-   * `slots.tabs` whose panels hold the related lists. Every authored copy
+   * `slots.discussion` whose panels hold the related lists (it sat under
+   * `slots.tabs` until that slot retired, #27053; the walk reads every slot
+   * the same way). Every authored copy
    * site that the walk can address carries an id.
    */
   const contractPage = () => ({
@@ -2560,7 +2564,7 @@ describe('translatePage — slotted page roots and tab panels', () => {
       header: { type: 'page:header', id: 'hdr', properties: { title: 'Contract', subtitle: 'Lifecycle' } },
       highlights: { type: 'record:path', id: 'stage_path', properties: { label: 'Stage', field: 'stage' } },
       details: [{ type: 'record:details', id: 'main_details', properties: { label: 'Details' } }],
-      tabs: {
+      discussion: {
         type: 'page:tabs',
         id: 'detail_tabs',
         properties: {
@@ -2638,7 +2642,7 @@ describe('translatePage — slotted page roots and tab panels', () => {
 
   it('resolves each authored key — slots roots, tab panels, and a card inside a panel', () => {
     const out = translatePage(contractPage(), bundle, { locale: 'zh-CN' });
-    const tabs = (out.slots as any).tabs;
+    const tabs = (out.slots as any).discussion;
     expect(out.label).toBe('合同');
     expect((out.slots as any).highlights.properties.label).toBe('阶段');
     expect((out.slots as any).details[0].properties.label).toBe('详细信息');
@@ -2659,7 +2663,7 @@ describe('translatePage — slotted page roots and tab panels', () => {
 
   it('CONTROL: a component under `body` inside a panel stays untranslated, and a slotted page without a bundle entry is untouched', () => {
     const out = translatePage(contractPage(), bundle, { locale: 'zh-CN' });
-    const docCard = (out.slots as any).tabs.properties.items[2].children[0];
+    const docCard = (out.slots as any).discussion.properties.items[2].children[0];
     expect(docCard.properties.body[0].properties.title).toBe('Body control');
 
     const other = translatePage(
@@ -2675,10 +2679,10 @@ describe('translatePage — slotted page roots and tab panels', () => {
     // is also localisable at its authoring site. A bundle that does not key
     // the item must leave that map alone rather than flatten it.
     const page = contractPage();
-    (page.slots.tabs.properties.items[0] as any).label = { en: 'Parties', 'zh-CN': '当事方' };
+    (page.slots.discussion.properties.items[0] as any).label = { en: 'Parties', 'zh-CN': '当事方' };
     const out = translatePage(page, bundle, { locale: 'zh-CN' });
-    expect((out.slots as any).tabs.properties.items[0].label).toEqual({ en: 'Parties', 'zh-CN': '当事方' });
-    expect((out.slots as any).tabs.properties.items[1].label).toBe('Clauses');
+    expect((out.slots as any).discussion.properties.items[0].label).toEqual({ en: 'Parties', 'zh-CN': '当事方' });
+    expect((out.slots as any).discussion.properties.items[1].label).toBe('Clauses');
   });
 });
 

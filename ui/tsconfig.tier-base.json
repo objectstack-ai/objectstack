@@ -15,10 +15,11 @@
 //
 // ## The measured `extends` graph
 //
-// Counted, not recalled: every one of the 94 tracked `tsconfig*.json` files in
+// Counted, not recalled: every one of the 87 tracked `tsconfig*.json` files in
 // the repo, read with TypeScript's own JSONC reader (`ts.readConfigFile`), at
-// cb725e78f. Re-derive it rather than trusting this block if it matters — the
-// numbers below are a reading with a date on it, not a contract.
+// 4d3a077f6 with #25910's package removal applied. Re-derive it rather than
+// trusting this block if it matters — the numbers below are a reading with a
+// date on it, not a contract.
 //
 //   THIS FILE is extended by 2 files and by nothing else:
 //     tsconfig.node.json                         editor / reference only; NO script
@@ -31,14 +32,14 @@
 //   `examples/byo-backend-console`, the one real compile that did, was deleted
 //   (#25922); turbo's task inputs no longer name it for that reason.
 //
-//   The root `tsconfig.json` is extended by 75 of the 94, every one of them
-//   under `packages/`: 38 of the 40 `packages/*/tsconfig.json`, 36 of the 37
+//   The root `tsconfig.json` is extended by 73 of the 87, every one of them
+//   under `packages/`: 37 of the 38 `packages/*/tsconfig.json`, all 35
 //   `packages/*/tsconfig.test.json`, and `packages/types/tsconfig.examples.json`.
 //   Nothing under `apps/` or `examples/` extends it.
 //
-//   `packages/runner/tsconfig.json` and `packages/vscode-extension/tsconfig.json`
-//   extend NOTHING — they are the two of forty that inherit from neither root
-//   config. Recorded here per the ruling, ⛔ not changed by it.
+//   `packages/runner/tsconfig.json` extends NOTHING — it is the one of
+//   thirty-eight that inherits from neither root config. Recorded here per the
+//   ruling, ⛔ not changed by it.
 //
 // ⚠️ Two figures in objectui#9330's own thread disagree and neither may be
 // copied forward. The card body says "all 30 `packages/*/tsconfig.json`"; the

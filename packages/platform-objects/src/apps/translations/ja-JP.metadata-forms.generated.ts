@@ -72,6 +72,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "ハイライト項目",
         helpText: "このオブジェクトの項目名を重要な順に並べます。1 つしか表示できない場所では先頭の項目が使われます（ADR-0085）。既定の一覧列、カード、子レコードのプレビュー、詳細画面のハイライト帯を決めます。このオブジェクトの項目でない名前は公開時に拒否されます。"
       },
+      relatedLists: {
+        label: "関連リストの順序",
+        helpText: "レコードページに表示するこのオブジェクトの関連リストの業務上の順序を、重要な順に並べます。各項目は子オブジェクト名（例：task）で、その子オブジェクトがこのオブジェクトと複数の関係を持つ場合は object.field と書きます。指定したリストが先に並び、残りは派生順で続きます。このオブジェクトを指す関係に一致しない名前は何も配置せず、オブジェクトの保存時や検証時に拒否されます。"
+      },
       searchableFields: {
         label: "検索対象項目",
         helpText: "$search クエリが照合する項目名（ADR-0061）。レコードピッカー、一覧のクイック検索、グローバル検索の既定値で、ビューで絞り込めます。未設定の場合は名前／タイトル項目と短いテキスト項目で検索します。各項目はこのオブジェクトの保存済みの項目を指す必要があり、不明な名前や仮想の formula 項目は公開時に拒否されます。"
@@ -95,6 +99,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "fieldGroups.description": {
         label: "説明",
         helpText: "見出しの下に表示されるテキスト。入力フォームとレコード詳細ページに表示されます。"
+      },
+      "fieldGroups.relatedList": {
+        label: "関連リスト",
+        helpText: "このエントリをフィールドのセクションではなく関連リストの表にします。子オブジェクト（または object.field）を指定すると、そのリストがレコードの詳細列のこの位置に表示されます。このようなグループはフィールドを持たず、これを自身のグループに指定したフィールドは拒否されます。このオブジェクトを指す関係に一致しない名前も拒否されます。レコードページはこの配置をまだ描画しません。"
       },
       "fieldGroups.collapse": {
         label: "折りたたみ",
@@ -618,7 +626,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "currencyConfig.defaultCurrency": {
         label: "既定の通貨",
-        helpText: "fixed モードのフィールドの通貨。3 文字の ISO 4217 コード（例：USD、EUR）で指定します。既定は CNY です。dynamic モードでは参照されません。"
+        helpText: "fixed モードのフィールドの通貨。3 文字の ISO 4217 コード（例：USD、EUR）で指定します。fixed モードでは必須で、自動では補われません。dynamic モードでは参照されません。"
       },
       step: {
         label: "ステップ値",
@@ -1836,8 +1844,8 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "アクションの実行結果を新しいタブで開きます。レンダラーはクリック時に同期的にタブを先に開き（ポップアップブロックを回避します）、ハンドラーが返す redirectUrl へ遷移させます。静的な URL の行き先を決める `openIn` とは別物です。"
       },
       newTabUrl: {
-        label: "新しいタブの URL テンプレート",
-        helpText: "新しいタブで直接開く URL テンプレート。{recordId} プレースホルダーが使えます。`opensInNewTab` と併せて設定すると、レンダラーは先に開いたタブをただちにここへ遷移させ、アクションの POST は行いません。したがってこのエンドポイントは自前で認証を強制する必要があります。"
+        label: "新しいタブのパス",
+        helpText: "このバックエンド上のパスで、/ で始めます（例: /sso-open/{recordId}）。{recordId} プレースホルダーが使えます。`opensInNewTab` と併せて設定すると、レンダラーは先に開いたタブをただちに「バックエンドのオリジン + このパス」へ遷移させ、アクションの POST は行いません。したがってこのエンドポイントは自前で認証を強制する必要があります。絶対 URL は拒否されます。外部ページを開くには、url タイプのアクションで「リンクを開く場所」を new-tab にしてください。"
       },
       locations: {
         label: "表示位置",

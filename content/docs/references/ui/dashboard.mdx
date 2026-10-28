@@ -67,7 +67,7 @@ const result = DashboardSchema.parse(data);
 | **type** | `Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| …>` | optional (default: `"metric"`) | Visualization type |
 | **chartConfig** | `{ title?: string \| Record<string, string>; subtitle?: string \| Record<string, string>; description?: string \| Record<string, string>; colors?: string[] \| Record<string, string>; … }` | optional | Chart appearance: title, subtitle, description, colors, height, legend, data labels, annotations, interaction. The bound dataset decides which series exist and which column each one reads (ADR-0021), so `type` (the widget's own `type` wins), `xAxis`, `yAxis` and `series` are refused here — select `dimensions` / `values` instead. |
 | **colorVariant** | `Enum<'default' \| 'blue' \| 'teal' \| 'orange' \| 'purple' \| 'success' \| 'warning' \| 'danger'>` | optional | Widget color variant for theming |
-| **requiresObject** | `string` | optional | Hide the widget unless the named object is registered |
+| **requiresObject** | `string` | optional | Hide the widget unless the named object is registered — an install gate, not a viewer gate. Outside design mode, a dataset-bound widget whose query the server refuses as a read refusal (403 PERMISSION_DENIED) is left out of the dashboard for that viewer with no key. |
 | **requiresService** | `string` | optional | Hide the widget unless the named kernel service is registered |
 | **filter** | `any` | optional | Presentation-scope filter (runtimeFilter) |
 | **compareTo** | `{ kind: Enum<'previousPeriod' \| 'previousYear'>; dimension?: string }` | optional | Period-over-period comparison window (`{ kind, dimension? }`) |
@@ -167,7 +167,7 @@ Dashboard header action
 | **type** | `Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| 'funnel' \| 'scatter' \| 'treemap' \| 'sankey' \| 'combo' \| 'gauge' \| 'solid-gauge' \| … +6 more>` | optional (default: `"metric"`) | Visualization type |
 | **chartConfig** | `{ title?: string \| Record<string, string>; subtitle?: string \| Record<string, string>; description?: string \| Record<string, string>; colors?: string[] \| Record<string, string>; … }` | optional | Chart appearance: title, subtitle, description, colors, height, legend, data labels, annotations, interaction. The bound dataset decides which series exist and which column each one reads (ADR-0021), so `type` (the widget's own `type` wins), `xAxis`, `yAxis` and `series` are refused here — select `dimensions` / `values` instead. |
 | **colorVariant** | `Enum<'default' \| 'blue' \| 'teal' \| 'orange' \| 'purple' \| 'success' \| 'warning' \| 'danger'>` | optional | Widget color variant for theming |
-| **requiresObject** | `string` | optional | Hide the widget unless the named object is registered |
+| **requiresObject** | `string` | optional | Hide the widget unless the named object is registered — an install gate, not a viewer gate. Outside design mode, a dataset-bound widget whose query the server refuses as a read refusal (403 PERMISSION_DENIED) is left out of the dashboard for that viewer with no key. |
 | **requiresService** | `string` | optional | Hide the widget unless the named kernel service is registered |
 | **filter** | `any` | optional | Presentation-scope filter (runtimeFilter) |
 | **compareTo** | `{ kind: Enum<'previousPeriod' \| 'previousYear'>; dimension?: string }` | optional | Period-over-period comparison window (`{ kind, dimension? }`) |

@@ -27,7 +27,7 @@ import {
   type ParamCollectionHandler,
   type ResultDialogHandler,
 } from '@object-ui/core';
-import { useActionRunnerDisplayLocale, useActionRunnerTranslator } from './actionRunnerTranslator.js';
+import { useActionRunnerDisplayLocale, useActionRunnerTenantCurrency, useActionRunnerTranslator } from './actionRunnerTranslator.js';
 import { usePredicateScope } from '../hooks/useExpression.js';
 
 export interface ActionProviderProps {
@@ -102,6 +102,8 @@ export const ActionProvider: React.FC<ActionProviderProps> = ({
   const translate = useActionRunnerTranslator();
   // Its copy templates' formatters in the viewer's display locale (#26232).
   const displayLocale = useActionRunnerDisplayLocale();
+  // Their no-argument `currency` holes in the tenant default currency.
+  const tenantCurrency = useActionRunnerTenantCurrency();
 
   const runner = useMemo(() => {
     // Normalize the evaluator scope so predicates can use *either* flat
@@ -120,6 +122,7 @@ export const ActionProvider: React.FC<ActionProviderProps> = ({
     const r = new ActionRunner(normalizedContext);
     r.setTranslator(translate);
     r.setDisplayLocale(displayLocale);
+    r.setTenantCurrency(tenantCurrency);
     if (onConfirm) r.setConfirmHandler(onConfirm);
     if (onToast) r.setToastHandler(onToast);
     if (onModal) r.setModalHandler(onModal);

@@ -62,7 +62,6 @@ import {
   checkPageSourceCompleteness,
   checkPageRequiresKind,
   checkPagePrintComposition,
-  checkPageSlotPair,
   checkPageDefaultPlacement,
   checkPageRegionPlacement,
   checkPageRecordBindingPlacement,
@@ -278,28 +277,6 @@ const pagePrintFixtures: Fixture[] = [
   { label: '`print.repeatFooter` with no `footer` region', value: { ...PAGE_BASE, regions: PRINT_REGIONS, print: { repeatHeader: true, repeatFooter: true } }, refusesAt: ['print.repeatFooter'] },
   { label: '`print` on a `full` page with `regions` and its `header` region', value: { ...PAGE_BASE, regions: PRINT_REGIONS, print: { repeatHeader: true } }, refusesAt: [] },
   { label: 'a `slotted` page with no `print`', value: { ...PAGE_BASE, kind: 'slotted' }, refusesAt: [] },
-];
-
-// [#22568] `slots.details` beside `slots.tabs` is refused at `slots.details`:
-// the `tabs` slot replaces the strip the Details tab lives in, so the
-// `details` body never rendered. Every fixture is a `record` page with no
-// `print`, `source` or `requires`, so the three siblings stay silent and each
-// row exercises THIS check alone; the kind-less row is the one whose direct
-// call sees no `kind` while the parse sees the applied `full` default.
-const SLOT_DETAILS = { type: 'record:details', properties: { hideFields: ['id'] } } as const;
-const SLOT_TABS = {
-  type: 'page:tabs',
-  properties: { items: [{ label: 'Related', children: [{ type: 'record:related_list' }] }] },
-} as const;
-const SLOT_PAGE = { ...PAGE_BASE, type: 'record', object: 'account', kind: 'slotted' } as const;
-const pageSlotPairFixtures: Fixture[] = [
-  { label: '`details` beside `tabs`, one component each', value: { ...SLOT_PAGE, slots: { details: SLOT_DETAILS, tabs: SLOT_TABS } }, refusesAt: ['slots.details'] },
-  { label: '`details` beside `tabs`, each an array', value: { ...SLOT_PAGE, slots: { details: [SLOT_DETAILS], tabs: [SLOT_TABS] } }, refusesAt: ['slots.details'] },
-  { label: 'an EMPTY `details: []` beside `tabs` — a present slot is refused, not its contents', value: { ...SLOT_PAGE, slots: { details: [], tabs: SLOT_TABS } }, refusesAt: ['slots.details'] },
-  { label: '`details` beside `tabs` on a page with no `kind` (the `full` default)', value: { ...PAGE_BASE, type: 'record', object: 'account', slots: { details: SLOT_DETAILS, tabs: SLOT_TABS } }, refusesAt: ['slots.details'] },
-  { label: '`details` alone', value: { ...SLOT_PAGE, slots: { details: SLOT_DETAILS } }, refusesAt: [] },
-  { label: '`tabs` alone, carrying the `record:details` in its first item', value: { ...SLOT_PAGE, slots: { tabs: { type: 'page:tabs', properties: { items: [{ label: 'Details', children: [SLOT_DETAILS] }] } } } }, refusesAt: [] },
-  { label: 'a slot map with neither', value: { ...SLOT_PAGE, slots: { discussion: [] } }, refusesAt: [] },
 ];
 
 // [#23610] `isDefault: true` off a record page bound to an object, and a
@@ -571,7 +548,6 @@ const MIRRORED: MirroredSchema[] = [
       { name: 'checkPageSourceCompleteness', check: checkPageSourceCompleteness, fixtures: pageSourceFixtures },
       { name: 'checkPageRequiresKind', check: checkPageRequiresKind, fixtures: pageRequiresFixtures },
       { name: 'checkPagePrintComposition', check: checkPagePrintComposition, fixtures: pagePrintFixtures },
-      { name: 'checkPageSlotPair', check: checkPageSlotPair, fixtures: pageSlotPairFixtures },
       { name: 'checkPageDefaultPlacement', check: checkPageDefaultPlacement, fixtures: pageDefaultPlacementFixtures },
       { name: 'checkPageRegionPlacement', check: checkPageRegionPlacement, fixtures: pageRegionPlacementFixtures },
       { name: 'checkPageRecordBindingPlacement', check: checkPageRecordBindingPlacement, fixtures: pageRecordBindingPlacementFixtures },
@@ -730,9 +706,9 @@ describe('each schema attaches its export BY IDENTIFIER — no inline copy', () 
     expect(attachments(src, 'checkListViewPageMount')).toBe(0);
   });
 
-  it('page.zod.ts declares all eight exports and attaches each to PageSchema', () => {
+  it('page.zod.ts declares all seven exports and attaches each to PageSchema', () => {
     const src = read('page.zod.ts');
-    for (const name of ['checkPageSourceCompleteness', 'checkPageRequiresKind', 'checkPagePrintComposition', 'checkPageSlotPair', 'checkPageDefaultPlacement', 'checkPageRegionPlacement', 'checkPageRecordBindingPlacement', 'checkPageMainRegionWidth']) {
+    for (const name of ['checkPageSourceCompleteness', 'checkPageRequiresKind', 'checkPagePrintComposition', 'checkPageDefaultPlacement', 'checkPageRegionPlacement', 'checkPageRecordBindingPlacement', 'checkPageMainRegionWidth']) {
       expect(src).toContain(`export function ${name}(`);
       expect(declarations(src, name)).toBe(1);
       expect(attachments(src, name)).toBe(1);
@@ -743,6 +719,11 @@ describe('each schema attaches its export BY IDENTIFIER — no inline copy', () 
     // a second judge of the same bag.
     expect(declarations(src, 'checkPageComponentViewData')).toBe(0);
     expect(attachments(src, 'checkPageComponentViewData')).toBe(0);
+    // `checkPageSlotPair` left with the `tabs` slot it paired with `details`
+    // (#27053): with no `tabs` slot there is no pair to refuse, and a
+    // re-attachment would be a check with no rule left to enforce.
+    expect(declarations(src, 'checkPageSlotPair')).toBe(0);
+    expect(attachments(src, 'checkPageSlotPair')).toBe(0);
   });
 
   it('dashboard.zod.ts declares the export and attaches it to GlobalFilterSchema', () => {
@@ -772,7 +753,6 @@ describe('`./index` (the `@objectstack/spec/ui` surface) exports the same functi
     ['checkPageSourceCompleteness', checkPageSourceCompleteness],
     ['checkPageRequiresKind', checkPageRequiresKind],
     ['checkPagePrintComposition', checkPagePrintComposition],
-    ['checkPageSlotPair', checkPageSlotPair],
     ['checkPageDefaultPlacement', checkPageDefaultPlacement],
     ['checkPageRegionPlacement', checkPageRegionPlacement],
     ['checkPageRecordBindingPlacement', checkPageRecordBindingPlacement],
@@ -795,5 +775,9 @@ describe('`./index` (the `@objectstack/spec/ui` surface) exports the same functi
 
   it('no longer exports `checkPageComponentViewData` — the props rule judges the component bag', () => {
     expect('checkPageComponentViewData' in (ui as Record<string, unknown>)).toBe(false);
+  });
+
+  it('no longer exports `checkPageSlotPair` — retired with the `tabs` slot', () => {
+    expect('checkPageSlotPair' in (ui as Record<string, unknown>)).toBe(false);
   });
 });

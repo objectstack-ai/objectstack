@@ -82,6 +82,17 @@ never needs triple braces.
   same way they do in-app. `datetime` honours the reference timezone the caller
   passes; calendar-day `date` values are timezone-naive.
 
+**The formatter is one word, optionally followed by `:` and its argument.**
+`{{ due | date-long }}` and `{{ x | two words }}` are refused by the same doors
+and rule, naming the hole and the shape, where the renderer used to print the
+hole to the reader as written. Mail reads a formatter part exactly as in-app
+templates do: `{{ amount | currency :EUR }}` is `currency` with `EUR`, and
+`default:'n/a'` and `default:"n/a"` both supply `n/a`. Brace text with no path
+before the `|` (`{{ not a path }}`, `{{ | upper }}`) is not a hole and stays as
+written. A template stored before this rule fails its render with
+`TEMPLATE_INVALID` and sends nothing; republish it with the formatter written
+in that shape.
+
 **The formatter is one the whitelist names.** `{{ amount | curency:EUR }}` is
 refused by `os validate`, `os build`, `os lint` and the metadata publish door
 (`email-template-hole-grammar`, a `422 INVALID_METADATA` at the publish door),
@@ -100,7 +111,7 @@ second format — and pass the finished value as its own variable.
 argument is either a literal ISO 4217 code in three capital letters
 (`currency:EUR`) or, in a mail template only, `@` followed by a path into the
 send's data whose value is such a code (`currency:@currency_code`). `currency`
-with no argument formats in US dollars.
+with no argument formats in the tenant default currency (below).
 
 The marked path is how one template shows each record's amount in that record's
 own currency:
@@ -128,6 +139,17 @@ The `@` form belongs to mail templates. In-app template text (flow
 notifications, action and bulk-action copy) takes a literal code only and
 refuses `currency:@path` by name.
 
+**`currency` with no argument formats in the tenant default currency.**
+`{{ amount | currency }}` formats in the organization's default currency, the
+`localization.currency` setting (Setup → Localization) that currency fields and
+dashboards read too. The notification channels hand it to every templated
+send; code that calls `sendTemplate` or `renderTemplate` itself passes it as
+`currency`. When no default currency reaches the render, the render fails with
+`TEMPLATE_INVALID`, naming the template, its locale and the hole, and nothing is
+sent: the amount is never formatted in US dollars or any other guess. Set the
+organization's default currency, or name the currency in the hole: a literal
+code (`currency:EUR`) or a marked path to it (`currency:@currency_code`).
+
 **Where a hole may sit in `bodyHtml`.** The renderer's escaping is right for
 element text and for a quoted attribute value that holds plain text, so those
 are the supported placements for `{{path}}`. A hole anywhere else — inside a
@@ -151,8 +173,6 @@ Three properties of the renderer to author around:
 - **There are no loops, conditionals or partials.** A template is a data-only
   rendering by design; branching belongs in the caller, which passes in the
   already-decided values.
-
-An unknown formatter falls back to the raw value rather than failing the render.
 
 ## Declared variables
 

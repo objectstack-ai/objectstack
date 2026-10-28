@@ -28,8 +28,9 @@ import { SysUserDetailPage } from './sys-user.page.js';
 
 type Rec = Record<string, any>;
 
-const slots = SysUserDetailPage.slots as Rec;
-const tabItems = (slots.tabs.properties as Rec).items as Rec[];
+const components = SysUserDetailPage.regions![0]!.components as Rec[];
+const nodeOf = (type: string): Rec => components.find((c) => c.type === type) as Rec;
+const tabItems = (nodeOf('page:tabs').properties as Rec).items as Rec[];
 const security = tabItems.find((it) => it.label?.en === 'Security') as Rec;
 const securityNodes = security.children as Rec[];
 
@@ -60,7 +61,7 @@ describe('sys_user — 2FA display only where 2FA is offered (#25287)', () => {
   });
 
   it('the highlights chip strip does not carry the 2FA state', () => {
-    expect(slots.highlights.properties.fields).not.toContain('two_factor_enabled');
+    expect(nodeOf('record:highlights').properties.fields).not.toContain('two_factor_enabled');
   });
 
   it('the details grid still hides the field, so dropping the chip does not move it into the body', () => {
