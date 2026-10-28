@@ -3004,7 +3004,12 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // Mobile card-view: below the 768px app breakpoint (matches useIsMobile /
   // Tailwind md: / the responsive page+grid layout), render stacked cards
   // instead of a side-scrolling wide table.
-  if (useCardView && data.length > 0 && !isGrouped) {
+  //
+  // objectstack#26896 — one renderer draws a record's card for both card
+  // views: the plain list below, and a grouped list on a phone (the grouped
+  // `gridContent`), which draws each group's band followed by its rows as
+  // these same cards rather than keeping the desktop table.
+  const buildMobileCardRenderer = () => {
     const displayColumns = generateColumns().filter((c) => c.accessorKey !== '_actions');
 
     // Build a lookup of column metadata for smart rendering
@@ -3120,6 +3125,191 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       return { label: /^[a-z0-9]+(_[a-z0-9]+)+$/.test(str) ? humanizeLabel(str) : str };
     };
 
+    return (row: any, idx: number) => {
+      // Collect secondary fields (skip the title column)
+      const secondaryCols = bodyColumns.slice(0, 4);
+      const amountCol = secondaryCols.find((c: any) => classify(c.accessorKey) === 'amount');
+      const stageCol = secondaryCols.find((c: any) => classify(c.accessorKey) === 'stage');
+      const dateCols = secondaryCols.filter((c: any) => classify(c.accessorKey) === 'date');
+      const percentCols = secondaryCols.filter((c: any) => classify(c.accessorKey) === 'percent');
+      const otherCols = secondaryCols.filter(
+        (c: any) => c !== amountCol && c !== stageCol && !dateCols.includes(c) && !percentCols.includes(c)
+      );
+
+      // Determine left border accent color from stage value
+      const stageValue = stageCol ? String(row[stageCol.accessorKey] ?? '') : '';
+      const leftBorderClass = stageValue ? stageBorderLeft(stageValue) : '';
+      const cardClassName = [
+        'border rounded-lg p-2.5 bg-card hover:bg-accent/50 cursor-pointer transition-colors touch-manipulation',
+        leftBorderClass ? `border-l-[3px] ${leftBorderClass}` : '',
+      ].filter(Boolean).join(' ');
+
+      return (
+        <div
+          key={row.id || row._id || idx}
+          className={cardClassName}
+          onClick={() => navigation.handleClick(row)}
+        >
+          {/* Title row - Name as bold prominent title */}
+          {titleKey !== undefined && (
+            <div data-testid="grid-card-title" className="font-semibold text-sm truncate mb-1">
+              {isMaskedCardColumn(titleKey)
+                ? (titleCol
+                    ? titleCol.cell?.(row[titleKey], row)
+                    // A masked name field no column shows has no `cell`
+                    // to draw its mask, so the mask is drawn here.
+                    : <MaskedCellRenderer value={row[titleKey]} />)
+                : (coerceToSafeValue(row[titleKey]) ?? '—')}
+              {/* objectui#13330 — the host's node beside the title. */}
+              {rowAdornment ? <span className="ml-1.5 inline-flex align-middle">{rowAdornment(row)}</span> : null}
+            </div>
+          )}
+
+          {/* Amount + Stage row - side by side for compact display */}
+          {(amountCol || stageCol) && (
+            <div className="flex items-center justify-between gap-2 mb-1">
+              {amountCol && (
+                <span className="text-sm tabular-nums font-medium">
+                  {/* objectui#10423 — the currency resolves from the FIELD
+                      def, as the desktop cell's does (objectui#10354);
+                      `amountCol` is a column draft and carries neither
+                      `currency` nor `currencyConfig`. */}
+                  {typeof row[amountCol.accessorKey] === 'number'
+                    ? formatCompactCurrency(row[amountCol.accessorKey], resolveFieldCurrency(objectSchema?.fields?.[amountCol.accessorKey], tenantCurrency), displayLocale)
+                    : (coerceToSafeValue(row[amountCol.accessorKey]) ?? '—')}
+                </span>
+              )}
+              {stageCol && row[stageCol.accessorKey] && (() => {
+                const rawValue = row[stageCol.accessorKey];
+                const optMeta = resolveOptionMeta(stageCol.accessorKey, rawValue);
+                // Explicit option color wins, resolved EXACTLY as the
+                // desktop cell resolves it (`SelectCellRenderer` in
+                // `@object-ui/fields`): a declared hex renders as
+                // declared via `getBadgeHexAppearance` (objectui#5141,
+                // adopted here by objectui#5183), a family name keeps
+                // going through `getBadgeColorClasses`. The `style` is
+                // load-bearing — the hex ships as CSS custom properties
+                // that the returned className reads, so dropping it
+                // yields a badge referencing undefined variables.
+                // With no declared colour at all we keep the
+                // pipeline-stage heuristic keyed on the raw value,
+                // which stays stable across locales.
+                const hexBadge = getBadgeHexAppearance(optMeta.color);
+                const badgeClasses = hexBadge
+                  ? hexBadge.className
+                  : optMeta.color
+                    ? getBadgeColorClasses(optMeta.color, rawValue)
+                    : stageBadgeColor(String(rawValue));
+                return (
+                  <Badge
+                    variant="outline"
+                    className={`text-xs shrink-0 max-w-[140px] truncate ${badgeClasses}`}
+                    style={hexBadge?.style}
+                  >
+                    {optMeta.label}
+                  </Badge>
+                );
+              })()}
+            </div>
+          )}
+
+          {/* Date + Percent combined row for density */}
+          {(dateCols.length > 0 || percentCols.length > 0) && (
+            <div className="flex items-center justify-between py-0.5 text-xs text-muted-foreground">
+              {dateCols[0] && (
+                <span className="tabular-nums">
+                  {row[dateCols[0].accessorKey]
+                    ? formatDate(row[dateCols[0].accessorKey], 'short', { locale: displayLocale })
+                    : '—'}
+                </span>
+              )}
+              {percentCols[0] && row[percentCols[0].accessorKey] != null && (() => {
+                // objectui#11254 — the width is the FIELD's, read through
+                // `resolveFieldScale` (ruling A′ on
+                // objectstack-ai/objectstack#19628) off the field def the
+                // amount cell above reads its currency from, so a percent
+                // declaring `scale: 2` reads two decimals here as it does
+                // in the desktop cell. This cell handed `formatPercent` an
+                // `undefined` width, so the function's own default decided.
+                //
+                // Only a `percent` field's width is a percent width. The
+                // column reached this slot by its NAME (`classify`), and a
+                // `number` named like a rate counts its `scale` in the
+                // stored value's decimals, not in the percentage points
+                // printed here, so its scale is not read.
+                //
+                // objectui#11475 — nor is a non-percent field printed as a
+                // percent at all. A percent face reads the field's declared
+                // STORAGE (`percentCellScale`, the spec's `percentScaleOf`),
+                // and a field that is not a `percent` declares none: the
+                // spec's words are "a plain `number` carries no percent
+                // semantics". Choosing a percent face by the column's NAME
+                // was a consumer-side guess (`lead_score` and `tax_rate`,
+                // both `Field.number` in the showcase, printed with a
+                // percent sign), so
+                // such a field prints through its own cell, as the desktop
+                // row prints it, with no percent affix.
+                const percentDef = objectSchema?.fields?.[percentCols[0].accessorKey];
+                if (percentDef?.type !== 'percent') {
+                  const { Renderer: SlotRenderer } = resolveGridCellRendering(percentDef);
+                  return (
+                    <span className="tabular-nums">
+                      <SlotRenderer
+                        value={row[percentCols[0].accessorKey]}
+                        field={percentDef ?? { name: percentCols[0].accessorKey }}
+                      />
+                    </span>
+                  );
+                }
+                const width = resolveFieldScale({ type: percentDef.type, scale: percentDef.scale });
+                return (
+                  <span className="tabular-nums">
+                    {/* objectui#4553: the mobile card's percent cell takes
+                        the same `displayLocale` its date sibling above
+                        already does (objectui#4272). */}
+                    {formatPercent(
+                      Number(row[percentCols[0].accessorKey]),
+                      percentCellScale(percentDef),
+                      width,
+                      displayLocale,
+                    )}
+                  </span>
+                );
+              })()}
+            </div>
+          )}
+
+          {/* Additional date fields beyond the first */}
+          {dateCols.slice(1).map((col: any) => (
+            <div key={col.accessorKey} className="flex justify-between items-center py-0.5">
+              <span className="text-xs text-muted-foreground">{col.header}</span>
+              <span className="text-xs text-muted-foreground tabular-nums">
+                {row[col.accessorKey] ? formatDate(row[col.accessorKey], 'short', { locale: displayLocale }) : '—'}
+              </span>
+            </div>
+          ))}
+
+          {/* Other fields - hide empty values on mobile */}
+          {otherCols.map((col: any) => {
+            const val = row[col.accessorKey];
+            if (val == null || val === '') return null;
+            return (
+              <div key={col.accessorKey} className="flex justify-between items-center py-0.5">
+                <span className="text-xs text-muted-foreground">{col.header}</span>
+                <span className="text-xs font-medium truncate ml-2 text-right">
+                  {col.cell ? col.cell(val, row) : String(coerceToSafeValue(val) ?? '')}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      );
+    };
+  };
+
+  if (useCardView && data.length > 0 && !isGrouped) {
+    const renderMobileCard = buildMobileCardRenderer();
+
     // objectui#13134 — the card list scrolls in a box of its own, as the
     // table does in its own body. Its host bounds it (`ListView`'s view area
     // is `overflow-hidden`), so without this box a list taller than the
@@ -3141,186 +3331,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         >
         {gridDescription}
         <div className="space-y-2 p-2">
-          {data.map((row, idx) => {
-            // Collect secondary fields (skip the title column)
-            const secondaryCols = bodyColumns.slice(0, 4);
-            const amountCol = secondaryCols.find((c: any) => classify(c.accessorKey) === 'amount');
-            const stageCol = secondaryCols.find((c: any) => classify(c.accessorKey) === 'stage');
-            const dateCols = secondaryCols.filter((c: any) => classify(c.accessorKey) === 'date');
-            const percentCols = secondaryCols.filter((c: any) => classify(c.accessorKey) === 'percent');
-            const otherCols = secondaryCols.filter(
-              (c: any) => c !== amountCol && c !== stageCol && !dateCols.includes(c) && !percentCols.includes(c)
-            );
-
-            // Determine left border accent color from stage value
-            const stageValue = stageCol ? String(row[stageCol.accessorKey] ?? '') : '';
-            const leftBorderClass = stageValue ? stageBorderLeft(stageValue) : '';
-            const cardClassName = [
-              'border rounded-lg p-2.5 bg-card hover:bg-accent/50 cursor-pointer transition-colors touch-manipulation',
-              leftBorderClass ? `border-l-[3px] ${leftBorderClass}` : '',
-            ].filter(Boolean).join(' ');
-
-            return (
-              <div
-                key={row.id || row._id || idx}
-                className={cardClassName}
-                onClick={() => navigation.handleClick(row)}
-              >
-                {/* Title row - Name as bold prominent title */}
-                {titleKey !== undefined && (
-                  <div data-testid="grid-card-title" className="font-semibold text-sm truncate mb-1">
-                    {isMaskedCardColumn(titleKey)
-                      ? (titleCol
-                          ? titleCol.cell?.(row[titleKey], row)
-                          // A masked name field no column shows has no `cell`
-                          // to draw its mask, so the mask is drawn here.
-                          : <MaskedCellRenderer value={row[titleKey]} />)
-                      : (coerceToSafeValue(row[titleKey]) ?? '—')}
-                    {/* objectui#13330 — the host's node beside the title. */}
-                    {rowAdornment ? <span className="ml-1.5 inline-flex align-middle">{rowAdornment(row)}</span> : null}
-                  </div>
-                )}
-
-                {/* Amount + Stage row - side by side for compact display */}
-                {(amountCol || stageCol) && (
-                  <div className="flex items-center justify-between gap-2 mb-1">
-                    {amountCol && (
-                      <span className="text-sm tabular-nums font-medium">
-                        {/* objectui#10423 — the currency resolves from the FIELD
-                            def, as the desktop cell's does (objectui#10354);
-                            `amountCol` is a column draft and carries neither
-                            `currency` nor `currencyConfig`. */}
-                        {typeof row[amountCol.accessorKey] === 'number'
-                          ? formatCompactCurrency(row[amountCol.accessorKey], resolveFieldCurrency(objectSchema?.fields?.[amountCol.accessorKey], tenantCurrency), displayLocale)
-                          : (coerceToSafeValue(row[amountCol.accessorKey]) ?? '—')}
-                      </span>
-                    )}
-                    {stageCol && row[stageCol.accessorKey] && (() => {
-                      const rawValue = row[stageCol.accessorKey];
-                      const optMeta = resolveOptionMeta(stageCol.accessorKey, rawValue);
-                      // Explicit option color wins, resolved EXACTLY as the
-                      // desktop cell resolves it (`SelectCellRenderer` in
-                      // `@object-ui/fields`): a declared hex renders as
-                      // declared via `getBadgeHexAppearance` (objectui#5141,
-                      // adopted here by objectui#5183), a family name keeps
-                      // going through `getBadgeColorClasses`. The `style` is
-                      // load-bearing — the hex ships as CSS custom properties
-                      // that the returned className reads, so dropping it
-                      // yields a badge referencing undefined variables.
-                      // With no declared colour at all we keep the
-                      // pipeline-stage heuristic keyed on the raw value,
-                      // which stays stable across locales.
-                      const hexBadge = getBadgeHexAppearance(optMeta.color);
-                      const badgeClasses = hexBadge
-                        ? hexBadge.className
-                        : optMeta.color
-                          ? getBadgeColorClasses(optMeta.color, rawValue)
-                          : stageBadgeColor(String(rawValue));
-                      return (
-                        <Badge
-                          variant="outline"
-                          className={`text-xs shrink-0 max-w-[140px] truncate ${badgeClasses}`}
-                          style={hexBadge?.style}
-                        >
-                          {optMeta.label}
-                        </Badge>
-                      );
-                    })()}
-                  </div>
-                )}
-
-                {/* Date + Percent combined row for density */}
-                {(dateCols.length > 0 || percentCols.length > 0) && (
-                  <div className="flex items-center justify-between py-0.5 text-xs text-muted-foreground">
-                    {dateCols[0] && (
-                      <span className="tabular-nums">
-                        {row[dateCols[0].accessorKey]
-                          ? formatDate(row[dateCols[0].accessorKey], 'short', { locale: displayLocale })
-                          : '—'}
-                      </span>
-                    )}
-                    {percentCols[0] && row[percentCols[0].accessorKey] != null && (() => {
-                      // objectui#11254 — the width is the FIELD's, read through
-                      // `resolveFieldScale` (ruling A′ on
-                      // objectstack-ai/objectstack#19628) off the field def the
-                      // amount cell above reads its currency from, so a percent
-                      // declaring `scale: 2` reads two decimals here as it does
-                      // in the desktop cell. This cell handed `formatPercent` an
-                      // `undefined` width, so the function's own default decided.
-                      //
-                      // Only a `percent` field's width is a percent width. The
-                      // column reached this slot by its NAME (`classify`), and a
-                      // `number` named like a rate counts its `scale` in the
-                      // stored value's decimals, not in the percentage points
-                      // printed here, so its scale is not read.
-                      //
-                      // objectui#11475 — nor is a non-percent field printed as a
-                      // percent at all. A percent face reads the field's declared
-                      // STORAGE (`percentCellScale`, the spec's `percentScaleOf`),
-                      // and a field that is not a `percent` declares none: the
-                      // spec's words are "a plain `number` carries no percent
-                      // semantics". Choosing a percent face by the column's NAME
-                      // was a consumer-side guess (`lead_score` and `tax_rate`,
-                      // both `Field.number` in the showcase, printed with a
-                      // percent sign), so
-                      // such a field prints through its own cell, as the desktop
-                      // row prints it, with no percent affix.
-                      const percentDef = objectSchema?.fields?.[percentCols[0].accessorKey];
-                      if (percentDef?.type !== 'percent') {
-                        const { Renderer: SlotRenderer } = resolveGridCellRendering(percentDef);
-                        return (
-                          <span className="tabular-nums">
-                            <SlotRenderer
-                              value={row[percentCols[0].accessorKey]}
-                              field={percentDef ?? { name: percentCols[0].accessorKey }}
-                            />
-                          </span>
-                        );
-                      }
-                      const width = resolveFieldScale({ type: percentDef.type, scale: percentDef.scale });
-                      return (
-                        <span className="tabular-nums">
-                          {/* objectui#4553: the mobile card's percent cell takes
-                              the same `displayLocale` its date sibling above
-                              already does (objectui#4272). */}
-                          {formatPercent(
-                            Number(row[percentCols[0].accessorKey]),
-                            percentCellScale(percentDef),
-                            width,
-                            displayLocale,
-                          )}
-                        </span>
-                      );
-                    })()}
-                  </div>
-                )}
-
-                {/* Additional date fields beyond the first */}
-                {dateCols.slice(1).map((col: any) => (
-                  <div key={col.accessorKey} className="flex justify-between items-center py-0.5">
-                    <span className="text-xs text-muted-foreground">{col.header}</span>
-                    <span className="text-xs text-muted-foreground tabular-nums">
-                      {row[col.accessorKey] ? formatDate(row[col.accessorKey], 'short', { locale: displayLocale }) : '—'}
-                    </span>
-                  </div>
-                ))}
-
-                {/* Other fields - hide empty values on mobile */}
-                {otherCols.map((col: any) => {
-                  const val = row[col.accessorKey];
-                  if (val == null || val === '') return null;
-                  return (
-                    <div key={col.accessorKey} className="flex justify-between items-center py-0.5">
-                      <span className="text-xs text-muted-foreground">{col.header}</span>
-                      <span className="text-xs font-medium truncate ml-2 text-right">
-                        {col.cell ? col.cell(val, row) : String(coerceToSafeValue(val) ?? '')}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            );
-          })}
+          {data.map(renderMobileCard)}
         </div>
         </div>
         {navigation.isOverlay && (
@@ -3661,11 +3672,40 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     </div>
   ) : null;
 
-  // Both branches fill the remaining height (flex-1 + min-h-0) so the
+  // Every branch fills the remaining height (flex-1 + min-h-0) so the
   // BulkActionBar rendered *after* gridContent stays inside the flex column
   // and remains visible; otherwise an h-full table pushes the bar past the
   // bottom of an overflow-hidden ancestor and clips it.
-  const gridContent = isGrouped ? (
+  //
+  // objectstack#26896 — on a phone (`useCardView`, the plain list's card
+  // breakpoint) a grouped list draws the same bands in the same order, each
+  // followed by its rows as the plain list's cards and by its footer (a
+  // server-grouped group's pager), in one vertical scroller like the plain
+  // card list's. A band keeps its toggle and count, `groupedPager` still
+  // pages whole groups, and the desktop table's columns never reach a phone.
+  const gridContent = isGrouped && useCardView ? (
+    <div className="flex flex-col flex-1 min-h-0">
+      <div
+        className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden"
+        data-fab-clearance=""
+        data-testid="grouped-grid-card-scroller"
+      >
+        {(() => {
+          const renderMobileCard = buildMobileCardRenderer();
+          return groupBandsOf(pagedGroups).map((group) => (
+            <div key={group.key} data-testid="grouped-grid-card-band">
+              {group.band}
+              {group.rows.length > 0 && (
+                <div className="space-y-2 px-2 pb-2">{group.rows.map(renderMobileCard)}</div>
+              )}
+              {group.footer}
+            </div>
+          ));
+        })()}
+      </div>
+      {groupedPager}
+    </div>
+  ) : isGrouped ? (
     <div className="flex flex-col flex-1 min-h-0">
       {/* One scroller for the one grouped table (objectui#12620): it holds
           both scrollbars, and the table's sticky header sticks to its top
