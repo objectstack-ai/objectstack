@@ -1,0 +1,112 @@
+---
+title: "Action components — component reference"
+navTitle: "Actions"
+description: "The action:* components that put an action on a page: a button, an icon, a group or a menu."
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Generated from sdui.manifest.json by node scripts/gen-sdui-reference.mjs; change the manifest or the generator, never this page. */}
+
+The `action:*` components put an action on a page as a button, an icon button, a group of buttons or a menu.
+
+<Callout type="info">
+This page is generated from the repo-root `sdui.manifest.json`, the component manifest CI
+regenerates from the renderer registry. Regenerate it with
+`node scripts/gen-sdui-reference.mjs`; `node scripts/gen-sdui-reference.mjs --check` fails when it is stale.
+</Callout>
+
+## `action:button` [#action-button]
+
+Namespace `action`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `name` | `string` |  | — |
+| `label` | `string` |  | — |
+| `icon` | `string` |  | — |
+| `actionType` | `enum`: `script`, `url`, `modal`, `flow`, `api` |  | — |
+| `target` | `string` |  | — |
+| `variant` | `enum`: `default`, `primary`, `secondary`, `destructive`, `outline`, `ghost` |  | — |
+| `size` | `enum`: `default`, `sm`, `md`, `lg`, `icon` |  | Button size: the Button primitive's `default`, `sm`, `lg` or `icon`, plus `md`, which renders as `default` (default: `default`) |
+| `className` | `string` |  | — |
+| `visible` | `boolean` \| `string` \| `object` |  | Visibility predicate: `true`/`false`, a bare CEL expression, or the `{ dialect: 'cel', source }` envelope, evaluated against the row the host binds; the button is not rendered when it is false, nor when the predicate fails to evaluate. Omit for always-visible |
+| `disabled` | `boolean` \| `string` \| `object` |  | Disabled predicate, in the same three shapes as `visible`: the button is shown but cannot be pressed while it holds. Omit for never-disabled |
+| `params` | `array` |  | The parameters to collect from the user before the action runs (`ActionParam` objects: `name`, `type`, `label`, …); each collected value reaches the executor under its parameter `name`. Static execution values ride `properties.params` instead |
+| `description` | `string` |  | Action description — the parameter dialog shows it under its title |
+| `openIn` | `enum`: `self`, `new-tab` |  | For a `url` action: `self` navigates in place, `new-tab` opens a new browser tab |
+| `method` | `string` |  | HTTP method of an `api` action (`POST` when omitted) |
+| `bodyExtra` | `object` |  | Static request-body fields of an `api` action, merged last, so a constant here overrides a collected value of the same name |
+| `bodyShape` | `enum` \| `object`: `flat` |  | How an `api` action shapes its request body: `flat` (the default) or `{ wrap: KEY }` to nest the collected values under that key, with `bodyExtra` beside it |
+| `operation` | `enum`: `update` |  | `update` declares a single-record field write: the row runs the declared action its `name` names, so it needs a `name`. The runner posts the collected values to the platform action route under that name, and the route writes that action's own `patch` |
+| `confirmText` | `string` |  | Confirmation question asked before the action runs; the action runs only if it is confirmed |
+| `successMessage` | `string` |  | Toast text when the action succeeds; a `${result.*}` token reads the handler's answer (e.g. `${result.id}`) |
+| `errorMessage` | `string` |  | Toast text when the action fails, in place of the raw error |
+| `refreshAfter` | `boolean` |  | Refresh the surrounding data after the action succeeds |
+| `locations` | `array` of `string` |  | The placements the action declares (`list_toolbar`, `list_item`, `record_header`, …). A `script` or `flow` action declared record-scoped (`list_item`, `record_header`, `record_more` or `record_section`) refuses to run when no record or single selection is in scope, instead of running without one |
+| `toast` | `object` |  | Toast behaviour: `{ showOnSuccess?, showOnError?, duration? }` — `false` suppresses that toast, `duration` is handed to the toast |
+| `resultDialog` | `object` |  | One-shot result dialog for a value the response shows exactly once (a 2FA code, a fresh secret); it replaces the success toast |
+| `onSuccess` | `object` |  | Post-success navigation `{ navigate, openIn? }`: `navigate` is a route template that can read `${result.*}`, `openIn` is `self` (the default) or `newTab` |
+| `objectName` | `string` |  | Object the action acts on — dispatch goes to this object instead of the page's. Omit to act on the page's object |
+| `recordIdField` | `string` |  | For a `script` action run against a single selected row: the row field whose value is sent as the record id (default `id`) |
+| `undoable` | `boolean` |  | Offer an Undo affordance after an update action: once an `operation: update` succeeds, its success toast offers Undo, which writes back the values the fields it wrote held on the record in scope (the record page's record, or the row the host binds), provided that record carries each of them. The one limit: a button with no record in scope (standalone, or writing a record other than the one in scope) offers no Undo, because there is no row to restore |
+
+## `action:group` [#action-group]
+
+Namespace `action`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `label` | `string` |  | — |
+| `icon` | `string` |  | — |
+| `actions` | `array` of `object` |  | The actions in this group, in order. Each member is an action object the group draws and runs itself (`name`, `label`, `icon`, `type`, `target`, `locations`, `visible`, `disabled`, …); a member's executor is its own `type` |
+| `display` | `enum`: `inline`, `dropdown` |  | — |
+| `location` | `enum`: `list_toolbar`, `list_item`, `record_header`, `record_more`, `record_related`, `record_section` |  | Render only the members whose `locations` include this location. Omit to render every member |
+| `variant` | `enum`: `default`, `secondary`, `outline`, `ghost` |  | — |
+| `size` | `enum`: `default`, `sm`, `lg`, `icon` |  | Button size for the dropdown trigger and for every inline member that sets none |
+| `visible` | `boolean` \| `string` \| `object` |  | Visibility predicate for the whole group: `true`/`false`, a bare CEL expression, or the `{ dialect: 'cel', source }` envelope, evaluated against the row the host binds. Omit for always-visible |
+| `className` | `string` |  | — |
+
+## `action:icon` [#action-icon]
+
+Namespace `action`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `name` | `string` |  | — |
+| `label` | `string` |  | — |
+| `icon` | `string` |  | — |
+| `actionType` | `enum`: `script`, `url`, `modal`, `flow`, `api` |  | — |
+| `target` | `string` |  | — |
+| `variant` | `enum`: `default`, `secondary`, `destructive`, `outline`, `ghost` |  | — |
+| `className` | `string` |  | — |
+| `visible` | `boolean` \| `string` \| `object` |  | Visibility predicate: `true`/`false`, a bare CEL expression, or the `{ dialect: 'cel', source }` envelope, evaluated against the row the host binds; the icon is not rendered when it is false. Omit for always-visible |
+| `disabled` | `boolean` \| `string` \| `object` |  | Disabled predicate, in the same three shapes as `visible`: the icon is shown but cannot be pressed while it holds. Omit for never-disabled |
+| `params` | `array` |  | The parameters to collect from the user before the action runs (`ActionParam` objects: `name`, `type`, `label`, …); each collected value reaches the executor under its parameter `name`. Static execution values ride `properties.params` instead |
+| `description` | `string` |  | Action description — the tooltip text when there is no `label`, and what the parameter dialog shows under its title |
+| `openIn` | `enum`: `self`, `new-tab` |  | For a `url` action: `self` navigates in place, `new-tab` opens a new browser tab |
+| `method` | `string` |  | HTTP method of an `api` action (`POST` when omitted) |
+| `bodyExtra` | `object` |  | Static request-body fields of an `api` action, merged last, so a constant here overrides a collected value of the same name |
+| `bodyShape` | `enum` \| `object`: `flat` |  | How an `api` action shapes its request body: `flat` (the default) or `{ wrap: KEY }` to nest the collected values under that key, with `bodyExtra` beside it |
+| `operation` | `enum`: `update` |  | `update` declares a single-record field write: the row runs the declared action its `name` names, so it needs a `name`. The runner posts the collected values to the platform action route under that name, and the route writes that action's own `patch` |
+| `confirmText` | `string` |  | Confirmation question asked before the action runs; the action runs only if it is confirmed |
+| `successMessage` | `string` |  | Toast text when the action succeeds; a `${result.*}` token reads the handler's answer (e.g. `${result.id}`) |
+| `errorMessage` | `string` |  | Toast text when the action fails, in place of the raw error |
+| `refreshAfter` | `boolean` |  | Refresh the surrounding data after the action succeeds |
+| `locations` | `array` of `string` |  | The placements the action declares (`list_toolbar`, `list_item`, `record_header`, …). A `script` or `flow` action declared record-scoped (`list_item`, `record_header`, `record_more` or `record_section`) refuses to run when no record or single selection is in scope, instead of running without one |
+| `toast` | `object` |  | Toast behaviour: `{ showOnSuccess?, showOnError?, duration? }` — `false` suppresses that toast, `duration` is handed to the toast |
+| `resultDialog` | `object` |  | One-shot result dialog for a value the response shows exactly once (a 2FA code, a fresh secret); it replaces the success toast |
+| `onSuccess` | `object` |  | Post-success navigation `{ navigate, openIn? }`: `navigate` is a route template that can read `${result.*}`, `openIn` is `self` (the default) or `newTab` |
+| `objectName` | `string` |  | Object the action acts on — dispatch goes to this object instead of the page's. Omit to act on the page's object |
+
+## `action:menu` [#action-menu]
+
+Namespace `action`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `label` | `string` |  | — |
+| `icon` | `string` |  | — |
+| `actions` | `array` of `object` |  | The menu's actions, in order. Each member is an action object the menu draws and runs itself (`name`, `label`, `icon`, `type`, `target`, `visible`, `disabled`, `tags`, …); a member's executor is its own `type` |
+| `variant` | `enum`: `default`, `secondary`, `outline`, `ghost` |  | — |
+| `size` | `enum`: `default`, `sm`, `lg`, `icon` |  | Trigger button size (renderer default: `icon`) |
+| `visible` | `boolean` \| `string` \| `object` |  | Visibility predicate for the whole menu: `true`/`false`, a bare CEL expression, or the `{ dialect: 'cel', source }` envelope, evaluated against the row the host binds; a predicate that fails to evaluate hides it. Omit for always-visible |
+| `className` | `string` |  | — |

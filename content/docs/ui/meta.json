@@ -13,6 +13,7 @@
     "forms",
     "doc-pages",
     "setup-app",
+    "components",
     "---Recipes---",
     "create-vs-edit-form",
     "field-grouping-and-order",
