@@ -3,8 +3,6 @@ title: Architecture Overview
 description: Deep dive into the ObjectUI 3-layer architecture, data flow, plugin system, state management, and action system.
 ---
 
-# Architecture Overview
-
 ObjectUI is a **Server-Driven UI (SDUI) engine** that transforms JSON schemas into fully interactive React interfaces built on Shadcn/Tailwind. This document covers the internal architecture, data flow, and extension points.
 
 ## The 3-Layer Architecture
@@ -150,7 +148,7 @@ Plugins use `React.lazy()` wrapped by `LazyPluginLoader` (`packages/react/src/La
 
 Every plugin follows the same structure (see `packages/plugin-kanban/`, `packages/plugin-grid/`):
 
-```typescript
+```tsx
 // 1. Lazy-load the heavy implementation
 const LazyKanban = React.lazy(() => import('./KanbanImpl'));
 

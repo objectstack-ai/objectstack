@@ -220,7 +220,7 @@ Add a line only for the plugins you install. The other `@object-ui/plugin-*` pac
 
 Plugins use React's `lazy()` and `Suspense` to load heavy dependencies on-demand:
 
-```typescript
+```tsx
 // The plugin structure
 import React, { Suspense } from 'react'
 import { Skeleton } from '@object-ui/components'
@@ -301,7 +301,7 @@ cd packages/plugin-myfeature
 
 ### 2. Create Heavy Implementation
 
-```typescript
+```tsx
 // src/MyFeatureImpl.tsx
 import HeavyLibrary from 'heavy-library'
 
@@ -312,7 +312,7 @@ export default function MyFeatureImpl(props) {
 
 ### 3. Create Lazy Wrapper
 
-```typescript
+```tsx
 // src/index.tsx
 import React, { Suspense } from 'react'
 import { ComponentRegistry } from '@object-ui/core'
@@ -437,7 +437,7 @@ Heavy imports go in the `*Impl.tsx` file.
 
 Always show a meaningful skeleton while loading:
 
-```typescript
+```tsx
 <Suspense fallback={
   <Skeleton className="w-full h-[400px]" />
 }>

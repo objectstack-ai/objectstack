@@ -3,8 +3,6 @@ title: "Schema Type Reference"
 description: "Complete API reference for all ObjectUI schema types with annotated examples"
 ---
 
-# Schema Type Reference
-
 This reference documents every ObjectUI schema type with annotated JSON examples. Each schema extends `BaseSchema` and can be rendered by the ObjectUI engine from pure JSON.
 
 > **Import:** All types are available from `@object-ui/types`.
@@ -875,10 +873,12 @@ An authored `object-form` node takes its props in its `properties` bag, whose me
     "fields": ["firstName", "lastName", "email", "phone", "company"],
     "sections": [
       {
+        "name": "basic_info",
         "label": "Basic Info",
         "fields": ["firstName", "lastName", "email"]
       },
       {
+        "name": "details",
         "label": "Details",
         "fields": ["phone", "company", "address"]
       }
@@ -1183,6 +1183,7 @@ An enhanced detail view for a single record with sections, tabs and navigation.
   "deleteConfirmation": "Are you sure you want to delete this contact?",
   "sections": [
     {
+      "name": "personal_information",
       "title": "Personal Information",
       "icon": "User",
       "columns": 2,

@@ -3,8 +3,6 @@ title: "Plugin Gallery"
 description: "Explore all ObjectUI plugins for extended functionality"
 ---
 
-# Plugin Gallery
-
 ObjectUI plugins are lazy-loaded component packages that extend the framework with additional functionality. They load on-demand, keeping your main application bundle small while providing rich features.
 
 ## Quick Navigation
@@ -283,7 +281,7 @@ npm install @object-ui/plugin-view
 
 Plugins use React's `lazy()` and `Suspense` to load heavy dependencies on-demand:
 
-```typescript
+```tsx
 // The plugin structure
 import React, { Suspense } from 'react'
 import { Skeleton } from '@object-ui/components'

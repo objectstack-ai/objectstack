@@ -707,8 +707,8 @@ const userFields: ObjectViewSchema = {
   form: {
     fields: ['name', 'email', 'role'], // flat field list, or use sections
     sections: [
-      { label: 'Identity', fields: ['name', 'email'] },
-      { label: 'Access', fields: ['role'] },
+      { name: 'identity', label: 'Identity', fields: ['name', 'email'] },
+      { name: 'access', label: 'Access', fields: ['role'] },
     ],
     columns: 2,
   },
@@ -788,7 +788,7 @@ Configuration".
 
 The adapter is the `dataSource` **prop**, not part of the schema:
 
-```typescript
+```tsx
 import { createObjectStackAdapter } from '@object-ui/data-objectstack';
 import { ObjectView } from '@object-ui/plugin-view';
 import type { ObjectViewSchema } from '@object-ui/types';

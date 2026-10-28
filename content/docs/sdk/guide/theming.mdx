@@ -3,8 +3,6 @@ title: "Theming & Customization"
 description: "Customize the look-and-feel of ObjectUI components with CSS custom properties, Tailwind CSS, cva variants, and runtime theme switching"
 ---
 
-# Theming & Customization
-
 ObjectUI's theming system is built on three layers: **CSS custom properties** (design tokens), **Tailwind CSS** (utility classes), and **class-variance-authority** (component variants). Together they give you full control over appearance — from global palettes down to individual component states.
 
 ## How Theming Works
@@ -264,7 +262,7 @@ Start from HSL values and define both light and dark variants:
 ```tsx
 import type { Theme } from "@object-ui/types";
 
-export const brand: Theme = {
+export const brand = {
   name: "brand",
   label: "Brand",
   colors: {
@@ -292,7 +290,7 @@ export const brand: Theme = {
     ring: "262 83% 58%",
   },
   borderRadius: { base: "0.5rem" },  // --radius
-};
+} satisfies Theme;
 ```
 
 > **Tip:** Use the [Shadcn Themes tool](https://ui.shadcn.com/themes) to generate a full palette, then paste the HSL values into your Theme object.
