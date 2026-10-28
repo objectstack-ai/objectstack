@@ -17,8 +17,11 @@ accept is the defect it names) and Post-Task Checklist step 3 (the changeset).
 **Governs**: every `?: never` member on the ui TypeScript authoring face — `ui/packages/types` and any `.d.ts` another
 `ui/packages/*` package publishes — and the zod twin that mirrors it. ⛔ Not a live `@deprecated` member (an alias the
 runtime still accepts): it is not a tombstone, and its retirement is its own card's.
-**Registry**: the root `docs/adr/` (Prime Directive #13: one registry per repository). `ui/docs/adr/` is the imported
-ObjectUI sequence, kept in place, and gains no record here.
+**Registry**: the root `docs/adr/`. The ruling's words were "objectui `docs/adr/**`", written before the card moved into
+this repository. Here `ui/docs/adr/` is the imported ObjectUI sequence, files untouched and indexed under the `ui-`
+prefix (#26080, ruling A), and `scripts/check-adr-anchors.mjs` resolves a bare `ADR-NNNN` against the root registry
+only, spelling a ui record `ObjectUI ADR-NNNN`; so a new decision governing `ui/` code lands here (Prime Directive #13:
+an ADR lives in the repository whose code it governs).
 
 ---
 
@@ -53,27 +56,34 @@ Spelled on ADR-0087's clock, with **R** the protocol major the retirement belong
 
 - the tombstone is carried through major **R + 1**, and is **due** from the cut of major **R + 2** — the same cut at
   which the spec's kit for a key retired in R leaves (ADR-0087, 2026-10-26 addendum);
-- "major" is the **protocol** major (`PROTOCOL_VERSION`, the `CURRENT_MAJOR` the spec's deletion gate reads), ⛔ never
-  the npm major: ADR-0087's pre-launch section keeps the two apart, and the `@object-ui/*` and `@objectstack/*`
-  packages release as one fixed group, so one clock serves both faces;
+- "major" is the major of the one `fixed` release group: `@objectstack/*` and `@object-ui/*` release together, lockstep
+  with `PROTOCOL_VERSION` at every cut, and the spec's deletion gate reads its `CURRENT_MAJOR` off
+  `@objectstack/spec`'s package version — so one clock serves both faces. A changeset's *level* is a different axis
+  (ADR-0087's 2026-09-13 amendment, `scripts/check-changeset-no-major.mjs`) and moves nothing here;
 - the window binds in both directions: a tombstone that names a spec retirement ⛔ never leaves while the spec still
-  carries that key's kit (the ui author would lose the remedy the spec still prints), and ⛔ never outlives it.
+  carries that key's kit (the ui author would lose the remedy the spec still prints), and ⛔ never outlives it — except
+  as D3 holds it: a named refusal D3 keeps outlives the kit by design (the `agedOutSpecKeyRefusal` twins are that case).
 
 ### D2 — Reading R, including a retirement that predates ADR-0087
 
 - **The tombstone names a spec retirement** (its JSDoc or zod guidance names the `@objectstack/spec` key or release it
   mirrors): R is the spec major that retired the key — the `RETIRED_KEYS_BY_MAJOR` row where one exists, otherwise the
-  spec release clock ADR-0087's deletion gate uses (a key already `[RETIRED]` on the authorable surface at
-  `@objectstack/spec@<M>.0.0` retired in a major below M).
+  release-tag clock ADR-0087's deletion gate uses (a key already `[RETIRED]` on the authorable surface at
+  `@objectstack/spec@<M>.0.0` retired in a major below M). ⚠️ A ui guidance that says a key "was retired in
+  @objectstack/spec 17.0.0" (`agedOutSpecKeyRefusal`'s `retiredIn`) names the first release that **refused** it; by the
+  gate's clock that key was already `[RETIRED]` at `17.0.0`, so R is 16, not 17. Reading the guidance's number as R
+  runs a window one major longer than the spec's, which D1 forbids.
 - **The spec retirement predates ADR-0087**, so no conversion was ever registered for it — the pre-launch one-step
   breaks of majors 12–15 that ADR-0087's "Ratified: the pre-launch launch-window exemption" section records, or a
   retirement older than D2 itself: it is counted **as if its conversion had run the one-major window from the major it
-  retired in**. R is the major of the first spec release that refused the key. No such tombstone is granted a fresh
+  retired in**. R is read on the same tag clock: the major of the first spec release that refused the key, where a key
+  first refused by a major's `.0.0` cut counts in the major before it. No such tombstone is granted a fresh
   window by this record: with the protocol at major 18, any whose R is 16 or below is already due, and the first
   application batch takes it.
 - **The tombstone names a ui-only retirement** (an objectui or ui card, no spec key behind it): the same window runs
   from the ui's own retirement. R is the major of the first `@object-ui/types` release tag (or the first release of the
-  package that publishes the `.d.ts`) whose tree carries the tombstone.
+  package that publishes the `.d.ts`) whose tree carries the tombstone, on the same convention: first carried by a
+  major's `.0.0` cut counts in the major before it.
 - **Where R cannot be read** (no tag, no row, a history the reader cannot reach): the tombstone is not due. The batch
   reports it as undated, ⛔ never guesses a date — a wrong date removes a remedy early, which is option B by accident.
 
@@ -90,8 +100,12 @@ strips unknown keys; the same test applies on both ui faces, judged per key:
   from it is **kept in silence** by the tolerant face (the case `agedOutSpecKeyRefusal` in `zod/tombstone.zod.ts`
   exists for: the ui keeps its own named refusal once the spec's tombstone ages out). Such a twin stays, as the ui's
   refusal, until its container refuses unknown keys — the posture the spec's strip-container tombstones keep.
-- **Derived faces move together.** Where the TS member is derived from the zod twin (`z.input` / `z.infer`), the two
-  leave together or neither does.
+- **A mirror pair moves together — the key is held, not one face.** Where the TS type and its zod schema are a
+  registered mirror pair (`ui/packages/types/src/__tests__/zod-mirror-parity.test.ts`), or the TS member is derived from
+  the zod twin (`z.input` / `z.infer`), the two faces leave together or neither does: a zod container that would keep
+  the key in silence holds the TS member too, and an open TS container holds the zod twin. That test's fourth
+  direction, `MirroredUndeclaredKeys` (a key the zod side mirrors and the TS side does not declare), is the pin that
+  turns a one-sided deletion red — ⛔ never grow its ledger to land one.
 
 A tombstone held by D3 is listed by the batch with the container that holds it; it is not due, and it is not a
 defect of this rule.
@@ -116,7 +130,7 @@ defect of this rule.
 
 ## Applying the rule
 
-The first application batch — one card per protocol major thereafter — finds due tombstones mechanically and reports
+The first application batch — one card per major thereafter — finds due tombstones mechanically and reports
 what it could not date. ⛔ No count is written here: the population moves, and the instrument is the reading
 (ui/AGENTS.md #9).
 
@@ -129,9 +143,9 @@ what it could not date. ⛔ No count is written here: the population moves, and 
    `objectstack-ai/objectui`, whose `@object-ui/types@*` tags carry that era. On a shallow clone the reading is refused,
    ⛔ never read as "no history" (`git rev-parse --is-shallow-repository`, with a control leg of known age). For a
    tombstone that names a spec retirement, read R from the spec (D2), not from the ui commit.
-3. **Judge.** Due ⇔ the current protocol major ≥ R + 2 and D3 does not hold the key. Report three lists — due, held by
+3. **Judge.** Due ⇔ the current major (D1) ≥ R + 2 and D3 does not hold the key. Report three lists — due, held by
    D3 (with the container), undated — and remove only the first.
-4. **Remove and re-pin.** Delete the member and its JSDoc; delete the zod twin where D3 allows; move any test that pins
+4. **Remove and re-pin.** Delete the member, its JSDoc and its zod twin together (D3); move any test that pins
    the tombstone's named refusal to assert what the key meets now — the TS excess-property refusal and the strict zod
    face's unknown-key refusal — ⛔ never delete such a pin without its replacement. Ship the D4 changeset.
 
