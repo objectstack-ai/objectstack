@@ -303,6 +303,7 @@ import {
 // each body the members it reads (`CountAggregateHost`).
 import { count, rejectCredentialAggregation } from './engine-count-aggregate.js';
 import { assertGroupByNamesNoJsonStoredField } from './group-by-structured-json-door.js';
+import { assertProjectionNamesAField } from './empty-projection-door.js';
 import { assertAggregationFieldTypesAccepted } from './aggregate-field-type-door.js';
 import { assertAggregatedColumnsAreDistinct, assertDateBucketTargetsAreTemporal } from './aggregate-query-shape-door.js';
 import { applyProtection, pluralToSingular, ExternalWriteForbiddenError } from '@objectstack/spec/shared';
@@ -13519,6 +13520,8 @@ export class ObjectQL implements IObjectQLEngine {
     // (#4371, three shipped instances in #4370).
     query = foldEngineOptionAliases(object, 'find', query, ENGINE_QUERY_SLOTS, ENGINE_WIRE_ONLY_SLOTS);
     rejectUnknownEngineOptions(object, 'find', query, ENGINE_FIND_OPTION_KEYS);
+    // [#27008] An empty projection is refused, never read as every column.
+    assertProjectionNamesAField(object, 'find', query);
     query = lowerWhereFilterArray(object, 'find', query, this._registry.getObject(object), this.relatedSchemaOf);
     this.logger.debug('Find operation starting', { object, query });
     const driver = this.getDriver(object);
@@ -13847,6 +13850,8 @@ export class ObjectQL implements IObjectQLEngine {
     // matters here too: findOne({ sort }) means "first row of THIS order".
     query = foldEngineOptionAliases(objectName, 'findOne', query, ENGINE_QUERY_SLOTS, ENGINE_WIRE_ONLY_SLOTS);
     rejectUnknownEngineOptions(objectName, 'findOne', query, ENGINE_FIND_OPTION_KEYS);
+    // [#27008] Same refusal as find().
+    assertProjectionNamesAField(objectName, 'findOne', query);
     query = lowerWhereFilterArray(objectName, 'findOne', query, this._registry.getObject(objectName), this.relatedSchemaOf);
     this.logger.debug('FindOne operation', { objectName });
     const driver = this.getDriver(objectName);
