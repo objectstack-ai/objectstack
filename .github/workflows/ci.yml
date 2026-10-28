@@ -3384,6 +3384,32 @@ jobs:
       - name: Verify type-check coverage
         run: pnpm --dir ui run type-check:coverage
 
+      # objectui's `lockfile-integrity.yml` (objectui#8326), row 19 of the
+      # objectstack#25697 workflow roster, ported by objectstack#26717: a pull
+      # request's `pnpm-lock.yaml` may not give any package a second physical
+      # copy. The script's header has the mechanism and its boundary.
+      #
+      # It lives here because this job already checks out with
+      # `fetch-depth: 0`, so `origin/<base>` and the merge base are in the
+      # clone, and because it runs on every change to `pnpm-lock.yaml` (the
+      # `ui` filter lists it). Before the install on purpose: the gate reads
+      # two text files with Node builtins only, which Lint UI's pre-install
+      # import graph check holds. `pull_request` only, because the gate's
+      # subject is the pull request's delta against its base; a push or queue
+      # run has none of its own.
+      #
+      # ⛔ `continue-on-error` keeps it an ALARM, as objectui ran it: a finding
+      # prints an `::error::` annotation naming the packages on the pull
+      # request and does NOT fail this required job. Making it blocking is a
+      # maintainer decision (`NOT_A_GATE` in `ui/scripts/dependabot-merge-gate.mjs`
+      # says why), not a step edit.
+      - name: check:lockfile-integrity — compare this pull request's lockfile with its merge base
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: pnpm --dir ui run check:lockfile-integrity --base-ref "origin/${BASE_REF}"
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
