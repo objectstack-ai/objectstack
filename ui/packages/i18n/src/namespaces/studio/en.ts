@@ -433,6 +433,17 @@ const STUDIO_EN: Record<string, string> = {
   // labels are NOT here: they are read from the spec's own describe() prose.
   'designer.field.valueDomain': 'Value domain',
   'designer.field.valueDomainNone': '— None —',
+  // ADR-0144 D2 — the currency section (`CurrencyConfigField`).
+  'designer.field.currency.mode': 'Currency mode',
+  'designer.field.currency.modeDynamic': 'Dynamic — the organization currency',
+  'designer.field.currency.modeFixed': 'Fixed — one currency for this field',
+  'designer.field.currency.modeRecord': 'Record — each record names its currency',
+  'designer.field.currency.defaultCurrency': 'Currency (ISO 4217 code)',
+  'designer.field.currency.currencyField': 'Currency field',
+  'designer.field.currency.currencyFieldNone': '— Pick a currency field —',
+  'designer.field.currency.createCodeField': 'Create currency field',
+  'designer.field.currency.codeFieldLabel': 'Currency',
+  'designer.field.currency.recordHint': 'Lists the text fields of this object whose value domain is ISO 4217 currency. Each record stores its own code there; the amount shows in that currency.',
   // Object basics (no-selection default inspector)
   'designer.object.kind': 'Object',
   'designer.object.section.basic': 'Basic info',

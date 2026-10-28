@@ -26,7 +26,8 @@ export function isMoneyAggregate(type: string): boolean {
   return MONEY_AGGREGATES.has(type);
 }
 
-type CurrencyFieldLike = { currencyConfig?: unknown } | null | undefined;
+/** Any object field def; only its `currencyConfig` is read. */
+type CurrencyFieldLike = object | null | undefined;
 
 /**
  * The code field a money aggregate over `field` needs to be grouped by, or
@@ -39,7 +40,7 @@ export function requiredCurrencyGrouping(
   objectFields: Readonly<Record<string, CurrencyFieldLike>> | undefined,
 ): string | undefined {
   if (!isMoneyAggregate(type)) return undefined;
-  return recordCurrencyField(objectFields?.[field] as Parameters<typeof recordCurrencyField>[0]);
+  return recordCurrencyField(objectFields?.[field] as Parameters<typeof recordCurrencyField>[0] | undefined);
 }
 
 /**
