@@ -503,6 +503,16 @@ async function bootDoor() {
     engine.registry.registerObject(SysMetadataObject as any, TEST_PACKAGE_ID);
     engine.registry.registerObject(SysMetadataHistoryObject as any, TEST_PACKAGE_ID);
     engine.registry.registerObject(SysMetadataAuditObject as any, TEST_PACKAGE_ID);
+    // [#26708] A save naming a package the registry does not hold is refused,
+    // so the two packages the item is saved into are installed first, as a
+    // boot or `POST /packages` does. Each depends on the package owning
+    // `task`, so a view over `task` stays inside its closure.
+    for (const id of [PKG, 'com.qa.beta']) {
+        engine.registry.installPackage(
+            { id, name: id, version: '1.0.0', dependencies: { [TEST_PACKAGE_ID]: '*' } } as any,
+            'authored',
+        );
+    }
     // Real DDL — the overlay rows the assertions read are physically there.
     await engine.syncSchemas();
 

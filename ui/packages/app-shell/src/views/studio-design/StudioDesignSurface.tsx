@@ -171,6 +171,8 @@ import {
   CornerDownRight,
   Layers,
   ArrowUpRight,
+  FileQuestion,
+  PackageX,
   type LucideIcon,
 } from 'lucide-react';
 import {
@@ -358,7 +360,7 @@ import { ObjectApiPanel } from './ObjectApiPanel.js';
 import { ObjectHooksPanel } from './ObjectHooksPanel.js';
 import { ObjectActionsPanel } from './ObjectActionsPanel.js';
 import { getIcon } from '../../utils/getIcon.js';
-import { fetchPackages, prefixObjectName, type PkgEntry } from './packages-io.js';
+import { fetchListedPackageIds, fetchPackages, prefixObjectName, type PkgEntry } from './packages-io.js';
 import {
   DraftChangesPanel,
   type DraftChangeEntry,
@@ -1478,6 +1480,9 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
   // reserved segment as though it named a package.
   const packageId: string | null = isStudioOrgScope(scopeSegment) ? null : scopeSegment;
   const tab = params.tab ?? 'interfaces';
+  // objectstack#26708 — a segment no pillar has is a not-found state, never
+  // the Interfaces pillar it used to fall through to.
+  const pillarKnown = PILLARS.some((p) => p.key === tab);
   const locale = useMetadataLocale();
 
   // Courtesy gate (the framework's ADR-0124 D1 — server enforces, client is
@@ -1495,18 +1500,39 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
   // the id it answered for, so a switch never hands the next package the
   // previous one's name while its own read is in flight.
   const [pkgEntry, setPkgEntry] = React.useState<PkgEntry | null>(null);
+  // objectstack#26708 — the package list answered and lists no package with
+  // this id: the surface renders "package not found" instead of a builder
+  // whose every save the server refuses. Only a positive answer sets it — a
+  // read still in flight or one that failed leaves the builder as it was, the
+  // same fail direction as the writability gate above. A switcher entry is
+  // installed; an id with none is then looked up in every id the list serves
+  // (`fetchListedPackageIds`, the same request), because the switcher's
+  // entries hide the kernel packages that ARE installed.
+  const [pkgMissing, setPkgMissing] = React.useState(false);
   React.useEffect(() => {
     // objectui#11553 — the package-less scope has no package to look up; its
     // writability is decided below, not fetched.
     if (packageId === null) return;
     let cancelled = false;
     setPkgWritable(undefined);
+    setPkgMissing(false);
+    // Asked beside the entries read, so both share its one request. A failure
+    // is reported once, by the entries read below.
+    const listedIds = fetchListedPackageIds();
+    listedIds.catch(() => {});
     fetchPackages()
       .then((list) => {
         if (cancelled) return;
         const entry = list.find((p) => p.id === packageId) ?? null;
         setPkgWritable(entry?.writable ?? null);
         setPkgEntry(entry);
+        if (entry) return;
+        listedIds.then(
+          (ids) => {
+            if (!cancelled) setPkgMissing(!ids.has(packageId));
+          },
+          () => {},
+        );
       })
       .catch((e: unknown) => {
         // Staying ungated is still right — the server gate is the authority
@@ -2262,7 +2288,8 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
             </div>
             <nav className={STUDIO_HEADER_PILLAR_NAV} data-testid="studio-pillar-nav">
               {/* objectui#11553 — the package-less scope offers its one pillar. */}
-              {(packageId === null ? PILLARS.filter((p) => p.key === STUDIO_ORG_SCOPE_PILLAR) : PILLARS).map((p) => (
+              {/* objectstack#26708 — a package that is not there has no pillars. */}
+              {(packageId === null ? PILLARS.filter((p) => p.key === STUDIO_ORG_SCOPE_PILLAR) : pkgMissing ? [] : PILLARS).map((p) => (
                 <Link
                   key={p.key}
                   to={`/studio/${scopeSegment}/${p.key}`}
@@ -2293,6 +2320,9 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
 
             {/* Package-level draft review + one atomic publish (replaces per-item Publish) */}
             <div className="flex min-w-0 items-center justify-end gap-2">
+              {/* objectstack#26708 — nothing to create, review or publish in a
+                  package that is not there. */}
+              {!pkgMissing && (<>
               {/* objectui#5800 — the Open app teleport is retired: the canvas's
                   Run mode IS the way to try the app without leaving the
                   workbench. The published-app state needs no chrome at all.
@@ -2380,6 +2410,7 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
               ) : (
                 publishButton
               )}
+              </>)}
               {/* objectui#12725 — the top bar's right-most icon shows or hides
                   the right slot; `⌘.` switches what it shows. */}
               {slotHost && slotHasContent && (
@@ -2438,6 +2469,23 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
               ) : (
                 <Navigate to={studioOrgScopePath()} replace />
               )
+            ) : pkgMissing ? (
+              <StudioEmptyState
+                icon={PackageX}
+                testId="studio-package-not-found"
+                sentence={tFormat('engine.studio.notFound.package', locale, { id: packageId })}
+                action={
+                  <Button type="button" size="sm" variant="outline" onClick={() => shellNavigate(STUDIO_LANDING_PATH)}>
+                    {t('engine.studio.landingHome', locale)}
+                  </Button>
+                }
+              />
+            ) : !pillarKnown ? (
+              <StudioEmptyState
+                icon={FileQuestion}
+                testId="studio-pillar-not-found"
+                sentence={tFormat('engine.studio.notFound.pillar', locale, { pillar: tab })}
+              />
             ) : tab === 'data' ? (
               <DataPillar
                 key={packageId}

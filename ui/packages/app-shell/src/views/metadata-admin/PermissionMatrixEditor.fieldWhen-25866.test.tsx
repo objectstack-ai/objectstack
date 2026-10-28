@@ -6,7 +6,7 @@
  * offers the key beside the Read / Edit boxes and shows an authored one, and
  * it never authors the shape the spec refuses (`when` beside
  * `readable: false`): Read off clears the condition, the bulk shortcuts keep
- * it, blank text removes the key, and a condition the publish gate would
+ * it (Read-only all / Write all), blank text removes the key, and a condition the publish gate would
  * refuse holds the save the way an RLS clause does.
  */
 
@@ -136,7 +136,7 @@ describe('a field row offers a row condition on its edit vote (objectstack#25866
     expect(set.fields?.['a_account.amount']).toEqual({ readable: false, editable: false });
   });
 
-  it('the Edit toggle and the bulk Read all / Write all keep the condition; Clear drops it', async () => {
+  it('the Edit toggle and the bulk Read-only all / Write all keep the condition; Clear drops it', async () => {
     await renderExpanded({ 'a_account.amount': { readable: true, editable: false, when: "status == 'draft'" } });
 
     fireEvent.click(screen.getByLabelText('a_account.amount editable'));
@@ -146,7 +146,7 @@ describe('a field row offers a row condition on its edit vote (objectstack#25866
     expect(screen.getByLabelText('a_account.amount editable')).toBeChecked();
     expect(whenButton('amount')).toHaveTextContent("status == 'draft'");
 
-    fireEvent.click(screen.getByRole('button', { name: 'Read all' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Read-only all' }));
     expect(screen.getByLabelText('a_account.amount editable')).not.toBeChecked();
     expect(whenButton('amount')).toHaveTextContent("status == 'draft'");
 

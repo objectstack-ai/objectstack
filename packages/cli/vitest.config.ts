@@ -643,7 +643,8 @@
 // `node_modules` exclusion: an exact-path list matches nothing it does not name.
 import { defineConfig } from 'vitest/config';
 import path from 'path';
-import { parseCLI, type TestUserConfig } from 'vitest/node';
+import { createHash } from 'node:crypto';
+import { BaseSequencer, parseCLI, type TestSpecification, type TestUserConfig } from 'vitest/node';
 import {
   runFilterPreflight,
   runProjectCliOverridePreflight,
@@ -739,6 +740,103 @@ runProjectCliOverridePreflight({
 // reading the variable — it looks for the read in code position, so the read
 // lives at its use site in the `test` block below, not in a helper binding
 // that could outlive the spread.
+
+// #25870 — THE FILES THAT READ BUILT DECLARATIONS RUN IN SLICE 1/n, AND ONLY
+// THERE. Test Core builds a shard's dependency closure without `.d.ts`
+// (`OS_SKIP_DTS=1`, ci.yml "Choose this shard's declaration build") unless the
+// shard tests a package whose tests compile against BUILT declarations. In this
+// package exactly the files in `DECLARATION_READER_FILES` do: each runs `tsc`
+// over a packed tarball or a scaffolded project that resolves
+// `@objectstack/spec` (or this package) through `dist/*.d.ts`, and on a
+// declaration-less closure each reds with TS7016 or ENOENT. Measured, never
+// recalled: build the closure with `OS_SKIP_DTS=1`, run the whole suite, and
+// the red files are this list; with declarations they are green (the PR that
+// added this section carries both readings).
+//
+// vitest's own `shard()` scatters files by the sha1 of their path, so those
+// files sat in all four CLI slices and every slice shard paid the ~4.5 min
+// declaration closure for one or two files. `DeclarationReaderSequencer` puts
+// them first, then every other file in vitest's own sha1 order, and cuts that
+// one sequence into vitest's own equal-count ranges, so the readers take the
+// first places of slice 1/n and each other file moves at most a few places
+// along vitest's order. ci.yml then keeps declarations for slice 1/n only, and
+// `scripts/partition-test-shards.mjs` (`DECLARATION_READER_SLICES`) charges
+// that slice the closure so its shard carries less whole-package work. The
+// index is spelled in those three places; the partitioner's self-test reads the
+// other two back.
+//
+// ⛔ Checked at config load, both directions of drift:
+//   - a listed file that is not in this run's queue population (renamed,
+//     deleted, or moved to a nightly tier) refuses to load the config, naming
+//     it -- a pin on a file that no longer runs would keep slice 1 holding the
+//     closure for nothing;
+//   - a NEW reader that is not listed lands wherever sha1 puts it. On slices
+//     2..n it reds its own PR, loudly and deterministically, with TS7016 or
+//     ENOENT on a declaration-less closure: add it here. On slice 1 it passes
+//     until a later file moves the cut past it, and then reds the same way.
+const DECLARATION_READER_SLICE = 1;
+export const DECLARATION_READER_FILES = Object.freeze([
+  'test/create-in-repo-scaffold-typechecks.test.ts',
+  'test/published-subpath-console.pin.test.ts',
+  'test/published-subpath-hook-body.pin.test.ts',
+  'test/scaffold-emission-typechecks.test.ts',
+  'test/scaffold-test-script-passes.test.ts',
+]);
+
+// The run's queue population holds every listed reader; a nightly-tier run
+// holds none of them, and the pin is inert there (its closure builds
+// declarations on every shard).
+if (readTierMode() === 'queue') {
+  const population = new Set([...UNIT_FILES, ...INTEGRATION_FILES]);
+  const missing = DECLARATION_READER_FILES.filter((file) => !population.has(file));
+  if (missing.length > 0) {
+    throw new Error(
+      `packages/cli/vitest.config.ts: DECLARATION_READER_FILES names ${missing.join(', ')}, which this ` +
+        'package\'s queue test population does not hold. Remove or rename the entry: a pinned reader that ' +
+        'never runs keeps slice 1/n building declarations for nothing.'
+    );
+  }
+}
+
+// vitest's equal-count range for slice `index` of `count` over `total` files
+// (`BaseSequencer.calculateShardRange`, which vitest declares private).
+function shardRange(total: number, index: number, count: number): [number, number] {
+  const base = Math.floor(total / count);
+  const remainder = total % count;
+  if (remainder >= index) return [(base + 1) * (index - 1), (base + 1) * index];
+  const start = remainder * (base + 1) + (index - remainder - 1) * base;
+  return [start, start + base];
+}
+
+const READER_SET = new Set<string>(DECLARATION_READER_FILES);
+
+class DeclarationReaderSequencer extends BaseSequencer {
+  override async shard(files: TestSpecification[]): Promise<TestSpecification[]> {
+    const { root, shard } = this.ctx.config;
+    if (!shard) return files;
+    const { index, count } = shard;
+    const relative = (spec: TestSpecification) =>
+      path.relative(root, spec.moduleId).split(path.sep).join('/');
+    // vitest's own key: the path below the root, with its leading separator.
+    const key = (spec: TestSpecification) => createHash('sha1').update(`/${relative(spec)}`).digest('hex');
+    const readers = files.filter((spec) => READER_SET.has(relative(spec)));
+    const rest = files
+      .filter((spec) => !READER_SET.has(relative(spec)))
+      .map((spec) => ({ spec, hash: key(spec) }))
+      .sort((a, b) => (a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0))
+      .map(({ spec }) => spec);
+    const ordered = [...readers.sort((a, b) => (relative(a) < relative(b) ? -1 : 1)), ...rest];
+    const [start, end] = shardRange(ordered.length, DECLARATION_READER_SLICE, count);
+    if (readers.length > end - start) {
+      throw new Error(
+        `packages/cli/vitest.config.ts: ${readers.length} declaration readers do not fit in slice ` +
+          `${DECLARATION_READER_SLICE}/${count}, which holds ${end - start} files. Pin fewer files, or slice fewer ways.`
+      );
+    }
+    const [from, to] = shardRange(ordered.length, index, count);
+    return ordered.slice(from, to);
+  }
+}
 
 // #23181 slice 14 — THE OCLIF MANIFEST SETUP. One `globalSetup` module writes
 // `oclif.manifest.json` from source when the `integration` project runs (the
@@ -869,6 +967,10 @@ export default defineConfig({
     // The file-level slice, when Test Core runs one (#19278) — see the section
     // above `export default` for why it is spread and typed this way.
     ...({ shard: process.env.OS_TEST_SHARD } satisfies Pick<TestUserConfig, 'shard'>),
+    // The declaration readers into slice 1/n (#25870) -- see the section of
+    // that number above `export default`. Read by the root context only, which
+    // is the one that shards.
+    sequence: { sequencer: DeclarationReaderSequencer },
     // A late console.* must not redden a green suite (#10374): vitest's worker
     // forwards console output over RPC and discards the promise, and a write
     // landing after teardown's rpcDone() snapshot is rejected into an unhandled

@@ -345,9 +345,10 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
     // `dashboard` 22 → 20 (`aria`, `performance`), `field` 80 → 79
     // (`conditionalRequired`), `flow` 24 → 22 (`template`, `active`), `skill`
     // 17 → 16 (`triggerPhrases`). The live sets are unchanged.
+    // [#26170] `hook` 22 → 23: the declared refusal catalogue, `refusals`.
     const CARD_PROPERTY_COUNTS: Record<string, number> = {
         agent: 24, app: 22, dashboard: 20, dataset: 16, field: 79, flow: 22,
-        hook: 22, object: 48, page: 26, position: 13, report: 23, skill: 16, tool: 14,
+        hook: 23, object: 48, page: 26, position: 13, report: 23, skill: 16, tool: 14,
     };
 
     it.each(Object.entries(CARD_PROPERTY_COUNTS))(

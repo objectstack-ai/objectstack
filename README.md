@@ -292,7 +292,7 @@ Every package in `packages/`, grouped by layer, plus the example apps, is in
 - ⭐ **Star this repo** if ObjectStack is useful — it helps others find it.
 - 🐛 Questions, bugs, or feature requests → [open an issue](https://github.com/objectstack-ai/objectstack/issues).
 - 💬 Ideas and open-ended questions → [GitHub Discussions](https://github.com/objectstack-ai/objectstack/discussions).
-- 🤝 Want to contribute? Start with [CONTRIBUTING.md](./CONTRIBUTING.md); [North Star](https://objectstack.ai/docs/concepts/north-star) says where the project is headed.
+- 🤝 Want to contribute? Start with [CONTRIBUTING.md](./CONTRIBUTING.md); [North Star](./docs/NORTH-STAR.md) says where the project is headed.
 - 📖 Full documentation at [objectstack.ai/docs](https://objectstack.ai/docs); upgrading between majors is covered in the [upgrade guide](https://objectstack.ai/docs/upgrading).
 - ☁️ Want it hosted, with Build & Ask AI built in? [ObjectOS](https://www.objectos.ai) Cloud runs these definitions for you — [objectstack-ai/objectos](https://github.com/objectstack-ai/objectos) is its public home.
 
