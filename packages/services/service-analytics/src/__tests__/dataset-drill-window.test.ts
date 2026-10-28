@@ -304,6 +304,7 @@ const DEALS: Array<{ id: string; stage: string; closed_at: string; close_on: str
   { id: 'd7', stage: 'lost', closed_at: '2026-01-05T02:00:00.000Z', close_on: '2026-01-05' },
   { id: 'd8', stage: 'won', closed_at: '2026-08-03T02:00:00.000Z', close_on: '2026-08-03' }, // August, before last_30_days
   { id: 'd9', stage: 'won', closed_at: '2026-11-20T02:00:00.000Z', close_on: '2026-11-20' },
+  { id: 'd10', stage: 'lost', closed_at: '2026-09-05T02:00:00.000Z', close_on: '2026-09-05' },
 ];
 
 const deals = DatasetSchema.parse({
@@ -370,24 +371,26 @@ describe('#27074 — on a real engine, each row drill lists exactly the records 
     [
       'stage × this_quarter on the datetime field, Shanghai',
       { dimensions: ['stage'], timeDimensions: [{ dimension: 'closed', dateRange: 'this_quarter' }], timezone: SHANGHAI },
-      { won: ['d2', 'd3', 'd6', 'd8'], lost: ['d4'] },
+      { won: ['d2', 'd3', 'd6', 'd8'], lost: ['d10', 'd4'] },
     ],
     [
       'stage × an explicit bare-day window on the datetime field, Shanghai',
       { dimensions: ['stage'], timeDimensions: [{ dimension: 'closed', dateRange: ['2026-07-01', '2026-09-30'] }], timezone: SHANGHAI },
       // The explicit arm keeps the engine's UTC calendar day (ADR-0053 D-D):
       // d2 is Shanghai's July but UTC's June, d5 the other way round.
-      { won: ['d3', 'd6', 'd8'], lost: ['d4', 'd5'] },
+      { won: ['d3', 'd6', 'd8'], lost: ['d10', 'd4', 'd5'] },
     ],
     [
       'month buckets × last_30_days on the datetime field, Shanghai',
       { dimensions: ['closed'], timeDimensions: [{ dimension: 'closed', dateRange: 'last_30_days' }], timezone: SHANGHAI },
-      { '2026-08': ['d6'] },
+      // Both in-window months hold a deal, so the answer has the same rows
+      // whether or not empty buckets are filled.
+      { '2026-08': ['d6'], '2026-09': ['d10'] },
     ],
     [
       'stage × this_quarter on the date field, UTC',
       { dimensions: ['stage'], timeDimensions: [{ dimension: 'closed_on', dateRange: 'this_quarter' }] },
-      { won: ['d2', 'd3', 'd6', 'd8'], lost: ['d4'] },
+      { won: ['d2', 'd3', 'd6', 'd8'], lost: ['d10', 'd4'] },
     ],
     [
       // The query compares a `date` column with the preset's Shanghai-midnight
