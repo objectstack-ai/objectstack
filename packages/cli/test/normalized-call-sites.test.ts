@@ -50,10 +50,10 @@
  * By file and by the chain of callees directly wrapping the identifier, never
  * by line or by count: `computeI18nCoverage(authoringRuleUnionStack(normalized`
  * names both the analysis and the fold it reads through. A grouping paren is
- * named by the member read off it: `(normalized).i18n`. Comments and string
- * bodies are blanked first, so prose and messages do not count; the bound that
- * buys is that a site inside a template literal's `${…}` is blanked too, and none
- * exists today. Test files are not scanned.
+ * named by the member read off it: `(normalized).i18n`. Comments, string
+ * bodies, template text and regex bodies are blanked first, so prose and
+ * messages do not count; a template literal's `${…}` is code and is scanned, at
+ * any depth. Test files are not scanned.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -152,11 +152,45 @@ const KEYWORDS: ReadonlySet<string> = new Set([
   'new', 'do', 'else', 'yield', 'void', 'delete', 'in', 'of', 'as', 'async',
 ]);
 
-/** The source with comment bodies and string/template bodies blanked to spaces. */
+/** Words a `/` can follow and still open a regex literal rather than divide. */
+const REGEX_AFTER_WORD: ReadonlySet<string> = new Set([
+  'return', 'typeof', 'instanceof', 'in', 'of', 'new', 'delete', 'void', 'throw', 'case', 'do', 'else', 'yield', 'await',
+]);
+
+/** Does the `/` at `at` open a regex literal? Judged by the last code character before it. */
+function regexMayStart(code: readonly string[], at: number): boolean {
+  let k = at - 1;
+  while (k >= 0 && /\s/.test(code[k])) k -= 1;
+  if (k < 0 || '(,=:[!&|?{};+-*%<>~^}'.includes(code[k])) return true;
+  const word = /[A-Za-z_$][\w$]*$/.exec(code.slice(Math.max(0, k - 16), k + 1).join(''));
+  return word !== null && REGEX_AFTER_WORD.has(word[0]);
+}
+
+/**
+ * The source with comment bodies, string bodies, template TEXT and regex
+ * literal bodies blanked to spaces; offsets, quotes and newlines kept.
+ *
+ * A template literal's `${…}` is code at any depth: `holes` holds one count per
+ * open `${` of the `{` opened inside it, so its own `}` hands back to the text,
+ * and a template, string or object literal inside it is masked as code would
+ * be. A `/` after an operator, an opening bracket or a keyword opens a regex
+ * literal (its character class may hold a `/`); anywhere else it divides.
+ */
 function codeOnly(src: string): string {
   const out = src.split('');
   const blank = (from: number, to: number) => {
     for (let k = from; k < to && k < src.length; k++) if (out[k] !== '\n') out[k] = ' ';
+  };
+  const holes: number[] = [];
+  /** Blanks template text from `from`; the index past its closing backtick or its `${`. */
+  const templateText = (from: number): number => {
+    let j = from;
+    while (j < src.length && src[j] !== '`' && !(src[j] === '$' && src[j + 1] === '{')) j += src[j] === '\\' ? 2 : 1;
+    blank(from, j);
+    if (j >= src.length) return src.length;
+    if (src[j] === '`') return j + 1;
+    holes.push(0);
+    return j + 2;
   };
   let i = 0;
   while (i < src.length) {
@@ -172,11 +206,39 @@ function codeOnly(src: string): string {
       const end = j === -1 ? src.length : j + 2;
       blank(i, end);
       i = end;
-    } else if (c === "'" || c === '"' || c === '`') {
+    } else if (c === "'" || c === '"') {
       let j = i + 1;
       while (j < src.length && src[j] !== c) j += src[j] === '\\' ? 2 : 1;
       blank(i + 1, j);
       i = j + 1;
+    } else if (c === '`') {
+      i = templateText(i + 1);
+    } else if (c === '/' && regexMayStart(out, i)) {
+      let j = i + 1;
+      let inClass = false;
+      while (j < src.length && src[j] !== '\n' && (inClass || src[j] !== '/')) {
+        if (src[j] === '[') inClass = true;
+        else if (src[j] === ']') inClass = false;
+        j += src[j] === '\\' ? 2 : 1;
+      }
+      // No closing `/` on the line: not a regex after all, so read on as code.
+      if (src[j] === '/') {
+        blank(i + 1, j);
+        i = j + 1;
+      } else {
+        i += 1;
+      }
+    } else if (c === '{' && holes.length > 0) {
+      holes[holes.length - 1] += 1;
+      i += 1;
+    } else if (c === '}' && holes.length > 0) {
+      if (holes[holes.length - 1] === 0) {
+        holes.pop();
+        i = templateText(i + 1);
+      } else {
+        holes[holes.length - 1] -= 1;
+        i += 1;
+      }
     } else {
       i += 1;
     }
@@ -317,7 +379,8 @@ describe('the site scanner', () => {
 // A receiver holds a stack by its NAME: `config`, `stack`, `normalized`,
 // `bundle`, `cfg`, or any name ending in `Config`, `Stack` or `Bundle`. The
 // read forms are `R.key`, `R?.key`, `R!.key`, `(R as T).key` (a `T` without
-// parentheses) and `R['key']`. Comments and string bodies are blanked first.
+// parentheses) and `R['key']`. Comments, string bodies, template text and
+// regex bodies are blanked first; a template's `${…}` is code and is read.
 // An assignment target (`R.key = …`) is a write and is not a read.
 //
 // ⛔ Bounds, stated so they are not mistaken for coverage: a stack held under
@@ -595,6 +658,27 @@ describe('the package-owned read scanner', () => {
     // An envelope key, a key outside the set, prose and strings.
     expect(packageOwnedReadsOf('const m = config.manifest ?? config.packages;\n', keys)).toEqual([]);
     expect(packageOwnedReadsOf('// (config as any).requires\nconst s = \'config.requires\';\n', keys)).toEqual([]);
+  });
+
+  it('keeps its place past a nested template literal and a regex literal (#27210)', () => {
+    // The did-you-mean shape `collect-docs.ts` carries: a template nested in another's `${…}`.
+    const nested = 'err(`unknown "${t}"${s ? ` — did you mean \\`${s}\\`?` : ` (expected ${x})`}.`);\n';
+    expect(packageOwnedReadsOf(`${nested}const o = stack.objects;\n`, keys)).toEqual(['stack.objects']);
+    // A `${…}` is code at any depth, braces and strings inside it included.
+    expect(packageOwnedReadsOf('const m = `${stack.flows.length} of ${ {a: \'}\'}.a } ${ `${config.requires}` }`;\n', keys))
+      .toEqual(['stack.flows', 'config.requires']);
+    // A quote or backtick inside a regex literal opens nothing; a division is not a regex.
+    expect(packageOwnedReadsOf('const v = l.replace(/^[\'"`]|[\'"]$/g, \'\'); const o = stack.objects;\n', keys))
+      .toEqual(['stack.objects']);
+    expect(packageOwnedReadsOf('const h = w / 2; const o = stack.objects; const q = h / 3;\n', keys))
+      .toEqual(['stack.objects']);
+    // A `${` in a quoted string opens no interpolation.
+    expect(packageOwnedReadsOf('const s = \'${\'; const o = stack.objects;\n', keys)).toEqual(['stack.objects']);
+  });
+
+  it('masks a nested template exactly: its text blanked, its interpolations kept', () => {
+    expect(codeOnly('`a ${ `b ${c}` } d`;')).toBe('`  ${ `  ${c}` }  `;');
+    expect(codeOnly('`${ {k: "}"} }x`; /[/`]/.test(y) / 2;')).toBe('`${ {k: " "} } `; /    /.test(y) / 2;');
   });
 
   it('sees the reads where they are (positive control on the real tree)', () => {
