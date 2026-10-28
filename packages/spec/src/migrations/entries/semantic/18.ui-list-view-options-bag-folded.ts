@@ -21,8 +21,8 @@ export const entry: SemanticMigration = {
   reason:
     'One key per concept (Prime Directive #12). The bag was a second spelling of every per-kind block, '
     + 'declared an underlay the top-level block wins over per key, and the renderers each re-implemented '
-    + 'that merge. Ruling direction A on objectui#10380 kept it only for objectui\'s pinned options.map '
-    + 'read, which #25923 retires with every other reader. The D2 conversion '
+    + 'that merge. An earlier ruling kept it only for objectui\'s pinned options.map read, which this '
+    + 'change retires with every other reader. The D2 conversion '
     + '`list-view-options-bag-folded` folds each stored or source bag onto the top-level blocks, which '
     + 'is what those renderers drew (for `chart`, whose block replaced the bag whole, a bag beside a '
     + 'block is dropped). What it cannot decide: the bag was judged with every key optional, so a bag '
