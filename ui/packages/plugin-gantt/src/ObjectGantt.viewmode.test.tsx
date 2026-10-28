@@ -46,15 +46,20 @@ const INLINE = [
   { id: '2', name: 'Beta', start: '2024-02-01', end: '2024-02-10', owner: 'bob' },
 ];
 
-/** Flattened ObjectGanttSchema style (top-level gantt fields). */
-function schema(extra: Record<string, any> = {}) {
+/**
+ * An `object-gantt` node with its binding in the `gantt` block, the one
+ * spelling the renderer reads since objectstack#25923; `gantt` adds members.
+ */
+function schema(gantt: Record<string, any> = {}) {
   return {
     type: 'object-gantt',
-    startDateField: 'start',
-    endDateField: 'end',
-    titleField: 'name',
+    gantt: {
+      startDateField: 'start',
+      endDateField: 'end',
+      titleField: 'name',
+      ...gantt,
+    },
     data: { provider: 'value', items: INLINE },
-    ...extra,
   } as any;
 }
 
@@ -65,7 +70,7 @@ const modeOf = async (container: HTMLElement, testId: string) => {
 };
 
 describe('ObjectGantt viewMode wiring — timeline branch (objectui#5074)', () => {
-  it('honours an authored viewMode on the flattened object-gantt schema', async () => {
+  it('honours an authored viewMode in the object-gantt node\'s gantt block', async () => {
     const { container } = render(<ObjectGantt schema={schema({ viewMode: 'month' })} />);
     expect(await modeOf(container, 'gantt-view')).toBe('month');
   });

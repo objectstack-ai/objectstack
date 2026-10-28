@@ -682,17 +682,18 @@ function pageBlockKeys(table: EngineStringTable): string[] {
 }
 
 describe('a retired key leaves BOTH locale tables (objectui#8368)', () => {
-  it('reads two disjoint, non-empty tables out of i18n.ts', () => {
+  it('reads two disjoint tables out of i18n.ts, both emptied into the namespace', () => {
     // The extractor is a source parser, so its silent failure mode is finding
     // FEWER keys — which would make every assertion below vacuously green over
     // an empty corpus. Ranges first: overlapping ones would mean the `};`
     // scan ran past a table and both sets became the same set.
-    // The table drains slice by slice into the namespace (objectstack#25922),
-    // so its floor is "non-empty"; the 3,000-key floor is held over both homes
-    // together, below.
+    // The table drained slice by slice into the namespace (objectstack#25922)
+    // and is empty since slice S6b: a key back in it would shadow the
+    // namespace's copy. The 3,000-key floor, held over both homes together
+    // below, is what keeps an empty table from reading as a parser gone quiet.
     expect(EN_TABLE.to).toBeLessThan(ZH_TABLE.from);
-    expect(EN_TABLE.keys.length).toBeGreaterThan(0);
-    expect(ZH_TABLE.keys.length).toBeGreaterThan(0);
+    expect(EN_TABLE.keys).toEqual([]);
+    expect(ZH_TABLE.keys).toEqual([]);
     // No duplicates: a key declared twice would be a silent overwrite, and the
     // set arithmetic below would hide it.
     expect(EN_TABLE.keys.length).toBe(new Set(EN_TABLE.keys).size);

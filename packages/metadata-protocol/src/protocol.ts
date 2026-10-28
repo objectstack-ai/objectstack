@@ -16222,17 +16222,53 @@ export class ObjectStackProtocolImplementation implements
      *
      * The sentence names the type the write names; for a flow it is the
      * sentence the flow arm always answered, byte for byte.
+     *
+     * [#26921] Two more doors ask it, about a binding the CALLER did not name
+     * but the item's stored rows give — rows bound to such an id were stored
+     * before the save door refused one, and these two doors still extended
+     * or published them:
+     *
+     *  - `inherited`: a save naming no package, whose address the item's rows
+     *    give (#11087 / ADR-0048: the package of its active row, or of its
+     *    lone draft). It kept the phantom binding.
+     *  - `verb: 'publish'`: the per-item publish ({@link promoteDraftForPublish}),
+     *    named or not — the package its promotion lands in. It served the
+     *    draft live, the way `publish-drafts` did before it refused the id.
+     *
+     * Same rule and envelope; only the sentence says which write was refused
+     * and the way out. Saving "without naming a package" is no way out there
+     * (that save inherits the binding), so those two name the ones that are:
+     * creating a package with that id, or removing the rows bound to it — a
+     * delete naming the id still removes the active row, and discarding the
+     * drafts under it removes those. ⛔ Nothing here migrates or deletes a
+     * stored row: the author chooses.
      */
-    private uninstalledNamedBaseRefusal(request: { type: string; name: string; packageId?: string | null }): Error | null {
+    private uninstalledNamedBaseRefusal(
+        request: { type: string; name: string; packageId?: string | null },
+        how: { verb?: 'save' | 'publish'; inherited?: boolean } = {},
+    ): Error | null {
         const namedBase = request.packageId;
         if (!namedBase || namedBase === 'sys_metadata') return null;
         if (this.resolveWritePackageScope(namedBase) !== undefined) return null;
         const type = PLURAL_TO_SINGULAR[request.type] ?? request.type;
+        // Kept under the REST door's client-message bound (`truncateClientMessage`)
+        // for ordinary names, so the last sentence reaches the caller.
+        const storedWayOut = `Create a package with that id first, or remove the rows bound to it (a delete naming `
+            + `that package; discard-drafts for drafts) and save again, into an installed writable package or with `
+            + `no package.`;
         const err = new Error(
-            `Cannot save ${type} '${request.name}' into package '${namedBase}': no package with that id is `
-            + `installed in this deployment, so the ${type} would be stored bound to a package that does not `
-            + `exist. Name an installed writable package as the ${type}'s base (or create one first), or save `
-            + `the ${type} without naming a package. Nothing was written.`,
+            how.verb === 'publish'
+                ? `Cannot publish ${type} '${request.name}' into package '${namedBase}': no package with that id `
+                    + `is installed in this deployment, so the ${type} would go live bound to a package that does `
+                    + `not exist. ${storedWayOut} Nothing was published.`
+                : how.inherited
+                    ? `Cannot save ${type} '${request.name}' without naming a package: its stored rows are bound to `
+                        + `package '${namedBase}', which is not installed in this deployment, and this save would `
+                        + `extend that binding. ${storedWayOut} Nothing was written.`
+                    : `Cannot save ${type} '${request.name}' into package '${namedBase}': no package with that id is `
+                        + `installed in this deployment, so the ${type} would be stored bound to a package that does not `
+                        + `exist. Name an installed writable package as the ${type}'s base (or create one first), or save `
+                        + `the ${type} without naming a package. Nothing was written.`,
         );
         (err as any).code = 'WRITABLE_PACKAGE_REQUIRED';
         (err as any).status = 422;
@@ -20544,6 +20580,43 @@ export class ObjectStackProtocolImplementation implements
 
         const singularType = PLURAL_TO_SINGULAR[request.type] ?? request.type;
 
+        // [#23712] The draft a draft save naming no package writes
+        // ({@link packagelessDraftAddress}): the repository resolves its
+        // binding (#11087), so `packageId` stays empty, but the address is
+        // read here for the two gates below that judge the row it lands in.
+        // Read once, for the same authoring saves the publish-mode address
+        // above is resolved for.
+        const draftAddress = mode === 'draft'
+            && request.packageId == null
+            && request.source === undefined
+            && request.writeFace !== 'package-duplicate'
+            ? await this.packagelessDraftAddress(
+                singularType, request.name, itemDiscriminator(singularType, request.item),
+            )
+            : undefined;
+
+        // [#26921] THE NAMED-BASE RULE for the binding a save naming no
+        // package INHERITS: the package its address gives (the resolved
+        // `packageId` above for a publish-mode save; the draft address's
+        // package for a draft save) must be installed too. Rows bound to an id
+        // no installed package has were stored before the save door refused
+        // naming one, and this save kept extending them. Refused, naming the
+        // id and the way out, ⛔ never re-homed package-less in silence: that
+        // would move the item without a word. Not asked of a save that names a
+        // package (asked above as named) nor of the server-stated rewrites,
+        // which resolve no address. An ambiguous draft address is left to the
+        // repository's `409`, as before. See {@link uninstalledNamedBaseRefusal}.
+        if (namedNoPackage && request.source === undefined && request.writeFace !== 'package-duplicate') {
+            const inherited = mode === 'draft'
+                ? draftAddress && draftAddress.kind !== 'ambiguous' ? draftAddress.into : null
+                : request.packageId ?? null;
+            const unboundInherited = this.uninstalledNamedBaseRefusal(
+                { type: singularType, name: request.name, packageId: inherited },
+                { inherited: true },
+            );
+            if (unboundInherited) throw unboundInherited;
+        }
+
         // [ADR-0029 D9.9 / #6995] The refusal that is about REPRESENTABILITY
         // rather than authorization: an `object` overlay bound to a package
         // that does not own the object. See
@@ -20571,16 +20644,9 @@ export class ObjectStackProtocolImplementation implements
         // `Q`, or a lone draft bound to `Q`, is `Q`'s: judged with the
         // request's empty package, the sentinel owner read `own` and the save
         // answered `200` for a draft no publish can serve. An ambiguous
-        // address is left to the repository's `409`, as before.
+        // address is left to the repository's `409`, as before. The address
+        // is the one read above, before the named-base rule's inherited arm.
         if (singularType === 'object') {
-            const draftAddress = mode === 'draft'
-                && request.packageId == null
-                && request.source === undefined
-                && request.writeFace !== 'package-duplicate'
-                ? await this.packagelessDraftAddress(
-                    singularType, request.name, itemDiscriminator(singularType, request.item),
-                )
-                : undefined;
             const writtenPackage = draftAddress && draftAddress.kind !== 'ambiguous'
                 ? draftAddress.into
                 : request.packageId;
@@ -22836,6 +22902,20 @@ export class ObjectStackProtocolImplementation implements
             throw withPendingAudit(_publishLockRefusal.err, _publishLockRefusal.audit);
         }
         if (addressRefusal) throw addressRefusal;
+        // [#26921] THE NAMED-BASE RULE at the promotion: the package the
+        // draft goes live in — named by the caller, or given by the item's
+        // rows when it names none — must be installed. A draft bound to an id
+        // no installed package has was stored before the save door refused
+        // naming one, and promoting it served it live, owned by nothing (no
+        // manifest, so no namespace, uninstall or export). `publish-drafts`
+        // refuses such an id at its door before it gets here; this is the
+        // per-item publish, and it is refused before the draft is read.
+        // Nothing is migrated or deleted. See {@link uninstalledNamedBaseRefusal}.
+        const unboundBase = this.uninstalledNamedBaseRefusal(
+            { type: singularType, name: request.name, packageId: promoteInto },
+            { verb: 'publish' },
+        );
+        if (unboundBase) throw unboundBase;
         const draftForGate = await repo.get(
             { type: singularType, name: request.name, org: 'env' } as Parameters<typeof repo.get>[0],
             { state: 'draft', packageId: draftKey, ...memberOption(request.member) },

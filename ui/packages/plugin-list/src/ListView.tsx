@@ -478,6 +478,18 @@ export interface ListViewProps {
    */
   onTotalChange?: (total: number) => void;
   /**
+   * Called with the rows the list shows, in the order it shows them, each
+   * time that set changes once a load settles — another page, sort, filter or
+   * search (objectstack#26679). The console's object page hands it to its
+   * record drawer, whose `↑` `↓` at the root step through these rows. Answered
+   * where `onTotalChange` is: a paged grid that draws the rows it fetched; any
+   * other kind (a board, a calendar, a grouped grid) has no single row order
+   * and answers with no rows, so a host never steps through a stale set.
+   *
+   * A HOST prop, never a schema key: the rows are the list's runtime state.
+   */
+  onRowsChange?: (rows: ReadonlyArray<Record<string, unknown>>) => void;
+  /**
    * The Display control's Open records section (objectstack#26681): how a row
    * opens its record — the mode the host resolved for this object and view,
    * the reader's own drawer | split preference and its setter. See
@@ -1543,6 +1555,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   compact = false,
   capped = false,
   onTotalChange,
+  onRowsChange,
   viewDefaults,
   recordOpen,
   ...props
@@ -5472,6 +5485,25 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   React.useEffect(() => {
     if (settledTotal != null) onTotalChangeRef.current?.(settledTotal);
   }, [settledTotal]);
+  // objectstack#26679 — the rows on show, for a host that steps through them.
+  // Keyed on the ids in their order (never on the identity of `data` or of
+  // the callback, AGENTS.md #10), so an equal refetch reports nothing new; a
+  // load in flight keeps the last answer, as the count does.
+  const onRowsChangeRef = React.useRef(onRowsChange);
+  React.useEffect(() => {
+    onRowsChangeRef.current = onRowsChange;
+  });
+  const rowSequenceShown = paginate && surfaceDrawsFetchedRows;
+  const shownRowsSettled = rowSequenceShown ? !loading && !loadError : true;
+  const shownRowsKey = rowSequenceShown
+    ? JSON.stringify(data.map((row: any) => row?.id ?? row?._id ?? null))
+    : '[]';
+  const shownRowsRef = React.useRef(data);
+  shownRowsRef.current = rowSequenceShown ? data : [];
+  React.useEffect(() => {
+    if (!shownRowsSettled) return;
+    onRowsChangeRef.current?.(shownRowsRef.current);
+  }, [shownRowsKey, shownRowsSettled]);
 
   return (
     <div

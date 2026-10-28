@@ -143,7 +143,7 @@ describe('validateRlsPredicateEnforceability — the engine judge is an INPUT (#
       expect(hintFor(code).length, code).toBeLessThanOrEqual(200);
     }
     expect(explainRule(RLS_PREDICATE_UNENFORCEABLE)?.paragraphs.join('\n')).toContain(
-      'the caller\'s values are the `current_user` keys (accessible_org_ids, email, id, org_user_ids, organization_id, positions)',
+      'the caller\'s values are the `current_user` keys (accessible_org_ids, email, id, org_user_ids, organization_id, positions, queues)',
     );
   });
 

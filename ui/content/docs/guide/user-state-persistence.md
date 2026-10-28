@@ -323,3 +323,24 @@ calendar, gantt, list, gallery, map and timeline all mount `@object-ui/plugin-de
 `RecordDetailPanel`, so a record reads with its declared labels and typed
 values, and without its `hidden` fields, whichever view it was opened from
 (objectui#13458).
+
+## The record drawer's stack
+
+A record opened from a list sits at the root of the drawer, and the root is
+**addressable**: `?recordId=` on the list's URL, so a reload, a shared link or
+Back reopens it. Records opened **inside** the drawer — a related row, a lookup
+value — open in the same drawer one level down (objectstack#26679), and those
+levels are **in-memory** state: a reload shows the root record.
+
+| State | Lives in | Survives a reload |
+|---|---|---|
+| The root record | `?recordId=` | Yes |
+| The levels above it, their titles and sibling sets | Component state | No |
+| Each level's record tab | `?tab=`, saved per level while another level is shown | The shown level's only |
+| The stack across a `⤢` round trip | Router history state, consumed once on return | No |
+
+`⤢` at any level opens that record's page with the levels below it as its
+`?from=` trail, which is addressable like any record trail. The page it opens
+offers "Collapse to drawer", which returns to the drawer with the stack it left;
+the history state that carries the stack is rewritten without it as soon as the
+drawer has it back, so a later reload or Back shows the root alone.

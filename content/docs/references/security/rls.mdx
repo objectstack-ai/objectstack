@@ -53,7 +53,8 @@ object-level permissions (CRUD), RLS provides record-level filtering.
 ### Where a membership key comes from
 
 The kernel resolves `current_user.id`, `organization_id`, `positions`,
-`org_user_ids`, `accessible_org_ids` and `email` itself. Any other
+`org_user_ids`, `accessible_org_ids`, `email` and `queues` (the ownership
+queues the caller sits in, ADR-0142 D3) itself. Any other
 `current_user.KEY` read with `in` is a membership set the APP supplies,
 through one of two sources:
 

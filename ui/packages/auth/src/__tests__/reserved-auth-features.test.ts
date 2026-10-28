@@ -45,7 +45,7 @@
  *
  * ## Why the consumer sweep is a blunt string match
  *
- * It follows the `scripts/__tests__/ci-cd-pipeline-doc.test.ts` pattern (#4170):
+ * It follows the pattern objectui's CI-guide pin test set (#4170; deleted by objectstack#26058):
  * read the real files, compare them, pin the inverse direction too. A type-aware
  * "is this identifier read anywhere" analysis would be more precise and much more
  * fragile, and it would still miss the reachable path that has no static reference

@@ -1,6 +1,6 @@
 # ADR-0072: Reference Scope & Resolvability — the authored-expression data-picker model (#1934)
 
-**Status**: Proposed (2026-06-25)
+**Status**: Accepted — 2026-10-28 (ruled on objectstack#26553, ADR batch 3; proposed 2026-06-25). implemented: Slice 0/1 (flow scope resolution, the `{x}` picker, scope-aware unknown-reference validation inline and in the Problems panel — objectui `FlowReferenceField.tsx`, `flow-node-refs.ts`, `flow-expr-problems.ts`) and Slice 2 object-output drilling (`resolveObjectName` from the producing node's `config.objectName`); pending: Slice 3 lazy reference tree, Slice 4 guided fetch (D4), Slice 5 the D2 resolver on formula / validation / visibility / sharing surfaces, and D6 `outputSchema.objectName`; the Open questions stand.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0032](./0032-unified-expression-layer.md) (one authoring language: CEL), [ADR-0058](./0058-expression-and-predicate-surface.md) (the expression & predicate surface — interpret vs compile, fail-policy matrix), [ADR-0036 field conditional rules](https://github.com/objectstack-ai/objectui/blob/main/docs/adr/0036-field-conditional-rules.md) (objectui repo)
 **Consumers**: `@objectstack/spec` (`FlowNode.outputSchema`), `@objectstack/service-automation`, `@objectstack/formula`; `@object-ui/app-shell` (the metadata-admin authoring surface — implementation lives in the objectui repo)

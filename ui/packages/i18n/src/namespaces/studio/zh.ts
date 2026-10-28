@@ -3590,6 +3590,31 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.appNav.item': '导航项 {n}',
   'engine.appNav.itemOne': '项',
   'engine.appNav.itemOther': '项',
+  // The translation preview, the designer table's last family: held out of S6
+  // while a sibling change added its category.hooks row (#25922 slice S6b).
+  'engine.translationPreview.empty': '此语言包为空 —— 至少添加一条译文，即可查看覆盖率报告。',
+  'engine.translationPreview.category.objects': '对象',
+  'engine.translationPreview.category.picklists': '选项列表',
+  'engine.translationPreview.category.apps': '应用',
+  'engine.translationPreview.category.messages': '消息',
+  'engine.translationPreview.category.globalActions': '全局操作',
+  'engine.translationPreview.category.dashboards': '仪表盘',
+  'engine.translationPreview.category.datasets': '数据集',
+  'engine.translationPreview.category.reports': '报表',
+  'engine.translationPreview.category.pages': '页面',
+  'engine.translationPreview.category.flows': '流程',
+  'engine.translationPreview.category.hooks': '钩子',
+  'engine.translationPreview.category.positions': '岗位',
+  'engine.translationPreview.category.permissions': '权限集',
+  'engine.translationPreview.category.books': '文档书',
+  'engine.translationPreview.category.metadataForms': '元数据表单',
+  'engine.translationPreview.category.settingsCommon': '设置界面',
+  'engine.translationPreview.coverage': '分类覆盖率：',
+  'engine.translationPreview.totalKeys': '共 {count} 个键',
+  'engine.translationPreview.categoryEmpty': '空',
+  'engine.translationPreview.more': '另有 {count} 项…',
+  'engine.translationPreview.keyCountOne': '{{count} 个键}',
+  'engine.translationPreview.keyCountOther': '{{count} 个键}',
 };
 
 export default STUDIO_ZH;

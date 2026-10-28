@@ -70,6 +70,7 @@ export function useObjectViewListRenderer({
     filterScope,
     actions,
     handleRowClick,
+    handleListRowsChange,
     navOverlay,
     recordOpen,
     openAsPage,
@@ -103,6 +104,8 @@ export function useObjectViewListRenderer({
     filterScope: FilterTokenScope;
     actions: ReturnType<typeof useObjectActions>;
     handleRowClick: ReturnType<typeof useObjectViewRecordNavigation>['handleRowClick'];
+    /** objectstack#26679 — the rows the list shows, for the drawer's root `↑` `↓`. */
+    handleListRowsChange: ReturnType<typeof useObjectViewRecordNavigation>['handleListRowsChange'];
     navOverlay: ReturnType<typeof useObjectViewRecordNavigation>['navOverlay'];
     /** objectstack#26681 — the Display menu's Open records section. */
     recordOpen: NonNullable<ListViewProps['recordOpen']>;
@@ -870,6 +873,7 @@ export function useObjectViewListRenderer({
                 onRowClick={(record: any, event?: any) => {
                     handleRowClick(record, event);
                 }}
+                onRowsChange={handleListRowsChange}
                 onSortChange={(sort: any) => {
                     // objectui#12418 — this user's sort, not the view's.
                     persistListSort(sort);
@@ -928,7 +932,7 @@ export function useObjectViewListRenderer({
                 dataSource={ds}
             />
         );
-    }, [inSetup, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, navOverlay, actions, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, viewTabBar, viewTabRow, managedUsers, managedUserMarker, recordOpen, openAsPage]);
+    }, [inSetup, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, navOverlay, actions, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, viewTabBar, viewTabRow, managedUsers, managedUserMarker, recordOpen, openAsPage, handleListRowsChange]);
 
     return { renderListView };
 }

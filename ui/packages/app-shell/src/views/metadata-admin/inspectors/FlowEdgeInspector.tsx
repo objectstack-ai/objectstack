@@ -48,6 +48,7 @@ import { useConnectorRegistry } from './connector-input-fields.js';
 import { VariableTextInput } from './VariableTextInput.js';
 import { findUnknownRefs, scopeRoots, describeUnknownRefs } from './flow-ref-check.js';
 import { writeExpressionSource } from './expression-envelope.js';
+import { useServerErrorsAt } from '../draftVerdict.js';
 import { describeEdgeConnectionRefusal, edgeConnectionRefusal } from '../previews/flow-problems.js';
 import { flowEdgeDisplayName } from '../previews/flow-canvas-parts.js';
 // objectui#7265 — the selected edge as this panel reads it out of the draft.
@@ -89,6 +90,9 @@ export function FlowEdgeInspector({
   // time it evaluates this guard (objectui#11085). Called unconditionally — a
   // missing edge resolves the flow variables alone.
   const { groups: scopeGroups } = useEdgeScope(draft as Record<string, unknown>, edge, connectors);
+  // objectstack#26858 — what the page's served verdict says at this edge's
+  // `condition` (an `expression-invalid` its publish would refuse), as written.
+  const conditionVerdict = useServerErrorsAt(index >= 0 ? `edges.${index}.condition` : undefined);
 
   if (!edge) {
     return (
@@ -330,6 +334,11 @@ export function FlowEdgeInspector({
           </p>
         ) : null;
       })()}
+      {conditionVerdict.map((e, i) => (
+        <p key={i} className="text-[11px] leading-snug text-destructive" role="alert" data-testid="flow-edge-server-error">
+          {e.message}
+        </p>
+      ))}
       <InspectorCheckboxField
         label={t('engine.inspector.flowEdge.isDefault', locale)}
         value={isDefault}

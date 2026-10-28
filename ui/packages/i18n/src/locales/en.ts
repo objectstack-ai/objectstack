@@ -1447,6 +1447,9 @@ const en = {
     // a possessive particle (ja/zh) writes its own arrangement here.
     recordDetailWithLabel: '{{label}} Detail',
     openAsFullPage: 'Open as full page',
+    // The record page's way back into the drawer it was expanded from
+    // (objectstack#26679).
+    collapseToDrawer: 'Collapse to drawer',
     recordDetailOverlay: 'Record detail overlay for {{title}}.',
     addToFavorites: 'Add to favorites',
     removeFromFavorites: 'Remove from favorites',
@@ -4405,7 +4408,9 @@ const en = {
       get_record: 'Read the record',
       query_data: 'Query the data',
       query_records: 'Look up the records',
+      read_package_doc: 'Read the app guide',
       search_knowledge: 'Search the knowledge base',
+      search_package_docs: 'Search the app guides',
       visualize_data: 'Chart the data',
       add_field: 'Add a field',
       apply_blueprint: 'Build the app from the plan',

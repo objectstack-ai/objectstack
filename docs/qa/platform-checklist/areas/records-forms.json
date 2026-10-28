@@ -3698,7 +3698,7 @@
       "title": "Record edit undo: toast Undo / Ctrl+Z restores the prior value through the API and logs a revert; undo after a concurrent change must not silently clobber",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -3708,11 +3708,11 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "a writable record and an action that declares `undoable: true` with operation 'update' (a patch of one field) — at objectui 1fb1ced36243 the ONLY path that pushes an Undo op: useConsoleActionRuntime and RecordDetailView attach the toast Undo for `undoable` actions, while inline grid and form edits push none. objectui react/src/hooks/useGlobalUndo.ts + core globalUndoManager hold the stack. ⚠ The stock showcase declares NO undoable action (examples/app-showcase has zero `undoable` keys), and a runtime-authored action is not joined into the served object's actions[] (records-forms.action-location-matrix knownGaps), so the action must ship PACKAGED in the showcase — see `blocked`"
+          "a writable record and an action that declares `undoable: true` with operation 'update' (a patch of one field) — at objectui 1fb1ced36243, and still on main f2fdac5d under ui/, the ONLY path that pushes an Undo op: useConsoleActionRuntime and RecordDetailView attach the toast Undo for `undoable` actions, while inline grid and form edits push none. objectui react/src/hooks/useGlobalUndo.ts + core globalUndoManager hold the stack. ⚠ The stock showcase declares NO undoable action (examples/app-showcase has zero `undoable` keys), and a runtime-authored action is not joined into the served object's actions[] (records-forms.action-location-matrix knownGaps), so the action must ship PACKAGED in the showcase — see `blocked`"
         ],
         "knownGaps": [
           "AUTOMATION LIVES IN THE objectui TREE, WHICH IS ui/ IN THIS CHECKOUT — `automated.ref` names objectui specs exclusively, by objectui-relative paths that resolve under ui/ (a unit suite at ui/packages/…, a Playwright spec at ui/e2e/…). They run from that tree: a unit suite with cwd ui/ (pnpm exec vitest run FILE), a live spec only against a booted stack serving a console built by pnpm console:build. Drive the item by hand in the browser and score it as a manual run, OR run the pin from ui/ and cite its output naming the framework commit it ran at. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact, whose 'none of those specs exist here' predates the ui/ import.",
-          "BLOCKED(fixture) on stock, all four clauses (QA run #23163, objectstack 36b2889c, objectui 1fb1ced36243). Inline edits push no Undo op at this pin — only actions declaring `undoable` do — and the showcase declares none, while a runtime-authored undoable action is not served. The item becomes runnable when examples/app-showcase ships a packaged undoable update action on a writable object (operation 'update' with a patch, so the Undo captures the prior value of every written field — ActionSchema.undoable in packages/spec/src/ui/action.zod.ts). Lift `blocked` in the revision that names that fixture. ⛔ Do not score an inline edit's missing Undo as this item's FAIL: the console never offers one by design"
+          "BLOCKED(fixture) on stock, all four clauses (QA run #23163, objectstack 36b2889c, objectui 1fb1ced36243). Inline edits push no Undo op at this pin — only actions declaring `undoable` do — and the showcase declares none, while a runtime-authored undoable action is not served. The item becomes runnable when examples/app-showcase ships a packaged undoable update action on a writable object (operation 'update' with a patch, so the Undo captures the prior value of every written field — ActionSchema.undoable in packages/spec/src/ui/action.zod.ts). Lift `blocked` in the revision that names that fixture. ⛔ Do not score an inline edit's missing Undo as this item's FAIL: the console never offers one by design. Re-checked at main f2fdac5d (wave anchor #25807, slice C): the premise holds — examples/ carries zero `undoable` keys and no packaged action in packages/ declares `undoable: true`, and inline edits still push no Undo op (ui/packages/core/src/actions/ActionRunner.ts pushes only an action result's undo onto globalUndoManager). Since the spec's semantic migration ui-action-undoable-unfulfillable-refused (packages/spec/src/migrations/entries/semantic/18.ui-action-undoable-unfulfillable-refused.ts), `undoable: true` parses only on the two shapes some runtime fulfils — operation 'update' with a patch (the framework runtime snapshots the prior value, packages/runtime/src/action-execution.ts#DeclarativeUpdateUndo) or type 'api' (the console builds the undo envelope) — so the lifting fixture may be either"
         ]
       },
       "steps": [
@@ -3791,6 +3791,12 @@
           "date": "2026-10-26",
           "change": "automated.ref says UndoManager.test.ts scores no clause: it tests only the in-memory undo/redo stack, and no clause of this item is a stack-semantics clause (Tier 1 run #25815 (6679644a, pin b41ed7f68956)). fixtures.knownGaps[0], the objectui-pinned-automation note, said the objectui specs live in a separate repo and none exist here; they are under ui/ in this checkout since the import, so it says where they resolve and how they run (devx seat 2's direction, carried for #26035). Re-read on main cc378e93. No clause changed",
           "ref": "#25846"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-28",
+          "change": "BLOCKED premise re-checked and kept (lead from slice B's report 6457925443). At base f2fdac5d, examples/ declares zero `undoable` keys and no packaged action in packages/ declares undoable: true, so the showcase still ships no undoable action; inline edits still push no Undo op (ActionRunner pushes only an action result's undo). fixtures.requires[0] says the reading is current on main, and knownGaps[1] records the re-check and the two undoable shapes the spec now accepts (operation 'update' with a patch, or type 'api'), either of which can be the lifting fixture. `blocked` unchanged. Wave anchor #25807, slice C. No clause changed",
+          "ref": "#25807"
         }
       ]
     },

@@ -51,7 +51,7 @@
     "@objectstack/driver-turso": "workspace:*",
     "@objectstack/setup": "workspace:*",
     "@objectstack/trigger-api": "workspace:*",
-    "@types/node": "^26.6.3",
+    "@types/node": "^26.6.5",
     "playwright-core": "1.63.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"

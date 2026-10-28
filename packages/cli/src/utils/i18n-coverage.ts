@@ -42,6 +42,7 @@
  * check`, IDE tooling, and unit tests.
  */
 
+import { deepMerge } from '@objectstack/core';
 import type { TranslationBundle, TranslationData } from '@objectstack/spec/system';
 import { collectExpectedEntries, type ExpectedEntry } from './i18n-extract.js';
 
@@ -174,58 +175,38 @@ export interface CoverageOptions {
 
 // ─── Bundle helpers ────────────────────────────────────────────────────
 
-function mergeData(target: TranslationData | undefined, source: TranslationData): TranslationData {
-  if (!target) return JSON.parse(JSON.stringify(source));
-  // shallow object merge across the four well-known sub-records is enough for
-  // coverage detection; we never need a deep merge of leaf strings because
-  // duplicates are accepted (last-write-wins).
-  const out: TranslationData = { ...target };
-  if (source.objects) {
-    out.objects = { ...(out.objects ?? {}) };
-    for (const [name, data] of Object.entries(source.objects)) {
-      out.objects[name] = {
-        ...(out.objects[name] ?? {}),
-        ...data,
-        fields: { ...(out.objects[name]?.fields ?? {}), ...(data.fields ?? {}) },
-        _views: { ...(out.objects[name]?._views ?? {}), ...(data._views ?? {}) },
-        _actions: { ...(out.objects[name]?._actions ?? {}), ...(data._actions ?? {}) },
-      } as any;
-    }
-  }
-  if (source.globalActions) {
-    out.globalActions = { ...(out.globalActions ?? {}), ...source.globalActions };
-  }
-  if (source.apps) out.apps = { ...(out.apps ?? {}), ...source.apps };
-  if (source.messages) out.messages = { ...(out.messages ?? {}), ...source.messages };
-  if ((source as any).metadataForms) {
-    const tgt: Record<string, any> = { ...((out as any).metadataForms ?? {}) };
-    for (const [type, data] of Object.entries((source as any).metadataForms)) {
-      const existing = tgt[type] ?? {};
-      const incoming = (data ?? {}) as any;
-      tgt[type] = {
-        ...existing,
-        ...incoming,
-        sections: { ...(existing.sections ?? {}), ...(incoming.sections ?? {}) },
-        fields: { ...(existing.fields ?? {}), ...(incoming.fields ?? {}) },
-      };
-    }
-    (out as any).metadataForms = tgt;
-  }
-  return out;
-}
-
-function flattenBundles(bundles: TranslationBundle[]): { merged: TranslationBundle; locales: string[] } {
-  const merged: Record<string, TranslationData> = {};
-  const localesSet = new Set<string>();
+/**
+ * Fold a stack's bundles into one tree per locale, exactly as the runtime
+ * serves them (#27087).
+ *
+ * The runtime's `loadTranslations` deep-merges each bundle into the locale's
+ * tree, in order: the kernel's in-memory fallback with `deepMerge` from
+ * `@objectstack/core`, `service-i18n`'s `FileI18nAdapter` with a byte-identical
+ * copy of it. Objects merge key by key at every depth; anything else — a
+ * string, an array — is replaced by the later bundle. This calls core's
+ * function, so the lint reads exactly what `GET /api/v1/i18n/translations/LOCALE`
+ * serves, never more and never less. `apps.APP.navigation` is a map keyed by
+ * node id, so it merges per id with no rule of its own.
+ *
+ * ⛔ No merge of this file's own. The one it used to keep folded only
+ * `objects`, `globalActions`, `apps` (a later `apps.APP` replacing the whole
+ * entry, navigation included), `messages` and `metadataForms`, and dropped
+ * every other group of a later bundle: a multi-package artifact, one bundle
+ * per package, read hundreds of served keys as missing.
+ * `test/i18n-multi-bundle-merge.test.ts` pins this against the served tree.
+ */
+export function mergeTranslationBundles(
+  bundles: readonly TranslationBundle[],
+): { merged: TranslationBundle; locales: string[] } {
+  const merged: Record<string, Record<string, unknown>> = {};
   for (const bundle of bundles) {
     if (!bundle || typeof bundle !== 'object') continue;
     for (const [locale, data] of Object.entries(bundle)) {
       if (!data || typeof data !== 'object') continue;
-      localesSet.add(locale);
-      merged[locale] = mergeData(merged[locale], data as TranslationData);
+      merged[locale] = deepMerge(merged[locale] ?? {}, data as Record<string, unknown>);
     }
   }
-  return { merged, locales: Array.from(localesSet).sort() };
+  return { merged: merged as TranslationBundle, locales: Object.keys(merged).sort() };
 }
 
 // ─── Who owns the platform baseline ────────────────────────────────────
@@ -631,7 +612,7 @@ export function computeI18nCoverage(config: any, opts: CoverageOptions = {}): Co
       ? declared.defaultLocale
       : 'en');
   const bundles: TranslationBundle[] = Array.isArray(config?.translations) ? config.translations : [];
-  const { merged, locales: discovered } = flattenBundles(bundles);
+  const { merged, locales: discovered } = mergeTranslationBundles(bundles);
 
   // A project only owes translations for locales it opted into. `supportedLocales`
   // is that opt-in; without it the check falls back to the locales some bundle

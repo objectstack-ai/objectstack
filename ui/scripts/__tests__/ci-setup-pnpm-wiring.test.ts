@@ -73,8 +73,8 @@ const SETUP = 'scripts/ci-setup-pnpm.sh';
  * `dependabot-auto-merge.yml`'s explanatory comments say the word `corepack`
  * without being read as a step that runs it.
  *
- * Ported deliberately from `ci-cd-pipeline-doc.test.ts`, which established the
- * shape for the same reason.
+ * Ported deliberately from objectui's CI-guide pin test (deleted by objectstack#26058), which
+ * established the shape for the same reason.
  */
 function runSteps(yaml: string): string[] {
   const lines = yaml.split('\n');

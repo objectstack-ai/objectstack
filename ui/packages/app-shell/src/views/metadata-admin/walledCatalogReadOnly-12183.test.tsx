@@ -106,6 +106,8 @@ function layeredFor(type: string) {
 
 /** Stable singleton — the pages' load effects key on the client identity. */
 const CLIENT = {
+  // objectstack#26840 — the Access matrix reads its objects through the draft-overlaid door.
+  withPreviewDrafts() { return this; },
   list: vi.fn(async (type: string) => {
     if (type === 'package') return [{ manifest: { id: PACKAGE, scope: 'project', name: 'Showcase' } }];
     if (type === 'object') return [{ item: { name: 'a_account', label: 'Account' } }];

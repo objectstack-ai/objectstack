@@ -1307,7 +1307,9 @@ export const CEILINGS = new Map([
   // lane patrol (dispatch-runbook.md, line-neutral there). The human-ruling
   // floor and the risk / workload tests stayed intact. Landed count, headroom 0,
   // same convention (lowering is always legitimate).
-  ['.claude/skills/pm-dispatch/references/triage-duties.md', 103],
+  // Lowered 103 → 102 when the whole-card cloud route (PR #26749) merged with
+  // main's cloud-involvement lines; landed count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/triage-duties.md', 102],
   // execution-duties.md, raised 183 → 185 by the split-off-card ruling — an
   // ORDINARY raise, ⛔ not a cross-file move (card #23579). The text is two rule
   // lines beside the derived-sub-issue rules in 〈候选与批次〉: a queued card found
