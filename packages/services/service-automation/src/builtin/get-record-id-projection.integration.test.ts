@@ -172,7 +172,7 @@ describe('get_record answers the row id as output.id whatever its fields project
     expect(handed, 'the engine is never asked').toEqual([]);
     expect(result.success, 'an empty projection is refused, never read as the whole row').toBe(false);
     expect(result.output).toBeUndefined();
-    expect(result.error).toContain("get_record 'read': config does not satisfy the get_record contract — fields: Name at least one field.");
+    expect(result.error).toContain("get_record 'read': config does not satisfy the get_record contract — config.fields: Name at least one field.");
   });
 
   it('a downstream update_record filtering on read.id updates the row the narrowed get_record read', async () => {
