@@ -2516,7 +2516,7 @@
       "title": "Keyboard shortcut surface: `?` and ?shortcuts=1 open the dialog and Esc closes it, typing in an input never triggers it, the dialog lists exactly the shortcuts whose handler is mounted and every listed one fires (⌘K, ⌘/Ctrl+B shown as ⌘B, Esc, ?), the five formerly advertised dead accelerators (⌘/, N, R, ⌘E, ⌘D) are neither listed nor bound, and the AI-chat pair ⌘⇧O / ⌘⇧S is listed only on the page that handles it (objectui#11674)",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "browser",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -2527,7 +2527,7 @@
         ],
         "knownGaps": [
           "⌘⇧I (chat dock) is wired but the dock only exists when the AI surface is present — on a stock open boot the agent catalog is empty, the listener is not armed and ⌘⇧I is deliberately inert; that WHOLE cell (inert-when-gated AND armed-when-entitled) is scored by ai.console-ai-surface-gating — here record only that the accelerator's handler exists and is gated, never a second verdict",
-          "⌘⇧O / ⌘⇧S are advertised by the AI chat page itself, beside its handler (AiChatPage's useAdvertiseShortcut(NEW_CHAT_SHORTCUT / TOGGLE_CHATS_LIST_SHORTCUT) next to matchAiChatShortcut, objectui#11674), so the dialog lists them ONLY while that page is mounted. The off-page half is scorable on every stock boot: the dialog shows no AI-chat group and neither chord does anything. The on-page half needs the AI chat page, which is reachable only where the access-filtered agent catalog serves at least one agent, i.e. a deployment running the Cloud/Enterprise @objectstack/service-ai, or a console rebuilt with VITE_AI_BASE_URL pointing at such a server (ai.console-ai-surface-gating knownGaps). The open framework ships no agent server by design and CI has no such deployment, so that half scores blocked(environment) (QA run #21782, parked on #22017 row 9). objectui pins that the page's advertisements carry chords its matcher answers (KeyboardShortcutsDialog.wiredOnly-11674.test.tsx, the AI chat page describe) and the key-to-intent mapping (packages/app-shell/src/console/ai/__tests__/matchAiChatShortcut.test.ts); neither is a live on-page run"
+          "⌘⇧O / ⌘⇧S are advertised by the AI chat page itself, beside its handler (AiChatPage's useAdvertiseShortcut(NEW_CHAT_SHORTCUT / TOGGLE_CHATS_LIST_SHORTCUT) next to matchAiChatShortcut, objectui#11674), so the dialog lists them ONLY while that page is mounted. The off-page half is scorable on every stock boot: the dialog shows no AI-chat group and neither chord does anything. The on-page half needs the AI chat page, which is reachable only where the access-filtered agent catalog serves at least one agent, i.e. a deployment running the Cloud/Enterprise @objectstack/service-ai, or a console rebuilt with VITE_AI_BASE_URL pointing at such a server (ai.console-ai-surface-gating knownGaps). The open framework ships no agent server by design and CI has no such deployment, so that half scores blocked(environment) (QA run #21782, parked on #22017 row 9). Unit pins under ui/ cover the page's advertisements carrying chords its matcher answers (ui/packages/app-shell/src/chrome/KeyboardShortcutsDialog.wiredOnly-11674.test.tsx, the AI chat page describe) and the key-to-intent mapping (ui/packages/app-shell/src/console/ai/__tests__/matchAiChatShortcut.test.ts); neither is a live on-page run"
         ]
       },
       "steps": [
@@ -2556,13 +2556,13 @@
         {
           "clause": "the sidebar's displayed chord equals its binding: the dialog lists Toggle sidebar as `⌘ B` and lists no bare B; bare B does nothing and ⌘B / Ctrl+B toggle the sidebar. This was expected-fail K1a until objectui#11674 derived the dialog's rows from the mounted handlers",
           "oracle": "dom",
-          "verify": "the dialog's Navigation group reads `⌘ B` for Toggle sidebar and carries no bare-B row; a bare-B keypress leaves the sidebar state unchanged (read the sidebar's data-state), and ⌘B and Ctrl+B each flip it. objectui pins the same pair in packages/app-shell/src/chrome/KeyboardShortcutsDialog.wiredOnly-11674.test.tsx ('a listed row whose chord does nothing is caught: a bare B leaves the sidebar alone'), which this checkout carries as ui/packages/app-shell/src/chrome/KeyboardShortcutsDialog.wiredOnly-11674.test.tsx; run it at the run's framework SHA — the Console builds from this tree, so there is no separate objectui revision to name — to cite it beside the live read",
+          "verify": "the dialog's Navigation group reads `⌘ B` for Toggle sidebar and carries no bare-B row; a bare-B keypress leaves the sidebar state unchanged (read the sidebar's data-state), and ⌘B and Ctrl+B each flip it. ui/packages/app-shell/src/chrome/KeyboardShortcutsDialog.wiredOnly-11674.test.tsx pins the same pair ('a listed row whose chord does nothing is caught: a bare B leaves the sidebar alone'); run it at the run's framework SHA — the Console builds from this tree, so there is no separate objectui revision to name — to cite it beside the live read",
           "evidence": "the sidebar state trace + the dialog screenshot"
         },
         {
           "clause": "the advertised set equals the wired set: every row the dialog lists fires its own handler, and none of the five formerly advertised accelerators ⌘/ (focus search), N (create), R (refresh), ⌘E (edit), ⌘D (dark mode) is listed; each of the five still produces NO effect. Each probe is its own record: effect-absence proven against the specific once-advertised effect (focus, overlay, network refetch, edit surface, root theme class). This was expected-fail K1b until objectui#11674 made the dialog list only shortcuts whose handler is mounted",
           "oracle": "network",
-          "verify": "the step-3 inventory lists none of the five; per key, the once-advertised effect's own oracle stays silent (no focus change via document.activeElement, no ?form=new push, no list refetch on the wire, no edit route, documentElement class list unchanged); reproduce twice on fresh loads per RUNNER rule 2. objectui pins the listed half in KeyboardShortcutsDialog.wiredOnly-11674.test.tsx ('every row the console dialog lists fires its real handler, with ⌘ and with Ctrl')",
+          "verify": "the step-3 inventory lists none of the five; per key, the once-advertised effect's own oracle stays silent (no focus change via document.activeElement, no ?form=new push, no list refetch on the wire, no edit route, documentElement class list unchanged); reproduce twice on fresh loads per RUNNER rule 2. the listed half is pinned in ui/packages/app-shell/src/chrome/KeyboardShortcutsDialog.wiredOnly-11674.test.tsx ('every row the console dialog lists fires its real handler, with ⌘ and with Ctrl')",
           "evidence": "the five per-key traces/DOM reads"
         },
         {
@@ -2617,6 +2617,12 @@
           "date": "2026-10-26",
           "change": "acceptance[2].verify re-pointed off the retired pin: it told the runner to run the objectui pin from an objectui checkout at the .objectui-sha revision. There is no .objectui-sha any more: objectui lives in this repository under ui/ and the Console builds from the framework SHA (#26052). The pin is ui/packages/app-shell/src/chrome/KeyboardShortcutsDialog.wiredOnly-11674.test.tsx, run at the run's own SHA. Wording only: no clause changed. #26035 left this file's retired pin wording to the 18.2.0 ledger card #25845. Re-read at 9753d163",
           "ref": "#26035"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-27",
+          "change": "fixtures.knownGaps[1], acceptance[2].verify and acceptance[3].verify: the unit pins are named by their ui/ paths in this checkout instead of as objectui pins (#26626, maintainer-directed). No clause changed, no status changed",
+          "ref": "#26626"
         }
       ]
     },

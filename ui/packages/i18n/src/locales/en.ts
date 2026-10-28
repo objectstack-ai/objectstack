@@ -5211,8 +5211,8 @@ const en = {
   // places"), so it has no fixed catalogue to key against and is passed through
   // untranslated — the same division `appManagement` states above. The runner
   // borrows `common.{loading,cancel,close,submit}` for its chrome and
-  // `wizard.missingRequired` for the pre-submit check, which is the same
-  // sentence `plugin-form`'s WizardForm raises.
+  // `validation.required` for the pre-submit check, drawn under each missing
+  // field — the same message the record form draws there.
   flowRunner: {
     // Fallback dialog title, used only when the `screen` node declares none.
     title: 'Input',
