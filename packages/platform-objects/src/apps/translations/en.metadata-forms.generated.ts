@@ -1844,7 +1844,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "Open the action RESULT in a new tab: the renderer pre-opens the tab synchronously on click (popup-blocker-safe) and navigates it to the handler's redirectUrl. Distinct from `openIn`, which routes a static URL target."
       },
       newTabUrl: {
-        label: "New-tab URL",
+        label: "New-tab path",
         helpText: "Path on this backend, starting with / (e.g. /sso-open/{recordId}), with a {recordId} placeholder. Set together with `opensInNewTab` the renderer navigates the pre-opened tab to the backend origin + this path immediately and posts nothing — so the endpoint must enforce auth itself. An absolute URL is refused; for an external page use a url action with Open In set to new-tab."
       },
       locations: {

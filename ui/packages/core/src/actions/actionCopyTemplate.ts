@@ -84,12 +84,41 @@ export function hasTemplateHoles(text: string): boolean {
  * named `locale` (a param of that name) is a value a hole prints, not the
  * locale of the whole sentence (objectstack#26232). Omitted, the engine
  * formats in `en-US`.
+ *
+ * `currency` is the tenant default currency (`localization.currency`, the
+ * code `useLocalization()` holds), passed the same way and on its own reserved
+ * channel: a `{{ amount | currency }}` hole with no argument formats in it.
+ * Omitted, the engine refuses such a sentence and it is returned as written,
+ * like any sentence the engine refuses — never with a guessed currency.
+ *
+ * A refused sentence is shown as written, and the engine's refusal — which
+ * names the hole and the remedy (for a missing default: set
+ * `localization.currency`, or write `currency:CODE`) — goes to
+ * `console.warn`, once per distinct refusal, so it reaches whoever reads the
+ * console rather than nobody.
  */
 export function fillTemplateHoles(
   source: string,
   roots: Record<string, unknown>,
   locale?: string,
+  currency?: string,
 ): string {
-  const filled = templateEngine.evaluate<string>({ dialect: 'template', source }, { extra: roots, locale });
-  return filled.ok && typeof filled.value === 'string' ? filled.value : source;
+  const filled = templateEngine.evaluate<string>(
+    { dialect: 'template', source },
+    { extra: roots, locale, ...(currency ? { currency } : {}) },
+  );
+  if (filled.ok && typeof filled.value === 'string') return filled.value;
+  if (!filled.ok) warnRefusedCopy(source, filled.error.message);
+  return source;
+}
+
+/** Refusals already logged, so a dialog that re-renders does not repeat one. */
+const warnedRefusals = new Set<string>();
+
+function warnRefusedCopy(source: string, refusal: string): void {
+  const key = `${source}\u0000${refusal}`;
+  if (warnedRefusals.has(key)) return;
+  if (warnedRefusals.size >= 200) warnedRefusals.clear();
+  warnedRefusals.add(key);
+  console.warn(`[action copy] the sentence "${source}" is shown as written: ${refusal}`);
 }

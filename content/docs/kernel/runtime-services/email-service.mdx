@@ -31,4 +31,4 @@ services.email.sendTemplate(input: SendTemplateInput): Promise<SendEmailResult>
 - `TEMPLATE_NOT_FOUND`
 - `TEMPLATE_INACTIVE`
 - `MISSING_VARIABLES`
-- `TEMPLATE_INVALID`: the stored template has a hole the authoring rules refuse (a second formatter, or a `currency` argument that is not a literal ISO 4217 code). It is permanent: retrying fails until the template is re-published without that hole. `renderTemplate` raises it too.
+- `TEMPLATE_INVALID`: the stored template has a hole the authoring rules refuse (a second formatter, or a `currency` argument that is not a literal ISO 4217 code). It is permanent: retrying fails until the template is re-published without that hole. `renderTemplate` raises it too. It is also raised when the template has a `currency` hole with no argument (`{{ amount | currency }}`) and the call carries no `currency`: such a hole formats in the organization's default currency (`localization.currency`), which the notification channels pass for you and a direct caller passes as `currency`. Nothing is sent until the default is set or the hole names its code.
