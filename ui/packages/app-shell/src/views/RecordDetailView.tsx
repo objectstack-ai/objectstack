@@ -35,7 +35,10 @@ import { FlowRefusalNotice, type FlowRefusalState } from './FlowRefusalNotice.js
 import { RelatedRecordActionsBridge } from './RelatedRecordActionsBridge.js';
 import { RecordDrawerReturnLink, RecordPageDrawerHost } from './recordDrawerStack.js';
 import { withPageTabsUrlSync } from '../utils/pageTabsUrlSync.js';
-import { RECORD_DETAIL_TAB_PARAM, RECORD_TRAIL_PARAM, decodeRecordTrail, buildRecordTrailHref } from '../urlParams.js';
+import { RECORD_DETAIL_TAB_PARAM, RECORD_RELATED_ENLARGE_PARAM, RECORD_TRAIL_PARAM, decodeRecordTrail, buildRecordTrailHref } from '../urlParams.js';
+
+/** History-state flag: this view pushed the `?related=` entry, so closing pops it. */
+const RELATED_ENLARGE_PUSHED = '__relatedEnlargePushed';
 import { resolveActionParams } from '@object-ui/fields';
 import { createConsoleServerActionHandler } from '../utils/consoleServerAction.js';
 import { withNewTabUrlFastPath } from '../utils/newTabUrlFastPath.js';
@@ -701,6 +704,30 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     // renders the "← All <object>" back link — switching tabs must keep it.
     setTabSearchParams(sp, { replace: true, state: location.state });
   }, [setTabSearchParams, location.state]);
+  // ── The enlarged related list, `?related=object.field` (objectstack#27055,
+  // Target 9) ── One path to a related list's every record and column: a
+  // card's ⤢ (or its count) opens the list as a full-width table over the
+  // page body, addressed by the URL so it survives a reload and a shared link.
+  // Opening PUSHES an entry (the browser's Back returns to the columns);
+  // closing — Esc or ‹ — pops it when this view pushed it, and otherwise
+  // replaces the URL without the parameter.
+  const enlargedRelatedParam = tabSearchParams.get(RECORD_RELATED_ENLARGE_PARAM) ?? undefined;
+  const openEnlargedRelated = useCallback((id: string) => {
+    const sp = new URLSearchParams(window.location.search);
+    if (sp.get(RECORD_RELATED_ENLARGE_PARAM) === id) return;
+    sp.set(RECORD_RELATED_ENLARGE_PARAM, id);
+    const state = location.state && typeof location.state === 'object' ? location.state : {};
+    setTabSearchParams(sp, { state: { ...(state as object), [RELATED_ENLARGE_PUSHED]: true } });
+  }, [setTabSearchParams, location.state]);
+  const closeEnlargedRelated = useCallback(() => {
+    if ((location.state as Record<string, unknown> | null)?.[RELATED_ENLARGE_PUSHED]) {
+      navigate(-1);
+      return;
+    }
+    const sp = new URLSearchParams(window.location.search);
+    sp.delete(RECORD_RELATED_ENLARGE_PARAM);
+    setTabSearchParams(sp, { replace: true, state: location.state });
+  }, [setTabSearchParams, location.state, navigate]);
   // Inline "← back to parent" link shown above the record body. Prefers an
   // explicit history-state `from` (legacy, in-session only), then falls back
   // to the last ancestor in the `?from=` URL trail — which, unlike history
@@ -4205,6 +4232,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                     switches={columnSwitches}
                     relatedArrangement={relatedArrangement}
                     onRelatedArrangementChange={setRelatedArrangement}
+                    enlargedRelated={enlargedRelatedParam}
+                    onEnlargeRelated={openEnlargedRelated}
+                    onCloseEnlargedRelated={closeEnlargedRelated}
                     footer={
                       <RecordMetaFooter
                         data={readablePageRecord}

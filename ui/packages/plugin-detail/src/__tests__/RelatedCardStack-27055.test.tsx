@@ -20,7 +20,7 @@
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
-import { RelatedCardChromeContext } from '../relatedListCompact';
+import { RelatedCardChromeContext, RelatedListCompactContext } from '../relatedListCompact';
 
 vi.mock('@object-ui/react', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -29,9 +29,11 @@ vi.mock('@object-ui/react', async (importOriginal) => ({
 
 function StubNode({ schema }: { schema: any }) {
   const chrome = React.useContext(RelatedCardChromeContext);
+  const compact = React.useContext(RelatedListCompactContext);
   const p = schema?.properties ?? {};
   return (
-    <section data-node={schema?.type} data-related-card-id={chrome?.id}>
+    <section data-node={schema?.type} data-related-card-id={chrome?.id} data-compact={compact ? 'yes' : 'no'} data-limit={p.limit}>
+      {chrome?.onEnlarge && <button onClick={chrome.onEnlarge}>{`enlarge ${p.objectName}`}</button>}
       {p.objectName ?? schema?.type}
       {chrome?.onMoveUp && <button onClick={chrome.onMoveUp}>{`up ${p.objectName}`}</button>}
       {chrome?.onMoveDown && <button onClick={chrome.onMoveDown}>{`down ${p.objectName}`}</button>}
@@ -141,11 +143,54 @@ describe('RelatedCardStack — the reader arranges the related cards (objectstac
     const dragged = editRelatedArrangement(DEFAULT.slice(0, 2), undefined, { kind: 'move', id: 'note.parent_id', to: 0 }, Date.now());
     const onWrite = vi.fn();
     const { container } = render(<Host initial={dragged} onWrite={onWrite} />);
-    expect(cardOrder(container)).toEqual(['note.parent_id', 'task.lead_id', 'call.lead_id']);
+    // Rule 3: after its nearest default predecessor the reader's order holds (note).
+    expect(cardOrder(container)).toEqual(['note.parent_id', 'call.lead_id', 'task.lead_id']);
     expect(container.querySelector('[data-related-card-id="call.lead_id"] [data-fresh]')).not.toBeNull();
     await waitFor(() => expect(onWrite).toHaveBeenCalledTimes(1));
     expect(Object.keys(onWrite.mock.calls[0][0].seen)).toEqual(['call.lead_id']);
     // Still badged after the stamp (48 h from it).
     expect(container.querySelector('[data-related-card-id="call.lead_id"] [data-fresh]')).not.toBeNull();
+  });
+});
+
+describe('the enlarged related list — ⤢ and ?related= (objectstack#27055, Target 9)', () => {
+  it('⤢ asks the host to enlarge that relationship', () => {
+    const onEnlarge = vi.fn();
+    render(<RecordPageColumns tier="three-column" columns={columnsOf()} onEnlargeRelated={onEnlarge} />);
+    fireEvent.click(screen.getByText('enlarge note'));
+    expect(onEnlarge).toHaveBeenCalledWith('note.parent_id');
+  });
+
+  it('draws the full list over the page body: the header stays, the columns step aside', () => {
+    const { container } = render(
+      <RecordPageColumns tier="three-column" columns={columnsOf()} enlargedRelated="note.parent_id" onCloseEnlargedRelated={vi.fn()} />,
+    );
+    const enlarged = container.querySelector('[data-related-enlarged="note.parent_id"]')!;
+    expect(enlarged).toBeTruthy();
+    expect(container.querySelector('[data-record-columns]')).toBeNull();
+    // The FULL face, not the compact card — and paged.
+    const list = enlarged.querySelector('[data-node="record:related_list"]')!;
+    expect(list.getAttribute('data-compact')).toBe('no');
+    expect(list.getAttribute('data-limit')).toBe('25');
+    // The header nodes are still drawn above it.
+    expect(container.querySelector('[data-node="page:header"]')).not.toBeNull();
+  });
+
+  it('‹ and Esc return to the columns', () => {
+    const onClose = vi.fn();
+    const { container } = render(
+      <RecordPageColumns tier="three-column" columns={columnsOf()} enlargedRelated="note.parent_id" onCloseEnlargedRelated={onClose} />,
+    );
+    fireEvent.click(container.querySelector('[data-related-enlarged-back]')!);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(2);
+  });
+
+  it('an id naming no related list draws the columns', () => {
+    const { container } = render(
+      <RecordPageColumns tier="three-column" columns={columnsOf()} enlargedRelated="ghost.parent_id" />,
+    );
+    expect(container.querySelector('[data-related-enlarged]')).toBeNull();
+    expect(container.querySelector('[data-record-columns]')).not.toBeNull();
   });
 });

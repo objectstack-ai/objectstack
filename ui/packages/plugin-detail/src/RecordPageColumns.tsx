@@ -9,7 +9,7 @@
 import * as React from 'react';
 import { Badge, Button, cn } from '@object-ui/components';
 import { SchemaRenderer, toRenderableSchema } from '@object-ui/react';
-import { PanelRightClose, PanelRightOpen } from 'lucide-react';
+import { ChevronLeft, PanelRightClose, PanelRightOpen } from 'lucide-react';
 import {
   recordPageArrangementFor,
   type DefaultPageColumns,
@@ -19,7 +19,7 @@ import { useDetailTranslation } from './useDetailTranslation';
 import { RelatedListCompactContext } from './relatedListCompact';
 import { DefaultRecordPageContext } from './defaultRecordPage';
 import { RelatedCardStack } from './RelatedCardStack';
-import type { RelatedArrangement, RelatedCardId } from './synth/relatedArrangement';
+import { relatedCardId, type RelatedArrangement, type RelatedCardId } from './synth/relatedArrangement';
 
 export interface RecordPageColumnsProps {
   /** The column tier to draw; the tabbed tier is the page itself, drawn by its host. */
@@ -48,8 +48,74 @@ export interface RecordPageColumnsProps {
   onRelatedArrangementChange?: (next: RelatedArrangement) => void;
   /** Enlarge a related card's list in place (Target 9, the host's `?related=`). */
   onEnlargeRelated?: (id: RelatedCardId) => void;
+  /**
+   * The enlarged related list (`object.field`, the host's `?related=`): drawn
+   * as a full-width table over the page body — the header stays, the columns
+   * step aside — until Esc or ‹ (`onCloseEnlargedRelated`). An id naming no
+   * related list of the page draws the columns.
+   */
+  enlargedRelated?: RelatedCardId;
+  onCloseEnlargedRelated?: () => void;
   className?: string;
 }
+
+/** Rows per page of an enlarged related list whose block names no `limit`. */
+const ENLARGED_PAGE_SIZE = 25;
+
+/** The relationship id of a related-list node, or `null`. */
+function relatedNodeId(node: any): RelatedCardId | null {
+  const p = node && typeof node === 'object' ? { ...node, ...(node.properties ?? {}) } : null;
+  if (!p || p.type !== 'record:related_list') return null;
+  if (typeof p.objectName !== 'string' || typeof p.relationshipField !== 'string') return null;
+  return relatedCardId(p.objectName, p.relationshipField);
+}
+
+/**
+ * The enlarged related list (objectstack#27055, Target 9 — the ONE path to a
+ * related list's every record): the full `RelatedList` face the old Related
+ * tab drew — every column, paging, sort, inline edit — at the page's full
+ * width, under the record header. ‹ and Esc return to the columns. A dialog
+ * open over the page keeps its own Esc.
+ */
+const EnlargedRelatedList: React.FC<{ node: any; onClose?: () => void }> = ({ node, onClose }) => {
+  const { t } = useDetailTranslation();
+  const p = { ...node, ...(node.properties ?? {}) };
+  const title = typeof p.title === 'string' && p.title ? p.title : p.objectName;
+  React.useEffect(() => {
+    if (!onClose) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      if (document.querySelector('[role="dialog"], [role="alertdialog"], [role="menu"]')) return;
+      onClose();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
+  const authoredLimit = typeof p.limit === 'number' && p.limit > 0;
+  const enlarged = authoredLimit
+    ? node
+    : { ...node, properties: { ...(node.properties ?? {}), limit: ENLARGED_PAGE_SIZE } };
+  return (
+    <section className="flex min-w-0 flex-col gap-3" data-related-enlarged={relatedNodeId(node) ?? ''} aria-label={title}>
+      <div className="flex items-center gap-2">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-8 gap-1 px-2"
+          onClick={onClose}
+          aria-keyshortcuts="Escape"
+          data-related-enlarged-back=""
+        >
+          <ChevronLeft className="h-4 w-4" aria-hidden />
+          <span>{t('detail.relatedEnlargedBack', { defaultValue: 'Back' })}</span>
+        </Button>
+        <h2 className="truncate text-sm font-semibold">{title}</h2>
+      </div>
+      <SchemaRenderer schema={toRenderableSchema(enlarged)} />
+    </section>
+  );
+};
 
 const ALL_COLUMNS_ON: RecordPageColumnSwitches = { timeline: true, related: true };
 
@@ -117,6 +183,8 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
   relatedArrangement,
   onRelatedArrangementChange,
   onEnlargeRelated,
+  enlargedRelated,
+  onCloseEnlargedRelated,
   className,
 }) => {
   const { t } = useDetailTranslation();
@@ -124,6 +192,9 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
   const toggleRef = React.useRef<HTMLButtonElement>(null);
   const [railOpen, setRailOpen] = React.useState(false);
   const arrangement = recordPageArrangementFor(tier, switches);
+  const enlargedNode = enlargedRelated
+    ? columns.related.find((node) => relatedNodeId(node) === enlargedRelated)
+    : undefined;
   const hasTimeline = columns.timeline.length > 0;
   const hasRelatedLists = columns.related.length > 0;
   // objectstack#27052 — a timeline the reader switched off is not a column:
@@ -260,7 +331,7 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
       >
         <div className="flex flex-col gap-4">
           {drawNodes(columns.header)}
-          {body}
+          {enlargedNode ? <EnlargedRelatedList node={enlargedNode} onClose={onCloseEnlargedRelated} /> : body}
         </div>
       </div>
     </DefaultRecordPageContext.Provider>

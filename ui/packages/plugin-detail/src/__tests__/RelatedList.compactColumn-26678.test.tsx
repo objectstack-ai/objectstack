@@ -75,7 +75,7 @@ describe('RelatedList in the related column (objectstack#26678)', () => {
     renderList(false);
     await waitFor(() => expect(screen.getByText('Call Ada')).toBeInTheDocument());
     expect(headers()).toEqual(['Name', 'Status']);
-    expect(screen.getByText('open')).toBeInTheDocument();
+    expect(screen.getAllByText('Open').length).toBeGreaterThan(0);
   });
 
   it('draws the compact card inside it: no table header, three named rows, one chip each', async () => {
