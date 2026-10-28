@@ -158,8 +158,8 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 | 标签 | 包家族 |
 |:--|:--|
 | `domain:server` | 服务端:引擎 + 服务插件 + CLI/运行时;`objectql core formula metadata* platform-objects drivers/* services/* connectors/* triggers/* plugin-* embedder-openai knowledge-* cli runtime verify types rest mcp observability client* cloud-connection create-objectstack adapters/*`;详见 `references/lanes/server.md` |
-| `domain:devx` | `sdui-parser`、`packages/qa`、`content/docs`、`apps/docs`、`docs/qa`、`.githooks`、`docker/README.md`、`examples/**` 仅测试基建面;`packages/lint`、`scripts`(门禁类)、`.github/workflows`(接线)三者按锚定规则归 `domain:spec`,门禁按 SUBJECT:governed 面归 skills,代码/文档质量归本域 |
-| `domain:skills` | governed 面全量(含本文件;统一定义见「governed 面统一定义」行);非门禁的 `scripts/pm/**`(PM 循环工具);governed 面的治理执行文件:`.github/CODEOWNERS` + SUBJECT 是 governed 面本身的门禁/审计(现为 `scripts/pm/check-governed-merges.mjs`) |
+| `domain:devx` | `sdui-parser`、`packages/qa`、`content/docs`、`apps/docs`、`docs/qa`、`.githooks`、`.github/workflows/**`(接线、CI 性能)、`docker/README.md`、`examples/**` 仅测试基建面;`packages/lint`、`scripts`(门禁类)按锚定规则归 spec,门禁按 SUBJECT:governed 面归 skills,代码/文档质量归本域 |
+| `domain:skills` | 规则文本:`AGENTS.md`+`CLAUDE.md`+`.claude/**`(含本文件)+`skills/**`+`docs/adr/**`+`docs/NORTH-STAR.md`;非门禁的 `scripts/pm/**`(PM 循环工具);governed 面的治理执行文件:`.github/CODEOWNERS` + SUBJECT 是 governed 面本身的门禁/审计(现为 `scripts/pm/check-governed-merges.mjs`) |
 | `domain:spec` | `packages/spec` 整包:schema 形状、`contracts/**`、退役行为半边、strictness 台账;describe/JSDoc/墓碑散文/错误 guidance 与 alias 表;`packages/spec/scripts/**`、`packages/spec/docs/**` 及按锚定规则的例外归本域的工具链(域边界枚举与席内分派见 `references/lanes/spec.md`) |
 | `domain:ui` | `ui/**` 全部代码:`@object-ui/*` 库与 `ui/apps/*`、`ui/packages/types` 与 schema 语料、`ui/scripts` 与门禁工具、文档随所记录的面走;`packages/console`(dist 由 `pnpm console:build` 生成 ⛔ 不手改);协议恒归 `domain:spec`,受管面归 `domain:skills`;详见 `references/lanes/ui.md` |
 | `domain:cloud` | 凡涉 cloud 即归 cloud PM(非按落点):停放(加 `status:parked`,sweep 免扫),本仓不派 |
@@ -180,7 +180,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 
 - **ACCEPT 之后的路径分叉**:翻 ready / 挂 auto-merge / 入队前先取一次 PR 的路径面。
 - 路径面用 `get_files` 取,⛔ 不看报告自述;动手之前先分,不是事后对照。
-- governed 面统一定义:`docs/adr/**`+`.claude/**`(全量)+`skills/**`+`docs/NORTH-STAR.md`+`.github/workflows/**`。
+- governed 面(定 Tier,非车道):`docs/adr/**`+`.claude/**`+`skills/**`+`docs/NORTH-STAR.md`+`.github/workflows/**`。
 - governed 面同含 `AGENTS.md`+`CLAUDE.md`;`GOVERNED_REPOS` 同治理、行可限仓,执行席恒随落地仓车道。
 - 另含 `ui/docs/adr/**`+`ui/.claude/**`+`ui/skills/**`+`ui/AGENTS.md`+`ui/CLAUDE.md`+`ui/.github/workflows/**`。
 - 路径面命中 Tier H ⇒ ACCEPT 换终局四件套,混合 diff ⛔ 不按比例判;要拆让 dev 单独开 PR。
