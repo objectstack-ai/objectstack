@@ -54,8 +54,7 @@ describe('PanelToggles (objectstack#27052)', () => {
     expect(related.getAttribute('aria-pressed')).toBe('false');
     expect(timeline.getAttribute('aria-keyshortcuts')).toBe('Meta+Shift+T');
     // The pressed state is tinted.
-    expect(timeline.className).toContain('data-[state=on]:text-primary');
-    expect(timeline.getAttribute('data-state')).toBe('on');
+    expect(timeline.className).toContain('aria-pressed:text-primary');
   });
 
   it('a click flips its own panel and no other', () => {

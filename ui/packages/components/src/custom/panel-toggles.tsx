@@ -64,7 +64,9 @@ export function PanelToggles({ items, label, className }: PanelTogglesProps) {
                   aria-keyshortcuts={item.ariaKeyShortcuts}
                   className={cn(
                     'h-8 min-w-8 px-2 text-muted-foreground',
-                    'data-[state=on]:bg-primary/10 data-[state=on]:text-primary',
+                    // `aria-pressed`, not Radix's `data-state`: the tooltip
+                    // trigger writes its own `data-state` onto this button.
+                    'aria-pressed:bg-primary/10 aria-pressed:text-primary hover:aria-pressed:bg-primary/15',
                   )}
                   data-panel-toggle={item.id}
                 >

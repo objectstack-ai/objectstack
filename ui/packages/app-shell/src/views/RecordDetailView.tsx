@@ -3836,7 +3836,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   if (pageColumns && pageColumns.timeline.length > 0) {
     panelToggleItems.push({
       id: 'timeline',
-      label: t('detail.timeline'),
+      label: t('detail.timeline', { defaultValue: 'Timeline' }),
       icon: Rows3,
       pressed: columnSwitches.timeline,
       onPressedChange: (pressed) => setTimelineSwitch(pressed ? 'on' : 'off'),
@@ -3847,7 +3847,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   if (pageColumns && pageColumns.related.length > 0) {
     panelToggleItems.push({
       id: 'related',
-      label: t('detail.related'),
+      label: t('detail.related', { defaultValue: 'Related' }),
       icon: LayoutGrid,
       pressed: columnSwitches.related,
       onPressedChange: (pressed) => setRelatedSwitch(pressed ? 'on' : 'off'),
@@ -4035,7 +4035,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   {panelToggleItems.length > 0 && (
                     <PanelToggles
                       className="ml-auto"
-                      label={t('detail.panelToggles')}
+                      label={t('detail.panelToggles', { defaultValue: 'Panels' })}
                       items={panelToggleItems}
                     />
                   )}
