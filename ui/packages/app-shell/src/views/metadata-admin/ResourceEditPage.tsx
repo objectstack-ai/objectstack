@@ -125,6 +125,7 @@ import {
 // objectui#11773 — the draft save's optimistic-concurrency guard and its dialog.
 import { readDraftForSave, useDraftSaveGuard } from './DraftConflictDialog.js';
 import {
+  BUNDLE_MEMBER_PARAM,
   getMetadataResource,
   resolveResourceConfig,
   listAnchorsFor,
@@ -498,6 +499,13 @@ function MetadataResourceEditPageImpl({
   // package's item. NOT the active Studio app's package — Studio edits items
   // across all installed packages.
   const ownerPackageId = searchParams.get('package') ?? undefined;
+  // objectstack#26649 — the bundle member this page edits, carried on the edit
+  // URL as `?member=` by the list's row link (`bundleMemberField`): every
+  // by-name read and write below addresses it, so two locales of one template
+  // open, publish, reset and discard as two items. Absent (never empty) for
+  // the canonical member and for a type with no members.
+  const bundleMember = searchParams.get(BUNDLE_MEMBER_PARAM) || undefined;
+  const memberScope = bundleMember ? { member: bundleMember } : {};
   const client = useMetadataClient();
   const { entries, loading: typesLoading } = useMetadataTypes(client);
   const entry: RichMetadataTypeEntry | undefined = entries.find((t) => t.type === type);
@@ -1167,7 +1175,10 @@ function MetadataResourceEditPageImpl({
     setLoadFailed(false);
     (async () => {
       try {
-        const scope = ownerPackageId ? { packageId: ownerPackageId } : {};
+        const scope = {
+          ...(ownerPackageId ? { packageId: ownerPackageId } : {}),
+          ...(bundleMember ? { member: bundleMember } : {}),
+        };
         // objectui#11773 — the draft is read at the address `doSave` writes
         // (`readActivePackageBinding`, the folded `?package=`), so the version
         // it serves is the one that save compares against.
@@ -1177,7 +1188,7 @@ function MetadataResourceEditPageImpl({
           // Draft reads are best-effort — a 404/error must not block
           // the page; readers without overlay-write permission still
           // see the published item.
-          readDraftForSave<any>(client, type, name, draftPackage),
+          readDraftForSave<any>(client, type, name, draftPackage, bundleMember),
         ]);
         if (cancelled) return;
         const draftResp = draftRead.answer;
@@ -1250,7 +1261,7 @@ function MetadataResourceEditPageImpl({
     return () => {
       cancelled = true;
     };
-  }, [client, type, name, ownerPackageId, createMode, reloadKey, locale, recordDraftRead]);
+  }, [client, type, name, ownerPackageId, bundleMember, createMode, reloadKey, locale, recordDraftRead]);
 
   // Lazy-load references the first time the References sheet opens.
   //
@@ -1787,7 +1798,7 @@ function MetadataResourceEditPageImpl({
       // Refresh layered + draft state after save — scope to the same package
       // as the initial load (ADR-0048) so a same-name collision re-reads this
       // package's own row, not another's.
-      const refreshScope = ownerPackageId ? { packageId: ownerPackageId } : {};
+      const refreshScope = { ...(ownerPackageId ? { packageId: ownerPackageId } : {}), ...memberScope };
       // objectui#11799 — this save went into a draft, which makes no layer. An
       // item this page loaded with no layer still has none, and an item it
       // just created has never been published (the page then navigates to the
@@ -1982,12 +1993,13 @@ function MetadataResourceEditPageImpl({
       const activePackage = readActivePackageBinding();
       await client.reset(type, name, {
         ...(activePackage ? { packageId: activePackage } : {}),
+        ...memberScope,
       });
       // objectui#11773 — the buffer below is re-read from the layers, with no
       // draft read behind it, so nothing pins its next save.
       forgetDraftVersion();
       if (resetSemantic) {
-        const lay = await client.layered<any>(type, name);
+        const lay = await client.layered<any>(type, name, memberScope);
         setLayered(lay);
         const fresh = (lay.effective ?? lay.code ?? {}) as Record<string, unknown>;
         setDraft(fresh);
@@ -2025,12 +2037,13 @@ function MetadataResourceEditPageImpl({
       const activePackage = readActivePackageBinding();
       await client.publish<any>(type, name, {
         ...(activePackage ? { packageId: activePackage } : {}),
+        ...memberScope,
       });
       // objectui#11773 — the draft is re-read at the address the next save
       // writes, so its answer pins that save (see the load effect).
       const [lay, draftRead] = await Promise.all([
-        client.layered<any>(type, name),
-        readDraftForSave<any>(client, type, name, activePackage),
+        client.layered<any>(type, name, memberScope),
+        readDraftForSave<any>(client, type, name, activePackage, bundleMember),
       ]);
       const draftResp = draftRead.answer;
       setLayered(lay);
@@ -2087,13 +2100,14 @@ function MetadataResourceEditPageImpl({
       await client.reset(type, name, {
         state: 'draft',
         ...(activePackage ? { packageId: activePackage } : {}),
+        ...memberScope,
       });
       // objectui#11773 — the discard dropped the draft the held version named,
       // and no draft read follows it: nothing pins the next save.
       forgetDraftVersion();
       // objectui#11799 — a discard makes no layer: an item this page loaded
       // with no layer still has none, and `/layers` would answer 404.
-      const lay = layered && holdsNoLayer(layered) ? layered : await client.layered<any>(type, name);
+      const lay = layered && holdsNoLayer(layered) ? layered : await client.layered<any>(type, name, memberScope);
       setLayered(lay);
       const fresh = (lay.effective ?? lay.code ?? {}) as Record<string, unknown>;
       setDraft(fresh);
@@ -3081,8 +3095,17 @@ function MetadataResourceEditPageImpl({
                           onSelectionChange={setSelection}
                           locale={locale}
                           diagnostics={previewDiagnostics}
-                          onPatch={(patch) =>
-                            handleDraftChange((d) => ({ ...(d as Record<string, unknown>), ...patch }))
+                          // objectstack#26888 — an item this page cannot write (a
+                          // locked package item, a caller without the capability)
+                          // gets no `onPatch`: per the preview contract the canvas
+                          // is then read-only, as Studio does for a read-only
+                          // package (objectui#11136). A live canvas here took
+                          // edits the page offers no Save for, and dropped them.
+                          onPatch={
+                            readOnly
+                              ? undefined
+                              : (patch) =>
+                                  handleDraftChange((d) => ({ ...(d as Record<string, unknown>), ...patch }))
                           }
                         />
                       </div>

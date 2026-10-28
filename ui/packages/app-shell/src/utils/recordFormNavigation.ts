@@ -10,6 +10,7 @@
 
 import { FormViewSchema, type FormView } from '@objectstack/spec/ui';
 import type { RecordFlowSurface } from '@objectstack/spec/data';
+import { pickLocalized } from '@object-ui/i18n';
 
 /**
  * Subset of the object metadata shape consumed by the resolver. Mirrors the
@@ -157,6 +158,16 @@ export interface FormViewDefinition {
   subforms?: any[];
   /** The modal's size bucket, as the spec's `FormView.modalSize` declares it. */
   modalSize?: FormView['modalSize'];
+  /** Initially active tab of a `tabbed` form view (a section name). */
+  defaultTab?: FormView['defaultTab'];
+  /** Tab strip position of a `tabbed` form view. */
+  tabPosition?: FormView['tabPosition'];
+  /** Field layout direction — see {@link resolveFormViewChrome}. */
+  layout?: FormView['layout'];
+  /** Per-button visibility and label — see {@link resolveFormViewChrome}. */
+  buttons?: FormView['buttons'];
+  /** Create-mode initial values — see {@link resolveFormViewChrome}. */
+  defaults?: FormView['defaults'];
 }
 
 /**
@@ -227,6 +238,13 @@ export interface FormViewModalLayout {
    * the form view authors none, so the modal keeps its own default size.
    */
   modalSize?: FormView['modalSize'];
+  /**
+   * A `tabbed` form view's `defaultTab` and `tabPosition`
+   * (objectstack-ai/objectstack#26843), copied only beside
+   * `contentLayout: 'tabbed'` — the one layout that draws a tab strip.
+   */
+  defaultTab?: string;
+  tabPosition?: FormView['tabPosition'];
 }
 
 /**
@@ -271,7 +289,21 @@ export function resolveFormViewLayout(
     layout.sections = formView.sections;
     // Only 'tabbed' maps to a modal content layout; 'wizard'/'split' have no
     // modal equivalent and degrade to a stacked section list.
-    if (formView.type === 'tabbed') layout.contentLayout = 'tabbed';
+    if (formView.type === 'tabbed') {
+      layout.contentLayout = 'tabbed';
+      // objectstack-ai/objectstack#26843: the tab the form opens on and where
+      // its strip sits, which the modal dropped. A position is copied only when
+      // the spec's enum allows it, read from `FormViewSchema` as `modalSize` is.
+      if (typeof formView.defaultTab === 'string' && formView.defaultTab) {
+        layout.defaultTab = formView.defaultTab;
+      }
+      if (
+        formView.tabPosition !== undefined
+        && FormViewSchema.shape.tabPosition.safeParse(formView.tabPosition).success
+      ) {
+        layout.tabPosition = formView.tabPosition;
+      }
+    }
   }
 
   if (Array.isArray(formView.subforms) && formView.subforms.length > 0) {
@@ -312,6 +344,106 @@ export function resolveRecordFormModalLayout(
   const { modalSize: authoredSize, ...layout } = resolveFormViewLayout(objectDef, flow);
   const modalSize = derivedSize === 'full' ? 'full' : authoredSize;
   return modalSize ? { ...layout, modalSize } : layout;
+}
+
+/**
+ * The form chrome a console form host draws from the form view it opens
+ * (objectstack-ai/objectstack#26843), ready to spread into an `<ObjectForm>` or
+ * `<ModalForm>` schema: the action buttons' visibility and labels, the field
+ * layout, and a create's opening values.
+ */
+export interface FormViewChrome {
+  showSubmit: boolean;
+  submitText: string;
+  showCancel: boolean;
+  cancelText: string;
+  layout: 'vertical' | 'horizontal';
+  /** Omitted when the flow opens with no values (an edit, or a bare create). */
+  initialValues?: Record<string, unknown>;
+}
+
+/**
+ * The opening values of a create that carries both a form view's `defaults`
+ * and the host's own values, per `defaults` payload. The forms re-seed whenever
+ * `initialValues` is a new object, so a merge rebuilt per render would wipe
+ * what the user typed. The cache keys on the metadata payload and on the
+ * host's values by CONTENT, never on a memoised identity (ui/AGENTS.md #10).
+ */
+const mergedCreateValues = new WeakMap<object, { key: string; values: Record<string, unknown> }>();
+
+function createSeed(
+  defaults: Record<string, unknown> | undefined,
+  createValues: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (!defaults || Object.keys(defaults).length === 0) return createValues;
+  if (!createValues) return defaults;
+  let key: string;
+  try {
+    key = JSON.stringify(createValues);
+  } catch {
+    return { ...defaults, ...createValues };
+  }
+  const hit = mergedCreateValues.get(defaults);
+  if (hit && hit.key === key) return hit.values;
+  const values = { ...defaults, ...createValues };
+  mergedCreateValues.set(defaults, { key, values });
+  return values;
+}
+
+/**
+ * Resolve the {@link FormViewChrome} of the form view a record flow opens.
+ *
+ * Every console form host used to hard-set these props — `showSubmit: true`,
+ * its own submit label, `layout: 'vertical'` — over the keys the form view
+ * declares, so an authored `buttons`, `layout` or `defaults` saved, published
+ * and never rendered. No flat `showSubmit` / `submitText` key is an author's
+ * (the spec's form view refuses them), so the host's values are console
+ * defaults and the author's keys win:
+ *
+ *   - `buttons.submit` / `buttons.cancel`: an authored `show` over the host's
+ *     `true`; an authored `label`, an `I18nLabel` resolved against `language`,
+ *     over the host's label. `buttons.reset` is not read: no host draws a
+ *     reset button.
+ *   - `layout`: the authored value when the spec's enum allows it, else
+ *     `'vertical'`, the renderer default.
+ *   - `defaults`, on a create only: the opening values under the ones the host
+ *     already carries (`createValues`: a URL prefill, a parent pre-link, a
+ *     seeded day), which win per field.
+ */
+export function resolveFormViewChrome(
+  formView: FormViewDefinition | null | undefined,
+  opts: {
+    flow: RecordFormFlow;
+    /** The UI language an authored `I18nLabel` resolves against. */
+    language: string;
+    /** The host's submit label when the form view authors none. */
+    submitText: string;
+    /** The host's cancel label when the form view authors none. */
+    cancelText: string;
+    /** The values the host opens a create with, if any. */
+    createValues?: Record<string, unknown>;
+  },
+): FormViewChrome {
+  const { submit, cancel } = formView?.buttons ?? {};
+  const layout = formView?.layout !== undefined
+    && FormViewSchema.shape.layout.safeParse(formView.layout).success
+    ? formView.layout
+    : undefined;
+  const chrome: FormViewChrome = {
+    showSubmit: submit?.show ?? true,
+    submitText: pickLocalized(submit?.label, opts.language) || opts.submitText,
+    showCancel: cancel?.show ?? true,
+    cancelText: pickLocalized(cancel?.label, opts.language) || opts.cancelText,
+    layout: layout ?? 'vertical',
+  };
+  const defaults = formView?.defaults && typeof formView.defaults === 'object' && !Array.isArray(formView.defaults)
+    ? formView.defaults
+    : undefined;
+  const initialValues = opts.flow === 'create'
+    ? createSeed(defaults, opts.createValues)
+    : opts.createValues;
+  if (initialValues) chrome.initialValues = initialValues;
+  return chrome;
 }
 
 /**
