@@ -6,6 +6,7 @@ import { SysMetadataActivation } from './system/sys-metadata-activation.object.j
 import { SysMigration } from './system/sys-migration.object.js';
 import { SysMigrationJournal } from './system/sys-migration-journal.object.js';
 import { SysSecret } from './system/sys-secret.object.js';
+import { SysExchangeRate } from './system/sys-exchange-rate.object.js';
 import { attestFreshDatastore } from './system/migration-flag.js';
 import type {
   II18nService,
@@ -78,6 +79,13 @@ import { SEED_SETTLEMENT_SERVICE } from '@objectstack/spec/contracts';
  *    ⚠️ It rides its OWN manifest, not the one above, and that is a
  *    smooth-upgrade requirement rather than tidiness — see
  *    {@link ACTIVATION_LEDGER_MANIFEST}.
+ *  - **`sys_exchange_rate`** — the organization's dated exchange rates
+ *    (multi-currency M1-1, epic #8345, ruling 6465431966). Its one reader is
+ *    the ObjectQL engine's write-time home-currency projection — present in
+ *    every composition that can write a record — so it registers with the
+ *    engine-facing infrastructure above, not with an optional service. Rides
+ *    the first manifest (the project database), like every per-organization
+ *    table here.
  *  - **Fresh-datastore attestation** (#3438, ADR-0104 2026-07-30) —
  *    travels with the ledger registration: a store this boot created from
  *    empty is attested once that boot's own data has settled
@@ -187,7 +195,7 @@ export class PlatformObjectsPlugin {
         version: this.version,
         type: 'plugin',
         scope: 'system',
-        objects: [SysMigration, SysMigrationJournal, SysSecret],
+        objects: [SysMigration, SysMigrationJournal, SysSecret, SysExchangeRate],
       });
       ctx?.getService?.('manifest')?.register?.({
         ...ACTIVATION_LEDGER_MANIFEST,

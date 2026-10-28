@@ -20,6 +20,13 @@ export { SysSettingAudit } from './sys-setting-audit.object.js';
 export { SysPlatformSettingAudit } from './sys-platform-setting-audit.object.js';
 export { SysMigration } from './sys-migration.object.js';
 export { SysMigrationJournal } from './sys-migration-journal.object.js';
+// Multi-currency M1-1 (epic #8345): the dated rate table the write-time
+// home-currency projection reads.
+export {
+  SysExchangeRate,
+  EXCHANGE_RATE_DIRECTION,
+  EXCHANGE_RATE_SCALE,
+} from './sys-exchange-rate.object.js';
 export {
   readDataMigrationFlag,
   isDataMigrationVerified,
