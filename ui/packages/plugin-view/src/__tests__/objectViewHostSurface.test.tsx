@@ -29,6 +29,8 @@
  * `ObjectViewSchema`; 27 are not. objectui#13118 dropped one of the four,
  * `filterableFields`, with the spec's retirement of the key (objectstack#24640,
  * ruling C), so the branch reads 30 today: three declared, the 27 unchanged.
+ * objectstack#25918 dropped the cast from the three declared reads, so only
+ * the 27 are still read through `(schema as any).K`.
  *
  * The maintainer ruled on 2026-08-18 (verbatim 「同意」) that the 27 are HOST
  * surface, exempted with reasons — not authored surface — on a MEASURED
@@ -129,6 +131,18 @@ const castReadsIn = (slice: string): string[] =>
     ),
   ].sort();
 
+/**
+ * Every UNCAST read of a key off `schema` in a slice of CODE, distinct, sorted.
+ * The lookbehind keeps `objectSchema.K` and `x.schema.K` out; the cast form
+ * never matches, because `schema` is followed by ` as any)` there, not `.`.
+ */
+const uncastReadsIn = (slice: string): string[] =>
+  [
+    ...new Set(
+      [...stripComments(slice).matchAll(/(?<![\w$.])schema\.([A-Za-z_$][\w$]*)/g)].map((m) => m[1]),
+    ),
+  ].sort();
+
 const regionSlice = (): string => {
   const start = SOURCE.indexOf(REGION_OPEN);
   const end = SOURCE.indexOf(REGION_CLOSE);
@@ -153,8 +167,14 @@ describe('the forwarded key set equals the documented exemption (objectui#5097)'
   const exempt: string[] = [...OBJECT_VIEW_HOST_COMPOSITION_KEYS].sort();
   const declared: string[] = [...OBJECT_VIEW_DECLARED_FORWARDED_KEYS].sort();
 
-  it('the fence reads exactly the 27 exempt keys plus the 3 declared ones', () => {
-    expect(castReadsIn(regionSlice())).toEqual([...exempt, ...declared].sort());
+  it('the fence reads exactly the 27 exempt keys through the cast, and the 3 declared ones without it', () => {
+    // The three declared members are read as `schema.K` since objectstack#25918:
+    // a cast on a key the type already declares hides nothing and is retired.
+    // ⛔ That is the ONLY kind of cast this card removed; the 27 stay cast,
+    // because they are undeclared by ruling.
+    expect(castReadsIn(regionSlice())).toEqual(exempt);
+    const uncast = uncastReadsIn(regionSlice());
+    for (const k of declared) expect(uncast, `\`${k}\` is no longer read off the node uncast`).toContain(k);
   });
 
   it('subtracting the declared members leaves exactly the exempt list — by name', () => {
@@ -342,7 +362,7 @@ describe('the fence reads the named view first for every protocol member it rela
       expect(cast, `\`${k}\` is now read off the node through a cast`).not.toContain(k);
       expect(namedViewReadsIn(regionSlice())).toContain(k);
     }
-    expect(cast).toHaveLength(OBJECT_VIEW_HOST_COMPOSITION_KEYS.length + OBJECT_VIEW_DECLARED_FORWARDED_KEYS.length);
+    expect(cast).toHaveLength(OBJECT_VIEW_HOST_COMPOSITION_KEYS.length);
   });
 });
 
