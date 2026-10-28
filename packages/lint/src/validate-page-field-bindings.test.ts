@@ -588,8 +588,8 @@ describe('validatePageFieldBindings — binding precedence and traversal', () =>
     });
     expect(findings).toHaveLength(2);
     expect(findings.map((f) => f.path).sort()).toEqual([
-      'pages[0].slots.highlights.properties.fields[0]',
       'pages[0].slots.details.properties.items[0].children[0].properties.fields[0]',
+      'pages[0].slots.highlights.properties.fields[0]',
     ]);
   });
 

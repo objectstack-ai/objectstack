@@ -431,8 +431,8 @@ describe('visibility-bare-identifier (#6128 / #5149 requirement 3)', () => {
         ],
       };
       expect(bareFindings(stack).map((f) => f.path).sort()).toEqual([
-        'pages[0].slots.highlights',
         'pages[0].slots.details[1]',
+        'pages[0].slots.highlights',
       ]);
     });
 
