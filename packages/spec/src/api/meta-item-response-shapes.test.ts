@@ -356,8 +356,8 @@ describe('`draftChanges` — which surface last changed each key of a pending dr
     }
   });
 
-  it('#27176 — refuses a client with no id, an empty id or an empty name, at the entry\'s `client`', () => {
-    for (const client of [{}, { id: '' }, { id: 'cli_1', name: '' }, 'cli_1']) {
+  it('#27176 — refuses a client with no id, an empty id, an empty name or an unknown member, at the entry\'s `client`', () => {
+    for (const client of [{}, { id: '' }, { id: 'cli_1', name: '' }, { id: 'cli_1', secret: 's' }, 'cli_1']) {
       expect(issueOf([{ ...ENTRIES[3], client }])?.path?.slice(0, 3)).toEqual(['draftChanges', 0, 'client']);
     }
   });

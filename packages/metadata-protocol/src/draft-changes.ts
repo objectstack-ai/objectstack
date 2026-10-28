@@ -29,7 +29,7 @@
  */
 
 import { canonicalize, orderedMapKeys } from '@objectstack/metadata-core';
-import type { MetadataAuthoringClient, MetadataAuthoringSurface } from '@objectstack/spec/api';
+import { MetadataAuthoringClientSchema, type MetadataAuthoringClient, type MetadataAuthoringSurface } from '@objectstack/spec/api';
 
 /** One entry of `draftChanges`, as stored and as served. */
 export interface DraftChangeEntry {
@@ -56,19 +56,16 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * `value` as a `MetadataAuthoringClient` (a non-empty `id`, an optional
- * non-empty `name`, nothing else), copied member by member, or `undefined`
- * when it is not one. The save door refuses a `client` this answers
- * `undefined` for; the stored read treats such an entry as malformed.
+ * `value` as a `MetadataAuthoringClient`, or `undefined` when it is not one —
+ * judged by the spec's own `MetadataAuthoringClientSchema` (closed: a
+ * non-empty `id`, an optional non-empty `name`, nothing else), so the writer
+ * never holds a second, drifting verdict. The save door refuses a `client`
+ * this answers `undefined` for; the stored read treats such an entry as
+ * malformed.
  */
 export function authoringClientOf(value: unknown): MetadataAuthoringClient | undefined {
-  if (!isPlainObject(value)) return undefined;
-  const { id, name, ...rest } = value;
-  if (Object.keys(rest).length > 0) return undefined;
-  if (typeof id !== 'string' || id === '') return undefined;
-  if (name === undefined) return { id };
-  if (typeof name !== 'string' || name === '') return undefined;
-  return { id, name };
+  const parsed = MetadataAuthoringClientSchema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
 }
 
 /**

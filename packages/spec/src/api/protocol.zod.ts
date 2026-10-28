@@ -521,8 +521,10 @@ export const MetadataAuthoringClientSchema = z.object({
     'The client\'s registered display name (its OAuth `client_name`) when it registered one, as '
     + 'registered. Absent when it registered none; ⛔ never the id standing in for it.',
   ),
-}).describe(
-  'The OAuth client an MCP build-door write was made by (see `MetadataAuthoringClientSchema`).',
+}).strict().describe(
+  'The OAuth client an MCP build-door write was made by: the client a person consented to with '
+  + '`metadata:write`, as the MCP build door verified it from the request\'s token. Closed: a member '
+  + 'other than `id` and `name` is refused, never stripped.',
 );
 export type MetadataAuthoringClient = z.input<typeof MetadataAuthoringClientSchema>;
 
