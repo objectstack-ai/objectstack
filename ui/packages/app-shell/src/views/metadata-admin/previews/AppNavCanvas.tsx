@@ -276,7 +276,11 @@ export function navPayloadOf(entries: readonly unknown[]): Array<Record<string, 
  * the same entries: the `StudioDesignSurface.railNavOrder-26979` block of
  * `StudioDesignSurface.railLabels.test.tsx`. ⛔ No third copy: sort a Studio
  * nav level through this.
+ *
+ * Exported for `NavTree`, as `navPayloadOf` is for the nav save: a pure
+ * function, not a component, that never reaches the package entry.
  */
+// eslint-disable-next-line react-refresh/only-export-components -- see above
 export function inMenuOrder<T extends { order?: number }>(list: readonly T[]): Array<readonly [T, number]> {
   return list.map((it, i) => [it, i] as const).sort(([a], [b]) => (a.order ?? 0) - (b.order ?? 0));
 }
