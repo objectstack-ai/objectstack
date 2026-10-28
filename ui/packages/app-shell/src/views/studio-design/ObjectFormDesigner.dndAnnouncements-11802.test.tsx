@@ -45,6 +45,12 @@ vi.mock('@dnd-kit/core', async (importOriginal) => {
 
 import { ObjectFormDesigner } from './ObjectFormDesigner';
 
+// The designer rows this suite reads in zh live in `@object-ui/i18n`'s `studio`
+// namespace, whose `zh` catalogue is fetched on demand (objectstack#25922).
+// Resident before any case, so the zh rows below read synchronously.
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+await loadStudioCatalogue('zh');
+
 type Field = { name: string; type: string; label: string; group?: string };
 
 const DRAFT = {

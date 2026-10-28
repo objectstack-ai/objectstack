@@ -1,8 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * objectui#6605 — the bulk buttons (R / CRUD / All / None) and the keys the
- * matrix does not author.
+ * objectui#6605 — the bulk buttons (R / CRUD / All / None) and the keys they
+ * do not author.
  *
  * `bulkSetObject` used to REPLACE the object's permission row. Keys outside
  * the `OBJECT_ACTIONS` column list — `allowExport`, and the ADR-0057
@@ -21,6 +21,12 @@
  * both scopes, as the per-checkbox cascade does — effective access is the same
  * `org` either way. It still merges: `allowExport` and every other key the
  * matrix does not author rides through.
+ *
+ * ## Export has a column, and still no bulk button — objectstack#26885
+ *
+ * Export (`allowExport`) is a matrix column now, but an opt-in one: no
+ * granting arm sets or clears it, "All" included, so the pins below hold as
+ * written. Its own pins live in `PermissionMatrixEditor.exportColumn-26885`.
  *
  * Every pin here asserts the SAVED payload, never editor state. That is the
  * card's own argument for why the defect persisted: both save doors carry the
@@ -47,7 +53,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
-/** Every object-permission key the matrix authors, in column order. */
+/** Every object-permission key the bulk buttons author, in column order (all but Export). */
 const MATRIX_KEYS = [
   'allowCreate',
   'allowRead',

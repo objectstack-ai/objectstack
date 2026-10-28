@@ -220,15 +220,14 @@ bindings below; authored `items` are not.
 
 `navigation` is what an entry click opens — the spec's `NavigationConfig` by
 reference, `ViewNavigationConfig` in `@object-ui/types`, the type
-`ObjectGridSchema.navigation` uses: `mode` (`page`, `drawer`, `modal`, `split`,
-`popover`, `new_window` or `none`) with `size`, `openNewTab` and
-`preventNavigation`.
+`ObjectGridSchema.navigation` uses: `mode` (`drawer`, `page`, `new_window`
+or `none`) with `size`, `openNewTab` and `preventNavigation`.
 
 | Member | On an entry click |
 |--------|-------------------|
-| `mode: 'drawer'` / `'modal'` / `'popover'` | Opens the entry's record in that overlay |
+| `mode: 'drawer'`, or a block without `mode` (the spec's `drawer` default) | Opens the entry's record in the drawer |
 | `mode: 'new_window'`, or `openNewTab: true` | Opens the record page in a new tab; `openNewTab` outranks every mode except `none`. On a timeline that names no `objectName` there is no record page: the tab opens at a slash and the entry's `id` alone (its `_id` when it has no `id`, `undefined` when it has neither) |
-| `mode: 'page'`, or a block without `mode` (the spec's `page` default) | Opens the record page of the timeline's `objectName` through the record navigator the host publishes (the console publishes one on its custom pages, record pages and list views); under a host that publishes none, such as an embedded renderer, or on a timeline that names no `objectName`, it opens nothing |
+| `mode: 'page'` | Opens the record page of the timeline's `objectName` through the record navigator the host publishes (the console publishes one on its custom pages, record pages and list views); under a host that publishes none, such as an embedded renderer, or on a timeline that names no `objectName`, it opens nothing |
 | `preventNavigation: true`, or `mode: 'none'` | Opens nothing, whatever else the block says |
 | `size` | Sets the overlay width (`sm` … `full`, or `auto` for the default) |
 
@@ -236,8 +235,7 @@ A click handler from a parent view outranks the whole key.
 
 <Callout type="warn">
 With the key absent a click opens nothing: unlike the board and the calendar,
-this renderer supplies no drawer default. `split` opens nothing on this block
-either, because the timeline gives the split shell no main panel.
+this renderer supplies no drawer default.
 </Callout>
 
 ## Variants
