@@ -120,7 +120,7 @@ bridge (warns). The compiler resolves these
 
 Rows keyed on a **named record** (an account, a supplier) rather than on a
 person or a position: declare the set on the **roster** object whose rows
-define it — not a stamp on every data row, not one policy per record.
+define it, not one policy per record.
 
 <!-- os:check -->
 ```typescript

@@ -1559,7 +1559,7 @@ function referenceFindings(
       // nearest key, so no author text can lengthen it. What each key holds,
       // and how an app stages a membership set, are the explanation's.
       hint:
-        `Read a pre-resolved key (${listNames(PRERESOLVED_USER_KEYS)}), or test an app-staged membership ` +
+        `Read a kernel key (${listNames(PRERESOLVED_USER_KEYS)}), or test an app-staged membership ` +
         `set with \`in\`, never \`==\`.${suggestName(key, PRERESOLVED_USER_KEYS)}`,
     });
   }
