@@ -118,3 +118,7 @@ describe('MetadataClient.save — the authoring surface, `?surface=` (objectui#1
 // it. The option's type is the spec's set minus `copilot`, so it cannot be sent.
 // @ts-expect-error -- `copilot` is not a surface this client may send.
 export const copilotRefused: MetadataClientSaveOptions = { surface: 'copilot' };
+
+// objectstack#27176 — `mcp` likewise: only the MCP build door states it, in-process.
+// @ts-expect-error -- `mcp` is not a surface this client may send.
+export const mcpRefused: MetadataClientSaveOptions = { surface: 'mcp' };

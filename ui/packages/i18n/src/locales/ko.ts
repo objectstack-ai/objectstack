@@ -4311,6 +4311,10 @@ const ko = {
       detailLoading: '상세 정보 로드 중…',
       detailLoadFailed: '변경 상세 정보를 불러오지 못했습니다:',
       detailNone: '차이가 감지되지 않았습니다 — 초안이 게시된 버전과 일치합니다.',
+      // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
+      draftedByCopilot: 'AI 코파일럿이 초안으로 작성한 변경 사항 포함',
+      draftedByMcpClient: 'MCP 클라이언트 “{{client}}”이(가) 초안으로 작성한 변경 사항 포함',
+      draftedByMcp: 'MCP 클라이언트가 초안으로 작성한 변경 사항 포함',
       detailChangedKeys: '기타 변경:',
       detailNewKeys: '포함:',
       generatedGroup: '플랫폼에서 생성됨 ({{n}})',

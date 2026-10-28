@@ -4312,6 +4312,10 @@ const de = {
       detailLoading: 'Details werden geladen…',
       detailLoadFailed: 'Änderungsdetails konnten nicht geladen werden:',
       detailNone: 'Keine Unterschiede erkannt — der Entwurf entspricht der veröffentlichten Version.',
+      // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
+      draftedByCopilot: 'Enthält Änderungen, die der KI-Copilot entworfen hat',
+      draftedByMcpClient: 'Enthält Änderungen, die der MCP-Client „{{client}}“ entworfen hat',
+      draftedByMcp: 'Enthält Änderungen, die ein MCP-Client entworfen hat',
       detailChangedKeys: 'Ebenfalls geändert:',
       detailNewKeys: 'Enthält:',
       generatedGroup: 'Von der Plattform erzeugt ({{n}})',

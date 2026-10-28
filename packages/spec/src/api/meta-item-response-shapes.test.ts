@@ -314,7 +314,9 @@ describe('the engine\'s verdict on a stored flow: `registration` beside the item
  * an SDK caller branches on, and deliberately not on the `_drafts` row.
  */
 type DraftChange = NonNullable<GetMetaItemResponse['draftChanges']>[number];
-export type DraftChangeByIsTheClosedSurfaceSet = Assert< Eq< DraftChange['by'], 'copilot' | 'studio' | 'api' > >;
+export type DraftChangeByIsTheClosedSurfaceSet = Assert< Eq< DraftChange['by'], 'copilot' | 'mcp' | 'studio' | 'api' > >;
+// #27176 — the OAuth client an `mcp` write was made by: an id, an optional name, and absent otherwise.
+export type DraftChangeClientIsOptional = Assert< Eq< DraftChange['client'], { id: string; name?: string | undefined } | undefined > >;
 export type DraftChangePathIsAnArrayOfKeys = Assert< Eq< DraftChange['path'], string[] > >;
 export type DraftChangeActorIsIdOrNull = Assert< Eq< DraftChange['actor'], string | null > >;
 export type DraftChangesMayBeAbsent = Assert< Eq< undefined extends GetMetaItemResponse['draftChanges'] ? true : false, true > >;
@@ -327,6 +329,8 @@ describe('`draftChanges` — which surface last changed each key of a pending dr
     { path: [], by: 'copilot', actor: 'usr_1', at: AT },
     { path: ['columns'], by: 'studio', actor: 'usr_1', at: AT },
     { path: ['fields', 'account.name', 'readable'], by: 'api', actor: null, at: AT },
+    { path: ['label'], by: 'mcp', actor: 'usr_1', at: AT, client: { id: 'cli_1', name: 'Claude' } },
+    { path: ['description'], by: 'mcp', actor: 'usr_1', at: AT },
   ];
   const DRAFT_READ = { type: 'view', name: 'loan_board', item: VIEW, version: 'v1', draftChanges: ENTRIES };
 
@@ -347,8 +351,14 @@ describe('`draftChanges` — which surface last changed each key of a pending dr
   };
 
   it('refuses a surface outside the closed set, at the entry\'s `by`', () => {
-    for (const by of ['ai', 'user', 'mcp', 'Copilot']) {
+    for (const by of ['ai', 'user', 'MCP', 'Copilot']) {
       expect(issueOf([{ ...ENTRIES[0], by }])).toMatchObject({ code: 'invalid_value', path: ['draftChanges', 0, 'by'] });
+    }
+  });
+
+  it('#27176 — refuses a client with no id, an empty id or an empty name, at the entry\'s `client`', () => {
+    for (const client of [{}, { id: '' }, { id: 'cli_1', name: '' }, 'cli_1']) {
+      expect(issueOf([{ ...ENTRIES[3], client }])?.path?.slice(0, 3)).toEqual(['draftChanges', 0, 'client']);
     }
   });
 

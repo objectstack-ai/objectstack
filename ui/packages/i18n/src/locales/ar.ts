@@ -4681,6 +4681,10 @@ const ar = {
       detailLoading: 'جارٍ تحميل التفاصيل…',
       detailLoadFailed: 'تعذر تحميل تفاصيل التغيير:',
       detailNone: 'لم يتم اكتشاف اختلافات — المسودة مطابقة للنسخة المنشورة.',
+      // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
+      draftedByCopilot: 'يتضمن تغييرات صاغها مساعد الذكاء الاصطناعي',
+      draftedByMcpClient: 'يتضمن تغييرات صاغها عميل MCP «{{client}}»',
+      draftedByMcp: 'يتضمن تغييرات صاغها عميل MCP',
       detailChangedKeys: 'تغييرات أخرى:',
       detailNewKeys: 'يتضمن:',
       generatedGroup: 'أنشأتها المنصة ({{n}})',
