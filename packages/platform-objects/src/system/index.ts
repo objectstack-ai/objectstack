@@ -26,6 +26,7 @@ export {
   SysExchangeRate,
   EXCHANGE_RATE_DIRECTION,
   EXCHANGE_RATE_SCALE,
+  EXCHANGE_RATE_PRECISION,
 } from './sys-exchange-rate.object.js';
 export {
   readDataMigrationFlag,

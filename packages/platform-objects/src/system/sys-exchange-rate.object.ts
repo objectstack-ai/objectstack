@@ -13,19 +13,18 @@ export const EXCHANGE_RATE_DIRECTION =
   'Example: home currency USD, currency EUR, rate 0.92 means 1 USD = 0.92 EUR.';
 
 /**
- * Decimal places a `rate` keeps. A write carrying more is refused at the
- * engine's `scale` seam, never rounded.
- *
- * Ruling 6465431966 parameter 4 says "12 significant decimals", which reads
- * two ways (the multi-currency ADR's open item 5, #27183): 12 digits after
- * the point, or 12
- * significant digits. 18 satisfies both: it keeps 12 places for every rate,
- * and 12 significant digits for every rate down to 10⁻⁶ (a weak home currency
- * against a strong one, e.g. 1 VND = 0.0000393 USD, needs 17). The column is
- * the platform's exact decimal whatever this says, so settling the open item
- * later is an edit here and moves no data.
+ * Decimal places a `rate` keeps — twelve digits after the point (ruling
+ * 6465431966 parameter 4, its unit settled by ruling 6469382727). A write
+ * carrying more is refused at the engine's `scale` seam, never rounded.
  */
-export const EXCHANGE_RATE_SCALE = 18;
+export const EXCHANGE_RATE_SCALE = 12;
+
+/**
+ * Total digits a `rate` may carry, integer and fraction together (ruling
+ * 6469382727): twelve on each side of the point. A write needing more is
+ * refused at the engine's `precision` seam (`max_precision`).
+ */
+export const EXCHANGE_RATE_PRECISION = 24;
 
 /**
  * sys_exchange_rate — Exchange Rate (multi-currency M1-1, epic #8345)
@@ -41,7 +40,8 @@ export const EXCHANGE_RATE_SCALE = 18;
  * - **Direction** — {@link EXCHANGE_RATE_DIRECTION}; one direction only, so
  *   no reader has to guess whether a row is the rate or its reciprocal.
  * - **Precision** — `rate` is a `number` field (the platform's exact-decimal
- *   column, never a float column) with `scale` {@link EXCHANGE_RATE_SCALE}.
+ *   column, never a float column) with `scale` {@link EXCHANGE_RATE_SCALE}
+ *   and `precision` {@link EXCHANGE_RATE_PRECISION}.
  *   A home amount is the record amount DIVIDED by `rate` (parameter 3 as
  *   arithmetic, recorded by the multi-currency ADR, #27183).
  * - **Uniqueness** — `(currency, effective_date)` within an organization. Two
@@ -102,6 +102,7 @@ export const SysExchangeRate = ObjectSchema.create({
       // every amount it touched.
       min: 10 ** -EXCHANGE_RATE_SCALE,
       scale: EXCHANGE_RATE_SCALE,
+      precision: EXCHANGE_RATE_PRECISION,
       trackHistory: true,
       description: EXCHANGE_RATE_DIRECTION,
       group: 'Rate',
