@@ -156,9 +156,11 @@ export const SysTrustedKey = ObjectSchema.create({
   },
 
   indexes: [
-    // One key id names one key across the environment, revoked rows included.
+    // One key id names one key, and one key carries one key id, across the
+    // environment, revoked rows included. The store checks both before it
+    // writes; these indexes hold them when two adds race.
     { fields: ['key_id'], unique: 'global' },
-    { fields: ['fingerprint'], unique: false },
+    { fields: ['fingerprint'], unique: 'global' },
   ],
 
   enable: {

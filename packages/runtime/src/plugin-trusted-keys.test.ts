@@ -150,6 +150,27 @@ describe('addTrustedKey / revokeTrustedKey', () => {
     expect(await rowCount()).toBe(1);
   });
 
+  it('the table itself holds both rules when a write goes around the store (two adds racing)', async () => {
+    const a = freshKey();
+    const b = freshKey();
+    const row = (keyId: string, k: { publicKeyPem: string; fingerprint: string }) => ({
+      key_id: keyId,
+      public_key: k.publicKeyPem,
+      fingerprint: k.fingerprint,
+      source: 'local',
+      status: 'active',
+      added_by: null,
+      added_at: new Date().toISOString(),
+    });
+    await engine.insert(TRUSTED_KEY_OBJECT, row('acme', a), SYSTEM);
+    // The same key under a second id, and a second key under the same id.
+    await expect(engine.insert(TRUSTED_KEY_OBJECT, row('acme-2', a), SYSTEM)).rejects.toThrow();
+    await expect(engine.insert(TRUSTED_KEY_OBJECT, row('acme', b), SYSTEM)).rejects.toThrow();
+    // Control: a second key under a second id is a second row.
+    await engine.insert(TRUSTED_KEY_OBJECT, row('acme-2', b), SYSTEM);
+    expect(await rowCount()).toBe(2);
+  });
+
   it('refuses to revoke a key id it does not hold', async () => {
     expect(await revokeTrustedKey(store(), 'nobody')).toMatchObject({ outcome: 'refused', reason: 'key-id-unknown' });
   });

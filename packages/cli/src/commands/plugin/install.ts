@@ -17,9 +17,15 @@
  *      `verifyPluginArtifact`. Refused by name: no signature, a malformed one,
  *      a key id this environment does not trust, a revoked key id, and a
  *      signature that does not match the bytes.
- *   4. Materialize to `<OS_HOME>/plugins/<env>/<id>/<version>/`, keeping the
+ *   4. Before anything is written, read this project's installation records
+ *      (refusing a file it cannot read, which a write would clobber) and
+ *      refuse an install directory that already holds other bytes no record
+ *      of this project owns: two projects sharing one `OS_HOME` and one
+ *      environment id share the directory, and one must not overwrite the
+ *      other's install.
+ *   5. Materialize to `<OS_HOME>/plugins/<env>/<id>/<version>/`, keeping the
  *      original artifact and its signature beside the unpacked files.
- *   5. Record the installation — key id and fingerprint included — in the
+ *   6. Record the installation — key id and fingerprint included — in the
  *      local installation store (`@objectstack/runtime`).
  *
  * `--trust-unsigned` is the explicit, loud dev override for an artifact that
@@ -34,7 +40,7 @@
  */
 
 import { readFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { resolve as resolvePath } from 'node:path';
 import { Args, Command, Flags } from '@oclif/core';
 import {
@@ -46,6 +52,7 @@ import {
 import {
   DEFAULT_PLUGIN_ENVIRONMENT_ID,
   TRUSTED_KEY_OBJECT,
+  loadPluginInstallations,
   pluginInstallDir,
   recordPluginInstallation,
   resolveTrustedKey,
@@ -70,6 +77,7 @@ import {
   INSTALLED_ARTIFACT_FILE,
   INSTALLED_SIGNATURE_FILE,
   archiveEntryProblems,
+  installedArtifactSha,
   materializePlugin,
 } from '../../utils/plugin-install.js';
 
@@ -130,9 +138,11 @@ export default class PluginInstall extends Command {
       await refuse({ error: 'artifact_not_found', message: `Artifact not found: ${args.artifact}` });
       return;
     }
-    const bytes = new Uint8Array(await readFile(artifactPath));
+    let bytes: Uint8Array;
     let files: ArchiveFile[];
     try {
+      if (!statSync(artifactPath).isFile()) throw new Error('not a regular file');
+      bytes = new Uint8Array(await readFile(artifactPath));
       files = readTarGz(bytes);
     } catch (error) {
       await refuse({
@@ -207,7 +217,18 @@ export default class PluginInstall extends Command {
     const sigPath = resolvePath(process.cwd(), flags.sig ?? `${args.artifact}.sig`);
     let signature: string | null = null;
     if (existsSync(sigPath)) {
-      signature = (await readFile(sigPath, 'utf-8')).trim();
+      // A signature that is there but cannot be read is refused, never taken
+      // for an absent one: --trust-unsigned must not install around it.
+      try {
+        if (!statSync(sigPath).isFile()) throw new Error('not a regular file');
+        signature = (await readFile(sigPath, 'utf-8')).trim();
+      } catch (error) {
+        await refuse({
+          error: 'signature_unreadable',
+          message: `Cannot read the signature ${sigPath}: ${(error as Error).message}. Nothing was installed.`,
+        });
+        return;
+      }
     } else if (flags.sig) {
       await refuse({ error: 'signature_not_found', message: `Signature not found: ${flags.sig}` });
       return;
@@ -297,7 +318,34 @@ export default class PluginInstall extends Command {
       trusted = { keyId: parsed.keyId, fingerprint: resolved.row.fingerprint };
     }
 
-    // 4. Materialize. 5. Record. ───────────────────────────────────────
+    // 4. Before anything is written. ──────────────────────────────────
+    let installations: PluginInstallationRecord[];
+    try {
+      installations = loadPluginInstallations(environmentId);
+    } catch (error) {
+      await refuse({ error: 'record_unreadable', message: `${(error as Error).message} Nothing was installed.` });
+      return;
+    }
+    const artifactSha = sha256Hex(bytes);
+    const presentSha = installedArtifactSha(installDir);
+    if (
+      presentSha !== undefined
+      && presentSha !== artifactSha
+      && !installations.some((r) => r.id === id && r.dir === installDir && r.artifact?.sha256 === presentSha)
+    ) {
+      await refuse({
+        error: 'install_dir_taken',
+        message:
+          `${installDir} already holds ${id}@${version} `
+          + (presentSha === null ? `with no readable ${INSTALLED_ARTIFACT_FILE}` : `built from other bytes (artifact sha256 ${presentSha})`)
+          + ', and no installation of this project put it there: another project sharing this OS_HOME and environment did, '
+          + 'or something else wrote it. Nothing was installed. Give this project its own environment (OS_ENVIRONMENT_ID) '
+          + 'or home (OS_HOME), or publish the change under a new version.',
+      });
+      return;
+    }
+
+    // 5. Materialize. 6. Record. ───────────────────────────────────────
     let replaced: boolean;
     try {
       ({ replaced } = materializePlugin({ dir: installDir, files, artifact: bytes, signature }));
@@ -314,7 +362,7 @@ export default class PluginInstall extends Command {
       status: 'installed',
       grantedPermissions: permissions && typeof permissions === 'object' && !Array.isArray(permissions) ? permissions : null,
       dir: installDir,
-      artifact: { file: INSTALLED_ARTIFACT_FILE, sha256: sha256Hex(bytes) },
+      artifact: { file: INSTALLED_ARTIFACT_FILE, sha256: artifactSha },
       signatureFile: signature === null ? null : INSTALLED_SIGNATURE_FILE,
       signature: trusted,
       trustUnsigned: signature === null,

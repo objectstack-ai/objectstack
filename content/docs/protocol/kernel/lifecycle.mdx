@@ -196,11 +196,15 @@ class AppPlugin implements Plugin {
 ## Plugin Installation
 
 <Callout type="warn">
-**Not implemented.** Installing a code plugin is a design that
+**Partly implemented.** Installing a code plugin is a design that
 [ADR-0025](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0025-plugin-package-distribution.md)
-records but the platform does not yet ship: the install half (download,
-verify, materialize, load) has no command and no runtime path. The sections
-below up to *Upgrades* describe that design, not a command you can run. See
+records and the platform ships only in part: `os plugin install ./x.osplugin`
+verifies a local artifact (its signature against the environment's trusted
+keys, its files against the manifest's `integrity` map), unpacks it and
+records the installation, writing nothing until every check passes. Download
+from the cloud, loading an installed plugin at boot, and the install hooks and
+registry below have no command and no runtime path. The sections below up to
+*Upgrades* describe that design, not a command you can run. See
 [What an author does today](#what-an-author-does-today).
 </Callout>
 
@@ -370,7 +374,9 @@ transitions (this page, above), not code hooks; boot-time code goes in
 
 ### What an author does today
 
-There is no install command for a code plugin. What exists, per the
+The one install command for a code plugin is `os plugin install`, for a
+signed artifact on local disk, and nothing loads what it installs yet. What
+exists, per the
 [CLI reference](https://github.com/objectstack-ai/objectstack/blob/main/packages/cli/README.md):
 
 - **Runtime plugins** declared in `objectstack.config.ts` `plugins` are loaded
@@ -914,7 +920,7 @@ Plugin authors must document breaking changes in CHANGELOG.md.
 
 ObjectStack lifecycle management provides:
 - **Deterministic Boot:** 7-phase boot sequence with clear error handling
-- **Atomic Installations (design):** ADR-0025 calls for transactional, all-or-nothing plugin installs; code-plugin installation is not implemented yet
+- **Atomic Installations (design):** ADR-0025 calls for transactional, all-or-nothing plugin installs; `os plugin install` verifies a local artifact in full before it writes anything, but nothing loads an installed plugin at boot yet
 - **Zero-Downtime Upgrades:** Blue-green and rolling strategies for production
 - **Automatic Rollback:** Failed upgrades auto-revert to previous version
 - **Health Monitoring:** Built-in health checks validate system state
