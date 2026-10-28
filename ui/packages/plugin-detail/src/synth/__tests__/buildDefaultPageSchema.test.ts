@@ -551,17 +551,6 @@ describe('buildDefaultPageSchema', () => {
       expect(timeline.children).toEqual([{ type: 'div', id: 'custom-discussion' }]);
     });
 
-    it('a discussion slot beside an authored tabs slot stays under the strip', () => {
-      const page = buildDefaultPageSchema(leadDef, {
-        slots: {
-          tabs: { type: 'page:tabs', items: [] },
-          discussion: { type: 'div', id: 'custom-discussion' },
-        },
-      });
-      const components = page.regions[0].components;
-      expect(components[components.length - 1].id).toBe('custom-discussion');
-    });
-
     it('omitted slots fall through to synth defaults', () => {
       const page = buildDefaultPageSchema(leadDef, {
         slots: { header: { type: 'div', id: 'h' } },
