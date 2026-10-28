@@ -384,7 +384,7 @@ gh label create needs:contract-review -R objectstack-ai/objectstack -c bfdadc -d
 # repo:cloud to match while you are here: under --reconcile that rewrites a LIVE
 # label object's colour, which is a deliberate PM action and not this row's.
 gh label create repo:objectui -R objectstack-ai/objectstack -c fbca04 -d "Seam card: cross-repo ordering with objectui is the substance (pure objectui fixes live in objectui)" 2>/dev/null || true
-gh label create repo:cloud    -R objectstack-ai/objectstack -c c5def5 -d "Seam card: cross-repo ordering with cloud is the substance (pure cloud fixes live in cloud)" 2>/dev/null || true
+gh label create repo:cloud    -R objectstack-ai/objectstack -c c5def5 -d "Card routed whole to the cloud PM: needs cloud code, a producer or a fact (cloud owns it to closure)" 2>/dev/null || true
 gh label create repo:hotcrm   -R objectstack-ai/objectstack -c fbca04 -d "Seam card: cross-repo ordering with hotcrm is the substance (pure hotcrm fixes live in hotcrm)" 2>/dev/null || true
 
 # ⛔ There is no fourth `repo:*` row, and that absence is now DECLARED rather
