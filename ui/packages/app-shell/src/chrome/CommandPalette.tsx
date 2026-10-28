@@ -151,11 +151,13 @@ export function CommandPalette(props: CommandPaletteProps) {
 
 /**
  * The app scope's palette, with the member's navigation gates, the sidebar's
- * (objectstack#26892). Built here, not in the body: the `studio` scope has no
- * app, so it asks for no gate and reads nothing until it opens.
+ * (objectstack#26892), for the app it lists: inside an app that is the
+ * frame's app; on Home, whose expression scope binds none, it is the host app.
+ * Built here, not in the body: the `studio` scope has no app, so it asks for
+ * no gate and reads nothing until it opens.
  */
 function AppCommandPaletteBody(props: AppCommandPaletteProps) {
-  const gates = useNavMemberGates();
+  const gates = useNavMemberGates(props.activeApp ?? undefined);
   return <CommandPaletteBody {...props} gates={gates} />;
 }
 

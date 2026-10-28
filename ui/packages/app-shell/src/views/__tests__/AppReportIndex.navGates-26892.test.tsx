@@ -36,7 +36,10 @@
  *  (f) neither palette door offers Gamma under (b) or (c), nor an object
  *      entry whose `requiredPermissions` the member lacks;
  *  (g) an entry's API binding is read once with the sidebar mounted beside
- *      the palette: one reader per binding, no second request.
+ *      the palette: one reader per binding, no second request;
+ *  (h) on Home, whose expression scope binds no app while the palette lists
+ *      its host app, the gates are the host app's: an entry bound to an API
+ *      read shows once that read answers.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -139,6 +142,8 @@ function adapterFor(app: unknown) {
 interface ShellOptions {
   forecastRead?: boolean;
   apiFetch?: ApiFetch;
+  /** The app the frame's expression scope binds; the app itself by default. */
+  frameApp?: Record<string, unknown>;
 }
 
 function shell(app: ReturnType<typeof appWith>, children: React.ReactNode, url: string, options: ShellOptions = {}) {
@@ -150,7 +155,7 @@ function shell(app: ReturnType<typeof appWith>, children: React.ReactNode, url: 
       <SchemaRendererContext.Provider value={{ dataSource: null, apiFetch }}>
         <MePermissionsProvider endpoint="/api/v1/auth/me/permissions" fetcher={fetcher as unknown as typeof fetch}>
           <MetadataProvider adapter={adapterFor(app)}>
-            <ExpressionProvider app={app}>
+            <ExpressionProvider app={options.frameApp ?? app}>
               <MemoryRouter initialEntries={[url]}>{children}</MemoryRouter>
             </ExpressionProvider>
           </MetadataProvider>
@@ -385,5 +390,34 @@ describe('⌘K offers its navigation entries as the sidebar shows them (objectst
     await waitFor(() => expect(paletteReports()).toEqual(ALL));
     expect(screen.getByTestId('sidebar-probe')).toHaveTextContent('Gamma');
     expect(apiFetch.mock.calls.filter(([asked]) => asked === url)).toHaveLength(1);
+  });
+});
+
+describe('⌘K on Home gates the host app it lists (objectstack#26892)', () => {
+  it('(h) with no app in the expression scope, an entry bound to the host app\'s API read shows once it answers', async () => {
+    const url = '/api/v1/nav-probe/26892-home';
+    const apiFetch = vi.fn<ApiFetch>(
+      async () => ({ ok: true, status: 200, json: async () => ({ total: 1 }) }) as unknown as Response,
+    );
+    const dataSource = { provider: 'api', read: { url } };
+    // HomeLayout's shape: `ExpressionProvider app={NO_SCOPE_INPUT}`, the palette handed the host app.
+    renderPalette(appWith(gammaEntry({ visible: 'data.total == 1', dataSource })), { apiFetch, frameApp: {} });
+    await waitFor(() => expect(paletteReports()).toEqual(ALL));
+    expect(apiFetch.mock.calls.filter(([asked]) => asked === url)).toHaveLength(1);
+  });
+
+  it('(h) CONTROL: the same binding answering `total: 2` keeps the entry, and its report, hidden', async () => {
+    const url = '/api/v1/nav-probe/26892-home-2';
+    const apiFetch = vi.fn<ApiFetch>(
+      async () => ({ ok: true, status: 200, json: async () => ({ total: 2 }) }) as unknown as Response,
+    );
+    const dataSource = { provider: 'api', read: { url } };
+    renderPalette(appWith(gammaEntry({ visible: 'data.total == 1', dataSource })), { apiFetch, frameApp: {} });
+    await paletteSettled();
+    await waitFor(() => expect(apiFetch).toHaveBeenCalled());
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(paletteReports()).toEqual(WITHOUT_GAMMA);
   });
 });

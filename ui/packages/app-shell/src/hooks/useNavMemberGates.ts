@@ -308,9 +308,15 @@ export interface NavMemberGatesWithReads extends NavMemberGates {
 /**
  * The member's gates, built from the providers the console mounts: the
  * expression evaluator, `usePermissions()`, and the registered object list.
+ *
+ * `forApp` names the app whose navigation is gated when it is not the frame's
+ * own (objectstack#26892): Home binds no app in its expression scope yet hands
+ * the palette its host app, whose entries' API bindings and package object
+ * scope are that app's. Omitted, the frame's app is gated, as before.
  */
-export function useNavMemberGates(): NavMemberGatesWithReads {
-  const { app } = useExpressionContext();
+export function useNavMemberGates(forApp?: Record<string, unknown>): NavMemberGatesWithReads {
+  const { app: frameApp } = useExpressionContext();
+  const app: Record<string, unknown> = forApp ?? frameApp;
   // objectui#13029 — the entries of the app this frame renders may bind data.
   const { evaluate: evalVis, readEntry } = useNavVisibilityAndReads(app);
 
