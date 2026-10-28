@@ -5,8 +5,8 @@
 
 feat(spec,service-analytics): analytics over a record-currency amount — grouped answers name a per-row currency, an ungrouped amount aggregate is refused, and two compile-time measure-currency guards (ADR-0144 D2, D6)
 
-Clause-②: yes (widening)
-Metadata-protocol: added
+Clause-②: yes (narrowing)
+Metadata-protocol: narrowed
 
 A measure column over a `currencyMode: 'record'` amount now carries `fields[].currencyField` on a `queryDataset` answer: the name of the dimension column that groups by the amount's code field. Each row's currency is that row's value of it, and the column carries no `currency`. Before, a breakdown by currency labelled every group with one code.
 
