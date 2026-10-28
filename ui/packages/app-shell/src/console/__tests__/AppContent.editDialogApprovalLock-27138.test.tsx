@@ -26,7 +26,7 @@
  */
 
 import '@testing-library/jest-dom/vitest';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 import React from 'react';
 import { render, cleanup, waitFor, screen } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
@@ -131,24 +131,32 @@ import { __resetRecordApprovalsStore } from '../../hooks/useRecordApprovals';
 
 type Approvals = { requests: any[]; lock: boolean };
 
-function serveApprovals({ requests, lock }: Approvals) {
-  const fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
-    const url = String(input);
-    const body = url.includes('/approvals/records/')
-      ? { success: true, data: { locked: lock } }
-      : url.includes('/approvals/requests?')
-        ? { data: requests }
-        : url.includes('/approvals/requests/')
-          ? { data: requests[0] }
-          : {};
-    return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
-  });
-  vi.stubGlobal('fetch', fetchSpy);
+/** What the approvals routes answer; set per test. */
+let served: Approvals = { requests: [], lock: false };
+
+// Installed once for the whole file, so no read the dialog issues after a
+// test body returns can reach a socket; handed back in `afterAll`.
+const fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+  const url = String(input);
+  const body = url.includes('/approvals/records/')
+    ? { success: true, data: { locked: served.lock } }
+    : url.includes('/approvals/requests?')
+      ? { data: served.requests }
+      : url.includes('/approvals/requests/')
+        ? { data: served.requests[0] }
+        : {};
+  return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+});
+vi.stubGlobal('fetch', fetchSpy);
+afterAll(() => vi.unstubAllGlobals());
+
+function serveApprovals(approvals: Approvals) {
+  served = approvals;
   return fetchSpy;
 }
 
-const approvalReads = (fetchSpy: ReturnType<typeof vi.fn>) =>
-  fetchSpy.mock.calls.map(([u]) => String(u)).filter((u) => u.includes('/approvals/'));
+const approvalReads = (spy: typeof fetchSpy) =>
+  spy.mock.calls.map(([u]) => String(u)).filter((u) => u.includes('/approvals/'));
 
 function openAt(url: string) {
   render(
@@ -169,10 +177,7 @@ beforeEach(() => {
   __resetRecordApprovalsStore();
   vi.clearAllMocks();
 });
-afterEach(() => {
-  cleanup();
-  vi.unstubAllGlobals();
-});
+afterEach(cleanup);
 
 describe('[#27138] the console edit dialog reads the approvals record lock', () => {
   it.each([
