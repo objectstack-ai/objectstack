@@ -232,7 +232,7 @@ A value: a CEL value envelope `{ dialect: 'cel', source }` evaluated by the expr
 | :--- | :--- | :--- | :--- |
 | **objectName** | `string` | ✅ | Object to query |
 | **filter** | `Record<string, any>` | optional | Field/value pairs to match: each operand — a field's value, an operator's comparand (`{"$ne": null}`), a list comparand's element — is a CEL value envelope `{ dialect: 'cel', source }` evaluated before the query (one that evaluates to null refuses the node), a query placeholder such as `{current_user_id}` or `{today}` the query engine resolves, or a literal; a flow `{…}` template token is refused |
-| **fields** | `string[]` | optional | Field projection — only these fields are read (default: all) |
+| **fields** | `string[]` | optional | Field projection — only these fields are read; omit it to read all. An empty list or a blank name is refused |
 | **limit** | `integer` | optional | Max records to return — a positive integer; >1 switches to a multi-record query |
 | **outputVariable** | `string` | optional | Flow variable the result is bound to — a name without a leading `$` (the `$` names are the flow engine's own), read as `{{ name }}` |
 
