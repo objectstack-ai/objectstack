@@ -44,7 +44,7 @@ export const PipelineDashboard: Dashboard = {
     {
       id: 'total_pipeline',
       type: 'metric',
-      title: 'Total Pipeline ($)',
+      title: 'Total Pipeline',
       description: 'Sum of opportunity amounts across open stages.',
       filter: { stage: { $nin: ['closed_won', 'closed_lost'] } },
       dataset: 'opportunity_metrics',
@@ -125,7 +125,7 @@ export const PipelineDashboard: Dashboard = {
     {
       id: 'pipeline_by_industry',
       type: 'pie',
-      title: 'Open Pipeline by Stage ($)',
+      title: 'Open Pipeline by Stage',
       description: 'Open-pipeline revenue split by pipeline stage. Pie/donut/funnel ignore `compareTo`.',
       filter: { stage: { $nin: ['closed_won', 'closed_lost'] } },
       dataset: 'opportunity_metrics',
