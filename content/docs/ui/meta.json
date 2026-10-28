@@ -1,5 +1,5 @@
 {
-  "title": "Views & Apps",
+  "title": "User Interface",
   "pages": [
     "apps",
     "pages",
@@ -12,9 +12,6 @@
     "translations",
     "forms",
     "doc-pages",
-    "setup-app",
-    "console",
-    "studio",
     "components",
     "---Recipes---",
     "create-vs-edit-form",

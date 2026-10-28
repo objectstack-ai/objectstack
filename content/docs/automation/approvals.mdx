@@ -758,6 +758,15 @@ reassign user-picker) is collected by the generic action dialog with **no
 per-action UI code**. New decision capabilities ship as backend metadata, not
 hand-written buttons.
 
+On the record itself, a record with approval requests grows an **Approvals** tab
+beside Details and Related, with a request-count badge: the current step, decision
+progress, the approvers it is waiting on, the merged decision timeline and a remind
+button for the submitter. Every viewer who can read the record sees it, not only
+approvers. A request opens on its record page through the approvals routes rather
+than the data API, so an approver who is not an administrator sees the whole page,
+decision actions included, although the data API stays closed to them on the
+approval objects.
+
 Each action's visibility is gated by a **server-computed per-viewer block** the
 service attaches to every request it returns:
 

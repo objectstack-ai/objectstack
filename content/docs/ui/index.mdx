@@ -1,10 +1,10 @@
 ---
-title: UI engine — render views from metadata
-navTitle: UI Engine
+title: User interface — apps, pages and views from metadata
+navTitle: User Interface
 description: Apps, views, dashboards, branding, and public forms — server-driven UI declared as metadata and rendered by the ObjectUI runtime.
 ---
 
-The UI engine turns metadata into user interfaces: you declare **apps**, **views**, **pages**, and **dashboards** as data, and any compliant renderer draws them. This module is the practical documentation for the **ObjectUI layer** — the UI Protocol specified normatively in the [ObjectUI spec](/docs/protocol/objectui). Because the UI is data, it ships inside the same artifact as your schema, respects the same permissions, and can be generated or modified by AI agents through the same typed surface.
+The UI layer turns metadata into user interfaces: you declare **apps**, **views**, **pages**, and **dashboards** as data, and any compliant renderer draws them. This module is the practical documentation for the **ObjectUI layer** — the UI Protocol specified normatively in the [ObjectUI spec](/docs/protocol/objectui). Because the UI is data, it ships inside the same artifact as your schema, respects the same permissions, and can be generated or modified by AI agents through the same typed surface.
 
 An app is a navigation shell over your objects (from the CRM example app):
 
@@ -33,8 +33,7 @@ export const CrmApp = App.create({
 - **Pages** compose free-form layouts from widgets; **Dashboards** combine charts, reports, and datasets for analytics.
 - **Branding** colours an app: `app.branding.primaryColor` / `accentColor` drive the console's `--primary` / `--accent` variables. (The standalone `themes` collection was retired in spec 17.1, ADR-0049 — it was parsed but never applied.)
 - **Public forms** expose a scoped slice of an object to external audiences through **anonymous entry routes** for public data collection ([Forms](/docs/ui/forms), [public data collection](/docs/ui/public-data-collection)).
-- The **Setup App** — the platform's built-in administration UI — is itself rendered from the same protocol ([Setup App](/docs/ui/setup-app)).
-- The **Console** renders all of it for end users, and **Studio** is where it is authored without code ([Console](/docs/ui/console), [Studio](/docs/ui/studio)).
+- The **Console** renders all of it for users, **Studio** edits it without code, and **Setup** administers the platform; all three are toured in [Build without code](/docs/build-without-code).
 
 ## What's in this module
 
@@ -50,9 +49,6 @@ export const CrmApp = App.create({
   <Card href="/docs/ui/translations" title="Translations" description="Labels and UI text as metadata, one bundle per locale" />
   <Card href="/docs/ui/forms" title="Forms" description="Public and internal form patterns" />
   <Card href="/docs/ui/doc-pages" title="Doc Pages" description="Ship package documentation rendered in the console" />
-  <Card href="/docs/ui/setup-app" title="Setup App" description="The built-in administration UI" />
-  <Card href="/docs/ui/console" title="Console" description="How the Console renders your metadata: record surfaces, per-user state, broken predicates" />
-  <Card href="/docs/ui/studio" title="Studio" description="Object design, the Flow Designer, drafts and metadata diagnostics" />
   <Card href="/docs/ui/components" title="Component Reference" description="Every component a page can place, with its inputs, generated from the component manifest" />
 </Cards>
 
