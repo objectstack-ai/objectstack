@@ -81,6 +81,8 @@ aggregation. The ruling names them by topic ("Q0 A", "rates A", "home currency A
   record's currency.
 - **A `fixed` field with no code becomes a yuan field.** `defaultCurrency` defaults to `'CNY'` (same schema).
   #27157 (#27119 Q2 X) requires the code and drops the default. It is a member of R1 and a blocker of M0-1.
+  *Note (2026-10-28):* #27157 landed in PR #27218 (`0cd578f7`). On `main`, `defaultCurrency` has no default, and a
+  `fixed` config without a code is refused.
 - **The tenant currency is the `localization.currency` setting**
   (`packages/services/service-settings/src/manifests/localization.manifest.ts#localizationSettingsManifest`, key
   `currency`). It has tenant scope, no platform default and `valueDomain: 'iso_4217_currency'`. It may be unset. It is
@@ -356,7 +358,7 @@ says what the command printed at `cdec7473`.
 
 ```bash
 git grep -n "Neither mode is a per-record choice" -- packages/spec/src/data/field.zod.ts      # 1 line
-git grep -n "default('CNY')" -- packages/spec/src/data/field.zod.ts                           # 1 line, until #27157
+git grep -n "default('CNY')" -- packages/spec/src/data/field.zod.ts                           # 1 line; #27157 landed 2026-10-28 in PR #27218 (0cd578f7), after which the one match is a docblock line recording the old default
 git grep -n "export const CurrencyValueSchema" -- packages/spec/src/data/field.zod.ts         # 1 line, until #27182
 git grep -n "may be handed a res" -- packages/formula/src/stdlib.ts                            # 1 line
 git grep -n -i -E "exchange.?rate|fx_rate|currency_conversion|convertCurrency" -- packages/ ':!*.test.ts'   # 0 lines
