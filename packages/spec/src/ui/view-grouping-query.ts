@@ -167,9 +167,8 @@
  * (`packages/metadata-protocol/src/protocol.ts`, the `hasGroupBy ||
  * hasAggregations` branch) and answers `{ object, records, total, hasMore }`
  * with the header rows as `records`; `client.data.query()`
- * (`packages/client/src/index.ts`) posts there, and the RPC face declares
- * `method: 'aggregate'` with an `EngineAggregateOptions` body
- * (`data/data-engine.zod.ts`, `DataEngineAggregateRequestSchema`). The row
+ * (`packages/client/src/index.ts`) posts there; in process the same body is
+ * `IDataEngine.aggregate`'s `EngineAggregateOptions`. The row
  * page is the same door with the compiled `EngineQueryOptions`. No new
  * route, no new wire shape; the platform half of the card PINS that door on
  * the compiled queries (the 186-row fixture through the route, on driver-sql
