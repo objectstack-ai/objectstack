@@ -452,7 +452,15 @@ export const CEILINGS = new Map([
   // pointer in References, and eight clause-level trims. Arithmetic in priced
   // bytes (stamp line excluded): 25864 -> 25860 (-4 net) -> ceil(25860 / 4) =
   // 6465; re-locked AT the measurement, headroom 0 tokens.
-  ['skills/objectstack-automation/SKILL.md', 6465],
+  // 6465 -> 6457 (same card, contract-review patch round): the five-condition
+  // sentence gains "and then it is the platform's, filed as a card; the app
+  // still writes none" (ADR-0019 D2), and the flow-type table's `api` row names
+  // `secretRef` (or a literal `secret`) instead of `secret` alone. Paid down in
+  // the same file: the CEL blockquote's "(the example apps use plain strings)",
+  // three pointer lines' "Moved to", and five clause-level trims. Arithmetic in
+  // priced bytes: 25860 -> 25827 (-33 net) -> ceil(25827 / 4) = 6457; re-locked
+  // AT the measurement, headroom 0 tokens.
+  ['skills/objectstack-automation/SKILL.md', 6457],
   // 13783 -> 13892 (2026-08-31 app-repo-principles raise, see the block above).
   // The invariant-vs-transition-gate choice, placed in the field-conditional-rule
   // bullet list where the tool is actually picked. Both wrong picks are silent:
@@ -740,9 +748,12 @@ export const CEILINGS = new Map([
   ['skills/objectstack-automation/evals/approvals/test-revise-loop.md', 1329],
   // NEW FILE (card #27223): the three integration cases — DocuSign (fails any
   // answer proposing a platform plugin), Stripe read, vendor without a spec.
-  // Pinned AT its landed count, no headroom.
-  //   ceil($(wc -c < skills/objectstack-automation/evals/integrations-declared.json) / 4) == ceil(4772 / 4)
-  ['skills/objectstack-automation/evals/integrations-declared.json', 1193],
+  // Pinned AT its landed count, no headroom. Re-measured in the same PR's
+  // contract-review patch round (`clientSecret` -> `clientSecret:` in case 1's
+  // must_not_contain, so a correct answer naming the absent field still passes):
+  // 4772 -> 4773 bytes, 1193 -> 1194.
+  //   ceil($(wc -c < skills/objectstack-automation/evals/integrations-declared.json) / 4) == ceil(4773 / 4)
+  ['skills/objectstack-automation/evals/integrations-declared.json', 1194],
 
   // objectstack-ui — the three authored eval files; its `references/react-blocks.md`
   // is generator-owned and carries no row here on purpose (see the boundary
@@ -1097,9 +1108,14 @@ export const CEILINGS = new Map([
   // a static key, remote MCP with a static header, plain REST, the vendor
   // callback, a hand-written document for a spec-less vendor — plus the two
   // "not yet" entries (OAuth, request signing) and the author / administrator
-  // credential hand-off. Pinned AT its landed count, no headroom.
-  //   ceil($(wc -c < skills/objectstack-automation/references/integration-recipes.md) / 4) == ceil(8705 / 4)
-  ['skills/objectstack-automation/references/integration-recipes.md', 2177],
+  // credential hand-off. Pinned AT its landed count, no headroom. Re-measured
+  // in the same PR's contract-review patch round: recipe 1's `$ref` wording
+  // widened from "no `$ref` into other files" to "dereference every `$ref`
+  // offline, in-document ones included" (the loader skips a `$ref` parameter,
+  // request body or response, so the derived schema silently loses it):
+  // 8705 -> 8814 bytes, 2177 -> 2204.
+  //   ceil($(wc -c < skills/objectstack-automation/references/integration-recipes.md) / 4) == ceil(8814 / 4)
+  ['skills/objectstack-automation/references/integration-recipes.md', 2204],
   // 5569 -> 5587 (card #26298, audit #26184 row A2): the approval config table
   // gains `excludeSubmitter` (refused beside `onEmptyApprovers: 'auto_approve'`),
   // +105 tokens. Paid down first: Best Practices 1 and 4 restated the Branching

@@ -32,7 +32,7 @@ metadata:
 > `entryCondition` / filter `value` here is an **Expression** envelope evaluated
 > by `@objectstack/formula`. A slot takes a plain CEL string; the
 > `P\`...\`` / `cel\`...\`` tags wrap the same string with author-time validation.
-> Both parse — pick one per file (the example apps use plain strings). See
+> Both parse — pick one per file. See
 > **objectstack-formula** for the CEL contract, stdlib and legacy → CEL table.
 
 ---
@@ -49,7 +49,7 @@ A **Flow** is a directed graph of nodes — the primary automation building bloc
 | `screen` | Interactive — presents UI screens to the user (wizards, forms) |
 | `schedule` | Runs on a cron/interval cadence declared on the **start node's `config.schedule`** — or a **per-record date sweep** via `config.timeRelative`, see *Time-relative triggers* |
 | `record_change` | Fires automatically on record create/update/delete (bind via the `start` node's `triggerType`). `autolaunched` + the same `record-*` binding behaves identically; `record_change` also opts into the trigger-readiness lint |
-| `api` | Inbound **webhook** — needs a start-node `secret` (see *Inbound webhook triggers* below); a flow only ever started explicitly is `autolaunched` |
+| `api` | Inbound **webhook** — needs a start-node `secretRef` (or a literal `secret`; see *Inbound webhook triggers* below); a flow only ever started explicitly is `autolaunched` |
 
 ### Flow Node Types
 
@@ -86,7 +86,7 @@ Flows are built from **20 built-in node types** (plugins register more, e.g.
 | Node | Purpose |
 |:-----|:--------|
 | `http` | Call an external HTTP API — always set `timeoutMs` (unset = no timeout). `url` and `headers` are served as written with the definition to every member who can read flows — only `signingSecret` and a start node's `secret` are withheld — so never a credential there: a credential means a declared connector called via `connector_action` |
-| `notify` | Send a notification through the messaging service (inbox channel by default) |
+| `notify` | Send a notification through the messaging service (inbox by default) |
 | `connector_action` | Dispatch an action of a declared connector (a `connectors:` entry with a `provider`, § *Integrations are declared, not coded*) or a plugin's. `connectorConfig.input` is sent as written — no CEL or `{{ }}` in it |
 | `script` | Call a **registered** function named by `config.function` (see *Valid-but-silently-wrong* #3) |
 | `screen` | Display a UI form to the user (screen flows only). `config.fields[]`: `{ name, label, type, required, options, defaultValue }`, `type` an open widget hint; `'file'` renders the upload widget and resumes with the `sys_file` id bound to `name` — a later `create_record` / `update_record` writes it into a `file` field, which claims the file: collect first, write after the last screen. `'record_link'` (never `'record'`, an object field type) takes no input — it shows the `reference` record whose id `defaultValue` evaluates to, by display name, as a link to its record page: the result screen of a flow that created records, `{ name: 'account_link', type: 'record_link', reference: 'crm_account', defaultValue: { dialect: 'cel', source: 'account.id' } }` over a `create_record` `outputVariable: 'account'`. Both keys required; `required` / `options` / `placeholder` / `min` / `max` refused; a resume value under its name refused (`400 INVALID_SCREEN_INPUT`). A completed `end` `message` is refused and a markdown link in a screen `description` renders literally. Next / Submit and "Step N of M" are not authored: the engine reads the graph when the screen pauses and serves `progress` (`nextScreen: 'none' | 'possible' | 'certain'`; `step` / `stepCount` only when every path agrees), which alone labels the button and draws the counter. A `decision`, `fault` edge, loop back, non-screen pause (`approval`, `wait`) or `subflow` after a screen answers `possible` — "Next", no count. `progress` in a node `config` is refused; never hand-roll a button label or step counter into `fields` |
@@ -95,7 +95,7 @@ Flows are built from **20 built-in node types** (plugins register more, e.g.
 
 | Node | Purpose |
 |:-----|:--------|
-| `approval` | Route a record for human sign-off — **suspends** the run until a decision, then continues down the `approve` / `reject` branch (contributed by `plugin-approvals`) |
+| `approval` | Route a record for human sign-off — **suspends** the run until a decision, then continues down the `approve` / `reject` branch (from `plugin-approvals`) |
 
 ### `notify` — the most-used node type
 
@@ -131,7 +131,7 @@ variables: [
 ],
 ```
 
-→ Moved to [references/examples-flows.md](./references/examples-flows.md) § Flow Example — Auto-Escalate Overdue Cases.
+→ [references/examples-flows.md](./references/examples-flows.md) § Flow Example — Auto-Escalate Overdue Cases.
 
 ### Failure routing & `runAs`
 
@@ -261,8 +261,7 @@ write them right the first time:
 3. **`script` nodes call a registered function — that is all they do.** Set
    `config.function` to a function registered via
    `defineStack({ functions: { my_fn: (ctx) => … } })`. It is **required**: an
-   empty `script` node refuses at execute, and one pointing at an unregistered
-   function fails loudly.
+   empty `script` node refuses at execute; an unregistered function fails loudly.
 
    There is no other dispatch form: `notify` for delivery, `connector_action`
    for a vendor system, a function for logic.
@@ -313,7 +312,7 @@ write them right the first time:
 
 ---
 
-→ State Machines & Approvals moved to [references/state-machines-and-approvals.md](./references/state-machines-and-approvals.md) — its state-introspection route is `GET /api/v1/meta/object/:name/state/:field?from=:state`.
+→ State Machines & Approvals: [references/state-machines-and-approvals.md](./references/state-machines-and-approvals.md) — its state-introspection route is `GET /api/v1/meta/object/:name/state/:field?from=:state`.
 
 ---
 
@@ -352,7 +351,7 @@ node `config`**:
 
 - **Signature:** `x-objectstack-signature: t=<unix seconds>,v1=<hex>` — `v1` = HMAC-SHA256 of `<t>.<raw body>` under the secret; refused when `t` is over 300 s from the server clock.
 - **Idempotency:** `x-idempotency-key` dedupes retries — author the flow to be idempotent (delivery is at-least-once).
-- **Queue-backed:** the endpoint ACKs `202` and enqueues; the flow runs on the consumer, never in-band.
+- **Queue-backed:** the endpoint ACKs `202` and enqueues; the flow runs on the consumer.
 - The JSON body surfaces to the flow as the trigger record (`record.*` / bare fields) plus `params`.
 
 ### Trigger Types (start-node `config.triggerType`)
@@ -394,7 +393,7 @@ owns `label`, `type`, `nodes` and the `edges` `FlowSchema` requires):
 > `previous` (before the change) vs `record` (after) in an update trigger's
 > condition: see [objectstack-formula](../objectstack-formula/SKILL.md) §5.
 
-→ Moved to [references/examples-flows.md](./references/examples-flows.md) § Time-relative triggers — scheduled per-record date sweep.
+→ [references/examples-flows.md](./references/examples-flows.md) § Time-relative triggers — scheduled per-record date sweep.
 
 ---
 
@@ -406,7 +405,8 @@ packaged spec, `auth.credentialRef` (the customer's administrator supplies the
 value) — dispatched by `connector_action`; an inbound vendor callback is an
 `api` flow. Never a plugin, never an `http` node holding a credential. Recipes,
 credential hand-off, loader limits: [references/integration-recipes.md](./references/integration-recipes.md).
-Platform code only when one holds: the protocol is not HTTP; the work writes
+Platform code only when one holds — and then it is the platform's, filed as
+a card; the app still writes none: the protocol is not HTTP; the work writes
 identity objects (users, units, positions); it processes files or binaries
 locally; one fixed action contract must span several vendors; the callback's
 signature is outside the `api` door's HMAC. A document the loader cannot take
@@ -417,9 +417,8 @@ its platform card, never a reason to write code.
 
 ## CRM Automation Blueprint
 
-Default approach for metadata apps — model the business lifecycle in
-Flow/Approval metadata first (integrations: above) — in this CRM-style
-structure:
+Default approach — model the business lifecycle in Flow/Approval metadata
+first (integrations: above) — in this CRM-style structure:
 
 | Automation Type | Typical Location | Pattern |
 |:--|:--|:--|

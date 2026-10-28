@@ -8,7 +8,7 @@
       "files": [],
       "assertions": {
         "must_contain": ["defineConnector", "provider: 'openapi'", "credentialRef", "connector_action", "type: 'api'", "secretRef", "Swagger 2.0", "blocked"],
-        "must_not_contain": ["registerConnector(", "connector-esign", "provider: 'docusign'", "implements Plugin", "clientSecret", "token:"]
+        "must_not_contain": ["registerConnector(", "connector-esign", "provider: 'docusign'", "implements Plugin", "clientSecret:", "token:"]
       }
     },
     {

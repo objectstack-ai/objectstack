@@ -9,8 +9,7 @@ deployment (a credential object filled in the running app is a platform card in
 flight); an unset ref is a hard boot error naming the entry. A spec is not a
 secret and ships in the package; an `api` flow's hook secret goes to the
 deployment and to the sender. Scaffolded apps list the three executors in
-`plugins:`; keep `automation` in `requires` whenever a connector is declared.
-Full guide: https://objectstack.ai/docs/automation/connectors.
+`plugins:`; keep `automation` in `requires` whenever a connector is declared. Full guide: https://objectstack.ai/docs/automation/connectors.
 
 ## Holds on every recipe
 
@@ -32,7 +31,7 @@ Full guide: https://objectstack.ai/docs/automation/connectors.
 
 ```ts
 // Trim the vendor's OpenAPI 3.x document to the operations the app calls and ship
-// it in the package (3.x only, package-relative, no `$ref` into other files).
+// it in the package: 3.x only, package-relative, every `$ref` dereferenced offline.
 export const StripeConnector = defineConnector({
   name: 'stripe', label: 'Stripe', type: 'api', provider: 'openapi',
   providerConfig: { spec: './src/connectors/stripe.trimmed.json' },   // holds `GetBalance` alone
@@ -58,9 +57,10 @@ export const StripeBalanceSweep = defineFlow({
 });
 ```
 
-`requires: ['automation', 'triggers', 'job']`. Swagger 2.0, YAML or a multi-file
-`$ref` tree is converted or bundled offline (the runtime never converts); the
-`openapi` provider has no `include` key — the trimmed document is the allowlist.
+`requires: ['automation', 'triggers', 'job']`. Convert Swagger 2.0 or YAML and
+dereference every `$ref` offline, in-document ones included: the loader skips a
+`$ref` parameter, request body or response, and the derived input/output schema
+silently loses it. The `openapi` provider has no `include` key — the trimmed document is the allowlist.
 
 ## 2 · Remote MCP server, static header — GitHub
 
