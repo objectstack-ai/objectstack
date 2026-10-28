@@ -503,11 +503,11 @@ Even inside your own worktree, operate defensively:
    yet"; `in_progress` is not a pass, and arming a red PR hides it
    ([why](docs/agents/multi-agent-discipline.md#arming-a-red-pr-hides-it)). Always read *two* things:
    the queue branch **and** `origin/main`. And **the queue enforces only the required
-   set** — nine contexts block: `Lint & Repo Gates` (all `check:*` gates), `TypeScript Type Check`,
-   `Test Core`, `Build Core`, `Governed Surface Queue Guard`, `Lint UI`, `Type Check UI`, `Test UI`
-   and `Build & E2E UI`; a check outside those nine is advisory
+   set** — ten contexts block: `Lint & Repo Gates` (all `check:*` gates), `TypeScript Type Check`,
+   `Test Core`, `Build Core`, `Governed Surface Queue Guard`, `Lint UI`, `Type Check UI`, `Test UI`,
+   `Build & E2E UI` and `Live E2E UI`; a check outside those ten is advisory
    ([why that matters](docs/agents/multi-agent-discipline.md#advisory-checks-ride-through)). A required context is
-   matched by check-run name, so a rename detaches its gate silently — treat those nine names as contract.
+   matched by check-run name, so a rename detaches its gate silently — treat those ten names as contract.
    **Two speeds** — PR and queue runs carry the fast set; `main`'s scheduled and push runs carry the full
    battery ([detail](docs/agents/multi-agent-discipline.md#two-speeds-which-runs-carry-which-battery)).
    **Main-red:** a full-battery red is its lane's first work — triage files it under
