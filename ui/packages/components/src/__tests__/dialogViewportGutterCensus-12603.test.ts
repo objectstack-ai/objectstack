@@ -347,7 +347,6 @@ const WIDE_SITES: Array<[file: string, tags: string[]]> = [
   ['packages/app-shell/src/views/FlowRunner.tsx', ['DialogContent']],
   ['packages/app-shell/src/views/metadata-admin/CelTestRunDialog.tsx', ['DialogContent']],
   ['packages/components/src/custom/fullscreen-editor.tsx', ['DialogContent']],
-  ['packages/components/src/custom/navigation-overlay.tsx', ['DialogContent']],
   ['packages/fields/src/widgets/ImageLightbox.tsx', ['DialogContent']],
   ['packages/fields/src/widgets/RecordPickerDialog.tsx', ['DialogContent']],
   ['packages/plugin-form/src/ModalForm.tsx', ['MobileDialogContent', 'MobileDialogContent']],
@@ -358,12 +357,11 @@ const WIDE_SITES: Array<[file: string, tags: string[]]> = [
  * Wide dialogs that keep a viewport gutter of their own instead of the shared
  * export. Deletions only: converging one removes it from here.
  *
- *  - `navigation-overlay.tsx`'s modal mode draws `w-[calc(100vw-1rem)]` under
- *    a host-set `--ov-w` cap (default 42rem): never edge to edge, but a 0.5rem
- *    literal of its own. It was outside objectui#12603's enumeration and file
- *    surface.
+ * Empty since objectstack#26677: its one entry, `navigation-overlay.tsx`'s
+ * modal mode (`w-[calc(100vw-1rem)]` under a host-set `--ov-w` cap), left with
+ * the retired `navigation.mode: 'modal'` — the dialog is gone, not converged.
  */
-const OWN_GUTTER: ReadonlySet<string> = new Set(['packages/components/src/custom/navigation-overlay.tsx · DialogContent']);
+const OWN_GUTTER: ReadonlySet<string> = new Set<string>();
 
 function tally(entries: Array<{ file: string; tag: string }>): Map<string, number> {
   const out = new Map<string, number>();

@@ -98,6 +98,9 @@ async function boot(environmentId?: string) {
     engine.registry.registerObject(SysMetadataHistoryObject as any, TEST_PACKAGE_ID);
     engine.registry.registerObject(SysMetadataAuditObject as any, TEST_PACKAGE_ID);
     await engine.syncSchemas();
+    // [#26708] The authored packages the saves below name are installed: a save
+    // naming a package no installed package has is refused before it is written.
+    for (const id of [P, Q]) engine.registry.installPackage({ id, name: id, version: '1.0.0' } as any, 'authored');
     // A real `single` install's Default Organization: the system writes below
     // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
     await installDefaultOrganization(engine);

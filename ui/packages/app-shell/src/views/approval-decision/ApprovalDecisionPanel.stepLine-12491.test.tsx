@@ -7,7 +7,8 @@
  */
 
 /**
- * The approval decision panel draws NO step line (objectstack#26563).
+ * The approval decision panel draws the request's own route, `flow_route`
+ * (objectstack#26668), never the flow graph's trunk (objectstack#26563).
  *
  * The panel used to draw the bound row's `flow_steps` through
  * `ApprovalStepLine` (objectui#12491). That field is the flow graph's trunk:
@@ -15,21 +16,20 @@
  * then the first edge. So a request a decision routed elsewhere was drawn on
  * rungs it never visits. The reported case, hotclm's `contract_approval`
  * routed manager → finance only, read "直属上级 · 法务负责人 + 财务负责人（会签） ·
- * 分管领导 · 总经理" while the request waited on the finance controller.
- *
- * The bound row proves only its own step, which the page's header names, and
- * one step is no line, so the panel draws none until the approvals read
- * serves the route the run takes.
+ * 分管领导 · 总经理" while the request waited on the finance controller. #26563
+ * stopped drawing the line; the approvals get now serves the route itself, so
+ * the line is back, drawn from that.
  *
  * ## What is asserted
  *
- * The reported row, served trunk and all, draws no step line and none of the
- * trunk's rungs; a decided row draws none either; the panel's other parts
- * still draw, in their order. The step line's own layout contract (vertical,
+ * The reported row, served its trunk and its route, draws the route's two
+ * rungs and none of the trunk's others; a decided row draws its route; a row
+ * served no route draws no line, whatever its trunk reads; the line sits above
+ * the tally and the decisions. The step line's own layout contract (vertical,
  * no width pinning, no scroller, the same classes at every step count, the
- * connector tint) is pinned where the line is still drawn, over the same
- * `ApprovalStepLine` markup: `RecordApprovalsPanel.stepProgressVertical.test.tsx`.
- * The declared actions bar is doubled.
+ * connector tint) is pinned over the same `ApprovalStepLine` markup in
+ * `RecordApprovalsPanel.stepProgressVertical.test.tsx`. The declared actions
+ * bar is doubled.
  */
 
 import * as React from 'react';
@@ -46,6 +46,7 @@ import { ApprovalDecisionRenderer } from './ApprovalDecisionPanel';
 import type { ApprovalRequestLite } from '../../hooks/useRecordApprovals';
 
 type Step = NonNullable<ApprovalRequestLite['flow_steps']>[number];
+type Route = NonNullable<ApprovalRequestLite['flow_route']>;
 
 /** The line's accessible name: the `en` pack's `approvalsInbox.stepProgress` row. */
 const STEP_LINE_NAME = (builtInLocales as unknown as { en: { approvalsInbox: { stepProgress: string } } })
@@ -70,6 +71,15 @@ const SERVED_TRUNK: Step[] = [
   { id: 'gm_signoff', label: GM, state: 'upcoming' },
 ];
 
+/** The route the get serves for that request: the manager passed, finance current, a gateway ahead. */
+const SERVED_ROUTE: Route = {
+  steps: [
+    { id: 'manager_review', label: MANAGER, state: 'done' },
+    { id: 'finance_only', label: FINANCE, state: 'current' },
+  ],
+  ahead: 'undecided',
+};
+
 /** The request as the approvals get serves it to the page. */
 function requestRow(extra: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -88,6 +98,7 @@ function requestRow(extra: Record<string, unknown> = {}): Record<string, unknown
     pending_approvers: [],
     viewer: { can_act: false, is_submitter: false, can_override: false },
     flow_steps: SERVED_TRUNK,
+    flow_route: SERVED_ROUTE,
     ...extra,
   };
 }
@@ -105,32 +116,52 @@ afterEach(() => {
   cleanup();
 });
 
-describe('ApprovalDecisionPanel — no guessed step line (objectstack#26563)', () => {
-  it('the reported request, served with its flow trunk, draws no step line and none of the trunk\'s rungs', () => {
+/** Each drawn step's label, in order. */
+function lineLabels(panel: HTMLElement): string[] {
+  const line = within(panel).getByLabelText(STEP_LINE_NAME);
+  // A row is the marker column, then the label.
+  return within(line).getAllByRole('listitem').map((li) => li.children[1]?.textContent ?? '');
+}
+
+describe('ApprovalDecisionPanel — the step line draws the served route (objectstack#26668)', () => {
+  it('the reported request draws its route, manager then finance only, and none of the trunk\'s other rungs', () => {
     const panel = mount(requestRow());
+    expect(lineLabels(panel)).toEqual([MANAGER, FINANCE]);
+    const line = within(panel).getByLabelText(STEP_LINE_NAME);
+    for (const rung of [JOINT, EXECUTIVE, GM]) {
+      expect(within(line).queryByText(rung)).toBeNull();
+    }
+    // The bound request's rung is the current one: bold, numbered, not checked.
+    const rows = within(line).getAllByRole('listitem');
+    expect(within(rows[1]).getByText(FINANCE).className).toContain('font-medium');
+    expect(rows[1]).toHaveTextContent('2');
+  });
+
+  it('a decided request draws its route too, every step done', () => {
+    const panel = mount(requestRow({
+      status: 'approved',
+      flow_steps: SERVED_TRUNK.map((s) => ({ ...s, state: 'done' })),
+      flow_route: { steps: SERVED_ROUTE.steps.map((s) => ({ ...s, state: 'done' })), ahead: 'decided' },
+    }));
+    expect(lineLabels(panel)).toEqual([MANAGER, FINANCE]);
+  });
+
+  it('a row served no route draws no line, whatever its trunk reads', () => {
+    const panel = mount(requestRow({ flow_route: undefined }));
     expect(within(panel).queryByLabelText(STEP_LINE_NAME)).toBeNull();
-    expect(within(panel).queryByRole('list')).toBeNull();
     for (const rung of [MANAGER, JOINT, EXECUTIVE, GM]) {
       expect(within(panel).queryByText(rung)).toBeNull();
     }
     expect(within(panel).getByTestId('declared-actions-probe')).toBeTruthy();
   });
 
-  it('a decided request whose trunk the server marked all done draws no step line either', () => {
-    const panel = mount(requestRow({
-      status: 'approved',
-      flow_steps: SERVED_TRUNK.map((s) => ({ ...s, state: 'done' })),
-    }));
-    expect(within(panel).queryByLabelText(STEP_LINE_NAME)).toBeNull();
-    expect(within(panel).queryByRole('list')).toBeNull();
-  });
-
-  it('CONTROL: the tally still draws, above the decisions', () => {
+  it('the line sits above the tally, and the tally above the decisions', () => {
     const panel = mount(requestRow({ decision_progress: { behavior: 'quorum', got: 1, need: 2 } }));
+    const line = within(panel).getByLabelText(STEP_LINE_NAME);
     const bar = within(panel).getByRole('progressbar');
     const actions = within(panel).getByTestId('declared-actions-probe');
     // DOCUMENT_POSITION_FOLLOWING: the argument comes after the receiver.
+    expect(line.compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(bar.compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(within(panel).queryByLabelText(STEP_LINE_NAME)).toBeNull();
   });
 });

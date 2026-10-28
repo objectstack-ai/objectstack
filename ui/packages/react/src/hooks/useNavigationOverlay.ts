@@ -50,9 +50,10 @@
  *
  * ## `page` with no `onNavigate`: the HOST's record navigator (objectui#11293)
  *
- * `page` is the spec's default `mode`, so it is what `{ mode: 'page' }` and
- * every authored block written without `mode` (`{ size: 'lg' }`) resolve to.
- * The branch used to call `onNavigate` and nothing else, and a host that
+ * `page` is what `{ mode: 'page' }` resolves to. (It was also the spec's
+ * default `mode` until objectstack#26677 moved the default to `drawer`, so an
+ * authored block written without `mode` — `{ size: 'lg' }` — now opens the
+ * drawer instead.) The branch used to call `onNavigate` and nothing else, and a host that
  * renders a block without wiring one — a board, a calendar, a gallery or a
  * grid placed on a page as a standalone block — has no `onNavigate`: the
  * click did nothing at all. Measured before the change: a standalone
@@ -79,9 +80,8 @@
  * `object-gallery` with no `navigation` and an `onRowClick` that is undefined
  * when the bridge withheld `onView`; reading the published navigator on the
  * absent-key path would open those records anyway, under the very bridge that
- * withheld them. So `{}` and no config still agree whenever an `onNavigate`
- * is supplied, and part only where a host published a navigator but wired no
- * callback. The kanban, calendar and gantt default an absent key to a drawer
+ * withheld them. So an absent `navigation` and `{}` differ: the first is the
+ * host's call, the second the spec's `drawer` default. The kanban, calendar and gantt default an absent key to a drawer
  * before it reaches this hook in any case. Modifier clicks and `new_window`
  * are untouched as well. Pinned by
  * `__tests__/useNavigationOverlay.hostRecordNavigator-11293.test.tsx` here and
@@ -109,7 +109,7 @@ import { useRelatedRecordActions } from '../context/RelatedRecordActionsContext.
  *
  * `mode` is OPTIONAL, because the spec says so and this hook agrees.
  * `packages/spec/src/ui/view.zod.ts` declares
- * `mode: NavigationModeSchema.default('page')`, and a `.default()` lands on the
+ * `mode: NavigationModeSchema.default('drawer')`, and a `.default()` lands on the
  * AUTHORING side as `| undefined` — so `navigation: { size: 'lg' }` is legal
  * authored metadata that lets the mode default. ⛔ This sentence used to make
  * the same point with a `view` member; see "The RETIRED `view` key" below for
@@ -119,8 +119,9 @@ import { useRelatedRecordActions } from '../context/RelatedRecordActionsContext.
  * `NonNullable<…>`, on the stated reasoning that "this hook dispatches on
  * `mode` and its callers always supply one". Both halves were false.
  * `useNavigationOverlay` does not require `mode` — it DEFAULTS it
- * (`navigation?.mode ?? 'page'`, ~140 lines below), and `'page'` is meaningful
- * behaviour rather than a placeholder. And callers did not always supply one:
+ * (`navigation?.mode ?? 'drawer'`, ~140 lines below, the spec's own default
+ * since objectstack#26677), and `'drawer'` is meaningful behaviour rather than
+ * a placeholder. And callers did not always supply one:
  * `ListView` carried `schema.navigation as NavigationConfig | undefined` purely
  * to get a spec-shaped value past this declaration — a value the hook had
  * always been willing to take.
@@ -187,13 +188,14 @@ export function resolveOverlayWidth(navigation: NavigationConfig | undefined): s
  * rc.6 publishes `NavigationMode` (`z.input<typeof NavigationModeSchema>`), and
  * this alias resolved to exactly it already: `NavigationConfig['mode']` was then
  * `NonNullable<…['mode']>`, and stripping the `undefined` that the schema's
- * `.default()` puts on the authoring side leaves the seven-member enum itself.
+ * `.default()` puts on the authoring side leaves the enum itself.
  * So the spec reference was one hop away rather than absent — the alias just
  * reached it through a member access, which reads as a hand-written union to
  * `check:spec-symbols` and, more to the point, to a person.
  *
- * Bound to the spec directly instead: the seven members now arrive from the
- * schema that validates them. `__tests__/offline-nav-performance-spec-parity.test.ts`
+ * Bound to the spec directly instead: the members now arrive from the schema
+ * that validates them — four since objectstack#26677 (`drawer`, `page`,
+ * `new_window`, `none`; `modal`, `split` and `popover` were retired). `__tests__/offline-nav-performance-spec-parity.test.ts`
  * pins that this stays the same type as `NonNullable<NavigationConfig['mode']>`,
  * so the two spellings cannot silently come apart if the spec ever stops
  * defaulting `mode` or defaults it on a narrower union.
@@ -202,8 +204,8 @@ export function resolveOverlayWidth(navigation: NavigationConfig | undefined): s
  * `NavigationConfig` no longer strips the authoring-side `undefined`, so
  * `NavigationConfig['mode']` is `NavigationMode | undefined` and a bare
  * equality would now fail for a reason unrelated to the drift being guarded.
- * What stays pinned is the MEMBERSHIP — the seven modes this hook switches on
- * are exactly the seven the exported union publishes.
+ * What stays pinned is the MEMBERSHIP — the modes this hook switches on are
+ * exactly the ones the exported union publishes.
  */
 export type NavigationMode = SpecNavigationMode;
 
@@ -273,7 +275,7 @@ export interface HandleClickModifiers {
 }
 
 export interface NavigationOverlayState {
-  /** Whether the overlay (drawer/modal/split/popover) is open */
+  /** Whether the overlay (the drawer, or a host's split pane) is open */
   isOpen: boolean;
   /** The record that triggered the navigation */
   selectedRecord: Record<string, unknown> | null;
@@ -294,9 +296,9 @@ export interface NavigationOverlayState {
    * configured mode — matches Linear / Notion / Airtable convention.
    */
   handleClick: (record: Record<string, unknown>, event?: HandleClickModifiers) => void;
-  /** The width from NavigationConfig (for drawer/modal/split sizing) */
+  /** The width from NavigationConfig (for drawer / split sizing) */
   width: string | number | undefined;
-  /** Whether navigation is an overlay mode (drawer/modal/split/popover) */
+  /** Whether navigation opens an overlay — `drawer`, the one overlay mode */
   isOverlay: boolean;
 }
 
@@ -361,9 +363,14 @@ export function useNavigationOverlay(
   const [isOpen, setIsOpen] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState<Record<string, unknown> | null>(null);
 
-  const mode: NavigationMode = navigation?.mode ?? 'page';
+  // The spec's own default (`NavigationModeSchema.default('drawer')`,
+  // objectstack#26677): a block written without `mode` opens the drawer.
+  const mode: NavigationMode = navigation?.mode ?? 'drawer';
   const width = resolveOverlayWidth(navigation);
-  const isOverlay = mode === 'drawer' || mode === 'modal' || mode === 'split' || mode === 'popover';
+  // `drawer` is the one overlay mode the spec keeps; `modal`, `split` and
+  // `popover` were retired (objectstack#26677). A side-by-side pane is a
+  // reader's own preference, which a host draws from an open drawer.
+  const isOverlay = mode === 'drawer';
 
   const close = useCallback(() => {
     setIsOpen(false);
@@ -454,7 +461,7 @@ export function useNavigationOverlay(
         return;
       }
 
-      // Overlay modes: drawer, modal, split, popover
+      // The overlay mode: drawer
       if (isOverlay) {
         setSelectedRecord(record);
         setIsOpen(true);

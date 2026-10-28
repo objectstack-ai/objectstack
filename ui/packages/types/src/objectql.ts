@@ -3333,20 +3333,20 @@ export interface NamedListView {
  * This used to be a hand-written interface mirroring the spec's six keys, and
  * it had drifted on exactly one of them: it required `mode`, under a doc
  * comment that itself said `@default 'page'` (objectui#4588). The spec declares
- * `mode: NavigationModeSchema.default('page')`
+ * `mode: NavigationModeSchema.default('drawer')` — `'page'` until
+ * objectstack#26677, which also retired `modal`, `split` and `popover`
  * (`@objectstack/spec` `ui/view.zod.ts` `NavigationConfigSchema`), and a
  * `.default()` lands on the AUTHORING side as `| undefined` — which is why the
  * spec publishes its own type as `z.input< typeof NavigationConfigSchema >`.
  * So `navigation: { openNewTab: true }` is legal authored metadata that lets
- * the mode default (to `'page'`, the mode `openNewTab` applies to), and the
- * hand copy refused it.
+ * the mode default, and the hand copy refused it.
  *
  * `index.ts` already re-exports that same spec type under its own name
  * (`NavigationConfig`), so this package published two disagreeing spellings of
  * one spec object. They are one type now. Per this file's rule above —
  * "Never Redefine Types. ALWAYS import them." — the per-key documentation lives
  * with the schema in the spec rather than being restated here, so there is no
- * third place to keep the `'page'` default in sync.
+ * third place to keep the default in sync.
  *
  * objectui#4550 / PR objectui#4586 made the same collapse for
  * `@object-ui/react`'s `NavigationConfig`.

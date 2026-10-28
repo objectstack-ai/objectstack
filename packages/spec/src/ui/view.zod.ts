@@ -64,7 +64,7 @@ import { SectionGroupKeySchema, sectionGroupReferenceRefinement } from '../share
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 import { ChartTypeSchema } from './chart.zod';
 import { SharingConfigSchema } from './sharing.zod';
-import { retiredKey } from '../shared/retired-key';
+import { enumWithRetiredValues, retiredKey } from '../shared/retired-key';
 // [#19088] The decimal-places ceiling every renderer enforces, and the refusal
 // text that explains it. A `src/shared/` leaf that no package entry re-exports,
 // so the bound this row applies costs no published export — see that module's
@@ -2413,19 +2413,58 @@ export const ListMapConfigSchema = lazySchema(() => strictObject({
   style: z.string().optional().describe('Map style URL — the MapLibre style document the renderer loads in place of the public demo tiles. The component-level `mapStyle` is read FIRST and wins when both are present; this is NOT the inline CSS `style` record a component node carries'),
 }).describe('Map view configuration'));
 
+// [#26677] `navigation.mode` retired members — the prescription each one
+// answers with at parse (`enumWithRetiredValues`, `../shared/retired-key.ts`).
+// Declared with `//` on purpose: an enum's error map consumes this, it is no
+// documented surface (the `NAVIGATION_VIEW_RETIRED` placement note below).
+//
+// Maintainer ruling 2026-10-27 (record-page-v2 epic, ruling 1): an object has
+// ONE default way to open a record — the drawer, which expands to the full
+// page; `page` only for an object that declares it; `modal` retired; split and
+// popover become a reader's own preference. The drawer and the full page are
+// the same record page at two widths. The `navigation-mode-overlay-values-removed`
+// conversion (ADR-0087 D2, `conversions/registry.ts`) strips a retired member
+// from existing sources and stored rows, which lands them on the default.
+const NAVIGATION_MODE_RETIRED_FIX =
+  'Delete the value — `drawer` is the default; declare `page` only for an object whose record should '
+  + 'open as a full page; a side-by-side pane is a reader\'s own preference in the list\'s Display menu, '
+  + 'not metadata. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
+
+const NAVIGATION_MODE_RETIRED = {
+  modal:
+    "`navigation.mode: 'modal'` was removed in @objectstack/spec 18.3.0 (ADR-0087 D2) — a record opens "
+    + 'one way per object: in the drawer, which expands to the full page, or as the full page for an '
+    + 'object that declares `page`, so a centred dialog was a third surface for the same record. '
+    + NAVIGATION_MODE_RETIRED_FIX,
+  split:
+    "`navigation.mode: 'split'` was removed in @objectstack/spec 18.3.0 (ADR-0087 D2) — whether the "
+    + 'record opens beside the list is each reader\'s own choice, not a mode an author fixes for every '
+    + 'reader of the list. '
+    + NAVIGATION_MODE_RETIRED_FIX,
+  popover:
+    "`navigation.mode: 'popover'` was removed in @objectstack/spec 18.3.0 (ADR-0087 D2) — a record opens "
+    + 'one way per object: in the drawer, which expands to the full page, or as the full page for an '
+    + 'object that declares `page`, so a popover was a cramped fourth surface for the same record. '
+    + NAVIGATION_MODE_RETIRED_FIX,
+} as const;
+
 /**
  * Navigation Mode Enum
- * Defines how to navigate to the detail view from a list item.
+ * How a list opens the record a reader clicks. `drawer` is the default: the
+ * record opens in the side drawer, which expands to the full page — the same
+ * record page at two widths. `page` is for an object whose record should open
+ * as a full page, and is declared for that object only. `modal`, `split` and
+ * `popover` were retired (#26677): a side-by-side pane is a reader's own
+ * preference, not metadata, and each retired member is refused at parse with
+ * its prescription.
  */
-export const NavigationModeSchema = lazySchema(() => z.enum([
-  'page',       // Navigate to a new route (default)
-  'drawer',     // Open details in a side drawer/panel
-  'modal',      // Open details in a modal dialog
-  'split',      // Show details side-by-side with the list (master-detail)
-  'popover',    // Show details in a popover (lightweight)
+export const NavigationModeSchema = lazySchema(() => enumWithRetiredValues([
+  'drawer',     // Open the record in the side drawer, which expands to the full page (default)
+  'page',       // Navigate to the record route — declared only for an object that opens as a full page
   'new_window', // Open in new browser tab/window
-  'none'        // No navigation (read-only list)
-]));
+  'none',       // No navigation (read-only list)
+], NAVIGATION_MODE_RETIRED));
 
 // [#16885] `navigation.view` retirement prescription — director decision batch
 // #126 item 4 (maintainer ruling 2026-09-13, option B: retire). Declared with
@@ -2464,7 +2503,13 @@ export const NavigationConfigSchema = lazySchema(() => strictObject({
   surface: 'this navigation configuration',
   history: VIEW_HISTORY,
 }, {
-  mode: NavigationModeSchema.default('page'),
+  /**
+   * [#26677] How a click opens the record. Defaults to `drawer` — before
+   * 18.3.0 it defaulted to `page`, which the console never honoured for an
+   * un-authored list (it guessed the surface from the object's field count).
+   * Declare `page` only for an object whose record should open as a full page.
+   */
+  mode: NavigationModeSchema.default('drawer'),
 
   /**
    * [#16885] RETIRED — see {@link NAVIGATION_VIEW_RETIRED} above the schema.
@@ -2479,14 +2524,14 @@ export const NavigationConfigSchema = lazySchema(() => strictObject({
   openNewTab: z.boolean().default(false).describe('Force open in new tab (applies to page mode)'),
   
   /**
-   * [#2578] Overlay size for a drawer/modal detail — coarse T-shirt buckets,
+   * [#2578] Overlay size for a drawer detail — coarse T-shirt buckets,
    * aligned with `FormView.modalSize` (`page` mode ignores it). `'auto'`
    * (default): the renderer derives the size from the object's field count and
    * clamps it to the client viewport, so AI writes nothing — it cannot know the
    * client width. Explicit buckets are a coarse, viewport-independent override.
    */
   size: z.enum(['auto', 'sm', 'md', 'lg', 'xl', 'full']).default('auto')
-    .describe("Overlay size bucket for drawer/modal detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it."),
+    .describe("Overlay size bucket for the drawer detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it."),
 
   /**
    * @deprecated [#2578 → `size`] A pixel/percent width cannot be authored blind:
@@ -2494,7 +2539,7 @@ export const NavigationConfigSchema = lazySchema(() => strictObject({
    * renderer fallback for pre-#2578 metadata; new metadata sets `size` (or omits
    * it for `auto`).
    */
-  width: z.union([z.string(), z.number()]).optional().describe('[DEPRECATED → size] Pixel/percent width of the drawer/modal (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket.'),
+  width: z.union([z.string(), z.number()]).optional().describe('[DEPRECATED → size] Pixel/percent width of the drawer (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket.'),
 }));
 
 /**
@@ -3020,7 +3065,7 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
   selection: SelectionConfigSchema.optional().describe('Row selection configuration'),
 
   /** Navigation / Interaction */
-  navigation: NavigationConfigSchema.optional().describe('Configuration for item click navigation (page, drawer, modal, etc.)'),
+  navigation: NavigationConfigSchema.optional().describe('Configuration for item click navigation (drawer by default, page, new_window or none)'),
 
   /** Pagination */
   pagination: PaginationConfigSchema.optional().describe('Pagination configuration'),

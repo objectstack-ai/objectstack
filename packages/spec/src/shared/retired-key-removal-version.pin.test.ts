@@ -90,8 +90,8 @@ import { AdminScopeSchema, PermissionSetSchema } from '../security/permission.zo
 import { SharingLevel } from '../security/sharing.zod';
 import { DatasourceSchema } from '../data/datasource.zod';
 import { TursoConfigSchema } from '../data/driver/turso.zod';
-import { PageComponentSchema, PageSchema } from '../ui/page.zod';
-import { AddRecordConfigSchema, FormFieldSchema, FormSectionSchema, ListViewSchema, ObjectListViewSchema } from '../ui/view.zod';
+import { InterfacePageConfigSchema, PageComponentSchema, PageSchema } from '../ui/page.zod';
+import { AddRecordConfigSchema, FormFieldSchema, FormSectionSchema, ListViewSchema, NavigationModeSchema, ObjectListViewSchema } from '../ui/view.zod';
 import { FlowSchema } from '../automation/flow.zod';
 import { JobSchema } from '../system/job.zod';
 import { TranslationItemSchema } from '../system/translation.zod';
@@ -381,6 +381,18 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
   ],
   'add-record-enabled-defaulted': [
     refusal('an addRecord block without `enabled`', () => AddRecordConfigSchema.safeParse({}), 'enabled'),
+  ],
+  // #26677: value-level retirements — each retired member is refused by the
+  // enum's own error map with its prescription, so the refusal is the parse.
+  'navigation-mode-overlay-values-removed': [
+    ...(['modal', 'split', 'popover'] as const).map((mode) =>
+      refusal(`navigation.mode '${mode}'`, () => NavigationModeSchema.safeParse(mode)),
+    ),
+    refusal(
+      "interfaceConfig.recordAction 'modal'",
+      () => InterfacePageConfigSchema.safeParse({ source: 'crm_contact', recordAction: 'modal' }),
+      'recordAction',
+    ),
   ],
   // #25050: retired after 18.0.0, so the v18 train's major. Partial (unset
   // values and remote urls only), so the prescription's migrate sentence is

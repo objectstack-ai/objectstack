@@ -44,9 +44,9 @@ import { SecurityPlugin, appSecurityPluginOptions } from '@objectstack/plugin-se
 const ENV = 'env_zero_row';
 const TABLE = 'sys_permission_set';
 /** A package whose drafts the package door publishes. */
-const DRAFT_PKG = 'app.zero_row_drafts';
+const DRAFT_PKG = 'app.zero-row-drafts';
 /** A writable base that publishes its set directly (ADR-0070). */
-const BASE_PKG = 'app.zero_row_base';
+const BASE_PKG = 'app.zero-row-base';
 
 const stack: any = {
   manifest: { id: 'com.example.zero_row', name: 'zero_row', version: '0.0.1', type: 'app' },
@@ -116,6 +116,11 @@ for (const kind of ['host', 'environment'] as Kind[]) {
       try {
         const protocol = await kernel.getServiceAsync('protocol');
         const set = (name: string) => ({ name, label: name, isDefault: true, objects: { zero_doc: { allowRead: true } } });
+
+        // [#26708] A save naming a package the registry does not hold is
+        // refused, so both packages are created first, as `POST /packages` does.
+        await protocol.installPackage({ manifest: { id: DRAFT_PKG, name: 'Zero row drafts', version: '0.1.0', type: 'app', namespace: 'zrd' } });
+        await protocol.installPackage({ manifest: { id: BASE_PKG, name: 'Zero row base', version: '0.1.0', type: 'app', namespace: 'zrb' } });
 
         // The package door: a draft into the package, then its atomic publish.
         await protocol.saveMetaItem({ type: 'permission', name: 'zero_pkg_default', item: set('zero_pkg_default'), packageId: DRAFT_PKG, mode: 'draft' });

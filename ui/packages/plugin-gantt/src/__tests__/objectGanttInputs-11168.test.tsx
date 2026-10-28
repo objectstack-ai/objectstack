@@ -394,20 +394,17 @@ describe('`object-gantt.navigation` — the members decide what a task click ope
     expect(pushed()).toEqual([]);
   });
 
-  it.each(['drawer', 'modal', 'popover'] as const)('`mode: "%s"` opens the task\'s record in that overlay', async (mode) => {
-    await clickTask({ mode });
+  // `drawer`, and a block written without `mode` (the spec's `drawer` default
+  // since objectstack#26677, which also retired `modal`, `split` and `popover`).
+  it.each([
+    ['`mode: "drawer"`', { mode: 'drawer' }],
+    ['a block without `mode`', { size: 'lg' }],
+  ] as const)('%s opens the task\'s record in the drawer', async (_why, navigation) => {
+    await clickTask(navigation);
     await waitFor(() => expect(dialog()).not.toBeNull());
     expect(panel()?.getAttribute('data-record')).toBe('t1');
     expect(pushed()).toEqual([]);
     expect(opened()).toEqual([]);
-  });
-
-  it('`mode: "split"` opens the record BESIDE the chart, which stays drawn', async () => {
-    await clickTask({ mode: 'split' });
-    await waitFor(() => expect(panel()).not.toBeNull());
-    expect(panel()?.getAttribute('data-record')).toBe('t1');
-    expect(screen.getByTestId('gantt-body')).toBeTruthy();
-    expect(dialog()).toBeNull();
   });
 
   it('`mode: "none"` and `preventNavigation: true` open nothing, the flag outranking an overlay mode', async () => {
@@ -418,7 +415,7 @@ describe('`object-gantt.navigation` — the members decide what a task click ope
     expectNothingOpened('preventNavigation');
   });
 
-  it('`page`, and a block without `mode`, open the record page in the same tab', async () => {
+  it('`page` opens the record page in the same tab — and a block without `mode` no longer does (objectstack#26677)', async () => {
     await clickTask({ mode: 'page' });
     expect(pushed()).toEqual([RECORD_PAGE]);
     expect(window.location.pathname).toBe(RECORD_PAGE);
@@ -426,9 +423,11 @@ describe('`object-gantt.navigation` — the members decide what a task click ope
     cleanup();
     pushSpy.mockClear();
     window.history.replaceState({}, '', `/console/${OBJECT}/views/all`);
+    // FLIPPED: the mode-less block took the spec's `page` default until
+    // objectstack#26677; it now takes `drawer` and opens the drawer in place.
     await clickTask({ size: 'lg' });
-    expect(pushed()).toEqual([RECORD_PAGE]);
-    expect(dialog()).toBeNull();
+    await waitFor(() => expect(dialog()).not.toBeNull());
+    expect(pushed()).toEqual([]);
   });
 
   it('`new_window` opens the record page in a new tab, and `openNewTab` outranks `page` and `drawer` but not `none`', async () => {
@@ -491,15 +490,17 @@ describe('`object-gantt.navigation` does not use the host\'s record navigator (o
     expect(openRecord).not.toHaveBeenCalled();
   });
 
-  it('under that host, `page` and a block without `mode` open the gantt\'s OWN derived address, never `openRecord`', async () => {
+  it('under that host, `page` opens the gantt\'s OWN derived address, never `openRecord`; a block without `mode` opens the drawer', async () => {
     const { value, openRecord } = recordNavigatorHost();
     await clickTask({ mode: 'page' }, { host: value });
     expect(pushed()).toEqual([RECORD_PAGE]);
     cleanup();
     pushSpy.mockClear();
     window.history.replaceState({}, '', `/console/${OBJECT}/views/all`);
+    // FLIPPED (objectstack#26677): the spec's default is `drawer` now.
     await clickTask({ size: 'lg' }, { host: value });
-    expect(pushed()).toEqual([RECORD_PAGE]);
+    await waitFor(() => expect(dialog()).not.toBeNull());
+    expect(pushed()).toEqual([]);
     expect(openRecord).not.toHaveBeenCalled();
   });
 

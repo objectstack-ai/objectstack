@@ -128,10 +128,10 @@ at runtime from how heavy the record is + the client viewport, because an author
 (especially an AI) cannot know the client's screen. **Write the data (fields,
 `fieldGroups`); let the platform lay it out.**
 
-- **Surface.** Derived from field count and viewport. A field-heavy record, or
-  any on mobile, is viewed on a **page** and created/edited in a **modal**
-  (bounded on desktop, full-screen on mobile); otherwise a **drawer**. To force
-  it, set `navigation.mode` (`page` | `drawer` | `modal`) on the list view — or,
+- **Surface.** A clicked record opens in a **drawer** that expands to the full
+  page (on mobile, a **page**); create/edit opens in a **modal** for a
+  field-heavy record, otherwise a drawer. Set `navigation.mode: 'page'` on the
+  list view only for an object whose record should open as a full page — or,
   for bespoke layout, assign a record `Page`.
 - **Field width.** **Omit it** (`auto` sizes by widget type × current columns —
   textarea / rich-text / file take the row). Both keys are valid: `colSpan`

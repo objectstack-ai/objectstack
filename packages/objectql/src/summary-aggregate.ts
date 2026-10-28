@@ -120,3 +120,38 @@ export async function aggregateSummaryValue(
   const value = rows?.[0]?.value;
   return value == null ? summaryEmptySetValue(desc.fn) : value;
 }
+
+/**
+ * [#26950] The matched rows a predicate delete hands the recompute, less every
+ * foreign key that names a row the same delete removed.
+ *
+ * A roll-up over its own object (a `summary` aggregating `object` through a
+ * self-reference) can name, from one matched row, a parent that is itself a
+ * matched row. That parent is gone after the delete, so it has no roll-up left
+ * to recompute, and asking would answer not-found for a row the delete itself
+ * took: a `SummaryRecomputeError` on a delete that succeeded. The by-id delete
+ * never meets this, because it deletes one row and its children's own deletes
+ * recompute it while it still exists. Only self-referencing descriptors are
+ * touched; every other foreign key is handed over as read.
+ */
+export function withoutDeletedSelfParents(
+  object: string,
+  rows: Array<Record<string, unknown>>,
+  deletedIds: ReadonlyArray<string | number>,
+  descriptors: readonly SummaryDescriptor[],
+): Array<Record<string, unknown>> {
+  const selfKeys = descriptors.filter((desc) => desc.parentObject === object).map((desc) => desc.fkField);
+  if (selfKeys.length === 0 || deletedIds.length === 0) return rows;
+  const gone = new Set(deletedIds.map(String));
+  return rows.map((row) => {
+    let out = row;
+    for (const key of selfKeys) {
+      const v = row?.[key];
+      if (v != null && gone.has(String(v))) {
+        if (out === row) out = { ...row };
+        out[key] = null;
+      }
+    }
+    return out;
+  });
+}

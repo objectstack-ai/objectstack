@@ -920,14 +920,14 @@ Enable package response
 | **$top** | `integer \| string \| null` | optional | Transport spelling of `limit` (OData `$top`) — a non-negative integer, or the digits a querystring carries it as |
 | **$skip** | `integer \| string \| null` | optional | Transport spelling of `offset` (OData `$skip`) — a non-negative integer, or the digits a querystring carries it as |
 | **$orderby** | `Record<string, Enum<'asc' \| 'desc'>> \| Record<string, 1 \| -1> \| { field: string; order?: Enum<'asc' \| 'desc'> }[] \| null` | optional | Transport spelling of `orderBy` (OData `$orderby`) |
-| **$select** | `string \| string[] \| null` | optional | Transport spelling of `fields` (OData `$select`) |
+| **$select** | `string \| string[] \| null` | optional | Transport spelling of `fields` (OData `$select`) — at least one field name; a value naming no field (blank, only commas and spaces, an empty list, or a list with a blank name) is refused |
 | **$expand** | `string \| string[] \| Record<string, { object: string; fields?: string[]; where?: any; search?: string \| object; … }> \| null` | optional | Transport spelling of `expand` (OData `$expand`) |
 | **$search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … } \| null` | optional | Transport spelling of `search` (OData `$search`) |
 | **$searchFields** | `string \| string[] \| null` | optional | Transport spelling of `searchFields` (OData `$searchFields`) |
 | **$count** | `boolean \| Enum<'true' \| 'false'> \| null` | optional | Transport spelling of the response total-count flag (OData `$count`) |
 | **count** | `boolean \| Enum<'true' \| 'false'> \| null` | optional | Response total-count flag — only an explicit `false` skips the COUNT query |
 | **filter** | `[string, string, any] \| [string, string] \| [string, object, ...object[]] \| object[] \| Record<string, any> \| any \| null` | optional | Transport spelling of `where` |
-| **select** | `string \| string[] \| null` | optional | Transport spelling of `fields` |
+| **select** | `string \| string[] \| null` | optional | Transport spelling of `fields` — at least one field name; a value naming no field (blank, only commas and spaces, an empty list, or a list with a blank name) is refused |
 | **sort** | `Record<string, Enum<'asc' \| 'desc'>> \| Record<string, 1 \| -1> \| { field: string; order?: Enum<'asc' \| 'desc'> }[] \| null` | optional | Transport spelling of `orderBy` |
 | **skip** | `integer \| string \| null` | optional | Transport spelling of `offset` — a non-negative integer, or the digits a querystring carries it as |
 | **populate** | `string \| string[] \| null` | optional | Transport spelling of `expand` |
@@ -1038,7 +1038,7 @@ This schema accepts one of the following structures:
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | The object name. |
 | **id** | `string` | ✅ | The unique record identifier (primary key). |
-| **select** | `string[]` | optional | Fields to include in the response (allowlisted query param). |
+| **select** | `string[]` | optional | Fields to include in the response (allowlisted query param) — at least one field name; an empty list, or a list with a blank name, is refused. |
 | **expand** | `string[]` | optional | Lookup/master_detail field names to expand. The engine resolves these via batch $in queries, replacing foreign key IDs with full objects. |
 
 
@@ -1782,6 +1782,7 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | **reports** | `Record<string, { label?: string; description?: string; blocks?: Record<string, object> }>` | optional | Report translations keyed by report name |
 | **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string; … }>` | optional | Page translations keyed by page name |
 | **flows** | `Record<string, { label?: string; successMessage?: string; errorMessage?: string; screens?: Record<string, object>; … }>` | optional | Screen-flow translations keyed by flow name |
+| **hooks** | `Record<string, { refusals?: Record<string, object> }>` | optional | Hook translations keyed by hook name |
 | **positions** | `Record<string, { label?: string; description?: string }>` | optional | Position translations keyed by position name |
 | **permissions** | `Record<string, { label?: string; description?: string }>` | optional | Permission-set translations keyed by permission-set name |
 | **books** | `Record<string, { label?: string; description?: string; groups?: Record<string, object> }>` | optional | Doc-book translations keyed by book name |
@@ -1841,7 +1842,7 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | **resizable** | `boolean` | optional | Enable column resizing |
 | **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover |
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
-| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
+| **navigation** | `{ mode?: Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation (drawer by default, page, new_window or none) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
 | **kanban** | `{ groupByField: string; summarizeField?: string; titleField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
@@ -1920,7 +1921,7 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | **resizable** | `boolean` | optional | Enable column resizing |
 | **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover |
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
-| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
+| **navigation** | `{ mode?: Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation (drawer by default, page, new_window or none) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
 | **kanban** | `{ groupByField: string; summarizeField?: string; titleField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |

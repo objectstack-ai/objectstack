@@ -158,11 +158,10 @@ describe('[#8144] session.create.after records a login', () => {
     expect(recordAuthEvent).toHaveBeenCalledTimes(1);
   });
 
-  it('is wired even when autoActiveOrganization is off (which removes create.before)', async () => {
+  it('is wired even when autoActiveOrganization is off (which removes the active-organization default)', async () => {
     const { hooks, recordAuthEvent } = hooksWithSink({ autoActiveOrganization: false });
     // The pre-#8144 shape omitted the whole `session` block when there was no
     // `before` hook to install — the audit writer must not inherit that gate.
-    expect(hooks.session?.create?.before).toBeUndefined();
     await hooks.session.create.after(SESSION, { path: '/sign-in/email' });
     expect(recordAuthEvent).toHaveBeenCalledTimes(1);
   });

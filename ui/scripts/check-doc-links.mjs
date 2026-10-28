@@ -668,9 +668,6 @@ const BOTH_FILTERS = 'A SCAN_ROOTS row may set `exclude` OR `collect`, never bot
 export const SCAN_ROOTS = [
   { path: 'content/docs', rule: 'docs' },
   { path: 'examples', rule: 'disk' },
-  { path: 'README.md', rule: 'disk' },
-  { path: 'CONTRIBUTING.md', rule: 'disk' },
-  { path: 'ROADMAP.md', rule: 'disk' },
   { path: 'docs', rule: 'disk' },
   { path: 'packages/*/README.md', rule: 'disk' },
   { path: 'apps/*/README.md', rule: 'disk' },
@@ -688,14 +685,14 @@ export const SCAN_ROOTS = [
   // section in the header.
   { path: 'packages/*/*', rule: 'disk', collect: ['README.md'] },
   { path: 'apps/*/*', rule: 'disk', collect: ['README.md'] },
-  // The rest of the root-level markdown, completing that surface (objectui#4148).
-  // `README.md`, `CONTRIBUTING.md` and `ROADMAP.md` are already above, in the
-  // positions the rows that bought them left them in.
+  // The root-level markdown (objectui#4148). `README.md`, `CONTRIBUTING.md`,
+  // `ROADMAP.md` and `QUICK_REFERENCE.md` had a row each until objectstack#26080
+  // folded them into the repository root's documents, outside this tree; their
+  // examples moved to `content/docs/guide/quick-start.md`, under the first row.
   { path: 'AGENTS.md', rule: 'disk' },
   { path: 'CHANGELOG.md', rule: 'disk' },
   { path: 'CLAUDE.md', rule: 'disk' },
   { path: 'LICENSE-THIRD-PARTY.md', rule: 'disk' },
-  { path: 'QUICK_REFERENCE.md', rule: 'disk' },
 ];
 
 const blank = (text) => text.replace(/[^\n]/g, ' ');

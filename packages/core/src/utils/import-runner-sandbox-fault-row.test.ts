@@ -55,6 +55,19 @@
  * until the door asked `isSandboxOwnFault` first. So §1 holds each site that
  * names the requested object to the door's `500`, and §3 holds the controls
  * that keep the heuristic's other answers where they were.
+ *
+ * [#26903] The capability gates call `throwCapabilityDenial(vm, origin,
+ * capability, message)`, not `throwSandboxFault` directly. Each of those calls
+ * is still a site here, its message rendered from argument 3, but with an
+ * ACTION origin: the helper sends an action or job body's denial to
+ * `throwSandboxFault` (the fault this file pins) and answers a HOOK body's as
+ * a coded `403` refusal, which is not a fault and is pinned by
+ * `runtime/src/sandbox/hook-capability-denial-is-a-refusal.integration.test.ts`.
+ * The census reads that routing from the helper's body rather than trusting
+ * this comment: if its first statement stops sending every non-hook origin to
+ * `throwSandboxFault`, the census is red. The helper's own
+ * `throwSandboxFault(vm, message)` relays its call sites, like the
+ * `new SandboxError(message)` inside `throwSandboxFault`.
  */
 
 import { readFileSync } from 'node:fs';
@@ -92,6 +105,18 @@ const SAMPLES: Readonly<Record<string, string>> = {
   fieldName: 'owner',
 };
 
+/**
+ * [#26903] A `throwCapabilityDenial` site is a fault only on the non-hook arm,
+ * so its message is rendered with an action origin (see the header).
+ */
+const CAPABILITY_FAULT_SAMPLES: Readonly<Record<string, string>> = {
+  ...SAMPLES,
+  'origin.kind': 'action',
+};
+
+/** The helper every capability gate throws through, read below from the producer. */
+const CAPABILITY_HELPER = 'throwCapabilityDenial';
+
 /** §2: the error a nested body threw, so the construction it lands in is a CRASH. */
 const CRASH_SAMPLES: Readonly<Record<string, string>> = {
   ...SAMPLES,
@@ -105,7 +130,7 @@ const CRASH_SAMPLES: Readonly<Record<string, string>> = {
  * runner, or a new non-literal one, fails §1's census.
  */
 const RELAYS: Readonly<Record<string, string>> = {
-  message: '`throwSandboxFault` builds the error for each of its call sites, which are sites here in their own right',
+  message: '`throwSandboxFault` builds the error for each of its call sites, and `throwCapabilityDenial` hands it each of its own (action and job origins); both helpers\' call sites are sites here in their own right',
   'withoutSandboxErrorPrefix(String(errStr))':
     'the pump loop rebuilds a fault marked across the VM hop: the `throwSandboxFault` messages, the host-side faults thrown inside a host call (sites here), and a nested body\'s crash (§2)',
 };
@@ -182,6 +207,7 @@ const census = (() => {
   const crashes: Site[] = [];
   const relays: string[] = [];
   const unrenderable: string[] = [];
+  const capabilityGates: string[] = [];
   const visit = (node: ts.Node): void => {
     if (ts.isNewExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'SandboxError') {
       const args = node.arguments ?? [];
@@ -209,8 +235,26 @@ const census = (() => {
     }
     if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'throwSandboxFault') {
       const at = `quickjs-runner.ts:${lineOf(node)}`;
+      const text = node.arguments[1]?.getText() ?? '';
+      if (text in RELAYS) {
+        relays.push(text);
+      } else {
+        try {
+          faults.push({ label: `${at} throwSandboxFault(…)`, message: render(node.arguments[1], SAMPLES) });
+        } catch (e) {
+          unrenderable.push(`${at}: ${(e as Error).message}`);
+        }
+      }
+    }
+    // [#26903] A capability gate: a fault on the action/job arm (see the header).
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === CAPABILITY_HELPER) {
+      const at = `quickjs-runner.ts:${lineOf(node)}`;
       try {
-        faults.push({ label: `${at} throwSandboxFault(…)`, message: render(node.arguments[1], SAMPLES) });
+        faults.push({
+          label: `${at} ${CAPABILITY_HELPER}(…), action origin`,
+          message: render(node.arguments[3], CAPABILITY_FAULT_SAMPLES),
+        });
+        capabilityGates.push(at);
       } catch (e) {
         unrenderable.push(`${at}: ${(e as Error).message}`);
       }
@@ -218,8 +262,32 @@ const census = (() => {
     ts.forEachChild(node, visit);
   };
   visit(SOURCE);
-  return { faults, crashes, relays, unrenderable };
+  return { faults, crashes, relays, unrenderable, capabilityGates };
 })();
+
+/**
+ * [#26903] Does the capability helper send every non-hook origin to
+ * `throwSandboxFault` before anything else? Read from its body: the first
+ * statement must be `if (origin.kind !== 'hook') throwSandboxFault(vm, message)`
+ * (the parameter names read from its own signature).
+ */
+function capabilityHelperFaultsNonHook(): boolean {
+  let ok = false;
+  const visit = (node: ts.Node): void => {
+    if (ts.isFunctionDeclaration(node) && node.name?.text === CAPABILITY_HELPER && node.body) {
+      const [vm, origin, , message] = node.parameters.map((p) => p.name.getText());
+      const first = node.body.statements[0];
+      ok = first !== undefined
+        && ts.isIfStatement(first)
+        && first.elseStatement === undefined
+        && first.expression.getText() === `${origin}.kind !== 'hook'`
+        && first.thenStatement.getText().replace(/;$/, '') === `throwSandboxFault(${vm}, ${message})`;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(SOURCE);
+  return ok;
+}
 
 const PRODUCER_NAME = producerName();
 
@@ -281,6 +349,10 @@ describe('[#22741] §1 — every fault the runner raises itself reads the door\'
     expect(PRODUCER_NAME, 'the `this.name = …` assignment in SandboxError\'s constructor').toBeTypeOf('string');
     expect(census.unrenderable, 'sites this pin cannot render; add a sample or a relay').toEqual([]);
     expect([...new Set(census.relays)].sort()).toEqual(Object.keys(RELAYS).sort());
+    // [#26903] The capability gates throw through the helper, and the helper
+    // keeps their action/job arm on `throwSandboxFault`, the fault rows below.
+    expect(census.capabilityGates.length, `${CAPABILITY_HELPER} call sites`).toBeGreaterThanOrEqual(5);
+    expect(capabilityHelperFaultsNonHook(), `${CAPABILITY_HELPER} sends every non-hook origin to throwSandboxFault first`).toBe(true);
     for (const [kind, pattern, floor] of KINDS) {
       const n = census.faults.filter((s) => pattern.test(s.message)).length;
       expect(n, `${kind}: sites found`).toBeGreaterThanOrEqual(floor);

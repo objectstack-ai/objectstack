@@ -353,12 +353,11 @@ parent view navigates for:
 
 - **Absent**: a marker click opens nothing. This renderer supplies no drawer
   default.
-- `drawer`, `modal` and `popover` open the marker's record in that overlay.
-  `split` opens nothing: the map hands the split shell no main panel.
+- `drawer`, and a block without `mode` (it takes the spec's `drawer`
+  default), open the marker's record in the drawer.
 - `new_window` opens `/{objectName}/record/{id}` in a new tab. `none` opens
   nothing.
-- `page`, and a block without `mode` (it takes the spec's `page` default), open
-  the record page of the map's `objectName` through the record navigator the
+- `page` opens the record page of the map's `objectName` through the record navigator the
   host publishes (the console publishes one on its custom pages, record pages
   and list views). Under a host that publishes none, such as an embedded
   renderer, or on a map that names no `objectName`, there is no record page to

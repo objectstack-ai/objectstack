@@ -45,5 +45,5 @@
 ## 七、语言与汇报(coordinator 与席位线程皆读)
 
 - 项目内对维护者用维护者的语言;GitHub 内容英文,照 SKILL.md 全体座位不变量。
-- 只在结果、阻塞或待裁决时向维护者汇报,与席位同规;例行进展进线程清单。
-- 转述线程 PR「无需你做」前自读其 `mergeable_state`;`dirty` ⇒ 退回线程先合 main,⛔ 不转述。
+- 向维护者报任一 PR 状态前同轮重读:merged、draft、auto_merge、在队、reviews、`mergeable_state`。
+- 无 APPROVED 也可能已被 ready 入队 ⇒ ⛔ 单读 reviews;已办即删;`dirty` ⇒ 退回线程先合 main。

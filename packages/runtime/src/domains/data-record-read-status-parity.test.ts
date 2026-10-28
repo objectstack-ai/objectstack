@@ -20,6 +20,12 @@
  * their own readers (`declaredEnvelopeForThrow` for `@objectstack/hono`'s
  * catch-all, `resolveThrownHttpError` for `dispatcher-plugin`), ⛔ not
  * restated — the rig of `data-empty-projection-count.test.ts`.
+ *
+ * [#26898] …and an unknown query parameter is one answer too. Measured on the
+ * base (`57820085fa`): `RestServer` refused `?nope=1` `400 VALIDATION_ERROR`
+ * through the route's closed set (#7606, `DATA_RECORD_READ_PARAMS`), the
+ * dispatcher dropped it and answered `200` with the full record. Both now ask
+ * that one set and answer the same status, code and sentence.
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
@@ -36,6 +42,9 @@ import { installDefaultOrganization } from '../default-organization.testkit.js';
 
 const PREFIX = '/api/v1';
 const OBJECT = 'by_id_parity_26816';
+// [#26898] An object the API does not expose, for the closed set's place in
+// the gate order: after the exposure gate, on both hosts.
+const UNEXPOSED = 'by_id_parity_26898_unexposed';
 const ME = 'usr_26816_member';
 const OTHER = 'usr_26816_other';
 const SYS_CTX = { isSystem: true, userId: 'usr_system' };
@@ -72,7 +81,16 @@ const CASES: ReadonlyArray<readonly [string, string, Record<string, string>, Omi
     ['CONTROL hidden row', HIDDEN, {}, { status: 404, code: 'RECORD_NOT_FOUND' }],
     ['CONTROL hidden row ?select=title', HIDDEN, { select: 'title' }, { status: 404, code: 'RECORD_NOT_FOUND' }],
     ['CONTROL own record ?select=title', MINE, { select: 'title' }, { status: 200 }],
+    ['CONTROL own record ?expand=parent', MINE, { expand: 'parent' }, { status: 200 }],
     ['CONTROL own record', MINE, {}, { status: 200 }],
+    // [#26898] The route's closed parameter set (#7606), asked by both hosts:
+    // a name outside it is refused before the read, whichever id it names.
+    ['own record ?nope=1 (the card)', MINE, { nope: '1' }, { status: 400, code: 'VALIDATION_ERROR' }],
+    ['own record ?select=title&nope=1', MINE, { select: 'title', nope: '1' }, { status: 400, code: 'VALIDATION_ERROR' }],
+    ['own record ?fields=title (the #8039 alias)', MINE, { fields: 'title' }, { status: 400, code: 'VALIDATION_ERROR' }],
+    ['own record ?nope=1&selct=title', MINE, { nope: '1', selct: 'title' }, { status: 400, code: 'VALIDATION_ERROR' }],
+    ['hidden row ?nope=1', HIDDEN, { nope: '1' }, { status: 400, code: 'VALIDATION_ERROR' }],
+    ['missing id ?nope=1', NOWHERE, { nope: '1' }, { status: 400, code: 'VALIDATION_ERROR' }],
 ];
 
 function createMockServer() {
@@ -92,8 +110,8 @@ function makeRes() {
 
 describe('[#26816] GET /data/:object/:id — RestServer and the dispatcher give one answer', () => {
     let engine: ObjectQL;
-    let rest: (id: string, query: Record<string, string>) => Promise<Answer>;
-    let dispatched: (id: string, query: Record<string, string>) => Promise<Answer>;
+    let rest: (id: string, query: Record<string, string>, object?: string) => Promise<Answer>;
+    let dispatched: (id: string, query: Record<string, string>, object?: string) => Promise<Answer>;
 
     beforeAll(async () => {
         engine = new ObjectQL();
@@ -116,7 +134,16 @@ describe('[#26816] GET /data/:object/:id — RestServer and the dispatcher give 
                     fields: {
                         title: { name: 'title', type: 'text' },
                         owner: { name: 'owner', type: 'text' },
+                        // A lookup, so `?expand=` has a relation to accept.
+                        parent: { name: 'parent', type: 'lookup', reference: OBJECT },
                     },
+                },
+                {
+                    name: UNEXPOSED,
+                    label: 'Hidden ledger',
+                    sharingModel: 'public_read_write',
+                    enable: { apiEnabled: false },
+                    fields: { title: { name: 'title', type: 'text' } },
                 },
             ],
         } as never);
@@ -156,10 +183,16 @@ describe('[#26816] GET /data/:object/:id — RestServer and the dispatcher give 
         server.registerRoutes();
         const route = server.getRoutes().find((r: any) => r.method === 'GET' && r.path === '/api/v1/data/:object/:id');
         expect(route).toBeDefined();
-        rest = async (id, query) => {
+        rest = async (id, query, object = OBJECT) => {
             const res = makeRes();
-            await route!.handler({ params: { object: OBJECT, id }, query, headers: {} } as any, res);
+            await route!.handler({ params: { object, id }, query, headers: {} } as any, res);
             const body = res._json;
+            // [#26898] The closed-set gate writes the nested `{ error: { code,
+            // message } }` body (`refuseUnknownQueryParams`); every other
+            // refusal here is `mapDataError`'s flat one.
+            if (body?.error && typeof body.error === 'object') {
+                return { status: res._status ?? 200, code: body.error.code, message: body.error.message };
+            }
             return { status: res._status ?? 200, code: body?.code, field: body?.field, message: body?.error };
         };
 
@@ -170,8 +203,8 @@ describe('[#26816] GET /data/:object/:id — RestServer and the dispatcher give 
         const kernel: any = { context: { getService: get }, getService: get, getServiceAsync: async (n: string) => get(n) };
         const dispatcher = new HttpDispatcher(kernel);
         (dispatcher as any).timedResolveExecutionContext = async () => ({ ...MEMBER_CTX });
-        dispatched = async (id, query) => {
-            const path = `/data/${OBJECT}/${id}`;
+        dispatched = async (id, query, object = OBJECT) => {
+            const path = `/data/${object}/${id}`;
             const raw = new Request(`http://localhost${PREFIX}${path}`, { method: 'GET' });
             let returned: any;
             try {
@@ -211,5 +244,20 @@ describe('[#26816] GET /data/:object/:id — RestServer and the dispatcher give 
         expect(dispatcherAnswer, 'the dispatcher').toEqual(expected);
         // One refusal, one sentence: the same text whichever host carried it.
         expect(restMessage, 'the refusal sentence').toBe(dispatcherMessage);
+    });
+
+    // [#26898] Which parameters a route understands is information: a caller
+    // the object refuses is answered that refusal, never a verdict on its
+    // query. `RestServer` asks the closed set after `enforceApiAccess`
+    // (`crud-routes.ts`); the dispatcher now asks it after the same exposure
+    // gate. Pinned on the dispatcher alone: this rig's `RestServer` has no
+    // metadata store to read the declaration from, so its exposure gate falls
+    // open here (`loadObjectItem` answers nothing) and it would not be
+    // measuring the gate order at all.
+    it('the dispatcher: an unexposed object ?nope=1 answers the exposure refusal, not the closed set', async () => {
+        const withUnknown = await dispatched(MINE, { nope: '1' }, UNEXPOSED);
+        const without = await dispatched(MINE, {}, UNEXPOSED);
+        expect(withUnknown).toEqual({ status: 404, code: 'OBJECT_API_DISABLED', field: undefined, message: without.message });
+        expect(without.code).toBe('OBJECT_API_DISABLED');
     });
 });

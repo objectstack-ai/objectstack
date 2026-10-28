@@ -212,7 +212,7 @@ raw rows** with nothing to say the aggregation never happened.
 
 ### `GET /data/:object/:id`
 
-Get a single record by ID. Only `select` and `expand` query parameters are allowed; all other parameters are discarded.
+Get a single record by ID. Only `select` and `expand` query parameters are allowed; any other parameter is refused `400 VALIDATION_ERROR`, and the message names it and lists the two accepted ones.
 
 | Parameter | Location | Description |
 |:----------|:---------|:------------|

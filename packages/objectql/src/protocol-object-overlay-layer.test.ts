@@ -207,6 +207,10 @@ function makeSession(opts: { controlPlane?: boolean; seed?: any[] } = {}) {
  */
 async function persistOverlayRow(name: string, packageId?: string): Promise<any[]> {
     const s = makeSession();
+    // [#26708] The package the row names is installed while it is written — an
+    // authored base, before any code ships the name: a save naming a package
+    // no installed package has is refused before it is written.
+    if (packageId) s.registry.installPackage({ id: packageId, name: packageId, version: '1.0.0' } as any, 'authored');
     await s.protocol.saveMetaItem({
         type: 'object',
         name,
@@ -568,6 +572,9 @@ describe('ADR-0029 D9.9 / #6995 — the row\'s package_id is provenance, never a
     it('different package — the WRITE is refused with an ADR-0112 envelope, and nothing is persisted', async () => {
         const seed = await persistOverlayRow('myapp_invoice', APP_PKG);
         const { protocol, registry, rows } = await bootWithPackage(seed);
+        // [#26708] The other package is a real, installed one: a save naming a
+        // package no installed package has is refused before this door.
+        registry.installPackage({ id: OTHER_PKG, name: OTHER_PKG, version: '1.0.0' } as any, 'authored');
 
         // [ADR-0131 D6] Under the hatch this write used to reach the D9.9
         // package check (`OBJECT_OVERLAY_PACKAGE_MISMATCH` / 422). Managed
@@ -624,7 +631,12 @@ describe('ADR-0029 D9.9 / #6995 — the row\'s package_id is provenance, never a
      * registry can represent that — so nothing here narrows them.
      */
     it('a non-object type with a different binding is untouched by the rule', async () => {
-        const { protocol } = makeSession();
+        const { protocol, registry } = makeSession();
+        // [#26708] Installed, with the object its grid binds: a save naming a
+        // package no installed package has is refused, and an installed
+        // package's write is judged against its closure.
+        registry.installPackage({ id: OTHER_PKG, name: OTHER_PKG, version: '1.0.0' } as any, 'authored');
+        registry.registerObject({ name: 'task', label: 'Task', fields: { name: { type: 'text', label: 'Name' } } } as never, OTHER_PKG);
         const res = await protocol.saveMetaItem({
             type: 'view', name: 'shared_grid', packageId: OTHER_PKG,
             item: { name: 'shared_grid', type: 'grid', columns: ['name'], object: 'task', viewKind: 'list' }, // [#7741] the inline arm requires the object binding pair

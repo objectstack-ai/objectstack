@@ -11,9 +11,12 @@
  * things are keyed on its answer:
  *
  *  - the session row's `ip_address`, and through it the `login` / `logout`
- *    audit rows (`auth-session-audit.ts` copies them from the row);
- *  - the `login_failed` / `account_locked` audit fingerprint, which applies the
- *    same reader to the same request on purpose (`signInClientFingerprint`), so
+ *    audit rows (`auth-session-audit.ts` copies them from the row) — though
+ *    where the server established an address, the `session.create.before`
+ *    hook stores that address instead of the reader's answer, which masks an
+ *    IPv6 address to its /64 network (`client-address-canonical.ts`);
+ *  - the `login_failed` / `account_locked` audit fingerprint, which resolves
+ *    the same request the same way on purpose (`signInClientFingerprint`), so
  *    a refused and a successful sign-in from one client carry one address;
  *  - the key of the library's own per-address rate limiter (ADR-0069 D2).
  *

@@ -2381,7 +2381,9 @@ export const HttpFindQueryParamsSchema = lazySchema(() => z.object({
   // each member and refuses a value naming no field (blank, whitespace-only,
   // commas only) with a 400. `[^\s,]` is that rule as a pattern — `\s` is the
   // set `trim()` strips — so the published JSON Schema states it too.
-  select: z.string().regex(/[^\s,]/, 'Name at least one field').optional().describe(
+  // [#26909] Read off the body-side declaration of the same door
+  // (`QueryTransportParamsSchema.select`, its string arm), not restated.
+  select: QueryTransportParamsSchema.shape.select.unwrap().unwrap().options[0].optional().describe(
     'Comma-separated list of fields to retrieve — at least one field name; a value naming no field '
     + '(blank, or only commas and spaces) is refused.'
   ),
@@ -2427,7 +2429,13 @@ export const HttpFindQueryParamsSchema = lazySchema(() => z.object({
 export const GetDataRequestSchema = lazySchema(() => z.object({
   object: z.string().describe('The object name.'),
   id: z.string().describe('The unique record identifier (primary key).'),
-  select: z.array(z.string()).optional().describe('Fields to include in the response (allowlisted query param).'),
+  // [#26909] The by-id door reads `select` through the list door's own
+  // projection rule (`projectionFieldsValue`) and refuses `[]`; the array arm
+  // of the list declaration is that rule, so it is read off it here.
+  select: QueryTransportParamsSchema.shape.select.unwrap().unwrap().options[1].optional().describe(
+    'Fields to include in the response (allowlisted query param) — at least one field name; an empty '
+    + 'list, or a list with a blank name, is refused.'
+  ),
   expand: z.array(z.string()).optional().describe(
     'Lookup/master_detail field names to expand. '
     + 'The engine resolves these via batch $in queries, replacing foreign key IDs with full objects.'
