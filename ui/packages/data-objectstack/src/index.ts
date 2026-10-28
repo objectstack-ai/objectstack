@@ -47,6 +47,7 @@ import {
 import type { AnalyticsResult, DatasetSelection } from '@objectstack/spec/contracts';
 import type {
   DataSource,
+  RecordFieldAccess,
   ConnectionState,
   // #4564 — the canonical `deleteView` receipt shapes, declared beside the
   // `DataSource` interface they belong to. Imported for the local uses below
@@ -1016,6 +1017,17 @@ export function is404Error(error: unknown): boolean {
   }
   const code = typeof err.code === 'string' ? err.code : '';
   return errorCodeIsAnyOf({ code }, ['OBJECT_NOT_FOUND', 'RECORD_NOT_FOUND']);
+}
+
+/**
+ * A server that does not offer the route asked (`501 NOT_IMPLEMENTED`) — for an
+ * optional capability, "no answer", never a failure of the read.
+ */
+function isNotImplementedError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const err = error as Record<string, unknown>;
+  if (err.httpStatus === 501 || err.status === 501 || err.statusCode === 501) return true;
+  return errorCodeIs({ code: typeof err.code === 'string' ? err.code : '' }, 'NOT_IMPLEMENTED');
 }
 
 // `API_ACCESS_DENIED_CODES` / `isApiAccessDeniedError` live in
@@ -7229,6 +7241,28 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     }
 
     return response.json();
+  }
+
+  /**
+   * The field projection of ONE stored record (objectstack#26594):
+   * `GET /data/{object}/{id}/field-access` through the client's
+   * `data.fieldAccess`. Its `editable` is the server's write gate judged on
+   * the stored row, so a field permission whose `when` names only some rows
+   * locks the field only on those rows.
+   *
+   * `null` when there is no answer to give: a record the caller cannot see
+   * (the route answers the record read's own 404), or a server with no
+   * record-scoped projection (501). Any other failure is thrown, as a read's.
+   */
+  async getRecordFieldAccess(resource: string, id: string): Promise<RecordFieldAccess | null> {
+    await this.connect();
+    try {
+      const access = await this.client.data.fieldAccess(resource, String(id));
+      return access ?? null;
+    } catch (error: unknown) {
+      if (is404Error(error) || isNotImplementedError(error)) return null;
+      throw error;
+    }
   }
 
   /**

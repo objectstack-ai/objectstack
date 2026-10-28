@@ -2103,6 +2103,9 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "measures.currency": {
         label: "Currency"
       },
+      "measures.polarity": {
+        label: "Polarity"
+      },
       "measures.derived": {
         label: "Derived From"
       },

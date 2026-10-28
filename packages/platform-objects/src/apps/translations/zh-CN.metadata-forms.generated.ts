@@ -2103,6 +2103,9 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "measures.currency": {
         label: "货币"
       },
+      "measures.polarity": {
+        label: "极性"
+      },
       "measures.derived": {
         label: "派生自"
       },

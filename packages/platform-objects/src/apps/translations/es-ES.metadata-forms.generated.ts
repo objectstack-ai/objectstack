@@ -2103,6 +2103,9 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "measures.currency": {
         label: "Moneda"
       },
+      "measures.polarity": {
+        label: "Polaridad"
+      },
       "measures.derived": {
         label: "Derivada de"
       },
