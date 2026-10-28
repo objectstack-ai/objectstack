@@ -239,7 +239,7 @@ function isDeclaredFilter(value: unknown): value is Record<string, any> {
  * explicit `true` is the author keeping the list a side card, so the default
  * applies only to an ABSENT `relatedList`.
  */
-function isMainContentList(type: string, fieldDef: Record<string, any>): boolean {
+export function isMainContentList(type: string, fieldDef: Record<string, any>): boolean {
   if (fieldDef.relatedList === 'primary') return true;
   if (fieldDef.relatedList !== undefined) return false;
   const inlineEdit = fieldDef.inlineEdit;
