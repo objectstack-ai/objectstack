@@ -309,7 +309,8 @@ for (const cell of CELLS) {
           await engine.delete(OBJECT, { where: { id: 'd_cap' } } as any);
           await engine.delete(OWNER, { where: { region: { $in: ['CAP', 'CAP_EXTRA'] } }, multi: true } as any);
         }
-      });
+        // Budget for the 1,000-row seed and its 1,001-row delete on a loaded full-suite shard (#27037); the slowdown itself is #27004's.
+      }, 30_000);
 
       it('CONTROL the routes still answer the rows, and a file field\'s object reaches the driver unjudged', async () => {
         const na = await query({ where: { region: 'NA' } }, OWNER);

@@ -27,7 +27,25 @@ on:
   merge_group:
   # ── THE SCHEDULED FULL RUN (#16467), the half this file owns ─────────────
   # Every 4 hours since #25771 (maintainer ruling Q6 = C), the same cadence as
-  # ci.yml's half and for the reason stated there; no step changed.
+  # ci.yml's half and for the reason stated there.
+  #
+  # ⭐ IT SKIPS WHEN THE PUSH RUN ALREADY COVERED THE COMMIT (#26071, ruling
+  # 6416984681, letter A (i)). A scheduled run tests `main`'s head, and the
+  # push run of that same commit ran the same battery over the same tree: on
+  # `push` the selector keeps every family and the workspace type check takes
+  # the whole universe, exactly as on `schedule`. Measured on 2026-10-28: all 12
+  # newest scheduled runs repeated a commit whose push run had already ended
+  # `success`. So the `schedule-gate` job (first under `jobs:`) asks the runs
+  # API for a completed `push` run of THIS workflow on `github.sha` that
+  # concluded `success`; when there is one, every lane skips and the two
+  # aggregates skip with them, and the run concludes `success` with one ran
+  # job. ⛔ It fails CLOSED toward running: no answer, an error, a 403 or a
+  # body it cannot read all mean "run the battery". Only `schedule` is gated:
+  # on `push`, `pull_request`, `merge_group` and `workflow_dispatch` the gate
+  # job is skipped, its output reads empty, and every lane runs as before.
+  # ci.yml's scheduled run is NOT gated: there `push` tests the affected set
+  # only, and the schedule is the full battery.
+  #
   # The card's ruling is that the scheduled run covers BOTH required-context
   # files, not just ci.yml, and the reason is measured rather than symmetric:
   # the push-on-`main` run of THIS workflow is the only post-merge full-battery
@@ -42,7 +60,8 @@ on:
   #
   # The selector already treats every event that is neither `merge_group` nor
   # `pull_request` as "run every family", so this trigger alone restores the
-  # full battery here — no step in this file changes.
+  # full battery here — no step in this file changes. That same sentence is
+  # why the gate above may skip it: the push run of the commit already ran it.
   #
   # ⛔ A NEW TRIGGER KEY, not a widening of `push:`; see ci.yml's `on:` block.
   schedule:
@@ -197,6 +216,61 @@ concurrency:
 
 jobs:
 
+  schedule-gate:
+    # ── THE SCHEDULED RUN'S SKIP (#26071, ruling 6416984681, letter A (i)) ───
+    # The why is the `on:` block's ⭐ note. This job runs on `schedule` only, and
+    # every other job in this file needs it and carries the same `if:`:
+    #
+    #   if: ${{ !cancelled() && needs.schedule-gate.outputs.skip != 'true' }}
+    #
+    # On every other event this job is SKIPPED, a skipped job's outputs read as
+    # the empty string, and `!cancelled()` lets a job run past a skipped (or a
+    # failed) need, so each lane runs exactly as it did before this job existed.
+    # The two aggregates keep `always()` and add one schedule-only conjunct:
+    # they skip only on a scheduled run whose lanes skipped, never on a PR or a
+    # queue build, where a skipped required context would read as green.
+    #
+    # ⛔ FAIL CLOSED TOWARD RUNNING. Only a positive answer skips: a completed
+    # `push` run of THIS workflow on `github.sha`, concluded `success`, read
+    # from the runs API. A failed read, a 403, a body that does not parse, no
+    # such run, or a push run still in progress all leave `skip=false`, and a
+    # crash of this job leaves the output empty, which also runs the lanes.
+    name: Schedule gate · skip when a green push run covers the commit
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    # The job-wall rule's floor (see the `lint` job): one API read, no checkout.
+    timeout-minutes: 10
+    permissions:
+      actions: read
+    outputs:
+      skip: ${{ steps.probe.outputs.skip }}
+    steps:
+      - name: Look for a completed green push run on this commit
+        id: probe
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OS_GATE_SHA: ${{ github.sha }}
+        run: |
+          set -uo pipefail
+          skip=false
+          reason="no completed push run of this workflow on $OS_GATE_SHA concluded success"
+          if green=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/lint.yml/runs?event=push&branch=main&head_sha=$OS_GATE_SHA&status=completed&per_page=10" \
+              --jq '.workflow_runs[] | select(.event == "push" and .status == "completed" and .conclusion == "success") | "\(.head_sha) \(.id)"' \
+              2> "$RUNNER_TEMP/schedule-gate.err"); then
+            while read -r sha id; do
+              if [ -n "$sha" ] && [ "$sha" = "$OS_GATE_SHA" ]; then
+                skip=true
+                reason="push run $id on $OS_GATE_SHA concluded success: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$id"
+                break
+              fi
+            done <<< "$green"
+          else
+            reason="the runs API did not answer ($(head -c 300 "$RUNNER_TEMP/schedule-gate.err" | tr '\n' ' ')), so the battery runs"
+          fi
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+          echo "schedule-gate: skip=$skip -- $reason"
+          echo "schedule-gate: skip=$skip -- $reason" >> "$GITHUB_STEP_SUMMARY"
+
   lint:
     # ⚠️ This `name:` IS the required-status-check context in repository
     # Settings → Rulesets (a job's check-run name is its `name:`), so it is
@@ -300,7 +374,12 @@ jobs:
     # skipped required context is an absence, which reads as green in every
     # checks list and never blocks the queue. The `typecheck` job carries the
     # same contract and says so at length.
-    if: always()
+    # The one conjunct after it is the scheduled run's skip (`schedule-gate`):
+    # on `schedule` alone, lanes that skipped mean the gate found a green push
+    # run on the commit, and this aggregate skips with them rather than reding
+    # over lanes that were told not to run. On every other event the
+    # conjunct is true and `always()` alone decides, as before.
+    if: ${{ always() && !(github.event_name == 'schedule' && contains(needs.*.result, 'skipped')) }}
     runs-on: ubuntu-latest
     # ⭐ JOB WALL — measured, and the rule for every job in this file. No step in
     # this workflow runs under `scripts/run-with-stall-guard.mjs` (if one ever
@@ -429,6 +508,8 @@ jobs:
     # test-double contract gate, the two heaviest always-on gates, side by
     # side.
     name: Lint · ESLint
+    needs: [schedule-gate]
+    if: ${{ !cancelled() && needs.schedule-gate.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
     # JOB WALL = CHECKOUT BUDGET (20, on the checkout step) + BODY BUDGET, the
     # scheme `typecheck-source-gates` argues for a full-history checkout. Body
@@ -511,6 +592,8 @@ jobs:
     # shared-module self-tests, the PM tooling self-tests, the Claude hook
     # guards, the docs authoring gates and both censuses.
     name: Lint · repo & tooling gates
+    needs: [schedule-gate]
+    if: ${{ !cancelled() && needs.schedule-gate.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
     # JOB WALL = CHECKOUT BUDGET (20) + BODY BUDGET, `typecheck-source-gates`'
     # scheme. Body after the checkout, rebuilt per run from the 70 runs the
@@ -1934,6 +2017,8 @@ jobs:
     # symbol anchors, and the product-code guards (CLI, error codes, routes,
     # logging, the objectui pin).
     name: Lint · docs & code guards
+    needs: [schedule-gate]
+    if: ${{ !cancelled() && needs.schedule-gate.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
     # JOB WALL = CHECKOUT BUDGET (20) + BODY BUDGET, `typecheck-source-gates`'
     # scheme. Body after the checkout, rebuilt per run from the 70 runs the
@@ -2953,6 +3038,8 @@ jobs:
     # them), the engine and packaging gates, and the issue-citation gate,
     # which is why this lane alone reads issues and pull requests.
     name: Lint · CI, release & engine gates
+    needs: [schedule-gate]
+    if: ${{ !cancelled() && needs.schedule-gate.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
     # JOB WALL = CHECKOUT BUDGET (20) + BODY BUDGET, `typecheck-source-gates`'
     # scheme. Body after the checkout, rebuilt per run from the 70 runs the
@@ -4090,6 +4177,8 @@ jobs:
     # argument is in this lane) and pays its setup even when the selector
     # skips everything in it: about a minute of runner, not of wall.
     name: Lint · scoped · query-options erasure
+    needs: [schedule-gate]
+    if: ${{ !cancelled() && needs.schedule-gate.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
     # JOB WALL = CHECKOUT BUDGET (20) + BODY BUDGET, `typecheck-source-gates`'
     # scheme. Body after the checkout, rebuilt per run from the 70 runs the
@@ -4248,6 +4337,8 @@ jobs:
     # entry-guard sweep and the comment-mask corpus walk. The slot-lookup
     # ratchet is the gate the checkout step's `fetch-depth: 0` note names.
     name: Lint · scoped · slot lookup & corpus
+    needs: [schedule-gate]
+    if: ${{ !cancelled() && needs.schedule-gate.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
     # JOB WALL = CHECKOUT BUDGET (20) + BODY BUDGET, `typecheck-source-gates`'
     # scheme. Body after the checkout, rebuilt per run from the 70 runs the
@@ -4392,6 +4483,8 @@ jobs:
     # self-test, the self-test workflow-command gate and the verify-lock
     # entry-point self-test.
     name: Lint · scoped · tooling self-tests
+    needs: [schedule-gate]
+    if: ${{ !cancelled() && needs.schedule-gate.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
     # JOB WALL = CHECKOUT BUDGET (20) + BODY BUDGET, `typecheck-source-gates`'
     # scheme. Body after the checkout, rebuilt per run from the 70 runs the
@@ -4578,6 +4671,8 @@ jobs:
     # `schedule` and `push` both tiers, the slow tier's daily home under the
     # ruling (`scripts/pm/check-dispatch-gates.mjs` decides, from the event).
     name: Lint · PM dispatch-gates
+    needs: [schedule-gate]
+    if: ${{ !cancelled() && needs.schedule-gate.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
     # JOB WALL = CHECKOUT BUDGET (20) + BODY BUDGET, `typecheck-source-gates`'
     # scheme. Body after the checkout, rebuilt per run from the 70 runs the
@@ -4724,6 +4819,8 @@ jobs:
   # missing or stale one. Build-dependent gates belong in the lanes below.
   typecheck-source-gates:
     name: Type Check · source gates
+    needs: [schedule-gate]
+    if: ${{ !cancelled() && needs.schedule-gate.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
     # JOB WALL — why every job here has one and the rule (about 2× the measured
     # maximum, a 5-minute grain, never below 10, never above the queue's
@@ -5413,6 +5510,8 @@ jobs:
   # runs the `typecheck` task family and so the only one that can seed it.
   typecheck-workspace:
     name: Type Check · workspace
+    needs: [schedule-gate]
+    if: ${{ !cancelled() && needs.schedule-gate.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
     # JOB WALL = CHECKOUT BUDGET (20) + BODY BUDGET; the split, its window, the
     # checkout numbers and what the aggregate reads: `typecheck-source-gates`.
@@ -5658,6 +5757,8 @@ jobs:
   # semantics are untouched: same script, same flags, same command.
   typecheck-debt:
     name: Type Check · debt ledger
+    needs: [schedule-gate]
+    if: ${{ !cancelled() && needs.schedule-gate.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
     # JOB WALL = CHECKOUT BUDGET (20) + BODY BUDGET; the split, its window, the
     # checkout numbers and what the aggregate reads: `typecheck-source-gates`.
@@ -5860,6 +5961,8 @@ jobs:
   # api-surface family, the skill/docs example compilers and the i18n gates.
   typecheck-consumers:
     name: Type Check · consumer gates
+    needs: [schedule-gate]
+    if: ${{ !cancelled() && needs.schedule-gate.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
     # JOB WALL = CHECKOUT BUDGET (20) + BODY BUDGET; the split, its window, the
     # checkout numbers and what the aggregate reads: `typecheck-source-gates`.
@@ -6389,8 +6492,9 @@ jobs:
     # required context is not a red — it is an absence, which reads as green in
     # every checks list and never blocks the queue. The same contract
     # ci.yml's `test-gate` documents. With `always()` the job runs on every
-    # outcome and the verdict below is what decides.
-    if: always()
+    # outcome and the verdict below is what decides. Its one schedule-only
+    # conjunct is the `lint` job's, for the reason stated there.
+    if: ${{ always() && !(github.event_name == 'schedule' && contains(needs.*.result, 'skipped')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

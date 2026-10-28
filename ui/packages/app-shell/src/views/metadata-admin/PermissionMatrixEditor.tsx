@@ -297,6 +297,19 @@ function isArtifactBackedLayer(
   );
 }
 
+/**
+ * The editable body of a pending package draft, as `readDraftForSave` served
+ * it (the `{ type, name, item }` envelope, or a bare body), or `null` for "no
+ * draft". Read decorations come off here, at the unwrap, so neither the load
+ * nor the save's merge base carries `_diagnostics` / `_draft` (objectui#8181).
+ */
+function pendingDraftBody(
+  answer: { item?: PermissionSetDraft } | PermissionSetDraft | null,
+): PermissionSetDraft | null {
+  if (!answer) return null;
+  return stripReadDecorations((answer as { item?: PermissionSetDraft }).item ?? answer) as PermissionSetDraft;
+}
+
 /** Localized short label for an OWD value; falls back to the raw value. */
 function owdLabel(t: (k: string) => string, value: string): string {
   const key: Record<string, string> = {
@@ -910,13 +923,10 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         // below re-bases on a fresh RAW `layered` read, which drops them — but
         // its `.catch(() => null)` arm falls back to this very body and
         // spreads it into `client.save`, so a failed layered read used to put
-        // `_diagnostics` / `_draft` on the wire. Strip at the unwrap, which is
-        // the one place the served envelope becomes an editable draft.
-        const draftBody = pendingDraft
-          ? (stripReadDecorations(
-              (pendingDraft as any).item ?? pendingDraft,
-            ) as PermissionSetDraft)
-          : null;
+        // `_diagnostics` / `_draft` on the wire. Strip at the unwrap,
+        // `pendingDraftBody`, the one function through which a served envelope
+        // becomes an editable body — here and in `doSave`'s merge base.
+        const draftBody = pendingDraftBody(pendingDraft);
         // Draft wins over the published baseline for display (D6).
         const effective: PermissionSetDraft = (draftBody ?? lay?.effective ??
           lay?.code ?? { name, objects: {} }) as PermissionSetDraft;
@@ -1344,19 +1354,36 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         // purpose: a set that exists only as a package draft (what the Studio
         // Access pillar's "+ New" creates) has no published rows for anyone to
         // lose, and refusing there would block its first save.
+        //
+        // objectstack#26837 — and this door's save WRITES the pending draft, so
+        // when one exists it is the base, not the published body: the facets
+        // the editor cannot author (`description`, `packageId`, any key another
+        // door wrote) come from the draft, exactly as the load displayed it.
+        // Read through the load's own door, at the address this save writes.
+        // The pin the load recorded is left alone, so a draft that moved since
+        // the load is still refused as a version conflict. `readDraftForSave`
+        // resolves a REJECTED read as no answer AND no pin, while a read that
+        // found no draft pins `If-None-Match: *` — so the pair tells a failure
+        // apart from "no draft", and a failure refuses exactly like the
+        // layered re-read: falling back to the published body would drop the
+        // draft's values with a 200.
         let rereadFailed = false;
-        const fresh = await client
-          .layered<PermissionSetDraft>(type, payload.name)
-          // Kept on `.catch` so the rejection can never escape as an unhandled
-          // one; the refusal is raised below, inside this `try`'s own body, and
-          // reaches the author on the same error channel a failed
-          // `client.save` already uses.
-          .catch(() => {
-            rereadFailed = true;
-            return null;
-          });
+        const [fresh, draftRead] = await Promise.all([
+          client
+            .layered<PermissionSetDraft>(type, payload.name)
+            // Kept on `.catch` so the rejection can never escape as an
+            // unhandled one; the refusal is raised below, inside this `try`'s
+            // own body, and reaches the author on the same error channel a
+            // failed `client.save` already uses.
+            .catch(() => {
+              rereadFailed = true;
+              return null;
+            }),
+          readDraftForSave<{ item?: PermissionSetDraft } | PermissionSetDraft>(client, type, payload.name, packageId),
+        ]);
+        if (draftRead.answer === null && draftRead.pin === null) rereadFailed = true;
         if (rereadFailed) throw new Error(t('perm.save.rereadFailed'));
-        const base = (fresh?.effective ?? payload) as PermissionSetDraft;
+        const base = (pendingDraftBody(draftRead.answer) ?? fresh?.effective ?? payload) as PermissionSetDraft;
         toSave = mergePermissionSlice(base, payload, scope);
       }
       // ADR-0086 P2 (D6/D7). Package door → the set is metadata: write a DRAFT
