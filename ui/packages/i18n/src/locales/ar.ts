@@ -1443,6 +1443,7 @@ const ar = {
     activity: "النشاط",
     timeline: "الخط الزمني",
     timelineFolded: "النشاط",
+    relatedColumn: "عمود العناصر ذات الصلة",
     panelToggles: "اللوحات",
     history: "السجل",
     historyEmpty: "لا يوجد سجل بعد",

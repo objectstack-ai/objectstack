@@ -1289,6 +1289,7 @@ const ko = {
     activity: "활동",
     timeline: "타임라인",
     timelineFolded: "활동",
+    relatedColumn: "관련 열",
     panelToggles: "패널",
     history: "기록",
     historyEmpty: "아직 기록이 없습니다",

@@ -3847,7 +3847,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   if (pageColumns && pageColumns.related.length > 0) {
     panelToggleItems.push({
       id: 'related',
-      label: t('detail.related', { defaultValue: 'Related' }),
+      // Not `detail.related`: the rail toggle and the Related tab carry that
+      // name, and a second control with the same name would announce as them.
+      label: t('detail.relatedColumn', { defaultValue: 'Related column' }),
       icon: LayoutGrid,
       pressed: columnSwitches.related,
       onPressedChange: (pressed) => setRelatedSwitch(pressed ? 'on' : 'off'),

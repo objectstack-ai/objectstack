@@ -1289,6 +1289,7 @@ const de = {
     activity: "Aktivität",
     timeline: "Zeitleiste",
     timelineFolded: "Aktivität",
+    relatedColumn: "Verknüpfte Spalte",
     panelToggles: "Bereiche",
     history: "Verlauf",
     historyEmpty: "Noch kein Verlauf",

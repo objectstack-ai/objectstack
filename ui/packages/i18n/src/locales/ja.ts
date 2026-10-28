@@ -1136,6 +1136,7 @@ const ja = {
     activity: "アクティビティ",
     timeline: "タイムライン",
     timelineFolded: "アクティビティ",
+    relatedColumn: "関連列",
     panelToggles: "パネル",
     editRow: "編集",
     deleteRow: "削除",

@@ -1473,6 +1473,7 @@ const en = {
     activity: 'Activity',
     timeline: 'Timeline',
     timelineFolded: 'Activity',
+    relatedColumn: 'Related column',
     panelToggles: 'Panels',
     history: 'History',
     historyEmpty: 'No history yet',

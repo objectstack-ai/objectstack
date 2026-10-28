@@ -1329,6 +1329,7 @@ const es = {
     activity: "Actividad",
     timeline: "Cronología",
     timelineFolded: "Actividad",
+    relatedColumn: "Columna relacionada",
     panelToggles: "Paneles",
     history: "Historial",
     historyEmpty: "Aún no hay historial",

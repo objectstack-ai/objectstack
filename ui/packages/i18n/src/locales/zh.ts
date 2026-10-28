@@ -1211,6 +1211,7 @@ const zh = {
     activity: '活动',
     timeline: '时间线',
     timelineFolded: '动态',
+    relatedColumn: '关联',
     panelToggles: '面板',
     history: '历史',
     historyEmpty: '暂无历史记录',

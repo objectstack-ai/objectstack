@@ -1203,6 +1203,7 @@ const ru = {
     activity: "Активность",
     timeline: "Хронология",
     timelineFolded: "Активность",
+    relatedColumn: "Связанная колонка",
     panelToggles: "Панели",
     editRow: "Редактировать",
     deleteRow: "Удалить",

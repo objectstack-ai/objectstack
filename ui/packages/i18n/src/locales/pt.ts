@@ -1326,6 +1326,7 @@ const pt = {
     activity: "Atividade",
     timeline: "Linha do tempo",
     timelineFolded: "Atividade",
+    relatedColumn: "Coluna relacionada",
     panelToggles: "Painéis",
     history: "Histórico",
     historyEmpty: "Nenhum histórico ainda",

@@ -192,7 +192,8 @@ describe('RecordDetailView — one record page at two widths (objectstack#26678)
 
   it('1100 px: two columns and the related toggle; the lists mount when the rail opens', async () => {
     const { container } = renderPage({ width: 1100 });
-    const toggle = await screen.findByRole('button', { name: /Related/ }, { timeout: 5000 });
+    // The rail toggle — not the crumb row's related-column switch (objectstack#27052).
+    const toggle = await screen.findByTestId('record-related-rail-toggle', undefined, { timeout: 5000 });
     expect(tierOf(container)).toBe('two-column');
     expect(screen.queryByRole('tablist')).toBeNull();
     expect(column(container, 'details')).not.toBeNull();

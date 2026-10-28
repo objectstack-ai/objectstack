@@ -185,7 +185,7 @@ describe('RecordDetailView — the panel toggles (objectstack#27052)', () => {
     expect(group.closest('[data-record-crumb-row]')).not.toBeNull();
     expect(shown(container)).toBe('details timeline related');
     expect(toggle(/^Timeline$/).getAttribute('aria-pressed')).toBe('true');
-    expect(toggle(/^Related$/).getAttribute('aria-pressed')).toBe('true');
+    expect(toggle(/^Related column$/).getAttribute('aria-pressed')).toBe('true');
 
     fireEvent.click(toggle(/^Timeline$/));
     await waitFor(() => expect(shown(container)).toBe('details related'));
@@ -241,7 +241,7 @@ describe('RecordDetailView — the panel toggles (objectstack#27052)', () => {
     await waitFor(() => expect(shown(container)).toBe('details related'));
     press('R');
     await waitFor(() => expect(shown(container)).toBe('details'));
-    expect(toggle(/^Related$/).getAttribute('aria-pressed')).toBe('false');
+    expect(toggle(/^Related column$/).getAttribute('aria-pressed')).toBe('false');
     press('T');
     await waitFor(() => expect(shown(container)).toBe('details timeline'));
   });
@@ -250,7 +250,7 @@ describe('RecordDetailView — the panel toggles (objectstack#27052)', () => {
     renderPage();
     await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
     expect(toggle(/^Timeline$/).getAttribute('aria-keyshortcuts')).toMatch(/^(Meta|Control)\+Shift\+T$/);
-    expect(toggle(/^Related$/).getAttribute('aria-keyshortcuts')).toMatch(/^(Meta|Control)\+Shift\+R$/);
+    expect(toggle(/^Related column$/).getAttribute('aria-keyshortcuts')).toMatch(/^(Meta|Control)\+Shift\+R$/);
   });
 
   it('not drawn in the tabbed tier, nor in the drawer / split pane; the shortcut does nothing there', async () => {
