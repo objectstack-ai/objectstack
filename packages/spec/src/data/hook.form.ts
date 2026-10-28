@@ -8,7 +8,7 @@ import { defineForm } from '../ui/view.zod';
  * Hooks intercept the data lifecycle. The body field is a composite
  * (`{ language, source, capabilities?, timeoutMs?, memoryMb? }`) whose
  * `source` renders in a Monaco code editor with language-appropriate
- * syntax highlighting.
+ * syntax highlighting. The body's refusal catalogue (`refusals`) sits beside it.
  */
 export const hookForm = defineForm({
   schemaId: 'hook',
@@ -44,6 +44,19 @@ export const hookForm = defineForm({
             { field: 'capabilities', type: 'tags', helpText: 'Allowed ctx APIs (api.read, api.write, crypto.uuid, log, …)' },
             { field: 'timeoutMs', type: 'number', helpText: 'Per-invocation timeout (ms)' },
             { field: 'memoryMb', type: 'number', helpText: 'Per-invocation memory cap (MB, max 256)' },
+          ],
+        },
+        // The catalogue is a record keyed by the code, and an entry has no
+        // member that echoes its key — so the row takes the key-only record
+        // control, which never writes the key into the entry (#26835).
+        {
+          field: 'refusals',
+          type: 'record',
+          widget: 'key-only-record',
+          helpText: 'Refusal catalogue, keyed by the SCREAMING_SNAKE code the body throws (e.g. CLEAN_VERSION_REQUIRED). The caller reads the declared message, translated into their language, with the declared status. JavaScript (L2) bodies only',
+          fields: [
+            { field: 'message', type: 'textarea', required: true, helpText: 'The sentence the user reads when the body throws this code — plain text, with no placeholders' },
+            { field: 'status', type: 'number', helpText: 'HTTP status of the refusal (400–499). Absent: 400' },
           ],
         },
       ],

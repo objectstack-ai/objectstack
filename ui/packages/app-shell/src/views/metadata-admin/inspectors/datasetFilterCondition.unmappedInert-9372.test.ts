@@ -88,7 +88,7 @@ const row = (operator: string, value: unknown = ''): BuilderGroup => ({
 const STORED = { name: { $eq: 'acme' } };
 
 /**
- * The commit decision, spelled exactly as `DatasetFilterField` spells it.
+ * The commit decision, spelled exactly as `FilterConditionField` spells it.
  *
  * Returned rather than asserted inline so each gesture below reads as "what
  * would this commit", and so the HOLD case is a value rather than the absence
