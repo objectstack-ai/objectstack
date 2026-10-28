@@ -321,7 +321,7 @@ export interface IEmailService {
    * - `TEMPLATE_INVALID`   — the stored template has a hole the authoring rules
    *   refuse (rule `email-template-hole-grammar`: a second formatter, a
    *   formatter the whitelist does not name, or a `currency` argument that is
-   *   not a literal ISO 4217 code). It is refused
+   *   neither a literal ISO 4217 code nor a marked `@path`). It is refused
    *   at render, as `TEMPLATE_INVALID: email template <name> (locale=<l>):
    *   <hole and rule>`, so nothing is delivered. Permanent: retrying cannot
    *   succeed until the template is re-published without that hole.
@@ -347,7 +347,7 @@ export interface IEmailService {
    * - `TEMPLATE_INVALID`   — the stored template has a hole the authoring rules
    *   refuse (rule `email-template-hole-grammar`: a second formatter, a
    *   formatter the whitelist does not name, or a `currency` argument that is
-   *   not a literal ISO 4217 code). It is refused
+   *   neither a literal ISO 4217 code nor a marked `@path`). It is refused
    *   at render, as `TEMPLATE_INVALID: email template <name> (locale=<l>):
    *   <hole and rule>`, so nothing is rendered. Permanent: retrying cannot
    *   succeed until the template is re-published without that hole.
