@@ -19,6 +19,6 @@ The console's record drawer is one drawer (objectstack#26679):
 - **On the record page**, a related row or a lookup opens its record in a drawer over the page, under the same rules.
 - **What a reload keeps.** The root stays `?recordId=` on an object list; the levels above it live in memory, so a reload shows the root record.
 
-Published-type additions, all optional: `RelatedRecordHandlers.onView` receives the ids of the rows on show as a third argument, and `RelatedList`'s `onRowClick` receives those rows as its third argument. The i18n packs gain `detail.collapseToDrawer` in all ten languages.
+Published-type additions, all optional: `RelatedRecordHandlers.onView` receives the ids of the rows on show as a third argument, and `RelatedList`'s `onRowClick` receives those rows as its third argument. The i18n packs gain `detail.collapseToDrawer` in all ten languages. In zh, the `⤢` label (`detail.openAsFullPage` and `console.objectView.expandToPage`, kept byte-identical) reads 整页打开.
 
 Not yet: `↑` `↓` at the root of an object list's drawer, which needs the list to publish the rows it shows.
