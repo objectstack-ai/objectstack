@@ -163,8 +163,9 @@ Directive #2. It exports:
 **Reality wins.** Where the de-facto stored shape is coherent, the contract
 adopts it — deployed data is a wire contract we don't get to rewrite by
 editing Zod. Concretely: `currency` **is a scalar number** —
-`CurrencyValueSchema` is deleted (tombstoned in `UNKNOWN_KEY_GUIDANCE` /
-changelog with the FROM → TO note); `location` adopts the stored `{lat, lng}`
+`CurrencyValueSchema` is deleted (registered in `RETIRED_DEFS_BY_MAJOR` with a
+D3 semantic entry and the changelog carrying the FROM → TO note — see the
+2026-10-28 note below); `location` adopts the stored `{lat, lng}`
 and `LocationCoordinatesSchema` is rewritten to match; `AddressSchema` is
 either adopted by the contract and enforced, or deleted — it does not remain
 exported-but-dead. An exported-but-unconsumed value schema is exactly the
@@ -176,12 +177,14 @@ inert metadata ADR-0078 forbids.
 > `@objectstack/spec/data`, `@deprecated`, with zero readers. They are now
 > removed, ahead of the multi-currency epic #8345 (ruling 6465431966 on
 > #27119), so that no author reads `{value, currency}` as the shape that
-> records a currency. With no carrier key there is nothing for a
-> `retiredKey()` tombstone or an `UNKNOWN_KEY_GUIDANCE` entry to sit on, so the
+> records a currency. The schema had no carrier key, so there is no
+> `retiredKey()` tombstone and no guidance-map entry: the
 > FROM → TO note (a currency value is a bare number; the code is
 > `currencyConfig.defaultCurrency`) is carried by `RETIRED_DEFS_BY_MAJOR[18]`
 > (`data/CurrencyValue`), the D3 semantic entry
-> `currency-value-schema-retired` and the changelog.
+> `currency-value-schema-retired` (entry file
+> `packages/spec/src/migrations/entries/retired-defs/18.data__CurrencyValue.ts`)
+> and the changelog.
 
 **Consumers converge on the contract** (each keeps its role, loses its private
 type lists):
