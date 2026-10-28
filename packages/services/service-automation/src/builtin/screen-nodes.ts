@@ -410,7 +410,7 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
             ? context.flowName
             : undefined;
         const screenText = (key: FlowScreenCopyKey, authored: unknown, shownAs: string): string | undefined => {
-            if (flowName === undefined) return renderTextSlot(authored, variables);
+            if (flowName === undefined) return renderTextSlot(authored, variables, context.currency);
             return engine.renderFlowTextSlot(
                 {
                     key: flowScreenCopyKey(flowName, node.id, key),

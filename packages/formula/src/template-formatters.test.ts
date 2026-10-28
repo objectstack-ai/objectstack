@@ -15,8 +15,12 @@ describe('template formatters (ADR-0032 §3)', () => {
     expect(render('Hi {{ record.name }}', { name: 'Jane' })).toBe('Hi Jane');
   });
 
-  it('currency (default USD + explicit code)', () => {
-    expect(render('{{ record.amt | currency }}', { amt: 1234.5 })).toBe('$1,234.50');
+  it('currency (the tenant default the context carries + explicit code)', () => {
+    const r = templateEngine.evaluate<string>(
+      { dialect: 'template', source: '{{ record.amt | currency }}' },
+      { record: { amt: 1234.5 }, locale: 'en-US', currency: 'USD' },
+    );
+    expect(r).toEqual({ ok: true, value: '$1,234.50' });
     expect(render('{{ record.amt | currency:EUR }}', { amt: 1000 })).toContain('1,000');
   });
 
