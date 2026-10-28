@@ -15,7 +15,8 @@
  * as proper proposed-plan / draft cards instead of a raw tool-result JSON
  * dump. Every other object renders its fields read-only through
  * `SharedRecordFields`: the record's own keys, labelled and formatted, and
- * never the raw JSON (objectstack#26767).
+ * never the raw JSON (objectstack#26767) — labelled with the authored labels
+ * the resolve answer's `fields` projection carries (objectstack#27121).
  *
  * A link's password travels in the `X-Share-Password` request header, never in
  * the request URL (objectui#11649) — see `SHARE_PASSWORD_HEADER`. A `401` is
@@ -345,7 +346,7 @@ export default function SharedRecordPage() {
         </h1>
       </header>
       <main className="flex-1 overflow-y-auto p-4">
-        <SharedRecordFields record={data.record} />
+        <SharedRecordFields record={data.record} fields={data.fields} />
         {data.redactedFields && data.redactedFields.length > 0 && (
           <p className="mt-2 text-[11px] text-muted-foreground">
             {t('sharedRecord.redactedFields', {

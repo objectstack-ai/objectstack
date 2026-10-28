@@ -405,6 +405,7 @@
     "ui/DatasetMeasure:format",
     "ui/DatasetMeasure:label",
     "ui/DatasetMeasure:name",
+    "ui/DatasetMeasure:polarity",
     "ui/DatasetMeasureDuration:from",
     "ui/DatasetMeasureDuration:to",
     "ui/DatasetMeasureDuration:unit",

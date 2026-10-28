@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { AnalyticsQuerySchema } from '../data/analytics.zod';
 import { FilterConditionSchema } from '../data/filter.zod';
 import { AggregationFunction, DateGranularity } from '../data/query.zod';
+import { DatasetMeasurePolarity } from '../ui/dataset.zod';
 import { strictObject } from '../shared/strict-object';
 import { BaseResponseSchema } from './contract.zod';
 
@@ -135,6 +136,15 @@ export const AnalyticsResultResponseSchema = lazySchema(() => BaseResponseSchema
         + '(`POST /analytics/dataset/query`) whose dimension declares one; absent on measure columns '
         + 'and on a cube query answer. Display copy only: grouping is unchanged.',
       ),
+      polarity: DatasetMeasurePolarity.optional().describe(
+        'Which direction of change is good news for a measure column: the dataset measure\'s '
+        + '`polarity` (`higher` / `lower` / `neutral`), relayed as declared. A renderer colours a '
+        + 'period-over-period delta by it: `lower` draws a rise as bad, `neutral` draws no good or '
+        + 'bad colour. Set on a measure column of a dataset answer (`POST /analytics/dataset/query`, '
+        + 'the live query and the draft-data preview alike) whose measure declares one, its '
+        + '`__compare` column included; absent otherwise, on dimension columns, and on a cube query '
+        + 'answer. Absent means a rise is drawn as good.',
+      ),
     })).describe('Column metadata'),
     sql: z.string().optional().describe('Executed SQL (if debug enabled)'),
     totals: z.array(z.object({
@@ -180,16 +190,21 @@ export const AnalyticsResultResponseSchema = lazySchema(() => BaseResponseSchema
     ),
     drillRanges: z.array(z.record(z.string(), z.object({
       field: z.string().describe('The date dimension\'s own `field`'),
-      gte: z.string().describe('Inclusive lower bound of the bucket'),
-      lt: z.string().describe('Exclusive upper bound of the bucket'),
+      gte: z.string().describe('Inclusive lower bound of the range'),
+      lt: z.string().describe('Exclusive upper bound of the range'),
     }))).optional().describe(
-      'Drill-through sidecar for time buckets, aligned to `rows` by index: date '
-      + 'dimension name to the half-open range `[gte, lt)` that row\'s bucket covers. '
-      + 'Bounds are `YYYY-MM-DD` calendar days, or ISO-8601 instants at midnight in the '
-      + 'reference timezone when the source field is `datetime`; a row whose bucket '
-      + 'value is null gets no entry for that dimension. Set only on a dataset answer '
-      + 'that has rows and groups by at least one `type: \'date\'` dimension with a '
-      + '`field` and a granularity; independent of `dimensionFields`. Absent on a cube '
+      'Drill-through sidecar for date ranges, aligned to `rows` by index: date '
+      + 'dimension name to the half-open range `[gte, lt)` that row\'s records fall in '
+      + 'on that dimension\'s field. A time bucket gets the span it covers; a '
+      + '`timeDimensions[].dateRange` window gets the window the query filtered by on '
+      + 'every row, or narrows the bucket entry on the same field to the part inside '
+      + 'the window. Bounds are `YYYY-MM-DD` calendar days, or ISO-8601 instants when '
+      + 'the source field is `datetime` (a bucket\'s at midnight in the reference '
+      + 'timezone); a row whose bucket value is null gets no bucket entry, and a window '
+      + 'whose end is an instant or the last supported day gets none. Set only on a '
+      + 'dataset answer that has rows and groups by at least one `type: \'date\'` '
+      + 'dimension with a `field` and a granularity, or carries a `dateRange` on a '
+      + 'dimension with a `field`; independent of `dimensionFields`. Absent on a cube '
       + 'query answer.',
     ),
   }),
