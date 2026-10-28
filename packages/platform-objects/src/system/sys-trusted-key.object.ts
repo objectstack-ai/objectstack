@@ -113,7 +113,7 @@ export const SysTrustedKey = ObjectSchema.create({
         readonly: true,
         defaultValue: 'local',
         description:
-          'Where the key came from. `local`: added on this host by `os plugin trust add`. `platform` and `cloud` are reserved for keys cached from the marketplace chain (ADR-0025 M2 / M3); nothing writes them yet.',
+          'Where the key came from. `local`: added on this host by `os plugin trust add`. `platform` and `cloud` are reserved for keys cached from the marketplace signing chain; nothing writes them yet.',
       },
     ),
 
