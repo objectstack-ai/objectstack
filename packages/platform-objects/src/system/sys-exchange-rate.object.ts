@@ -9,7 +9,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * a rate points (ruling 6465431966, parameter 3).
  */
 export const EXCHANGE_RATE_DIRECTION =
-  "1 unit of the organization's home currency (Localization → Default currency) = `rate` units of this currency. " +
+  "1 unit of the organization's home currency (Localization → Default currency) = Rate units of this currency. " +
   'Example: home currency USD, currency EUR, rate 0.92 means 1 USD = 0.92 EUR.';
 
 /**
