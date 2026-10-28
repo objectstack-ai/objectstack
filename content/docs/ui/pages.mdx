@@ -278,7 +278,7 @@ unknown or retired key (`description`, `icon`, `breadcrumb`, `showStar`) is refu
 | `recordChrome` | `true` | Draw the title as the record chip (object label, copy-id button, the record's picture when the object names an `imageField`); `false` keeps a bare heading |
 | `showCopyId` | `true` | The copy-record-id button in the chip |
 | `maxVisible` / `mobileMaxVisible` | 3 / 1 | How many actions render inline before the rest fold into the `⋯` menu |
-| `aria` | — | `ariaLabel`, `ariaDescribedBy`, `role` for the `<header>` element |
+| `aria` | — | ARIA attributes (`ariaLabel`, `ariaDescribedBy`, …) for the `<header>` element |
 
 A named action renders only if its `locations` include `record_header` (inline) or
 `record_more` (straight into `⋯`); an id that names no action renders nothing and is reported
