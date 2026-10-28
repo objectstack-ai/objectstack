@@ -1,11 +1,12 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * objectstack#25922 slices S2 to S6 — the designer rows that moved into
+ * objectstack#25922 slices S2 to S6b — the designer rows that moved into
  * `@object-ui/i18n`'s `studio` namespace (every `engine.inspector.*` row;
  * `engine.packages.*`, `engine.form.*`, `engine.edit.*`; all of
  * `engine.studio.*`; the data source pages, the field types, the metadata
- * preview panes, the flow designer and the rest of the Studio chrome), and
+ * preview panes, the flow designer, the rest of the Studio chrome and, last,
+ * the translation preview), and
  * app-shell's `t()` / `tOptional()` still answer every one of them the way they
  * did when the rows sat in its own table.
  *
@@ -124,6 +125,8 @@ const FAMILY_FLOOR: Readonly<Record<string, number>> = Object.freeze({
   'engine.home.': 1,
   'engine.cancel': 1,
   'engine.close': 1,
+  // S6b — the translation preview, the table's last family
+  'engine.translationPreview.': 20,
 });
 
 /**

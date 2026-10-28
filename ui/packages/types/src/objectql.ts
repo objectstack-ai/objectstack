@@ -314,13 +314,11 @@ export type GanttConfig = SpecGanttConfig & {
   //
   // The nine members below were declared ONLY in `plugin-gantt`'s package-private
   // `GanttConfigEx` intersection — the type `getGanttConfig` casts the `gantt`
-  // block to. `ObjectGantt` honours every one of them on BOTH authoring faces
-  // (the `gantt: { … }` block AND the flattened top-level spelling, declared
-  // since objectstack#25923 on `plugin-gantt`'s own hand-off type
-  // `ObjectGanttFlatFields`, not on `ObjectGanttSchema`), and a type that lives
-  // inside the plugin can be
-  // referenced by neither declaration — so the vocabulary is lifted here rather
-  // than restated, and the two faces derive from ONE source that cannot fork.
+  // block to. `ObjectGantt` honours every one of them in the `gantt: { … }`
+  // block, the one spelling it reads since objectstack#25923 retired the
+  // flattened top-level fallback, and a type that lives inside the plugin
+  // cannot be referenced by this declaration — so the vocabulary is lifted
+  // here rather than restated, from ONE source that cannot fork.
   //
   // Like `timeSegments` above, each of the nine is now DECLARED by the spec —
   // objectstack#15469 closed `GanttConfigSchema` and modelled them, so they are
@@ -3841,8 +3839,10 @@ export interface ObjectTreeSchema extends BaseSchema {
  * (`ObjectView` and `ListView` lowering a stored gantt view into the node's
  * `gantt` block, a host mounting `<ObjectGantt schema={…}>`). Since
  * objectstack#25923 it carries no flat `GanttConfig` key and no `search` pair:
- * the spec refuses those on the node, and what the renderer still reads flat
- * is `plugin-gantt`'s package-local hand-off type.
+ * the spec refuses those on the node, and the renderer reads none of them flat.
+ * The one pair it does read flat, the toolbar's `search` / `searchableFields`
+ * that `ListView` writes at runtime, is `plugin-gantt`'s package-local
+ * hand-off type.
  *
  * It is NOT the shape of an AUTHORED `object-gantt` document. An authored node
  * takes its props in the spec's `properties` bag, whose members are
@@ -4176,8 +4176,8 @@ export interface ObjectCalendarSchema extends BaseSchema {
    * concept, the spec's Prime Directive #12). This interface declares none of
    * the five flat, so a fresh literal carrying one is a compile error; both
    * producers (`ListView`, and `ObjectView`'s `generateViewSchema`) emit this
-   * block. The flat fallback `getCalendarConfig` still reads is typed on
-   * `plugin-calendar`'s package-local hand-off type (Commandment #0.1).
+   * block, and it is the one spelling `getCalendarConfig` reads: its flat
+   * fallback retired in objectstack#25923.
    *
    * `@objectstack/spec` declares the KEY and, since 17.7.0, its SHAPE:
    * `ComponentPropsMap['object-calendar'].calendar` is a strict copy of the list

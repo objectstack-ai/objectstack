@@ -50,6 +50,8 @@ function makeClient(server: Server) {
     // ADR-0086 P2: the package door reads any pending draft first. This fixture
     // models the published baseline only (no pending draft) → null.
     getDraft: async () => null,
+    // objectstack#26840 — the package door reads its objects through the draft-overlaid door.
+    withPreviewDrafts() { return this; },
     list: async (type: string, opts?: { packageId?: string }) => {
       if (type === 'object') {
         // The server scopes to the package — the panel must not see anything

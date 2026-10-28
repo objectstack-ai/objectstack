@@ -200,6 +200,7 @@
     "api/GetPresenceResponse",
     "api/GetPresignedUrlRequest",
     "api/GetPublishedMetaItemResponse",
+    "api/GetRecordFieldAccessResponse",
     "api/GetRunRequest",
     "api/GetRunResponse",
     "api/GetTranslationsRequest",

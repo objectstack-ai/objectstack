@@ -282,9 +282,9 @@ describe('check-required-check-set — the declaration cannot drift from the rep
   /**
    * `REQUIRED_CONTEXTS` (`scripts/dependabot-merge-gate.mjs`) is where this
    * repository already writes down that a check is blocking and reports on
-   * every pull request; `content/docs/guide/ci-cd-pipeline.md` calls it "a
-   * human's answer" to which contexts may be required. The nine names in the
-   * live ruleset are a subset of it — measured 2026-09-14, 9 of 26 — so a
+   * every pull request: a human's answer to which contexts may be required.
+   * The nine names in the live ruleset are a subset of it — measured
+   * 2026-09-14, 9 of 26 — so a
    * rename that updates that list and forgets this one fails here instead of
    * quietly leaving the patrol watching a name nothing produces.
    */
@@ -354,8 +354,11 @@ describe('check-required-check-set — the wiring', () => {
  * leg still proves the detector can fire before any zero here is read.
  */
 describe('check-required-check-set — the prose points here instead of answering (#9502)', () => {
-  /** The files objectui#9502 repaired, less the workflow the note above retires. */
-  const REPAIRED = ['content/docs/guide/ci-cd-pipeline.md', 'scripts/dependabot-merge-gate.mjs'];
+  /**
+   * The files objectui#9502 repaired, less the workflow the note above retires
+   * and objectui's CI guide page, which objectstack#26944 deleted.
+   */
+  const REPAIRED = ['scripts/dependabot-merge-gate.mjs'];
 
   /**
    * The claim being hunted: the ruleset cannot be READ from this repository.

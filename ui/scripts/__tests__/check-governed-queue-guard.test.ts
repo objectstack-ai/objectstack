@@ -67,8 +67,9 @@ describe('check-governed-queue-guard is wired, not merely present', () => {
   it('this repository has written the context down as blocking', () => {
     // `REQUIRED_CONTEXTS` is objectui's own answer to "which checks are
     // blocking" (`scripts/dependabot-merge-gate.mjs`), and it is what
-    // `merge-queue-reporting.test.ts` derives the merge_group floor from. A
-    // guard outside it is a guard that floor cannot see.
+    // `merge-queue-reporting.test.ts` derived the merge_group floor from
+    // (retired by objectstack#26944 with the page it last pinned). A guard
+    // outside it is one a Dependabot merge is let past.
     expect(REQUIRED_CONTEXTS).toContain(CHECK_CONTEXT_NAME);
   });
 

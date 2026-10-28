@@ -4,6 +4,7 @@ import { QueryAST, SortNode, AggregationNode, isFilterAST, type DroppedFieldsEve
 import {
   BatchUpdateRequest,
   BatchUpdateResponse,
+  GetRecordFieldAccessResponse,
   UpdateManyRequest,
   DeleteManyRequest,
   BatchOptions,
@@ -7401,6 +7402,25 @@ export class ObjectStackClient {
     },
 
     /**
+     * [#26594] The field projection of ONE record —
+     * `GET /data/:object/:id/field-access`, declared by
+     * `GetRecordFieldAccessResponseSchema` (`@objectstack/spec/api`): the
+     * fields the caller may read on `object`, and the fields the write gate
+     * admits on an update of THIS stored row. A record's edit form reads it, so
+     * a field permission whose `when` names only some rows disables the field
+     * only on those rows; the row-less `/auth/me/permissions` read keeps
+     * reporting such an entry as its lock. A row that is absent or that the
+     * caller cannot read rejects with the record read's 404.
+     */
+    fieldAccess: async (object: string, id: string): Promise<GetRecordFieldAccessResponse> => {
+        const route = this.getRoute('data');
+        const res = await this.fetch(
+            `${this.baseUrl}${route}/${encodeURIComponent(object)}/${encodeURIComponent(id)}/field-access`,
+        );
+        return this.unwrapResponse<GetRecordFieldAccessResponse>(res);
+    },
+
+    /**
      * Streaming export (M10.9): CSV / JSON / XLSX file download. Returns the
      * raw `Response` — the body is a file stream (`Content-Disposition`
      * attachment), not a JSON envelope; call `.blob()` / `.text()` yourself.
@@ -8338,6 +8358,7 @@ export type {
   CheckPermissionResponse,
   GetObjectPermissionsResponse,
   GetEffectivePermissionsResponse,
+  GetRecordFieldAccessResponse,
   RealtimeConnectRequest,
   RealtimeConnectResponse,
   RealtimeSubscribeRequest,

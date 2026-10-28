@@ -10,6 +10,21 @@ updates:
     commit-message:
       prefix: "chore(deps)"
       include: "scope"
+    ignore:
+      # pnpm-workspace.yaml patches this package at one exact version (the
+      # focus-trap race fix that keeps a lookup popover searchable inside a
+      # Dialog). A bump leaves the new version unpatched, so move it by hand:
+      # re-key the patch to the new version and run
+      # ui/packages/components/src/__tests__/dialog-popover-focus-scope.test.tsx.
+      - dependency-name: "@radix-ui/react-focus-scope"
+      # playwright-core is pinned exact (service-print, dogfood) to the chromium
+      # build the container image ships, and playwright / @playwright/test carry
+      # their own playwright-core. Bumping only the two ranges forks
+      # playwright-core into two copies, which check:lockfile-integrity refuses.
+      # Move all three together, by hand, with the browser build.
+      - dependency-name: "playwright"
+      - dependency-name: "@playwright/test"
+      - dependency-name: "playwright-core"
     groups:
       # Group all patch and minor updates together
       development-dependencies:

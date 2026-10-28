@@ -17,8 +17,8 @@
 
 | Status | Records |
 |---|---|
-| Accepted | 116 |
-| Proposed | 14 |
+| Accepted | 124 |
+| Proposed | 6 |
 | Superseded | 4 |
 | Draft | 3 |
 | Deferred | 2 |
@@ -134,23 +134,23 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0060](./0060-conformance-ledger-platform-pattern.md) | Conformance Ledger as a Platform Pattern | Accepted — P1–P2 implemented; D5 landed-bar in force; D6 (CI aggregate) de… | 2026-06-21 | — | — |
 | [ADR-0061](./0061-record-search-architecture.md) | Record Search Architecture — metadata-driven `$search` resolution | Accepted — 2026-06-21; Tier 1 — implemented and conformance-closed per thi… | 2026-06-21 | — | — |
 | [ADR-0062](./0062-external-datasource-runtime.md) | External Datasource Runtime — connection lifecycle, credentials, visibility & query completeness | Accepted — 2026-06-22 — D1–D8 implemented. D1 fully implemented across bot… | 2026-06-22 | ADR-0015 | — |
-| [ADR-0063](./0063-two-kernel-agents-skills-are-the-extension-primitive.md) | Two agents (`ask` / `build`), bound by surface; skills are the only third-party extension primitive | Proposed — 2026-06-22 — cloud-owned (2026-07-16 audit): the framework spec… | 2026-06-22 | ADR-0040, ADR-0064 | cloud ADR-0025 |
-| [ADR-0064](./0064-tool-scoping-to-agent.md) | Tool scoping — an agent's tools are exactly its skills' tools | Proposed — 2026-06-22 — cloud-owned (2026-07-16 audit): the only framework… | 2026-06-22 | — | cloud ADR-0025 |
+| [ADR-0063](./0063-two-kernel-agents-skills-are-the-extension-primitive.md) | Two agents (`ask` / `build`), bound by surface; skills are the only third-party extension primitive | Accepted — 2026-10-28 (ruled on objectstack#26553, ADR batch 3; proposed 2… | 2026-10-28 | ADR-0040, ADR-0064 | cloud ADR-0025 |
+| [ADR-0064](./0064-tool-scoping-to-agent.md) | Tool scoping — an agent's tools are exactly its skills' tools | Accepted — 2026-10-28 (ruled on objectstack#26553, ADR batch 3; proposed 2… | 2026-10-28 | — | cloud ADR-0025 |
 | [ADR-0065](./0065-sdui-styling-model.md) | SDUI styling model — scoped style-objects over arbitrary Tailwind classes | Accepted — 2026-06-22 — open-mechanism half implemented: `style`/`responsi… | 2026-06-22 | — | — |
 | [ADR-0066](./0066-unified-authorization-model.md) | Unified authorization model — capability registry, secure-by-default posture, resource→capability contracts,… | Accepted — 2026-06-23 — D1–D5 + refinements ⑤/⑨ implemented (capability re… | 2026-06-23 | — | — |
 | [ADR-0067](./0067-commit-history-and-rollback-for-ai-authoring.md) | Commit history and rollback for AI authoring — turns become atomic, revertible commits | Accepted — 2026-06-24; completed 2026-07-16 · Amended (2026-08-06, #5351/#… | 2026-06-24 | — | — |
 | [ADR-0068](./0068-unified-user-context-and-built-in-identity-roles.md) | Unified user-context contract & built-in identity roles — one `currentuser` shape across formula/RLS/client,… | Accepted — 2026-06-24 — implemented under the position model: `EvalUser` f… | 2026-06-24 | — | — |
 | [ADR-0069](./0069-enterprise-authentication-hardening.md) | Enterprise authentication hardening — password policy, enforced MFA, SSO, session controls, network gating, a… | Accepted — P1 + P2 implemented (2026-07-04); P3 partially landed (see Adde… | 2026-07-04 | — | — |
 | [ADR-0070](./0070-package-first-authoring.md) | Package-first authoring — every runtime-authored item lives in a writable package (base); no orphans | Accepted — 2026-06-24 — P1–P3 implemented, merged & live-verified (see Imp… | 2026-06-24 | — | — |
-| [ADR-0071](./0071-dataset-semantic-layer-depth.md) | Dataset semantic-layer depth — multi-hop joins | Proposed — Refocused — see Correction below. The first merged draft also p… | — | — | — |
-| [ADR-0072](./0072-reference-scope-and-resolvability.md) | Reference Scope & Resolvability — the authored-expression data-picker model (#1934) | Proposed — 2026-06-25 | 2026-06-25 | — | — |
-| [ADR-0073](./0073-automation-execution-identity.md) | Automation execution identity — a built-in non-human principal for user-less runs, `runAs` as authorization p… | Proposed — 2026-06-25 | 2026-06-25 | — | — |
+| [ADR-0071](./0071-dataset-semantic-layer-depth.md) | Dataset semantic-layer depth — multi-hop joins | Accepted — 2026-10-28 (ruled on objectstack#26553, ADR batch 3; proposed 2… | 2026-10-28 | — | — |
+| [ADR-0072](./0072-reference-scope-and-resolvability.md) | Reference Scope & Resolvability — the authored-expression data-picker model (#1934) | Accepted — 2026-10-28 (ruled on objectstack#26553, ADR batch 3; proposed 2… | 2026-10-28 | — | — |
+| [ADR-0073](./0073-automation-execution-identity.md) | Automation execution identity — a built-in non-human principal for user-less runs, `runAs` as authorization p… | Accepted — 2026-10-28 (ruled on objectstack#26553, ADR batch 3; proposed 2… | 2026-10-28 | — | — |
 | [ADR-0074](./0074-canonical-audit-timestamp-storage-on-sqlite.md) | Audit timestamps are stored in one canonical, timezone-explicit format on SQLite | Accepted — 2026-06-26. Read side extended (2026-09-07): the read repair th… | 2026-06-26 | — | — |
 | [ADR-0076](./0076-objectql-core-tiering.md) | objectql is the data engine — relocate metadata management (protocol) out of it; enforce the boundary; defer… | Accepted — D1/D2/D4/D5/D6/D8/D9 implemented; D10/D12 partially landed; D11… | 2026-08-15 | — | — |
-| [ADR-0077](./0077-authoring-surface-boundary-hook-flow-validation.md) | The authoring-surface boundary — route by intent, not mechanism; verifiability tier = friction tier; loud-not… | Proposed — 2026-06-28 | 2026-06-28 | — | — |
+| [ADR-0077](./0077-authoring-surface-boundary-hook-flow-validation.md) | The authoring-surface boundary — route by intent, not mechanism; verifiability tier = friction tier; loud-not… | Accepted — 2026-10-28 (ruled on objectstack#26553, ADR batch 4; proposed 2… | 2026-10-28 | — | — |
 | [ADR-0078](./0078-no-silently-inert-metadata.md) | A Zod-valid metadata instance that is functionally incomplete must fail loudly at author time, uniformly acro… | Accepted — framework implemented; the cloud half of §2/§3 pending (cloud)… | 2026-06-28 | — | — |
 | [ADR-0079](./0079-record-display-name.md) | The record display-name contract — `nameField` is the one canonical primary-title pointer | Accepted — implemented. This file is a RETROACTIVE RECONSTRUCTION written… | 2026-06-28 | — | — |
-| [ADR-0080](./0080-ai-authored-ui-jsx-source.md) | AI-authored UI pages — JSX source compiled to the SDUI tree (parse ≠ execute); the component registry is the… | Proposed — 2026-06-29 — partially implemented (2026-07-16 audit): `sdui-pa… | 2026-06-29 | — | ADR-0065 |
+| [ADR-0080](./0080-ai-authored-ui-jsx-source.md) | AI-authored UI pages — JSX source compiled to the SDUI tree (parse ≠ execute); the component registry is the… | Accepted — 2026-10-28 (ruled on objectstack#26553, ADR batch 4; proposed 2… | 2026-10-28 | — | ADR-0065 |
 | [ADR-0081](./0081-trusted-react-page-tier.md) | A trusted `kind:'react'` page tier — real React executed in the main tree, gated by a host capability; and re… | Accepted — 2026-06-30 — framework scope implemented (`html`/`react` page k… | 2026-06-30 | — | ADR-0065 |
 | [ADR-0082](./0082-react-component-contract-governance.md) | Governing the react-tier component contract — spec is the protocol source of truth, the registry is a designe… | Accepted — 2026-06-30 | 2026-06-30 | — | — |
 | [ADR-0084](./0084-application-builder-information-architecture.md) | Application-builder information architecture — four content pillars + Settings/Advanced | Accepted — 2026-07-01 | 2026-07-01 | — | — |
@@ -165,7 +165,7 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0093](./0093-tenancy-mode-and-membership-lifecycle.md) | Tenancy mode as a first-class capability, and a single owner for the user→membership lifecycle | Accepted — 2026-07-13 — implemented: `tenancy` kernel service (`plugin-aut… | 2026-07-13 | — | — |
 | [ADR-0094](./0094-sys-permission-set-pure-projection.md) | Permission-Set Definitions Have One Authoritative Store — `syspermissionset` Becomes a Pure Projection | Accepted — 2026-07-14; D5 retired 2026-08-09 (see D5-R) · Amended (2026-10… | 2026-07-14 | — | — |
 | [ADR-0095](./0095-authz-kernel-tenant-layer-and-posture-ladder.md) | Authorization Kernel Chain — Tenant Isolation as Layer 0, a Monotonic Posture Ladder, Capability-Derived Post… | Accepted — 2026-07-14 — implemented: D1 tenant Layer 0 (`plugin-security/s… | 2026-07-14 | — | — |
-| [ADR-0096](./0096-execution-surface-identity-admission.md) | Execution-Surface Identity Admission — no data-engine call without an explicit principal or an explicit, audi… | Proposed — 2026-07-15 | 2026-07-15 | — | — |
+| [ADR-0096](./0096-execution-surface-identity-admission.md) | Execution-Surface Identity Admission — no data-engine call without an explicit principal or an explicit, audi… | Accepted — 2026-10-28 (ruled on objectstack#26553, ADR batch 4; proposed 2… | 2026-10-28 | — | — |
 | [ADR-0097](./0097-declarative-connector-instances.md) | Declarative Connector Instances — Provider-Bound `connectors:` Entries Materialized by Generic Executors | Accepted — 2026-07-15 — implemented in framework#2977 | 2026-07-15 | — | — |
 | [ADR-0098](./0098-pinyin-search-companion-column.md) | Pinyin Search via a Locale-Gated Companion Column | Accepted | 2026-07-16 | — | — |
 | [ADR-0099](./0099-posture-adjudicated-tiering-and-external-rung.md) | Posture-Adjudicated Tiering — one axis for tier decisions, the EXTERNAL rung's enforcement path, no explicit… | Accepted — 2026-07-18; proposed 2026-07-17 — P0 equivalence gate landed wi… | 2026-07-18 | — | — |
@@ -209,7 +209,7 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0138](./0138-guest-model-anonymous-principal-doors-grants-and-organization.md) | The guest model — one anonymous principal, a closed list of doors, one grants channel, one organization rule,… | Accepted — 2026-10-13, accepted by the maintainer's approval of the pull r… | 2026-10-13 | — | — |
 | [ADR-0139](./0139-engine-internal-semi-join-leaf-readable-parent-ids.md) | One engine-internal semi-join leaf — "the ids of object X this caller may read" — pushed down by ObjectQL, ne… | Accepted — 2026-10-11, accepted by the merge that landed it on `main` | 2026-10-11 | — | — |
 | [ADR-0141](./0141-inter-app-dependency-declared-checked-before-install.md) | An app may depend on another installed app — declared in `manifest.dependencies`, checked once before install… | Proposed — 2026-10-25; first draft 2026-10-24. `docs/adr/` is Tier H (Prim… | 2026-10-25 | — | — |
-| [ADR-0142](./0142-ownership-queue-membership-claim-and-assignment-rules.md) | An ownership queue is a platform primitive — a queue entity, membership through the existing recipient kinds,… | Proposed — 2026-10-25. `docs/adr/` is Tier H (Prime Directive #14): this r… | 2026-10-25 | — | — |
+| [ADR-0142](./0142-ownership-queue-membership-claim-and-assignment-rules.md) | An ownership queue is a platform primitive — a queue entity, membership through the existing recipient kinds,… | Proposed — 2026-10-25 · Amended (2026-10-28, ruling `6457475657` on #25769… | 2026-10-25 | — | — |
 | [ADR-0143](./0143-outbound-connector-auth-is-open-tier.md) | Outbound connector auth is open tier — OAuth2 grants, vendor app-credential exchange and request signing in o… | Proposed — 2026-10-27. `docs/adr/` is Tier H (Prime Directive #14): the ma… | 2026-10-27 | — | — |
 
 ## ObjectUI registry — `ui/docs/adr/` (`ui-` prefix)
