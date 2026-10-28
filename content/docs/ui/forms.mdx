@@ -280,7 +280,7 @@ async function submit(slug: string, payload: Record<string, unknown>) {
 }
 ```
 
-The ObjectUI console (a separate package/repo) ships a unified `FormPage` renderer at `/_console/f/:slug` (public) and `/_console/forms/:name` (internal) that does exactly this.
+The Console ships a unified `FormPage` renderer at `/_console/f/:slug` (public) and `/_console/forms/:name` (internal) that does exactly this.
 
 ## 6. Internal forms (`/_console/forms/:name`)
 
@@ -319,6 +319,14 @@ Operators hit `/_console/forms/quick_create`. The renderer:
 - Submits to `POST /api/v1/data/lead` carrying the auth cookie
 
 Permissions are enforced server-side just like every other authed write — no `guest_portal` profile required.
+
+Inside an app the same form opens at `/_console/apps/:appName/forms/:name`, with that app's
+sidebar and branding: a `type: 'form'` action fired from an app route (a record page, an
+object list or a page) opens there, and the app-less `/forms/:name` serves every other
+link, cold deep links included. The form is headed by the view's label or the form's
+`title`, else by its object's label (the object's API name only when it has no label). An
+internal form also has **Cancel**, which returns to the page the form was opened from, or,
+on a cold link, to the record being edited, else to the app's home.
 
 ## 7. URL prefill
 
