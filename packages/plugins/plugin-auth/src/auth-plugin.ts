@@ -1000,6 +1000,20 @@ export class AuthPlugin implements Plugin {
       }
     }
 
+    // [#26638] A session is born with `last_activity_at` = the `created_at`
+    // it is stored with, after ObjectQL's own stamp (session-first-activity.ts).
+    // Registered here rather than on `kernel:ready`: the development admin
+    // seed's sign-up, itself a `kernel:ready` hook, mints a session as well.
+    // An engine that cannot take hooks (mock mode) stores no session row.
+    try {
+      const ql = ctx.getService<IObjectQLEngine>('objectql');
+      if (ql && typeof ql.registerHook === 'function') {
+        registerSessionFirstActivity(ql, { packageId: 'com.objectstack.plugin-auth.session-first-activity' });
+      }
+    } catch {
+      // No `objectql` service (mock mode): nothing to register on.
+    }
+
     // [#8009] Move any provider row still holding a CLEARTEXT OIDC client
     // secret in `oidc_config` into the encrypted column. Registered
     // unconditionally (not under `registerRoutes`) because the disposition of
@@ -1857,12 +1871,6 @@ export class AuthPlugin implements Plugin {
         registerMembershipEndedSessionTrigger(engine, {
           packageId: 'com.objectstack.plugin-auth.membership-ended-session',
           logger: ctx.logger,
-        });
-        // [#26638] A session is born with `last_activity_at` = the
-        // `created_at` it is stored with, after ObjectQL's own stamp. See
-        // session-first-activity.ts.
-        registerSessionFirstActivity(engine, {
-          packageId: 'com.objectstack.plugin-auth.session-first-activity',
         });
       } catch {
         // Engine not available (mock mode) — permission-set defaults remain

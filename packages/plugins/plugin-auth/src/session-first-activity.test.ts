@@ -114,6 +114,15 @@ describe('[#26638] on the real stack, a session row is born with last_activity_a
     return minted[0]!;
   };
 
+  it('the session the development admin seed mints at boot is born with it too', async () => {
+    const atBoot = (await ql.find('sys_session', { limit: 500, context: SYS })) as Array<Record<string, any>>;
+    expect(atBoot.length, 'the seed signs the admin up, which mints a session').toBeGreaterThan(0);
+    for (const row of atBoot) {
+      expect(row.last_activity_at, `session ${row.id}`).toBeTruthy();
+      expect(at(row.last_activity_at)).toBe(at(row.created_at));
+    }
+  });
+
   it('a sign-in from ::1 stores ::1, and last_activity_at equal to the stored created_at', async () => {
     const session = await signInFrom('::1');
 
