@@ -2230,6 +2230,50 @@ describe('SecurityPlugin', () => {
         await expect(updateAdmitted(harness)).resolves.toBe(false);
       });
 
+      it('a stored row outside a row-level check answers false, while a save moving it back inside passes', async () => {
+        // The check judges the post-image; the probe's post-image is the stored
+        // row as it is. So `false` is "an update that leaves the row as stored",
+        // not "every update" — the describe says exactly that.
+        const checkSet = {
+          ...ownRowsSet(true),
+          rowLevelSecurity: [
+            { name: 'own_rows_update', object: 'task', operation: 'update', using: 'owner_id = current_user.id', check: "status != 'archived'" },
+          ],
+        } as any;
+        for (const status of ['draft', 'archived']) {
+          const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+          const harness = makeMiddlewareCtx({ permissionSets: [checkSet], objectFields: whenFields, findOneImpl: () => rowOf(status) });
+          await plugin.init(harness.ctx);
+          await plugin.start(harness.ctx);
+          const writable = status !== 'archived';
+          await expect(plugin.getRecordFieldAccess('task', 'r1', whenCtx), status).resolves.toMatchObject({ writable });
+          const save = (data: Record<string, unknown>) =>
+            harness
+              .run({ object: 'task', operation: 'update', context: { ...whenCtx }, data, options: { where: { id: 'r1' } } })
+              .then(() => true, () => false);
+          await expect(save({ name: 'renamed' }), status).resolves.toBe(writable);
+          await expect(save({ status: 'draft' }), status).resolves.toBe(true);
+        }
+      });
+
+      it('a refused probe logs at debug, tagged probe: true; a refused update still warns', async () => {
+        const { plugin, harness } = await bootRows({ inWriteScope: false });
+        harness.ctx.logger.debug = vi.fn();
+        const denials = () =>
+          harness.ctx.logger.warn.mock.calls.filter((c: any[]) => String(c[0]).includes('Access denied'));
+        await expect(plugin.getRecordFieldAccess('task', 'r1', whenCtx)).resolves.toMatchObject({ writable: false });
+        expect(denials()).toEqual([]);
+        expect(harness.ctx.logger.debug).toHaveBeenCalledWith(
+          expect.stringContaining('row-level security'),
+          expect.objectContaining({ operation: 'update', recordId: 'r1', probe: true }),
+        );
+        // Positive control: the same refusal on a real update is a warning.
+        await expect(updateAdmitted(harness)).resolves.toBe(false);
+        expect(denials()).toEqual([
+          [expect.stringContaining('row-level security'), expect.not.objectContaining({ probe: true })],
+        ]);
+      });
+
       it('leaves nothing behind: no write epoch advanced, the caller\'s context unstamped', async () => {
         const { plugin, harness } = await bootRows({ inWriteScope: true });
         const epoch = (plugin as any).epoch;

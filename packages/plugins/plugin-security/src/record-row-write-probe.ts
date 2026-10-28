@@ -33,8 +33,13 @@
  * The question is the ROW, not a change set: every gate above judges the
  * stored row and the caller, and none reads the payload. The gates that do —
  * field-level security (its own answer is `editable`, field by field), the
- * masked echo, the owner forge, the RLS `check` post-image — admit an empty
- * one, so the probe asks nothing about which values a save may carry.
+ * masked echo, the owner forge — admit an empty one, so the probe asks
+ * nothing about which values a save may carry. One payload gate still speaks:
+ * the RLS `check` post-image (step 3.6) is the stored row merged with nothing,
+ * so a stored row outside a `check` scope answers `false`, while a save that
+ * moves the checked field back inside that scope is admitted by the same
+ * step. That is the gate's own verdict on an update that leaves the row as it
+ * is, and the published describe says so.
  *
  * ## Why it writes nothing
  *
@@ -53,9 +58,12 @@
  * Rules outside those two middlewares, which a save can still meet: a
  * pending approval's record lock (its own reader, the approval service's
  * `getRecordLock`), conditional read-only rules and validation rules on the
- * values sent, an external datasource that refuses writes, and another
- * plugin's own rules for its own objects. ⛔ So `true` never means "this save
- * will succeed"; `false` always means the gate refuses the whole row.
+ * values sent, an external datasource that refuses writes, another plugin's
+ * own rules for its own objects (comments, attachments, mail messages,
+ * approval requests), and the REST door's exposure policy for the object (an
+ * object served read-only refuses the PATCH before the engine). ⛔ So `true`
+ * never means "this save will succeed"; `false` means the gate refuses an
+ * update that leaves the row as it is stored.
  *
  * Fails CLOSED: no middleware registered (no engine), an unexpected throw, or
  * a middleware that answers without passing the operation on are all `false`.
@@ -72,6 +80,25 @@ export const ROW_WRITE_PROBE: unique symbol = Symbol('objectstack.security.rowWr
 /** Whether `opCtx` is a row write probe's synthetic operation. */
 export function isRowWriteProbe(opCtx: unknown): boolean {
   return !!opCtx && typeof opCtx === 'object' && (opCtx as Record<symbol, unknown>)[ROW_WRITE_PROBE] === true;
+}
+
+/**
+ * Log a gate refusal. A refused write logs `warn`: someone tried to change a
+ * row they may not. A refused probe is a form asking whether to offer an edit
+ * at all, so it logs `debug` with `probe: true` — otherwise every open of a
+ * read-only record writes a line indistinguishable from a denied write, and a
+ * warning channel that fires on reads is one operators learn to ignore.
+ */
+export function logGateRefusal(
+  logger: { warn?: (...args: any[]) => void; debug?: (...args: any[]) => void } | null | undefined,
+  opCtx: unknown,
+  ...args: [message: string, meta?: Record<string, unknown>]
+): void {
+  if (isRowWriteProbe(opCtx)) {
+    logger?.debug?.(args[0], { ...args[1], probe: true });
+    return;
+  }
+  logger?.warn?.(...args);
 }
 
 /** The engine middleware signature `registerAuthzMiddleware` registers. */

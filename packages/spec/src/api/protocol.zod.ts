@@ -3126,9 +3126,13 @@ export const GetRecordFieldAccessResponseSchema = lazySchema(() => z.object({
   writable: z.boolean().describe(
     'Whether the caller may update this record at all, judged by the write gate on the stored row: the object\'s '
     + 'edit permission, record sharing and ownership, row-level security, and a parent record\'s edit access for a '
-    + 'record controlled by its parent. False means an update of this record is refused whole, whatever it changes. '
-    + 'True does not promise that a save succeeds: a pending approval that locks the record, conditional read-only '
-    + 'and validation rules on the values sent, and a data source that refuses writes are judged when the record is saved',
+    + 'record controlled by its parent. False means an update that leaves the record as it is stored is refused: '
+    + 'either the caller may not edit this record, or the stored record fails a row-level security check that every '
+    + 'save must satisfy, which a save moving the checked value back inside that check can still pass. True does not '
+    + 'promise that a save succeeds: a pending approval that locks the record, conditional read-only and validation '
+    + 'rules on the values sent, a data source that refuses writes, the platform\'s own rules for its own records '
+    + '(comments, attachments, mail messages, approval requests) and an object the API serves read-only are judged '
+    + 'when the record is saved',
   ),
 }));
 

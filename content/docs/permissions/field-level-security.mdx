@@ -70,9 +70,14 @@ fields: {
   the row's own verdict: `false` on a row the caller may read but not write,
   where an update is refused as a whole, so a client need not offer the
   edit at all. It comes from the write gate too, run over an update of the
-  row without performing it. `true` does not promise a save succeeds: a
-  pending approval's record lock and rules judged on the values sent
-  (conditional read-only, validation) still apply when the record is saved.
+  row without performing it. A stored row outside a row-level `check` also
+  answers `false`: an update that leaves it as it is fails the check, while a
+  save that moves the checked value back inside it can pass. `true` does not
+  promise a save succeeds: a pending approval's record lock, rules judged on
+  the values sent (conditional read-only, validation), a data source that
+  refuses writes, the platform's own rules for its own records (comments,
+  attachments, mail messages, approval requests) and an object the API serves
+  read-only still apply when the record is saved.
 - **Union without deny is unchanged.** A matched conditioned lock is still
   out-voted by another set's unconditioned `editable: true`; an entry
   without `when` votes on every row, as before (ADR-0066 ⑧, note of

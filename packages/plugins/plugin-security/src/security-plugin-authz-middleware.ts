@@ -100,7 +100,7 @@ import { crossFieldClassRefusalCarriedBy, findCrossFieldClassRefusal } from '@ob
 import type { SecurityPlugin } from './security-plugin.js';
 import { isGuestEnvelope, requiredCapsForOperation } from './security-plugin.js';
 import { assertFlowSystemIdentityWriteAllowed } from './flow-system-identity-write-refusal.js';
-import { isRowWriteProbe, type AuthzMiddlewareFn } from './record-row-write-probe.js';
+import { isRowWriteProbe, logGateRefusal, type AuthzMiddlewareFn } from './record-row-write-probe.js';
 import {
   intersectDelegatedScope,
 } from './explain-engine.js';
@@ -679,7 +679,7 @@ export function registerAuthzMiddleware(
           const developerMessage =
             `[Security] Access denied: '${opCtx.object}' (operation '${opCtx.operation}') requires capability ` +
             `[${required.join(', ')}] — ${missing.length > 0 ? 'caller' : 'the delegator'} is missing [${allMissing.join(', ')}]`;
-          ctx.logger.warn(developerMessage, {
+          logGateRefusal(ctx.logger, opCtx, developerMessage, {
             operation: opCtx.operation,
             object: opCtx.object,
             requiredPermissions: required,
@@ -809,7 +809,7 @@ export function registerAuthzMiddleware(
         const developerMessage =
           `[Security] Access denied: operation '${opCtx.operation}' on object '${opCtx.object}' ` +
           `is not permitted for positions [${positions.join(', ')}]`;
-        ctx.logger.warn(developerMessage, {
+        logGateRefusal(ctx.logger, opCtx, developerMessage, {
           operation: opCtx.operation,
           object: opCtx.object,
           positions,
@@ -1124,7 +1124,7 @@ export function registerAuthzMiddleware(
             const developerMessage =
               `[Security] Access denied: not permitted to ${opCtx.operation} this ` +
               `'${opCtx.object}' record (row-level security)`;
-            ctx.logger.warn(developerMessage, {
+            logGateRefusal(ctx.logger, opCtx, developerMessage, {
               operation: opCtx.operation,
               object: opCtx.object,
               recordId: targetId,
@@ -1774,7 +1774,9 @@ export function registerAuthzMiddleware(
         // the engine (an insert, a predicate update) and a by-id update
         // judged here answer a caller identically.
         const denyCheck = (): never => {
-          this.logger.warn?.(
+          logGateRefusal(
+            this.logger,
+            opCtx,
             `[Security] RLS check FAILED on ${opCtx.operation} '${opCtx.object}' — write denied (fail-closed)`,
           );
           // [#7451] The third end-user situation, and the only one of the
@@ -1790,7 +1792,7 @@ export function registerAuthzMiddleware(
           // Naming the object without the field would send the user hunting.
           const developerMessage =
             `[Security] Access denied: the ${opCtx.operation} would violate a row-level CHECK on '${opCtx.object}'`;
-          ctx.logger.warn(developerMessage, {
+          logGateRefusal(ctx.logger, opCtx, developerMessage, {
             operation: opCtx.operation,
             object: opCtx.object,
             positions,

@@ -629,10 +629,15 @@ export interface ISecurityService {
    * second evaluator either: whether a by-id update of `recordId` passes the
    * object grant, record sharing and ownership, row-level security and the
    * controlled-by-parent master's edit access, judged by running those gates
-   * over that update without performing it. `false` means the update is
-   * refused whole; `true` promises nothing about rules judged on the values a
-   * save sends (a pending approval's record lock, conditional read-only and
-   * validation rules) or about a data source that refuses writes.
+   * over that update without performing it. `false` means an update that
+   * leaves the row as stored is refused: the caller may not edit the row, or
+   * the stored row fails a row-level `check` every save must satisfy (a save
+   * moving the checked value back inside that check can still pass). `true`
+   * promises nothing about rules judged on the values a save sends (a pending
+   * approval's record lock, conditional read-only and validation rules), a
+   * data source that refuses writes, a platform object's own gates (comments,
+   * attachments, mail messages, approval requests), or the REST door's
+   * exposure policy for an object served read-only.
    *
    * **`readable` is {@link getReadableFields}' answer**, unchanged: reads are
    * judged row-blind (a `when` reaches the edit vote only).
