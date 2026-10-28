@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { workspaceRoot } from '../workspace-root.mjs';
 
 /**
  * objectui#3449 — `check-links.yml` was pointed at the wrong tree.
@@ -53,6 +54,15 @@ import { fileURLToPath } from 'node:url';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const lycheeConfigPath = path.join(repoRoot, 'lychee.toml');
+/**
+ * The lychee config a run actually reads: the root `check-links.yml` passes
+ * `--config lychee.toml` from the repository root, and no workflow reads
+ * `ui/lychee.toml` (objectstack#26080). A pin whose property the root file
+ * carries reads this one; the `root_dir` sentinel pin below has no root
+ * counterpart (the root lane RESOLVES site routes with `--root-dir`), so it
+ * stays on the ui copy until that is decided.
+ */
+const liveLycheeConfigPath = path.join(workspaceRoot(), 'lychee.toml');
 
 /**
  * This file's own leading block comment — the second surface the count pin reads.
@@ -227,7 +237,7 @@ describe('lychee.toml — site-absolute routes are skipped, not resolved', () =>
     // a parsed URL; `/docs/x` fails to parse first) and pointed at the internal
     // `docs/` tree besides. Route-to-file resolution has exactly one owner:
     // scripts/check-doc-links.mjs.
-    const config = fs.readFileSync(lycheeConfigPath, 'utf8');
+    const config = fs.readFileSync(liveLycheeConfigPath, 'utf8');
     const active = config
       .split('\n')
       .filter((line) => !/^\s*#/.test(line))
