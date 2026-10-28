@@ -33,6 +33,11 @@ function makeDriver() {
     if (!where || typeof where !== 'object') return true;
     for (const [k, v] of Object.entries(where as Row)) {
       if (k.startsWith('$')) continue;
+      // [#27004] The collection probes the records of one depth together.
+      if (v && typeof v === 'object' && Array.isArray((v as Row).$in)) {
+        if (!((v as Row).$in as unknown[]).some((x) => String(x) === String(row[k]))) return false;
+        continue;
+      }
       const exp = v && typeof v === 'object' && '$eq' in (v as Row) ? (v as Row).$eq : v;
       if ((row[k] ?? null) !== (exp ?? null)) return false;
     }

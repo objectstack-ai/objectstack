@@ -43,6 +43,15 @@ const LANDING = { name: 'landing', label: 'Landing', type: 'app', kind: 'html', 
 
 const NAV = [{ id: 'nav_landing', type: 'page', label: 'Landing', pageName: 'landing' }];
 
+
+/** A package other than the pillar's: its items answer the unscoped list only. */
+const OTHER_PKG = 'com.other.app';
+
+/** A package-scoped list keeps the rows of that package, as the server's does (objectstack#26889). */
+function inScope(rows: Array<Record<string, unknown>>, opts: { packageId?: string }) {
+  return opts.packageId ? rows.filter((r) => (r._packageId ?? opts.packageId) === opts.packageId) : rows;
+}
+
 let apps: Array<Record<string, unknown>>;
 let published: Record<string, Array<Record<string, unknown>>>;
 let draftHeaders: Array<{ type: string; name: string; packageId: string }>;
@@ -53,7 +62,9 @@ const mockClient = {
     draftRows[`${type}:${name}`] = body;
     return { success: true, version: 'v1', state: 'draft' };
   }),
-  list: vi.fn(async (type: string) => (type === 'app' ? apps : (published[type] ?? []))),
+  list: vi.fn(async (type: string, opts: { packageId?: string } = {}) =>
+    type === 'app' ? apps : inScope(published[type] ?? [], opts),
+  ),
   listDrafts: vi.fn(async (opts: { type?: string } = {}) =>
     draftHeaders.filter((h) => !opts.type || h.type === opts.type),
   ),
@@ -268,7 +279,7 @@ describe('the Interfaces pillar creates a page and opens it on source plus live 
   });
 
   it('an identifier a page in another package holds is refused in the dialog, and nothing is written', async () => {
-    published.page = [LANDING, { name: 'team_handbook', label: 'Their handbook', type: 'app' }];
+    published.page = [LANDING, { name: 'team_handbook', label: 'Their handbook', type: 'app', _packageId: OTHER_PKG }];
     mountPillar();
     await ready();
     const dialog = await openNewPage();
