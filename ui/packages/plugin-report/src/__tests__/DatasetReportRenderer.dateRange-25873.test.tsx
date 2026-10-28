@@ -13,6 +13,7 @@ import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { SchemaRendererProvider } from '@object-ui/react';
+import { I18nProvider } from '@object-ui/i18n';
 import { DatasetReportRenderer } from '../DatasetReportRenderer';
 
 // Radix Select opens on pointer events the DOM environment does not implement;
@@ -74,9 +75,11 @@ const BASE = {
 
 function renderReport(report: Record<string, unknown>, src: ReturnType<typeof makeSource>, apiFetch?: any) {
   return render(
-    <SchemaRendererProvider dataSource={undefined} apiFetch={apiFetch}>
-      <DatasetReportRenderer report={report} dataSource={src} />
-    </SchemaRendererProvider>,
+    <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }}>
+      <SchemaRendererProvider dataSource={undefined} apiFetch={apiFetch}>
+        <DatasetReportRenderer report={report} dataSource={src} />
+      </SchemaRendererProvider>
+    </I18nProvider>,
   );
 }
 
