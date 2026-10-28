@@ -209,7 +209,7 @@ The expression engine lives in `packages/core/src/evaluator/` and powers dynamic
 
 ```json
 {
-  "visible": "${data.role === 'admin'}",
+  "visible": "${data.department === 'finance'}",
   "label": "Hello, ${data.user.name}!",
   "disabled": "${data.status !== 'draft'}",
   "className": "${data.priority === 'high' ? 'text-red-500' : 'text-gray-500'}"

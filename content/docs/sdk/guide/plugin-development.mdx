@@ -32,7 +32,7 @@ packages/plugin-board/
 └── README.md
 ```
 
-| File | Role |
+| File | Purpose |
 |------|------|
 | `index.tsx` | Lightweight entry — sets up `React.lazy()`, `Suspense` fallback, and calls `ComponentRegistry.register()`. |
 | `BoardImpl.tsx` | The actual renderer. All heavy dependencies live here so they are tree-shaken from the initial bundle. |

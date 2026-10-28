@@ -46,7 +46,7 @@ here.
     "columns": [
       "name",
       "email",
-      "role",
+      "title",
       "department",
       "status"
     ],
@@ -83,7 +83,7 @@ here.
       "columns": [
         "name",
         "email",
-        "role",
+        "title",
         "department",
         "status"
       ]
@@ -127,7 +127,7 @@ here.
     "columns": [
       "name",
       "email",
-      "role",
+      "title",
       "status"
     ]
   },
@@ -135,7 +135,7 @@ here.
     "fields": [
       "name",
       "email",
-      "role",
+      "title",
       "department",
       "status"
     ],
@@ -426,7 +426,7 @@ const userDirectory: ObjectViewSchema = {
   objectName: 'users',
   defaultViewType: 'grid',
   table: {
-    columns: ['name', 'email', 'role', 'created_at'],
+    columns: ['name', 'email', 'title', 'created_at'],
     sort: [{ field: 'created_at', order: 'desc' }],
   },
 };
@@ -452,7 +452,7 @@ const userForm: ObjectViewSchema = {
   objectName: 'users',
   layout: 'drawer', // drawer | modal | page
   form: {
-    fields: ['name', 'email', 'role'],
+    fields: ['name', 'email', 'title'],
     submitText: 'Save user',
     showCancel: true,
   },
@@ -702,13 +702,13 @@ const userFields: ObjectViewSchema = {
   type: 'object-view',
   objectName: 'users',
   table: {
-    columns: ['name', 'email', 'role'], // grid columns
+    columns: ['name', 'email', 'title'], // grid columns
   },
   form: {
-    fields: ['name', 'email', 'role'], // flat field list, or use sections
+    fields: ['name', 'email', 'title'], // flat field list, or use sections
     sections: [
       { name: 'identity', label: 'Identity', fields: ['name', 'email'] },
-      { name: 'access', label: 'Access', fields: ['role'] },
+      { name: 'work', label: 'Work', fields: ['title'] },
     ],
     columns: 2,
   },
@@ -774,7 +774,7 @@ const userTabs: ObjectViewSchema = {
       label: 'Admins',
       type: 'grid',
       columns: ['name', 'email'],
-      filter: [{ field: 'role', operator: 'equals', value: 'admin' }],
+      filter: [{ field: 'title', operator: 'equals', value: 'Manager' }],
     },
   },
   defaultListView: 'active',
@@ -840,7 +840,7 @@ const userView: ObjectViewSchema = {
   objectName: 'users',
   defaultViewType: 'grid',
   // Displayed columns are grid configuration, inherited from ObjectGridSchema.
-  table: { columns: ['name', 'email', 'role'] },
+  table: { columns: ['name', 'email', 'title'] },
 };
 ```
 

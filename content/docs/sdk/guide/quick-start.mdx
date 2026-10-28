@@ -91,12 +91,12 @@ const schema: CardSchema = {
     columns: [
       { header: 'Name', accessorKey: 'name', sortable: true },
       { header: 'Email', accessorKey: 'email' },
-      { header: 'Role', accessorKey: 'role' },
+      { header: 'Department', accessorKey: 'department' },
     ],
     data: [
-      { name: 'Ada Lovelace', email: 'ada@example.com', role: 'Admin' },
-      { name: 'Grace Hopper', email: 'grace@example.com', role: 'Editor' },
-      { name: 'Katherine Johnson', email: 'katherine@example.com', role: 'Viewer' },
+      { name: 'Ada Lovelace', email: 'ada@example.com', department: 'Engineering' },
+      { name: 'Grace Hopper', email: 'grace@example.com', department: 'Marketing' },
+      { name: 'Katherine Johnson', email: 'katherine@example.com', department: 'Sales' },
     ],
     pagination: false,
     searchable: false,
@@ -231,7 +231,7 @@ published is not an error: the expression is returned as its own source text.
     "columns": [
       { "field": "name", "label": "Name", "sortable": true },
       { "field": "email", "label": "Email" },
-      { "field": "role", "label": "Role" },
+      { "field": "department", "label": "Department" },
       { "field": "status", "label": "Status" },
       { "field": "created_at", "label": "Joined" }
     ],

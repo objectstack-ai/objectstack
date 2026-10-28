@@ -66,7 +66,7 @@ interface BaseSchema {
   "id": "stats-card",
   "className": "p-6 shadow-lg",
   "title": "User Statistics",
-  "visibleWhen": "${user.role === 'admin'}",
+  "visibleWhen": "${user.department === 'finance'}",
   "children": {
     "type": "text",
     "content": "Total Users: ${stats.totalUsers}"
@@ -93,7 +93,7 @@ declare const schema: DeclaredNode
 
 // Every name here becomes a root the schema's expressions can read.
 const scope = {
-  user: { name: 'John', role: 'admin' },
+  user: { name: 'John', department: 'finance' },
   stats: { totalUsers: 1234 },
 }
 
@@ -265,7 +265,7 @@ it on `label`: `text` is not a `BadgeSchema` key.
 {
   "type": "button",
   "label": "Delete",
-  "visibleWhen": "${user.role === 'admin'}"
+  "visibleWhen": "${user.department === 'finance'}"
 }
 ```
 

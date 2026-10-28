@@ -152,7 +152,7 @@ const schema: ChatbotSchema = {
 
 ## Features
 
-- **Message History**: Display chat messages with user and assistant roles
+- **Message History**: Display user and assistant chat messages
 - **System Messages**: Show system notifications in the chat
 - **Timestamps**: Optional timestamp display for each message
 - **Custom Avatars**: Configurable avatar images and fallback text
@@ -434,7 +434,7 @@ const schema: ChatbotSchema = {
 };
 ```
 
-## Message Roles
+## Message Kinds
 
 ### User Messages
 
@@ -482,7 +482,7 @@ const systemMessage: ChatMessage = {
 
 ### Tool Messages (AI Mode)
 
-Tool messages represent results from tool invocations during AI streaming. They are generated automatically by the vercel/ai SDK when the backend performs tool calls (e.g., fetching weather, querying a database). The SDK may emit `role: 'tool'` messages as well as populate the assistant message's `toolInvocations` array.
+Tool messages represent results from tool invocations during AI streaming. They are generated automatically by the vercel/ai SDK when the backend performs tool calls (e.g., fetching weather, querying a database). The SDK may emit tool messages as well as populate the assistant message's `toolInvocations` array.
 
 By default, `ChatbotEnhanced` renders tool invocations as a compact agent activity summary. Repeated calls are grouped, raw tool names are hidden, and reasoning text is not shown. Use `processVisibility="debug"` for developer/admin views that need the full reasoning panel, raw tool names, parameters, and results. Use `processVisibility="hidden"` to suppress non-interactive activity entirely; approval and draft-review actions remain visible.
 

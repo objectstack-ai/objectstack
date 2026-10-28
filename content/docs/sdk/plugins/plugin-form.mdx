@@ -42,7 +42,7 @@ examples used to be, and they now live in the catalog under
     "fields": [
       "name",
       "email",
-      "role",
+      "title",
       "department",
       "status"
     ],
@@ -83,10 +83,10 @@ examples used to be, and they now live in the catalog under
         ]
       },
       {
-        "name": "access",
-        "label": "Access",
+        "name": "work",
+        "label": "Work",
         "fields": [
-          "role",
+          "title",
           "status"
         ]
       }
@@ -553,7 +553,7 @@ as well as a simple form whose mobile `stepper` option routes it through the
 wizard, and the parent operation of a master-detail form. Every layout also
 strips what a form never writes, on a create as on an edit: server-owned,
 computed and read-only columns, keys the object does not declare, and fields the
-caller's field-level security refuses — which every layout renders disabled. A field asks the question of the form's mode: a create form asks whether the caller may set it on a NEW record (the server's insert rule — a field the permission set does not mention falls back to the object's `allowCreate`), and an edit form whether they may change it on an existing one (`allowEdit`), so a role that may create but not edit can fill a create form. Every layout also disables every field of a managed object whose `userActions` do not open the form's mode, of an object whose `create` or `update` the server's effective API operations deny, and of an object whose create (create form) or update (edit form) grant the caller does not hold. While that lock holds, the form shows one notice naming the object and the missing permission, and a `wizard` disables Next and its final submit button. A field whose sameness cannot be proven is sent: `5` and `'5'`, `null` and
+caller's field-level security refuses — which every layout renders disabled. A field asks the question of the form's mode: a create form asks whether the caller may set it on a NEW record (the server's insert rule — a field the permission set does not mention falls back to the object's `allowCreate`), and an edit form whether they may change it on an existing one (`allowEdit`), so a caller who may create but not edit can fill a create form. Every layout also disables every field of a managed object whose `userActions` do not open the form's mode, of an object whose `create` or `update` the server's effective API operations deny, and of an object whose create (create form) or update (edit form) grant the caller does not hold. While that lock holds, the form shows one notice naming the object and the missing permission, and a `wizard` disables Next and its final submit button. A field whose sameness cannot be proven is sent: `5` and `'5'`, `null` and
 `''`, and a lookup id and its expanded object all count as different. A save with
 nothing changed still sends the full payload, as it always has. The record's
 owner (`owner_id`) is the one server-owned column an edit writes: it is sent when
