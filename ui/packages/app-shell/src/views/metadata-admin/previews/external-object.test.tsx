@@ -32,7 +32,10 @@ import { readExternalBinding } from './external-object';
 // The zh rows are read synchronously below; the catalogue is fetched on demand.
 await loadStudioCatalogue('zh');
 
-beforeEach(() => metaGet.mockReset());
+// A braced body: an arrow returning the mock would hand vitest a cleanup hook to call.
+beforeEach(() => {
+  metaGet.mockReset();
+});
 afterEach(cleanup);
 
 const FIELDS = {
@@ -137,7 +140,9 @@ describe('ObjectFormCanvas — external object', () => {
   });
 
   it('a datasource read that fails is shown as unconfirmed, never guessed', async () => {
-    metaGet.mockRejectedValue(new Error('403'));
+    metaGet.mockImplementation(async () => {
+      throw new Error('datasource read refused');
+    });
     render(
       <ObjectFormCanvas objectName="gantt_task" draft={externalDraft({ writable: true })} onPatch={vi.fn()} />,
     );
