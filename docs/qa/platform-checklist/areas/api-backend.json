@@ -2789,7 +2789,7 @@
       "title": "RestServerConfig.routes is an all-tombstone sub-object: every one of the four retired selectors refuses at construction with the prescription that names where the contract moved, while the empty block still constructs",
       "since": "v17",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "build",
       "personas": [
@@ -2861,8 +2861,8 @@
         "stale-dist"
       ],
       "automated": {
-        "kind": "unit",
-        "ref": "packages/rest/src/rest-sub-config-parse-not-cast.test.ts — per clause. acceptance[1] in full, by §B's case 'rejects `createRestApiPlugin({ api: { routes: { nameTransform: \"none\" } } }).start()` — a #14691 tombstone, through the plugin path' (§E's own plugin-path case drives batch.defaultAtomic, not a routes key). acceptance[0] by §E's 'refuses every `routes.*` key — the whole sub-object is tombstones', for one authored value per key: nameTransform is driven with 'none' only, so its former 'plural' value is driven by hand. That case matches `routes.KEY`, RouteGenerationConfigSchema and /was removed/, never the clause's full 'was removed in @objectstack/spec 17', so the release-naming half is read off the harness's refusal texts and the pin scores acceptance[0] partial. acceptance[4]'s empty-block half by §E's 'an empty `routes` sub-object still constructs — the tombstones refuse keys, not the block'; its other half, an unknown key inside `routes` stripped, is pinned for batch and metadata.endpoints only (§C's 'STRIPS an unknown key inside a sub-object rather than refusing it — the schemas are non-strict'), never for routes. No pin covers acceptance[2] (each prescription names a replacement that exists today) or acceptance[3] (the tsc error): drive them by hand"
+        "kind": "dogfood",
+        "ref": "packages/rest/src/rest-sub-config-parse-not-cast.test.ts — per clause. acceptance[1] in full, by §B's case 'rejects `createRestApiPlugin({ api: { routes: { nameTransform: \"none\" } } }).start()` — a #14691 tombstone, through the plugin path' (§E's own plugin-path case drives batch.defaultAtomic, not a routes key). acceptance[0] by §E's 'refuses every `routes.*` key — the whole sub-object is tombstones', for one authored value per key: nameTransform is driven with 'none' only, so its former 'plural' value is driven by hand. That case matches `routes.KEY`, RouteGenerationConfigSchema and /was removed/, never the clause's full 'was removed in @objectstack/spec 17', so the release-naming half is read off the harness's refusal texts and the pin scores acceptance[0] partial. acceptance[4]'s empty-block half by §E's 'an empty `routes` sub-object still constructs — the tombstones refuse keys, not the block'; its other half, an unknown key inside `routes` stripped, is pinned for batch and metadata.endpoints only (§C's 'STRIPS an unknown key inside a sub-object rather than refusing it — the schemas are non-strict'), never for routes. packages/qa/dogfood/test/rest-route-generation-tombstones.test.ts (#26572) carries what that file leaves open: acceptance[0] on a real RestServer for every key, nameTransform at 'none' AND 'plural', each refusal naming RouteGenerationConfigSchema and '`routes.KEY` was removed in @objectstack/spec 17'; acceptance[1] the same five through createRestApiPlugin(...).start(), beside a control that boots; acceptance[2] each prescription's surface — enable.apiEnabled / enable.apiMethods declared on the strict ObjectCapabilities, crud.dataPrefix moving a real RestServer's data routes, the :object path segment, and object_operation parsed by ApiEndpointSchema (the 404/405 enforcement itself is second-object-exposure.dogfood.test.ts's, over HTTP); acceptance[3] each key authored as a RestServerConfig in a scratch TypeScript file fails tsc with an error on the key's own line naming '[REMOVED] Key retired', beside a clean control; acceptance[4] routes: {} normalizing to {} and an unknown key inside routes stripped"
       },
       "source": [
         "packages/spec/liveness/route_generation.json (the ADR-0049 ledger this item answers: all four properties dead, removed 2026-09-03 — the sub-object ships nothing but its refusals)",
@@ -2890,6 +2890,12 @@
           "date": "2026-10-26",
           "change": "automated.ref says which half of acceptance[0]'s message the §E case asserts, from QA run #25815 (release-18.2.0-tier1, at 6679644a), finding a0. Re-read at base f6c61932: 'refuses every `routes.*` key' asserts the key, RouteGenerationConfigSchema and /was removed/, not 'was removed in @objectstack/spec 17'; nameTransform 'none' only, as the ref already said. No clause changed",
           "ref": "#25837"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-27",
+          "change": "acceptance[0]–[4] and negative[0] are pinned at the layers their oracles name (the release-18.2.0 Tier 1 sweep #26468 scored a0, a4 and n0 half-asserted and a2, a3 unpinned). The new rest-route-generation-tombstones.test.ts drives every retired key at every former value through the constructor and the plugin path, checks each prescription against the shipped spec and a real RestServer, runs tsc over each authored key, and holds the empty-block and unknown-key controls. automated.kind is dogfood; automated.ref names what it asserts. Measured at base 4c29f384. No clause changed",
+          "ref": "#26572"
         }
       ]
     },

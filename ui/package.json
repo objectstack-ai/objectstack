@@ -84,7 +84,6 @@
     "check:merge-queue-head": "node scripts/check-merge-queue-head.mjs --self-test",
     "check:required-check-set": "node scripts/check-required-check-set.mjs --self-test",
     "check:lockfile-integrity": "node scripts/check-lockfile-integrity.mjs",
-    "check:lockfile-dedupe": "node scripts/check-lockfile-dedupe.mjs",
     "merge-queue-head": "node scripts/check-merge-queue-head.mjs",
     "check:pre-install-import-graph": "node scripts/check-pre-install-import-graph.mjs",
     "check:test-path-roots": "node scripts/check-test-path-roots.mjs",

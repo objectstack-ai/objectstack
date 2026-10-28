@@ -13,10 +13,10 @@ Liveness is judged by **code consumption**, not browser observation (an unreacti
 | object | `2026-06-objectschema-property-liveness.md` | ~half dead |
 | view | `2026-06-viewschema-property-liveness.md` | list-family healthy; chart/form-variants broken |
 | app | `2026-06-appschema-property-liveness.md` | nav core healthy; aspirational tail |
-| page | `2026-06-pageschema-property-liveness.md` | drift breaks layouts |
+| page | `archive/2026-06/2026-06-pageschema-property-liveness.md` | drift breaks layouts |
 | dashboard | `2026-06-dashboardschema-property-liveness.md` | ADR-0021 half-done |
 | report | `2026-06-reportschema-property-liveness.md` | dataset live; chart dead |
-| dataset | `2026-06-datasetschema-property-liveness.md` | live; Studio under-covers |
+| dataset | `archive/2026-06/2026-06-datasetschema-property-liveness.md` | live; Studio under-covers |
 | action | `2026-06-actionschema-property-liveness.md` | disabled-CEL ignored; form/shortcut dead |
 | flow | `2026-06-flowschema-property-liveness.md` | enum out of sync; runAs unenforced |
 | agent | `2026-06-agentschema-property-liveness.md` | autonomy + access-control aspirational |
@@ -25,7 +25,7 @@ Liveness is judged by **code consumption**, not browser observation (an unreacti
 | hook | `2026-06-hookschema-property-liveness.md` | **healthy** (near-total) |
 | validation | `2026-06-validationschema-property-liveness.md` | **healthy** (all 6 types enforced) |
 | security/identity (role, permission, policy, sharing) | `2026-06-security-identity-property-liveness.md` | **policy 100% dead** |
-| system/integration (email/i18n/theme/job/webhook/portal) | `2026-06-system-integration-property-liveness.md` | email + portal dead |
+| system/integration (email/i18n/theme/job/webhook/portal) | `archive/2026-06/2026-06-system-integration-property-liveness.md` | email + portal dead |
 
 ## Cross-cutting patterns (in priority order)
 

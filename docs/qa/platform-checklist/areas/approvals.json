@@ -1676,7 +1676,7 @@
       "title": "Approval requests on v18: the request record page serves record:approval_decision and a Reply action that lands in its timeline, `enable.approvalsVisibleToReaders` lets a plain record reader see the record's requests read-only (and only then), the generic /data door serves request rows by approvals visibility, and titles shown to a reader use only what that reader may read",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -1691,7 +1691,7 @@
           "for the reader leg: a scratch object (or showcase object via the scratch app) with enable.approvalsVisibleToReaders:true"
         ],
         "knownGaps": [
-          "the console clause (acceptance[4]) needs a bundled console: build it with `pnpm console:build`, which builds ui/apps/console from this checkout, so the console and the spec it renders are one tree by construction (packages/console/build-dist.sh). The blocked(environment) this gap used to record — the retired .objectui-sha pin not building against current spec — no longer arises"
+          "the console clause (acceptance[4]) needs a bundled console: build it with `pnpm console:build`, which builds ui/apps/console from this checkout, so the console and the spec it renders are one tree by construction (packages/console/build-dist.sh). The blocked(environment) this gap used to record — a console built from a pinned objectui revision instead of this tree, not building against current spec — no longer arises"
         ]
       },
       "steps": [
@@ -1764,6 +1764,12 @@
           "date": "2026-10-26",
           "change": "two checklist-accuracy findings of the 18.2.0 sweep's QA run #25815, Tier 1 set, at framework 6679644a (findings card #25838, wave anchor #25807): acceptance[1].verify names the reply's HTTP legs — the comment landing in the timeline, and the pending-approver-or-submitter-only refusal — because no pin in automated.ref asserts either, and cites the two service-layer pins that do as evidence of their layer only; automated.ref's acceptance[2] annotation says request-read-gate.integration.test.ts drives ObjectQL and the data protocol in-process, never /data/sys_approval_request over HTTP. Also respelled while there, the retired pin flow (#26052, #26035): knownGaps[0] builds the console with `pnpm console:build` from this tree, and the pin-skew block it recorded no longer arises. Pins re-read at base 9753d163. No clause changed",
           "ref": "#26116"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-27",
+          "change": "fixtures.knownGaps[0]: the retired pin-file name dropped from the description of the gap that no longer arises (#26626, maintainer-directed). No clause changed, no status changed",
+          "ref": "#26626"
         }
       ]
     },

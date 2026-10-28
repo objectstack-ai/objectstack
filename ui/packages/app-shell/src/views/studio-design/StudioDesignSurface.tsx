@@ -157,6 +157,7 @@ import {
   ShieldCheck,
   ShieldQuestion,
   Menu,
+  Undo2,
   PanelRightClose,
   PanelRightOpen,
   Play,
@@ -422,7 +423,8 @@ function interfacesSaveBody(type: string, draft: Record<string, unknown>): Recor
 /**
  * objectui#11786 — tells the surface's Publish what edit a pillar holds unsent
  * (`StudioHeld.clause`, or `null`), and takes it back when the pillar unmounts,
- * so a pillar left behind never keeps Publish refusing.
+ * so a pillar left behind never keeps Publish refusing — nor, since
+ * objectstack#26705, keeps the surface's departure guard asking.
  *
  * Keyed on the clause, a string, never on the view model's identity (AGENTS.md
  * #10); the reporter is read through a ref, so an unmemoised one cannot re-fire it.
@@ -436,6 +438,83 @@ function useHeldEditReport(report: ((clause: string | null) => void) | undefined
     reportRef.current?.(clause);
   }, [clause]);
   React.useEffect(() => () => reportRef.current?.(null), []);
+}
+
+/**
+ * objectstack#26705 — the one question Studio asks before a departure drops
+ * unsaved work: a dirty pillar's edits (objectui#2600) or an edit a pillar's
+ * autosave holds unsent (objectui#11786). The surface asks it before the header
+ * leaves the pillar; a pillar asks it before its rail opens another item, which
+ * reloads the one buffer the work lives in. `true` when nothing would be lost
+ * or the author agrees to lose it.
+ */
+function confirmDropUnsavedWork(unsaved: boolean, locale: string): boolean {
+  return !unsaved || window.confirm(t('engine.edit.unsavedLeaveConfirm', locale));
+}
+
+/**
+ * objectstack#26836, objectstack#26917 — the item of `type` that already holds
+ * `name`, published or as a draft, in this package or any other; `null` when
+ * the identifier is free. Every Studio create reads it before its save and
+ * refuses a taken identifier, writing nothing.
+ *
+ * The create's first-write pin (`ifNoneMatch: '*'` with `mode: 'draft'`)
+ * asserts "no DRAFT row" only — the spec's `parentVersion: null` is
+ * lifecycle-scoped — so over a PUBLISHED item it would write the blank
+ * skeleton as that item's pending draft, and publishing the package would
+ * replace the live item with it. The pin stays on the save for a draft that
+ * lands between this read and the write; an item published in that window is
+ * not refused by it.
+ */
+async function findTakenIdentifier(
+  client: Pick<MetadataClient, 'list' | 'listDrafts'>,
+  type: string,
+  name: string,
+  locale: string,
+): Promise<{ name: string; label: string } | null> {
+  const [published, drafts] = await Promise.all([
+    client.list<Record<string, unknown>>(type),
+    client.listDrafts({ type }) as Promise<Array<{ name?: string; label?: I18nLabel | null }>>,
+  ]);
+  const publishedRow = (published ?? []).find((row) => row?.name === name);
+  const draftRow = (drafts ?? []).find((row) => row?.name === name);
+  if (!publishedRow && !draftRow) return null;
+  const label = navItemLabelText((publishedRow?.label as I18nLabel | undefined) ?? draftRow?.label ?? undefined, locale);
+  return { name, label: label.trim() || name };
+}
+
+/**
+ * A create refused over a taken identifier (`findTakenIdentifier`), in the
+ * create dialog: the sentence naming the item that holds it and, when that item
+ * is on the pillar's own rail, a way to open it instead.
+ */
+function CreateTakenNotice({
+  scope,
+  sentence,
+  openLabel,
+  onOpen,
+}: {
+  /** The pillar's test-id prefix: `${scope}-create-taken`. */
+  scope: string;
+  sentence: string;
+  openLabel?: string;
+  onOpen?: () => void;
+}): React.ReactElement {
+  return (
+    <div className="space-y-2" data-testid={`${scope}-create-taken`}>
+      <p className="text-sm text-destructive">{sentence}</p>
+      {onOpen && openLabel && (
+        <button
+          type="button"
+          data-testid={`${scope}-create-open-existing`}
+          onClick={onOpen}
+          className="text-sm font-medium text-primary underline-offset-4 hover:underline"
+        >
+          {openLabel}
+        </button>
+      )}
+    </div>
+  );
 }
 
 /**
@@ -1326,15 +1405,24 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
   // Pillars reset their report on unmount, so a confirmed discard clears the
   // flag by itself.
   const [pillarDirty, setPillarDirty] = React.useState(false);
-  const confirmLeavePillar = React.useCallback(() => {
-    if (!pillarDirty) return true;
-    return window.confirm(t('engine.edit.unsavedLeaveConfirm', locale));
-  }, [pillarDirty, locale]);
+  // objectui#11786 — what the open pillar's autosave holds unsent (an
+  // incomplete-but-normal edit), as the clause naming what it needs. A publish
+  // promotes the drafts the server holds, which do not carry that edit, so it is
+  // refused while one is held rather than going around it silently.
+  const [heldEdit, setHeldEdit] = React.useState<string | null>(null);
+  // objectstack#26705 — a held edit lives only in the pillar's buffer, so a
+  // departure drops it exactly as it drops a dirty pillar's edits: both are
+  // unsaved work, and every guard below reads this one bit.
+  const unsavedPillarWork = pillarDirty || heldEdit !== null;
+  const confirmLeavePillar = React.useCallback(
+    () => confirmDropUnsavedWork(unsavedPillarWork, locale),
+    [unsavedPillarWork, locale],
+  );
   // Browser-native "leave site?" prompt on tab close / reload while a pillar
   // is dirty. The matrix editor installs its own (double registration is
   // harmless); the Interfaces nav editor has none, so this closes that gap.
   React.useEffect(() => {
-    if (!pillarDirty) return;
+    if (!unsavedPillarWork) return;
     const handler = (e: BeforeUnloadEvent) => {
       e.preventDefault();
       // Required for Chrome to actually show the prompt.
@@ -1342,13 +1430,13 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
     };
     window.addEventListener('beforeunload', handler);
     return () => window.removeEventListener('beforeunload', handler);
-  }, [pillarDirty]);
+  }, [unsavedPillarWork]);
   // objectui#13253 — the shell's own departures (header menus, palette, inbox,
   // AI entry) leave from buttons this surface never sees, so a dirty pillar
   // registers with the shell's seam, with the same question the header asks.
   // While registered, the seam's link guard also asks before a pillar link
   // leaves, so the pillar links below no longer ask a second time.
-  useRegisterUnsavedEdits(pillarDirty, t('engine.edit.unsavedLeaveConfirm', locale));
+  useRegisterUnsavedEdits(unsavedPillarWork, t('engine.edit.unsavedLeaveConfirm', locale));
 
   // The shared authenticated metadata client for this surface. Declared here
   // rather than beside its other reader below because the publish immediately
@@ -1421,12 +1509,6 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
   React.useLayoutEffect(() => {
     refreshPendingRef.current = refreshPending;
   });
-
-  // objectui#11786 — what the open pillar's autosave holds unsent (an
-  // incomplete-but-normal edit), as the clause naming what it needs. A publish
-  // promotes the drafts the server holds, which do not carry that edit, so it is
-  // refused while one is held rather than going around it silently.
-  const [heldEdit, setHeldEdit] = React.useState<string | null>(null);
 
   // `options` is the review sheet's (objectui#12929): its checked backfill
   // choices, or nothing. Only the package batch door below carries it; the
@@ -1634,6 +1716,11 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
   const [appBusy, setAppBusy] = React.useState(false);
   const [appErr, setAppErr] = React.useState<string | null>(null);
   const [appDraftPending, setAppDraftPending] = React.useState<string | null>(null);
+  // objectstack#26917 — a create refused because an app already holds the
+  // identifier (published or as a draft, in any package): the app's label, for
+  // the dialog's sentence. Create app is offered only to a package with no app,
+  // so the holder is never one this package can open instead.
+  const [appTaken, setAppTaken] = React.useState<{ name: string; label: string } | null>(null);
   // Scaffold the new app's navigation from the package's objects (default on) —
   // otherwise a fresh app has zero menu items and every object must be wired by
   // hand in the Interfaces pillar (objectui#2262).
@@ -1667,10 +1754,21 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
       if (packageId === null) return;
       setAppBusy(true);
       setAppErr(null);
+      setAppTaken(null);
       try {
+        // A name an app already holds, published or as a draft, in any
+        // package, is refused here and nothing is written: over a published
+        // app the first-write pin below would write this skeleton as its
+        // pending draft (`findTakenIdentifier`).
+        const taken = await findTakenIdentifier(shellClient, 'app', name, locale);
+        if (taken) {
+          setAppTaken(taken);
+          return;
+        }
         const navObjects = appAddObjects ? await loadPackageObjects().catch(() => []) : [];
-        // objectui#11773 — a create is the first-write pin: refused where the
-        // name already holds a draft, instead of written over it.
+        // objectui#11773 — and the door refuses a draft row too (the
+        // first-write pin), for one that lands between the check above and
+        // this save.
         await shellClient.save(
           'app',
           name,
@@ -2246,7 +2344,10 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
 
         <CreateItemDialog
           open={appCreating}
-          onOpenChange={setAppCreating}
+          onOpenChange={(open) => {
+            setAppCreating(open);
+            if (!open) setAppTaken(null);
+          }}
           title={t('engine.studio.app.create', locale)}
           labelFieldLabel={t('engine.studio.app.nameLabel', locale)}
           labelPlaceholder={t('engine.studio.app.namePlaceholder', locale)}
@@ -2259,15 +2360,23 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
           locale={locale}
           onSubmit={({ label, name }) => void doCreateApp(label, name)}
           extra={
-            <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
-              <input
-                type="checkbox"
-                checked={appAddObjects}
-                onChange={(e) => setAppAddObjects(e.target.checked)}
-                className="h-3.5 w-3.5 accent-primary"
-              />
-              {t('engine.studio.app.scaffoldNav', locale)}
-            </label>
+            <>
+              {appTaken && (
+                <CreateTakenNotice
+                  scope="app"
+                  sentence={tFormat('engine.studio.app.createTaken', locale, { label: appTaken.label, name: appTaken.name })}
+                />
+              )}
+              <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={appAddObjects}
+                  onChange={(e) => setAppAddObjects(e.target.checked)}
+                  className="h-3.5 w-3.5 accent-primary"
+                />
+                {t('engine.studio.app.scaffoldNav', locale)}
+              </label>
+            </>
           }
         />
       </div>
@@ -2614,6 +2723,8 @@ export function StudioNavItemInspector({
   const targetLabel = useNavTargetLabel();
   const typeGroupName = React.useId();
   const iconFieldId = React.useId();
+  const objectFieldId = React.useId();
+  const labelFieldId = React.useId();
   const idx = React.useMemo(() => {
     const m = /^navigation\[(\d+)\]$/.exec(navId);
     return m ? Number(m[1]) : -1;
@@ -2732,8 +2843,11 @@ export function StudioNavItemInspector({
       : inheritedNavEntryText(node as NavEntryLike, targetLabel);
   const labelField = (
     <div>
-      <label className="mb-1 block text-[11px] font-medium text-muted-foreground">{t('engine.studio.nav.label', locale)}</label>
+      <label htmlFor={labelFieldId} className="mb-1 block text-[11px] font-medium text-muted-foreground">
+        {t('engine.studio.nav.label', locale)}
+      </label>
       <input
+        id={labelFieldId}
         value={navItemLabelText(label, locale)}
         onChange={(e) => editLabel(e.target.value)}
         placeholder={placeholderText}
@@ -2772,8 +2886,11 @@ export function StudioNavItemInspector({
       </fieldset>
       {(kind === 'object' || kind === null) && (
         <div>
-          <label className="mb-1 block text-[11px] font-medium text-muted-foreground">{t('engine.studio.nav.linkObject', locale)}</label>
+          <label htmlFor={objectFieldId} className="mb-1 block text-[11px] font-medium text-muted-foreground">
+            {t('engine.studio.nav.linkObject', locale)}
+          </label>
           <StudioPicker
+            id={objectFieldId}
             value={boundObject}
             options={[
               { value: '', label: t('engine.studio.nav.chooseObject', locale) },
@@ -2955,14 +3072,43 @@ const NAV_TARGET_KEY = {
  * Whether a listed row can be a nav target. A record page needs a record id a
  * `page` entry cannot pass (`isStaticPageOption`), and an action bound to an
  * object is not addressable from the nav, which runs GLOBAL actions only
- * (`useNavActionDispatch`). Only a CONFIRMED one is left out: a draft header
- * carries no body, so a draft-only row is kept, as `isStaticPageOption` keeps
- * a row with no `type`.
+ * (`useNavActionDispatch`). Only a CONFIRMED one is left out, as
+ * `isStaticPageOption` keeps a row with no `type`.
+ *
+ * objectstack-ai/objectstack#26743 — a `_drafts` header names the METADATA
+ * type (`page`), never the body's own `type` (`record`), so a draft-only row
+ * is judged on its draft body instead ({@link NAV_TARGET_BODY_KEYED}). A draft
+ * record page is still a record page once it is published with the app.
  */
 function isNavTargetRow(metaType: string, row: Record<string, unknown>): boolean {
   if (metaType === 'page') return isStaticPageOption(row as { type?: string });
   if (metaType === 'action') return !row.objectName;
   return true;
+}
+
+/** The types whose {@link isNavTargetRow} verdict reads a body key, so a draft-only row's body is read for it. */
+const NAV_TARGET_BODY_KEYED: ReadonlySet<string> = new Set(['page', 'action']);
+
+/**
+ * Whether a draft-only row can be a nav target, judged on its draft body. A
+ * body that cannot be read (no draft served, a failed read) leaves the row in,
+ * as a published row with no `type` is left in: only a confirmed non-target
+ * is dropped.
+ */
+async function isDraftNavTarget(
+  client: MetadataClient,
+  metaType: string,
+  name: string,
+  packageId: string,
+): Promise<boolean> {
+  if (!NAV_TARGET_BODY_KEYED.has(metaType)) return true;
+  let body: Record<string, unknown> | null;
+  try {
+    body = extractDraftBody(await client.getDraft(metaType, name, { packageId }));
+  } catch {
+    return true;
+  }
+  return !body || isNavTargetRow(metaType, body);
 }
 
 /**
@@ -2996,10 +3142,19 @@ function usePackageNavTargets(
         // objectui#11862 — a draft-only target carries the label its `_drafts`
         // row serves (objectstack-ai/objectstack#22200), so the picker offers
         // it by that label, as it offers a published one.
+        const draftOnly: NavTargetRow[] = [];
         for (const draft of (drafts ?? []) as Array<{ name?: string | null; label?: I18nLabel | null }>) {
           const name = typeof draft?.name === 'string' ? draft.name : '';
-          if (name && !byName.has(name)) byName.set(name, { name, label: draft.label ?? undefined });
+          if (name && !byName.has(name) && !draftOnly.some((row) => row.name === name)) {
+            draftOnly.push({ name, label: draft.label ?? undefined });
+          }
         }
+        const verdicts = await Promise.all(
+          draftOnly.map((row) => isDraftNavTarget(client, metaType, row.name, packageId)),
+        );
+        draftOnly.forEach((row, i) => {
+          if (verdicts[i]) byName.set(row.name, row);
+        });
       } catch {
         /* non-fatal — the picker just stays empty */
       }
@@ -3044,7 +3199,8 @@ const PICKER_XS = 'h-auto rounded px-2 py-1 text-xs';
  *   opens there.
  * - Each caller keeps the name its native control had: a `<label htmlFor>`
  *   names the trigger by `id`, and a wrapping `<label>` names it as it named
- *   the native control. The object picker had none and still has none.
+ *   the native control. The nav-item inspector's object picker is named by
+ *   its *Link to object* label the same way.
  */
 function StudioPicker({
   id,
@@ -4145,12 +4301,19 @@ export function InterfacesPillar({
   const [createError, setCreateError] = React.useState<string | null>(null);
   const [reportBinding, setReportBinding] = React.useState<ReportBinding>(NO_REPORT_BINDING);
   const [pageKind, setPageKind] = React.useState<PageSourceKind>(DEFAULT_PAGE_SOURCE_KIND);
-  const openCreate = React.useCallback((kind: InterfaceCreateKind) => {
-    setCreateError(null);
-    setReportBinding(NO_REPORT_BINDING);
-    setPageKind(DEFAULT_PAGE_SOURCE_KIND);
-    setCreateKind(kind);
-  }, []);
+  const openCreate = React.useCallback(
+    (kind: InterfaceCreateKind) => {
+      // objectstack#26845 — the created item opens at once, and its load
+      // replaces the buffer a held widget lives in: asked before the dialog
+      // opens, so Cancel costs nothing and the create itself asks nothing.
+      if (!confirmDropUnsavedWork(leafHeld !== null, locale)) return;
+      setCreateError(null);
+      setReportBinding(NO_REPORT_BINDING);
+      setPageKind(DEFAULT_PAGE_SOURCE_KIND);
+      setCreateKind(kind);
+    },
+    [leafHeld, locale],
+  );
   // objectui#12455 — the "+" kind picker's other kinds: the entry is added
   // where "Add nav item" adds one (the end of the top level, an id minted the
   // way `AppNavCanvas` mints it), born with no label (objectui#11196) and, for
@@ -4435,6 +4598,26 @@ export function InterfacesPillar({
         : navIcon(currentNavEntry?.type ?? current.type);
   const ifKindName = current ? navKindName(currentNavEntry ?? { type: current.type }, locale) || translateMetadataType(current.type, locale) : '';
   const ifInternalId = current ? `${t('engine.studio.if.internalId', locale)}: ${current.type} · ${current.name}` : undefined;
+  // objectstack#26746 — the header names the open leaf as its rail row names
+  // it: the row's entry in `railTree`, through the same `navEntryLabelText`
+  // and resolver, asked on every render. `current.label` is that text frozen
+  // when the Surface was made, so a label the resolver learns later (a
+  // draft-only object's `_drafts` label, the console's object metadata) left
+  // the header on the machine name while the rail already read the label.
+  const ifTitleText = (() => {
+    if (!current) return '';
+    const find = (nodes: NavNode[]): NavNode | null => {
+      for (const node of nodes) {
+        if (node.id === current.navId) return node;
+        const hit = Array.isArray(node.children) ? find(node.children) : null;
+        if (hit) return hit;
+      }
+      return null;
+    };
+    const railEntry = current.navId ? find(railTree) : null;
+    const text = railEntry ? navEntryLabelText(railEntry as NavEntryLike, locale, targetLabel) : current.label;
+    return text || current.name;
+  })();
   // objectui#12455 — an object entry's structure is the Data pillar's: the
   // header offers to open it there, through the host's surface channel (no
   // channel, no chip: the hint under the tab row still names the pillar).
@@ -4558,7 +4741,7 @@ export function InterfacesPillar({
       title={
         current ? (
           <>
-            {current.label || current.name}
+            {ifTitleText}
             <span className="sr-only"> · {ifKindName}</span>
           </>
         ) : (
@@ -4573,7 +4756,7 @@ export function InterfacesPillar({
       chips={
         current ? (
           <span className={STUDIO_KIND_CHIP} data-testid="if-canvas-caption" title={ifInternalId}>
-            <span className="sr-only">{current.label || current.name} · </span>
+            <span className="sr-only">{ifTitleText} · </span>
             {ifKindName}
           </span>
         ) : undefined
@@ -4964,7 +5147,7 @@ export function InterfacesPillar({
       >
         <SheetHeader className="shrink-0 border-b px-4 py-3 pr-10">
           <SheetTitle className="text-[13px] font-medium">
-            {tFormat('engine.studio.if.definitionTitle', locale, { label: current.label || current.name })}
+            {tFormat('engine.studio.if.definitionTitle', locale, { label: ifTitleText })}
           </SheetTitle>
         </SheetHeader>
         {isSourcePage ? (
@@ -5212,6 +5395,9 @@ export function InterfacesPillar({
                 active={current}
                 objectIcons={objectIconMap}
                 onPick={(s) => {
+                  // objectstack#26705 — another leaf's load replaces the buffer
+                  // the held widget lives in; an entry for the open leaf keeps it.
+                  if (leafKeyOf(s) !== leafKey && !confirmDropUnsavedWork(leafHeld !== null, locale)) return;
                   setCurrent(s);
                   if (isMobile) setRailOpen(false);
                 }}
@@ -5481,15 +5667,10 @@ export function DataPillar({
   // they had since selected, which is the regression the mount-time ref exists
   // to prevent — so the id is marked spent as soon as the loaded rail has been
   // consulted, whether or not it held a match.
+  //
+  // Applied below `objHeld`, which it asks about (objectstack#26845).
   const requestedSurface = useRequestedSurface();
   const appliedRequestRef = React.useRef(0);
-  React.useEffect(() => {
-    if (!requestedSurface || !objectsLoaded) return;
-    if (requestedSurface.id === appliedRequestRef.current) return;
-    appliedRequestRef.current = requestedSurface.id;
-    const match = resolveSurfaceDeepLink(objects, requestedSurface.target, 'object');
-    if (match) setCurrent(match);
-  }, [requestedSurface, objects, objectsLoaded]);
   const [objDraft, setObjDraft] = React.useState<Record<string, unknown>>({});
   // objectui#11272 — the object `objDraft` was loaded for, `object:NAME`:
   // written where the load below installs it, and nowhere else.
@@ -5636,8 +5817,12 @@ export function DataPillar({
   // an effect on `creating` — the effect spelling re-renders the dialog a
   // second time on every open purely to undo a previous session's pick.
   const [createOwd, setCreateOwd] = React.useState<OwdCreateModel>(OWD_DEFAULT);
+  // objectstack#26917 — a create refused because the identifier is taken:
+  // which object holds it, and whether it is on this rail, so it can be opened.
+  const [createTaken, setCreateTaken] = React.useState<{ name: string; label: string; here: boolean } | null>(null);
   const openCreateDialog = React.useCallback(() => {
     setError(null);
+    setCreateTaken(null);
     setCreateOwd(OWD_DEFAULT);
     setCreating(true);
   }, []);
@@ -5960,16 +6145,28 @@ export function DataPillar({
       // Auto-prefix with the package namespace (framework#2694) so a prefix-less
       // object can't be authored; the rule lives in packages-io/spec.
       const name = prefixObjectName(rawName, namespace);
-      if (objects.some((o) => o.name === name)) {
-        setError({ message: tFormat('engine.studio.data.idExists', locale, { name }) });
-        return;
-      }
       setCreateBusy(true);
       setError(null);
+      setCreateTaken(null);
       try {
+        // A name an object already holds, published or as a draft, on this
+        // rail or in any other package, is refused here and nothing is
+        // written: over a published object the first-write pin below would
+        // write this blank skeleton as its pending draft
+        // (`findTakenIdentifier`). The namespace prefix makes a clash with
+        // another package's object rarer, not impossible.
+        const onRail = objects.find((o) => o.name === name);
+        const taken = onRail
+          ? { name, label: onRail.label || name }
+          : await findTakenIdentifier(client, 'object', name, locale);
+        if (taken) {
+          setCreateTaken({ ...taken, here: onRail !== undefined });
+          return;
+        }
         const body = buildObjectSkeleton(name, label, t('engine.studio.data.nameFieldLabel', locale), sharingModel);
-        // objectui#11773 — a create is the first-write pin: refused where the
-        // name already holds a draft, instead of written over it.
+        // objectui#11773 — and the door refuses a draft row too (the
+        // first-write pin), for one that lands between the check above and
+        // this save.
         await client.save('object', name, body, { mode: 'draft', packageId, ifNoneMatch: '*', surface: 'studio' });
         const surface: Surface = { type: 'object', name, label };
         setObjects((prev) => [...prev, surface]);
@@ -6038,11 +6235,41 @@ export function DataPillar({
   });
   // Only the open object's own buffer is held (objectui#11272).
   const objHeld = objLoaded ? objIncomplete : null;
+  // objectstack#26917 — the refusal's way out: the object holding the
+  // identifier is on this rail, so it opens instead of a second one being
+  // made. The New button already asked about a held edit (objectstack#26845).
+  const openTakenObject = (name: string) => {
+    const object = objects.find((o) => o.name === name);
+    if (!object) return;
+    setCreating(false);
+    setCreateTaken(null);
+    setCurrent(object);
+  };
   // objectui#12725 — the copilot's mark on the selected field: its key path is
   // `["fields", NAME]` in the object body, and only a `copilot` write answers.
   const fieldCopilotMark =
     objLoaded && fieldSel?.kind === 'field' ? copilotDraftMarkOf(objDraftChanges, ['fields', fieldSel.id]) : null;
   useHeldEditReport(onHeldEditChange, objHeld?.clause ?? null);
+  // The live request's apply (see `requestedSurface` above). objectstack#26845
+  // — another object's load replaces the buffer a held edit lives in, so it
+  // asks first, as the rail does; declined, the request is spent and the held
+  // edit stays. A request for the open object drops nothing and asks nothing.
+  React.useEffect(() => {
+    if (!requestedSurface || !objectsLoaded) return;
+    if (requestedSurface.id === appliedRequestRef.current) return;
+    appliedRequestRef.current = requestedSurface.id;
+    const match = resolveSurfaceDeepLink(objects, requestedSurface.target, 'object');
+    if (!match) return;
+    if (match.name !== current?.name && !confirmDropUnsavedWork(objHeld !== null, locale)) return;
+    setCurrent(match);
+  }, [requestedSurface, objects, objectsLoaded, current, objHeld, locale]);
+  // objectstack#26845 — a created object opens at once, and its load replaces
+  // the buffer a held edit lives in: asked before the dialog opens, so Cancel
+  // costs nothing and the create itself asks nothing.
+  const openCreateObject = () => {
+    if (!confirmDropUnsavedWork(objHeld !== null, locale)) return;
+    openCreateDialog();
+  };
   // objectui#12725 — the header's draft line reads the badge's ledger.
   const objDraftStatus = useStudioItemDraftStatus(
     current ? { type: 'object', name: current.name } : null,
@@ -6276,6 +6503,11 @@ export function DataPillar({
     </>
   ) : undefined;
 
+  const objectNeedle = query.trim().toLowerCase();
+  const shownObjects = objects.filter(
+    (o) => !objectNeedle || o.label.toLowerCase().includes(objectNeedle) || o.name.toLowerCase().includes(objectNeedle),
+  );
+
   return (
     <div ref={pillarRef} className="flex h-full flex-col">
       {objConflictDialog}
@@ -6291,10 +6523,15 @@ export function DataPillar({
           testId="studio-rail-data"
           heading={t('engine.studio.data.objects', locale)}
           count={objects.length}
-          onAdd={readOnly ? undefined : openCreateDialog}
+          onAdd={readOnly ? undefined : openCreateObject}
           addLabel={t('engine.studio.data.newObject', locale)}
           addTestId="studio-rail-add"
-          search={{ value: query, onChange: setQuery, placeholder: t('engine.studio.data.searchObjects', locale) }}
+          search={{
+            value: query,
+            onChange: setQuery,
+            placeholder: t('engine.studio.data.searchObjects', locale),
+            matchCount: shownObjects.length,
+          }}
           isMobile={isMobile}
           open={railOpen}
         >
@@ -6303,29 +6540,25 @@ export function DataPillar({
               {error ? t('engine.studio.loadFailed', locale) : objectsLoaded ? t('engine.studio.data.noObjects', locale) : t('engine.studio.loading', locale)}
             </p>
           )}
-          {objects
-            .filter(
-              (o) =>
-                !query.trim() ||
-                o.label.toLowerCase().includes(query.trim().toLowerCase()) ||
-                o.name.toLowerCase().includes(query.trim().toLowerCase()),
-            )
-            .map((o) => {
-              const Icon = getIcon(o.icon);
-              return (
-                <StudioRailRow
-                  key={o.name}
-                  active={current?.name === o.name}
-                  onClick={() => {
-                    setCurrent(o);
-                    if (isMobile) setRailOpen(false);
-                  }}
-                  icon={<Icon className="h-4 w-4 shrink-0" />}
-                >
-                  {o.label}
-                </StudioRailRow>
-              );
-            })}
+          {shownObjects.map((o) => {
+            const Icon = getIcon(o.icon);
+            return (
+              <StudioRailRow
+                key={o.name}
+                active={current?.name === o.name}
+                onClick={() => {
+                  // objectstack#26705 — another object's load replaces the
+                  // buffer the held edit lives in; the open one keeps it.
+                  if (current?.name !== o.name && !confirmDropUnsavedWork(objHeld !== null, locale)) return;
+                  setCurrent(o);
+                  if (isMobile) setRailOpen(false);
+                }}
+                icon={<Icon className="h-4 w-4 shrink-0" />}
+              >
+                {o.label}
+              </StudioRailRow>
+            );
+          })}
         </StudioRail>
 
         <div className={cn('flex min-w-0 flex-1 flex-col overflow-hidden', DATA_CONTENT_CONTAINER)} data-testid="data-content-column">
@@ -6413,7 +6646,7 @@ export function DataPillar({
                   <button
                     type="button"
                     data-testid="empty-state-new-object"
-                    onClick={openCreateDialog}
+                    onClick={openCreateObject}
                     className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
                   >
                     <Plus className="h-3.5 w-3.5" /> {t('engine.studio.data.newObject', locale)}
@@ -6866,34 +7099,48 @@ export function DataPillar({
         // shows `repairs_repair_ticket`, not the bare identifier.
         storedName={(identifier) => prefixObjectName(identifier, namespace)}
         extra={
-          /* Record sharing (OWD) — the third thing `New object` must ask for
-             (`7a90afdf9`). Without it the object saves as a draft happily and
-             is then REFUSED at Publish → Publish all by `security-owd-unset`, a
-             wall the author meets only after building the whole object. The
-             gloss is the SAME string the Settings tab shows for each model, so
-             the two surfaces cannot describe one baseline two ways.
+          <>
+            {createTaken && (
+              <CreateTakenNotice
+                scope="object"
+                sentence={tFormat(
+                  createTaken.here ? 'engine.studio.data.createTaken' : 'engine.studio.data.createTakenElsewhere',
+                  locale,
+                  { label: createTaken.label, name: createTaken.name },
+                )}
+                openLabel={tFormat('engine.studio.create.openExisting', locale, { label: createTaken.label })}
+                onOpen={createTaken.here ? () => openTakenObject(createTaken.name) : undefined}
+              />
+            )}
+            {/* Record sharing (OWD) — the third thing `New object` must ask for
+               (`7a90afdf9`). Without it the object saves as a draft happily and
+               is then REFUSED at Publish → Publish all by `security-owd-unset`, a
+               wall the author meets only after building the whole object. The
+               gloss is the SAME string the Settings tab shows for each model, so
+               the two surfaces cannot describe one baseline two ways.
 
-             `controlled_by_parent` is absent on purpose — see OWD_CREATE_MODELS:
-             a just-created object has no master-detail field for it to derive
-             access from. */
-          <label className="block">
-            <span className="mb-1 block text-[11px] text-muted-foreground">
-              {t('engine.studio.data.owdLabel', locale)}
-            </span>
-            <StudioPicker
-              value={createOwd}
-              options={OWD_CREATE_MODELS.map((m) => ({ value: m, label: t(OWD_OPTION_LABEL_KEY[m], locale) }))}
-              onPick={(m) => setCreateOwd(m as OwdCreateModel)}
-              className="h-auto rounded px-2 py-1 text-[12px]"
-              testId="create-object-owd"
-            />
-            <span className="mt-1 block text-[11px] text-muted-foreground">
-              {t(OWD_OPTION_DESC_KEY[createOwd], locale)}
-            </span>
-            <span className="mt-1 block text-[11px] text-muted-foreground">
-              {t('engine.studio.data.owdHint', locale)}
-            </span>
-          </label>
+               `controlled_by_parent` is absent on purpose — see OWD_CREATE_MODELS:
+               a just-created object has no master-detail field for it to derive
+               access from. */}
+            <label className="block">
+              <span className="mb-1 block text-[11px] text-muted-foreground">
+                {t('engine.studio.data.owdLabel', locale)}
+              </span>
+              <StudioPicker
+                value={createOwd}
+                options={OWD_CREATE_MODELS.map((m) => ({ value: m, label: t(OWD_OPTION_LABEL_KEY[m], locale) }))}
+                onPick={(m) => setCreateOwd(m as OwdCreateModel)}
+                className="h-auto rounded px-2 py-1 text-[12px]"
+                testId="create-object-owd"
+              />
+              <span className="mt-1 block text-[11px] text-muted-foreground">
+                {t(OWD_OPTION_DESC_KEY[createOwd], locale)}
+              </span>
+              <span className="mt-1 block text-[11px] text-muted-foreground">
+                {t('engine.studio.data.owdHint', locale)}
+              </span>
+            </label>
+          </>
         }
         onSubmit={({ label, name }) => void doCreateObject(label, name, createOwd)}
       />
@@ -7299,6 +7546,9 @@ export function AutomationsPillar({
   // shows while Create holds it.
   const [newChoice, setNewChoice] = React.useState<FlowPreset | 'advanced'>(FLOW_PRESETS[0]);
   const [newNeeds, setNewNeeds] = React.useState<string | null>(null);
+  // objectstack#26917 — a create refused because the identifier is taken:
+  // which flow holds it, and whether it is on this rail, so it can be opened.
+  const [createTaken, setCreateTaken] = React.useState<{ name: string; label: string; here: boolean } | null>(null);
   const newChoiceGroup = React.useId();
   // objectui#12303 — the read-only reason the header's status switch is described by.
   const toggleReadOnlyReasonId = React.useId();
@@ -7431,7 +7681,17 @@ export function AutomationsPillar({
     async (label: string, name: string, trigger: NewFlowTrigger | null) => {
       setCreateBusy(true);
       setError(null);
+      setCreateTaken(null);
       try {
+        // A name a flow already holds, published or as a draft, in this
+        // package or any other, is refused here and nothing is written: over
+        // a published flow the first-write pin below would write this blank
+        // skeleton as its pending draft (`findTakenIdentifier`).
+        const taken = await findTakenIdentifier(client, 'flow', name, locale);
+        if (taken) {
+          setCreateTaken({ ...taken, here: flows.some((f) => f.name === name) });
+          return;
+        }
         // Minimal valid, autolaunched skeleton: start → end. The designer fills in
         // the trigger + nodes; publishing it is a separate, user-initiated step.
         //
@@ -7454,8 +7714,9 @@ export function AutomationsPillar({
           },
           trigger,
         );
-        // objectui#11773 — a create is the first-write pin: refused where the
-        // name already holds a draft, instead of written over it.
+        // objectui#11773 — and the door refuses a draft row too (the
+        // first-write pin), for one that lands between the check above and
+        // this save.
         await client.save('flow', name, skeleton, { mode: 'draft', packageId: draftPackageId, ifNoneMatch: '*', surface: 'studio' });
         const item: Surface = { type: 'flow', name, label };
         setFlows((fs) => [...fs.filter((f) => f.name !== name), item]);
@@ -7473,7 +7734,7 @@ export function AutomationsPillar({
         setCreateBusy(false);
       }
     },
-    [client, draftPackageId, onDraftSaved, locale],
+    [client, draftPackageId, onDraftSaved, locale, flows],
   );
 
   React.useEffect(() => {
@@ -7635,14 +7896,29 @@ export function AutomationsPillar({
   const openCreateFlow =
     !readOnly && packageId !== null
       ? () => {
+          // objectstack#26845 — the created flow opens at once, and its load
+          // replaces the buffer a held step lives in: asked before the dialog
+          // opens, so Cancel costs nothing and the create itself asks nothing.
+          if (!confirmDropUnsavedWork(flowHeld !== null, locale)) return;
           setError(null);
           setNewTrigger('');
           setNewTriggerObject('');
           setNewChoice(FLOW_PRESETS[0]);
           setNewNeeds(null);
+          setCreateTaken(null);
           setCreating(true);
         }
       : undefined;
+  // objectstack#26917 — the refusal's way out: the flow holding the identifier
+  // is on this rail, so it opens instead of a second one being made. The New
+  // button already asked about a held step (objectstack#26845).
+  const openTakenFlow = (name: string) => {
+    const flow = flows.find((f) => f.name === name);
+    if (!flow) return;
+    setCreating(false);
+    setCreateTaken(null);
+    setCurrent(flow);
+  };
   // objectui#12514 — a listed package with no flow: one centered block in the
   // content column, and no aside while there is nothing to select.
   const flowsEmpty = listed && !error && flows.length === 0;
@@ -7920,6 +8196,7 @@ export function AutomationsPillar({
             onChange: setRailQuery,
             placeholder: t('engine.studio.designer.search', locale),
             testId: 'auto-rail-search',
+            matchCount: shownFlows.length,
           }}
           footer={railLegend}
           isMobile={isMobile}
@@ -7965,6 +8242,9 @@ export function AutomationsPillar({
                       data-trigger={glyph}
                       title={[f.label, t(FLOW_GLYPH_LABEL_KEY[glyph], locale), reading?.view.label].filter(Boolean).join(' · ')}
                       onClick={() => {
+                        // objectstack#26705 — another flow's load replaces the
+                        // buffer the held step lives in; the open one keeps it.
+                        if (!active && !confirmDropUnsavedWork(flowHeld !== null, locale)) return;
                         setCurrent(f);
                         if (isMobile) setRailOpen(false);
                       }}
@@ -7978,11 +8258,6 @@ export function AutomationsPillar({
               </StudioRailGroup>
             );
           })}
-          {flows.length > 0 && shownFlows.length === 0 && (
-            <p className="px-2 py-3 text-[11px] text-muted-foreground">
-              {tFormat('engine.list.emptyQuery', locale, { query: railQuery.trim() })}
-            </p>
-          )}
           {flows.length === 0 && !creating && (error || !listed || openCreateFlow) && (
             <p className="px-2 py-3 text-[11px] text-muted-foreground">
               {error
@@ -8257,91 +8532,105 @@ export function AutomationsPillar({
              node's own Object field, and Create holds it until one is named.
              *Advanced* is the trigger form below, unchanged: it writes what
              it wrote. */
-          <fieldset className="space-y-2">
-            <legend className="mb-1 block text-sm font-medium">{t('engine.studio.auto.presets', locale)}</legend>
-            {FLOW_PRESETS.map((p) => (
-              <div key={p.id}>
+          <>
+            {createTaken && (
+              <CreateTakenNotice
+                scope="flow"
+                sentence={tFormat(
+                  createTaken.here ? 'engine.studio.auto.createTaken' : 'engine.studio.auto.createTakenElsewhere',
+                  locale,
+                  { label: createTaken.label, name: createTaken.name },
+                )}
+                openLabel={tFormat('engine.studio.create.openExisting', locale, { label: createTaken.label })}
+                onOpen={createTaken.here ? () => openTakenFlow(createTaken.name) : undefined}
+              />
+            )}
+            <fieldset className="space-y-2">
+              <legend className="mb-1 block text-sm font-medium">{t('engine.studio.auto.presets', locale)}</legend>
+              {FLOW_PRESETS.map((p) => (
+                <div key={p.id}>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="radio"
+                      name={newChoiceGroup}
+                      value={p.id}
+                      checked={newChoice === p}
+                      data-testid={`create-flow-preset-${p.id}`}
+                      onChange={() => {
+                        setNewChoice(p);
+                        setNewNeeds(null);
+                      }}
+                    />
+                    {t(p.labelKey, locale)}
+                  </label>
+                  {newChoice === p && startTrigger.object?.showWhen?.equals.includes(p.triggerType) && (
+                    <div className="ml-6 mt-1.5">
+                      <ObjectPicker
+                        label={startTrigger.object.label}
+                        value={newTriggerObject}
+                        onCommit={(v) => {
+                          setNewTriggerObject(v);
+                          setNewNeeds(null);
+                        }}
+                        locale={locale}
+                      />
+                    </div>
+                  )}
+                </div>
+              ))}
+              <div>
                 <label className="flex items-center gap-2 text-sm">
                   <input
                     type="radio"
                     name={newChoiceGroup}
-                    value={p.id}
-                    checked={newChoice === p}
-                    data-testid={`create-flow-preset-${p.id}`}
+                    value="advanced"
+                    checked={newChoice === 'advanced'}
+                    data-testid="create-flow-advanced"
                     onChange={() => {
-                      setNewChoice(p);
+                      setNewChoice('advanced');
                       setNewNeeds(null);
                     }}
                   />
-                  {t(p.labelKey, locale)}
+                  {/* The Validations and Actions menus' own word for the full form. */}
+                  {t('engine.studio.rules.advanced', locale)}
                 </label>
-                {newChoice === p && startTrigger.object?.showWhen?.equals.includes(p.triggerType) && (
-                  <div className="ml-6 mt-1.5">
-                    <ObjectPicker
-                      label={startTrigger.object.label}
-                      value={newTriggerObject}
-                      onCommit={(v) => {
-                        setNewTriggerObject(v);
-                        setNewNeeds(null);
-                      }}
-                      locale={locale}
-                    />
+                {/* objectui#11788 — the trigger, asked for here rather than found
+                    later inside the Start node. The choices, their labels and
+                    which of them watch an object are the Start node's own
+                    trigger field (`fieldsForNodeType('start')`), so the two can
+                    never offer different triggers; what is chosen is written
+                    where that field writes it. */}
+                {newChoice === 'advanced' && startTrigger.trigger && (
+                  <div className="ml-6 mt-1.5 space-y-3">
+                    <label className="block">
+                      <span className="mb-1 block text-sm font-medium">{startTrigger.trigger.label}</span>
+                      <StudioPicker
+                        value={newTrigger}
+                        options={[
+                          { value: '', label: t('engine.studio.newAutoTrigger.later', locale) },
+                          ...(startTrigger.trigger.options ?? []).map((o) => ({ value: o.value, label: o.label })),
+                        ]}
+                        onPick={setNewTrigger}
+                        className="h-auto rounded px-2 py-1.5 text-sm"
+                        testId="create-flow-trigger"
+                      />
+                    </label>
+                    {startTrigger.trigger.help && (
+                      <p className="-mt-2 text-[11px] text-muted-foreground">{startTrigger.trigger.help}</p>
+                    )}
+                    {startTrigger.object && newTrigger && startTrigger.object.showWhen?.equals.includes(newTrigger) && (
+                      <ObjectPicker
+                        label={startTrigger.object.label}
+                        value={newTriggerObject}
+                        onCommit={setNewTriggerObject}
+                        locale={locale}
+                      />
+                    )}
                   </div>
                 )}
               </div>
-            ))}
-            <div>
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="radio"
-                  name={newChoiceGroup}
-                  value="advanced"
-                  checked={newChoice === 'advanced'}
-                  data-testid="create-flow-advanced"
-                  onChange={() => {
-                    setNewChoice('advanced');
-                    setNewNeeds(null);
-                  }}
-                />
-                {/* The Validations and Actions menus' own word for the full form. */}
-                {t('engine.studio.rules.advanced', locale)}
-              </label>
-              {/* objectui#11788 — the trigger, asked for here rather than found
-                  later inside the Start node. The choices, their labels and
-                  which of them watch an object are the Start node's own
-                  trigger field (`fieldsForNodeType('start')`), so the two can
-                  never offer different triggers; what is chosen is written
-                  where that field writes it. */}
-              {newChoice === 'advanced' && startTrigger.trigger && (
-                <div className="ml-6 mt-1.5 space-y-3">
-                  <label className="block">
-                    <span className="mb-1 block text-sm font-medium">{startTrigger.trigger.label}</span>
-                    <StudioPicker
-                      value={newTrigger}
-                      options={[
-                        { value: '', label: t('engine.studio.newAutoTrigger.later', locale) },
-                        ...(startTrigger.trigger.options ?? []).map((o) => ({ value: o.value, label: o.label })),
-                      ]}
-                      onPick={setNewTrigger}
-                      className="h-auto rounded px-2 py-1.5 text-sm"
-                      testId="create-flow-trigger"
-                    />
-                  </label>
-                  {startTrigger.trigger.help && (
-                    <p className="-mt-2 text-[11px] text-muted-foreground">{startTrigger.trigger.help}</p>
-                  )}
-                  {startTrigger.object && newTrigger && startTrigger.object.showWhen?.equals.includes(newTrigger) && (
-                    <ObjectPicker
-                      label={startTrigger.object.label}
-                      value={newTriggerObject}
-                      onCommit={setNewTriggerObject}
-                      locale={locale}
-                    />
-                  )}
-                </div>
-              )}
-            </div>
-          </fieldset>
+            </fieldset>
+          </>
         }
         onSubmit={({ label, name }) => {
           if (newChoice === 'advanced') {
@@ -8447,6 +8736,17 @@ export function AccessPillar({
   const [creating, setCreating] = React.useState(false);
   const [createErr, setCreateErr] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
+  // objectstack#26836 — a create refused because the name is taken: which set
+  // holds it, and whether it is this package's, so the dialog can open it.
+  const [createTaken, setCreateTaken] = React.useState<{ name: string; label: string; here: boolean } | null>(null);
+  // Which of the rail's sets are published, and which hold a pending draft:
+  // the draft discard's two inputs, read by `load` with the rail.
+  const [publishedNames, setPublishedNames] = React.useState<ReadonlySet<string>>(() => new Set());
+  const [draftNames, setDraftNames] = React.useState<ReadonlySet<string>>(() => new Set());
+  const [discarding, setDiscarding] = React.useState(false);
+  // Bumped by a discard: the open matrix re-reads as it does after a publish,
+  // since in both its draft is gone (added to `publishNonce` below).
+  const [draftGoneNonce, setDraftGoneNonce] = React.useState(0);
   // [ADR-0090 D6] "why can this user access?" — right-side explain sheet.
   const [explainOpen, setExplainOpen] = React.useState(false);
   // objectui#12456 — the open set's tab (epic objectui#12446, decision C):
@@ -8482,10 +8782,10 @@ export function AccessPillar({
     },
     [],
   );
-  const confirmDiscardEdits = React.useCallback(() => {
-    if (!pillarDirty) return true;
-    return window.confirm(t('engine.edit.unsavedLeaveConfirm', locale));
-  }, [pillarDirty, locale]);
+  const confirmDiscardEdits = React.useCallback(
+    () => confirmDropUnsavedWork(pillarDirty, locale),
+    [pillarDirty, locale],
+  );
 
   const load = React.useCallback(async () => {
     try {
@@ -8526,6 +8826,10 @@ export function AccessPillar({
       }
       const scoped = [...byName.values()];
       setPerms(scoped);
+      setPublishedNames(new Set((list || []).map((p) => String(p.name ?? (p as Record<string, unknown>).id ?? ''))));
+      setDraftNames(
+        new Set(((drafts as Array<{ name?: string }>) || []).map((d) => String(d?.name ?? '')).filter(Boolean)),
+      );
       // A `?surface=owd:overview` deep-link opens the OWD overview instead of a
       // permission set; `current` still defaults to the first set so switching
       // back to the matrix has a target. Applied once — a later publish re-runs
@@ -8554,11 +8858,22 @@ export function AccessPillar({
     async (label: string, name: string) => {
       setBusy(true);
       setCreateErr(null);
+      setCreateTaken(null);
       try {
+        // A name a permission set already holds, published or as a draft, in
+        // this package or any other, is refused here and nothing is written:
+        // over a published set the first-write pin below would write this
+        // blank skeleton as its pending draft (`findTakenIdentifier`).
+        const taken = await findTakenIdentifier(client, 'permission', name, locale);
+        if (taken) {
+          setCreateTaken({ ...taken, here: perms.some((p) => p.name === name) });
+          return;
+        }
         // Package door → create as a DRAFT stamped with this package (D6/D7),
         // published atomically with the rest of the package.
-        // objectui#11773 — a create is the first-write pin: refused where the
-        // name already holds a draft, instead of written over it.
+        // objectui#11773 — and the door refuses a draft row too (the
+        // first-write pin), for one that lands between the check above and
+        // this save. A set published in that window is not refused by it.
         await client.save('permission', name, buildPermissionSkeleton(name, label), {
           mode: 'draft',
           packageId,
@@ -8579,7 +8894,61 @@ export function AccessPillar({
         setBusy(false);
       }
     },
-    [client, load, packageId, onDraftSaved, locale],
+    [client, load, packageId, onDraftSaved, locale, perms],
+  );
+
+  // The refusal's way out: the taken set is this package's, so it opens in
+  // the matrix instead of a second one being made. The "+ New" gate already
+  // confirmed any discard of unsaved edits.
+  const openTakenSet = React.useCallback((name: string) => {
+    setCreating(false);
+    setCreateTaken(null);
+    setOwdOpen(false);
+    setCurrent(name);
+  }, []);
+
+  // Discard the open set's pending draft (`DELETE ?state=draft` at this
+  // package's address, the door the metadata editor's "Discard draft" uses).
+  // A published set goes back to its live body; a set that was never
+  // published has nothing left, so it leaves the rail.
+  const discardDraft = React.useCallback(
+    async (name: string) => {
+      const row = perms.find((p) => p.name === name);
+      const item = row?.label || name;
+      const neverPublished = !publishedNames.has(name);
+      // One confirm: an unsaved edit on the open matrix is an unpublished
+      // change of this same set, and the discard removes it with the rest.
+      if (
+        !window.confirm(
+          tFormat(
+            neverPublished ? 'engine.studio.access.discardConfirmUnpublished' : 'engine.studio.access.discardConfirm',
+            locale,
+            { item },
+          ),
+        )
+      ) {
+        return;
+      }
+      setDiscarding(true);
+      try {
+        await client.reset('permission', name, { state: 'draft', packageId });
+        toast.success(tFormat('engine.edit.draftDiscarded', locale, { item }));
+        if (neverPublished) setCurrent((c) => (c === name ? null : c));
+        // The open matrix holds the discarded draft and the pin it was read
+        // with: read it again, as after a publish (its draft is gone).
+        setDraftGoneNonce((n) => n + 1);
+        onDraftSaved?.();
+        await load();
+      } catch (e) {
+        toast.error(t('engine.studio.access.discardFailed', locale), {
+          description: formatMetadataError(e),
+          classNames: { description: 'whitespace-pre-line' },
+        });
+      } finally {
+        setDiscarding(false);
+      }
+    },
+    [perms, publishedNames, locale, client, packageId, onDraftSaved, load],
   );
 
   const filtered = perms.filter(
@@ -8644,8 +9013,25 @@ export function AccessPillar({
     : () => {
         if (!confirmDiscardEdits()) return;
         setCreateErr(null);
+        setCreateTaken(null);
         setCreating(true);
       };
+  // objectstack#26836 — the open set's pending draft can be discarded where
+  // the set is edited; nothing in Studio offered it, so a blank draft over a
+  // live set could only be published.
+  const accessDiscardEl =
+    !readOnly && current && !owdOpen && draftNames.has(current) ? (
+      <button
+        type="button"
+        data-testid="access-discard-draft"
+        onClick={() => void discardDraft(current)}
+        disabled={discarding}
+        className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-[12px] text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+      >
+        <Undo2 className="h-3.5 w-3.5" />
+        {t('engine.edit.discardDraft', locale)}
+      </button>
+    ) : null;
   const accessHeaderEl = (
     <StudioItemHeader
       testId="access-item-header"
@@ -8723,7 +9109,12 @@ export function AccessPillar({
           onAdd={openCreateSet}
           addLabel={t('engine.studio.access.new', locale)}
           addTestId="studio-rail-add"
-          search={{ value: query, onChange: setQuery, placeholder: t('engine.studio.access.search', locale) }}
+          search={{
+            value: query,
+            onChange: setQuery,
+            placeholder: t('engine.studio.access.search', locale),
+            matchCount: filtered.length,
+          }}
           pinned={
             // Pinned sibling surface: the package-wide Record Sharing Baseline
             // (OWD) overview (objectui#2505). Same package-author ownership as
@@ -8821,8 +9212,12 @@ export function AccessPillar({
               type="permission"
               name={current}
               packageId={packageId}
-              publishNonce={publishNonce}
-              onDraftSaved={onDraftSaved}
+              publishNonce={(publishNonce ?? 0) + draftGoneNonce}
+              onDraftSaved={() => {
+                // The set now holds a pending draft, so its discard shows.
+                setDraftNames((names) => (names.has(current) ? names : new Set(names).add(current)));
+                onDraftSaved?.();
+              }}
               readOnly={readOnly}
               onDirtyChange={setMatrixDirty}
               embedded
@@ -8831,7 +9226,12 @@ export function AccessPillar({
                 onTabChange: setAccessTab,
                 leading: accessRailToggleEl,
                 chips: accessNoteEl,
-                actions: accessExplainEl,
+                actions: (
+                  <>
+                    {accessDiscardEl}
+                    {accessExplainEl}
+                  </>
+                ),
               }}
               onOpenOwd={(objectName) => {
                 // The badge deep-link swaps this page out for the OWD
@@ -8880,6 +9280,20 @@ export function AccessPillar({
         busy={busy}
         error={createErr}
         locale={locale}
+        extra={
+          createTaken && (
+            <CreateTakenNotice
+              scope="access"
+              sentence={tFormat(
+                createTaken.here ? 'engine.studio.access.createTaken' : 'engine.studio.access.createTakenElsewhere',
+                locale,
+                { label: createTaken.label, name: createTaken.name },
+              )}
+              openLabel={tFormat('engine.studio.create.openExisting', locale, { label: createTaken.label })}
+              onOpen={createTaken.here ? () => openTakenSet(createTaken.name) : undefined}
+            />
+          )
+        }
         onSubmit={({ label, name }) => void doCreate(label, name)}
       />
     </div>

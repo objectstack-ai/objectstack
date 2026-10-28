@@ -208,6 +208,7 @@ import {
     decorateMetadataItem,
     decorateMetadataItems,
     type MetadataDiagnostics,
+    withPublishVerdict,
 } from './metadata-diagnostics.js';
 // [#8154] The per-type read-path redaction seam. `decorateMetadataItem` already
 // composes `redactMetadataItem` (see its ordering note), which covers the
@@ -340,6 +341,7 @@ import {
     objectsBoundExternallyTo,
     refuseUngrammaticalMetaItemName,
     saveWriteBinding,
+    unknownDatasourceSaveRefusal,
 } from './protocol-save-door-refusals.js';
 // [#25467 cut 7] Package install and update.
 import {
@@ -351,6 +353,7 @@ import {
 // [#25467 cut 8] The runtime authoring gate and the restored-body doors.
 import {
     assertRuntimeAuthoringRules,
+    draftPublishVerdict,
     refuseRestoredBodyTheSaveDoorRefuses,
     restoredBodyDerivation,
     restoredBodyWriter,
@@ -405,6 +408,7 @@ import { reportSealedOverlayRows } from './protocol-sealed-overlay-report.js';
 import { expandUnderOwnName, resolveRowlessExpandedView } from './protocol-view-expansion-names.js';
 // [#25467 cut 23] The read-side conversion of a stored item: the ADR-0087 chain with its notices, and the warned-once read with the page `type` default.
 import { convertStoredItem, convertStoredItemDetailed } from './protocol-stored-item-conversion.js';
+import { withParsedStoredActions } from './protocol-stored-action-parse.js';
 // [#25467 cut 24] The live metadata-type listing: the SchemaRegistry's types and the `metadata` service's, de-duplicated.
 import { listLiveMetadataTypes } from './protocol-live-metadata-types.js';
 // [#25467 cut 24] The save door's 409 for a `ConflictError`, with its decision-audit row.
@@ -413,6 +417,10 @@ import { saveConflict } from './protocol-save-conflict.js';
 import { emitMetaItemPublished, notifyMutationListenersLocal, publishMetadataMutation, runMutationProjector } from './protocol-mutation-fan-out.js';
 // [#25467 cut 26] The runtime authoring gate's deployment-posture probes: org wall, tenancy, RLS keys, hierarchy.
 import { hierarchyResolverMounted, orgWallEnforced, rlsMembershipResolverKeys, tenancyPostureInForce } from './protocol-authoring-posture-probes.js';
+// [#25467 cut 27] The automation service's flow reads: the stored-flow canonicalizer and the engine's registrations.
+import { flowRegistrationsOf, resolveFlowCanonicalizer, resolveFlowRegistrationReader } from './protocol-automation-flow-reads.js';
+// [#25467 cut 28] The code-datasource predicates: declared by an installed package, or registered by the host.
+import { isDeclaredCodeDatasource, isHostCodeDatasource } from './protocol-code-datasource-predicates.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -6584,18 +6592,12 @@ export class ObjectStackProtocolImplementation implements
      */
     private resolveFlowCanonicalizer():
         ((name: string, body: unknown, options?: { includeRetired?: boolean }) => StoredFlowCanonicalization) | undefined {
-        const automation = this.getServicesRegistry?.().get('automation') as
-            | {
-                canonicalizeStoredFlow?: (
-                    name: string, definition: unknown, options?: { includeRetired?: boolean },
-                ) => StoredFlowCanonicalization;
-            }
-            | undefined;
-        const canonicalize = automation?.canonicalizeStoredFlow;
-        if (typeof canonicalize !== 'function') return undefined;
-        return (name, body, options) => (options === undefined
-            ? canonicalize.call(automation, name, body)
-            : canonicalize.call(automation, name, body, options));
+        // [#25467 cut 27] The body moved to `protocol-automation-flow-reads.ts` (see `AutomationFlowReadsHost`).
+        const readGetServicesRegistry = () => this.getServicesRegistry;
+        const host: ThisParameterType<typeof resolveFlowCanonicalizer> = {
+            get getServicesRegistry() { return readGetServicesRegistry(); },
+        };
+        return resolveFlowCanonicalizer.call(host);
     }
 
     /**
@@ -6691,13 +6693,12 @@ export class ObjectStackProtocolImplementation implements
      * cross-process store is read.
      */
     private resolveFlowRegistrationReader(type: string): ((name: string) => FlowRegistration) | undefined {
-        if (canonicalMetaType(type) !== 'flow') return undefined;
-        const automation = this.getServicesRegistry?.().get('automation') as
-            | { getFlowRegistration?: (name: string) => FlowRegistration }
-            | undefined;
-        const read = automation?.getFlowRegistration;
-        if (typeof read !== 'function') return undefined;
-        return (name) => read.call(automation, name);
+        // [#25467 cut 27] The body moved to `protocol-automation-flow-reads.ts` (see `AutomationFlowReadsHost`).
+        const readGetServicesRegistry = () => this.getServicesRegistry;
+        const host: ThisParameterType<typeof resolveFlowRegistrationReader> = {
+            get getServicesRegistry() { return readGetServicesRegistry(); },
+        };
+        return resolveFlowRegistrationReader.call(host, type);
     }
 
     /**
@@ -6709,15 +6710,11 @@ export class ObjectStackProtocolImplementation implements
      * `Object.fromEntries`, so a name is an own key whatever it spells.
      */
     private flowRegistrationsOf(type: string, items: readonly unknown[]): { registrations?: Record<string, FlowRegistration> } {
-        const read = this.resolveFlowRegistrationReader(type);
-        if (!read) return {};
-        const entries: Array<[string, FlowRegistration]> = [];
-        for (const it of items) {
-            const name = (it as { name?: unknown } | null | undefined)?.name;
-            if (typeof name !== 'string' || (it as { _draft?: unknown })._draft === true) continue;
-            entries.push([name, read(name)]);
-        }
-        return { registrations: Object.fromEntries(entries) };
+        // [#25467 cut 27] The body moved to `protocol-automation-flow-reads.ts` (see `AutomationFlowReadsHost`).
+        const host: ThisParameterType<typeof flowRegistrationsOf> = {
+            resolveFlowRegistrationReader: (...a) => this.resolveFlowRegistrationReader(...a),
+        };
+        return flowRegistrationsOf.call(host, type, items);
     }
 
     /**
@@ -6992,6 +6989,9 @@ export class ObjectStackProtocolImplementation implements
      *    while objects bind it `external` is refused naming them, and an
      *    object restored `external` on a datasource that is managed now is
      *    refused at `external`;
+     *  - [#26724] an object restored with a `datasource` that names no
+     *    datasource here, when that is not the binding it holds now
+     *    ({@link unknownDatasourceSaveRefusal});
      *  - a `runAs: 'system'` flow an anonymous endpoint names
      *    ({@link anonymousElevatedFlowRefusal}): a restore writes an ACTIVE
      *    row, the case the save door asks it of;
@@ -7046,6 +7046,7 @@ export class ObjectStackProtocolImplementation implements
             defaultRecordPageSaveRefusal: (...a) => this.defaultRecordPageSaveRefusal(...a),
             externalBindingSaveRefusal: (...a) => this.externalBindingSaveRefusal(...a),
             runAuthoringGate: (...a) => this.runAuthoringGate(...a),
+            unknownDatasourceSaveRefusal: (...a) => this.unknownDatasourceSaveRefusal(...a),
         };
         return refuseRestoredBodyTheSaveDoorRefuses.call(host, type, name, body, binding, source);
     }
@@ -7168,6 +7169,52 @@ export class ObjectStackProtocolImplementation implements
             tenancyPostureInForce: (...a) => this.tenancyPostureInForce(...a),
         };
         return assertRuntimeAuthoringRules.call(host, evt);
+    }
+
+    /**
+     * [#26707] What publishing a stored draft would answer from the runtime
+     * authoring gate, without publishing it: the refusal's `issues` (rule id,
+     * path, message, exactly as the publish 422 carries them), or `[]` when
+     * the publish would pass the gate.
+     *
+     * The draft save stays ungated (#4463 D1): a draft may be half-finished and
+     * is stored as before. What changes is what its READ says about it. The
+     * draft's `_diagnostics` used to be the schema parse alone, so a draft the
+     * publish refuses (`expression-invalid` on a flow edge, a summary field
+     * with no operations, …) read `valid: true` in every editor until the
+     * author pressed Publish, and in a package publish it rolled back every
+     * other draft with it.
+     *
+     * One judgement, never a second copy of the rules: this reads
+     * `judgeRuntimeAuthoringRules`, the function the publish gate
+     * ({@link assertRuntimeAuthoringRules}) throws from, with the arguments the
+     * draft→active promotion states — the draft row's package (whose other
+     * drafts are the closure "Publish all" judges it against, read by the
+     * batch door's own collector) and the credential channel's held positions.
+     * Computed on every draft read rather than stored at save: the verdict
+     * depends on the live universe and the package's other drafts, which a
+     * stored verdict would not see change.
+     */
+    private draftPublishVerdict(draft: {
+        type: string; name: string; body: unknown; packageId: string | null;
+    }): Promise<RuntimeAuthoringIssue[]> {
+        const readAuthoringChannel = () => this.authoringChannel;
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof draftPublishVerdict> = {
+            get authoringChannel() { return readAuthoringChannel(); },
+            get engine() { return readEngine(); },
+            collectBatchPendingDeclarations: (...a) => this.collectBatchPendingDeclarations(...a),
+            credentialChannelFor: (...a) => this.credentialChannelFor(...a),
+            foldStoredCollection: (...a) => this.foldStoredCollection(...a),
+            getOverlayRepo: (...a) => this.getOverlayRepo(...a),
+            hierarchyResolverMounted: (...a) => this.hierarchyResolverMounted(...a),
+            orgWallEnforced: (...a) => this.orgWallEnforced(...a),
+            resolveSduiManifest: (...a) => this.resolveSduiManifest(...a),
+            resolveWritePackageScope: (...a) => this.resolveWritePackageScope(...a),
+            rlsMembershipResolverKeys: (...a) => this.rlsMembershipResolverKeys(...a),
+            tenancyPostureInForce: (...a) => this.tenancyPostureInForce(...a),
+        };
+        return draftPublishVerdict.call(host, draft);
     }
 
     /**
@@ -10727,6 +10774,25 @@ export class ObjectStackProtocolImplementation implements
         // Every read of `execution` below is one of those exits.
         const execution = opts.face === 'execution';
         const serveItem = <T>(resolved: T): T => (execution ? resolved : decorateMetadataItem(request.type, resolved));
+        // [#26707] A served DRAFT is decorated as above and then told what its
+        // publish would refuse: the runtime gate's verdict on the stored draft
+        // body ({@link draftPublishVerdict}), folded into `_diagnostics`
+        // ({@link withPublishVerdict}). Judged on the row as stored — the body
+        // the promotion judges — never on the governed, converted or redacted
+        // copy this read serves. The execution face serves no `_diagnostics`.
+        const serveDraft = async <T>(resolved: T, row: { metadata?: unknown; package_id?: string | null }): Promise<T> => {
+            const served = serveItem(resolved);
+            if (execution || !served || typeof served !== 'object') return served;
+            const issues = await this.draftPublishVerdict({
+                type: request.type,
+                name: request.name,
+                body: storedRowDocument(row),
+                packageId: row.package_id ?? null,
+            });
+            const before = (served as { _diagnostics?: MetadataDiagnostics })._diagnostics;
+            const after = withPublishVerdict(request.type, request.name, before, issues);
+            return after === before ? served : { ...served, _diagnostics: after };
+        };
         // ── [#20946, #20761 ruling rule 1, ADR-0126 §2 / §3] A shipped FLOW name ──
         //
         // `flow` is Regime C: the packaged base is locked, "⛔ Never silent
@@ -10874,7 +10940,7 @@ export class ObjectStackProtocolImplementation implements
                     return {
                         type: request.type,
                         name: request.name,
-                        item: serveItem(this.governServedObject(request.type, draftItem)),
+                        item: await serveDraft(this.governServedObject(request.type, draftItem), draftRec),
                     };
                 }
             } catch (error) {
@@ -10900,6 +10966,8 @@ export class ObjectStackProtocolImplementation implements
         // [#24395] The served draft row's per-key provenance — read off the
         // row this read serves, so it can never describe another body.
         let draftChanges: ReturnType<typeof storedDraftChanges>;
+        // [#26707] The draft row this read serves, for its publish verdict.
+        let servedDraftRow: { metadata?: unknown; package_id?: string | null } | undefined;
         try {
             let record = (await this.findServedOverlayRow({
                 type: request.type,
@@ -10935,7 +11003,10 @@ export class ObjectStackProtocolImplementation implements
                 if (recPkg && item && typeof item === 'object' && (item as any)._packageId === undefined) {
                     (item as any)._packageId = recPkg;
                 }
-                if (readState === 'draft') draftChanges = storedDraftChanges((record as { draft_changes?: unknown }).draft_changes);
+                if (readState === 'draft') {
+                    draftChanges = storedDraftChanges((record as { draft_changes?: unknown }).draft_changes);
+                    servedDraftRow = record as { metadata?: unknown; package_id?: string | null };
+                }
             }
         } catch (error) {
             // [#5532] THE site this issue was raised on. Falling through to the
@@ -10955,10 +11026,11 @@ export class ObjectStackProtocolImplementation implements
         // envelope shape. See ADR-0005 §draft-lifecycle.
         if (readState === 'draft') {
             if (item === undefined) throw noPendingDraftError(request.type, request.name);
+            const governedDraft = this.governServedObject(request.type, item);
             return {
                 type: request.type,
                 name: request.name,
-                item: serveItem(this.governServedObject(request.type, item)),
+                item: servedDraftRow ? await serveDraft(governedDraft, servedDraftRow) : serveItem(governedDraft),
                 // [#22114] The draft row's version token — the one a draft save
                 // (`?mode=draft`) at this address accepts as `If-Match`.
                 // [#22877] The member's own row's, as a save of that member's
@@ -11326,6 +11398,8 @@ export class ObjectStackProtocolImplementation implements
         type: string;
         name: string;
         packageId?: string;
+        /** [#26699] The bundle member whose layers to read — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
+        member?: string;
     }): Promise<{
         type: string;
         name: string;
@@ -11372,6 +11446,18 @@ export class ObjectStackProtocolImplementation implements
         if (request.type === 'object' && isObjectOfDisabledPackage(this.engine?.registry, request.name)) {
             throw objectPackageDisabledError(request.name);
         }
+        // [#26699] Ruling 6116165299 (Q2 i), extended to this read by the
+        // option-A ruling on #26649: ONE member of a bundled type, the
+        // selector's or else the canonical one, read exactly as
+        // {@link getMetaItem} reads it. Every layer below is that member's or
+        // nothing — the code layer's service copy, artifact and registry entry,
+        // and the stored row — so a named member nothing holds answers no
+        // layer, which the door answers as an absent item, ⛔ never with the
+        // canonical member's layers.
+        const member = resolveBundleMemberSelector(request.type, request.member);
+        const wantedMember = bundleMemberDiscriminator(request.type, member);
+        const isWantedMember = (candidate: unknown): boolean =>
+            wantedMember === undefined || itemDiscriminator(request.type, candidate) === wantedMember;
 
         // [ADR-0131 D6] Environment → code: the overlay layer is the
         // environment's stored row; no organization's row is read.
@@ -11388,15 +11474,22 @@ export class ObjectStackProtocolImplementation implements
                 request.packageId,
             );
             if (fromService.data !== undefined && fromService.data !== null) {
+                // [#26699] …when it is the member this read addresses, as in
+                // {@link getMetaItem}: the service keys a type's items by name
+                // alone, so for a bundle it holds whichever member it
+                // registered last. Another member's copy is no layer of this
+                // one; the artifact and registry lookups below ask for it.
                 // [#7556] The CODE layer of an object is D9.6's "owner's
                 // declaration with its extenders folded on", so the
                 // MetadataService copy is its base, not the layer itself.
                 // `effective` is `overlay ?? code`, so an object with no
                 // overlay row — the ordinary shape — is corrected by this
                 // single fold on both layers the diagnostic reports.
-                code = this.foldObjectExtendersFromRegistry(
-                    request.type, request.name, fromService.data,
-                );
+                if (isWantedMember(fromService.data)) {
+                    code = this.foldObjectExtendersFromRegistry(
+                        request.type, request.name, fromService.data,
+                    );
+                }
             } else if (fromService.degraded) {
                 // [#5840] Kept, not swallowed — acted on after the registry
                 // fallback below, which may still produce a real code layer.
@@ -11435,13 +11528,25 @@ export class ObjectStackProtocolImplementation implements
             // item-lock resolution below). A
             // runtime-registered item with no package carries no tenant marker
             // and keeps its code layer.
+            //
+            //
+            // [#26699] Each lookup is asked for the addressed member, exactly
+            // as {@link getMetaItem}'s are: the artifact at the member (the
+            // canonical one when none was named), and the registry for the
+            // member named. The registry's bare-name read still answers a
+            // bundle that ships no canonical member; a registry that does not
+            // narrow by member can answer another one for a NAMED member, and
+            // that answer is not this member's layer.
             const runtimeOnly = (item: unknown): unknown =>
                 item !== undefined && isTenantAuthored(item) ? undefined : item;
-            let regItem = this.lookupArtifactItem(request.type, request.name, request.packageId)
-                ?? runtimeOnly(this.engine.registry.getItem(request.type, request.name, request.packageId));
+            const namedMemberOnly = (item: unknown): unknown =>
+                member !== undefined && item !== undefined && !isWantedMember(item) ? undefined : item;
+            const artifact = this.lookupArtifactItem(request.type, request.name, request.packageId, wantedMember);
+            let regItem = (artifact !== undefined && isWantedMember(artifact) ? artifact : undefined)
+                ?? namedMemberOnly(runtimeOnly(this.engine.registry.getItem(request.type, request.name, request.packageId, member)));
             if (regItem === undefined) {
                 const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
-                if (alt) regItem = runtimeOnly(this.engine.registry.getItem(alt, request.name, request.packageId));
+                if (alt) regItem = namedMemberOnly(runtimeOnly(this.engine.registry.getItem(alt, request.name, request.packageId, member)));
             }
             if (regItem !== undefined) code = regItem;
         }
@@ -11484,15 +11589,17 @@ export class ObjectStackProtocolImplementation implements
         // lock stays at the request's address, as the `_lock` gate judges it.
         // Asked outside the `try` below: its own failed read already answers
         // the #5532 envelope, with the driver's error as `cause`.
-        const contentPackageId = request.packageId || await this.packagelessReadAddress(request.type, request.name);
+        const contentPackageId = request.packageId || await this.packagelessReadAddress(request.type, request.name, member);
         try {
             // ADR-0048 prefer-local. [#21716] The ONE served-row resolution
             // {@link getMetaItem} calls too — see {@link findServedOverlayRow}.
+            // [#26699] At the addressed member, as that read asks it.
             const served = await this.findServedOverlayRow({
                 type: request.type,
                 name: request.name,
                 state: 'active',
                 ...(contentPackageId ? { packageId: contentPackageId } : {}),
+                ...memberOption(member),
             });
             overlayLockLayer = await this.overlayLockLayerAt({
                 type: request.type,
@@ -15568,18 +15675,13 @@ export class ObjectStackProtocolImplementation implements
      *    datasource stays creatable, editable and removable through this door.
      */
     private isDeclaredCodeDatasource(type: string, name: string): boolean {
-        if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'datasource') return false;
-        if (this.isHostCodeDatasource(type, name)) return true;
-        const registry = (this.engine as any)?.registry;
-        if (typeof registry?.getAllPackages !== 'function') return false;
-        for (const record of registry.getAllPackages() as unknown[]) {
-            const declared = (record as { manifest?: { datasources?: unknown } } | null | undefined)
-                ?.manifest?.datasources;
-            if (Array.isArray(declared) && declared.some((ds) => (ds as { name?: unknown } | null)?.name === name)) {
-                return true;
-            }
-        }
-        return false;
+        // [#25467 cut 28] The body moved to `protocol-code-datasource-predicates.ts` (see `CodeDatasourcePredicatesHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof isDeclaredCodeDatasource> = {
+            get engine() { return readEngine(); },
+            isHostCodeDatasource: (...a) => this.isHostCodeDatasource(...a),
+        };
+        return isDeclaredCodeDatasource.call(host, type, name);
     }
 
     /**
@@ -15590,9 +15692,12 @@ export class ObjectStackProtocolImplementation implements
      * those rows to that warning).
      */
     private isHostCodeDatasource(type: string, name: string): boolean {
-        if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'datasource') return false;
-        const hostCode = this.getServicesRegistry?.().get('code-datasource-names') as { has?: unknown } | undefined;
-        return typeof hostCode?.has === 'function' && (hostCode as { has(n: string): boolean }).has(name);
+        // [#25467 cut 28] The body moved to `protocol-code-datasource-predicates.ts` (see `CodeDatasourcePredicatesHost`).
+        const readGetServicesRegistry = () => this.getServicesRegistry;
+        const host: ThisParameterType<typeof isHostCodeDatasource> = {
+            get getServicesRegistry() { return readGetServicesRegistry(); },
+        };
+        return isHostCodeDatasource.call(host, type, name);
     }
 
     /**
@@ -19519,6 +19624,56 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#26724] The save doors refuse an `object` whose `datasource` names a
+     * datasource that does not exist here. Before this, such an object was
+     * stored and published ("published"), and then never registered: the
+     * engine routes an explicit `datasource` to the driver of that name only
+     * (`resolveDatasourceBinding` step 1), so every data call on it answered
+     * 404 "not registered", and nothing told the author why.
+     *
+     * A name exists when any of these holds, and the refusal fires on none:
+     *  - it is absent, empty or `'default'` (the primary datasource);
+     *  - the engine has a driver registered under it
+     *    (`IDataEngine.getDriverByName`): one a host or plugin registers at
+     *    run time with no datasource item (a `driver.*` service, an `onEnable`
+     *    `drivers.register`). An engine without that member cannot say a name
+     *    is unknown, so nothing is refused on it;
+     *  - a datasource item of that name resolves through this door's by-name
+     *    read ({@link readMetaItem}: the environment's stored row, else the
+     *    code layer's definition), connected or not;
+     *  - it is still pending: on a draft save, any datasource draft of that
+     *    name; on a package publish, a datasource draft of the same batch
+     *    (`pending` as a set), since the batch promotes as one unit in no
+     *    type order;
+     *  - the object's current definition already names it: the binding is not
+     *    this write's. A re-save, a stored-row migration or a restore that
+     *    keeps it is not judged; a declaration boot (`os migrate`) never runs
+     *    `onEnable`, so a driver registered there is absent from it.
+     *
+     * Asked in draft and in publish mode by {@link saveMetaItem} after the
+     * schema gate, again by {@link promoteDraftForPublish} on the draft body
+     * (the datasource can go between a draft's save and its publish), and by
+     * the restore doors ({@link refuseRestoredBodyTheSaveDoorRefuses}).
+     * Answered as the schema gate answers: `422 INVALID_METADATA`, one finding
+     * at `datasource` naming the datasource.
+     */
+    private unknownDatasourceSaveRefusal(
+        singularType: string,
+        item: unknown,
+        name: string,
+        pending?: 'drafts' | ReadonlySet<string>,
+        writeFace?: MetadataWriteFace,
+    ): Promise<(Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] }) | undefined> {
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof unknownDatasourceSaveRefusal> = {
+            get engine() { return readEngine(); },
+            listDrafts: (...a) => this.listDrafts(...a),
+            readMetaItem: (...a) => this.readMetaItem(...a),
+        };
+        return unknownDatasourceSaveRefusal.call(host, singularType, item, name, pending, writeFace);
+    }
+
+    /**
      * [#25211] Every object this environment holds that binds `datasource`
      * with `external`, for {@link externalBindingSaveRefusal}'s datasource
      * half: the environment's stored active rows ({@link readActiveOverlayRows},
@@ -20929,6 +21084,10 @@ export class ObjectStackProtocolImplementation implements
                         graftFoldedFormSections(request.item, parsed.data),
                         parsed.data,
                     );
+                    // [#26723] …and an action is stored as its parse, so its
+                    // `requiresFeature` / `requiresMembershipReach` is lowered
+                    // into `visible`. See {@link withParsedStoredActions}.
+                    request.item = withParsedStoredActions(singularType, request.item, parsed.data);
                 }
                 // [#20101] …and a page's declared `type` default, the one
                 // default that a reader of the served body selects on. It is
@@ -20990,6 +21149,18 @@ export class ObjectStackProtocolImplementation implements
         {
             const bindingRefusal = await this.externalBindingSaveRefusal(singularType, request.item, request.name, request.writeFace);
             if (bindingRefusal) throw bindingRefusal;
+        }
+
+        // [#26724] An `object` whose `datasource` names no datasource here is
+        // refused, in draft and in publish mode, after the schema and before
+        // the authoring gate and every write: stored, it never registers. A
+        // draft may name a datasource that is itself still a draft. See
+        // {@link unknownDatasourceSaveRefusal}.
+        {
+            const datasourceRefusal = await this.unknownDatasourceSaveRefusal(
+                singularType, request.item, request.name, mode === 'draft' ? 'drafts' : undefined, request.writeFace,
+            );
+            if (datasourceRefusal) throw datasourceRefusal;
         }
 
         // [ADR-0138 D2b] A flow published with `runAs: 'system'` while an
@@ -22500,6 +22671,13 @@ export class ObjectStackProtocolImplementation implements
          */
         pending?: RuntimePendingDeclarations;
         /**
+         * [#26724] The names of the datasource drafts this promotion's batch
+         * publishes with it, for {@link unknownDatasourceSaveRefusal}: an
+         * object draft may name one. Stated by `publishPackageDrafts`; absent
+         * on the `publishMetaItem` path, where the datasource must be live.
+         */
+        batchDatasources?: ReadonlySet<string>;
+        /**
          * [#22877] The bundle member whose draft to promote; omitted, the
          * canonical one. The draft read, the gate's read and the promotion
          * all address it, so the body judged is the body that goes live.
@@ -22739,6 +22917,19 @@ export class ObjectStackProtocolImplementation implements
         if (draftForGate) {
             const bindingRefusal = await this.externalBindingSaveRefusal(singularType, draftForGate.body, request.name);
             if (bindingRefusal) throw bindingRefusal;
+        }
+        // [#26724] …and an object draft whose `datasource` names no datasource
+        // by the time it is published, or never did: a draft save accepts a
+        // datasource that is itself a draft, and that draft may not be
+        // published with it. Judged on the draft body, before
+        // `repo.promoteDraft` writes, so a batch publish aborts on it too; a
+        // datasource draft of the same batch counts. See
+        // {@link unknownDatasourceSaveRefusal}.
+        if (draftForGate) {
+            const datasourceRefusal = await this.unknownDatasourceSaveRefusal(
+                singularType, draftForGate.body, request.name, request.batchDatasources,
+            );
+            if (datasourceRefusal) throw datasourceRefusal;
         }
         // [ADR-0138 D2b] …and a flow draft that would go `active` with
         // `runAs: 'system'` while an anonymous endpoint of `type: 'flow'` names
@@ -23659,6 +23850,9 @@ export class ObjectStackProtocolImplementation implements
         // publishable in either order — see
         // {@link collectBatchPendingDeclarations}.
         const pendingDeclarations = await this.collectBatchPendingDeclarations(drafts);
+        const batchDatasources: ReadonlySet<string> = new Set(
+            drafts.filter((d) => canonicalMetaType(d.type) === 'datasource').map((d) => d.name),
+        );
 
         // ADR-0067 — capture each artifact's PRE-publish state so this turn can
         // be recorded as ONE revertible commit. existedBefore=false → the commit
@@ -23847,6 +24041,9 @@ export class ObjectStackProtocolImplementation implements
                             // universe as it stood before the publish started.
                             ...(pendingDeclarations !== undefined
                                 ? { pending: pendingDeclarations } : {}),
+                            // [#26724] …and the datasources it drafts, which
+                            // an object draft beside them may name.
+                            batchDatasources,
                             ...(request.actor ? { actor: request.actor } : {}),
                             message: `publish app package '${request.packageId}'`,
                         });

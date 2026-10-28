@@ -17,6 +17,7 @@
 
 - `visible` — CEL predicate (prefer the `P\`...\`` tagged template); when false the action is **hidden**.
 - `disabled` — `boolean` **or** a CEL predicate; when true the action **shows but greys out**. Use this (not `visible`) when the action should stay discoverable but locked in the current state.
+- `disabledReason` — an I18nLabel (a plain sentence or an inline locale map) a greyed action shows as its hover title and accessible description. Display-only: never a predicate and never a gate (the hook or permission still refuses). Omit it to keep the console's default "Not available for this record"; a blank one is refused, and `disabledMessage` / `disabledTooltip` / `disabledHint` / `disabledText` are refused naming this key. The reason goes here, not in `description`.
 - `confirmText` — set for any destructive or irreversible operation.
 - `successMessage` / `errorMessage` — toast copy on success / failure. Always set `successMessage` for non-obvious outcomes; without it the UI shows a generic "Action completed" toast.
 - Copy holes are `{{ }}`: `confirmText` reads `record`, `successMessage` `record` and `result` (the handler's answer); `errorMessage` takes none. A `bulkActionDefs` entry's `confirmText` reads `{{ count }}` and its params by bare name (`{{ tier }}`). `${record.name}`, `{name}`, logic in a hole and a blank sentence fail `os validate`.
@@ -39,10 +40,10 @@ export const ReassignLeadAction = defineAction({
   type: 'api',
   target: 'lead',
   locations: ['record_header', 'list_item'],
-  // Greys out (stays visible) once the lead is converted:
   disabled: P`record.status == "converted"`,
+  disabledReason: 'A converted lead is reassigned from its opportunity.',
   params: [{ field: 'assigned_to', required: true }],
-  undoable: true,                 // success toast offers Undo; Ctrl+Z works too
+  undoable: true,
   successMessage: 'Lead {{ record.name }} reassigned.',
   errorMessage: "Couldn't reassign this lead — try again.",
 });

@@ -306,57 +306,26 @@ describe('ObjectView', () => {
       expect(onNavigate).toHaveBeenCalledWith('1', 'view');
     });
 
-    it('should open form in view mode when split navigation mode is clicked', () => {
+    it('a navigation block without `mode` takes the spec\'s `drawer` default: a row click opens the record form in the drawer (objectstack#26677)', () => {
+      // Until objectstack#26677 a mode-less block fell through to the default
+      // row behaviour; it now takes the spec's `drawer` default, like
+      // `{ mode: 'drawer' }`. `split` and `popover`, which this suite also
+      // drove here, left the spec with the same change.
+      const onNavigate = vi.fn();
       const schema: ObjectViewSchema = {
         type: 'object-view',
         objectName: 'contacts',
-        navigation: { mode: 'split' },
+        navigation: { size: 'lg' },
+        onNavigate,
       };
 
       render(<ObjectView schema={schema} dataSource={mockDataSource} />);
 
       fireEvent.click(screen.getByTestId('grid-row'));
 
-      // Split mode renders NavigationOverlay with split panels including a close button
-      expect(screen.getByTestId('object-form')).toBeDefined();
-      expect(screen.getByLabelText('Close panel')).toBeDefined();
-    });
-
-    it('should open form in view mode when popover navigation mode is clicked', () => {
-      const schema: ObjectViewSchema = {
-        type: 'object-view',
-        objectName: 'contacts',
-        navigation: { mode: 'popover' },
-      };
-
-      render(<ObjectView schema={schema} dataSource={mockDataSource} />);
-
-      fireEvent.click(screen.getByTestId('grid-row'));
-
-      // Popover mode renders NavigationOverlay Dialog fallback (no popoverTrigger)
       expect(screen.getByTestId('object-form')).toBeDefined();
       expect(screen.getByRole('dialog')).toBeDefined();
-    });
-
-    it('should close split panel and return to normal view', () => {
-      const schema: ObjectViewSchema = {
-        type: 'object-view',
-        objectName: 'contacts',
-        navigation: { mode: 'split' },
-      };
-
-      render(<ObjectView schema={schema} dataSource={mockDataSource} />);
-
-      // Open split panel
-      fireEvent.click(screen.getByTestId('grid-row'));
-      expect(screen.getByLabelText('Close panel')).toBeDefined();
-
-      // Close split panel
-      fireEvent.click(screen.getByLabelText('Close panel'));
-
-      // Form should be gone, grid should remain
-      expect(screen.queryByLabelText('Close panel')).toBeNull();
-      expect(screen.getByTestId('object-grid')).toBeDefined();
+      expect(onNavigate).not.toHaveBeenCalled();
     });
   });
 

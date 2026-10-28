@@ -790,6 +790,12 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
     expect(memberRes.status, 'a session must not change the answer on a route that is gone').toBe(404);
     expect(memberRes.headers.get('content-type') ?? '', 'no page is served').not.toContain('text/html');
     expect(await memberRes.text(), 'the retired path answers the ordinary not-found body').toBe(controlBody);
+    // [#26571] access-security.anonymous-floor-v18-doors acceptance[2] names
+    // the ADMIN: the platform administrator's session finds no page either.
+    const adminRes = await stack.apiAs(adminToken, 'GET', RETIRED_VIEWER_PATH);
+    expect(adminRes.status, 'the admin is answered the same not-found').toBe(404);
+    expect(adminRes.headers.get('content-type') ?? '', 'no page is served to the admin').not.toContain('text/html');
+    expect(await adminRes.text(), 'the retired path answers the admin the ordinary not-found body').toBe(controlBody);
   });
 
   // ── the translation faces (dispatcher-mounted; runtime domains/i18n.ts) — #22432

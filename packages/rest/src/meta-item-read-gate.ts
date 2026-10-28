@@ -2248,7 +2248,9 @@ export function metaTypeWriteRefusal(
 /**
  * [#22877] The bundle member selector's query parameter on the by-name `/meta`
  * doors (ruling 6116165299, Q2 i): GET, DELETE, `/history`, `/publish` and
- * `/rollback` on `/meta/:type/:name` each carry it in their closed set.
+ * `/rollback` on `/meta/:type/:name` each carry it in their closed set, and
+ * [#26699] `/layers` too (the ruling's door list extended to the layered read
+ * by the option-A ruling on #26649).
  * Named after the discriminator's concept (`sys_metadata.bundle_member`) and
  * type-neutral — ⛔ never `locale`, which on `/meta` already names the
  * response translation locale (`extractLocale`).
@@ -2299,12 +2301,19 @@ export const META_ITEM_SAVE_PARAMS: readonly string[] = ['force', 'package', 'mo
  * [#23072] The closed set of `GET {metaPath}/:type/:name/layers`.
  * **Measured**: `package`, read a frame down by `serveMetaItemLayered` (the
  * layered read's package scope, `metaItemPackageBinding`); the masker and
- * the read gate read the session. The layered view shows the canonical
- * member's layers, as the deprecated `?layers=` spelling's refusal of a member
- * on the item read already says. The runtime dispatcher's `/layers` reads the
- * same one name, through the same binding.
+ * the read gate read the session. The runtime dispatcher's `/layers` reads the
+ * same name, through the same binding.
+ *
+ * [#26699] …and {@link META_ITEM_MEMBER_PARAM}: the layered view of ONE bundle
+ * member (an `email_template` locale), read through {@link metaMemberSelector}
+ * on both doors and judged by the protocol's one reading, as on the item read.
+ * Absent, the canonical member's layers, as before. A member on a type with no
+ * members, and a blank or overlong one, is the protocol's located 400; a member
+ * nothing holds is the door's absent answer, ⛔ never the canonical member's
+ * layers. The deprecated `?layers=` spelling on the item read still names no
+ * member (rule 3 of {@link metaItemQueryRefusal}): its successor is this door.
  */
-export const META_ITEM_LAYERS_PARAMS: readonly string[] = ['package'];
+export const META_ITEM_LAYERS_PARAMS: readonly string[] = ['package', META_ITEM_MEMBER_PARAM];
 
 /**
  * [#23072] The closed set of `GET {metaPath}/:type/:name/published`: EMPTY.
@@ -2357,7 +2366,7 @@ const META_ITEM_QUERY_DOORS: Readonly<Record<MetaItemQueryDoor, {
         accepted: META_ITEM_READ_PARAMS,
         once: ['layers', 'state', 'preview', 'package', META_ITEM_MEMBER_PARAM],
     },
-    layers: { accepted: META_ITEM_LAYERS_PARAMS, once: ['package'] },
+    layers: { accepted: META_ITEM_LAYERS_PARAMS, once: ['package', META_ITEM_MEMBER_PARAM] },
     published: { accepted: META_ITEM_PUBLISHED_PARAMS, once: [] },
     save: { accepted: META_ITEM_SAVE_UNFORCED_PARAMS, once: META_ITEM_SAVE_UNFORCED_PARAMS },
 });
@@ -2403,7 +2412,9 @@ export interface MetaItemQueryRefusal {
  *     query;
  *  3. **`item` only: a member on the layered view** — `?layers=` shows the
  *     canonical member's layers and reads no member, so one named beside it is
- *     refused rather than answered with another member's layers.
+ *     refused rather than answered with another member's layers. [#26699] The
+ *     `layers` door's own set takes the member; only the deprecated spelling
+ *     stays member-less.
  *
  * `undefined` — go on, nothing sent — otherwise. A query that is not an object
  * carries no name, so it is judged by rule 3 alone (and passes it).
@@ -2537,6 +2548,7 @@ export function metaQueryArityRefusal(door: MetaQueryArityDoor, query: unknown):
  * [#23072] Moved here, unchanged, out of `rest-server.ts`, whose five member
  * doors read it by the same name; the runtime dispatcher's item read reads it
  * too, after {@link metaItemQueryRefusal} (which unwraps a one-element array).
+ * [#26699] So does `/layers`, on both transports.
  */
 export function metaMemberSelector(query: unknown): { member?: string } {
     const raw = (query as Record<string, unknown> | null | undefined)?.[META_ITEM_MEMBER_PARAM];
@@ -3926,7 +3938,8 @@ export function createMetaLayeredAnswer(
 // ── THE book tree ─────────────────────────────────────────────────────────────
 
 /** Everything {@link createMetaBookTreeAnswer} reads, supplied by the transport. */
-export interface MetaBookTreeSources extends MetaReadGateAudienceSources {
+export interface MetaBookTreeSources
+    extends MetaReadGateAudienceSources, Pick<MetaListTranslationSources, 'resolveI18nService'> {
     /**
      * One list read of `type` for the tree, env-wide, scoped to `packageId` when
      * the request names one (`?package=`, ADR-0048). A THROW propagates: an
@@ -3972,7 +3985,13 @@ export type MetaBookTreeAnswer =
  *     (fail closed when holdings cannot be resolved, ADR-0049).
  *  4. Every doc (the same package scope), collapsed to the request's locale and
  *     reduced to the header the tree renders.
- *  5. The tree, its ENTRIES narrowed by each doc's effective audience, so a
+ *  5. [#26690] The book itself in the request's locale — its `label` and each
+ *     group's `label` from the bundle's `books` group — through
+ *     {@link translateMetaDocument}, the table every `/meta/book` read
+ *     translates through, so the tree and the list the console's sidebar
+ *     draws cannot disagree. Translated AFTER the gate: the audience is
+ *     judged on the book as stored, and a label is not an access input.
+ *  6. The tree, its ENTRIES narrowed by each doc's effective audience, so a
  *     reader never sees an entry that would refuse them on fetch.
  */
 export async function createMetaBookTreeAnswer(
@@ -4003,5 +4022,7 @@ export async function createMetaBookTreeAnswer(
             tags: d.tags,
             packageId: d._packageId,
         }));
-    return { ok: true, tree: audience.readableTree(book, docs) };
+    // A book has no packaged base (`PACKAGED_BASE_ACCESSORS`), so the protocol is never asked for.
+    const served = await translateMetaDocument({ ...sources, resolveProtocol: async () => undefined }, 'book', book);
+    return { ok: true, tree: audience.readableTree(served as typeof book, docs) };
 }

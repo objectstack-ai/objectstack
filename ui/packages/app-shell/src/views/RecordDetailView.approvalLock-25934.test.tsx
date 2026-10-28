@@ -16,8 +16,12 @@
  * `200 { data: [] }` while a `lockRecord: true` approval runs. The page took
  * that for "no approval is running" and offered inline edit, and the save
  * answered `409 RECORD_LOCKED`. The page now asks the record's own lock
- * (`client.approvals.getRecordLock`, answered to every reader) when the list
- * finds no pending request.
+ * (`GET /approvals/records/:object/:recordId/lock`, answered to every reader)
+ * when the list finds no pending request.
+ *
+ * A composition without the approvals service answers that read 501, its
+ * designed "no lock service": the page reads it silently and does not ask
+ * again, while any other failure still logs (objectstack#26632).
  *
  * Same probe as `RecordDetailView.approvalLock-12220`: it prints what the page
  * threads into its `<InlineEditProvider>`. The record carries no
@@ -126,6 +130,7 @@ const pendingRequest = (over: Record<string, unknown> = {}) => ({
 });
 
 let listGets: string[];
+let lockGets: string[];
 
 const jsonResponse = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -137,12 +142,31 @@ const jsonResponse = (status: number, body: unknown) =>
  */
 type ListAnswer = { row: Record<string, unknown> | null } | { absent: number };
 
-function stubApprovalsApi(answer: ListAnswer) {
+/**
+ * What the record-lock route answers: `{ locked }` in the declared envelope,
+ * or a refusal carrying the route's status (501 when the approvals service is
+ * absent, the body `respond501` sends).
+ */
+type LockAnswer = { locked: boolean } | { refused: number };
+
+const LOCK_PATH = `/approvals/records/${OBJECT_NAME}/${RECORD_ID}/lock`;
+
+function stubApprovalsApi(answer: ListAnswer, lock: LockAnswer) {
   listGets = [];
+  lockGets = [];
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string) => {
       const u = String(url);
+      if (u.endsWith(LOCK_PATH)) {
+        lockGets.push(u);
+        if ('refused' in lock) {
+          return lock.refused === 501
+            ? jsonResponse(501, { code: 'NOT_IMPLEMENTED', message: 'Approvals service is not configured on this deployment' })
+            : jsonResponse(lock.refused, { success: false, error: { code: 'INTERNAL_ERROR', message: 'boom' } });
+        }
+        return jsonResponse(200, { success: true, data: { locked: lock.locked } });
+      }
       if (u.includes('/approvals/requests?object=')) {
         listGets.push(u);
         if ('absent' in answer) return jsonResponse(answer.absent, { code: 'NOT_FOUND' });
@@ -181,24 +205,20 @@ function makeDataSource() {
 }
 
 /**
- * The record-lock read as the SDK answers it: `{ locked }`, or a refusal
- * carrying the route's status (501 when the approvals service is absent).
+ * The SDK's own record-lock read. The page must not use it: the client logs
+ * every non-2xx as an error before the page sees the answer (objectstack#26632).
  */
-type LockAnswer = { locked: boolean } | { refused: number };
 let getRecordLock: ReturnType<typeof vi.fn>;
 
-function makeAdapter(answer: LockAnswer) {
-  getRecordLock = vi.fn(async () => {
-    if ('refused' in answer) throw Object.assign(new Error(`HTTP ${answer.refused}`), { status: answer.refused });
-    return { locked: answer.locked };
-  });
+function makeAdapter() {
+  getRecordLock = vi.fn(async () => ({ locked: false }));
   return { getClient: () => ({ approvals: { getRecordLock } }) } as any;
 }
 
-function renderRecordPage(lock: LockAnswer) {
+function renderRecordPage() {
   return render(
     <MemoryRouter initialEntries={[`/app/crm/${OBJECT_NAME}/${RECORD_ID}`]}>
-      <AdapterCtx.Provider value={makeAdapter(lock)}>
+      <AdapterCtx.Provider value={makeAdapter()}>
       <MetadataCtx.Provider value={METADATA}>
         <RecordDetailView
           dataSource={makeDataSource()}
@@ -216,24 +236,32 @@ function renderRecordPage(lock: LockAnswer) {
 
 const attr = (probe: HTMLElement, name: string) => probe.getAttribute(`data-${name}`);
 
+let consoleError: ReturnType<typeof vi.spyOn>;
+
 beforeEach(() => {
   cleanup();
   __resetRecordApprovalsStore();
   authFetchSpy.mockClear();
+  consoleError = vi.spyOn(console, 'error');
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  consoleError.mockRestore();
 });
+
+/** The `console.error` lines that name the record-lock read. */
+const lockErrorLines = () =>
+  consoleError.mock.calls.filter((args: unknown[]) => args.some((a) => String(a).includes(LOCK_PATH)));
 
 describe('record page lock for a reader outside the approval (objectstack#25934)', () => {
   it('a non-participant on a record held by a locking approval is offered no inline edit', async () => {
-    stubApprovalsApi({ row: null });
-    renderRecordPage({ locked: true });
+    stubApprovalsApi({ row: null }, { locked: true });
+    renderRecordPage();
     const probe = await screen.findByTestId('inline-probe');
 
     await waitFor(() => expect(attr(probe, 'locked')).toBe('true'));
-    expect(getRecordLock).toHaveBeenCalledWith(OBJECT_NAME, RECORD_ID);
+    expect(lockGets).toHaveLength(1);
     expect(attr(probe, 'approval-read-answered')).toBe('true');
     expect(attr(probe, 'approval-pending')).toBe('true');
     expect(attr(probe, 'can-edit')).toBe('false');
@@ -242,11 +270,11 @@ describe('record page lock for a reader outside the approval (objectstack#25934)
   });
 
   it('a record the server reports unlocked opens editable', async () => {
-    stubApprovalsApi({ row: null });
-    renderRecordPage({ locked: false });
+    stubApprovalsApi({ row: null }, { locked: false });
+    renderRecordPage();
     const probe = await screen.findByTestId('inline-probe');
 
-    await waitFor(() => expect(getRecordLock).toHaveBeenCalled());
+    await waitFor(() => expect(lockGets).toHaveLength(1));
     await waitFor(() => expect(attr(probe, 'approval-read-answered')).toBe('true'));
     expect(attr(probe, 'locked')).toBe('false');
     expect(attr(probe, 'approval-pending')).toBe('false');
@@ -254,25 +282,60 @@ describe('record page lock for a reader outside the approval (objectstack#25934)
   });
 
   it('without the approvals service (lock read 501) nothing changes: an answered empty read is not locked', async () => {
-    stubApprovalsApi({ row: null });
-    renderRecordPage({ refused: 501 });
+    stubApprovalsApi({ row: null }, { refused: 501 });
+    renderRecordPage();
     const probe = await screen.findByTestId('inline-probe');
 
-    await waitFor(() => expect(getRecordLock).toHaveBeenCalled());
+    await waitFor(() => expect(lockGets).toHaveLength(1));
     await waitFor(() => expect(attr(probe, 'approval-read-answered')).toBe('true'));
     expect(attr(probe, 'locked')).toBe('false');
     expect(attr(probe, 'approval-pending')).toBe('false');
     await waitFor(() => expect(attr(probe, 'can-edit')).toBe('true'));
   });
 
+  it('the 501 of a composition without the approvals service logs nothing, and the lock is not read again (objectstack#26632)', async () => {
+    stubApprovalsApi({ row: null }, { refused: 501 });
+    renderRecordPage();
+    const probe = await screen.findByTestId('inline-probe');
+    await waitFor(() => expect(attr(probe, 'approval-read-answered')).toBe('true'));
+    await waitFor(() => expect(lockGets).toHaveLength(1));
+    expect(lockErrorLines()).toEqual([]);
+    expect(getRecordLock).not.toHaveBeenCalled();
+
+    // Open the record again: the list is read again, the lock is not.
+    cleanup();
+    renderRecordPage();
+    await waitFor(() => expect(listGets.length).toBeGreaterThanOrEqual(2));
+    const again = await screen.findByTestId('inline-probe');
+    await waitFor(() => expect(attr(again, 'approval-read-answered')).toBe('true'));
+    expect(attr(again, 'locked')).toBe('false');
+    expect(lockGets).toHaveLength(1);
+    expect(lockErrorLines()).toEqual([]);
+  });
+
+  it('any other lock-read failure still logs, and the next open asks again', async () => {
+    stubApprovalsApi({ row: null }, { refused: 500 });
+    renderRecordPage();
+    const probe = await screen.findByTestId('inline-probe');
+    await waitFor(() => expect(attr(probe, 'approval-read-answered')).toBe('true'));
+    await waitFor(() => expect(lockErrorLines()).toHaveLength(1));
+    expect(String(lockErrorLines()[0][0])).toContain(`GET `);
+    expect(String(lockErrorLines()[0][0])).toContain('-> 500');
+    expect(attr(probe, 'locked')).toBe('false');
+
+    cleanup();
+    renderRecordPage();
+    await waitFor(() => expect(lockGets).toHaveLength(2));
+  });
+
   it('a participant\'s pending request decides, and the record lock is not read', async () => {
-    stubApprovalsApi({ row: pendingRequest({ lock_record: false }) });
-    renderRecordPage({ locked: true });
+    stubApprovalsApi({ row: pendingRequest({ lock_record: false }) }, { locked: true });
+    renderRecordPage();
     const probe = await screen.findByTestId('inline-probe');
 
     await waitFor(() => expect(attr(probe, 'approval-pending')).toBe('true'));
     expect(attr(probe, 'locked')).toBe('false');
     await waitFor(() => expect(attr(probe, 'can-edit')).toBe('true'));
-    expect(getRecordLock).not.toHaveBeenCalled();
+    expect(lockGets).toEqual([]);
   });
 });

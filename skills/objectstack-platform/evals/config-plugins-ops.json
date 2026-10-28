@@ -70,6 +70,16 @@
         "must_contain": ["demoStaff", "position", "permissionSets", "os dev"],
         "must_not_contain": ["role:", "admin_full_access"]
       }
+    },
+    {
+      "id": 8,
+      "prompt": "In the contracts demo, Paralegal 1 reports to Legal Counsel 1, so the approval flow's manager step reaches the right person on a fresh `os dev`. Set that up.",
+      "expected_output": "On Paralegal 1's `demoStaff` entry, `manager: 'counsel1@example.com'` — the `email` of Legal Counsel 1's own entry, never the display name — and nothing else: `os dev` writes `sys_user.manager_id` itself once every demo account exists, and leaves a manager an operator set by hand. No seed row or hook writing `manager_id`, no `reportsTo` / `managerEmail` alias (refused, naming `manager`); a manager naming no entry, the entry itself or a loop is refused when the stack loads.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["demoStaff", "manager: '", "os dev"],
+        "must_not_contain": ["manager_id:", "reportsTo:"]
+      }
     }
   ]
 }

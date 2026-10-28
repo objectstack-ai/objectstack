@@ -1,0 +1,16 @@
+{
+  "skill_name": "objectstack-ui",
+  "description": "Report period and export (ADR-0021 dataset reports): a non-joined report windows ONE `type: 'date'` dataset dimension through `dateRange` and declares its download in `exportOptions`; who may export stays the base object's `allowExport` permission.",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "The opportunity_metrics dataset (base object opportunity) declares the amount_sum measure and the stage and close_date dimensions (close_date is type: 'date', dateGranularity: 'quarter'). Add a pipeline-by-stage summary report that opens on the current quarter, lets the viewer pick another period, and lets users who may already export opportunities download the table as CSV or Excel. Emit the metadata.",
+      "expected_output": "One non-joined defineReport bound to opportunity_metrics (rows: ['stage'], values: ['amount_sum']) with `dateRange: { dimension: 'close_date', defaultRange: 'this_quarter', allowCustomRange: true }` — the dataset's `type: 'date'` dimension and the dashboard's own preset names, never a second preset table or a hand-rolled `runtimeFilter` window on close_date — and `exportOptions: { formats: ['csv', 'xlsx'] }` (optionally `includeHeaders` / `fileNamePrefix`). Who may download is the base object's existing permission-set `allowExport`, named in words: no report permission key is invented, and neither key is placed on a `joined` container (refused).",
+      "files": [],
+      "assertions": {
+        "must_contain": ["defineReport", "dateRange", "dimension: 'close_date'", "defaultRange: 'this_quarter'", "exportOptions", "'csv'", "'xlsx'", "allowExport"],
+        "must_not_contain": ["type: 'joined'", "blocks:", "close_date: {", "presets:", "permissions.export", "canExport", "allowExport: true", "'pdf'"]
+      }
+    }
+  ]
+}

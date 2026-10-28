@@ -401,3 +401,53 @@ describe('§5 the declared OUTPUT type, pinned where a runtime test cannot reach
     expect([transportBag, canonicalAst, noObject].length).toBe(3);
   });
 });
+
+describe('§6 the projection spellings admit exactly what the doors accept', () => {
+  /**
+   * [#26909] `select` / `$select` are read by `projectionFieldsValue`
+   * (`@objectstack/metadata-protocol`): a comma string is split, trimmed and
+   * emptied of blank members, an array is kept as sent, and a value naming no
+   * field is refused with a 400 — absent means "every column", so an empty
+   * projection is a widening. Every array member is then checked against the
+   * object's fields, where a blank name is never one. The declaration used to
+   * admit all of these; the GET querystring's own declaration
+   * (`HttpFindQueryParamsSchema.select`, #26817) already refused the strings.
+   */
+  const REFUSED: ReadonlyArray<readonly [string, unknown]> = [
+    ['a blank string', ''],
+    ['whitespace only', '   '],
+    ['commas and spaces only', ' , '],
+    ['a comma', ','],
+    ['an empty list', []],
+    ['an all-blank list', ['', ' ']],
+    ['a list with a blank name', ['name', '']],
+  ];
+  const KEPT: ReadonlyArray<readonly [string, unknown]> = [
+    ['one name', 'name'],
+    ['a comma list', 'name,email'],
+    ['a spaced comma list', ' name , email '],
+    ['a list', ['name', 'email']],
+  ];
+
+  for (const key of ['select', '$select'] as const) {
+    it.each(REFUSED)(`refuses \`${key}\` as %s`, (_name, value) => {
+      expect(QueryTransportParamsSchema.safeParse({ [key]: value }).success).toBe(false);
+      const parsed = QueryWithTransportSchema.safeParse({ object: 'a', [key]: value });
+      expect(parsed.success).toBe(false);
+      if (!parsed.success) expect(parsed.error.issues[0].path[0]).toBe(key);
+    });
+
+    it.each(KEPT)(`keeps \`${key}\` as %s, unchanged`, (_name, value) => {
+      const params = QueryTransportParamsSchema.safeParse({ [key]: value });
+      expect(params.success).toBe(true);
+      if (params.success) expect(params.data[key]).toEqual(value);
+    });
+
+    it(`still reads an explicit null \`${key}\` as a withdrawal`, () =>
+      expect(QueryWithTransportSchema.parse({ object: 'a', [key]: null })).toEqual({ object: 'a' }));
+  }
+
+  it('lowers a kept comma list onto `fields` as the door does', () =>
+    expect(QueryWithTransportSchema.parse({ object: 'a', select: ' name , email ' }))
+      .toEqual({ object: 'a', fields: ['name', 'email'] }));
+});

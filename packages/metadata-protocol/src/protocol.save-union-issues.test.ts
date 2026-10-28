@@ -504,3 +504,51 @@ describe('#20230 a flattened overlay carrying a retired owner/hidden is refused 
         }
     });
 });
+
+// [#26711] The write door's unknown TOP-LEVEL key. Three of the union's four
+// members `.strip()`ped their top level, and since the save stores the parsed
+// body (#20051) a misspelt or retired key answered success and was not stored:
+// `PUT /api/v1/meta/view/…?mode=draft` with `zzz_junk_key` → 200, key absent.
+describe('#26711 the view write door refuses an unknown top-level key', () => {
+    const OVERLAY = { name: 'task_list', object: 'task', viewKind: 'list', type: 'grid', columns: ['title'] };
+    const RECORD = {
+        name: 'task.mine', object: 'task', viewKind: 'list',
+        config: { type: 'grid', data: { provider: 'object', object: 'task' }, columns: ['title'] },
+    };
+
+    it.each([
+        ['an inline list view, draft', OVERLAY, 'task_list', 'draft', 'zzz_junk_key', 'this inline list view'],
+        ['an inline list view, publish', OVERLAY, 'task_list', undefined, 'striped', 'this inline list view'],
+        ['a view item record, draft', RECORD, 'task.mine', 'draft', 'zzz_junk_key', 'this view item record'],
+    ] as const)('%s: 422 INVALID_METADATA naming the key, nothing stored', async (_label, body, name, mode, key, surface) => {
+        const { protocol, rows } = makeProtocol();
+
+        const err = await rejection(protocol.saveMetaItem({ type: 'view', name, item: { ...body, [key]: true }, ...(mode ? { mode } : {}) }));
+
+        expect(err.code).toBe('INVALID_METADATA');
+        expect(err.status).toBe(422);
+        expect(rows.size).toBe(0);
+        const unknownKey = err.issues.find((i: any) => i.code === 'unrecognized_keys');
+        expect(unknownKey?.message).toMatch(new RegExp(`^Unrecognized key\\(s\\) on ${surface}: \`${key}\`\\.`));
+    });
+
+    it.each([
+        ['an inline list view', OVERLAY, 'task_list'],
+        ['a view item record', RECORD, 'task.mine'],
+    ] as const)('CONTROL: %s without the key saves, one row', async (_label, body, name) => {
+        const { protocol, rows } = makeProtocol();
+        const result = await protocol.saveMetaItem({ type: 'view', name, item: body, mode: 'draft' });
+        expect(result.success).toBe(true);
+        expect(rows.size).toBe(1);
+    });
+
+    it('READ PATH: a row stored with such a key is served badged invalid, naming it', async () => {
+        const { protocol } = makeProtocol([
+            { type: 'view', name: 'task_list', metadata: { ...OVERLAY, zzz_junk_key: true } },
+        ]);
+
+        const served = (await protocol.getMetaItem({ type: 'view', name: 'task_list' })).item;
+        expect(served._diagnostics?.valid).toBe(false);
+        expect(JSON.stringify(served._diagnostics)).toContain('zzz_junk_key');
+    });
+});

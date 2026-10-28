@@ -681,5 +681,21 @@ export const DEFAULT_CHANGES_BY_MAJOR: Readonly<Record<number, readonly Declared
         + '`ui-nav-group-expanded-default-open` carries the change to `os migrate meta` and the '
         + 'upgrade guide.',
     },
+    {
+      key: 'ui/NavigationConfig:mode',
+      from: '"page"',
+      to: '"drawer"',
+      reason:
+        'A RULED default change (maintainer ruling 2026-10-27, record-page-v2 epic ruling 1: 「默认抽屉'
+        + '（带展开整页），`page` 只给显式声明的对象」): a list opens a clicked record in the drawer, which '
+        + 'expands to the full page, unless the object declares `page`. What moves is the PARSED value '
+        + 'of a navigation block that omits `mode`: it used to read `page` and now reads `drawer`. The '
+        + 'console never honoured the old default for a list with no navigation block (it guessed the '
+        + 'surface from the field count, and that guess is retired in the same release); a block that '
+        + 'omitted `mode` now opens the drawer. A stored row or built artifact that a released toolchain '
+        + 'parsed carries the old `page` written out and keeps opening as a full page. To keep a full '
+        + 'page, write `mode: \'page\'`. The `semantic` entry `ui-record-open-overlay-modes-retired` '
+        + 'carries the change to `os migrate meta` and the upgrade guide.',
+    },
   ],
 };
