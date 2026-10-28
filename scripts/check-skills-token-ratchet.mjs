@@ -441,7 +441,18 @@ export const CEILINGS = new Map([
   // AT the measurement. Maintainer ruling 2026-10-27 on the seat's decision
   // card 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」, tap A
   // verbatim and untranslated: 「A:先削重复,余额按实测提高」.
-  ['skills/objectstack-automation/SKILL.md', 6466],
+  // 6466 -> 6465 (card #27223): the `connector_action` row no longer says
+  // "pre-built", the "reserve custom code for edge-case integrations" line is
+  // gone, and a new section "Integrations are declared, not coded" states the
+  // declarative-connector-first rule, the five cases that justify platform
+  // code and the gap-naming discipline. Paid down in the same file: the `http`
+  // row's auth-routing tail (now in references/integration-recipes.md), the
+  // Flow Variables example re-spelled one entry per line, a stale "(see the
+  // approval example below)" pointer, the ADR-0032 sentence and the eval
+  // pointer in References, and eight clause-level trims. Arithmetic in priced
+  // bytes (stamp line excluded): 25864 -> 25860 (-4 net) -> ceil(25860 / 4) =
+  // 6465; re-locked AT the measurement, headroom 0 tokens.
+  ['skills/objectstack-automation/SKILL.md', 6465],
   // 13783 -> 13892 (2026-08-31 app-repo-principles raise, see the block above).
   // The invariant-vs-transition-gate choice, placed in the field-conditional-rule
   // bullet list where the tool is actually picked. Both wrong picks are silent:
@@ -727,6 +738,11 @@ export const CEILINGS = new Map([
 
   // objectstack-automation
   ['skills/objectstack-automation/evals/approvals/test-revise-loop.md', 1329],
+  // NEW FILE (card #27223): the three integration cases — DocuSign (fails any
+  // answer proposing a platform plugin), Stripe read, vendor without a spec.
+  // Pinned AT its landed count, no headroom.
+  //   ceil($(wc -c < skills/objectstack-automation/evals/integrations-declared.json) / 4) == ceil(4772 / 4)
+  ['skills/objectstack-automation/evals/integrations-declared.json', 1193],
 
   // objectstack-ui — the three authored eval files; its `references/react-blocks.md`
   // is generator-owned and carries no row here on purpose (see the boundary
@@ -1077,6 +1093,13 @@ export const CEILINGS = new Map([
   // because a split that arrives with budget is a raise wearing a new path.
   // The package deltas are the pointer lines and the four new file titles only.
   ['skills/objectstack-automation/references/examples-flows.md', 1436],
+  // NEW FILE (card #27223): one recipe per integration archetype — OpenAPI with
+  // a static key, remote MCP with a static header, plain REST, the vendor
+  // callback, a hand-written document for a spec-less vendor — plus the two
+  // "not yet" entries (OAuth, request signing) and the author / administrator
+  // credential hand-off. Pinned AT its landed count, no headroom.
+  //   ceil($(wc -c < skills/objectstack-automation/references/integration-recipes.md) / 4) == ceil(8705 / 4)
+  ['skills/objectstack-automation/references/integration-recipes.md', 2177],
   // 5569 -> 5587 (card #26298, audit #26184 row A2): the approval config table
   // gains `excludeSubmitter` (refused beside `onEmptyApprovers: 'auto_approve'`),
   // +105 tokens. Paid down first: Best Practices 1 and 4 restated the Branching

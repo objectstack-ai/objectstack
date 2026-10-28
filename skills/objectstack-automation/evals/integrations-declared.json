@@ -1,0 +1,35 @@
+{
+  "skill_name": "objectstack-automation",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Our contract-lifecycle app (objects `contract`, `crm_account`) needs DocuSign: send a contract out for signature, read an envelope's status, and reflect status changes on the record. DocuSign publishes a 4.7 MB Swagger 2.0 document with several hundred operations, authenticates with OAuth 2.0, and its Connect webhooks sign posts with their own HMAC header. Propose what to build and where.",
+      "expected_output": "A declarative instance inside the app, not a platform plugin and not a `connector-esign` family: `defineConnector` with `provider: 'openapi'`, whose `providerConfig.spec` is a trimmed, packaged OpenAPI 3.x document carrying only the three operations (create envelope, get envelope, list status changes), converted offline from the Swagger 2.0 document — the `openapi` provider has no `include` key, so the trimmed document is the allowlist. Fields on `contract` (`envelope_id`, `signature_status`). Flows dispatch `connector_action`; the callback is an `api` flow with a start-node `secretRef`. Three gaps are named plainly, each blocked on its platform card: the declarative `auth` union has no `oauth2`, so the integration is marked **blocked** on outbound OAuth (no short-lived token parked behind a `bearer` `credentialRef`); DocuSign Connect signs its own header, which the `api` door does not verify, so status is polled until vendor schemes are verified; `connectorConfig.input` is sent as written, so a per-contract payload waits on the platform too. The answer proposes no `registerConnector` code and no plugin.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["defineConnector", "provider: 'openapi'", "credentialRef", "connector_action", "type: 'api'", "secretRef", "Swagger 2.0", "blocked"],
+        "must_not_contain": ["registerConnector(", "connector-esign", "provider: 'docusign'", "implements Plugin", "clientSecret", "token:"]
+      }
+    },
+    {
+      "id": 2,
+      "prompt": "Every night, read our Stripe account balance and write the available amount and the sync time onto our own company's `crm_account` row (it is flagged `is_house_account`). The Stripe secret key must not appear in metadata.",
+      "expected_output": "A `connectors:` entry `defineConnector({ provider: 'openapi', providerConfig: { spec: './…/stripe.trimmed.json' }, auth: { type: 'bearer', credentialRef: 'STRIPE_SECRET_KEY' } })` over a trimmed, packaged OpenAPI 3.x document holding `GetBalance`; the administrator sets `STRIPE_SECRET_KEY` on the deployment, an unset ref fails boot. A `type: 'schedule'` flow with the cadence on the start node's `config.schedule`, `runAs: 'system'`, a `connector_action` with `actionId: 'GetBalance'` and a literal `input: {}`, then an `update_record` on `crm_account` with `filter: { is_house_account: true }` and `fields` read from the node's answer via CEL (`bal.body.available[0].amount / 100.0`, `isoDatetime(now())`). `requires` lists `automation`, `triggers`, `job`. No `http` node with the key in a header, no plugin.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["provider: 'openapi'", "credentialRef", "type: 'schedule'", "runAs: 'system'", "connector_action", "update_record", "dialect: 'cel'"],
+        "must_not_contain": ["type: 'http'", "registerConnector(", "token:", "Authorization: 'Bearer"]
+      }
+    },
+    {
+      "id": 3,
+      "prompt": "Our legacy ERP exposes `GET https://erp.example.com/v2/open-orders` behind HTTP basic auth and publishes no OpenAPI document, only a PDF. We want the call to appear as a named action in the flow palette and to run every hour into `erp_order` rows.",
+      "expected_output": "Write a minimal OpenAPI 3.x document by hand from the vendor's docs — inline on `providerConfig.spec` (or packaged as a file) with one `operationId: 'listOpenOrders'` — and declare `defineConnector({ provider: 'openapi', auth: { type: 'basic', username: 'svc_objectstack', credentialRef: 'ERP_SVC_PASSWORD' } })`; the username stays in metadata, the administrator supplies the password under that name. A scheduled flow dispatches `connector_action` with `actionId: 'listOpenOrders'` and a literal `input: {}`, then a `create_record` reads `<nodeId>.body` through a CEL value slot. `provider: 'rest'` with `actionId: 'request'` is the alternative when the path should stay per call, not when named actions are wanted. No plugin, no hand-written HTTP client.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["provider: 'openapi'", "operationId", "credentialRef", "type: 'basic'", "connector_action"],
+        "must_not_contain": ["password:", "registerConnector(", "implements Plugin", "fetch("]
+      }
+    }
+  ]
+}
