@@ -165,6 +165,7 @@ jobs:
           && steps.turbo-cache.outputs.cache-hit != 'true'
           && steps.prune-turbo-cache.outputs.save == 'true'
         uses: actions/cache/save@v6
+        timeout-minutes: 5
         continue-on-error: true
         with:
           path: .turbo/cache
