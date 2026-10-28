@@ -30,7 +30,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ObjectKernel, type Plugin, type PluginContext } from '@objectstack/core';
 import { defineStack, defineView } from '@objectstack/spec';
-import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
+import type { DriverQuery, IDataDriver, IExternalDatasourceService } from '@objectstack/spec/contracts';
 import { ObjectQLPlugin } from '@objectstack/objectql';
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import { createRestApiPlugin } from '@objectstack/rest';
@@ -42,6 +42,7 @@ import {
   DatasourceAdminServicePlugin,
   ExternalDatasourceServicePlugin,
   createDefaultDatasourceDriverFactory,
+  type DatasourceConnectionService,
 } from '@objectstack/service-datasource';
 import { AppPlugin } from './app-plugin.js';
 import { DefaultDatasourcePlugin } from './default-datasource-plugin.js';
@@ -79,20 +80,20 @@ type Call = { method: string; object?: string; id?: unknown; query?: unknown; da
 function matches(row: Row, where: unknown): boolean {
   if (where === undefined || where === null) return true;
   if (typeof where !== 'object' || Array.isArray(where)) {
-    throw new Error(`spike_tree driver: a non-object where reached the driver: ${JSON.stringify(where)}`);
+    throw new Error(`spike_tree remote: a non-object where arrived: ${JSON.stringify(where)}`);
   }
   for (const [key, cond] of Object.entries(where as Record<string, unknown>)) {
     if (key === '$and') {
       if (!(cond as unknown[]).every((w) => matches(row, w))) return false;
       continue;
     }
-    if (key.startsWith('$')) throw new Error(`spike_tree driver: unsupported combinator ${key}`);
+    if (key.startsWith('$')) throw new Error(`spike_tree remote: unsupported combinator ${key}`);
     if (cond !== null && typeof cond === 'object' && !Array.isArray(cond)) {
       for (const [op, value] of Object.entries(cond as Record<string, unknown>)) {
         if (op === '$eq') { if (row[key] !== value) return false; continue; }
         if (op === '$ne') { if (row[key] === value) return false; continue; }
         if (op === '$in') { if (!(value as unknown[]).includes(row[key])) return false; continue; }
-        throw new Error(`spike_tree driver: unsupported operator ${op} on ${key}`);
+        throw new Error(`spike_tree remote: unsupported operator ${op} on ${key}`);
       }
       continue;
     }
@@ -468,8 +469,8 @@ describe('(a) defineStack accepts a datasource whose driver is a plugin-publishe
   });
 
   it('auto-connect finds the driver already registered and leaves it alone; the boot connects it once', () => {
-    const connection: any = kernel.getService('datasource-connection');
-    expect(connection.getConnectionState?.(DATASOURCE)?.status).toBe('already-registered');
+    const connection = kernel.getService<DatasourceConnectionService>('datasource-connection');
+    expect(connection.getConnectionState(DATASOURCE)?.status).toBe('already-registered');
     expect(bootCalls.filter((c) => c.method === 'connect')).toHaveLength(1);
   });
 });
@@ -481,9 +482,9 @@ describe('(b) the stack boots with `checkOnBoot: false` and no `introspectSchema
   });
 
   it('the validation it skipped would have failed: a fresh sweep reports the object unvalidatable', async () => {
-    const svc: any = kernel.getService('external-datasource');
+    const svc = kernel.getService<IExternalDatasourceService>('external-datasource');
     const report = await svc.validateAll();
-    const row = report.results.find((r: any) => r.object === OBJECT);
+    const row = report.results.find((r) => r.object === OBJECT);
     expect(row?.datasource).toBe(DATASOURCE);
     expect(row?.ok).toBe(false);
   });
