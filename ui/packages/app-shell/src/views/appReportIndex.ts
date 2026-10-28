@@ -249,15 +249,19 @@ const NOT_READ: AppReportEntries = { entries: [], loading: false };
 /**
  * The reports `app` ships that this member may open and the app's navigation
  * shows them, labelled and sorted. `gates` are the member's navigation gates,
- * the caller's `useNavMemberGates()`. With `enabled` false it reads neither
- * list and answers no entry.
+ * the caller's `useNavMemberGates()`, or `null` on a frame with no app. With
+ * `enabled` false, or no gates, it reads neither list and answers no entry.
  */
-export function useAppReportEntries(app: unknown, enabled: boolean, gates: NavMemberGates): AppReportEntries {
+export function useAppReportEntries(
+  app: unknown,
+  enabled: boolean,
+  gates: NavMemberGates | null,
+): AppReportEntries {
   const metadata = useMetadata();
   const { can } = usePermissions();
   const { reportLabel } = useObjectLabel();
   const { language } = useObjectTranslation();
-  if (!enabled) return NOT_READ;
+  if (!enabled || !gates) return NOT_READ;
 
   // Read through the lazy getters: each starts its list's one read.
   const reports = metadata.reports;
