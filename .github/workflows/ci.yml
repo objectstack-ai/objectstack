@@ -3006,8 +3006,17 @@ jobs:
       - name: Setup workspace
         uses: ./.github/actions/setup-workspace
 
-      - name: Setup Next.js cache
-        uses: actions/cache@v6
+      # The Next.js cache is RESTORED on every run and SAVED only on `push` and
+      # `schedule`, by "Save Next.js cache" at the end of this job -- the rule
+      # `.github/actions/setup-workspace` holds for the pnpm store, for the same
+      # reason: an entry saved on a pull request or merge-queue ref is
+      # restorable only from that ref, yet it counts toward the one 10 GB
+      # Actions cache pool and evicts `main`'s entries, which every pull request
+      # and queue run CAN restore. ⛔ No `pull_request` or `merge_group` run
+      # saves it.
+      - name: Restore Next.js cache
+        id: nextjs-cache
+        uses: actions/cache/restore@v6
         with:
           path: apps/docs/.next/cache
           key: ${{ runner.os }}-nextjs-${{ hashFiles('**/pnpm-lock.yaml') }}-${{ hashFiles('apps/docs/**.[jt]s', 'apps/docs/**.[jt]sx', 'content/**/*.mdx') }}
@@ -3073,9 +3082,9 @@ jobs:
       # this card exists to catch, arriving AFTER the gate reported green.
       # Assert the artifact rather than trusting the exit code.
       #
-      # `.next/BUILD_ID` cannot be a leftover from the cache step above: that
-      # step stores `apps/docs/.next/cache` ONLY, so nothing outside that
-      # subtree is ever restored. ⛔ Widening that cache path to
+      # `.next/BUILD_ID` cannot be a leftover from the cache restore above:
+      # the Next.js cache steps store `apps/docs/.next/cache` ONLY, so nothing
+      # outside that subtree is ever restored. ⛔ Widening that cache path to
       # `apps/docs/.next` would let this assertion pass without a build.
       - name: Assert the docs app actually built
         run: |
@@ -3085,6 +3094,31 @@ jobs:
             exit 1
           fi
           echo "Built docs app: BUILD_ID=$(cat apps/docs/.next/BUILD_ID)"
+
+      # The save half of "Restore Next.js cache" (its comment says why it runs
+      # on `push` and `schedule` only). It reproduces what the combined
+      # `actions/cache` post step did on those events, three ways:
+      #   - no status function in `if:`, so it runs only when every step above
+      #     succeeded -- the combined action's `post-if: success()`;
+      #   - skipped on an exact hit, which has nothing new to write;
+      #   - saved under `cache-primary-key`, the key the restore step resolved
+      #     BEFORE the build, which is the key the combined action saved under.
+      #     A key re-hashed here would hash `apps/docs/`, the tree the build
+      #     has just written into, so it could differ from the key the restore
+      #     looked up.
+      # A main-phase step, bounded and `continue-on-error` like the ui jobs'
+      # saves: a stalled or failed upload costs the next run time and says
+      # nothing about the docs build.
+      - name: Save Next.js cache
+        if: >-
+          (github.event_name == 'push' || github.event_name == 'schedule')
+          && steps.nextjs-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        timeout-minutes: 5
+        continue-on-error: true
+        with:
+          path: apps/docs/.next/cache
+          key: ${{ steps.nextjs-cache.outputs.cache-primary-key }}
 
   # ── THE ui/ JOBS (objectstack#25697, epic objectstack#25677) ──────────────
   # objectui is imported under `ui/` as a subtree. These four jobs are its CI,

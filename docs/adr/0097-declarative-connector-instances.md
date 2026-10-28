@@ -5,7 +5,7 @@
 **Builds on**: [ADR-0015](./0015-external-datasource-federation.md) (open mechanism / enterprise lifecycle split), [ADR-0018](./0018-unified-node-action-registry.md) (`connector_action` baseline dispatch + `engine.registerConnector()`), [ADR-0022](./0022-connectors-vs-messaging-channels.md) (Connector = transport/integration mechanism), [ADR-0023](./0023-openapi-to-connector-generator.md) (OpenAPI → Connector generator), [ADR-0024](./0024-mcp-connectors.md) (MCP servers as connectors)
 **Tracking**: framework#2977 (supersedes the interim descriptor-only contract from framework#2612)
 **Consumers**: `@objectstack/spec` (`stack.zod.ts`, `integration/connector.zod.ts`), `@objectstack/service-automation` (boot audit → provider binding), `@objectstack/connector-openapi`, `@objectstack/connector-mcp`, `@objectstack/connector-rest`, the Studio flow palette, AI authoring (stack generation)
-**Amended by**: [ADR-0143](./0143-outbound-connector-auth-is-open-tier.md) (2026-10-27) — OAuth2, the vendor app-credential exchange and request signing join `ConnectorInstanceAuthSchema` in the open tier, and those kinds resolve per dispatch; see the notes under §3 and under "Open / enterprise line".
+**Amended by**: [ADR-0143](./0143-outbound-connector-auth-is-open-tier.md) (2026-10-27) — OAuth2, the vendor app-credential exchange and request signing join `ConnectorInstanceAuthSchema` in the open tier, and those kinds resolve per dispatch; see the notes under §3 and under "Open / enterprise line". PR #26798 (2026-10-27, #26709 item 3(b)) — a credential the MCP server rejects (HTTP `401` / `403`) is a fatal configuration fault, not upstream-unavailable; see the note under "Upstream availability".
 
 ---
 
@@ -189,6 +189,25 @@ transport-shape validation stays a plain (fatal) throw. Lazy connect-on-first-
 dispatch was rejected: MCP actions ARE the server's `tools/list`, so a
 connector materialized without connecting would register a zero-action def —
 exactly the plausible-but-dead shape this ADR exists to kill.
+
+> **Amendment note (2026-10-27, #26709 item 3(b) — PR #26798).** The sentence
+> above has one exception past transport validation: a credential the MCP
+> server **rejects** — an HTTP `401` / `403` on connect, handshake or
+> `tools/list` — is a **configuration fault**, thrown plain: fatal at boot, a
+> skipped entry on reload, never `CONNECTOR_UPSTREAM_UNAVAILABLE` and never
+> retried. It sits on the fatal side of this section's own split, beside an
+> unresolvable `credentialRef` and the `openapi` provider's non-retryable
+> `4xx` (a `401` included) on its spec fetch: retrying cannot make a wrong,
+> missing or under-scoped credential valid, and a degraded instance retried
+> with backoff reads as "server down", hiding the misconfiguration the author
+> has to fix. The rejection is told apart by the MCP SDK's own HTTP-transport
+> errors only — a `StreamableHTTPError` with status 401 / 403, or an
+> `UnauthorizedError`, in the error's `cause` chain
+> (`packages/connectors/connector-mcp/src/mcp-provider.ts#credentialRejectionStatus`, `#createMcpProviderFactory`);
+> a JSON-RPC error that merely carries a numeric code 401 stays operational, as
+> does every other connect / `tools/list` failure. Pinned against a real
+> Streamable-HTTP server in
+> `packages/connectors/connector-mcp/src/mcp-http-discovery-faults.test.ts`.
 
 The `openapi` provider applies the same split to its **remote-URL spec fetch**:
 an unreachable endpoint (network error) or a transient HTTP status
