@@ -114,7 +114,7 @@ describe('sys_exchange_rate — declaration (multi-currency M1-1)', () => {
 
     it('rate is an exact decimal keeping at least 12 decimal places, strictly positive', () => {
       // `number` takes the platform's exact-decimal column; ⛔ never `float`.
-      // ≥ 12 satisfies both readings of parameter 4 (ADR-0144 Open item 5).
+      // ≥ 12 satisfies both readings of parameter 4 (the multi-currency ADR's open item 5, #27183).
       expect(fields.rate.type).toBe('number');
       expect(EXCHANGE_RATE_SCALE).toBe(18);
       expect(fields.rate.scale).toBe(EXCHANGE_RATE_SCALE);

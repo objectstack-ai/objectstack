@@ -17,7 +17,8 @@ export const EXCHANGE_RATE_DIRECTION =
  * engine's `scale` seam, never rounded.
  *
  * Ruling 6465431966 parameter 4 says "12 significant decimals", which reads
- * two ways (ADR-0144 Open item 5): 12 digits after the point, or 12
+ * two ways (the multi-currency ADR's open item 5, #27183): 12 digits after
+ * the point, or 12
  * significant digits. 18 satisfies both: it keeps 12 places for every rate,
  * and 12 significant digits for every rate down to 10⁻⁶ (a weak home currency
  * against a strong one, e.g. 1 VND = 0.0000393 USD, needs 17). The column is
@@ -41,8 +42,8 @@ export const EXCHANGE_RATE_SCALE = 18;
  *   no reader has to guess whether a row is the rate or its reciprocal.
  * - **Precision** — `rate` is a `number` field (the platform's exact-decimal
  *   column, never a float column) with `scale` {@link EXCHANGE_RATE_SCALE}.
- *   A home amount is the record amount DIVIDED by `rate` (ADR-0144, parameter
- *   3 as arithmetic).
+ *   A home amount is the record amount DIVIDED by `rate` (parameter 3 as
+ *   arithmetic, recorded by the multi-currency ADR, #27183).
  * - **Uniqueness** — `(currency, effective_date)` within an organization. Two
  *   organizations both holding EUR on the same day is the normal case, so the
  *   key is spelled `'organization'` (ADR-0120 D1), never bare `true`.
