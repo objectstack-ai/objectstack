@@ -13,7 +13,7 @@
 - 车道可分席(席号 `· seat N`,或域×仓):忙时一车道开多席,闲时收归一席;每席独立座位贴。
 - 认领评论带 `Seat: domain:X#N` 行申报席号(缺省席 1);同席认领互斥,他席认领不触发自退。
 - 拆分触发预登记:单轮逼近 fire 周期,或某仓在全序下持续断粮 ⇒ 按仓拆回多席。
-- seam 卡单一归属:归修复落地仓的席,双仓皆动 objectstack 侧主导。
+- seam 卡单一归属:归修复落地仓的席,双仓皆动 objectstack 侧主导;涉 cloud 者归 cloud PM(下文)。
 - `scripts/pm/**` 等住 objectstack 的全板工具链单写手恒为 objectstack 侧席,他侧上游立卡回链。
 - 工装只答被告知的仓,缺 `--repo`/`PM_SWEEP_REPO` 即答 objectstack;⛔ 不答手上那张卡的仓。
 - 规则 1:issue 住在修复落地的仓,分诊时按判据严格执行。
@@ -41,7 +41,7 @@
 - 转移落对方队列:目标仓立单带 `pm:queue`、出处行与一行可执行判据,依赖用 `Blocked-by:`。
 - 跨座位请求骑在它所关的既有卡上:请求席在自卡写 `Blocked-by:`,并在目标卡留一条评论。
 - 该评论点名席位与步骤;无既有卡承载且请求自身即立卡门 ①②④ 时才立新卡。
-- 跨不可达仓的卡立卡或首触按仓拆:该仓部分由可达席立卡,或挂 `domain:cloud`+`status:parked`。
-- 本卡只留本仓活,不读他仓;拆不开先立该仓前置卡;依赖即 `pm:blocked`+`Blocked-by: owner/repo#N`。
-- 开发中涉 cloud 车道者由席位同拆:报告 `open_questions`/`out_of_scope_findings`、复核/落地所见。
-- ⛔ 不记而弃、不并入本仓 PR、不留 `carrier: none`;停放卡加 `repo:cloud`,出处行与一行判据。
+- 涉 cloud 即整卡归 cloud PM(`repo:cloud` 席):要读改 cloud 代码、生产方、事实或带 cloud 半边。
+- 本仓卡挂 `domain:cloud`+`repo:cloud`+活态,摘车道 `domain:*`,⛔ 不挂 `status:parked`。
+- 他仓卡能转即转 cloud 仓,否则本仓立 `repo:cloud` 承接卡写全所求;⛔ 不拆半边等读数。
+- 在飞卡见涉 cloud 即 `Release:`+`pm:retriage` 交分诊转 cloud 车道,已测读点留卡。

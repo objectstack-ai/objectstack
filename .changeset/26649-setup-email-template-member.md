@@ -1,5 +1,6 @@
 ---
 '@object-ui/data-objectstack': patch
+'@object-ui/i18n': patch
 ---
 
 fix(data-objectstack): the metadata client's layered read, item and draft reads, publish and reset name the bundle member they address
@@ -12,3 +13,5 @@ Metadata-protocol: none
 `getDraft()` with a `member` skips the draft read when the pending-drafts ledger lists that name only as another member's draft.
 
 Setup's metadata list now shows an email template's locale in its own column and links each row to its own member (`?member=LOCALE`), and the editor passes that member to its layered and draft reads and to its publish, reset and discard, so each language of a template opens and is edited on its own.
+
+`@object-ui/i18n`'s `studio` namespace gains the column's label, `engine.list.col.locale` (`Locale` / `语言`).

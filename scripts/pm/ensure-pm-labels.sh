@@ -384,7 +384,7 @@ gh label create needs:contract-review -R objectstack-ai/objectstack -c bfdadc -d
 # repo:cloud to match while you are here: under --reconcile that rewrites a LIVE
 # label object's colour, which is a deliberate PM action and not this row's.
 gh label create repo:objectui -R objectstack-ai/objectstack -c fbca04 -d "Seam card: cross-repo ordering with objectui is the substance (pure objectui fixes live in objectui)" 2>/dev/null || true
-gh label create repo:cloud    -R objectstack-ai/objectstack -c c5def5 -d "Seam card: cross-repo ordering with cloud is the substance (pure cloud fixes live in cloud)" 2>/dev/null || true
+gh label create repo:cloud    -R objectstack-ai/objectstack -c c5def5 -d "Card routed whole to the cloud PM: needs cloud code, a producer or a fact (cloud owns it to closure)" 2>/dev/null || true
 gh label create repo:hotcrm   -R objectstack-ai/objectstack -c fbca04 -d "Seam card: cross-repo ordering with hotcrm is the substance (pure hotcrm fixes live in hotcrm)" 2>/dev/null || true
 
 # ⛔ There is no fourth `repo:*` row, and that absence is now DECLARED rather
@@ -471,15 +471,18 @@ gh label create domain:engine   -R objectstack-ai/objectstack -c bfd4f2 -d "Reti
 gh label create domain:services -R objectstack-ai/objectstack -c bfd4f2 -d "Retired 2026-10-22, alias of domain:server (services surface); in-flight cards keep it until landed" 2>/dev/null || true
 gh label create domain:cli      -R objectstack-ai/objectstack -c bfd4f2 -d "Retired 2026-10-22, alias of domain:server (cli surface); in-flight cards keep it until they land" 2>/dev/null || true
 
-# domain:cloud is a PARKING label, not a lane: no seat, never dispatched in this
-# repo. Cloud-service journeys found in objectstack / objectui keep it until the
-# cloud PM migrates them — maintainer ruling 2026-09-18, verbatim: 「云服务旅程
-# 混在 objectstack / objectui 里的 ⇒保留 domain:cloud 标签 等 cloud 项目经理迁移」.
-# The object already exists in objectstack (auto-created, so `--reconcile` is
-# what aligns it) and is absent in objectui; the roster makes both. SKILL.md's
-# domain table carries the matching row (北极星「现在不做」).
-gh label create domain:cloud -R objectstack-ai/objectstack -c bfd4f2 -d "Cloud-service journey parked for the cloud PM to migrate — not dispatched in this repo (云服务旅程,本仓不派)" 2>/dev/null || true
-gh label create domain:cloud -R objectstack-ai/objectui    -c bfd4f2 -d "Cloud-service journey parked for the cloud PM to migrate — not dispatched from objectui (云服务旅程,本仓不派)" 2>/dev/null || true
+# domain:cloud routes a WHOLE card to the cloud PM (the `repo:cloud` seat): any
+# card that needs cloud code, a cloud producer, a cloud fact or carries a cloud
+# half. No objectstack lane claims it; it rides with `repo:cloud`, the label the
+# cloud seat's scope reads. Maintainer ruling 2026-10-27, verbatim: 「一个issue只要
+# 涉及 cloud ，就归 cloud pm 处理」, superseding the 2026-09-18 parking ruling
+# (「云服务旅程混在 objectstack / objectui 里的 ⇒保留 domain:cloud 标签 等 cloud 项目经理
+# 迁移」): parked journeys are the cloud PM's too. The object already exists in
+# objectstack (auto-created, so `--reconcile` is what aligns it) and is absent in
+# objectui; the roster makes both. SKILL.md's domain table carries the matching
+# row, and references/cross-repo-coordination.md the routing rule.
+gh label create domain:cloud -R objectstack-ai/objectstack -c bfd4f2 -d "Touches cloud: the whole card is the cloud PM's (repo:cloud seat); no objectstack lane claims it" 2>/dev/null || true
+gh label create domain:cloud -R objectstack-ai/objectui    -c bfd4f2 -d "Touches cloud: the whole card is the cloud PM's (repo:cloud seat); objectui lanes never claim it" 2>/dev/null || true
 # status:parked is the other half of parking: the backlog sweep's disjunct ③
 # (有 domain:* 无 pm-state) and check-half-states.mjs's H13 read it as the
 # exemption (H13_EXEMPT_LABELS; SKILL.md 排除 `status:parked`), so a card that

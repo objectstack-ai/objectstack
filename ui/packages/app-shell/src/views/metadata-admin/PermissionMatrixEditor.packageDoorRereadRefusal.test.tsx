@@ -141,6 +141,8 @@ function makeClient(
     getDraft: async () => (opts.draft ? { type: 'permission', name: 'sales_perms', item: opts.draft } : null),
     // The package declares `a_account` only — which is what narrows the draft
     // and is therefore what makes `payload` an unusable merge base.
+    // objectstack#26840 — the package door reads its objects through the draft-overlaid door.
+    withPreviewDrafts() { return this; },
     list: async (type: string) => (type === 'object' ? [{ item: { name: 'a_account' } }] : []),
     get: async () => null,
     save: async (

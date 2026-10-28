@@ -498,6 +498,9 @@ describe('check-doc-expression-carriage: the scan surface is check:doc-types’,
    * shrank silently, which is objectui#7115's defect exactly.
    */
   it('reaches every leg of the walk: the guide tree, the app docs trees, the package READMEs, the root pages', async () => {
+    // The root pages are none since objectstack#26080; the README examples they
+    // carried are judged on the guide-tree leg, in the quick-start page.
+    expect([...ROOT_PAGES]).toEqual([]);
     const census = analyze(ROOT, { channels: deriveChannels(ROOT), carriage: await loadCarriage() });
     const documents: string[] = census.documents;
 
@@ -516,6 +519,7 @@ describe('check-doc-expression-carriage: the scan surface is check:doc-types’,
     ).toBeGreaterThan(10);
 
     for (const name of ROOT_PAGES) expect(documents).toContain(name);
+    expect(documents).toContain(`${DOCS_ROOT}/guide/quick-start.md`);
   });
 
   it('names the surface it walked in the summary it prints', () => {
@@ -534,19 +538,20 @@ describe('check-doc-expression-carriage: the scan surface is check:doc-types’,
 
 describe('check-doc-expression-carriage: the census on a fixture tree', () => {
   /** The same known defect, one copy on each leg of the walk. */
+  const FIXTURE_README_DIR = `${PACKAGE_READMES.dir}/demo`;
+  const FIXTURE_README = `${FIXTURE_README_DIR}/${PACKAGE_READMES.name}`;
   const defect = ['```json', '{', '  "type": "badge",', '  "text": "${status}"', '}', '```', ''];
 
   /**
-   * A throwaway tree with a page on EVERY leg of the scan surface: the guide tree,
-   * an `apps/<app>/docs` tree, and a root page. One defective page per leg plus one
-   * clean page, so a leg that stops being walked costs a finding rather than
-   * nothing — objectui#7878.
+   * A throwaway tree with a page on EVERY leg of the scan surface that names a
+   * page: the guide tree, an `apps/<app>/docs` tree, and a package README. One
+   * defective page per leg plus one clean page, so a leg that stops being walked
+   * costs a finding rather than nothing — objectui#7878.
    *
-   * ⚠️ A fixture tree deliberately has no root README of its own beyond the one
-   * written here: `listDocuments` DROPS an absent root page so a throwaway tree
-   * stays scannable, which is the same bargain `check-doc-component-types.scanDocs`
-   * strikes. That is what makes the root-page leg testable at all, and it is also
-   * why the real-tree reach pin above exists.
+   * The third page used to be a root page. `ROOT_PAGES` is empty since
+   * objectstack#26080 moved the root README's examples into the guide tree, so
+   * that leg has no page to write, and the package-README leg (objectui#7896)
+   * takes its slot: the leg the root pages followed in walk order.
    */
   function fixtureTree(): string {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'carriage-docs-'));
@@ -575,7 +580,8 @@ describe('check-doc-expression-carriage: the census on a fixture tree', () => {
     const appDocs = path.join(root, APP_DOCS.dir, 'console', APP_DOCS.subdir);
     fs.mkdirSync(appDocs, { recursive: true });
     fs.writeFileSync(path.join(appDocs, 'guide.md'), ['# App', '', ...defect].join('\n'));
-    fs.writeFileSync(path.join(root, ROOT_PAGES[0]), ['# Root', '', ...defect].join('\n'));
+    fs.mkdirSync(path.join(root, FIXTURE_README_DIR), { recursive: true });
+    fs.writeFileSync(path.join(root, FIXTURE_README), ['# Demo', '', ...defect].join('\n'));
     return root;
   }
 
@@ -587,7 +593,7 @@ describe('check-doc-expression-carriage: the census on a fixture tree', () => {
     expect(census.counters.unparsed).toBe(0);
     expect(census.sites).toHaveLength(3);
     expect(census.sites.map((site: { file: string }) => site.file).sort()).toEqual(
-      [`${APP_DOCS.dir}/console/${APP_DOCS.subdir}/guide.md`, ROOT_PAGES[0], `${DOCS_ROOT}/guide/bad.md`].sort(),
+      [`${APP_DOCS.dir}/console/${APP_DOCS.subdir}/guide.md`, FIXTURE_README, `${DOCS_ROOT}/guide/bad.md`].sort(),
     );
     expect(census.sites.every((site: { type: string; key: string }) => site.type === 'badge' && site.key === 'text')).toBe(
       true,
@@ -610,7 +616,7 @@ describe('check-doc-expression-carriage: the census on a fixture tree', () => {
     expect(analyze(root, args).sites).toHaveLength(3);
 
     fs.rmSync(path.join(root, APP_DOCS.dir), { recursive: true, force: true });
-    fs.rmSync(path.join(root, ROOT_PAGES[0]), { force: true });
+    fs.rmSync(path.join(root, PACKAGE_READMES.dir), { recursive: true, force: true });
 
     const narrowed = analyze(root, args);
     expect(narrowed.counters.files).toBe(2);
@@ -619,13 +625,13 @@ describe('check-doc-expression-carriage: the census on a fixture tree', () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  it('lists the documents it walked, in walk order: guide tree, app docs, root pages', () => {
+  it('lists the documents it walked, in walk order: guide tree, app docs, package READMEs', () => {
     const root = fixtureTree();
     expect(listDocuments(root).map((abs: string) => path.relative(root, abs).split(path.sep).join('/'))).toEqual([
       `${DOCS_ROOT}/guide/bad.md`,
       `${DOCS_ROOT}/guide/clean.md`,
       `${APP_DOCS.dir}/console/${APP_DOCS.subdir}/guide.md`,
-      ROOT_PAGES[0],
+      FIXTURE_README,
     ]);
     fs.rmSync(root, { recursive: true, force: true });
   });
@@ -850,28 +856,15 @@ describe('check-doc-expression-carriage: the real tree, and the posture', () => 
   });
 });
 
-describe('check-doc-expression-carriage: the wiring', () => {
-  // `is actually run by ci.yml` retired with objectstack#25712. The census ran,
-  // report-only, in objectui ci.yml's `docs` job (`Build Docs`), and that file
-  // runs nowhere under the monorepo. The job is row 7 `Build Docs
-  // (@object-ui/site)` of the objectstack#25697 workflow roster, "kept,
-  // follow-up port": no root job runs the census until that port lands, and
-  // the port brings this pin back against its job (`helpers/root-ci.ts`).
-
-  it('is named on the page that documents what CI runs', () => {
-    const page = fs.readFileSync(path.join(ROOT, 'content/docs/guide/ci-cd-pipeline.md'), 'utf8');
-    expect(page).toContain(GATE);
-    // objectui#3653 pins the pairing by command; this asserts the page also says
-    // the posture, because a row that reads like a guardrail when the step blocks
-    // nothing is the objectui#3451 mistake.
-    const row = page.split('\n').find((line) => line.startsWith('|') && line.includes(GATE));
-    expect(row, 'the docs job row must name the gate').toBeDefined();
-    expect(row!.toLowerCase()).toContain('report-only');
-    // objectui#7878: the row named `content/docs/**` while the walk had widened.
-    // A row that understates a gate's reach is the same defect one level up from
-    // objectui#3451 — a page describing a guardrail that is not the one that runs.
-    expect(row!).toContain(DOCS_ROOT);
-    expect(row!).toContain(`${APP_DOCS.dir}/`);
-    for (const name of ROOT_PAGES) expect(row!).toContain(name);
-  });
-});
+// The wiring.
+//
+// `is actually run by ci.yml` retired with objectstack#25712. The census ran,
+// report-only, in objectui ci.yml's `docs` job (`Build Docs`), and that file
+// runs nowhere under the monorepo. The job is row 7 `Build Docs
+// (@object-ui/site)` of the objectstack#25697 workflow roster, "kept,
+// follow-up port": no root job runs the census until that port lands, and
+// the port brings this pin back against its job (`helpers/root-ci.ts`).
+//
+// `is named on the page that documents what CI runs` retired with
+// objectstack#26944, which deleted that page: it described objectui's
+// workflows, and the census runs in none of the root ones yet.

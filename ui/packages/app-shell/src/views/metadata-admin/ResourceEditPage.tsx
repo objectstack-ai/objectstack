@@ -148,6 +148,7 @@ import { useMetadataLocale, t, tFormat, translateMetadataType, translateValidati
 import { JsonSourceEditor } from './JsonSourceEditor.js';
 import { validateMetadataDraft, hasClientValidator, type DraftMode } from './clientValidation.js';
 import {
+  DraftVerdictContext,
   draftEnvelopeDiagnostics,
   editedItemDiagnostics,
   withServerOnlyErrors,
@@ -2657,7 +2658,7 @@ function MetadataResourceEditPageImpl({
     </>
   );
 
-  return (
+  const page = (
     <PageShell
       entry={entry ?? { type, label: type }}
       itemName={createMode ? '(new)' : name}
@@ -3550,6 +3551,9 @@ function MetadataResourceEditPageImpl({
       </AlertDialog>
     </PageShell>
   );
+  // objectstack#26858 — the verdict on the body on screen, for an expression
+  // field to read at its own path (`useServerErrorsAt`).
+  return <DraftVerdictContext.Provider value={serverDiagnostics}>{page}</DraftVerdictContext.Provider>;
 }
 
 /**

@@ -171,10 +171,13 @@ Top-level groups alongside `objects`: `apps` (label, description, navigation),
 an **error** whose message names the `objects.{owner}._actions.{action_name}` key to write
 instead), `picklists` (`label`, `options` by stored value — every field referencing the
 picklist inherits them), `dashboards`, `datasets`, `reports`, `pages`, `flows`, `positions`,
-`permissions` (permission sets, spelled as the stack's `permissions[]`), `metadataForms`,
-`settingsCommon`; `reports`, `positions` and `permissions` hold `label` + `description` by name,
-and a joined report's block headings sit at `reports.{report}.blocks.{block_name}.{label,description}`,
-keyed by the block's required `name`.
+`permissions` (permission sets, spelled as the stack's `permissions[]`), `books` (a doc book's
+spine, by `Book.name`: `books.{book}.label` / `.description`, and `groups.{group_key}.label` by
+each group's stable `key`, never its position — `books.crm_manual.groups.getting_started.label`;
+the pages themselves localize through `doc.translations`, and the inline `translations` map a
+book once carried stays retired), `metadataForms`, `settingsCommon`; `reports`, `positions` and
+`permissions` hold `label` + `description` by name, and a joined report's block headings sit at
+`reports.{report}.blocks.{block_name}.{label,description}`, keyed by the block's required `name`.
 Two keys sit deeper than their group's `label`: a `page:tabs` item at
 `pages.{page}.components.{tabs_id}.items.{value}.label` (by the item's `value`; an item without
 one has no key) and an approval step at `flows.{flow}.approvals.{node_id}.label`.

@@ -26,6 +26,8 @@ const POSITION = { name: 'env_position', label: 'Environment Position' };
 const SET = { name: 'sales_perms', label: 'Sales', objects: {}, fields: {} };
 
 const mockClient = {
+  // objectstack#26840 — the Access matrix reads its objects through the draft-overlaid door.
+  withPreviewDrafts() { return this; },
   list: vi.fn(async () => []),
   listDrafts: vi.fn(async () => []),
   get: vi.fn(async () => null),

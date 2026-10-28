@@ -139,9 +139,12 @@ describe("PermissionAdvancedFacets · delegated admin scope (objectui#9464)", ()
     const user = await mountFacet({ adminScope: { businessUnit: "bu_sales" } });
     await user.click(switchFor("perm.admin.includeSubtree"));
 
+    // The switch draws the spec default for the unset key, so one flip writes
+    // its opposite as an explicit boolean
+    // (`PermissionAdvancedFacets.adminScopeDefault-26706.test.tsx`).
     expect(latest.adminScope).toEqual({
       businessUnit: "bu_sales",
-      includeSubtree: true,
+      includeSubtree: false,
     });
     expect(AdminScopeSchema.safeParse(latest.adminScope).success).toBe(true);
   });
@@ -214,9 +217,11 @@ describe("PermissionAdvancedFacets · the retired delegated-admin keys (objectui
       AdminScopeSchema.safeParse(written).success,
       `the editor wrote ${JSON.stringify(written)}, which the spec refuses`,
     ).toBe(true);
+    // Each flip writes the opposite of the spec default its switch draws for
+    // the unset key.
     expect(written).toEqual({
       businessUnit: "bu_sales",
-      includeSubtree: true,
+      includeSubtree: false,
       manageAssignments: true,
       assignablePermissionSets: ["ps_support"],
     });

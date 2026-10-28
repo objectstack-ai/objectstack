@@ -224,6 +224,10 @@ function makeKernel(opts: {
             registerItem: () => {}, registerObject: () => {}, listItems: () => [],
             getItem: () => undefined, getArtifactItem: () => undefined,
             removeRuntimeShadow: () => false, removeOverlayEntry: () => {}, uninstallPackage: () => {},
+            // [#26921] The package the seeded rows are bound to is installed:
+            // a promotion into it, or a save naming none over its rows, asks
+            // the named-base rule, which refuses a package the registry lacks.
+            getPackage: (id: string) => (id === PKG ? { manifest: { id } } : undefined),
         },
     };
 

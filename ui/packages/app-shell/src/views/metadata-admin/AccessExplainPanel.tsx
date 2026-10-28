@@ -57,6 +57,7 @@ import {
 } from 'lucide-react';
 import { t, tFormat, useMetadataLocale } from './i18n.js';
 import { useMetadataClient } from './useMetadata.js';
+import { readEnvelopeFailureText } from '../../utils/apiErrorEnvelope.js';
 
 /**
  * The explain-report vocabulary is OWNED by `@objectstack/spec/security` and
@@ -458,8 +459,16 @@ export function AccessExplainPanel({ open, onOpenChange, defaultObject, packageI
         return;
       }
       if (!res.ok) {
+        // The door refuses in the ADR-0112 envelope, `{ success: false, error:
+        // { code, message } }`, so `error` is an OBJECT there — handed to
+        // `setError` it rendered as a React child and unmounted the panel. The
+        // shared reader asks the envelope; the two typed rungs below it keep the
+        // flat bodies this panel already read, and only a string reaches state.
         const detail =
-          (data?.message as string) || (data?.error as string) || `HTTP ${res.status} ${res.statusText}`.trim();
+          readEnvelopeFailureText(data) ||
+          (typeof data?.message === 'string' ? data.message : '') ||
+          (typeof data?.error === 'string' ? data.error : '') ||
+          `HTTP ${res.status} ${res.statusText}`.trim();
         setError(detail);
         return;
       }
@@ -468,7 +477,7 @@ export function AccessExplainPanel({ open, onOpenChange, defaultObject, packageI
       void lookUpPeople(decided);
       void lookUpItemLabels(decided);
     } catch (err) {
-      setError((err as Error)?.message ?? String(err));
+      setError(err instanceof Error && err.message ? err.message : String(err));
     } finally {
       setBusy(false);
     }

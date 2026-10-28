@@ -108,8 +108,11 @@ function adapterFor(reports: unknown[], asked: string[]) {
     },
     getClient: () => ({
       meta: {
-        getItems: (type: string) => {
-          asked.push(type);
+        // A package-scoped read is recorded with its scope: the navigation
+        // gates read the app's object scope, as the sidebar does
+        // (objectstack#26892), which is not the object registry.
+        getItems: (type: string, params?: { packageId?: string }) => {
+          asked.push(params?.packageId ? `${type}?packageId=${params.packageId}` : type);
           return Promise.resolve({ type, items: items[type] ?? [] });
         },
         getItem: () => Promise.resolve({ item: null }),
@@ -202,6 +205,8 @@ describe('the app report index (objectui#13020)', () => {
     expect(asked).toContain('report');
     expect(asked).toContain('dataset');
     expect(asked).not.toContain('object');
+    // The sidebar's own read, through its gates: the app's package scope.
+    expect(asked).toContain(`object?packageId=${PKG}`);
   });
 
   it('CONTROL: an app that ships no report shows the empty state', async () => {

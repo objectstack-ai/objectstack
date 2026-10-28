@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 #
-# board-snapshot-r2-upload -- the body of board-snapshot.yml's "Upload the
-# archive to R2" step (#26086), moved out of an inline `run:` block.
+# board-snapshot-r2-upload -- the body of fleet-patrols.yml's `board-snapshot` job's
+# "Upload the archive to R2" step (#26086), moved out of an inline `run:` block.
 #
 #   bash scripts/ci/board-snapshot-r2-upload.sh          # in the step, env from its `env:`
 #   bash scripts/ci/board-snapshot-r2-upload.selftest.sh # offline: stub aws, throwaway archive

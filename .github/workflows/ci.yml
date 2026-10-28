@@ -913,16 +913,29 @@ jobs:
       # hash in one namespace (turbo.json `globalEnv`).
       #
       # ⛔ EXCEPT a shard carrying a package in DTS_READERS, whose tests compile
-      # against BUILT declarations and go red without them (TS7016). Measured
-      # on 830a63a, the whole Test Core list under `OS_SKIP_DTS=1`: red only in
+      # against BUILT declarations and go red without them (TS7016, or ENOENT
+      # on a `dist/*.d.ts`). Measured on 830a63a, the whole Test Core list under
+      # `OS_SKIP_DTS=1`, re-measured for the CLI on 43731031 (#25870): red only in
       #   @objectstack/cli       published-subpath-console/-hook-body.pin (its
       #                          own dist/*.d.ts), scaffold-emission-typechecks,
-      #                          scaffold-test-script-passes (spec's .d.ts)
+      #                          scaffold-test-script-passes,
+      #                          create-in-repo-scaffold-typechecks (spec's .d.ts)
       #   @objectstack/metadata  typescript-serializer-annotation (spec's .d.ts)
-      # A new test that reads a built `.d.ts` reds the same loud way on a
-      # skipping shard: add its package here. Every other package's counts
-      # matched the DTS-on run but one: spec's root-entry-type-nameability
-      # pin skips (by its own design) and runs in lint.yml's built-dist step.
+      # Every other package's counts matched the DTS-on run but one: spec's
+      # root-entry-type-nameability pin skips (by its own design) and runs in
+      # lint.yml's built-dist step.
+      #
+      # ⛔ A SLICED reader keeps declarations on ONE slice, DTS_READER_SLICE
+      # (#25870). The CLI's vitest config pins its reader files into slice 1/n
+      # (DECLARATION_READER_FILES, packages/cli/vitest.config.ts), so its other
+      # slices read no `.d.ts` and skip them like any other shard; the
+      # partitioner charges slice 1/n the closure and puts the whole readers
+      # here on its shard (DECLARATION_READER_SLICES / DECLARATION_READER_PACKAGES,
+      # scripts/partition-test-shards.mjs, whose self-test reads this step back).
+      # A whole reader, or the CLI unsliced, keeps them as before. A new test
+      # that reads a built `.d.ts` reds the same loud way on a skipping shard:
+      # add its package here, or, for the CLI, its file to
+      # DECLARATION_READER_FILES.
       #
       # Local cold closure, 65 packages, 4 cores, `--force`: 5m59s with
       # declarations, 1m24s without. The cost is replay: a skipping shard
@@ -931,10 +944,14 @@ jobs:
       - name: Choose this shard's declaration build
         run: |
           DTS_READERS='@objectstack/cli @objectstack/metadata'
+          DTS_READER_SLICE='1'
           KEEP=""
-          while read -r PKG _; do
+          while read -r PKG SLICE; do
             for R in $DTS_READERS; do
-              [ "$PKG" = "$R" ] && KEEP="$KEEP $PKG"
+              [ "$PKG" = "$R" ] || continue
+              case "$SLICE" in
+                ''|"$DTS_READER_SLICE"/*) KEEP="$KEEP $PKG${SLICE:+ $SLICE}" ;;
+              esac
             done
           done < "$RUNNER_TEMP/shard-packages.txt"
           if [ -n "$KEEP" ]; then
@@ -2980,9 +2997,22 @@ jobs:
             packages/spec/json-schema/
           retention-days: 30
 
+      # Keeps only the entries the build's run summary (`--summarize`, left in
+      # `.turbo/runs/` by the assertion above) names, as Test Core's prune step
+      # does (#25452): the restore step takes the newest seed by prefix and
+      # turbo never evicts its local cache, so a seed saved whole is every seed
+      # before it plus this run. No summary -- the build never finished --
+      # means no save, and the previous seed stays the newest.
+      - name: Prune the Turbo cache to this run's tasks (main only)
+        id: prune-turbo-cache
+        if: always() && github.event_name == 'push'
+        run: |
+          node scripts/ci/prune-turbo-cache.mjs --site 'Build Core' \
+            --cache .turbo/cache --run-summaries .turbo/runs
+
       # Seed the shared Turbo cache from main only (see the restore step above).
       - name: Save Turbo cache (main only)
-        if: always() && github.event_name == 'push'
+        if: always() && github.event_name == 'push' && steps.prune-turbo-cache.outputs.save == 'true'
         uses: actions/cache/save@v6
         with:
           path: .turbo/cache

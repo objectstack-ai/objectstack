@@ -3,8 +3,10 @@
 /**
  * objectui#2600 B4 — field-level bulk + filter. Expanding a wide object used to
  * mean toggling two checkboxes per field, one field at a time. The sub-table
- * now carries a field filter and Read-all / Write-all / Clear shortcuts that
- * act over the VISIBLE (filtered) fields — mirroring the per-object row.
+ * now carries a field filter and Read-only all / Write all / Clear shortcuts
+ * that act over the VISIBLE (filtered) fields — mirroring the per-object row.
+ * What a shortcut writes on a row with no rule, and what Clear returns a row
+ * to, is pinned in `PermissionMatrixEditor.fieldRuleInherited-26597.test.tsx`.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -39,6 +41,8 @@ function makeClient() {
       overlayScope: null,
     }),
     getDraft: async () => null,
+    // objectstack#26840 — the package door reads its objects through the draft-overlaid door.
+    withPreviewDrafts() { return this; },
     list: async (type: string) => (type === 'object' ? [{ item: { name: 'a_account' } }] : []),
     get: async (type: string) =>
       type === 'object' ? { fields: FIELDS.map((name) => ({ name })) } : null,
@@ -85,8 +89,8 @@ describe('PermissionMatrixEditPage — field-level bulk + filter (objectui#2600 
     expect(screen.queryByLabelText('a_account.email readable')).toBeNull();
     expect(screen.getByText('2 / 8')).toBeInTheDocument();
 
-    // Read-all now only revokes write on the visible (filtered) fields.
-    fireEvent.click(screen.getByRole('button', { name: 'Read all' }));
+    // Read-only all now only revokes write on the visible (filtered) fields.
+    fireEvent.click(screen.getByRole('button', { name: 'Read-only all' }));
     expect(screen.getByLabelText('a_account.region editable')).not.toBeChecked();
     expect(screen.getByLabelText('a_account.region readable')).toBeChecked();
 
@@ -95,15 +99,16 @@ describe('PermissionMatrixEditPage — field-level bulk + filter (objectui#2600 
     expect(screen.getByLabelText('a_account.email editable')).toBeChecked();
   });
 
-  it('Clear drops the overrides so fields fall back to the read-only default', async () => {
+  it('Clear drops the rules so the rows draw the object grant again', async () => {
     await renderExpanded();
 
     fireEvent.click(screen.getByRole('button', { name: 'Write all' }));
     expect(screen.getByLabelText('a_account.name editable')).toBeChecked();
 
     fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
-    // Default field posture: readable, not editable.
+    // No rule: the row draws the object row's grant (Read, no Edit), marked inherited.
     expect(screen.getByLabelText('a_account.name readable')).toBeChecked();
     expect(screen.getByLabelText('a_account.name editable')).not.toBeChecked();
+    expect(screen.getByLabelText('a_account.name editable')).toHaveAttribute('data-field-rule', 'inherited');
   });
 });

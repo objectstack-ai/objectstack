@@ -36,6 +36,11 @@
 //
 // The file owns its boot (and its database file): it writes ledger rows, so it
 // may not share a showcase with any other file.
+//
+// The task the Mark Done cases act on is picked as a not-done one in a stable
+// order, and its `done === false` is asserted in `beforeAll`: the seed carries
+// done tasks too, and an unordered first row could be one of them, which
+// acceptance[0]'s "nothing written" check cannot tell from a refusal.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -65,7 +70,6 @@ describe('[#26572] a disabled packaged action is refused at both doors, over HTT
   let dir: string;
   let dbFile: string;
   let taskId: string;
-  let markDoneRowId: unknown;
 
   const boot = (file: string) => bootShowcase({ databaseFile: file, extraPlugins: [new MCPServerPlugin()] });
 
@@ -115,9 +119,13 @@ describe('[#26572] a disabled packaged action is refused at both doors, over HTT
     dbFile = join(dir, 'showcase.db');
     stack = await boot(dbFile);
     admin = await stack.signIn();
-    const list = await call(admin, 'GET', '/data/showcase_task?$top=1');
-    taskId = list.json.records[0].id;
-    expect(taskId).toBeTruthy();
+    const notDone = encodeURIComponent(JSON.stringify({ done: false }));
+    const list = await call(admin, 'GET', `/data/showcase_task?$filter=${notDone}&$orderby=id&$top=1`);
+    expect(list.status, list.text).toBe(200);
+    taskId = list.json.records[0]?.id;
+    expect(taskId, 'setup: the showcase seed has no task with done = false').toBeTruthy();
+    // The precondition acceptance[0] rests on, asserted before any switch flips.
+    expect((await readTask(taskId)).done, `setup: task ${taskId} was picked as not done`).toBe(false);
   }, 240_000);
 
   afterAll(async () => {
@@ -152,9 +160,7 @@ describe('[#26572] a disabled packaged action is refused at both doors, over HTT
       .toEqual({ done: before.done, progress: before.progress, updated_at: before.updated_at });
     expect(after.done).toBe(false);
 
-    const rows = await actionRows('showcase_mark_done');
-    expect(rows).toHaveLength(1);
-    markDoneRowId = rows[0].id;
+    expect(await actionRows('showcase_mark_done')).toHaveLength(1);
   });
 
   it('acceptance[1]: the consult precedes the param contract — 409 disabled, 400 enabled, for the identical request', async () => {
@@ -233,6 +239,12 @@ describe('[#26572] a disabled packaged action is refused at both doors, over HTT
   });
 
   it('acceptance[5] / [2]: after a cold boot the switch holds; re-enabling updates the same row and re-arms dispatch', async () => {
+    // The row acceptance[0]'s switch wrote, read here before the reboot.
+    const rowsBeforeBoot = await actionRows('showcase_mark_done');
+    expect(rowsBeforeBoot, 'acceptance[0] disables showcase_mark_done; this clause re-reads the ledger row it wrote')
+      .toHaveLength(1);
+    const markDoneRowId = rowsBeforeBoot[0].id;
+
     await stack.stop();
     stack = await boot(dbFile);
     admin = await stack.signIn();

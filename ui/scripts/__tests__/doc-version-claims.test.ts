@@ -38,8 +38,8 @@ import { labelPath, skillBundleBase, skillsWalk } from '../skill-bundle-root.mjs
  *
  * The inventory ratchets in both directions: an entry naming a claim that is no longer
  * in the tree also fails, so cleaning a doc forces the list to shrink and the list can
- * never rot into a permanent hole (same stance as `DOCUMENTATION_EXEMPT` in
- * `ci-cd-pipeline-doc.test.ts`).
+ * never rot into a permanent hole (the stance objectui's CI-guide pin test took with
+ * its `DOCUMENTATION_EXEMPT` list).
  *
  * ## The one class this file ASSERTS instead of recording (objectui#3717)
  *
@@ -362,11 +362,11 @@ import { labelPath, skillBundleBase, skillsWalk } from '../skill-bundle-root.mjs
  *
  * Measured across the widening, over the 241 files the three roots resolve to: 37
  * matched literals before, 38 after — ONE new, none lost (control, same sweep: the three
- * `Node 22.x` claims stay matched, and no entry below went stale). The one is in
- * `content/docs/guide/ci-cd-pipeline.md`, and it is inventoried `anchored` below rather
- * than repaired, because the sentence carrying it is TRUE: it cites `node-version: 20`
- * as the value that page's own copied YAML block had fossilised at, and says in the same
- * breath that every workflow declares 22 instead. Re-measured against
+ * `Node 22.x` claims stay matched, and no entry below went stale). The one was on
+ * objectui's CI guide page, and it was inventoried `anchored` rather than repaired,
+ * because the sentence carrying it was TRUE: it cited `node-version: 20` as the value
+ * that page's own copied YAML block had fossilised at, and said in the same breath that
+ * every workflow declares 22 instead. Re-measured against
  * `.github/workflows`, where NO `node-version` declaration reads 20 and every one of them
  * reads 22 — a reading the workflow-version assertion below RE-TAKES on every run, which
  * is why it is stated here without a count. It used to carry one, and a control beside it,
@@ -401,9 +401,10 @@ import { labelPath, skillBundleBase, skillsWalk } from '../skill-bundle-root.mjs
  * Every section above widened what the SCAN can see. This one changes what an entry may
  * REST on, and the entry that forced it sat in the strongest class this file has.
  *
- * `content/docs/guide/ci-cd-pipeline.md :: Node 22.x` was `anchored`, and its whole reason
- * read: "Matches the 14 node-version: 22.x declarations across .github/workflows. Verified
- * true; this page already has its own pin test (ci-cd-pipeline-doc.test.ts)." For an
+ * The CI guide page's `Node 22.x` entry was `anchored`, and its whole reason read:
+ * "Matches the 14 node-version: 22.x declarations across .github/workflows. Verified
+ * true; this page already has its own pin test." (That page, its pin test and both of
+ * its entries are gone since objectstack#26058 and objectstack#26944.) For an
  * `anchored` entry carrying no machine-checked field, that sentence IS the anchor - a
  * reviewer re-runs the command it describes. Both of its halves had gone false, and nothing
  * in this repository was in a position to notice:
@@ -415,7 +416,7 @@ import { labelPath, skillBundleBase, skillsWalk } from '../skill-bundle-root.mjs
  *     spelling that sentence does not admit at all. (Control, same sweep, same directory:
  *     20 `corepack enable` steps across 14 files. A non-zero second reading, so this is
  *     not a grep that found nothing and was read as agreement.)
- *   - The PIN TEST. `ci-cd-pipeline-doc.test.ts` contains no `node-version` and no `22`
+ *   - The PIN TEST. The page's own pin test contained no `node-version` and no `22`
  *     whatsoever (control, same file, same sweep: 28 LINES matching `ci.yml`, as of
  *     objectui#6400 - not an occurrence count, which reads one higher). It pins the
  *     PAGE; it does not pin this LINE. The second half was true of the file it named and
@@ -461,9 +462,9 @@ import { labelPath, skillBundleBase, skillsWalk } from '../skill-bundle-root.mjs
  *
  * ### What it deliberately does NOT cover, and where those went
  *
- *   - `ci-cd-pipeline.md :: node-version: 20`, objectui#6409's entry, sits one line above
- *     and cannot share this field. It CITES a value the workflows do not declare, so its
- *     sentence is true exactly when this comparison would be false. It stays
+ *   - The same page's `node-version: 20`, objectui#6409's entry, sat one line above
+ *     and could not share this field. It CITED a value the workflows do not declare, so its
+ *     sentence was true exactly when this comparison would be false. It stayed
  *     reviewer-checked on purpose - and its `why` already carried no count, the instinct
  *     this card generalised.
  *   - The two `pnpm 10.x` entries, whose reasons COUNTED `corepack enable` steps. Same
@@ -472,7 +473,7 @@ import { labelPath, skillBundleBase, skillsWalk } from '../skill-bundle-root.mjs
  *     this one. Filed as objectui#6447 and closed by the section below, which built that
  *     second derivation. The bullet stays as the record of why one field could not do both
  *     jobs.
- *   - The prose absolute on the page itself: `ci-cd-pipeline.md:1744` says "every workflow
+ *   - The prose absolute on the page itself, which said "every workflow
  *     declares `'22.x'`", which the one `'22'` lane falsifies. That is a claim about
  *     SPELLING on a doc surface, and this assertion is blind to spelling by construction.
  *     Filed as objectui#6448.
@@ -1056,22 +1057,9 @@ const KNOWN_CLAIMS: KnownClaim[] = [
     manifestVersionField: 'packageManager',
     why: "Anchored on the root packageManager field and ASSERTED against it by the manifest-version assertion below, which re-reads that field on every run and demands this page state the tool and the major it names (objectui#6447). That field is what corepack hands every CI job installing this workspace, so the pnpm these packages are built with is the one it declares. Same objectui#6307 rewrite as the Node line above, replacing `**pnpm** 9+` - a floor zero manifests in this workspace declare. The corepack-step count this reason used to quote left it in objectui#6447: it had already drifted, and a count no run re-takes is what that card is about.",
   },
-  {
-    file: 'content/docs/guide/ci-cd-pipeline.md',
-    // Newly VISIBLE to the scan in objectui#6409 (the keyed `name-version:` recogniser),
-    // and invisible for the whole life of this gate before it: the word `version` sits
-    // between the toolchain name and the number, and `SEP` is a character class.
-    claim: 'node-version: 20',
-    kind: 'anchored',
-    why: "Not a version this page teaches - the sentence CITES node-version: 20 as the value this page's own copied YAML block had fossilised at, and says in the same breath that every workflow declares 22 instead. Anchored on .github/workflows and .github/actions, where NO node-version declaration reads 20 and every one of them reads 22, literally or through .nvmrc: the sentence therefore goes false exactly when the workflows move off 22, which is when it should. Deliberately phrased without a declaration COUNT - counts in this ledger's reasons are what objectui#6400 is open about.",
-  },
-  {
-    file: 'content/docs/guide/ci-cd-pipeline.md',
-    claim: 'Node 22.x',
-    kind: 'anchored',
-    workflowVersionKey: 'node-version',
-    why: "The Node this repository's CI runs, anchored on the node-version declarations in .github/workflows and .github/actions (literal, or through node-version-file: .nvmrc since objectstack#26421) and ASSERTED against them by the workflow-version assertion below (objectui#6400) rather than restated here. Both halves of the reason this replaces were false by the time anyone read them: it named a declaration count the tree had since doubled, in a spelling one lane does not use, and it credited this page's own pin test with covering the line - ci-cd-pipeline-doc.test.ts contains no node-version and no 22 at all (control, same file: 28 lines matching ci.yml, as of objectui#6400 - not an occurrence count, which reads one higher). Nothing re-measured either half, which is the whole reason the count moved into a run.",
-  },
+  // The two entries objectui's CI guide page carried (`node-version: 20`,
+  // objectui#6409's, and `Node 22.x`, objectui#6400's) left with the page:
+  // objectstack#26944 deleted it.
   {
     file: 'content/docs/guide/layout.md',
     claim: '@objectstack/spec 17.0.0',
@@ -2366,9 +2354,9 @@ describe('doc version claims - the scan itself', () => {
     //
     // This fixture is the change's PERMANENT witness, and it is needed for the same
     // reason objectui#6307's is one section above. The corpus instance is a single line
-    // of PROSE (`ci-cd-pipeline.md`, citing the value a fossilised YAML block had
-    // drifted to), which any docs PR can reword out of existence without knowing it is
-    // load-bearing; objectui#6308 had already deleted the live YAML instance before this
+    // of PROSE (on objectui's CI guide page, citing the value a fossilised YAML block
+    // had drifted to), which any docs PR could delete without knowing it was
+    // load-bearing — objectstack#26944 did, with the page; objectui#6308 had already deleted the live YAML instance before this
     // card was written. When the prose goes, reverting this recogniser stops being
     // observable on the corpus alone and the blind spot returns unnoticed.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'doc-version-claims-keyed-'));
@@ -2457,7 +2445,7 @@ describe('doc version claims - the scan itself', () => {
     // sibling GitHub-Actions setup keys name runtimes this tree declares nowhere, so a
     // claim about one could not be re-measured against anything here. Measured across
     // the three scan roots at this cut: ZERO of them (control, same sweep: one
-    // `node-version:` line, on `content/docs/guide/ci-cd-pipeline.md`).
+    // `node-version:` line, on objectui's CI guide page, which objectstack#26944 deleted).
     for (const foreign of ['    python-version: 3.12', '    java-version: 21', '    go-version: 1.23']) {
       expect(
         matches(CLAIM_RES, foreign),
@@ -2524,9 +2512,7 @@ describe('doc version claims - the ratchet', () => {
       `KNOWN_CLAIMS names version claims that are no longer in the tree:\n` +
         stale.map((e) => `  - ${keyOf(e)}`).join('\n') +
         `\n\nDelete the entries. The inventory only ratchets downward if a cleaned-up doc ` +
-        `forces its entry out; a list allowed to keep dead rows becomes a permanent hole ` +
-        `(the same reason DOCUMENTATION_EXEMPT in ci-cd-pipeline-doc.test.ts is checked ` +
-        `against the workflow directory).`,
+        `forces its entry out; a list allowed to keep dead rows becomes a permanent hole.`,
     ).toEqual([]);
   });
 
@@ -3040,11 +3026,7 @@ describe('doc version claims - the workflow-version assertion', () => {
         `  - the SPELLING. '22' and '22.x' are one anchor here - see majorOf for why a ` +
         `spelling comparison has no correct branch available to it - nor WHERE a lane ` +
         `states it: a literal and a node-version-file reference to .nvmrc are one anchor ` +
-        `too (objectstack#26421).\n` +
-        `  - the neighbouring content/docs/guide/ci-cd-pipeline.md :: node-version: 20 ` +
-        `entry, which CITES a value the workflows do not declare. Its sentence is true ` +
-        `exactly when this comparison would be false, so it cannot share this field; it ` +
-        `stays reviewer-checked on purpose.`,
+        `too (objectstack#26421).`,
     ).toEqual([]);
 
     // Vacuity floors. Every branch above loops over a list that could be empty, and an
@@ -3054,7 +3036,7 @@ describe('doc version claims - the workflow-version assertion', () => {
       workflowVersionChecks.reduce((n, check) => n + check.stated.length, 0),
       'the workflow-version assertion compared no doc lines at all - the claim resolution ' +
         'collapsed and it is now green over nothing',
-    ).toBeGreaterThanOrEqual(3);
+    ).toBeGreaterThanOrEqual(2); // 3 until objectstack#26944 deleted the CI guide page's entry
 
     for (const check of workflowVersionChecks) {
       expect(
@@ -3334,7 +3316,7 @@ describe('doc version claims - the workflow-version assertion', () => {
       'no inventory entry carries workflowVersionKey - the workflow-anchored entries lost ' +
         'the field and are back to being recorded rather than checked, which is the state ' +
         'objectui#6400 found them in',
-    ).toBeGreaterThanOrEqual(3);
+    ).toBeGreaterThanOrEqual(2); // 3 until objectstack#26944 deleted the CI guide page's entry
   });
 });
 

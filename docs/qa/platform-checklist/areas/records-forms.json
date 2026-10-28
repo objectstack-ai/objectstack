@@ -187,7 +187,7 @@
       "title": "Create → read → update → delete a record through the console UI",
       "since": "v15",
       "status": "active",
-      "revision": 14,
+      "revision": 15,
       "priority": "P0",
       "surface": "browser",
       "personas": [
@@ -208,11 +208,11 @@
         ]
       },
       "steps": [
-        "sign in as seeded admin; open Accounts via its nav entry (/_console/apps/com.example.showcase/showcase_account)",
-        "click New; fill name with a distinctive value (os-qa-<runid>), industry, status=active; leave website empty; Save",
+        "sign in as seeded admin; open Accounts via its nav entry (/_console/apps/com.example.showcase/showcase_account) — it sits in the Data Model group, which may render collapsed: expand it first",
+        "click New; fill name with a distinctive value (os-qa-<runid>), industry, status=active; leave website empty; submit — the create form's button reads 'Create', not 'Save' (ui/packages/plugin-form: form.create / form.update)",
         "capture the create request/response (expect POST /api/v1/data/showcase_account). The payload also carries the select defaults of fields the step leaves untouched — sales_region:'amer' (its AMER option is default:true, examples/app-showcase/src/data/objects/account.object.ts) — so expect that key in the body you diff (QA run #24556)",
         "re-read server-side: GET /api/v1/data/showcase_account?$filter=[[\"name\",\"=\",\"os-qa-<runid>\"]] — field-by-field vs the submitted payload",
-        "open the record detail; edit exactly one field (annual_revenue); Save; capture the PATCH /api/v1/data/showcase_account/<id>; re-read the full row via GET /api/v1/data/showcase_account/<id>",
+        "open the record detail; edit exactly one field (annual_revenue); submit it (an edit form's button reads 'Update'); capture the PATCH /api/v1/data/showcase_account/<id>; re-read the full row via GET /api/v1/data/showcase_account/<id>",
         "open the record's History tab (screenshot first, then read entries)",
         "clone the record: POST /api/v1/data/showcase_account/<id>/clone (optionally with {overrides:{name:'os-qa-<runid>-clone'}}); capture the 201 result (new id ≠ source, sourceId, record); re-read the clone via GET /api/v1/data/showcase_account/<new id>",
         "RLS probe on clone: as a persona WITHOUT read on the source row (a permission-zoo persona, or a non-owner under owner-RLS), POST the same clone route and capture the refusal — expect 404 RECORD_NOT_FOUND, never a silent duplicate (record blocked(fixture) if no non-reading persona is bound on this boot)",
@@ -247,7 +247,7 @@
         {
           "clause": "record History reflects the create and the update with display values (option labels, localized dates, real actor), not raw audit payloads or phantom value→null rows",
           "oracle": "dom",
-          "verify": "after a screenshot confirms the History tab rendered, read its entries — same contract objectui e2e/live/record-history-display.spec.ts pins on showcase_account, the showcase's enable.trackHistory object (its option labels, the localized Customer Since date and the resolved owner; objectui blob 7ebc45106cff at the console pin cf153eb2e535)",
+          "verify": "after a screenshot confirms the History tab rendered, read its entries — same contract ui/e2e/live/record-history-display.spec.ts pins on showcase_account, the showcase's enable.trackHistory object (its option labels, the localized Customer Since date and the resolved owner); it is a live Playwright spec in this checkout, run from ui/ with `pnpm test:e2e:live` against a backend on port 3000 and the console dev server on port 5180",
           "evidence": "screenshot + entries"
         },
         {
@@ -285,7 +285,7 @@
         "packages/runtime/src/route-ledger.ts (/data CRUD routes)",
         "packages/rest/src/data-action-routes.ts#registerDataActionEndpoints (POST /data/:object/:id/clone → registerDataActionEndpoints) + packages/metadata-protocol/src/protocol.ts#cloneData (cloneData: enable.clone gate, findOne-in-caller-context, CLONE_STRIP_FIELDS; the static-readonly strip is engine.insert's since #14147)",
         "packages/rest/src/rest-route-ledger.ts (POST /api/v1/data/:object/:id/clone, client data.clone)",
-        "objectui: e2e/live/record-history-display.spec.ts",
+        "ui/e2e/live/record-history-display.spec.ts",
         "cross-ref: the inline-edit atomic two-surface behavior (ONE Save bar / ONE PATCH carrying exactly the changed keys + ifMatch) is folded into records-forms.concurrent-edit-conflict, not here"
       ],
       "history": [
@@ -367,6 +367,12 @@
           "date": "2026-10-26",
           "change": "acceptance[6].verify: the ownership half's 'source-derived and not yet run' note is replaced by its replay. P0 run #25812 (6679644a, pin b41ed7f68956) drove it: the contributor-bound member's clone of a seeded showcase_field_zoo row answered 201 with owner_id and created_by the member (the source owned by the admin), and f_autonumber re-derived 0002 → 0003. Wave anchor #25807. No clause changed",
           "ref": "#25846"
+        },
+        {
+          "revision": 15,
+          "date": "2026-10-28",
+          "change": "steps[0], steps[1], steps[4], acceptance[4].verify and one source line corrected. Checklist-accuracy findings of the 18.2.0 wave 2 (QA run #26481, priority:P0, at 756220c4; wave anchor #25807, slice B): the Accounts entry sits in the Data Model group, which the runner found collapsed; the form buttons read 'Create' and 'Update', not 'Save'; and acceptance[4].verify still cited the retired console pin cf153eb2e535 and an objectui blob, while the spec lives in this checkout at ui/e2e/live/record-history-display.spec.ts. Re-read at base fd246c22: examples/app-showcase/src/ui/apps/index.ts (grp_data 'Data Model', nav_accounts), ui/packages/plugin-form/src/ModalForm.tsx and DrawerForm.tsx (form.create 'Create', form.update 'Update'), ui/playwright.live.config.ts. No clause's assertion changed",
+          "ref": "#25807"
         }
       ]
     },
@@ -867,7 +873,7 @@
       "title": "Form-view gallery: every FormViewSchema layout type renders and submits",
       "since": "v15",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -899,7 +905,7 @@
         "overlay the default form with the split variant; open the page form; verify primary/secondary panes render their assigned sections side-by-side",
         "drawer and modal: open task-desk.page.ts; click a task row — ObjectForm formType=\"drawer\" opens as a side panel over the list with the task's fields; click New task — ObjectForm formType=\"modal\" opens as a dialog. An overlay of the default form with type drawer/modal renders the page form as simple, which is the designed fallback, not a fail",
         "on the simple form, set priority to 'urgent' and verify the notes field appears (FormField.visibleWhen CEL); set it back and verify notes hides",
-        "save an edit through each rendered variant; capture each save request; re-read via GET /api/v1/data/showcase_task/<id>",
+        "save an edit through each rendered variant; capture each save request; re-read via GET /api/v1/data/showcase_task/<id>. Reach a page form's /new or /edit route by in-app navigation (the row's Edit, or New), not by a fresh page load: the page form's save goes back one history entry (RecordFormPage navigate(-1)), so on a deep-linked load it leaves the document and the toast goes with it — a driver artifact, not a lost save",
         "revert the default-form overlay so the stock simple form is back — DELETE /api/v1/meta/view/showcase_task.form, the reset door, which restores the artifact default byte-identically (QA run #24572) — and confirm it with a re-read of the view"
       ],
       "acceptance": [
@@ -973,6 +979,12 @@
           "date": "2026-10-19",
           "change": "fixtures.requires[0] and steps[7] corrected from QA run #24572 (18.0 sweep, 5b14b7f3), re-read at objectstack f89d29e382: the revert step named no door, and the run measured DELETE /api/v1/meta/view/NAME (the reset, which restores the artifact default byte-identically); and each named variant is served as its own view item, so its sections can be read before overlaying them. No clause changed. Wave anchor #24579 §3",
           "ref": "#24671"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-28",
+          "change": "steps[6] says how to reach the page form. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26456, manual browser set, at 756220c4; wave anchor #25807, slice B): deep-linking /new or /edit with a page load made save's navigate(-1) leave the document and drop the toast. Re-read at base fd246c22: ui/packages/app-shell/src/views/RecordFormPage.tsx (navigate(-1) after save). No clause changed",
+          "ref": "#25807"
         }
       ]
     },
@@ -3686,7 +3698,7 @@
       "title": "Record edit undo: toast Undo / Ctrl+Z restores the prior value through the API and logs a revert; undo after a concurrent change must not silently clobber",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -3696,11 +3708,11 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "a writable record and an action that declares `undoable: true` with operation 'update' (a patch of one field) — at objectui 1fb1ced36243 the ONLY path that pushes an Undo op: useConsoleActionRuntime and RecordDetailView attach the toast Undo for `undoable` actions, while inline grid and form edits push none. objectui react/src/hooks/useGlobalUndo.ts + core globalUndoManager hold the stack. ⚠ The stock showcase declares NO undoable action (examples/app-showcase has zero `undoable` keys), and a runtime-authored action is not joined into the served object's actions[] (records-forms.action-location-matrix knownGaps), so the action must ship PACKAGED in the showcase — see `blocked`"
+          "a writable record and an action that declares `undoable: true` with operation 'update' (a patch of one field) — at objectui 1fb1ced36243, and still on main f2fdac5d under ui/, the ONLY path that pushes an Undo op: useConsoleActionRuntime and RecordDetailView attach the toast Undo for `undoable` actions, while inline grid and form edits push none. objectui react/src/hooks/useGlobalUndo.ts + core globalUndoManager hold the stack. ⚠ The stock showcase declares NO undoable action (examples/app-showcase has zero `undoable` keys), and a runtime-authored action is not joined into the served object's actions[] (records-forms.action-location-matrix knownGaps), so the action must ship PACKAGED in the showcase — see `blocked`"
         ],
         "knownGaps": [
           "AUTOMATION LIVES IN THE objectui TREE, WHICH IS ui/ IN THIS CHECKOUT — `automated.ref` names objectui specs exclusively, by objectui-relative paths that resolve under ui/ (a unit suite at ui/packages/…, a Playwright spec at ui/e2e/…). They run from that tree: a unit suite with cwd ui/ (pnpm exec vitest run FILE), a live spec only against a booted stack serving a console built by pnpm console:build. Drive the item by hand in the browser and score it as a manual run, OR run the pin from ui/ and cite its output naming the framework commit it ran at. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact, whose 'none of those specs exist here' predates the ui/ import.",
-          "BLOCKED(fixture) on stock, all four clauses (QA run #23163, objectstack 36b2889c, objectui 1fb1ced36243). Inline edits push no Undo op at this pin — only actions declaring `undoable` do — and the showcase declares none, while a runtime-authored undoable action is not served. The item becomes runnable when examples/app-showcase ships a packaged undoable update action on a writable object (operation 'update' with a patch, so the Undo captures the prior value of every written field — ActionSchema.undoable in packages/spec/src/ui/action.zod.ts). Lift `blocked` in the revision that names that fixture. ⛔ Do not score an inline edit's missing Undo as this item's FAIL: the console never offers one by design"
+          "BLOCKED(fixture) on stock, all four clauses (QA run #23163, objectstack 36b2889c, objectui 1fb1ced36243). Inline edits push no Undo op at this pin — only actions declaring `undoable` do — and the showcase declares none, while a runtime-authored undoable action is not served. The item becomes runnable when examples/app-showcase ships a packaged undoable update action on a writable object (operation 'update' with a patch, so the Undo captures the prior value of every written field — ActionSchema.undoable in packages/spec/src/ui/action.zod.ts). Lift `blocked` in the revision that names that fixture. ⛔ Do not score an inline edit's missing Undo as this item's FAIL: the console never offers one by design. Re-checked at main f2fdac5d (wave anchor #25807, slice C): the premise holds — examples/ carries zero `undoable` keys and no packaged action in packages/ declares `undoable: true`, and inline edits still push no Undo op (ui/packages/core/src/actions/ActionRunner.ts pushes only an action result's undo onto globalUndoManager). Since the spec's semantic migration ui-action-undoable-unfulfillable-refused (packages/spec/src/migrations/entries/semantic/18.ui-action-undoable-unfulfillable-refused.ts), `undoable: true` parses only on the two shapes some runtime fulfils — operation 'update' with a patch (the framework runtime snapshots the prior value, packages/runtime/src/action-execution.ts#DeclarativeUpdateUndo) or type 'api' (the console builds the undo envelope) — so the lifting fixture may be either"
         ]
       },
       "steps": [
@@ -3779,6 +3791,12 @@
           "date": "2026-10-26",
           "change": "automated.ref says UndoManager.test.ts scores no clause: it tests only the in-memory undo/redo stack, and no clause of this item is a stack-semantics clause (Tier 1 run #25815 (6679644a, pin b41ed7f68956)). fixtures.knownGaps[0], the objectui-pinned-automation note, said the objectui specs live in a separate repo and none exist here; they are under ui/ in this checkout since the import, so it says where they resolve and how they run (devx seat 2's direction, carried for #26035). Re-read on main cc378e93. No clause changed",
           "ref": "#25846"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-28",
+          "change": "BLOCKED premise re-checked and kept (lead from slice B's report 6457925443). At base f2fdac5d, examples/ declares zero `undoable` keys and no packaged action in packages/ declares undoable: true, so the showcase still ships no undoable action; inline edits still push no Undo op (ActionRunner pushes only an action result's undo). fixtures.requires[0] says the reading is current on main, and knownGaps[1] records the re-check and the two undoable shapes the spec now accepts (operation 'update' with a patch, or type 'api'), either of which can be the lifting fixture. `blocked` unchanged. Wave anchor #25807, slice C. No clause changed",
+          "ref": "#25807"
         }
       ]
     },
@@ -4136,7 +4154,7 @@
       "title": "Per-type CONSTRAINT enforcement on the write path (not just widget render): length/range/option/reference/computed limits, and where the platform deliberately does NOT enforce",
       "since": "v15",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -4145,11 +4163,11 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "showcase_field_zoo (examples/app-showcase/src/data/objects/field-zoo.object.ts): name text maxLength 200; f_number min 0 max 1000; f_currency scale 2 currencyConfig{precision 2} min 0; f_percent min 0 max 100; f_select {low,medium,high}; f_multiselect {red,green,blue}; f_lookup→showcase_account; f_master_detail→showcase_project; f_tree→showcase_field_zoo (self-reference); f_autonumber (default counter, NO autonumberFormat); f_formula = f_number*f_percent/100",
+          "showcase_field_zoo (examples/app-showcase/src/data/objects/field-zoo.object.ts): name text maxLength 200; f_number min 0 max 1000; f_currency min 0 currencyConfig{currencyMode fixed, defaultCurrency USD}, no scale and no precision (`scale` is retired from currency); f_percent min 0 max 100; f_select {low,medium,high}; f_multiselect {red,green,blue}; f_lookup→showcase_account; f_master_detail→showcase_project; f_tree→showcase_field_zoo (self-reference); f_autonumber (default counter, NO autonumberFormat); f_formula = f_number*f_percent/100",
           "showcase_invoice (invoice.object.ts): status select {draft,sent,paid,void} required; account lookup with lookupFilters status!=churned; total summary(sum showcase_invoice_line.amount) — the summary carrier the zoo lacks"
         ],
         "knownGaps": [
-          "precision/scale is DECLARED but NOT enforced on the write path — record-validator.ts validateOne's number branch checks only min/max/finite, no runtime reads field.scale/precision for rounding (grep clean across objectql/rest/runtime), and the SQL driver stores number/currency/percent as table.float (REAL affinity), not DECIMAL(p,s) (packages/drivers/driver-sql/src/sql-driver.ts#createColumn). A currency value with more decimals than `scale` is stored verbatim, unrounded. Record it as a gap; do NOT tick 'scale enforced'.",
+          "RETIRED gap, superseded: `scale` and `precision` ARE enforced on the write path, by rejection and never by rounding — more decimals than a number / percent / rating / slider field's declared scale answers max_scale (#7501), more digits than a declared precision answers max_precision (#19992), on number / currency / percent / rating / slider (packages/objectql/src/validation/record-validator.ts; unit pins record-validator.test.ts and record-validator.precision.test.ts). `currency` takes no `scale` at all: a field declaring one is refused at save (packages/spec/src/data/field.zod.ts, ruling 5791803339), so a currency value is stored as written. No stock zoo field declares a scale, so the scale probe authors a scratch number field (steps[3]). The column is still table.float (packages/drivers/driver-sql/src/sql-driver.ts#createColumn); the refusal is the validator's, not the column's.",
           "autonumberFormat TOKEN expansion ({0000}/{YYYY}/{MM}/{DD}/{YYYYMMDD}/{field}, per-rendered-prefix scope+reset) has NO showcase fixture — no showcase object declares autonumberFormat (f_autonumber uses the default bare 4-width global counter). Token expansion is pinned instead by packages/spec/src/data/autonumber-format.test.ts + packages/drivers/driver-sql/src/sql-driver-autonumber.test.ts; only server-assignment + client-value-ignored is driveable on the zoo.",
           "the #4441 reference gate is EXISTENCE-only and deliberately unscoped (engine.ts assertReferencesResolve) — an id that exists but lies outside the field's lookupFilters/dependsOn scope is accepted; scope enforcement is client-only (drilled in records-forms.cascading-multilevel-and-clear).",
           "summary is a runtime-MAINTAINED cache, not a write-rejected readonly field — a caller-supplied initial total is a SUPPORTED import path and is kept, then self-heals to the child aggregate on the next child write (rule-validator.ts RUNTIME_OWNED_FIELD_TYPES note, #6014). Only `formula` is strictly read-only-on-write; do NOT assert 'summary rejects direct writes'."
@@ -4183,7 +4201,7 @@
         "boot the showcase on its own port and DB; sign in as the seeded admin; capture an API token for direct /api/v1/data/* POST/PATCH/GET",
         "STRING length: POST /api/v1/data/showcase_field_zoo with name = a 201-char string (maxLength 200) and capture the refusal; then POST a 200-char name and capture success — confirm the long value was NOT silently truncated-and-stored",
         "NUMBER range: POST f_number = -1, then = 1001, then a non-number ('abc'); capture each refusal; POST f_number = 500 and re-read verbatim",
-        "SCALE (gap probe): POST f_currency = 1234.567 (declared scale 2); GET the row and record whether the stored value is rounded (expected: stored 1234.567 verbatim — NOT enforced)",
+        "SCALE: in a writable package (the metadata-authoring-roundtrip fixture), author a scratch object with a number field declaring scale 2; POST 1234.567 → 400 with a max_scale field error and no row, POST 1234.56 → 201 read back verbatim. Then try to save a currency field declaring scale 2 → refused at save (422). Control: POST f_currency = 1234.567 on the zoo → 201 and read back 1234.567, because currency carries no scale",
         "SELECT server boundary: POST f_select = 'not-a-value' AND (second carrier) POST showcase_invoice status = 'archived'; capture both invalid_option refusals with their options[] echo; confirm neither row count grew",
         "MULTISELECT shape: POST f_multiselect = 'red' (a scalar) and re-read as ['red'] (coerced to array); POST f_multiselect = {x:1} (a non-array object) → capture invalid_type; POST f_multiselect = ['red','purple'] → capture the per-element invalid_option naming 'purple'; POST ['red','blue'] → re-read as a set",
         "REFERENCE: POST f_lookup = a fabricated account id → capture reference_not_found; POST f_lookup = a real seeded account id → re-read verbatim (note: an EXISTING but out-of-scope id is accepted — see cascading-multilevel-and-clear)",
@@ -4205,9 +4223,9 @@
           "evidence": "the three refusals + the in-range re-read"
         },
         {
-          "clause": "KNOWN GAP recorded, not ticked: `scale`/`precision` are NOT enforced on write — a currency value with more decimals than the declared scale is stored VERBATIM (float column, validator checks only min/max/finite). The run records the observed unrounded value as a gap and must NOT report 'scale enforced'",
+          "clause": "`scale` is enforced by REJECTION, never by rounding: a number value with more decimals than the field's declared scale is refused 400 (max_scale) and nothing is stored, while a conforming value is stored verbatim; `currency` declares no scale — a currency field carrying one is refused at save — so a currency value is stored as written, which is the contract and not a gap",
           "oracle": "api",
-          "verify": "POST f_currency 1234.567 (scale 2) succeeds and GET returns 1234.567 unrounded — corroborated by record-validator.ts (no scale rounding) and sql-driver.ts createColumn (table.float, not DECIMAL). A run that shows rounding-to-2 would be a NEW enforcement to file, not a pass here",
+          "verify": "the steps[3] probe: the scratch number field's 1234.567 → 400 max_scale with no row, 1234.56 → 201 verbatim; the currency-with-scale save refused; the zoo's f_currency 1234.567 → 201 read back unrounded. Corroborated by record-validator.ts (max_scale / max_precision by rejection) and field.zod.ts (the currency scale refusal). A rounded value, on either field, is a FAIL",
           "evidence": "the write response + the unrounded re-read"
         },
         {
@@ -4245,7 +4263,7 @@
         "a 201-char value silently TRUNCATED to 200 and stored with 200/201 is a FAIL — the contract is reject-not-truncate (max_length), and a truncating write corrupts the value with no signal",
         "an out-of-set select/status value accepted with 200 is a FAIL — the record-validator, not the picker, is the boundary",
         "a client-supplied f_autonumber persisted verbatim is a FAIL — a forged business identifier bypassing the sequence (#5503)",
-        "a currency value rounded to `scale` and reported as 'scale enforced' is a FALSE PASS — the platform does not round on write; the honest verdict is the recorded gap",
+        "a value ROUNDED to its field's scale and reported as 'scale enforced' is a FAIL — the platform refuses (max_scale), it never rounds; and a currency value stored unrounded is not a scale gap, because currency declares no scale",
         "a dangling lookup id accepted with 200 is a FAIL (#4441)"
       ],
       "traps": [
@@ -4258,7 +4276,7 @@
         "ref": "packages/qa/dogfood/test/field-zoo-roundtrip.dogfood.test.ts — accepted vectors only, over HTTP: it writes one in-range value per field and re-reads it, so none of the refusal codes acceptance[0]–[4] score (max_length, min_value, max_value, invalid_number, invalid_option, invalid_type) is pinned at any layer by this ref. Its vectors live in field-zoo.matrix.ts beside it, a data module and not a test file; field-zoo-value-shape.test.ts parses those write vectors under valueSchemaFor. packages/objectql/src/engine-lookup-referential-integrity.test.ts (reference_not_found, #4441) and packages/objectql/src/engine-autonumber-runtime-owned.test.ts (the autonumber strip, #5503) drive ObjectQL in-process, not the /data door acceptance[5] and [6] name: engine-layer evidence beside those clauses, never their pass (RUNNER rule 6)"
       },
       "source": [
-        "packages/objectql/src/validation/record-validator.ts#validateOne (validateOne: max_length/min_length, min_value/max_value/invalid_number, invalid_option for select+multiselect, normalizeMultiValueFields; NO scale/precision rounding)",
+        "packages/objectql/src/validation/record-validator.ts#validateOne (validateOne: max_length/min_length, min_value/max_value/invalid_number, invalid_option for select+multiselect, normalizeMultiValueFields; max_scale / max_precision by rejection, never rounding)",
         "packages/spec/src/api/errors.zod.ts#FieldErrorCode (FieldErrorCode catalog — required, max_length, min_value/max_value, invalid_option, reference_not_found, invalid_type … ADR-0114)",
         "packages/spec/src/data/field.zod.ts#maxLength (per-type constraints: maxLength/minLength, precision/scale/min/max, options value-vs-label, lookupFilters/dependsOn, autonumberFormat tokens, formula expression, summaryOperations)",
         "packages/drivers/driver-sql/src/sql-driver.ts#createColumn (createColumn: number/currency/percent → table.float, NOT DECIMAL; datetime → DATETIME(3)/timestamptz)",
@@ -4291,6 +4309,12 @@
           "date": "2026-10-26",
           "change": "From Tier 1 run #25815 (6679644a, pin b41ed7f68956), re-read on main cc378e93. (1) automated.ref claimed 'round-trip & masking' coverage that asserts accepted vectors only; it now says no refusal code of acceptance[0]–[4] is pinned by this ref at any layer. (2) It names field-zoo.matrix.ts as the data module it is, not a pin. (3) The engine pins for acceptance[5] and [6] drive ObjectQL in-process, not the /data door the api oracle names; the ref and both verifies now call them engine-layer evidence. No clause changed",
           "ref": "#25846"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-28",
+          "change": "acceptance[2], negative[3], steps[3], fixtures.requires[0], knownGaps[0] and one source line follow the enforced scale contract. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26450, Tier 1 half B, at 756220c4; wave anchor #25807, slice B): the item recorded scale/precision as declared-but-unenforced on a currency field declared scale 2, but the served f_currency declares no scale, a currency field declaring scale is refused at save (the run's PUT of a scale-2 currency field answered 422), and number scale is enforced on write. Re-read at base fd246c22: packages/objectql/src/validation/record-validator.ts (scale → max_scale on number/percent/rating/slider, NOT currency; precision → max_precision, rejection never rounding), packages/spec/src/data/field.zod.ts (the currency scale refusal, ruling 5791803339), examples/app-showcase/src/data/objects/field-zoo.object.ts (f_currency: min 0, currencyConfig only). acceptance[2] changed meaning with the product (from a recorded gap to an enforced refusal), so a verdict for revision 4 does not carry to it",
+          "ref": "#25807"
         }
       ]
     },
@@ -4575,7 +4599,7 @@
       "title": "fieldGroups[].visibleWhen section predicate: both spellings accepted, the parse normalizes to the envelope, retired visibleOn refused with the located prescription, derivation carries it verbatim — the console gates the section on the form AND the detail page (objectui#11630 fixed)",
       "since": "v17",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -4621,9 +4645,9 @@
           "evidence": "test run output"
         },
         {
-          "clause": "the console renders the derived section GATED — the whole 'Pro details' section, header included, absent while kind=basic and appearing LIVE when kind flips to pro, on form and detail alike. At objectui 1fb1ced36243 both halves hold: plugin-form fieldGroups.ts copies visibleWhen onto the derived form section, and the detail page references the group (`{ group }`) so record:details evaluates its visibleWhen per record (objectui#11630, fixed). A section rendered ungated on EITHER page is now a FAIL — a regression, not the known defect. Read the adapters at the running build's revision, or observe the gating itself, before scoring either half",
+          "clause": "the console renders the derived section GATED — the whole 'Pro details' section, header included, absent while kind=basic and appearing when kind flips to pro, on form and detail alike — live on the form as the select changes, and on the detail page once the flip is saved (record:details evaluates the record it renders, so an unsaved inline flip there does not re-gate). At objectui 1fb1ced36243 both halves hold: plugin-form fieldGroups.ts copies visibleWhen onto the derived form section, and the detail page references the group (`{ group }`) so record:details evaluates its visibleWhen per record (objectui#11630, fixed). A section rendered ungated on EITHER page is now a FAIL — a regression, not the known defect. Read the adapters at the running build's revision, or observe the gating itself, before scoring either half",
           "oracle": "dom",
-          "verify": "screenshots of both kind states on form and detail, after settle; plus the console revision consulted (stale-console-bundle discipline) — on both pages the section gates live. ui/packages/plugin-detail/src/renderers/__tests__/record-details.groupVisibleWhen-11630.test.tsx pins the detail half ('record:details evaluates a group's visibleWhen exactly as the form does'); run it with cwd ui/ in this checkout (pnpm exec vitest run packages/plugin-detail/src/renderers/__tests__/record-details.groupVisibleWhen-11630.test.tsx) to cite it beside the live read",
+          "verify": "screenshots of both kind states on form and detail, after settle; plus the console revision consulted (stale-console-bundle discipline) — the form gates as the select changes, the detail page after the flipped kind is saved. ui/packages/plugin-detail/src/renderers/__tests__/record-details.groupVisibleWhen-11630.test.tsx pins the detail half ('record:details evaluates a group's visibleWhen exactly as the form does'); run it with cwd ui/ in this checkout (pnpm exec vitest run packages/plugin-detail/src/renderers/__tests__/record-details.groupVisibleWhen-11630.test.tsx) to cite it beside the live read",
           "evidence": "the four screenshots + the console revision/adapter reading the verdict rests on"
         },
         {
@@ -4705,6 +4729,12 @@
           "date": "2026-10-27",
           "change": "acceptance[3].verify: the detail-half unit pin is named by its ui/ path instead of as an objectui pin (#26626, maintainer-directed). No clause changed, no status changed",
           "ref": "#26626"
+        },
+        {
+          "revision": 10,
+          "date": "2026-10-28",
+          "change": "acceptance[3] says when the detail page re-gates. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26456, manual browser set, at 756220c4; wave anchor #25807, slice B): on the detail page the gate applied on save, not on an unsaved inline flip, while the clause said 'LIVE … on form and detail alike'. The run scored the clause PASS; the clause now names the moment each page re-gates. The run's other line (the scratch object needs its namespace prefix) is already closed: steps[1] declares namespace qagroup and names qagroup_group_gate. Re-read at base fd246c22: the clause's detail pin, ui/packages/plugin-detail/src/renderers/__tests__/record-details.groupVisibleWhen-11630.test.tsx, evaluates the group per record",
+          "ref": "#25807"
         }
       ]
     },

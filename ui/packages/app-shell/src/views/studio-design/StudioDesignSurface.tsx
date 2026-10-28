@@ -171,6 +171,8 @@ import {
   CornerDownRight,
   Layers,
   ArrowUpRight,
+  FileQuestion,
+  PackageX,
   type LucideIcon,
 } from 'lucide-react';
 import {
@@ -198,6 +200,7 @@ import {
   listViewColumnIndexOf,
   listViewColumnSelection,
   listViewIsKanban,
+  listViewTargetOf,
   ObjectListViewInspector,
   useObjectListViewDraft,
   type DraftOnlyObjects,
@@ -227,6 +230,13 @@ import { getMetadataResource } from '../metadata-admin/registry.js';
 import { useMetadataClient, useMetadataTypes } from '../metadata-admin/useMetadata.js';
 // objectui#11773 — every draft save of an existing item sends the version its buffer was built on.
 import { readDraftForSave, useDraftSaveGuard } from '../metadata-admin/DraftConflictDialog.js';
+// objectstack#26858 — the served verdict a flow's inspectors read at their own paths.
+import {
+  DraftVerdictContext,
+  draftEnvelopeDiagnostics,
+  editedItemDiagnostics,
+  type ServerDiagnostics,
+} from '../metadata-admin/draftVerdict.js';
 import {
   DESIGNER_SURFACE_PARAM,
   formatSurfaceParam,
@@ -255,7 +265,7 @@ import {
   type StudioRefusal,
 } from './metadataError.js';
 import { readEnvelopeFailureText } from '../../utils/apiErrorEnvelope.js';
-import { loadPackageLessSurfaces, loadPackageSurfaces } from './packageSurfaces.js';
+import { loadPackageLessSurfaces, loadPackageSurfaces, type PackageSurface } from './packageSurfaces.js';
 import {
   STUDIO_ORG_SCOPE_PILLAR,
   isOrgScopeDraft,
@@ -278,7 +288,7 @@ import { ObjectPicker } from '../metadata-admin/inspectors/ObjectPicker.js';
 import { IconPickerWidget } from '../metadata-admin/widgets.js';
 import { useDisplayLocale } from '@object-ui/i18n';
 import { SuggestedBindingsPanel } from '../../components/SuggestedBindingsPanel.js';
-import { AppNavCanvas, navPayloadOf } from '../metadata-admin/previews/AppNavCanvas.js';
+import { AppNavCanvas, inMenuOrder, navPayloadOf } from '../metadata-admin/previews/AppNavCanvas.js';
 import {
   FlowRegistrationContext,
   FlowRuntimeContext,
@@ -351,7 +361,7 @@ import { ObjectApiPanel } from './ObjectApiPanel.js';
 import { ObjectHooksPanel } from './ObjectHooksPanel.js';
 import { ObjectActionsPanel } from './ObjectActionsPanel.js';
 import { getIcon } from '../../utils/getIcon.js';
-import { fetchPackages, prefixObjectName, type PkgEntry } from './packages-io.js';
+import { fetchListedPackageIds, fetchPackages, prefixObjectName, type PkgEntry } from './packages-io.js';
 import {
   DraftChangesPanel,
   type DraftChangeEntry,
@@ -1471,6 +1481,9 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
   // reserved segment as though it named a package.
   const packageId: string | null = isStudioOrgScope(scopeSegment) ? null : scopeSegment;
   const tab = params.tab ?? 'interfaces';
+  // objectstack#26708 — a segment no pillar has is a not-found state, never
+  // the Interfaces pillar it used to fall through to.
+  const pillarKnown = PILLARS.some((p) => p.key === tab);
   const locale = useMetadataLocale();
 
   // Courtesy gate (the framework's ADR-0124 D1 — server enforces, client is
@@ -1488,18 +1501,39 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
   // the id it answered for, so a switch never hands the next package the
   // previous one's name while its own read is in flight.
   const [pkgEntry, setPkgEntry] = React.useState<PkgEntry | null>(null);
+  // objectstack#26708 — the package list answered and lists no package with
+  // this id: the surface renders "package not found" instead of a builder
+  // whose every save the server refuses. Only a positive answer sets it — a
+  // read still in flight or one that failed leaves the builder as it was, the
+  // same fail direction as the writability gate above. A switcher entry is
+  // installed; an id with none is then looked up in every id the list serves
+  // (`fetchListedPackageIds`, the same request), because the switcher's
+  // entries hide the kernel packages that ARE installed.
+  const [pkgMissing, setPkgMissing] = React.useState(false);
   React.useEffect(() => {
     // objectui#11553 — the package-less scope has no package to look up; its
     // writability is decided below, not fetched.
     if (packageId === null) return;
     let cancelled = false;
     setPkgWritable(undefined);
+    setPkgMissing(false);
+    // Asked beside the entries read, so both share its one request. A failure
+    // is reported once, by the entries read below.
+    const listedIds = fetchListedPackageIds();
+    listedIds.catch(() => {});
     fetchPackages()
       .then((list) => {
         if (cancelled) return;
         const entry = list.find((p) => p.id === packageId) ?? null;
         setPkgWritable(entry?.writable ?? null);
         setPkgEntry(entry);
+        if (entry) return;
+        listedIds.then(
+          (ids) => {
+            if (!cancelled) setPkgMissing(!ids.has(packageId));
+          },
+          () => {},
+        );
       })
       .catch((e: unknown) => {
         // Staying ungated is still right — the server gate is the authority
@@ -2255,7 +2289,8 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
             </div>
             <nav className={STUDIO_HEADER_PILLAR_NAV} data-testid="studio-pillar-nav">
               {/* objectui#11553 — the package-less scope offers its one pillar. */}
-              {(packageId === null ? PILLARS.filter((p) => p.key === STUDIO_ORG_SCOPE_PILLAR) : PILLARS).map((p) => (
+              {/* objectstack#26708 — a package that is not there has no pillars. */}
+              {(packageId === null ? PILLARS.filter((p) => p.key === STUDIO_ORG_SCOPE_PILLAR) : pkgMissing ? [] : PILLARS).map((p) => (
                 <Link
                   key={p.key}
                   to={`/studio/${scopeSegment}/${p.key}`}
@@ -2286,6 +2321,9 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
 
             {/* Package-level draft review + one atomic publish (replaces per-item Publish) */}
             <div className="flex min-w-0 items-center justify-end gap-2">
+              {/* objectstack#26708 — nothing to create, review or publish in a
+                  package that is not there. */}
+              {!pkgMissing && (<>
               {/* objectui#5800 — the Open app teleport is retired: the canvas's
                   Run mode IS the way to try the app without leaving the
                   workbench. The published-app state needs no chrome at all.
@@ -2373,6 +2411,7 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
               ) : (
                 publishButton
               )}
+              </>)}
               {/* objectui#12725 — the top bar's right-most icon shows or hides
                   the right slot; `⌘.` switches what it shows. */}
               {slotHost && slotHasContent && (
@@ -2431,6 +2470,23 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
               ) : (
                 <Navigate to={studioOrgScopePath()} replace />
               )
+            ) : pkgMissing ? (
+              <StudioEmptyState
+                icon={PackageX}
+                testId="studio-package-not-found"
+                sentence={tFormat('engine.studio.notFound.package', locale, { id: packageId })}
+                action={
+                  <Button type="button" size="sm" variant="outline" onClick={() => shellNavigate(STUDIO_LANDING_PATH)}>
+                    {t('engine.studio.landingHome', locale)}
+                  </Button>
+                }
+              />
+            ) : !pillarKnown ? (
+              <StudioEmptyState
+                icon={FileQuestion}
+                testId="studio-pillar-not-found"
+                sentence={tFormat('engine.studio.notFound.pillar', locale, { pillar: tab })}
+              />
             ) : tab === 'data' ? (
               <DataPillar
                 key={packageId}
@@ -2741,9 +2797,14 @@ function NavTree({
   // What a label-less row inherits is asked of the console's own resolver, so
   // the rail names it as the console's sidebar does (objectui#11196).
   const targetLabel = useNavTargetLabel();
+  // objectstack#26979 — a level is listed in the order the running menu draws
+  // it, through the canvas's `inMenuOrder` (the menu's `byNavOrder` rule). `i`
+  // stays the entry's position in the authored array, which the canvas numbers
+  // an untitled entry by too.
+  const ordered = inMenuOrder(nodes);
   return (
     <>
-      {nodes.map((node, i) => {
+      {ordered.map(([node, i]) => {
         // objectui#11158 — the spec types a nav item's `label` as `I18nLabel`,
         // so a locale map rendered raw threw ("Objects are not valid as a
         // React child") and took the whole rail down. Every read below goes
@@ -2835,6 +2896,121 @@ function NavTree({
         );
       })}
     </>
+  );
+}
+
+/**
+ * objectstack#26889 — the item types the Interfaces pillar lists under the
+ * navigation tree, in the order of their sections: the three a nav entry can
+ * open by name, in the "+" menu's order, then views, which a package ships by
+ * the dozen and so sit last.
+ */
+const OFF_NAV_TYPES = ['page', 'dashboard', 'report', 'view'] as const;
+type OffNavType = (typeof OFF_NAV_TYPES)[number];
+
+/** An item's identity in {@link navOpenedItems}' set. Not a cache key. */
+const itemKeyOf = (type: string, name: string): string => `${type}:${name}`;
+
+/**
+ * The `type:name` of every item a nav entry in `nodes` opens, at any depth —
+ * what the sections under the tree leave out, so no item is listed twice. The
+ * binding is the tree's own (`resolveSurface`): a page / dashboard / report
+ * entry opens the item it names, and an `object` entry with a `viewName` opens
+ * that view, under the name its view item carries (`<object>.<viewName>`, the
+ * spelling the entry's list-view panel edits, `listViewTargetOf`). A plain
+ * `object` entry opens its object, so the object's views stay listed.
+ */
+function navOpenedItems(nodes: readonly NavNode[], locale: string): Set<string> {
+  const opened = new Set<string>();
+  const walk = (list: readonly NavNode[]) => {
+    for (const node of list) {
+      if (Array.isArray(node.children) && node.children.length) {
+        walk(node.children);
+        continue;
+      }
+      const surface = resolveSurface(node, locale);
+      if (!surface) continue;
+      opened.add(itemKeyOf(surface.type, surface.name));
+      if (surface.type === 'object' && typeof node.viewName === 'string' && node.viewName) {
+        opened.add(itemKeyOf('view', listViewTargetOf(surface.name, node.viewName, {}).viewId));
+      }
+    }
+  };
+  walk(nodes);
+  return opened;
+}
+
+/**
+ * objectstack#26889 — the package's pages, dashboards, reports and views that
+ * no nav entry opens (`navOpenedItems`), one collapsible section per type,
+ * under the navigation tree. A package with no app lists everything it ships
+ * here, under its "no app yet" notice. A row opens its item in the pillar's
+ * canvas and inspector as a tree row does, so a read-only package shows it
+ * read-only. Listing writes nothing: no nav entry is added for a row.
+ */
+function OffNavSections({
+  sections,
+  active,
+  onPick,
+}: {
+  sections: ReadonlyArray<{ type: OffNavType; items: ReadonlyArray<PackageSurface> }>;
+  active: Surface | null;
+  onPick: (s: Surface) => void;
+}): React.ReactElement | null {
+  const locale = useMetadataLocale();
+  const shown = sections.filter((s) => s.items.length > 0);
+  if (shown.length === 0) return null;
+  return (
+    <div data-testid="if-off-nav" className="mt-3 border-t pt-2">
+      <p className="px-2 pb-1 text-[11px] text-muted-foreground">{t('engine.studio.if.offNav.heading', locale)}</p>
+      {shown.map((s) => (
+        <OffNavSection key={s.type} type={s.type} items={s.items} active={active} onPick={onPick} />
+      ))}
+    </div>
+  );
+}
+
+/** One type's section: its rows, open until the author closes it. */
+function OffNavSection({
+  type,
+  items,
+  active,
+  onPick,
+}: {
+  type: OffNavType;
+  items: ReadonlyArray<PackageSurface>;
+  active: Surface | null;
+  onPick: (s: Surface) => void;
+}): React.ReactElement {
+  const locale = useMetadataLocale();
+  const [open, setOpen] = React.useState(true);
+  const Icon = navIcon(type);
+  return (
+    <StudioRailGroup
+      testId={`if-off-nav-${type}`}
+      label={t(`engine.studio.if.offNav.${type}`, locale)}
+      count={items.length}
+      collapsed={!open}
+      onToggle={() => setOpen((v) => !v)}
+    >
+      {items.map((item) => {
+        const surface: Surface = { type: item.type, name: item.name, label: item.label };
+        return (
+          <StudioRailRow
+            key={item.name}
+            onClick={() => onPick(surface)}
+            active={!!active && isSameSurface(active, surface)}
+            indent
+            // The label is what the row says; the machine name rides on the
+            // tooltip with the type, as on a tree row (objectui#11862).
+            title={`${item.type} · ${item.name}`}
+            icon={<Icon className="h-4 w-4 shrink-0" />}
+          >
+            {item.label || item.name}
+          </StudioRailRow>
+        );
+      })}
+    </StudioRailGroup>
   );
 }
 
@@ -4227,6 +4403,35 @@ export function InterfacesPillar({
     };
   }, [client, packageId, publishNonce, draftNonce, metadataRefreshNonce]);
 
+  // objectstack#26889 — the package's pages, dashboards, reports and views,
+  // published ∪ draft, each narrowed by its type's own list filter, as
+  // Setup › Metadata lists them: the sections under the nav tree list the ones
+  // no entry opens (`OffNavSections`). Re-read when the package's metadata
+  // moves, as the app is. Stamped with the package read, so a package switch
+  // never shows another package's items. A type whose read fails lists
+  // nothing, as the object read above leaves its picker empty.
+  const [packageItems, setPackageItems] = React.useState<{
+    packageId: string;
+    byType: Partial<Record<OffNavType, PackageSurface[]>>;
+  } | null>(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const lists = await Promise.all(
+        OFF_NAV_TYPES.map((type) =>
+          loadPackageSurfaces(client, type, packageId, locale, getMetadataResource(type)?.listFilter).catch(
+            () => [] as PackageSurface[],
+          ),
+        ),
+      );
+      if (cancelled) return;
+      setPackageItems({ packageId, byType: Object.fromEntries(OFF_NAV_TYPES.map((type, i) => [type, lists[i]])) });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [client, packageId, locale, publishNonce, draftNonce, metadataRefreshNonce]);
+
   // Resolve THIS package's App → load its navigation tree. The query is scoped
   // to the package (`list('app', { packageId })`) so a design surface only ever
   // shows the current package's app — never another package's. `list()` sees
@@ -5357,7 +5562,9 @@ export function InterfacesPillar({
               : 'rounded-lg border bg-background p-4',
         )}
       >
-        {appStatus === 'missing' && !error ? (
+        {/* objectstack#26889 — a package with no app shows its empty state
+            until a row of the rail's sections opens one of its items. */}
+        {appStatus === 'missing' && !error && !current ? (
           <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
               <LayoutDashboard className="h-6 w-6 text-muted-foreground" />
@@ -5666,6 +5873,27 @@ export function InterfacesPillar({
     </Sheet>
   ) : null;
 
+  // A rail row opens its item: a tree entry or a row of the sections under it.
+  const pickSurface = (s: Surface) => {
+    // objectstack#26705 — another leaf's load replaces the buffer the held
+    // widget lives in; an entry for the open leaf keeps it.
+    if (leafKeyOf(s) !== leafKey && !confirmDropUnsavedWork(leafHeld !== null, locale)) return;
+    setCurrent(s);
+    if (isMobile) setRailOpen(false);
+  };
+  // objectstack#26889 — what the sections under the tree list: the package's
+  // items no entry of the nav buffer opens, an unsent nav edit included. None
+  // while the app is still resolving, so an item its entry will claim is never
+  // shown and then taken away.
+  const navOpened = navOpenedItems(navTree, locale);
+  const offNavSections = OFF_NAV_TYPES.map((type) => ({
+    type,
+    items:
+      appStatus !== 'loading' && packageItems?.packageId === packageId
+        ? (packageItems.byType[type] ?? []).filter((item) => !navOpened.has(itemKeyOf(type, item.name)))
+        : [],
+  }));
+
   return (
     <div className="flex h-full flex-col">
       {leafConflictDialog}
@@ -5879,19 +6107,12 @@ export function InterfacesPillar({
                     : t('engine.studio.if.noNavItems', locale)}
               </p>
             ) : (
-              <NavTree
-                nodes={railTree}
-                active={current}
-                objectIcons={objectIconMap}
-                onPick={(s) => {
-                  // objectstack#26705 — another leaf's load replaces the buffer
-                  // the held widget lives in; an entry for the open leaf keeps it.
-                  if (leafKeyOf(s) !== leafKey && !confirmDropUnsavedWork(leafHeld !== null, locale)) return;
-                  setCurrent(s);
-                  if (isMobile) setRailOpen(false);
-                }}
-              />
+              <NavTree nodes={railTree} active={current} objectIcons={objectIconMap} onPick={pickSurface} />
             )}
+            {/* objectstack#26889 — under the tree (or the no-app notice), the
+                items no entry opens. Not while nav editing: the rail is the
+                nav editor then. */}
+            {!editNav && <OffNavSections sections={offNavSections} active={current} onPick={pickSurface} />}
         </StudioRail>
 
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden" data-testid="if-content-column">
@@ -8023,6 +8244,20 @@ export function AutomationsPillar({
   const [loading, setLoading] = React.useState(false);
   const [saving, setSaving] = React.useState<false | 'draft' | 'publish'>(false);
   const [hasDraft, setHasDraft] = React.useState(false);
+  // objectstack#26858 — the server's verdict on the flow on screen: the pending
+  // draft's (what its publish will refuse), else the layered read's. Taken off
+  // each read, never computed here; the inspectors read it at their paths.
+  const [flowVerdict, setFlowVerdict] = React.useState<ServerDiagnostics | undefined>(undefined);
+  const flowVerdictSeq = React.useRef(0);
+  const rereadFlowVerdict = React.useCallback(
+    (flowName: string) => {
+      const seq = ++flowVerdictSeq.current;
+      void readDraftForSave(client, 'flow', flowName, draftPackageId).then((read) => {
+        if (seq === flowVerdictSeq.current) setFlowVerdict(draftEnvelopeDiagnostics(read.answer));
+      });
+    },
+    [client, draftPackageId],
+  );
   // objectui#11785 — a load failure as it was (`plainRefusal`), a refused save
   // as an author sentence naming the step and its input, raw text behind Details.
   const [error, setError] = React.useState<StudioRefusal | null>(null);
@@ -8267,6 +8502,14 @@ export function AutomationsPillar({
         // Served draft as-is, baseline only without one (objectui#10765).
         setDraft(draftBody ?? baseline);
         setDraftFor(`flow:${current.name}`);
+        flowVerdictSeq.current += 1;
+        setFlowVerdict(
+          editedItemDiagnostics({
+            hasDraft: !!draftBody,
+            draftDiagnostics: draftEnvelopeDiagnostics(draftRead.answer),
+            layered: layRaw,
+          }),
+        );
         // objectui#11773 — the next save is pinned to what the draft read served.
         recordFlowRead('flow', current.name, draftPackageId, draftRead.pin);
         setHasDraft(!!draftBody);
@@ -8306,6 +8549,8 @@ export function AutomationsPillar({
       // objectui#11773 — the author chose the saved version; the load replaces the buffer.
       if (outcome === 'reloaded') return;
       setHasDraft(true);
+      // objectstack#26858 — the stored draft carries its own verdict now.
+      rereadFlowVerdict(current.name);
       // objectui#11204 — clean only if nothing was edited while it was in flight.
       if (sent.unmoved()) setAutoDirty(false);
       onDraftSaved?.({ type: 'flow', name: current.name });
@@ -8315,7 +8560,7 @@ export function AutomationsPillar({
     } finally {
       setSaving(false);
     }
-  }, [saveFlowDraft, current, draft, draftPackageId, onDraftSaved, locale]);
+  }, [saveFlowDraft, current, draft, draftPackageId, onDraftSaved, locale, rereadFlowVerdict]);
   // objectui#11786 — an edit that leaves a step's required input out (a step
   // just added, before it is filled in) is held, not sent: the server would
   // refuse the flow with a 422 naming that input. The step's inspector hints the
@@ -8375,6 +8620,7 @@ export function AutomationsPillar({
       // objectui#11773 — a reload replaced the buffer the flip was taken on.
       if ((await saveFlowDraft('flow', flowName, nextDraft, { mode: 'draft', packageId: draftPackageId, surface: 'studio' })) === 'reloaded') return;
       setHasDraft(true);
+      rereadFlowVerdict(flowName);
       onDraftSaved?.({ type: 'flow', name: flowName });
       toast.success(next ? t('engine.studio.auto.enabledToast', locale) : t('engine.studio.auto.disabledToast', locale));
     } catch (e) {
@@ -8392,7 +8638,7 @@ export function AutomationsPillar({
     } finally {
       setSaving(false);
     }
-  }, [saveFlowDraft, current, draft, draftPackageId, onDraftSaved, locale, readOnly, sendingFlowDraft]);
+  }, [saveFlowDraft, current, draft, draftPackageId, onDraftSaved, locale, readOnly, sendingFlowDraft, rereadFlowVerdict]);
 
   // The rail's "+" — and the empty block's button, which runs this same
   // handler (objectui#12514). objectui#11553 — no "New" in the package-less
@@ -8464,6 +8710,8 @@ export function AutomationsPillar({
   const focusConfigInput = useShowInputFocus(configBodyRef);
   const configBodyEl =
     selection && inspector && current && flowLoaded ? (
+      // objectstack#26858 — the inspectors read the served verdict at their paths.
+      <DraftVerdictContext.Provider value={flowVerdict}>
       <div ref={configBodyRef} className="contents">
         {React.createElement(inspector, {
           type: 'flow',
@@ -8479,6 +8727,7 @@ export function AutomationsPillar({
           locale,
         })}
       </div>
+      </DraftVerdictContext.Provider>
     ) : designersUnregistered ? (
       <div className="flex flex-col items-center gap-2 px-2 py-10 text-center text-xs text-muted-foreground">
         <Ban className="h-5 w-5" />

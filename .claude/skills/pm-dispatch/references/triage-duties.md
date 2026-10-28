@@ -54,10 +54,9 @@
 - 定义项取北极星「做出来的是什么」或仪器卡的车队决定;无则关;`none` 非分诊缺口。
 - 「无则关」= 首触即关 not_planned,带理由与入队三门,⛔ 不定 p3、不 hold;下行同此。
 - 所入车道队列 P0/P1 开着(= 未派发,在飞不算)时,三门皆无的 p2/p3 `tooling` 卡同样关。
-- 路由是分诊的技术判断,⛔ 永不升级哪个仓的问题;父单是协调节点,永不派发。
-- 涉 cloud 任一即算:修复/验收/必经步骤落 cloud 仓或托管面;cloud 卡半张或被其阻;因在 cloud。
-- 不算:只在 cloud 测得而修复与验收全在本仓;仅引 cloud 卡作历史;命中者归 cloud PM。
-- 已 `pm:dispatched` 到本仓车道的原地完工,评论注明涉 cloud 给 cloud PM,⛔ 认领中不迁。
+- 路由是分诊的技术判断,⛔ 不升级哪个仓的问题;涉 cloud 整卡归 cloud 车道;父单永不派发。
+- 算涉 cloud:亦含托管面(objectos-runtime)、`Blocked-by:` cloud 卡、病因在 cloud。
+- 不算涉 cloud:只在 cloud 测得而修复与验收全在本仓;仅引 cloud 卡作历史。
 - 父单已有子结构的:父单队列标签即可,分诊逐个展开路由、补 `Blocked-by:` 排序。
 - 跨层功能点(≥2 层)立父单带 `area:*`+`pm:epic`+清单项级,逐层子单按 `Blocked-by:` 排。
 - 每张留一条英文审计评论(`Triage: lands in …; rationale: …`),可选带 `Size/model suggestion:` 行。

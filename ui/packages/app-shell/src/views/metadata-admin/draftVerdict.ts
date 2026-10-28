@@ -19,6 +19,8 @@
  * the live client parse.
  */
 
+import * as React from 'react';
+
 /** One `_diagnostics` entry, as served (`MetadataValidationResult`). */
 export interface ServerDiagnosticEntry {
   path: string;
@@ -74,4 +76,36 @@ export function withServerOnlyErrors<T extends { path: string; message: string }
   const seen = new Set(clientErrors.map((e) => `${e.path}\n${e.message}`));
   const extra = (serverErrors ?? []).filter((e) => !seen.has(`${e.path}\n${e.message}`));
   return [...clientErrors, ...extra];
+}
+
+/**
+ * objectstack#26858 — the served verdict on the body on screen, for a field
+ * that edits one path of it. The page holding the draft read provides it
+ * (`ResourceEditPage`, the permission-set editor); a field asks for the errors
+ * at its own item-relative path with {@link useServerErrorsAt}. Absent outside
+ * such a page, so a field mounted anywhere else reads none.
+ */
+export const DraftVerdictContext = React.createContext<ServerDiagnostics | undefined>(undefined);
+
+const NO_ERRORS: readonly ServerDiagnosticEntry[] = [];
+
+/**
+ * The served errors located exactly at `path` — the dotted, item-relative
+ * spelling `_diagnostics` uses (`rowLevelSecurity.0.using`, `edges.1.condition`).
+ * Equality, never a prefix: a sibling's error (`edges.10.condition`, the same
+ * policy's `check`) is not this field's. ⛔ Reads the path the server wrote;
+ * no rule is restated here.
+ */
+export function serverErrorsAt(
+  diagnostics: ServerDiagnostics | undefined,
+  path: string | undefined,
+): readonly ServerDiagnosticEntry[] {
+  if (!path || !diagnostics?.errors?.length) return NO_ERRORS;
+  const hits = diagnostics.errors.filter((e) => e.path === path);
+  return hits.length ? hits : NO_ERRORS;
+}
+
+/** {@link serverErrorsAt} against the verdict the enclosing page provides. */
+export function useServerErrorsAt(path: string | undefined): readonly ServerDiagnosticEntry[] {
+  return serverErrorsAt(React.useContext(DraftVerdictContext), path);
 }

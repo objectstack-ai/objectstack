@@ -108,7 +108,7 @@ describe('NavigationOverlay expand button — default label (objectstack#5506)',
   it('reads the zh bundle value under a zh session', () => {
     renderDrawer('zh', { title: 'Acme Corp', onExpand: () => {} });
 
-    expect(screen.getByTitle('以完整页面打开').getAttribute('aria-label')).toBe('以完整页面打开');
+    expect(screen.getByTitle('整页打开').getAttribute('aria-label')).toBe('整页打开');
     expect(screen.queryByTitle('Open as full page')).toBeNull();
   });
 
@@ -131,7 +131,7 @@ describe('NavigationOverlay expand button — default label (objectstack#5506)',
     });
 
     expect(screen.getByTitle('主机自定义标签')).toBeTruthy();
-    expect(screen.queryByTitle('以完整页面打开')).toBeNull();
+    expect(screen.queryByTitle('整页打开')).toBeNull();
   });
 });
 

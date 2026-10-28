@@ -490,6 +490,12 @@ describe('HttpDispatcher extracted domains (PR-4: share-links)', () => {
             shareLinks: { resolveToken },
             objectql: {
                 find,
+                // [#26991] The resolve answer projects the served fields from the
+                // shared object's schema, which the route reads off the same engine.
+                getSchema: vi.fn().mockReturnValue({
+                    name: 'account',
+                    fields: { name: { name: 'name', label: 'Account Name', type: 'text' }, secret: { name: 'secret', type: 'text' } },
+                }),
                 getObjects: vi.fn().mockReturnValue({}),
                 registry: { getObject: vi.fn().mockReturnValue(null), getRegisteredTypes: vi.fn().mockReturnValue([]) },
             },
@@ -500,6 +506,8 @@ describe('HttpDispatcher extracted domains (PR-4: share-links)', () => {
         expect(record?.name).toBe('Acme');
         // redactFields stripped before the record leaves the server.
         expect(record?.secret).toBeUndefined();
+        // ...and from the field projection, which describes only what the record carries.
+        expect(result.response?.body?.data?.fields).toEqual({ name: { label: 'Account Name', type: 'text' } });
     });
 
     // ── #4038: one shape, no duplicate keys ──────────────────────────────

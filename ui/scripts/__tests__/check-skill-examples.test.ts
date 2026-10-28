@@ -668,7 +668,8 @@ describe('wiring — the gate is reachable by name, classified and documented', 
   it('is classified as a blocking context rather than defaulting into silence', () => {
     // `dependabot-merge-gate.test.ts` asserts its three buckets partition the
     // produced check-run set exactly, and `merge-queue-reporting.test.ts`
-    // derives the `merge_group` floor from the required bucket. Asserted here
+    // derived the `merge_group` floor from the required bucket until
+    // objectstack#26944 retired it. Asserted here
     // too, in this gate's own file, so the reason travels with the gate.
     // Since objectui#12214 the check reports as a step of the ONE `Repo Gates`
     // context, which is the name the classification and the floor read.
@@ -676,14 +677,8 @@ describe('wiring — the gate is reachable by name, classified and documented', 
     expect(gate).toContain("'Repo Gates'");
   });
 
-  it('has a section on the CI page, named by heading', () => {
-    // `ci-cd-pipeline-doc.test.ts` enforces this repo-wide; restated here
-    // because objectui#3212's lesson is that the omission happens at the moment
-    // the workflow is added, not later.
-    const doc = fs.readFileSync(path.join(repoRoot, 'content/docs/guide/ci-cd-pipeline.md'), 'utf8');
-    const headings = doc.split('\n').filter((line) => /^#{1,6}\s/.test(line));
-    expect(headings.some((h) => h.includes('repo-gates.yml'))).toBe(true);
-  });
+  // `has a section on the CI page, named by heading` retired with
+  // objectstack#26944, which deleted that page.
 });
 
 describe('the harness is imported, not re-rolled', () => {

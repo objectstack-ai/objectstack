@@ -121,8 +121,11 @@ jobs:
       - name: Setup workspace
         uses: ./.github/actions/setup-workspace
 
+      # Restore here, save at the end of the job: the save sits behind the
+      # prune step below, which a combined `actions/cache` post-step cannot.
       - name: Setup turbo cache
-        uses: actions/cache@v6
+        id: turbo-cache
+        uses: actions/cache/restore@v6
         with:
           path: .turbo/cache
           key: ${{ runner.os }}-turbo-${{ github.job }}-${{ github.sha }}
@@ -132,8 +135,9 @@ jobs:
 
       # The driver's own prerequisite, asserted by the script itself: pack mode
       # fails fast unless packages/cli/dist and the create-objectstack bin exist.
+      # `--summarize` writes the run summary the prune step below keeps.
       - name: Build
-        run: pnpm run build
+        run: pnpm run build --summarize
 
       # SMOKE_MODE defaults to `pack`, so this is the same invocation
       # publish-smoke.yml's pack-smoke job makes. ⛔ Do not add flags or env here
@@ -141,3 +145,28 @@ jobs:
       # refusal this script reports is a refusal a user would get.
       - name: Publish smoke (packed tarballs)
         run: bash scripts/publish-smoke.sh
+
+      # Keeps only the entries the build's run summary (`.turbo/runs/`) names,
+      # as ci.yml Test Core's prune step does (#25452): the restore step takes
+      # the newest seed by prefix and turbo never evicts its local cache, so a
+      # seed saved whole is every seed before it plus this run. The save keeps
+      # the gate the combined `actions/cache` post-step had: a green job whose
+      # exact key missed, and a save failure never fails the job.
+      - name: Prune the Turbo cache to this run's tasks
+        id: prune-turbo-cache
+        if: success() && steps.turbo-cache.outputs.cache-hit != 'true'
+        run: |
+          node scripts/ci/prune-turbo-cache.mjs --site 'Packed-tarball smoke (opt-in)' \
+            --cache .turbo/cache --run-summaries .turbo/runs
+
+      - name: Save turbo cache
+        if: >-
+          success()
+          && steps.turbo-cache.outputs.cache-hit != 'true'
+          && steps.prune-turbo-cache.outputs.save == 'true'
+        uses: actions/cache/save@v6
+        timeout-minutes: 5
+        continue-on-error: true
+        with:
+          path: .turbo/cache
+          key: ${{ runner.os }}-turbo-${{ github.job }}-${{ github.sha }}

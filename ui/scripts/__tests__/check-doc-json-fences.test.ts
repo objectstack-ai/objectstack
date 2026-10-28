@@ -292,21 +292,30 @@ describe('the scan surface — the published READMEs (objectui#12131)', () => {
   const refusedDoc = fence('json', { type: 'button', label: 'Go', action: { type: 'submit' } });
   const acceptedDoc = fence('json', { type: 'button', label: 'Go' });
 
-  it('RED: refuses a node document in a package\'s own README and in the root README, and names each', () => {
-    const r = run({ 'content/docs/a.mdx': acceptedDoc, 'packages/demo/README.md': refusedDoc, 'README.md': refusedDoc });
+  // The root `README.md` was the second README leg until objectstack#26080 moved
+  // its examples into `content/docs/guide/quick-start.md`, on the first leg; a
+  // root README in a fixture is off the surface now, and the refusal below says so.
+  it('RED: refuses a node document in each package\'s own README, and names each — never a root README', () => {
+    const r = run({
+      'content/docs/a.mdx': acceptedDoc,
+      'packages/demo/README.md': refusedDoc,
+      'packages/other/README.md': refusedDoc,
+      'README.md': refusedDoc,
+    });
     expect(reasons(r)).toEqual(['refused', 'refused']);
     // fixture-address: pages in the temp fixture tree this test writes, as the gate under test reports them
-    expect(r.findings.map((f) => f.site)).toEqual(['packages/demo/README.md:1', 'README.md:1']);
+    expect(r.findings.map((f) => f.site)).toEqual(['packages/demo/README.md:1', 'packages/other/README.md:1']);
     expect(r.findings.map((f) => f.issues)).toEqual([['at (root): undeclared key "action"'], ['at (root): undeclared key "action"']]);
   });
 
   it('walks the legs in their declared order and counts each leg\'s pages', () => {
     const r = run({ 'content/docs/a.mdx': acceptedDoc, 'packages/demo/README.md': acceptedDoc, 'README.md': acceptedDoc });
     expect(r.legs.map((l) => l.leg)).toEqual(SCAN_SURFACE.map((l) => l.leg));
-    // The skills leg (objectui#12204) walks last and collects nothing in this fixture.
-    expect(r.legs.map((l) => l.pages)).toEqual([['content/docs/a.mdx'], ['packages/demo/README.md'], ['README.md'], []]);
-    expect(r.documents).toEqual(['content/docs/a.mdx', 'packages/demo/README.md', 'README.md']);
-    expect(r.accepted).toHaveLength(3);
+    // The skills leg (objectui#12204) walks last and collects nothing in this fixture;
+    // the root README is on no leg (objectstack#26080).
+    expect(r.legs.map((l) => l.pages)).toEqual([['content/docs/a.mdx'], ['packages/demo/README.md'], []]);
+    expect(r.documents).toEqual(['content/docs/a.mdx', 'packages/demo/README.md']);
+    expect(r.accepted).toHaveLength(2);
   });
 
   it('takes a README fragment declared with the HTML-comment marker, and judges a declaration there as anywhere else', () => {
@@ -314,14 +323,14 @@ describe('the scan surface — the published READMEs (objectui#12131)', () => {
     expect(declared.findings).toEqual([]);
     expect(declared.declared).toHaveLength(1);
 
-    const stale = run({ 'README.md': [FRAGMENT_MARKER_EXAMPLES[1], acceptedDoc].join('\n') });
+    const stale = run({ 'packages/other/README.md': [FRAGMENT_MARKER_EXAMPLES[1], acceptedDoc].join('\n') });
     expect(reasons(stale)).toEqual(['stale-fragment-marker']);
   });
 
   it('ANTI-IDLE: every leg owes its anchor — a leg that collected nothing is a precondition, never a green', () => {
     const otherAnchors = SURFACE_ANCHORS.filter((a) => a !== ANCHOR_DOCUMENT);
-    // Non-vacuous: both README legs and the skills leg exist, so there are anchors to fail.
-    expect(otherAnchors).toContain('README.md');
+    // Non-vacuous: the package-README leg and the skills leg exist, so there are anchors to fail.
+    expect(otherAnchors).not.toContain('README.md');
     expect(otherAnchors.some((a) => /^packages\/[^/]+\/README\.md$/.test(a))).toBe(true);
     expect(otherAnchors).toContain(SKILLS_ANCHOR);
     const r = run({ [ANCHOR_DOCUMENT]: acceptedDoc }, SURFACE_ANCHORS);
@@ -527,11 +536,10 @@ describe('wiring — the gate is reachable by name, and documented', () => {
   // into the root `Lint UI` job and brings these pins back against that job, by
   // path.
 
-  it('has a root script and is documented on the page that inventories the gates', () => {
+  // Its page half (`pnpm check:doc-json` named on the page that inventoried the
+  // gates) retired with objectstack#26944, which deleted that page.
+  it('has a root script', () => {
     const manifest = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
     expect(manifest.scripts['check:doc-json']).toBe(`node ${GATE}`);
-    const page = fs.readFileSync(path.join(repoRoot, 'content/docs/guide/ci-cd-pipeline.md'), 'utf8');
-    expect(page).toContain('pnpm check:doc-json');
-    expect(page).toContain(GATE);
   });
 });

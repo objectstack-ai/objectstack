@@ -120,7 +120,7 @@ bridge (warns). The compiler resolves these
 
 Rows keyed on a **named record** (an account, a supplier) rather than on a
 person or a position: declare the set on the **roster** object whose rows
-define it — not a stamp on every data row, not one policy per record.
+define it, not one policy per record.
 
 <!-- os:check -->
 ```typescript
@@ -154,7 +154,7 @@ rowLevelSecurity: [
   columns, no `current_user.*`.
 - One name per stack: a key on two objects, a kernel name (`id`,
   `organization_id`, `positions`, `org_user_ids`, `accessible_org_ids`,
-  `email`) and a key on an object extension are refused.
+  `email`, `queues`) and a key on an object extension are refused.
 - Read once per request as a system read in the caller's organization (no
   read on the roster needed), at most 1,000 values; more, a failed read or a
   `filter` that does not compile matches **no rows**. Whoever writes roster

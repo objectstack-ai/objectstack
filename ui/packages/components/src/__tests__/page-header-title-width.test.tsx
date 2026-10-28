@@ -101,6 +101,21 @@ describe('PageHeaderRenderer — record title width arbitration (#7244)', () => 
     expect(titleColumn.className).toContain('min-w-0');
   });
 
+  it('sizes the title column to the row below sm, so the h1 can ellipsise on a phone (objectstack#26897)', () => {
+    const { header, titleColumn } = renderRecordHeader();
+    // Below `sm` the header is `flex-col items-start`: a child's WIDTH is its
+    // cross size there and `items-start` makes it fit-content, so without a
+    // definite width this column took the h1's max-content width (1015px in a
+    // 390px row) and the console's content pane clipped the title mid-word.
+    // `min-w-0` above is a floor and cannot bound it. The geometry itself is
+    // pinned in Chromium by `e2e/record-header-title-width.spec.ts`.
+    expect(header.className.split(/\s+/)).toContain('items-start');
+    const tokens = titleColumn.className.split(/\s+/);
+    expect(tokens).toContain('w-full');
+    // …and `sm:w-auto` hands the row back to the arbitration above.
+    expect(tokens).toContain('sm:w-auto');
+  });
+
   it('still truncates rather than wrapping the title text itself', () => {
     const { h1 } = renderRecordHeader();
     expect(h1.className).toContain('truncate');

@@ -19,7 +19,7 @@
  */
 
 import type { HierarchyScope } from '@objectstack/spec/contracts';
-import type { ObjectAccessScope } from '@objectstack/spec/security';
+import { objectPermissionGrants, type ObjectAccessScope } from '@objectstack/spec/security';
 
 export interface ObjectPerm {
   allowCreate?: boolean;
@@ -68,6 +68,80 @@ export interface ObjectPerm {
 export type ObjectPermFlag = Exclude<keyof ObjectPerm, 'readScope' | 'writeScope'>;
 
 /**
+ * The `objects` key whose entry a permission set applies to an object it has
+ * no entry of its own for (ADR-0066 D2, `resolveObjectPermission` in
+ * `@objectstack/plugin-security`'s `permission-evaluator.ts`).
+ */
+export const OBJECT_WILDCARD_KEY = '*';
+
+/** An object's `access.default` posture, as the object catalog serves it. */
+export type ObjectAccessDefault = 'public' | 'private';
+
+/**
+ * objectstack#27010 — what one object row of the matrix draws: the entry the
+ * runtime applies for this object, resolved exactly as `resolveObjectPermission`
+ * resolves it.
+ *
+ * - The object's own entry, when the set has one (any entry, `{}` included:
+ *   the resolver returns it and never merges two entries).
+ * - Otherwise the `'*'` entry, for an object whose `access.default` is not
+ *   `'private'` (the runtime reads exactly `access.default === 'private'`).
+ *   For a private object, only a `'*'` entry carrying `viewAllRecords` or
+ *   `modifyAllRecords` applies.
+ * - Otherwise nothing.
+ *
+ * `inherited` marks the second case: the row has no entry of its own and draws
+ * the `'*'` entry. The row draws that entry's bits as an entry of its own
+ * would, so the boxes and the scope pickers read the same keys either way.
+ *
+ * The runtime half of this reading is pinned in plugin-security's
+ * `object-grant-wildcard.test.ts`; change the two together.
+ */
+export interface ObjectRuleCell {
+  /** Where the drawn entry comes from: the object's own, the `'*'` entry, or none applies. */
+  source: 'entry' | 'wildcard' | 'none';
+  /** `source === 'wildcard'`: no entry of its own, and the row draws the `'*'` entry. */
+  inherited: boolean;
+  perm: ObjectPerm;
+}
+
+export function objectRuleCell(
+  objects: Readonly<Record<string, ObjectPerm>> | undefined,
+  objectName: string,
+  accessDefault: ObjectAccessDefault | undefined,
+): ObjectRuleCell {
+  const entry = objects?.[objectName];
+  if (entry) return { source: 'entry', inherited: false, perm: entry };
+  const wildcard = objects?.[OBJECT_WILDCARD_KEY];
+  if (wildcard && (accessDefault !== 'private' || wildcard.viewAllRecords || wildcard.modifyAllRecords)) {
+    return { source: 'wildcard', inherited: true, perm: wildcard };
+  }
+  return { source: 'none', inherited: false, perm: {} };
+}
+
+/**
+ * The entry an edit of an object row starts from: what the row draws
+ * ({@link objectRuleCell}), as a fresh copy. On a row without an entry of its
+ * own, the first edit writes the drawn bits with the one change the admin made,
+ * so every other bit is written as the admin saw it.
+ */
+export function objectRuleSeed(
+  objects: Readonly<Record<string, ObjectPerm>> | undefined,
+  objectName: string,
+  accessDefault: ObjectAccessDefault | undefined,
+): ObjectPerm {
+  return { ...objectRuleCell(objects, objectName, accessDefault).perm };
+}
+
+/**
+ * Does the row grant anything at all? The "Only granted" filter and the
+ * granted-object count read the row as it is drawn ({@link objectRuleCell}).
+ */
+export function objectRowGrantsAny(perm: ObjectPerm): boolean {
+  return Object.values(perm).some(Boolean);
+}
+
+/**
  * objectstack#26187 — `ObjectAccessScopeSchema`'s values, narrowest first, in
  * the spec's own order. Restated rather than imported for the reason
  * `useTenancyPosture` gives: the `@objectstack/spec/security` value entry adds
@@ -111,6 +185,116 @@ export interface FieldPerm {
    * off and never authors that shape.
    */
   when?: string;
+}
+
+/**
+ * objectstack#26597 — what one field row of the matrix draws.
+ *
+ * A set's `fields` map constrains only the fields it names (ADR-0066 ⑧): the
+ * write gate refuses a field only on an entry that is not `editable`, the read
+ * mask hides one only on an entry that is not `readable`, and a field the set
+ * does not name passes both, so the object grant alone decides
+ * (`FieldMasker.detectForbiddenWrites` / `maskResults` in
+ * `@objectstack/plugin-security`). A row WITHOUT an entry therefore draws the
+ * object row's own Read and Edit, read through the spec's
+ * `objectPermissionGrants` (the fold the evaluator answers from, the
+ * super-user bits included), and is marked `inherited`.
+ *
+ * A row WITH an entry draws the entry's bits, read as the runtime's merge reads
+ * them (`=== true`, `fieldPermissionVote` in `@objectstack/core`). A bit the
+ * entry grants and the object row does not is `capped`: the entry still votes
+ * in the most-permissive merge across a holder's sets, but on its own it opens
+ * nothing, because the object grant is judged first.
+ *
+ * The runtime half of this reading is pinned in plugin-security's
+ * `field-rule-object-grant.test.ts`; change the two together.
+ */
+export interface FieldRuleCell {
+  /** No entry: the row draws the object grant and writes nothing until changed. */
+  inherited: boolean;
+  readable: boolean;
+  editable: boolean;
+  /** The entry grants Read and the object row does not. */
+  readCapped: boolean;
+  /** The entry grants Edit and the object row does not. */
+  editCapped: boolean;
+}
+
+export function fieldRuleCell(entry: FieldPerm | undefined, objectPerm: ObjectPerm | undefined): FieldRuleCell {
+  // The spec fold takes an open record; an interface carries no implicit index
+  // signature (and `check:designer-field-key-parity` reads `ObjectPerm` as an
+  // interface), so the row is handed over as a shallow copy.
+  const row = objectPerm ? { ...objectPerm } : undefined;
+  const objectRead = objectPermissionGrants(row, 'allowRead');
+  const objectEdit = objectPermissionGrants(row, 'allowEdit');
+  if (!entry) {
+    return { inherited: true, readable: objectRead, editable: objectEdit, readCapped: false, editCapped: false };
+  }
+  const readable = entry.readable === true;
+  const editable = entry.editable === true;
+  return {
+    inherited: false,
+    readable,
+    editable,
+    readCapped: readable && !objectRead,
+    editCapped: editable && !objectEdit,
+  };
+}
+
+/**
+ * The entry a click on a field row starts from: the entry itself, or — on a
+ * row without one — exactly the bits the row draws, so a click changes only
+ * the box it lands on and every other bit is written as the admin saw it.
+ */
+export function fieldRuleSeed(entry: FieldPerm | undefined, objectPerm: ObjectPerm | undefined): FieldPerm {
+  if (entry) return entry;
+  const cell = fieldRuleCell(undefined, objectPerm);
+  return { readable: cell.readable, editable: cell.editable };
+}
+
+/**
+ * objectstack#25866 — a bulk shortcut rewrites the two booleans and keeps an
+ * authored row condition, so it never silently widens a conditioned entry into
+ * an unconditioned one. Clearing a condition is its own act, in the row.
+ */
+export function withFieldBits(cur: FieldPerm | undefined, readable: boolean, editable: boolean): FieldPerm {
+  const next: FieldPerm = { readable, editable };
+  if (cur?.when !== undefined) next.when = cur.when;
+  return next;
+}
+
+/** The field sub-table's bulk shortcuts: read-only, read and edit, or drop the rules. */
+export type FieldBulkAction = 'readable' | 'writable' | 'clear';
+
+/**
+ * objectstack#26597 — a field bulk shortcut over `fieldNames` (the rows the
+ * filter leaves visible). `readable` moves each row to Read on / Edit off and
+ * `writable` to Read on / Edit on; a row that already DRAWS the target
+ * ({@link fieldRuleCell}) is left exactly as it is, an inherited row included,
+ * so the shortcut writes only the rows whose boxes change on screen. `clear`
+ * drops the entries, and those rows draw the object grant again. Returns the
+ * next `fields` map; `fields` is not mutated.
+ */
+export function applyFieldBulk(
+  fields: Record<string, FieldPerm>,
+  objectName: string,
+  objectPerm: ObjectPerm | undefined,
+  action: FieldBulkAction,
+  fieldNames: readonly string[],
+): Record<string, FieldPerm> {
+  const next = { ...fields };
+  const editable = action === 'writable';
+  for (const fieldName of fieldNames) {
+    const key = `${objectName}.${fieldName}`;
+    if (action === 'clear') {
+      delete next[key];
+      continue;
+    }
+    const cell = fieldRuleCell(next[key], objectPerm);
+    if (cell.readable && cell.editable === editable) continue;
+    next[key] = withFieldBits(next[key], true, editable);
+  }
+  return next;
 }
 
 export interface PermissionSetDraft {
@@ -174,6 +358,12 @@ function asScopeSet(scope: Iterable<string>): Set<string> {
  * Narrow a permission set down to just the rows whose object is in `scope`.
  * Used to drive the matrix display so a package panel lists only its own
  * objects (and their field overrides), never the whole environment.
+ *
+ * objectstack#27010 — the `'*'` entry is kept beside them: the runtime applies
+ * it to the package's objects too, and a row without an entry of its own draws
+ * it ({@link objectRuleCell}). It is display input only. The matrix has no row
+ * that edits it, and {@link mergePermissionSlice} takes it from the fresh base
+ * like every other key outside the scope.
  */
 export function scopePermissionSet(
   set: Pick<PermissionSetDraft, 'objects' | 'fields'>,
@@ -182,7 +372,7 @@ export function scopePermissionSet(
   const scopeSet = asScopeSet(scope);
   const objects: Record<string, ObjectPerm> = {};
   for (const [k, v] of Object.entries(set.objects ?? {})) {
-    if (scopeSet.has(k)) objects[k] = v;
+    if (scopeSet.has(k) || k === OBJECT_WILDCARD_KEY) objects[k] = v;
   }
   const fields: Record<string, FieldPerm> = {};
   for (const [k, v] of Object.entries(set.fields ?? {})) {

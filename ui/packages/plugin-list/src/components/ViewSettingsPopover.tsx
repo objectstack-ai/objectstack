@@ -5,6 +5,7 @@
  * the bar keeps Filter, Sort, Display and Search, and everything else sits
  * here, in this order —
  *   - Layout (the visualization switcher; only when the list offers a choice)
+ *   - Open records (how a row opens its record; only when the host passes it)
  *   - Group, Row color, Hide fields
  *   - Density
  *   - Row numbers (a session-only switch, grid only)
@@ -14,7 +15,8 @@
  * It began as UX Sprint 2 (P1-4)'s "View settings" gear behind
  * `compactToolbar: true`; the wide form — one toolbar button per control — is
  * what a host gets with `compactToolbar: false`, and ListView.tsx keeps it.
- * Content is duplicated between the two forms: change one, change both.
+ * Content is duplicated between the two forms: change one, change both. One
+ * exception: Open records is drawn here only — see `recordOpen`.
  *
  * Every control persists exactly what its wide-form twin persists; this
  * component writes nothing itself. The trigger's count is the number of
@@ -38,6 +40,8 @@ import {
   SelectTrigger,
   SelectValue,
   Switch,
+  ToggleGroup,
+  ToggleGroupItem,
 } from '@object-ui/components';
 import {
   SlidersHorizontal,
@@ -61,6 +65,34 @@ export interface ViewSettingsDensity {
   cycle: () => void;
 }
 
+/** How a reader prefers a drawer-mode record to open (objectstack#26681). */
+export type ViewSettingsRecordOpenPreference = 'drawer' | 'split';
+
+/**
+ * The Open records section (objectstack#26681): how a row opens its record.
+ *
+ * The side-by-side pane is each READER's own choice, kept per browser across
+ * objects; it is not metadata, and an object declares only `drawer` (the
+ * default) or `page` (maintainer ruling 2026-10-27, objectstack#26677). So the
+ * section answers by the mode the host resolved for this object and view:
+ *
+ *   - `drawer`: two segments, Drawer | Split, writing the reader's preference
+ *     through `setPreference`, with a one-line note that the choice is the
+ *     reader's own and that both expand to the full page;
+ *   - `page`: one read-only line saying the object is declared to open as a
+ *     full page — the declaration wins, so there is nothing to choose;
+ *   - `new_window` / `none`: no section. The preference changes nothing there
+ *     and the ruling gives those declarations no line of their own.
+ */
+export interface ViewSettingsRecordOpen {
+  /** The `navigation.mode` the host resolved for this object and view. */
+  resolvedMode: 'drawer' | 'page' | 'new_window' | 'none';
+  /** The reader's current preference; read only when `resolvedMode` is `drawer`. */
+  preference: ViewSettingsRecordOpenPreference;
+  /** Keep the reader's choice. The host owns where it is kept. */
+  setPreference: (next: ViewSettingsRecordOpenPreference) => void;
+}
+
 export interface ViewSettingsPopoverProps {
   t: (key: string, opts?: any) => string;
   allFields: ViewSettingsField[];
@@ -78,6 +110,17 @@ export interface ViewSettingsPopoverProps {
    * child `<span>`, the shape `ViewSwitcherDropdown` draws.
    */
   layout?: (closeMenu: () => void) => React.ReactNode;
+
+  /**
+   * The Open records section (objectstack#26681), drawn after Layout. A host
+   * prop: the console passes it; any other host draws no section. It is not a
+   * setting of the view, so it neither counts in `changedCount` nor returns
+   * under Reset.
+   *
+   * Drawn in this panel only: no host that passes it draws the wide toolbar
+   * (`compactToolbar: false`), so the wide form has no twin of it.
+   */
+  recordOpen?: ViewSettingsRecordOpen;
 
   showGroup?: boolean;
   groupingConfig?: any;
@@ -253,6 +296,71 @@ function SwitchRow({
   );
 }
 
+/**
+ * The Open records section — see {@link ViewSettingsRecordOpen}. `null` for a
+ * mode it draws nothing for.
+ */
+function RecordOpenSection({
+  t,
+  recordOpen,
+}: {
+  t: ViewSettingsPopoverProps['t'];
+  recordOpen: ViewSettingsRecordOpen;
+}) {
+  const { resolvedMode, preference, setPreference } = recordOpen;
+  if (resolvedMode !== 'drawer' && resolvedMode !== 'page') return null;
+  const title = t('list.recordOpen', { defaultValue: 'Open records' });
+  return (
+    <div className="border-b px-3 py-2" data-testid="display-record-open">
+      <div className="flex items-center justify-between gap-3">
+        <span className="shrink-0 whitespace-nowrap text-xs font-medium text-foreground/80">{title}</span>
+        {resolvedMode === 'drawer' ? (
+          <ToggleGroup
+            type="single"
+            variant="outline"
+            size="sm"
+            value={preference}
+            // Radix hands back '' when the pressed segment is pressed again:
+            // one of the two is always the choice, so that writes nothing.
+            onValueChange={(next) => {
+              if ((next === 'drawer' || next === 'split') && next !== preference) setPreference(next);
+            }}
+            aria-label={title}
+            className="gap-0"
+            data-testid="display-record-open-choice"
+          >
+            <ToggleGroupItem
+              value="drawer"
+              className="h-7 rounded-r-none px-2.5 text-xs"
+              data-testid="display-record-open-drawer"
+            >
+              {t('list.recordOpenDrawer', { defaultValue: 'Drawer' })}
+            </ToggleGroupItem>
+            <ToggleGroupItem
+              value="split"
+              className="-ml-px h-7 rounded-l-none px-2.5 text-xs"
+              data-testid="display-record-open-split"
+            >
+              {t('list.recordOpenSplit', { defaultValue: 'Split' })}
+            </ToggleGroupItem>
+          </ToggleGroup>
+        ) : (
+          <span className="min-w-0 text-right text-xs text-muted-foreground" data-testid="display-record-open-declared">
+            {t('list.recordOpenDeclaredPage', { defaultValue: 'This object is declared to open as a full page' })}
+          </span>
+        )}
+      </div>
+      {resolvedMode === 'drawer' && (
+        <p className="mt-1 text-[11px] leading-snug text-muted-foreground" data-testid="display-record-open-note">
+          {t('list.recordOpenNote', {
+            defaultValue: 'Your own preference, not part of the object’s declaration. Both expand to the full page.',
+          })}
+        </p>
+      )}
+    </div>
+  );
+}
+
 /** Set on the layout slot while its segments show icons only; the class below reads it. */
 const LAYOUT_FOLD_ATTR = 'data-layout-fold';
 
@@ -321,6 +429,7 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
     t,
     allFields,
     layout,
+    recordOpen,
     showGroup,
     groupingConfig,
     setGroupingConfig,
@@ -395,6 +504,8 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
               <LayoutSlot>{layout(closeMenu)}</LayoutSlot>
             </div>
           )}
+
+          {recordOpen && <RecordOpenSection t={t} recordOpen={recordOpen} />}
 
           {showGroup && setGroupingConfig && (
             <Section
