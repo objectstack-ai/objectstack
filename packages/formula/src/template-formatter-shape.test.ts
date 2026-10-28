@@ -103,7 +103,7 @@ describe('the mail grammar', () => {
     const face = 'Due {{ due | date-long }}, {{ amount | currency :EUR }} for {{{ who | two words }}}';
     expect(judgeMailHoleGrammar(face).map((f) => [f.text, f.start, f.refusal.rule])).toEqual([
       ['{{ due | date-long }}', 4, 'formatter-shape'],
-      ['{{{ who | two words }}}', 62, 'formatter-shape'],
+      ['{{{ who | two words }}}', 60, 'formatter-shape'],
     ]);
   });
 });
