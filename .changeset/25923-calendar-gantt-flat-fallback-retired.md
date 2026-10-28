@@ -1,6 +1,6 @@
 ---
-'@object-ui/plugin-calendar': minor
-'@object-ui/plugin-gantt': minor
+'@object-ui/plugin-calendar': patch
+'@object-ui/plugin-gantt': patch
 '@objectstack/spec': patch
 ---
 
@@ -16,6 +16,8 @@ Metadata-protocol: none
 - **`@object-ui/plugin-calendar`**: `getCalendarConfig` reads the `calendar` block only. A node that writes `startDateField`, `endDateField`, `titleField`, `colorField` or `allDayField` flat, with no block, shows the "Calendar configuration required" screen, whose hint names the `calendar` block. The package-local `ObjectCalendarFlatFields` and `ObjectCalendarHandoff` types are gone, and `ObjectCalendarProps['schema']` is the published `ObjectCalendarSchema`.
 - **`@object-ui/plugin-gantt`**: `getGanttConfig` reads the `gantt` block only. A node that writes its `GanttConfig` keys flat, with no block, shows the "Gantt configuration required" screen, which now names the `gantt` block, and in development a warning names every flat key the chart did not read, with or without a block beside it. The legacy singular `dependencyField` is read nowhere (the spec spells it `dependenciesField`, inside the block). The package-local `ObjectGanttFlatFields` type is gone; `ObjectGanttProps['schema']` keeps the two search keys `ListView` writes at runtime, now on `ObjectGanttSearchFields`.
 - **`@objectstack/spec`**: the `object-calendar` and `object-gantt` flat-key refusals no longer say the renderer still reads the flat spelling. The prescription is unchanged: write the keys in the `calendar` / `gantt` block.
+
+**Supersedes, in the same release:** `25923-calendar-gantt-flat-keys-handoff.md` (the earlier slice of #25923) says the calendar and gantt renderers are unchanged and still read the flat spelling a host hands them, that `ObjectCalendarProps['schema']` and `ObjectGanttProps['schema']` carry the flat keys, and that the spec refusals call the flat spelling a fallback the renderer still reads. This change retires that read, so those sentences no longer hold: the renderers read the block only, the props types carry no flat binding key, and the refusals no longer say it.
 
 **BREAKING** for code that mounts `<ObjectCalendar>` or `<ObjectGantt>` with a flat node.
 

@@ -23,7 +23,7 @@
  */
 
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import type { ObjectCalendarSchema, ObjectCalendarBlockConfig, DataSource, CalendarConfig } from '@object-ui/types';
+import type { ObjectCalendarSchema, DataSource, CalendarConfig } from '@object-ui/types';
 import { CalendarView, type CalendarViewEvent } from './CalendarView';
 import { getVisibleDateRange } from './visibleDays';
 import { usePullToRefresh } from '@object-ui/mobile';
