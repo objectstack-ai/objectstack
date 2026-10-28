@@ -144,8 +144,8 @@ beforeAll(async () => {
 
   const svc = new ShareLinkService({ engine: engine as any });
   const creator = { isSystem: true, userId: 'usr_creator' } as any;
-  tokens.redacted = (await svc.createLink({ object: OBJECT, recordId: RECORD, redactFields: ['margin_note'] }, creator)).token;
-  tokens.unredacted = (await svc.createLink({ object: OBJECT, recordId: RECORD }, creator)).token;
+  tokens.redacted = (await svc.createLink({ object: OBJECT, recordId: RECORD, audience: 'public', redactFields: ['margin_note'] }, creator)).token;
+  tokens.unredacted = (await svc.createLink({ object: OBJECT, recordId: RECORD, audience: 'public' }, creator)).token;
 
   const http = new RouteRecorder();
   registerShareLinkRoutes(http, svc, engine as any, { contextFromRequest: () => ({}) });

@@ -7,7 +7,7 @@
  *   GET    /api/v1/share-links                 → list links         → data: link[]
  *                                                (?object, ?recordId, ?includeRevoked)
  *   DELETE /api/v1/share-links/:idOrToken      → revoke             → data: { ok: true }
- *   GET    /api/v1/share-links/:token/resolve  → resolve token      → data: { record, link, redactFields }
+ *   GET    /api/v1/share-links/:token/resolve  → resolve token      → data: { record, link, redactFields, fields }
  *   GET    /api/v1/share-links/:token/messages → conversation rows  → data: ai_messages[]
  *   *      /api/v1/share-links/*               → every other verb and path: refused
  *                                                (anonymous 401, signed-in 404)
@@ -26,7 +26,9 @@
  *      which gates audience / expiry / password and stamps usage).
  *   2. Fetch the underlying record with a SYSTEM context (so the read
  *      bypasses normal RLS — the token IS the authorisation).
- *   3. Strip `redactFields` from the record before returning.
+ *   3. Strip `redactFields` from the record before returning, and describe
+ *      the fields it still carries (`fields`: label, type, option labels,
+ *      currency and lookup display bits — `buildShareLinkResolveAnswer`).
  *
  * For browser-rendered share pages, the front-end calls this endpoint
  * and renders the response read-only.
@@ -47,6 +49,9 @@ import { sendOk, sendError, sendServerFault } from '@objectstack/types';
 // [#22049] The one reading of the password header pair, shared with the
 // dispatcher twin — see `presentedPassword` below.
 import { readSharePasswordHeader, SHARE_PASSWORD_VARY, type SharePasswordHeaderReading } from '@objectstack/types';
+// [#26991] The resolve answer — redaction and the field display projection
+// included — from the ONE builder the dispatcher twin serves it with.
+import { buildShareLinkResolveAnswer } from '@objectstack/types';
 import type { ShareLinkExecutionContext } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { ErrorCode } from '@objectstack/spec/api';
@@ -269,18 +274,6 @@ const SHARE_LINK_PUBLIC_RESPONSE_HEADERS: Readonly<Record<string, string>> = Obj
 
 function setPublicResponseHeaders(res: IHttpResponse): void {
   for (const [name, value] of Object.entries(SHARE_LINK_PUBLIC_RESPONSE_HEADERS)) res.header(name, value);
-}
-
-/** Strip `redactFields` from a record (also removes from nested arrays of objects). */
-function applyRedaction(record: any, redactFields: string[]): any {
-  if (!record || typeof record !== 'object' || redactFields.length === 0) return record;
-  if (Array.isArray(record)) return record.map((r) => applyRedaction(r, redactFields));
-  const out: any = {};
-  for (const [k, v] of Object.entries(record)) {
-    if (redactFields.includes(k)) continue;
-    out[k] = v;
-  }
-  return out;
 }
 
 export function registerShareLinkRoutes(
@@ -548,21 +541,9 @@ export function registerShareLinkRoutes(
         return sendError(res, 410, 'RECORD_GONE', 'The shared record no longer exists');
       }
 
-      sendOk(res, {
-        record: applyRedaction(record, resolved.redactFields),
-        link: {
-          id: resolved.link.id,
-          token: resolved.link.token,
-          object_name: resolved.link.object_name,
-          record_id: resolved.link.record_id,
-          permission: resolved.link.permission,
-          audience: resolved.link.audience,
-          expires_at: resolved.link.expires_at,
-          label: resolved.link.label,
-          created_at: resolved.link.created_at,
-        },
-        redactFields: resolved.redactFields,
-      });
+      // [#26991] The redacted record, the link, and the display projection of
+      // exactly the fields that record carries (`fields`).
+      sendOk(res, buildShareLinkResolveAnswer(record, resolved, engine.getSchema?.(resolved.link.object_name)));
     },
     failure: 'Failed to resolve link',
   });
