@@ -3238,6 +3238,12 @@ const es = {
     totals: "Totales",
     loading: "Cargando…",
     forbiddenMessage: "No tienes permiso para ver los datos de este informe.",
+    dateRange: {
+      from: "Desde",
+      to: "Hasta",
+      datasetUnreadable: "El periodo de este informe no indica ninguna dimensión y no se pudo leer el conjunto de datos «{{dataset}}» para encontrar su dimensión de fecha ({{reason}}).",
+      noSingleDateDimension: "El periodo de este informe no indica ninguna dimensión y el conjunto de datos «{{dataset}}» declara {{total}} dimensiones de fecha ({{found}}) cuando necesita exactamente una. Indique la dimensión de fecha en dateRange.dimension del informe.",
+    },
     aggregate: {
       count: "Contar",
       countDistinct: "Contar únicos",

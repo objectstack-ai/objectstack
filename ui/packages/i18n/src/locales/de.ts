@@ -3177,6 +3177,12 @@ const de = {
     totals: "Summen",
     loading: "Wird geladen…",
     forbiddenMessage: "Sie haben keine Berechtigung, die Daten dieses Berichts anzuzeigen.",
+    dateRange: {
+      from: "Von",
+      to: "Bis",
+      datasetUnreadable: "Der Zeitraum dieses Berichts nennt keine Dimension, und das Dataset „{{dataset}}“ konnte nicht gelesen werden, um seine Datumsdimension zu finden ({{reason}}).",
+      noSingleDateDimension: "Der Zeitraum dieses Berichts nennt keine Dimension, und das Dataset „{{dataset}}“ deklariert {{total}} Datumsdimensionen ({{found}}), benötigt wird genau eine. Nennen Sie die Datumsdimension in dateRange.dimension des Berichts.",
+    },
     aggregate: {
       count: "Anzahl",
       countDistinct: "Eindeutige Anzahl",
