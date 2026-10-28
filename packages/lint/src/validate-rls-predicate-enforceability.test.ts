@@ -811,7 +811,9 @@ describe('validateRlsPredicateEnforceability — the messages name the COST, not
  * `userId`, `organization_id` ← `tenantId`, the rest by name), and
  * `ExecutionContextSchema` declares `userId`, `tenantId` and `email` as strings
  * and `positions`, `org_user_ids` and `accessible_org_ids` as string arrays;
- * `resolveAuthzContext` produces the same types.
+ * `resolveAuthzContext` produces the same types. `queues` (ADR-0142 D3) has no
+ * `ExecutionContext` field: the security plugin stages it as a string array of
+ * queue names, and the probe binds it as one.
  */
 const KERNEL_KEY_RUNTIME_TYPE: Record<string, 'scalar' | 'array'> = {
   id: 'scalar',
@@ -820,6 +822,7 @@ const KERNEL_KEY_RUNTIME_TYPE: Record<string, 'scalar' | 'array'> = {
   positions: 'array',
   org_user_ids: 'array',
   accessible_org_ids: 'array',
+  queues: 'array',
 };
 
 describe('validateRlsPredicateEnforceability — the `current_user` set is DERIVED, not transcribed', () => {

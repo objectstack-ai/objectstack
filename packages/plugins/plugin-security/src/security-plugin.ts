@@ -2615,6 +2615,19 @@ export class SecurityPlugin implements Plugin {
   }
 
   /**
+   * [ADR-0142 D3] The same ownership-queue service, for the caller's queue set
+   * (`queuesOf`) — the one producer of `current_user.queues`
+   * (`kernel-queue-membership.ts`). `null` with no service, and the key then
+   * stays unresolved: every policy reading it fails closed.
+   */
+  private ownershipQueueMembership(): Pick<IOwnershipQueueService, 'queuesOf'> | null {
+    const svc = this.resolveKernelService?.(OWNERSHIP_QUEUE_SERVICE) as
+      | Pick<IOwnershipQueueService, 'queuesOf'>
+      | undefined;
+    return svc && typeof svc.queuesOf === 'function' ? svc : null;
+  }
+
+  /**
    * [ADR-0090 D10] The composition knobs the DELEGATOR's own direct by-id
    * write of `recordId` would get: its floor decision
    * ({@link resolvePreImageFloorDrop}, asked as the delegator — its own sets,
@@ -4202,6 +4215,10 @@ export class SecurityPlugin implements Plugin {
    * with every miss failing closed. A key both the resolver and a declaration
    * claim resolves from neither. Called with the context alone, it stages the
    * resolver's keys only, as before.
+   *
+   * [ADR-0142 D3] When those policies read `current_user.queues`, it first
+   * resolves that reserved key from the ownership-queue service
+   * (`kernel-queue-membership.ts`), once per request.
    */
   private stageRlsMembership(
     context: any,
@@ -4215,13 +4232,14 @@ export class SecurityPlugin implements Plugin {
     const readRlsCompiler = () => this.rlsCompiler;
     const readRlsMembershipResolver = () => this.rlsMembershipResolver;
     const readTenancyPosture = () => this.tenancyPosture;
-    const host: Pick<RlsFilterHost, 'datetimeFieldNamesCache' | 'getObjectFieldNames' | 'getObjectSecurityMeta' | 'logger' | 'metadata' | 'numberComparandFieldsCache' | 'ql' | 'rlsCompiler' | 'rlsMembershipResolver' | 'tenancyDisabledCache' | 'tenancyPosture'> = {
+    const host: Pick<RlsFilterHost, 'datetimeFieldNamesCache' | 'getObjectFieldNames' | 'getObjectSecurityMeta' | 'logger' | 'metadata' | 'numberComparandFieldsCache' | 'ownershipQueueMembership' | 'ql' | 'rlsCompiler' | 'rlsMembershipResolver' | 'tenancyDisabledCache' | 'tenancyPosture'> = {
       datetimeFieldNamesCache: this.datetimeFieldNamesCache,
       getObjectFieldNames: (...a) => this.getObjectFieldNames(...a),
       getObjectSecurityMeta: (...a) => this.getObjectSecurityMeta(...a),
       get logger() { return readLogger(); },
       get metadata() { return readMetadata(); },
       numberComparandFieldsCache: this.numberComparandFieldsCache,
+      ownershipQueueMembership: () => this.ownershipQueueMembership(),
       get ql() { return readQl(); },
       get rlsCompiler() { return readRlsCompiler(); },
       get rlsMembershipResolver() { return readRlsMembershipResolver(); },

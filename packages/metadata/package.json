@@ -104,7 +104,7 @@
   "devDependencies": {
     "@objectstack/driver-sqlite-wasm": "workspace:*",
     "@types/js-yaml": "^4.0.9",
-    "@types/node": "^26.6.3",
+    "@types/node": "^26.6.5",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"
   },

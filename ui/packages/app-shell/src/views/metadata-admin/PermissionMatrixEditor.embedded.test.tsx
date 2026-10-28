@@ -28,6 +28,8 @@ function makeClient() {
       overlayScope: null,
     }),
     getDraft: async () => null,
+    // objectstack#26840 — the package door reads its objects through the draft-overlaid door.
+    withPreviewDrafts() { return this; },
     list: async (type: string) => (type === 'object' ? [{ item: { name: 'a_account' } }] : []),
     get: async (type: string) => (type === 'object' ? { fields: [] } : null),
     save: async (_t: string, _n: string, payload: Record<string, unknown>) => payload,

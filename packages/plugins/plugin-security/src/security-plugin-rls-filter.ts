@@ -17,7 +17,8 @@
  *   ask before they run. Since #25234 (ruling A) it also stages the declared
  *   membership keys the policies about to compile read
  *   (`object-membership-keys.ts`), so its resolver half is
- *   `stageResolverMembership`.
+ *   `stageResolverMembership`; and per ADR-0142 D3 the kernel's own
+ *   `current_user.queues` (`kernel-queue-membership.ts`).
  *
  * A MOVE, not a redesign. Each function below is the body of the
  * `SecurityPlugin` method of the same name as it stood, re-indented one level
@@ -86,7 +87,8 @@ import { RESERVED_RLS_MEMBERSHIP_KEYS } from '@objectstack/spec/contracts';
 import { isConfiguredPlatformAdminEmail, resolvePlatformAdminEmails } from '@objectstack/core';
 import { RLS_DENY_FILTER, policyDeclaresClause } from './rls-compiler.js';
 import { isPlatformOwnershipFloorPolicy } from './platform-ownership-policies.js';
-import { noteResolverStagedKeys, stageDeclaredMembershipKeys } from './object-membership-keys.js';
+import { noteResolverStagedKeys, policiesReadCurrentUserKey, stageDeclaredMembershipKeys } from './object-membership-keys.js';
+import { stageKernelQueues } from './kernel-queue-membership.js';
 import {
   computeTenantLayer0Verdict,
   tenantLayer0FilterOf,
@@ -130,6 +132,7 @@ export interface RlsFilterHost {
   getObjectSecurityMeta: SecurityPlugin['getObjectSecurityMeta'];
   hasPlatformAdminPosture: SecurityPlugin['hasPlatformAdminPosture'];
   isVerifiedPlatformOwnerSession: SecurityPlugin['isVerifiedPlatformOwnerSession'];
+  ownershipQueueMembership: SecurityPlugin['ownershipQueueMembership'];
   platformFloorYieldsToObjectWriteModel: SecurityPlugin['platformFloorYieldsToObjectWriteModel'];
   stageRlsMembership: SecurityPlugin['stageRlsMembership'];
 }
@@ -668,12 +671,16 @@ export async function computeWriteCheckFilter(
 
 /** The body of `SecurityPlugin#stageRlsMembership`; the method's docblock there is its contract. */
 export async function stageRlsMembership(
-  this: Pick<RlsFilterHost, 'datetimeFieldNamesCache' | 'getObjectFieldNames' | 'getObjectSecurityMeta' | 'logger' | 'metadata' | 'numberComparandFieldsCache' | 'ql' | 'rlsCompiler' | 'rlsMembershipResolver' | 'tenancyDisabledCache' | 'tenancyPosture'>,
+  this: Pick<RlsFilterHost, 'datetimeFieldNamesCache' | 'getObjectFieldNames' | 'getObjectSecurityMeta' | 'logger' | 'metadata' | 'numberComparandFieldsCache' | 'ownershipQueueMembership' | 'ql' | 'rlsCompiler' | 'rlsMembershipResolver' | 'tenancyDisabledCache' | 'tenancyPosture'>,
   context: any,
   policies?: readonly RowLevelSecurityPolicy[],
   object?: string,
 ): Promise<void> {
   if (!context || typeof context !== 'object') return;
+  // [ADR-0142 D3] The kernel's own `current_user.queues`, from the
+  // ownership-queue service — staged only when a policy about to compile reads
+  // it. A reserved key: no resolver or declaration below can supply it.
+  if (policies && policiesReadCurrentUserKey(policies, 'queues')) await stageKernelQueues(this, context);
   await stageResolverMembership.call(this, context);
   // [#25234 ruling A] The declarative second source: the keys these policies
   // read that an object declares (`object-membership-keys.ts`), per key and

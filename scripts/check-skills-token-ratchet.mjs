@@ -690,7 +690,10 @@ export const CEILINGS = new Map([
   // 2956 at headroom 0, ceiling +737. No repeated passage in the file to
   // cut first (measured: no sentence repeats). Maintainer ruling 2026-10-27 on the decision card 「skills 修复卡的教学和 eval 都撞 token 天
   // 花板,怎么付?」, tap A, verbatim and untranslated: 「A:先削重复,余额按实测提高」.
-  ['skills/objectstack-data/rules/security.md', 3693],
+  // 3693 -> 3687 (#27016): RE-LOCK at the landed count. `queues` joins the
+  // kernel names a membership key may not take (+3 tokens), paid by cutting
+  // "not a stamp on every data row," from the membership-keys intro; net -6.
+  ['skills/objectstack-data/rules/security.md', 3687],
   // 3024 -> 3109 (2026-08-31 app-repo-principles raise, see the block above).
   // Severity Levels listed the three values and left the CHOICE unstated: a
   // block rests on a judgement a person made, so a machine-inferred signal — a

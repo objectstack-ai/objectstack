@@ -276,6 +276,35 @@
  * resume consumed the suspension) withdraws Submit as the sections above say:
  * the run is over, and only a new run, or an operator's
  * `restore-suspension`, can accept input again.
+ *
+ * ## A result screen is acknowledged, never cancelled (objectstack#26902)
+ *
+ * A flow can end on a screen that only shows what it did: every field a
+ * `record_link` ({@link isDisplayOnlyScreen}), such as a lead conversion's
+ * last screen linking the account, contact and opportunity it created. That
+ * screen used to draw Cancel + Submit, and Cancel and the dialog close only
+ * dismissed the dialog: the run stayed suspended, `onComplete` never fired, so
+ * the page behind still showed the lead as it was before the conversion, and
+ * "Cancel" read as if it could undo records already written.
+ *
+ * So on such a screen the footer is one primary Done (`common.done`), and
+ * Done, the close button, Escape and a click outside all do the same thing:
+ * resume the run with no inputs (the engine refuses any value under a record
+ * link's name, and completes on the empty resume) and take the answer exactly
+ * as Submit does — the completion toast, `notifyDataChanged`, `onComplete`; a
+ * further screen if the run pauses again; the banner if the resume fails.
+ * While that resume is in flight the dialog cannot be dismissed, as on Submit.
+ * Once a resume has failed, closing goes back to a plain close: Done stays
+ * the retry, but an outage must never leave the user with a dialog that every
+ * way out answers by trying the same request again.
+ *
+ * It applies only where the screen is the end of the line. A display-only
+ * step the engine says another screen follows (`progress.nextScreen` other
+ * than `'none'`) keeps Cancel + Next: there Cancel abandons a wizard, which is
+ * still a real choice, and an X that resumed would open the next step instead
+ * of closing. A screen with no fields at all is not display-only either (see
+ * {@link isDisplayOnlyScreen}), and a terminal failure or a refusal keeps its
+ * single Close.
  */
 import { Suspense, useEffect, useState } from 'react';
 import {
@@ -304,6 +333,7 @@ import type { AutomationResult } from '@objectstack/spec/contracts';
 import { toast } from 'sonner';
 import {
   ScreenView,
+  isDisplayOnlyScreen,
   isObjectFormScreen,
   initialScreenValues,
   screenFieldBoundViolations,
@@ -736,9 +766,15 @@ export function FlowRunner({ state, authFetch, baseUrl, onClose, onComplete, dat
   const stepCounter = progress?.step !== undefined && progress.stepCount !== undefined
     ? t('form.stepOf', { current: progress.step, total: progress.stepCount, defaultValue: 'Step {{current}} of {{total}}' })
     : undefined;
+  // A last screen that only shows what the run did is acknowledged, not
+  // cancelled (objectstack#26902 — see the header): Done, and every way of
+  // closing the dialog, resumes the run exactly as Submit does — until a
+  // resume has failed, when closing is a plain close again and Done the retry.
+  const resultScreen = !terminal && !anotherScreen && isDisplayOnlyScreen(screen);
+  const dismiss = resultScreen && !resumeError ? () => { void submit(); } : onClose;
 
   return (
-    <Dialog open onOpenChange={(o) => { if (!o && !submitting) onClose(); }}>
+    <Dialog open onOpenChange={(o) => { if (!o && !submitting) dismiss(); }}>
       {/* Bounded on every screen (objectui#12080): a flex column at most 90vh
           tall, in which only the body below can give up height (`min-h-0`)
           and scroll, so the header and the footer always stay on screen. */}
@@ -829,6 +865,12 @@ export function FlowRunner({ state, authFetch, baseUrl, onClose, onComplete, dat
           <DialogFooter>
             {terminal ? (
               <Button variant="outline" onClick={onClose}>{t('common.close', { defaultValue: 'Close' })}</Button>
+            ) : resultScreen ? (
+              <Button onClick={submit} disabled={submitting}>
+                {submitting
+                  ? t('flowRunner.submitting', { defaultValue: 'Submitting…' })
+                  : t('common.done', { defaultValue: 'Done' })}
+              </Button>
             ) : (
               <>
                 <Button variant="outline" onClick={onClose} disabled={submitting}>{t('common.cancel', { defaultValue: 'Cancel' })}</Button>
