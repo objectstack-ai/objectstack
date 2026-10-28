@@ -69,7 +69,8 @@ function pageRelatedHandlers(
  * A block on a page is rendered with no host callback — the page is a
  * document, and a document carries no function. So an `object-kanban` or
  * `object-calendar` whose authored `navigation` resolves to `page` (the
- * spec's default `mode`) had nowhere to go: `useNavigationOverlay` hands such
+ * spec's default `mode` until objectstack#26677, which moved it to `drawer`)
+ * had nowhere to go: `useNavigationOverlay` hands such
  * a click to the record navigator its host publishes, and this host published
  * none. The record page and the object list page already publish one (the
  * record page's `RelatedRecordActionsBridge`, the list page's

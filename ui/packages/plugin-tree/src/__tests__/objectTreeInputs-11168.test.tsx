@@ -447,19 +447,12 @@ describe('`object-tree.navigation` — the members decide what a row click opens
     expect(open).not.toHaveBeenCalled();
   });
 
-  it.each(['modal', 'popover'] as const)('`mode: "%s"` opens the row\'s record in that overlay', async (mode) => {
-    const { open } = await clickRoot({ mode });
+  it('a block WITHOUT `mode` takes the spec\'s `drawer` default — it opens the row\'s record in the drawer (objectstack#26677)', async () => {
+    // `modal`, `split` and `popover`, which these rows drove, left the spec
+    // with objectstack#26677; the mode-less block is the second overlay input.
+    const { open } = await clickRoot({ size: 'lg' });
     await waitFor(() => expect(dialog()).not.toBeNull());
     expect(openedRecord()).not.toBeNull();
-    expect(open).not.toHaveBeenCalled();
-  });
-
-  it('`mode: "split"` opens the record BESIDE the tree, which stays drawn', async () => {
-    // Unlike the timeline, the tree hands the split shell its own view as the
-    // main panel (objectui#9299 item 2).
-    const { open } = await clickRoot({ mode: 'split' });
-    await waitFor(() => expect(openedRecord()).not.toBeNull());
-    expect(screen.getAllByTestId('object-tree-row').length).toBeGreaterThan(0);
     expect(open).not.toHaveBeenCalled();
   });
 
@@ -526,13 +519,12 @@ describe('`object-tree.navigation` — the members decide what a row click opens
     await expectNothingOpened(open, 'absent key');
   });
 
-  it('with NO host navigator, `mode: "page"` and a block without `mode` have no record page to open, and open nothing', async () => {
+  it('with NO host navigator, `mode: "page"` has no record page to open, and opens nothing', async () => {
     const page = await clickRoot({ mode: 'page' });
     await expectNothingOpened(page.open, 'page');
-    cleanup();
-    // `size` alone, written to widen an overlay: the absent `mode` reads `page`.
-    const modeless = await clickRoot({ size: 'lg' });
-    await expectNothingOpened(modeless.open, 'mode-less block');
+    // A block without `mode` used to sit in this row (the absent `mode` read
+    // `page`); since objectstack#26677 it takes `drawer` and opens the drawer,
+    // pinned in its own row above.
   });
 });
 
@@ -600,12 +592,11 @@ describe('`object-tree.navigation` `page` under the host\'s record navigator (ob
     expect(open).not.toHaveBeenCalled();
   });
 
-  it('a block WITHOUT `mode` resolves to `page`, and navigates the same way', async () => {
+  it('a block WITHOUT `mode` takes the spec\'s `drawer` default: it opens the drawer and does NOT navigate (objectstack#26677)', async () => {
     const { value, openRecord } = recordNavigatorHost();
     const { open } = await clickRootUnderHost({ size: 'lg' }, value);
-    await waitFor(() => expect(openRecord).toHaveBeenCalledTimes(1));
-    expect(openRecord).toHaveBeenCalledWith(OBJECT, 'r1');
-    expect(dialog()).toBeNull();
+    await waitFor(() => expect(dialog()).not.toBeNull());
+    expect(openRecord).not.toHaveBeenCalled();
     expect(open).not.toHaveBeenCalled();
   });
 

@@ -438,16 +438,13 @@ describe('`object-map.navigation` — the members decide what a marker click ope
     expect(open).not.toHaveBeenCalled();
   });
 
-  it.each(['modal', 'popover'] as const)('`mode: "%s"` opens the marker\'s record in that overlay', async (mode) => {
-    const { open } = await clickMarker({ mode });
+  it('a block WITHOUT `mode` takes the spec\'s `drawer` default — it opens the marker\'s record in the drawer (objectstack#26677)', async () => {
+    // `modal`, `split` and `popover`, which these rows drove, left the spec
+    // with objectstack#26677; the mode-less block is the second overlay input.
+    const { open } = await clickMarker({ size: 'lg' });
     await waitFor(() => expect(dialog()).not.toBeNull());
     expect(openedRecord()).not.toBeNull();
     expect(open).not.toHaveBeenCalled();
-  });
-
-  it('`mode: "split"` opens NOTHING — the map hands the split shell no main panel', async () => {
-    const { open } = await clickMarker({ mode: 'split' });
-    await expectNothingOpened(open, 'split');
   });
 
   it('`mode: "none"` and `preventNavigation: true` open nothing, the flag outranking an overlay mode', async () => {
@@ -497,15 +494,15 @@ describe('`object-map.navigation` — the members decide what a marker click ope
     await expectNothingOpened(open, 'parent handler');
   });
 
-  it('with NO host navigator, the key ABSENT, `page`, or a block without `mode` opens nothing — there is no record page to open', async () => {
+  it('with NO host navigator, the key ABSENT or `page` opens nothing — there is no record page to open', async () => {
     const absent = await clickMarker(undefined);
     await expectNothingOpened(absent.open, 'absent key');
     cleanup();
     const page = await clickMarker({ mode: 'page' });
     await expectNothingOpened(page.open, 'page');
-    cleanup();
-    const modeless = await clickMarker({ size: 'lg' });
-    await expectNothingOpened(modeless.open, 'mode-less block');
+    // A block without `mode` used to sit in this row (it took the spec's
+    // `page` default); since objectstack#26677 it takes `drawer` and opens the
+    // drawer, pinned in its own row above.
   });
 });
 
@@ -573,19 +570,17 @@ describe('`object-map.navigation` `page` under the host\'s record navigator (obj
     expect(open).not.toHaveBeenCalled();
   });
 
-  it('a block WITHOUT `mode` resolves to `page`, and navigates the same way', async () => {
+  it('a block WITHOUT `mode` takes the spec\'s `drawer` default: it opens the drawer and does NOT navigate (objectstack#26677)', async () => {
     const { value, openRecord } = recordNavigatorHost();
     const { open } = await clickMarkerUnderHost({ size: 'lg' }, value);
-    await waitFor(() => expect(openRecord).toHaveBeenCalledTimes(1));
-    expect(openRecord).toHaveBeenCalledWith(OBJECT, 'm1');
-    expect(dialog()).toBeNull();
+    await waitFor(() => expect(dialog()).not.toBeNull());
+    expect(openRecord).not.toHaveBeenCalled();
     expect(open).not.toHaveBeenCalled();
   });
 
   it.each([
     ['the key ABSENT', undefined],
     ['`mode: "none"`', { mode: 'none' }],
-    ['`mode: "split"`', { mode: 'split' }],
   ] as const)('%s still opens nothing under the host, and does not navigate', async (why, navigation) => {
     const { value, openRecord } = recordNavigatorHost();
     const { open } = await clickMarkerUnderHost(navigation, value);

@@ -49,7 +49,7 @@ import { resolveI18nLabel as resolveInlineI18nLabel } from '@objectstack/spec/ui
 import { stateMachineNextValues } from './inline-edit-options';
 import {
   Badge, Button, NavigationOverlay, EmptyValue,
-  legacyRecordDrawerWidthKey, recordOverlayWidthStorageKey, useOverlayAnchor,
+  legacyRecordDrawerWidthKey, recordOverlayWidthStorageKey,
   Popover, PopoverContent, PopoverTrigger,
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
   RefreshIndicator,
@@ -1150,12 +1150,6 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     onNavigate: onNavigate ?? schema.onNavigate,
     onRowClick,
   });
-
-  // objectui#9299 item 3 — `popover` anchors to the ROW the user clicked. The
-  // grid reaches `handleClick` from several places that carry no DOM event
-  // (`DataTable`'s own row handler, `LinkCell.onActivate`), so the anchor is
-  // recorded by a capture listener on this component's container.
-  const { anchorRef, anchorCaptureProps } = useOverlayAnchor();
 
   // --- Action support for action columns ---
   const { execute: executeAction, updateContext: updateActionContext } = useAction();
@@ -2764,7 +2758,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // Keyed, not string-built (objectui#3426). This value is handed to
   // `NavigationOverlay`'s `title` prop, which means the overlay's own
   // `detail.recordDetail` default never applies here — whatever this computes
-  // IS the visible heading of the drawer/modal/split/popover. Interpolating
+  // IS the visible heading of the drawer. Interpolating
   // the label through `detail.recordDetailWithLabel` instead of splicing it
   // into an English template lets each pack choose its own word order; the
   // no-label branch reuses the overlay's own key rather than a twin.
@@ -2799,16 +2793,12 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       : t('detail.recordDetail');
 
   /**
-   * The shell-side props every one of this component's three
-   * `NavigationOverlay` call sites shares (objectui#9299).
+   * The shell-side props both of this component's `NavigationOverlay` call
+   * sites share (objectui#9299). Spelled once so the two cannot drift. (A
+   * `popoverAnchorRef` used to ride here too, and a third, `split` call site
+   * shared the set: both went with the retired `popover` and `split` modes,
+   * objectstack#26677.)
    *
-   * Spelled once because three copies of a set like this is how two of them
-   * end up carrying a `popoverAnchorRef` and the third silently keeps falling
-   * back to the `Dialog` the ruling closed.
-   *
-   * - `popoverAnchorRef` (item 3): the row the user clicked. Before this card
-   *   NO renderer passed an anchor, so `popover` degraded to a `Dialog` on all
-   *   five surfaces — measured, not inferred.
    * - `storageKey` / `legacyStorageKey` (item 4): one drag-resize
    *   implementation, one key per object across every view type, and a width
    *   persisted under the retired `objectui.drawerWidth.OBJECT` carries over.
@@ -2816,7 +2806,6 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
    *   rather than on the shell's own `42rem` floor.
    */
   const recordOverlayShellProps = {
-    popoverAnchorRef: anchorRef,
     storageKey: schema.objectName ? recordOverlayWidthStorageKey(schema.objectName) : undefined,
     legacyStorageKey: schema.objectName ? legacyRecordDrawerWidthKey(schema.objectName) : undefined,
     width: navigation.width ?? RECORD_OVERLAY_DEFAULT_WIDTH,
@@ -2830,7 +2819,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   const renderRecordDetail = (record: any) => {
     // ⭐ objectui#9299 — ONE payload on every view type.
     //
-    // `ObjectGrid` already honoured all four `navigation.mode` values through
+    // `ObjectGrid` already honoured every overlay `navigation.mode` through
     // `NavigationOverlay`, but it drew its OWN read-only key/value panel inside
     // them while the gantt/kanban/calendar drew the rich
     // `InlineEditProvider` -> `DetailView` -> `InlineEditSaveBar` payload. The
@@ -3151,7 +3140,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
           data-testid="object-grid-card-scroller"
         >
         {gridDescription}
-        <div className="space-y-2 p-2" {...anchorCaptureProps}>
+        <div className="space-y-2 p-2">
           {data.map((row, idx) => {
             // Collect secondary fields (skip the title column)
             const secondaryCols = bodyColumns.slice(0, 4);
@@ -3865,60 +3854,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     />
   );
 
-  // For split mode, wrap the grid in the ResizablePanelGroup.
-  //
-  // ⭐ objectui#9299, MEASURED WHILE REPAIRING THIS CARD and repaired here.
-  // This branch used to be entered on the authored mode alone, and the shell's
-  // split branch opens `if (!isOpen || !mainContent) return null` — so a grid
-  // authored `split` rendered NOTHING until a record was selected, and a record
-  // could never be selected because there was no grid to click. Same defect
-  // class as the `ObjectTree` blank the card names, on the renderer the card
-  // calls correct; the card's measurement read only that `mainContent` is
-  // PASSED here, never that the closed state renders. Ruling item 2 requires
-  // `split` to work on all five, so the guard joins the open state.
-  if (
-    navigation.isOverlay
-    && navigation.mode === 'split'
-    && navigation.isOpen
-    && navigation.selectedRecord
-  ) {
-    return (
-      <>
-        <NavigationOverlay
-          {...navigation}
-          title={detailTitle}
-          {...recordOverlayShellProps}
-          mainContent={
-            <div className="flex flex-col h-full">
-              {gridDescription}
-              {gridToolbar}
-              {renderedGridContent}
-              <BulkActionBar
-                selectedRows={selectedRows}
-                actions={effectiveBulkActions ?? []}
-                actionDefs={bulkActionDefs}
-                objectFields={objectSchema?.fields}
-                onAction={dispatchBulkAction}
-                onActionDef={dispatchBulkActionDef}
-                onClearSelection={resetSelection}
-                pageSize={data.length}
-                totalMatching={canOfferSelectAllMatching ? resolvedTotalMatching : undefined}
-                allMatchingSelected={selectAllMatching}
-                onSelectAllMatching={canOfferSelectAllMatching ? () => setSelectAllMatching(true) : undefined}
-              />
-            </div>
-          }
-        >
-          {(record) => renderRecordDetail(record)}
-        </NavigationOverlay>
-        {bulkDialog}
-        {rowConflictDialog}
-      </>
-    );
-  }
-
   return (
-    <div ref={pullRef} className="relative h-full flex flex-col" {...anchorCaptureProps}>
+    <div ref={pullRef} className="relative h-full flex flex-col">
       {/* Re-fetch indicator while existing rows remain visible (filter/sort
           change). The initial-load skeleton above handles the empty case. */}
       <RefreshIndicator active={loading && data.length > 0} ariaLabel={t('grid.refreshing')} />

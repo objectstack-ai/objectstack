@@ -3167,12 +3167,13 @@ export const ObjectCalendarSchema = BaseSchema.extend({
   // the gantt and map arms above spell it. Until this card it rode
   // `BaseSchema`'s `.passthrough()`: `navigation: { mode: 'not-a-mode' }`
   // parsed green here while the spec's own element schema refused it. The
-  // import-boundary strip keeps the spec's `mode: 'page'` default out of a
-  // parsed document, so the renderer's own `{ mode: 'drawer' }` fallback for
+  // import-boundary strip keeps the spec's `mode` default (`drawer` since
+  // objectstack#26677) out of a parsed document, so the renderer's own
+  // `{ mode: 'drawer' }` fallback for
   // an ABSENT key still applies (objectui#8317). Mirrored at the SAME
   // requiredness as `../objectql.ts` (optional), so the zod-mirror-parity
   // ratchet stays at zero drift for this pair.
-  navigation: stripImportedDefaults(SpecNavigationConfigSchema).optional().describe('Event-click navigation behaviour (drawer/modal/split/popover/page/new_window/none), the same block ListViewSchema.navigation declares; the renderer defaults an absent key to a drawer'),
+  navigation: stripImportedDefaults(SpecNavigationConfigSchema).optional().describe('Event-click navigation behaviour (drawer/page/new_window/none), the same block ListViewSchema.navigation declares; the renderer defaults an absent key to a drawer'),
   // objectstack#25923 (work item 4) — two NODE members `ComponentPropsMap['object-calendar']`
   // declares and `plugin-calendar`'s registration boundary reads off the node
   // (`resolveAuthoredLocale(rest.locale)`, `resolveExternalLoading(rest.loading)`),
@@ -3539,12 +3540,13 @@ export const ObjectKanbanSchema = BaseSchema.extend({
   // the gantt and map arms above spell it. Until this card it rode
   // `BaseSchema`'s `.passthrough()`: `navigation: { mode: 'not-a-mode' }`
   // parsed green here while the spec's own element schema refused it. The
-  // import-boundary strip keeps the spec's `mode: 'page'` default out of a
-  // parsed document, so the renderer's own `{ mode: 'drawer' }` fallback for
+  // import-boundary strip keeps the spec's `mode` default (`drawer` since
+  // objectstack#26677) out of a parsed document, so the renderer's own
+  // `{ mode: 'drawer' }` fallback for
   // an ABSENT key still applies (objectui#8317). Mirrored at the SAME
   // requiredness as `../objectql.ts` (optional), so the zod-mirror-parity
   // ratchet stays at zero drift for this pair.
-  navigation: stripImportedDefaults(SpecNavigationConfigSchema).optional().describe('Card-click navigation behaviour (drawer/modal/split/popover/page/new_window/none), the same block ListViewSchema.navigation declares; the renderer defaults an absent key to a drawer'),
+  navigation: stripImportedDefaults(SpecNavigationConfigSchema).optional().describe('Card-click navigation behaviour (drawer/page/new_window/none), the same block ListViewSchema.navigation declares; the renderer defaults an absent key to a drawer'),
   // ── `5a41ce733` — the three handler keys `KanbanRenderer` reads off the
   // document this arm judges, MEASURED one at a time (director seat ruling of
   // 2026-09-07, decision batch #69: the arm a `type` selects is the contract

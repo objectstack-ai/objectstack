@@ -1,10 +1,11 @@
 /**
- * The record detail overlay of the Console `ObjectView` (`./ObjectView.tsx`)
- * for every navigation mode but `split` (drawer, modal, popover): the
- * `NavigationOverlay` that draws the opened record's `RecordDetailView`, moved
- * out of `ObjectViewInner`'s JSX verbatim (objectstack#25992, slice 10). The
- * `split` face stays in the component, where it wraps the list itself. Every
- * value is passed in as a prop.
+ * The record detail overlay of the Console `ObjectView` (`./ObjectView.tsx`):
+ * the drawer — the `NavigationOverlay` that draws the opened record's
+ * `RecordDetailView`, moved out of `ObjectViewInner`'s JSX verbatim
+ * (objectstack#25992, slice 10). The `split` face — drawn when the READER
+ * prefers the record beside the list (`utils/recordOpenPreference.ts`,
+ * objectstack#26677) — stays in the component, where it wraps the list
+ * itself. Every value is passed in as a prop.
  */
 
 import { NavigationOverlay } from '@object-ui/components';

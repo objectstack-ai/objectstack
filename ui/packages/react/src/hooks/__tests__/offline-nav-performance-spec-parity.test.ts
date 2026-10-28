@@ -252,7 +252,7 @@ describe('NavigationConfig IS the spec\'s authored navigation config', () => {
     //
     // The alias used to `Omit` `mode` and re-add it as `NonNullable<…>`, which
     // made it strictly tighter than BOTH the spec that produces the value and
-    // the hook that consumes it (`navigation?.mode ?? 'page'`, 140 lines below
+    // the hook that consumes it (`navigation?.mode ?? 'drawer'`, 140 lines below
     // the declaration). A required key in front of an implementation that
     // defaults it is not a contract, and the cost was paid at every spec-typed
     // caller: `ListView` had to write `schema.navigation as NavigationConfig`
@@ -266,7 +266,7 @@ describe('NavigationConfig IS the spec\'s authored navigation config', () => {
     type _IsExactlyTheSpecInput = Assert<Equal<NavigationConfig, SpecNavigationInput>>;
 
     // `mode` is OPTIONAL to author, because the spec defaults it
-    // (`packages/spec/src/ui/view.zod.ts` → `mode: NavigationModeSchema.default('page')`)
+    // (`packages/spec/src/ui/view.zod.ts` → `mode: NavigationModeSchema.default('drawer')`)
     // and a `.default()` lands on the AUTHORING side as `| undefined`. This is
     // the assertion that was false before objectui#4550.
     type _ModeIsOptional = Assert<Equal<undefined extends NavigationConfig['mode'] ? true : false, true>>;
@@ -285,17 +285,20 @@ describe('NavigationConfig IS the spec\'s authored navigation config', () => {
     expect(true).toBe(true);
   });
 
-  it('still carries every overlay mode the hook switches on', () => {
+  it('carries exactly the four modes the hook switches on — modal, split and popover are retired', () => {
+    // objectstack#26677: the spec keeps `drawer | page | new_window | none`.
+    // The three retired members are NOT assignable any more; asserted on the
+    // type, so a spec that re-admitted one would fail here, not just shrink.
+    type _ModalRetired = Assert<Equal<'modal' extends NonNullable<NavigationConfig['mode']> ? true : false, false>>;
+    type _SplitRetired = Assert<Equal<'split' extends NonNullable<NavigationConfig['mode']> ? true : false, false>>;
+    type _PopoverRetired = Assert<Equal<'popover' extends NonNullable<NavigationConfig['mode']> ? true : false, false>>;
     const all: NonNullable<NavigationConfig['mode']>[] = [
-      'page',
       'drawer',
-      'modal',
-      'split',
-      'popover',
+      'page',
       'new_window',
       'none',
     ];
-    expect(all).toHaveLength(7);
+    expect(all).toHaveLength(4);
   });
 
   it('the exported NavigationMode is the spec union AND still this config\'s `mode`', () => {
@@ -309,7 +312,7 @@ describe('NavigationConfig IS the spec\'s authored navigation config', () => {
     // stops defaulting `mode`, or defaults it on a narrower union,
     // `NavigationConfig['mode']` moves and the exported alias does not — and
     // every call site keeps compiling, because the hook's
-    // `navigation?.mode ?? 'page'` would still be assignable either way.
+    // `navigation?.mode ?? 'drawer'` would still be assignable either way.
     //
     // Both directions, deliberately: a one-way `extends` is satisfied by a
     // narrowing as well as by equality, and a narrowing is exactly the drift
@@ -317,26 +320,23 @@ describe('NavigationConfig IS the spec\'s authored navigation config', () => {
     //
     // `NonNullable` is objectui#4550's mark on this pin, and it is load-bearing
     // rather than cosmetic. The alias no longer strips the `undefined` that
-    // `.default('page')` puts on the authoring side, so `NavigationConfig['mode']`
+    // `.default('drawer')` puts on the authoring side, so `NavigationConfig['mode']`
     // is now `NavigationMode | undefined` — a bare `Equal` here would fail for
     // a reason that has nothing to do with the drift this test exists to catch.
-    // What must stay pinned is the MEMBERSHIP: the seven modes the hook
-    // switches on are exactly the seven the exported union publishes.
+    // What must stay pinned is the MEMBERSHIP: the four modes the hook
+    // switches on are exactly the four the exported union publishes.
     type _ModeIsSpecMode = Assert<Equal<NavigationMode, SpecNavigationMode>>;
     type _ModeIsConfigMode = Assert<Equal<NavigationMode, NonNullable<NavigationConfig['mode']>>>;
 
     // Runtime half — the type assertions above are erased, so this is what
     // fails visibly if the union ever loses a member.
     const everyMode: NavigationMode[] = [
-      'page',
       'drawer',
-      'modal',
-      'split',
-      'popover',
+      'page',
       'new_window',
       'none',
     ];
-    expect(new Set(everyMode).size).toBe(7);
+    expect(new Set(everyMode).size).toBe(4);
   });
 });
 

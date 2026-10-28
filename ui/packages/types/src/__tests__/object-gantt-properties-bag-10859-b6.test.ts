@@ -255,9 +255,10 @@ describe('object-gantt validates in the spec\'s `properties` bag (objectui#10859
       type: 'object-gantt',
       properties: { objectName: 'task', navigation: {}, gantt: GANTT },
     } as const;
-    // Control: the spec's own row writes a default `mode` into its output.
+    // Control: the spec's own row writes a default `mode` into its output —
+    // `drawer` since objectstack#26677 (it was `page`).
     const specOut = SpecObjectGanttPropsSchema.parse(doc.properties) as unknown as { navigation: Record<string, unknown> };
-    expect(specOut.navigation.mode).toBe('page');
+    expect(specOut.navigation.mode).toBe('drawer');
     // This face validates and writes nothing.
     const result = safeValidateSchema(doc);
     expect(result.success).toBe(true);

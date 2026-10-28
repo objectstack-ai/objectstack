@@ -4,6 +4,7 @@
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0005](./0005-metadata-customization-overlay.md) (one Zod source of truth per metadata type), [ADR-0012](./0012-notification-platform.md) (generalized outbox in `service-messaging`)
 **Consumers**: `@objectstack/spec` (`automation/`), `@objectstack/services/service-automation`, `@objectstack/plugins/plugin-approvals`, `@objectstack/plugins/plugin-webhooks` → `service-messaging`, every plugin that registers a node executor, `../objectui` (`plugin-workflow` designer)
+**Amended by**: [ADR-0143](./0143-outbound-connector-auth-is-open-tier.md) (2026-10-27) — OAuth2 token refresh and the connection lifecycle leave the "Out of scope" enterprise list; see the note under that paragraph.
 
 ---
 
@@ -227,6 +228,14 @@ Because the registry starts empty, a flow that references a connector no plugin 
 ### Out of scope (deliberately not baseline)
 
 Managed credentials/secret vault, OAuth2 token refresh, multi-tenant connection lifecycle, and a connector marketplace are **not** part of this mechanism — they are the enterprise tier, on the ADR-0015 precedent. The open framework ships the contract + dispatch + an in-process registry only.
+
+> **Amendment note (2026-10-27, ADR-0143).** "OAuth2 token refresh" and the "multi-tenant connection
+> lifecycle" leave the enterprise list above: outbound connector auth is open tier. That covers
+> OAuth2 grants, the vendor app-credential exchange, request signing, per-dispatch refresh and the
+> connection record. The vault **backend** and the connector marketplace keep this paragraph's
+> placement. The "ADR-0015 precedent" this paragraph cites does not exist in ADR-0015's text; this
+> paragraph is where the line was first drawn for connectors. The registry, dispatch and the
+> `connector-rest` reference connector's static auth below are unchanged.
 
 ### Implementation checklist
 
