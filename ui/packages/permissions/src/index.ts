@@ -22,6 +22,11 @@
 export { PermissionProvider, type PermissionProviderProps } from './PermissionProvider.js';
 export { MePermissionsProvider, type MePermissionsProviderProps, type MePermissionsResponse } from './MePermissionsProvider.js';
 export { ServerReadScope, type ServerReadScopeProps } from './ServerReadScope.js';
+export {
+  RecordFieldAccessScope,
+  type RecordFieldAccessScopeProps,
+  type RecordFieldAccessAnswer,
+} from './RecordFieldAccessScope.js';
 export { usePermissions } from './usePermissions.js';
 export { useFieldPermissions } from './useFieldPermissions.js';
 export { PermissionGuard, type PermissionGuardProps } from './PermissionGuard.js';

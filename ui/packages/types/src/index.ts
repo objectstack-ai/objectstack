@@ -443,6 +443,7 @@ export type {
   ConnectionState,
   DeleteViewResult,
   ViewHomeDeleteOutcome,
+  RecordFieldAccess,
   GlobalSearchHit,
   GlobalSearchResult,
   BatchRef,

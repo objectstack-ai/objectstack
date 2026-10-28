@@ -14,6 +14,10 @@
 //    row-blind lock is shown to stay a lock on every row.
 //  - `rfa_memo` is `private`: a member reads only the rows they own. It is the
 //    row the caller cannot read, for the existence-leak leg.
+//  - `rfa_notice` is `public_read`: everyone reads, only the owner writes. A
+//    row someone else owns is one the member may READ but not WRITE — the
+//    row-level write scope the record-scoped projection declares it leaves
+//    out, measured against the PATCH.
 
 import { defineStack } from '@objectstack/spec';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
@@ -54,6 +58,17 @@ export const RecordFieldAccessMemo = ObjectSchema.create({
   },
 });
 
+export const RecordFieldAccessNotice = ObjectSchema.create({
+  name: 'rfa_notice',
+  sharingModel: 'public_read',
+  label: 'RFA Notice',
+  pluralLabel: 'RFA Notices',
+  fields: {
+    title: Field.text({ label: 'Title', required: true }),
+    summary: Field.text({ label: 'Summary' }),
+  },
+});
+
 export const recordFieldAccessFixtureStack = defineStack({
   manifest: {
     id: 'com.dogfood.record-field-access-fixture',
@@ -63,7 +78,7 @@ export const recordFieldAccessFixtureStack = defineStack({
     name: 'Record Field Access Fixture',
     description: 'A field lock that holds only from a stage onward (field permission `when`).',
   },
-  objects: [RecordFieldAccessContract, RecordFieldAccessMemo],
+  objects: [RecordFieldAccessContract, RecordFieldAccessMemo, RecordFieldAccessNotice],
 } as any);
 
 /** The `when` the conditioned entry carries, as authored. */
@@ -81,6 +96,7 @@ export const recordFieldAccessMemberSet: PermissionSet = PermissionSetSchema.par
   objects: {
     rfa_contract: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
     rfa_memo: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
+    rfa_notice: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
   },
   fields: {
     'rfa_contract.summary': { readable: true, editable: false, when: APPROVED_ONLY },
