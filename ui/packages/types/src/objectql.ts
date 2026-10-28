@@ -2610,8 +2610,8 @@ export interface ObjectViewSchema extends BaseSchema {
    * `filter` as `{ field, operator, value }` rules and declares each view kind's
    * config in the top-level block of that kind (`kanban`, `calendar`, …).
    * ⛔ The legacy `options` bag is not a member: a stored body that carries one
-   * is folded onto the top-level blocks by `@object-ui/app-shell`'s
-   * `ViewPreview` before it reaches this record. `NamedListView` is no longer
+   * is folded onto the top-level blocks by the server's ADR-0087 conversion
+   * `list-view-options-bag-folded` before it reaches this record (objectstack#25923). `NamedListView` is no longer
    * this member's type, and its retirement follows objectui#7924.
    */
   listViews?: Record<string, z.input<typeof SpecObjectListViewSchema>>;
@@ -2892,8 +2892,13 @@ export interface NamedListView {
   /** Sort configuration */
   sort?: Array<{ field: string; order: 'asc' | 'desc' }>;
   
-  /** Type-specific options (kanban groupField, calendar startDateField, etc.) */
-  options?: Record<string, any>;
+  /**
+   * @deprecated RETIRED (objectstack#25923) — write each per-kind block at the
+   * top level of the view (`kanban`, `calendar`, `gallery`, `timeline`, `gantt`,
+   * `map`, `tree`, `chart`). The protocol retired the legacy `options` bag, and
+   * the server folds a stored one onto those blocks before the row is served.
+   */
+  options?: never;
 
   /* ── objectui#7924 — RETIRED on the authoring face (director-seat ruling,
    * bucket ② A and bucket ③) ────────────────────────────────────────────────
