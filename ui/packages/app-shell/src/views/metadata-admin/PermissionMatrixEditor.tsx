@@ -132,7 +132,13 @@ import {
   applyFieldBulk,
   fieldRuleCell,
   fieldRuleSeed,
+  objectRuleCell,
+  objectRuleSeed,
+  objectRowGrantsAny,
+  OBJECT_WILDCARD_KEY,
   type FieldBulkAction,
+  type ObjectAccessDefault,
+  type ObjectRuleCell,
   type ObjectPerm,
   type ObjectPermFlag,
   type FieldPerm,
@@ -197,8 +203,9 @@ interface ObjectSummary {
    * access requires an explicit per-object grant (or the superuser
    * viewAllRecords/modifyAllRecords bypass). Surfaced as a row badge so
    * admins editing the matrix know a wildcard-only set does not reach it.
+   * A row reads it to draw the grant the runtime resolves ({@link objectRuleCell}).
    */
-  accessDefault?: 'public' | 'private';
+  accessDefault?: ObjectAccessDefault;
   /**
    * [ADR-0090 D1] The object's authored OWD. Record-level baseline
    * context for the grants edited here: object CRUD in this matrix gates the
@@ -206,6 +213,30 @@ interface ObjectSummary {
    * `owd` unset renders as the D1 fail-closed default (private).
    */
   owd?: string;
+  /**
+   * Served from its pending draft (`_draft`), not from the published version
+   * (objectstack#26840). Only the package door reads drafts, so it is never
+   * set at environment scope. Badged with the object picker's draft mark.
+   */
+  draft?: boolean;
+}
+
+/**
+ * Read one object's merged definition for its field rows and the RLS editor.
+ *
+ * objectstack#26840 — under the package door the read goes through the
+ * draft-overlaid door, as the object list does: a draft-only object has no
+ * published definition, so the plain read answers it with no fields. The
+ * server serves the pending draft when there is one and the published object
+ * otherwise (`useObjectFields`, the same read). The environment door reads
+ * the published definition, as before.
+ */
+function readObjectDefinition(
+  client: ReturnType<typeof useMetadataClient>,
+  packageId: string | undefined,
+  objectName: string,
+): Promise<unknown> {
+  return (packageId ? client.withPreviewDrafts(true) : client).get<any>('object', objectName);
 }
 
 /**
@@ -273,6 +304,19 @@ function isArtifactBackedLayer(
   );
 }
 
+/**
+ * The editable body of a pending package draft, as `readDraftForSave` served
+ * it (the `{ type, name, item }` envelope, or a bare body), or `null` for "no
+ * draft". Read decorations come off here, at the unwrap, so neither the load
+ * nor the save's merge base carries `_diagnostics` / `_draft` (objectui#8181).
+ */
+function pendingDraftBody(
+  answer: { item?: PermissionSetDraft } | PermissionSetDraft | null,
+): PermissionSetDraft | null {
+  if (!answer) return null;
+  return stripReadDecorations((answer as { item?: PermissionSetDraft }).item ?? answer) as PermissionSetDraft;
+}
+
 /** Localized short label for an OWD value; falls back to the raw value. */
 function owdLabel(t: (k: string) => string, value: string): string {
   const key: Record<string, string> = {
@@ -338,6 +382,7 @@ const SCOPE_OUTSIDE = 'outside';
 function ScopePicker({
   objectName,
   perm,
+  inherited = false,
   axis,
   writable,
   t,
@@ -345,6 +390,8 @@ function ScopePicker({
 }: {
   objectName: string;
   perm: ObjectPerm;
+  /** objectstack#27010 — the row draws the `'*'` entry: the trigger wears the inherited look. */
+  inherited?: boolean;
   axis: (typeof SCOPE_AXES)[number];
   writable: boolean;
   t: (key: string) => string;
@@ -369,7 +416,8 @@ function ScopePicker({
         data-testid={`perm-scope-${axis.testId}-${objectName}`}
         aria-label={`${objectName} ${t(axis.labelKey)}`}
         title={title}
-        className="h-7 w-full gap-1 px-2 text-xs"
+        data-object-rule={inherited ? 'inherited' : undefined}
+        className={cn('h-7 w-full gap-1 px-2 text-xs', inherited && 'border-dashed border-muted-foreground/60 text-muted-foreground')}
       >
         {/* The trigger shows the bare label; the hint lives on the items. */}
         <SelectValue>{known ? label(value) : value}</SelectValue>
@@ -858,7 +906,15 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
             : readLayered(),
           // In package scope, list only the objects this package declares
           // (ADR-0086 P0) — otherwise the whole environment leaks into the panel.
-          client.list<any>('object', packageId ? { packageId } : {}).catch(() => []),
+          // objectstack#26840 — and read the draft-overlaid list there, so a
+          // package whose objects are still drafts can be secured before its
+          // first publish: each pending draft is served with a `_draft` mark
+          // (the object picker's read, `useObjectCatalog`). The environment
+          // door keeps the published list: only the package door authors drafts.
+          (packageId
+            ? client.withPreviewDrafts(true).list<any>('object', { packageId })
+            : client.list<any>('object', {})
+          ).catch(() => []),
           draftReadForSave,
         ]);
         if (cancelled) return;
@@ -887,13 +943,10 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         // below re-bases on a fresh RAW `layered` read, which drops them — but
         // its `.catch(() => null)` arm falls back to this very body and
         // spreads it into `client.save`, so a failed layered read used to put
-        // `_diagnostics` / `_draft` on the wire. Strip at the unwrap, which is
-        // the one place the served envelope becomes an editable draft.
-        const draftBody = pendingDraft
-          ? (stripReadDecorations(
-              (pendingDraft as any).item ?? pendingDraft,
-            ) as PermissionSetDraft)
-          : null;
+        // `_diagnostics` / `_draft` on the wire. Strip at the unwrap,
+        // `pendingDraftBody`, the one function through which a served envelope
+        // becomes an editable body — here and in `doSave`'s merge base.
+        const draftBody = pendingDraftBody(pendingDraft);
         // Draft wins over the published baseline for display (D6).
         const effective: PermissionSetDraft = (draftBody ?? lay?.effective ??
           lay?.code ?? { name, objects: {} }) as PermissionSetDraft;
@@ -905,6 +958,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
               label: item?.label,
               accessDefault: item?.access?.default as ObjectSummary['accessDefault'],
               owd: typeof item?.sharingModel === 'string' ? item.sharingModel : undefined,
+              ...(item?._draft === true ? { draft: true } : {}),
             };
           })
           .filter((o) => !!o.name)
@@ -951,7 +1005,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
       // and misses fields carried inline on a published object, which left
       // this editor showing "no fields" for objects that clearly have them.
       // `fields` may come back as an array or as a `{ [name]: def }` map.
-      const obj = (await client.get<any>('object', objectName)) as
+      const obj = (await readObjectDefinition(client, packageId, objectName)) as
         | { fields?: Record<string, any> | Array<any> }
         | null;
       const raw = obj?.fields;
@@ -981,7 +1035,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
   const loadObjectFields = React.useCallback(
     async (objectName: string): Promise<string[]> => {
       try {
-        const obj = (await client.get<any>('object', objectName)) as
+        const obj = (await readObjectDefinition(client, packageId, objectName)) as
           | { fields?: Record<string, any> | Array<any> }
           | null;
         const raw = obj?.fields;
@@ -997,7 +1051,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         return [];
       }
     },
-    [client],
+    [client, packageId],
   );
 
   // Count of blocking CEL parse errors in the RLS editor — gates Save
@@ -1093,9 +1147,26 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
   }
 
   /* ── Mutators ───────────────────────────────────────────── */
+  // objectstack#27010 — every object-row and field-row edit starts from the
+  // object entry the row DRAWS (`objectRuleCell`): its own entry, or the `'*'`
+  // entry where the runtime applies that to the object. The object's posture
+  // decides the second case, read from the catalog the rows are listed from.
+  const accessDefaultByObject = React.useMemo(
+    () => new Map<string, ObjectAccessDefault | undefined>(objects.map((o) => [o.name, o.accessDefault])),
+    [objects],
+  );
+  const objectAccessDefault = React.useCallback(
+    (objectName: string) => accessDefaultByObject.get(objectName),
+    [accessDefaultByObject],
+  );
+  const drawnObjectPerm = (set: PermissionSetDraft, objectName: string): ObjectPerm =>
+    objectRuleCell(set.objects, objectName, accessDefaultByObject.get(objectName)).perm;
+  const objectEditSeed = (set: PermissionSetDraft, objectName: string): ObjectPerm =>
+    objectRuleSeed(set.objects, objectName, accessDefaultByObject.get(objectName));
+
   function updateObjectPerm(objectName: string, action: ObjectPermFlag, value: boolean) {
     setDraft((prev) => {
-      const cur = prev.objects[objectName] ?? {};
+      const cur = objectEditSeed(prev, objectName);
       const nextObj: ObjectPerm = { ...cur, [action]: value };
       // Cascade: viewAllRecords implies allowRead.
       if (action === 'viewAllRecords' && value) nextObj.allowRead = true;
@@ -1127,7 +1198,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
     value: ObjectAccessScope | undefined,
   ) {
     setDraft((prev) => {
-      const next: ObjectPerm = { ...(prev.objects[objectName] ?? {}) };
+      const next: ObjectPerm = objectEditSeed(prev, objectName);
       if (value === undefined) delete next[axis];
       else next[axis] = value;
       return { ...prev, objects: { ...prev.objects, [objectName]: next } };
@@ -1145,7 +1216,9 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
       // on the button labelled "None" — a permissive outcome that does not
       // exist today. What an admin's "None" means is a behaviour decision, not
       // a mechanical merge; pinned by
-      // `PermissionMatrixEditor.bulkMergeKeys.test.tsx`.
+      // `PermissionMatrixEditor.bulkMergeKeys.test.tsx`. On a row that draws
+      // the `'*'` entry, `{}` is an entry of its own: the resolver returns it
+      // instead of `'*'`, so the object gets nothing, as the row then shows.
       if (action === 'none') {
         return { ...prev, objects: { ...prev.objects, [objectName]: {} } };
       }
@@ -1162,8 +1235,9 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
       // environment door writes the whole record, and at package scope
       // `mergePermissionSlice` takes in-scope rows entirely from `edited`
       // (ADR-0086 P0), so `base` cannot restore what a bulk click dropped.
-      const cur = prev.objects[objectName] ?? {};
-      const next: ObjectPerm = { ...cur };
+      // objectstack#27010 — "the current row" is the row as drawn, so on a
+      // row drawing the `'*'` entry the merge starts from that entry.
+      const next: ObjectPerm = objectEditSeed(prev, objectName);
       const bulkKeys = OBJECT_ACTIONS.filter((a) => !a.optIn).map((a) => a.key);
       for (const key of bulkKeys) delete next[key];
       const grants: ObjectPermFlag[] =
@@ -1191,7 +1265,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
       const fields = { ...(prev.fields ?? {}) };
       // objectstack#26597 — a row without an entry starts from the bits it
       // draws (the object grant), so the click changes only the box it lands on.
-      const cur = fieldRuleSeed(fields[key], prev.objects[objectName]);
+      const cur = fieldRuleSeed(fields[key], drawnObjectPerm(prev, objectName));
       const next: FieldPerm = { ...cur, [action]: value };
       // Cascade: !readable implies !editable — and no row condition: the spec
       // refuses `when` beside `readable: false` (objectstack#25866), so Read
@@ -1217,7 +1291,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
       const fields = { ...(prev.fields ?? {}) };
       // objectstack#26597 — the condition alone changes no box: the entry
       // starts from the bits the row draws.
-      const cur = fieldRuleSeed(fields[key], prev.objects[objectName]);
+      const cur = fieldRuleSeed(fields[key], drawnObjectPerm(prev, objectName));
       const next: FieldPerm = { ...cur };
       if (when.trim() === '') delete next.when;
       else {
@@ -1251,7 +1325,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
     if (fieldNames.length === 0) return;
     setDraft((prev) => ({
       ...prev,
-      fields: applyFieldBulk(prev.fields ?? {}, objectName, prev.objects[objectName], action, fieldNames),
+      fields: applyFieldBulk(prev.fields ?? {}, objectName, drawnObjectPerm(prev, objectName), action, fieldNames),
     }));
   }
 
@@ -1300,19 +1374,36 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         // purpose: a set that exists only as a package draft (what the Studio
         // Access pillar's "+ New" creates) has no published rows for anyone to
         // lose, and refusing there would block its first save.
+        //
+        // objectstack#26837 — and this door's save WRITES the pending draft, so
+        // when one exists it is the base, not the published body: the facets
+        // the editor cannot author (`description`, `packageId`, any key another
+        // door wrote) come from the draft, exactly as the load displayed it.
+        // Read through the load's own door, at the address this save writes.
+        // The pin the load recorded is left alone, so a draft that moved since
+        // the load is still refused as a version conflict. `readDraftForSave`
+        // resolves a REJECTED read as no answer AND no pin, while a read that
+        // found no draft pins `If-None-Match: *` — so the pair tells a failure
+        // apart from "no draft", and a failure refuses exactly like the
+        // layered re-read: falling back to the published body would drop the
+        // draft's values with a 200.
         let rereadFailed = false;
-        const fresh = await client
-          .layered<PermissionSetDraft>(type, payload.name)
-          // Kept on `.catch` so the rejection can never escape as an unhandled
-          // one; the refusal is raised below, inside this `try`'s own body, and
-          // reaches the author on the same error channel a failed
-          // `client.save` already uses.
-          .catch(() => {
-            rereadFailed = true;
-            return null;
-          });
+        const [fresh, draftRead] = await Promise.all([
+          client
+            .layered<PermissionSetDraft>(type, payload.name)
+            // Kept on `.catch` so the rejection can never escape as an
+            // unhandled one; the refusal is raised below, inside this `try`'s
+            // own body, and reaches the author on the same error channel a
+            // failed `client.save` already uses.
+            .catch(() => {
+              rereadFailed = true;
+              return null;
+            }),
+          readDraftForSave<{ item?: PermissionSetDraft } | PermissionSetDraft>(client, type, payload.name, packageId),
+        ]);
+        if (draftRead.answer === null && draftRead.pin === null) rereadFailed = true;
         if (rereadFailed) throw new Error(t('perm.save.rereadFailed'));
-        const base = (fresh?.effective ?? payload) as PermissionSetDraft;
+        const base = (pendingDraftBody(draftRead.answer) ?? fresh?.effective ?? payload) as PermissionSetDraft;
         toSave = mergePermissionSlice(base, payload, scope);
       }
       // ADR-0086 P2 (D6/D7). Package door → the set is metadata: write a DRAFT
@@ -1499,9 +1590,9 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
   const filteredObjects = React.useMemo(() => {
     const q = filter.trim().toLowerCase();
     return objects.filter((o) => {
-      if (showOnlyEnabled) {
-        const perm = draft.objects[o.name];
-        if (!perm || !Object.values(perm).some(Boolean)) return false;
+      // objectstack#27010 — "Only granted" keeps a row by what it draws.
+      if (showOnlyEnabled && !objectRowGrantsAny(objectRuleCell(draft.objects, o.name, o.accessDefault).perm)) {
+        return false;
       }
       if (!q) return true;
       return (
@@ -1511,16 +1602,35 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
     });
   }, [objects, filter, showOnlyEnabled, draft.objects]);
 
+  // objectstack#27010 — counted by what the rows draw: every object entry that
+  // grants anything, plus every listed object without one that the `'*'` entry
+  // grants. The `'*'` entry itself names no object.
+  const grantedObjectCount =
+    Object.entries(draft.objects).filter(([key, p]) => key !== OBJECT_WILDCARD_KEY && objectRowGrantsAny(p)).length +
+    objects.filter((o) => {
+      const cell = objectRuleCell(draft.objects, o.name, o.accessDefault);
+      return cell.inherited && objectRowGrantsAny(cell.perm);
+    }).length;
   const stats = [
     {
       label: t('perm.stat.objectsGranted'),
-      value: Object.values(draft.objects).filter((p) => Object.values(p).some(Boolean)).length,
+      value: grantedObjectCount,
     },
     {
       label: t('perm.stat.fieldOverrides'),
       value: Object.keys(draft.fields ?? {}).length,
     },
   ];
+
+  // objectstack#27010 — what a grey object box means, said once above the rows,
+  // whenever a listed row draws the `'*'` entry.
+  const objectInheritedLegendEl = filteredObjects.some(
+    (o) => objectRuleCell(draft.objects, o.name, o.accessDefault).inherited,
+  ) ? (
+    <p className="shrink-0 border-b px-6 py-2 text-xs text-muted-foreground" data-testid="perm-object-inherited-legend">
+      {t('perm.object.inherited.legend')}
+    </p>
+  ) : null;
 
   // objectui#5987 — one element, two seats: the header slot Save would occupy
   // when the artifact tier locks the surface, and the refused-save strip when a
@@ -2055,6 +2165,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
                 locale={locale}
                 t={t}
               />
+              {objectInheritedLegendEl}
               <div className="min-h-0 flex-1 overflow-auto">
                 <StudioObjectMatrix
                   objects={filteredObjects}
@@ -2096,6 +2207,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
                   t={t}
                   only={facetTab}
                   packageBound={!!packageId}
+                  objectAccessDefault={objectAccessDefault}
                 />
               </DraftVerdictContext.Provider>
             </div>
@@ -2241,6 +2353,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
             </span>
           ))}
         </div>
+        {objectInheritedLegendEl}
 
         {/* Matrix */}
         <div className="flex-1 overflow-auto">
@@ -2275,6 +2388,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
               onCelErrorsChange={setCelErrorCount}
               t={t}
               packageBound={!!packageId}
+              objectAccessDefault={objectAccessDefault}
             />
           </DraftVerdictContext.Provider>
           {/* ADR-0056 P4 — assigning users is a Setup act, so the DESIGN surface
@@ -2381,7 +2495,9 @@ function PermissionTable({
           </tr>
         )}
         {objects.map((o) => {
-          const perm = draft.objects[o.name] ?? {};
+          // objectstack#27010 — the row draws the entry the runtime resolves.
+          const cell = objectRuleCell(draft.objects, o.name, o.accessDefault);
+          const perm = cell.perm;
           const open = expanded.has(o.name);
           return (
             <React.Fragment key={o.name}>
@@ -2410,6 +2526,12 @@ function PermissionTable({
                     >
                       {t('perm.posture.private')}
                     </Badge>
+                  )}
+                  {o.draft && (
+                    // objectstack#26840 — the object picker's draft mark (`ObjectPicker`).
+                    <span data-draft-marker="" className="ml-2 align-middle text-[10px] text-muted-foreground">
+                      {t('engine.inspector.draftSuffix')}
+                    </span>
                   )}
                   <Badge
                     variant="outline"
@@ -2440,17 +2562,28 @@ function PermissionTable({
                 </td>
                 {objectActions.map((a) => (
                   <td key={a.key as string} className="text-center px-2 py-1.5">
-                    <Checkbox
+                    <ObjectRuleBox
+                      objectName={o.name}
+                      action={a}
                       checked={!!perm[a.key]}
-                      disabled={!writable}
-                      onCheckedChange={(v) => onObjectPerm(o.name, a.key, !!v)}
-                      aria-label={`${o.name} ${a.tip}`}
+                      source={cell.source}
+                      writable={writable}
+                      t={t}
+                      onObjectPerm={onObjectPerm}
                     />
                   </td>
                 ))}
                 {SCOPE_AXES.map((s) => (
                   <td key={s.axis} className="px-2 py-1.5">
-                    <ScopePicker objectName={o.name} perm={perm} axis={s} writable={writable} t={t} onChange={onObjectScope} />
+                    <ScopePicker
+                      objectName={o.name}
+                      perm={perm}
+                      inherited={cell.inherited}
+                      axis={s}
+                      writable={writable}
+                      t={t}
+                      onChange={onObjectScope}
+                    />
                   </td>
                 ))}
                 <td className="px-2 py-1.5 text-right space-x-1">
@@ -2657,7 +2790,7 @@ function StudioObjectMatrix({
           <StudioObjectRow
             key={o.name}
             object={o}
-            perm={draft.objects[o.name] ?? {}}
+            cell={objectRuleCell(draft.objects, o.name, o.accessDefault)}
             open={expanded.has(o.name)}
             fieldsState={draft.fields ?? {}}
             fields={fieldsByObject[o.name]}
@@ -2683,7 +2816,7 @@ function StudioObjectMatrix({
 
 function StudioObjectRow({
   object: o,
-  perm,
+  cell,
   open,
   fieldsState,
   fields,
@@ -2702,7 +2835,8 @@ function StudioObjectRow({
   onOpenOwd,
 }: {
   object: ObjectSummary;
-  perm: ObjectPerm;
+  /** objectstack#27010 — the entry the row draws (`objectRuleCell`). */
+  cell: ObjectRuleCell;
   open: boolean;
   fieldsState: Record<string, FieldPerm>;
   fields: FieldSummary[] | undefined;
@@ -2726,6 +2860,7 @@ function StudioObjectRow({
   const [hovered, setHovered] = React.useState(false);
   const [focused, setFocused] = React.useState(false);
   const active = hovered || focused;
+  const perm = cell.perm;
   const bulk: Array<{ action: 'read' | 'crud' | 'all' | 'none'; key: string }> = [
     { action: 'read', key: 'perm.bulk.read' },
     { action: 'crud', key: 'perm.bulk.crud' },
@@ -2771,6 +2906,12 @@ function StudioObjectRow({
               {t('perm.posture.private')}
             </Badge>
           )}
+          {o.draft && (
+            // objectstack#26840 — the object picker's draft mark (`ObjectPicker`).
+            <span data-draft-marker="" className="ml-2 align-middle text-[10px] text-muted-foreground">
+              {t('engine.inspector.draftSuffix')}
+            </span>
+          )}
         </td>
         <td className="px-3 py-1 align-middle">
           <span
@@ -2800,18 +2941,29 @@ function StudioObjectRow({
         </td>
         {objectActions.map((a, i) => (
           <td key={a.key as string} className={cn('px-1 py-1 text-center align-middle', divider(i))}>
-            <Checkbox
+            <ObjectRuleBox
+              objectName={o.name}
+              action={a}
               checked={!!perm[a.key]}
-              disabled={!writable}
-              onCheckedChange={(v) => onObjectPerm(o.name, a.key, !!v)}
-              aria-label={`${o.name} ${a.tip}`}
+              source={cell.source}
+              writable={writable}
+              t={t}
+              onObjectPerm={onObjectPerm}
               className="h-[18px] w-[18px] rounded border-muted-foreground/40 align-middle data-[state=checked]:border-primary"
             />
           </td>
         ))}
         {SCOPE_AXES.map((s, i) => (
           <td key={s.axis} className={cn('px-2 py-1 align-middle', i === 0 && 'border-l')}>
-            <ScopePicker objectName={o.name} perm={perm} axis={s} writable={writable} t={t} onChange={onObjectScope} />
+            <ScopePicker
+              objectName={o.name}
+              perm={perm}
+              inherited={cell.inherited}
+              axis={s}
+              writable={writable}
+              t={t}
+              onChange={onObjectScope}
+            />
           </td>
         ))}
         <td className="border-l px-3 py-1 align-middle">
@@ -2852,6 +3004,58 @@ function StudioObjectRow({
         </tr>
       )}
     </>
+  );
+}
+
+/**
+ * The inherited look, shared by object and field boxes: grey with a dashed
+ * edge, so a box that draws a grant the set inherits never reads as one the
+ * set declares for that row.
+ */
+const INHERITED_BOX_CLASS =
+  'border-dashed border-muted-foreground/60 data-[state=checked]:bg-muted-foreground/40 data-[state=checked]:text-foreground';
+
+/**
+ * objectstack#27010 — one boolean box of an object row, drawn from
+ * {@link objectRuleCell}. A row without an entry of its own that draws the
+ * `'*'` entry wears the inherited look (`data-object-rule="inherited"`) and says
+ * so in its tooltip; a click writes an entry for the object that starts from
+ * the drawn bits (`objectRuleSeed`).
+ */
+function ObjectRuleBox({
+  objectName,
+  action,
+  checked,
+  source,
+  writable,
+  t,
+  onObjectPerm,
+  className,
+}: {
+  objectName: string;
+  action: { key: ObjectPermFlag; tip: string };
+  checked: boolean;
+  source: ObjectRuleCell['source'];
+  writable: boolean;
+  t: (key: string) => string;
+  onObjectPerm: (objectName: string, action: ObjectPermFlag, value: boolean) => void;
+  className?: string;
+}) {
+  const inherited = source === 'wildcard';
+  return (
+    <Checkbox
+      checked={checked}
+      disabled={!writable}
+      onCheckedChange={(v) => onObjectPerm(objectName, action.key, !!v)}
+      aria-label={`${objectName} ${action.tip}`}
+      title={inherited ? t('perm.object.inherited.tip') : undefined}
+      data-object-rule={source}
+      className={cn(
+        className,
+        // The Studio row's own class pins a checked border; the inherited one replaces it.
+        inherited && [INHERITED_BOX_CLASS, 'data-[state=checked]:border-muted-foreground/60'],
+      )}
+    />
   );
 }
 
@@ -2897,11 +3101,7 @@ function FieldRuleBox({
       title={title}
       data-field-rule={inherited ? 'inherited' : 'rule'}
       data-capped={capped || undefined}
-      className={cn(
-        inherited &&
-          'border-dashed border-muted-foreground/60 data-[state=checked]:bg-muted-foreground/40 data-[state=checked]:text-foreground',
-        capped && 'ring-1 ring-amber-500/70 ring-offset-1',
-      )}
+      className={cn(inherited && INHERITED_BOX_CLASS, capped && 'ring-1 ring-amber-500/70 ring-offset-1')}
     />
   );
 }

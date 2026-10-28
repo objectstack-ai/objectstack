@@ -127,6 +127,8 @@ function makeClient(server: Server) {
     // does for a published set, so the load reads its layers exactly as before
     // (call #1 above). A set the list does not hold is not asked while its
     // draft is in hand.
+    // objectstack#26840 — the package door reads its objects through the draft-overlaid door.
+    withPreviewDrafts() { return this; },
     list: async (type: string) =>
       type === 'object'
         ? [{ item: { name: 'a_account' } }, { item: { name: 'a_contact' } }]

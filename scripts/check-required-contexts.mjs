@@ -235,7 +235,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the recognizer itself, in BOTH directions': 10,
   '…and the NARROW recognizer beside it, in both directions': 6,
   'is the pin WIRED into the required job?': 3,
-  'the wiring recognizer, in BOTH directions': 13,
+  'the wiring recognizer, in BOTH directions': 23,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -989,6 +989,36 @@ function jobsCarriedByLint(doc) {
     if (job && typeof job === 'object') carried.push([id, job]);
   }
   return carried;
+}
+
+// The ONE job-level `if:` a lane hosting the pin may carry: lint.yml's scheduled-run skip
+// (#26071, ruling 6416984681, letter A (i)). The lane needs `schedule-gate`, a job that runs
+// on `schedule` only; on every other event that job is skipped, its output reads empty, and
+// `!cancelled()` runs the lane past it — so no PR, queue build or push can arrange that the
+// pin does not run on it without editing one of these two byte-exact spellings, which is
+// what the wiring assertion then refuses. Any other `if:` on the lane is still refused.
+const SCHEDULE_GATE_JOB = 'schedule-gate';
+const SCHEDULE_GATE_JOB_IF = "github.event_name == 'schedule'";
+const SCHEDULE_SKIP_LANE_IF = "${{ !cancelled() && needs.schedule-gate.outputs.skip != 'true' }}";
+
+/**
+ * Whether every lane hosting the pin carries either no job-level `if:` or exactly the
+ * scheduled-run skip, read from one parsed lint.yml. The `lint` aggregate itself is exempt by
+ * construction: its `if: always()` (plus its schedule-only conjunct) is what makes it report.
+ *
+ * @param {unknown} doc a parsed lint.yml
+ * @returns {boolean}
+ */
+function pinLanesCarryNoArrangeableIf(doc) {
+  const gate = doc && typeof doc === 'object' && doc.jobs && typeof doc.jobs === 'object' ? doc.jobs[SCHEDULE_GATE_JOB] : undefined;
+  const gateIsScheduleOnly = !!gate && typeof gate === 'object' && gate.if === SCHEDULE_GATE_JOB_IF;
+  return jobsCarriedByLint(doc)
+    .filter(([, job]) => pinSteps(job).length > 0)
+    .every(([id, job]) => {
+      if (id === 'lint' || !Object.prototype.hasOwnProperty.call(job, 'if')) return true;
+      const needs = Array.isArray(job.needs) ? job.needs.map(String) : typeof job.needs === 'string' ? [job.needs] : [];
+      return gateIsScheduleOnly && job.if === SCHEDULE_SKIP_LANE_IF && needs.includes(SCHEDULE_GATE_JOB);
+    });
 }
 
 /**
@@ -3277,9 +3307,11 @@ async function selfTest() {
     // …and, since the pin moved into a lane (#22991), neither may the LANE: a job-level `if:` is
     // the same arrangement one level up, and it is the one a step-level read cannot see. The
     // aggregate itself is exempt by construction — its `if: always()` is what makes it report.
+    // One spelling is admitted, the scheduled-run skip (`pinLanesCarryNoArrangeableIf`, #26071):
+    // it can skip the lane on `schedule` alone, never on a PR or a queue build.
     assert(
-      hosts.every((h) => h.id === 'lint' || !Object.prototype.hasOwnProperty.call(h.job, 'if')),
-      'wiring: the lane hosting the required-context pin must carry NO job-level `if:` — a skipped lane is a pin that did not run',
+      pinLanesCarryNoArrangeableIf(lintDoc),
+      'wiring: the lane hosting the required-context pin must carry NO job-level `if:` other than the scheduled-run skip — a skipped lane is a pin that did not run',
     );
 
     // ── the wiring recognizer, in BOTH directions ────────────────────────────
@@ -3358,8 +3390,9 @@ async function selfTest() {
     );
     // (q) ⭐ #22991: the pin in a LANE of the `lint` aggregate — declared AND needed — is wired.
     // The checked-in lint.yml is this shape; the fixture pins the reading apart from it.
-    const aggregateFixture = ({ declare, need, laneIf = null }) =>
+    const aggregateFixture = ({ declare, need, laneIf = null, gateIf = null, laneNeedsGate = false }) =>
       lintFixture(
+        ...(gateIf ? ['  schedule-gate:', `    if: ${gateIf}`, '    runs-on: ubuntu-latest', '    steps:', '      - run: echo skip=false'] : []),
         '  lint:',
         '    name: Lint & Repo Gates',
         ...(need ? ['    needs: [lint-lane]'] : []),
@@ -3370,6 +3403,7 @@ async function selfTest() {
         '      - name: Verify every lint lane succeeded',
         '        run: node verify.mjs',
         '  lint-lane:',
+        ...(laneNeedsGate ? ['    needs: [schedule-gate]'] : []),
         ...(laneIf ? [`    if: ${laneIf}`] : []),
         '    runs-on: ubuntu-latest',
         '    steps:',
@@ -3399,6 +3433,36 @@ async function selfTest() {
       assert(
         laneHosts.length === 1 && Object.prototype.hasOwnProperty.call(laneHosts[0][1], 'if'),
         'wiring: a job-level `if:` on the lane hosting the pin is SEEN by the hosts read (#22991) — the live no-`if:` assertion depends on it',
+      );
+    }
+    // (u) #26071: the live no-`if:` predicate itself, in BOTH directions. The scheduled-run skip
+    // is admitted only as the whole shape — the lane's byte-exact `if:`, its `needs:` on the gate,
+    // and a gate job that runs on `schedule` alone; any one half missing is refused again.
+    {
+      const skip = { declare: true, need: true, laneIf: SCHEDULE_SKIP_LANE_IF, gateIf: SCHEDULE_GATE_JOB_IF, laneNeedsGate: true };
+      assert(
+        pinLanesCarryNoArrangeableIf(parse(aggregateFixture({ declare: true, need: true }))),
+        'wiring: a pin lane with NO job-level `if:` passes the live predicate (#26071 control)',
+      );
+      assert(
+        pinLanesCarryNoArrangeableIf(parse(aggregateFixture(skip))),
+        'wiring: the scheduled-run skip (lane `if:` + `needs: [schedule-gate]` + a schedule-only gate) is admitted on the pin lane (#26071)',
+      );
+      assert(
+        !pinLanesCarryNoArrangeableIf(parse(aggregateFixture({ declare: true, need: true, laneIf: "github.event_name != 'pull_request'" }))),
+        'wiring: any other job-level `if:` on the pin lane is still refused (#26071)',
+      );
+      assert(
+        !pinLanesCarryNoArrangeableIf(parse(aggregateFixture({ ...skip, gateIf: "github.event_name != 'merge_group'" }))),
+        'wiring: the skip spelling is refused when the gate job also runs on a PR — there it could say skip (#26071)',
+      );
+      assert(
+        !pinLanesCarryNoArrangeableIf(parse(aggregateFixture({ ...skip, gateIf: null }))),
+        'wiring: the skip spelling is refused when no `schedule-gate` job exists to bound it (#26071)',
+      );
+      assert(
+        !pinLanesCarryNoArrangeableIf(parse(aggregateFixture({ ...skip, laneNeedsGate: false }))),
+        'wiring: the skip spelling is refused when the lane does not need the gate it reads (#26071)',
       );
     }
     // (n) the genuine article, spelled the way lint.yml spells it.

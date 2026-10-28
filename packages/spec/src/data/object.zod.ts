@@ -3203,7 +3203,7 @@ const ObjectSchemaBase = strictObject(
     + 'userField: \'user\', valueField: \'supplier\', filter: \'active == true\' }`). Declare a key on the '
     + 'one object whose rows define it; a key name is one request-wide name, so declaring it on two objects is '
     + 'refused, and the kernel\'s own names (`id`, `organization_id`, `positions`, `org_user_ids`, '
-    + '`accessible_org_ids`, `email`) are refused. The set is read once per request, only when a policy reads '
+    + '`accessible_org_ids`, `email`, `queues`) are refused. The set is read once per request, only when a policy reads '
     + 'the key, as a system read inside the caller\'s organization and regardless of what the caller may read on '
     + 'this object, so the caller needs no read on it; it holds at most 1,000 values, and a larger set, a failed '
     + 'read, a `filter` that does not compile for this object, or a key a registered membership resolver also '

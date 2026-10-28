@@ -93,6 +93,34 @@ export const LinkCell: React.FC<{
    * `data-table` does to the body around it. Absent / `false` ⇒ unchanged.
    */
   wrap?: boolean;
+  /**
+   * A host-drawn node after the link, never inside it (objectstack#26681):
+   * `ObjectGrid`'s `recordLinkAdornment` for this row. The console's object
+   * list hands its "open as full page" arrow here. Absent (or `null` /
+   * `false`) ⇒ the cell is exactly the link, as before.
+   */
+  trailing?: React.ReactNode;
+  children: React.ReactNode;
+}> = ({ trailing, ...link }) => {
+  const own = <RecordLink {...link} />;
+  if (trailing === null || trailing === undefined || trailing === false) return own;
+  // The link keeps its own one-line clamp: its box may shrink (`min-w-0`),
+  // the trailing node never does.
+  return (
+    <span className="flex min-w-0 max-w-full items-center gap-1" data-testid="link-cell-trailing">
+      <span className="min-w-0">{own}</span>
+      {trailing}
+    </span>
+  );
+};
+
+/** {@link LinkCell}'s link itself: the anchor, or the span a host with no record URL gets. */
+const RecordLink: React.FC<{
+  testId: string;
+  onActivate: () => void;
+  objectName?: string;
+  recordId?: string | number | null;
+  wrap?: boolean;
   children: React.ReactNode;
 }> = ({ testId, onActivate, objectName, recordId, wrap, children }) => {
   const host = useRelatedRecordActions();
