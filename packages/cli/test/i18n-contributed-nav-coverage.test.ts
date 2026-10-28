@@ -81,9 +81,9 @@ const without = (labels: Record<string, unknown>, id?: string) =>
 
 /**
  * The app package's pack carries every navigation label, the contributed ones
- * included — the layout HotCRM's packs were measured in (#18203). A pack's
- * `apps.APP` entry requires the app's own `label`, so a module could ship the
- * contributed labels itself only by restating it.
+ * included — the layout HotCRM's packs were measured in (#18203). A module may
+ * instead ship the contributed labels in its own pack, without the app's
+ * `label` (#27086); this file pins the walker, not where the labels live.
  */
 function stacks(drop?: string) {
   const appStack = defineStack({

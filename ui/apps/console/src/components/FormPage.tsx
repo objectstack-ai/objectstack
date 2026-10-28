@@ -148,6 +148,7 @@ import {
   mapFieldTypeToFormType,
   resolveFormWidgetType,
 } from '@object-ui/fields';
+import { Tabs, TabsContent, TabsList, TabsTrigger, cn } from '@object-ui/components';
 import { SchemaRendererContext, usePredicateScope, type ApiFetch } from '@object-ui/react';
 import { pickLocalized, useObjectTranslation, useSafeFieldLabel } from '@object-ui/i18n';
 import type { FormFieldSpec, FormSectionSpec, FormViewSpec } from '@object-ui/app-shell';
@@ -996,6 +997,46 @@ export function isSectionVisible(
     context: `visibleWhen of section '${section.label ?? '(unlabelled)'}'`,
   });
 }
+
+/**
+ * The tab value of one section of a `type: 'tabbed'` form view
+ * (objectstack-ai/objectstack#26843): its `name`, else its heading, else its
+ * position. The same answer `@object-ui/plugin-form`'s `TabbedForm` gives a
+ * section, so one authored `defaultTab` opens the same tab on the app's tabbed
+ * form and on this page.
+ */
+export function sectionTabKey(section: Pick<RenderableSection, 'name' | 'label'>, index: number): string {
+  return section.name || section.label || `tab-${index}`;
+}
+
+/**
+ * The open tab of a tabbed form view, among the tabs actually DRAWN (a section
+ * its predicate hides draws no tab): the user's pick, else the form view's
+ * `defaultTab`, else the first drawn tab. A pick or a `defaultTab` naming a
+ * tab that is not drawn falls through to the next answer, so the strip never
+ * opens onto a panel that is not there.
+ */
+export function resolveActiveTab(
+  drawn: readonly string[],
+  picked: string | null,
+  defaultTab: string | undefined,
+): string | undefined {
+  if (picked && drawn.includes(picked)) return picked;
+  if (defaultTab && drawn.includes(defaultTab)) return defaultTab;
+  return drawn[0];
+}
+
+/**
+ * One field row under the form view's `layout: 'horizontal'`
+ * (objectstack-ai/objectstack#26843): the label in a fixed column beside its
+ * control from `sm` up, and stacked as `vertical` draws it below `sm`. The
+ * arrangement `@object-ui/components`' form renderer gives a field item under
+ * the same key, so a form view reads the same here and in the app's forms:
+ * every child but the `<label>` (the control, its help line) takes the second
+ * column, and the label sits on the control's first text line.
+ */
+const HORIZONTAL_ROW_CLASS =
+  'sm:grid sm:grid-cols-[minmax(0,10rem)_minmax(0,1fr)] sm:items-baseline sm:gap-x-4 sm:[&>:not(label)]:col-start-2';
 
 /**
  * The row's EFFECTIVE `{ visible, readonly, required }` — every conditional
@@ -2230,6 +2271,12 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
   const [uploading, setUploading] = useState<Record<string, boolean>>({});
   const isUploading = Object.values(uploading).some(Boolean);
   /**
+   * The tab the user opened on a `type: 'tabbed'` form view
+   * (objectstack-ai/objectstack#26843). Null until they open one, so the form
+   * view's `defaultTab` decides until then; see {@link resolveActiveTab}.
+   */
+  const [pickedTab, setPickedTab] = useState<string | null>(null);
+  /**
    * The sonner id this form's submit OUTCOME is published under — one id for
    * the confirmation and for the refusal, so the later of the two SUPERSEDES
    * the earlier instead of stacking beside it (objectui#7252).
@@ -2318,6 +2365,17 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
   const submitButton = readFormButton(loaded?.form?.buttons?.submit, language);
   const cancelButton = readFormButton(loaded?.form?.buttons?.cancel, language);
 
+  /**
+   * The form view's `type: 'tabbed'` and `layout`, which this page never read
+   * (objectstack-ai/objectstack#26843). Tabbed draws one tab per section; with
+   * a single section there is nothing to switch between, so it draws stacked,
+   * as the app's tabbed form draws no strip for one. The form's ONE `values`
+   * map holds every section's fields whichever tab is open, so a submit
+   * carries them all.
+   */
+  const tabbedView = loaded?.form?.type === 'tabbed' && sections.length > 1;
+  const horizontalRows = loaded?.form?.layout === 'horizontal';
+
   const behavior: EffectiveSubmitBehavior = resolveSubmitBehavior(
     mode,
     loaded?.form?.submitBehavior,
@@ -2377,6 +2435,14 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
       isCreateForm,
       predicateScope,
     );
+    // On a tabbed form view the refused field may sit on a tab that is not
+    // open (objectstack-ai/objectstack#26843): open the tab of the first field
+    // the message below names, the way the app's tabbed form jumps to it.
+    const refused = faultedVisibleWhen[0] ?? missing[0];
+    if (refused && tabbedView) {
+      const at = sections.findIndex((s) => s.fields.includes(refused));
+      if (at >= 0) setPickedTab(sectionTabKey(sections[at], at));
+    }
     // A faulted `visibleWhen` first (objectui#8069): it names the field and
     // the rule, and nothing typed into the form can clear it, so the required
     // check behind it would only ask for work that is refused anyway.
@@ -2576,6 +2642,170 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
     );
   }
 
+  /**
+   * A section's heading (objectui#8813): `objects.{object}._sections.{name}.label`,
+   * falling back to the authored string, exactly as `ObjectForm` does on the
+   * app path. The KEY is `sec.name`; a section authored without one has no key
+   * and keeps its authored heading. Empty for a section with neither.
+   */
+  const sectionHeading = (sec: RenderableSection): string =>
+    (sec.name ? sectionLabel(loaded.object, sec.name, sec.label ?? '') : sec.label) ?? '';
+
+  /**
+   * One section's description and field grid: what a stacked section draws
+   * under its heading, and what a tab of a tabbed form view draws as its panel
+   * (objectstack-ai/objectstack#26843).
+   */
+  const renderSectionBody = (sec: RenderableSection) => (
+    <>
+      {/*
+        * objectui#12333 — the served description, under the heading.
+        * No client-side key is read for it: the signed-out visitor holds
+        * no bundle, and the server already localized it.
+        */}
+      {sec.description && (
+        <p className="mb-3 text-sm text-muted-foreground">{sec.description}</p>
+      )}
+      <div
+        className={
+          sec.columns === 1
+            ? 'grid grid-cols-1 gap-4'
+            : sec.columns === 2
+              ? 'grid grid-cols-1 gap-4 sm:grid-cols-2'
+              : sec.columns === 3
+                ? 'grid grid-cols-1 gap-4 sm:grid-cols-3'
+                : 'grid grid-cols-1 gap-4 sm:grid-cols-4'
+        }
+      >
+        {sec.fields.map((f) => {
+          // One resolution per row per render, read by all three of the
+          // things that depend on it below — the row's presence, the
+          // required marker, and the control's own attributes. Computing
+          // it three times would be three chances to disagree.
+          const state = resolveRowState(f, values, loaded.record, isCreateForm, predicateScope);
+          if (!state.visible) return null;
+          const spanClass =
+            f.colSpan === 2 ? 'sm:col-span-2'
+              : f.colSpan === 3 ? 'sm:col-span-3'
+                : f.colSpan === 4 ? 'sm:col-span-4'
+                  : '';
+          return (
+          <div
+            key={f.name}
+            // `layout: 'horizontal'` puts the label beside the control — see
+            // HORIZONTAL_ROW_CLASS. `vertical` (and no layout) adds nothing.
+            className={horizontalRows ? cn(spanClass, HORIZONTAL_ROW_CLASS) : spanClass}
+          >
+            <label
+              // `for` the control, or an `id` the group / display answers
+              // to — the widget's declaration decides (objectui#10179).
+              {...rowLabelProps(f)}
+              className={
+                horizontalRows
+                  ? 'mb-1 block text-xs font-medium text-foreground sm:mb-0'
+                  : 'mb-1 block text-xs font-medium text-foreground'
+              }
+            >
+              {/*
+                * objectui#8813 — `fields.{object}.{name}`, the same
+                * resolver and the same fallback-to-the-served-label as
+                * the app path (`ObjectForm`). On this route the served
+                * label is usually ALREADY localized by the server
+                * payload, which is why the symptom looked like "field
+                * labels translate, section headings do not"; the client
+                * lookup is the overlay an app bundle can put on top,
+                * not a replacement for that server value.
+                */}
+              {fieldLabel(loaded.object, f.name, f.label)}
+              {/* Visual-only (objectui#3299): the control's `required` /
+                  `aria-required` is the announced channel; hiding the `*`
+                  keeps it out of the control's accessible name. */}
+              {state.required && (
+                <span className="ml-0.5 text-destructive" aria-hidden="true">*</span>
+              )}
+            </label>
+            <FieldInput
+              field={f}
+              state={state}
+              value={values[f.name]}
+              values={values}
+              onChange={(v) => setValues((prev) => ({ ...prev, [f.name]: v }))}
+              onUploadingChange={(u) =>
+                setUploading((prev) => (prev[f.name] === u ? prev : { ...prev, [f.name]: u }))
+              }
+            />
+            {f.helpText && (
+              <p className="mt-1 text-xs text-muted-foreground">{f.helpText}</p>
+            )}
+          </div>
+          );
+        })}
+      </div>
+    </>
+  );
+
+  /**
+   * A `type: 'tabbed'` form view (objectstack-ai/objectstack#26843): one tab
+   * per section, the tab semantics of the app's tabbed form — the form view's
+   * `defaultTab` opens first, `tabPosition` places the strip, a section its
+   * predicate hides draws no tab. The panels are force-mounted and only
+   * CSS-hidden when inactive, so a control on a closed tab keeps its widget
+   * state (an upload in flight included) as well as its value.
+   */
+  const renderTabbedSections = () => {
+    const drawn = sections
+      .map((sec, at) => ({ sec, at, key: sectionTabKey(sec, at) }))
+      .filter(({ sec }) => isSectionVisible(sec, values, loaded.record, predicateScope));
+    if (drawn.length === 0) return null;
+    const active = resolveActiveTab(drawn.map((d) => d.key), pickedTab, loaded.form?.defaultTab);
+    const stripAt = loaded.form?.tabPosition ?? 'top';
+    const verticalStrip = stripAt === 'left' || stripAt === 'right';
+    return (
+      <Tabs
+        value={active}
+        onValueChange={setPickedTab}
+        orientation={verticalStrip ? 'vertical' : 'horizontal'}
+        // Always a flex container: `order-last` on the strip is what puts it
+        // after the panels for `bottom` / `right`.
+        className={cn('flex w-full', verticalStrip ? 'gap-4' : 'flex-col')}
+      >
+        <TabsList
+          className={cn(
+            'self-start',
+            verticalStrip
+              ? cn('h-auto flex-col', stripAt === 'right' && 'order-last')
+              : stripAt === 'bottom' ? 'order-last mt-4' : 'mb-4',
+          )}
+        >
+          {drawn.map(({ sec, at, key }) => (
+            <TabsTrigger
+              key={key}
+              value={key}
+              data-testid={`form-tab:${key}`}
+              className={cn(verticalStrip && 'w-full justify-start')}
+            >
+              {/* A section with no heading is named by its position. */}
+              {sectionHeading(sec) || String(at + 1)}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+        <div className="min-w-0 flex-1">
+          {drawn.map(({ sec, key }) => (
+            <TabsContent
+              key={key}
+              value={key}
+              forceMount
+              data-testid={`form-tab-panel:${key}`}
+              className="mt-0 rounded-md border bg-card p-4 data-[state=inactive]:hidden sm:p-5"
+            >
+              {renderSectionBody(sec)}
+            </TabsContent>
+          ))}
+        </div>
+      </Tabs>
+    );
+  };
+
   return (
     <div className="mx-auto max-w-2xl p-4 sm:p-6">
       <header className="mb-6">
@@ -2626,7 +2856,7 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
         )}
       </header>
       <form onSubmit={handleSubmit} className="space-y-6">
-        {sections.map((sec, i) => {
+        {tabbedView ? renderTabbedSections() : sections.map((sec, i) => {
           // A section conditioned away is skipped IN PLACE rather than filtered
           // out of the list first (objectui#5627). The key here is the section's
           // POSITION, and these predicates re-decide on every keystroke: filtering
@@ -2639,98 +2869,16 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
             {sec.label && (
               <h2 className={sec.description ? 'mb-1 text-sm font-medium' : 'mb-3 text-sm font-medium'}>
                 {/*
-                  * objectui#8813 — the heading resolves
-                  * `objects.{object}._sections.{name}.label` and falls back to
-                  * the authored string, exactly as `ObjectForm` does on the
-                  * app path. The KEY is `sec.name`; a section authored without
-                  * one has no key and keeps its authored heading.
-                  *
-                  * The `sec.label &&` guard above is unchanged on purpose: this
-                  * card translates a heading that already renders, it does not
-                  * start rendering headings for sections that had none. A
-                  * translation cannot conjure a heading the author did not
-                  * write — that would be a different, wider change.
+                  * The `sec.label &&` guard is unchanged on purpose (objectui#8813):
+                  * this heading translates a heading that already renders, it
+                  * does not start rendering headings for sections that had
+                  * none. A translation cannot conjure a heading the author did
+                  * not write — that would be a different, wider change.
                   */}
-                {sec.name ? sectionLabel(loaded.object, sec.name, sec.label) : sec.label}
+                {sectionHeading(sec)}
               </h2>
             )}
-            {/*
-              * objectui#12333 — the served description, under the heading.
-              * No client-side key is read for it: the signed-out visitor holds
-              * no bundle, and the server already localized it.
-              */}
-            {sec.description && (
-              <p className="mb-3 text-sm text-muted-foreground">{sec.description}</p>
-            )}
-            <div
-              className={
-                sec.columns === 1
-                  ? 'grid grid-cols-1 gap-4'
-                  : sec.columns === 2
-                    ? 'grid grid-cols-1 gap-4 sm:grid-cols-2'
-                    : sec.columns === 3
-                      ? 'grid grid-cols-1 gap-4 sm:grid-cols-3'
-                      : 'grid grid-cols-1 gap-4 sm:grid-cols-4'
-              }
-            >
-              {sec.fields.map((f) => {
-                // One resolution per row per render, read by all three of the
-                // things that depend on it below — the row's presence, the
-                // required marker, and the control's own attributes. Computing
-                // it three times would be three chances to disagree.
-                const state = resolveRowState(f, values, loaded.record, isCreateForm, predicateScope);
-                if (!state.visible) return null;
-                return (
-                <div
-                  key={f.name}
-                  className={
-                    f.colSpan === 2 ? 'sm:col-span-2'
-                      : f.colSpan === 3 ? 'sm:col-span-3'
-                        : f.colSpan === 4 ? 'sm:col-span-4'
-                          : ''
-                  }
-                >
-                  <label
-                    // `for` the control, or an `id` the group / display answers
-                    // to — the widget's declaration decides (objectui#10179).
-                    {...rowLabelProps(f)}
-                    className="mb-1 block text-xs font-medium text-foreground"
-                  >
-                    {/*
-                      * objectui#8813 — `fields.{object}.{name}`, the same
-                      * resolver and the same fallback-to-the-served-label as
-                      * the app path (`ObjectForm`). On this route the served
-                      * label is usually ALREADY localized by the server
-                      * payload, which is why the symptom looked like "field
-                      * labels translate, section headings do not"; the client
-                      * lookup is the overlay an app bundle can put on top,
-                      * not a replacement for that server value.
-                      */}
-                    {fieldLabel(loaded.object, f.name, f.label)}
-                    {/* Visual-only (objectui#3299): the control's `required` /
-                        `aria-required` is the announced channel; hiding the `*`
-                        keeps it out of the control's accessible name. */}
-                    {state.required && (
-                      <span className="ml-0.5 text-destructive" aria-hidden="true">*</span>
-                    )}
-                  </label>
-                  <FieldInput
-                    field={f}
-                    state={state}
-                    value={values[f.name]}
-                    values={values}
-                    onChange={(v) => setValues((prev) => ({ ...prev, [f.name]: v }))}
-                    onUploadingChange={(u) =>
-                      setUploading((prev) => (prev[f.name] === u ? prev : { ...prev, [f.name]: u }))
-                    }
-                  />
-                  {f.helpText && (
-                    <p className="mt-1 text-xs text-muted-foreground">{f.helpText}</p>
-                  )}
-                </div>
-                );
-              })}
-            </div>
+            {renderSectionBody(sec)}
           </section>
           );
         })}

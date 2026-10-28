@@ -82,6 +82,14 @@ never needs triple braces.
   same way they do in-app. `datetime` honours the reference timezone the caller
   passes; calendar-day `date` values are timezone-naive.
 
+**The formatter is one the whitelist names.** `{{ amount | curency:EUR }}` is
+refused by `os validate`, `os build`, `os lint` and the metadata publish door
+(`email-template-hole-grammar`, a `422 INVALID_METADATA` at the publish door),
+naming the hole and listing the known formatters (`TEMPLATE_FORMATTERS`,
+exported from `@objectstack/formula`). A template stored before this rule fails its render with
+`TEMPLATE_INVALID` and sends nothing, rather than print the raw value (`1234.5`)
+where a formatted one was meant; republish it with the name corrected.
+
 **One formatter per hole.** `{{ amount | default:0 | number:2 }}` is refused by
 `os validate`, `os build`, `os lint` and the metadata publish door
 (`email-template-hole-grammar`): a hole takes one formatter, and there is no

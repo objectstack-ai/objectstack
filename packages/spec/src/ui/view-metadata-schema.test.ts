@@ -380,10 +380,10 @@ describe('ViewMetadataSchema — genuine validation across the three runtime sha
 
     it('derives its vocabulary from the members, so a new arm key is admitted automatically', () => {
       // Not a hand-written list: every top-level key any member declares counts.
-      // `splitSize` is a FormView key nobody would think to allow-list by hand.
-      // ([#7741] full acceptance additionally needs the binding pair; the
+      // `splitDirection` is a FormView key nobody would think to allow-list by
+      // hand. ([#7741] full acceptance additionally needs the binding pair; the
       // vocabulary question this test asks is unchanged.)
-      expect(ViewMetadataSchema.safeParse({ splitSize: 30, object: 'crm_lead', viewKind: 'form' }).success).toBe(true);
+      expect(ViewMetadataSchema.safeParse({ splitDirection: 'vertical', object: 'crm_lead', viewKind: 'form' }).success).toBe(true);
       // …and a key that exists only NESTED (inside `config`) is not top-level
       // vocabulary, so it cannot smuggle a garbage body through.
       expect(ViewMetadataSchema.safeParse({ groupByField: 'stage' }).success).toBe(false);

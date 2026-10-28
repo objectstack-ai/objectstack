@@ -941,7 +941,18 @@ const appTranslationDataShape = () => ({
     history: TRANSLATION_HISTORY,
     aliases: { name: 'label', title: 'label', nav: 'navigation', menu: 'navigation', menus: 'navigation' },
   }, {
-    label: z.string().describe('Translated app label'),
+    /**
+     * Translated app label.
+     *
+     * Optional because a bundle may carry only the navigation ids its own
+     * package contributes into another package's app
+     * (`manifest.navigationContributions`): the app's label is declared and
+     * translated by the package that owns the app, and the runtime deep-merges
+     * the bundles, so the owner's label survives. Requiring it would make every
+     * contributing module restate one package's string, and whichever bundle
+     * merged last would win.
+     */
+    label: z.string().optional().describe('Translated app label'),
     description: z.string().optional().describe('Translated app description'),
     navigation: z.record(z.string(), strictObject({
       surface: 'this navigation group translation',

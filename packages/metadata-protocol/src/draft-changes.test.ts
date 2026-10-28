@@ -10,7 +10,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { GetMetaItemResponseSchema } from '@objectstack/spec/api';
-import { draftChangedPaths, mergeDraftChanges, storedDraftChanges, type DraftChangeEntry } from './draft-changes.js';
+import { authoringClientOf, draftChangedPaths, mergeDraftChanges, storedDraftChanges, type DraftChangeEntry } from './draft-changes.js';
 
 const AT = '2026-10-18T12:00:00.000Z';
 const AT2 = '2026-10-18T12:05:00.000Z';
@@ -105,6 +105,36 @@ describe('mergeDraftChanges — no two entries share a path; the longest prefix 
         const entries = mergeDraftChanges([], [['label']], copilot);
         expect(mergeDraftChanges(entries, [['label']], studio)).toEqual([{ path: ['label'], ...studio }]);
     });
+
+    it('[#27176] an `mcp` stamp carries its client onto each path; a stamp with none adds no `client` key', () => {
+        const mcp = { by: 'mcp' as const, actor: 'u_1', at: AT, client: { id: 'cli_1', name: 'Claude' } };
+        expect(mergeDraftChanges([], [['label'], ['columns']], mcp)).toEqual([
+            { path: ['label'], ...mcp },
+            { path: ['columns'], ...mcp },
+        ]);
+        const [bare] = mergeDraftChanges([], [['label']], { by: 'mcp', actor: null, at: AT });
+        expect('client' in bare!).toBe(false);
+    });
+});
+
+describe('[#27176] authoringClientOf — the one shape a client takes', () => {
+    it('copies a non-empty id and an optional non-empty name, member by member', () => {
+        expect(authoringClientOf({ id: 'cli_1' })).toEqual({ id: 'cli_1' });
+        expect(authoringClientOf({ id: 'cli_1', name: 'Claude' })).toEqual({ id: 'cli_1', name: 'Claude' });
+    });
+
+    it.each([
+        ['not an object', 'cli_1'],
+        ['null', null],
+        ['an array', [{ id: 'cli_1' }]],
+        ['an empty id', { id: '' }],
+        ['no id', { name: 'Claude' }],
+        ['an empty name', { id: 'cli_1', name: '' }],
+        ['a non-string name', { id: 'cli_1', name: 7 }],
+        ['an extra member', { id: 'cli_1', secret: 's' }],
+    ])('%s is not a client', (_label, value) => {
+        expect(authoringClientOf(value)).toBeUndefined();
+    });
 });
 
 describe('storedDraftChanges — the stored form, never []', () => {
@@ -113,6 +143,12 @@ describe('storedDraftChanges — the stored form, never []', () => {
     it('reads the serialized column and an already-parsed value alike', () => {
         expect(storedDraftChanges(JSON.stringify([entry]))).toEqual([entry]);
         expect(storedDraftChanges([entry])).toEqual([entry]);
+    });
+
+    it('[#27176] reads an `mcp` entry with its client, and one without', () => {
+        const mcp: DraftChangeEntry = { path: ['label'], by: 'mcp', actor: 'u_1', at: AT, client: { id: 'cli_1', name: 'Claude' } };
+        const bare: DraftChangeEntry = { path: ['columns'], by: 'mcp', actor: 'u_1', at: AT };
+        expect(storedDraftChanges(JSON.stringify([mcp, bare]))).toEqual([mcp, bare]);
     });
 
     it.each([
@@ -124,6 +160,8 @@ describe('storedDraftChanges — the stored form, never []', () => {
         ['an unknown surface', JSON.stringify([{ ...entry, by: 'robot' }])],
         ['an empty segment', JSON.stringify([{ ...entry, path: [''] }])],
         ['a dotted-string path', JSON.stringify([{ ...entry, path: 'a.b' }])],
+        ['a client beside a surface other than mcp', JSON.stringify([{ ...entry, client: { id: 'cli_1' } }])],
+        ['a malformed client', JSON.stringify([{ ...entry, by: 'mcp', client: { id: '' } }])],
     ])('%s reads as not recorded (undefined), never []', (_label, raw) => {
         expect(storedDraftChanges(raw)).toBeUndefined();
     });

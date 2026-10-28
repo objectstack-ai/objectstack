@@ -91,7 +91,7 @@ import { SharingLevel } from '../security/sharing.zod';
 import { DatasourceSchema } from '../data/datasource.zod';
 import { TursoConfigSchema } from '../data/driver/turso.zod';
 import { InterfacePageConfigSchema, PageComponentSchema, PageSchema } from '../ui/page.zod';
-import { AddRecordConfigSchema, FormFieldSchema, FormSectionSchema, ListViewSchema, NavigationModeSchema, ObjectListViewSchema } from '../ui/view.zod';
+import { AddRecordConfigSchema, FormFieldSchema, FormSectionSchema, FormViewSchema, ListViewSchema, NavigationModeSchema, ObjectListViewSchema } from '../ui/view.zod';
 import { FlowSchema } from '../automation/flow.zod';
 import { JobSchema } from '../system/job.zod';
 import { TranslationItemSchema } from '../system/translation.zod';
@@ -274,6 +274,14 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
   'declared-index-unique-scope': [
     refusal('indexes[].unique: true', () => IndexSchema.safeParse({ fields: ['code'], unique: true })),
   ],
+  'page-action-block-variant-destructive-to-danger': [
+    refusal("action:button variant 'destructive'", () => ActionButtonPropsSchema.safeParse({ label: 'Purge', variant: 'destructive' })),
+    refusal("action:icon variant 'destructive'", () => ActionIconPropsSchema.safeParse({ icon: 'trash', variant: 'destructive' })),
+    refusal("action:group variant 'destructive'", () => ActionGroupPropsSchema.safeParse({ actions: [], variant: 'destructive' })),
+    refusal("action:group member variant 'destructive'", () => ActionGroupPropsSchema.safeParse({ actions: [{ label: 'Purge', type: 'script', variant: 'destructive' }] })),
+    refusal("action:menu variant 'destructive'", () => ActionMenuPropsSchema.safeParse({ actions: [], variant: 'destructive' })),
+    refusal("action:menu member variant 'destructive'", () => ActionMenuPropsSchema.safeParse({ actions: [{ label: 'Purge', type: 'script', variant: 'destructive' }] })),
+  ],
   'page-action-row-navigation-executor-to-url': [
     refusal("action:button actionType 'navigation'", () => ActionButtonPropsSchema.safeParse({ label: 'Clone', actionType: 'navigation', target: '/apps/crm/tasks' })),
     refusal("action:icon actionType 'navigation'", () => ActionIconPropsSchema.safeParse({ icon: 'copy', label: 'Clone', actionType: 'navigation', target: '/apps/crm/tasks' })),
@@ -385,6 +393,17 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
       () => InterfacePageConfigSchema.safeParse({ source: 'crm_contact', recordAction: 'modal' }),
       'recordAction',
     ),
+  ],
+  // #27155: the form view `type` narrowed to the form's layout — each retired
+  // member refused by the enum's own error map, plus the three split-only keys
+  // tombstoned beside it.
+  'form-view-presentation-types-removed': [
+    ...(['split', 'drawer', 'modal'] as const).map((type) =>
+      refusal(`form view type '${type}'`, () => FormViewSchema.safeParse({ type }), 'type'),
+    ),
+    tombstone(FormSectionSchema, 'view.form.sections[]', 'pane'),
+    tombstone(FormViewSchema, 'view.form', 'splitSize'),
+    tombstone(FormViewSchema, 'view.form', 'splitResizable'),
   ],
   // #25050: retired after 18.0.0, so the v18 train's major. Partial (unset
   // values and remote urls only), so the prescription's migrate sentence is

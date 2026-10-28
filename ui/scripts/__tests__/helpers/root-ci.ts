@@ -34,6 +34,13 @@ export const UI_JOBS = {
 } as const;
 
 /**
+ * objectui's live-e2e lane, `live-e2e.yml`, ported to the root as its own job
+ * on the workspace backend (objectstack#27154). Not one of `UI_JOBS`: it runs
+ * none of the lint, type-check or vitest gates those pins hold the four to.
+ */
+export const UI_LIVE_E2E_JOB = 'live-e2e-ui';
+
+/**
  * objectui's coverage lane, ported to the root as a nightly workflow
  * (objectstack#25924): the file, the sharded job and the merge job that
  * enforces the thresholds.

@@ -7535,7 +7535,7 @@ export function selfTest({ tier = 'full' } = {}) {
   }
   const censusRows = liveMarkerCensus.map((r) => `${r.file}:${r.line} ${r.key}`).sort();
   t(
-    `the live tree carries the eight declarations measured for this census, and no others (${censusRows.join(' · ') || 'none'})`,
+    `the live tree carries the nine declarations measured for this census, and no others (${censusRows.join(' · ') || 'none'})`,
     censusRows.join(' · ') === [
       // Seventh row, added with the declaration it names: `checklist-status.yml`
       // is paths-filtered (its `pull_request:` trigger is filtered to itself) and
@@ -7557,13 +7557,18 @@ export function selfTest({ tier = 'full' } = {}) {
       'scripts/pm/check-expected-skips.mjs:137 self-test-reads',
       // 736 -> 738 (#26318): the data import and its re-export each gained UI_SCRIPTS_SUITE_ROOTS.
       'scripts/pm/dispatch-gates.mjs:738 inherited-population',
+      // Ninth row, added with the declaration it names: the recogniser's mailbox
+      // doorbell battery pins the seven key templates verbatim in the pm-dispatch
+      // references' project-forms.md, a population claim on a governed file, so
+      // that read is declared and `GOVERNED_READ_FLOOR` carries its row.
+      'scripts/pm/record-recognisers.mjs:77 self-test-reads',
     ].join(' · '),
     censusRows.join(' · '),
   );
   const censusCut = liveMarkerCensus.filter((r) => !r.whole).map((r) => `${r.file}:${r.line} ${r.key}`);
   t(
     `every live reason on those markers ENDS on its own marker line (cut: ${censusCut.join(', ') || 'none'})`,
-    censusCut.length === 0 && liveMarkerCensus.length === 8,
+    censusCut.length === 0 && liveMarkerCensus.length === 9,
   );
   t(
     'and every one of them carries a non-empty reason — whole is not the same claim as present, and both are owed',

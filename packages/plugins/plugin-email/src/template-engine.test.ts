@@ -95,8 +95,9 @@ describe('template-engine', () => {
         expect(renderTemplate('{{{ s | upper }}}', { s: 'a&b' })).toBe('A&B');
       });
 
-      it('falls back to the raw value for an unknown formatter (no throw)', () => {
-        expect(renderTemplate('{{ x | bogus }}', { x: 'hi' })).toBe('hi');
+      it('refuses an unknown formatter with TEMPLATE_INVALID, never the raw value', () => {
+        expect(() => renderTemplate('{{ x | bogus }}', { x: 'hi' })).toThrow(/^TEMPLATE_INVALID: /);
+        expect(() => renderPlainTextTemplate('{{ x | bogus }}', { x: 'hi' })).toThrow("the formatter 'bogus'");
       });
 
       it('renders a missing formatted value as empty (never "undefined")', () => {
