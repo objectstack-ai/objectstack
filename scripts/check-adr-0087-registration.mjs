@@ -464,7 +464,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'WS (#26220): ui workspace packages, `.tsx` modules, aliases and shims': 11,
   'IX (#26220): predicate 4 reads an `any` index signature; the entry may be `src/index.tsx`': 52,
   'WP (#26220): a deleted published package is retired whole, `<package>#*`': 59,
-  'DX (#26324): an export named `default` is reached through an import, never through the word': 11,
+  'DX (#26324): an export named `default` is reached through an import, never through the word': 19,
   'G6: a changeset that was ALREADY breaking at base is inherited': 1,
   'R15: a changeset RENAMED AND turned breaking in the same commit': 5,
   'G10: a PURE rename of an ALREADY-breaking stock changeset': 3,
@@ -497,7 +497,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 58;
+const SELF_TEST_BATTERY_FLOOR = 59;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -3215,10 +3215,18 @@ export function metadataSurfaceReference(symbol, declPath, surfaceTexts, package
  *   import x, { y } from 'm'   beside it or not, `type` or not
  *   import { default as x } from 'm'   `default` named inside the braces, an
  *   export { default } from 'm'        `export ... from` re-export included
+ *
+ * and the three that bind the whole MODULE, read as reaching its default too:
+ *
+ *   import * as ns from 'm'    a namespace import or re-export, `ns.default`
+ *   export * as ns from 'm'    being one member read away
+ *   import('m')  require('m')  a dynamic load, whose `.default` likewise
  */
 const DEFAULT_BINDING_IMPORT_RE =
   /(?:^|;)[ \t]*import\s+(?:type\s+)?[A-Za-z_$][\w$]*\s*(?:,\s*(?:\{[^}]*\}|\*\s*as\s+[A-Za-z_$][\w$]*)\s*)?from\s*(['"])([^'"\n]+)\1/gm;
 const BRACED_IMPORT_RE = /(?:^|;)[ \t]*(?:import|export)\s+(?:type\s+)?\{([^}]*)\}\s*from\s*(['"])([^'"\n]+)\2/gm;
+const NAMESPACE_IMPORT_RE = /(?:^|;)[ \t]*(?:import|export)\s+(?:type\s+)?\*\s*as\s+[A-Za-z_$][\w$]*\s*from\s*(['"])([^'"\n]+)\1/gm;
+const DYNAMIC_IMPORT_RE = /\b(?:import|require)\s*\(\s*(['"])([^'"\n]+)\1\s*\)/g;
 
 /**
  * `metadataSurfaceReference` for an export named `default` (#26324): the IMPORT arm
@@ -3226,19 +3234,22 @@ const BRACED_IMPORT_RE = /(?:^|;)[ \t]*(?:import|export)\s+(?:type\s+)?\{([^}]*)
  * this step reads -- a field option `{ value: 'technology', default: true }`, a Zod
  * `.default(...)` -- so the bare-word arm hit on every tree, and no retirement of a
  * default export could ever certify. A metadata surface reaches a default export
- * through an import that binds it (the two shapes above). The specifier is
- * attributed as for any other name (`specifierNamesModule`), and comment spans are
- * blanked first, so a docblock quoting the import is not one.
- * ⛔ A namespace import's `ns.default` and a dynamic `import()` are not read here:
- * both reach the export through a member named `default`, the very spelling that
- * cannot be told from the object keys above.
+ * through an import that binds it (the two shapes above), or through one that binds
+ * the whole module (the three after them). Those three are refused on the module
+ * alone, never on a `.default` read after them: that member spelling is the one
+ * that cannot be told from the object keys above, and refusing on the binding is
+ * the conservative direction -- every other export name refuses them too, through
+ * its bare-word arm. The specifier is attributed as for any other name
+ * (`specifierNamesModule`), and comment spans are blanked first, so a docblock
+ * quoting the import is not one.
  */
 function defaultImportReference(declPath, surfaceTexts, packages) {
   for (const [hitPath, rawText] of surfaceTexts) {
-    if (hitPath === declPath || !(rawText.includes('import') || rawText.includes('export'))) continue;
+    if (hitPath === declPath || !(rawText.includes('import') || rawText.includes('export') || rawText.includes('require'))) continue;
     const code = maskComments(rawText);
     const specifiers = [...code.matchAll(DEFAULT_BINDING_IMPORT_RE)].map((m) => m[2]);
     for (const m of code.matchAll(BRACED_IMPORT_RE)) if (/\bdefault\b/.test(m[1])) specifiers.push(m[3]);
+    for (const re of [NAMESPACE_IMPORT_RE, DYNAMIC_IMPORT_RE]) for (const m of code.matchAll(re)) specifiers.push(m[2]);
     if (specifiers.length === 0) continue;
     const pkgs = packages();
     if (specifiers.some((s) => specifierNamesModule(s, hitPath, declPath, pkgs))) return { kind: 'import', hitPath };
@@ -8368,6 +8379,20 @@ function selfTest() {
     }), [DX_P2]);
     red('DX-R2 ...and the same default named inside the braces, `{ default as x }`', dx({
       [DX_HOST]: `import { default as emailPlugin } from '${REX_PKG}';\nexport const Host = { name: 'host', plugin: emailPlugin };\n`,
+    }), [DX_P2]);
+    // A binding of the whole MODULE reaches its default one member read away; every
+    // other export name refuses these through its bare-word arm, so `default` must too.
+    red('DX-R3 a NAMESPACE import of the package (`ns.default` one read away)', dx({
+      [DX_HOST]: `import * as email from '${REX_PKG}';\nexport const Host = { name: 'host', plugin: email.default };\n`,
+    }), [DX_P2]);
+    red('DX-R4 a DYNAMIC `import()` of the package', dx({
+      [DX_HOST]: `export const Host = { name: 'host', load: () => import('${REX_PKG}').then((m) => m.default) };\n`,
+    }), [DX_P2]);
+    red('DX-R5 a `require()` of the package', dx({
+      [DX_HOST]: `export const Host = { name: 'host', plugin: require('${REX_PKG}').default };\n`,
+    }), [DX_P2]);
+    red('DX-R6 a NAMESPACE re-export, `export * as ns from`', dx({
+      [DX_HOST]: `export * as email from '${REX_PKG}';\nexport const Host = { name: 'host' };\n`,
     }), [DX_P2]);
 
     const DX_DECL = rexPath('src/index.ts');
