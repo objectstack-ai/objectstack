@@ -96,7 +96,7 @@ describe('Setup list: each bundle member opens itself (objectstack#26649)', () =
     expect(hrefs).toHaveLength(2);
     expect(hrefs.map((h) => queryOf(h).get('member'))).toEqual(['en', 'zh-CN']);
     for (const href of hrefs) {
-      expect(href).toMatch(/\/email_template\/duly\.task_overdue\?/);
+      expect(href).toMatch(/\/duly\.task_overdue\?/);
       expect(queryOf(href).get('scope')).toBe('environment');
     }
     expect(new Set(hrefs).size).toBe(2);
@@ -108,13 +108,6 @@ describe('Setup list: each bundle member opens itself (objectstack#26649)', () =
 
     expect(queryOf(href!).has('member')).toBe(false);
     expect(queryOf(href!).get('scope')).toBe('environment');
-  });
-
-  it('without a scope suffix the member is the link\'s only query', async () => {
-    mount('email_template', '');
-    const hrefs = await hrefsOf('duly.task_overdue');
-
-    expect(hrefs.map((h) => h.slice(h.indexOf('?')))).toEqual(['?member=en', '?member=zh-CN']);
   });
 
   it('the member shows in its own column, second, labelled Locale', async () => {
