@@ -172,27 +172,17 @@ Stored as JSON on the parent row — no separate table / FK:
 ```typescript
 {
   type: 'currency',
-  currencyConfig: {
-    currencyMode: 'fixed',   // 'fixed' = the column is pinned to
-                             // defaultCurrency; 'dynamic' = tenant default
-    defaultCurrency: 'USD',  // ISO 4217
-  },
+  currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' },  // ISO 4217
 }
 ```
 
-**Currency resolution.** The value is a bare number in both modes (ADR-0104
-D1), never `{ value, currency }`. The displayed symbol: under `'fixed'`,
-`currencyConfig.defaultCurrency`; under `'dynamic'` (default), the tenant
-`localization.currency` setting, not `defaultCurrency`; with neither, a plain
-grouped number (never a hardcoded `$`). A measure's own `currency` wins.
-
-**Per-record currency** (`currencyMode: 'record'`): `currencyField` names a
-`text` field on the same object with `valueDomain: 'iso_4217_currency'` that
-holds each record's code; the amount stays a bare number. Name it
-`currency_code`; an amount `price`'s home-currency copy and its rate go in
-`price_home` and `price_rate` (`AMOUNT_home`, `AMOUNT_rate`) — a convention,
-not a contract. A pointer at a missing, non-`text` or domain-less field is
-refused at parse.
+**Currency resolution.** The value is a bare number in every mode (ADR-0104
+D1), never `{ value, currency }`. Shown: `'fixed'`, `defaultCurrency`;
+`'dynamic'` (default), the tenant `localization.currency`, not
+`defaultCurrency`, else a plain number (never `$`); `'record'`, each record's
+code in the `text` field `currencyField` names, which declares `valueDomain:
+'iso_4217_currency'` (names by convention, not contract: `currency_code`,
+`AMOUNT_home`, `AMOUNT_rate`). A measure's own `currency` wins.
 
 ### Select with Default
 
