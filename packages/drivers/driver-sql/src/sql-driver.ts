@@ -195,6 +195,9 @@ import { applyEmptyOperator, applyJsonMembership, applyLike, applyLikePattern, a
 // [#25521 cut 20] Date bucketing (`buildDateBucketExpr`); the method of the same name below hands the body what
 // it reads (`DateBucketHost`).
 import { buildDateBucketExpr } from './sql-driver-date-bucket.js';
+// [#25521 cut 21] The presumed-timestamp update; the two methods of the same names below hand the bodies what
+// they read (`PresumedTimestampHost`).
+import { resolveUpdatedAtColumnPresence, updateWithPresumedTimestamp } from './sql-driver-presumed-timestamp.js';
 import { makeDatabaseDirectory, probeAbsentSqliteDatabaseFile, SqliteDatabaseFileError } from './sqlite-database-file.js';
 import { jsonMembershipPredicate } from '@objectstack/core';
 import knex, { Knex } from 'knex';
@@ -7510,26 +7513,20 @@ export class SqlDriver implements IDataDriver {
    * snapshot — and, on Postgres, so it runs on a transaction that is still
    * usable (see {@link updateWithPresumedTimestamp}).
    */
-  protected async resolveUpdatedAtColumnPresence(
+  protected resolveUpdatedAtColumnPresence(
     object: string,
     trx?: Knex.Transaction,
   ): Promise<boolean | null> {
-    const physical = this.physicalTableByObject[object] ?? object;
-    const runner = trx ?? this.knex;
-    let builder = runner(physical);
-    const remoteSchema = this.physicalSchemaByObject[object];
-    if (remoteSchema) builder = builder.withSchema(remoteSchema);
-    let info: Record<string, unknown>;
-    try {
-      info = (await builder.columnInfo()) as Record<string, unknown>;
-    } catch {
-      // The probe itself failed — we learned nothing, so we may not claim the
-      // column is absent. The caller rethrows the write's own error.
-      return null;
-    }
-    const columns = Object.keys(info ?? {});
-    if (columns.length === 0) return null;
-    return columns.includes('updated_at');
+    // [#25521 cut 21] The body moved to `sql-driver-presumed-timestamp.ts` (see `PresumedTimestampHost`).
+    const readKnex = () => this.knex;
+    const readPhysicalSchemaByObject = () => this.physicalSchemaByObject;
+    const readPhysicalTableByObject = () => this.physicalTableByObject;
+    const host: ThisParameterType<typeof resolveUpdatedAtColumnPresence> = {
+      get knex() { return readKnex(); },
+      get physicalSchemaByObject() { return readPhysicalSchemaByObject(); },
+      get physicalTableByObject() { return readPhysicalTableByObject(); },
+    };
+    return resolveUpdatedAtColumnPresence.call(host, object, trx);
   }
 
   /**
@@ -7584,53 +7581,22 @@ export class SqlDriver implements IDataDriver {
    *   caller owns the WHERE and the tenant scope, so this method never rebuilds
    *   them and cannot get them wrong.
    */
-  protected async updateWithPresumedTimestamp(
+  protected updateWithPresumedTimestamp(
     object: string,
     formatted: Record<string, any>,
     options: DriverOptions | undefined,
     issue: (payload: Record<string, any>, options?: DriverOptions) => Promise<number>,
   ): Promise<number> {
-    const unstamped = (): Record<string, any> => {
-      const { updated_at: _dropped, ...rest } = formatted;
-      return rest;
+    // [#25521 cut 21] The body moved to `sql-driver-presumed-timestamp.ts` (see `PresumedTimestampHost`).
+    const readLogger = () => this.logger;
+    const readUpdatedAtColumnState = () => this.updatedAtColumnState;
+    const host: ThisParameterType<typeof updateWithPresumedTimestamp> = {
+      attemptWithoutPoisoning: (...a) => this.attemptWithoutPoisoning(...a),
+      get logger() { return readLogger(); },
+      resolveUpdatedAtColumnPresence: (...a) => this.resolveUpdatedAtColumnPresence(...a),
+      get updatedAtColumnState() { return readUpdatedAtColumnState(); },
     };
-    const settleAbsent = (): void => {
-      this.updatedAtColumnState.set(object, 'absent');
-      this.logger.warn(
-        `[sql-driver] '${object}' has no physical 'updated_at' column, so this driver will not ` +
-          'stamp one on update. The object is registered as managed, whose schema this ' +
-          "driver's own DDL would give `created_at`/`updated_at` — a table migrated out-of-band " +
-          'without them will keep a stale "last modified" for every consumer that reads it ' +
-          '(list-view sorts, delta sync, cache invalidation, audit). Add the column, or accept ' +
-          'that it is not tracked here.',
-      );
-    };
-
-    const parentTrx = options?.transaction as Knex.Transaction | undefined;
-    if (parentTrx) {
-      const attempt = await this.attemptWithoutPoisoning(parentTrx, (scoped) =>
-        issue(formatted, { ...options, transaction: scoped }),
-      );
-      if (attempt.ok) {
-        this.updatedAtColumnState.set(object, 'present');
-        return attempt.value;
-      }
-      const present = await this.resolveUpdatedAtColumnPresence(object, parentTrx);
-      if (present !== false) throw attempt.error;
-      settleAbsent();
-      return issue(unstamped(), options);
-    }
-
-    try {
-      const affected = await issue(formatted, options);
-      this.updatedAtColumnState.set(object, 'present');
-      return affected;
-    } catch (error) {
-      const present = await this.resolveUpdatedAtColumnPresence(object);
-      if (present !== false) throw error;
-      settleAbsent();
-      return issue(unstamped(), options);
-    }
+    return updateWithPresumedTimestamp.call(host, object, formatted, options, issue);
   }
 
   /**

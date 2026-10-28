@@ -6,7 +6,7 @@ import type { FilterCondition } from '../data/filter.zod.js';
 import type { AggregationFunction } from '../data/query.zod.js';
 import type { PercentScale } from '../data/percent-scale.js';
 import type { ExecutionContext } from '../kernel/execution-context.zod.js';
-import type { Dataset } from '../ui/dataset.zod.js';
+import type { Dataset, DatasetMeasurePolarity } from '../ui/dataset.zod.js';
 
 /**
  * IAnalyticsService - Analytics / BI Service Contract
@@ -149,6 +149,20 @@ export interface AnalyticsResult {
          * Display copy only: it never changes which rows fall in the bucket.
          */
         nullLabel?: string;
+        /**
+         * [#26602] Which direction of change is good news for a MEASURE column:
+         * the dataset measure's `polarity` (`DatasetMeasureSchema`), relayed as
+         * declared by the column-description seam, the measure's `__compare`
+         * column included. A renderer colours a period-over-period delta by
+         * it: `higher` draws a rise good and a fall bad, `lower` the reverse,
+         * `neutral` neither.
+         *
+         * Present only on a measure column of a `queryDataset` answer whose
+         * dataset measure declares one; absent otherwise, on every dimension
+         * column, and on a `query` (cube) answer. Absent reads as a rise drawn
+         * good, the colouring every delta had before the key existed.
+         */
+        polarity?: DatasetMeasurePolarity;
     }>;
     /** Generated SQL (if available) */
     sql?: string;
@@ -224,22 +238,38 @@ export interface AnalyticsResult {
      */
     drillRawTotals?: Array<Array<Record<string, unknown>>>;
     /**
-     * The half-open range `[gte, lt)` each row's time bucket covers, aligned
-     * to `rows` by index: `drillRanges[i]` maps date dimension NAME →
-     * `{ field, gte, lt }`, `field` being that dimension's `field`. A bucket
-     * ("2026-Q2") groups a span of records, so it drills by range rather than
-     * by the equality `drillRawRows` carries. `gte` and `lt` are `YYYY-MM-DD`
-     * calendar days, except for a dimension whose source field is `datetime`:
-     * those are ISO-8601 instants at midnight in the reference timezone (the
-     * selection's `timezone`, else the request's, else UTC). A row whose
-     * bucket value is `null` gets no entry for that dimension.
+     * The half-open range `[gte, lt)` each row's records fall in on a date
+     * field, aligned to `rows` by index: `drillRanges[i]` maps date dimension
+     * NAME → `{ field, gte, lt }`, `field` being that dimension's `field`. A
+     * drill list filters `field` by every entry, so it lists the records the
+     * row counted.
+     *
+     * Two things bound a row on a date field. A time bucket ("2026-Q2") groups
+     * a span of records, so it drills by range rather than by the equality
+     * `drillRawRows` carries; its entry is the span the bucket covers. A
+     * `selection.timeDimensions[].dateRange` window filters every row, so its
+     * dimension gets an entry on every row: the window the query filtered by,
+     * a preset as resolved in the reference timezone, an explicit `[a, b]`
+     * with a bare-day `b` running to the start of the next day. When the
+     * windowed field is also a bucket's field, the bucket's entry is narrowed
+     * to the part inside the window (an edge bucket can be wider than it),
+     * and the window gets no entry of its own.
+     *
+     * `gte` and `lt` are `YYYY-MM-DD` calendar days, except for a dimension
+     * whose source field is `datetime`: those are ISO-8601 instants, a
+     * bucket's at midnight in the reference timezone (the selection's
+     * `timezone`, else the request's, else UTC). A row whose bucket value is
+     * `null` gets no bucket entry. A window with no exact half-open spelling
+     * gets no entry: an explicit end that is an instant, or one on the last
+     * supported day.
      *
      * Set only on a `queryDataset` answer that has rows and whose selection
      * groups by at least one `type: 'date'` dimension with a `field` and a
-     * granularity (the selection's, else the dimension's `dateGranularity`).
-     * Such a dimension is left out when its source field is neither `date`
-     * nor `datetime` (or its type is unknown) and the reference timezone is
-     * not UTC. Independent of `dimensionFields`: a date-only grouping carries
+     * granularity (the selection's, else the dimension's `dateGranularity`),
+     * or carries a `dateRange` on a dimension with a `field`. Such a
+     * dimension is left out when its source field is neither `date` nor
+     * `datetime` (or its type is unknown) and the reference timezone is not
+     * UTC. Independent of `dimensionFields`: a date-only grouping carries
      * `drillRanges` and none of the equality sidecars.
      */
     drillRanges?: Array<Record<string, { field: string; gte: string; lt: string }>>;

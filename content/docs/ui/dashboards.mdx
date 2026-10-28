@@ -103,7 +103,7 @@ selects `dimensions` (X / group / split) and `values` (the measures to plot):
 | `layout` | `object` | optional | Grid position and size (auto-flowed into the grid when omitted) |
 | `chartConfig` | `object` | optional | Chart **appearance**: `title`, `subtitle`, `description`, `colors`, `height`, `showLegend`, `showDataLabels`, `annotations`, `interaction`. The bound dataset decides which series exist and which column each one reads, so `type`, `xAxis`, `yAxis` and `series` are refused here — see below |
 | `colorVariant` | `enum` | optional | KPI/card accent color |
-| `compareTo` | `object` | optional | Period-over-period comparison: `{ kind: 'previousPeriod' \| 'previousYear', dimension? }`. Omit `dimension` when the selection dates exactly one time dimension — the runtime resolves it, and errors naming the candidates rather than guessing when it cannot. |
+| `compareTo` | `object` | optional | Period-over-period comparison: `{ kind: 'previousPeriod' \| 'previousYear', dimension? }`. Omit `dimension` when the selection dates exactly one time dimension — the runtime resolves it, and errors naming the candidates rather than guessing when it cannot. The delta is coloured by the measure's `polarity`: `'lower'` draws a rise red and a fall green, `'neutral'` draws neither; undeclared, a rise is green. |
 | `options` | `object` | optional | The query keys below. Presentation does not go here — see below |
 
 ### What `chartConfig` does **not** carry
@@ -147,6 +147,7 @@ Presentation has declared homes instead:
 | You want | Write it here |
 | :--- | :--- |
 | A number's format or currency | The dataset **measure**'s `format` and `currency` |
+| A KPI delta's good/bad colour (lower is better for turnaround, cost) | The dataset **measure**'s `polarity`: `'higher'`, `'lower'` or `'neutral'` |
 | A KPI tile's accent color | The widget's `colorVariant` |
 | A chart's look (colors, legend, data labels, height) | The widget's `chartConfig` |
 
