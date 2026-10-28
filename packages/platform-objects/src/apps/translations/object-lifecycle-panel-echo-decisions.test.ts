@@ -1230,7 +1230,10 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // each with its type-level display pair, authored in all three locales.
       // 689 since #26619: the action form's `disabledReason` row (why a greyed
       // action is unavailable) — one row label, authored in all three locales.
-      expect(translated.length, `${locale} positive control`).toBe(689);
+      // 691 since #27069: the object form's `relatedLists` row and the
+      // `fieldGroups` repeater's `relatedList` sub-row — two row labels,
+      // authored in all three locales.
+      expect(translated.length, `${locale} positive control`).toBe(691);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the
