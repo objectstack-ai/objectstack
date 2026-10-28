@@ -138,6 +138,20 @@ describe('defineStack — relatedLists names an inbound relationship', () => {
     expect(refusalOf(() => defineStack(stackOf(lead({ relatedLists: ['rlo_sibling'] }))))?.code).toBe('STACK_CROSS_REFERENCE_INVALID');
   });
 
+  it('judges an artifact whose objects live only in package bodies, once per object name', () => {
+    const body = (parent: Record<string, unknown>) => ({
+      manifest: { ...manifest, id: 'com.example.rlo-body', objects: [parent, task, event, note] },
+    });
+    const stack = (parent: Record<string, unknown>) => ({ manifest, packages: [body(parent)] }) as any;
+    expect(() => defineStack(stack(lead({ relatedLists: ['rlo_task'] })))).not.toThrow();
+    const refusal = refusalOf(() => defineStack(stack(lead({ relatedLists: ['rlo_note'] }))));
+    expect(refusal?.code).toBe('STACK_CROSS_REFERENCE_INVALID');
+    expect(refusal?.issues).toEqual([expect.stringContaining("Object 'rlo_lead' relatedLists[0] 'rlo_note'")]);
+    // The same object declared top-level AND in a body is one verdict, not two.
+    const twice = refusalOf(() => defineStack(({ ...stack(lead({ relatedLists: ['rlo_note'] })), objects: [lead({ relatedLists: ['rlo_note'] })] }) as any));
+    expect(twice?.issues?.filter((i) => i.includes("relatedLists[0] 'rlo_note'"))).toHaveLength(1);
+  });
+
   it('judges a field group relatedList the same way', () => {
     const groups = (relatedList: string) => [{ key: 'lines', label: 'Lines', relatedList }];
     expect(() => defineStack(stackOf(lead({ fieldGroups: groups('rlo_task') })))).not.toThrow();

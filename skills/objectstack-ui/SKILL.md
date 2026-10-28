@@ -116,15 +116,15 @@ children first). Refine on the relationship:
 
 **Related-list layout.** On the synthesized record detail page, each
 `relatedList: 'primary'` child gets its **own tab**; every other related list
-stacks under a single shared **Related** tab. Promoting a child table to a
+stacks under a single shared **Related** tab, both in the object's
+`relatedLists` order. Promoting a child table to a
 first-class tab is therefore a one-word change on the relationship — no custom
 page needed. The object still declares no per-surface *layout* hints: the old
 `detail.relatedLayout` toggle and object-level `detail: {...}` block stay
 **removed** (ADR-0085); `relatedLayout: 'tabs' | 'stack'` survives only as an
 app-level default override, not an object key. For arrangements the
 relationship layer can't express — filtered splits (e.g. Open vs Closed tabs), a
-chart/report tab, exact tab ordering — assign the object a **custom record
-Page** and lay it out explicitly with `record:related_list` (or inline-editable
+chart/report tab — assign the object a **custom record Page** and lay it out explicitly with `record:related_list` (or inline-editable
 `line_items`) blocks.
 
 ### Field Conditional Rules in Forms

@@ -3901,11 +3901,13 @@ function collectRelatedListNameErrors(
   };
 
   const errors: string[] = [];
-  const seen = new Set<Record<string, unknown>>();
+  // One verdict per object NAME: an object declared both top-level and in a
+  // package body is judged once, on its first declaration.
+  const seen = new Set<string>();
   for (const parent of parents) {
-    if (seen.has(parent)) continue;
-    seen.add(parent);
     const parentName = parent.name as string;
+    if (seen.has(parentName)) continue;
+    seen.add(parentName);
     const relationships = inbound.get(parentName) ?? [];
     const judge = (entry: unknown, where: string): void => {
       if (typeof entry !== 'string') return;
@@ -4425,6 +4427,14 @@ function validateCrossReferences(
   // Same placement: the development boot's demo accounts resolve against the
   // stack's positions and permission sets, and need no object either.
   errors.push(...collectDemoStaffErrors(config));
+  // Same placement: the names an object gives its related lists (`relatedLists`,
+  // a field group's `relatedList`) resolve against the objects of the stack AND
+  // its package bodies, so an artifact whose objects live only in package
+  // bodies is judged too (#27069). Its scope is the artifact scope below.
+  errors.push(...collectRelatedListNameErrors(
+    config,
+    artifactObjects && artifactObjects.size > 0 ? new Set([...objectNames, ...artifactObjects]) : objectNames,
+  ));
 
   if (objectNames.size === 0) return errors;
 
@@ -4483,10 +4493,6 @@ function validateCrossReferences(
   // (#20901) — every carrier (#20928 added the master-detail page block's,
   // #24190 the line-items block's), the column schema's own verdict.
   errors.push(...collectHydratedInlineColumnErrors(config));
-
-  // Validate the names an object gives its related lists (`relatedLists`, a
-  // field group's `relatedList`) against its inbound relationships (#27069).
-  errors.push(...collectRelatedListNameErrors(config, artifactScope));
 
   // Validate seed data → object references. ARTIFACT-SCOPED (#18202).
   errors.push(...collectSeedDataObjectErrors(config, artifactScope));

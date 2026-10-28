@@ -500,14 +500,14 @@
       "status": "live",
       "verifiedAt": "2026-10-28",
       "evidenceScope": "in-repo",
-      "evidence": "ui/packages/app-shell/src/utils/deriveRelatedLists.ts:367 skips the FK entirely when relatedList is false; ui/packages/app-shell/src/utils/deriveRelatedLists.ts#isMainContentList marks the derived list isPrimary when it is 'primary', or when it is absent on a master_detail FK that sets inlineEdit; ui/packages/app-shell/src/views/RecordDetailView.tsx:1827 calls deriveRelatedLists and renders what it returns, consuming the derived structure rather than the key",
+      "evidence": "ui/packages/app-shell/src/utils/deriveRelatedLists.ts:367 skips the FK entirely when relatedList is false; ui/packages/app-shell/src/utils/deriveRelatedLists.ts#isMainContentList marks the derived list isPrimary when it is 'primary', or when it is absent on a master_detail FK that sets inlineEdit; ui/packages/app-shell/src/views/RecordDetailView.tsx:1959 calls deriveRelatedLists and renders what it returns, consuming the derived structure rather than the key",
       "note": "RE-CITED 2026-08-10 (#7133/#7142): the old split citation's RecordDetailView half went to prose — every `relatedList` occurrence in that file is now a comment (:1013, :1847, :1857, :1864). The working half is deriveRelatedLists, which is what branches on the value. RecordDetailView is kept, explicitly labelled as the consumer of the DERIVED list, so the next re-audit does not read its zero key-hits as rot a second time. Verdict unchanged: LIVE. 2026-10-28 (#27069): 'primary' re-read as PLACEMENT (the record's main content: a body table, its own tab on the tabbed page) rather than order — the parent object's `relatedLists` orders the lists now — and an absent relatedList on an inline-edited master_detail FK is 'primary' by default (`isMainContentList`). Re-cited to the moved lines; verdict unchanged: LIVE."
     },
     "relatedListTitle": {
       "status": "live",
       "verifiedAt": "2026-08-10",
       "evidenceScope": "in-repo",
-      "evidence": "ui/packages/app-shell/src/utils/deriveRelatedLists.ts:378-379 uses relatedListTitle as the related-list title when it is a non-empty string, falling back to a label derived from the child object; ui/packages/app-shell/src/views/RecordDetailView.tsx:1827 renders the derived list — measured objectui @11c1e71e",
+      "evidence": "ui/packages/app-shell/src/utils/deriveRelatedLists.ts:378-379 uses relatedListTitle as the related-list title when it is a non-empty string, falling back to a label derived from the child object; ui/packages/app-shell/src/views/RecordDetailView.tsx:1959 renders the derived list — measured objectui @11c1e71e",
       "note": "RE-CITED 2026-08-10 (#7133/#7142): same repair as `relatedList` — the RecordDetailView half of the old split citation is comments only (:1847 describes the rule it no longer implements), while deriveRelatedLists is the reader that applies the value. Verdict unchanged: LIVE."
     },
     "relatedListColumns": {

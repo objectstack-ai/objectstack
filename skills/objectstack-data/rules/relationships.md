@@ -346,8 +346,9 @@ audit_ref: { type: 'master_detail', reference: 'invoice', relatedList: false },
 
 - `'primary'` — main content: a full-width table in the record's body (its own
   tab on the tabbed page). Default for a `master_detail` FK with `inlineEdit`.
-- `false` — suppress this child from the parent's detail page.
-- `true` / omitted — a side card (the shared **Related** tab).
+- `false` — hidden from the parent's page.
+- `true`, or omitted (except inline-edited `master_detail`) — a side card
+  (the shared **Related** tab).
 - Order is the parent's: `relatedLists: ['task', 'event.related_to']` (child, or
   `object.field`) lists those first; a name matching no inbound FK is refused.
 
