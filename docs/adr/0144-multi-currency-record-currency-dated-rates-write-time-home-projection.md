@@ -95,9 +95,8 @@ aggregation. The ruling names them by topic ("Q0 A", "rates A", "home currency A
 - **The CEL standard library is pure.** Its header says: "Nothing registered here may be handed a resolver, a lazy
   getter or any other callback into the host" (`packages/formula/src/stdlib.ts`). That purity keeps
   `objectstack build` byte-stable, so a formula function cannot read a rate table.
-- **`CurrencyValueSchema` is still exported**, marked `@deprecated`
-  (`packages/spec/src/data/field.zod.ts#CurrencyValueSchema`, its type `#CurrencyValue`), although ADR-0104 D1 says it
-  "is deleted". #27182 retires it, in PR #27233.
+- **`CurrencyValueSchema` is still exported** from `packages/spec/src/data/field.zod.ts`, marked `@deprecated`,
+  together with its `CurrencyValue` type, although ADR-0104 D1 says it "is deleted". #27182 retires it, in PR #27233.
 - **Today's numbers are silently wrong** (from the measurement round's probes over a real ObjectQL engine; the scratch
   files were run and deleted and are not re-run for this record). The probes model a record currency the way authors
   do today, as a sibling text field. `sum` over a USD row of 100 and an EUR row of 100 answers `200 "USD"`. A `summary`
