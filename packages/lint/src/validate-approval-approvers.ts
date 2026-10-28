@@ -8,9 +8,10 @@
  * — it is NOT a position. After ADR-0090 D3 renamed `sys_role` → `sys_position`,
  * downstream apps that authored `{ type: 'role', value: 'sales_manager' }`
  * silently route the approval to nobody: the expansion finds no member row,
- * falls back to the `role:sales_manager` literal, and the request waits on an
- * approver that can never act. These rules move that failure from a stuck
- * request at runtime to a located fix-it at author time.
+ * falls back to the `role:sales_manager` literal, a slot no one can act on,
+ * and a slate that names no one else lands on the node's `onEmptyApprovers`
+ * instead of the people the author meant. These rules move that failure from
+ * runtime to a located fix-it at author time.
  *
  * Rules:
  *
@@ -230,6 +231,27 @@ const MANAGER_ONLY_FIX =
 const GROUP_ONLY_FIX =
   "Staff at least one target, add an approver that cannot resolve empty (e.g. { type: 'org_membership_level', " +
   "value: 'owner' }), or name who decides in fallbackApprovers with onEmptyApprovers: 'fallback'";
+
+/**
+ * [#27101] The clause both single-slot verdicts end on — one wording, so the
+ * two arms cannot drift. It states the SLOT, never the request's fate, the
+ * runtime's own rule for its expansion warnings (`resolveApproverSpec` in
+ * plugin-approvals): one approver cannot see the rest of the slate, and what an
+ * empty slate does is the node's `onEmptyApprovers`, whose default can move.
+ * ⛔ Never name an outcome or the default here: "the request stalls" was such
+ * a restated outcome, and it went false when the default became `admin_rescue`.
+ */
+const EMPTY_SLATE_DECIDES = 'onEmptyApprovers decides an empty slate';
+
+/**
+ * [#27101] The routes the unsupported-type hint offers: the group-routed types
+ * whose binding the runtime implements, derived so the hint can never offer a
+ * type that is itself `unsupported` (it offered `queue` while `queue` was the
+ * one unsupported type, ADR-0142 D6).
+ */
+const EXPANDABLE_GROUP_TYPES = [...GROUP_ROUTED_TYPES].filter(
+  (t) => (APPROVER_VALUE_BINDINGS as Record<string, { source: string }>)[t]?.source !== 'unsupported',
+);
 
 export type ApprovalApproverSeverity = 'error' | 'warning' | 'info';
 
@@ -458,8 +480,8 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
             // [#22161] One verdict; what the type resolves against and why a
             // business role is a position is `os explain` text.
             message:
-              `approver { type: '${type}', value: '${value}' } names no org-membership tier ` +
-              `(${MEMBERSHIP_TIER_LIST}), so it matches nobody and the request stalls`,
+              `approver { type: '${type}', value: '${value}' } names no membership tier ` +
+              `(${MEMBERSHIP_TIER_LIST}), so it matches nobody; ${EMPTY_SLATE_DECIDES}`,
             // [#22161] One remedy line: the verdict already lists the tiers,
             // and why a business role is always a position (the closed
             // ADR-0108 vocabulary, `sys_user_position`) is the explanation's.
@@ -483,9 +505,12 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
           (APPROVER_VALUE_BINDINGS as Record<string, { source: string }>)[canonical]?.source === 'unsupported'
         ) {
           // Declared-but-unenforced (#3508): the runtime has no resolution for
-          // this type — the slot degrades to an inert `type:value` literal and
-          // the request routes to nobody. Say it at authoring time instead of
-          // letting the request stall silently (Prime Directive #10).
+          // this type — the slot degrades to an inert `type:value` literal that
+          // names no one, and a slate left naming no one takes the node's
+          // `onEmptyApprovers` route. Say it at authoring time instead of
+          // letting the slot fail silently (Prime Directive #10). No binding is
+          // `unsupported` today (ADR-0142 D6 implemented the last, `queue`);
+          // the arm stays as the guard for the next one.
           findings.push({
             severity: 'warning',
             rule: APPROVAL_APPROVER_TYPE_UNSUPPORTED,
@@ -493,9 +518,11 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
             path: `${path}.type`,
             message:
               `approver type '${type}' is declared but not implemented by the runtime: it was deprecated ` +
-              `rather than built, and is no longer offered for authoring — the slot resolves to nobody and ` +
-              `the request stalls.`,
-            hint: `Route to people the engine can expand: { type: 'team' | 'department' | 'position' | 'queue', ... }.`,
+              `rather than built, and is no longer offered for authoring — the slot resolves to nobody, and ` +
+              `${EMPTY_SLATE_DECIDES}.`,
+            hint:
+              `Route to people the engine can expand: ` +
+              `{ type: ${EXPANDABLE_GROUP_TYPES.map((t) => `'${t}'`).join(' | ')}, ... }.`,
           });
         }
 

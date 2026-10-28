@@ -2779,8 +2779,9 @@ const APPROVAL_APPROVER_NOT_MEMBERSHIP_TIER_EXPLANATION: RuleExplanation = {
       'case-insensitively.',
     'After ADR-0090 D3 renamed `sys_role` to `sys_position`, an approver authored as ' +
       '`{ type: \'role\', value: \'sales_manager\' }` finds no member row: the expansion falls back ' +
-      'to the `role:sales_manager` literal, and the request waits on an approver that can never ' +
-      'act. A business role is always a position, resolved through `sys_user_position`.',
+      'to the `role:sales_manager` literal, a slot no one can act on. A slate that names no one ' +
+      'else is decided by the node\'s `onEmptyApprovers`, as any empty slate is. A business role is ' +
+      'always a position, resolved through `sys_user_position`.',
     'A warning, not an error: the runtime keeps its literal fallback rather than refusing the node. ' +
       'When the value is not a tier, this finding is reported instead of ' +
       '`approval-approver-type-deprecated` on the same approver: the bad value is the more serious ' +
