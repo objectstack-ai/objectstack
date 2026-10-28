@@ -79,7 +79,10 @@ import '../renderers';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(HERE, '..', '..', '..', '..');
-const README = readFileSync(join(REPO_ROOT, 'README.md'), 'utf8');
+// The README's "Basic Usage" example lives in the quick-start guide since
+// objectstack#26080 folded the tree's root README into the repository root's;
+// `README` below names that page, and every assertion still reads the same fence.
+const README = readFileSync(join(REPO_ROOT, 'content/docs/guide/quick-start.md'), 'utf8');
 
 /** The three `statistic` labels the README's flagship example authors. */
 const LABELS = ['Total Users', 'Revenue', 'Orders'];
@@ -162,7 +165,7 @@ describe('`grid` reads `children` and nothing else — the defect shape (objectu
  * a regex so a nested array cannot end the span early.
  */
 function basicUsageSchemaLiteral(): string {
-  const heading = README.indexOf('#### Basic Usage');
+  const heading = README.indexOf('### Basic Usage');
   expect(heading).toBeGreaterThan(-1);
   // The example is typed as the node the `schema` prop takes since objectui#11466.
   const start = README.indexOf('const schema: DeclaredNode = {', heading);
@@ -180,7 +183,7 @@ function basicUsageSchemaLiteral(): string {
   throw new Error('unbalanced braces in the README "Basic Usage" schema literal');
 }
 
-describe('the root README authors the grid child list `grid` actually reads (objectui#8912)', () => {
+describe('the README example, now in the quick-start guide, authors the grid child list `grid` actually reads (objectui#8912)', () => {
   it('spells the flagship grid child list `children`, never `items`', () => {
     const literal = basicUsageSchemaLiteral();
     expect(literal).toContain('children: [');

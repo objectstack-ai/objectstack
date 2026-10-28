@@ -1,7 +1,18 @@
 name: Docs Deploy
 
-# The ONE path by which the docs site (Vercel project `objectstack`, Root
-# Directory `apps/docs`) reaches production.
+# The ONE path by which this repository's two docs sites reach production,
+# one job each:
+#
+#   - `deploy`: the ObjectStack docs, Vercel project `objectstack`, Root
+#     Directory `apps/docs`;
+#   - `deploy-ui-site`: the Object UI docs at www.objectui.org, Vercel project
+#     `objectui`, Root Directory `ui/apps/site`. That site came here with the
+#     objectui tree; objectui's own copy of this workflow was deleted with the
+#     rest of `ui/.github/workflows/`, and nothing else deploys it. Its header
+#     below says what differs from `deploy`.
+#
+# Everything this header says applies to both jobs. The two are independent:
+# one going red does not stop or cancel the other.
 #
 # ## Why the build runs here and not on Vercel
 #
@@ -201,6 +212,142 @@ jobs:
         run: |
           {
             echo "### Docs Deploy — ${{ job.status }}"
+            echo
+            echo "Commit: \`${{ github.sha }}\` (${{ github.event_name }})"
+            echo
+            echo "Deployment: ${{ steps.deploy.outputs.url || 'none (the run stopped before the deploy step finished)' }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ── The Object UI docs site (www.objectui.org) ─────────────────────────────
+  #
+  # The same build-here, upload-prebuilt path as `deploy` above, for the Vercel
+  # project `objectui`. `ui/apps/site/vercel.json` turns that project's Git
+  # deployments off (`git.deploymentEnabled: false`), so this job is the only
+  # thing that publishes the site, and every failure is red, as above.
+  #
+  # What differs from `deploy`, and why:
+  #
+  #   - The project's Root Directory must read `ui/apps/site`. It read
+  #     `apps/site` while the site lived in the objectui repository, and it is
+  #     a dashboard setting that no file here can change. A step right after
+  #     `vercel pull` reads the setting the pull wrote and goes red, naming the
+  #     setting and its value, when it is anything else; without that step
+  #     the old value fails later inside `vercel build`, as an error that does
+  #     not say a dashboard setting is the cause.
+  #   - `vercel build` gets no token. It runs `vercel.json`'s install and build
+  #     commands, which run every workspace package's lifecycle scripts, and
+  #     it does not call the Vercel API. Only the `pull` and `deploy` steps,
+  #     which do, see VERCEL_TOKEN. objectui's own workflow made this choice
+  #     for the same reason.
+  #   - objectui's pinned-@objectstack restore and build steps are not ported.
+  #     In this repository every @objectstack package the site imports is a
+  #     workspace package, and `vercel.json`'s build command builds it from
+  #     this tree through turbo's `^build`.
+  #
+  # The site's own install and build commands live in `ui/apps/site/vercel.json`
+  # and are unchanged from objectui: `pnpm i` installs this whole workspace from
+  # any member directory, and its build command's `cd ../..` lands in `ui/`,
+  # from which turbo resolves this repository's root and builds
+  # `@object-ui/site` with its full closure (65 tasks, all built, on the
+  # local run measured below).
+  deploy-ui-site:
+    name: Deploy objectui docs to Vercel (production)
+    runs-on: ubuntu-latest
+    # The build behind `vercel.json`'s command (the site, its @object-ui
+    # packages and their @objectstack closure: 65 turbo tasks, none cached)
+    # measured 596 s at `--concurrency=2` on a shared dev container; the runner
+    # adds install and upload.
+    timeout-minutes: 30
+    env:
+      # Identifiers, not credentials, as in `deploy`: the same team, and the
+      # project that serves www.objectui.org.
+      VERCEL_ORG_ID: team_06nvlGKZCkwhzdXmRdxeCNnB
+      VERCEL_PROJECT_ID: prj_v1rXIczaI7YGmXmseQCLFUFOFxTB
+      # The same pin as `deploy`'s VERCEL_CLI_VERSION; move the two together.
+      VERCEL_CLI_VERSION: '60.1.3'
+      # The value the project's Root Directory must have; see the header.
+      VERCEL_ROOT_DIRECTORY: ui/apps/site
+    steps:
+      - name: Refuse any ref but main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Docs Deploy publishes to PRODUCTION and runs only from main; this run is on ${GITHUB_REF}. Re-run it with 'main' selected in the branch picker."
+          exit 1
+
+      - name: Require the Vercel token
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          if [ -z "${VERCEL_TOKEN:-}" ]; then
+            echo "::error::The secret VERCEL_TOKEN is not visible to this run, so www.objectui.org cannot be deployed and production is NOT being updated. It is provided as an objectstack-ai ORGANIZATION secret: check that it still exists and that this repository is in its repository access list (org Settings -> Secrets and variables -> Actions). Then re-run this workflow."
+            exit 1
+          fi
+          echo "VERCEL_TOKEN is set."
+
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
+
+      # From the repository root, for the reason `deploy`'s comment on this
+      # step gives: the CLI applies the Root Directory relative to its cwd.
+      - name: Pull the production project settings
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: npx --yes "vercel@${VERCEL_CLI_VERSION}" pull --yes --environment=production --token="$VERCEL_TOKEN"
+
+      - name: Require the project's Root Directory to be ui/apps/site
+        run: |
+          set -euo pipefail
+          actual="$(node -e "
+            const fs = require('node:fs');
+            const file = '.vercel/project.json';
+            if (!fs.existsSync(file)) { console.log('(vercel pull wrote no ' + file + ')'); process.exit(0); }
+            const settings = JSON.parse(fs.readFileSync(file, 'utf8')).settings || {};
+            console.log(settings.rootDirectory ?? '(not set)');
+          ")"
+          if [ "$actual" != "$VERCEL_ROOT_DIRECTORY" ]; then
+            echo "::error::The Vercel project ${VERCEL_PROJECT_ID} has Root Directory '${actual}', and this repository builds the site from '${VERCEL_ROOT_DIRECTORY}'. Nothing is deployed. A maintainer sets it in the Vercel dashboard: project objectui -> Settings -> Build and Deployment -> Root Directory = ${VERCEL_ROOT_DIRECTORY}. Then re-run this workflow."
+            exit 1
+          fi
+          echo "Root Directory: ${actual}"
+
+      # No VERCEL_TOKEN here; see the header. TURBO_FORCE for the reason
+      # `deploy`'s build step gives.
+      - name: Build the site (vercel build --prod)
+        env:
+          TURBO_FORCE: 'true'
+        run: npx --yes "vercel@${VERCEL_CLI_VERSION}" build --prod
+
+      - name: Assert the build produced a deployable output
+        run: |
+          set -euo pipefail
+          if [ ! -f ui/apps/site/.next/BUILD_ID ]; then
+            echo "::error file=ui/apps/site/vercel.json::vercel build exited 0 but produced no ui/apps/site/.next/BUILD_ID - the site was not built, so nothing is deployed."
+            exit 1
+          fi
+          if [ ! -f .vercel/output/config.json ]; then
+            echo "::error::vercel build exited 0 but wrote no .vercel/output/config.json at the repository root - there is no prebuilt output to deploy."
+            exit 1
+          fi
+          echo "Built the objectui site: BUILD_ID=$(cat ui/apps/site/.next/BUILD_ID)"
+
+      - name: Deploy the prebuilt output to production
+        id: deploy
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          url=$(npx --yes "vercel@${VERCEL_CLI_VERSION}" deploy --prebuilt --prod --token="$VERCEL_TOKEN")
+          echo "url=${url}" >> "$GITHUB_OUTPUT"
+          echo "Deployed: ${url}"
+
+      - name: Publish the run to the summary
+        if: always()
+        run: |
+          {
+            echo "### Docs Deploy (www.objectui.org) — ${{ job.status }}"
             echo
             echo "Commit: \`${{ github.sha }}\` (${{ github.event_name }})"
             echo
