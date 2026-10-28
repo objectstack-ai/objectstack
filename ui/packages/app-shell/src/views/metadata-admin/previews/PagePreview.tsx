@@ -20,7 +20,7 @@ import { PreviewShell, PreviewErrorBoundary, PreviewMessage } from './PreviewShe
 import { OutlineStrip } from './OutlineStrip.js';
 import { SourcePageEditor } from './SourcePageEditor.js';
 import { pageKindNode } from '../../pageKindNode.js';
-import { deriveStudioDetailSections } from '../../recordDetailSections.js';
+import { deriveStudioDetailSections, toAuthoredDetailSections, MORE_DETAILS_DEFAULT_LABEL } from '../../recordDetailSections.js';
 import { PageBlockCanvas } from './PageBlockCanvas.js';
 import { InterfaceListPage } from '../../InterfaceListPage.js';
 import { t as tr, tFormat } from '../i18n.js';
@@ -320,19 +320,32 @@ export function PagePreview({ draft, editing, selection, onSelectionChange, onPa
   }, [isSlotted, schema, draft, recordSchema, moreDetailsLabel]);
   /**
    * "Convert to full page" — the one explicit way a slotted record page takes
-   * ownership of its whole layout. It writes the regions the page renders right
-   * now (the synthesized default with the authored slot overrides applied, the
-   * same `renderSchema` the canvas shows), switches the kind to `full`, and
-   * drops `slots`, which a full page never reads. Offered only once the bound
-   * object's schema has loaded: before that the synthesized regions carry no
-   * fields, and copying them would save a page with an empty body.
+   * ownership of its whole layout. It writes the page the canvas shows — the
+   * synthesized default with the authored slot overrides applied — switches the
+   * kind to `full`, and drops `slots`, which a full page never reads.
+   *
+   * The regions are synthesized AGAIN for the write, in the PERSISTED shape:
+   * the detail sections name their fields (`toAuthoredDetailSections`) and
+   * carry the English default heading, exactly as the create-time seed writes
+   * them (`anchors.ts`). The canvas's own `renderSchema` holds the RUNTIME
+   * section shape (field objects, a translated heading) and is refused by the
+   * spec as authored metadata. Offered only once the bound object's schema has
+   * loaded: before that the synthesized regions carry no fields, and copying
+   * them would save a page with an empty body.
    */
   const slottedRecordPage = isSlotted && isRecordPage;
-  const canConvertToFull = canEdit && slottedRecordPage && !!recordSchema
-    && Array.isArray((renderSchema as { regions?: unknown })?.regions);
+  const canConvertToFull = canEdit && slottedRecordPage && !!recordSchema;
   const convertToFull = () => {
     if (!canConvertToFull) return;
-    const synth = renderSchema as { regions?: unknown[]; template?: unknown };
+    const slots = (draft as { slots?: Record<string, unknown> })?.slots ?? {};
+    const sections = toAuthoredDetailSections(
+      deriveStudioDetailSections(recordSchema, { moreDetails: MORE_DETAILS_DEFAULT_LABEL }),
+    );
+    const synth = buildDefaultPageSchema(
+      recordSchema,
+      sections ? { slots, sections: sections as any } : { slots },
+    ) as { regions?: unknown[]; template?: unknown };
+    if (!Array.isArray(synth?.regions) || synth.regions.length === 0) return;
     onPatch!({
       kind: 'full',
       regions: structuredClone(synth.regions),

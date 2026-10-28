@@ -55,6 +55,7 @@ vi.mock('@object-ui/react', async (importOriginal) => ({
 
 import { PagePreview } from './PagePreview';
 import { t } from '../i18n';
+import { validateMetadataDraft } from '../clientValidation';
 
 const OBJECT = 'showcase_invoice';
 const FIELDS = {
@@ -132,6 +133,13 @@ describe('PagePreview — a slotted record page is the default page; converting 
     // The copied body carries the object's details, not a bare shell.
     expect(JSON.stringify(regions)).toContain('record:details');
     expect(JSON.stringify(regions)).toContain('total');
+    // And it is AUTHORED metadata: the converted page passes the check the
+    // console runs on a page draft. (The canvas's own render schema holds the
+    // runtime section shape, field objects, which this check refuses.)
+    const converted = { ...newRecordPage, ...patch };
+    delete (converted as Record<string, unknown>).slots;
+    const verdict = await validateMetadataDraft('page', converted, undefined, { mode: 'edit' });
+    expect(verdict.issues, JSON.stringify(verdict.issues.slice(0, 3))).toEqual([]);
   });
 
   it('keeps an authored slot override when converting', async () => {

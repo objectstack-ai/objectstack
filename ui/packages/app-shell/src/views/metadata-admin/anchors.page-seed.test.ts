@@ -19,6 +19,7 @@ import { registerBuiltinAnchors } from './anchors';
 import { resolveResourceConfig } from './registry';
 import { applyTransform } from './createDerive';
 import { buildCreateModeBody } from './createBody';
+import { validateMetadataDraft } from './clientValidation';
 import { getMetadataCreateSeed } from '@objectstack/spec/kernel';
 import { PageSchema } from '@objectstack/spec/ui';
 
@@ -89,6 +90,10 @@ describe('page createSeed (record-page region seeding)', () => {
     expect(Array.isArray((seeded as any).regions)).toBe(true);
     expect((seeded as any).regions.length).toBeGreaterThan(0);
     expect((seeded as any).kind).toBeUndefined();
+    // The copied regions are authored metadata the console's own page check accepts.
+    const body = { name: 'invoice_full', label: 'Invoice', type: 'record', object: 'showcase_invoice', kind: 'full', ...(seeded as object) };
+    const verdict = await validateMetadataDraft('page', body, undefined, { mode: 'edit' });
+    expect(verdict.issues, JSON.stringify(verdict.issues.slice(0, 3))).toEqual([]);
   });
 
   it('derives the create form kind from the page type (record → slotted, else full)', () => {
