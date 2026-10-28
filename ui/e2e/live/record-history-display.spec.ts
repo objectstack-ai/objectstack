@@ -36,6 +36,16 @@ async function seededUsers(request: APIRequestContext): Promise<{ actor: SysUser
   return { actor: actor!, other: other! };
 }
 
+/**
+ * The synthesized record page lays itself out by the width of the view it
+ * occupies (objectstack#26678): the tab strip this spec opens exists only
+ * below the two-column floor (`RECORD_PAGE_TWO_COLUMN_MIN_WIDTH` in
+ * `@object-ui/plugin-detail`). The Desktop Chrome viewport leaves the record
+ * view right at that floor once the console sidebar takes its share, so the
+ * spec pins a viewport that keeps the page in its tabbed tier.
+ */
+test.use({ viewport: { width: 1200, height: 800 } });
+
 test('History tab shows display values (localized dates, option labels, resolved lookups, real actor) instead of raw audit payloads', async ({ page, request }) => {
   const { actor, other } = await seededUsers(request);
 

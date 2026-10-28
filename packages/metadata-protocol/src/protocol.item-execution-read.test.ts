@@ -13,6 +13,10 @@
 //    decoration (`_diagnostics` computed on the raw body, then the type's
 //    credential redaction), so this one equality says "the served item minus
 //    `_diagnostics` and redaction", for a redacting type as for a plain one.
+//    A PENDING DRAFT's served item also carries what its publish will refuse
+//    (#26707): `_diagnostics` is the decoration's verdict extended by the
+//    protocol's own `draftPublishVerdict` on the draft body
+//    (`withPublishVerdict`), the execution face carrying neither.
 //  - THE ENVELOPE: every other key (`lock`, `editable`, `version`, `packageId`,
 //    …) is equal, save `registration`, which the served face alone carries,
 //    as the list read's served face alone carries `registrations`.
@@ -30,7 +34,7 @@
 import { describe, it, expect } from 'vitest';
 import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
-import { decorateMetadataItem } from './metadata-diagnostics.js';
+import { decorateMetadataItem, withPublishVerdict } from './metadata-diagnostics.js';
 import { metaOverlayCacheEntryCount } from './meta-overlay-cache.js';
 
 type Row = Record<string, unknown>;
@@ -139,6 +143,14 @@ function harness(rows: Row[], opts: { disabledObjects?: string[]; automation?: b
     return { protocol, engine, reads, write };
 }
 
+/**
+ * [#26707] The publish verdict a pending draft's served read carries: the
+ * protocol's own judge, on the stored draft body.
+ */
+async function draftVerdictOf(h: ReturnType<typeof harness>, type: string, body: Row): Promise<unknown[]> {
+    return h.protocol.draftPublishVerdict({ type, name: body.name, body, packageId: null });
+}
+
 /** Read one request on both faces. */
 async function bothFaces(h: ReturnType<typeof harness>, request: Row) {
     const served = await h.protocol.getMetaItem(structuredClone(request));
@@ -150,11 +162,16 @@ async function bothFaces(h: ReturnType<typeof harness>, request: Row) {
  * THE parity: the served item is the execution item decorated, every other
  * envelope key is equal, and the served item really is decorated.
  */
-function expectParity(type: string, served: any, execution: any) {
+function expectParity(type: string, served: any, execution: any, publishVerdict?: unknown[]) {
     expect(served.item, 'the served face found an item').toBeTruthy();
     expect(served.item._diagnostics, 'the served item is decorated (anti-vacuity)').toBeDefined();
     expect(Object.prototype.hasOwnProperty.call(execution.item, '_diagnostics')).toBe(false);
-    expect(served.item).toEqual(decorateMetadataItem(type, execution.item));
+    const decorated = decorateMetadataItem(type, execution.item);
+    expect(served.item).toEqual(
+        publishVerdict === undefined
+            ? decorated
+            : { ...decorated, _diagnostics: withPublishVerdict(type, execution.item.name, decorated._diagnostics, publishVerdict as never) },
+    );
     const { item: _servedItem, registration: _servedOnly, ...servedEnvelope } = served;
     const { item: _executionItem, ...executionEnvelope } = execution;
     expect(executionEnvelope).toEqual(servedEnvelope);
@@ -213,7 +230,10 @@ describe('[#24535] the by-name execution read is the served read minus the servi
         ];
         const h = harness(rows);
         const { served, execution } = await bothFaces(h, { type: 'object', name: 'stored_widget', state: 'draft' });
-        expectParity('object', served, execution);
+        const verdict = await draftVerdictOf(h, 'object', JSON.parse(rows[1].metadata as string));
+        // The draft declares no sharingModel, which its publish refuses (#26707).
+        expect(verdict).toContainEqual(expect.objectContaining({ rule: 'security-owd-unset' }));
+        expectParity('object', served, execution, verdict);
         expect(execution.item.label).toBe('Draft');
     });
 
@@ -223,7 +243,7 @@ describe('[#24535] the by-name execution read is the served read minus the servi
             objectRow('stored_widget', 'draft', { label: 'Draft' }),
         ]);
         const preview = await bothFaces(withDraft, { type: 'object', name: 'stored_widget', previewDrafts: true });
-        expectParity('object', preview.served, preview.execution);
+        expectParity('object', preview.served, preview.execution, await draftVerdictOf(withDraft, 'object', { name: 'stored_widget', fields: {}, label: 'Draft' }));
         expect(preview.execution.item).toMatchObject({ label: 'Draft', _draft: true });
 
         const withoutDraft = harness([objectRow('stored_widget', 'active', { label: 'Active' })]);

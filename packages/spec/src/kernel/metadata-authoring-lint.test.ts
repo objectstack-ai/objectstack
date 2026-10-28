@@ -108,16 +108,26 @@ describe('coverage derivation (no third hand-written list)', () => {
     const registrySchema = getMetadataTypeSchema('view');
     expect(registrySchema, 'the registry entry itself must still exist — only the lint stopped reading it')
       .toBeDefined();
-    // The registry schema is still STRIP-mode, which is what makes reading it
-    // wrong rather than merely redundant: run the walk against it explicitly
-    // and the old contradicting finding comes straight back. This keeps the
-    // card's evidence alive — if `ViewMetadataSchema` ever goes strict, this
-    // assertion fails and the exclusion above needs restating, rather than
-    // quietly becoming true for a second, unrelated reason.
+    // The registry schema WAS strip-mode, which is what made reading it wrong
+    // rather than merely redundant: walked explicitly, it gave the old
+    // contradicting finding (`views.v1.bogusViewKey`) straight back.
+    //
+    // [#26711] `ViewMetadataSchema` closed too: the `view` write door now
+    // refuses an unknown top-level key on every member, so the explicit walk
+    // finds nothing — and the parse refuses the key, which is what makes that
+    // empty answer a graduation and not a walker that broke. The exclusion
+    // above now holds for both schemas; the card's point (ask the schema the
+    // parse applies) still stands for the next type that serves two shapes.
     expect(
       lintUnknownKeysAgainstSchema(registrySchema, VIEW_ENTRY, 'view', 'views.v1').map((f) => f.path),
-      'ViewMetadataSchema still strips — the divergence this card fixed is real, not stale',
-    ).toEqual(['views.v1.bogusViewKey']);
+      'ViewMetadataSchema is closed — the walk has nothing to warn about',
+    ).toEqual([]);
+    const parsed = registrySchema!.safeParse(VIEW_ENTRY);
+    expect(parsed.success, 'the registry schema REFUSES the key the walk no longer reports').toBe(false);
+    // The union carries the claimed branch's refusal inside `invalid_union`.
+    expect(JSON.stringify(parsed.success ? [] : parsed.error.issues)).toContain('"keys":["bogusViewKey"]');
+    const { bogusViewKey: _bogus, ...clean } = VIEW_ENTRY;
+    expect(registrySchema!.safeParse(clean).success, 'control: the entry without the key saves').toBe(true);
   });
 
   it('excludes the strict types — the parse is already loud there', () => {

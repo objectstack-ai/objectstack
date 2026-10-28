@@ -146,6 +146,12 @@ import { useRegisteredMetadataDefaultInspector } from './default-inspector-regis
 import { useMetadataLocale, t, tFormat, translateMetadataType, translateValidationMessage } from './i18n.js';
 import { JsonSourceEditor } from './JsonSourceEditor.js';
 import { validateMetadataDraft, hasClientValidator, type DraftMode } from './clientValidation.js';
+import {
+  draftEnvelopeDiagnostics,
+  editedItemDiagnostics,
+  withServerOnlyErrors,
+  type ServerDiagnostics,
+} from './draftVerdict.js';
 import { describeIssuePath, issueSlicePath, issueSliceFingerprint } from './issuePath.js';
 import { buildCreateModeBody, seedStructuralDefaults, unsetSeedPlaceholders } from './createBody.js';
 import { errorCodeIs, errorCodeIsAnyOf } from '@object-ui/types';
@@ -750,6 +756,18 @@ function MetadataResourceEditPageImpl({
     () => (createMode && !createDirty ? [] : issues),
     [createMode, createDirty, issues],
   );
+  // Per-item draft pending publish (mode=draft saves land here).
+  // When non-null, the editor is "viewing the draft" and we surface
+  // Publish / Discard-draft actions.
+  const [hasDraft, setHasDraft] = React.useState(false);
+  // objectstack#26707 — the pending draft's own `_diagnostics`, kept from each
+  // draft read (load, save, publish) before its decorations are stripped.
+  const [draftDiagnostics, setDraftDiagnostics] = React.useState<ServerDiagnostics | undefined>(undefined);
+  // The server verdict on the body on screen (see `draftVerdict.ts`).
+  const serverDiagnostics = React.useMemo(
+    () => editedItemDiagnostics({ hasDraft, draftDiagnostics, layered }),
+    [hasDraft, draftDiagnostics, layered],
+  );
   // Server-computed diagnostics handed to a canvas Preview (e.g. the flow
   // Problems panel + on-canvas badges). Errors prefer the live client-side Zod
   // issues when a client validator exists (so they track every keystroke);
@@ -758,12 +776,13 @@ function MetadataResourceEditPageImpl({
   const previewDiagnostics = React.useMemo<
     Array<{ path?: string; message: string; severity: 'error' | 'warning' }>
   >(() => {
-    const diag = (layered as any)?._diagnostics as
-      | { errors?: Array<{ path: string; message: string }>; warnings?: Array<{ path: string; message: string }> }
-      | undefined;
-    const errs = hasClientValidator(type, draftMode)
-      ? displayIssues.map((i) => ({ path: i.path, message: translateValidationMessage(i.message, locale) }))
-      : (diag?.errors ?? []).map((i) => ({ path: i.path, message: translateValidationMessage(i.message, locale) }));
+    // objectstack#26707 — the verdict on the body on screen: the pending
+    // draft's (which carries what its publish would refuse) while one is held.
+    const diag = serverDiagnostics;
+    const errs = (hasClientValidator(type, draftMode)
+      ? withServerOnlyErrors(displayIssues, diag?.errors)
+      : (diag?.errors ?? [])
+    ).map((i) => ({ path: i.path, message: translateValidationMessage(i.message, locale) }));
     const warns = (diag?.warnings ?? []).map((i) => ({
       path: i.path,
       message: translateValidationMessage(i.message, locale),
@@ -772,11 +791,7 @@ function MetadataResourceEditPageImpl({
       ...errs.map((e) => ({ path: e.path || undefined, message: e.message, severity: 'error' as const })),
       ...warns.map((w) => ({ path: w.path || undefined, message: w.message, severity: 'warning' as const })),
     ];
-  }, [layered, displayIssues, type, locale, draftMode]);
-  // Per-item draft pending publish (mode=draft saves land here).
-  // When non-null, the editor is "viewing the draft" and we surface
-  // Publish / Discard-draft actions.
-  const [hasDraft, setHasDraft] = React.useState(false);
+  }, [serverDiagnostics, displayIssues, type, locale, draftMode]);
   const [publishing, setPublishing] = React.useState(false);
   // Bumped by destructive operations (rollback / discard-draft) to
   // force the load effect to refetch layered + draft state.
@@ -1166,10 +1181,14 @@ function MetadataResourceEditPageImpl({
         if (cancelled) return;
         const draftResp = draftRead.answer;
         setLayered(lay);
+        // objectstack#26707 — a pending draft is judged by its own read, whose
+        // verdict carries what its publish would refuse.
+        const loadDraftDiagnostics = extractDraftBody(draftResp) ? draftEnvelopeDiagnostics(draftResp) : undefined;
+        setDraftDiagnostics(loadDraftDiagnostics);
         // Surface server-computed load-time validation errors as inline
         // SchemaForm issues — operators see what's wrong with the
         // saved metadata immediately, not just on the next Save round-trip.
-        const loadDiag = (lay as any)?._diagnostics as
+        const loadDiag = loadDraftDiagnostics ?? (lay as any)?._diagnostics as
           | { valid: boolean; errors?: Array<{ path: string; message: string }> }
           | undefined;
         if (loadDiag && loadDiag.valid === false && Array.isArray(loadDiag.errors)) {
@@ -1781,6 +1800,7 @@ function MetadataResourceEditPageImpl({
       if (!layerless) setLayered(lay);
       const draftReal = extractDraftBody(draftResp);
       setHasDraft(!!draftReal);
+      setDraftDiagnostics(draftReal ? draftEnvelopeDiagnostics(draftResp) : undefined);
       // The served draft is the whole document the save just stored (see the
       // load effect, objectui#10765): take it as-is. ⛔ Not spread over
       // `effective` — that is the PUBLISHED layer, and a spread would bring a
@@ -2015,6 +2035,7 @@ function MetadataResourceEditPageImpl({
       setLayered(lay);
       const draftReal = extractDraftBody(draftResp);
       setHasDraft(!!draftReal);
+      setDraftDiagnostics(draftReal ? draftEnvelopeDiagnostics(draftResp) : undefined);
       // After a publish the promoted body IS `effective` and the draft row is
       // normally gone; a draft that does remain is a whole document and is
       // taken as-is (objectui#10765). ⛔ Not spread over `effective`: the
@@ -2077,6 +2098,7 @@ function MetadataResourceEditPageImpl({
       setDraft(fresh);
       draftSnapshotRef.current = fresh;
       setHasDraft(false);
+      setDraftDiagnostics(undefined);
       // objectui#12303 — the discard is said, naming what it discarded, through
       // the console's shared toast (`sonner`, the one Studio's publish uses).
       // Only here, after the DELETE and the re-read landed: a refused discard
@@ -2847,27 +2869,20 @@ function MetadataResourceEditPageImpl({
               // a structural problem without saving first. The same
               // errors are also threaded into SchemaForm as `issues`
               // and rendered inline next to each broken field.
-              const diag = (layered as any)?._diagnostics as
-                | {
-                    valid: boolean;
-                    errors?: Array<{ path: string; message: string }>;
-                    warnings?: Array<{ path: string; message: string }>;
-                  }
-                | undefined;
+              // objectstack#26707 — the pending draft's verdict while one is held.
+              const diag = serverDiagnostics;
               // When client-side Zod validation is available for this
               // type, drive the error portion of the banner from the
               // live `issues` state instead of the stale load-time
               // diagnostics, so it stays in sync with every keystroke.
               // Warnings remain server-sourced (Zod doesn't model them).
-              const liveErrors = hasClientValidator(type, draftMode)
-                ? issues.map((i) => ({
-                    path: i.path,
-                    message: translateValidationMessage(i.message, locale),
-                  }))
-                : (diag?.errors ?? []).map((i) => ({
-                    ...i,
-                    message: translateValidationMessage(i.message, locale),
-                  }));
+              const liveErrors = (hasClientValidator(type, draftMode)
+                ? withServerOnlyErrors(issues, diag?.errors)
+                : (diag?.errors ?? [])
+              ).map((i) => ({
+                path: i.path,
+                message: translateValidationMessage(i.message, locale),
+              }));
               const liveValid = hasClientValidator(type, draftMode)
                 ? liveErrors.length === 0
                 : diag?.valid !== false;

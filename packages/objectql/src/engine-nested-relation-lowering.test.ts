@@ -203,15 +203,21 @@ describe('[#20802] the nested-relation form is lowered at the engine\'s where se
       expect(outer.length, verb).toBeGreaterThan(0);
       for (const read of outer) expect(read.ast.where, verb).toEqual(lowered);
     }
-    for (const [verb, call] of [
-      ['update', () => engine.update(OBJECT, { title: 'x' }, { where, multi: true })],
-      ['delete', () => engine.delete(OBJECT, { where, multi: true })],
-    ] as const) {
-      rec.writes.length = 0;
-      await call();
-      expect(rec.writes, verb).toHaveLength(1);
-      expect(rec.writes[0].ast.where, verb).toEqual(lowered);
-    }
+    rec.writes.length = 0;
+    await engine.update(OBJECT, { title: 'x' }, { where, multi: true });
+    expect(rec.writes, 'update').toHaveLength(1);
+    expect(rec.writes[0].ast.where, 'update').toEqual(lowered);
+    // [#26871] Relations point at this ledger (the owner's `account`, its own
+    // `parent` tree), so a predicate delete first reads the rows it will walk
+    // and then deletes those rows by id. The predicate reaches the driver on
+    // that read, lowered; nothing matches here, so nothing is written.
+    rec.reads.length = 0;
+    rec.writes.length = 0;
+    await engine.delete(OBJECT, { where, multi: true });
+    const resolution = rec.reads.filter((r) => r.object === OBJECT && Array.isArray(r.ast?.fields) && r.ast.fields.includes('id'));
+    expect(resolution, 'delete').toHaveLength(1);
+    expect(resolution[0].ast.where, 'delete').toEqual(lowered);
+    expect(rec.writes, 'delete').toHaveLength(0);
     expect(engine.judgeFilter(OBJECT, where)).toEqual({ ok: true });
     expect(engine.judgeFilter(OBJECT, { owners: { region: 'NA' } })).toEqual({ ok: true });
   });

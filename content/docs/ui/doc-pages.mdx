@@ -302,11 +302,34 @@ expands to *the rest* — every doc the group's rule would have claimed but that
 names, in `order`-then-label sequence. An entry can also be an object to attach a `label`
 override, a `badge` or an `icon`, or to point at an external `href` instead of a doc.
 
+#### Translating the spine
+
+A book's title, its description and each group's section title translate through the
+translation bundle, like an app's label and its navigation labels — keyed by the book's
+`name` and each group's `key`:
+
+```typescript
+translations: [{
+  'zh-CN': {
+    books: {
+      crm_docs: {
+        label: 'CRM 文档',
+        groups: { overview: { label: '概览' }, guides: { label: '使用指南' }, admin: { label: '管理' } },
+      },
+    },
+  },
+}],
+```
+
+`GET /meta/book`, the book tree and the docs sidebar serve the reader's locale; a key the
+bundle does not carry keeps the authored string. `os i18n extract` seeds the keys, and
+`os i18n check` reports a missing one as `i18n/missing-book`. The docs themselves localize
+through `doc.translations` and `<name>.<locale>.md` variants.
+
 <Callout type="warn">
 Inline `translations` on a **book** or a **book group** is rejected: no resolver ever read
-it, so a localized spine shipped its authoring-locale strings to every reader. The near
-neighbour that *does* work is `doc.translations`, read on every doc render path — localize
-the docs themselves.
+it, so a localized spine shipped its authoring-locale strings to every reader. Move those
+strings into the bundle's `books` group above.
 </Callout>
 
 ### How `doc` and `book` compose

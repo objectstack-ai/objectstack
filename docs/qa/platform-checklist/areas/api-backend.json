@@ -1631,7 +1631,7 @@
       "title": "A disabled packaged action is refused 409 ACTION_DISABLED at BOTH dispatch doors — after the capability gate (a 403 is never an oracle for the switch), before the param contract and the record load, durable across restart",
       "since": "v17",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -1665,7 +1665,7 @@
         {
           "clause": "the REST door refuses a disabled packaged action 409 ACTION_DISABLED and dispatches NOTHING: status 409, code ACTION_DISABLED (registered in the ADR-0112 ledger, error-code-ledger.zod.ts), message = the engine's own describeDisabledAction sentence naming the ledger — and no side effect lands (mark_done's declared done/progress write never ran)",
           "oracle": "api",
-          "verify": "step-3 trace: 409 + code ACTION_DISABLED + the disabled-action sentence; follow-up reads show no task mutated. Neither pin scores this clause pass: the dogfood file asserts 409 and /ACTION_DISABLED|is disabled/ only, and the exact code and sentence are pinned only in the unit action-activation-dispatch.test.ts",
+          "verify": "step-3 trace: 409 + code ACTION_DISABLED + the disabled-action sentence; follow-up reads show no task mutated. packaged-action-disabled-dispatch-live.dogfood.test.ts scores it over HTTP: the exact code, the sentence (prefix \"Action 'showcase_mark_done' is disabled — \" and the ledger citation), and the real task re-read with done, progress and updated_at unchanged. packaged-activation-ledger-reach.dogfood.test.ts still asserts 409 and /ACTION_DISABLED|is disabled/ only",
           "evidence": "the trace + the control re-reads"
         },
         {
@@ -1718,7 +1718,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/qa/dogfood/test/packaged-activation-ledger-reach.dogfood.test.ts (live boots, both compositions: the flip lands 200, ONE deployment-level row on a table with no tenant column at all — 'writes ONE deployment-level row, and the TABLE has no tenant column at all', a KEY-SET reading off the driver's own SELECT rather than a value read — REST-door dispatch 409 — asserted as status 409 and text toMatch(/ACTION_DISABLED|is disabled/), neither the exact code nor the describeDisabledAction sentence, and no record re-read for side effects, so it scores acceptance[0] partial — re-enable UPDATES the row and re-arms, flows+actions share one table without touching each other's rows) + packages/runtime/src/domains/action-activation-dispatch.test.ts (UNIT: HttpDispatcher and invokeBusinessAction over a stubbed engine and metadata service, no HTTP layer. It pins the exact 409 ACTION_DISABLED with the engine's own sentence — 'the shared guard itself' › 'answers 409 ACTION_DISABLED with the ENGINE's own sentence' — and both doors incl. the MCP envelope, the 403-not-an-oracle leg, the flow-type-refused-by-its-own-switch leg and absence-means-active, all at that layer: acceptance[3], acceptance[6] and negative[1] are api-oracle legs it scores partial, never pass, RUNNER rule 6). ⚠️ Neither pin covers the RESTART leg, the param-ordering contrast, or a LIVE MCP transport call — those stay manual"
+        "ref": "packages/qa/dogfood/test/packaged-activation-ledger-reach.dogfood.test.ts (live boots, both compositions: the flip lands 200, ONE deployment-level row on a table with no tenant column at all — 'writes ONE deployment-level row, and the TABLE has no tenant column at all', a KEY-SET reading off the driver's own SELECT rather than a value read — REST-door dispatch 409 — asserted as status 409 and text toMatch(/ACTION_DISABLED|is disabled/), neither the exact code nor the describeDisabledAction sentence, and no record re-read for side effects, so it scores acceptance[0] partial — re-enable UPDATES the row and re-arms, flows+actions share one table without touching each other's rows) + packages/runtime/src/domains/action-activation-dispatch.test.ts (UNIT: HttpDispatcher and invokeBusinessAction over a stubbed engine and metadata service, no HTTP layer. It pins the exact 409 ACTION_DISABLED with the engine's own sentence — 'the shared guard itself' › 'answers 409 ACTION_DISABLED with the ENGINE's own sentence' — and both doors incl. the MCP envelope, the 403-not-an-oracle leg, the flow-type-refused-by-its-own-switch leg and absence-means-active, all at that layer: acceptance[3], acceptance[6] and negative[1] are api-oracle legs it scores partial, never pass, RUNNER rule 6) + packages/qa/dogfood/test/packaged-action-disabled-dispatch-live.dogfood.test.ts (#26572 — every api leg over HTTP on its own showcase boot, with the MCP server plugin composed and a database file kept across a cold boot: absence-means-active (the stock gallery bag answers its param 400, no row); acceptance[0] 409 ACTION_DISABLED with the describeDisabledAction sentence for a bogus and a real recordId, and the real task re-read unchanged; acceptance[1] the gallery pair, 409 disabled vs 400 'Invalid action params' enabled for the identical request; acceptance[2] every 409 with the bogus id in play and the enabled 404 RECORD_NOT_FOUND recorded beside it; acceptance[3] the two 403 bodies byte-identical; acceptance[4] a live POST /api/v1/mcp tools/call run_action — isError with code ACTION_DISABLED, status 409 and the REST door's exact message, re-armed after the flip; acceptance[5] after stop and re-boot on the same file still 409, the same row id, re-enable updates it and Mark Done dispatches 200 with done true; acceptance[6] showcase_bulk_reassign refused by its own switch; negative[2] the anonymous 401). The unit file stays the evidence for the dispatcher internals only"
       },
       "traps": [
         "dispatcher-vs-hono-route",
@@ -1784,6 +1784,12 @@
           "date": "2026-10-26",
           "change": "automated.ref and acceptance[0].verify name what each pin asserts and the layer it reaches, from QA run #25815 (release-18.2.0-tier1, at 6679644a), findings a0 and a3/a6/n1. Re-read at base f6c61932: packaged-activation-ledger-reach.dogfood.test.ts asserts the disabled dispatch as 409 plus /ACTION_DISABLED|is disabled/ and re-reads no record; action-activation-dispatch.test.ts, which carries the exact sentence and the 403, flow-type and absence legs, is a unit HttpDispatcher over fakes, above the HTTP layer the api oracle needs. Finding a5 (the restart leg stays manual) confirmed the ref as written; that sentence is unchanged. No clause changed",
           "ref": "#25837"
+        },
+        {
+          "revision": 9,
+          "date": "2026-10-27",
+          "change": "acceptance[0]–[6] and negative[0]–[2] are pinned at the layer their api oracle names (the release-18.2.0 Tier 1 sweep #26468 scored a0, a3, a4, a6 and n1 partial below the HTTP layer, and a1, a5, n0 and n2 unpinned). The new packaged-action-disabled-dispatch-live.dogfood.test.ts drives the REST door, the live MCP transport and a cold boot on one database file; automated.ref names what it asserts and acceptance[0].verify names the pin that carries it. Measured at base c8583f80. No clause changed",
+          "ref": "#26572"
         }
       ]
     },
@@ -1792,7 +1798,7 @@
       "title": "POST /actions/_activation/:object/:action — the activation door's ordered arms: authority before body and lookup, the exact 400 shapes, 404 undeclared, 409 ambiguity, 501/503 honesty, and the reserved segment surviving the real mount",
       "since": "v17",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -1807,7 +1813,7 @@
           "an engine carrying the activation projection (any stock v17 boot — ObjectQLPlugin attaches the sys_metadata_activation store at start)"
         ],
         "knownGaps": [
-          "The AMBIGUITY arm (409 RESOURCE_CONFLICT from refuseAmbiguousActionActivation — two objects declaring one action name) has NO stock fixture: every showcase action name is unique across both action files (verified — the machine names are all showcase_-prefixed and declared once), so the live leg needs an authored scratch package declaring the SAME action name on two objects. Do not fake it; the arm is pinned at unit level (action-activation-posture-gate.test.ts: 409 RESOURCE_CONFLICT and setActionActive NEVER called — no row on refusal; of the owners it asserts only that the message contains the TWIN's name, 'crm_account', never the declaring object's), and a run without the scratch package scores the clause from that pin, recorded as such and partial on the every-owner-named half.",
+          "The AMBIGUITY arm (409 RESOURCE_CONFLICT from refuseAmbiguousActionActivation — two objects declaring one action name) has NO stock fixture: every showcase action name is unique across both action files (verified — the machine names are all showcase_-prefixed and declared once), so the live leg needs an authored scratch package declaring the SAME action name on two objects. Do not fake it; the arm is pinned at unit level (action-activation-posture-gate.test.ts: 409 RESOURCE_CONFLICT and setActionActive NEVER called — no row on refusal; of the owners it asserts only that the message contains the TWIN's name, 'crm_account', never the declaring object's), and a run without the scratch package scores the clause from that pin, recorded as such and partial on the every-owner-named half. Since #26572 that scratch package exists: packages/qa/dogfood/test/fixtures/activation-ambiguity-fixture.ts declares actamb_archive on actamb_invoice and actamb_order, and action-activation-door-live.dogfood.test.ts drives the arm live with every owner named, so the pin above is no longer the only evidence.",
           "The 501 arm (engine without setActionActive) and the 503 arm (attached store that throws / no ledger attached) are unreachable on a stock boot — the stock engine implements the projection and the plugin attaches the store. Both are pinned at unit level (action-activation-posture-gate.test.ts: 501 naming ADR-0126 §8; 503 SERVICE_UNAVAILABLE rather than a 200 for a write that did not persist). #12359 measured the 503 live once (actions-without-automation composition) and the registration MOVE closed it — packaged-activation-ledger-reach.dogfood.test.ts keeps that composition green.",
           "The group/isolated POSTURE legs of the §5 operator gate run on a walled boot provisioned per RUNNER.md's environment-facts entry 'A walled boot is a fixture of its own' (a scratch app declaring the open @objectstack/organizations, which no example app declares). The gate itself (both tiers, all postures) is access-security territory (activation-write-operator-gate); this item asserts only the ORDER, authority before body and lookup (packages/runtime/src/domains/actions.ts#handleActionActivationWrite), which the stock single-posture boot proves through the manage_metadata tier and a walled boot through the operator tier: on both postures QA run #24783's org admin holding manage_metadata got the posture/operator 403 for the mis-bodied, undeclared probe, never the 400 or the 404.",
           "acceptance[4]'s metadata-plane 503 arm — the declaration lookup reports `degraded` (packages/runtime/src/domains/actions.ts, the 'Cannot verify the declaration … the metadata plane is unavailable' refusal) — is unreachable on a stock boot and pinned by no file in automated.ref: action-activation-posture-gate.test.ts's 503 is the store that cannot persist the row, a different arm, and http-dispatcher.actions-type-dispatch.test.ts '503s rather than running ungated when the metadata plane cannot answer' pins the DISPATCH door's use of the same lookup, not this door. Record that arm as not covered — no live door, no pin — never as a pass carried by the 404"
@@ -1838,7 +1844,7 @@
         {
           "clause": "the body contract refuses rather than inverts (#3899 — the flow toggle's one-letter-off lesson): {\"enable\": false} → 400 VALIDATION_FAILED with fields[0] {field:'enable', code:'unknown_field'} and a message suggesting `enabled`; {\"enabled\":\"false\"} → 400 with code 'invalid_type' (a JSON boolean, not a string); a non-object body → 400 invalid_type on '(body)'; and the envelope is the shared validationFailure shape every other door emits (fields[], per api-backend.error-envelope-ledger), never a hand-rolled lookalike",
           "oracle": "api",
-          "verify": "step-4 traces: each 400 carries the named field-level code; crucially the {\"enable\": false} probe must NOT answer 200 — a 200 there ENABLED the artifact the caller meant to switch off. The unit pin asserts less than this clause: action-activation-posture-gate.test.ts's unknown-key and non-boolean cases assert status 400 and code VALIDATION_FAILED only, never fields[0]'s field and code, and it has no non-object-body case. The field rows are pinned for the shared body reader through the CATALOG activation door (packages/runtime/src/domains/field-error-code-catalog.test.ts, 'activation-gate.ts readActivationBody'), a unit read of the helper, not of this door, so the field-level codes and the '(body)' arm are scored from the step-4 traces",
+          "verify": "step-4 traces: each 400 carries the named field-level code; crucially the {\"enable\": false} probe must NOT answer 200 — a 200 there ENABLED the artifact the caller meant to switch off. The unit pin asserts less than this clause: action-activation-posture-gate.test.ts's unknown-key and non-boolean cases assert status 400 and code VALIDATION_FAILED only, never fields[0]'s field and code, and it has no non-object-body case. action-activation-door-live.dogfood.test.ts asserts each 400's fields[0] field and code over HTTP, the '(body)' arm included, and that the one-letter-off probe does not answer 200; field-error-code-catalog.test.ts remains a unit read of the shared helper",
           "evidence": "the four envelopes"
         },
         {
@@ -1856,13 +1862,13 @@
         {
           "clause": "the happy path writes exactly ONE DEPLOYMENT-level row and re-enable UPDATES it: 200 {name, objectName, enabled}; the row carries metadata_type 'action', the declarative name and active — and NO organization_id key, because the ledger has no tenant column to carry one (ADR-0131 D7 WITHDREW ADR-0126 §5 D3's reserved-and-never-written column before 17.3, and names this table as not getting it back — so the per-org dimension is not 'reserved', it is gone); flipping back answers 200 and the same row flips active — never a second row, never a delete (§6 wall 3: the ledger records the choice)",
           "oracle": "api",
-          "verify": "step-6: the 200 body + before/after ledger reads (one row throughout, active false then true), each read scored on the row's KEY SET for the tenant half. ⛔ Never score it from a value: a check of the shape `row.organization_id ?? null` answers `null` for a column that does not exist, so it passes while measuring nothing (platform-core.activation-ledger-row-contract owns the schema-side probe). The dogfood pin does not score two halves of this clause: packaged-activation-ledger-reach.dogfood.test.ts locates the row with rows.find on the name, so it never asserts that exactly ONE row exists for it, and it asserts the flip's status 200, never the body {name, objectName, enabled}. Both come from the step-6 traces",
+          "verify": "step-6: the 200 body + before/after ledger reads (one row throughout, active false then true), each read scored on the row's KEY SET for the tenant half. ⛔ Never score it from a value: a check of the shape `row.organization_id ?? null` answers `null` for a column that does not exist, so it passes while measuring nothing (platform-core.activation-ledger-row-contract owns the schema-side probe). action-activation-door-live.dogfood.test.ts scores both halves packaged-activation-ledger-reach.dogfood.test.ts leaves open: the flip's body {name, objectName, enabled} on both flips, and exactly ONE row for the name, keeping its id across the flip back",
           "evidence": "the traces + both row reads, key sets included"
         },
         {
           "clause": "the ambiguity arm refuses instead of switching off artifacts the caller did not name: a name declared on 2+ objects answers 409 RESOURCE_CONFLICT (standard catalog — no new code minted) naming every owner object, and writes nothing",
           "oracle": "test",
-          "verify": "no stock fixture (knownGaps) — run packages/runtime/src/domains/action-activation-posture-gate.test.ts and cite the ambiguity case (409 RESOURCE_CONFLICT and setActionActive never called; of the owners it asserts only messageOf(res) toContain('crm_account'), the twin, so 'naming every owner object' is unasserted there: read the declaring object's name in the pin's refusal text and record it, or score that half partial); with an authored colliding scratch package, the live probe supersedes the pin",
+          "verify": "no stock fixture (knownGaps) — run packages/runtime/src/domains/action-activation-posture-gate.test.ts and cite the ambiguity case (409 RESOURCE_CONFLICT and setActionActive never called; of the owners it asserts only messageOf(res) toContain('crm_account'), the twin, so 'naming every owner object' is unasserted there: read the declaring object's name in the pin's refusal text and record it, or score that half partial); the colliding scratch package now exists (fixtures/activation-ambiguity-fixture.ts) and action-activation-door-live.dogfood.test.ts drives the live probe, naming both owners from either object, so it supersedes the pin on every half",
           "evidence": "the pin's output (or the live trace when the scratch fixture exists), with which oracle the verdict rests on recorded"
         },
         {
@@ -1879,8 +1885,8 @@
         "`_activation` read as an invocation — it is structurally impossible (machine names are ^[a-z][a-z0-9_]*$ and cannot start with '_'), so an invocation-shaped answer from this path means the reserved segment collapsed into the name space"
       ],
       "automated": {
-        "kind": "unit",
-        "ref": "packages/runtime/src/domains/action-activation-posture-gate.test.ts (the door's own contract: both authority tiers across all three postures, unknown-key/non-boolean 400s by status and code VALIDATION_FAILED only, never fields[0] or the non-object-body arm, empty-body-enables, undeclared 404 + no row, ambiguity 409 + no write with one owner (the twin 'crm_account') asserted in the message, 501 no-projection, 503 non-durable) + packages/qa/dogfood/test/action-params-contract.dogfood.test.ts ('[#12160] the reserved `_activation` segment survives the real mount' — the 2-segment 400 and undeclared 404 measured through the live dispatcher reconstruction) + packages/qa/dogfood/test/packaged-activation-ledger-reach.dogfood.test.ts (the live happy path: 200 flip, then 'writes ONE deployment-level row, and the TABLE has no tenant column at all' — a key-set reading off the driver's own SELECT, not a value read, on the row rows.find returns, so 'exactly one row' is not asserted — and re-enable updates; the flip is asserted by status, not by its {name, objectName, enabled} body). The live-server body/authority arm sweep as a whole stays manual"
+        "kind": "dogfood",
+        "ref": "packages/runtime/src/domains/action-activation-posture-gate.test.ts (the door's own contract: both authority tiers across all three postures, unknown-key/non-boolean 400s by status and code VALIDATION_FAILED only, never fields[0] or the non-object-body arm, empty-body-enables, undeclared 404 + no row, ambiguity 409 + no write with one owner (the twin 'crm_account') asserted in the message, 501 no-projection, 503 non-durable) + packages/qa/dogfood/test/action-params-contract.dogfood.test.ts ('[#12160] the reserved `_activation` segment survives the real mount' — the 2-segment 400 and undeclared 404 measured through the live dispatcher reconstruction) + packages/qa/dogfood/test/packaged-activation-ledger-reach.dogfood.test.ts (the live happy path: 200 flip, then 'writes ONE deployment-level row, and the TABLE has no tenant column at all' — a key-set reading off the driver's own SELECT, not a value read, on the row rows.find returns, so 'exactly one row' is not asserted — and re-enable updates; the flip is asserted by status, not by its {name, objectName, enabled} body) + packages/qa/dogfood/test/action-activation-door-live.dogfood.test.ts (#26572 — the door over HTTP on its own showcase boot: acceptance[0] a signed-up member's mis-bodied undeclared probe → 403 PERMISSION_DENIED with the manage_metadata sentence and no clone wording, never the 400 or the 404, and the anonymous twin → 401 UNAUTHENTICATED; acceptance[1] the 2-segment shape sentence and the 4-segment 404 byte-identical to an unmounted path; acceptance[2] fields[0] {enable, unknown_field} with the did-you-mean, {enabled, invalid_type} and {(body), invalid_type}; acceptance[4] the undeclared 404 sentence and ZERO ledger rows after every refusal; acceptance[3] {} → 200 data {name, objectName, enabled: true}; acceptance[5] the flip body, exactly ONE row for the name with no organization_id key, the same row id after flipping back. acceptance[6] live on the scratch fixtures/activation-ambiguity-fixture.ts: both owners' flips → 409 RESOURCE_CONFLICT naming both objects, zero rows, the action still dispatching)"
       },
       "traps": [
         "dispatcher-vs-hono-route",
@@ -1934,6 +1940,12 @@
           "date": "2026-10-26",
           "change": "acceptance[2], [5] and [6] verify, fixtures.knownGaps[0] and automated.ref now say what the pins assert, from QA run #25815 (release-18.2.0-tier1, at 6679644a), findings a2, a5 and a6. Re-read at base f6c61932: action-activation-posture-gate.test.ts asserts the unknown-key and non-boolean refusals by status and code only (no fields[0], no non-object-body case) and the ambiguity refusal by toContain('crm_account') only; packaged-activation-ledger-reach.dogfood.test.ts finds the row with rows.find and reads the flip's status, not its body. The field rows are pinned through the catalog door's shared reader (field-error-code-catalog.test.ts), which this item now names as a unit read of the helper, not of this door. No clause changed",
           "ref": "#25837"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-27",
+          "change": "acceptance[0]–[6] and negative[0]–[2] are pinned over HTTP (the release-18.2.0 Tier 1 sweep #26468 scored a0, a1, a2, a4, a5 and a6 half-asserted, a3, n0 and n2 below the HTTP layer, and n1 unpinned). The new action-activation-door-live.dogfood.test.ts drives every arm on its own showcase boot, and the ambiguity arm on the new activation-ambiguity-fixture.ts scratch app, which fixtures.knownGaps[0] now names. automated.kind is dogfood; automated.ref and the verify texts of acceptance[2], [5] and [6] name what the pins assert. The metadata-plane 503 and the 501/503 arms are unchanged. Measured at base c8583f80. No clause changed",
+          "ref": "#26572"
         }
       ]
     },
@@ -2330,7 +2342,7 @@
       "title": "RestServerConfig.crud is the CRUD surface's construction contract: five switches gate six mounts, dataPrefix moves the routes and their discovery advertisement together, and both tombstones refuse at construction",
       "since": "v17",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -2386,7 +2398,7 @@
         {
           "clause": "the two #14691 tombstones are REFUSED at construction, not stripped: `crud.patterns` and `crud.objectParamStyle` (both former enum values) throw naming the sub-object, the declaring schema (CrudEndpointsConfigSchema), and the prescription — a declarative `api` endpoint for a custom path, the object name always being a path segment",
           "oracle": "test",
-          "verify": "the constructor throws; the message contains `crud.patterns` / `crud.objectParamStyle`, `CrudEndpointsConfigSchema`, and the removal prescription. A clean construction is the silent-strip failure ADR-0049 forbids. §E asserts only part of this (automated.ref): the prescription is never matched, so read it in the refusal texts",
+          "verify": "the constructor throws; the message contains `crud.patterns` / `crud.objectParamStyle`, `CrudEndpointsConfigSchema`, and the removal prescription. A clean construction is the silent-strip failure ADR-0049 forbids. §E asserts only part of this (automated.ref); rest-config-contract-harness.test.ts matches the rest: the schema name for both keys and each prescription (the declarative `api` endpoint for patterns, the object name always a path segment for objectParamStyle)",
           "evidence": "both refusal texts"
         },
         {
@@ -2416,8 +2428,8 @@
         "stale-dist"
       ],
       "automated": {
-        "kind": "unit",
-        "ref": "packages/rest/src/rest-sub-config-parse-not-cast.test.ts (the construction half — §C/§D normalized defaults for acceptance[5], §E's 'refuses `crud.patterns` and `crud.objectParamStyle` — both former enum values included' for acceptance[4], partial: it asserts the crud.patterns message's key, CrudEndpointsConfigSchema and /was removed in @objectstack\\/spec 17/, and the objectParamStyle message's key and /was removed/ only, so the declarative-api-endpoint prescription, and the schema name for objectParamStyle, are read off the harness's refusal texts) + packages/rest/src/rest-config-mount-table.pin.test.ts (#15544 — the mount half, acceptance[1]: each crud.operations.* row and api.enableCrud as an exact route-set diff) + packages/rest/src/discovery-services-route-follows-mount.test.ts ('#16674 — a moved `crud.dataPrefix` moves BOTH halves of the document': at dataPrefix '/objects' the discovery body's routes.data and services.data.route both name /api/v1/objects — acceptance[3]'s advertisement half, at another non-default prefix than the step's '/records'). acceptance[3]'s moved-route-table half (no route left under /data) has no pin; acceptance[0] and that half need the run"
+        "kind": "dogfood",
+        "ref": "packages/rest/src/rest-sub-config-parse-not-cast.test.ts (the construction half — §C/§D normalized defaults for acceptance[5], §E's 'refuses `crud.patterns` and `crud.objectParamStyle` — both former enum values included' for acceptance[4], partial: it asserts the crud.patterns message's key, CrudEndpointsConfigSchema and /was removed in @objectstack\\/spec 17/, and the objectParamStyle message's key and /was removed/ only, so the declarative-api-endpoint prescription, and the schema name for objectParamStyle, are read off the harness's refusal texts) + packages/rest/src/rest-config-mount-table.pin.test.ts (#15544 — the mount half, acceptance[1]: each crud.operations.* row and api.enableCrud as an exact route-set diff) + packages/rest/src/discovery-services-route-follows-mount.test.ts ('#16674 — a moved `crud.dataPrefix` moves BOTH halves of the document': at dataPrefix '/objects' the discovery body's routes.data and services.data.route both name /api/v1/objects — acceptance[3]'s advertisement half, at another non-default prefix than the step's '/records') + packages/qa/dogfood/test/rest-config-contract-live.dogfood.test.ts (#26572 — acceptance[0] over HTTP on a booted showcase: list, read, create, query, update and delete each answer a body other than the per-method routing-404 control; acceptance[2]'s live half: sox_hidden (apiEnabled: false) answers 404 OBJECT_API_DISABLED, a body other than the control) + packages/qa/dogfood/test/rest-config-contract-harness.test.ts (#26572 — a real RestServer: acceptance[2]'s absence half, create:false removes exactly POST /api/v1/data/:object; acceptance[3] at dataPrefix '/records' the whole table equals the default one re-based, CRUD, data-action, sharing, import and per-object batch routes included, nothing under /data, discovery routes.data /api/v1/records; acceptance[4] both tombstones, objectParamStyle at path and query, refused naming the key, CrudEndpointsConfigSchema and each prescription)"
       },
       "source": [
         "packages/spec/liveness/crud_endpoints.json (the ADR-0049 ledger this item answers: five live `operations.*` switches + `dataPrefix`, two dead keys)",
@@ -2456,6 +2468,12 @@
           "date": "2026-10-26",
           "change": "automated.ref names the discovery pin for acceptance[3] and says what §E asserts for acceptance[4], from QA run #25815 (release-18.2.0-tier1, at 6679644a), findings a3 and a4. Re-read at base f6c61932: discovery-services-route-follows-mount.test.ts pins the advertisement half at a non-default prefix and was not in the ref; no pin asserts the moved route table. §E's crud case asserts 'crud.patterns', CrudEndpointsConfigSchema and the release-naming 'was removed' sentence, and for objectParamStyle the key and /was removed/ only, never the declarative-endpoint prescription. No clause changed",
           "ref": "#25837"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-27",
+          "change": "acceptance[0], [2], [3] and [4] are pinned at the layer their oracle names (the release-18.2.0 Tier 1 sweep #26468 scored a0 unpinned and a2, a3, a4 half-asserted). The new rest-config-contract-live.dogfood.test.ts fires the default mounts and the OBJECT_API_DISABLED body against the routing-404 control on booted stacks, and rest-config-contract-harness.test.ts reads the re-based route table and both refusal texts off a real RestServer. automated.kind is dogfood; automated.ref and acceptance[4].verify name what they assert. Measured at base c8583f80. No clause changed",
+          "ref": "#26572"
         }
       ]
     },
@@ -2464,7 +2482,7 @@
       "title": "RestServerConfig.batch is the bulk surface's construction contract: three switches and enableBatchEndpoint gate four per-object mounts (each ANDed with its protocol member), maxBatchSize is the one cap every bulk door measures, and both tombstones refuse at construction",
       "since": "v17",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -2528,7 +2546,7 @@
         {
           "clause": "the two #14691 tombstones are REFUSED at construction with their prescriptions: `batch.operations.upsertMany` (no such route was ever built — upsert is an operation TYPE of the generic batch door) and `batch.defaultAtomic` (atomicity is the per-request options.atomic, ADR-0119 D4), whatever value is authored",
           "oracle": "test",
-          "verify": "the constructor throws for both, and for defaultAtomic at true AND false; each message names the key, BatchEndpointsConfigSchema and the replacement. The pin asserts less than this: rest-sub-config-parse-not-cast.test.ts §E › 'refuses `batch.operations.upsertMany` and `batch.defaultAtomic`' matches the key plus /never built/ for upsertMany and /options.atomic/ for defaultAtomic. It asserts neither that a message names BatchEndpointsConfigSchema nor upsertMany's replacement (upsert as an operation type of the generic batch door): read both in the harness's refusal texts, or score the clause partial",
+          "verify": "the constructor throws for both, and for defaultAtomic at true AND false; each message names the key, BatchEndpointsConfigSchema and the replacement. The pin asserts less than this: rest-sub-config-parse-not-cast.test.ts §E › 'refuses `batch.operations.upsertMany` and `batch.defaultAtomic`' matches the key plus /never built/ for upsertMany and /options.atomic/ for defaultAtomic. It asserts neither that a message names BatchEndpointsConfigSchema nor upsertMany's replacement (upsert as an operation type of the generic batch door); rest-config-contract-harness.test.ts asserts both, for defaultAtomic at true and false as well",
           "evidence": "both refusal texts"
         },
         {
@@ -2556,8 +2574,8 @@
         "absence-inference"
       ],
       "automated": {
-        "kind": "unit",
-        "ref": "packages/rest/src/rest-batch-size-cap.test.ts (the cap on all five doors) + packages/rest/src/rest-sub-config-parse-not-cast.test.ts (bounds, defaults, both tombstone refusals) + packages/rest/src/rest-config-mount-table.pin.test.ts (#15544 — the mount half: each batch.* row as a route-set diff, and the protocol-member conjunct in §2)"
+        "kind": "dogfood",
+        "ref": "packages/rest/src/rest-batch-size-cap.test.ts (the cap on all five doors) + packages/rest/src/rest-sub-config-parse-not-cast.test.ts (bounds, defaults, both tombstone refusals) + packages/rest/src/rest-config-mount-table.pin.test.ts (#15544 — the mount half: each batch.* row as a route-set diff, and the protocol-member conjunct in §2) + packages/qa/dogfood/test/rest-config-contract-live.dogfood.test.ts (#26572 — acceptance[0] over HTTP on a booted showcase: the four per-object bulk doors and the cross-object POST /batch each answer a body other than the routing-404 control; acceptance[4] 201 records → 400 {code BATCH_TOO_LARGE, count 201, max 200} and a $startsWith read of the marker finds no row, while one record through the same door is found by the same read) + packages/qa/dogfood/test/rest-config-contract-harness.test.ts (#26572 — acceptance[5] on a real RestServer: upsertMany and defaultAtomic at true and false refused naming the key, BatchEndpointsConfigSchema and the replacement — upsert as an operation type of POST /data/:object/batch, options.atomic per request)"
       },
       "source": [
         "packages/spec/liveness/batch_endpoints.json (the ADR-0049 ledger this item answers: maxBatchSize, enableBatchEndpoint and three operations.* live, upsertMany and defaultAtomic dead)",
@@ -2597,6 +2615,12 @@
           "date": "2026-10-26",
           "change": "acceptance[5].verify says what §E asserts, from QA run #25815 (release-18.2.0-tier1, at 6679644a), finding a5. Re-read at base f6c61932: the case asserts the key and /never built/, resp. /options\\.atomic/, never BatchEndpointsConfigSchema or the upsert replacement the clause names. No clause changed",
           "ref": "#25837"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-27",
+          "change": "acceptance[0], [4] and [5] are pinned at the layer their oracle names (the release-18.2.0 Tier 1 sweep #26468 scored a0 unpinned, a4 below the HTTP layer and a5 half-asserted). The new rest-config-contract-live.dogfood.test.ts fires the bulk doors and the 201-record cap probe on a booted showcase, and rest-config-contract-harness.test.ts reads both refusal texts off a real RestServer. automated.kind is dogfood; automated.ref and acceptance[5].verify name what they assert. Measured at base c8583f80. No clause changed",
+          "ref": "#26572"
         }
       ]
     },
@@ -2605,7 +2629,7 @@
       "title": "RestServerConfig.metadata is the metadata surface's construction contract: prefix moves eleven mounts and their discovery advertisement, four endpoint switches each gate exactly the face its name states (#15542/#15854), maskObjectFields is the ADR-0106 D8 disclosure gate, and both tombstones refuse at construction",
       "since": "v17",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2672,7 +2696,7 @@
         {
           "clause": "the two #14691 tombstones are REFUSED at construction with their prescriptions: `metadata.cacheTtl` at 3600, 0 and the -1 the old unbounded contract accepted, and the nested `metadata.endpoints.schema` — a tombstone inside a live block, which must not be stripped while its siblings parse",
           "oracle": "test",
-          "verify": "the constructor throws for all four; each message names the key, MetadataEndpointsConfigSchema and the replacement (enableCache is the live switch; no GET /meta/:type/:name/schema route exists). §E asserts less: the cacheTtl case the key, MetadataEndpointsConfigSchema and /was removed/; the endpoints.schema case the key and /does not exist/ only. Neither asserts the replacement, so read it in the four refusal texts or score the clause partial",
+          "verify": "the constructor throws for all four; each message names the key, MetadataEndpointsConfigSchema and the replacement (enableCache is the live switch; no GET /meta/:type/:name/schema route exists). §E asserts less: the cacheTtl case the key, MetadataEndpointsConfigSchema and /was removed/; the endpoints.schema case the key and /does not exist/ only. Neither asserts the replacement; rest-config-contract-harness.test.ts asserts it, and the schema name, in all four refusal texts",
           "evidence": "the four refusal texts"
         }
       ],
@@ -2699,8 +2723,8 @@
         "absence-inference"
       ],
       "automated": {
-        "kind": "unit",
-        "ref": "packages/rest/src/rest-sub-config-parse-not-cast.test.ts (§D pins prefix/enableCache/maskObjectFields survival through normalizeConfig and the partial endpoints shape — no mount at a moved prefix; §E pins the cacheTtl and endpoints.schema refusals by key and /was removed/, resp. /does not exist/, never the replacement acceptance[5] names); packages/rest/src/discovery-services-route-follows-mount.test.ts ('moves `metadata` on the same terms — the instance was `data`, the cause was the pass': at metadata.prefix '/metadata' the discovery body's routes.metadata and services.metadata.route both name /api/v1/metadata — acceptance[1]'s advertisement half; its route-table half, no route left under /meta, has no pin); packages/rest/src/meta-object-fls.test.ts (acceptance[3]'s masking effect at the route-handler layer: RestServer handlers over a mocked server and a security double, the shared OBJECT_SCHEMA_MASK_CASES table, whose 'masking-disabled/D8' case serves the unmasked schema under maskObjectFields: false — partial for acceptance[3], whose client_liaison diff on a booted showcase stays the live leg); packages/rest/src/rest-config-mount-table.pin.test.ts (#15544 — the MOUNT half: every switch's radius asserted route by route as ABSENCE from the mounted table, in both directions, including all four endpoints.* rows); the cache-branch half has no pin"
+        "kind": "dogfood",
+        "ref": "packages/rest/src/rest-sub-config-parse-not-cast.test.ts (§D pins prefix/enableCache/maskObjectFields survival through normalizeConfig and the partial endpoints shape — no mount at a moved prefix; §E pins the cacheTtl and endpoints.schema refusals by key and /was removed/, resp. /does not exist/, never the replacement acceptance[5] names); packages/rest/src/discovery-services-route-follows-mount.test.ts ('moves `metadata` on the same terms — the instance was `data`, the cause was the pass': at metadata.prefix '/metadata' the discovery body's routes.metadata and services.metadata.route both name /api/v1/metadata — acceptance[1]'s advertisement half); packages/rest/src/meta-object-fls.test.ts (acceptance[3]'s masking effect at the route-handler layer: RestServer handlers over a mocked server and a security double, the shared OBJECT_SCHEMA_MASK_CASES table, whose 'masking-disabled/D8' case serves the unmasked schema under maskObjectFields: false — the handler-layer half of acceptance[3]); packages/rest/src/rest-config-mount-table.pin.test.ts (#15544 — the MOUNT half: every switch's radius asserted route by route as ABSENCE from the mounted table, in both directions, including all four endpoints.* rows); packages/qa/dogfood/test/rest-config-contract-live.dogfood.test.ts (#26572 — acceptance[0] over HTTP on a booted showcase: /meta, /meta/types, /meta/diagnostics, /meta/_drafts, /meta/object, /meta/object/showcase_task and its /references and /layers, and /meta/book/<seeded book>/tree each answer 200, a body other than the routing-404 control; acceptance[3] live: a client_liaison-bound member's /meta/object/showcase_project carries no budget, spent or budget_remaining key and no budget text anywhere, every other field kept, while the admin's copy carries all three) + packages/qa/dogfood/test/rest-config-contract-harness.test.ts (#26572 — a real RestServer: acceptance[1] at prefix '/metadata' the whole table equals the default one re-based, nothing under /meta, discovery routes.metadata /api/v1/metadata; acceptance[4] enableCache true calls getMetaItemCached and false getMetaItem, and each carve-out — app, dashboard, ?state=draft, ?preview=draft, ?package=, ?member=, book, doc — calls getMetaItem with the switch on; acceptance[5] cacheTtl 3600, 0 and -1 and endpoints.schema refused naming the key, MetadataEndpointsConfigSchema and the replacement)"
       },
       "source": [
         "packages/spec/liveness/metadata_endpoints.json (the ADR-0049 ledger this item answers: prefix, enableCache, maskObjectFields and three endpoints.* live, cacheTtl and endpoints.schema dead)",
@@ -2751,6 +2775,12 @@
           "date": "2026-10-26",
           "change": "automated.ref says what §D and §E assert and names the two pins it lacked, from QA run #25815 (release-18.2.0-tier1, at 6679644a), findings a1, a3 and a5. Re-read at base f6c61932: §D pins prefix survival through normalizeConfig, not a mount at '/metadata'; §E's cacheTtl and endpoints.schema cases never assert the replacement. The record's 'no pin reads the discovery body's routes.metadata' is narrower on this tree: discovery-services-route-follows-mount.test.ts reads it at prefix '/metadata', outside the ref; the route-table half has no pin. The record's 'only the normalizeConfig half is pinned' for acceptance[3] is narrower too: meta-object-fls.test.ts pins the masking effect and the maskObjectFields: false opt-out at the route-handler layer, which scores the api clause partial. No clause changed",
           "ref": "#25837"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-27",
+          "change": "acceptance[0], [1], [3], [4] and [5] and negative[0] are pinned at the layer their oracle names (the release-18.2.0 Tier 1 sweep #26468 scored a0 and a4 unpinned, a1 and a5 half-asserted, a3 and n0 below the HTTP layer). The new rest-config-contract-live.dogfood.test.ts fires the default mounts and the client_liaison schema diff on a booted showcase, and rest-config-contract-harness.test.ts reads the re-based table, the cache branch per carve-out and the refusal texts off a real RestServer. automated.kind is dogfood; automated.ref and acceptance[5].verify name what they assert. Measured at base c8583f80. No clause changed",
+          "ref": "#26572"
         }
       ]
     },
@@ -2759,7 +2789,7 @@
       "title": "RestServerConfig.routes is an all-tombstone sub-object: every one of the four retired selectors refuses at construction with the prescription that names where the contract moved, while the empty block still constructs",
       "since": "v17",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "build",
       "personas": [
@@ -2831,8 +2861,8 @@
         "stale-dist"
       ],
       "automated": {
-        "kind": "unit",
-        "ref": "packages/rest/src/rest-sub-config-parse-not-cast.test.ts — per clause. acceptance[1] in full, by §B's case 'rejects `createRestApiPlugin({ api: { routes: { nameTransform: \"none\" } } }).start()` — a #14691 tombstone, through the plugin path' (§E's own plugin-path case drives batch.defaultAtomic, not a routes key). acceptance[0] by §E's 'refuses every `routes.*` key — the whole sub-object is tombstones', for one authored value per key: nameTransform is driven with 'none' only, so its former 'plural' value is driven by hand. That case matches `routes.KEY`, RouteGenerationConfigSchema and /was removed/, never the clause's full 'was removed in @objectstack/spec 17', so the release-naming half is read off the harness's refusal texts and the pin scores acceptance[0] partial. acceptance[4]'s empty-block half by §E's 'an empty `routes` sub-object still constructs — the tombstones refuse keys, not the block'; its other half, an unknown key inside `routes` stripped, is pinned for batch and metadata.endpoints only (§C's 'STRIPS an unknown key inside a sub-object rather than refusing it — the schemas are non-strict'), never for routes. No pin covers acceptance[2] (each prescription names a replacement that exists today) or acceptance[3] (the tsc error): drive them by hand"
+        "kind": "dogfood",
+        "ref": "packages/rest/src/rest-sub-config-parse-not-cast.test.ts — per clause. acceptance[1] in full, by §B's case 'rejects `createRestApiPlugin({ api: { routes: { nameTransform: \"none\" } } }).start()` — a #14691 tombstone, through the plugin path' (§E's own plugin-path case drives batch.defaultAtomic, not a routes key). acceptance[0] by §E's 'refuses every `routes.*` key — the whole sub-object is tombstones', for one authored value per key: nameTransform is driven with 'none' only, so its former 'plural' value is driven by hand. That case matches `routes.KEY`, RouteGenerationConfigSchema and /was removed/, never the clause's full 'was removed in @objectstack/spec 17', so the release-naming half is read off the harness's refusal texts and the pin scores acceptance[0] partial. acceptance[4]'s empty-block half by §E's 'an empty `routes` sub-object still constructs — the tombstones refuse keys, not the block'; its other half, an unknown key inside `routes` stripped, is pinned for batch and metadata.endpoints only (§C's 'STRIPS an unknown key inside a sub-object rather than refusing it — the schemas are non-strict'), never for routes. packages/qa/dogfood/test/rest-route-generation-tombstones.test.ts (#26572) carries what that file leaves open: acceptance[0] on a real RestServer for every key, nameTransform at 'none' AND 'plural', each refusal naming RouteGenerationConfigSchema and '`routes.KEY` was removed in @objectstack/spec 17'; acceptance[1] the same five through createRestApiPlugin(...).start(), beside a control that boots; acceptance[2] each prescription's surface — enable.apiEnabled / enable.apiMethods declared on the strict ObjectCapabilities, crud.dataPrefix moving a real RestServer's data routes, the :object path segment, and object_operation parsed by ApiEndpointSchema (the 404/405 enforcement itself is second-object-exposure.dogfood.test.ts's, over HTTP); acceptance[3] each key authored as a RestServerConfig in a scratch TypeScript file fails tsc with an error on the key's own line naming '[REMOVED] Key retired', beside a clean control; acceptance[4] routes: {} normalizing to {} and an unknown key inside routes stripped"
       },
       "source": [
         "packages/spec/liveness/route_generation.json (the ADR-0049 ledger this item answers: all four properties dead, removed 2026-09-03 — the sub-object ships nothing but its refusals)",
@@ -2860,6 +2890,12 @@
           "date": "2026-10-26",
           "change": "automated.ref says which half of acceptance[0]'s message the §E case asserts, from QA run #25815 (release-18.2.0-tier1, at 6679644a), finding a0. Re-read at base f6c61932: 'refuses every `routes.*` key' asserts the key, RouteGenerationConfigSchema and /was removed/, not 'was removed in @objectstack/spec 17'; nameTransform 'none' only, as the ref already said. No clause changed",
           "ref": "#25837"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-27",
+          "change": "acceptance[0]–[4] and negative[0] are pinned at the layers their oracles name (the release-18.2.0 Tier 1 sweep #26468 scored a0, a4 and n0 half-asserted and a2, a3 unpinned). The new rest-route-generation-tombstones.test.ts drives every retired key at every former value through the constructor and the plugin path, checks each prescription against the shipped spec and a real RestServer, runs tsc over each authored key, and holds the empty-block and unknown-key controls. automated.kind is dogfood; automated.ref names what it asserts. Measured at base 4c29f384. No clause changed",
+          "ref": "#26572"
         }
       ]
     },

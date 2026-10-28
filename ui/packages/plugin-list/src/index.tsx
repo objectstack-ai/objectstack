@@ -269,7 +269,7 @@ const LIST_VIEW_INPUTS: ComponentInput[] = [
     name: 'navigation',
     type: 'object',
     description:
-      'What clicking a row does, the spec\'s `NavigationConfig`: `{ mode: "page" | "drawer" | "modal" | "split" | "popover" | "new_window" | "none", … }`. An overlay mode opens the record over the list, headed by the list\'s `label`.',
+      'What clicking a row does, the spec\'s `NavigationConfig`: `{ mode: "drawer" | "page" | "new_window" | "none", … }`. The drawer opens the record over the list, headed by the list\'s `label`.',
   },
   {
     name: 'grouping',

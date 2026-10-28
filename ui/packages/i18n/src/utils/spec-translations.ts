@@ -107,6 +107,9 @@ const SPEC_TRANSLATION_GROUPS = [
   // objectstack #25788 serves `reports` (a report's label and description are
   // translatable), copied through onto `app` the same way.
   'reports',
+  // objectstack #26690 serves `books` (a doc book's title, description and
+  // section titles are translatable), copied through onto `app` the same way.
+  'books',
 ] as const;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

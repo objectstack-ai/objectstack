@@ -406,8 +406,8 @@ Three rules the shape enforces, all of them closed since #4001:
 
 - **The top level is the declared group set and nothing else** — `objects`,
   `picklists`, `apps`, `messages`, `globalActions`, `dashboards`, `datasets`,
-  `reports`, `pages`, `flows`, `positions`, `permissions`, `metadataForms`,
-  `settingsCommon`. A group invented beside them
+  `reports`, `pages`, `flows`, `positions`, `permissions`, `books`,
+  `metadataForms`, `settingsCommon`. A group invented beside them
   (`"account"`, `"fields"`, `"list"`, `"industries"`) is rejected **by name**
   at both authoring doors, with the group to use instead named in the
   rejection.
@@ -496,7 +496,7 @@ what the overlay writes back as the node's `title`.
 The contract is `t(key, locale, params?)` — the target locale is always passed
 explicitly, and the key itself is returned when no translation is found (there
 is no `defaultValue` option). The key is a **dot path into `TranslationData`**,
-so it starts at one of the fourteen declared groups.
+so it starts at one of the fifteen declared groups.
 
 ```typescript
 const i18n = kernel.getService('i18n');

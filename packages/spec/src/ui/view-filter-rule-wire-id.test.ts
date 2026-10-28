@@ -201,15 +201,19 @@ describe('why the flattened member could not rescue this block', () => {
   // assertions about the fix. Remove the decoration strip from the wire door
   // and case 3/3 above goes red while these two stay green: that gap is still
   // the finding, now pointing at the mechanism instead of the posture.
-  it('the flattened member re-opens the TOP level: an unknown aux key rides along', () => {
+  // [#26711] The member's TOP level is closed now too, so an unknown aux key is
+  // refused there. The point this block makes is unchanged: a top-level
+  // posture, open or closed, never reached the nested rows, and only the
+  // decoration strip before the parse lets the console's row ids through.
+  it('the flattened member judges its TOP level: an unknown aux key is refused', () => {
     expect(
       ViewMetadataSchema.safeParse({ ...OVERLAY_BASE, someStudioAuxKey: 1 }).success,
-    ).toBe(true);
+    ).toBe(false);
   });
 
-  it('…but a still-CLOSED nested block rejects through that same member', () => {
-    // `emptyState` was closed at 批 18 and stays closed. The top level rides,
-    // the nested block does not: `.strip()` re-opened one level, not the tree.
+  it('…and a CLOSED nested block rejects through that same member', () => {
+    // `emptyState` was closed at 批 18 and stays closed. Its posture is its
+    // own: when the member's top level was `.strip()`ped it still refused.
     expect(
       ViewMetadataSchema.safeParse({
         ...OVERLAY_BASE,

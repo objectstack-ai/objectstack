@@ -69,6 +69,7 @@ export default defineStack({
 |:---|:---|
 | Object label / plural / description | `objects.<name>.label` / `pluralLabel` / `description` |
 | Field labels, help text, placeholders | `objects.<name>.fields.<field>.label` / `help` / `placeholder` |
+| Inline child-grid heading of a master-detail field (drawn on the parent's form) | `objects.<child>.fields.<field>.inlineTitle` — keyed on the child object that owns the field; untranslated it keeps its authored text, with no fallback to the child's plural label |
 | Picklist option labels | `objects.<name>.fields.<field>.options.<value>` |
 | View titles, descriptions, empty states | `objects.<name>._views.<view>` |
 | Bulk-action copy on a list view (button, confirm prompt, dialog fields) | `objects.<name>._views.<view>.bulkActions.<def>.label` / `.confirmText` / `.confirmLabel` / `.params.<param>.label` / `.help` / `.placeholder` — a bulk param's hint is `help`, not `helpText` |
@@ -82,19 +83,20 @@ export default defineStack({
 | Dashboard global-filter label and static option labels | `dashboards.<name>.globalFilters.<filterName>.label` / `.options.<value>` — the key is the filter's `name`, or its `field` when it authors no `name`; an option is keyed by its `value` spelled as a string |
 | Analytics dataset label / description | `datasets.<name>.label` / `description` |
 | Dataset dimension and measure labels | `datasets.<name>.dimensions.<dimension>.label` / `datasets.<name>.measures.<measure>.label` |
-| Report label / description | `reports.<name>.label` / `description` — keyed by the report's `name`; overlaid on every served report, which is what the console's report index lists and the report page is headed by. A label or description an org re-authored on a packaged report is served as edited |
+| Report label / description | `reports.<name>.label` / `description` — keyed by the report's `name`; overlaid on every served report, which is what the console's report index lists and the report page is headed by. A label or description an org re-authored on a packaged report is served as edited; a joined report's block headings are `reports.<name>.blocks.<block>.label` / `description`, keyed by the block's required `name` |
 | Page labels and `page:header` copy | `pages.<name>.label` / `description` / `title` / `subtitle` — on a `kind: 'slotted'` page the header under `slots.header` is the page's header |
 | Page component copy, by component id | `pages.<name>.components.<id>.title` / `description` / `label` / `placeholder` / `emptyText` — reached under `regions[].components[]` and `slots.<slot>`, through `properties.children` and a `page:tabs` / `page:accordion` panel's `items[].children` |
 | Page tab labels (`page:tabs` items) | `pages.<name>.components.<tabsId>.items.<value>.label` — keyed by the tabs component's `id` and the item's `value`; an item without a `value` has no key (localize it with an inline locale map), and `page:accordion` panels have none |
 | Screen-flow wizards (flow label, screen headings and body text, screen field copy) | `flows.<flow>.label` / `flows.<flow>.screens.<node_id>.title` / `.description` / `.fields.<field>.label` / `.placeholder` / `.inlineHelpText` — a screen field's help text is `inlineHelpText`, the key the field itself declares, not `help`; see the boundary note below |
 | Position label / description | `positions.<name>.label` / `description` — keyed by the position's `name`; overlaid on every served position, which is the list the console's position picker draws |
 | Permission-set label / description | `permissions.<name>.label` / `description` — the group is spelled as the stack spells the collection (`permissions[]`), keyed by the set's `name` |
+| Doc book title, description and section titles | `books.<name>.label` / `description` / `groups.<key>.label` — keyed by the book's `name` and each group's `key`; overlaid on every served book and on the book tree, which is what the docs sidebar draws. A doc's own title and body localize through `doc.translations` instead |
 | Global actions, messages | `globalActions`, `messages` |
 | Settings UI shell copy (the source badge on a settings row) | `settingsCommon.sourceLabels.<layer>` — the per-namespace settings copy under `settings` is **platform-only**: an app bundle carrying it is refused by name, and the platform's own strings are translated in `@objectstack/service-settings`'s bundle |
 | A label written as an inline locale map (`label: { en: 'Members', 'zh-CN': '成员' }`) | Nowhere — it is written on the metadata and resolved at render time; see **Current boundaries** below |
 
 The metadata types resolved per request are **object, view, action, app,
-dashboard, dataset, report, page, picklist, position and permission** — a field's labels are translated as part of
+dashboard, dataset, report, page, picklist, position, permission and book** — a field's labels are translated as part of
 its object document, and so are the labels of any actions the object declares
 inline
 (#3370). Before that, an object document went out with its authored action

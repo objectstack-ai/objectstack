@@ -4,7 +4,7 @@
     {
       "id": 1,
       "prompt": "Add a `full_name` formula on `contact` built from salutation, first name and last name, and a `margin_pct` formula on `deal` = (revenue - cost) / cost * 100.",
-      "expected_output": "Two `type: 'formula'` fields whose `expression` is CEL via the `F` tag. The text formula coalesces every nullable operand — `F`coalesce(record.salutation, '') + ' ' + coalesce(record.first_name, '') + ' ' + coalesce(record.last_name, '')`` — because `null + 'foo'` throws. The numeric one guards the divisor: `F`coalesce(record.cost, 0) > 0 ? ((coalesce(record.revenue, 0) - record.cost) * 100) / record.cost : 0.0``. Field references are bare `record.<field>`, never brace-wrapped.",
+      "expected_output": "Two `type: 'formula'` fields whose `expression` is CEL via the `F` tag. The text formula coalesces every nullable operand — `F`coalesce(record.salutation, '') + ' ' + coalesce(record.first_name, '') + ' ' + coalesce(record.last_name, '')`` — because `null + 'foo'` throws. The numeric one guards the divisor: `F`coalesce(record.cost, 0) > 0 ? ((coalesce(record.revenue, 0) - record.cost) * 100) / record.cost : 0.0``.",
       "files": [],
       "assertions": {
         "must_contain": ["F`", "coalesce(", "record."],
@@ -14,7 +14,7 @@
     {
       "id": 2,
       "prompt": "Translate this Salesforce validation rule into ObjectStack: AND(ISBLANK(po_number), amount > 10000, NOT(ISPICKVAL(status, 'draft'))).",
-      "expected_output": "Applies the mechanical legacy → CEL table: `P`isBlank(record.po_number) && record.amount > 10000 && record.status != 'draft'``, noting that a `script` validation is inverted (it FAILS when the expression is true, so keep the failing condition) and that `record.amount > 10000` on a declared-nullable field needs an explicit `record.amount != null &&` guard or the publish gate rejects it. Uses `'draft'` single quotes and bare `record.` references.",
+      "expected_output": "Applies the mechanical legacy → CEL table: `P`isBlank(record.po_number) && record.amount > 10000 && record.status != 'draft'``, noting that a `script` validation is inverted (it FAILS when the expression is true, so keep the failing condition) and that `record.amount > 10000` on a declared-nullable field needs an explicit `record.amount != null &&` guard or the publish gate rejects it.",
       "files": [],
       "assertions": {
         "must_contain": ["isBlank(", "&&", "record.", "P`"],
@@ -24,7 +24,7 @@
     {
       "id": 3,
       "prompt": "Run an automation only when a support case has just become `escalated` — on single updates and on bulk updates alike.",
-      "expected_output": "Writes it once as `P`previous.status != 'escalated' && record.status == 'escalated'``: `record` is the post-write state (true on every later update too), so only `previous` says \"just became\"; `previous` is bound per row on `before*`/`after*` update events, bulk too. On insert `previous` is `null`: the `previous.status` read faults and aborts the write, so to run on inserts guard with `previous != null &&`. No `ISCHANGED()` function.",
+      "expected_output": "Writes it once as `P`previous.status != 'escalated' && record.status == 'escalated'``: `record` is the post-write state (true on every later update too), so only `previous` says \"just became\"; `previous` is bound per row on `before*`/`after*` update events, bulk too. On insert `previous` is `null`: the `previous.status` read faults and aborts the write, so to run on inserts guard with `previous != null &&`.",
       "files": [],
       "assertions": {
         "must_contain": ["previous.status", "record.status", "!="],
@@ -44,11 +44,31 @@
     {
       "id": 5,
       "prompt": "Hide `discount_reason` unless a discount amount was entered, and reject any `end_date` earlier than `start_date`.",
-      "expected_output": "`visibleWhen: P`record.discount != null`` (or `!isBlank(record.discount)`) on the field — `has(record.discount)` is not a null check: every declared field exists, so it is always true. The date rule is a `script` validation whose predicate dominates the comparison with explicit null tests: `record.start_date != null && record.end_date != null && record.end_date < record.start_date`; a `has()` guard does not satisfy the publish-time gate. Canonical property names only — never `conditionalRequired`.",
+      "expected_output": "`visibleWhen: P`record.discount != null`` (or `!isBlank(record.discount)`) on the field — `has(record.discount)` is not a null check: every declared field exists, so it is always true. The date rule is a `script` validation whose predicate dominates the comparison with explicit null tests: `record.start_date != null && record.end_date != null && record.end_date < record.start_date`; a `has()` guard does not satisfy the publish-time gate.",
       "files": [],
       "assertions": {
         "must_contain": ["visibleWhen", "!= null", "record.end_date"],
         "must_not_contain": ["conditionalRequired:", "{record."]
+      }
+    },
+    {
+      "id": 6,
+      "prompt": "Name `contract_version` records by their version number and the `kind` select, so a zh-CN reader sees `v2 · 清稿` and an en-US reader `v2 · Clean`.",
+      "expected_output": "A `type: 'formula'` `nameField`: `F`'v' + string(record.version_no) + ' · ' + label(record.kind)``. `label()` takes exactly `record.<field>` of a select field and reads its option label in the reader's locale (`''` for null). The stored value is the same in every locale, so a ternary over it with hard-coded strings cannot follow the reader.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["label(record.kind)", "F`"],
+        "must_not_contain": ["== 'clean' ?", "{record."]
+      }
+    },
+    {
+      "id": 7,
+      "prompt": "Refuse a `contract_version` save unless its `kind` is the clean copy, and show `signed_at` only once `status` is signed.",
+      "expected_output": "Both are predicates over the STORED value: a `script` validation `P`record.kind != 'clean'`` (it fails when true) and `visibleWhen: P`record.status == 'signed'``. The `label` macro evaluates only in a formula field; in a validation, `visibleWhen` or hook predicate it faults and aborts every write, so compare the stored value, never its option label.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["record.kind", "visibleWhen", "P`"],
+        "must_not_contain": ["label(", "{record."]
       }
     }
   ]

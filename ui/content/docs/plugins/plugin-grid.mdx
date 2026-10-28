@@ -104,7 +104,7 @@ below for why this plugin deliberately does not claim it.
 | `rowActions` / `bulkActions` | `string[]` | **Names** of actions, not inline definitions. |
 | `editable` / `singleClickEdit` | `boolean` | Inline editing — see [Inline Editing](#inline-editing). |
 | `keyboardNavigation` | `boolean` | Arrow keys move focus between cells, and the cells are one Tab stop — see [Keyboard navigation](#keyboard-navigation). On by default when the grid renders editable. |
-| `navigation` | `NavigationConfig` | What a row click does: `{ mode: 'page' \| 'drawer' \| 'modal' \| 'split' \| 'none', … }`. |
+| `navigation` | `NavigationConfig` | What a row click does: `{ mode: 'drawer' \| 'page' \| 'new_window' \| 'none', … }`; a block written without `mode` opens the drawer. |
 | `operations` | `object` | Toggles the built-in CRUD/export/import affordances, e.g. `{ delete: false }`. |
 | `rowHeight`, `frozenColumns`, `resizable`, `reorderableColumns`, `showColumnTypeIcons`, `rowColor`, `conditionalFormatting`, `aggregations`, `exportOptions` | | The rest of the declared surface. (`className` is a base prop: it stays on the node, beside the bag.) |
 | `grouping` | `GroupingConfig` | Row grouping — **server-side**: group set, counts and aggregations come from the query, rows are paged per group; see [Grouping is server-side](#grouping-is-server-side). |

@@ -37,6 +37,13 @@ import { zodIssuesToMetadataIssues } from './protocol.js';
 // landed by #8300). Composed into `decorateMetadataItem` below — see the
 // ordering note there for why it is not applied per read exit.
 import { redactMetadataItem } from './metadata-redaction.js';
+// [#26707] The snapshot key a write type's findings are spelled under — the
+// runtime gate's own answer, so the publish verdict below is re-spelled
+// against the same prefix the gate wrote it with.
+import { stackKeyForType } from '@objectstack/lint/runtime';
+// [#26886] The resolution's mark on options it derived from a shared picklist.
+import { isResolvedPicklistOptions } from '@objectstack/metadata-core';
+import type { RuntimeAuthoringIssue } from '@objectstack/spec/api';
 
 /**
  * Re-export the canonical validation-result type so callers in this
@@ -170,6 +177,52 @@ function copyDiagnostics(verdict: MetadataDiagnostics): MetadataDiagnostics {
     return copy;
 }
 
+// ---------------------------------------------------------------------------
+// [#26886] Options the runtime resolved from a shared picklist
+// ---------------------------------------------------------------------------
+//
+// A field authors `picklist: '<name>'` and no `options`; every object read
+// serves it with the list's options written beside `picklist` (the registry's
+// picklist resolution, `PicklistServedFieldSchema`). Diagnostics judge what the
+// author wrote, so the field schema's rule that refuses `picklist` and
+// `options` together must not read the copy the runtime wrote: it flagged
+// every picklist-bound field of every app.
+//
+// The resolution therefore MARKS the options array it derived
+// (`markResolvedPicklistOptions`, `@objectstack/metadata-core`), and only a
+// marked array is left out here. A field that authored its own `options`
+// beside `picklist` arrives unmarked and is still flagged, with the same
+// message and severity. The mark is a non-enumerable property, so it is no
+// part of the memo key either: the key is the content of the candidate the
+// mark has already shaped.
+
+function withoutResolvedOptions(field: unknown): unknown {
+    if (!field || typeof field !== 'object') return field;
+    const { picklist, options } = field as { picklist?: unknown; options?: unknown };
+    if (typeof picklist !== 'string' || !isResolvedPicklistOptions(options)) return field;
+    const { options: _resolved, ...authored } = field as Record<string, unknown>;
+    return authored;
+}
+
+/**
+ * A document with the resolved `options` left out of every picklist-bound
+ * field of its name-keyed `fields` (the only spelling the object schema
+ * accepts). By reference when no field carries resolved options.
+ */
+function withoutResolvedPicklistOptions(document: unknown): unknown {
+    if (!document || typeof document !== 'object') return document;
+    const fields = (document as { fields?: unknown }).fields;
+    if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return document;
+    let next: Record<string, unknown> | undefined;
+    for (const [name, field] of Object.entries(fields as Record<string, unknown>)) {
+        const judged = withoutResolvedOptions(field);
+        if (judged === field) continue;
+        next ??= { ...(fields as Record<string, unknown>) };
+        next[name] = judged;
+    }
+    return next ? { ...(document as object), fields: next } : document;
+}
+
 /**
  * Compute spec diagnostics for a single metadata document.
  *
@@ -219,7 +272,10 @@ export function computeMetadataDiagnostics(
     // says. Same class as #6810 (`indexed`), different remedy — that key did
     // not belong on the served body at all and left at its injection site,
     // whereas this one is read by the UI and belongs on the response.
-    const candidate = stripReadDecorations(item);
+    // [#26886] …and judge each picklist-bound field as its author wrote it:
+    // the `options` the runtime resolved onto it are not part of that shape
+    // ({@link withoutResolvedPicklistOptions}).
+    const candidate = withoutResolvedPicklistOptions(stripReadDecorations(item));
 
     // [#25783] A document parsed before against this same schema is answered
     // from the memo — see "The verdict memo" above.
@@ -314,6 +370,64 @@ export function decorateMetadataItem<T>(type: string, item: T): T {
 export function decorateMetadataItems<T>(type: string, items: T[]): T[] {
     if (!Array.isArray(items)) return items;
     return items.map((item) => decorateMetadataItem(type, item));
+}
+
+// ---------------------------------------------------------------------------
+// [#26707] The publish verdict on a draft's `_diagnostics`
+// ---------------------------------------------------------------------------
+
+/**
+ * A runtime-gate finding's path, re-spelled relative to the item it was found
+ * on: the gate spells it inside its private per-write snapshot
+ * (`flows[0].edges[1].condition`, `objects.invoice.fields.total`), and
+ * `_diagnostics` paths are dotted and item-relative (`edges.1.condition`), the
+ * spelling Studio's inline errors and canvas badges resolve. A path that does
+ * not start at the written item (a finding located on a sibling, or a `where`-
+ * style locator) is kept as the gate wrote it.
+ */
+function itemRelativeIssuePath(type: string, name: string, path: string): string {
+    const stackKey = stackKeyForType(PLURAL_TO_SINGULAR[type] ?? type);
+    if (!stackKey) return path;
+    let rest: string | undefined;
+    for (const prefix of [`${stackKey}[0]`, `${stackKey}.${name}`]) {
+        if (path === prefix || path.startsWith(`${prefix}.`) || path.startsWith(`${prefix}[`)) {
+            rest = path.slice(prefix.length);
+            break;
+        }
+    }
+    if (rest === undefined) return path;
+    return rest.replace(/\[(\d+)\]/g, '.$1').replace(/^\./, '');
+}
+
+/**
+ * Fold what publishing a draft would refuse into the draft's `_diagnostics`.
+ *
+ * `issues` are the runtime authoring gate's refusal for the draft body —
+ * `ObjectStackProtocolImplementation#draftPublishVerdict`, the judgement the
+ * publish door enforces — and each becomes one `errors[]` entry carrying the
+ * publish's own `message`, with its `rule` id as the entry's `code`. Any of
+ * them makes the verdict `valid: false`: the draft is still stored, but it does
+ * not say it is valid while the publish says it is not. No issues: the schema
+ * verdict is returned as it was. A type with no schema verdict (`undefined`)
+ * gets one only when there is something to report.
+ */
+export function withPublishVerdict(
+    type: string,
+    name: string,
+    diagnostics: MetadataDiagnostics | undefined,
+    issues: readonly RuntimeAuthoringIssue[],
+): MetadataDiagnostics | undefined {
+    if (issues.length === 0) return diagnostics;
+    const refusals = issues.map((issue) => ({
+        path: itemRelativeIssuePath(type, name, issue.path),
+        message: issue.message,
+        code: issue.rule,
+    }));
+    return {
+        ...diagnostics,
+        valid: false,
+        errors: [...(diagnostics?.errors ?? []), ...refusals],
+    };
 }
 
 // ---------------------------------------------------------------------------
