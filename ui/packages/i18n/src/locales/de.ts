@@ -1105,6 +1105,7 @@ const de = {
     recordDetail: "Datensatzdetails",
     recordDetailWithLabel: "{{label}}-Details",
     openAsFullPage: "Als ganze Seite öffnen",
+    collapseToDrawer: "In Seitenleiste verkleinern",
     recordDetailOverlay: "Detail-Overlay des Datensatzes für {{title}}.",
     addToFavorites: "Zu Favoriten hinzufügen",
     removeFromFavorites: "Aus Favoriten entfernen",

@@ -1172,6 +1172,7 @@ const ru = {
     recordDetail: "Сведения о записи",
     recordDetailWithLabel: "Сведения: {{label}}",
     openAsFullPage: "Открыть на всю страницу",
+    collapseToDrawer: "Свернуть в панель",
     recordDetailOverlay: "Наложение со сведениями о записи для {{title}}.",
     addToFavorites: "Добавить в избранное",
     removeFromFavorites: "Удалить из избранного",

@@ -1135,6 +1135,7 @@ const fr = {
     recordDetail: "Détail de l'enregistrement",
     recordDetailWithLabel: "Détail — {{label}}",
     openAsFullPage: "Ouvrir en pleine page",
+    collapseToDrawer: "Réduire en panneau",
     recordDetailOverlay: "Panneau de détail de l'enregistrement pour {{title}}.",
     addToFavorites: "Ajouter aux favoris",
     removeFromFavorites: "Retirer des favoris",

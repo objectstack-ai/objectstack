@@ -1231,6 +1231,7 @@ const ar = {
     recordDetail: "تفاصيل السجل",
     recordDetailWithLabel: "تفاصيل {{label}}",
     openAsFullPage: "فتح كصفحة كاملة",
+    collapseToDrawer: "طي إلى اللوحة الجانبية",
     recordDetailOverlay: "طبقة تفاصيل السجل الخاصة بـ {{title}}.",
     addToFavorites: "إضافة إلى المفضلة",
     removeFromFavorites: "إزالة من المفضلة",

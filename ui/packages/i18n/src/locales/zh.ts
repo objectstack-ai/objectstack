@@ -1180,6 +1180,7 @@ const zh = {
     recordDetail: '记录详情',
     recordDetailWithLabel: '{{label}}详情',
     openAsFullPage: '以完整页面打开',
+    collapseToDrawer: '收为抽屉',
     recordDetailOverlay: '{{title}} 的记录详情浮层。',
     addToFavorites: '添加到收藏',
     removeFromFavorites: '从收藏中移除',

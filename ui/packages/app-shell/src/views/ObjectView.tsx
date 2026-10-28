@@ -719,7 +719,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // to a record that opens in the drawer: an object that declares `page`
     // (or `new_window` / `none`) keeps its declaration.
     const [recordOpenPreference] = useState(readRecordOpenPreference);
-    const { listRecordActions, navOverlay, handleDrawerClose, handleRowClick, handleExpandDrawer } = useObjectViewRecordNavigation({
+    const { listRecordActions, navOverlay, handleDrawerClose, handleRowClick, handleExpandDrawer, drawerRoot, drawerRestore } = useObjectViewRecordNavigation({
         activeView,
         objectDef,
         objects,
@@ -1147,9 +1147,10 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
              <ObjectViewRecordOverlay
                  navOverlay={navOverlay}
                  handleDrawerClose={handleDrawerClose}
-                 objectLabel={objectLabel}
                  objectDef={objectDef}
                  handleExpandDrawer={handleExpandDrawer}
+                 drawerRoot={drawerRoot}
+                 drawerRestore={drawerRestore}
                  t={t}
                  dataSource={dataSource}
                  objects={objects}

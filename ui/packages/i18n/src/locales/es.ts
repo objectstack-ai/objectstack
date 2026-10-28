@@ -1138,6 +1138,7 @@ const es = {
     recordDetail: "Detalle del registro",
     recordDetailWithLabel: "Detalle de {{label}}",
     openAsFullPage: "Abrir como página completa",
+    collapseToDrawer: "Contraer en panel",
     recordDetailOverlay: "Capa de detalle del registro para {{title}}.",
     addToFavorites: "Añadir a favoritos",
     removeFromFavorites: "Quitar de favoritos",
