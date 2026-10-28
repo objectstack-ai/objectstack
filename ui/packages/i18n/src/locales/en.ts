@@ -220,6 +220,9 @@ const en = {
     // (objectui#11000). `{{object}}` is the object's label.
     noPermissionToCreate: "You don't have permission to create {{object}} records. The fields are read-only.",
     noPermissionToEdit: "You don't have permission to edit {{object}} records. The fields are read-only.",
+    // The same notice when THIS record refuses the update while the object
+    // allows it: sharing, ownership or row-level security (objectstack#27138).
+    noPermissionToEditRecord: "You don't have permission to edit this record. The fields are read-only.",
     submitFailed: 'Could not save. Please try again.',
     uploadInFlight: 'Wait for the upload to finish before saving.',
     // The notice the record form raises when a field's own `visibleWhen` turns

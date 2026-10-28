@@ -179,6 +179,7 @@ const ar = {
     noPermissionToSave: "ليس لديك إذن لحفظ هذا السجل.",
     noPermissionToCreate: "ليس لديك إذن لإنشاء سجلات {{object}}. الحقول للقراءة فقط.",
     noPermissionToEdit: "ليس لديك إذن لتعديل سجلات {{object}}. الحقول للقراءة فقط.",
+    noPermissionToEditRecord: "ليس لديك إذن لتعديل هذا السجل. الحقول للقراءة فقط.",
     submitFailed: "تعذّر الحفظ. يرجى المحاولة مرة أخرى.",
     uploadInFlight: "انتظر حتى ينتهي الرفع قبل الحفظ.",
     clearedOnHide: "تم مسح ما لم يعد ينطبق على القيم الحالية: {{fields}}",

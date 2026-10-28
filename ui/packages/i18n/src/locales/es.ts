@@ -172,6 +172,7 @@ const es = {
     noPermissionToSave: "No tienes permiso para guardar este registro.",
     noPermissionToCreate: "No tienes permiso para crear registros de {{object}}. Los campos son de solo lectura.",
     noPermissionToEdit: "No tienes permiso para editar registros de {{object}}. Los campos son de solo lectura.",
+    noPermissionToEditRecord: "No tienes permiso para editar este registro. Los campos son de solo lectura.",
     submitFailed: "No se pudo guardar. Inténtalo de nuevo.",
     uploadInFlight: "Espere a que finalice la carga antes de guardar.",
     clearedOnHide: "Se borró lo que ya no corresponde a los valores actuales: {{fields}}",
