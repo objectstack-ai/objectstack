@@ -503,13 +503,23 @@ describe('wiring', () => {
 
   it('runs on the publish path, before anything is published', () => {
     // The ruling (objectui#4846 comment 5307574139) put the gate where the harm
-    // materialises. `changeset:publish` is the command `changesets/action` runs
-    // to push tarballs to npm, so a red gate stops the publish itself rather
-    // than reporting after the fact.
-    expect(manifest.scripts['changeset:publish']).toContain(GATE);
-    expect(manifest.scripts['changeset:publish'].indexOf(GATE)).toBeLessThan(
-      manifest.scripts['changeset:publish'].indexOf('changeset publish'),
-    );
+    // materialises. The release publishes through the workspace root's
+    // `release` script (release.yml's publish step runs `pnpm run release`),
+    // whose last command is `scripts/release-publish.sh`; that script runs the
+    // gate with `--no-build` and refuses to go on when it is red, before
+    // `changeset publish` packs a single tarball. So a red gate stops the
+    // publish itself rather than reporting after the fact. Comment lines are
+    // dropped first: the script's header names `changeset publish` in prose.
+    // `repoRoot` in this file is the objectui root, `ui/` under the monorepo.
+    const workspace = workspaceRoot(repoRoot);
+    const scripts = rootManifest(repoRoot).scripts as Record<string, string>;
+    expect(scripts.release.endsWith(' && bash scripts/release-publish.sh')).toBe(true);
+    const publish = withoutComments(fs.readFileSync(path.join(workspace, 'scripts/release-publish.sh'), 'utf8'));
+    const gate = `node ${path.relative(workspace, path.join(repoRoot, GATE))} --no-build`;
+    expect(publish).toMatch(new RegExp(`^if ! ${gate.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}; then$`, 'm'));
+    const publishAt = publish.search(/^changeset publish\b/m);
+    expect(publishAt).toBeGreaterThan(-1);
+    expect(publish.indexOf(gate)).toBeLessThan(publishAt);
   });
 
   // The full-battery half (objectstack#26717). objectui scheduled the scan

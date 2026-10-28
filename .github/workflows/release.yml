@@ -1946,9 +1946,16 @@ jobs:
       # ──────────────────────────────────────────────────────────────────────
       # The publish itself. `pnpm run release` = build (both scopes; the turbo
       # cache makes it the build above) + console:build (the Console dist into
-      # packages/console) + scripts/release-publish.sh, which is `changeset
-      # publish` followed by ONE atomic `git push origin --tags` (#2191: the action's concurrent per-tag
-      # pushes raced GitHub's ref backend and lost ~half the tags).
+      # packages/console) + scripts/release-publish.sh, which runs, in order:
+      #   1. `node ui/scripts/check-published-dist-tooling.mjs --no-build`, which
+      #      refuses the publish when a published @object-ui package carries
+      #      tooling material (a test, a mock, a `*.tsbuildinfo`) or has no build
+      #      output. `--no-build` because the build above is what gets packed,
+      #      so the scan reads exactly those artifacts;
+      #   2. `changeset publish`, with npm's own per-package answers recorded for
+      #      scripts/release-verify-npm.mjs, which this step runs next;
+      #   3. ONE atomic `git push origin --tags` (#2191: the action's concurrent
+      #      per-tag pushes raced GitHub's ref backend and lost ~half the tags).
       #
       # changesets/action is NOT used here, and that is deliberate: handed a
       # workspace with pending changesets it would take the VERSION path and mint
