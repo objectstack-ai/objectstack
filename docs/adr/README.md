@@ -17,8 +17,8 @@
 
 | Status | Records |
 |---|---|
-| Accepted | 112 |
-| Proposed | 18 |
+| Accepted | 121 |
+| Proposed | 9 |
 | Superseded | 4 |
 | Draft | 3 |
 | Deferred | 2 |
@@ -108,7 +108,7 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0035](./0035-config-driven-master-detail.md) | Config-driven master-detail (declare on the relationship, forms derive) | Accepted | — | — | — |
 | [ADR-0036](./0036-app-as-rest-api-and-mcp-server.md) | Every app is a REST API + an MCP server — make it visible and connectable after build | Accepted — framework implemented; cloud surfacing pending (proposed 2026-0… | 2026-06-06 | — | — |
 | [ADR-0037](./0037-live-canvas-draft-preview.md) | Live Canvas — draft-overlay live preview while you build | Accepted — 2026-06-10 — all four phases implemented: `previewDrafts` reads… | 2026-06-10 | — | — |
-| [ADR-0038](./0038-build-verification-loop.md) | Build Verification Loop — the agent builds, verifies, and corrects itself | Proposed — 2026-06-11 — cloud-owned; framework slice partially implemented… | 2026-06-11 | — | cloud ADR-0025 |
+| [ADR-0038](./0038-build-verification-loop.md) | Build Verification Loop — the agent builds, verifies, and corrects itself | Accepted — 2026-10-28 (ruled on objectstack#26553, ADR batch 2; proposed 2… | 2026-10-28 | — | cloud ADR-0025 |
 | [ADR-0039](./0039-token-scope-tree-execution.md) | Concurrent durable pause — multi-instance nodes now, token/scope-tree later | Accepted — Track A implemented; Track B deferred (proposed 2026-06-11, rev… | 2026-06-11 | — | — |
 | [ADR-0040](./0040-unified-assistant-and-agent-binding.md) | Unified Assistant — the end user never picks an agent | Superseded — by ADR-0063 — original: Proposed (2026-06-11) | 2026-06-11 | — | ADR-0063, cloud ADR-0025 |
 | [ADR-0041](./0041-flow-trigger-family.md) | Flow trigger family — taxonomy, naming, and the open-source core set | Accepted — Tier 1 implemented (rename deprecation stubs pending) (proposed… | 2026-06-12 | — | — |
@@ -116,13 +116,13 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0043](./0043-actionable-approval-links.md) | Actionable approval links — single-use tokens with a session-less confirm page | Accepted — implemented (proposed 2026-06-12 · calibrated 2026-06-12) · Ame… | 2026-06-12 | — | — |
 | [ADR-0044](./0044-approval-send-back-for-revision.md) | Flow-level send-back-for-revision — `revise` branch + typed back-edge re-entry | Accepted — engine + model implemented; designer pending (objectui) (propos… | 2026-06-12 | — | — |
 | [ADR-0045](./0045-additive-materialization-and-visibility-gate.md) | Additive materialization with a visibility gate — drafts narrow to mutations | Accepted — 2026-06-12 · Amended 2026-08-09 (#4829, maintainer ruling 2026-… | 2026-06-12 | — | — |
-| [ADR-0046](./0046-package-docs-as-metadata.md) | Package documentation as metadata — flat `src/docs/.md` compiled into the manifest | Proposed — 2026-06-12, revised — simplified from the original directory/do… | 2026-06-12 | — | — |
+| [ADR-0046](./0046-package-docs-as-metadata.md) | Package documentation as metadata — flat `src/docs/.md` compiled into the manifest | Accepted — 2026-10-28 (ruled on objectstack#26553, ADR batch 2; proposed 2… | 2026-10-28 | — | — |
 | [ADR-0047](./0047-object-ui-run-modes.md) | Two run modes for object UI — data views vs interface pages, user filters, and runtime visualization choice | Accepted — 2026-06-12; revised 2026-06-19 — framework scope implemented (`… | 2026-06-12 | — | — |
 | [ADR-0048](./0048-cross-package-metadata-collision.md) | Cross-package metadata collision — package-id identity, namespace install gate, package-scoped resolution | Revised — 2026-06-13 — supersedes the original per-item collision | 2026-06-13 | — | — |
 | [ADR-0049](./0049-no-unenforced-security-properties.md) | Spec must not declare security properties the runtime does not enforce (enforce-or-remove gate) | Accepted — 2026-06-15 — implemented: fail-closed `DESTRUCTIVEOPERATIONS` (… | 2026-06-15 | — | — |
 | [ADR-0050](./0050-form-layout-vs-presentation.md) | Form layout vs presentation — split the overloaded `FormView.type` | Proposed — 2026-06-15 · Amended (2026-10-20, letter B′ on #24692, ruling r… | 2026-06-15 | — | — |
-| [ADR-0051](./0051-inline-metadata-views-in-docs.md) | Inline metadata views in docs — the ` ```metadata ` fenced block | Proposed — 2026-06-16 — P1 authoring surface implemented (2026-07-16 audit… | 2026-06-16 | — | — |
-| [ADR-0052](./0052-audit-is-not-the-activity-feed.md) | Audit is not the activity feed — decompose collaboration, activity, and audit into bounded contexts | Proposed — 2026-06-16 — partially implemented (2026-07-16 audit): §5b decl… | 2026-06-16 | — | — |
+| [ADR-0051](./0051-inline-metadata-views-in-docs.md) | Inline metadata views in docs — the ` ```metadata ` fenced block | Accepted — 2026-10-28 (ruled on objectstack#26553, ADR batch 2; proposed 2… | 2026-10-28 | — | — |
+| [ADR-0052](./0052-audit-is-not-the-activity-feed.md) | Audit is not the activity feed — decompose collaboration, activity, and audit into bounded contexts | Accepted — 2026-10-28 (ruled on objectstack#26553, ADR batch 2; proposed 2… | 2026-10-28 | — | — |
 | [ADR-0053](./0053-date-and-datetime-semantics.md) | `date` is a timezone-naive calendar day; `datetime` is an instant rendered in a reference timezone | Accepted — 2026-06-16 — Phase 1 + addendum D-A1 implemented (`sql-driver.t… | 2026-06-16 | — | — |
 | [ADR-0054](./0054-runtime-proof-for-authorable-surface.md) | A live authorable property must be proven at runtime, not merely have a consumer (prove-it-runs gate) | Accepted — 2026-06-18 | 2026-06-18 | — | — |
 | [ADR-0055](./0055-master-detail-controlled-by-parent.md) | Master-detail "controlled by parent" permissions — derived access via pre-resolved master-id membership | Accepted — 2026-06-19 — implemented in this PR (P0–P2) · Amended (2026-09-… | 2026-06-19 | — | — |
@@ -134,17 +134,17 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0060](./0060-conformance-ledger-platform-pattern.md) | Conformance Ledger as a Platform Pattern | Accepted — P1–P2 implemented; D5 landed-bar in force; D6 (CI aggregate) de… | 2026-06-21 | — | — |
 | [ADR-0061](./0061-record-search-architecture.md) | Record Search Architecture — metadata-driven `$search` resolution | Accepted — 2026-06-21; Tier 1 — implemented and conformance-closed per thi… | 2026-06-21 | — | — |
 | [ADR-0062](./0062-external-datasource-runtime.md) | External Datasource Runtime — connection lifecycle, credentials, visibility & query completeness | Accepted — 2026-06-22 — D1–D8 implemented. D1 fully implemented across bot… | 2026-06-22 | ADR-0015 | — |
-| [ADR-0063](./0063-two-kernel-agents-skills-are-the-extension-primitive.md) | Two agents (`ask` / `build`), bound by surface; skills are the only third-party extension primitive | Proposed — 2026-06-22 — cloud-owned (2026-07-16 audit): the framework spec… | 2026-06-22 | ADR-0040, ADR-0064 | cloud ADR-0025 |
-| [ADR-0064](./0064-tool-scoping-to-agent.md) | Tool scoping — an agent's tools are exactly its skills' tools | Proposed — 2026-06-22 — cloud-owned (2026-07-16 audit): the only framework… | 2026-06-22 | — | cloud ADR-0025 |
+| [ADR-0063](./0063-two-kernel-agents-skills-are-the-extension-primitive.md) | Two agents (`ask` / `build`), bound by surface; skills are the only third-party extension primitive | Accepted — 2026-10-28 (ruled on objectstack#26553, ADR batch 3; proposed 2… | 2026-10-28 | ADR-0040, ADR-0064 | cloud ADR-0025 |
+| [ADR-0064](./0064-tool-scoping-to-agent.md) | Tool scoping — an agent's tools are exactly its skills' tools | Accepted — 2026-10-28 (ruled on objectstack#26553, ADR batch 3; proposed 2… | 2026-10-28 | — | cloud ADR-0025 |
 | [ADR-0065](./0065-sdui-styling-model.md) | SDUI styling model — scoped style-objects over arbitrary Tailwind classes | Accepted — 2026-06-22 — open-mechanism half implemented: `style`/`responsi… | 2026-06-22 | — | — |
 | [ADR-0066](./0066-unified-authorization-model.md) | Unified authorization model — capability registry, secure-by-default posture, resource→capability contracts,… | Accepted — 2026-06-23 — D1–D5 + refinements ⑤/⑨ implemented (capability re… | 2026-06-23 | — | — |
 | [ADR-0067](./0067-commit-history-and-rollback-for-ai-authoring.md) | Commit history and rollback for AI authoring — turns become atomic, revertible commits | Accepted — 2026-06-24; completed 2026-07-16 · Amended (2026-08-06, #5351/#… | 2026-06-24 | — | — |
 | [ADR-0068](./0068-unified-user-context-and-built-in-identity-roles.md) | Unified user-context contract & built-in identity roles — one `currentuser` shape across formula/RLS/client,… | Accepted — 2026-06-24 — implemented under the position model: `EvalUser` f… | 2026-06-24 | — | — |
 | [ADR-0069](./0069-enterprise-authentication-hardening.md) | Enterprise authentication hardening — password policy, enforced MFA, SSO, session controls, network gating, a… | Accepted — P1 + P2 implemented (2026-07-04); P3 partially landed (see Adde… | 2026-07-04 | — | — |
 | [ADR-0070](./0070-package-first-authoring.md) | Package-first authoring — every runtime-authored item lives in a writable package (base); no orphans | Accepted — 2026-06-24 — P1–P3 implemented, merged & live-verified (see Imp… | 2026-06-24 | — | — |
-| [ADR-0071](./0071-dataset-semantic-layer-depth.md) | Dataset semantic-layer depth — multi-hop joins | Proposed — Refocused — see Correction below. The first merged draft also p… | — | — | — |
-| [ADR-0072](./0072-reference-scope-and-resolvability.md) | Reference Scope & Resolvability — the authored-expression data-picker model (#1934) | Proposed — 2026-06-25 | 2026-06-25 | — | — |
-| [ADR-0073](./0073-automation-execution-identity.md) | Automation execution identity — a built-in non-human principal for user-less runs, `runAs` as authorization p… | Proposed — 2026-06-25 | 2026-06-25 | — | — |
+| [ADR-0071](./0071-dataset-semantic-layer-depth.md) | Dataset semantic-layer depth — multi-hop joins | Accepted — 2026-10-28 (ruled on objectstack#26553, ADR batch 3; proposed 2… | 2026-10-28 | — | — |
+| [ADR-0072](./0072-reference-scope-and-resolvability.md) | Reference Scope & Resolvability — the authored-expression data-picker model (#1934) | Accepted — 2026-10-28 (ruled on objectstack#26553, ADR batch 3; proposed 2… | 2026-10-28 | — | — |
+| [ADR-0073](./0073-automation-execution-identity.md) | Automation execution identity — a built-in non-human principal for user-less runs, `runAs` as authorization p… | Accepted — 2026-10-28 (ruled on objectstack#26553, ADR batch 3; proposed 2… | 2026-10-28 | — | — |
 | [ADR-0074](./0074-canonical-audit-timestamp-storage-on-sqlite.md) | Audit timestamps are stored in one canonical, timezone-explicit format on SQLite | Accepted — 2026-06-26. Read side extended (2026-09-07): the read repair th… | 2026-06-26 | — | — |
 | [ADR-0076](./0076-objectql-core-tiering.md) | objectql is the data engine — relocate metadata management (protocol) out of it; enforce the boundary; defer… | Accepted — D1/D2/D4/D5/D6/D8/D9 implemented; D10/D12 partially landed; D11… | 2026-08-15 | — | — |
 | [ADR-0077](./0077-authoring-surface-boundary-hook-flow-validation.md) | The authoring-surface boundary — route by intent, not mechanism; verifiability tier = friction tier; loud-not… | Proposed — 2026-06-28 | 2026-06-28 | — | — |

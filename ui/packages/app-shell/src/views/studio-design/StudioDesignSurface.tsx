@@ -200,6 +200,7 @@ import {
   listViewColumnIndexOf,
   listViewColumnSelection,
   listViewIsKanban,
+  listViewTargetOf,
   ObjectListViewInspector,
   useObjectListViewDraft,
   type DraftOnlyObjects,
@@ -257,7 +258,7 @@ import {
   type StudioRefusal,
 } from './metadataError.js';
 import { readEnvelopeFailureText } from '../../utils/apiErrorEnvelope.js';
-import { loadPackageLessSurfaces, loadPackageSurfaces } from './packageSurfaces.js';
+import { loadPackageLessSurfaces, loadPackageSurfaces, type PackageSurface } from './packageSurfaces.js';
 import {
   STUDIO_ORG_SCOPE_PILLAR,
   isOrgScopeDraft,
@@ -280,7 +281,7 @@ import { ObjectPicker } from '../metadata-admin/inspectors/ObjectPicker.js';
 import { IconPickerWidget } from '../metadata-admin/widgets.js';
 import { useDisplayLocale } from '@object-ui/i18n';
 import { SuggestedBindingsPanel } from '../../components/SuggestedBindingsPanel.js';
-import { AppNavCanvas, navPayloadOf } from '../metadata-admin/previews/AppNavCanvas.js';
+import { AppNavCanvas, inMenuOrder, navPayloadOf } from '../metadata-admin/previews/AppNavCanvas.js';
 import {
   FlowRegistrationContext,
   FlowRuntimeContext,
@@ -2789,9 +2790,14 @@ function NavTree({
   // What a label-less row inherits is asked of the console's own resolver, so
   // the rail names it as the console's sidebar does (objectui#11196).
   const targetLabel = useNavTargetLabel();
+  // objectstack#26979 — a level is listed in the order the running menu draws
+  // it, through the canvas's `inMenuOrder` (the menu's `byNavOrder` rule). `i`
+  // stays the entry's position in the authored array, which the canvas numbers
+  // an untitled entry by too.
+  const ordered = inMenuOrder(nodes);
   return (
     <>
-      {nodes.map((node, i) => {
+      {ordered.map(([node, i]) => {
         // objectui#11158 — the spec types a nav item's `label` as `I18nLabel`,
         // so a locale map rendered raw threw ("Objects are not valid as a
         // React child") and took the whole rail down. Every read below goes
@@ -2883,6 +2889,121 @@ function NavTree({
         );
       })}
     </>
+  );
+}
+
+/**
+ * objectstack#26889 — the item types the Interfaces pillar lists under the
+ * navigation tree, in the order of their sections: the three a nav entry can
+ * open by name, in the "+" menu's order, then views, which a package ships by
+ * the dozen and so sit last.
+ */
+const OFF_NAV_TYPES = ['page', 'dashboard', 'report', 'view'] as const;
+type OffNavType = (typeof OFF_NAV_TYPES)[number];
+
+/** An item's identity in {@link navOpenedItems}' set. Not a cache key. */
+const itemKeyOf = (type: string, name: string): string => `${type}:${name}`;
+
+/**
+ * The `type:name` of every item a nav entry in `nodes` opens, at any depth —
+ * what the sections under the tree leave out, so no item is listed twice. The
+ * binding is the tree's own (`resolveSurface`): a page / dashboard / report
+ * entry opens the item it names, and an `object` entry with a `viewName` opens
+ * that view, under the name its view item carries (`<object>.<viewName>`, the
+ * spelling the entry's list-view panel edits, `listViewTargetOf`). A plain
+ * `object` entry opens its object, so the object's views stay listed.
+ */
+function navOpenedItems(nodes: readonly NavNode[], locale: string): Set<string> {
+  const opened = new Set<string>();
+  const walk = (list: readonly NavNode[]) => {
+    for (const node of list) {
+      if (Array.isArray(node.children) && node.children.length) {
+        walk(node.children);
+        continue;
+      }
+      const surface = resolveSurface(node, locale);
+      if (!surface) continue;
+      opened.add(itemKeyOf(surface.type, surface.name));
+      if (surface.type === 'object' && typeof node.viewName === 'string' && node.viewName) {
+        opened.add(itemKeyOf('view', listViewTargetOf(surface.name, node.viewName, {}).viewId));
+      }
+    }
+  };
+  walk(nodes);
+  return opened;
+}
+
+/**
+ * objectstack#26889 — the package's pages, dashboards, reports and views that
+ * no nav entry opens (`navOpenedItems`), one collapsible section per type,
+ * under the navigation tree. A package with no app lists everything it ships
+ * here, under its "no app yet" notice. A row opens its item in the pillar's
+ * canvas and inspector as a tree row does, so a read-only package shows it
+ * read-only. Listing writes nothing: no nav entry is added for a row.
+ */
+function OffNavSections({
+  sections,
+  active,
+  onPick,
+}: {
+  sections: ReadonlyArray<{ type: OffNavType; items: ReadonlyArray<PackageSurface> }>;
+  active: Surface | null;
+  onPick: (s: Surface) => void;
+}): React.ReactElement | null {
+  const locale = useMetadataLocale();
+  const shown = sections.filter((s) => s.items.length > 0);
+  if (shown.length === 0) return null;
+  return (
+    <div data-testid="if-off-nav" className="mt-3 border-t pt-2">
+      <p className="px-2 pb-1 text-[11px] text-muted-foreground">{t('engine.studio.if.offNav.heading', locale)}</p>
+      {shown.map((s) => (
+        <OffNavSection key={s.type} type={s.type} items={s.items} active={active} onPick={onPick} />
+      ))}
+    </div>
+  );
+}
+
+/** One type's section: its rows, open until the author closes it. */
+function OffNavSection({
+  type,
+  items,
+  active,
+  onPick,
+}: {
+  type: OffNavType;
+  items: ReadonlyArray<PackageSurface>;
+  active: Surface | null;
+  onPick: (s: Surface) => void;
+}): React.ReactElement {
+  const locale = useMetadataLocale();
+  const [open, setOpen] = React.useState(true);
+  const Icon = navIcon(type);
+  return (
+    <StudioRailGroup
+      testId={`if-off-nav-${type}`}
+      label={t(`engine.studio.if.offNav.${type}`, locale)}
+      count={items.length}
+      collapsed={!open}
+      onToggle={() => setOpen((v) => !v)}
+    >
+      {items.map((item) => {
+        const surface: Surface = { type: item.type, name: item.name, label: item.label };
+        return (
+          <StudioRailRow
+            key={item.name}
+            onClick={() => onPick(surface)}
+            active={!!active && isSameSurface(active, surface)}
+            indent
+            // The label is what the row says; the machine name rides on the
+            // tooltip with the type, as on a tree row (objectui#11862).
+            title={`${item.type} · ${item.name}`}
+            icon={<Icon className="h-4 w-4 shrink-0" />}
+          >
+            {item.label || item.name}
+          </StudioRailRow>
+        );
+      })}
+    </StudioRailGroup>
   );
 }
 
@@ -4275,6 +4396,35 @@ export function InterfacesPillar({
     };
   }, [client, packageId, publishNonce, draftNonce, metadataRefreshNonce]);
 
+  // objectstack#26889 — the package's pages, dashboards, reports and views,
+  // published ∪ draft, each narrowed by its type's own list filter, as
+  // Setup › Metadata lists them: the sections under the nav tree list the ones
+  // no entry opens (`OffNavSections`). Re-read when the package's metadata
+  // moves, as the app is. Stamped with the package read, so a package switch
+  // never shows another package's items. A type whose read fails lists
+  // nothing, as the object read above leaves its picker empty.
+  const [packageItems, setPackageItems] = React.useState<{
+    packageId: string;
+    byType: Partial<Record<OffNavType, PackageSurface[]>>;
+  } | null>(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const lists = await Promise.all(
+        OFF_NAV_TYPES.map((type) =>
+          loadPackageSurfaces(client, type, packageId, locale, getMetadataResource(type)?.listFilter).catch(
+            () => [] as PackageSurface[],
+          ),
+        ),
+      );
+      if (cancelled) return;
+      setPackageItems({ packageId, byType: Object.fromEntries(OFF_NAV_TYPES.map((type, i) => [type, lists[i]])) });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [client, packageId, locale, publishNonce, draftNonce, metadataRefreshNonce]);
+
   // Resolve THIS package's App → load its navigation tree. The query is scoped
   // to the package (`list('app', { packageId })`) so a design surface only ever
   // shows the current package's app — never another package's. `list()` sees
@@ -5405,7 +5555,9 @@ export function InterfacesPillar({
               : 'rounded-lg border bg-background p-4',
         )}
       >
-        {appStatus === 'missing' && !error ? (
+        {/* objectstack#26889 — a package with no app shows its empty state
+            until a row of the rail's sections opens one of its items. */}
+        {appStatus === 'missing' && !error && !current ? (
           <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
               <LayoutDashboard className="h-6 w-6 text-muted-foreground" />
@@ -5714,6 +5866,27 @@ export function InterfacesPillar({
     </Sheet>
   ) : null;
 
+  // A rail row opens its item: a tree entry or a row of the sections under it.
+  const pickSurface = (s: Surface) => {
+    // objectstack#26705 — another leaf's load replaces the buffer the held
+    // widget lives in; an entry for the open leaf keeps it.
+    if (leafKeyOf(s) !== leafKey && !confirmDropUnsavedWork(leafHeld !== null, locale)) return;
+    setCurrent(s);
+    if (isMobile) setRailOpen(false);
+  };
+  // objectstack#26889 — what the sections under the tree list: the package's
+  // items no entry of the nav buffer opens, an unsent nav edit included. None
+  // while the app is still resolving, so an item its entry will claim is never
+  // shown and then taken away.
+  const navOpened = navOpenedItems(navTree, locale);
+  const offNavSections = OFF_NAV_TYPES.map((type) => ({
+    type,
+    items:
+      appStatus !== 'loading' && packageItems?.packageId === packageId
+        ? (packageItems.byType[type] ?? []).filter((item) => !navOpened.has(itemKeyOf(type, item.name)))
+        : [],
+  }));
+
   return (
     <div className="flex h-full flex-col">
       {leafConflictDialog}
@@ -5927,19 +6100,12 @@ export function InterfacesPillar({
                     : t('engine.studio.if.noNavItems', locale)}
               </p>
             ) : (
-              <NavTree
-                nodes={railTree}
-                active={current}
-                objectIcons={objectIconMap}
-                onPick={(s) => {
-                  // objectstack#26705 — another leaf's load replaces the buffer
-                  // the held widget lives in; an entry for the open leaf keeps it.
-                  if (leafKeyOf(s) !== leafKey && !confirmDropUnsavedWork(leafHeld !== null, locale)) return;
-                  setCurrent(s);
-                  if (isMobile) setRailOpen(false);
-                }}
-              />
+              <NavTree nodes={railTree} active={current} objectIcons={objectIconMap} onPick={pickSurface} />
             )}
+            {/* objectstack#26889 — under the tree (or the no-app notice), the
+                items no entry opens. Not while nav editing: the rail is the
+                nav editor then. */}
+            {!editNav && <OffNavSections sections={offNavSections} active={current} onPick={pickSurface} />}
         </StudioRail>
 
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden" data-testid="if-content-column">

@@ -50,12 +50,15 @@ function deferred() {
 }
 
 /** The slice of the metadata client the editor calls here. */
-type FakeClient = Record<string, (...args: never[]) => Promise<unknown>>;
+// `withPreviewDrafts` answers the client itself, not a promise (objectstack#26840).
+type FakeClient = Record<string, (...args: never[]) => unknown>;
 
 function makeClient(server: Server, opts: { holdFirstSave?: Promise<void> } = {}): FakeClient {
   return {
     layered: async () => LAYERED,
     getDraft: async () => null,
+    // objectstack#26840 — the package door reads its objects through the draft-overlaid door.
+    withPreviewDrafts() { return this; },
     list: async (type: string) => (type === 'object' ? [{ item: { name: 'a_account' } }] : []),
     get: async () => null,
     save: async (

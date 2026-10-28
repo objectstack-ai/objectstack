@@ -690,7 +690,10 @@ export const CEILINGS = new Map([
   // 2956 at headroom 0, ceiling +737. No repeated passage in the file to
   // cut first (measured: no sentence repeats). Maintainer ruling 2026-10-27 on the decision card 「skills 修复卡的教学和 eval 都撞 token 天
   // 花板,怎么付?」, tap A, verbatim and untranslated: 「A:先削重复,余额按实测提高」.
-  ['skills/objectstack-data/rules/security.md', 3693],
+  // 3693 -> 3687 (#27016): RE-LOCK at the landed count. `queues` joins the
+  // kernel names a membership key may not take (+3 tokens), paid by cutting
+  // "not a stamp on every data row," from the membership-keys intro; net -6.
+  ['skills/objectstack-data/rules/security.md', 3687],
   // 3024 -> 3109 (2026-08-31 app-repo-principles raise, see the block above).
   // Severity Levels listed the three values and left the CHOICE unstated: a
   // block rests on a judgement a person made, so a machine-inferred signal — a
@@ -930,7 +933,25 @@ export const CEILINGS = new Map([
   // `applyOn: 'create'`. +309 tokens at headroom 0, ceiling +309; nothing
   // duplicated in the file to cut first. Maintainer ruling 2026-10-27 on the decision card 「skills 修复卡的教学和 eval 都撞 token 天
   // 花板,怎么付?」, tap A, verbatim and untranslated: 「A:先削重复,余额按实测提高」.
-  ['skills/objectstack-data/evals/hooks-security-seeds-datasources.json', 1404],
+  // 1404 -> 1573 (card #26834, the eval owed by the spec PR that added a
+  // hook's `refusals` catalogue): one case for a save refused over the
+  // account's credit limit in an app serving English and Chinese users —
+  // expected `refusals: { CREDIT_LIMIT: { message } }` on the hook, a
+  // `language: 'js'` body throwing `{ code: 'CREDIT_LIMIT' }`, the zh-CN
+  // sentence under the bundle's `hooks: { HOOK: { refusals } }`; NO sentence
+  // on the throw (`new Error('`), NO `handler:`. Triage 6450886908 (room
+  // inside the package first, no raise) read together with the standing
+  // ruling, strictest first — maintainer ruling 2026-10-27 on the decision
+  // card 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」, tap A, verbatim
+  // and untranslated: 「A:先削重复,余额按实测提高」. PAID DOWN FIRST: five
+  // sentences in cases 1–5 that restated their own `must_not_contain`
+  // assertions (case 4 keeps its one non-asserted clause), 453 bytes = 114
+  // units; the case adds 1129 bytes = 283 units. On `origin/main` the file
+  // was 5616 bytes (1404 tokens, headroom 0); the LANDED file is 6292 bytes
+  // -> 1573 tokens, ceiling +169, pinned AT the measurement, zero headroom.
+  // The raising PR's body carries the same arithmetic.
+  //   ceil($(wc -c < skills/objectstack-data/evals/hooks-security-seeds-datasources.json) / 4) == ceil(6292 / 4)
+  ['skills/objectstack-data/evals/hooks-security-seeds-datasources.json', 1573],
   // 946 -> 1050 (#26297): the invoice-line case gains the owner opt-in
   // (`ownerMayEdit` on the controlled_by_parent line) and pins `added_by` as
   // `type: 'user'`, never a lookup to a `user` object. +104 tokens at

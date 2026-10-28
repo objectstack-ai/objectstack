@@ -44,7 +44,8 @@ import { IdentityImportOptions, IdentityImportResultExtra, identityImportFields 
 import { ManagedUsersInviteLine } from './managedEnvironmentUsers.js';
 import { importTargetFields } from './importTargetFields.js';
 import { resolveViewId } from '../utils/resolveViewId.js';
-import { readRecordOpenPreference } from '../utils/recordOpenPreference.js';
+import { useRecordOpenPreference } from '../utils/recordOpenPreference.js';
+import type { ListViewProps } from '@object-ui/plugin-list';
 import { defaultListViewId, viewRowId } from '../utils/viewIdentity.js';
 import { useObjectActions } from '../hooks/useObjectActions.js';
 import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
@@ -714,11 +715,12 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // objectstack#25992 slice 6: the record navigation overlay (drawer state in the
     // URL, row click, expand to page, record links) moved to `./objectViewRecordNavigation.ts`.
     // objectstack#26677 — the side-by-side pane is a READER's preference, not a
-    // `navigation.mode` (`split` left the spec). Read once per mount; the
-    // Display-menu control that writes it is objectstack#26681. It applies only
-    // to a record that opens in the drawer: an object that declares `page`
-    // (or `new_window` / `none`) keeps its declaration.
-    const [recordOpenPreference] = useState(readRecordOpenPreference);
+    // `navigation.mode` (`split` left the spec). Live state: the Display menu's
+    // Open records section writes it (objectstack#26681) and the next row click
+    // opens the new way. It applies only to a record that opens in the drawer:
+    // an object that declares `page` (or `new_window` / `none`) keeps its
+    // declaration.
+    const [recordOpenPreference, setRecordOpenPreference] = useRecordOpenPreference();
     const { listRecordActions, navOverlay, handleDrawerClose, handleRowClick, handleExpandDrawer } = useObjectViewRecordNavigation({
         activeView,
         objectDef,
@@ -738,6 +740,20 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // The split face draws the drawer's own record beside the list: same URL
     // state (`?recordId=`), same close, a different shell.
     const opensBesideList = recordOpenPreference === 'split' && navOverlay.mode === 'drawer';
+    // objectstack#26681 — the Display menu's Open records section: the mode this
+    // object and view resolved to, and the reader's preference with its setter.
+    const recordOpen = useMemo<NonNullable<ListViewProps['recordOpen']>>(
+        () => ({ resolvedMode: navOverlay.mode, preference: recordOpenPreference, setPreference: setRecordOpenPreference }),
+        [navOverlay.mode, recordOpenPreference, setRecordOpenPreference],
+    );
+    // objectstack#26681 — the name cell's ↗, "open as full page", for a row that
+    // opens the drawer (or the pane beside the list). A `page` object's row
+    // already opens the page; a `new_window` / `none` one keeps its declaration.
+    const openAsPageLabel = t('console.objectView.openAsPage', { defaultValue: 'Open as full page' });
+    const openAsPage = useMemo(
+        () => (navOverlay.mode === 'drawer' ? { objectName: objectDef.name, label: openAsPageLabel } : null),
+        [navOverlay.mode, objectDef.name, openAsPageLabel],
+    );
 
     // objectstack#25992 slice 8: the `filter[...]` URL equality filters and the `uf_*`
     // user-filter selections moved to `./objectViewListUrlState.ts`.
@@ -800,6 +816,8 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         actions,
         handleRowClick,
         navOverlay,
+        recordOpen,
+        openAsPage,
         urlFilters,
         initialUfSelections,
         handleUserFilterSelectionsChange,

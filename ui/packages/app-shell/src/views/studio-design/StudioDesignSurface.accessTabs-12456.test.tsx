@@ -69,6 +69,8 @@ function makeClient() {
     },
   };
   return {
+    // objectstack#26840 — the Access matrix reads its objects through the draft-overlaid door.
+    withPreviewDrafts() { return this; },
     list: async (type: string) => {
       if (type === 'permission') return Object.values(sets).map((s) => ({ name: s.name, label: s.label }));
       if (type === 'object') {

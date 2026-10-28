@@ -71,6 +71,8 @@ const STUDIO_ZH: Record<string, string> = {
   'perm.field.inherited.tip': '该字段没有规则：跟随对象的“读”“改”权限。点击即写入一条规则。',
   'perm.field.capped.read': '该规则授予了“读”，但对象未授予：仅持有本权限集的用户无法读取此字段。',
   'perm.field.capped.edit': '该规则授予了“改”，但对象未授予：仅持有本权限集的用户无法编辑此字段。',
+  'perm.object.inherited.legend': '灰色框：权限集没有该对象的显式授权，因此适用 “*” 通配授权。在此点击会为该对象写入一条显式授权，从该行当前显示的内容开始；此后 “*” 不再适用于该对象。',
+  'perm.object.inherited.tip': '该对象没有显式授权：适用权限集的 “*” 通配授权。点击会为该对象写入一条显式授权，从此行当前显示的内容开始；此后该对象适用这条显式授权，不再适用 “*”。',
   'perm.field.col.name': '字段',
   'perm.field.read': '读',
   'perm.field.edit': '改',
@@ -2007,6 +2009,12 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.if.kindDesc.separator': '一条分隔线,无标签,不打开任何内容',
   'engine.studio.if.addMenuTitle': '添加到导航',
   'engine.studio.if.emptyGroup': '这个软件包里没有条目',
+  // objectstack#26889 — the rail's sections under the nav tree: the items no entry opens.
+  'engine.studio.if.offNav.heading': '不在导航中',
+  'engine.studio.if.offNav.page': '页面',
+  'engine.studio.if.offNav.dashboard': '仪表板',
+  'engine.studio.if.offNav.report': '报表',
+  'engine.studio.if.offNav.view': '视图',
   'engine.studio.if.openInData': '在「数据」中打开',
   // objectui#12725 — 画布上方的状态行，以及条目的 ⋯ 菜单。
   'engine.studio.if.status.design': '设计态',
@@ -3557,6 +3565,31 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.appNav.item': '导航项 {n}',
   'engine.appNav.itemOne': '项',
   'engine.appNav.itemOther': '项',
+  // The translation preview, the designer table's last family: held out of S6
+  // while a sibling change added its category.hooks row (#25922 slice S6b).
+  'engine.translationPreview.empty': '此语言包为空 —— 至少添加一条译文，即可查看覆盖率报告。',
+  'engine.translationPreview.category.objects': '对象',
+  'engine.translationPreview.category.picklists': '选项列表',
+  'engine.translationPreview.category.apps': '应用',
+  'engine.translationPreview.category.messages': '消息',
+  'engine.translationPreview.category.globalActions': '全局操作',
+  'engine.translationPreview.category.dashboards': '仪表盘',
+  'engine.translationPreview.category.datasets': '数据集',
+  'engine.translationPreview.category.reports': '报表',
+  'engine.translationPreview.category.pages': '页面',
+  'engine.translationPreview.category.flows': '流程',
+  'engine.translationPreview.category.hooks': '钩子',
+  'engine.translationPreview.category.positions': '岗位',
+  'engine.translationPreview.category.permissions': '权限集',
+  'engine.translationPreview.category.books': '文档书',
+  'engine.translationPreview.category.metadataForms': '元数据表单',
+  'engine.translationPreview.category.settingsCommon': '设置界面',
+  'engine.translationPreview.coverage': '分类覆盖率：',
+  'engine.translationPreview.totalKeys': '共 {count} 个键',
+  'engine.translationPreview.categoryEmpty': '空',
+  'engine.translationPreview.more': '另有 {count} 项…',
+  'engine.translationPreview.keyCountOne': '{{count} 个键}',
+  'engine.translationPreview.keyCountOther': '{{count} 个键}',
 };
 
 export default STUDIO_ZH;

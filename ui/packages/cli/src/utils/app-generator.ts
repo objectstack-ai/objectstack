@@ -205,7 +205,7 @@ function buildRoutedAppDependencies(): Record<string, string> {
   return {
     react: REACT_RANGE,
     'react-dom': REACT_RANGE,
-    'react-router-dom': '^7.18.2',
+    'react-router-dom': '^7.18.4',
     'lucide-react': '^1.43.0',
     ...Object.fromEntries(PLATFORM_RUNTIME_PACKAGES.map((name) => [name, range]))
   };

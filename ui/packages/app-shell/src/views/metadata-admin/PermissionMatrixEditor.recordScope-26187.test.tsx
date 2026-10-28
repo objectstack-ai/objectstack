@@ -42,6 +42,8 @@ function makeClient(server: FakeServer) {
   return {
     layered: async () => ({ effective: server.set, code: null, overlay: null, overlayScope: null }),
     getDraft: async () => null,
+    // objectstack#26840 — the package door reads its objects through the draft-overlaid door.
+    withPreviewDrafts() { return this; },
     list: async (type: string) =>
       type === 'object' ? server.objectNames.map((name) => ({ item: { name } })) : [],
     get: async (type: string) => (type === 'object' ? { fields: [] } : null),
