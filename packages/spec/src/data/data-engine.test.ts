@@ -1311,4 +1311,36 @@ describe('the engine-side projection declarations admit exactly what their trans
       expect(parsed.query).toEqual({ fields: value });
     });
   }
+
+  // The legacy options bag's `select` and the vector-find request's `fields`
+  // are `z.string()` lists, so their sibling is the bare `select`.
+  it.each(REFUSED)('DataEngineQueryOptionsSchema.select refuses %s, naming the path, as the bare `select` does', (_name, value, tail) => {
+    const parsed = DataEngineQueryOptionsSchema.safeParse({ select: value });
+    expect(parsed.success).toBe(false);
+    const issue = parsed.success ? undefined : parsed.error.issues[0];
+    expect(issue?.path).toEqual(['select', ...tail]);
+    expect(issue?.message).toBe(sibling('select', value)?.message);
+  });
+
+  it.each(KEPT)('DataEngineQueryOptionsSchema.select keeps %s, unchanged', (_name, value) => {
+    expect(DataEngineQueryOptionsSchema.parse({ select: value }).select).toEqual(value);
+  });
+
+  for (const [label, schema] of [
+    ['DataEngineVectorFindRequestSchema', DataEngineVectorFindRequestSchema],
+    ['DataEngineRequestSchema', DataEngineRequestSchema],
+  ] as const) {
+    it.each(REFUSED)(`${label}: vectorFind fields refuses %s, naming the path, as the bare \`select\` does`, (_name, value, tail) => {
+      const parsed = schema.safeParse({ method: 'vectorFind', object: 'doc', vector: [0.1, 0.2], fields: value });
+      expect(parsed.success).toBe(false);
+      const issue = parsed.success ? undefined : parsed.error.issues[0];
+      expect(issue?.path).toEqual(['fields', ...tail]);
+      expect(issue?.message).toBe(sibling('select', value)?.message);
+    });
+
+    it.each(KEPT)(`${label}: vectorFind fields keeps %s, unchanged`, (_name, value) => {
+      const parsed = schema.parse({ method: 'vectorFind', object: 'doc', vector: [0.1, 0.2], fields: value }) as { fields?: string[] };
+      expect(parsed.fields).toEqual(value);
+    });
+  }
 });

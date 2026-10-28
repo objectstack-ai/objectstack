@@ -96,8 +96,10 @@ export const BaseEngineOptionsSchema = lazySchema(() => z.object({
  * rule cannot drift apart.
  *
  * [#26954] The engine-side declarations of the same projection —
- * `EngineQueryOptionsSchema.fields` and `RpcQueryOptionsSchema.select` — take
- * the array arm from here too. It is declared ahead of both because
+ * `EngineQueryOptionsSchema.fields`, `RpcQueryOptionsSchema.select`, the
+ * legacy `DataEngineQueryOptionsSchema.select` and
+ * `DataEngineVectorFindRequestSchema.fields` — take the array arm from here
+ * too. It is declared ahead of both because
  * `RpcQueryOptionsSchema` extends `EngineQueryOptionsSchema` at module load,
  * which runs the lazy factory before any later `const` exists.
  */
@@ -212,8 +214,8 @@ export const EngineQueryOptionsSchema = lazySchema(() => BaseEngineOptionsSchema
 export const DataEngineQueryOptionsSchema = lazySchema(() => BaseEngineOptionsSchema.extend({
   /** @deprecated Use `where` (EngineQueryOptionsSchema) */
   filter: DataEngineFilterSchema.optional(),
-  /** @deprecated Use `fields` (EngineQueryOptionsSchema) */
-  select: z.array(z.string()).optional(),
+  /** @deprecated Use `fields` (EngineQueryOptionsSchema) — the same projection rule (#26954) */
+  select: transportProjectionArray(z.string()).optional(),
   /** @deprecated Use `orderBy` (EngineQueryOptionsSchema) */
   sort: DataEngineSortSchema.optional(),
   limit: z.number().int().min(1).optional(),
@@ -1519,8 +1521,8 @@ export const DataEngineVectorFindRequestSchema = lazySchema(() => z.object({
   vector: z.array(z.number()),
   /** Optional pre-filter (Metadata filtering) — standard QueryAST `where` */
   where: z.union([z.record(z.string(), z.unknown()), FilterConditionSchema]).optional(),
-  /** Fields to retrieve — standard QueryAST `fields` */
-  fields: z.array(z.string()).optional(),
+  /** Fields to retrieve — standard QueryAST `fields`; the same projection rule (#26954) */
+  fields: transportProjectionArray(z.string()).optional(),
   /** Number of results */
   limit: z.number().int().default(5).optional(),
   /** Minimum similarity score (0-1) or distance threshold */
