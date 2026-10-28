@@ -4407,6 +4407,10 @@ const fr = {
       detailLoading: 'Chargement des détails…',
       detailLoadFailed: 'Impossible de charger les détails de la modification :',
       detailNone: 'Aucune différence détectée — le brouillon correspond à la version publiée.',
+      // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
+      draftedByCopilot: 'Inclut des modifications rédigées par le copilote IA',
+      draftedByMcpClient: 'Inclut des modifications rédigées par le client MCP « {{client}} »',
+      draftedByMcp: 'Inclut des modifications rédigées par un client MCP',
       detailChangedKeys: 'Également modifié :',
       detailNewKeys: 'Inclut :',
       generatedGroup: 'Généré par la plateforme ({{n}})',

@@ -4411,6 +4411,10 @@ const es = {
       detailLoading: 'Cargando detalles…',
       detailLoadFailed: 'No se pudieron cargar los detalles del cambio:',
       detailNone: 'No se detectaron diferencias — el borrador coincide con la versión publicada.',
+      // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
+      draftedByCopilot: 'Incluye cambios redactados por el copiloto de IA',
+      draftedByMcpClient: 'Incluye cambios redactados por el cliente MCP «{{client}}»',
+      draftedByMcp: 'Incluye cambios redactados por un cliente MCP',
       detailChangedKeys: 'También cambió:',
       detailNewKeys: 'Incluye:',
       generatedGroup: 'Generado por la plataforma ({{n}})',

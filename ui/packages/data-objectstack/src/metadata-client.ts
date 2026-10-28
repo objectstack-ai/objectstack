@@ -452,11 +452,12 @@ export interface MetadataClientSaveOptions {
    * edit there is told apart from the AI copilot's (objectstack#24395).
    *
    * DERIVED from the spec's authoring-surface set (the one `draftChanges[].by`
-   * reports, `MetadataAuthoringSurface`), minus `'copilot'`: the HTTP doors
-   * refuse `?surface=copilot` `400` (only an in-process tool may state it), so
-   * this client cannot send it. Omit for any other caller.
+   * reports, `MetadataAuthoringSurface`), minus `'copilot'` and `'mcp'`: the
+   * HTTP doors refuse `?surface=copilot` and `?surface=mcp` `400` (only an
+   * in-process tool, or the MCP build door, may state them — objectstack#27176),
+   * so this client cannot send them. Omit for any other caller.
    */
-  surface?: Exclude<DraftChange['by'], 'copilot'>;
+  surface?: Exclude<DraftChange['by'], 'copilot' | 'mcp'>;
 }
 
 export interface MetadataGetOptions {
