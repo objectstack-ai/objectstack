@@ -38,14 +38,18 @@
 export const PLATFORM_TOOLS_BY_PACKAGE: Readonly<Record<string, readonly string[]>> = {
   /**
    * `@objectstack/service-ai` (cloud) — the `ask` data product's shared
-   * data/knowledge/visualization tools.
+   * data/knowledge/visualization tools, and the package-doc pair that reads the
+   * installed packages' `doc` items behind the `/meta/doc` audience gate
+   * (cloud#3335).
    */
   'service-ai': [
     'aggregate_data',
     'get_record',
     'query_data',
     'query_records',
+    'read_package_doc',
     'search_knowledge',
+    'search_package_docs',
     'visualize_data',
   ],
   /**
