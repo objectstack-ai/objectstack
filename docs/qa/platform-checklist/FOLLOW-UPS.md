@@ -760,3 +760,22 @@ what else is missing.
   texts need a measured run before they change.
 - **Explain access** was listed as uncovered by the Access card; Studio's Access pillar
   already drives it in `access-security.record-access-explain`, so no item was added.
+
+### 12b. Re-verification on takeover, 2026-10-28 (`main` `3230bdbf`)
+
+§12 was written against `43731031`. Before landing, the branch was merged with `main` and
+the 35 items were re-read at `3230bdbf`. Every card §12 names as broken is now **closed as
+fixed**: #26705 (PR #26839, PR #26927), #26707 (PR #26856), #26708 (PR #26920), #26711
+(PR #26851), #26712 (dbf7e04a, which was already an ancestor of `43731031`), #26718
+(PR #26864, PR #26930) and #26719 (PR #26842, PR #26906). Several defects that §12 cited
+only as "recorded by QA run #26715" have also been fixed since, through their own cards.
+For each affected item, the `fixtures.knownGaps` entry that said "FAILS TODAY" was removed
+or narrowed to what still fails. The clauses were left unchanged as the correct behaviour,
+and each item has a `history` row naming the fix. Three items still carry a
+half that fails today, with no open card:
+`flow-edge-type-authoring` (the Studio Automations pillar shows no draft verdict),
+`summary-field-authoring` (an unconfigured summary is saved, not held; sum and avg offer
+non-numeric fields) and `expression-editors` knownGaps[4] (the RLS editor reads 'Valid
+CEL' on a formula-field predicate). These three were read from source, not measured.
+`app-and-nav-properties` scores acceptance[5]'s `requiresObject` cell as not judged:
+neither Studio nor Setup edits that key, and no ruling says Studio must.
