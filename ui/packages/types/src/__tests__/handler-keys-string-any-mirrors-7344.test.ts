@@ -157,7 +157,7 @@ import { z } from 'zod';
 
 import { CalendarViewSchema as CalendarViewZod } from '../zod/complex.zod';
 import {
-  ActionSchema as ActionZod,
+  CRUDActionSchema as ActionZod,
   CRUDDialogSchema as CRUDDialogZod,
   DetailSchema as DetailZod,
 } from '../zod/crud.zod';
@@ -191,7 +191,7 @@ const objectOf = (mirror: z.ZodType, key: string): z.ZodObject<z.ZodRawShape> =>
 /** The six keys whose function value REACHES a renderer (channels above). */
 const RUNTIME_SLOT: readonly Site[] = [
   ['views.zod.ts', 'DetailViewSchema', 'onBack', DetailViewZod],
-  ['crud.zod.ts', 'ActionSchema', 'onClick', ActionZod],
+  ['crud.zod.ts', 'CRUDActionSchema', 'onClick', ActionZod],
   ['crud.zod.ts', 'DetailSchema', 'onBack', DetailZod],
   // objectui#7804 — the two keys `DetailView` reads off a `'detail'` document
   // that its arm never declared. They arrive by a DIFFERENT route from the four

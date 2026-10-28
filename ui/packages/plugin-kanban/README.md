@@ -151,7 +151,7 @@ const board: ObjectKanbanSchema = {
   groupBy: 'status',                  // optional, but the field that makes the lanes
   data: [],                           // one record source is required
   columns,                            // Array of columns
-  navigation: { mode: 'modal' },      // What a card click opens (see below)
+    navigation: { mode: 'drawer' },     // What a card click opens (see below)
   className: 'h-full',                // Tailwind classes
 };
 
@@ -199,11 +199,10 @@ interface KanbanCard {
 
 `navigation` is what a card click opens — the spec's `NavigationConfig` by
 reference, `ViewNavigationConfig` in `@object-ui/types`, the type
-`ObjectGridSchema.navigation` uses: `mode` (`page`, `drawer`, `modal`, `split`,
-`popover`, `new_window` or `none`) with `size`, `openNewTab` and
-`preventNavigation`. With the key absent a click opens the record in a drawer,
-and a click handler from a parent view outranks the whole key. `page` — and a
-block written without `mode`, which takes the spec's `page` default — opens the
+`ObjectGridSchema.navigation` uses: `mode` (`drawer`, `page`, `new_window`
+or `none`) with `size`, `openNewTab` and `preventNavigation`. With the key absent a click opens the record in a drawer,
+and a click handler from a parent view outranks the whole key. A block
+written without `mode` takes the spec's `drawer` default. `page` opens the
 record page through the record navigator the host publishes on
 `RelatedRecordActionsContext` (objectui#11293); the console publishes one on its
 custom pages, record pages and list views. Under a host that publishes none,
@@ -289,8 +288,8 @@ handler to supply, and the document key is refused by name.
 - 📦 [npm package](https://www.npmjs.com/package/@object-ui/plugin-kanban)
 - 📝 [Changelog](./CHANGELOG.md)
 - 🐛 [Report an issue](https://github.com/objectstack-ai/objectui/issues)
-- 🤝 [Contributing Guide](https://github.com/objectstack-ai/objectui/blob/main/CONTRIBUTING.md)
-- 🗺️ [Roadmap](https://github.com/objectstack-ai/objectui/blob/main/ROADMAP.md)
+- 🤝 [Contributing Guide](https://github.com/objectstack-ai/objectstack/blob/main/CONTRIBUTING.md)
+- 🗺️ [Roadmap](https://github.com/objectstack-ai/objectstack/blob/main/ROADMAP.md)
 
 ## License
 

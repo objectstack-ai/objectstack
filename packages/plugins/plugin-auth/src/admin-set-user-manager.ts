@@ -72,7 +72,12 @@
  *     here is an unbounded rollup there. The reference resolver in
  *     `packages/qa/dogfood` bounds itself at 20 levels, and this cap is the
  *     same number so a chain this endpoint accepts cannot exceed what that
- *     resolver walks.
+ *     resolver walks. The cap is on the WHOLE chain the link creates: the
+ *     links above the proposed manager, plus the edge being written, plus
+ *     the longest chain of subordinates already below the edited user
+ *     ({@link deepestSubordinateChain}). Counting only the upper half would
+ *     let a chain built bottom-up — each link attaching an existing subtree
+ *     under a short chain — grow past the cap one accepted link at a time.
  *  4. **Cross-organization** — refused when the two identities are PROVABLY
  *     in disjoint organizations. `sys_user` carries no `organization_id` (it
  *     is a global identity table), so `sys_member` rows are the only tenancy
@@ -126,7 +131,9 @@ import { readJsonRequestBody } from './request-json-body.js';
 
 /**
  * Hard cap on the reporting chain this endpoint will create, counted in links
- * from the edited user upward. See refusal 3 above for why a cap exists at
+ * along the longest chain that passes through the new edge: from the deepest
+ * existing subordinate of the edited user, up through the edited user and the
+ * proposed manager, to the top. See refusal 3 above for why a cap exists at
  * all and why this is the number.
  */
 export const MAX_MANAGER_CHAIN_DEPTH = 20;
@@ -357,6 +364,63 @@ async function walkChain(
 }
 
 /**
+ * How many ids one subordinate read names in its `manager_id IN (...)` list.
+ * A level wider than this is read in several queries, so no single statement
+ * carries an unbounded parameter list.
+ */
+const SUBORDINATE_READ_CHUNK = 500;
+
+/**
+ * The lower half of the depth cap: the longest chain of subordinates already
+ * hanging below `userId`, measured only as far as `budget` levels.
+ *
+ * The walk is breadth-first, one level per round: each level is read as
+ * `manager_id IN (the previous level's ids)` (chunked by
+ * {@link SUBORDINATE_READ_CHUNK}), never as one read per user. It is bounded
+ * two ways:
+ *
+ *  - **Depth.** It stops the moment a level exists past `budget`, so it issues
+ *    at most `budget + 1` level reads (at most {@link MAX_MANAGER_CHAIN_DEPTH}
+ *    + 1) however deep the subtree really is — the verdict needs only to know
+ *    the cap is crossed, not by how much.
+ *  - **Work.** A `seen` set, seeded with `userId`, admits each user at most
+ *    once, so a corrupt `manager_id` loop that runs back through `userId`
+ *    cannot make the walk revisit anyone; the rows read are bounded by the
+ *    size of the subtree.
+ */
+async function deepestSubordinateChain(
+  engine: SetUserManagerEngine,
+  userId: string,
+  budget: number,
+): Promise<{ kind: 'ok'; depth: number } | { kind: 'too_deep' }> {
+  const seen = new Set<string>([userId]);
+  let level: string[] = [userId];
+  let depth = 0;
+
+  while (level.length > 0) {
+    const below: string[] = [];
+    for (let i = 0; i < level.length; i += SUBORDINATE_READ_CHUNK) {
+      const rows = await engine.find('sys_user', {
+        where: { manager_id: { $in: level.slice(i, i + SUBORDINATE_READ_CHUNK) } },
+        fields: ['id'],
+        context: SYSTEM_READ_CTX,
+      });
+      for (const row of Array.isArray(rows) ? rows : []) {
+        const id = (row as UserRow | undefined)?.id ? String((row as UserRow).id) : '';
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        below.push(id);
+      }
+    }
+    if (below.length === 0) break;
+    depth += 1;
+    if (depth > budget) return { kind: 'too_deep' };
+    level = below;
+  }
+  return { kind: 'ok', depth };
+}
+
+/**
  * `POST /api/v1/auth/admin/set-user-manager` — the caller is ALREADY gated by
  * the mount's ADR-0068 platform-admin check, and `actor` is that judged admin.
  *
@@ -516,15 +580,21 @@ export async function applyUserManagerLink(
           + `top. Repair that loop first.`,
       );
     }
-    if (walk.kind === 'too_deep') {
+    // The upper half fits; the lower half must fit in what is left of the cap.
+    const below = walk.kind === 'too_deep'
+      ? walk
+      : await deepestSubordinateChain(engine, userId, MAX_MANAGER_CHAIN_DEPTH - walk.links);
+    if (below.kind === 'too_deep') {
       return deny(
         400,
         'VALUE_OUT_OF_RANGE',
         'max_depth_exceeded',
         `That link would make this user's reporting chain longer than the maximum of `
           + `${MAX_MANAGER_CHAIN_DEPTH} links. The hierarchy scopes that walk this chain are `
-          + `bounded, so a longer chain is not resolved in full. Shorten the chain above the `
-          + `proposed manager first.`,
+          + `bounded, so a longer chain is not resolved in full. The count runs from the deepest `
+          + `existing report below this user, through this user, to the top above the proposed `
+          + `manager. Shorten the chain above the proposed manager, or the chain of reports below `
+          + `this user, first.`,
       );
     }
   }

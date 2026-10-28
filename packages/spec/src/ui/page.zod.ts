@@ -483,9 +483,9 @@ const ELEMENT_API_NO_CREDENTIALS =
  * ## Rendered by the console, on a page element
  *
  * The console reads this binding on every page element, whatever its type
- * (objectui: packages/react/src/SchemaRenderer.tsx, which calls
+ * (ui/packages/react/src/SchemaRenderer.tsx, which calls
  * `useElementApiDataSource` for each node it renders; the read itself is
- * objectui: packages/react/src/element-data-source/useElementApiDataSource.ts).
+ * ui/packages/react/src/element-data-source/useElementApiDataSource.ts).
  * It parses the binding with this schema before anything else, so a binding
  * refused here is refused there, with this schema's own message, and nothing
  * is read.
@@ -498,7 +498,7 @@ const ELEMENT_API_NO_CREDENTIALS =
  * answer, a body that is not JSON, a `path` that selects nothing) draws an
  * error panel naming which. The element's `visibleWhen` is decided only once
  * the value is in. The console's generic `stat`, `usage-bar` and `checklist`
- * blocks (objectui: packages/app-shell/src/console/blocks/productBlocks.tsx)
+ * blocks (ui/packages/app-shell/src/console/blocks/productBlocks.tsx)
  * are built to take it as their `dataSource`. Measured at the console pin
  * (`.objectui-sha` `0707b4ae37`), which carries the renderer
  * (objectui#12197). The liveness record is the `liveness/page.json` `_note`:
@@ -751,7 +751,7 @@ export const PageComponentSchema = lazySchema(() => strictObject({
    * {@link ElementApiDataSourceSchema}): on an element whose `dataSource` is
    * `{ provider: 'api', … }`, `data` is the value the binding selects, in
    * that element's own `visibleWhen` and in every element nested inside it
-   * (objectui: packages/react/src/SchemaRenderer.tsx, which calls
+   * (ui/packages/react/src/SchemaRenderer.tsx, which calls
    * `useElementApiDataSource` for the node and publishes the value to its
    * subtree through `PredicateScopeProvider`). So `data.used < data.limit`
    * gates there. That `visibleWhen` is decided once the read has answered:
@@ -994,6 +994,24 @@ export const PAGE_TYPE_ROADMAP = [
 // renderer and was dropped from PageTypeSchema (framework#2265, enforce-or-remove);
 // objectui dropped all references in objectui#1949.
 
+// [#26677] `interfaceConfig.recordAction` retired member — the prescription it
+// answers with at parse (`enumWithRetiredValues`, `../shared/retired-key.ts`).
+// Same ruling as `navigation.mode` (`ui/view.zod.ts`, maintainer ruling
+// 2026-10-27, record-page-v2 epic ruling 1): a record opens in the drawer by
+// default, which expands to the full page, or as the full page where the
+// author says `page`; `modal` is retired. The
+// `navigation-mode-overlay-values-removed` conversion (ADR-0087 D2) strips it
+// from existing sources and stored rows.
+const RECORD_ACTION_RETIRED = {
+  modal:
+    "`interfaceConfig.recordAction: 'modal'` was removed in @objectstack/spec 18.3.0 (ADR-0087 D2) — a "
+    + 'record opens one way per object: in the drawer, which expands to the full page, or as the full '
+    + 'page where the page declares `page`, so a centred dialog was a third surface for the same record. '
+    + 'Delete the value — `drawer` is the default; write `page` only where the record should open as a '
+    + 'full page, and `none` where rows are not clickable. '
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
+} as const;
+
 /**
  * Interface Page Configuration Schema (Airtable Interface parity)
  * Page-level declarative configuration for Airtable-style interface pages.
@@ -1063,11 +1081,13 @@ export const InterfacePageConfigSchema = lazySchema(() => strictObject({
    * Buttons ARE object actions (not free text): correct-by-construction. */
   buttons: z.array(z.string()).optional().describe("Toolbar buttons — names of the source object's actions to surface in the page toolbar"),
 
-  /** How clicking a record opens its detail: 'drawer' (right-side peek panel,
-   * default), 'page' (full-page navigate to the record route), 'modal', or
-   * 'none' (rows not clickable). */
-  recordAction: z.enum(['drawer', 'page', 'modal', 'none']).optional()
-    .describe("How clicking a record opens its detail (drawer | page | modal | none). Default: drawer"),
+  /** How clicking a record opens its detail: 'drawer' (right-side panel that
+   * expands to the full page, default), 'page' (full-page navigate to the
+   * record route), or 'none' (rows not clickable). `modal` was retired
+   * (#26677) and is refused at parse with {@link RECORD_ACTION_RETIRED}'s
+   * prescription. */
+  recordAction: enumWithRetiredValues(['drawer', 'page', 'none'], RECORD_ACTION_RETIRED).optional()
+    .describe("How clicking a record opens its detail (drawer | page | none). Default: drawer"),
 
   /** Record count */
   showRecordCount: z.boolean().optional().describe('Show record count at page bottom'),

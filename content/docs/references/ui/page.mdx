@@ -97,7 +97,7 @@ Interface-level page configuration (Airtable parity)
 | **userActions** | `{ sort?: boolean; search?: boolean; filter?: boolean; refresh?: boolean; … }` | optional | User action toggles |
 | **addRecord** | `{ enabled: boolean; position?: Enum<'top' \| 'bottom' \| 'both'> }` | optional | Add record entry point configuration |
 | **buttons** | `string[]` | optional | Toolbar buttons — names of the source object's actions to surface in the page toolbar |
-| **recordAction** | `Enum<'drawer' \| 'page' \| 'modal' \| 'none'>` | optional | How clicking a record opens its detail (drawer \| page \| modal \| none). Default: drawer |
+| **recordAction** | `Enum<'drawer' \| 'page' \| 'none'>` | optional | How clicking a record opens its detail (drawer \| page \| none). Default: drawer |
 | **showRecordCount** | `boolean` | optional | Show record count at page bottom |
 | **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string; link?: object }` | optional | What the page draws in place of rows when its list has none to show: `{ title, message, icon, link }`, the list view's own empty-state shape. The console's list page prefers it, whole, over its source view's empty state; with none declared, the page draws the source view's, if any. |
 | **allowPrinting** | `boolean` | optional | Allow users to print the page |
@@ -268,7 +268,7 @@ View filter rule
 | **userActions** | `{ sort?: boolean; search?: boolean; filter?: boolean; refresh?: boolean; … }` | optional | User action toggles |
 | **addRecord** | `{ enabled: boolean; position?: Enum<'top' \| 'bottom' \| 'both'> }` | optional | Add record entry point configuration |
 | **buttons** | `string[]` | optional | Toolbar buttons — names of the source object's actions to surface in the page toolbar |
-| **recordAction** | `Enum<'drawer' \| 'page' \| 'modal' \| 'none'>` | optional | How clicking a record opens its detail (drawer \| page \| modal \| none). Default: drawer |
+| **recordAction** | `Enum<'drawer' \| 'page' \| 'none'>` | optional | How clicking a record opens its detail (drawer \| page \| none). Default: drawer |
 | **showRecordCount** | `boolean` | optional | Show record count at page bottom |
 | **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string; link?: object }` | optional | What the page draws in place of rows when its list has none to show: `{ title, message, icon, link }`, the list view's own empty-state shape. The console's list page prefers it, whole, over its source view's empty state; with none declared, the page draws the source view's, if any. |
 | **allowPrinting** | `boolean` | optional | Allow users to print the page |

@@ -27,7 +27,7 @@
       "TS2339: Property 'flow_run_id' does not exist on type '…'.": 1,
       "TS2339: Property 'id' does not exist on type '…'.": 182,
       "TS2339: Property 'lock_record' does not exist on type '…'.": 3,
-      "TS2339: Property 'pending_approvers' does not exist on type '…'.": 40,
+      "TS2339: Property 'pending_approvers' does not exist on type '…'.": 39,
       "TS2339: Property 'process_label' does not exist on type '…'.": 2,
       "TS2339: Property 'process_name' does not exist on type '…'.": 1,
       "TS2339: Property 'sla_due_at' does not exist on type '…'.": 2,

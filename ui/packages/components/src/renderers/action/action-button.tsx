@@ -31,6 +31,7 @@ import { resolveIcon } from './resolve-icon';
 import { hasDeclaredVisibilityGate } from './visibility-gate';
 import { useAutoTriggerOnce } from './auto-trigger';
 import { readStaticParamValues } from './static-params';
+import { toRunnerVariant } from './runner-variant';
 import { DisabledReasonTrigger, describedByWithReason, useDisabledReason } from './disabled-reason';
 import type { RendererHostProps } from '../../lib/renderer-host-props';
 
@@ -197,6 +198,7 @@ const ActionButtonRenderer = forwardRef<
     // leg disable the button without one. See `./disabled-reason`.
     const disabledReason = useDisabledReason(
       hasDeclaredVisibilityGate(schema.disabled) && isDisabled,
+      schema.disabledReason,
     );
 
     // Resolve icon
@@ -324,6 +326,10 @@ const ActionButtonRenderer = forwardRef<
           // objectui#12941.
           operation: schema.operation,
           confirmText: schema.confirmText,
+          // The block's `variant`, in the runner's dialect: a `destructive`
+          // button confirms through the destructive button, as a `danger`
+          // action does (objectstack#26665). See `./runner-variant`.
+          variant: toRunnerVariant(schema.variant),
           successMessage: schema.successMessage,
           // Success copy per handler outcome (spec 17.6.0, objectui#11344): the
           // runner's success toast reads the entry named by the answer's

@@ -36,6 +36,7 @@ import { Loader2, ChevronDown } from 'lucide-react';
 import { resolveIcon } from './resolve-icon';
 import { hasDeclaredVisibilityGate } from './visibility-gate';
 import { readActionEntryParamValues } from './static-params';
+import { toRunnerVariant } from './runner-variant';
 import {
   DisabledReasonMenuLabel,
   DisabledReasonTrigger,
@@ -130,6 +131,7 @@ const InlineActionButton: React.FC<{
   // member's `loading` disable it without one. See `./disabled-reason`.
   const disabledReason = useDisabledReason(
     hasDeclaredVisibilityGate(action.disabled) && isDisabledPred,
+    action.disabledReason,
   );
 
   const Icon = resolveIcon(action.icon);
@@ -227,6 +229,7 @@ export const DropdownActionItem: React.FC<{
   // item's description. See `./disabled-reason`.
   const disabledReason = useDisabledReason(
     hasDeclaredVisibilityGate(action.disabled) && isDisabledPred,
+    action.disabledReason,
   );
   // Same declared-gate rule as `InlineActionButton` above — one action cannot be
   // hidden in one display mode and shown in the other (objectui#3812).
@@ -371,6 +374,9 @@ const ActionGroupRenderer = forwardRef<HTMLDivElement, { schema: ActionGroupSche
           // (objectui#13022).
           operation: action.operation,
           confirmText: action.confirmText,
+          // See action-button.tsx — the member's own `variant` in the runner's
+          // dialect (objectstack#26665).
+          variant: toRunnerVariant(action.variant),
           successMessage: action.successMessage,
           // See action-button.tsx — success copy per handler outcome, the
           // toast's first rung (objectui#11344).

@@ -188,12 +188,12 @@ describe('#7606 §1 — GET /data/:object/:id refuses what it would have dropped
         expect(getData).not.toHaveBeenCalled();
     });
 
-    it('the refusal stays a 400 — the catch that rewrites 400→404 must not swallow it', async () => {
-        // This route's catch turns every 400 into a 404 (a bad id is a miss,
-        // not a malformed request). The gate RESPONDS rather than throwing
-        // precisely so a refusal cannot reach the caller as "no such record" —
-        // the silent-drop defect wearing a different status. If someone later
-        // converts the gate to `throw`, this is the test that goes red.
+    it('the refusal is a 400 — never "no such record"', async () => {
+        // This route's catch used to turn every 400 into a 404, and the gate
+        // RESPONDED rather than throwing so a refusal could not reach the
+        // caller as "no such record". Since #26816 the catch answers the
+        // mapped status; the pin stays, so a refusal reading as a miss — by
+        // either road — is still the test that goes red.
         const { readRecord } = boot();
         const answer = await readRecord({ nope: '1' }, { object: 'task', id: '1' });
         expect(answer.status).toBe(400);

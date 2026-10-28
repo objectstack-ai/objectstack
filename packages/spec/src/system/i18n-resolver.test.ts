@@ -3324,13 +3324,14 @@ describe('translateObject localises every platform-injected column', () => {
     return Object.fromEntries(Object.keys(injected).map((name) => [name, fields[name].label]));
   };
 
-  it('starts from all seven injected columns carrying their shipped English defaults', () => {
+  it('starts from all eight injected columns carrying their shipped English defaults', () => {
     expect(Object.keys(injected).sort()).toEqual([
       'created_at',
       'created_by',
       'organization_id',
       'owner_id',
       'owning_business_unit_id',
+      'queue',
       'updated_at',
       'updated_by',
     ]);
@@ -3343,6 +3344,7 @@ describe('translateObject localises every platform-injected column', () => {
       updated_by: 'Last Modified By',
       owner_id: 'Owner',
       owning_business_unit_id: 'Owning Business Unit',
+      queue: 'Queue',
     });
   });
 
@@ -3355,6 +3357,7 @@ describe('translateObject localises every platform-injected column', () => {
       updated_by: '更新人',
       owner_id: '所有者',
       owning_business_unit_id: '所属业务单元',
+      queue: '队列',
     });
   });
 
@@ -3367,6 +3370,7 @@ describe('translateObject localises every platform-injected column', () => {
       updated_by: '更新者',
       owner_id: '所有者',
       owning_business_unit_id: '所属ビジネスユニット',
+      queue: 'キュー',
     });
   });
 
@@ -3379,6 +3383,7 @@ describe('translateObject localises every platform-injected column', () => {
       updated_by: 'Actualizado por',
       owner_id: 'Propietario',
       owning_business_unit_id: 'Unidad de negocio propietaria',
+      queue: 'Cola',
     });
   });
 

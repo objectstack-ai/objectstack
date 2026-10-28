@@ -17,7 +17,8 @@
  *    returns it to the flow's Configuration. A row too narrow for the classic
  *    aside opens no drawer (objectui#11795's fold is the classic layout's).
  *  - While 属性 shows, the copilot strip stays at the slot's foot.
- *  - A hidden slot stays hidden on a selection, as on Interfaces.
+ *  - A hidden slot unfolds on a new selection (objectstack#26737); hidden again
+ *    over the same selection, it stays hidden.
  *  - CONTROL: the Access pillar claims nothing — the slot shows the copilot
  *    alone; the Interfaces pillar's own pins live in `rightSlot-12725`.
  *
@@ -383,19 +384,39 @@ describe('Automations: the Configuration is in the right slot (objectui#12725)',
     }
   });
 
-  it('a hidden slot stays hidden on a selection, as on Interfaces', async () => {
-    window.sessionStorage.setItem(DOCK_STUDIO_EXPANDED_STORAGE_KEY, '0');
+  // objectstack#26737 — at a desktop width (no `md` match), a node selected
+  // while the panel is hidden unfolds it on that node's configuration.
+  it('a hidden slot unfolds on a selection, on the selected node’s configuration', async () => {
     await openFlow();
+    fireEvent.click(screen.getByTestId('studio-slot-toggle'));
     expect(slot()).not.toBeVisible();
+    expect(window.sessionStorage.getItem(DOCK_STUDIO_EXPANDED_STORAGE_KEY)).toBe('0');
 
+    fireEvent.click(screen.getByTestId('pick-node'));
+    await waitFor(() => expect(slot()).toBeVisible());
+    expect(slot()).toHaveAttribute('data-mode', 'props');
+    expect(within(slotProps()).getByLabelText('Node start')).toBeVisible();
+    expect(screen.getByTestId('studio-slot-toggle')).toHaveAttribute('aria-pressed', 'true');
+    expect(window.sessionStorage.getItem(DOCK_STUDIO_EXPANDED_STORAGE_KEY)).toBe('1');
+    expect(screen.queryByTestId('auto-config-drawer')).toBeNull();
+  });
+
+  it('hidden again over the same selection, it stays hidden until another node is selected', async () => {
+    await openFlow();
+    fireEvent.click(screen.getByTestId('pick-node'));
+    await waitFor(() => expect(within(slotProps()).getByTestId('stub-flow-inspector')).toBeVisible());
+
+    fireEvent.click(screen.getByTestId('studio-slot-toggle'));
+    await act(async () => {});
+    expect(slot()).not.toBeVisible();
+    // The same node again is no new selection.
     fireEvent.click(screen.getByTestId('pick-node'));
     await act(async () => {});
     expect(slot()).not.toBeVisible();
-    expect(screen.queryByTestId('auto-config-drawer')).toBeNull();
-    // Shown again, it opens on the selection's properties.
-    fireEvent.click(screen.getByTestId('studio-slot-toggle'));
-    expect(slot()).toHaveAttribute('data-mode', 'props');
-    expect(within(slotProps()).getByTestId('stub-flow-inspector')).toBeVisible();
+
+    fireEvent.click(screen.getByTestId('pick-other-node'));
+    await waitFor(() => expect(slot()).toBeVisible());
+    expect(within(slotProps()).getByLabelText('Node end')).toBeVisible();
   });
 });
 

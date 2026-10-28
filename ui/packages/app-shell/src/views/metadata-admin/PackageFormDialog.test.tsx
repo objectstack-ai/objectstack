@@ -5,6 +5,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { PackageFormDialog } from './PackageFormDialog';
 import { t } from './i18n';
+// The designer rows this suite reads in zh live in `@object-ui/i18n`'s `studio`
+// namespace, whose `zh` catalogue is fetched on demand (objectstack#25922).
+// Resident before any case, so the zh rows below read synchronously.
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+await loadStudioCatalogue('zh');
 
 // Which console language the dialog renders in. Only `useMetadataLocale` is
 // replaced — the rest of `./i18n` (the `t` resolver and both string tables) is

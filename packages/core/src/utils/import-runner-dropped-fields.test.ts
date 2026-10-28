@@ -71,6 +71,10 @@ const withDrops = (row: Record<string, unknown>) => {
   return d.length > 0 ? { droppedFields: d } : {};
 };
 
+/** The submitted rows of a `validateData` call: one verdict is owed per row (#26684 previews a batch). */
+const rowsOf = (args: ValidateArgs) =>
+  (Array.isArray(args.data) ? args.data : [args.data]) as Array<Record<string, unknown>>;
+
 /** The row's key set — a clean row must not grow an empty `droppedFields`. */
 const keysOf = (r: ImportRowResult | undefined) => Object.keys(r ?? {}).sort();
 
@@ -85,7 +89,7 @@ describe('[#20701] the dry run copies validateData\'s per-row drops onto the row
   it('a create-resolved row carries the verdict\'s droppedFields verbatim; a clean row carries no key', async () => {
     const validateData = vi.fn(async (args: ValidateArgs) => ({
       object: OBJECT, mode: args.mode ?? 'insert', valid: true,
-      results: [{ valid: true, errors: [], warnings: [], ...withDrops(args.data as Record<string, unknown>) }],
+      results: rowsOf(args).map((row) => ({ valid: true, errors: [], warnings: [], ...withDrops(row) })),
       posture: { valueShapeStrict: false, mediaValueShapeStrict: false },
     }));
     const p: ImportProtocolLike = { findData: vi.fn(async () => []), createData: vi.fn(), updateData: vi.fn(), validateData };
@@ -116,12 +120,12 @@ describe('[#20701] the dry run copies validateData\'s per-row drops onto the row
   it('a row the verdict refuses carries no droppedFields, and an admitted warning rides beside the drops', async () => {
     const warning = { field: 'name', code: 'invalid_format', message: 'admitted' };
     const validateData = vi.fn(async (args: ValidateArgs) => {
-      const refused = (args.data as Record<string, unknown>).name === 'bad';
+      const results = rowsOf(args).map((row) => (row.name === 'bad'
+        ? { valid: false, errors: [{ field: 'name', code: 'required', message: 'name is required' }], warnings: [], droppedFields: [COMPUTED] }
+        : { valid: true, errors: [], warnings: [warning], droppedFields: [COMPUTED] }));
       return {
-        object: OBJECT, mode: 'insert' as const, valid: !refused,
-        results: [refused
-          ? { valid: false, errors: [{ field: 'name', code: 'required', message: 'name is required' }], warnings: [], droppedFields: [COMPUTED] }
-          : { valid: true, errors: [], warnings: [warning], droppedFields: [COMPUTED] }],
+        object: OBJECT, mode: 'insert' as const, valid: results.every((r) => r.valid),
+        results,
         posture: { valueShapeStrict: false, mediaValueShapeStrict: false },
       };
     });

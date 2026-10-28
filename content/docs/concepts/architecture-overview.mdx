@@ -1,0 +1,115 @@
+---
+title: Architecture overview — principles and runtime shape
+navTitle: Architecture Overview
+description: "What ObjectStack is built as: a metadata-native backend that humans and AI agents can both operate safely — its principles, runtime shape and non-goals."
+---
+
+ObjectStack is the metadata-native backend for business software that humans and
+AI agents can both operate safely. The platform makes the business system
+explicit: data models, views, flows, permissions, actions, AI tools, and runtime
+requirements are typed metadata instead of scattered ad-hoc code. In the
+enterprise-AI vocabulary, the ontology is the software.
+
+The goal is a small, inspectable, governed application surface:
+
+```text
+Zod metadata -> compiled environment artifact -> ObjectStack runtime -> REST / UI / MCP / AI tools
+```
+
+This page is the architecture. Where the project is headed and what comes first
+— its goals and priority ladder — is the
+[North Star](https://github.com/objectstack-ai/objectstack/blob/main/docs/NORTH-STAR.md).
+
+---
+
+## Principles
+
+1. **Zod first.** Zod schemas are the source of truth. Types and JSON Schemas
+   are derived from them.
+2. **Metadata is the app contract.** Objects, fields, views, flows, actions,
+   agents, permissions, datasets, and translations are structured metadata.
+3. **Runtime identity is environment identity.** Use `environment`, not
+   `project`, for deployment/runtime scoping: `OS_ENVIRONMENT_ID`,
+   `X-Environment-Id`, `/api/v1/environments/:environmentId`, and
+   `environment_id`.
+4. **Deployment config is not artifact content.** Database URLs, secrets,
+   runtime credentials, and hostnames are injected by the host or Cloud control
+   plane. They do not belong in `objectstack.json`.
+5. **AI exposure is governed.** Actions become AI tools only through explicit
+   `ai: { exposed: true, description: ... }` metadata.
+6. **Automation is Flow-first.** Event automation, scheduled work, approvals,
+   waits, screens, and notifications are modeled as Flow nodes. State machines
+   model strict lifecycles.
+7. **The console is a consumer, not the source of truth.** The framework serves
+   the published ObjectUI console bundle; source UI work happens in sibling repo
+   `../objectui`.
+
+---
+
+## Runtime Shape
+
+This framework repo owns:
+
+- protocol schemas in `packages/spec`
+- kernel/runtime/bootstrap in `packages/core` and `packages/runtime`
+- REST, ObjectQL, metadata, services, plugins, adapters, CLI, examples, docs
+- bundled console integration in `packages/console`
+- docs site in `apps/docs` and account app in `packages/apps/account`
+
+Cloud control-plane distribution, public SaaS operations, and ObjectUI source
+development live outside this repo.
+
+---
+
+## Environment Artifact
+
+`os compile` produces the local runtime bundle (`dist/objectstack.json`,
+validated against `ObjectStackDefinitionSchema`). When published to Cloud it is
+wrapped in the immutable environment artifact envelope defined by
+`EnvironmentArtifactSchema` in
+`packages/spec/src/system/environment-artifact.zod.ts` (the single
+declaration, published on `@objectstack/spec/system`).
+
+The artifact contains:
+
+- `schemaVersion`
+- `environmentId`
+- `commitId`
+- `checksum` — a SHA-256 hex digest (string) of the canonical `metadata`
+  serialization
+- `metadata` — the compiled `ObjectStackDefinition` itself
+- optional `builtAt` / `builtWith` provenance
+- optional `grantedPermissions` — the install-time GRANTED permission set per
+  plugin, keyed by the plugin manifest `id`; consent state the control plane
+  re-emits on each assembly (absent = no consent record, `{}` = consented to
+  nothing), sitting beside `metadata` and outside the `checksum` digest
+
+The artifact is enough to describe what the runtime should load. It is not
+enough to deploy by itself; the host still supplies deployment config.
+
+---
+
+## Request Resolution
+
+Environment-aware hosts resolve data-plane requests in this order:
+
+1. `/api/v1/environments/:environmentId/...`
+2. hostname through the environment registry
+3. `X-Environment-Id`
+4. `session.activeEnvironmentId`
+5. configured default environment
+6. one unambiguous environment
+
+Cloud control-plane endpoints such as `/api/v1/cloud/environments/:id` manage
+environments and are not themselves scoped data-plane requests.
+
+---
+
+## Non-Goals
+
+- Do not reintroduce `namespace` or `tableName` as object identity fields.
+- Do not put business logic in `packages/spec`.
+- Do not hand-edit `content/docs/references/`.
+- Do not expose every UI action to AI by default.
+- Do not treat Cloud control-plane deployment as part of this framework repo's
+  local dev server.

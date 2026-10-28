@@ -21,10 +21,11 @@
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { lockfilePath } from '../workspace-root.mjs';
 
-import { repoRoot } from './workflow-checks';
+import { jobBlock, rootCi, rootWorkflow, rootWorkflowFiles, uiRun, withoutComments } from './helpers/root-ci';
 import { NOT_A_GATE, OPTIONAL_CONTEXTS, REQUIRED_CONTEXTS } from '../dependabot-merge-gate.mjs';
 import {
   compareLockfiles,
@@ -33,11 +34,12 @@ import {
   readSnapshotKeys,
 } from '../check-lockfile-integrity.mjs';
 
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const GATE = path.join(repoRoot, 'scripts/check-lockfile-integrity.mjs');
 const LOCKFILE = lockfilePath();
 const realLock = fs.readFileSync(LOCKFILE, 'utf8');
 
-/** The check-run name the workflow's job produces. */
+/** The check-run name objectui's own job produced, the name the Dependabot merge gate classifies. */
 const CHECK_NAME = 'Lockfile Integrity Check';
 
 describe('the gate runs its own self-test', () => {
@@ -190,15 +192,61 @@ describe('cause 2 — a declared dependency forks with no version moving (object
   });
 });
 
-describe('the gate is classified the way the dispatch reserved', () => {
-  // `exists and runs the gate` and `checks out deep enough to have a merge
-  // base` retired with objectstack#25712. They read objectui's
-  // `lockfile-integrity.yml`, which runs nowhere under the monorepo: GitHub
-  // runs the root `.github/workflows/` alone. That workflow is row 19 of the
-  // objectstack#25697 workflow roster, "kept, follow-up port", re-aimed at the
-  // one root `pnpm-lock.yaml`; the port brings both pins back against the root
-  // job that runs the gate.
+describe('the gate is wired into the root CI (objectstack#26717)', () => {
+  // objectui ran it in its own `lockfile-integrity.yml`, which runs nowhere
+  // under the monorepo: GitHub runs the root `.github/workflows/` alone. Row 19
+  // of the objectstack#25697 workflow roster ported it as one step of root
+  // `ci.yml`'s `type-check-ui` job, re-aimed at the one root `pnpm-lock.yaml`.
+  // The two pins objectui kept on its workflow (`exists and runs the gate`,
+  // `checks out deep enough to have a merge base`) read that job now.
+  const JOB = 'type-check-ui';
+  const STEP_NAME = 'check:lockfile-integrity — ';
+  const COMMAND = `${uiRun('check:lockfile-integrity')} --base-ref "origin/\${BASE_REF}"`;
 
+  /** The step's own lines, from its `- name:` to the next step. Throws when it is gone. */
+  function step(): string {
+    const block = withoutComments(jobBlock(rootCi(), JOB));
+    const start = block.indexOf(`- name: ${STEP_NAME}`);
+    if (start === -1) throw new Error(`ci.yml job ${JOB} has no step named ${STEP_NAME}…`);
+    const next = block.indexOf('\n      - ', start + 1);
+    return next === -1 ? block.slice(start) : block.slice(start, next);
+  }
+
+  it('exists and runs the gate against the pull request base', () => {
+    expect(step()).toContain(`run: ${COMMAND}`);
+    expect(step()).toContain('BASE_REF: ${{ github.base_ref }}');
+    expect(step()).toContain("if: github.event_name == 'pull_request'");
+  });
+
+  it('checks out deep enough to have a merge base', () => {
+    // A shallow clone has no merge base, and the script exits 2 rather than
+    // guess one: a reading that never measured the change.
+    const block = withoutComments(jobBlock(rootCi(), JOB));
+    const checkout = block.indexOf('uses: actions/checkout@');
+    expect(checkout).toBeGreaterThan(-1);
+    expect(block.indexOf('fetch-depth: 0', checkout)).toBeGreaterThan(checkout);
+    expect(block.indexOf('fetch-depth: 0', checkout)).toBeLessThan(block.indexOf(`- name: ${STEP_NAME}`));
+  });
+
+  it('⛔ stays an alarm in a required job: continue-on-error, before the install', () => {
+    // The step's finding must not fail Type Check UI; enrolling the gate is
+    // the maintainer's decision (the classification below). Before the
+    // install, because the script needs nothing installed.
+    expect(step()).toContain('continue-on-error: true');
+    const block = withoutComments(jobBlock(rootCi(), JOB));
+    expect(block.indexOf(`- name: ${STEP_NAME}`)).toBeLessThan(block.indexOf('run: pnpm install --frozen-lockfile'));
+  });
+
+  it('runs in that one place: no other root workflow carries it', () => {
+    const carriers = rootWorkflowFiles().filter((file) =>
+      withoutComments(rootWorkflow(file)).includes('check:lockfile-integrity'),
+    );
+    expect(carriers).toEqual(['ci.yml']);
+    expect(withoutComments(rootCi()).split('check:lockfile-integrity').length - 1).toBe(2); // the name and the run
+  });
+});
+
+describe('the gate is classified the way the dispatch reserved', () => {
   it('⛔ is classified as NOT a blocking context (the maintainer floor)', () => {
     expect(Object.keys(NOT_A_GATE)).toContain(CHECK_NAME);
     expect(REQUIRED_CONTEXTS).not.toContain(CHECK_NAME);

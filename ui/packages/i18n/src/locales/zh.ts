@@ -761,6 +761,9 @@ const zh = {
     addRecord: '添加记录',
     // objectui#12703 — the compact list's footer link to the object's list or the block's view.
     viewAll: '查看全部',
+    viewAllCount: '查看全部 {{count}} 条',
+    viewAllCount_one: '查看全部 {{count}} 条',
+    viewAllCount_other: '查看全部 {{count}} 条',
     tabs: '标签页',
     allRecords: '全部记录',
     userFilters: {
@@ -2988,6 +2991,7 @@ const zh = {
     build: {
       title: '构建应用',
       noCapability: '本系统不提供构建应用功能 — 它需要「管理元数据」权限,而你的账号没有该权限。',
+      inStudio: '在 Studio 中新建',
     },
     template: {
       title: '从模板开始',
@@ -3144,6 +3148,8 @@ const zh = {
     recordAccessDeniedDescription: '你没有查看此类记录的权限。如需访问，请联系管理员。',
     recordLoadFailed: '无法加载此记录',
     recordLoadFailedDescription: '加载时出错。请检查网络连接后重试。',
+    recordAccessEnded: '你的审批决定已记录',
+    recordAccessEndedDescription: '你的审批环节已结束，对此记录的访问权限也随之结束。',
     pageNotFound: '未找到页面',
     pageNotFoundDescription: '未找到页面 “{{name}}”，可能已被删除或重命名。',
     dashboardNotFound: '未找到仪表板',
@@ -3890,8 +3896,8 @@ const zh = {
       nameField: '名称：{{field}}',
     },
     build: {
-      building: '正在构建{{app}}…',
-      built: '已构建{{app}}',
+      building: '正在构建 · {{app}}…',
+      built: '已构建 · {{app}}',
       builtAndLive: '已搭建并上线 · {{app}}',
       appFallback: '你的应用',
       addingSampleData: '正在添加示例数据',

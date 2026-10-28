@@ -1843,6 +1843,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Disabled",
         helpText: "CEL expression: disable when condition is true"
       },
+      disabledReason: {
+        label: "Disabled Reason",
+        helpText: "Why the action is greyed, shown on hover and read by screen readers while Disabled is true (e.g. \"An approved legal review is required first.\"). Display only: the server still refuses the call on its own rules. Leave empty to show \"Not available for this record\"."
+      },
       requiresFeature: {
         label: "Requires Feature",
         helpText: "Public auth feature flag gating this action. It is lowered into the `visible` predicate at parse time and stripped from the output, so no downstream consumer ever sees the key."
@@ -1895,6 +1899,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       filter_and_chart: {
         label: "Filter & chart",
         description: "Render-time scope filter and chart presentation."
+      },
+      period_and_export: {
+        label: "Period & export",
+        description: "The default period of the report and the formats its table can be downloaded in."
       }
     },
     fields: {
@@ -1983,6 +1991,14 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       chart: {
         label: "Chart",
         helpText: "Chart config (type, legend, colors)"
+      },
+      dateRange: {
+        label: "Date Range",
+        helpText: "Default period and custom-range switch. The dimension must be a date dimension of the dataset; leave it empty when the dataset has exactly one."
+      },
+      exportOptions: {
+        label: "Export Options",
+        helpText: "Download formats (csv, xlsx) and file name. Who may download is the export permission on the dataset object."
       }
     }
   },
@@ -2428,6 +2444,14 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   sharing_rule: {
     label: "Sharing Rule",
     description: "A rule a package declares to share records; organizations author their own in Setup"
+  },
+  queue: {
+    label: "Queue",
+    description: "A named set of people records can sit in until one of them takes the record; organizations staff their own in Setup"
+  },
+  assignment_rule: {
+    label: "Assignment Rule",
+    description: "A rule a package declares to route new records to a queue or a person"
   },
   agent: {
     label: "AI Agent",

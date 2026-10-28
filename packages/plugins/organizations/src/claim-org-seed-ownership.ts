@@ -108,6 +108,22 @@
  * the chunked predicate write. A row whose own write is refused stays
  * owner-less and is reported; the object's other rows are still claimed. The
  * twin made the same change.
+ *
+ * ## [#26825] …written a bounded batch at a time, yielding between batches
+ *
+ * On a synchronous driver (better-sqlite3, the wasm fallback) every `await` of
+ * a claim write resolves as a microtask, so one chunk's write ran its whole
+ * per-row fan-out (code hooks, an audit row per row) as one unbroken chain, and
+ * no request was read until it ended; the write is one engine transaction, and
+ * SQLite's pool holds one connection, so no yield can land inside it. Its
+ * single-tenant twin was measured stalling the event loop 2.7 s on a 1 500-row
+ * seed. So a chunk is written {@link CLAIM_HANDOVER_ROWS} ids at a time, with
+ * one macrotask yielded after every write ({@link yieldToEventLoop}), and the
+ * by-row path yields after every {@link CLAIM_HANDOVER_ROWS} rows. Which rows
+ * are claimed is unchanged, and so is a chunk every batch of which is refused
+ * (one warning, the chunk owner-less). The unit of failure is now the batch:
+ * when only some batches are refused, the others stay claimed and one warning
+ * names the rows left owner-less. The twin made the same change.
  */
 
 import { analyzeRelationshipTraversals } from '@objectstack/formula';
@@ -163,6 +179,31 @@ const CLAIM_WRITE_CTX = { isSystem: true, skipAutomations: true };
 const CLAIM_CHUNK_IDS = Math.floor(MAX_BULK_PER_ROW_HOOK_ROWS / 2);
 
 /**
+ * [#26825] Seeded rows one claim write re-owns, and rows the by-row path
+ * writes between two yields: the bound on how long a request waits behind the
+ * claim on a synchronous driver. The twin's value (about 1.8 ms of per-row hook
+ * work per row was measured there, so a batch is about 90 ms).
+ */
+const CLAIM_HANDOVER_ROWS = 50;
+
+/**
+ * [#26825] Yield one macrotask so the host's event loop can read pending I/O
+ * between two claim writes.
+ *
+ * A module-private copy, by ruling (#26825): the same four lines live in the
+ * single-tenant twin `claimSeedOwnership` (`@objectstack/plugin-security`),
+ * in `@objectstack/metadata-protocol` (`seed-files.ts`) and in
+ * `@objectstack/core` (`import-runner.ts`). None is exported, and exporting one
+ * would widen a published surface for a `setImmediate` promise.
+ */
+function yieldToEventLoop(): Promise<void> {
+  return new Promise<void>((resolve) => {
+    if (typeof setImmediate === 'function') setImmediate(resolve);
+    else setTimeout(resolve, 0);
+  });
+}
+
+/**
  * The affected-row count a predicate write resolved, or `undefined` when the
  * result is not one.
  *
@@ -177,13 +218,18 @@ function affectedRowCount(value: unknown): number | undefined {
 }
 
 /**
- * Re-own the rows one chunk's predicate matches, in one write. Returns the
- * affected-row count it resolved.
+ * Re-own the rows one chunk's predicate matches. Returns the sum of the
+ * affected-row counts its writes resolved.
  *
- * Never throws. Best-effort per chunk, as the per-id loop was per row: a chunk
- * that cannot be claimed must not cost a later chunk or a later object its
- * claim. An unreadable count is warned as unknown and counts nothing, because
- * this function never adds a number it cannot attest.
+ * [#26825] Written {@link CLAIM_HANDOVER_ROWS} ids at a time, one write each,
+ * with one macrotask yielded after every write.
+ *
+ * Never throws. Best-effort per batch, as the per-id loop was per row: a batch
+ * that cannot be claimed must not cost a later batch, chunk or object its
+ * claim. When every batch is refused the warning is the one a refused chunk
+ * always gave; when only some are, one warning names the rows left owner-less
+ * and the first refusal. An unreadable count is warned as unknown, once, and
+ * counts nothing, because this function never adds a number it cannot attest.
  */
 async function claimChunk(
   reown: (where: Record<string, unknown>) => Promise<unknown>,
@@ -192,34 +238,56 @@ async function claimChunk(
   where: Record<string, unknown>,
   logger: ClaimOwnershipOptions['logger'],
 ): Promise<number> {
-  const ids = (where.id as { $in: readonly string[] }).$in.length;
+  const chunk = (where.id as { $in: readonly string[] }).$in;
+  const ids = chunk.length;
   const at = { object: objectName, organizationId, ids };
-  try {
-    const count = affectedRowCount(await reown(where));
-    if (count === undefined) {
-      logger?.warn?.(
-        `[org-scoping] claimOrgSeedOwnership could not read an affected-row count for ${objectName} ` +
-          `in org ${organizationId}: the seeded rows were re-owned but this run cannot say how many`,
-        at,
-      );
-      return 0;
+  let claimed = 0;
+  let countUnknown = false;
+  const refused: string[] = [];
+  let firstError: string | undefined;
+  for (let from = 0; from < ids; from += CLAIM_HANDOVER_ROWS) {
+    const batch = chunk.slice(from, from + CLAIM_HANDOVER_ROWS);
+    try {
+      const count = affectedRowCount(await reown({ ...where, id: { $in: batch } }));
+      if (count === undefined) countUnknown = true;
+      else claimed += count;
+    } catch (e) {
+      if (refused.length === 0) firstError = (e as Error).message;
+      refused.push(...batch);
+    } finally {
+      await yieldToEventLoop();
     }
-    return count;
-  } catch (e) {
+  }
+  if (refused.length === ids) {
     logger?.warn?.(
       `[org-scoping] claimOrgSeedOwnership failed for ${objectName} in org ${organizationId}: ` +
         `the ${ids} seeded row(s) of this write stay owner-less`,
-      { ...at, error: (e as Error).message },
+      { ...at, error: firstError },
     );
-    return 0;
+  } else if (refused.length > 0) {
+    logger?.warn?.(
+      `[org-scoping] claimOrgSeedOwnership failed for ${objectName} in org ${organizationId}: ` +
+        `${refused.length} of the ${ids} seeded row(s) of this chunk stay owner-less`,
+      { ...at, refused: refused.length, refusedIds: refused.slice(0, 20), error: firstError },
+    );
   }
+  if (countUnknown) {
+    logger?.warn?.(
+      `[org-scoping] claimOrgSeedOwnership could not read an affected-row count for ${objectName} ` +
+        `in org ${organizationId}: the seeded rows were re-owned but this run cannot say how many`,
+      at,
+    );
+  }
+  return claimed;
 }
 
 /**
  * [#25668] Re-own one chunk's seeded rows one write each: the chunk's scope and
  * owner-less terms plus the row's id. Returns the sum of the affected-row
  * counts. Never throws: a refused row stays owner-less and the chunk's
- * refusals are reported once, with the first refusal's message.
+ * refusals are reported once, with the first refusal's message. [#26825]
+ * Yields one macrotask after every {@link CLAIM_HANDOVER_ROWS} rows and after
+ * the last.
  */
 async function claimChunkByRow(
   reown: (where: Record<string, unknown>) => Promise<unknown>,
@@ -233,7 +301,8 @@ async function claimChunkByRow(
   let countUnknown = false;
   const refused: string[] = [];
   let firstError: string | undefined;
-  for (const id of ids) {
+  for (let i = 0; i < ids.length; i += 1) {
+    const id = ids[i]!;
     try {
       const count = affectedRowCount(await reown({ ...where, id }));
       if (count === undefined) countUnknown = true;
@@ -242,6 +311,8 @@ async function claimChunkByRow(
       refused.push(id);
       firstError ??= (e as Error).message;
     }
+    // [#26825] A request waits behind one batch of rows, never the chunk.
+    if ((i + 1) % CLAIM_HANDOVER_ROWS === 0 || i === ids.length - 1) await yieldToEventLoop();
   }
   const at = { object: objectName, organizationId, ids: ids.length };
   if (refused.length > 0) {
@@ -320,7 +391,9 @@ function storedExpressionReadsOwner(schema: ServiceObject): boolean {
  * and re-owns the org's unowned seeded rows as `isSystem` with
  * `skipAutomations`, in one predicate write per chunk of
  * {@link CLAIM_CHUNK_IDS} seeded ids — [#25668] one write per row instead on an
- * object whose stored expressions read `owner_id`. Returns a per-object summary whose
+ * object whose stored expressions read `owner_id`; [#26825] either path writes
+ * {@link CLAIM_HANDOVER_ROWS} rows at most between two yields to the event
+ * loop. Returns a per-object summary whose
  * `count` is the sum of every write's affected-row count.
  */
 export async function claimOrgSeedOwnership(

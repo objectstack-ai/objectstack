@@ -40,7 +40,7 @@ describe('indexImportMappingTargets', () => {
     expect(index).not.toBeNull();
     expect([...index!.names].sort()).toEqual([
       'account', 'created_at', 'created_by', 'email', 'full_name', 'geo', 'id', 'mailing_address',
-      'organization_id', 'owner_id', 'owning_business_unit_id', 'updated_at', 'updated_by',
+      'organization_id', 'owner_id', 'owning_business_unit_id', 'queue', 'updated_at', 'updated_by',
     ]);
     // Only the DECLARED definitions are carried: the compound-part arm reads a head's type here.
     expect([...index!.fields.keys()].sort()).toEqual(['account', 'email', 'full_name', 'geo', 'mailing_address']);

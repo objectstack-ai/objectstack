@@ -1584,19 +1584,23 @@ describe('HttpDispatcher', () => {
             );
         });
 
-        it('should NOT pass non-allowlisted params for GET /data/:object/:id', async () => {
+        it('refuses a non-allowlisted param for GET /data/:object/:id, never dropping it (#26898)', async () => {
             mockProtocol.getData.mockResolvedValue({ object: 'task', id: 't1', record: {} });
 
-            await dispatcher.handleData(
+            const result = await dispatcher.handleData(
                 '/task/t1', 'GET', {},
                 { expand: 'assignee', malicious: 'drop_table', filter: 'hack' },
                 AUTHED_CALLER()
             );
 
-            // Only expand is passed; malicious and filter are dropped
-            expect(mockProtocol.getData).toHaveBeenCalledWith(
-                { object: 'task', id: 't1', expand: 'assignee', context: AUTHED_CALLER().executionContext }
-            );
+            // The route's closed set (#7606), `RestServer`'s: the names outside
+            // it are refused before the read, and the sentence names them.
+            // They used to be dropped and the read served (`200`).
+            expect(result.handled).toBe(true);
+            expect(result.response?.status).toBe(400);
+            expect(result.response?.body?.error?.code).toBe('VALIDATION_ERROR');
+            expect(result.response?.body?.error?.message).toMatch(/^The query parameters "filter", "malicious" are not supported by this endpoint\./);
+            expect(mockProtocol.getData).not.toHaveBeenCalled();
         });
 
         it('should pass full query (with expand/populate) for GET /data/:object list', async () => {

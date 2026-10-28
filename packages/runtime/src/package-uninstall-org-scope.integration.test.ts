@@ -124,6 +124,12 @@ async function boot() {
   // and owning `sys_metadata` from `PKG` would tear the table out from under
   // the post-uninstall assertions that read the surviving rows back.
   for (const o of objects) engine.registry.registerObject(o, PLATFORM_PKG);
+  // [#26708] The packages this file's saves name are installed, as authored
+  // bases: a save naming a package no installed package has is refused
+  // before it is written.
+  for (const id of [PKG, OTHER_PKG]) {
+    engine.registry.installPackage({ id, name: id, version: '1.0.0' } as any, 'authored');
+  }
   cleanup.push(() => { void engine.destroy(); });
 
   // `'package-author'` is the genuine control-plane assembly's channel — the

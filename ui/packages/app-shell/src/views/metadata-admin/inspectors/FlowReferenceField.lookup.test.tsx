@@ -203,11 +203,12 @@ describe('ReferenceCombobox — manager is auto-resolved', () => {
   });
 });
 
-describe('ReferenceCombobox — queue warns (declared-but-unenforced)', () => {
-  it('keeps the stored value editable but warns that it resolves to nobody', () => {
+describe('ReferenceCombobox — queue names a queue (ADR-0142 D6)', () => {
+  it('keeps the value editable, says what it names, and no longer warns that it resolves to nobody', () => {
     const onCommit = vi.fn();
     renderRef('queue', { value: 'q_west', onCommit });
-    expect(screen.getByText(/not supported by the runtime/i)).toBeInTheDocument();
+    expect(screen.queryByText(/not supported by the runtime/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/queue's machine name/i)).toBeInTheDocument();
     fireEvent.change(screen.getByDisplayValue('q_west'), { target: { value: 'q_east' } });
     expect(onCommit).toHaveBeenCalledWith('q_east');
     expect(state.metaList).not.toHaveBeenCalled();

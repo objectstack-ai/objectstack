@@ -984,20 +984,26 @@ function run({ list = false, packagesDir } = {}) {
 
     const baseline = loadBaseline();
     const allowed = new Map((baseline.entries ?? []).map((e) => [e.key, e]));
-    const violations = [];
-    const used = new Set();
-    for (const f of findings) {
-        const key = baselineKey(f);
-        if (allowed.has(key)) {
-            used.add(key);
-            continue;
-        }
-        violations.push(f);
-    }
-    // Shrink-only: an entry whose finding is gone must be deleted in the same PR.
-    const stale = packagesDir ? [] : [...allowed.keys()].filter((k) => !used.has(k));
+    const { violations, stale: staleKeys } = reconcileLedger(findings, allowed);
+    // The ledger describes THIS repo's tree, so a `--packages-dir` run judges
+    // neither its stale rows nor its unread ones.
+    const stale = packagesDir ? [] : staleKeys;
+    // Before any verdict (#26586): one-sided, a walk that lost part of its corpus
+    // would turn those rows into passing "stale" reports, so it is refused here.
+    const read = new Set(files.map((f) => relative(relBase, f).split(sep).join('/')));
+    const unread = packagesDir ? [] : unreadBaselined(allowed, read);
 
     let failed = false;
+    if (unread.length > 0) {
+        failed = true;
+        console.error(
+            `\n✗ ${unread.length} baselined entr(ies) in scripts/startup-registry-verdict.baseline.json name a file ` +
+                'still on disk that the scan never read — the walk lost part of its corpus; refusing rather than ' +
+                'reporting their rows stale:\n',
+        );
+        for (const k of unread) console.error(`  ${k}`);
+        console.error('');
+    }
     if (violations.length > 0) {
         failed = true;
         console.error(
@@ -1027,12 +1033,13 @@ function run({ list = false, packagesDir } = {}) {
     }
 
     if (stale.length > 0) {
-        failed = true;
-        console.error(
-            `\n✗ ${stale.length} stale baseline entr(ies) in scripts/startup-registry-verdict.baseline.json — the site no longer violates, so delete the entry (the baseline is shrink-only):\n`,
+        console.log(
+            `\n↓ ${stale.length} stale baseline entr(ies) in scripts/startup-registry-verdict.baseline.json — the site no ` +
+                'longer violates (fixed, renamed or deleted). Passing; delete the entry — until then it re-licenses ' +
+                'that key:\n',
         );
-        for (const k of stale) console.error(`  ${k}`);
-        console.error('');
+        for (const k of stale) console.log(`  ${k}`);
+        console.log('');
     }
 
     if (!failed) {
@@ -1045,6 +1052,44 @@ function run({ list = false, packagesDir } = {}) {
         );
     }
     return failed ? 1 : 0;
+}
+
+/**
+ * The ledger comparison, pure so the self-test can drive both directions
+ * (#26586). ONE-SIDED: a finding with no ledger row is a violation and fails; a
+ * ledger row with no finding behind it is STALE, which is reported and passes —
+ * deleting or fixing a file must not red a PR that never touched this gate.
+ */
+function reconcileLedger(findings, allowed) {
+    const used = new Set();
+    const violations = [];
+    for (const f of findings) {
+        const key = baselineKey(f);
+        if (allowed.has(key)) {
+            used.add(key);
+            continue;
+        }
+        violations.push(f);
+    }
+    const stale = [...allowed.keys()].filter((k) => !used.has(k));
+    return { violations, stale };
+}
+
+/**
+ * The dead-scan refusal the one-sided ledger needs (#26586): the ledger keys
+ * whose file (the key up to its first `::`) is still ON DISK but is not in the
+ * corpus the walk read, sorted. While a stale row failed, a walk that lost part
+ * of its corpus redded through it; now a stale row passes, so the corpus itself
+ * is asked. A deleted file is not on disk and a fixed site was read, so both
+ * still pass. `exists` is injected for the self-test.
+ */
+function unreadBaselined(allowed, read, exists = (f) => existsSync(join(ROOT, f))) {
+    return [...allowed.keys()]
+        .filter((k) => {
+            const file = k.split('::')[0];
+            return exists(file) && !read.has(file);
+        })
+        .sort();
 }
 
 // ── Self-test ────────────────────────────────────────────────────────────────
@@ -1094,6 +1139,11 @@ let selfTestReachedVerdict = false;
 // one at a time — and the verdict line has always counted the 18 analysis rows
 // and named the dead-root proof separately. This roster floors the 18 rows;
 // the eight `expectRoot` assertions are left exactly as they are.
+//
+// One battery is NOT a table row: the one-sided ledger (#26586) is driven
+// through `reconcileLedger` / `unreadBaselined` after the dead-root proof, and
+// each of its assertions registers against its own name, floored at its count.
+const SELF_TEST_LEDGER_BATTERY = '#26586 ledger: one-sided — a stale row passes and is reported, an unread on-disk row is refused';
 const SELF_TEST_BATTERIES = Object.freeze({
   '#4777/A flags: init() probes a service and ANNOUNCES the absence': 1,
   '#4777/A flags: init() probes a service and CACHES the absence on the instance': 1,
@@ -1113,6 +1163,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#4777/B passes: keyed lookup at registration warning about a duplicate': 1,
   '#4777/B passes: keyed descriptor lookup on a runtime path': 1,
   '#4777/B flags: the read hidden behind one same-file indirection': 1,
+  [SELF_TEST_LEDGER_BATTERY]: 8,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1121,7 +1172,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // the literal above, so the roster falls below this number; the table
 // cross-check in the floor block is the other half, and names WHICH label
 // collided.
-const SELF_TEST_BATTERY_FLOOR = 18;
+const SELF_TEST_BATTERY_FLOOR = 19;
 
 function selfTest() {
     // Every fixture is analysed on its own, so the provider index is built from
@@ -1508,6 +1559,40 @@ function selfTest() {
         rmSync(dir, { recursive: true, force: true });
     }
 
+    // --- The ledger is ONE-SIDED (#26586), driven through what `run()` uses. ---
+    // A finding with no row still fails; a row with no finding passes and is
+    // reported; a row whose file is on disk but unread is refused, so a walk
+    // that lost part of its corpus cannot pass as a list of stale rows.
+    const expectLedger = (label, got, want) => {
+        registerCase(SELF_TEST_LEDGER_BATTERY);
+        expectRoot(label, got, want);
+    };
+    {
+        const site = { rule: 'A', file: 'packages/a/src/p.ts', anchor: 'P.init()', service: 'cache' };
+        const other = { rule: 'B', file: 'packages/b/src/q.ts', anchor: 'audit', registries: ['nodeExecutors'] };
+        const ledger = new Map([[baselineKey(site), { key: baselineKey(site) }]]);
+        const same = reconcileLedger([site], ledger);
+        expectLedger('a ledgered finding neither fails nor reads stale',
+            `${same.violations.length}/${same.stale.length}`, '0/0');
+        const gone = reconcileLedger([], ledger);
+        expectLedger('a row whose finding is GONE passes (no violation) and is reported stale once',
+            `${gone.violations.length}/${gone.stale.length}`, '0/1');
+        const fresh = reconcileLedger([site, other], ledger);
+        expectLedger('a NEW finding still fails, beside a matching row',
+            `${fresh.violations.length}/${fresh.stale.length}`, '1/0');
+        expectLedger('...and the violation is the unledgered one', fresh.violations[0]?.file, other.file);
+
+        const onDisk = () => true;
+        expectLedger('an EMPTY corpus with the ledgered file still on disk is refused',
+            unreadBaselined(ledger, new Set(), onDisk).join(','), baselineKey(site));
+        expectLedger('a corpus that read the ledgered file is not refused, whatever its findings now',
+            unreadBaselined(ledger, new Set([site.file]), onDisk).length, 0);
+        expectLedger('a ledgered file that was DELETED is not refused (a decrease passes)',
+            unreadBaselined(ledger, new Set(), () => false).length, 0);
+        expectLedger('the file is the key up to its first `::`, so a rule-B key resolves too',
+            unreadBaselined(new Map([[baselineKey(other), {}]]), new Set([other.file]), onDisk).length, 0);
+    }
+
     // ── The floor: every declared row RAN, and ran its case (#13489) ───────
     //
     // Evaluated after every row has had its chance and BEFORE the verdict, so the
@@ -1568,7 +1653,7 @@ function selfTest() {
         console.error(`\n✗ self-test: ${failures} failure(s) (cases and floor)\n`);
         return 1;
     }
-    console.log(`\n✓ self-test: ${cases.length} analysis case(s) + the dead-root hard error (red when the scan root is renamed, green when restored) all passed\n`);
+    console.log(`\n✓ self-test: ${cases.length} analysis case(s) + the dead-root hard error (red when the scan root is renamed, green when restored) + the one-sided ledger (${batterySeen.get(SELF_TEST_LEDGER_BATTERY)} case(s)) all passed\n`);
     selfTestReachedVerdict = true;
     return 0;
 }

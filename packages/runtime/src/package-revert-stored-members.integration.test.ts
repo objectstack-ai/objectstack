@@ -120,6 +120,12 @@ async function boot() {
   engine.registerDriver(driver as any, true);
   await engine.init();
   for (const o of objects) engine.registry.registerObject(o, PLATFORM_PKG);
+  // [#26708] The packages this file's saves name are installed, as authored
+  // bases: a save naming a package no installed package has is refused
+  // before it is written.
+  for (const id of [STUDIO_PKG, DRAFT_ONLY_PKG]) {
+    engine.registry.installPackage({ id, name: id, version: '1.0.0' } as any, 'authored');
+  }
   cleanup.push(() => { void engine.destroy(); });
 
   // `'package-author'` — the control-plane channel, as the sibling suite: the

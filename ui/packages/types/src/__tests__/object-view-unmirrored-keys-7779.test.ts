@@ -1171,7 +1171,7 @@ describe('objectui#7779 — the three spec-modelled keys are the spec\'s own slo
 
   it('`navigation` parses exactly as the spec\'s `NavigationConfigSchema` does (the slot is that schema, optional)', () => {
     const slot = shapeMember(ObjectViewSchema, 'navigation') as { safeParse(v: unknown): { success: boolean; data?: unknown } };
-    // The spec declares `mode: NavigationModeSchema.default('page')`, so a
+    // The spec declares `mode: NavigationModeSchema.default('drawer')`, so a
     // config that omits the mode is legal authored metadata — the exact input
     // the hand copy of objectui#4588 refused. ⭐ It is STILL accepted, and since
     // objectui#8317 (decision batch #90) the parsed document no longer carries a

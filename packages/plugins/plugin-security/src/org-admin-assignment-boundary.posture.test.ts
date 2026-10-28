@@ -247,6 +247,11 @@ describe('[ADR-0090 D12, amended 2026-10-17] the organization administrator assi
       it('the delegable-scope report offers the org admin its in-boundary positions only, and explain admits it for its member', async () => {
         const h = await boot(posture);
         const security = h.plugin as any;
+        // [#26641] Explain answers only for a user a `sys_user` row carries, so
+        // the explained member gets one here (the boot leaves the table
+        // unprovisioned for the write cases above).
+        await h.engine.syncObjectSchema(SysUser.name);
+        await h.engine.insert('sys_user', { id: 'u_target', name: 'Target', email: 'u_target@example.test' }, { context: { isSystem: true } } as any);
         for (const context of [CALLERS.orgAdmin, CALLERS.orgAdminNoBypass]) {
           const sets = await security.resolvePermissionSetsForContext(context);
           const report = await security.delegatedAdminGate.describeDelegableScope(sets, context);

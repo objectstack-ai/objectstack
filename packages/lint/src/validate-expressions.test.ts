@@ -7,7 +7,7 @@ import { describe, it, expect } from 'vitest';
 // the root the rule never saw.
 import { SCOPE_ROOTS, buildScope, ExpressionEngine } from '@objectstack/formula';
 import { EVALUATED_EXPRESSION_SOURCE_REQUIRED, ExpressionInputSchema, ObjectStackSchema } from '@objectstack/spec';
-import { FieldSchema, ObjectSchema, SelectOptionSchema } from '@objectstack/spec/data';
+import { FieldSchema, ObjectFieldGroupSchema, ObjectSchema, SelectOptionSchema } from '@objectstack/spec/data';
 import { EvalUserSchema } from '@objectstack/spec/identity';
 import { SharingRuleSchema } from '@objectstack/spec/security';
 import { BulkActionDefSchema } from '@objectstack/spec/ui';
@@ -924,6 +924,21 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
         actions: [{ name: 'park', objectName: 'crm_lead', disabled: true }],
       });
       expect(ok).toHaveLength(0);
+    });
+
+    it('never reads `disabledReason` as a predicate — it is display copy (#26619)', () => {
+      // The same bare-field source that is an error on `disabled` above is a
+      // plain sentence on `disabledReason`: nothing is checked, nothing flagged.
+      const issues = validateStackExpressions({
+        objects: [{ name: 'crm_lead', fields: { status: { type: 'select' } } }],
+        actions: [{
+          name: 'park',
+          objectName: 'crm_lead',
+          disabled: 'record.status == "converted"',
+          disabledReason: 'status == "converted"',
+        }],
+      });
+      expect(issues).toHaveLength(0);
     });
 
     it('validates an action attached to an object (record scope = parent object)', () => {
@@ -3334,7 +3349,8 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
     // attachments, whose block names join the field index.
     // `listViews` joined with #24798: an object's own list views carry bulk
     // defs whose `confirmText` is judged.
-    expected: ['actions', 'attachedOnRead', 'fields', 'listViews', 'name', 'validations'],
+    // `fieldGroups` joined with #26646: each group's section predicate.
+    expected: ['actions', 'attachedOnRead', 'fieldGroups', 'fields', 'listViews', 'name', 'validations'],
     declaredBy: 'ObjectSchema',
     keys: () => Object.keys(ObjectSchema.shape),
   },
@@ -3372,6 +3388,8 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
   {
     receiver: 'action',
     // `object` is absent — the action schema's canonical key is `objectName`.
+    // `disabledReason` is absent by contract (#26619): display copy beside
+    // `disabled`, never read as a condition.
     expected: ['disabled', 'name', 'objectName', 'visible'],
     declaredBy: 'ObjectStackSchema.actions[]',
     keys: () => shapeKeysOf(ObjectStackSchema.shape.actions),
@@ -3417,6 +3435,14 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
     expected: ['value', 'visibleWhen'],
     declaredBy: 'SelectOptionSchema',
     keys: () => Object.keys(SelectOptionSchema.shape),
+  },
+  {
+    // [#26646] One `fieldGroups[]` entry: its section predicate, and its
+    // `key` for the location.
+    receiver: 'fieldGroup',
+    expected: ['key', 'visibleWhen'],
+    declaredBy: 'ObjectFieldGroupSchema',
+    keys: () => shapeKeysOf(ObjectFieldGroupSchema),
   },
   {
     // [#22228] A field's cell formatting rule — the list view's own rule

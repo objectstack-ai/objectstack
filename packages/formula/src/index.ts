@@ -63,7 +63,12 @@ export type {
   ParseCelToAstOptions,
 } from './cel-engine';
 export { cronEngine } from './cron-engine';
-export { templateEngine, TEMPLATE_FORMATTERS, formatValue } from './template-engine';
+export { templateEngine, TEMPLATE_FORMATTERS, formatValue, judgeHoleFormatter } from './template-engine';
+export type { TemplateHoleGrammarRefusal, TemplateHoleGrammarRule } from './template-engine';
+// The mail template hole grammar — one copy, read by `@objectstack/plugin-email`'s
+// renderer, the placement judge below and `@objectstack/lint`'s grammar rule.
+export { mailHolePattern, parseMailHole, judgeMailHoleGrammar } from './mail-hole-grammar';
+export type { ParsedMailHole, MailHoleGrammarFinding } from './mail-hole-grammar';
 // #25189 — where a hole may sit in a mail template's HTML face (ruling
 // 6335348115 on #25082, F1 A2 / F3 C2). Here because both readers already
 // depend on this package and on nothing else they share: `@objectstack/lint`'s
@@ -170,4 +175,4 @@ export type {
   ExpressionSourceKind,
 } from './expression-refusal';
 export type { SeedValue, SeedPrimitive } from './seed-eval';
-export type { DialectEngine, EvalContext, EvalResult, EvalError, EvalPermissions, EvalSystemPermissions } from './types';
+export type { DialectEngine, EvalContext, EvalResult, EvalError, EvalPermissions, EvalSystemPermissions, EvalOptionLabels } from './types';

@@ -908,6 +908,33 @@ const TransportFilterValueSchema = lazySchema(() => z.union([FilterArraySchema, 
 const TransportCountValueSchema = lazySchema(() => z.union([z.boolean(), z.enum(['true', 'false'])]));
 
 /**
+ * [#26909] The projection's accept set — the `select` / `$select` spellings
+ * of `fields` — as the doors that read it judge it (`projectionFieldsValue` in
+ * `@objectstack/metadata-protocol`, shared by the list's `findData` and the
+ * by-id `getData`). A comma string is split, trimmed and emptied of blank
+ * members there, and a value naming NO field is refused with a 400: absent
+ * means "every column", so an empty projection read as absent is a widening.
+ *
+ * The string arm is that rule as a pattern: `[^\s,]` holds iff some comma
+ * segment has a non-whitespace character, and `\s` is exactly the set
+ * `trim()` strips. A pattern, not a refinement, so the published JSON Schema
+ * states it too. The array arm is not split: the door keeps every member,
+ * refuses `[]`, and checks every member against the object's fields, where a
+ * blank name is never one.
+ *
+ * `HttpFindQueryParamsSchema.select` and `GetDataRequestSchema.select`
+ * (`../api/protocol.zod.ts`) read these arms off the members below rather
+ * than restating them, so the three declarations of one door rule cannot
+ * drift apart.
+ */
+const PROJECTION_NAMES_NO_FIELD = 'Name at least one field';
+const TransportProjectionStringSchema = z.string().regex(/[^\s,]/, PROJECTION_NAMES_NO_FIELD);
+const transportProjectionArray = <T extends z.ZodString>(member: T) =>
+  z.array(member.regex(/\S/, 'A field name cannot be blank')).min(1, PROJECTION_NAMES_NO_FIELD);
+const PROJECTION_ACCEPT_SET = 'at least one field name; a value naming no field (blank, only commas and spaces, '
+  + 'an empty list, or a list with a blank name) is refused';
+
+/**
  * [#25269] The page window — `limit` / `offset` and every spelling that folds
  * onto them (`top`, `$top`, `skip`, `$skip`) — as the Data API list doors
  * enforce it: a non-negative safe integer. `0` is a window (`$top=0` asks for
@@ -1029,8 +1056,8 @@ export const QueryTransportParamsSchema = lazySchema(() => z.object({
   $orderby: DataEngineSortSchema.nullable().optional()
     .describe('Transport spelling of `orderBy` (OData `$orderby`)'),
   /** OData spelling of `fields` (two hops: `$select` to `select` to `fields`). */
-  $select: z.union([z.string(), z.array(FieldNodeSchema)]).nullable().optional()
-    .describe('Transport spelling of `fields` (OData `$select`)'),
+  $select: z.union([TransportProjectionStringSchema, transportProjectionArray(FieldNodeSchema)]).nullable().optional()
+    .describe(`Transport spelling of \`fields\` (OData \`$select\`) — ${PROJECTION_ACCEPT_SET}`),
   /** OData spelling of `expand`. */
   $expand: z.union([z.string(), z.array(z.string()), z.record(z.string(), QuerySchema)]).nullable().optional()
     .describe('Transport spelling of `expand` (OData `$expand`)'),
@@ -1050,8 +1077,8 @@ export const QueryTransportParamsSchema = lazySchema(() => z.object({
   filter: TransportFilterValueSchema.nullable().optional()
     .describe('Transport spelling of `where`'),
   /** Bare transport spelling of `fields`. */
-  select: z.union([z.string(), z.array(z.string())]).nullable().optional()
-    .describe('Transport spelling of `fields`'),
+  select: z.union([TransportProjectionStringSchema, transportProjectionArray(z.string())]).nullable().optional()
+    .describe(`Transport spelling of \`fields\` — ${PROJECTION_ACCEPT_SET}`),
   /** Bare transport spelling of `orderBy`. */
   sort: DataEngineSortSchema.nullable().optional()
     .describe('Transport spelling of `orderBy`'),

@@ -14,7 +14,7 @@ import type { FilterBuilderRowGroup } from '@object-ui/components';
 import { VALUELESS_FILTER_BUILDER_OPERATORS, isFilterValueComplete } from '@object-ui/components';
 import { ViewSwitcherDropdown } from './ViewSwitcher';
 import { ListEmptyState, hasDeclaredFilter, filterNamesCurrentUser } from './ListEmptyState';
-import { ListViewCompactHeader, ListViewCompactRows } from './ListViewCompact';
+import { ListViewCompactHeader, ListViewCompactRows, ListViewCappedRows, CAPPED_LIST_DEFAULT_LIMIT } from './ListViewCompact';
 import { ViewSettingsPopover } from './components/ViewSettingsPopover';
 import { UserFilters } from './UserFilters';
 import {
@@ -32,7 +32,7 @@ import { useDensityMode, resolveInlineAriaProps } from '@object-ui/react';
 import type { DependsOnInput, ListViewSchema, ObjectMapConfig } from '@object-ui/types';
 import { detectStatusField, isSystemManagedField } from '@object-ui/types';
 import { usePullToRefresh } from '@object-ui/mobile';
-import { type ListViewVisualization, resolveConditionalFormatting, buildExpandFields, buildExportFileName, resolveAffordance, type SchemaLike, partitionRowsByPredicate, normalizeListViewSchema, isListViewVisualization, rowHeightToDensityMode, mergeFilterNodes, FilterOperatorError, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, PLATFORM_RECORD_COLUMNS, EXPANDABLE_FIELD_TYPES, UNMATERIALIZED_FIELD_TYPES, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, applyNonGridRowCeiling, type NonGridCeilingResult, resolveNameField, declaredNameField, resolveDependsOnFields, GANTT_CONFIG_SPELLING } from '@object-ui/core';
+import { type ListViewVisualization, resolveConditionalFormatting, buildExpandFields, buildExportFileName, resolveAffordance, type SchemaLike, partitionRowsByPredicate, normalizeListViewSchema, isListViewVisualization, rowHeightToDensityMode, mergeFilterNodes, FilterOperatorError, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, PLATFORM_RECORD_COLUMNS, EXPANDABLE_FIELD_TYPES, UNMATERIALIZED_FIELD_TYPES, readObjectSortability, isPlatformSortableField, leadWithNameField, filterPlatformSortableSort, applyNonGridRowCeiling, type NonGridCeilingResult, resolveNameField, declaredNameField, resolveDependsOnFields, GANTT_CONFIG_SPELLING } from '@object-ui/core';
 import { useObjectLabel, useSafeFieldLabel, createSafeTranslation, useDisplayLocale, pickLocalized } from '@object-ui/i18n';
 // Two resolvers, two vocabularies — the repo spells the distinction into the
 // NAMES (objectui#4167). `resolveInlineI18nLabel` is the spec's own
@@ -444,6 +444,28 @@ export interface ListViewProps {
    * keeps its full rendering. Absent ⇒ the full list, exactly as before.
    */
   compact?: boolean;
+  /**
+   * Draw the CAPPED posture (objectstack#26613): the first rows of the list, at
+   * most `pagination.pageSize` of them (the page block's `dataSource.limit`
+   * lands there) and `CAPPED_LIST_DEFAULT_LIMIT` when none is stated, in a
+   * short table of the view's first four columns, ending with a 「View all N →」
+   * link to the rest. None of the toolbar, view tabs, row-number column, pager
+   * or record-count bar. The `list-view` page block passes it when the page
+   * region it sits in is half the page or wider.
+   *
+   * A HOST prop, never a schema key, for the reason `compact` is one. It
+   * applies where `compact` applies, to a paged grid; `compact` wins when both
+   * are passed. Absent ⇒ the full list, exactly as before.
+   */
+  capped?: boolean;
+  /**
+   * Called with the number of records the list's query matched, each time a
+   * load settles with a different answer (objectstack#26613). The `list-view`
+   * page block hands it the count channel of the `page:tabs` panel it sits in,
+   * so the tab's badge says how many records its list holds. Only a paged grid
+   * that draws the rows it fetched answers; other kinds never call it.
+   */
+  onTotalChange?: (total: number) => void;
 }
 
 // Helper to convert FilterBuilder group to ObjectStack AST.
@@ -1490,6 +1512,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   defaultRowNumbers = true,
   rowAdornment,
   compact = false,
+  capped = false,
+  onTotalChange,
   viewDefaults,
   ...props
 }: ListViewProps & { [key: string]: any }, ref) => {
@@ -1929,11 +1953,20 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // no declared size, switching between the paged grid and an unpaged kind
   // moves the window and re-issues the fetch, where a declared size keeps one
   // window across the switch (objectui#7394).
-  const effectivePageSize = resolvePageSize(
-    dynamicPageSize,
-    authoredPageSize,
-    paginate ? DEFAULT_LIST_DISPLAY_PAGE_SIZE : DEFAULT_LIST_FETCH_BATCH_SIZE,
-  );
+  //
+  // objectstack#26613 — the capped posture's window IS its cap: the authored
+  // size (a page block's `dataSource.limit` lands on `pagination.pageSize`), or
+  // `CAPPED_LIST_DEFAULT_LIMIT`. Not the spec's display default, which sizes a
+  // page of the object list, and not a size the user picked, because the
+  // capped posture draws no pager to pick one with.
+  const cappedWindow = capped && !compact && paginate;
+  const effectivePageSize = cappedWindow
+    ? resolvePageSize(undefined, authoredPageSize, CAPPED_LIST_DEFAULT_LIMIT)
+    : resolvePageSize(
+      dynamicPageSize,
+      authoredPageSize,
+      paginate ? DEFAULT_LIST_DISPLAY_PAGE_SIZE : DEFAULT_LIST_FETCH_BATCH_SIZE,
+    );
 
   // [objectui#9897] The loud half, on the channel this component already uses
   // for "you declared it, the renderer dropped it". Keyed on the declaration
@@ -3877,6 +3910,27 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   );
 
   /**
+   * The columns the capped posture's table draws from (objectstack#26613); it
+   * keeps the first four. Authored ⇒ the visible columns, as the grid gets
+   * them. Unauthored ⇒ the object's `highlightFields` led by its name field,
+   * the first of the grid's own default-column rules, read by the same
+   * `leadWithNameField`, behind the same field-level read check. An object
+   * declaring no `highlightFields` gives an empty list, and the table then
+   * draws one column, each record's display name.
+   */
+  const cappedFields = React.useMemo((): readonly unknown[] => {
+    if (hasAuthoredColumns) return effectiveFields;
+    const declared: unknown = (objectDef as { highlightFields?: unknown } | null | undefined)?.highlightFields;
+    if (!Array.isArray(declared) || declared.length === 0) return [];
+    const highlighted = declared.filter(
+      (n): n is string => typeof n === 'string' && !!objectDef?.fields?.[n],
+    );
+    return leadWithNameField(objectDef, highlighted).filter((name) =>
+      !(perms?.isLoaded && schema.objectName) || perms.checkField(schema.objectName, name, 'read'),
+    );
+  }, [hasAuthoredColumns, effectiveFields, objectDef, perms, schema.objectName]);
+
+  /**
    * The filter a SELF-QUERYING view queries with — `gantt` (objectui#10037),
    * `tree` and `chart` (objectui#10250).
    *
@@ -4391,12 +4445,13 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           //
           // `ObjectGantt` owns a record drawer of its own and resolves
           // `const navConfig = schema.navigation ?? { mode: 'drawer' }`, then
-          // classifies four overlay modes (`drawer`/`modal`/`split`/`popover`)
-          // to decide whether to suppress the host's `onRowClick`. Nothing put
-          // `navigation` on the node it receives, so that `??` was the ONLY
-          // branch ever taken: a view authoring `navigation: { mode: 'page' }`
-          // got a drawer, with no diagnostic. The component knows four modes
-          // and was only ever handed the default.
+          // classifies the overlay mode (`drawer`, the one the spec keeps since
+          // objectstack#26677) to decide whether to suppress the host's
+          // `onRowClick`. Nothing put `navigation` on the node it receives, so
+          // that `??` was the ONLY branch ever taken: a view authoring
+          // `navigation: { mode: 'page' }` got a drawer, with no diagnostic.
+          // The component knows every mode and was only ever handed the
+          // default.
           //
           // ⭐ ON THE BRANCH, NOT ON `baseProps`, and that is a measurement
           // rather than a preference. SEVEN other child views read
@@ -5364,6 +5419,30 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // rows in hand when the whole result is in memory.
   const compactCount = compactPosture && !loading && !loadError ? (serverTotal ?? data.length) : null;
 
+  // objectstack#26613 — the capped posture a page region half the page or
+  // wider asks for (the `capped` host prop), over the same surfaces as the
+  // compact one. Its window was sized at the fetch (`cappedWindow`).
+  const cappedPosture = cappedWindow && surfaceDrawsFetchedRows;
+  // Either short posture draws none of the object list's chrome.
+  const listChromeShown = !compactPosture && !cappedPosture;
+  // The records the query matched, once a load settles: the server's total, or
+  // the rows in hand when the whole result is in memory. The capped list's
+  // 「View all N」 and the tab badge (`onTotalChange`) both say this number.
+  const settledTotal = paginate && surfaceDrawsFetchedRows && !loading && !loadError
+    ? (serverTotal ?? data.length)
+    : null;
+  // Read through a ref, so the report below keys on the number alone and never
+  // on the identity of the callback a host hands down (AGENTS.md #10).
+  const onTotalChangeRef = React.useRef(onTotalChange);
+  React.useEffect(() => {
+    onTotalChangeRef.current = onTotalChange;
+  });
+  // A load in flight keeps the last answer: the badge does not blink out while
+  // the list refetches.
+  React.useEffect(() => {
+    if (settledTotal != null) onTotalChangeRef.current?.(settledTotal);
+  }, [settledTotal]);
+
   return (
     <div
       ref={pullRef}
@@ -5397,8 +5476,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           The right-hand cluster is wrapped in a single rounded pill container
           with vertical dividers (Linear / Notion style) so utility buttons
           read as one segmented control rather than a loose bag of icons.
-          Not in the compact posture (objectui#12703). */}
-      {!compactPosture && (
+          Not in the compact posture (objectui#12703), nor in the capped one
+          (objectstack#26613). */}
+      {listChromeShown && (
       <div className="border-b px-2 sm:px-4 py-1.5 flex items-center justify-between gap-1 sm:gap-2 bg-background">
         {/* With a host's leading node the left group grows (`flex-1`) so that
             node's `flex-1` wrapper has the width the tool cluster leaves —
@@ -6301,6 +6381,17 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             objectDef={objectDef}
             onRowClick={navigation.handleClick}
           />
+        ) : cappedPosture ? (
+          // objectstack#26613 — the capped posture's rows, in place of the
+          // grid: the view's first four columns, no row-number column, no pager.
+          <ListViewCappedRows
+            rows={data}
+            fields={cappedFields}
+            objectName={schema.objectName}
+            objectDef={objectDef}
+            total={settledTotal}
+            onRowClick={navigation.handleClick}
+          />
         ) : (
           <SchemaRenderer
             schema={viewComponentSchema}
@@ -6413,7 +6504,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       {calendarWindowed && calendarCeiling && <NonGridRowCeilingNote result={calendarCeiling} />}
 
       {/* Add Record (bottom position) */}
-      {toolbarFlags.showAddRecordBottom && !compactPosture && (
+      {toolbarFlags.showAddRecordBottom && listChromeShown && (
         <div className="border-t px-2 sm:px-4 py-1 bg-background shrink-0">
           <Button
             variant="ghost"
@@ -6511,8 +6602,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           (objectui#12528): the count at the left, the grid's column summaries
           at the right of the same row, truncated with the full text as their
           tooltip when they do not fit. */}
-      {/* The compact posture prints its count in its header (objectui#12703). */}
-      {!compactPosture && (recordCountShown || boardRecordCountShown || footerSummaryText) && (
+      {/* The compact posture prints its count in its header (objectui#12703),
+          the capped one in its 「View all N」 link (objectstack#26613). */}
+      {listChromeShown && (recordCountShown || boardRecordCountShown || footerSummaryText) && (
         <div
           className="border-t px-4 py-2 flex items-center gap-3 text-xs text-muted-foreground bg-background shrink-0"
           data-testid="record-count-bar"
@@ -6581,7 +6673,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
         </div>
       )}
 
-      {/* Navigation Overlay (drawer/modal/popover) */}
+      {/* Navigation Overlay (the drawer) */}
       {navigation.isOverlay && (
         <NavigationOverlay
           {...navigation}

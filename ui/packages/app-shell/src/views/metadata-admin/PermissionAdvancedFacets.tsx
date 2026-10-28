@@ -119,8 +119,9 @@ function stripRetiredRlsKeys(policy: RlsPolicy): RlsPolicy {
  * `Partial<>` is the single deliberate divergence and it is the draft-buffer
  * one: the spec REQUIRES `businessUnit`, while this editor materializes the
  * facet from `asObject(draft.adminScope)` — `{}` before the author has typed
- * anything — and every field below reads through a fallback (`?? ''`, `!!`)
- * because a half-filled facet is the normal mid-edit state. Pinned in
+ * anything — and every field below reads through a fallback (`?? ''`, and the
+ * spec default for a switch, {@link scopeSwitchOn}) because a half-filled facet
+ * is the normal mid-edit state. Pinned in
  * `spec-symbol-parity.test.ts`, both halves: the spec still requires
  * `businessUnit` (so the widening is real and load-bearing) and no key here is
  * invented (so the widening stays confined to requiredness).
@@ -140,6 +141,37 @@ function stripRetiredRlsKeys(policy: RlsPolicy): RlsPolicy {
  * keys replays clean through the rehydration seam" (objectui#12406).
  */
 type AdminScope = Partial<SpecAdminScope>;
+
+/**
+ * The spec's default for each boolean key the delegated-admin facet draws a
+ * switch for: what `AdminScopeSchema` parses the key to when the scope leaves it
+ * unset, and so the value the server enforces for it.
+ *
+ * Restated rather than imported for the reason `useTenancyPosture` gives: the
+ * `@objectstack/spec/security` value entry adds its schema modules to the
+ * console bundle, here for two booleans. The keys are the spec type's, and
+ * `PermissionAdvancedFacets.adminScopeDefault-26706.test.tsx` compares what each
+ * switch draws for an unset key with the schema's own parse of it, so a default
+ * the spec moves fails CI here.
+ */
+const ADMIN_SCOPE_SWITCH_DEFAULTS = {
+  includeSubtree: true,
+  manageAssignments: false,
+} as const satisfies Required<Pick<SpecAdminScope, 'includeSubtree' | 'manageAssignments'>>;
+
+type AdminScopeSwitch = keyof typeof ADMIN_SCOPE_SWITCH_DEFAULTS;
+
+/**
+ * What a delegated-admin switch draws: the draft's own boolean, or, for a key
+ * the draft does not set to a boolean, the spec default from
+ * {@link ADMIN_SCOPE_SWITCH_DEFAULTS}. Drawing the value never writes it: the
+ * draft keeps the key unset until the author flips the switch, and a flip
+ * writes an explicit boolean.
+ */
+function scopeSwitchOn(scope: AdminScope, key: AdminScopeSwitch): boolean {
+  const value = scope[key];
+  return typeof value === 'boolean' ? value : ADMIN_SCOPE_SWITCH_DEFAULTS[key];
+}
 
 type TabVisibility = 'visible' | 'hidden' | 'default_on' | 'default_off';
 type TabPerms = Record<string, TabVisibility>;
@@ -745,18 +777,20 @@ export function PermissionAdvancedFacets({
       >
         <p className="text-xs text-muted-foreground mb-3">{t('perm.tabs.help')}</p>
         <div className="space-y-2">
-          {tabEntries.map(([tab, vis]) => (
-            <div key={tab} className="flex items-center gap-2">
-              <Input
-                value={tab}
+          {tabEntries.map(([tab, vis], row) => (
+            // objectui#26748 — keyed by position, not by the name the input
+            // edits: a rename keeps insertion order, so the row (and the
+            // input's focus) survives each keystroke.
+            <div key={row} className="flex items-center gap-2">
+              <TabNameInput
+                name={tab}
                 disabled={!writable}
-                onChange={(e) => {
-                  const nextKey = e.target.value;
+                taken={(name) => tabEntries.some(([k], j) => j !== row && k === name)}
+                onRename={(nextKey) => {
                   const next: TabPerms = {};
                   for (const [k, v] of tabEntries) next[k === tab ? nextKey : k] = v;
                   setTabs(next);
                 }}
-                className="h-8 w-64"
               />
               <FacetPicker
                 testId={`tab-visibility-${tab}`}
@@ -821,7 +855,7 @@ export function PermissionAdvancedFacets({
             </div>
             <label className="flex items-center gap-1.5 text-xs pb-1.5">
               <Switch
-                checked={!!scope.includeSubtree}
+                checked={scopeSwitchOn(scope, 'includeSubtree')}
                 disabled={!writable || !scopeAnchored}
                 onCheckedChange={(v) => setScopeDetail({ includeSubtree: !!v })}
               />
@@ -841,7 +875,7 @@ export function PermissionAdvancedFacets({
           <div className="flex flex-wrap gap-x-6 gap-y-2">
             <label className="flex items-center gap-1.5 text-xs">
               <Switch
-                checked={!!scope.manageAssignments}
+                checked={scopeSwitchOn(scope, 'manageAssignments')}
                 disabled={!writable || !scopeAnchored}
                 onCheckedChange={(v) => setScopeDetail({ manageAssignments: !!v })}
               />
@@ -935,3 +969,37 @@ export function PermissionAdvancedFacets({
 }
 
 export default PermissionAdvancedFacets;
+
+/**
+ * objectui#26748 — a Tab visibility row's name input. It holds what is typed
+ * and writes the rename only while the name is no other row's: a name that
+ * passes through (or ends at) another row's would otherwise merge the two
+ * rows in `tabPermissions` and drop one.
+ */
+function TabNameInput({
+  name,
+  disabled,
+  taken,
+  onRename,
+}: {
+  name: string;
+  disabled: boolean;
+  taken: (name: string) => boolean;
+  onRename: (name: string) => void;
+}) {
+  const [text, setText] = React.useState(name);
+  React.useEffect(() => setText(name), [name]);
+  return (
+    <Input
+      value={text}
+      disabled={disabled}
+      aria-invalid={text !== name || undefined}
+      onChange={(e) => {
+        const next = e.target.value;
+        setText(next);
+        if (next !== name && !taken(next)) onRename(next);
+      }}
+      className="h-8 w-64"
+    />
+  );
+}

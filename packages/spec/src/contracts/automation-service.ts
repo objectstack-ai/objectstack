@@ -397,6 +397,64 @@ export interface ScreenSpec {
      * prefilling its `account` FK with the id created by the Customer step).
      */
     idVariable?: string;
+    /**
+     * Where this screen sits among the screens of its run, read by the engine
+     * off the flow graph at the moment it pauses (#26657). A runner labels its
+     * primary button from {@link ScreenProgressSpec.nextScreen} ("Next" while
+     * another screen can follow, "Submit" on the last) and draws a step
+     * counter only from {@link ScreenProgressSpec.stepCount}.
+     *
+     * Absent when the engine cannot answer at all — a server that predates
+     * this member; a run with no flow name, a node that is not a `screen` of
+     * the registered flow, or a flow with no start node (no graph to read);
+     * or a screen inside a child run whose own graph shows no further screen
+     * (the parent may still have some) — and a runner then keeps the label
+     * it drew before this member existed.
+     */
+    progress?: ScreenProgressSpec;
+}
+
+/**
+ * The graph's answer about a paused screen's place in its run (#26657),
+ * served on {@link ScreenSpec.progress}. Computed by the engine — the only
+ * party that holds the graph — so a client ⛔ never walks the flow itself.
+ *
+ * "Another screen" means another `screen` node this run can still pause on
+ * and serve before it ends. A screen that never pauses (no fields and no
+ * `waitForInput`) does not count. A pause that serves no screen (an approval,
+ * a wait) may end the stretch of screens a runner draws, so a screen that can
+ * only be reached past one counts as possible, never as certain.
+ */
+export interface ScreenProgressSpec {
+    /**
+     * Whether another screen can follow this one.
+     *
+     * - `'none'` — no path out of this screen reaches another one: it is the
+     *   last step, and a runner says "Submit".
+     * - `'certain'` — every way the run can go from here pauses on another
+     *   screen first: a runner says "Next".
+     * - `'possible'` — some ways do and some do not, because something after
+     *   this screen decides: a branch (a `decision`, a fault path, a loop
+     *   back), a pause that serves no screen, or a `subflow` that may serve
+     *   a screen of its own. The engine does not guess which way the run
+     *   goes; a runner says "Next", since a later screen is still possible.
+     */
+    nextScreen: 'none' | 'possible' | 'certain';
+    /**
+     * This screen's 1-based position among the screens of the run. Present
+     * only when every path from the flow's start to this screen pauses on the
+     * same number of screens before it, so the number is exact; absent when a
+     * branch, a loop through a screen, a parallel fan-out or a `subflow` makes
+     * it vary.
+     */
+    step?: number;
+    /**
+     * How many screens the run pauses on in all, this one included. Present
+     * only alongside {@link step}, and only when every path through this
+     * screen pauses on the same number of screens after it too; a runner
+     * draws a step counter from it and draws none without it.
+     */
+    stepCount?: number;
 }
 
 /**

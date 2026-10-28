@@ -84,6 +84,28 @@
       "producer": "packages/objectql/src/hook-binder.ts#bindHooksToEngine (the same `wrapDeclarativeHook(hook, resolved, …)` call as retryPolicy — the binder hands the AUTHORED hook to the wrapper)",
       "note": "#14010 (ruling 2026-09-01): 'system' | 'user' | 'inherit', default 'inherit' = the pre-runAs behaviour. Scope is ctx.api data operations only (condition, readonly strip, session, async untouched). Honoured on both the in-process handler and the sandboxed body because the sandbox reads ctx.api from the engine context at call time (runtime/src/sandbox/body-runner.ts buildSandboxApi). Pinned in packages/objectql/src/hook-run-as.test.ts and packages/runtime/src/sandbox/hook-run-as.integration.test.ts."
     },
+    "refusals": {
+      "status": "live",
+      "verifiedAt": "2026-10-27",
+      "evidenceScope": "in-repo",
+      "evidence": "packages/runtime/src/sandbox/hook-refusal-catalogue.ts#resolveHookRefusal (the one reader: a sandboxed body's throw of a declared code is answered with that entry, and any other deliberate throw of a hook that declares `refusals` is refused as a fault naming the hook and the code); packages/runtime/src/sandbox/body-runner.ts#hookBodyRunnerFactory (hands every body throw of the hook to `resolveHookRefusal` before it leaves the handler)",
+      "producer": "packages/objectql/src/hook-binder.ts#bindHooksToEngine (hands the AUTHORED hook to the body runner factory, `refusals` included); packages/spec/src/data/hook.zod.ts#HookSchema (refuses at save a code the body throws literally and the catalogue does not declare)",
+      "children": {
+        "message": {
+          "status": "live",
+          "verifiedAt": "2026-10-27",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/runtime/src/sandbox/hook-refusal-catalogue.ts#declaredRefusalMessage (the sentence the refusal is answered with: `hooks.<hook>.refusals.<CODE>.message` picked through the `i18n` service in the caller's `HookContext.session.locale`, negotiated by `resolveBundleLocale`, else the declared `message`); packages/runtime/src/sandbox/hook-refusal-catalogue.ts#resolveHookRefusal (serves it as the refusal's caller-facing sentence and its `userMessage`)"
+        },
+        "status": {
+          "status": "live",
+          "verifiedAt": "2026-10-27",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/runtime/src/sandbox/hook-refusal-catalogue.ts#resolveHookRefusal (the refusal carries the declared `status`, else 400; the status the body set on its own throw is not read)"
+        }
+      },
+      "note": "[#26170, maintainer ruling 6431311681 letter A] Seeded `live` together with its reader: the key, the body runner that answers it, the translation group and the coverage count land in one change (Prime Directive 10). Read on the sandboxed `body` path only, so the schema refuses `refusals` on a hook with no `js` body (an in-process `handler`, an expression body): a catalogue nothing would answer is never saved. An error a host call raised and the body let through unchanged, a nested hook's refusal, a crash and a sandbox fault pass through untouched. DRILLED to the entry's two keys: the entry face is closed (`.strict()`)."
+    },
     "label": {
       "status": "live",
       "verifiedAt": "2026-09-29",

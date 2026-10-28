@@ -13,7 +13,9 @@
  * a read-only transcript with the SAME `ChatbotEnhanced` renderer the live
  * chat uses (in `readOnly` mode — no composer), so assistant tool calls show
  * as proper proposed-plan / draft cards instead of a raw tool-result JSON
- * dump. Other object kinds fall back to a generic JSON preview.
+ * dump. Every other object renders its fields read-only through
+ * `SharedRecordFields`: the record's own keys, labelled and formatted, and
+ * never the raw JSON (objectstack#26767).
  *
  * A link's password travels in the `X-Share-Password` request header, never in
  * the request URL (objectui#11649) — see `SHARE_PASSWORD_HEADER`. A `401` is
@@ -49,6 +51,7 @@ import {
   type ResolvedShare,
   type ResolveErrorBody,
 } from './shared-record-shape';
+import { SharedRecordFields } from './SharedRecordFields';
 
 /**
  * Why the link did not open. The server's own message is shown as it came;
@@ -333,7 +336,7 @@ export default function SharedRecordPage() {
     );
   }
 
-  // Generic fallback: dump the JSON record.
+  // Every other object: the record's fields, read-only.
   return (
     <div className="mx-auto flex h-svh max-w-3xl flex-col bg-background">
       <header className="border-b px-4 py-3">
@@ -342,9 +345,7 @@ export default function SharedRecordPage() {
         </h1>
       </header>
       <main className="flex-1 overflow-y-auto p-4">
-        <pre className="overflow-x-auto rounded-md border bg-muted/30 p-3 text-[12px]">
-          {JSON.stringify(data.record, null, 2)}
-        </pre>
+        <SharedRecordFields record={data.record} />
         {data.redactedFields && data.redactedFields.length > 0 && (
           <p className="mt-2 text-[11px] text-muted-foreground">
             {t('sharedRecord.redactedFields', {

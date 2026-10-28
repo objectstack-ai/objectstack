@@ -384,14 +384,35 @@ describe('a refused sys_file read still hydrates a file the record being read ow
     expect(rows.d5.attachment).toEqual(asFileReader.d5.attachment);
   });
 
-  it('a read whose projection leaves out id cannot name its owner record, so every id keeps the marker', async () => {
+  it('[#26672] a read whose projection leaves out id still names its owner record — and answers no id it did not name', async () => {
     const { engine, calls } = await boot();
 
     const rows = await engine.find('doc', { fields: ['attachment'], context: READER_CTX });
+    const withId = byId(await engine.find('doc', { fields: ['id', 'attachment'], context: READER_CTX }));
 
-    expect(rows.find((r: any) => r.attachment?.id === OWNED && !r.attachment.metadataRefused)).toBeUndefined();
-    expect(rows.filter((r: any) => r.attachment != null)).toContainEqual({ attachment: refused(OWNED) });
-    expect(calls).toEqual([]);
+    // The same verdict as the projection that names `id`: d1 owns OWNED and
+    // hydrates it, d3 holds a copy of it and keeps the marker.
+    expect(rows).toContainEqual({ attachment: hydrated(OWNED, 'owned.pdf') });
+    expect(rows).toContainEqual({ attachment: refused(OWNED) });
+    expect(withId.d1.attachment).toEqual(hydrated(OWNED, 'owned.pdf'));
+    expect(withId.d3.attachment).toEqual(refused(OWNED));
+    for (const row of rows) expect(Object.keys(row)).toEqual(['attachment']);
+    expect(calls[0]?.ownerIds).toContain('d1');
+
+    const one = await engine.findOne('doc', { where: { id: 'd1' }, fields: ['attachment'], context: READER_CTX });
+    expect(one).toEqual({ attachment: hydrated(OWNED, 'owned.pdf') });
+  });
+
+  it('[#26672] …and a reader the verdict refuses is still refused when the projection leaves out id', async () => {
+    const { engine } = await boot({ allow: [] });
+
+    const rows = await engine.find('doc', { fields: ['attachment'], context: READER_CTX });
+    expect(rows.filter((r: any) => r.attachment != null)).toEqual(
+      [refused(OWNED), refused(OWNED), refused(TOMBSTONE_OWNED), refused(PENDING_OWNED), refused(OTHER_OBJECT)]
+        .map((attachment) => ({ attachment })),
+    );
+    const one = await engine.findOne('doc', { where: { id: 'd1' }, fields: ['attachment'], context: READER_CTX });
+    expect(one).toEqual({ attachment: refused(OWNED) });
   });
 
   it('the happy path costs no warn; the one debug line counts what the verdict allowed', async () => {

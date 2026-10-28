@@ -310,7 +310,7 @@ export const REACT_BLOCKS: ReactBlockDef[] = [
         description: "The object this block binds to, written as the metadata-tier data source: data={{ provider: 'object', object: '…' }}. Any ViewData provider is accepted (a 'value' provider renders static rows); nothing stamps the object on a react page, so this prop is required.",
       },
       { name: 'filters', type: "FilterArray e.g. ['status','=','active']", kind: 'controlled', description: 'ObjectQL base filter; drive from React state for tabbed/searched lists. ([field, op, value]; ops =, !=, >, <, contains, in; compound: [\"and\", […], […]]).' },
-      { name: 'navigation', type: "{ mode: 'page' | 'drawer' | 'modal' | 'split' | 'none' }", kind: 'binding', description: 'What a row click does. Use { mode: \"none\" } when you handle clicks via onRowClick.' },
+      { name: 'navigation', type: "{ mode: 'drawer' | 'page' | 'new_window' | 'none' }", kind: 'binding', description: 'What a row click does. Use { mode: \"none\" } when you handle clicks via onRowClick.' },
       { name: 'onRowClick', type: '(record) => void', kind: 'callback', description: "Called with the clicked row's record — the hook for master/detail." },
       { name: 'onNavigate', type: "(recordId, action: 'view' | 'new_window') => void", kind: 'callback', description: "Called for page-level navigation. The second argument is a navigation-MODE token from a CLOSED vocabulary — 'view' opens the record page, 'new_window' opens it in a new browser tab; the reference implementation emits no other value and reads no other branch." },
       { name: 'fields', type: 'string[]', kind: 'binding', description: 'Limit/order the columns shown (defaults to the object list fields).' },

@@ -136,7 +136,7 @@ describe('FlowRunner — the `flows` translation overlay (objectui#5920)', () =>
     expect(dialog.queryByPlaceholderText('e.g. Annual renewal')).not.toBeInTheDocument();
   });
 
-  it('names the translated label in the missing-required toast, not the authored one', async () => {
+  it('names the translated label in the missing-required refusal, not the authored one', async () => {
     const user = userEvent.setup();
     const instance = i18nWith('zh-CN', 'zh-CN', ZH_CN);
     renderRunner(CONVERSION, instance);
@@ -146,8 +146,10 @@ describe('FlowRunner — the `flows` translation overlay (objectui#5920)', () =>
     // than spelled here.
     await user.click(screen.getByRole('button', { name: instance.t('common.submit') }));
 
-    await waitFor(() => expect(toasts.error).toHaveBeenCalledTimes(1));
-    const message = String(toasts.error.mock.calls[0][0]);
+    // The refusal is drawn at the field (objectstack#26882), not toasted.
+    await waitFor(() => expect(document.querySelector('[data-screen-field-error]')).not.toBeNull());
+    expect(toasts.error).not.toHaveBeenCalled();
+    const message = String(document.querySelector('[data-screen-field-error]')?.textContent);
     expect(message).toContain('商机名称');
     expect(message).not.toContain('Opportunity Name');
   });

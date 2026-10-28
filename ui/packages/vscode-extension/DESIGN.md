@@ -370,7 +370,7 @@ pnpm test:watch
 3. 提交更改
 4. 创建Pull Request
 
-详见主仓库的[CONTRIBUTING.md](../../CONTRIBUTING.md)
+详见主仓库的[CONTRIBUTING.md](https://github.com/objectstack-ai/objectstack/blob/main/CONTRIBUTING.md)
 
 ## 许可证 (License)
 

@@ -218,8 +218,8 @@ export interface ObjectTimelineProps {
      * component never passes, and never reads the host's record navigator. So
      * a click opens nothing, under a host that publishes a navigator too. A
      * block written without `mode` (`{ size: 'lg' }`) is different: it takes
-     * the spec's `page` default and opens the record page through that
-     * navigator (objectui#11293). A parent's `onRowClick` / `onItemClick`
+     * the spec's `drawer` default (`page` until objectstack#26677) and opens the
+     * record in the drawer. A parent's `onRowClick` / `onItemClick`
      * outranks the whole key. The members are pinned in
      * `__tests__/timelineNavigationMembers-8654.test.tsx`, and the absent key
      * against the mode-less block in `__tests__/objectTimelineInputs-11168.test.tsx`.

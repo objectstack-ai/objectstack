@@ -56,6 +56,8 @@ import {
 import { withSystemReadContext } from './objectql-adapter.js';
 import { emitAuthSessionAuditEvent, loginEventFor, logoutEventFor } from './auth-session-audit.js';
 import { holdPrincipalSessionExpiry } from './principal-session-mint.js';
+import { canonicalClientAddress } from './client-address-canonical.js';
+import { readRequestClientAddress } from './request-client-address.js';
 
 /**
  * The `AuthManager` members the functions below read — every one of them, and
@@ -266,7 +268,7 @@ export function composeDatabaseHooks(
       return; // never break session create
     }
   };
-  const sessionBefore =
+  const sessionActiveOrgBefore =
     this.config.autoActiveOrganization !== false
       ? async (session: any, ctx: any) => {
           let draft = session;
@@ -282,12 +284,37 @@ export function composeDatabaseHooks(
         }
       : hostSessionBefore;
 
+  // [#26638] The session row's `ip_address` is the address the server
+  // established for this request (the client-address trust rule,
+  // `client-address.ts`, carried in the request state by `handleRequest`), in
+  // its stored text (`client-address-canonical.ts`). better-auth fills the
+  // field from its own reader, which re-derives that address and stores its
+  // rate-limit bucket instead: an IPv6 address expanded and masked to its /64
+  // network, an IPv4-mapped one unmapped. No established address (a
+  // programmatic `auth.api.*` call) ⇒ better-auth's value, in the same text.
+  // It runs FIRST, so the steps below — the host's included — see the
+  // captured address, and a host that sets `ipAddress` itself still wins.
+  const captureSessionAddress = async (session: any) => {
+    const derived = typeof session?.ipAddress === 'string' ? session.ipAddress : undefined;
+    const ipAddress = canonicalClientAddress((await readRequestClientAddress()) ?? derived);
+    return ipAddress === derived ? session : { ...session, ipAddress };
+  };
+  const sessionBefore = async (session: any, ctx: any) => {
+    const captured = await captureSessionAddress(session);
+    const result = sessionActiveOrgBefore ? await sessionActiveOrgBefore(captured, ctx) : undefined;
+    if (result === false) return false;
+    if (result && typeof result === 'object' && 'data' in result) {
+      return { data: { ...captured, ...(result as any).data } };
+    }
+    return captured === session ? result : { data: captured };
+  };
+
   // [#8144] The `login` / `logout` audit writers (#7675 sub-issue A). See
   // `auth-session-audit.ts` for why these two hooks and no others, and why
   // logout reads the endpoint path from the hook's own `ctx` argument rather
   // than from the ambient auth context.
   //
-  // Host hooks chain FIRST and keep their result, exactly as `sessionBefore`
+  // Host hooks chain FIRST and keep their result, exactly as `sessionActiveOrgBefore`
   // above does: the audit row is an observation, never a participant in what
   // better-auth decides. Both emitters are awaited but cannot throw
   // (`emitAuthSessionAuditEvent` swallows), so neither can turn a valid
@@ -378,7 +405,7 @@ export function composeDatabaseHooks(
   // `user.create.before` is a seam only a CREATION traverses, so a later
   // email UPDATE to the owner address structurally cannot inherit the
   // stamp. Host hook chains FIRST and keeps its result shape, exactly as
-  // `sessionBefore` above does; a host `false` (refuse the creation) is
+  // `sessionActiveOrgBefore` above does; a host `false` (refuse the creation) is
   // honoured before the stamp is even consumed.
   const hostUserBefore = (host as any)?.user?.create?.before;
   const userBefore = async (user: any, ctx: any) => {
@@ -426,10 +453,7 @@ export function composeDatabaseHooks(
       ...((host as any)?.session ?? {}),
       create: {
         ...((host as any)?.session?.create ?? {}),
-        // `sessionBefore` is undefined only when `autoActiveOrganization` is
-        // off AND the host supplied none — spread it in conditionally so the
-        // key is absent rather than explicitly `undefined`.
-        ...(sessionBefore ? { before: sessionBefore } : {}),
+        before: sessionBefore,
         after: sessionCreateAfter,
       },
       update: {

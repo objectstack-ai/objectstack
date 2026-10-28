@@ -15,7 +15,7 @@
  * @module
  */
 
-import { useEffect, useId, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMetadata } from '../../providers/MetadataProvider.js';
 import { useRecentItems, type RecentItem } from '../../hooks/useRecentItems.js';
@@ -65,6 +65,7 @@ import { usePublishAllDrafts } from '../../preview/usePublishAllDrafts.js';
 import { fetchPackages } from '../../views/studio-design/packages-io.js';
 import { resolveAiApiBase } from '../../hooks/useAiSurface.js';
 import { isAiStudioEnabled, isMarketplaceEnabled } from '../../runtime-config.js';
+import { STUDIO_NEW_PACKAGE_PATH } from '../../views/studio-design/studioNewPackage.js';
 
 /**
  * Which AI home CTAs to surface, driven by the live agent catalog (the single
@@ -76,16 +77,29 @@ import { isAiStudioEnabled, isMarketplaceEnabled } from '../../runtime-config.js
  *  - `aiEnabled` — any agent at all (AI is on here in some form).
  * All false while the catalog loads or when AI isn't enabled, so nothing
  * flashes and no AI CTA appears where there's no agent to back it.
+ *
+ * `aiResolved` says the catalog has ANSWERED (objectstack#26614): false while
+ * it loads, so a control that differs between "AI here" and "no AI here" can
+ * wait instead of drawing the wrong one first. The latch is
+ * `useAiSurfaceEnabled`'s, for its reason: `useAgents` starts with
+ * `isLoading=false` and fetches an effect later, so the first frame's empty
+ * list means "not asked yet", not "no agents". A failed read resolves to no
+ * agents, as it does there.
  */
 function useHomeAiAvailability(): {
   aiEnabled: boolean;
+  aiResolved: boolean;
   askAvailable: boolean;
   buildAvailable: boolean;
 } {
   const apiBase = useMemo(() => resolveAiApiBase(), []);
-  const { agents } = useAgents({ apiBase });
+  const { agents, isLoading } = useAgents({ apiBase });
+  const fetchStartedRef = useRef(false);
+  if (isLoading) fetchStartedRef.current = true;
+  const aiEnabled = agents.length > 0;
   return {
-    aiEnabled: agents.length > 0,
+    aiEnabled,
+    aiResolved: aiEnabled || (fetchStartedRef.current && !isLoading),
     askAvailable: agents.some((a) => isAskAgent(a.name)),
     // cloud#816 — authoring availability by DECLARED capability (name-check fallback inside).
     buildAvailable: agents.some((a) => agentHasCapability(agents, a.name, 'authoring')),
@@ -364,7 +378,7 @@ export function HomePage() {
   // AI CTA gating, per agent: "Build with AI" only when a build agent is
   // deployed (cloud / AI Studio); "Ask AI" only when a data agent is; neither
   // when AI isn't enabled. Community builds typically land in the ask-only state.
-  const { askAvailable, buildAvailable } = useHomeAiAvailability();
+  const { aiEnabled, aiResolved, askAvailable, buildAvailable } = useHomeAiAvailability();
   // objectstack#8270 — the authoring CTAs below are gated on the SERVER's
   // capability answer, not on the admin ROLE: on the EE multi-tenant deploy an
   // `org_owner` is an admin (`isAdmin === true`) yet deliberately holds no
@@ -696,7 +710,16 @@ export function HomePage() {
                     * flags (`features.marketplace` / `installLocal`), and objectui#5504
                     * already ruled disable-and-explain for it. Its flag means
                     * reachability; this one means force-hide. */}
-                  {aiStudioEnabled && (
+                  {/* objectstack#26614 — on a deployment whose agent catalog
+                    * is empty or absent, "Build an app" promises a build nothing
+                    * here can start. There the chip says what it opens instead,
+                    * "New in Studio", and opens Studio's new-package flow; and
+                    * since Studio is then the ONLY way to build, a session that
+                    * may not author gets no chip rather than a dimmed one (the
+                    * template chip beside it still carries the reason). With
+                    * agents present nothing changes. The chip waits for the
+                    * catalog's answer, so neither form flashes before the other. */}
+                  {aiStudioEnabled && aiEnabled && (
                     <BuilderChip
                       icon={Hammer}
                       label={t('home.build.title', { defaultValue: 'Build an app' })}
@@ -705,6 +728,17 @@ export function HomePage() {
                       disabledReason={!canAuthorMetadata ? authoringGateReason : undefined}
                       reasonId={authoringReasonId}
                       testId="home-build-app"
+                    />
+                  )}
+                  {aiStudioEnabled && aiResolved && !aiEnabled && canAuthorMetadata && (
+                    <BuilderChip
+                      icon={Hammer}
+                      label={t('home.build.inStudio', { defaultValue: 'New in Studio' })}
+                      tone="soft"
+                      onClick={() => navigate(STUDIO_NEW_PACKAGE_PATH)}
+                      disabledReason={undefined}
+                      reasonId={undefined}
+                      testId="home-build-in-studio"
                     />
                   )}
                   {/* The reasons the withheld chips are described by — visually

@@ -3377,13 +3377,17 @@ describe('RLSCompiler — SQL→CEL deprecation bridge (ADR-0058 D1)', () => {
 });
 
 describe('SecurityPlugin – metadata-change cache invalidation', () => {
-  it('clears metadata-derived caches when metadata changes at runtime', async () => {
+  // [#26596, #26698] Driven through the protocol's `onMetadataMutation`, the
+  // signal every metadata authoring door emits. The rest of the subscription
+  // contract (drafts, `metadata:reloaded`, absence, `destroy()`) is pinned in
+  // `metadata-change-invalidation.test.ts`.
+  it('clears metadata-derived caches when a metadata mutation lands at runtime', async () => {
     const plugin = new SecurityPlugin();
-    let watchCb: (() => void) | undefined;
-    const metadata = {
-      watch: (_type: string, cb: () => void) => {
-        watchCb = cb;
-        return { unsubscribe: vi.fn() };
+    const listeners: Array<(evt: { type: string; name: string; state: string }) => void> = [];
+    const protocol = {
+      onMetadataMutation: (listener: (typeof listeners)[number]) => {
+        listeners.push(listener);
+        return () => {};
       },
     };
     const ctx: any = {
@@ -3392,7 +3396,8 @@ describe('SecurityPlugin – metadata-change cache invalidation', () => {
       hook: vi.fn(),
       getService: vi.fn().mockImplementation((name: string) => {
         if (name === 'manifest') return { register: vi.fn() };
-        if (name === 'metadata') return metadata;
+        if (name === 'metadata') return {};
+        if (name === 'protocol') return protocol;
         if (name === 'objectql') return { registerMiddleware: vi.fn() };
         return undefined;
       }),
@@ -3400,17 +3405,19 @@ describe('SecurityPlugin – metadata-change cache invalidation', () => {
     await plugin.init(ctx);
     await plugin.start(ctx);
 
-    expect(typeof watchCb).toBe('function');
+    expect(listeners.length).toBeGreaterThan(0);
 
     (plugin as any).fieldNamesCache.set('crm_account', new Set(['name']));
     (plugin as any).tenancyDisabledCache.set('crm_account', true);
     (plugin as any).cbpRelCache.set('crm_account', null);
+    (plugin as any).objectSecurityMetaCache.set('crm_account', { owdOpensRowWrites: false });
 
-    watchCb!();
+    for (const listener of listeners) listener({ type: 'object', name: 'crm_account', state: 'active' });
 
     expect((plugin as any).fieldNamesCache.size).toBe(0);
     expect((plugin as any).tenancyDisabledCache.size).toBe(0);
     expect((plugin as any).cbpRelCache.size).toBe(0);
+    expect((plugin as any).objectSecurityMetaCache.size).toBe(0);
   });
 });
 
@@ -3619,6 +3626,68 @@ describe('explainAccessForCaller (ADR-0090 D6/D12)', () => {
     ).rejects.toMatchObject({ name: 'PermissionDeniedError' });
     const self = await plugin.explainAccessForCaller({ object: 'task', operation: 'read', userId: 'u_east_1' }, plain);
     expect(self.principal.userId).toBe('u_east_1');
+  });
+
+  // [#26641] Explaining ANOTHER user by an id no `sys_user` row has is refused
+  // `404 RECORD_NOT_FOUND`, naming the id: the resolver synthesises a baseline
+  // principal for any id, so it used to answer a verdict about nobody. The
+  // existence read runs only after the caller is admitted to explain others.
+  describe('[#26641] an id no sys_user row has', () => {
+    const GHOST = 'u_no_such_user_26641';
+    /** The ids `sys_user` was asked about, in order. */
+    const userReads = (plugin: any): string[] => {
+      const seen: string[] = [];
+      const ql = (plugin as any).ql;
+      const findOne = ql.findOne.bind(ql);
+      ql.findOne = async (object: string, opts: any) => {
+        if (object === 'sys_user') seen.push(String(opts?.where?.id));
+        return findOne(object, opts);
+      };
+      return seen;
+    };
+
+    it('a caller holding manage_users is refused 404 RECORD_NOT_FOUND naming the id', async () => {
+      const { plugin } = await boot();
+      const caller = { userId: 'u_hr', positions: [], permissions: ['hr_admin'] };
+      for (const operation of ['read', 'create']) {
+        const err: any = await plugin
+          .explainAccessForCaller({ object: 'task', operation, userId: GHOST }, caller)
+          .then(() => null, (e) => e);
+        expect(err, `${operation}: refused, not answered`).toMatchObject({
+          name: 'ExplainUserNotFoundError', code: 'RECORD_NOT_FOUND', status: 404, statusCode: 404, userId: GHOST,
+        });
+        expect(err.message).toContain(`'${GHOST}'`);
+      }
+    });
+
+    it('a caller who may not explain others gets their 403 first, and no existence read is made', async () => {
+      const { plugin } = await boot();
+      const seen = userReads(plugin);
+      for (const caller of [
+        { userId: 'u_east_1', positions: [], permissions: [] },
+        { userId: 'u_delegate', positions: [], permissions: ['sub_admin'] },
+      ]) {
+        await expect(
+          plugin.explainAccessForCaller({ object: 'task', operation: 'read', userId: GHOST }, caller),
+          `${caller.userId}: the same refusal an existing user outside their reach gets`,
+        ).rejects.toMatchObject({ name: 'PermissionDeniedError', code: 'PERMISSION_DENIED' });
+      }
+      expect(seen, 'the unknown id is never looked up for a caller refused the right').not.toContain(GHOST);
+    });
+
+    it('an existing user is still explained, and a self-explanation is never refused for its id', async () => {
+      const { plugin } = await boot();
+      const hr = { userId: 'u_hr', positions: [], permissions: ['hr_admin'] };
+      const other = await plugin.explainAccessForCaller({ object: 'task', operation: 'read', userId: 'u_west_1' }, hr);
+      expect(other.principal.userId).toBe('u_west_1');
+      // Explaining yourself is unchanged: no `userId`, or your own, explains the
+      // request's own context, whether or not a row carries its id.
+      const ghostSelf = { userId: GHOST, positions: [], permissions: [] };
+      for (const request of [{}, { userId: GHOST }]) {
+        const self = await plugin.explainAccessForCaller({ object: 'task', operation: 'read', ...request }, ghostSelf);
+        expect(self.principal.userId).toBe(GHOST);
+      }
+    });
   });
 
   // [#20515] Explaining ANOTHER user resolves that user's grants in the CALLER's

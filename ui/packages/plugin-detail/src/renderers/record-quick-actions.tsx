@@ -458,11 +458,13 @@ function QuickActionButton({
   // button greyed out while its own action runs already says why — the spinner.
   const disabledByPredicate = hasDeclaredVisibilityGate((action as any).disabled) ? isDisabledPred : false;
   const isDisabled = disabledByPredicate || running;
-  // The generic reason (objectui#11811). The author-written reason beside the
-  // predicate is a spec question for objectstack, not a key this renderer may
-  // invent, so every predicate-disabled action says the same thing for now.
+  // The action's declared `disabledReason` (objectstack#26619), already
+  // resolved against the bundle by `localizeActionTexts` above, else the
+  // generic reason (objectui#11811).
+  const localizedReason: unknown = (action as { disabledReason?: unknown }).disabledReason;
+  const declaredReason = typeof localizedReason === 'string' ? localizedReason : '';
   const disabledReason = disabledByPredicate
-    ? tt('actions.notAvailableForRecord', 'Not available for this record')
+    ? (declaredReason.trim() !== '' ? declaredReason : tt('actions.notAvailableForRecord', 'Not available for this record'))
     : undefined;
   // The declared `icon` (objectui#12772), resolved through the shared icon seam.
   // It sits beside the label and gives way to the spinner while the action

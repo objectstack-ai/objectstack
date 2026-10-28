@@ -53,6 +53,7 @@ import { entitlementDialogFromError, type EntitlementDialogSpec } from '../envir
 import { resolvePageVarTokens } from '../utils/resolvePageVarTokens.js';
 import { launchConsoleFlow } from '../utils/flowLaunch.js';
 import { createConsoleServerActionHandler } from '../utils/consoleServerAction.js';
+import { withNewTabUrlFastPath } from '../utils/newTabUrlFastPath.js';
 import { modalTargetRefusalMessage } from '../utils/modalTargetDiagnostics.js';
 import { actionContextOrg } from '../utils/actionContextOrg.js';
 import { resolveHostAppSegment } from '../utils/appRoute.js';
@@ -803,6 +804,14 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
     [flowDispatch, serverActionHandler],
   );
 
+  // The registered `api` handler: {@link apiHandler}, except that an action
+  // declaring `opensInNewTab` + `newTabUrl` takes the server-action handler's
+  // zero-roundtrip new-tab path, which sends no request (objectstack#26747).
+  const apiActionHandler = useMemo(
+    () => withNewTabUrlFastPath(apiHandler, serverActionHandler),
+    [apiHandler, serverActionHandler],
+  );
+
   // Client-side modal transport, shared with RecordDetailView so a
   // `type: 'modal'` action behaves the SAME on a list page, an SDUI page, a
   // declared-actions bar and a record page. Before this, only RecordDetailView
@@ -883,10 +892,10 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
     onParamCollection: paramCollectionHandler,
     onResultDialog: resultDialogHandler,
     onModal: modalHandler,
-    handlers: { api: apiHandler, flow: flowHandler, script: serverActionHandler, modal: modalActionHandler },
+    handlers: { api: apiActionHandler, flow: flowHandler, script: serverActionHandler, modal: modalActionHandler },
   }), [
     objectName, objectDef, currentUser, activeOrganization, confirmHandler, toastHandler,
-    navigateHandler, paramCollectionHandler, resultDialogHandler, apiHandler,
+    navigateHandler, paramCollectionHandler, resultDialogHandler, apiActionHandler,
     flowHandler, serverActionHandler, modalHandler, modalActionHandler,
   ]);
 
@@ -982,7 +991,9 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
     navigateHandler,
     paramCollectionHandler,
     resultDialogHandler,
-    apiHandler,
+    // The composed handler, so every host that registers it (ConsoleShell's
+    // root provider included) honours the `newTabUrl` fast path.
+    apiHandler: apiActionHandler,
     flowHandler,
     serverActionHandler,
     modalActionHandler,

@@ -44,11 +44,44 @@ interface OpenApiProviderConfig {
    *
    * A remote URL that is unreachable / transiently failing (network error,
    * 408 / 429 / 5xx) degrades the instance and retries (#3049); a wrong URL
-   * (non-retryable 4xx) or an unparseable document stays a fatal config fault.
+   * (non-retryable 4xx), an unparseable document, or a document that is not
+   * OpenAPI 3.x (a Swagger 2.0 document included) stays a fatal config fault.
    */
   spec?: unknown;
   /** Override the base URL (else the document's `servers[0].url`). */
   baseUrl?: unknown;
+}
+
+/**
+ * Refuse a document that is not OpenAPI 3.x — a Swagger 2.0 document
+ * (`swagger: "2.0"`) included. The generator maps the 3.x shape only
+ * (ADR-0023): a 2.0 document would "load" with its `host` / `basePath` ignored
+ * and its `body` / `formData` parameters dropped, so the instance would come up
+ * with wrong actions and no error. That is a configuration fault — fatal at
+ * boot, a skipped entry on reload — and the runtime never converts: the remedy
+ * is an offline conversion to 3.x.
+ *
+ * `source` names where the document came from (file path, URL, or inline), so
+ * the refusal points at the thing to convert.
+ */
+function assertOpenApi3Document(document: object, source: string, connectorName: string): OpenApiDocument {
+  const version = (document as { openapi?: unknown }).openapi;
+  if (typeof version === 'string' && /^3\.\d+(\.\d+)?$/.test(version)) {
+    return document as OpenApiDocument;
+  }
+  const swagger = (document as { swagger?: unknown }).swagger;
+  const found =
+    swagger !== undefined
+      ? `a Swagger ${JSON.stringify(swagger)} document`
+      : version === undefined
+        ? `a document with no 'openapi' version field`
+        : `a document declaring openapi: ${JSON.stringify(version)}`;
+  throw new Error(
+    `connector-openapi provider: connector '${connectorName}' providerConfig.spec ${source} is ${found}; ` +
+      `this provider loads OpenAPI 3.x documents only and never converts at runtime. ` +
+      `Convert the document to OpenAPI 3.x offline (a Swagger 2.0 → OpenAPI 3 converter) and point ` +
+      `providerConfig.spec at the converted document.`,
+  );
 }
 
 /**
@@ -64,7 +97,9 @@ interface OpenApiProviderConfig {
  * {@link ConnectorUpstreamUnavailableError} — the materializer degrades the
  * instance and retries. Every OTHER failure (missing spec, a wrong URL,
  * an unparseable document, no host file access) throws a plain error, which
- * stays fatal at boot / a skipped entry on reload.
+ * stays fatal at boot / a skipped entry on reload. A document that is not
+ * OpenAPI 3.x (Swagger 2.0 included) is one of those fatal faults, whichever of
+ * the three forms carried it — see {@link assertOpenApi3Document}.
  */
 async function loadOpenApiDocument(
   spec: unknown,
@@ -73,12 +108,13 @@ async function loadOpenApiDocument(
 ): Promise<OpenApiDocument> {
   const connectorName = ctx.name;
   if (spec && typeof spec === 'object' && !Array.isArray(spec)) {
-    return spec as OpenApiDocument;
+    return assertOpenApi3Document(spec, '(the inline document)', connectorName);
   }
   if (typeof spec === 'string' && spec.length > 0) {
     if (/^https?:\/\//i.test(spec)) {
       const doFetch = fetchImpl ?? fetch;
       let res: Response;
+      let document: object;
       try {
         res = await doFetch(spec);
       } catch (err) {
@@ -113,13 +149,14 @@ async function loadOpenApiDocument(
         if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
           throw new Error('not a JSON object');
         }
-        return parsed as OpenApiDocument;
+        document = parsed;
       } catch (err) {
         throw new Error(
           `connector-openapi provider: connector '${connectorName}' fetched spec '${spec}' but it is not a parseable ` +
             `OpenAPI JSON document: ${(err as Error).message}`,
         );
       }
+      return assertOpenApi3Document(document, `URL '${spec}'`, connectorName);
     }
     // File path — dereferenced through the host capability so resolution stays
     // anchored to (and confined within) the declaring stack/package root.
@@ -138,18 +175,20 @@ async function loadOpenApiDocument(
           `${(err as Error).message}`,
       );
     }
+    let document: object;
     try {
       const parsed: unknown = JSON.parse(text);
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
         throw new Error('not a JSON object');
       }
-      return parsed as OpenApiDocument;
+      document = parsed;
     } catch (err) {
       throw new Error(
         `connector-openapi provider: connector '${connectorName}' providerConfig.spec '${spec}' is not a parseable ` +
           `OpenAPI JSON document: ${(err as Error).message}`,
       );
     }
+    return assertOpenApi3Document(document, `file '${spec}'`, connectorName);
   }
   throw new Error(
     `connector-openapi provider: connector '${connectorName}' requires providerConfig.spec — an inline OpenAPI 3.x ` +
@@ -166,7 +205,7 @@ async function loadOpenApiDocument(
  * static-auth HTTP transport, with the resolved `auth` applied.
  *
  * Hard-fails on invalid config (missing spec, a wrong spec URL, an unparseable
- * document, a bad base URL), so a misconfigured instance fails boot loudly. A
+ * document, a document that is not OpenAPI 3.x, a bad base URL), so a misconfigured instance fails boot loudly. A
  * remote spec URL that is merely unreachable / transiently failing instead
  * degrades the instance and retries (#3049) — see {@link loadOpenApiDocument}.
  */
