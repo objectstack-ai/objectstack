@@ -18,7 +18,7 @@
   shape verdict [`6041482631`](https://github.com/objectstack-ai/objectstack/issues/8345#issuecomment-6041482631);
   [#27119](https://github.com/objectstack-ai/objectstack/issues/27119) (design record, workload rows, ruling); this
   record's card [#27183](https://github.com/objectstack-ai/objectstack/issues/27183). Every claim below about current
-  behaviour cites a file and line on `origin/main` at `cdec7473`.
+  behaviour cites a file or symbol as read on `origin/main` at `cdec7473`.
 
 ---
 
@@ -51,7 +51,7 @@ Three kinds of text feed this record. Each section says which kind it carries.
    measurement round `6041378776` and the shape verdict `6041482631`. They supply the context, the shapes considered
    and the per-card plan. A detail that appears only there is not ruled. This record lists such details under
    [Open items](#open-items) or as a card's draft, never as a decision.
-3. **Readings.** Current behaviour, measured at `cdec7473` and cited by file and line.
+3. **Readings.** Current behaviour, measured at `cdec7473` and cited by file or symbol.
 
 **Two numberings meet here.** #27119 is a decision batch, and two of its items are also called Q1 and Q2. #27119 Q1
 asks when multi-currency starts, and the answer was 乙-现在. #27119 Q2 asks for one rule for an unknown currency, and
@@ -66,25 +66,25 @@ aggregation. The ruling names them by topic ("Q0 A", "rates A", "home currency A
 ### 1. What the platform has today (read at `cdec7473`)
 
 - **A currency value is a bare number** (ADR-0104 D1). `currencyConfig` has two modes
-  (`packages/spec/src/data/field.zod.ts:558`). In `fixed` mode the field has one currency, `defaultCurrency`. In
+  (`packages/spec/src/data/field.zod.ts#CurrencyConfigSchema`). In `fixed` mode the field has one currency, `defaultCurrency`. In
   `dynamic` mode (the default) amounts display in the tenant default currency. The describe says "Neither mode is a
   per-record choice: the value is a bare number either way." No key, column or value carries a record's currency.
-- **A `fixed` field with no code becomes a yuan field.** `defaultCurrency` defaults to `'CNY'` (`field.zod.ts:559`).
+- **A `fixed` field with no code becomes a yuan field.** `defaultCurrency` defaults to `'CNY'` (same schema).
   #27157 (#27119 Q2 X) requires the code and drops the default. It is a member of R1 and a blocker of M0-1.
 - **The tenant currency is the `localization.currency` setting**
-  (`packages/services/service-settings/src/manifests/localization.manifest.ts:105`). It has tenant scope, no platform
-  default and `valueDomain: 'iso_4217_currency'` (`:124`). It may be unset. It is mutable and keeps no history: probe B
+  (`packages/services/service-settings/src/manifests/localization.manifest.ts#localizationSettingsManifest`, key
+  `currency`). It has tenant scope, no platform default and `valueDomain: 'iso_4217_currency'`. It may be unset. It is mutable and keeps no history: probe B
   of the measurement round saw a change relabel every stored `dynamic` amount.
-- **The ISO 4217 value domain exists** (`packages/spec/src/shared/value-domain.zod.ts:159`). It checks membership in
-  `CURRENCY_FRACTION_DIGITS` (`packages/spec/src/data/currency-fraction-digits.ts:59`). Only that table's key set is
+- **The ISO 4217 value domain exists** (`packages/spec/src/shared/value-domain.zod.ts#isValueDomainMember`). It checks
+  membership in `CURRENCY_FRACTION_DIGITS` (`packages/spec/src/data/currency-fraction-digits.ts#CURRENCY_FRACTION_DIGITS`). Only that table's key set is
   read. Its fraction-digit values have no reader.
 - **No conversion is implemented.**
   `git grep -n -i -E "exchange.?rate|fx_rate|currency_conversion|convertCurrency" -- packages/ ':!*.test.ts'` prints 0
   lines. Control: `git grep -c currencyConfig -- packages/spec/src/data/field.zod.ts` prints 13.
 - **The CEL standard library is pure.** Its header says: "Nothing registered here may be handed a resolver, a lazy
-  getter or any other callback into the host" (`packages/formula/src/stdlib.ts:6`). That purity keeps
+  getter or any other callback into the host" (`packages/formula/src/stdlib.ts`). That purity keeps
   `objectstack build` byte-stable, so a formula function cannot read a rate table.
-- **`CurrencyValueSchema` is still exported**, marked `@deprecated` (`field.zod.ts:581`, its type at `:3062`), although
+- **`CurrencyValueSchema` is still exported**, marked `@deprecated` (`packages/spec/src/data/field.zod.ts#CurrencyValueSchema`, its type `#CurrencyValue`), although
   ADR-0104 D1 says it "is deleted". #27182 retires it.
 - **Today's numbers are silently wrong** (from the measurement round's probes over a real ObjectQL engine; the scratch
   files were run and deleted and are not re-run for this record). The probes model a record currency the way authors
@@ -248,7 +248,7 @@ Version Packages, and the epic body says that happens only when a pair is comple
 These are outside this decision, and each would need a decision of its own. The first eight are the workload rows'
 "What is not in this list", each "a capability with no pull in tree". The last comes from the design record §13.
 
-- A CEL `convertCurrency()`. The shape rules it out (D1), and it conflicts with `stdlib.ts:6`.
+- A CEL `convertCurrency()`. The shape rules it out (D1), and it conflicts with the purity rule in the header of `packages/formula/src/stdlib.ts`.
 - Read-time conversion.
 - A built-in provider feed (ECB or similar). An app flow writes rows instead (D3).
 - N×N pair rates. Every rate is against the home currency.
@@ -298,7 +298,7 @@ Where a source leans one way, the lean is quoted here, not adopted. This record 
    says money is computed in minor-unit integers or decimals, not floating point (「浮点算钱用最小单位整数或 decimal」).
    Neither point is in the ruling.
 4. **A home-amount declaration or a converting write while no home currency is set** (#27192, #27198).
-   `localization.currency` may be unset (`localization.manifest.ts:105`: `required: false`, no platform default). The
+   `localization.currency` may be unset (its manifest entry says `required: false`, and there is no platform default). The
    ruling locks the setting once used. It does not say what happens while the setting is unset. The sources rule out a
    silent default (design record §9: no CNY default).
 5. **The unit of parameter 4** (#27185). "12 significant decimals" can mean 12 significant digits or 12 digits after
@@ -320,16 +320,16 @@ Where a source leans one way, the lean is quoted here, not adopted. This record 
 
 ## Verification notes
 
-Each reading below was taken at `cdec7473`. To re-check one, run its command on a newer `origin/main` and compare. A
-changed line number means the file moved, not that the fact changed. Re-read the line before citing it.
+Each reading below was taken at `cdec7473`. To re-check one, run its command on a newer `origin/main`. The comment
+says what the command printed at `cdec7473`.
 
 ```bash
-git grep -n "Neither mode is a per-record choice" -- packages/spec/src/data/field.zod.ts      # :558
-git grep -n "default('CNY')" -- packages/spec/src/data/field.zod.ts                           # :559, until #27157
-git grep -n "export const CurrencyValueSchema" -- packages/spec/src/data/field.zod.ts         # :581, until #27182
-git grep -n "may be handed a res" -- packages/formula/src/stdlib.ts                            # :6
+git grep -n "Neither mode is a per-record choice" -- packages/spec/src/data/field.zod.ts      # 1 line
+git grep -n "default('CNY')" -- packages/spec/src/data/field.zod.ts                           # 1 line, until #27157
+git grep -n "export const CurrencyValueSchema" -- packages/spec/src/data/field.zod.ts         # 1 line, until #27182
+git grep -n "may be handed a res" -- packages/formula/src/stdlib.ts                            # 1 line
 git grep -n -i -E "exchange.?rate|fx_rate|currency_conversion|convertCurrency" -- packages/ ':!*.test.ts'   # 0 lines
-git grep -n "valueDomain: 'iso_4217_currency'" -- packages/services/service-settings/src/manifests/localization.manifest.ts   # :124
+git grep -n "valueDomain: 'iso_4217_currency'" -- packages/services/service-settings/src/manifests/localization.manifest.ts   # 1 line
 ```
 
 ## References

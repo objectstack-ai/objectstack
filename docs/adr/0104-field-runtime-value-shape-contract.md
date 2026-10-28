@@ -174,8 +174,9 @@ inert metadata ADR-0078 forbids.
 > This paragraph's currency sentence needs two corrections.
 > First, the deletion it records has not happened yet. At `cdec7473`,
 > `CurrencyValueSchema` is still exported and marked `@deprecated`
-> (`packages/spec/src/data/field.zod.ts:581`, its type at `:3062`). The
-> retirement is carried by #27182, which records its landing here.
+> (`packages/spec/src/data/field.zod.ts#CurrencyValueSchema`, its type
+> `#CurrencyValue`). The retirement is carried by #27182, which records its
+> landing here.
 > Second, multi-currency keeps this decision. ADR-0144 (ruling `6465431966`
 > on #27119) puts a record's currency in a sibling ISO 4217 code field that
 > the amount names through `currencyField`, never in the value, so a
