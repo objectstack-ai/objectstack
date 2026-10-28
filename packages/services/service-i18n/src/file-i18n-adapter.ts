@@ -37,6 +37,9 @@ function resolveKey(data: Record<string, unknown>, key: string): string | undefi
 /**
  * Deep-merge two plain objects recursively.
  * Arrays and non-plain-object values from `source` overwrite those in `target`.
+ * A source key whose value is `undefined` is skipped: a bundle that leaves a
+ * leaf unset (a module's `apps.APP.label`, which the owning package
+ * translates) must not erase the value an earlier bundle supplied.
  * Exported for the plugin's authored-translation re-sync (#2591), which must
  * merge multiple authored items targeting the same locale with the exact
  * semantics the adapter itself uses.
@@ -49,6 +52,7 @@ export function deepMerge(
   for (const key of Object.keys(source)) {
     const tVal = target[key];
     const sVal = source[key];
+    if (sVal === undefined) continue;
     if (
       tVal && sVal
       && typeof tVal === 'object' && !Array.isArray(tVal)

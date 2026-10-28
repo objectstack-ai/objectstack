@@ -298,11 +298,14 @@ export function registerBuiltinAnchors(): void {
           visibleWhen: "data.viewKind == 'list'",
         },
         // Form-family layout (FormViewSchema.type). Shown only when `viewKind`
-        // is 'form'; its value becomes the form `config.type`.
+        // is 'form'; its value becomes the form `config.type`. The spec's three
+        // layouts only: `split`, `drawer` and `modal` left the enum in
+        // `@objectstack/spec` 18.3.0 (where a form opens is the caller's choice),
+        // so offering them here would build a body the server refuses.
         formType: {
           type: 'string',
           title: 'Form layout',
-          enum: ['simple', 'tabbed', 'wizard', 'split', 'drawer', 'modal'],
+          enum: ['simple', 'tabbed', 'wizard'],
           default: 'simple',
           description: 'Pick a starter form layout. Switch later in the designer.',
           visibleWhen: "data.viewKind == 'form'",

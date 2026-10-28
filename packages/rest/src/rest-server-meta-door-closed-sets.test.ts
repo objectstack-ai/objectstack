@@ -255,6 +255,7 @@ describe('[#24395] ?surface= on the REST save door: studio and api reach the sav
 
     for (const [label, surface] of [
         ['copilot — an in-process tool\'s mark, never a remote caller\'s', 'copilot'],
+        ['mcp — the MCP build door\'s mark, never a remote caller\'s (#27176)', 'mcp'],
         ['a case variant, never folded to studio', 'Studio'],
         ['an unknown value, never read as api', 'robot'],
         ['an empty value', ''],

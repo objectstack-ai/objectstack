@@ -2974,6 +2974,20 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'carries, and on the assembled-manifest `viewItems` channel.',
   },
   {
+    id: 'ui-form-view-type-layout-only',
+    order: 112,
+    text:
+      'It also narrows the form view `type` to the form\'s layout — `simple`, `tabbed` or `wizard` '
+      + '(ADR-0050, accepted by the maintainer\'s ruling): `drawer` and `modal` named where a form is '
+      + 'opened, which is the caller\'s open mode, and `split` was a list-beside-record view mode, '
+      + 'which the same release had already made a reader\'s preference. Each retired member is '
+      + 'refused at parse with its prescription; the split-only keys `sections[].pane`, `splitSize` '
+      + 'and `splitResizable` are tombstoned with it. The D2 conversion '
+      + '`form-view-presentation-types-removed` deletes the member, which lands the form on the '
+      + '`simple` default, and strips the three keys from existing sources and stored rows. Its D3 '
+      + 'record is the semantic entry `ui-form-view-type-layout-only`.',
+  },
+  {
     id: 'ui-marketplace-installed-list-retired',
     order: 102,
     text:
