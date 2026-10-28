@@ -60,7 +60,8 @@ function Host({ props, writes }: { props: Row; writes: Row[] }) {
       selection={{ kind: 'block', id: 'regions[0].components[0]' }}
       onPatch={(patch: Row) => setDraft((d) => {
         const next = { ...d, ...patch };
-        writes.push(((next.regions as any)[0].components[0].properties) as Row);
+        const regions = next.regions as Array<{ components: Array<{ properties: Row }> }>;
+        writes.push(regions[0].components[0].properties);
         return next;
       })}
       onClearSelection={() => {}}
