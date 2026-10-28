@@ -323,6 +323,25 @@ export const REGEN_ARTIFACTS = Object.freeze([
     check: 'check:platform-object-tenancy-census',
     owner: ROOT_OWNER,
   },
+  // The component reference: every file under the directory is rendered whole
+  // from the repo-root `sdui.manifest.json` by scripts/gen-sdui-reference.mjs, and
+  // a write removes anything else there, so no hand-written region exists for a
+  // deferral to launder. Two branches that each change the manifest produce pages
+  // describing neither side once merged; only regenerating from the merged
+  // manifest reaches the answer. The manifest itself is not routed — it is built
+  // from the registry under `ui/` — so a merge resolves it first and this row's
+  // regeneration reads the result.
+  //
+  // Same LOCAL-facility caveat as its neighbours: `check:sdui-reference` runs in
+  // `lint.yml` on `pull_request` and `merge_group` with no `paths:` filter and
+  // re-renders from the manifest rather than reading the pages back. No
+  // `readsDist`: the generator reads the tracked manifest and nothing built.
+  {
+    path: 'content/docs/ui/components/**',
+    gen: 'gen:sdui-reference',
+    check: 'check:sdui-reference',
+    owner: ROOT_OWNER,
+  },
 ]);
 
 /**

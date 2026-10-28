@@ -206,7 +206,8 @@ EOF
   run -- sh -c 'exit 7' || rc=$?
   st_case "a failing command's own exit code passes through, never rewritten" "$rc" 7
   # A scripts/pm tool on the write-pace roster gates itself: identity only.
-  printf 'A body.\n' > "$dir/b.md"
+  # The body opens with the seat's signature line, which issue-create refuses a card body without.
+  printf 'domain:skills#2 · os-justin · session_01ABCDEFGHJKMNPQRSTVWXYZ\nA body.\n' > "$dir/b.md"
   : > "$err.tool"
   env -u GIT_DIR OS_FLEET_TOKEN_CACHE_FILE="$cache" OS_FLEET_APP_ID=1 OS_FLEET_INSTALLATION_ID=2 OS_PM_WRITE_PACE_FILE="$pace" OS_PM_WRITE_MIN_GAP_MS=0 HTTPS_PROXY= https_proxy= \
     CCR_AGENT_PROXY_ENABLED= bash "$SELF" -- node "$HERE/issue-create.mjs" --dry-run --repo o/r --title x --body-file "$dir/b.md" > /dev/null 2> "$err.tool"

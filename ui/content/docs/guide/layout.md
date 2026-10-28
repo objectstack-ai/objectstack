@@ -649,7 +649,7 @@ block's `properties.title`, not on the page.
             "properties": {
               "name": "delete_record",
               "label": "Delete",
-              "variant": "destructive",
+              "variant": "danger",
               "icon": "trash",
               "actionType": "deleteRecord"
             }

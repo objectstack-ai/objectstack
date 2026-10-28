@@ -80,12 +80,12 @@ describe('CurrencyConfigSchema', () => {
     expect(() => CurrencyConfigSchema.parse(validConfig)).not.toThrow();
   });
 
-  it('should apply default values — and materialize no decimal-places key', () => {
+  it('should apply the mode default — and materialize no decimal-places key and no currency code', () => {
     const config = CurrencyConfigSchema.parse({});
 
     // Byte-exact: the removed `.overwrite()` used to bake `precision: 2` in
-    // front of these two keys.
-    expect(JSON.stringify(config)).toBe('{"currencyMode":"dynamic","defaultCurrency":"CNY"}');
+    // front of the keys, and the removed `.default('CNY')` (#27157) a code.
+    expect(JSON.stringify(config)).toBe('{"currencyMode":"dynamic"}');
   });
 
   it('refuses `precision` at EVERY value, in range or not: the key was removed, not re-bounded', () => {
@@ -109,7 +109,7 @@ describe('CurrencyConfigSchema', () => {
 
   it('should accept both currency modes', () => {
     expect(() => CurrencyConfigSchema.parse({ currencyMode: 'dynamic' })).not.toThrow();
-    expect(() => CurrencyConfigSchema.parse({ currencyMode: 'fixed' })).not.toThrow();
+    expect(() => CurrencyConfigSchema.parse({ currencyMode: 'fixed', defaultCurrency: 'USD' })).not.toThrow();
   });
 
   it('should reject invalid currency modes', () => {
@@ -1753,8 +1753,8 @@ describe('Field Factory Helpers', () => {
       };
 
       const result = FieldSchema.parse(field);
-      // #19992: exactly the two keys — no baked `precision: 2` any more.
-      expect(result.currencyConfig).toEqual({ currencyMode: 'dynamic', defaultCurrency: 'CNY' });
+      // #19992: no baked `precision: 2` any more; #27157: no baked `'CNY'`.
+      expect(result.currencyConfig).toEqual({ currencyMode: 'dynamic' });
     });
 
     it('refuses a currencyConfig `precision` of any value as an unknown key, not as a bad number', () => {
@@ -1814,6 +1814,7 @@ describe('Field Factory Helpers', () => {
         type: 'currency' as const,
         currencyConfig: {
           currencyMode: 'fixed' as const,
+          defaultCurrency: 'EUR',
         },
       };
 

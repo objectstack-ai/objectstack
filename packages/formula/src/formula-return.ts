@@ -129,13 +129,16 @@ function sameCurrency(a: MoneyCurrency, b: MoneyCurrency): boolean {
   return a.code === b.code;
 }
 
-/** A field's currency, read through the schema a currency field is parsed with — or `null` when it does not parse. */
+/**
+ * A field's currency, read through the schema a currency field is parsed with — or `null` when it does not parse.
+ * A `fixed` config with no code does not parse (the schema refuses it rather than filling in a code), so the
+ * `defaultCurrency` guard below only narrows the type the refinement already guarantees.
+ */
 function currencyOf(config: unknown): MoneyCurrency | null {
   const parsed = CurrencyConfigSchema.safeParse(config ?? {});
   if (!parsed.success) return null;
-  return parsed.data.currencyMode === 'fixed'
-    ? { mode: 'fixed', code: parsed.data.defaultCurrency }
-    : { mode: 'dynamic' };
+  if (parsed.data.currencyMode !== 'fixed') return { mode: 'dynamic' };
+  return parsed.data.defaultCurrency === undefined ? null : { mode: 'fixed', code: parsed.data.defaultCurrency };
 }
 
 /** Is `d` a number that is not an amount (a quantity or a constant)? */

@@ -1092,6 +1092,15 @@ export const DashboardWidgetChartConfigSchema = lazySchema(() => ChartConfigSche
  * Dashboard Widget Schema
  * A single component on the dashboard grid.
  *
+ * **A viewer who may not read a tile's data does not see the tile.** Outside
+ * design mode, a dataset-bound widget whose query the server refuses as a read
+ * refusal (403 `PERMISSION_DENIED`) is left out of the dashboard for that
+ * viewer; no key declares it, and the server's refusal is the only verdict
+ * (the renderer never guesses a permission). In design mode the widget stays
+ * and shows its no-access state, so the author can still select it.
+ * `requiresObject` / `requiresService` keep their install-only meaning: they
+ * gate a widget on what is INSTALLED, never on who is viewing.
+ *
  * Strict since the ADR-0021 cutover; since #6619 strict through the SHARED
  * `strictObject` template rather than a hand-written `$ZodErrorMap`. The three
  * prescriptions are unchanged in wording ({@link WIDGET_GUIDANCE_SETS}); what
@@ -1145,8 +1154,12 @@ export const DashboardWidgetSchema = lazySchema(() => strictObject({
    * in single-environment runtimes instead of rendering a 404 error.
    * Set explicitly to the dataset's base object when the widget should be
    * gated on that object's availability.
+   *
+   * An install gate only, never a viewer gate: a viewer the server refuses a
+   * read of the widget's data is handled without this key (the widget is left
+   * out for that viewer outside design mode — see the schema's docblock).
    */
-  requiresObject: z.string().optional().describe('Hide the widget unless the named object is registered').meta({ title: 'Requires Object' }),
+  requiresObject: z.string().optional().describe('Hide the widget unless the named object is registered — an install gate, not a viewer gate. Outside design mode, a dataset-bound widget whose query the server refuses as a read refusal (403 PERMISSION_DENIED) is left out of the dashboard for that viewer with no key.').meta({ title: 'Requires Object' }),
 
   /**
    * Runtime capability gate — widget is hidden when the named kernel

@@ -5,6 +5,7 @@ import { FilterConditionSchema, FilterArraySchema, parseFilterAST } from './filt
 import type { FilterArray, FilterCondition } from './filter.zod';
 import { SortNodeSchema, QuerySchema, FullTextSearchSchema, FieldNodeSchema, AggregationNodeSchema, GroupByNodeSchema, QUERY_CURSOR_REMOVED, QUERY_DISTINCT_REMOVED } from './query.zod';
 import type { QueryAST, QueryInput } from './query.zod';
+import { PROJECTION_NAMES_NO_FIELD, transportProjectionArray } from './projection-names-a-field';
 import { retiredKey } from '../shared/retired-key';
 import { ExecutionContextSchema } from '../kernel/execution-context.zod';
 
@@ -102,11 +103,13 @@ export const BaseEngineOptionsSchema = lazySchema(() => z.object({
  * too. It is declared ahead of both because
  * `RpcQueryOptionsSchema` extends `EngineQueryOptionsSchema` at module load,
  * which runs the lazy factory before any later `const` exists.
+ *
+ * [#27166] The array arm and its sentence live in
+ * `./projection-names-a-field.ts`, because `QuerySchema.fields` (and so every
+ * nested `expand` value) and the flow `get_record` node's `fields` take it too,
+ * and `./query.zod.ts` cannot import this module.
  */
-const PROJECTION_NAMES_NO_FIELD = 'Name at least one field';
 const TransportProjectionStringSchema = z.string().regex(/[^\s,]/, PROJECTION_NAMES_NO_FIELD);
-const transportProjectionArray = <T extends z.ZodString>(member: T) =>
-  z.array(member.regex(/\S/, 'A field name cannot be blank')).min(1, PROJECTION_NAMES_NO_FIELD);
 const PROJECTION_ACCEPT_SET = 'at least one field name; a value naming no field (blank, only commas and spaces, '
   + 'an empty list, or a list with a blank name) is refused';
 
