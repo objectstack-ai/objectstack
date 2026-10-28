@@ -22,7 +22,9 @@ name: Fleet Patrols
 # ⛔ A cron string under `schedule:` and the same string in its job's `if:` are
 # ONE fact spelled twice: change both in the same edit. A cron no `if:` names
 # fires a run that does nothing, and a job whose `if:` names a cron the
-# schedule does not declare never runs — neither shape is red anywhere.
+# schedule does not declare never runs — neither shape is red at run time;
+# `scripts/check-platform-checklist-watchdog.mjs` (clause 7) refuses both
+# before the edit merges.
 #
 # `workflow_dispatch` takes one input, `patrol`: `all` (the default) runs every
 # job, a job id runs that one alone — the manual fire and the smoke test each
@@ -757,7 +759,7 @@ jobs:
   #
   # ## Why a workflow, when the gate ALREADY runs on every PR
   #
-  # Unlike `half-state-patrol.yml` and `required-set-patrol.yml`, this check does
+  # Unlike `half-state-patrol.yml` and the `required-set-patrol` job, this check does
   # not need a runner for TRANSPORT reasons. It is fully offline — it reads
   # `packages/spec/CHANGELOG.md` and `content/docs/releases/**` straight out of the
   # tree, opens no socket, and runs inside `lint.yml` on every pull request today.

@@ -214,7 +214,8 @@ on:
     - cron: '30 5 * * 1'
   workflow_dispatch:
   # Changes to this lane get exercised before they merge — the same posture
-  # half-state-patrol.yml and required-set-patrol.yml keep, and the reason a
+  # half-state-patrol.yml and fleet-patrols.yml's `required-set-patrol` job
+  # keep, and the reason a
   # scheduled-only lane is not an option: `dispatch-gates.mjs` reds when a gate
   # family is reachable ONLY on a schedule, because a family no PR-time event
   # reaches appears on no card's gate list and is therefore graded by nobody
