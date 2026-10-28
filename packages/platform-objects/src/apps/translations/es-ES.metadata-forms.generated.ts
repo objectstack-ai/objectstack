@@ -618,7 +618,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "currencyConfig.defaultCurrency": {
         label: "Moneda predeterminada",
-        helpText: "La única moneda de un campo en modo fixed, como código ISO 4217 de tres caracteres (p. ej., USD, EUR). Por defecto, CNY. No se lee en modo dynamic."
+        helpText: "La única moneda de un campo en modo fixed, como código ISO 4217 de tres caracteres (p. ej., USD, EUR). Obligatorio en modo fixed; no se rellena automáticamente. No se lee en modo dynamic."
       },
       step: {
         label: "Incremento",

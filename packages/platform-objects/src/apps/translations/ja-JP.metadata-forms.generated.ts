@@ -618,7 +618,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "currencyConfig.defaultCurrency": {
         label: "既定の通貨",
-        helpText: "fixed モードのフィールドの通貨。3 文字の ISO 4217 コード（例：USD、EUR）で指定します。既定は CNY です。dynamic モードでは参照されません。"
+        helpText: "fixed モードのフィールドの通貨。3 文字の ISO 4217 コード（例：USD、EUR）で指定します。fixed モードでは必須で、自動では補われません。dynamic モードでは参照されません。"
       },
       step: {
         label: "ステップ値",
