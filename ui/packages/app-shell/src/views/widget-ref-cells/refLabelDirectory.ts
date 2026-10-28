@@ -29,6 +29,12 @@
  *   - a registry kind (`position`, `RECIPIENT_REGISTRY_KINDS`) → the metadata
  *     store, `ensureType(<type>)`, the reader `RecipientPickerField` lists it
  *     with;
+ *   - a two-source kind (`queue`, `RECIPIENT_REGISTRY_AND_RECORD_KINDS`,
+ *     ADR-0142 D7) → both lists the picker reads, the metadata store's
+ *     `ensureType(<type>)` and the organization's rows of `<object>`, merged by
+ *     `mergeQueueCandidates`, the picker's own merge. A catalog read like a
+ *     registry kind's, so it carries the picker's 500-row cap on the rows: a
+ *     queue past it is `unresolved` and draws its stored name;
  *   - the `field` kind → the shared object's schema through
  *     `deriveUserFields`, the picker's own column derivation.
  *
@@ -78,8 +84,10 @@ import type { DataSource } from '@object-ui/types';
 import {
   FIELD_RECIPIENT_TYPE,
   RECIPIENT_RECORD_KINDS,
+  RECIPIENT_REGISTRY_AND_RECORD_KINDS,
   RECIPIENT_REGISTRY_KINDS,
   deriveUserFields,
+  mergeQueueCandidates,
   recipientCandidateLabel,
 } from '@object-ui/fields';
 
@@ -301,6 +309,7 @@ export function useRecipientLabel(
   const objectName = String(dependentValues?.object_name ?? '');
   const record = RECIPIENT_RECORD_KINDS[kind];
   const registry = RECIPIENT_REGISTRY_KINDS[kind];
+  const twoSource = RECIPIENT_REGISTRY_AND_RECORD_KINDS[kind];
   const id = dependentValues && typeof value === 'string' ? value : '';
   const key = !id
     ? ''
@@ -308,9 +317,14 @@ export function useRecipientLabel(
       ? typeof dataSource?.find === 'function' ? JSON.stringify(['record', kind, id]) : ''
       : registry
         ? store.present ? JSON.stringify(['registry', registry.type, id]) : ''
-        : kind === FIELD_RECIPIENT_TYPE && objectName && typeof dataSource?.getObjectSchema === 'function'
-          ? JSON.stringify(['field', objectName, id])
-          : '';
+        : twoSource
+          // Both readers or none, as the picker requires them.
+          ? store.present && typeof dataSource?.find === 'function'
+            ? JSON.stringify(['two-source', twoSource.type, id])
+            : ''
+          : kind === FIELD_RECIPIENT_TYPE && objectName && typeof dataSource?.getObjectSchema === 'function'
+            ? JSON.stringify(['field', objectName, id])
+            : '';
   const entry = useBookEntry(dataSource, key, (book) => {
     if (record) return book.askRecord(kind, id, key);
     if (registry) {
@@ -322,6 +336,21 @@ export function useRecipientLabel(
             map.set(item.name, { label: recipientCandidateLabel(registry.labelFields, item) });
           }
         }
+        return map;
+      });
+    }
+    if (twoSource) {
+      return book.ask(`two-source:${twoSource.type}`, id, key, async () => {
+        const [declared, rows] = await Promise.allSettled([
+          store.ref.current?.ensureType(twoSource.type) ?? Promise.resolve([]),
+          dataSource ? dataSource.find(twoSource.object, { $top: 500, $orderby: { name: 'asc' } }) : Promise.resolve([]),
+        ]);
+        const map = new Map<string, CatalogItem>();
+        const merged = mergeQueueCandidates(
+          declared.status === 'fulfilled' ? declared.value : [],
+          rows.status === 'fulfilled' ? rows.value : [],
+        );
+        for (const c of merged) map.set(c.name, { label: c.label });
         return map;
       });
     }

@@ -214,7 +214,7 @@ const created = (number, name = 'CI') => [
 ];
 const createCall = (name = 'CI') => ({
   api: 'issues.create',
-  params: { ...OWNER_REPO, title: mod.cardIdentity(name).title, labels: ['bug', 'domain:devx', 'priority:p1'] },
+  params: { ...OWNER_REPO, title: mod.cardIdentity(name).title, labels: ['bug', 'domain:devx', 'priority:p0'] },
 });
 
 /** The `renderBody` arguments the step must compute for a case. */

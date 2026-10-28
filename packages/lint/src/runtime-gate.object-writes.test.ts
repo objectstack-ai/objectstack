@@ -265,10 +265,15 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
     // per-write snapshot carries. Measured over the shipped object corpus (no
     // object list view charts, 0 findings); its door pins live in
     // `validate-chart-bindings.test.ts`.
+    // [#27069] `validateRelatedListRefs` is the door's copy of the verdict
+    // `defineStack` gives a related-list name matching no inbound FK: resolved
+    // against `stack.objects`, so no missing-collection channel. The keys are
+    // new (0 shipped declarations, 0 findings); its controls are below.
     expect(crossed).toEqual([
       'validateSearchableFields',
       'validateListViewFieldRefs',
       'validateObjectFieldRefs',
+      'validateRelatedListRefs',
       'validateChartBindings',
     ]);
     // `validateSortableFields` measured equally clean but was NOT crossed:
@@ -572,5 +577,70 @@ describe('collection-resident finding paths are name-keyed on the wire (#10064)'
       .find((f) => f.rule === 'security-master-detail-ungranted');
     expect(phantom, JSON.stringify([...result.errors, ...result.advisories])).toBeDefined();
     expect(phantom!.path).toMatch(/^objects\.shop_invoice_line(\.|$)/);
+  });
+});
+
+/**
+ * #27069 — the object door refuses a related-list name that matches no inbound
+ * relationship, the verdict `defineStack` gives on the CLI. The door runs no
+ * `defineStack`, so before `validateRelatedListRefs` it stored the entry and
+ * the record page placed nothing for it.
+ *
+ * The children are CONTEXT objects (the registry and stored rows the door
+ * hands over), never the write: a parent names its children, and the children
+ * are already there. Every refusal's control differs from it by the FK alone.
+ */
+describe('the object door judges related-list names against the live universe (#27069)', () => {
+  const childWith = (fields: Record<string, unknown>) => ({
+    name: 'leave_task',
+    sharingModel: 'private',
+    fields: { title: { type: 'text' }, ...fields },
+  });
+  const withFk = childWith({ request_id: { type: 'lookup', reference: 'leave_request' } });
+  const withoutFk = childWith({});
+  const gateWith = (item: unknown, child: unknown) =>
+    runRuntimeAuthoringRules({ type: 'object', item, context: { objects: [...STORED, child] } });
+
+  it('REFUSES a relatedLists entry naming a stored child with no FK to the object, with the full envelope', () => {
+    const result = gateWith(cleanObject({ relatedLists: ['leave_task'] }), withoutFk);
+    const f = result.errors.find((e) => e.rule === 'related-list-ref-unknown');
+    expect(f, JSON.stringify(result.errors)).toBeDefined();
+    expect(f!.severity).toBe('error');
+    expect(f!.path).toBe('objects.leave_request.relatedLists[0]');
+    expect(f!.where).toBe('object "leave_request" › relatedLists');
+    expect(f!.message).toContain("Object 'leave_request' relatedLists[0] 'leave_task' matches no inbound relationship");
+    expect(f!.message).toContain('it has none');
+    expect(result.errors).toHaveLength(1);
+  });
+
+  it('publishes the same write once the stored child carries the FK — the refusal is about the relationship', () => {
+    const result = gateWith(cleanObject({ relatedLists: ['leave_task', 'leave_task.request_id'] }), withFk);
+    expect(result.errors, JSON.stringify(result.errors)).toEqual([]);
+    expect(result.rulesRun).toContain('validateReferenceIntegrity');
+  });
+
+  it('REFUSES a field group relatedList the same way, and publishes its control', () => {
+    const groups = [{ key: 'lines', label: 'Lines', relatedList: 'leave_task' }];
+    const refused = gateWith(cleanObject({ fieldGroups: groups }), withoutFk);
+    expect(refused.errors.map((e) => [e.rule, e.path])).toEqual([
+      ['related-list-ref-unknown', 'objects.leave_request.fieldGroups[0].relatedList'],
+    ]);
+    expect(gateWith(cleanObject({ fieldGroups: groups }), withFk).errors).toEqual([]);
+  });
+
+  it('REFUSES a child that exists nowhere: with no closure in force the context is the whole collection', () => {
+    const result = gateWith(cleanObject({ relatedLists: ['leave_ghost'] }), withFk);
+    expect(result.errors.map((e) => e.rule)).toEqual(['related-list-ref-unknown']);
+    expect(result.errors[0].message).toContain("the inbound relationships are 'leave_task'");
+  });
+
+  it('leaves a child outside a package closure unjudged — a downstream package that points in is outside it', () => {
+    const result = runRuntimeAuthoringRules({
+      type: 'object',
+      item: cleanObject({ relatedLists: ['leave_ghost'] }),
+      context: { objects: [...STORED, withFk] },
+      packageScope: { packageId: 'com.acme.leave', dependencies: [] },
+    });
+    expect(result.errors.filter((e) => e.rule === 'related-list-ref-unknown')).toEqual([]);
   });
 });

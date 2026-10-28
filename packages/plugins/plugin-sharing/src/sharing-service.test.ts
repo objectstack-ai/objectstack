@@ -747,6 +747,31 @@ describe('buildSharingMiddleware (engine integration)', () => {
     expect(nextCalled).toBe(true);
   });
 
+  // [#27175] The by-id gate is ONE method the middleware refuses on, so a
+  // reader asking `admitsByIdWrite` (the record field-access answer's
+  // `writable`) gets the middleware's own verdict — both verbs, both ways.
+  it('admitsByIdWrite is the middleware\'s by-id verdict: it refuses exactly where the method answers false', async () => {
+    await svc.grant({ object: 'account', recordId: 'a2', recipientId: 'alice', accessLevel: 'edit' }, { isSystem: true });
+    const mw = buildSharingMiddleware(svc);
+    const passes = (operation: 'update' | 'delete', id: string, userId: string) =>
+      mw({ object: 'account', operation, data: { id }, context: { userId } } as any, async () => {}).then(() => true, (e: any) => {
+        expect(e).toMatchObject({ code: 'FORBIDDEN', status: 403 });
+        return false;
+      });
+    const spy = vi.spyOn(svc, 'admitsByIdWrite');
+    for (const verb of ['update', 'delete'] as const) {
+      for (const [id, userId] of [['a1', 'alice'], ['a1', 'bob'], ['a2', 'alice'], ['a2', 'carol']] as const) {
+        const verdict = await svc.admitsByIdWrite('account', id, verb, { userId } as any);
+        expect(await passes(verb, id, userId), `${verb} ${id} as ${userId}`).toBe(verdict);
+      }
+    }
+    // The middleware asked the method itself, once per write.
+    expect(spy.mock.calls.filter((c) => c[2] === 'update')).toHaveLength(8);
+    // The edit share widens update, never delete (ADR-0111 D3), through the method too.
+    await expect(svc.admitsByIdWrite('account', 'a2', 'update', { userId: 'alice' } as any)).resolves.toBe(true);
+    await expect(svc.admitsByIdWrite('account', 'a2', 'delete', { userId: 'alice' } as any)).resolves.toBe(false);
+  });
+
   // [ADR-0111 D3] The verb boundary: an edit-level share opens UPDATE but NOT
   // delete. alice holds an edit share on a2 (owned by bob) — update passes,
   // delete is refused (delete needs ownership / write depth / Modify All).

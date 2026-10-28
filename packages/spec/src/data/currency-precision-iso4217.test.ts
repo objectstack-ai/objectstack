@@ -124,7 +124,8 @@ describe('`currencyConfig.precision` is removed: refused with the prescription, 
     // front on every row except the #11423 guarded class (bare fixed JPY/KRW/
     // KWD), which is why stored rows carry it without anyone writing it.
     const cases: Array<[Record<string, unknown>, string]> = [
-      [{}, '{"currencyMode":"dynamic","defaultCurrency":"CNY"}'],
+      // #27157: no baked `'CNY'` either — the empty config gets its mode only.
+      [{}, '{"currencyMode":"dynamic"}'],
       [{ currencyMode: 'fixed', defaultCurrency: 'USD' }, '{"currencyMode":"fixed","defaultCurrency":"USD"}'],
       [{ currencyMode: 'fixed', defaultCurrency: 'JPY' }, '{"currencyMode":"fixed","defaultCurrency":"JPY"}'],
       [{ currencyMode: 'fixed', defaultCurrency: 'KWD' }, '{"currencyMode":"fixed","defaultCurrency":"KWD"}'],
@@ -188,7 +189,9 @@ describe('the removed `currencyConfig.precision` at rest: a stored row carrying 
       onNotice: (n) => notices.push(`${n.conversionId}@${n.path}`),
     });
     expect(converted.fields.amount.currencyConfig).toEqual({ currencyMode: 'fixed', defaultCurrency: 'USD' });
-    expect(converted.fields.tax.currencyConfig).toEqual({ currencyMode: 'dynamic', defaultCurrency: 'CNY' });
+    // The baked `'CNY'` on the dynamic config goes too, by the later major-18
+    // entry `currency-config-dynamic-default-currency-removed` (#27157).
+    expect(converted.fields.tax.currencyConfig).toEqual({ currencyMode: 'dynamic' });
     // The FIELD-level total-digit count is a different key and survives.
     expect(converted.fields.qty).toEqual({ label: 'Qty', type: 'number', precision: 10, scale: 0 });
     expect(notices.filter((n) => n.startsWith('currency-config-precision-removed@'))).toHaveLength(2);

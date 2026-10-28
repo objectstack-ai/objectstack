@@ -3817,6 +3817,125 @@ const HYDRATED_INLINE_COLUMN_TYPE: Readonly<Record<string, 'currency'>> = {
 const hasOwnKey = (record: object, key: string): boolean => Object.prototype.hasOwnProperty.call(record, key);
 
 /**
+ * The audit / ownership FKs the record page never turns into a related list
+ * (objectui `deriveRelatedLists`, `AUDIT_FK_FIELDS`), so no entry may name one.
+ */
+const RELATED_LIST_AUDIT_FKS: ReadonlySet<string> = new Set(['created_by', 'updated_by', 'owner_id']);
+
+/**
+ * [#27069] Every name an object gives one of its related lists — each
+ * `relatedLists` entry and each field group's `relatedList` — must match an
+ * INBOUND relationship: a `lookup` / `master_detail` field of a child object
+ * whose `reference` is this object. An entry is a child object name (every
+ * relationship of that child), or `object.field` (that one FK).
+ *
+ * A cross-object question, so it is judged here, where every child's fields
+ * are known, and not in the object's own parse. The children are the stack's
+ * `objects`, every `packages[].manifest.objects`, and the fields their
+ * `objectExtensions` add (an extension can be the one that adds the FK).
+ *
+ * Left unjudged, so nothing here guesses at fields it cannot see: an entry
+ * naming a child this stack does not declare but a sibling package does
+ * (`artifactScope`, {@link DefineStackOptions.artifactObjects}), or a platform
+ * object ({@link isPlatformObjectName}). An entry naming a child that is
+ * nowhere is refused, as is one naming a declared child with no such FK.
+ *
+ * The message names the entry and every inbound relationship that exists,
+ * spelled the way an entry may name it.
+ */
+function collectRelatedListNameErrors(
+  config: ObjectStackDefinition,
+  artifactScope: ReadonlySet<string>,
+): string[] {
+  const asRecord = (value: unknown): Record<string, unknown> | undefined =>
+    isRecord(value) ? value : undefined;
+  const bodies = Array.isArray((config as { packages?: unknown }).packages)
+    ? ((config as { packages: unknown[] }).packages).map((entry) => asRecord(asRecord(entry)?.manifest) ?? {})
+    : [];
+  const objectLists: unknown[] = [config.objects, ...bodies.map((body) => body.objects)];
+  const extensionLists: unknown[] = [
+    (config as { objectExtensions?: unknown }).objectExtensions,
+    ...bodies.map((body) => body.objectExtensions),
+  ];
+
+  // Child object name → its fields (declaration and extensions merged by name).
+  const fieldsByObject = new Map<string, Record<string, unknown>>();
+  const parents: Record<string, unknown>[] = [];
+  for (const list of objectLists) {
+    if (!Array.isArray(list)) continue;
+    for (const obj of list) {
+      const record = asRecord(obj);
+      if (!record || typeof record.name !== 'string') continue;
+      parents.push(record);
+      fieldsByObject.set(record.name, { ...fieldsByObject.get(record.name), ...asRecord(record.fields) });
+    }
+  }
+  for (const list of extensionLists) {
+    if (!Array.isArray(list)) continue;
+    for (const ext of list) {
+      const record = asRecord(ext);
+      if (!record || typeof record.extend !== 'string') continue;
+      fieldsByObject.set(record.extend, { ...fieldsByObject.get(record.extend), ...asRecord(record.fields) });
+    }
+  }
+
+  // Parent name → its inbound relationships, in child then field order.
+  const inbound = new Map<string, Array<{ child: string; field: string }>>();
+  for (const [child, fields] of fieldsByObject) {
+    for (const [field, def] of Object.entries(fields)) {
+      const fieldDef = asRecord(def);
+      if (!fieldDef || (fieldDef.type !== 'lookup' && fieldDef.type !== 'master_detail')) continue;
+      if (typeof fieldDef.reference !== 'string' || RELATED_LIST_AUDIT_FKS.has(field)) continue;
+      const list = inbound.get(fieldDef.reference) ?? [];
+      list.push({ child, field });
+      inbound.set(fieldDef.reference, list);
+    }
+  }
+
+  const spell = (relationships: Array<{ child: string; field: string }>): string => {
+    if (relationships.length === 0) return 'it has none';
+    const perChild = new Map<string, number>();
+    for (const r of relationships) perChild.set(r.child, (perChild.get(r.child) ?? 0) + 1);
+    const names = relationships.map((r) => (perChild.get(r.child) === 1 ? r.child : `${r.child}.${r.field}`));
+    return `the inbound relationships are ${[...new Set(names)].map((n) => `'${n}'`).join(', ')}`;
+  };
+
+  const errors: string[] = [];
+  // One verdict per object NAME: an object declared both top-level and in a
+  // package body is judged once, on its first declaration.
+  const seen = new Set<string>();
+  for (const parent of parents) {
+    const parentName = parent.name as string;
+    if (seen.has(parentName)) continue;
+    seen.add(parentName);
+    const relationships = inbound.get(parentName) ?? [];
+    const judge = (entry: unknown, where: string): void => {
+      if (typeof entry !== 'string') return;
+      const dot = entry.indexOf('.');
+      const child = dot === -1 ? entry : entry.slice(0, dot);
+      const field = dot === -1 ? undefined : entry.slice(dot + 1);
+      if (relationships.some((r) => r.child === child && (field === undefined || r.field === field))) return;
+      if (!fieldsByObject.has(child) && (artifactScope.has(child) || isPlatformObjectName(child))) return;
+      errors.push(
+        `Object '${parentName}' ${where} '${entry}' matches no inbound relationship of '${parentName}' ` +
+          `(a lookup / master_detail field of a child object whose reference is '${parentName}'); ` +
+          `${spell(relationships)}. Name the child object, or object.field when that child has more than one.`,
+      );
+    };
+    if (Array.isArray(parent.relatedLists)) {
+      parent.relatedLists.forEach((entry: unknown, i: number) => judge(entry, `relatedLists[${i}]`));
+    }
+    if (Array.isArray(parent.fieldGroups)) {
+      parent.fieldGroups.forEach((group: unknown, i: number) => {
+        const record = asRecord(group);
+        if (record?.relatedList !== undefined) judge(record.relatedList, `fieldGroups[${i}].relatedList`);
+      });
+    }
+  }
+  return errors;
+}
+
+/**
  * [#20901] Inline grid columns whose TYPE comes from the child field, judged by
  * the column contract's own rules against the type they will render as.
  *
@@ -4308,6 +4427,14 @@ function validateCrossReferences(
   // Same placement: the development boot's demo accounts resolve against the
   // stack's positions and permission sets, and need no object either.
   errors.push(...collectDemoStaffErrors(config));
+  // Same placement: the names an object gives its related lists (`relatedLists`,
+  // a field group's `relatedList`) resolve against the objects of the stack AND
+  // its package bodies, so an artifact whose objects live only in package
+  // bodies is judged too (#27069). Its scope is the artifact scope below.
+  errors.push(...collectRelatedListNameErrors(
+    config,
+    artifactObjects && artifactObjects.size > 0 ? new Set([...objectNames, ...artifactObjects]) : objectNames,
+  ));
 
   if (objectNames.size === 0) return errors;
 

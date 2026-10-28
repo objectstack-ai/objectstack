@@ -42,12 +42,13 @@
  * ## Which gates read it
  *
  * `ui/scripts/check-i18n-dead-keys.mjs` (`collectDesignerKeys`) reads `./en.ts`
- * and `./zh.ts` as part of the designer table, by AST, whenever app-shell's
- * table module imports this namespace — the same edge the runtime follows. So
- * `check:i18n-designer-parity` (en ⊆ zh, placeholder parity, a key in exactly
- * one home), the designer population of `check:i18n-drift` and the dead-keys
- * report all see the moved keys. `__tests__/studio-namespace.test.ts` holds the
- * namespace's own parity, which outlives the designer table.
+ * and `./zh.ts` as app-shell's engine strings, by AST, whenever app-shell's
+ * string module imports this namespace — the same edge the runtime follows. So
+ * the designer population of `check:i18n-drift` and the dead-keys report see
+ * every key. `__tests__/studio-namespace.test.ts` holds the namespace's own
+ * parity (en ⊆ zh, placeholder parity, documented zh-only families), the job
+ * `check:i18n-designer-parity` shared until objectstack#25922 slice S7 retired
+ * the app-shell table and that gate with it.
  */
 import { useSyncExternalStore } from 'react';
 import { matchLanguageTag } from '../../locales/registry.js';

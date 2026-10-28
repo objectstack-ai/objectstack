@@ -974,7 +974,11 @@ describe('#19403 round 8 — the population, DERIVED from the form and a shape',
     // 118 since #23809 gave the field rows' `options` repeater its `kind`
     // sub-row (the option's lifecycle category) — label and help text, both
     // authored in all three locales, so `openEchoes` stays at zero.
-    expect(OPEN_LEAVES.length).toBe(118);
+    // 122 since #27069 gave `basics` the `relatedLists` row and the
+    // `fieldGroups` repeater its `relatedList` sub-row — four leaves (two
+    // labels, two help texts), authored in all three locales, so `openEchoes`
+    // stays at zero.
+    expect(OPEN_LEAVES.length).toBe(122);
     expect(PANEL_LEAVES.some((l) => l.path === 'fields.placeholder')).toBe(false);
     expect(OPEN_LEAVES.some((l) => l.path === 'fields.placeholder')).toBe(true);
     for (const path of ['name', 'label', 'fields', 'fields.valueDomain', 'fields.deleteBehavior', 'fields.expression']) {

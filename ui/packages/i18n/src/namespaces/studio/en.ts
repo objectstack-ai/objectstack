@@ -1459,6 +1459,7 @@ const STUDIO_EN: Record<string, string> = {
   // Flow reference picker — ReferenceCombobox / FlowReferenceField (objectui#10586)
   'engine.inspector.reference.pickFromRecords': 'Pick from records',
   'engine.inspector.reference.pickFromRegistry': 'Pick from declared items',
+  'engine.inspector.reference.pickFromQueues': 'Pick from the queues',
   'engine.inspector.reference.enterManually': 'Enter value manually',
   'engine.inspector.reference.managerPlaceholder': 'Resolved automatically',
   'engine.inspector.reference.managerHint': "Resolved at runtime from the submitter's manager — no value needed.",

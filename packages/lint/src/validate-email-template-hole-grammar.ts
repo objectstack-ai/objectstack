@@ -10,6 +10,9 @@
  * renderer can honour as written. A hole the grammar refuses never renders as
  * its author meant it:
  *
+ * - a formatter the whitelist (`TEMPLATE_FORMATTERS`) does not name
+ *   (`{{ amount | curency:EUR }}`) — the renderer used to print the raw value
+ *   (`1234.5`) where a formatted one was meant;
  * - a second formatter (`{{ x | default:0 | number:2 }}`) — the renderer used
  *   to read it as part of the first formatter's argument and print the text
  *   `0 | number:2`, or leave the whole hole on the page;

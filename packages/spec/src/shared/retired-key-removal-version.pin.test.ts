@@ -77,6 +77,7 @@ import { describe, expect, it } from 'vitest';
 
 import { ALL_CONVERSIONS } from '../conversions/registry';
 import { TimeUpdateInterval } from '../data/analytics.zod';
+import { CurrencyConfigSchema } from '../data/field.zod';
 import { IndexSchema, ObjectSchema } from '../data/object.zod';
 import { ManifestPermissionsSchema } from '../kernel/manifest.zod';
 import {
@@ -252,6 +253,15 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
     tombstone(AdminScopeSchema, 'permission.adminScope', 'authorEnvironmentSets'),
   ],
   'permission-set-managed-by-removed': [tombstone(PermissionSetSchema, 'permission', 'managedBy')],
+  // #27157: the D2 strip is the data-at-rest half; what an author meets is the
+  // refusal of a `fixed` config with no code, which names the release.
+  'currency-config-dynamic-default-currency-removed': [
+    refusal(
+      "currencyConfig.currencyMode 'fixed' without defaultCurrency",
+      () => CurrencyConfigSchema.safeParse({ currencyMode: 'fixed' }),
+      'defaultCurrency',
+    ),
+  ],
   'permission-modify-all-allow-delete-false-to-true': [
     refusal(
       'allowDelete: false beside modifyAllRecords: true',

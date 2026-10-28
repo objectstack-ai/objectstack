@@ -158,7 +158,7 @@
           "status": "live",
           "verifiedAt": "2026-08-03",
           "evidence": "ui/packages/app-shell/src/views/DashboardView.tsx:215-219 (prunes widgets whose requiresObject is not in the runtime SchemaRegistry)",
-          "note": "client-side capability gate. NOT gated server-side — packages/rest/src/rest-server.ts:1818 names `requiresObject` as deliberately not filtered there, unlike its `requiresService` sibling."
+          "note": "client-side capability gate. NOT gated server-side — packages/rest/src/rest-server.ts:1818 names `requiresObject` as deliberately not filtered there, unlike its `requiresService` sibling. An install gate only: a dataset-bound tile the server refuses as a read refusal (403 PERMISSION_DENIED) is left out for that viewer outside design mode by DashboardRenderer, with no key."
         },
         "requiresService": {
           "status": "live",

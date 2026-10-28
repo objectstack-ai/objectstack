@@ -127,6 +127,16 @@ export function validateSemanticRoles(stack: AnyRec): SemanticRoleFinding[] {
         .map((g) => g.key)
         .filter((k): k is string => typeof k === 'string' && k.length > 0),
     );
+    // [#27069] A group carrying `relatedList` stands for one related list's
+    // body table, not a section of fields: no field may name it (the object
+    // parse refuses one that does), so "no field references it" is its normal
+    // state. Rules (b) and (d) judge sections of fields and skip it.
+    const relatedListGroups = new Set(
+      (Array.isArray(obj.fieldGroups) ? obj.fieldGroups : [])
+        .filter((g): g is AnyRec => !!g && typeof g === 'object' && g.relatedList !== undefined)
+        .map((g) => g.key)
+        .filter((k): k is string => typeof k === 'string' && k.length > 0),
+    );
     const referencedGroups = new Set<string>();
     for (const [fname, f] of Object.entries(fields)) {
       const g = f?.group;
@@ -150,6 +160,7 @@ export function validateSemanticRoles(stack: AnyRec): SemanticRoleFinding[] {
 
     // ── (b) declared group no field references ──
     for (const key of declaredGroups) {
+      if (relatedListGroups.has(key)) continue;
       if (!referencedGroups.has(key)) {
         findings.push({
           severity: 'warning',
@@ -234,6 +245,7 @@ export function validateSemanticRoles(stack: AnyRec): SemanticRoleFinding[] {
       if (titleField) hiddenFromBody.add(titleField);
 
       for (const key of declaredGroups) {
+        if (relatedListGroups.has(key)) continue;
         const members = Object.entries(fields)
           .filter(([, f]) => f?.group === key && f?.hidden !== true)
           .map(([fname]) => fname);

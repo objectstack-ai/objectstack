@@ -262,7 +262,6 @@ const NOT_CONTROLS: Array<[file: string, key: string, reason: string]> = [
 const BACKLOG: Array<[file: string, key: string]> = [
   // The data form preview selects a field by a click delegated from its frame.
   ['packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx', 'div · closest,getAttribute,some,readFields,setFieldSel'],
-  ['packages/plugin-ai/src/AIRecommendations.tsx', 'div · handleSelect'],
   ['packages/plugin-designer/src/DashboardEditor.tsx', 'div · onSelect'],
   ['packages/plugin-designer/src/DataModelDesigner.tsx', 'span · stopPropagation,handleStartFieldEdit'],
   ['packages/plugin-designer/src/PageDesigner.tsx', 'div · stopPropagation,toggle'],

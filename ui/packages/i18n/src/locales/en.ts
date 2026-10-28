@@ -445,6 +445,7 @@ const en = {
       selectTeam: 'Select a team',
       selectBusinessUnit: 'Select a business unit',
       selectPosition: 'Select a position',
+      selectQueue: 'Select a queue',
       selectUnitAndSubordinates: 'Select a business unit',
       selectField: 'Select a user field',
       noUserFields: 'No user fields on this object',
@@ -1001,6 +1002,8 @@ const en = {
     viewAllCount_other: 'View all {{count}} records',
     tabs: 'Tabs',
     allRecords: 'All Records',
+    sittingInQueue: 'In a queue',
+    sittingInQueueHint: 'Show only records waiting in a queue for someone to claim them',
     // objectui#13405 — the synthetic trailing tab a `showAllRecords` user-filter bar adds.
     userFilters: {
       allRecords: 'All records',
@@ -1408,6 +1411,10 @@ const en = {
     commentEditFailed: 'Your edit was not saved. The comment keeps its previous text.',
     commentDeleteFailed: 'The comment was not deleted. Please try again.',
     linkCopyFailed: 'Failed to copy link',
+    claim: 'Claim',
+    claimed: 'You own this record now.',
+    claimTaken: 'Someone else claimed this record first.',
+    claimFailed: 'The claim was not accepted.',
     cancel: 'Cancel',
     cancelEdit: 'Discard changes',
     sectionMoreDetails: 'More details',
@@ -4275,37 +4282,6 @@ const en = {
   // is the seed, an IANA id printed verbatim.
   cloudWorkspaceTimezoneNotice: {
     seeded: 'The environment timezone was set to {{zone}} from your browser when the environment was created. You can change it in Settings → Localization.',
-  },
-  // `@object-ui/plugin-ai` — the `nl-query`, `ai-form-assist` and
-  // `ai-recommendations` components (objectui#10232). The two count labels are
-  // i18next count families (objectui#11445): the component passes `count` and
-  // each pack carries every CLDR category its language selects.
-  ai: {
-    nlQuery: {
-      placeholder: 'Ask a question about your data…',
-      ask: 'Ask',
-      results: 'Results',
-      match: '{{percent}} match',
-      simulatedSummary: 'Results for: {{query}}',
-      noResults: 'No matching records found',
-      recentQueries: 'Recent Queries',
-    },
-    formAssist: {
-      title: 'AI Suggestions',
-      suggestionCount: '{{count}} suggestions',
-      suggestionCount_one: '{{count}} suggestion',
-      suggestionCount_other: '{{count}} suggestions',
-      applyAll: 'Apply All',
-      confidence: '{{percent}} confidence',
-      appliedCount: '{{count}} suggestions applied',
-      appliedCount_one: '{{count}} suggestion applied',
-      appliedCount_other: '{{count}} suggestions applied',
-    },
-    recommendations: {
-      title: 'Recommendations',
-      generating: 'Generating recommendations…',
-      empty: 'No recommendations available',
-    },
   },
   // The AI HITL approval inbox (`@object-ui/plugin-chatbot`'s
   // `AiPendingActionsInbox`) — objectui#7173. Its four relative-time phrases

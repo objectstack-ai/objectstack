@@ -5,7 +5,7 @@
  *
  * `./index.ts` imports this module only through its lazy loader, so a viewer
  * whose language is not Chinese never downloads it. A key this catalogue does
- * not define renders the `en` row (`./en.ts`); `pnpm check:i18n-designer-parity`
+ * not define renders the `en` row (`./en.ts`); `../../__tests__/studio-namespace.test.ts`
  * holds every `en` key to a row here, with the same `{placeholders}`.
  *
  * ⛔ Keep the declaration `const STUDIO_ZH: Record<string, string> = { … }`
@@ -1311,6 +1311,7 @@ const STUDIO_ZH: Record<string, string> = {
   // Flow reference picker — ReferenceCombobox / FlowReferenceField (objectui#10586)
   'engine.inspector.reference.pickFromRecords': '从记录中选择',
   'engine.inspector.reference.pickFromRegistry': '从已声明的项中选择',
+  'engine.inspector.reference.pickFromQueues': '从队列中选择',
   'engine.inspector.reference.enterManually': '手动输入值',
   'engine.inspector.reference.managerPlaceholder': '自动解析',
   'engine.inspector.reference.managerHint': '运行时根据提交人的上级自动解析 —— 无需填写。',
