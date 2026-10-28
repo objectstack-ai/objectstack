@@ -112,6 +112,11 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
     invalid_url: '{{label}} must be a valid URL (scheme://...)',
     invalid_phone: '{{label}} must be a valid phone number',
     invalid_number: '{{label}} must be a number',
+    // `invalid_number`'s second sentence (#27236): a `currency` field written
+    // as an object, the retired `{ value, currency }` shape (ADR-0104 D1). The
+    // sentence names no currency code: the field's `currencyConfig` or the
+    // tenant default decides it (#27119 Q2 = X).
+    invalid_number_currency_object: '{{label}} is a currency amount: write it as a bare number (ADR-0104), such as 10, not an object such as { value, currency }. A currency field declares its currency in currencyConfig: the fixed mode\'s defaultCurrency, or under the dynamic mode (the default) the tenant default currency',
     invalid_boolean: '{{label}} must be true or false',
     invalid_date: '{{label}} must be a valid date (ISO-8601)',
     invalid_datetime: '{{label}} must be a valid datetime (ISO-8601)',
@@ -174,6 +179,7 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
     invalid_url: '{{label}}必须是有效的 URL(scheme://...)',
     invalid_phone: '{{label}}必须是有效的电话号码',
     invalid_number: '{{label}}必须是数字',
+    invalid_number_currency_object: '{{label}}是货币金额:请直接写数字(ADR-0104),如 10,不要写成 { value, currency } 这样的对象。币种在字段的 currencyConfig 中声明:fixed 模式取 defaultCurrency,dynamic 模式(默认)取组织默认币种',
     invalid_boolean: '{{label}}必须是 true 或 false',
     invalid_date: '{{label}}必须是有效的日期(ISO-8601)',
     invalid_datetime: '{{label}}必须是有效的日期时间(ISO-8601)',
@@ -219,6 +225,7 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
     invalid_url: '{{label}}は有効な URL(scheme://...)を入力してください',
     invalid_phone: '{{label}}は有効な電話番号を入力してください',
     invalid_number: '{{label}}は数値で入力してください',
+    invalid_number_currency_object: '{{label}}は通貨金額です。{ value, currency } のようなオブジェクトではなく、数値のみ(ADR-0104、例: 10)で入力してください。通貨はフィールドの currencyConfig で宣言します。fixed モードでは defaultCurrency、dynamic モード(既定)では組織の既定通貨です',
     invalid_boolean: '{{label}}は true または false で入力してください',
     invalid_date: '{{label}}は有効な日付(ISO-8601)を入力してください',
     invalid_datetime: '{{label}}は有効な日時(ISO-8601)を入力してください',
@@ -264,6 +271,7 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
     invalid_url: '{{label}} debe ser una URL válida (scheme://...)',
     invalid_phone: '{{label}} debe ser un número de teléfono válido',
     invalid_number: '{{label}} debe ser un número',
+    invalid_number_currency_object: '{{label}} es un importe de moneda: escríbalo como un número sin más (ADR-0104), por ejemplo 10, no como un objeto del tipo { value, currency }. El campo declara su moneda en currencyConfig: el defaultCurrency del modo fixed o, en el modo dynamic (el predeterminado), la moneda predeterminada del inquilino',
     invalid_boolean: '{{label}} debe ser true o false',
     invalid_date: '{{label}} debe ser una fecha válida (ISO-8601)',
     invalid_datetime: '{{label}} debe ser una fecha y hora válidas (ISO-8601)',
