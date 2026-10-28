@@ -5,9 +5,8 @@ description: From a built dist/objectstack.json to an app a customer has install
 ---
 
 This page follows one app from a built `dist/objectstack.json` to a customer
-environment and back out again, in the order you meet each step. It owns the
-**listing** and the **customer's path**; the mechanics it touches are owned by
-the pages it links, and are not repeated here.
+environment and back out, in the order you meet each step. The mechanics it
+touches live on the pages it links.
 
 ## What a listing is
 
@@ -18,9 +17,9 @@ consumer-installable
 D1/D2). Modules, plugins and other contributions ship **inside** that App — see
 [Extras](#extras-dependencies-and-modules) below.
 
-The listing is a package row in the catalog plus its versions. The package row
-carries the name, description, category, icon, README and translations; each
-version is an immutable snapshot of your compiled artifact.
+The listing is a package row in the catalog plus its versions: the row carries
+the name, description, category, icon, README and translations, and each
+version is a snapshot of your compiled artifact.
 
 ## The listing file: `objectstack.manifest.json`
 
@@ -188,8 +187,8 @@ the detail.
    with `OS_CLOUD_URL=off` shows **App Marketplace is turned off** instead —
    [Cloud connection](/docs/deployment/cloud-connection) covers connecting one.
 2. **Installing.** Into a cloud environment, **Install to cloud…** opens a
-   dialog with an environment picker and an **Include sample data** box; only
-   organization owners and admins can install. On a runtime that installs
+   dialog that names or picks the environment and offers **Include sample
+   data**; only organization owners and admins can install. On a runtime that installs
    locally, **Install** puts the app into this runtime; the result may say it
    loads at the next restart. Without a catalog at all, the operator runs
    `os package install ./dist/objectstack.json` against the runtime
@@ -209,10 +208,10 @@ the detail.
    `POST /api/v1/marketplace/install-local/:manifestId/reseed-sample-data` and
    `…/purge-sample-data`, both requiring `manage_metadata`.
 7. **Enable and disable.** **Setup → Installed Apps** lists the apps installed
-   from the marketplace. **Disable** is offered only for a writable package: for a package
-   provided by code or by an installed app, the runtime answers
-   `PATCH /api/v1/packages/:id/disable` with `422 WRITABLE_PACKAGE_REQUIRED`. To
-   take an installed app away, uninstall it.
+   from the marketplace. **Disable** is offered only for a writable package:
+   for a package provided by code or by an installed app, the runtime answers
+   `PATCH /api/v1/packages/:id/disable` with `422 WRITABLE_PACKAGE_REQUIRED`.
+   To take an installed app away, uninstall it.
 8. **Upgrading.** You publish a new version; nothing running changes. An
    environment installed through the cloud shows **Update available → v…** and
    an **Update** button; a runtime that installs locally shows **Reinstall**. A
@@ -247,14 +246,10 @@ An app ships extras in one of two shapes:
   in `manifest.dependencies`; install checks it, and the customer installs it
   first ([App dependencies](/docs/deployment/app-dependencies)).
 - **A module built into the same artifact** — a `type: 'module'` package
-  composed at build time, which travels inside your App and is never listed on
-  its own ([A project is a multi-package artifact](/docs/getting-started/examples#a-project-is-a-multi-package-artifact)).
+  composed at build time, which travels inside your App rather than as a
+  listing of its own ([A project is a multi-package artifact](/docs/getting-started/examples#a-project-is-a-multi-package-artifact)).
 
 ## Related
 
-- [Publish, versioning and preview](/docs/deployment/publish-and-preview)
-- [Install modes](/docs/deployment/install-modes)
-- [App dependencies](/docs/deployment/app-dependencies)
-- [Cloud connection](/docs/deployment/cloud-connection)
-- [CLI reference](/docs/deployment/cli)
+- [CLI reference](/docs/deployment/cli) — every `os package publish` and `os package install` flag
 - [Marketplace protocol reference](/docs/references/marketplace/marketplace)
