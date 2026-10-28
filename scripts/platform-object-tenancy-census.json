@@ -26,8 +26,8 @@
   "predicate": "resolveTenantFieldName(registered schema) !== null, where the registered schema is the authored schema plus the columns resolveInjectedSystemColumns says the registration injects (the applySystemFields pass). Both functions are loaded from source and executed; neither is re-spelled here.",
   "population": "every object registered by a tracked packages/**/*.object.ts module whose name carries a platform prefix (sys_ / cloud_ / ai_). The cloud repository's own cloud_ objects are not in this tree and so not in this census.",
   "totals": {
-    "registered": 87,
-    "inReach": 44,
+    "registered": 88,
+    "inReach": 45,
     "outOfReach": 43
   },
   "reasonTotals": {
@@ -182,6 +182,13 @@
     {
       "name": "sys_email_template",
       "file": "packages/platform-objects/src/audit/sys-email-template.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_exchange_rate",
+      "file": "packages/platform-objects/src/system/sys-exchange-rate.object.ts",
       "reach": "in",
       "tenantField": "organization_id",
       "reasons": []
