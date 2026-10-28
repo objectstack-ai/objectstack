@@ -66,26 +66,29 @@ aggregation. The ruling names them by topic ("Q0 A", "rates A", "home currency A
 ### 1. What the platform has today (read at `cdec7473`)
 
 - **A currency value is a bare number** (ADR-0104 D1). `currencyConfig` has two modes
-  (`packages/spec/src/data/field.zod.ts#CurrencyConfigSchema`). In `fixed` mode the field has one currency, `defaultCurrency`. In
-  `dynamic` mode (the default) amounts display in the tenant default currency. The describe says "Neither mode is a
-  per-record choice: the value is a bare number either way." No key, column or value carries a record's currency.
+  (`packages/spec/src/data/field.zod.ts#CurrencyConfigSchema`). In `fixed` mode the field has one currency,
+  `defaultCurrency`. In `dynamic` mode (the default) amounts display in the tenant default currency. The describe says
+  "Neither mode is a per-record choice: the value is a bare number either way." No key, column or value carries a
+  record's currency.
 - **A `fixed` field with no code becomes a yuan field.** `defaultCurrency` defaults to `'CNY'` (same schema).
   #27157 (#27119 Q2 X) requires the code and drops the default. It is a member of R1 and a blocker of M0-1.
 - **The tenant currency is the `localization.currency` setting**
   (`packages/services/service-settings/src/manifests/localization.manifest.ts#localizationSettingsManifest`, key
-  `currency`). It has tenant scope, no platform default and `valueDomain: 'iso_4217_currency'`. It may be unset. It is mutable and keeps no history: probe B
-  of the measurement round saw a change relabel every stored `dynamic` amount.
+  `currency`). It has tenant scope, no platform default and `valueDomain: 'iso_4217_currency'`. It may be unset. It is
+  mutable and keeps no history: probe B of the measurement round saw a change relabel every stored `dynamic` amount.
 - **The ISO 4217 value domain exists** (`packages/spec/src/shared/value-domain.zod.ts#isValueDomainMember`). It checks
-  membership in `CURRENCY_FRACTION_DIGITS` (`packages/spec/src/data/currency-fraction-digits.ts#CURRENCY_FRACTION_DIGITS`). Only that table's key set is
-  read. Its fraction-digit values have no reader.
+  membership in `CURRENCY_FRACTION_DIGITS`
+  (`packages/spec/src/data/currency-fraction-digits.ts#CURRENCY_FRACTION_DIGITS`). Only that table's key set is read.
+  Its fraction-digit values have no reader.
 - **No conversion is implemented.**
   `git grep -n -i -E "exchange.?rate|fx_rate|currency_conversion|convertCurrency" -- packages/ ':!*.test.ts'` prints 0
   lines. Control: `git grep -c currencyConfig -- packages/spec/src/data/field.zod.ts` prints 13.
 - **The CEL standard library is pure.** Its header says: "Nothing registered here may be handed a resolver, a lazy
   getter or any other callback into the host" (`packages/formula/src/stdlib.ts`). That purity keeps
   `objectstack build` byte-stable, so a formula function cannot read a rate table.
-- **`CurrencyValueSchema` is still exported**, marked `@deprecated` (`packages/spec/src/data/field.zod.ts#CurrencyValueSchema`, its type `#CurrencyValue`), although
-  ADR-0104 D1 says it "is deleted". #27182 retires it.
+- **`CurrencyValueSchema` is still exported**, marked `@deprecated`
+  (`packages/spec/src/data/field.zod.ts#CurrencyValueSchema`, its type `#CurrencyValue`), although ADR-0104 D1 says it
+  "is deleted". #27182 retires it.
 - **Today's numbers are silently wrong** (from the measurement round's probes over a real ObjectQL engine; the scratch
   files were run and deleted and are not re-run for this record). The probes model a record currency the way authors
   do today, as a sibling text field. `sum` over a USD row of 100 and an EUR row of 100 answers `200 "USD"`. A `summary`
@@ -102,10 +105,9 @@ One named overseas port and terminal customer (2026-08) needs three things:
 3. consolidate in one home currency.
 
 In-tree author pull is zero. The measurement round counted 17 currency fields in `examples/**` at `3d9188502e`, and
-none has a record currency. The hold of
-2026-10-08 ended with this ruling (乙-现在: now, as an epic). The commitment, as ruled: "R1 (about 4–5 agent-days) is
-the delivery the customer can rely on; R2 starts after the customer confirms the consolidation terms (home currency,
-rate source, which date drives the rate)."
+none has a record currency. The hold of 2026-10-08 ended with this ruling (乙-现在: now, as an epic). The commitment,
+as ruled: "R1 (about 4–5 agent-days) is the delivery the customer can rely on; R2 starts after the customer confirms
+the consolidation terms (home currency, rate source, which date drives the rate)."
 
 ### 3. The shapes considered
 
@@ -119,6 +121,8 @@ again against how Dynamics 365, Odoo, NetSuite, SAP, Salesforce and Airtable mod
 | B | Dated rates and a CEL `convertCurrency()` | Rejected. It conflicts with the stdlib purity invariant. A formula is virtual and aggregates refuse it, so the converted amount can never be totalled. |
 | **C′** | A′, plus `sys_exchange_rate` and a home amount computed at write and stored with its rate. No formula function. | **Ruled.** It meets all three needs. Existing aggregate readers total the stored home field without any change to the reader. |
 
+The ruling chose C′. The reasons in the Outcome column are the analysis', not the ruling's.
+
 Q0, where the record currency lives, had four options of its own:
 
 - **A, a sibling code field.** Ruled.
@@ -129,7 +133,8 @@ Q0, where the record currency lives, had four options of its own:
 
 ## Decision
 
-Every item in this section comes from the ruling. Its words are quoted wherever the reading matters.
+Every decision in this section comes from the ruling, and its words are quoted wherever the reading matters. A line
+that cites the design record, a workload row or a card is context for the decision above it, and names its source.
 
 ### D1 — Shape C′
 
@@ -151,8 +156,8 @@ pairing.
 ### D3 — Q1: dated rates live in `sys_exchange_rate` (letter A)
 
 - `sys_exchange_rate { currency, rate, effective_date, source }` is a platform system object.
-- In v1, rows come from manual entry and import. A provider feed is "by an app flow" that writes rows. The platform
-  ships no feed.
+- In v1, rows come from manual entry and import. Provider feeds come "by an app flow", which writes rows; the
+  platform ships no feed.
 - A missing rate refuses (D5).
 
 ### D4 — Q2: the home currency is `localization.currency`, locked once used (letter A)
@@ -210,9 +215,9 @@ pairing.
    `skills/**`, "never a contract".
 3. **"Enabled currencies" are derived, not a setting.** They are the home currency, plus every currency with a rate
    row, plus the codes already used.
-4. **The form pre-fills the organization's currency at the renderer, and the stored value is always explicit.** The
-   organization's currency reaches a new record only as a pre-filled value the user submits. The server never fills
-   in the code.
+4. **The form pre-fills the organization's currency at the renderer, and the stored value is always explicit.** Read
+   plainly, the organization's currency reaches a new record only as a pre-filled value the user submits, and the
+   server never fills in the code.
 5. **Metadata never names the home currency.** "the home field is a `dynamic`-mode currency field", so it displays in
    `localization.currency`, as every `dynamic` field does.
 
@@ -249,7 +254,8 @@ Version Packages, and the epic body says that happens only when a pair is comple
 These are outside this decision, and each would need a decision of its own. The first eight are the workload rows'
 "What is not in this list", each "a capability with no pull in tree". The last comes from the design record §13.
 
-- A CEL `convertCurrency()`. The shape rules it out (D1), and it conflicts with the purity rule in the header of `packages/formula/src/stdlib.ts`.
+- A CEL `convertCurrency()`. The shape rules it out (D1), and it conflicts with the purity rule in the header of
+  `packages/formula/src/stdlib.ts`.
 - Read-time conversion.
 - A built-in provider feed (ECB or similar). An app flow writes rows instead (D3).
 - N×N pair rates. Every rate is against the home currency.
@@ -267,11 +273,11 @@ D8 already excludes a switch, injected columns, fixed field names and a setting 
 - **The change is additive.** `record` is a new mode, `dynamic` and `fixed` keep their meaning and stored rows are not
   touched. An app that never writes `record` sees no change. The two spec cards that add keys (#27184, #27191) declare
   `Metadata-protocol: added`.
-- **Two steps cannot be undone once used.** The home-currency lock is one. The other: an object with record-mode
-  amounts and a home field returns to a single currency only through a data migration (design record §13).
-- **Today's relabel hazard closes where the feature is used.** Once the lock holds, a change to `localization.currency`
-  can no longer relabel stored amounts. An organization with no rate row and no home-amount declaration keeps today's
-  behaviour.
+- **Two steps cannot be undone once used** (design record §13). One is the home-currency lock. The other: an object
+  with record-mode amounts and a home field returns to a single currency only through a data migration.
+- **Today's relabel hazard closes where the feature is used** (the measurement round's Q2 recommendation). Once the
+  lock holds, a change to `localization.currency` can no longer relabel stored amounts. An organization with no rate
+  row and no home-amount declaration keeps today's behaviour.
 - **Every converting write adds a rate lookup.**
 - **The fraction-digit values may get their first reader.** That depends on [Open item](#open-items) 3.
 - **The docs start from a true baseline.** #27158 (closed) removed the two docs claims of exchange rates and a stored
@@ -299,8 +305,8 @@ Where a source leans one way, the lean is quoted here, not adopted. This record 
    says money is computed in minor-unit integers or decimals, not floating point (「浮点算钱用最小单位整数或 decimal」).
    Neither point is in the ruling.
 4. **A home-amount declaration or a converting write while no home currency is set** (#27192, #27198).
-   `localization.currency` may be unset (its manifest entry says `required: false`, and there is no platform default). The
-   ruling locks the setting once used. It does not say what happens while the setting is unset. The sources rule out a
+   `localization.currency` may be unset (its manifest entry says `required: false`, and there is no platform
+   default). The ruling locks the setting once used. It does not say what happens while the setting is unset. The sources rule out a
    silent default (design record §9: no CNY default).
 5. **The unit of parameter 4** (#27185). "12 significant decimals" can mean 12 significant digits or 12 digits after
    the decimal point. The precision and scale of the `rate` column follow from the choice.
@@ -340,5 +346,5 @@ git grep -n "valueDomain: 'iso_4217_currency'" -- packages/services/service-sett
 - Workload rows and parameters: [#27119 `6464936321`](https://github.com/objectstack-ai/objectstack/issues/27119#issuecomment-6464936321).
 - Measurement round and shape verdict: [#8345 `6041378776`](https://github.com/objectstack-ai/objectstack/issues/8345#issuecomment-6041378776),
   [#8345 `6041482631`](https://github.com/objectstack-ai/objectstack/issues/8345#issuecomment-6041482631).
-- Epic and children: [#8345](https://github.com/objectstack-ai/objectstack/issues/8345). Prerequisites outside the
-  epic (#27119 Q2 X): #27156, #27157, #27158, #26939.
+- Epic and children: [#8345](https://github.com/objectstack-ai/objectstack/issues/8345). The cards executing
+  #27119 Q2 X outside the epic: #27156, #27157 (also a member of R1), #27158, #26939.
