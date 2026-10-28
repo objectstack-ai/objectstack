@@ -18,12 +18,12 @@ Server-connected create/edit/view form for one object. Config props come from th
 | prop | type | kind | required | description |
 |------|------|------|:--------:|-------------|
 | `objectName` | `string` | binding | ✓ | The object this block binds to (server-connected). |
-| `formType` | `'simple' \| 'tabbed' \| 'wizard' \| 'drawer' \| 'modal'` | binding |  | The form's layout (simple/tabbed/wizard), or the built-in container the block opens it in: drawer/modal (use drawerSide/drawerWidth/modalSize; contentLayout 'tabbed' puts a modal's sections on tabs). |
+| `formType` | `'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'` | binding |  | Form presentation; drawer/modal render the form in a built-in overlay (use drawerSide/drawerWidth/modalSize). |
 | `fields` | `string[]` | binding |  | Limit/order the fields shown (defaults to the object form fields). |
 | `initialValues` | `Record<string, any>` | binding |  | Prefill values in create mode. |
 | `customFields` | `any[]` | binding |  | Field definitions merged over the set generated from object metadata. With inline definitions and no data source, this becomes the only field source. |
 | `readOnly` | `boolean` | binding |  | Render every field read-only, whatever `mode` says. |
-| `modalCloseButton` | `boolean` | binding |  | Show the close button of the block's modal container (formType 'modal'). |
+| `modalCloseButton` | `boolean` | binding |  | Show the modal presentation's close button (formType 'modal'; honoured by the modal form). |
 | `contentLayout` | `'simple' \| 'tabbed'` | binding |  | How the modal presentation lays out sections; 'tabbed' needs more than one section to differ from 'simple'. |
 | `confirmOnDiscard` | `boolean` | binding |  | Ask before discarding unsaved edits when a drawer/modal form is dismissed. Set false to close immediately. |
 | `submitText` | `string` | binding |  | Label of the submit button. |
@@ -44,9 +44,10 @@ Server-connected create/edit/view form for one object. Config props come from th
 | `layout` | `'vertical' \| 'horizontal'` | data |  | Field layout direction — 'vertical' (the renderer default) or 'horizontal'. Multi-column is not a layout value: set `columns` |
 | `columns` | `integer` | data |  | Number of columns for the form body |
 | `tabPosition` | `'top' \| 'bottom' \| 'left' \| 'right'` | data |  | Tab strip position (tabbed forms) |
-| `drawerSide` | `'top' \| 'bottom' \| 'left' \| 'right'` | data |  | Edge the drawer container opens from, when the React `ObjectForm` block opens this form with formType 'drawer' |
-| `drawerWidth` | `string` | data |  | [DEPRECATED → size buckets] Width of the drawer container the React `ObjectForm` block opens with formType 'drawer', e.g. "480px". A pixel width cannot be chos… |
-| `modalSize` | `'sm' \| 'default' \| 'lg' \| 'xl' \| 'full'` | data |  | Size bucket of the dialog a caller opens this form in: the console's New / Edit dialog, or the modal container of the React `ObjectForm` block (formType 'modal… |
+| `drawerSide` | `'top' \| 'bottom' \| 'left' \| 'right'` | data |  | Drawer side (drawer forms) |
+| `drawerWidth` | `string` | data |  | [DEPRECATED → size buckets] Drawer width, e.g. "480px". A pixel width cannot be chosen without knowing the client viewport — the renderer derives it. |
+| `modalSize` | `'sm' \| 'default' \| 'lg' \| 'xl' \| 'full'` | data |  | Modal size (modal forms) |
+| `splitDirection` | `'horizontal' \| 'vertical'` | data |  | Split orientation (split forms) |
 | `sections` | `object[]` | data |  |  |
 | `subforms` | `object[]` | data |  | Inline master-detail child collections |
 | `submitBehavior` | `object` | data |  | Post-submit behavior. On the `redirect` arm, `url` is relative-only and interpolates only declared record fields as `{{record.field_name}}`, URL-escaped. |
