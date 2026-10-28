@@ -2984,6 +2984,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.list.col.accessLevel': '访问级别',
   'engine.list.col._packageId': '软件包',
   'engine.list.col.criteria': '条件',
+  'engine.list.col.locale': '语言',
   'engine.list.col.actions': '操作',
   'engine.list.col._holderCount': '持有人数',
   'engine.list.col._grantedPermissionSets': '权限集',

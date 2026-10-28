@@ -61,6 +61,8 @@ import {
   type RichMetadataTypeEntry,
 } from './useMetadata.js';
 import {
+  BUNDLE_MEMBER_PARAM,
+  bundleMemberOf,
   getMetadataResource,
   resolveResourceConfig,
 } from './registry.js';
@@ -570,7 +572,10 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
     [scopedItems],
   );
 
-  const columns = config.listColumns ?? defaultColumns(config.primaryKey ?? 'name');
+  const columns = withBundleMemberColumn(
+    config.listColumns ?? defaultColumns(config.primaryKey ?? 'name'),
+    config.bundleMemberField,
+  );
   const typeLabel = translateMetadataType(type, locale, entry?.label ?? type);
   // The type offers SOME runtime write channel (the editors' type tier), and —
   // in the environment scope — the caller holds the capability the metadata
@@ -883,7 +888,14 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
                     row.source === 'artifact'
                       ? `${t('engine.list.source.artifactDesc', locale)}${row.item._packageId ? ` (${row.item._packageId})` : ''}`
                       : t('engine.list.source.runtimeDesc', locale);
-                  const rowHref = `./${encodeURIComponent(name)}${rowEditSuffix}`;
+                  // objectstack#26649 — two members of one name are two rows;
+                  // each opens its OWN member. A row that declares none is the
+                  // canonical member, which the bare name already opens.
+                  const rowMember = bundleMemberOf(row.item, config.bundleMemberField);
+                  const rowHref = `./${encodeURIComponent(name)}${withQueryParam(
+                    rowEditSuffix,
+                    rowMember ? `${BUNDLE_MEMBER_PARAM}=${encodeURIComponent(rowMember)}` : '',
+                  )}`;
                   return (
                     <tr
                       key={name + i}
@@ -1286,7 +1298,25 @@ export function openRowFromClick(e: React.MouseEvent<HTMLElement>, open: () => v
 const ROW_OWN_CONTROLS =
   'a,button,input,select,textarea,label,summary,[role="button"],[role="switch"],[role="checkbox"],[role="menuitem"],[role="link"],[contenteditable="true"]';
 
-function defaultColumns(primaryKey: string): NonNullable<import('./registry.js').MetadataResourceConfig['listColumns']> {
+type ListColumns = NonNullable<import('./registry.js').MetadataResourceConfig['listColumns']>;
+
+/**
+ * objectstack#26649 — the member column of a type whose identity is a pair,
+ * second after the primary key, unless the type's own columns already show it.
+ * Its label is localised like every default column (`engine.list.col.<key>`).
+ */
+function withBundleMemberColumn(columns: ListColumns, field: string | undefined): ListColumns {
+  if (!field || columns.some((c) => c.key === field)) return columns;
+  return [...columns.slice(0, 1), { key: field, label: field }, ...columns.slice(1)];
+}
+
+/** `suffix` (`''` or `?a=b`) with one more `key=value` pair, when there is one. */
+function withQueryParam(suffix: string, pair: string): string {
+  if (!pair) return suffix;
+  return suffix ? `${suffix}&${pair}` : `?${pair}`;
+}
+
+function defaultColumns(primaryKey: string): ListColumns {
   return [
     { key: primaryKey, label: primaryKey, width: '30%' },
     { key: 'label', label: 'Label', width: '30%' },

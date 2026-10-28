@@ -1137,6 +1137,7 @@ const en = {
     noCards: 'No cards',
     columnCards: '{{column}} cards',
     laneCards: '{{column}} - {{lane}} cards',
+    dropBlocked: 'A card in {{from}} cannot be moved to {{to}}.',
     cardTitlePlaceholder: 'Enter card title…',
     uncategorized: 'Uncategorized',
     loadMore: 'Load more',
@@ -1685,6 +1686,13 @@ const en = {
     loading: 'Loading…',
     // objectui#12330 — the report's no-access state; its title is `dashboard.widgetForbiddenTitle`.
     forbiddenMessage: 'You don’t have permission to view the data behind this report.',
+    // objectstack-ai/objectstack#25873 — the report period chip (`ReportSchema.dateRange`); its preset labels are `dashboard.filters.*`.
+    dateRange: {
+      from: 'From',
+      to: 'To',
+      datasetUnreadable: 'This report’s date range names no dimension, and the “{{dataset}}” dataset could not be read to find its date dimension ({{reason}}).',
+      noSingleDateDimension: 'This report’s date range names no dimension, and the “{{dataset}}” dataset declares {{total}} date dimensions ({{found}}) where it needs exactly one. Name the date dimension in the report’s dateRange.dimension.',
+    },
     aggregate: {
       count: 'Count',
       countDistinct: 'Distinct Count',

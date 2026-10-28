@@ -3343,6 +3343,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.list.col.accessLevel': 'Access',
   'engine.list.col._packageId': 'Package',
   'engine.list.col.criteria': 'Criteria',
+  // objectstack#26649 — the member column of a type whose identity is
+  // `(name, locale)` (`bundleMemberField`).
+  'engine.list.col.locale': 'Locale',
   'engine.list.col.actions': 'Actions',
   // objectstack#25333 — the position list's served columns (`PositionGrantCells.tsx`).
   'engine.list.col._holderCount': 'Holders',

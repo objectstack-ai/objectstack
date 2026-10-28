@@ -986,6 +986,7 @@ const ar = {
     noCards: "لا بطاقات",
     columnCards: "بطاقات العمود {{column}}",
     laneCards: "بطاقات {{column}} - {{lane}}",
+    dropBlocked: "لا يمكن نقل بطاقة من {{from}} إلى {{to}}.",
     cardTitlePlaceholder: "أدخل عنوان البطاقة…",
     requiredFieldsTitle: "أكمل الحقول المطلوبة",
     requiredFieldsDescription: "يجعل هذا النقل الحقول أدناه مطلوبة. أكملها للمتابعة.",
@@ -3428,6 +3429,12 @@ const ar = {
     totals: "الإجماليات",
     loading: "جارٍ التحميل…",
     forbiddenMessage: "ليست لديك صلاحية لعرض البيانات الخاصة بهذا التقرير.",
+    dateRange: {
+      from: "من",
+      to: "إلى",
+      datasetUnreadable: "لا تحدد الفترة الزمنية لهذا التقرير أي بُعد، وتعذّرت قراءة مجموعة البيانات \"{{dataset}}\" للعثور على بُعد التاريخ ({{reason}}).",
+      noSingleDateDimension: "لا تحدد الفترة الزمنية لهذا التقرير أي بُعد، وتعلن مجموعة البيانات \"{{dataset}}\" عن {{total}} من أبعاد التاريخ ({{found}}) بينما يلزم بُعد واحد بالضبط. حدّد بُعد التاريخ في dateRange.dimension الخاص بالتقرير.",
+    },
     aggregate: {
       count: "عدد",
       countDistinct: "عدد الفريد",
