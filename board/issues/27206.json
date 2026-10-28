@@ -4,7 +4,7 @@
   "title": "feat(spec,types,plugin-list,app-shell)!: retire the list view's `options` bag; stored bags fold onto the top-level blocks, and the renderers read the blocks alone",
   "state": "open",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "needs-user-decision",
     "protocol:ui",
     "size/xl",
     "tests",
@@ -24,7 +23,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-28T10:29:49Z",
-  "updated_at": "2026-10-28T12:05:42Z",
+  "updated_at": "2026-10-28T19:55:26Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

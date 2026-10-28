@@ -1,0 +1,36 @@
+{
+  "number": 27289,
+  "kind": "pull_request",
+  "title": "test(i18n): give the studio zh-only key families one home",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T14:34:47Z",
+  "updated_at": "2026-10-28T15:14:25Z",
+  "closed_at": "2026-10-28T15:14:23Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-28T15:14:23Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27289",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8WHECehD1njgR1VYkaf17RP)_\n\nFixes #27250\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:studio 命名空间里「只有中文、没有英文」的三个键族前缀,原先在 i18n 包和 app-shell 包的两个测试里各抄一份;现在只在 i18n 的一个测试辅助文件里写一次,app-shell 的测试断言自己那份理由清单的前缀与它完全相等。\n- 为什么改:两份清单各自都会拦住清单外的键,但互不对照,以后有人只改其中一份,两边就会对「哪些中文独有键是允许的」说法不一,却没有任何测试变红。\n- 风险与回滚:只动测试,不改任何运行时代码、不发布任何东西;回滚就是 revert 这一个提交。\n- 先看:`ui/packages/app-shell/src/views/metadata-admin/inspectors/inspectorStrings.studioNamespace-25922.test.ts` 新增的相等断言;`ui/packages/i18n/src/__tests__/studio-zh-only-families.ts`;`ui/packages/i18n/src/__tests__/studio-namespace.test.ts`。\n- 两分钟验证:在仓根跑 `pnpm --dir ui exec vitest run packages/i18n/src/__tests__/studio-namespace.test.ts packages/app-shell/src/views/metadata-admin/inspectors/inspectorStrings.studioNamespace-25922.test.ts`,应看到两个文件全绿;在任一清单里多加一个前缀,应只有「a reason is given for exactly the families the i18n pin allows」这一条变红。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- New test-support module `ui/packages/i18n/src/__tests__/studio-zh-only-families.ts` exports `STUDIO_ZH_ONLY_FAMILIES`, the three zh-only prefixes (`engine.flowNode.`, `engine.enum.type.`, `engine.packages.form.help.`). It sits under `__tests__/`, which the package's `tsconfig.json` excludes, so it is not in `dist` and nothing is added to `@object-ui/i18n`'s exports map.\n- `studio-namespace.test.ts` drops its local `ZH_ONLY_FAMILIES` literal and reads the module.\n- `inspectorStrings.studioNamespace-25922.test.ts` imports the module by relative path (the dependency direction stays app-shell → i18n) and adds one case, \"a reason is given for exactly the families the i18n pin allows\", asserting the sorted `ZH_ONLY_REASONS` prefixes equal the sorted list. The reasons and citation anchors stay in app-shell, beside the files they cite.\n\n## Why\n\nAfter the designer-table parity gate retired, the zh-only family list had two homes and nothing held them equal (triage's contract review of PR #27136). Route taken: one list on the i18n side plus an equality assertion, the dispatch's first option. Deriving `ZH_ONLY_REASONS` from the i18n list is not possible, because its reasons and anchors are app-shell facts.\n\n## Tests\n\n- Both pins: `Test Files 2 passed (2)`, `Tests 201 passed (201)` (the new case is the 201st).\n- Ablation, two one-shot legs through `scripts/ablation-replace.mjs`, each with on-disk anchor counts and blob hashes, restored after:\n  - fourth prefix added to `STUDIO_ZH_ONLY_FAMILIES` only: red, `Tests 1 failed | 200 passed (201)`, the one failure being the new equality case.\n  - fourth entry added to `ZH_ONLY_REASONS` only (with a valid citation anchor): red, `Tests 1 failed | 201 passed (202)`, again only the new equality case.\n  - After both legs `git diff HEAD` is empty and both files' blobs equal their `HEAD` blobs.\n\n## Acceptance notes\n\n- `ZH_ONLY_FLOOR` in the app-shell pin keys its floors by a coarser prefix, `engine.enum.` rather than `engine.enum.type.`. It holds counts, not the allowed set, so it is outside this card; noted only.\n- No changeset: the diff touches test files only, and the new module sits in a directory the build excludes, so no released package publishes anything new (`skip-changeset`).\n\n## Verification\n\nLocal readings on head `37238cc1` (merge base `1e8e5296`). Exit codes captured before any pipe; CI owns every other family.\n\n<details><summary>24 derived gate families: 24 run, all exit 0; <code>dispatch-gates --ran</code> reconciles 24/24, 0 NOT-MEASURED</summary>\n\n```text\nnode scripts/check-closing-keyword-parity.mjs :: exit 0\nnode scripts/check-closing-keyword-parity.mjs --self-test :: exit 0\nnode scripts/check-comment-mask-corpus.mjs :: exit 0\nnode scripts/check-sdui-manifest.mjs :: exit 0\nnode scripts/check-sdui-manifest.mjs --self-test :: exit 0\npnpm --dir ui exec vitest run scripts/ :: exit 0\npnpm --filter @objectstack/spec run check:duration-unit-keys :: exit 0\npnpm check:cross-package-test-inputs :: exit 0\npnpm check:dispatcher-error-vocabulary :: exit 0\npnpm check:driver-memory-census :: exit 0\npnpm check:engine-double-contract :: exit 0\npnpm check:gitlink-declared :: exit 0\npnpm check:nul-bytes :: exit 0\npnpm check:published-files :: exit 0\npnpm check:query-options-erasure :: exit 0\npnpm check:refd-timer-probe :: exit 0\npnpm check:skill-identifier-liveness :: exit 0\npnpm check:test-source-alias :: exit 0\npnpm check:tier-file-adoption :: exit 0\npnpm check:type-check-coverage :: exit 0\npnpm check:type-check-debt :: exit 0\npnpm check:undeclared-dep-imports :: exit 0\npnpm check:watch-hint-literal :: exit 0\npnpm check:where-matcher :: exit 0\n```\n\n</details>\n\n<details><summary>Owed beyond the derived list: both package type-checks (each compiles its tests through <code>tsconfig.test.json</code>, so the cross-package import is type-checked) and the line-citation check</summary>\n\n```text\npnpm --filter @object-ui/i18n run type-check :: exit 0\npnpm --filter @object-ui/app-shell run type-check :: exit 0\npnpm --dir ui run check:new-line-citations :: exit 0\n```\n\n`check:new-line-citations` printed `0 new citation(s)`.\n\n</details>\n\n`dispatch-gates --tier` on this surface: no path-derived mandate (TIER_DEFAULT). Changed lines 34 (+26 / -8).\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes. (lint is CI's run)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset. (publishes nothing)\n- [x] 6. `packages/spec` touched: n/a.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English (the 维护者速读 block is the dispatch-required Chinese summary).\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxban7wCJnPiiSY4ULYz)_\n"
+}

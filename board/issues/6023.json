@@ -1,7 +1,7 @@
 {
   "number": 6023,
   "kind": "issue",
-  "title": "[PM seat] domain:devx @ objectstack — ⏳ vacant · the lane is seat 2 only (#20163)",
+  "title": "[PM seat] domain:devx @ objectstack — 🟢 sunhaolin",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,16 +13,18 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [],
+  "assignees": [
+    "sunhaolin"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-08-06T15:03:28Z",
-  "updated_at": "2026-10-28T00:23:55Z",
+  "updated_at": "2026-10-28T17:19:34Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 445,
+  "comments": 446,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/6023",
-  "body": "⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/devx.md`, ⛔ not copied here. This is **`domain:devx` seat 1**. Seat 2 is #20163 and seat 3 is #26373 (⛔ this post is neither).\n\n## Current PM\n\n🟢 `os-warren` · 由 os-warren 账户的项目负责 (Claude Code project \"objectstack skills\", seat thread \"Dispatch the devx lane\") · `session_01JQwxbaFpnMwgpCgneKe2qS` · seated 2026-10-27T08:47Z; body refreshed 2026-10-27T09:51Z. Summons, the maintainer's words in that project, verbatim: 「开一个新 thread，接手 devx 车道」 then 「devx seat 1」. Seated on the release marker 6433605641 (`os-elon-musk`'s sign-off brief, the newest event on this post at the fire). The previous body revision holds that vacant ledger (released cards, lane snapshot, the mechanisable `dispatch-gates` ui-gates item).\n\n- **Only devx seat in office:** seat 2 (#20163) signed off in 6438441479 on its maintainer's word 「devx 车道当前任务处理完就下班」 and handed the whole devx queue to this seat (6438116163). Seat 3 (#26373) is `⏳ vacant`. Seat 2's tails this seat watches: #26569 (#26460, Tier H, awaits a governed approver; the ruleset change follows the merge), #26536 (#26035 slice 1, awaits a maintainer), #25870 (`needs-user-decision`), #26444 (blocked by #26523, `domain:server`), #26428's acceptance reading due 2026-10-28 03:00Z. Claims carry `Seat: domain:devx#1`.\n- **Model:** the ceiling tier is out of quota for this account (the maintainer, 2026-10-27). Dispatches run at the default judgment tier under the quota exemption; a card whose contract review needs the ceiling tier waits for the director seat's review.\n\n## Inherited ledger\n\nPosture and ledger live in the project (pointer only). Canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:devx#1` + `head:claude/` PRs, read by `assignee:os-warren`.\n\n## Hot-file serial queue\n\n⛔ Re-derive from live `Claim:` comments and each open PR's file list before every dispatch.\n\n- `.gitattributes` L97–108, `scripts/regen-artifacts.mjs` (`NOT_DRIVER_MANAGED`), `scripts/git-merge-regen.mjs` (`MIXED_COMPARATORS`) → #26535 (this seat).\n- Landed this term: #26423 → PR #26588 (`9dc8fba7a5`).\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`); ⛔ GitHub MCP writes.\n- Wake: this project's seat thread, PR subscriptions, and a self-bound hourly patrol. Wall: none.\n"
+  "body": "domain:devx#1 · sunhaolin · session_017xRBcVyH9FzSkzAGmz8LNE\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/devx.md`, ⛔ not copied here. This is **`domain:devx` seat 1**. Seat 2 is #20163 and seat 3 is #26373 (⛔ this post is neither).\n\n## Current PM\n\n🟢 `sunhaolin` (`GET /user`) · `session_017xRBcVyH9FzSkzAGmz8LNE` (cloud session, direct summons) · seated 2026-10-28T17:19Z. Summons, the maintainer's words in this session, verbatim: `/pm-dispatch devx seat 1`.\n\n- **Sibling seat:** seat 2 (#20163, `os-justin`) finishes only the cards it holds (#27114, #25910) and then signs off. The maintainer's word, verbatim, in this session: 「seat 2 只处理手上的任务就会下班」 (recorded on #20163). Every other `domain:devx` card is this seat's.\n- **Posture:** batch default 3, default judgment tier, `mode:subagent` for S/M cards. No predecessor posture carries over.\n- **Mailbox:** not opened. Zero open `pm:mailbox` pulls in the repository at seating, so no sibling reads one.\n\n## Inherited ledger\n\nPosture and ledger live in this session (pointer only). Canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:devx#1` + `head:claude/` PRs, read by `assignee:sunhaolin`. The previous body revision (os-warren, 2026-10-27) is the archive of the last term.\n\n## Hot-file serial queue\n\n⛔ Re-derive from live `Claim:` comments and each open PR's file list before every dispatch.\n\n- `packages/drivers/driver-memory/src/index.ts` → #26206, PR #27323 (in the merge queue).\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`); ⛔ GitHub MCP writes.\n- Wake: this session's chat and PR subscriptions (#27323). Wall: none. Decision filed: #27297 (blocks #25919).\n"
 }

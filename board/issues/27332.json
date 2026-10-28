@@ -1,0 +1,30 @@
+{
+  "number": 27332,
+  "kind": "issue",
+  "title": "access: an external object on the default sharing model refuses every member edit (403) because the ownership checks read `owner_id` / `created_by`, which no remote row carries — `os validate` says nothing (epic #27261, found by the P0 spike)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "finding",
+    "pm:epic"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T17:39:19Z",
+  "updated_at": "2026-10-28T17:39:19Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27332",
+  "body": "epic:#27261#1 · marchtian · session_017ihL2c5z3q4h8inrn5kwqV\nFiling gate: ① product defect, class c, reach measured through the public HTTP door.\nReader: the epic PM (#27261) routes it after triage sets the lane; the fix PR is the `os validate` warning below. #27278 (the guide) carries the author-facing rule meanwhile.\nDedupe (open AND closed): \"external federated object sharing model owner_id created_by 403 member edit\" → 20 hits, none this defect (#26596 is the public_read_write write-floor change, #23268 the retired `externalSharingModel`); \"external object datasource sharingModel owner column validate warning ADR-0015\" → 19 hits, none this defect.\nreach: public HTTP entry, measured: `PATCH /api/v1/data/spike_owned/o_1` by a member whose permission set grants `allowEdit` answers 403 `PERMISSION_DENIED` — pinned as step (e3) in `packages/runtime/src/plugin-driver-external-object.spike.test.ts` (PR #27330, head `680ce37b`).\ntype: Bug\n\nPart of #27261 (Tier A, ruling 6471382887). Found by the P0 spike #27276; its report is comment 6476152968 on #27276.\n\n## 维护者速读\n\n- **现象：** 外部对象（`external` 绑定）若沿用默认共享模型，持有 `allowEdit` 的普通成员改任何一行都被 403；只有管理员或 `sharingModel: public_read_write` 才能写。\n- **原因：** 写之前平台问远端两件事：共享检查读 `owner_id`，所有权兜底读 `created_by == 当前用户`。远端行没有这两列，于是永远判「不是你的」。\n- **影响：** #27130 这类虚拟对象的作者照默认写，上线后成员拖甘特条全部 403，且 `os validate` 不提示。\n- **最小修法：** `os validate` 对「外部对象 + 按所有者的共享模型 + 未映射所有者列」给警告，点名两条出路（改 `public_read_write` 由 hook 判谁能改，或在 `columnMap` 映射一列所有者）。不做 defineStack 拒收（那会收窄已发布接受集）。\n- **需要您做的：** 无。\n\n## Evidence\n\nThe spike's second external object `spike_owned` (no `sharingModel`, so the platform default) on the plugin driver `driver.spike_tree`. The member holds `{ allowRead: true, allowEdit: true }` on it. Before refusing, the remote is asked exactly:\n\n- `find { where: { id: 'o_1' }, fields: ['id', 'owner_id'], limit: 1 }` (the sharing check), and\n- `findOne { where: { $and: [{ id: 'o_1' }, { created_by: <caller> }] }, limit: 1 }` (the ownership floor).\n\nNeither column exists on a remote row, so every row reads as someone else's; `driver.update` is never called. On `sharingModel: 'public_read_write'` the same member's write reaches `beforeUpdate` and then `driver.update` (steps e1/e2 of the same file).\n\n## Task\n\n- [ ] `os validate` warning (not a refusal) for an object with an `external` binding whose effective sharing model is owner-keyed and whose `external.columnMap` maps no owner column; the message names both ways out.\n- [ ] Pin: the spike's `spike_owned` shape gets the warning; the `spike_node` shape (`public_read_write`) does not.\n- [ ] Check whether the same two reads also refuse `delete`, and name it in the PR.\n\n`Clause-②: no` (a warning narrows nothing) · `Metadata-protocol: none`."
+}

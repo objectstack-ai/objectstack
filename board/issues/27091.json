@@ -2,8 +2,8 @@
   "number": 27091,
   "kind": "issue",
   "title": "spec/books: a book's synthetic *Uncategorized* group catches same-package docs a sibling book already claims, so two books over one package each list the other's pages under Uncategorized",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:devpath",
     "bug",
     "domain:spec",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-28T04:58:07Z",
-  "updated_at": "2026-10-28T13:26:37Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-28T15:16:16Z",
+  "closed_at": "2026-10-28T15:14:25Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27091",
   "body": "## Source\n\nhotcrm#2327 (PR hotcrm#2355) measured this on HotCRM, platform 18.2.0. The report is hotcrm#2327 comment 6461000907.\n\nThe HotCRM app package ships two books over its own `src/docs/`:\n- `crm_manual` claims `crm_overview`, `crm_sales_*` and the service package's `crm_service_*`.\n- `crm_admin_manual` claims `crm_admin_*`, with `audience: { permissionSet: 'system_admin' }`.\n\nEvery doc is claimed by exactly one book, and `resolveBookClaimedDocs` per book agrees: hotcrm's `test/docs-books.test.ts` pins it. Even so, `GET /api/v1/meta/book/crm_manual/tree` as an administrator returns a trailing `uncategorized` group holding `crm_admin_access` and `crm_admin_automation`. The Admin Manual's tree likewise lists the app package's user pages under its own *Uncategorized*. Members without the admin set see neither, because the REST tree prunes by audience. The pages themselves are gated correctly.\n\n## Mechanism (objectstack `main` `cbb3a1a1a`)\n\n`resolveBookTree` (`packages/spec/src/system/book.zod.ts`, docblock above it) sends \"any doc OF THE BOOK'S PACKAGES claimed by no group\" to the synthetic *Uncategorized* group. \"Claimed\" is judged against this book's groups only. #20980 scoped the catch-all to the book's packages, but a doc a sibling book in the same package claims is still an orphan to every other book.\n\nADR-0046 §6.4 rolls up docs \"left unplaced\". A doc placed in a sibling book is not unplaced.\n\n## Effect\n\nAn administrator opening the User Manual sees an *Uncategorized* section with the admin pages, which the Admin Manual already presents. Splitting one package's docs across books by audience, the case §6.7's per-book audience exists for, always produces this.\n\n## Target\n\nThe orphan catch-all excludes docs that another registered book of the same package claims, which is the cross-book claim set `resolveDocAudiences` already builds by running `resolveBookClaimedDocs` over every book (`book.zod.ts:503–512`). A doc that no book claims still rolls up, as now.\n\n## Acceptance\n\n1. Two books over one package with disjoint includes: neither tree has an `uncategorized` group. A spec test pins this.\n2. A doc of that package that neither book claims still appears under *Uncategorized* in the package's book(s).\n3. The audience union (§6.7) is unmoved.\n\n<sub>Filed by the `repo:hotcrm` lane seat (session `session_01J8VVAnPkgK6CWrJa6t7Fk5`) from hotcrm#2327's report. Dedupe: searched objectstack issues for book tree Uncategorized, sibling book and `resolveBookClaimedDocs`. #20980 (closed) scoped the catch-all to the book's packages, a different case. No open card.</sub>"

@@ -1,0 +1,30 @@
+{
+  "number": 27312,
+  "kind": "issue",
+  "title": "spec: the describe() of relatedList 'primary' and of enable.trackHistory still narrate the v2 record page (own tab, History tab) after the v3 layout",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:spec",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T16:14:22Z",
+  "updated_at": "2026-10-28T16:14:22Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27312",
+  "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\n## Observed (PR #27310, the record page v3 layout, branch head `aef002ff60`)\n\nTwo published contract texts in `packages/spec` describe the v2 synthesized record page, which the v3 layout retires:\n\n1. `relatedList: 'primary'` (`packages/spec/src/data/field.zod.ts`) — the `.describe()` says the list is promoted to its own tab. On the v3 synthesized page a primary list is a full-width body table after the first field group (`bodyTablePlacement` in `ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts`); the #27069 wording on `ObjectSchema.relatedLists` already says \"places\" a list.\n2. `enable.trackHistory` (`packages/spec/src/data/object.zod.ts`) — the `.describe()` says \"Show the record History tab\", and the generated `content/docs/references/data/object.mdx` repeats it. On the v3 page field changes join the one timeline stream (the 「变更」 chip); there is no History tab on the synthesized page.\n\nBoth are docblock / describe prose, no schema shape change; the generated reference pages and the `authorable-surface` baseline follow whatever the describe says.\n\n## Reach\n\nNamed producer: `packages/spec` describe text, read by the Studio inspector help, the generated references and the skills. Not a runtime behaviour.\n\n## Target\n\nReword both describes to the v3 page (a primary list is a body table in the details column; `trackHistory` feeds field changes into the record's timeline stream and, on an authored page, the History block), regenerate the references and the baseline, no key change. Lands after PR #27310 (the behaviour it describes).\n\nGoverning text: the two `.describe()` strings; AGENTS.md on docblocks describing what the runtime does; ADR-0087 (describe-only changes need no conversion).\n\n<sub>Filed by the epic PM session `session_cdb7a717-def7-4e71-9988-f089fbaa18ff` on 2026-10-28 from PR #27310's out-of-scope findings (class b, named producer), under epic #26676.</sub>"
+}

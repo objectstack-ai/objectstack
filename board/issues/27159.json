@@ -23,11 +23,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-28T08:36:02Z",
-  "updated_at": "2026-10-28T13:07:43Z",
+  "updated_at": "2026-10-28T15:55:32Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 6,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27159",
   "body": "Blocked-by: #27155\n\nFiling gate ③ (maintainer-directed). Ruling 6464210455 on #27032 (batch #421 item 3, letter A′, maintainer 「其他同意」 2026-10-28): the renderer half of the ADR-0050 cutover; the spec half is #27155. Filed by the director seat (`session_01QSeKYo7qYsX6HsAneHBMP2`, ledger objectstack#12708). ⛔ Not a claim; triage sets the lane (`domain:ui` expected) and grade.\n\nRuling-ref: 6464210455\n\n## 维护者速读\n\n- **改了什么：** `ObjectForm` 删掉 `split` / `drawer` / `modal` 三个分支，`SplitForm` 退役；`DrawerForm` / `ModalForm` 保留为调用方容器（#1890 的布局转发不动）。\n- **为什么改：** spec 侧（#27155）把 `FormView.type` 收成布局三值后，渲染器里这三个分支成为死代码；留着就是「声明已拒、实现仍在」的分叉。\n- **风险与回滚：** 与 #27155 同窗落地（本卡 `Blocked-by:` 它）；回滚 = 还原三个分支。\n- **先看：** `ui/packages/plugin-form/src/ObjectForm.tsx` L41–42、L516、L553；`SplitForm.tsx`。\n- **两分钟验证：** showcase `task` 的两个演示视图以 `tabbed` / `simple` 布局渲染，打开方式由列表 `navigation.mode` 决定；`type: 'split'` 的 view 已被 spec 拒收。\n- **需要您做的：** 无。\n\n## Measured (on `origin/main` `e6e41998`, 2026-10-28)\n\n- `git grep -n \"SplitForm\\|DrawerForm\" origin/main -- ui/packages/plugin-form/src/ObjectForm.tsx` → imports L41–42, branches L516 / L553.\n- `ModalForm.tsx:167, 950`: the ADR-0050 / #1890 forwarding — kept.\n- Demo usage: `examples/app-showcase/src/ui/views/task.view.ts:421` (`split`), `:431` (`drawer`) — re-spelled by #27155's PR or this one, whichever lands the example (state it in the PR body); hotcrm `lead.view.ts` L747 / L796 / L839 by the hotcrm seat.\n\n## Task\n\n- [ ] Remove the three branches and the `SplitForm` module (and its tests / stories); keep `DrawerForm` / `ModalForm` as containers the caller supplies.\n- [ ] `section.pane` readers in `plugin-form` go with `split`.\n- [ ] Console / app-shell call sites that passed `formType: 'modal' | 'drawer'` into `ObjectForm` switch to the container + layout spelling (`AppContent.tsx:1513`, `useActionModal`).\n- [ ] Unit tests: a `tabbed` layout inside `ModalForm` still renders (#1890 pin stays green).\n\n`Clause-②: no` · `Metadata-protocol: none` (the protocol change is #27155's). Dedupe: #27032 (ruled), #27155 (parent), #1890 (closed); no open ui card removes these branches."

@@ -14,7 +14,6 @@
     "area:api",
     "bug",
     "domain:spec",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -23,7 +22,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T21:31:46Z",
-  "updated_at": "2026-10-28T14:08:52Z",
+  "updated_at": "2026-10-28T15:43:02Z",
   "closed_at": "2026-10-28T13:42:25Z",
   "closed_by": {
     "login": "os-zhuang",
@@ -31,7 +30,7 @@
     "type": "User"
   },
   "merged_at": null,
-  "comments": 5,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26924",
   "body": "## Source\n\nOpen question from the #26747 card thread (PR #26922, report comment 6454047244), checked by the ui seat on `origin/main` `5ce3404a`. Filed for the spec lane: the ui seat does not take contract-tier work.\n\n## Problem\n\n`packages/spec/src/ui/action.zod.ts` (~1701-1709) says two different things about `newTabUrl`:\n- The JSDoc says \"A path template the renderer navigates the pre-opened tab to\", naming the cloud `/sso-open` endpoint as the example.\n- `.describe()` and the action form's help text (`action.form.ts` ~153) say \"Direct new-tab URL template\".\n\nThe console's fast path (`createConsoleServerActionHandler`, and after PR #26922 also `type: 'api'` actions) treats it as a path and prefixes the backend origin. QA's repro for #26747 used `https://example.com/export/{recordId}`, and that value opens a tab at origin + `https://example.com/…`. Nothing refuses it at authoring, so AI-written metadata can carry an absolute value silently.\n\n## Target (the spec seat measures and chooses)\n\n- **A (thread's recommendation):** refuse at authoring. `newTabUrl` must start with `/`, matching \"path template\" and the same-backend, auth-enforcing endpoint the key exists for. This is a narrowing, so it needs a contract review and a stored-metadata survey.\n- **B:** declare absolute `http(s)` values legal and have the renderer navigate them verbatim. This is a widening, and it needs a renderer follow-up in `ui/packages/app-shell/src/utils/consoleServerAction.ts`.\n\nEither way, the JSDoc, `.describe()` and the form help text should say the same thing.\n\n## Acceptance\n\nOne meaning, stated identically in all three places. An authored value outside that meaning is either refused at parse (A) or navigated as declared (B, with its ui follow-up).\n\nRelated: #26747, PR #26922."

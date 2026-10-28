@@ -2,8 +2,8 @@
   "number": 27214,
   "kind": "issue",
   "title": "pm-dispatch runbook: the desktop-launched cloud os-dev path — base branch, model, relay, CI trigger, hand-back and archive, as measured on the first two cloud cards",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,19 +13,24 @@
   "labels": [
     "area:devpath",
     "domain:skills",
-    "pm:queue",
     "priority:p2",
     "tooling"
   ],
-  "assignees": [],
+  "assignees": [
+    "sunhaolin"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-28T10:52:29Z",
-  "updated_at": "2026-10-28T12:04:31Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-28T16:52:05Z",
+  "closed_at": "2026-10-28T16:50:00Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27214",
   "body": "## Observed (epic #26676, 2026-10-28, the first two cloud-dispatched cards #27052 → PR #27120 and #27054 → PR #27163)\n\nThe runbook's 「云卡（`mode:cloud`）四课」 (`.claude/skills/pm-dispatch/references/dispatch-runbook.md`) describes the claude.ai cloud API path: `create_session` with `source_url` / `outcome_branch`, poke triggers, `subscribe_pr_activity`. A PM seat running in the Claude desktop app has a second path — `start_session` with `target: cloud` — and it behaves differently on six points, each measured this round:\n\n1. **Base branch.** The cloud session clones the branch the app recorded for the launching session, not the current checkout and not `main`. That record goes stale (this seat's was a branch deleted after its PR merged two weeks earlier); the session then dies at start with `The requested branch or commit was not found in the repository` (upstream: anthropics/claude-code#104412, open). Three launches failed before the seat pushed a pointer branch of that exact name at `origin/main`. The dispatch order must say the base branch is a pointer, never a place to commit.\n2. **Model.** `start_session`'s `model` / `effort` are ignored for `target: cloud`; the session inherits the launching seat's model. Both cards started on the seat's tier until the maintainer switched them to the claim's `TIER_DEFAULT` by hand. A claim for a cloud card must say so, or the seat must launch from a session already on the card's tier.\n3. **Relay.** In the cloud container the fleet relay (`scripts/pm/fleet-write/dispatch.mjs`) auto-selects the dispatch transport with the container's session id — no `--session`, no `fleet.env`. Both cards' `pr_create` and report comments went through it as `objectstack-fleet[bot]` (2 relay strokes each).\n4. **CI.** The cloud session's git credential is the Claude GitHub App. Its pushes after the PR exists fire **no** PR workflow on this repository (`b36136e279` on #27120: five third-party check suites queued, no `github-actions` suite, while `pr-body-guards` listens to `synchronize`); only the fleet bot's PR-open event ran CI. The final head therefore needs one push from a user token — this round that was the seat's local patch round. Either the dispatch order says \"open the PR after the last push\", or the seat plans a local re-push.\n5. **Hand-back.** The cloud session cannot message the seat and receives no poke; the PR and the `os-dev-report` comment on the card are the only hand-back. A REWORK cannot be delivered to it: the patch round runs as a local os-dev agent on the same branch under the same claim (both cards this round).\n6. **Archive.** The failed and the finished cloud sessions are not visible to the desktop seat's session tools (`list_sessions` lists local sessions only); the archive duty (`execution-duties.md` 「归档义务只落在云卡」) falls to the maintainer in claude.ai/code until the seat has a handle.\n\nPositive reading, worth keeping: the cloud session on #27052 read its own CI red (an a11y name collision caught by a #26678 pin outside its touched families) and fixed it before reporting, without a poke.\n\n## Target\n\nOne addition to `dispatch-runbook.md` beside the existing four lessons — 「桌面起云会话」, the six points above as six lines, each with its re-check command (`get_session self` → `branch`; `git ls-remote --heads origin <branch>`; the check-suites read on a post-PR push) — and one line in `execution-duties.md`'s cloud rows pointing at it. No new gate (「新增门禁默认否」). Line budget for `.claude/skills/**`: net +8 lines, paid by tightening the existing cloud lesson wording where it repeats.\n\nGoverning text: `.claude/skills/pm-dispatch/references/dispatch-runbook.md` 〈云卡（`mode:cloud`）四课〉; `references/execution-duties.md` the `mode:cloud` rows; `.claude/agents/os-dev.md` (each dispatch mode's hand-back is GitHub).\n\n## Acceptance\n\n- The six lines are present with their re-check commands; `pnpm check:pm-skill-ratchet` (the SKILL.md line ratchet) is unaffected (references only); `check:skill-frame-sync` / `-freshness` green.\n- A seat following the new lesson launches a cloud card without the three failures above.\n\n<sub>Filed by the epic PM session `session_cdb7a717-def7-4e71-9988-f089fbaa18ff` on 2026-10-28 from the two cloud trials of epic #26676, on the maintainer's instruction (verbatim: 「好，失败的云会话我自己归档，skills 卡等云试派回报后你再立。」). Evidence: PR #27120 comments 6464903026 / 6466520937, PR #27163 comment 6465393909, the epic parent's round-3 checklist, and the seat's reading of check-suites on `b36136e279`.</sub>"

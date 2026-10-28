@@ -1,0 +1,32 @@
+{
+  "number": 27285,
+  "kind": "issue",
+  "title": "ADR-0025 M5 — hot attach / detach without restart: kernel attach/detach with per-plugin resource accounting, a mutable plugin route table, `plugin:loaded` reconcile, cluster fan-out; restart kept for sign-in, driver and core-service plugins",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:cloud",
+    "enhancement",
+    "priority:p2",
+    "status:parked"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T14:33:21Z",
+  "updated_at": "2026-10-28T16:25:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27285",
+  "body": "Part of #27108 (M5). Blocked-by: #27124\n\n**Filing gate ③** (maintainer ruling). Ruled on #27108 (the ruling comment of 2026-10-28 by `session_01J8VVAjRKqdoEYQ4hXxtBuf`, item 2): 「代码插件要到下次启动才加载，这个问题也要解决」 → 「好，把热加载和依赖策略并进清单」 → 「同意」. This reverses the epic's Q8 (「hot reload retired with #12587 → boot activation」) for the general case; ADR-0025 v2 §3.5 step 7 gains this arm (Tier H line, the maintainer lands). ⛔ Not a claim. ⛔ No `domain:*`: `packages/core` (kernel), `packages/runtime`, `packages/plugins/plugin-hono-server`, `packages/services/service-automation`, `service-cluster`; triage sets lanes and splits.\n\n## 维护者速读\n\n装插件不重启。内核加 `attach` / `detach`：对单个插件跑依赖检查、init、start，detach 跑 destroy 并按\"记账\"反注销它登记过的服务、钩子、路由、任务、通道提供者、连接器工厂——这层记账包装正是 M2 的 `SecurePluginContext`，一层做两件事。插件 HTTP 路由不直接挂 Hono（默认 SmartRouter 首次匹配后冻结），走启动时挂好的固定前缀 + 可变分发表。加载后发 `plugin:loaded`，自动化服务复用 `metadata:reloaded` 的 reconcile 拉起\"provider 刚出现\"的声明式连接器，messaging 的 `lazyChannelMount` 已能接晚到的通道。集群里一个节点装 → 广播 → 各节点自取自装。卸载是\"逻辑卸载\"（ESM 不能从进程卸掉，旧模块留到重启），升级按版本化路径并排加载再 detach 旧版。**三类仍须重启并在货架上标明**：改登录的插件（better-auth 实例启动时构建）、数据库驱动、替换内核核心服务的插件。\n\n## Readings (at `c3fb185a`, re-check at dispatch)\n\n- `packages/core/src/kernel.ts:350`: `use()` after bootstrap throws \"Cannot register plugins after bootstrap has started\". Re-check: `git grep -n \"Cannot register plugins after bootstrap\" origin/main -- packages/core/src/kernel.ts`.\n- `packages/core/src/hot-reload.ts` `reloadPlugin`: destroy → re-init of an already registered plugin, state strategies `memory | none`; no attach of a new plugin, no detach. Re-check: `git grep -n \"async reloadPlugin\" origin/main -- packages/core/src/hot-reload.ts`.\n- `kernel.ts:383-385`: `registerService` throws on a duplicate; `replaceService` exists; no `unregisterService`. Hook / event unsubscription: **not found by this seat** — the dev establishes it first.\n- `plugin-hono-server/src/adapter.ts:643`: `new Hono()` with the default router. Whether declarative endpoints (ADR-0121) already dispatch through a runtime-mutable table — **not verified**; if so, reuse it.\n- `runtime/src/http-dispatcher.ts:575`: `announceKernelEvent` exists; whether it fans out across cluster nodes — **not verified**.\n\n## What lands\n\n1. **Kernel**: `attach(plugin)` / `detach(name)` after bootstrap; dependency check against the running set; a plugin that others `requires` cannot be detached while they are attached; `destroy()` contract documented (release timers, sockets, subscriptions).\n2. **Resource accounting**: the `PluginContext` wrapper (shared with M2) records every registration under the plugin's name and reverses them on detach; `unregisterService` and hook/event unsubscription added where missing.\n3. **Plugin route table**: a fixed catch-all mounted at boot delegating to a mutable table; route ledger updated at attach/detach.\n4. **Consumers**: `plugin:loaded` / `plugin:unloaded` kernel events; automation reconcile of declared connector instances on the provider factory appearing or vanishing; messaging lazy mount verified.\n5. **Cluster**: install/uninstall announced to every node; per-node attach status on the installation record; a failing node degrades the installation visibly.\n6. **Restart boundary**: a manifest declaration for the three classes; the shelf (M4) and `os plugin install` print \"restart required\" for them and nothing else.\n7. Delete the Q8 sentence in ADR-0025 v2 and the epic's milestone line in the same stroke (docs follow-up, Tier H).\n\n## Acceptance\n\n- Attach the Stripe sample on a running single-node stack: its connector materializes, a flow dispatches, no restart; detach: the connector is gone, routes 404, services deregistered, no leaked timers (test harness asserts). Upgrade side-by-side; old version detached.\n- On a two-node cluster, install on node A; node B attaches within the announce window; a deliberate failure on B marks the installation degraded naming B.\n- A plugin declaring the sign-in class is refused hot attach with \"restart required\".\n\n## Related\n\n#27108 (epic, ruling item 2) · #27124 (M2 — the shared wrapper) · the M4 shelf card · ADR-0025 v2 §3.5 · ADR-0097 (reconcile) · ADR-0121 (declarative endpoints) · #12587 (the retirement this reverses in part).\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

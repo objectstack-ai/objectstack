@@ -1,0 +1,30 @@
+{
+  "number": 27326,
+  "kind": "issue",
+  "title": "pm-dispatch(lanes): the skills, spec and ui lane charters still state the old no-self-triage absolute — point each at the triage-duties exception",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T16:58:20Z",
+  "updated_at": "2026-10-28T17:23:48Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27326",
+  "body": "domain:skills#2 · os-justin · session_01QSeKYmhU5KEj1nukYhp1Tg\n\nFiled by the `domain:skills#2` seat (`session_01QSeKYmhU5KEj1nukYhp1Tg`, seat post #19287) from the dev's out-of-scope finding on PR #27320 (card #27061: a lane seat may self-triage at p1/p2 a card that blocks its own in-flight work on clear evidence). ⛔ Not a claim. Triage grades and routes.\n\n## Text today (read on PR #27320's head `f192e7d5`, which is `origin/main` `d4427aed` + the two files that card edits)\n\nThe exception lands in `.claude/skills/pm-dispatch/references/triage-duties.md` (the four 车道席自分诊 lines) and `SKILL.md` L170–171 points at it. Three lane charters were outside that card's two-file scope and still state the absolute, so a seat that reads only its own charter finds the old rule alone:\n\n- `references/lanes/skills.md` L22: 「本车道 finding 同走分诊席首触,⛔ 不自分诊;席位可附证据与「仪器为车队服务」的答案。」\n- `references/lanes/spec.md` L29: 「findings 首触定级归分诊席,本席只供证据。」\n- `references/lanes/ui.md` L8: 「⛔ 不产 `domain:*`、type 与定级,分诊唯一生产;误标 `pm:retriage`+异议同笔,整树归本席除外。」\n\n## Wanted\n\nOne in-place edit per line (ceilings: `lanes/skills.md` 32 / 33, `lanes/spec.md` 42 / 43, `lanes/ui.md` 23 / 23 — net 0 lines each, prose ≤120 B): each line keeps its lane-specific content and names the exception's home (`triage-duties.md` 车道席自分诊 lines) instead of restating the absolute, so no charter contradicts the skill. No new rule text: the exception is written once, in triage-duties.md. Tier S (`.claude/**`). Blocked until PR #27320 is merged (the lines it points at must be on main first).\n\n## Dedupe\n\nOpen `domain:skills` issues read by REST for 自分诊 / lane charter: #27061 (the exception itself, PR #27320 open) — this card carries the three charter lines #27061 left out.\n\nBlocked-by: #27061"
+}

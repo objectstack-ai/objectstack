@@ -1,0 +1,32 @@
+{
+  "number": 27328,
+  "kind": "issue",
+  "title": "record page: the Edit action still opens on a row the server answers writable:false (the dialog then explains and offers no Save)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T17:07:25Z",
+  "updated_at": "2026-10-28T18:20:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27328",
+  "body": "Follow-up from #27138 (PR #27313, seat ACCEPT 6475438098).\n\n## What happens\n\nOn a record the caller may read but not write (`public_read` sharing, ownership, row-level security), the record page's **Edit** action is still enabled. Clicking it opens the edit dialog. Since #27313 the dialog draws every field read-only, says \"You don't have permission to edit this record\", and offers no Save. So the page still advertises an edit that the write gate refuses (`permission.zod.ts`: a client never advertises an edit the gate refuses). The dialog now explains the refusal, but the entry point does not.\n\nThe approval-lock case is already handled. The Edit action is disabled while a pending approval locks the record, through `resolveApprovalLock` in `RecordDetailView`.\n\n## Why it was not in #27313\n\nThe row verdict (`writable` on `GET /data/{object}/{id}/field-access`, PR #27232) is read only inside `RecordFieldAccessScope`, which the edit forms and the detail blocks mount. The record page host that draws the Edit action does not fetch the projection today. Disabling the action needs the host to read that answer, or to sit under a scope for the record.\n\n## Acceptance\n\n- On a `writable: false` row, the record page's Edit action is disabled, or absent, with a reason the user can read. CONTROL: a `writable: true` row and an absent `writable` (an older server) keep it enabled.\n- The verdict comes from the server's projection, so there is no client re-derivation of sharing (ruling 6457467702 B).\n- There is still one read per record. The page already mounts the scope for its detail blocks, so the action should read that same answer rather than issue a second fetch.\n\nArea note: the record page host (`RecordDetailView`) sits in epic #26676 territory, so triage routes it."
+}
