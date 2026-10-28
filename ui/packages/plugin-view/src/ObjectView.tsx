@@ -54,7 +54,6 @@ import {
   SheetHeader,
   SheetTitle,
   SheetDescription,
-  NavigationOverlay,
   Button,
   Tabs,
   TabsList,
@@ -96,7 +95,6 @@ import { SchemaRenderer as ImportedSchemaRenderer, useSettledSchema, notifyDataC
 import type { HandleClickModifiers } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import { ViewSwitcher } from './ViewSwitcher';
-import { deriveRecordSurface } from './recordSurface';
 import { useStableIdentity, isStructurallyEqual } from './stableIdentity';
 
 /**
@@ -572,7 +570,8 @@ function useCreateVerb(): string {
 
 /**
  * English fallbacks for the headings this view resolves through `t()`
- * (objectui#3459 for the split-mode record-detail heading, objectui#3462 for
+ * (objectui#3459 for the split-mode record-detail heading — retired with the
+ * split face, objectstack#26677, the key staying as the probe — objectui#3462 for
  * the create/edit/view form titles — both following #3426's shape).
  *
  * Every entry must exist HERE as well as in the locale packs: a provider-less
@@ -589,7 +588,7 @@ function useCreateVerb(): string {
  * `form.createTitle` / `form.editTitle` are reused for the same reason, and are
  * not new: all ten packs already carry them, and `app-shell` already heads the
  * PAGE-mode record form with exactly these (`RecordFormPage.tsx`,
- * `AppContent.tsx`). The drawer / modal / popover titles below are the same
+ * `AppContent.tsx`). The drawer / modal titles below are the same
  * heading on a different surface, so they resolve the same keys — minting a
  * parallel `console.objectView.*` family would have guaranteed the two spellings
  * drift (zh already distinguishes 新建 from 创建). Only the third verb,
@@ -1172,8 +1171,9 @@ export const ObjectView: React.FC<ObjectViewProps> = ({
   onViewAction,
 }) => {
   const createVerb = useCreateVerb();
-  // Headings this view owns: the split-mode record-detail panel (see the split
-  // branch far below) and the create/edit/view form titles (`getFormTitle`).
+  // Headings this view owns: the create/edit/view form titles (`getFormTitle`).
+  // (The split-mode record-detail panel heading left with the split face,
+  // objectstack#26677.)
   // Declared with the other top-level hooks so it stays above every conditional
   // return — rules-of-hooks.
   const { t: tView } = useObjectViewTranslation();
@@ -1653,24 +1653,26 @@ export const ObjectView: React.FC<ObjectViewProps> = ({
     invalidationNonce, fetchDrawsView,
   ]);
 
-  // Determine layout mode. objectstack-ai/objectstack#2578: default the record surface from how heavy the
-  // object is — a field-heavy object opens create/edit/detail as a full page, a
-  // light one as a drawer. Mobile always pages. An explicit `schema.layout` (or
-  // a per-view navigation config, handled in handleRowClick) still wins.
+  // Determine layout mode. An object opens its records in the drawer — the
+  // drawer expands to the full page, the same record page at two widths — and
+  // a mobile viewport pages (objectstack#26677, maintainer ruling 2026-10-27).
+  // The field-count guess that used to page a field-heavy object with no author
+  // choosing it (objectstack-ai/objectstack#2578's `deriveRecordSurface`) is
+  // retired from this path: `page` is a declaration, never a count. An explicit
+  // `schema.layout` (or a per-view navigation config, handled in
+  // handleRowClick) still wins.
   const isMobile = useIsMobile();
-  const layout = schema.layout || deriveRecordSurface(objectSchema, { viewport: isMobile ? 'mobile' : 'desktop' });
+  const layout = schema.layout || (isMobile ? 'page' : 'drawer');
 
   // objectui#11015 — the surface create, edit and view actually open on. A
   // `page` hands the record to the host's router, so it holds only while there
   // IS one: with no `onNavigate` a page has no surface inside this component,
-  // and it falls back to the drawer — the surface objectui#10975 already gave
-  // create under `split` / `popover` for a page. That is the registered
-  // `object-view` renderer's case, where a JSON schema cannot carry a function,
-  // on a mobile viewport or a field-heavy object: `deriveRecordSurface` picks
-  // `page` with no author choosing it. An explicit `layout: 'page'` without
-  // `onNavigate` (the README's documented misconfiguration) takes the same
-  // fallback. The three handlers, `formLayout` and `renderCreateSurface` read
-  // this and never `layout`, so no two of them disagree. Pinned by
+  // and it falls back to the drawer. That is the registered `object-view`
+  // renderer's case, where a JSON schema cannot carry a function, on a mobile
+  // viewport: the viewport picks `page` with no author choosing it. An explicit
+  // `layout: 'page'` without `onNavigate` (the README's documented
+  // misconfiguration) takes the same fallback. The three handlers and
+  // `formLayout` read this and never `layout`, so no two of them disagree. Pinned by
   // `ObjectView.pageSurfaceFallback-11015.test.tsx`.
   const recordSurface = layout === 'page' && !schema.onNavigate ? 'drawer' : layout;
 
@@ -1776,38 +1778,29 @@ export const ObjectView: React.FC<ObjectViewProps> = ({
       modifiers && (modifiers.metaKey || modifiers.ctrlKey || modifiers.button === 1)
     ) && (record.id || record._id) != null;
 
-    // Check NavigationConfig
+    // Check NavigationConfig. A block written without `mode` takes the spec's
+    // `drawer` default (`NavigationModeSchema.default('drawer')`,
+    // objectstack#26677); `modal`, `split` and `popover` were retired with it.
     if (navigationConfig) {
-      if (navigationConfig.mode === 'none' || navigationConfig.preventNavigation) {
+      const mode = navigationConfig.mode ?? 'drawer';
+      if (mode === 'none' || navigationConfig.preventNavigation) {
         return; // Do nothing
       }
-      if (navigationConfig.mode === 'new_window' || navigationConfig.openNewTab || opensInNewTab) {
+      if (mode === 'new_window' || navigationConfig.openNewTab || opensInNewTab) {
         openRecordInNewTab(record);
         return;
       }
-      if (navigationConfig.mode === 'drawer') {
+      if (mode === 'drawer') {
         setFormMode('view');
         setSelectedRecord(record);
         setIsFormOpen(true);
         return;
       }
-      if (navigationConfig.mode === 'modal') {
-        setFormMode('view');
-        setSelectedRecord(record);
-        setIsFormOpen(true);
-        return;
-      }
-      if (navigationConfig.mode === 'page') {
+      if (mode === 'page') {
         const recordId = record.id || record._id;
         if (schema.onNavigate) {
           schema.onNavigate(recordId as string | number, 'view');
         }
-        return;
-      }
-      if (navigationConfig.mode === 'split' || navigationConfig.mode === 'popover') {
-        setFormMode('view');
-        setSelectedRecord(record);
-        setIsFormOpen(true);
         return;
       }
     }
@@ -3303,39 +3296,16 @@ export const ObjectView: React.FC<ObjectViewProps> = ({
     );
   };
 
-  // Determine which form container to render. With no overlay `navigation` it
-  // is `recordSurface`: `'page'` only with an `onNavigate`, whose handlers
-  // route every verb away, and the drawer for a page with nowhere to route
-  // (objectui#11015).
-  const formLayout = navigationConfig?.mode === 'modal' ? 'modal'
-    : navigationConfig?.mode === 'drawer' ? 'drawer'
-    : navigationConfig?.mode === 'split' ? 'split'
-    : navigationConfig?.mode === 'popover' ? 'popover'
+  // Determine which form container to render. A `navigation` block in the
+  // drawer mode (written, or defaulted: a block without `mode` takes the spec's
+  // `drawer`, objectstack#26677) opens the drawer; with no block, or a `page`
+  // one, it is `recordSurface`: `'page'` only with an `onNavigate`, whose
+  // handlers route every verb away, the modal for `layout: 'modal'`, and the
+  // drawer otherwise (objectui#11015). The `split` and `popover` faces this
+  // component also drew left with their spec values (objectstack#26677).
+  const formLayout = navigationConfig && (navigationConfig.mode ?? 'drawer') === 'drawer'
+    ? 'drawer'
     : recordSurface;
-
-  // objectui#10975 — `split` and `popover` draw a form only beside a selected
-  // record, and `handleCreate` clears it, so under either mode (the node's own
-  // or the active named view's) the CREATE form opens on the surface
-  // `formLayout` falls back to with no `navigation`: `recordSurface`, the modal
-  // for `layout: 'modal'`, the drawer otherwise. A `page` only gets here with no
-  // `onNavigate` (`handleCreate` routes it first), and `recordSurface` already
-  // resolves that page to the drawer (objectui#11015). A record opened to view
-  // or edit still opens beside, as before. Pinned by
-  // `ObjectView.splitPopoverCreate-10975.test.tsx`.
-  const renderCreateSurface = () =>
-    formMode !== 'create' ? null : recordSurface === 'modal' ? renderModalForm() : renderDrawerForm();
-
-  // Build the record detail content for NavigationOverlay (split/popover modes)
-  const renderOverlayDetail = (_record: Record<string, unknown>) => (
-    <div className="space-y-3">
-      <ObjectForm schema={buildFormSchema()} dataSource={dataSource} />
-    </div>
-  );
-
-  // Shared handler for NavigationOverlay onOpenChange — close form when overlay is dismissed
-  const handleOverlayOpenChange = useCallback((open: boolean) => {
-    if (!open) handleFormCancel();
-  }, [handleFormCancel]);
 
   // Computed once so a `null` toolbar (nothing to show — no named views, no
   // view switcher, no create button, no addon) doesn't still leave behind an
@@ -3403,52 +3373,6 @@ export const ObjectView: React.FC<ObjectViewProps> = ({
     </AlertDialog>
   );
 
-  // For split mode, wrap content inside NavigationOverlay with mainContent
-  if (formLayout === 'split') {
-    const objectLabel = (objectSchema?.label as string) || schema.objectName;
-    return (
-      <div className={cn('flex flex-col h-full min-w-0 overflow-hidden', className)}>
-        {(schema.title || schema.description) && (
-          <div className="mb-4 shrink-0">
-            {schema.title && <h2 className="text-2xl font-bold tracking-tight">{schema.title}</h2>}
-            {schema.description && <p className="text-muted-foreground mt-1">{schema.description}</p>}
-          </div>
-        )}
-        {toolbar && <div className="mb-4 shrink-0">{toolbar}</div>}
-        <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
-          {isFormOpen && selectedRecord ? (
-            <NavigationOverlay
-              isOpen={isFormOpen}
-              selectedRecord={selectedRecord}
-              mode="split"
-              close={handleFormCancel}
-              setIsOpen={handleOverlayOpenChange}
-              width={navigationConfig?.width}
-              isOverlay={true}
-              /* Keyed, not string-built (objectui#3459). This value is handed
-                 to `NavigationOverlay`'s `title` prop, so the overlay's own
-                 `detail.recordDetail` default never applies — whatever this
-                 resolves to IS the visible `h3` heading of the split panel.
-                 Interpolating through `detail.recordDetailWithLabel` instead of
-                 splicing the label into an English template lets each pack
-                 choose its own word order (de hyphenates, ja/zh need a
-                 possessive particle). English output is byte-identical
-                 (`Contacts Detail`), with or without an `I18nProvider`. */
-              title={tView('detail.recordDetailWithLabel', { label: objectLabel })}
-              mainContent={<div className="h-full overflow-auto">{renderContent()}</div>}
-            >
-              {renderOverlayDetail}
-            </NavigationOverlay>
-          ) : (
-            renderContent()
-          )}
-        </div>
-        {renderCreateSurface()}
-        {deleteConfirmDialog}
-      </div>
-    );
-  }
-
   return (
     <div className={cn('flex flex-col h-full min-w-0 overflow-hidden', className)}>
       {/* Title and description */}
@@ -3474,22 +3398,6 @@ export const ObjectView: React.FC<ObjectViewProps> = ({
       {/* Form (drawer or modal) */}
       {formLayout === 'drawer' && renderDrawerForm()}
       {formLayout === 'modal' && renderModalForm()}
-      {/* Popover mode — uses NavigationOverlay Dialog fallback (no popoverTrigger) */}
-      {formLayout === 'popover' && isFormOpen && selectedRecord && (
-        <NavigationOverlay
-          isOpen={isFormOpen}
-          selectedRecord={selectedRecord}
-          mode="popover"
-          close={handleFormCancel}
-          setIsOpen={handleOverlayOpenChange}
-          width={navigationConfig?.width}
-          isOverlay={true}
-          title={getFormTitle()}
-        >
-          {renderOverlayDetail}
-        </NavigationOverlay>
-      )}
-      {formLayout === 'popover' && renderCreateSurface()}
       {deleteConfirmDialog}
     </div>
   );

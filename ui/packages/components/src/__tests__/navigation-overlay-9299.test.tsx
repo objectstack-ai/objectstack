@@ -7,19 +7,18 @@
  */
 
 /**
- * objectui#9299 — the two shell mechanisms the ruling adds, pinned where they
+ * objectui#9299 — the shell mechanisms the ruling added, pinned where they
  * live rather than five times over in the renderers.
  *
- * - **item 3, the popover anchor.** `popover` was honoured on NO surface: the
- *   overlay falls back to a compact `Dialog` when it is given no trigger, and
- *   no renderer ever gave it one. The ruling anchors the popover to the clicked
- *   element — row, node, bar, card, event — and forbids any of the five from
- *   reaching the fallback afterwards. The carrier is `popoverAnchorRef`, and
- *   ⛔ it is NOT `popoverTrigger`: that prop MOUNTS its child inside the
- *   overlay through `PopoverTrigger asChild`, so handing it a row would draw a
- *   SECOND copy of the row instead of pointing at the first. The discriminator
- *   below is the heading ELEMENT, not its text — both branches render the same
- *   words, so a text assertion passes in both worlds.
+ * - **item 3, the popover anchor — RETIRED with its face (objectstack#26677).**
+ *   `popover` (and `modal`) left the spec's `NavigationModeSchema`: an object
+ *   opens its records in the drawer, which expands to the full page, or as the
+ *   full page where it declares `page`. With the values gone from metadata no
+ *   caller could reach the Popover face, its anchor (`popoverAnchorRef`,
+ *   `useOverlayAnchor`) or the Dialog face, so all three were deleted. The pins
+ *   below flip with them: a retired string reaching the shell at runtime draws
+ *   NO surface — neither the Dialog fallback the popover once fell back to nor
+ *   a modal — against a drawer lit control.
  *
  * - **item 4, the width migration.** Two drag-resize implementations became
  *   one. A width a user had already dragged, persisted under
@@ -40,6 +39,9 @@ import {
 } from '../custom/navigation-overlay';
 
 const RECORD = { id: '1', name: 'Ada' };
+
+/** A compile-time assertion: `Assert<false>` fails `tsc`. */
+type Assert<T extends true> = T;
 
 /**
  * `any` on the overrides bag, deliberately: each case varies a different
@@ -68,40 +70,29 @@ beforeEach(() => {
 });
 afterEach(() => cleanup());
 
-describe('objectui#9299 item 3 — popover anchors to the clicked element', () => {
-  it('LIT CONTROL: with NO anchor at all the compact Dialog fallback is what renders', async () => {
-    // First, because every case below is "the fallback was NOT taken". Without
-    // a case that takes it, a payload that rendered nothing anywhere would
-    // satisfy the others vacuously — and the discriminator itself would be
-    // unproven.
-    renderOverlay({ mode: 'popover' });
+describe('objectstack#26677 — the retired modal and popover faces are gone', () => {
+  // Compile-time half: neither retired string is a mode the shell types.
+  type Mode = React.ComponentProps<typeof NavigationOverlay>['mode'];
+  type _NoModal = Assert<'modal' extends Mode ? false : true>;
+  type _NoPopover = Assert<'popover' extends Mode ? false : true>;
+
+  it('LIT CONTROL: the drawer draws the payload inside a dialog-role panel', async () => {
+    // First, because the cases below assert ABSENCE: without a mode that does
+    // render, a payload that rendered nowhere would satisfy them vacuously.
+    renderOverlay({ mode: 'drawer' });
     expect(await screen.findByTestId('payload')).toBeInTheDocument();
-    // `DialogTitle` is a Radix `Title`, which is an `h2`.
-    expect(screen.getByRole('heading', { level: 2, name: 'Record Detail' })).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { level: 4 })).toBeNull();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
 
-  it('with a `popoverAnchorRef` the real Popover renders, not the fallback', async () => {
-    const anchor = document.createElement('div');
-    document.body.appendChild(anchor);
-    renderOverlay({ mode: 'popover', popoverAnchorRef: { current: anchor } });
-    expect(await screen.findByTestId('payload')).toBeInTheDocument();
-    // The Popover branch draws its heading as a plain `h4`; the fallback's
-    // `DialogTitle` is an `h2`. Same words, different element — which is the
-    // whole reason this reads the element.
-    expect(screen.getByRole('heading', { level: 4, name: 'Record Detail' })).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { level: 2, name: 'Record Detail' })).toBeNull();
-    anchor.remove();
-  });
-
-  it('an anchor whose ref is still empty does not resurrect the fallback', async () => {
-    // The renderers hand the ref down before anything is clicked. The branch is
-    // on the REF, not on its contents, so this must stay on the Popover path —
-    // otherwise the shell would flip shells mid-session the first time a user
-    // opened a record some way other than by clicking a row.
-    renderOverlay({ mode: 'popover', popoverAnchorRef: { current: null } });
-    expect(await screen.findByTestId('payload')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { level: 4, name: 'Record Detail' })).toBeInTheDocument();
+  it.each(['modal', 'popover'])('a retired `%s` reaching the shell at runtime draws no surface at all', (mode) => {
+    // A stored row is converted before it reaches a renderer and an authored one
+    // is refused at parse, so this string arrives only past a cast. What it
+    // must not do is resurrect the Dialog face, or the Dialog fallback the
+    // popover face used to take with no anchor.
+    renderOverlay({ mode, popoverAnchorRef: { current: document.createElement('div') } });
+    expect(screen.queryByTestId('payload')).toBeNull();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Record Detail' })).toBeNull();
   });
 });
 
