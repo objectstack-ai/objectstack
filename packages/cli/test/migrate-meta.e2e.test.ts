@@ -24,6 +24,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { ObjectStackDefinitionSchema } from '@objectstack/spec';
 import { PROTOCOL_MAJOR, PROTOCOL_VERSION } from '@objectstack/spec/kernel';
+import { MIGRATIONS_BY_MAJOR } from '@objectstack/spec/migrations';
 import { childEnv } from './helpers/serve-process.js';
 
 const execFileP = promisify(execFile);
@@ -33,10 +34,19 @@ const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
 /**
  * A stack authored against protocol 16: every line marked `// 16:` is a shape
- * the v17 chain must rewrite, spanning each conversion family — renames
- * (action execute→target, sharing full→edit) and the #3896 close-out removals (rls.priority, the four
- * tool keys, flow active/template/outputSchema/fallbackNodeId, view/dashboard
- * inert keys, agent.knowledge, skill.triggerPhrases).
+ * the v17 chain must rewrite, one per conversion step 17 still registers — the
+ * sharing-rule `full`→`edit` rename, the flow-node config aliases and lifts,
+ * the mongo driver alias, the converged retry policy, the page-header subtitle
+ * alias and the inline action's object-form `params`.
+ *
+ * The protocol-16.x conversions (action execute→target, the #3896 close-out
+ * removals: rls.priority, the four tool keys, flow active/template/
+ * outputSchema/fallbackNodeId, view/dashboard inert keys, agent.knowledge,
+ * skill.triggerPhrases) are deliberately NOT here. They aged out with their
+ * retirement kits (#25767, ADR-0087 2026-10-26 amendment): `--from 16` no
+ * longer rewrites those shapes, and the strict schema refuses them as unknown
+ * keys pointing at the protocol upgrade guide, so carrying one would make the
+ * replayed snapshot invalid by design rather than test the chain.
  */
 const PRE17_CONFIG = `
 export default {
@@ -51,76 +61,43 @@ export default {
       notes: { type: 'textarea', label: 'Notes' },
     },
   }],
-  actions: [{
-    name: 'close_ticket',
-    label: 'Close',
-    type: 'script',
-    execute: 'closeHandler',        // 16: renamed to target
-    shortcut: 'Ctrl+K',             // 16: removed (never dispatched)
-    bulkEnabled: true,              // 16: removed (toolbar reads view bulkActions)
+  datasources: [{
+    name: 'events',
+    label: 'Events',
+    driver: 'mongo',                // 16: mongo→mongodb
+    config: { url: 'mongodb://mongo.internal:27017/events' },
   }],
   flows: [{
     name: 'e2e_flow',
     label: 'E2E Flow',
     type: 'autolaunched',
-    active: false,                  // 16: removed (status is the lifecycle)
-    template: true,                 // 16: removed (no reader)
-    // 16: fallbackNodeId removed (fault edges own this). maxRetries is stated
-    // because #4247 refuses a zero-attempt 'retry' — the count is the one v17
-    // flow change the chain surfaces as a semantic TODO instead of rewriting.
-    errorHandling: { strategy: 'retry', maxRetries: 2, fallbackNodeId: 'n9' },
+    // 16: retryDelayMs→backoffMs. maxRetries is stated because #4247 refuses
+    // a zero-attempt 'retry' — the count is the one v17 flow change the chain
+    // surfaces as a semantic TODO instead of rewriting.
+    errorHandling: { strategy: 'retry', maxRetries: 2, retryDelayMs: 500 },
     nodes: [
-      { id: 'n1', type: 'start', label: 'Start', outputSchema: { ok: { type: 'boolean' } } },  // 16: removed
+      { id: 'n1', type: 'start', label: 'Start' },
       { id: 'n2', type: 'delete_record', label: 'Purge', config: { objectName: 'e2e_ticket', filter: { done: true } } },  // canonical since protocol 11 — must pass through untouched
+      { id: 'n3', type: 'get_record', label: 'Load', config: { object: 'e2e_ticket', filter: { done: false } } },  // 16: object→objectName
+      { id: 'n4', type: 'notify', label: 'Tell', config: { to: ['{record.owner}'], subject: 'Closed', body: 'Ticket closed.', channels: ['inbox'] } },  // 16: to/subject/body→recipients/title/message
+      { id: 'n5', type: 'wait', label: 'Pause', config: { duration: 'PT1M' } },  // 16: lifted into waitEventConfig
+      { id: 'n6', type: 'connector_action', label: 'Post', config: { connectorId: 'slack', actionId: 'chat.postMessage', input: { text: 'done' } } },  // 16: lifted into connectorConfig
+      { id: 'n7', type: 'map', label: 'Each', config: { collection: '{rows}', flow: 'e2e_child' } },  // 16: flow→flowName
+      { id: 'n8', type: 'subflow', label: 'Child', config: { flow: 'e2e_child' } },  // 16: flow→flowName
+      { id: 'n9', type: 'script', label: 'Score', config: { functionName: 'score_ticket', input: { id: '{recordId}' } } },  // 16: functionName/input→function/inputs
     ],
     edges: [],
   }],
-  views: [{
-    object: 'e2e_ticket',
-    list: { type: 'grid', columns: ['title'], responsive: { hiddenOn: ['xs'] }, performance: { lazyLoad: true } },  // 16: removed
-    form: { type: 'simple', sections: [{ fields: ['title'] }], defaultSort: [{ field: 'title' }], aria: { label: 'Ticket' } },  // 16: removed
-  }],
-  dashboards: [{
-    name: 'e2e_kpis',
-    label: 'E2E KPIs',
-    aria: { label: 'KPIs' },        // 16: removed
-    performance: { prefetch: true },// 16: removed
-    widgets: [],
-  }],
-  agents: [{
-    name: 'e2e_agent',
-    label: 'Agent',
-    role: 'Helper',
-    instructions: 'help',
-    knowledge: { sources: ['faq'] },  // 16: removed (never scoped retrieval)
-  }],
-  skills: [{
-    name: 'e2e_skill',
-    label: 'Skill',
-    tools: ['query_records'],
-    triggerPhrases: ['do the thing'],  // 16: removed (never matched)
-  }],
-  tools: [{
-    name: 'e2e_tool',
-    label: 'Tool',
-    description: 'A tool',
-    parameters: { type: 'object' },
-    category: 'action',             // 16: removed
-    permissions: ['x.y'],           // 16: removed (gated nothing)
-    active: true,                   // 16: removed (withdrew nothing)
-    builtIn: false,                 // 16: removed
-  }],
-  permissions: [{
-    name: 'e2e_set',
-    label: 'Set',
-    objects: { e2e_ticket: { allowRead: true } },
-    rowLevelSecurity: [{
-      name: 'own_rows',
-      object: 'e2e_ticket',
-      operation: 'select',
-      using: 'owner = current_user.id',
-      enabled: true,
-      priority: 10,                 // 16: removed (no conflict to order)
+  pages: [{
+    name: 'e2e_page',
+    label: 'E2E Page',
+    type: 'app',
+    regions: [{
+      name: 'header',
+      components: [
+        { type: 'page:header', properties: { title: 'Tickets', description: 'All open tickets' } },  // 16: description→subtitle
+        { type: 'element:button', properties: { label: 'Submit', action: { type: 'api', target: '/api/v1/e2e/submit', method: 'POST', params: { note: 'hi' } } } },  // 16: object-form params→bodyExtra
+      ],
     }],
   }],
   sharingRules: [{
@@ -135,18 +112,25 @@ export default {
 };
 `;
 
-/** Conversion ids the run MUST attribute at least one rewrite to. */
+/**
+ * Conversion ids the run MUST attribute at least one rewrite to: step 17's
+ * own `conversionIds`, written out so a family leaving the step reds here by
+ * name (the registry pin in the case below) instead of thinning the fixture's
+ * coverage in silence.
+ */
 const EXPECTED_CONVERSIONS = [
-  'action-execute-to-target',
-  'action-inert-keys-removed',
-  'flow-inert-keys-removed',
-  'view-inert-keys-removed',
-  'dashboard-inert-keys-removed',
-  'agent-knowledge-removed',
-  'skill-trigger-phrases-removed',
-  'tool-inert-authoring-keys-removed',
-  'permission-rls-priority-removed',
   'sharing-rule-access-level-full-to-edit',
+  'flow-node-crud-object-alias',
+  'flow-node-notify-config-aliases',
+  'flow-node-wait-event-config-lift',
+  'flow-node-connector-config-lift',
+  'flow-node-map-flow-alias',
+  'flow-node-subflow-flow-alias',
+  'flow-node-script-config-aliases',
+  'datasource-driver-mongo-to-mongodb',
+  'retry-policy-converged',
+  'page-header-subtitle-alias',
+  'inline-action-api-params-to-body-extra',
 ];
 
 let dir: string;
@@ -179,6 +163,11 @@ describe('os migrate meta --from 16 (e2e over the real CLI)', () => {
   });
 
   it('attributes at least one rewrite to every expected v17 conversion family', () => {
+    // The list IS step 17's: a conversion that ages out of the step (as the
+    // 16.x ones did, #25767) or joins it fails here naming the drift, before
+    // the per-id loop reads it as a missing rewrite.
+    expect([...EXPECTED_CONVERSIONS].sort(), 'EXPECTED_CONVERSIONS must equal step 17\'s registered conversionIds')
+      .toEqual([...(MIGRATIONS_BY_MAJOR[17]?.conversionIds ?? [])].sort());
     const ids = new Set(out.parsed.applied.map((a: any) => a.conversionId));
     for (const id of EXPECTED_CONVERSIONS) {
       expect(ids.has(id), `expected a rewrite from ${id}; got ${[...ids].join(', ')}`).toBe(true);
@@ -215,20 +204,26 @@ describe('os migrate meta --from 16 (e2e over the real CLI)', () => {
     expect(parsed.success, JSON.stringify(parsed.success ? '' : parsed.error.issues.slice(0, 3))).toBe(true);
 
     // Spot-check one rewrite per family on the snapshot itself.
-    expect(snap.actions[0].target).toBe('closeHandler');
-    expect(snap.actions[0].execute).toBeUndefined();
-    expect(snap.actions[0].shortcut).toBeUndefined();
-    expect(snap.flows[0].active).toBeUndefined();
-    expect(snap.flows[0].errorHandling.fallbackNodeId).toBeUndefined();
-    expect(snap.flows[0].nodes[0].outputSchema).toBeUndefined();
-    expect(snap.flows[0].nodes[1].config.filter, 'canonical key passes through untouched').toEqual({ done: true });
-    expect(snap.views[0].list.responsive).toBeUndefined();
-    expect(snap.views[0].form.defaultSort).toBeUndefined();
-    expect(snap.dashboards[0].aria).toBeUndefined();
-    expect(snap.agents[0].knowledge).toBeUndefined();
-    expect(snap.skills[0].triggerPhrases).toBeUndefined();
-    expect(snap.tools[0].category).toBeUndefined();
-    expect(snap.permissions[0].rowLevelSecurity[0].priority).toBeUndefined();
+    const [, purge, load, tell, pause, post, each, child, score] = snap.flows[0].nodes;
+    expect(purge.config.filter, 'canonical key passes through untouched').toEqual({ done: true });
+    expect(load.config.objectName).toBe('e2e_ticket');
+    expect(load.config.object).toBeUndefined();
+    expect(tell.config.recipients).toEqual(['{record.owner}']);
+    expect(tell.config.to).toBeUndefined();
+    expect(pause.waitEventConfig.timerDuration).toBe('PT1M');
+    expect(post.connectorConfig.connectorId).toBe('slack');
+    expect(each.config.flowName).toBe('e2e_child');
+    expect(child.config.flowName).toBe('e2e_child');
+    expect(score.config.function).toBe('score_ticket');
+    expect(score.config.functionName).toBeUndefined();
+    expect(snap.flows[0].errorHandling.backoffMs).toBe(500);
+    expect(snap.flows[0].errorHandling.retryDelayMs).toBeUndefined();
+    expect(snap.datasources[0].driver).toBe('mongodb');
+    const [header, button] = snap.pages[0].regions[0].components;
+    expect(header.properties.subtitle).toBe('All open tickets');
+    expect(header.properties.description).toBeUndefined();
+    expect(button.properties.action.bodyExtra).toEqual({ note: 'hi' });
+    expect(button.properties.action.params).toBeUndefined();
     expect(snap.sharingRules[0].accessLevel).toBe('edit');
     // ⛔ ADR-0113, #16693: the chain does NOT write a column constraint for the
     // author. `required: true` crosses 16→17 as the write-time contract and
@@ -358,10 +353,17 @@ describe('os migrate meta --from 16 (e2e over the real CLI)', () => {
  * telling the author to run this command.
  *
  * So the fixture here is deliberately shaped like a real project and not like a
- * test: `defineStack` at the root, per-artifact helpers imported from a spec
- * SUBPATH (`@objectstack/spec/ai`, the spelling the example apps use), and the
- * retired keys authored inside them. A `defineStack`-only tolerance passes the
- * first and fails the last two.
+ * test: `defineStack` at the root, per-artifact helpers imported from spec
+ * SUBPATHS (`@objectstack/spec/ai`, `@objectstack/spec/ui`, the spellings the
+ * example apps use), and the retired keys authored inside them. A
+ * `defineStack`-only tolerance passes the first and fails the last two.
+ *
+ * The retired keys are ones whose tombstone and conversion still stand
+ * (`agent.lifecycle`, `dashboard.refreshInterval`; protocol 18, which
+ * `--from 16` replays into). The fixture used to carry `agent.knowledge` and
+ * `skill.triggerPhrases`, whose 16.x kits aged out (#25767): their tombstones
+ * and conversions left the spec, so neither is a retired key any more, only an
+ * unknown one.
  *
  * The second test is the other half of the pin, and it is the one that keeps
  * this a restoration rather than a widening: `os validate` on the SAME fixture
@@ -379,7 +381,8 @@ describe('os migrate meta over a source carrying a retired key (#9418)', () => {
 
   const RETIRED_KEY_CONFIG = `
 import { defineStack } from '@objectstack/spec';
-import { defineAgent, defineSkill } from '@objectstack/spec/ai';
+import { defineAgent } from '@objectstack/spec/ai';
+import { Dashboard } from '@objectstack/spec/ui';
 
 export default defineStack({
   manifest: { id: 'com.example.retired-key-e2e', name: 'Retired Key E2E', version: '1.0.0', type: 'app', namespace: 'rk' },
@@ -393,13 +396,13 @@ export default defineStack({
     label: 'Agent',
     role: 'Helper',
     instructions: 'help',
-    knowledge: { sources: ['faq'] },     // RETIRED in protocol 17 — the whole point
+    lifecycle: { id: 'rk', initial: 'open', states: { open: {} } },  // RETIRED in 17.7.0 — the whole point
   })],
-  skills: [defineSkill({
-    name: 'rk_skill',
-    label: 'Skill',
-    tools: ['query_records'],
-    triggerPhrases: ['do the thing'],    // RETIRED in protocol 17
+  dashboards: [Dashboard.create({
+    name: 'rk_ops',
+    label: 'Ops',
+    widgets: [],
+    refreshInterval: 300,                // RETIRED: renamed to refreshIntervalSeconds
   })],
 });
 `;
@@ -434,17 +437,17 @@ export default defineStack({
     expect(parsed.from).toBe(16);
     // …and through helpers imported from a spec subpath, which is where a
     // tolerance scoped to `defineStack` alone would still have refused.
-    expect(appliedAt.get('agent-knowledge-removed')).toBe('agents[0].knowledge');
-    expect(appliedAt.get('skill-trigger-phrases-removed')).toBe('skills[0].triggerPhrases');
+    expect(appliedAt.get('agent-lifecycle-removed')).toBe('agents[0].lifecycle');
+    expect(appliedAt.get('dashboard-refresh-interval-to-refresh-interval-seconds')).toBe('dashboards[0].refreshIntervalSeconds');
     expect(parsed.schemaValid).toBe(true);
 
     const snap = JSON.parse(readFileSync(join(rkDir, 'migrated.json'), 'utf-8'));
-    expect(snap.agents[0].knowledge).toBeUndefined();
-    expect(snap.skills[0].triggerPhrases).toBeUndefined();
+    expect(snap.agents[0].lifecycle).toBeUndefined();
+    expect(snap.dashboards[0].refreshInterval).toBeUndefined();
     // The rest of the artifact survives the tolerant load intact — the codemod
     // removes what retired, not what it could not parse.
     expect(snap.agents[0].name).toBe('rk_agent');
-    expect(snap.skills[0].tools).toEqual(['query_records']);
+    expect(snap.dashboards[0].refreshIntervalSeconds).toBe(300);
   }, 180_000);
 
   it('still refuses the same source everywhere else — `os validate` keeps the prescription', async () => {
@@ -458,8 +461,8 @@ export default defineStack({
     } catch (e: any) {
       refused = true;
       const output = `${String(e.stdout ?? '')}${String(e.stderr ?? '')}`;
-      expect(output).toMatch(/`agent\.knowledge` was removed/);
-      expect(output).toMatch(/os migrate meta --from 16/);
+      expect(output).toMatch(/`agent\.lifecycle` was removed/);
+      expect(output).toMatch(/os migrate meta --from 17/);
     }
     expect(refused, '`os validate` must still reject a retired key').toBe(true);
   }, 180_000);
