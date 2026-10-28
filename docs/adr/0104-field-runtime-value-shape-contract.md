@@ -181,9 +181,10 @@ inert metadata ADR-0078 forbids.
 > `retiredKey()` tombstone and no guidance-map entry: the
 > FROM → TO note (a currency value is a bare number; the code is
 > `currencyConfig.defaultCurrency`) is carried by `RETIRED_DEFS_BY_MAJOR[18]`
-> (`data/CurrencyValue`), the D3 semantic entry
-> `currency-value-schema-retired` (entry file
-> `packages/spec/src/migrations/entries/retired-defs/18.data__CurrencyValue.ts`)
+> (`data/CurrencyValue`, entry file
+> `packages/spec/src/migrations/entries/retired-defs/18.data__CurrencyValue.ts`),
+> the D3 semantic entry `currency-value-schema-retired` (entry file
+> `packages/spec/src/migrations/entries/semantic/18.currency-value-schema-retired.ts`)
 > and the changelog.
 
 **Consumers converge on the contract** (each keeps its role, loses its private
