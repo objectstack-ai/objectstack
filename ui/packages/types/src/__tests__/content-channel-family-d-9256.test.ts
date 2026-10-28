@@ -236,7 +236,6 @@ import type { ObjectGallerySchema } from '../objectql';
 import type { CarouselSchema, ChatbotSchema, ChatbotEnhancedSchema } from '../complex';
 import type { ReportViewerSchema } from '../reports';
 import type { ViewSwitcherSchema } from '../views';
-import type { NLQuerySchema } from '../ai';
 import type { TextSchema, ImageSchema, IconSchema, TabsSchema } from '../layout';
 import type { AccordionSchema } from '../disclosure';
 import type { CalendarSchema } from '../form';
@@ -555,8 +554,8 @@ describe('objectui#9256 — the TypeScript face refuses both channels at the AUT
     const viewSwitcherChildren: ViewSwitcherSchema = { type: 'view-switcher', views: [], children: CONTENT };
     // @ts-expect-error objectui#9256 — `report-viewer` reads neither channel
     const reportBody: ReportViewerSchema = { type: 'report-viewer', body: CONTENT };
-    // @ts-expect-error objectui#9256 — `nl-query` reads neither channel (no zod mirror exists; this face is the only gate)
-    const nlQueryChildren: NLQuerySchema = { type: 'nl-query', children: CONTENT };
+    // (`nl-query` stood here until its node type retired with `@object-ui/plugin-ai`,
+    // objectstack#25921: `NLQuerySchema` is a `never` tombstone now.)
     // @ts-expect-error objectui#9256 — `pivot` reads neither channel (no zod mirror exists; this face is the only gate)
     const pivotBody: PivotTableSchema = { type: 'pivot', body: CONTENT };
     // @ts-expect-error objectui#9256 — `chatbot` reads neither channel; `children` is narrowed, `body` is held out
@@ -604,11 +603,11 @@ describe('objectui#9256 — the TypeScript face refuses both channels at the AUT
     expect([
       separatorBody, separatorChildren, kbdBody, skeletonChildren, checkboxBody, paginationChildren,
       dialogChildren, collapsibleChildren, carouselBody, galleryBody, viewSwitcherChildren, reportBody,
-      nlQueryChildren, pivotBody, chatbotChildren,
+      pivotBody, chatbotChildren,
       textBody, textChildren, imageBody, imageChildren, iconBody, iconChildren,
       tabsBody, tabsChildren, accordionBody, accordionChildren, calendarBody, calendarChildren,
       listBody, listChildren, timelineBody, timelineChildren,
-    ]).toHaveLength(31);
+    ]).toHaveLength(30);
   });
 
   it('CONTROL — the same nodes WITHOUT a content channel compile (no `@ts-expect-error` here, and `tsc` is the reader)', () => {

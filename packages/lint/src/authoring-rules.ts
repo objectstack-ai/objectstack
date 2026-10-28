@@ -2472,9 +2472,14 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   },
   // Every hole of an email template's three faces is within the mail hole
   // grammar — `@objectstack/formula`'s `judgeMailHoleGrammar`, the grammar the
-  // mail renderer parses with. A hole that chains a second formatter is
-  // refused, naming the one-formatter rule and the "branch in the caller"
-  // remedy (the renderer printed `0 | number:2`); a `currency` argument that
+  // mail renderer parses with. Text after a path's `|` that is not a formatter
+  // name (`{{ due | date-long }}`) is refused, stating the formatter shape
+  // (`formatter-shape`; the renderer printed the hole as written). A hole that
+  // chains a second formatter is refused, naming the one-formatter rule and
+  // the "branch in the caller"
+  // remedy (the renderer printed `0 | number:2`); a formatter name outside
+  // `TEMPLATE_FORMATTERS` is refused, listing the known formatters
+  // (`known-formatter`; the renderer printed the raw value); a `currency` argument that
   // is neither a literal ISO 4217 code nor a marked `@path` into the send's
   // data is refused, naming `CURRENCY_ARGUMENT_RULE` (the renderer printed the
   // amount in USD); and a marked path the template's declared `variables` do

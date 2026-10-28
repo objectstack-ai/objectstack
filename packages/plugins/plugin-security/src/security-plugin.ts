@@ -252,6 +252,9 @@ import {
   type AuthzMiddlewareHost,
   type WriteImageCheckSeam,
 } from './security-plugin-authz-middleware.js';
+// [#27175] The record field-access answer's `writable`: the registered
+// middleware, run over a synthetic by-id update.
+import { probeRecordRowWrite, type AuthzMiddlewareFn } from './record-row-write-probe.js';
 // [#25223 cut 13] What `start()` registers after the authorization middleware;
 // the block at the end of `start()` that calls it hands it the members it reads
 // and the one it writes (`StartHooksHost`).
@@ -1484,6 +1487,13 @@ export class SecurityPlugin implements Plugin {
    */
   private readonly engineOperationScope = new AsyncLocalStorage<true>();
   /**
+   * [#27175] The authorization middleware `start()` registered on the engine,
+   * kept so {@link getRecordFieldAccess} can run the very handler a write
+   * meets over a synthetic by-id update (`record-row-write-probe.ts`). `null`
+   * until then, and on a boot with no engine — where no write is admitted.
+   */
+  private authzMiddleware: AuthzMiddlewareFn | null = null;
+  /**
    * This plugin's report sink. Console-backed until a host injects one — see
    * {@link SecurityReportSink} and {@link CONSOLE_SECURITY_SINK} for the ruling
    * and for why `warn` is the member that is guaranteed (#9754 / #10556 (a)).
@@ -2168,7 +2178,7 @@ export class SecurityPlugin implements Plugin {
         resolveSharingWriteVerdict: (...a) => this.resolveSharingWriteVerdict(...a),
         writeCheckFieldOptions: (...a) => this.writeCheckFieldOptions(...a),
       };
-      registerAuthzMiddleware.call(host, ctx, ql, metadata);
+      this.authzMiddleware = registerAuthzMiddleware.call(host, ctx, ql, metadata);
     }
 
     ctx.logger.info('Security middleware registered on ObjectQL engine');
@@ -3004,6 +3014,11 @@ export class SecurityPlugin implements Plugin {
    * `readable` is {@link getReadableFields}' answer from the same mask: reads
    * are judged row-blind.
    *
+   * [#27175] `writable` is the row's own write verdict, from the gates
+   * themselves: {@link isRecordRowWritable} runs the registered middleware
+   * over a by-id update of the row. `editable` stays field-level; a form
+   * offers an edit only where both say so.
+   *
    * Never wider than the read path: `null` for a row that is absent or that the
    * caller cannot read — the same no-row read, deliberately indistinguishable
    * — and a read the middleware refuses outright (no read grant) rejects as it
@@ -3014,7 +3029,7 @@ export class SecurityPlugin implements Plugin {
     object: string,
     recordId: string,
     context?: any,
-  ): Promise<{ object: string; recordId: string; readable: string[]; editable: string[] } | null | undefined> {
+  ): Promise<{ object: string; recordId: string; readable: string[]; editable: string[]; writable: boolean } | null | undefined> {
     const objectName = String(object ?? '');
     const id = String(recordId ?? '');
     const mask = await this.resolveProjectionFieldMask(objectName, context, { fallbackOnEmptySets: false });
@@ -3027,8 +3042,9 @@ export class SecurityPlugin implements Plugin {
       { resolveProjectionFieldMask: async () => mask },
       objectName, context, { fallbackOnEmptySets: false },
     );
+    const writable = await this.isRecordRowWritable(objectName, id, context);
     if (mask.kind === 'answer') {
-      return { object: objectName, recordId: id, readable: readable ?? [], editable: mask.fields ?? [] };
+      return { object: objectName, recordId: id, readable: readable ?? [], editable: mask.fields ?? [], writable };
     }
     const forbidden = new Set(await mask.readRowForbiddenWrites(row));
     return {
@@ -3036,7 +3052,40 @@ export class SecurityPlugin implements Plugin {
       recordId: id,
       readable: readable ?? [],
       editable: mask.allFields.filter((f) => !forbidden.has(f)),
+      writable,
     };
+  }
+
+  /**
+   * [#27175] Would a by-id update of the stored row `recordId` pass the
+   * row-level write gates for `context`? — {@link getRecordFieldAccess}'s
+   * `writable`. Not a second evaluator: it runs the middleware `start()`
+   * registered ({@link authzMiddleware}) over a synthetic by-id update with
+   * an empty payload, and at the chain's end asks plugin-sharing's by-id
+   * gate (`SharingService.admitsByIdWrite`, the method its middleware refuses
+   * on) with the context as that middleware stamped it. The probe, what it
+   * covers and why it writes nothing: `record-row-write-probe.ts`.
+   *
+   * The sharing leg answers as the chain does: no sharing service, or one
+   * whose middleware is not installed (`enforce: false`), imposes nothing; a
+   * service without the method, or a throw, refuses (fail closed).
+   */
+  private isRecordRowWritable(object: string, recordId: string, context: any): Promise<boolean> {
+    return probeRecordRowWrite(this.authzMiddleware, object, recordId, context, async (stamped) => {
+      const sharing = this.resolveKernelService?.('sharing') as
+        | {
+          byIdWriteGateInstalled?: boolean;
+          admitsByIdWrite?: (o: string, id: string, verb: 'update', c: any) => Promise<boolean>;
+        }
+        | undefined;
+      if (!sharing || sharing.byIdWriteGateInstalled !== true) return true;
+      if (typeof sharing.admitsByIdWrite !== 'function') return false;
+      try {
+        return (await sharing.admitsByIdWrite(object, recordId, 'update', stamped)) === true;
+      } catch {
+        return false;
+      }
+    });
   }
 
   /**

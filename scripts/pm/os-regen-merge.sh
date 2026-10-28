@@ -489,6 +489,7 @@ content/docs/references/**                                   whole
 skills/*/references/_index.md                                whole
 skills/objectstack-ui/references/react-blocks.md             whole
 scripts/platform-object-tenancy-census.json                  whole
+content/docs/ui/components/**                                whole
 '
 
 # The `mixed:` rows of the driver table in module $1. Failure is the caller's to report —

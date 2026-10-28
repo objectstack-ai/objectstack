@@ -117,6 +117,7 @@ async function openRail(label: string, name: string): Promise<HTMLElement> {
 }
 
 const SOURCE_2_MIN = tFormat('engine.studio.draftMark.source', 'en-US', {
+  agent: tFormat('engine.studio.draftMark.agent.copilot', 'en-US', {}),
   when: tFormat('engine.studio.draftMark.minutesAgo', 'en-US', { n: 2 }),
 });
 

@@ -840,10 +840,10 @@ describe('QuerySchema - Edge Cases and Null Handling', () => {
 
   it('should handle empty arrays', () => {
     // `joins: []` / `windowFunctions: []` moved to the retirement pins — the
-    // tombstones refuse even an empty array (#4286).
+    // tombstones refuse even an empty array (#4286). `fields: []` moved to
+    // `projection-names-a-field.test.ts`: an empty projection is refused (#27166).
     const query: QueryAST = {
       object: 'account',
-      fields: [],
       aggregations: [],
       groupBy: [],
       orderBy: [],

@@ -73,11 +73,12 @@ import { FLOW_CREDENTIAL_CLEARED, HTTP_SIGNING_SECRET_KEY } from '../flow-creden
 function renderHeaders(
     headers: Readonly<Record<string, string>> | undefined,
     variables: VariableMap,
+    currency: string | undefined,
 ): Record<string, string> | undefined {
     if (headers === undefined) return undefined;
     const out: Record<string, string> = {};
     for (const [name, value] of Object.entries(headers)) {
-        const text = renderTextSlot(value, variables);
+        const text = renderTextSlot(value, variables, currency);
         if (text !== undefined) out[name] = text;
     }
     return out;
@@ -237,9 +238,9 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
 
             // The request, rendered and evaluated ONCE, before either mode: the
             // durable outbox enqueues what the inline call would send.
-            const url = renderTextSlot(cfg.url, variables);
+            const url = renderTextSlot(cfg.url, variables, context.currency);
             if (!url) return refuseNode('http: url is required');
-            const headers = renderHeaders(cfg.headers, variables);
+            const headers = renderHeaders(cfg.headers, variables, context.currency);
             const body = cfg.body === undefined ? undefined : resolveValueSlot(engine, cfg.body, variables, 'body', context);
 
             const durable = cfg.durable === true;

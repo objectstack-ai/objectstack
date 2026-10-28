@@ -1,0 +1,29 @@
+{
+  "title": "Custom Front-end",
+  "pages": [
+    "index",
+    "---ObjectUI SDK---",
+    "quick-start",
+    "building-crud-app",
+    "architecture-overview",
+    "---Rendering---",
+    "schema-rendering",
+    "component-registry",
+    "renderers",
+    "fields",
+    "data-source",
+    "---Layout & theming---",
+    "layout",
+    "app-shell",
+    "sidebar-nav",
+    "theming",
+    "---Plugins---",
+    "plugins",
+    "plugin-development",
+    "---Tools---",
+    "cli",
+    "create-plugin",
+    "data-objectstack",
+    "troubleshooting"
+  ]
+}

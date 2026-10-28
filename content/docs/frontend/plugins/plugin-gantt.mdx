@@ -1,0 +1,306 @@
+---
+title: "Plugin Gantt"
+---
+
+Gantt chart component for ObjectQL data sources - visualizes project tasks, timelines, and dependencies.
+
+## Installation
+
+```bash
+npm install @object-ui/plugin-gantt
+```
+
+The props an [`object-gantt`](/docs/ui/components/plugins#object-gantt) node reads on a page are generated from the spec into the component reference; this page covers using the plugin from React.
+
+## Overview
+
+The `@object-ui/plugin-gantt` plugin provides Gantt chart visualization for ObjectQL data sources. It's designed to work with object-based data providers and automatically maps record fields to Gantt chart tasks.
+
+**Note**: This plugin is designed for use with ObjectQL data sources. For a simpler timeline component, see [Timeline Plugin](/docs/frontend/plugins/plugin-timeline).
+
+## Features
+
+- **ObjectQL Integration**: Works seamlessly with object/value data providers
+- **Automatic Field Mapping**: Maps database fields to Gantt tasks
+- **Task Timeline**: Visual bars showing task duration
+- **Progress Tracking**: Display task completion percentage (0-100%)
+- **Dependencies**: Visualize task dependencies and relationships
+- **Date Ranges**: Automatic date range calculation
+- **Dates name their year**: the task list's Start / End cells and date line,
+  the bar tooltip and the drag previews add the year to a date outside the
+  current year (two digits on the compact faces), so a plan crossing a year
+  boundary never shows two different days alike
+- **Interactive**: Click handling for tasks
+- **Drag-and-drop rescheduling**: Drag a bar to move it; drag either edge to
+  resize start/end. Snaps to whole days, keeps each date's time of day across
+  a daylight-saving change (with shift bands configured via `timeSegments`, a
+  day-view drag goes by bands instead, and a move keeps the bar's elapsed
+  length), and persists the change through
+  `dataSource.update()` automatically (optimistic local update + revert on
+  failure). See the [package README](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/plugin-gantt/README.md#drag-and-drop-rescheduling) for details on the
+  lower-level `onTaskUpdate` hook when embedding `<GanttView>` directly.
+- **Writes follow the caller's grant**: a bar's drag, resize and progress, its
+  title edited in place and its dependency links are offered only when the
+  `rowEdit` row of the affordance-to-grant map (`@object-ui/core`) allows them —
+  the object's policy, the effective API operation set and the caller's
+  **update** grant — and a row's Delete only when `rowDelete` does. The record
+  drawer's inline edit reads the record page's `recordEdit` row. With no
+  permission provider mounted they read open, as `readOnly` and `lockField`
+  still close them.
+
+## Usage
+
+An `object-gantt` node takes its props in its `properties` bag, whose members are
+`@objectstack/spec`'s `ComponentPropsMap['object-gantt']` row, and its field
+mapping in the bag's `gantt` block. `objectui validate` judges the bag against that
+row and refuses a prop written flat on the node by name, naming its bag member
+(`Did you mean objectName → properties.objectName?`, or
+`startDateField → properties.gantt.startDateField` for a field-mapping key), as the
+spec's own page component does (objectui#10859). `SchemaRenderer` hoists the bag
+onto the node before `ObjectGantt` runs, so `ObjectGanttSchema` is the node as the
+renderer reads it, and as code composes it.
+
+### Basic Usage with ObjectQL
+
+```tsx
+import '@object-ui/plugin-gantt'
+import type { ObjectGanttBlockNode } from '@object-ui/types'
+
+const schema: ObjectGanttBlockNode = {
+  type: 'object-gantt',
+  properties: {
+    objectName: 'tasks',  // Your ObjectQL object
+    gantt: {
+      startDateField: 'startDate',
+      endDateField: 'endDate',
+      titleField: 'taskName',
+      progressField: 'completion',
+      dependenciesField: 'dependencies'
+    }
+  }
+}
+```
+
+### With Static Data
+
+```tsx
+import type { ObjectGanttBlockNode } from '@object-ui/types';
+
+const schema: ObjectGanttBlockNode = {
+  type: 'object-gantt',
+  properties: {
+    staticData: [
+      {
+        id: 1,
+        taskName: 'Design Phase',
+        startDate: '2024-01-01',
+        endDate: '2024-01-15',
+        completion: 100
+      },
+      {
+        id: 2,
+        taskName: 'Development',
+        startDate: '2024-01-16',
+        endDate: '2024-02-28',
+        completion: 60,
+        dependencies: [1]
+      },
+      {
+        id: 3,
+        taskName: 'Testing',
+        startDate: '2024-03-01',
+        endDate: '2024-03-15',
+        completion: 0,
+        dependencies: [2]
+      }
+    ],
+    gantt: {
+      startDateField: 'startDate',
+      endDateField: 'endDate',
+      titleField: 'taskName',
+      progressField: 'completion',
+      dependenciesField: 'dependencies'
+    }
+  }
+}
+```
+
+## Data Providers
+
+### Object Provider (Database)
+
+```tsx
+import type { ObjectGanttBlockNode } from '@object-ui/types';
+
+const objectProviderGantt: ObjectGanttBlockNode = {
+  type: 'object-gantt',
+  properties: {
+    objectName: 'project_tasks',
+    gantt: {
+      startDateField: 'start_date',
+      endDateField: 'due_date',
+      titleField: 'title',
+      progressField: 'progress'
+    }
+  }
+};
+```
+
+### Value Provider (Static)
+
+```tsx
+import type { ObjectGanttBlockNode } from '@object-ui/types';
+
+const valueProviderGantt: ObjectGanttBlockNode = {
+  type: 'object-gantt',
+  properties: {
+    staticData: [
+      { id: 1, title: 'Task 1', start: '2024-01-01', end: '2024-01-15' },
+      { id: 2, title: 'Task 2', start: '2024-01-16', end: '2024-01-31' }
+    ],
+    gantt: {
+      startDateField: 'start',
+      endDateField: 'end',
+      titleField: 'title'
+    }
+  }
+};
+```
+
+### No API provider
+
+The view-level `{ provider: 'api', read, write }` data source is retired in
+`@objectstack/spec` (objectstack#23082). A gantt reads its object
+(`provider: 'object'`) or inline rows (`provider: 'value'`); a
+metadata-declared API call is the page element's `dataSource` binding. A
+gantt that still carries an `api` block is not read through it: its `read` /
+`write` URLs are never requested.
+
+## Event Handling
+
+### Task Click
+
+The click handler is a **React prop**, not a schema key — the schema stays
+serializable. A component mounted yourself, without `SchemaRenderer`, receives the
+node as it reads it, so its `schema` prop keeps its props on the node: nothing
+hoists a `properties` bag there.
+
+```tsx
+import { ObjectGantt } from '@object-ui/plugin-gantt';
+import type { DataSource } from '@object-ui/types';
+
+export function ProjectGantt({ dataSource }: { dataSource: DataSource }) {
+  return (
+    <ObjectGantt
+      schema={{
+        type: 'object-gantt',
+        objectName: 'tasks',
+        gantt: {
+          startDateField: 'start',
+          endDateField: 'end',
+          titleField: 'name'
+        }
+      }}
+      dataSource={dataSource}
+      onTaskClick={(task) => {
+        console.log('Task clicked:', task);
+        // Open task details / edit / show dependencies
+      }}
+    />
+  );
+}
+```
+
+Rendered through the registered `object-gantt` type there is usually nothing to
+wire: clicking a row already opens the standard detail drawer.
+
+### Task click navigation
+
+`navigation` in the `properties` bag decides what a task click opens. With the
+key absent it is the drawer. `drawer`, and a block written without `mode` (the
+spec's `drawer` default), open the task's record in the drawer. `page` opens
+the record page in the same tab, and
+`new_window` opens it in a new tab. `none` opens nothing, `preventNavigation:
+true` opens nothing whatever the mode, `openNewTab: true` opens the record page
+in a new tab and outranks every mode except `none`, and `size` sets the overlay
+width.
+
+```json
+{
+  "type": "object-gantt",
+  "properties": {
+    "objectName": "project_task",
+    "gantt": { "startDateField": "start_date", "endDateField": "end_date", "titleField": "name" },
+    "navigation": { "mode": "drawer", "size": "lg" }
+  }
+}
+```
+
+The record-page address is the gantt's own: it derives it from the page it is
+on and does not use a record navigator the host publishes, so mounting one
+changes nothing. On the object's own list or view route the address is the
+object's record page; on any other page, such as a custom page, the gantt
+appends `/OBJECT/record/ID` to the current address. On inline rows that name
+no object (no `objectName`, no object `data` provider), no mode opens anything.
+
+## Comparison with Timeline Plugin
+
+| Feature | object-gantt | timeline (gantt variant) |
+|---------|-------------|--------------------------|
+| **Data Source** | ObjectQL (database) | Static arrays |
+| **Dependencies** | Yes | No |
+| **Progress** | Yes (0-100%) | No |
+| **Use Case** | Project management | Simple timelines |
+| **Field Mapping** | Configurable | Fixed schema |
+| **Best For** | Database-driven projects | Static presentations |
+
+**When to use object-gantt**:
+- You're using ObjectQL for data management
+- You need task dependencies and progress tracking
+- Tasks come from a database or API
+- You're building project management features
+
+**When to use timeline (gantt variant)**:
+- You have static timeline data
+- You don't need dependencies or progress
+- You're creating simple visual timelines
+- You're not using ObjectQL
+
+## Typical Use Cases
+
+1. **Project Management**: Track project tasks, milestones, and dependencies
+2. **Sprint Planning**: Visualize agile sprint tasks and their timeline
+3. **Construction Planning**: Display construction phases and their relationships
+4. **Event Planning**: Show event preparation tasks and schedules
+5. **Product Roadmap**: Display product features and release timelines
+
+## TypeScript Support
+
+```ts
+import type { ObjectGanttBlockNode, GanttConfig } from '@object-ui/types'
+
+const ganttConfig: GanttConfig = {
+  startDateField: 'startDate',
+  endDateField: 'endDate',
+  titleField: 'taskName',
+  progressField: 'completion',
+  dependenciesField: 'dependencies'
+}
+
+const ganttSchema: ObjectGanttBlockNode = {
+  type: 'object-gantt',
+  properties: {
+    objectName: 'project_tasks',
+    gantt: ganttConfig
+  }
+}
+```
+
+`ObjectGanttSchema` types the node as `ObjectGantt` reads it: after `SchemaRenderer`
+hoists the bag, or as you hand it to `<ObjectGantt schema={…}>` yourself.
+
+## Related Documentation
+
+- [Timeline Plugin](/docs/frontend/plugins/plugin-timeline) - Simpler timeline visualization
+- [Plugin System Overview](/docs/frontend/plugins)
+- [Package README](https://github.com/objectstack-ai/objectstack/tree/main/ui/packages/plugin-gantt)

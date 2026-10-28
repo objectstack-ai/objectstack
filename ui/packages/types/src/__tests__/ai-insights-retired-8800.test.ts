@@ -118,21 +118,23 @@ describe('objectui#8800 — `ai-insights` stays retired (type face)', () => {
     // declaration is caught even by a run that never type-checks.
     const source = readFileSync(DECLARATION_PATH, 'utf8');
 
-    expect(/^export interface AIInsightsSchema\b/m.test(source)).toBe(false);
-    expect(/^\s*type: 'ai-insights';/m.test(source)).toBe(false);
+    const declares = (name: string) => new RegExp(`^export (?:interface|type) ${name}\\b`, 'm');
+    const literal = /^\s*type: 'ai-insights';/m;
+    expect(declares('AIInsightsSchema').test(source)).toBe(false);
+    expect(literal.test(source)).toBe(false);
 
-    // ⭐ LIT CONTROLS — the SAME two matchers, one sibling over, still fire. The
-    // three AI schemas this file keeps are registered and rendered by
-    // `@object-ui/plugin-ai`; only the fourth was retired. Without these, both
-    // absences above would also be satisfied by a truncated read or a matcher
-    // that can never match.
-    expect(/^export interface AIRecommendationsSchema\b/m.test(source)).toBe(true);
-    expect(/^\s*type: 'ai-recommendations';/m.test(source)).toBe(true);
+    // ⭐ LIT CONTROLS — the SAME two matchers still fire. The three sibling names
+    // stay declared in this file (as `never` tombstones since `@object-ui/plugin-ai`
+    // retired, objectstack#25921), so the declaration matcher finds one; no
+    // node literal is declared here any more, so the literal matcher is lit on
+    // the line it was written to catch. Without these, both absences above would
+    // also be satisfied by a truncated read or a matcher that can never match.
+    expect(declares('AIRecommendationsSchema').test(source)).toBe(true);
+    expect(literal.test("  type: 'ai-insights';")).toBe(true);
 
-    // The tombstone itself must stay: it is where the ruling, the boundary
-    // against the three live schemas, and the in-repo limit are recorded. A
-    // retirement whose reasoning is deleted is re-litigated by the next sweep.
-    expect(source).toContain('`AIInsightsSchema` (`type: \'ai-insights\'`) — RETIRED');
+    // The module keeps pointing at this retirement, so the next sweep finds the
+    // ruling instead of re-litigating it.
+    expect(source).toContain('objectui#8800');
   });
 
   it('the published BARREL no longer re-exports the symbol', () => {
@@ -162,9 +164,6 @@ describe('objectui#8800 — nothing in this TRACKED tree carries either spelling
    *    a tombstone comment that names the symbol on purpose; a scan reddening on
    *    them would be asserting the retirement had not landed. That they no longer
    *    DECLARE it is asserted above, by matchers shaped for a declaration.
-   *  - `ai-zero-read-members-retired-8178.test.ts` — objectui#8178's pin, whose
-   *    exclusion paragraph was rewritten BY THIS RULING and names the symbol to
-   *    record what it used to hold.
    *  - this pin, which must write both spellings to probe for them.
    */
   const EXCLUDED = [
@@ -172,7 +171,6 @@ describe('objectui#8800 — nothing in this TRACKED tree carries either spelling
     ':!.changeset/',
     ':!packages/types/src/ai.ts',
     ':!packages/types/src/index.ts',
-    ':!packages/types/src/__tests__/ai-zero-read-members-retired-8178.test.ts',
     ':!packages/types/src/__tests__/ai-insights-retired-8800.test.ts',
   ];
 
@@ -201,7 +199,7 @@ describe('objectui#8800 — nothing in this TRACKED tree carries either spelling
     expect(grepTree('ai-insights')).toEqual([]);
   });
 
-  it('LIT CONTROLS — the same probe finds the three siblings that DO render', () => {
+  it('LIT CONTROLS — the same probe finds the three siblings (tombstoned since objectstack#25921)', () => {
     // Without these, both zeros above would also be produced by a broken
     // `git grep` invocation, a wrong cwd, or an exclusion list that swallowed
     // the tree — and a swallowed tree renders as a successful retirement.
@@ -242,7 +240,7 @@ describe('objectui#8800 — PREMISE: the zod face never accepted the spelling', 
     expect('AIInsightsSchema' in ZodFace).toBe(false);
     // ⭐ LIT CONTROLS — the same probes find a sibling the mirror DOES carry, so
     // the absences above are readings and not a broken path join or namespace.
-    expect(source).toMatch(/z\.literal\('ai-recommendations'\)/);
+    expect(source).toMatch(/retiredNodeType\('ai-recommendations'/);
     expect('AIRecommendationsSchema' in ZodFace).toBe(true);
   });
 });

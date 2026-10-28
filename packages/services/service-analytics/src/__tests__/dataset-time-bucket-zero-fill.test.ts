@@ -26,8 +26,12 @@
  *   - another grid dimension is filled per combination that holds a row;
  *   - a non-UTC zone: the keys the fill writes are the keys the query writes;
  *   - the controls — a full window, a top-N, an order on a measure, no time
- *     dimension, `compareTo` — come back as they always have;
- *   - the bound: a fill past `MAX_ZERO_FILLED_GRID_ROWS` does not run at all.
+ *     dimension — come back as they always have;
+ *   - the bound: a fill past `MAX_ZERO_FILLED_GRID_ROWS` does not run at all;
+ *   - #27111, `compareTo`: the same fill, over the PRIMARY window, adds the
+ *     buckets empty in both windows with `0` in both the measure and its
+ *     `__compare`; a bucket either window holds is unchanged, and the guards
+ *     (no axis `dateRange`, a `limit`, an order on a `__compare`) hold.
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
@@ -354,20 +358,6 @@ describe('[#26893] controls — answers the fill must not change', () => {
     expect(res.rows.map((r) => `${r.owner}|${r.opp_count}`).sort()).toEqual(['ann|10', 'bob|5']);
   });
 
-  it('compareTo keeps its shape: its empty buckets are not filled', async () => {
-    const res = await run({
-      dimensions: ['close_date'],
-      measures: ['total_amount'],
-      runtimeFilter: WON,
-      timeDimensions: [{ dimension: 'close_date', dateRange: ['2026-05-01', '2026-08-31'] }],
-      compareTo: { kind: 'previousYear' },
-    });
-    // May and August hold nothing in either window (2025-05..08 holds no
-    // deal), and stay absent: the fill does not run under `compareTo`.
-    expect(series(res.rows)).toEqual([['2026-06', 70], ['2026-07', 80]]);
-    expect(res.rows.map((r) => r.total_amount__compare)).toEqual([0, 0]);
-  });
-
   it(`a fill past ${MAX_ZERO_FILLED_GRID_ROWS} rows does not run at all — never a partial fill`, async () => {
     const res = await run({
       dimensions: ['close_date'],
@@ -377,6 +367,151 @@ describe('[#26893] controls — answers the fill must not change', () => {
       timeDimensions: [{ dimension: 'close_date', dateRange: ['2017-01-01', '2026-12-31'] }],
     });
     expect(res.rows).toHaveLength(DEALS.filter((d) => d.stage === 'closed_won').length);
+  });
+});
+
+describe('[#27111] compareTo: a bucket empty in both windows is filled, over the primary window', () => {
+  it('May–August vs the previous year: May and August come back, with 0 in the measure and in its __compare', async () => {
+    const res = await run({
+      dimensions: ['close_date'],
+      measures: ['opp_count', 'total_amount', 'avg_amount'],
+      runtimeFilter: WON,
+      timeDimensions: [{ dimension: 'close_date', dateRange: ['2026-05-01', '2026-08-31'] }],
+      compareTo: { kind: 'previousYear' },
+    });
+    // 2025-05..08 holds no deal, and 2026 holds June and July only.
+    expect(series(res.rows)).toEqual([['2026-05', 0], ['2026-06', 70], ['2026-07', 80], ['2026-08', 0]]);
+    expect(res.rows.map((r) => r.total_amount__compare)).toEqual([0, 0, 0, 0]);
+    for (const month of ['2026-05', '2026-08']) {
+      const row = res.rows.find((r) => r.close_date === month)!;
+      expect(row.opp_count).toBe(0);
+      expect(row.opp_count__compare).toBe(0);
+      // avg is an absent key on both sides, the way an empty group reads it.
+      expect('avg_amount' in row).toBe(false);
+      expect('avg_amount__compare' in row).toBe(false);
+    }
+  });
+});
+
+/**
+ * A compare-only fixture, its own stage: March–August 2026 against
+ * March–August 2025, one month in each of the four states.
+ *
+ * | month | 2026 (primary) | 2025 (compare) |
+ * |:--|:--|:--|
+ * | 03 | 1 deal | 1 deal |
+ * | 04 | 1 deal | — |
+ * | 05 | — | 1 deal |
+ * | 06 | — | — |
+ * | 07 | 1 deal | — |
+ * | 08 | — | — |
+ *
+ * `closed_at` dates the same deals for the window-only anchor case: 2026's
+ * deals close in 2026 and 2025's in 2025, so anchoring on `closed_at` while
+ * the grid buckets `close_date` gives a series with no axis window.
+ */
+const CMP = { stage: 'cmp_probe' };
+const CMP_DEALS = [
+  { id: 'c1', close_date: '2026-03-10', closed_at: '2026-03-10T12:00:00.000Z', amount: 4 },
+  { id: 'c2', close_date: '2026-04-10', closed_at: '2026-04-10T12:00:00.000Z', amount: 8 },
+  { id: 'c3', close_date: '2026-07-10', closed_at: '2026-07-10T12:00:00.000Z', amount: 16 },
+  { id: 'c4', close_date: '2025-03-10', closed_at: '2025-03-10T12:00:00.000Z', amount: 1 },
+  { id: 'c5', close_date: '2025-05-10', closed_at: '2025-05-10T12:00:00.000Z', amount: 2 },
+];
+const CMP_WINDOW: [string, string] = ['2026-03-01', '2026-08-31'];
+const cells = (rows: Record<string, unknown>[]) =>
+  rows.map((r) => `${r.close_date}|${r.opp_count}|${r.opp_count__compare}`);
+
+describe('[#27111] compareTo: only the both-empty buckets are added; every other answer is unchanged', () => {
+  beforeAll(async () => {
+    for (const deal of CMP_DEALS) await engine.insert(DEAL, { ...deal, ...CMP, owner: 'ann' } as any);
+  });
+
+  it('a bucket either window holds keeps the merge\'s values; June and August are added at 0 / 0', async () => {
+    const res = await run({
+      dimensions: ['close_date'],
+      measures: ['opp_count', 'total_amount'],
+      runtimeFilter: CMP,
+      timeDimensions: [{ dimension: 'close_date', dateRange: CMP_WINDOW }],
+      compareTo: { kind: 'previousYear' },
+    });
+    expect(cells(res.rows)).toEqual([
+      '2026-03|1|1', '2026-04|1|0', '2026-05|0|1', '2026-06|0|0', '2026-07|1|0', '2026-08|0|0',
+    ]);
+    expect(res.rows.map((r) => [r.total_amount, r.total_amount__compare].map(Number))).toEqual([
+      [4, 1], [8, 0], [0, 2], [0, 0], [16, 0], [0, 0],
+    ]);
+  });
+
+  it('the primary columns are the plain series\' answer: one fill rule', async () => {
+    const selection: DatasetSelection = {
+      dimensions: ['close_date'],
+      measures: ['opp_count', 'total_amount'],
+      runtimeFilter: CMP,
+      timeDimensions: [{ dimension: 'close_date', dateRange: CMP_WINDOW }],
+    };
+    const plain = await run(selection);
+    const compared = await run({ ...selection, compareTo: { kind: 'previousYear' } });
+    const primary = (rows: Record<string, unknown>[]) =>
+      rows.map((r) => [r.close_date, r.opp_count, Number(r.total_amount)]);
+    expect(primary(compared.rows)).toEqual(primary(plain.rows));
+    expect(plain.rows.map((r) => r.close_date)).toEqual([
+      '2026-03', '2026-04', '2026-05', '2026-06', '2026-07', '2026-08',
+    ]);
+  });
+
+  it('previousPeriod aligns by ordinal and fills the same way', async () => {
+    // June–August 2026 against March–May 2026: 03↔06, 04↔07, 05↔08.
+    const res = await run({
+      dimensions: ['close_date'],
+      measures: ['opp_count'],
+      runtimeFilter: CMP,
+      timeDimensions: [{ dimension: 'close_date', dateRange: ['2026-06-01', '2026-08-31'] }],
+      compareTo: { kind: 'previousPeriod' },
+    });
+    expect(cells(res.rows)).toEqual(['2026-06|0|1', '2026-07|1|1', '2026-08|0|0']);
+  });
+
+  it('an axis with no dateRange of its own (a window-only anchor) fills interior gaps only, no edges', async () => {
+    const res = await run({
+      dimensions: ['close_date'],
+      measures: ['opp_count'],
+      runtimeFilter: CMP,
+      timeDimensions: [{ dimension: 'closed_at', dateRange: ['2026-01-01', '2026-12-31'] }],
+      compareTo: { kind: 'previousYear', dimension: 'closed_at' },
+    });
+    // The anchor is not a grid column, so the comparison rows key by their
+    // own close_date (2025-03, 2025-05). Between the first and last bucket
+    // the grid holds, every month; nothing before 2025-03 or after 2026-07.
+    expect(cells(res.rows)).toEqual([
+      '2025-03|0|1', '2025-04|0|0', '2025-05|0|1', '2025-06|0|0', '2025-07|0|0', '2025-08|0|0',
+      '2025-09|0|0', '2025-10|0|0', '2025-11|0|0', '2025-12|0|0', '2026-01|0|0', '2026-02|0|0',
+      '2026-03|1|0', '2026-04|1|0', '2026-05|0|0', '2026-06|0|0', '2026-07|1|0',
+    ]);
+  });
+
+  it('a limit with compareTo is not filled', async () => {
+    const res = await run({
+      dimensions: ['close_date'],
+      measures: ['opp_count'],
+      runtimeFilter: CMP,
+      timeDimensions: [{ dimension: 'close_date', dateRange: CMP_WINDOW }],
+      compareTo: { kind: 'previousYear' },
+      limit: 10,
+    });
+    expect(cells(res.rows)).toEqual(['2026-03|1|1', '2026-04|1|0', '2026-05|0|1', '2026-07|1|0']);
+  });
+
+  it('an order on a __compare column is not filled', async () => {
+    const res = await run({
+      dimensions: ['close_date'],
+      measures: ['opp_count'],
+      runtimeFilter: CMP,
+      timeDimensions: [{ dimension: 'close_date', dateRange: CMP_WINDOW }],
+      compareTo: { kind: 'previousYear' },
+      order: { opp_count__compare: 'desc' },
+    });
+    expect(res.rows.map((r) => r.close_date).sort()).toEqual(['2026-03', '2026-04', '2026-05', '2026-07']);
   });
 });
 

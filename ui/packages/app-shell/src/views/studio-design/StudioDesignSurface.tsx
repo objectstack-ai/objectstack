@@ -64,7 +64,7 @@ import {
   STUDIO_PKG_READONLY_WORD,
 } from './studio-tokens.js';
 import { StudioInspector } from './StudioInspector.js';
-import { copilotDraftMarkOf, DraftChip, DraftSourceLine } from './StudioDraftMark.js';
+import { agentDraftMarkOf, DraftChip, DraftSourceLine } from './StudioDraftMark.js';
 import {
   StudioItemHeader,
   StudioStatusChip,
@@ -6968,9 +6968,10 @@ export function DataPillar({
     setCurrent(object);
   };
   // objectui#12725 — the copilot's mark on the selected field: its key path is
-  // `["fields", NAME]` in the object body, and only a `copilot` write answers.
-  const fieldCopilotMark =
-    objLoaded && fieldSel?.kind === 'field' ? copilotDraftMarkOf(objDraftChanges, ['fields', fieldSel.id]) : null;
+  // `["fields", NAME]` in the object body, and only a `copilot` write answers —
+  // or, objectstack#27176, an `mcp` one: an agent through the MCP build door.
+  const fieldAgentMark =
+    objLoaded && fieldSel?.kind === 'field' ? agentDraftMarkOf(objDraftChanges, ['fields', fieldSel.id]) : null;
   useHeldEditReport(onHeldEditChange, objHeld?.clause ?? null);
   // The live request's apply (see `requestedSurface` above). objectstack#26845
   // — another object's load replaces the buffer a held edit lives in, so it
@@ -7720,7 +7721,7 @@ export function DataPillar({
             onClose={() => setFieldSel(null)}
             closeLabel={t('engine.studio.close', locale)}
             // objectui#12725 — the copilot's 草稿 chip on a field it changed.
-            actions={fieldCopilotMark ? <DraftChip locale={locale} className="mr-1" /> : undefined}
+            actions={fieldAgentMark ? <DraftChip locale={locale} className="mr-1" /> : undefined}
             // objectui#12453 — a read-only package saves no draft: no footer.
             footer={readOnly ? null : t('engine.studio.inspector.draftFooter', locale)}
             bodyClassName="flex min-h-0 flex-1 flex-col"
@@ -7730,6 +7731,7 @@ export function DataPillar({
                 const fieldRailContent = fieldSel.kind === 'group' ? (
                   <ObjectGroupInspector
                     draft={objDraft}
+                    objectName={current.name}
                     groupKey={fieldSel.id}
                     onPatch={onPatch}
                     onClose={() => setFieldSel(null)}
@@ -7761,10 +7763,10 @@ export function DataPillar({
                   </div>
                 );
                 // objectui#12725 — the 来源 line under the field's properties.
-                const railContent = fieldCopilotMark ? (
+                const railContent = fieldAgentMark ? (
                   <>
                     {fieldRailContent}
-                    <DraftSourceLine at={fieldCopilotMark.at} locale={locale} className="mt-4 border-t pt-3" />
+                    <DraftSourceLine mark={fieldAgentMark} locale={locale} className="mt-4 border-t pt-3" />
                   </>
                 ) : (
                   fieldRailContent

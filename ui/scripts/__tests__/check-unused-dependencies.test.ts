@@ -401,14 +401,15 @@ describe('this repository', () => {
     expect(findings).toEqual([]);
   });
 
-  it('allows exactly the four rows the gate landed with, each still verifying', () => {
+  it('allows exactly the two rows left of the four the gate landed with, each still verifying', () => {
+    // The VS Code extension's two bundler-inlined rows left with that package
+    // (objectstack#25910), as the gate's rule 3 requires of a row with no subject.
     expect(
       Object.fromEntries(
         Object.entries(DECLARED_WITHOUT_IMPORT).map(([pkg, rows]) => [pkg, Object.keys(rows).sort()]),
       ),
     ).toEqual({
       '@object-ui/cli': ['@object-ui/components', '@object-ui/react'],
-      'object-ui': ['@object-ui/core', '@object-ui/types'],
     });
   });
 

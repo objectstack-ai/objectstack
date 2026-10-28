@@ -1013,6 +1013,17 @@ jobs:
         continue-on-error: true
         run: node scripts/check-sdui-manifest.mjs --self-test && node scripts/check-sdui-manifest.mjs
 
+      # The component reference under content/docs/ui/components/ is generated
+      # from that same manifest by scripts/gen-sdui-reference.mjs, so it sits
+      # next to the manifest's own check: a PR that changes the manifest and
+      # not the reference reds here, and the two land in one PR. Offline and
+      # unfiltered for the reason the step above gives. The script header is
+      # the authority on the page layout and on what the drift check compares.
+      - name: Component reference matches the SDUI manifest
+        id: component-reference-matches-the-sdui-manifest
+        continue-on-error: true
+        run: pnpm check:sdui-reference
+
       # pm-dispatch SKILL.md line ratchet (#7341 / #5925 item 7): the PM skill
       # is read in full by every seat session and every Routine fire, so its
       # size is a per-round tax on the whole fleet. The #7341 extraction moved

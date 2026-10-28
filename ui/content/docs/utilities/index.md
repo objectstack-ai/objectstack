@@ -21,10 +21,6 @@ Browse available utilities:
 
 - **[ObjectStack Adapter](/docs/utilities/data-objectstack)** - Connect to ObjectStack backend
 
-### Editor Extensions
-
-- **[VS Code Extension](/docs/utilities/vscode-extension)** - Schema editor and IntelliSense
-
 ## Official Utilities
 
 ### CLI
@@ -95,26 +91,6 @@ npm install @object-ui/data-objectstack @objectstack/client
 ```
 
 [Read full documentation →](/docs/utilities/data-objectstack)
-
----
-
-### VS Code Extension
-
-**[object-ui](/docs/utilities/vscode-extension)** - Visual Studio Code extension for ObjectUI schema development.
-
-- Schema preview
-- JSON validation
-- IntelliSense and auto-completion
-- Syntax highlighting
-- Export to React components
-- Schema formatting
-
-```bash
-# Install from VS Code Marketplace
-code --install-extension objectui.object-ui
-```
-
-[Read full documentation →](/docs/utilities/vscode-extension)
 
 ---
 
@@ -212,7 +188,6 @@ All ObjectUI utilities share these characteristics:
 
 - **[CLI Documentation](/docs/utilities/cli)** - Learn how to use the ObjectUI CLI
 - **[Create Plugin Guide](/docs/utilities/create-plugin)** - Build your first plugin
-- **[VS Code Extension](/docs/utilities/vscode-extension)** - Set up your development environment
 - **[Plugin Concepts](/docs/guide/plugins)** - Learn how plugins work in detail
 
 ## Need Help?

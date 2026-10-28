@@ -5,7 +5,7 @@
  *
  * `./index.ts` imports this module only through its lazy loader, so a viewer
  * whose language is not Chinese never downloads it. A key this catalogue does
- * not define renders the `en` row (`./en.ts`); `pnpm check:i18n-designer-parity`
+ * not define renders the `en` row (`./en.ts`); `../../__tests__/studio-namespace.test.ts`
  * holds every `en` key to a row here, with the same `{placeholders}`.
  *
  * ⛔ Keep the declaration `const STUDIO_ZH: Record<string, string> = { … }`
@@ -1046,6 +1046,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.inspector.dataset.displayFormat': '显示格式',
   'engine.inspector.dataset.decimals': '小数位数',
   'engine.inspector.dataset.currency': '货币',
+  'engine.inspector.dataset.currencyInherit': '继承 —— 字段或组织的默认币种',
+  'engine.inspector.dataset.currencyChoose': '选择币种',
   'engine.inspector.dataset.sample': '示例：{sample}',
   'engine.inspector.dataset.relWarning': '关联 {rel} 不在「包含的关联」中。',
   'engine.inspector.dataset.relWarningAdd': '添加它',
@@ -1310,6 +1312,7 @@ const STUDIO_ZH: Record<string, string> = {
   // Flow reference picker — ReferenceCombobox / FlowReferenceField (objectui#10586)
   'engine.inspector.reference.pickFromRecords': '从记录中选择',
   'engine.inspector.reference.pickFromRegistry': '从已声明的项中选择',
+  'engine.inspector.reference.pickFromQueues': '从队列中选择',
   'engine.inspector.reference.enterManually': '手动输入值',
   'engine.inspector.reference.managerPlaceholder': '自动解析',
   'engine.inspector.reference.managerHint': '运行时根据提交人的上级自动解析 —— 无需填写。',
@@ -1947,6 +1950,18 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.settings.undeclared': '(未声明 —— 各处按启发式自动挑选)',
   'engine.studio.settings.highlightMax': '最多 {max} 个重点字段——移除一个才能再添加。',
   'engine.studio.settings.highlightPreview': '要点条预览',
+  'engine.studio.settings.relatedLists': '关联列表顺序(relatedLists)—— 本对象记录页上各子记录列表的顺序,最重要的在前;只管排序,显示与否仍在关系字段上设置',
+  'engine.studio.settings.relatedListsAdd': '+ 添加关系…',
+  'engine.studio.settings.relatedListsTail': '未列出 —— 排在以上之后,按默认顺序',
+  'engine.studio.settings.relatedListsUndeclared': '未声明 —— 所有列表按默认顺序:先主从子对象,再查找关系',
+  'engine.studio.settings.relatedListsNone': '还没有对象通过查找或主从字段指向本对象。',
+  'engine.studio.settings.relatedListsLoading': '正在加载指向本对象的对象…',
+  'engine.studio.settings.relatedListsUnmatched': '“{entry}”不对应任何指向本对象的关系,下次修改此列表时会被去掉。',
+  'engine.studio.settings.relatedListsHidden': '已隐藏',
+  'engine.studio.settings.relatedListsPrimary': '正文',
+  'engine.studio.settings.relatedListsPreview': '记录页顺序',
+  'engine.studio.settings.relatedListsPreviewBody': '正文',
+  'engine.studio.settings.relatedListsPreviewSide': '侧栏卡片',
   'engine.studio.settings.sharing': '记录共享模型(OWD)',
   'engine.studio.settings.sharingHint': '在岗位与共享规则之前生效的记录可见性基线(ADR-0056/0090)',
   'engine.studio.settings.sharingModel': '共享模型(sharingModel)—— 谁能查看和编辑他人拥有的记录',
@@ -2742,6 +2757,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.designer.groupDelete': '删除分组',
   'engine.studio.designer.groupDeleteTitle': '删除分组(字段归为未分组)',
   'engine.studio.designer.dropHere': '拖字段到这里',
+  'engine.studio.designer.relatedTable': '关联表:{name} —— 此分组放置一张关联列表,不含字段',
   'engine.studio.designer.ungrouped': '未分组',
   'engine.studio.designer.newGroup': '新分组',
   'engine.studio.designer.fieldTitleReadOnly': '点选字段查看属性',
@@ -2837,10 +2853,14 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.nav.visibleWhen': '可见条件',
   'engine.studio.draftMark.chip': '草稿',
   'engine.studio.draftMark.sourceLabel': '来源',
-  'engine.studio.draftMark.source': '由 AI 副驾在 {when}作为草稿加入',
-  'engine.studio.draftMark.sourceJustNow': '由 AI 副驾刚刚作为草稿加入',
-  'engine.studio.draftMark.sourceItems': '{items} {count} 项由 AI 副驾在 {when}作为草稿加入',
-  'engine.studio.draftMark.sourceItemsJustNow': '{items} {count} 项由 AI 副驾刚刚作为草稿加入',
+  'engine.studio.draftMark.source': '由 {agent}在 {when}作为草稿加入',
+  'engine.studio.draftMark.sourceJustNow': '由 {agent}刚刚作为草稿加入',
+  'engine.studio.draftMark.sourceItems': '{items} {count} 项由 {agent}在 {when}作为草稿加入',
+  'engine.studio.draftMark.sourceItemsJustNow': '{items} {count} 项由 {agent}刚刚作为草稿加入',
+  // objectstack#27176 — 谁起草的:AI 副驾,或经 MCP 构建入口的智能体。
+  'engine.studio.draftMark.agent.copilot': 'AI 副驾',
+  'engine.studio.draftMark.agent.mcp': 'MCP 客户端',
+  'engine.studio.draftMark.agent.mcpClient': 'MCP 客户端「{client}」',
   'engine.studio.draftMark.item': '「{label}」',
   'engine.studio.draftMark.minutesAgo': '{n} 分钟前',
   'engine.studio.draftMark.hoursAgo': '{n} 小时前',
@@ -2923,6 +2943,11 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.designer.group.collapseExpanded': '可折叠 · 默认展开',
   'engine.studio.designer.group.collapseCollapsed': '可折叠 · 默认折叠',
   'engine.studio.designer.group.collapseHint': '控制该分组在真实表单（预览）中的折叠方式。',
+  'engine.studio.designer.group.relatedListLabel': '在此放置关联表(relatedList)',
+  'engine.studio.designer.group.relatedListNone': '无 —— 一组字段',
+  'engine.studio.designer.group.relatedListHint': '该分组将代表这张关联列表的表格,显示在记录详情栏的这个位置。放置表格的分组不含字段。',
+  'engine.studio.designer.group.relatedListHasFields': '请先把本分组的字段移到其他分组:放置关联表的分组不含字段。',
+  'engine.studio.designer.group.relatedListLoading': '正在加载指向本对象的对象…',
   // objectui#11788 — 新建自动化对话框里不选触发方式时的选项。
   'engine.studio.newAutoTrigger.later': '稍后在开始节点上选择',
   // ── 记录共享基线（OWD）总览 (objectui#2505) ──────────────────────────

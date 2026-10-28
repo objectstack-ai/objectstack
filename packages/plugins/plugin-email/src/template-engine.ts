@@ -24,12 +24,14 @@
  * whitelist — `{{ order.total | currency:EUR }}`, `{{ ts | datetime }}` —
  * reusing `@objectstack/formula`'s `formatValue` so dates, money, and
  * (ADR-0053 Phase 2) reference-timezone `datetime` render identically to
- * in-app templates. An unknown formatter falls back to the raw string.
+ * in-app templates.
  *
  * The hole grammar is `@objectstack/formula`'s (`mailHolePattern`,
  * `parseMailHole`), the one copy the authoring rule and the placement judge
- * read too. A hole that grammar REFUSES — a second formatter
- * (`{{ x | default:0 | number:2 }}`), or a `currency` argument that is not a
+ * read too. A hole that grammar REFUSES — text after the `|` that is not a
+ * formatter name (`{{ due | date-long }}`), a second formatter
+ * (`{{ x | default:0 | number:2 }}`), a formatter the whitelist does not name
+ * (`{{ amount | curency:EUR }}`), or a `currency` argument that is not a
  * literal ISO 4217 code — is refused at authoring and publish; one that still
  * reaches the renderer (a template stored before the rule existed, or a body
  * handed to these functions directly) makes the render throw
@@ -41,7 +43,10 @@
  * own path; a value that is not a code in three capital letters — missing,
  * `null`, lowercase (`eur`), anything else — makes the render throw
  * `TEMPLATE_INVALID` too, naming the hole, the path and the value
- * (`currencyCodeValueRefusal`). Those are the ways a render throws: it prints
+ * (`currencyCodeValueRefusal`). A `currency` hole with no argument formats in
+ * the tenant default currency, {@link RenderOptions.currency}; with none it
+ * throws `TEMPLATE_INVALID` as well (`currencyDefaultRefusal`), since it then
+ * names no currency at all. Those are the ways a render throws: it prints
  * neither a substituted currency nor formatter syntax to a recipient.
  *
  * Deliberately tiny (no loops / conditionals / partials) — the design
@@ -51,12 +56,18 @@
  * runtime; we resist that until a real use case demands it.
  */
 
-import { currencyCodeValueRefusal, formatValue, mailHolePattern, parseMailHole } from '@objectstack/formula';
+import { currencyCodeValueRefusal, currencyDefaultRefusal, formatValue, mailHolePattern, parseMailHole } from '@objectstack/formula';
 
 /** Locale + reference timezone for hole formatters (ADR-0053 Phase 2). */
 export interface RenderOptions {
   locale?: string;
   timeZone?: string;
+  /**
+   * The tenant default currency (ISO 4217, the `localization.currency`
+   * setting) a `{{ amount | currency }}` hole with no argument formats in.
+   * Unset, such a hole makes the render throw `TEMPLATE_INVALID`.
+   */
+  currency?: string;
 }
 
 function lookup(data: Record<string, any>, path: string): unknown {
@@ -130,6 +141,12 @@ function render(
       const raw = lookup(data, parsed.path);
       let str: string;
       if (parsed.formatter) {
+        // A `currency` hole with no argument formats in the tenant default,
+        // judged before the amount is read: with none, nothing is formatted.
+        if (parsed.formatter === 'currency' && parsed.arg === undefined) {
+          const refusal = currencyDefaultRefusal(match, opts.currency, 'mail');
+          if (refusal) throw new Error(`TEMPLATE_INVALID: ${refusal}`);
+        }
         // `currency:@path`: the code is the send's data at that path, judged
         // before the amount is read, as a literal argument is.
         let arg = parsed.arg;
@@ -144,10 +161,17 @@ function render(
         const formatted = formatValue(parsed.formatter, raw, arg, {
           locale: opts.locale,
           timeZone: opts.timeZone,
+          currency: opts.currency,
         });
-        str = formatted !== undefined
-          ? formatted
-          : raw == null ? '' : (typeof raw === 'string' ? raw : String(raw)); // unknown formatter → raw
+        // The grammar refuses a formatter the whitelist does not name, so
+        // `formatValue` knows this one; if the two ever disagree the render
+        // fails rather than print the raw value where a formatted one was meant.
+        if (formatted === undefined) {
+          throw new Error(
+            `TEMPLATE_INVALID: the hole ${match} names the formatter '${parsed.formatter}', which is not a template formatter.`,
+          );
+        }
+        str = formatted;
       } else {
         if (raw == null) return '';
         str = typeof raw === 'string' ? raw : String(raw);

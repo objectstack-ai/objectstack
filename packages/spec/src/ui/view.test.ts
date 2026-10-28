@@ -799,36 +799,16 @@ describe('FormViewSchema', () => {
     })).not.toThrow();
   });
 
-  // `section.pane` — explicit split placement. Explicit-per-section so the
-  // assignment is visible in the metadata and survives reordering (the legacy
-  // rule was positional: first section left, rest right — invisible, and a
-  // reorder silently moved sections across the divider).
-  describe('section.pane (split placement)', () => {
-    it('accepts pane assignments on a split form', () => {
-      const result = FormViewSchema.parse({
-        type: 'split',
-        sections: [
-          { label: 'Task', pane: 'primary', fields: ['title'] },
-          { label: 'Schedule', pane: 'secondary', fields: ['due_date'] },
-          // Omitted pane is fine — the renderer defaults by position.
-          { label: 'Notes', fields: ['notes'] },
-        ],
-      });
-      expect(result.sections?.map((s) => s.pane)).toEqual(['primary', 'secondary', undefined]);
-    });
-
-    it('rejects a typo pane value (strict enum, not free text)', () => {
-      expect(() => FormViewSchema.parse({
-        type: 'split',
-        sections: [{ label: 'Task', pane: 'left', fields: ['title'] }],
-      })).toThrow();
-    });
-
-    it('rejects pane on a non-split form instead of silently ignoring it', () => {
-      // "Accepted but ignored" is the failure mode this key must never have —
-      // especially for AI-authored metadata, where a no-op reads as working.
+  // `section.pane` — RETIRED with the form view `type` `'split'` it served
+  // (#27155, ADR-0050). It placed a section in one pane of a split form; with
+  // `type` narrowed to the form's layout no form view draws panes, so the key
+  // is a `retiredKey()` tombstone refused on every layout with its
+  // prescription — never "accepted but ignored". The full retirement is pinned
+  // in `form-view-type-layout-retirement.test.ts`.
+  describe('section.pane (retired with split)', () => {
+    it.each(['simple', 'tabbed', 'wizard'] as const)('refuses pane on a %s form with the prescription', (type) => {
       const result = FormViewSchema.safeParse({
-        type: 'tabbed',
+        type,
         sections: [
           { label: 'Details', fields: ['name'] },
           { label: 'Advanced', pane: 'secondary', fields: ['settings'] },
@@ -837,11 +817,18 @@ describe('FormViewSchema', () => {
       expect(result.success).toBe(false);
       if (!result.success) {
         const issue = result.error.issues.find((i) => i.path.join('.') === 'sections.1.pane');
-        expect(issue?.message).toMatch(/only valid on `type: 'split'`/);
+        expect(issue?.message).toMatch(/^`view\.form\.sections\[\]\.pane` was removed in @objectstack\/spec 18\.3\.0/);
       }
     });
 
-    it('rejects pane on the legacy `groups` alias the same way', () => {
+    it('refuses the retired `split` type itself', () => {
+      expect(FormViewSchema.safeParse({
+        type: 'split',
+        sections: [{ label: 'Task', fields: ['title'] }],
+      }).success).toBe(false);
+    });
+
+    it('refuses pane on the legacy `groups` alias the same way', () => {
       const result = FormViewSchema.safeParse({
         type: 'simple',
         groups: [{ label: 'Account', pane: 'primary', fields: ['account_name'] }],
@@ -852,7 +839,7 @@ describe('FormViewSchema', () => {
       }
     });
 
-    it('defaulted `type` counts as non-split (a forgotten type errors loudly)', () => {
+    it('a defaulted `type` refuses it too', () => {
       expect(FormViewSchema.safeParse({
         sections: [{ label: 'Task', pane: 'primary', fields: ['title'] }],
       }).success).toBe(false);
@@ -1101,7 +1088,7 @@ describe('FormViewSchema — the `groups` legacy alias folds onto `sections`', (
       .toBe(false);
   });
 
-  it('the `pane` refinement still reports the key the AUTHOR wrote', () => {
+  it('the `pane` tombstone still reports the key the AUTHOR wrote', () => {
     const result = FormViewSchema.safeParse({
       type: 'simple',
       groups: [{ label: 'Account', pane: 'primary', fields: ['account_name'] }],
@@ -3232,11 +3219,21 @@ describe('FormViewSchema - buttons & defaults', () => {
       buttons: {
         submit: { show: true, label: 'Save' },
         cancel: { show: true, label: 'Discard' },
-        reset: { show: false },
       },
     });
     expect(result.buttons?.submit).toEqual({ show: true, label: 'Save' });
-    expect(result.buttons?.reset).toEqual({ show: false });
+    expect(result.buttons?.cancel).toEqual({ show: true, label: 'Discard' });
+  });
+
+  it('refuses `buttons.reset` — a retiredKey() tombstone (#27153): no form drew a reset button', () => {
+    const r = FormViewSchema.safeParse({
+      type: 'simple',
+      sections: [{ fields: ['name'] }],
+      buttons: { submit: { show: true }, reset: { show: false } },
+    });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues.map((i) => i.path.join('.'))).toEqual(['buttons.reset']);
+    expect(r.error!.issues[0]!.message).toMatch(/buttons\.reset.*was removed.*Delete the key/s);
   });
 
   it('should accept a partial buttons block (each button optional)', () => {

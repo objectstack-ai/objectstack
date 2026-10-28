@@ -64,7 +64,9 @@
  * Its value set is CLOSED and narrower than the schema's: `studio` or `api`,
  * exactly. `copilot` is refused, because it is the mark of an in-process AI
  * tool's write and a remote caller cannot be one — an HTTP request saying
- * `copilot` would mark its own write as the AI's in Studio. Every other value
+ * `copilot` would mark its own write as the AI's in Studio. `mcp` is refused
+ * for the same reason (#27176): only the MCP build door states it, in-process,
+ * after verifying the client's token. Every other value
  * is refused too (case included), never read as `api`: a misspelt `Studio`
  * dropped to `api` would record the person's edit as some other caller's.
  * Both refusals are `400`, as the precondition's are; neither door mints a code.
@@ -89,7 +91,7 @@ export interface MetaSaveRequestHttp {
 /** The `saveMetaItem` members {@link metaSaveRequestOptions} answers, each present only when the request asked for it. */
 export type MetaSaveRequestMembers = Pick<SaveMetaItemRequest, 'parentVersion' | 'mode' | 'surface'>;
 
-/** [#24395] The `?surface=` values an HTTP save may state — the schema's set less `copilot`. */
+/** [#24395] The `?surface=` values an HTTP save may state — the schema's set less `copilot` and `mcp` (#27176). */
 const HTTP_SAVE_SURFACES: ReadonlySet<string> = new Set(['studio', 'api']);
 
 /** {@link metaSaveRequestOptions}'s answer: the members to spread into the save, or the sentence of a `400`. */
@@ -147,6 +149,17 @@ export function metaSaveRequestOptions(http: MetaSaveRequestHttp): MetaSaveReque
                 message: '?surface=copilot is not accepted over HTTP: it marks a write as the AI copilot\'s, '
                     + 'which only an AI tool calling the save in-process may state. Send ?surface=studio for a '
                     + 'person editing in Studio, ?surface=api for any other caller, or omit it (recorded as api).',
+            };
+        }
+        // [#27176] `mcp` is the MCP build door's, stated in-process once it
+        // has verified the client's token — never by a request about itself.
+        if (surface === 'mcp') {
+            return {
+                ok: false,
+                message: '?surface=mcp is not accepted over HTTP: it marks a write as an MCP agent\'s, which only '
+                    + 'the MCP build door states in-process, after verifying the client\'s token. Send '
+                    + '?surface=studio for a person editing in Studio, ?surface=api for any other caller, or omit '
+                    + 'it (recorded as api).',
             };
         }
         if (typeof surface !== 'string' || !HTTP_SAVE_SURFACES.has(surface)) {

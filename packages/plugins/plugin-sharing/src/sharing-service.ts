@@ -1305,6 +1305,60 @@ export class SharingService implements ISharingService {
   }
 
   /**
+   * Whether this service's engine middleware is installed and so enforces
+   * {@link admitsByIdWrite} on every by-id write. Set by the plugin when it
+   * registers the middleware; `false` when the deployment runs with
+   * enforcement off (`enforce: false`), where no by-id write meets the gate.
+   */
+  byIdWriteGateInstalled = false;
+
+  /**
+   * [#27175] The by-id write gate the sharing middleware enforces on an
+   * `update` / `delete` of ONE row, as a verdict: `true` when the middleware
+   * lets the write through, `false` when it refuses it.
+   *
+   * ⛔ This is not a copy of that gate — it IS that gate. The middleware calls
+   * this method and refuses exactly when it answers `false`, so a reader who
+   * must know whether a by-id write would pass record sharing (the record
+   * field-access answer's `writable`, judged in `plugin-security`) asks the
+   * same code the write meets. The calls, in the middleware's order: the
+   * per-verb gate ({@link canEdit} for update, {@link canDelete} for delete,
+   * ADR-0111 D3); [ADR-0090 D10] the same gate under the DELEGATOR's identity
+   * and write depth for an on-behalf-of write; and, on a refusal, the
+   * {@link probeAuthoredRowWrite} deferral, whose `admit` retracts it.
+   *
+   * `context` is the context the middleware reads, so it carries the write
+   * depth `plugin-security` stamps (`__writeScope`, `__delegatorWriteScope`).
+   * Read-only: it writes nothing and records nothing.
+   */
+  async admitsByIdWrite(
+    object: string,
+    recordId: string,
+    verb: 'update' | 'delete',
+    context: ExecutionContext,
+  ): Promise<boolean> {
+    const gate = (o: string, id: string, c: any) =>
+      verb === 'delete' ? this.canDelete(o, id, c) : this.canEdit(o, id, c);
+    const exec = context as any;
+    let ok = await gate(object, recordId, exec);
+    // [ADR-0090 D10] The delegator must ALSO be able to perform the write —
+    // an on-behalf-of write may only touch rows the delegator could touch.
+    if (ok && exec?.onBehalfOf?.userId) {
+      ok = await gate(object, recordId, {
+        ...exec,
+        userId: exec.onBehalfOf.userId,
+        onBehalfOf: undefined,
+        __writeScope: exec.__delegatorWriteScope,
+      });
+    }
+    if (ok) return true;
+    // [#5493] Row-level write authority is ONE composite determination: an
+    // APP-AUTHORED RLS widener that admits this row by declaration retracts
+    // the refusal (see the middleware's refusal branch for the full story).
+    return (await this.probeAuthoredRowWrite(object, recordId, verb, exec)) === 'admit';
+  }
+
+  /**
    * [ADR-0111 D1] May `context` MANAGE shares (grant / revoke / list) on
    * `(object, recordId)`? System → yes. Record owner → yes. Super-user write
    * bypass (`modifyAllRecords`, probed via the late-bound security service) →

@@ -370,9 +370,13 @@ describe('#6007 — the shift-back at each bucket size the selection can ask for
       },
       CTX,
     );
+    // 1 and 4 March hold nothing in either window: since #27111 the
+    // time-bucket fill adds them at 0 on both sides.
     expect(result.rows).toEqual([
+      { close_date: '2026-03-01', opp_count: 0, opp_count__compare: 0 },
       { close_date: '2026-03-02', opp_count: 1, opp_count__compare: 5 },
       { close_date: '2026-03-03', opp_count: 2, opp_count__compare: 6 },
+      { close_date: '2026-03-04', opp_count: 0, opp_count__compare: 0 },
     ]);
   });
 

@@ -178,14 +178,14 @@ describe('form-view predicates reject the features.* root', () => {
     expectFeaturesRefusal(inCall, ['sections', 0, 'fields', 0, 'visibleWhen']);
   });
 
-  it("refuses on type: 'split' forms too — the exclusion has no per-type gap", () => {
-    // The same refinement hosts the split-only `pane` check behind a type
+  it.each(['tabbed', 'wizard'] as const)('refuses on type: %s forms too — the exclusion has no per-type gap', (type) => {
+    // The same refinement hosts the wizard-only step checks behind a type
     // guard; this pins that the features scan did NOT inherit that guard.
     const issues = reject({
-      type: 'split',
+      type,
       sections: [
-        { pane: 'primary', fields: ['name'] },
-        { pane: 'secondary', fields: [{ field: 'phone', visibleWhen: 'features.x' }] },
+        { label: 'One', fields: ['name'] },
+        { label: 'Two', fields: [{ field: 'phone', visibleWhen: 'features.x' }] },
       ],
     });
     expectFeaturesRefusal(issues, ['sections', 1, 'fields', 0, 'visibleWhen']);

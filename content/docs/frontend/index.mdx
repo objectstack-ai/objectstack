@@ -1,0 +1,87 @@
+---
+title: "Custom front-end"
+description: "Three ways to build your own UI on ObjectStack: a React page inside the Console, your own front-end over the Client SDK, or your own React app rendering metadata with the ObjectUI SDK"
+---
+
+ObjectStack gives you three ways to build UI the Console does not draw for you. Pick by where the
+UI runs and who renders it.
+
+| You want to… | Use | Where it runs |
+| --- | --- | --- |
+| Add a custom page to an ObjectStack app | [React pages](/docs/ui/react-pages): the page source is metadata | Inside the Console |
+| Read and write ObjectStack data from your own front-end | [Client SDK](/docs/api/client-sdk) (`@objectstack/client`) | Your app, any framework |
+| Render ObjectStack views, forms and dashboards in your own React app | The ObjectUI SDK, below | Your React app |
+
+The first path is metadata like any other page, so it is documented with [User Interface](/docs/ui).
+The rest of this section is the ObjectUI SDK.
+
+## The ObjectUI SDK
+
+The ObjectUI SDK is the set of MIT-licensed `@object-ui/*` packages that render ObjectStack
+JSON schemas inside your own React app. JSON metadata goes in, and accessible, themeable
+components built with Tailwind CSS, Shadcn UI and Radix primitives come out.
+
+```bash
+npm install @object-ui/react @object-ui/components
+```
+
+The ObjectStack Console is built from these same packages: it reads your stack's metadata from
+the server and renders it through the renderer and component registry described here. If the
+Console already does what you need, you author metadata and never touch the SDK.
+
+## A small schema
+
+```json
+{
+  "type": "data-table",
+  "caption": "Users",
+  "className": "rounded-lg border",
+  "columns": [
+    {
+      "header": "Name",
+      "accessorKey": "name",
+      "sortable": true
+    },
+    {
+      "header": "Email",
+      "accessorKey": "email"
+    }
+  ],
+  "data": [
+    {
+      "name": "Ada Lovelace",
+      "email": "ada@example.com"
+    },
+    {
+      "name": "Grace Hopper",
+      "email": "grace@example.com"
+    }
+  ]
+}
+```
+
+That schema renders through `SchemaRenderer` once `@object-ui/components` has been imported for
+its registration side effects.
+
+## What's in this module
+
+<Cards>
+  <Card href="/docs/frontend/quick-start" title="Quick Start" description="Install the SDK and render a first schema" />
+  <Card href="/docs/frontend/building-crud-app" title="Building a CRUD App" description="An end-to-end app over an ObjectStack backend" />
+  <Card href="/docs/frontend/architecture-overview" title="Architecture Overview" description="The SDK's packages, data flow, state and actions" />
+  <Card href="/docs/frontend/schema-rendering" title="Schema Rendering" description="How SchemaRenderer turns JSON into React" />
+  <Card href="/docs/frontend/component-registry" title="Component Registry" description="How a type maps to a React component, and how to add your own" />
+  <Card href="/docs/frontend/renderers" title="Renderer types" description="The SDK-only renderer types the component packages register" />
+  <Card href="/docs/frontend/fields" title="Field Registry" description="Field widgets and how custom components reuse them" />
+  <Card href="/docs/frontend/data-source" title="Data Connectivity" description="The DataSource contract and its adapters" />
+  <Card href="/docs/frontend/layout" title="Layout System" description="AppShell, Page and SidebarNav for your app's shell" />
+  <Card href="/docs/frontend/app-shell" title="AppShell" description="The application shell component" />
+  <Card href="/docs/frontend/sidebar-nav" title="SidebarNav" description="The sidebar navigation component" />
+  <Card href="/docs/frontend/theming" title="Theming" description="CSS variables, Tailwind, variants and dark mode" />
+  <Card href="/docs/frontend/plugins" title="UI plugins" description="Lazy-loaded views: grid, kanban, calendar, charts and more" />
+  <Card href="/docs/frontend/plugin-development" title="Plugin Development" description="Write and publish your own UI plugin" />
+  <Card href="/docs/frontend/cli" title="CLI" description="The objectui command line" />
+  <Card href="/docs/frontend/create-plugin" title="Create Plugin" description="Scaffold a new UI plugin package" />
+  <Card href="/docs/frontend/data-objectstack" title="ObjectStack Adapter" description="Connect the SDK to an ObjectStack server" />
+  <Card href="/docs/frontend/troubleshooting" title="Troubleshooting" description="Fixes for common SDK problems" />
+</Cards>

@@ -499,6 +499,23 @@ export const COMPOUND_ANCHOR_LEDGER = [
  * the governed file is its input, not a fixture; it spells that path in its
  * module body and is MATCHED for it the same way the two undeclared rows
  * above are, so `declared` is false for the same reason.
+ *
+ * ## The fifth row: the mailbox doorbell's spelling pin
+ *
+ * `scripts/pm/record-recognisers.mjs` reads the seven doorbell keys off the
+ * pm-dispatch references' `project-forms.md` in its self-test, to pin each
+ * key's template verbatim in the protocol text — a population claim on a file
+ * a card can edit, the `check-expected-skips` shape exactly. It is DECLARED
+ * (`self-test-reads`), so a card touching that file derives
+ * `check:pm-record-recognisers`.
+ *
+ * ## The sixth row: the review claim line's spelling pin
+ *
+ * The same self-test reads the pm-dispatch references' `contract-review.md`
+ * to pin the `Contract-review-claim:` template and its two-hour lapse verbatim
+ * in the rule text — the same population claim, on a second governed file. The
+ * one `self-test-reads` line names both paths, so a card touching either file
+ * derives `check:pm-record-recognisers`.
  */
 export const GOVERNED_READ_FLOOR = Object.freeze([
   Object.freeze({ script: 'scripts/check-commit-card-trailers.mjs', file: '.claude/agents/os-dev.md', declared: false }),
@@ -516,6 +533,16 @@ export const GOVERNED_READ_FLOOR = Object.freeze([
     script: 'scripts/pm/check-settings-deny-roster.mjs',
     file: '.claude/settings.json',
     declared: false,
+  }),
+  Object.freeze({
+    script: 'scripts/pm/record-recognisers.mjs',
+    file: '.claude/skills/pm-dispatch/references/project-forms.md',
+    declared: true,
+  }),
+  Object.freeze({
+    script: 'scripts/pm/record-recognisers.mjs',
+    file: '.claude/skills/pm-dispatch/references/contract-review.md',
+    declared: true,
   }),
 ]);
 

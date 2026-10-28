@@ -1,0 +1,229 @@
+---
+title: "Plugin Kanban"
+---
+
+Kanban board component with drag-and-drop powered by @dnd-kit.
+
+## Installation
+
+```bash
+npm install @object-ui/plugin-kanban
+```
+
+This package publishes a stylesheet. Import it after the base sheets, or the board renders unstyled — the themed utilities it uses have no other source in a published app ([#4929](https://github.com/objectstack-ai/objectui/issues/4929)):
+
+```css
+/* src/index.css */
+@import "tailwindcss";
+@import "@object-ui/components/style.css";
+@import "@object-ui/fields/style.css";
+@import "@object-ui/plugin-kanban/style.css";
+```
+
+The props an [`object-kanban`](/docs/ui/components/plugins#object-kanban) node reads on a page are generated from the spec into the component reference; this page covers using the plugin from React.
+
+## Usage
+
+### Basic Usage
+
+```tsx
+// Import once in your app entry point
+import '@object-ui/plugin-kanban'
+import type { ObjectKanbanSchema } from '@object-ui/types'
+
+// Use in schemas
+const schema: ObjectKanbanSchema = {
+  type: 'object-kanban',
+  groupBy: 'status',
+  data: [],
+  columns: [
+    {
+      id: 'todo',
+      title: 'To Do',
+      cards: [
+        { id: '1', title: 'Task 1', description: 'Do something' }
+      ]
+    },
+    {
+      id: 'done',
+      title: 'Done',
+      cards: []
+    }
+  ]
+}
+
+// `onCardMove` is NOT a document key — JSON has no function value. The host
+// supplies it as a React prop, separate from `schema` above.
+const onCardMove = (cardId: string, fromCol: string, toCol: string, index: number) => {
+  console.log(`Card ${cardId} moved`)
+}
+```
+
+## Features
+
+- **Drag and drop cards** between columns — on an object-bound board
+  (`object-kanban`), only for a caller the `kanbanCardMove` row of the
+  affordance-to-grant map allows (the object's policy, the effective API
+  operation set and the caller's **update** grant); without it the cards are
+  not movable. With no permission provider mounted it reads open.
+- **Column limits** (WIP limits)
+- **Column totals**: a kanban view's `summarizeField` sums that field over each column's loaded cards in the column header, beside the count (with the count's `+` when the fetch window is full)
+- **Card badges** for status/priority
+- **Keyboard navigation**
+- **Lazy-loaded** (~100-150 KB loads only when rendered)
+
+## Card Badges
+
+Use badges to show card status, priority, or categories:
+
+```tsx
+import type { KanbanCard } from '@object-ui/plugin-kanban'
+
+const card: KanbanCard = {
+  id: 'task-1',
+  title: 'Important Task',
+  badges: [
+    { label: 'Frontend', variant: 'default' },
+    { label: 'Urgent', variant: 'destructive' },
+    { label: 'Reviewed', variant: 'secondary' },
+    { label: 'Blocked', variant: 'outline' }
+  ]
+}
+```
+
+### Badge Variants
+
+- `default` - Blue badge
+- `secondary` - Gray badge
+- `destructive` - Red badge
+- `outline` - Outlined badge
+
+## Column Limits (WIP Limits)
+
+Set maximum cards per column to enforce work-in-progress limits:
+
+```tsx
+import type { KanbanColumn } from '@object-ui/plugin-kanban'
+
+const column: KanbanColumn = {
+  id: 'in-progress',
+  title: 'In Progress',
+  limit: 3,  // Max 3 cards
+  cards: [
+    { id: 'task-2', title: 'Implement authentication' }
+  ]
+}
+```
+
+When the limit is reached, the column shows visual feedback.
+
+## Event Handling
+
+Handle card movements to update your backend or state:
+
+```tsx
+import { useState } from 'react'
+import type { KanbanColumn } from '@object-ui/plugin-kanban'
+import type { ObjectKanbanSchema } from '@object-ui/types'
+
+declare function updateCardColumn(cardId: string, toColumnId: string, newIndex: number): Promise<void>
+declare function moveCard(columns: KanbanColumn[], cardId: string, toColumnId: string, newIndex: number): KanbanColumn[]
+
+export function useBoard(initialColumns: KanbanColumn[]) {
+  const [columns, setColumns] = useState<KanbanColumn[]>(initialColumns)
+
+  const schema: ObjectKanbanSchema = {
+    type: 'object-kanban',
+    groupBy: 'status',
+    data: [],
+    columns,
+  }
+
+  // `onCardMove` is NOT a document key — the host supplies it as a React prop,
+  // separate from `schema` above. It returns void, so the callback cannot be
+  // awaited by the board: start the write and update local state without
+  // blocking the drop.
+  const onCardMove = (cardId: string, fromColumnId: string, toColumnId: string, newIndex: number) => {
+    // Update database
+    void updateCardColumn(cardId, toColumnId, newIndex)
+
+    // Update local state
+    setColumns((prev) => moveCard(prev, cardId, toColumnId, newIndex))
+  }
+
+  return { schema, onCardMove }
+}
+```
+
+### Quick Add is a React-host capability, not a document one
+
+The Quick Add button at the bottom of a lane is gated on **both** halves of a
+pair: `quickAdd`, and an `onQuickAdd` handler. `onQuickAdd` is a function, so it
+can only be supplied by a React host that mounts the board component directly:
+`KanbanRenderer`, exported from `@object-ui/plugin-kanban`, reads both halves off
+its `schema` and forwards them by identity.
+
+⚠️ There is **no node type key** that reaches it. The `kanban-ui` registration
+retired with objectui#8257, so a document naming that tag is now an
+`unknown-component` **error** rather than a board with a working pair. Import the
+component instead.
+
+An **object-driven** board (`object-kanban`, or a kanban view inside `ListView` /
+`ObjectView`) has no Quick Add control, and **both** halves of the pair are
+**retired** on it: `quickAdd` since objectui#8285, and `onQuickAdd` since
+objectui#11234. The board does not create records inline. Both
+`ObjectKanbanSchema` faces in `@object-ui/types` refuse both keys by name, and
+`@objectstack/spec` refuses `quickAdd`. `ObjectKanban` renders an internal board
+that takes the pair only as explicit props, and it supplies neither — so even a
+host that hands the board both halves of the pair gets no control. A page
+written as constrained JSX draws the ordinary `unknown-prop` **warning** for
+`quickAdd` (`validateTree` in `@objectstack/sdui-parser`), since the block has no
+such prop. Delete both keys; to offer Quick Add, mount `KanbanRenderer` as above.
+
+## Bundle Size
+
+The plugin uses lazy loading to optimize bundle size:
+
+- **Initial load**: ~0.2 KB (entry point)
+- **Lazy chunk**: ~100-150 KB (loaded when kanban is rendered)
+- **Includes @dnd-kit** for drag-and-drop functionality
+
+## Accessibility
+
+The kanban board includes:
+
+- **Keyboard navigation** - Move cards with keyboard
+- **Screen reader support** - ARIA labels for all interactions
+- **Focus management** - Clear focus indicators
+
+## TypeScript Support
+
+`ObjectKanbanSchema` is published by `@object-ui/types` (and its Zod mirror by
+`@object-ui/types/zod`); `@object-ui/plugin-kanban` publishes the card and column
+shapes. Importing all three from the plugin does not resolve — its barrel never
+exported the schema type.
+
+```ts
+import type { ObjectKanbanSchema } from '@object-ui/types'
+import type { KanbanCard, KanbanColumn } from '@object-ui/plugin-kanban'
+
+const column: KanbanColumn = {
+  id: 'todo',
+  title: 'To Do',
+  cards: [],
+  limit: 5
+}
+
+const kanbanSchema: ObjectKanbanSchema = {
+  type: 'object-kanban',
+  groupBy: 'status',
+  data: [],
+  columns: [column]
+}
+```
+
+## Related Documentation
+
+- [Plugin System Overview](/docs/frontend/plugins)
+- [Lazy-Loaded Plugins Architecture](/docs/frontend/plugins#lazy-loading-architecture)
+- [Package README](https://github.com/objectstack-ai/objectstack/tree/main/ui/packages/plugin-kanban)

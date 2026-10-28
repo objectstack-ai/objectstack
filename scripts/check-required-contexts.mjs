@@ -480,6 +480,16 @@ export const REQUIRED_CONTEXTS = [
       'after the ui flake reading 6436579765 (0/50); the ruleset entry is the maintainer\'s, in the same sitting as the merge (#9325)',
     carries: 'the sharded `ui/` vitest matrix, `Test UI (k/16)`, read through the aggregate job',
   },
+  {
+    workflow: 'ci.yml',
+    job: 'live-e2e-ui',
+    context: 'Live E2E UI',
+    authorized:
+      '#25914 ruling 6435339772 Q1 A (the required check), re-based by ruling 6464191239 letter D on the workspace backend, ' +
+      'maintainer 「其他同意」 2026-10-28T08:22Z — this row is the repo half (#27154); the ruleset entry is the maintainer\'s, ' +
+      'in the same sitting as the merge (#9325)',
+    carries: 'the Console against a real workspace backend: the allowlisted `ui/e2e/live` specs',
+  },
 ];
 
 /**
@@ -595,9 +605,10 @@ export const INSTRUCTION_SURFACES = [
     // the judge. Then 7→5 by #22998 (two-speed CI: the dogfood and temporal
     // contexts moved to the full battery). Then 5→7 by #25853 (the `ui/`
     // import's `Lint UI` and `Build & E2E UI`), 7→8 with `Type Check UI`
-    // once bill item 49 closed (#25856), and 8→9 with the `Test UI` aggregate
-    // (#26460). The full set is pinned here so the corrected sentence cannot
-    // rot back — a rename in ANY of the nine reddens this gate instead.
+    // once bill item 49 closed (#25856), 8→9 with the `Test UI` aggregate
+    // (#26460), and 9→10 with `Live E2E UI` (#27154). The full set is pinned
+    // here so the corrected sentence cannot rot back — a rename in ANY of the
+    // ten reddens this gate instead.
     file: 'AGENTS.md',
     statesTheSet: true,
     mustName: [
@@ -610,6 +621,7 @@ export const INSTRUCTION_SURFACES = [
       'Build & E2E UI',
       'Type Check UI',
       'Test UI',
+      'Live E2E UI',
     ],
   },
   {
@@ -642,6 +654,7 @@ export const INSTRUCTION_SURFACES = [
       'Build & E2E UI',
       'Type Check UI',
       'Test UI',
+      'Live E2E UI',
     ],
   },
   {
@@ -663,7 +676,7 @@ export const INSTRUCTION_SURFACES = [
  * of the six surfaces have one; `AGENTS.md` does not, because a repo-root FILE
  * has no separator to be found by — so an AGENTS.md card derived this gate not
  * at all, while that surface is the one carrying `mustName` for every
- * required context (widened 2→6 by #9677, 6→7 by #17798, 7→5 by #22998, 5→7 by #25853, 7→8, 8→9 by #26460). Editing the merge-queue
+ * required context (widened 2→6 by #9677, 6→7 by #17798, 7→5 by #22998, 5→7 by #25853, 7→8, 8→9 by #26460, 9→10 by #27154). Editing the merge-queue
  * paragraph there is precisely how this gate goes red, and it was reachable
  * only by judgment.
  *

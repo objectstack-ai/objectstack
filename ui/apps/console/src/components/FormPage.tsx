@@ -148,6 +148,7 @@ import {
   mapFieldTypeToFormType,
   resolveFormWidgetType,
 } from '@object-ui/fields';
+import { Tabs, TabsContent, TabsList, TabsTrigger, cn } from '@object-ui/components';
 import { SchemaRendererContext, usePredicateScope, type ApiFetch } from '@object-ui/react';
 import { pickLocalized, useObjectTranslation, useSafeFieldLabel } from '@object-ui/i18n';
 import type { FormFieldSpec, FormSectionSpec, FormViewSpec } from '@object-ui/app-shell';
@@ -998,6 +999,63 @@ export function isSectionVisible(
 }
 
 /**
+ * The tab value of one section of a `type: 'tabbed'` form view
+ * (objectstack-ai/objectstack#26843): its `name`, else its heading, else its
+ * position. The same answer `@object-ui/plugin-form`'s `TabbedForm` gives a
+ * section, so one authored `defaultTab` opens the same tab on the app's tabbed
+ * form and on this page.
+ */
+export function sectionTabKey(section: Pick<RenderableSection, 'name' | 'label'>, index: number): string {
+  return section.name || section.label || `tab-${index}`;
+}
+
+/**
+ * The open tab of a tabbed form view, among the tabs actually DRAWN (a section
+ * its predicate hides draws no tab): the user's pick, else the form view's
+ * `defaultTab`, else the first drawn tab. A pick or a `defaultTab` naming a
+ * tab that is not drawn falls through to the next answer, so the strip never
+ * opens onto a panel that is not there.
+ */
+export function resolveActiveTab(
+  drawn: readonly string[],
+  picked: string | null,
+  defaultTab: string | undefined,
+): string | undefined {
+  if (picked && drawn.includes(picked)) return picked;
+  if (defaultTab && drawn.includes(defaultTab)) return defaultTab;
+  return drawn[0];
+}
+
+/**
+ * Whether the step indicator of a `type: 'wizard'` form view may open `step`
+ * (objectstack-ai/objectstack#27224) — the rule `@object-ui/plugin-form`'s
+ * `WizardForm` applies: any step up to the current one, and a later one only
+ * once it has been completed or the form view declares `allowSkip`. The step
+ * gate is navigation, never authorization: the final submit re-checks every
+ * step whichever way the user got there.
+ */
+export function canOpenWizardStep(
+  step: number,
+  current: number,
+  completed: ReadonlySet<number>,
+  allowSkip: boolean | undefined,
+): boolean {
+  return step <= current || !!allowSkip || completed.has(step);
+}
+
+/**
+ * One field row under the form view's `layout: 'horizontal'`
+ * (objectstack-ai/objectstack#26843): the label in a fixed column beside its
+ * control from `sm` up, and stacked as `vertical` draws it below `sm`. The
+ * arrangement `@object-ui/components`' form renderer gives a field item under
+ * the same key, so a form view reads the same here and in the app's forms:
+ * every child but the `<label>` (the control, its help line) takes the second
+ * column, and the label sits on the control's first text line.
+ */
+const HORIZONTAL_ROW_CLASS =
+  'sm:grid sm:grid-cols-[minmax(0,10rem)_minmax(0,1fr)] sm:items-baseline sm:gap-x-4 sm:[&>:not(label)]:col-start-2';
+
+/**
  * The row's EFFECTIVE `{ visible, readonly, required }` — every conditional
  * rule that bears on one control, resolved in one place (objectui#5627).
  *
@@ -1370,8 +1428,8 @@ export function readPrefill(
  * One `FormView.buttons` entry as this page draws it (objectstack-ai/objectstack#26843):
  * shown unless the author wrote `show: false`, and the authored label — an
  * `I18nLabel`, resolved against the visitor's language — or `''` when there is
- * none, so the caller's own label shows. `buttons.reset` is never read: this
- * page draws no reset button.
+ * none, so the caller's own label shows. A form has no reset button: the spec
+ * refuses `buttons.reset` (objectstack-ai/objectstack#27153).
  */
 export function readFormButton(
   config: { show?: boolean; label?: unknown } | undefined,
@@ -2230,6 +2288,22 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
   const [uploading, setUploading] = useState<Record<string, boolean>>({});
   const isUploading = Object.values(uploading).some(Boolean);
   /**
+   * The tab the user opened on a `type: 'tabbed'` form view
+   * (objectstack-ai/objectstack#26843). Null until they open one, so the form
+   * view's `defaultTab` decides until then; see {@link resolveActiveTab}.
+   */
+  const [pickedTab, setPickedTab] = useState<string | null>(null);
+  /**
+   * Where a `type: 'wizard'` form view stands (objectstack-ai/objectstack#27224):
+   * the step drawn, the steps whose Next passed their check (a later step opens
+   * from the indicator only once completed, see {@link canOpenWizardStep}), and
+   * the steps a refused final submit found a field on, so their indicator says
+   * so. The form's ONE `values` map still holds every step's fields.
+   */
+  const [wizardStep, setWizardStep] = useState(0);
+  const [completedSteps, setCompletedSteps] = useState<ReadonlySet<number>>(() => new Set());
+  const [invalidSteps, setInvalidSteps] = useState<ReadonlySet<number>>(() => new Set());
+  /**
    * The sonner id this form's submit OUTCOME is published under — one id for
    * the confirmation and for the refusal, so the later of the two SUPERSEDES
    * the earlier instead of stacking beside it (objectui#7252).
@@ -2318,6 +2392,28 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
   const submitButton = readFormButton(loaded?.form?.buttons?.submit, language);
   const cancelButton = readFormButton(loaded?.form?.buttons?.cancel, language);
 
+  /**
+   * The form view's `type: 'tabbed'` and `layout`, which this page never read
+   * (objectstack-ai/objectstack#26843). Tabbed draws one tab per section; with
+   * a single section there is nothing to switch between, so it draws stacked,
+   * as the app's tabbed form draws no strip for one. The form's ONE `values`
+   * map holds every section's fields whichever tab is open, so a submit
+   * carries them all.
+   */
+  const tabbedView = loaded?.form?.type === 'tabbed' && sections.length > 1;
+  /**
+   * The form view's `type: 'wizard'` (objectstack-ai/objectstack#27224), which
+   * this page drew as stacked sections: one step per section, in array order,
+   * with the semantics of the app's wizard form. A single section has no step
+   * to move to, so it draws stacked, as a single-section tabbed view does.
+   */
+  const wizardView = loaded?.form?.type === 'wizard' && sections.length > 1;
+  const currentStep = Math.min(wizardStep, Math.max(sections.length - 1, 0));
+  const onLastStep = currentStep === sections.length - 1;
+  /** The index of the section holding `field`, or -1. */
+  const stepOf = (field: RenderableField) => sections.findIndex((s) => s.fields.includes(field));
+  const horizontalRows = loaded?.form?.layout === 'horizontal';
+
   const behavior: EffectiveSubmitBehavior = resolveSubmitBehavior(
     mode,
     loaded?.form?.submitBehavior,
@@ -2363,32 +2459,28 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
     navigate(recordTo ?? cancelPath ?? '/');
   };
 
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!loaded) return;
-    // The client-side refusals — see `findSubmitRefusals`. Both go out on the
-    // page's failure channel and the outcome toast id, so a retry that
-    // succeeds supersedes them exactly as it supersedes a refused write
-    // (objectui#7252).
-    const { faultedVisibleWhen, missing } = findSubmitRefusals(
-      sections,
-      values,
-      loaded.record,
-      isCreateForm,
-      predicateScope,
-    );
+  /**
+   * Puts the client-side refusals — see `findSubmitRefusals` — on screen, and
+   * answers whether there were any. Both go out on the page's failure channel
+   * and the outcome toast id, so a retry that succeeds supersedes them exactly
+   * as it supersedes a refused write (objectui#7252).
+   */
+  const reportRefusals = (
+    object: string,
+    { faultedVisibleWhen, missing }: ReturnType<typeof findSubmitRefusals>,
+  ): boolean => {
     // A faulted `visibleWhen` first (objectui#8069): it names the field and
     // the rule, and nothing typed into the form can clear it, so the required
     // check behind it would only ask for work that is refused anyway.
     if (faultedVisibleWhen.length > 0) {
       const msg = t('form.visibleWhenFaulted', {
         fields: faultedVisibleWhen
-          .map((f) => fieldLabel(loaded.object, f.name, f.label))
+          .map((f) => fieldLabel(object, f.name, f.label))
           .join(t('validation.formInvalidJoiner')),
       });
       setError(msg);
       toast.error(msg, { id: outcomeToastId });
-      return;
+      return true;
     }
     // The client-side required refusal the native attribute used to give the
     // hand-rolled controls (objectui#10179).
@@ -2398,13 +2490,83 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
       // the words are the locale's, not a concatenation of English.
       const msg = t('publicForm.requiredFields', {
         fields: missing
-          .map((f) => fieldLabel(loaded.object, f.name, f.label))
+          .map((f) => fieldLabel(object, f.name, f.label))
           .join(t('validation.formInvalidJoiner')),
       });
       setError(msg);
       toast.error(msg, { id: outcomeToastId });
+      return true;
+    }
+    return false;
+  };
+
+  /** Opens a wizard step, from the indicator or Back (objectstack-ai/objectstack#27224). */
+  const goToStep = (step: number) => {
+    setWizardStep(step);
+    setError(null);
+  };
+
+  /**
+   * A wizard step's Next (objectstack-ai/objectstack#27224): the step gate of
+   * the app's wizard form. The step's own fields are checked by the same rules
+   * the final submit applies, and the next step opens only when none is
+   * refused; nothing is written.
+   */
+  const handleWizardNext = (object: string) => {
+    const refusals = findSubmitRefusals(
+      [sections[currentStep]],
+      values,
+      loaded?.record,
+      isCreateForm,
+      predicateScope,
+    );
+    const refused = reportRefusals(object, refusals);
+    setInvalidSteps((prev) => {
+      if (refused === prev.has(currentStep)) return prev;
+      const next = new Set(prev);
+      if (refused) next.add(currentStep);
+      else next.delete(currentStep);
+      return next;
+    });
+    if (refused) return;
+    setCompletedSteps((prev) => new Set(prev).add(currentStep));
+    goToStep(currentStep + 1);
+  };
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!loaded) return;
+    // Before the last step of a wizard, a submit — the Next button, or Enter
+    // in a field — is that step's Next.
+    if (wizardView && !onLastStep) {
+      handleWizardNext(loaded.object);
       return;
     }
+    const refusals = findSubmitRefusals(
+      sections,
+      values,
+      loaded.record,
+      isCreateForm,
+      predicateScope,
+    );
+    // On a tabbed form view the refused field may sit on a tab that is not
+    // open (objectstack-ai/objectstack#26843): open the tab of the first field
+    // the message below names, the way the app's tabbed form jumps to it. A
+    // wizard opens that field's step (objectstack-ai/objectstack#27224) and
+    // marks every step a refused field sits on, as the app's wizard does.
+    const refused = refusals.faultedVisibleWhen[0] ?? refusals.missing[0];
+    if (refused && tabbedView) {
+      const at = stepOf(refused);
+      if (at >= 0) setPickedTab(sectionTabKey(sections[at], at));
+    }
+    if (wizardView) {
+      const blocked = refusals.faultedVisibleWhen.length > 0
+        ? refusals.faultedVisibleWhen
+        : refusals.missing;
+      setInvalidSteps(new Set(blocked.map(stepOf).filter((at) => at >= 0)));
+      if (refused && stepOf(refused) >= 0) setWizardStep(stepOf(refused));
+    }
+    if (reportRefusals(loaded.object, refusals)) return;
     setSubmitting(true);
     setError(null);
     try {
@@ -2495,6 +2657,9 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
           // stage a wipe of every field on the next save.
           const allFields = sections.flatMap((s) => s.fields);
           setValues(readPrefill(allFields, search, loaded.record, loaded.form?.defaults));
+          // A wizard starts over from its first step, as the app's wizard does.
+          setWizardStep(0);
+          setCompletedSteps(new Set());
           break;
         }
         case 'next-record':
@@ -2576,6 +2741,253 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
     );
   }
 
+  /**
+   * A section's heading (objectui#8813): `objects.{object}._sections.{name}.label`,
+   * falling back to the authored string, exactly as `ObjectForm` does on the
+   * app path. The KEY is `sec.name`; a section authored without one has no key
+   * and keeps its authored heading. Empty for a section with neither.
+   */
+  const sectionHeading = (sec: RenderableSection): string =>
+    (sec.name ? sectionLabel(loaded.object, sec.name, sec.label ?? '') : sec.label) ?? '';
+
+  /**
+   * One section's description and field grid: what a stacked section draws
+   * under its heading, and what a tab of a tabbed form view draws as its panel
+   * (objectstack-ai/objectstack#26843).
+   */
+  const renderSectionBody = (sec: RenderableSection) => (
+    <>
+      {/*
+        * objectui#12333 — the served description, under the heading.
+        * No client-side key is read for it: the signed-out visitor holds
+        * no bundle, and the server already localized it.
+        */}
+      {sec.description && (
+        <p className="mb-3 text-sm text-muted-foreground">{sec.description}</p>
+      )}
+      <div
+        className={
+          sec.columns === 1
+            ? 'grid grid-cols-1 gap-4'
+            : sec.columns === 2
+              ? 'grid grid-cols-1 gap-4 sm:grid-cols-2'
+              : sec.columns === 3
+                ? 'grid grid-cols-1 gap-4 sm:grid-cols-3'
+                : 'grid grid-cols-1 gap-4 sm:grid-cols-4'
+        }
+      >
+        {sec.fields.map((f) => {
+          // One resolution per row per render, read by all three of the
+          // things that depend on it below — the row's presence, the
+          // required marker, and the control's own attributes. Computing
+          // it three times would be three chances to disagree.
+          const state = resolveRowState(f, values, loaded.record, isCreateForm, predicateScope);
+          if (!state.visible) return null;
+          const spanClass =
+            f.colSpan === 2 ? 'sm:col-span-2'
+              : f.colSpan === 3 ? 'sm:col-span-3'
+                : f.colSpan === 4 ? 'sm:col-span-4'
+                  : '';
+          return (
+          <div
+            key={f.name}
+            // `layout: 'horizontal'` puts the label beside the control — see
+            // HORIZONTAL_ROW_CLASS. `vertical` (and no layout) adds nothing.
+            className={horizontalRows ? cn(spanClass, HORIZONTAL_ROW_CLASS) : spanClass}
+          >
+            <label
+              // `for` the control, or an `id` the group / display answers
+              // to — the widget's declaration decides (objectui#10179).
+              {...rowLabelProps(f)}
+              className={
+                horizontalRows
+                  ? 'mb-1 block text-xs font-medium text-foreground sm:mb-0'
+                  : 'mb-1 block text-xs font-medium text-foreground'
+              }
+            >
+              {/*
+                * objectui#8813 — `fields.{object}.{name}`, the same
+                * resolver and the same fallback-to-the-served-label as
+                * the app path (`ObjectForm`). On this route the served
+                * label is usually ALREADY localized by the server
+                * payload, which is why the symptom looked like "field
+                * labels translate, section headings do not"; the client
+                * lookup is the overlay an app bundle can put on top,
+                * not a replacement for that server value.
+                */}
+              {fieldLabel(loaded.object, f.name, f.label)}
+              {/* Visual-only (objectui#3299): the control's `required` /
+                  `aria-required` is the announced channel; hiding the `*`
+                  keeps it out of the control's accessible name. */}
+              {state.required && (
+                <span className="ml-0.5 text-destructive" aria-hidden="true">*</span>
+              )}
+            </label>
+            <FieldInput
+              field={f}
+              state={state}
+              value={values[f.name]}
+              values={values}
+              onChange={(v) => setValues((prev) => ({ ...prev, [f.name]: v }))}
+              onUploadingChange={(u) =>
+                setUploading((prev) => (prev[f.name] === u ? prev : { ...prev, [f.name]: u }))
+              }
+            />
+            {f.helpText && (
+              <p className="mt-1 text-xs text-muted-foreground">{f.helpText}</p>
+            )}
+          </div>
+          );
+        })}
+      </div>
+    </>
+  );
+
+  /**
+   * A `type: 'tabbed'` form view (objectstack-ai/objectstack#26843): one tab
+   * per section, the tab semantics of the app's tabbed form — the form view's
+   * `defaultTab` opens first, `tabPosition` places the strip, a section its
+   * predicate hides draws no tab. The panels are force-mounted and only
+   * CSS-hidden when inactive, so a control on a closed tab keeps its widget
+   * state (an upload in flight included) as well as its value.
+   */
+  const renderTabbedSections = () => {
+    const drawn = sections
+      .map((sec, at) => ({ sec, at, key: sectionTabKey(sec, at) }))
+      .filter(({ sec }) => isSectionVisible(sec, values, loaded.record, predicateScope));
+    if (drawn.length === 0) return null;
+    const active = resolveActiveTab(drawn.map((d) => d.key), pickedTab, loaded.form?.defaultTab);
+    const stripAt = loaded.form?.tabPosition ?? 'top';
+    const verticalStrip = stripAt === 'left' || stripAt === 'right';
+    return (
+      <Tabs
+        value={active}
+        onValueChange={setPickedTab}
+        orientation={verticalStrip ? 'vertical' : 'horizontal'}
+        // Always a flex container: `order-last` on the strip is what puts it
+        // after the panels for `bottom` / `right`.
+        className={cn('flex w-full', verticalStrip ? 'gap-4' : 'flex-col')}
+      >
+        <TabsList
+          className={cn(
+            'self-start',
+            verticalStrip
+              ? cn('h-auto flex-col', stripAt === 'right' && 'order-last')
+              : stripAt === 'bottom' ? 'order-last mt-4' : 'mb-4',
+          )}
+        >
+          {drawn.map(({ sec, at, key }) => (
+            <TabsTrigger
+              key={key}
+              value={key}
+              data-testid={`form-tab:${key}`}
+              className={cn(verticalStrip && 'w-full justify-start')}
+            >
+              {/* A section with no heading is named by its position. */}
+              {sectionHeading(sec) || String(at + 1)}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+        <div className="min-w-0 flex-1">
+          {drawn.map(({ sec, key }) => (
+            <TabsContent
+              key={key}
+              value={key}
+              forceMount
+              data-testid={`form-tab-panel:${key}`}
+              className="mt-0 rounded-md border bg-card p-4 data-[state=inactive]:hidden sm:p-5"
+            >
+              {renderSectionBody(sec)}
+            </TabsContent>
+          ))}
+        </div>
+      </Tabs>
+    );
+  };
+
+  /**
+   * A `type: 'wizard'` form view (objectstack-ai/objectstack#27224): one step
+   * per section, the step semantics of the app's wizard form — an indicator
+   * (unless `showStepIndicator: false`) that opens any step up to the current
+   * one and a later one once completed or under `allowSkip`, and the current
+   * step's card below it. Every step is mounted and only the current one
+   * drawn, so a control on another step keeps its widget state (an upload in
+   * flight included) as well as its value.
+   */
+  const renderWizardSteps = () => (
+    <>
+      {loaded.form?.showStepIndicator !== false && (
+        <nav aria-label={t('wizard.progressLabel')}>
+          <ol className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            {sections.map((sec, at) => {
+              const key = sectionTabKey(sec, at);
+              const current = at === currentStep;
+              const invalid = invalidSteps.has(at);
+              const completed = completedSteps.has(at);
+              return (
+                <li key={key}>
+                  <button
+                    type="button"
+                    onClick={() => goToStep(at)}
+                    disabled={!canOpenWizardStep(at, currentStep, completedSteps, loaded.form?.allowSkip)}
+                    aria-current={current ? 'step' : undefined}
+                    data-testid={`form-step:${key}`}
+                    data-state={invalid ? 'invalid' : current ? 'current' : completed ? 'complete' : 'upcoming'}
+                    className="flex items-center gap-2 text-sm font-medium disabled:cursor-not-allowed"
+                  >
+                    <span
+                      className={cn(
+                        'flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs',
+                        invalid
+                          ? 'border-2 border-destructive text-destructive'
+                          : completed
+                            ? 'bg-primary text-primary-foreground'
+                            : current
+                              ? 'border-2 border-primary text-primary'
+                              : 'border-2 border-muted text-muted-foreground',
+                      )}
+                    >
+                      {at + 1}
+                    </span>
+                    <span
+                      className={cn(
+                        'hidden sm:inline',
+                        invalid ? 'text-destructive' : current ? 'text-foreground' : 'text-muted-foreground',
+                      )}
+                    >
+                      {sectionHeading(sec) || t('wizard.stepFallback', { n: at + 1 })}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
+        </nav>
+      )}
+      {sections.map((sec, at) => (
+        <section
+          key={sectionTabKey(sec, at)}
+          hidden={at !== currentStep}
+          data-testid={`form-step-panel:${sectionTabKey(sec, at)}`}
+          className="rounded-md border bg-card p-4 sm:p-5"
+        >
+          {sec.label && (
+            <h2 className={sec.description ? 'mb-1 text-sm font-medium' : 'mb-3 text-sm font-medium'}>
+              {sectionHeading(sec)}
+            </h2>
+          )}
+          {sec.fields.length > 0 ? (
+            renderSectionBody(sec)
+          ) : (
+            // A step with no fields (a final review step, say) — the app's
+            // wizard says so rather than drawing an empty card.
+            <p className="py-6 text-center text-sm text-muted-foreground">{t('wizard.emptyStep')}</p>
+          )}
+        </section>
+      ))}
+    </>
+  );
+
   return (
     <div className="mx-auto max-w-2xl p-4 sm:p-6">
       <header className="mb-6">
@@ -2626,7 +3038,7 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
         )}
       </header>
       <form onSubmit={handleSubmit} className="space-y-6">
-        {sections.map((sec, i) => {
+        {wizardView ? renderWizardSteps() : tabbedView ? renderTabbedSections() : sections.map((sec, i) => {
           // A section conditioned away is skipped IN PLACE rather than filtered
           // out of the list first (objectui#5627). The key here is the section's
           // POSITION, and these predicates re-decide on every keystroke: filtering
@@ -2639,98 +3051,16 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
             {sec.label && (
               <h2 className={sec.description ? 'mb-1 text-sm font-medium' : 'mb-3 text-sm font-medium'}>
                 {/*
-                  * objectui#8813 — the heading resolves
-                  * `objects.{object}._sections.{name}.label` and falls back to
-                  * the authored string, exactly as `ObjectForm` does on the
-                  * app path. The KEY is `sec.name`; a section authored without
-                  * one has no key and keeps its authored heading.
-                  *
-                  * The `sec.label &&` guard above is unchanged on purpose: this
-                  * card translates a heading that already renders, it does not
-                  * start rendering headings for sections that had none. A
-                  * translation cannot conjure a heading the author did not
-                  * write — that would be a different, wider change.
+                  * The `sec.label &&` guard is unchanged on purpose (objectui#8813):
+                  * this heading translates a heading that already renders, it
+                  * does not start rendering headings for sections that had
+                  * none. A translation cannot conjure a heading the author did
+                  * not write — that would be a different, wider change.
                   */}
-                {sec.name ? sectionLabel(loaded.object, sec.name, sec.label) : sec.label}
+                {sectionHeading(sec)}
               </h2>
             )}
-            {/*
-              * objectui#12333 — the served description, under the heading.
-              * No client-side key is read for it: the signed-out visitor holds
-              * no bundle, and the server already localized it.
-              */}
-            {sec.description && (
-              <p className="mb-3 text-sm text-muted-foreground">{sec.description}</p>
-            )}
-            <div
-              className={
-                sec.columns === 1
-                  ? 'grid grid-cols-1 gap-4'
-                  : sec.columns === 2
-                    ? 'grid grid-cols-1 gap-4 sm:grid-cols-2'
-                    : sec.columns === 3
-                      ? 'grid grid-cols-1 gap-4 sm:grid-cols-3'
-                      : 'grid grid-cols-1 gap-4 sm:grid-cols-4'
-              }
-            >
-              {sec.fields.map((f) => {
-                // One resolution per row per render, read by all three of the
-                // things that depend on it below — the row's presence, the
-                // required marker, and the control's own attributes. Computing
-                // it three times would be three chances to disagree.
-                const state = resolveRowState(f, values, loaded.record, isCreateForm, predicateScope);
-                if (!state.visible) return null;
-                return (
-                <div
-                  key={f.name}
-                  className={
-                    f.colSpan === 2 ? 'sm:col-span-2'
-                      : f.colSpan === 3 ? 'sm:col-span-3'
-                        : f.colSpan === 4 ? 'sm:col-span-4'
-                          : ''
-                  }
-                >
-                  <label
-                    // `for` the control, or an `id` the group / display answers
-                    // to — the widget's declaration decides (objectui#10179).
-                    {...rowLabelProps(f)}
-                    className="mb-1 block text-xs font-medium text-foreground"
-                  >
-                    {/*
-                      * objectui#8813 — `fields.{object}.{name}`, the same
-                      * resolver and the same fallback-to-the-served-label as
-                      * the app path (`ObjectForm`). On this route the served
-                      * label is usually ALREADY localized by the server
-                      * payload, which is why the symptom looked like "field
-                      * labels translate, section headings do not"; the client
-                      * lookup is the overlay an app bundle can put on top,
-                      * not a replacement for that server value.
-                      */}
-                    {fieldLabel(loaded.object, f.name, f.label)}
-                    {/* Visual-only (objectui#3299): the control's `required` /
-                        `aria-required` is the announced channel; hiding the `*`
-                        keeps it out of the control's accessible name. */}
-                    {state.required && (
-                      <span className="ml-0.5 text-destructive" aria-hidden="true">*</span>
-                    )}
-                  </label>
-                  <FieldInput
-                    field={f}
-                    state={state}
-                    value={values[f.name]}
-                    values={values}
-                    onChange={(v) => setValues((prev) => ({ ...prev, [f.name]: v }))}
-                    onUploadingChange={(u) =>
-                      setUploading((prev) => (prev[f.name] === u ? prev : { ...prev, [f.name]: u }))
-                    }
-                  />
-                  {f.helpText && (
-                    <p className="mt-1 text-xs text-muted-foreground">{f.helpText}</p>
-                  )}
-                </div>
-                );
-              })}
-            </div>
+            {renderSectionBody(sec)}
           </section>
           );
         })}
@@ -2739,7 +3069,12 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
             {error}
           </div>
         )}
-        <div className="flex justify-end gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {wizardView && (
+            <span className="mr-auto text-sm text-muted-foreground">
+              {t('form.stepOf', { current: currentStep + 1, total: sections.length })}
+            </span>
+          )}
           {mode === 'internal' && cancelButton.show && (
             <button
               type="button"
@@ -2755,7 +3090,27 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
               submit that beats it writes an empty field and still reports
               success. The widget contract exists for this — see
               `FieldInputProps.onUploadingChange`. */}
-          {submitButton.show && (
+          {wizardView && currentStep > 0 && (
+            <button
+              type="button"
+              onClick={() => goToStep(currentStep - 1)}
+              disabled={submitting}
+              className="rounded-md border bg-background px-4 py-2 text-sm font-medium shadow-sm hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
+            >
+              {t('wizard.back')}
+            </button>
+          )}
+          {/* A wizard's Next submits the form, so Enter in a field moves on
+              too; `handleSubmit` runs it as the step's Next. */}
+          {wizardView && !onLastStep && (
+            <button
+              type="submit"
+              className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90"
+            >
+              {t('common.next')}
+            </button>
+          )}
+          {submitButton.show && (!wizardView || onLastStep) && (
           <button
             type="submit"
             disabled={submitting || isUploading}

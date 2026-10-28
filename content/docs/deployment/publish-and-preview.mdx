@@ -205,8 +205,9 @@ os package install ./dist/objectstack.json
 ```
 
 This authenticates against an account on the **target runtime**, not your cloud
-login. Uninstall removes the cached manifest; the kernel needs a restart to fully
-unload it, because app registration is additive.
+login. Uninstall (`DELETE /api/v1/marketplace/install-local/:manifestId`) removes
+the cached manifest and withdraws the app from the running kernel; its answer
+says whether any part stays loaded until the next restart.
 
 For the full command reference — every flag, every subcommand — see the
 [CLI reference](/docs/deployment/cli).
@@ -232,6 +233,7 @@ boot-time schema-drift policy, against a local file.
 
 ## Related
 
+- [Marketplace handbook](/docs/deployment/marketplace-handbook) — the listing, the README, review, and every screen a customer's administrator meets from install to uninstall
 - [Artifact-pinned boot](/docs/deployment/self-hosting#artifact-pinned-boot-os_artifact_url) — the operational detail for `OS_ARTIFACT_URL`: schemes, integrity pinning, cache behaviour, pre-signed URLs
 - [CLI reference](/docs/deployment/cli)
 - [Packages](/docs/plugins/packages)

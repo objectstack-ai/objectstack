@@ -1333,6 +1333,7 @@ export class ActionRunner {
   private resultDialogHandler: ResultDialogHandler | null;
   private translate: ((key: string, options: { defaultValue: string }) => string) | null;
   private displayLocale: (() => string | undefined) | null;
+  private tenantCurrency: (() => string | undefined) | null;
 
   /**
    * Built-in dispatch, one entry per runnable action type.
@@ -1373,6 +1374,7 @@ export class ActionRunner {
     this.resultDialogHandler = null;
     this.translate = null;
     this.displayLocale = null;
+    this.tenantCurrency = null;
   }
 
   /**
@@ -1404,6 +1406,19 @@ export class ActionRunner {
    */
   setDisplayLocale(displayLocale: () => string | undefined): void {
     this.displayLocale = displayLocale;
+  }
+
+  /**
+   * Set where the runner reads the tenant default currency (ISO 4217, the
+   * `localization.currency` setting) — the host's own, injected so this
+   * package resolves none. A `{{ amount | currency }}` hole with no argument
+   * in `confirmText` and `successMessage` formats in it, through the engine's
+   * reserved currency channel. With none installed, or none set for the
+   * tenant, such a sentence is not filled: it is shown as written, never with
+   * the amount in a guessed currency.
+   */
+  setTenantCurrency(tenantCurrency: () => string | undefined): void {
+    this.tenantCurrency = tenantCurrency;
   }
 
   /**
@@ -1900,6 +1915,7 @@ export class ActionRunner {
           successCopy,
           { result: payload, record: this.dispatchRecord(action) },
           this.displayLocale?.(),
+          this.tenantCurrency?.(),
         )
         : successCopy;
     }
@@ -1939,6 +1955,7 @@ export class ActionRunner {
       text,
       { record: this.dispatchRecord(action), params: staticParams },
       this.displayLocale?.(),
+      this.tenantCurrency?.(),
     );
   }
 
@@ -3074,6 +3091,7 @@ export class ActionRunner {
     scoped.resultDialogHandler = this.resultDialogHandler;
     scoped.translate = this.translate;
     scoped.displayLocale = this.displayLocale;
+    scoped.tenantCurrency = this.tenantCurrency;
     return scoped;
   }
 

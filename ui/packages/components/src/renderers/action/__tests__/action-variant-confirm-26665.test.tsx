@@ -7,15 +7,15 @@
  */
 
 /**
- * objectstack#26665 — a `destructive` action block confirms through the
- * destructive button.
+ * objectstack#26665, objectstack#26779 — a `danger` action block confirms
+ * through the destructive button.
  *
  * The runner paints its confirm button destructive when the action it runs
- * declares `variant: 'danger'` (`confirmOptions`, objectstack#26580). The four
- * action blocks speak the spec's BLOCK dialect, where that value is spelled
- * `destructive`, and before this card none of them forwarded `variant` at all,
- * so a destructive block asked its question through a neutral button. Each
- * renderer now forwards its variant through `toRunnerVariant`.
+ * declares `variant: 'danger'` (`confirmOptions`, objectstack#26580). Before
+ * objectstack#26665 none of the four action blocks forwarded `variant` at all,
+ * so a destructive block asked its question through a neutral button. Since
+ * objectstack#26779 the blocks spell that value `danger` too, the runner's
+ * word, and each renderer forwards it as it is through `toRunnerVariant`.
  *
  * Every row reads the confirm handler's own call, the artefact the dialog is
  * drawn from, and first asserts it was called once (the positive control). The
@@ -37,7 +37,7 @@ import '../action-button';
 import '../action-icon';
 import '../action-group';
 import '../action-menu';
-import { toRunnerVariant } from '../runner-variant';
+import { toButtonVariant, toRunnerVariant } from '../runner-variant';
 
 const ACTION = {
   name: 'purge_history',
@@ -82,9 +82,9 @@ async function confirmOptionsFor(type: string, schema: Record<string, unknown>, 
   return confirm.mock.calls[0][1];
 }
 
-describe.each(SURFACES)('%s forwards its variant in the runner dialect (objectstack#26665)', (type, schemaFor, click) => {
-  it('`destructive` confirms through the destructive button', async () => {
-    expect(await confirmOptionsFor(type, schemaFor('destructive'), click)).toEqual({
+describe.each(SURFACES)('%s forwards its variant to the runner (objectstack#26665, objectstack#26779)', (type, schemaFor, click) => {
+  it('`danger` confirms through the destructive button', async () => {
+    expect(await confirmOptionsFor(type, schemaFor('danger'), click)).toEqual({
       title: 'Purge history',
       confirmText: 'Purge history',
       destructive: true,
@@ -99,9 +99,9 @@ describe.each(SURFACES)('%s forwards its variant in the runner dialect (objectst
   });
 });
 
-describe('toRunnerVariant (objectstack#26665)', () => {
-  it('maps the block dialect onto the action dialect', () => {
-    expect(toRunnerVariant('destructive')).toBe('danger');
+describe('toRunnerVariant (objectstack#26779)', () => {
+  it('forwards the values the action dialect shares, `danger` as it is', () => {
+    expect(toRunnerVariant('danger')).toBe('danger');
     expect(toRunnerVariant('primary')).toBe('primary');
     expect(toRunnerVariant('secondary')).toBe('secondary');
     expect(toRunnerVariant('ghost')).toBe('ghost');
@@ -109,5 +109,23 @@ describe('toRunnerVariant (objectstack#26665)', () => {
     expect(toRunnerVariant('default')).toBeUndefined();
     expect(toRunnerVariant('outline')).toBeUndefined();
     expect(toRunnerVariant(undefined)).toBeUndefined();
+  });
+
+  it('CONTROL: the retired block spelling `destructive` is not read', () => {
+    expect(toRunnerVariant('destructive' as never)).toBeUndefined();
+  });
+});
+
+describe('toButtonVariant (objectstack#26779)', () => {
+  it('draws `danger` as the Button primitive\'s `destructive`, `primary` as `default`', () => {
+    expect(toButtonVariant('danger', 'ghost')).toBe('destructive');
+    expect(toButtonVariant('primary', 'ghost')).toBe('default');
+    expect(toButtonVariant('outline', 'ghost')).toBe('outline');
+    expect(toButtonVariant('link', 'ghost')).toBe('link');
+    expect(toButtonVariant(undefined, 'ghost')).toBe('ghost');
+  });
+
+  it('CONTROL: the retired block spelling `destructive` draws the renderer default', () => {
+    expect(toButtonVariant('destructive' as never, 'outline')).toBe('outline');
   });
 });

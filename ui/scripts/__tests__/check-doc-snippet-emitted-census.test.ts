@@ -339,18 +339,20 @@ describe('the census reports what it cannot see, and separates its own artefacts
     expect(summary).toContain('Diagnostics');
   });
 
-  it('keys the per-package split by DIRECTORY as well as name — on this tree they disagree', () => {
+  it('keys the per-package split by DIRECTORY as well as name — the two can disagree', () => {
+    // The tree's own case (the VS Code extension, directory and name apart) left
+    // the workspace with objectstack#25910; the fixture keeps the shape.
     expect(
-      emittingPackageOf('packages/vscode-extension/src/extension.ts', {
-        'object-ui': 'packages/vscode-extension',
+      emittingPackageOf('packages/editor-ext/src/extension.ts', {
+        'ext-x': 'packages/editor-ext',
       }),
-      'packages/vscode-extension publishes as `object-ui`; a split keyed on the name alone ' +
+      'packages/editor-ext publishes as `ext-x`; a split keyed on the name alone ' +
         'prints a row nobody can find on disk',
-    ).toBe('packages/vscode-extension (object-ui)');
+    ).toBe('packages/editor-ext (ext-x)');
   });
 });
 
-describe('on this repository — the walk is non-vacuous and reaches both known members', () => {
+describe('on this repository — the walk is non-vacuous and reaches the known member', () => {
   const census = emittedCensus({ root: repoRoot }) as unknown as {
     files: string[];
     excludedAsTooling: string[];
@@ -368,13 +370,10 @@ describe('on this repository — the walk is non-vacuous and reaches both known 
     expect(census.templatesSeen).toBeGreaterThan(500);
   });
 
-  it('recognises at least the two members objectui#7864 names', () => {
+  it('recognises the member objectui#7864 names that is still in the tree', () => {
+    // objectui#7864 named two. The other, `packages/vscode-extension/src/extension.ts`
+    // (fixed by PR objectui#7863), left with its package in objectstack#25910.
     const sites = new Set(census.recognised.map((r) => r.file));
-    expect(
-      sites,
-      'PR objectui#7863 fixed this one; the census must still SEE it, or nothing would notice ' +
-        'the phantom import coming back',
-    ).toContain('packages/vscode-extension/src/extension.ts');
     expect(
       sites,
       'objectui#7472 is the known UNFIXED member. The card requires the census to show it; ' +

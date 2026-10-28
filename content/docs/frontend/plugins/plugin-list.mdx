@@ -1,0 +1,70 @@
+---
+title: "Plugin List"
+description: "ListView plugin for ObjectUI - unified view component with view type switching"
+---
+
+## @object-ui/plugin-list
+
+ListView plugin for ObjectUI - unified view component with view type switching
+
+## Installation
+
+```bash
+pnpm add @object-ui/plugin-list
+```
+
+The props a [`list-view`](/docs/ui/components/plugins#list-view) node reads on a page are generated from the spec into the component reference; this page covers using the plugin from React.
+
+## On a page — `requiredPermissions`
+
+A page `list-view` node is written in `@objectstack/spec`'s list view spelling,
+with its keys in `properties`. `requiredPermissions` gates what the node draws:
+
+```json
+{
+  "type": "list-view",
+  "properties": {
+    "data": { "provider": "object", "object": "deal" },
+    "requiredPermissions": ["sales.view_pipeline"]
+  }
+}
+```
+
+`requiredPermissions` lists capabilities the viewer must all hold. A viewer
+missing one sees "Insufficient permissions to view list." in place of the list,
+as the record blocks show, and no records are queried.
+
+`addRecord` draws an Add button, and `position` places it (`"top"`, `"bottom"`
+or `"both"`). The spec row declares `enabled` default `true` and `position`
+default `"bottom"`, but the renderer does not apply those defaults: it draws the
+button only for an explicit `enabled: true`, and places an absent `position` at
+the top. objectui#13099 owns that gap; until it lands, write both keys. A click opens the
+create form the object list's New opens: the record-form overlay, or the
+full-page create for an object whose `editMode` is `page`. The button is not
+drawn for a viewer who may not create, or under a host that serves no create.
+`mode` and `formView` are not read.
+
+```json
+{
+  "type": "list-view",
+  "properties": {
+    "data": { "provider": "object", "object": "deal" },
+    "addRecord": { "enabled": true, "position": "top" }
+  }
+}
+```
+
+`sharing` is not a published input of a page node yet: the Share button has no
+action the spec declares.
+
+## Status
+
+This plugin is part of the v3.3.0 release. For full API reference and usage
+examples, see the package README:
+
+- 📦 [`@object-ui/plugin-list` on npm](https://www.npmjs.com/package/@object-ui/plugin-list)
+- 📝 [Package README](https://github.com/objectstack-ai/objectstack/tree/main/ui/packages/plugin-list)
+- 🐛 [Report an issue](https://github.com/objectstack-ai/objectstack/issues)
+
+> **Note:** A rich interactive documentation page for this plugin is coming soon.
+> In the meantime, refer to the package README for schema, props and examples.

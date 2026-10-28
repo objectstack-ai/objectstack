@@ -72,6 +72,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Highlight Fields",
         helpText: "Field names of this object, most important first — the first entry wins where only one fits (ADR-0085). Drives the default list columns, cards, child-record previews and the detail highlight strip. A name that is not a field of this object is refused at publish."
       },
+      relatedLists: {
+        label: "Related Lists",
+        helpText: "Business order of this object's related lists on its record page, most important first. Each entry is a child object name (e.g. task), or object.field when that child has more than one relationship to this object. Listed lists come first; the rest follow in the derived order. A name that matches no relationship pointing at this object places nothing, so saving or validating the object refuses it."
+      },
       searchableFields: {
         label: "Searchable Fields",
         helpText: "Field names the $search query matches (ADR-0061): the default for the record picker, list quick-search and global search; a view may narrow it. Unset, search uses the name/title field plus short-text fields. Each entry must name a stored field of this object — an unknown name or a virtual formula field is refused at publish."
@@ -95,6 +99,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "fieldGroups.description": {
         label: "Description",
         helpText: "Text shown under the header, on the entry form and the record detail page."
+      },
+      "fieldGroups.relatedList": {
+        label: "Related List",
+        helpText: "Makes this entry a related list's table instead of a section of fields: name the child object (or object.field) whose list is drawn at this position in the record's details column. Such a group holds no fields; a field that names it as its group is refused, and so is a name that matches no relationship pointing at this object. The record page does not draw this placement yet."
       },
       "fieldGroups.collapse": {
         label: "Collapse",
@@ -618,7 +626,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "currencyConfig.defaultCurrency": {
         label: "Default Currency",
-        helpText: "The one currency of a fixed-mode field, as a three-character ISO 4217 code (e.g. USD, EUR). Defaults to CNY. Not read in dynamic mode."
+        helpText: "The one currency of a fixed-mode field, as a three-character ISO 4217 code (e.g. USD, EUR). Required in fixed mode; nothing fills one in. Not read in dynamic mode."
       },
       step: {
         label: "Step",
@@ -1836,8 +1844,8 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "Open the action RESULT in a new tab: the renderer pre-opens the tab synchronously on click (popup-blocker-safe) and navigates it to the handler's redirectUrl. Distinct from `openIn`, which routes a static URL target."
       },
       newTabUrl: {
-        label: "New-tab URL",
-        helpText: "Direct new-tab URL template, with a {recordId} placeholder. Set together with `opensInNewTab` the renderer navigates the pre-opened tab here immediately and posts nothing — so the endpoint must enforce auth itself."
+        label: "New-tab path",
+        helpText: "Path on this backend, starting with / (e.g. /sso-open/{recordId}), with a {recordId} placeholder. Set together with `opensInNewTab` the renderer navigates the pre-opened tab to the backend origin + this path immediately and posts nothing — so the endpoint must enforce auth itself. An absolute URL is refused; for an external page use a url action with Open In set to new-tab."
       },
       locations: {
         label: "Locations",

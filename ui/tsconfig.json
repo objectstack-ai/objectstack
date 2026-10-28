@@ -9,16 +9,14 @@
 //
 // ## The measured `extends` graph
 //
-// Counted, not recalled: every one of the 94 tracked `tsconfig*.json` files in
+// Counted, not recalled: every one of the 87 tracked `tsconfig*.json` files in
 // the repo, read with TypeScript's own JSONC reader (`ts.readConfigFile`), at
-// cb725e78f. Re-derive rather than trust it if it matters — this is a reading
-// with a date on it, not a contract.
+// 4d3a077f6 with #25910's package removal applied. Re-derive rather than trust
+// it if it matters — this is a reading with a date on it, not a contract.
 //
-//   THIS FILE is extended by 75 of the 94, every one of them under `packages/`:
-//     38 of the 40 `packages/*/tsconfig.json`
-//     36 of the 37 `packages/*/tsconfig.test.json`
-//         (the 37th, `packages/vscode-extension/tsconfig.test.json`, extends its
-//          own sibling instead)
+//   THIS FILE is extended by 73 of the 87, every one of them under `packages/`:
+//     37 of the 38 `packages/*/tsconfig.json`
+//     all 35 `packages/*/tsconfig.test.json`
 //     `packages/types/tsconfig.examples.json`
 //   Nothing under `apps/` or `examples/` extends it.
 //
@@ -27,16 +25,16 @@
 //   Its full header carries the rest, including why `tsconfig.scripts.json` is
 //   NOT among them although objectui#9330's ruling names it.
 //
-//   `packages/runner/tsconfig.json` and `packages/vscode-extension/tsconfig.json`
-//   extend NOTHING — the two of forty that inherit from neither root config.
+//   `packages/runner/tsconfig.json` extends NOTHING — the one of thirty-eight
+//   that inherits from neither root config.
 //   Recorded per the ruling, ⛔ not changed by it; objectui#7212's population
 //   question is not settled here either.
 //
 // ⚠️ objectui#9330's card body says "all 30 `packages/*/tsconfig.json`" extend
 // this file and its ruling says 38. Same population, and the card's own stated
 // commit c64975e9f measures 38 as well — 30 matches no population in this repo
-// at either commit, so it is a miscount, not a narrower reading. Use 38, or
-// re-measure.
+// at either commit, so it is a miscount, not a narrower reading. Neither is
+// today's figure (37 since #25910): re-measure.
 //
 // Comments here are `//`, not `/* */`: a glob containing `**` followed by `/`
 // closes a block comment early, and a tsconfig that silently fails to parse

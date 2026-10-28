@@ -115,7 +115,11 @@ export function getPackageForm(locale: string, { create = false }: { create?: bo
     immutable: true,
   };
   return {
-    type: 'modal',
+    // The form's layout. That it opens in a dialog is `PackageFormDialog`'s
+    // choice, not the form's: `modal` left the form view `type` in
+    // `@objectstack/spec` 18.3.0, and `SectionedSchemaForm` reads only
+    // `tabbed`, so `simple` renders exactly what `modal` did.
+    type: 'simple',
     sections: [
       {
         label: t('engine.packages.form.basics', locale),

@@ -4938,3 +4938,61 @@ describe('runtime authoring gate on OBJECT writes — the field group visibleWhe
         expect(err.issues.filter((i: any) => i.rule === EXPRESSION_INVALID)).toEqual(atBuild);
     });
 });
+
+/**
+ * [#27069] The object save door refuses a related-list name that matches no
+ * inbound relationship of the object — the verdict `defineStack` gives
+ * `os validate` — judged against the children the live registry holds. The
+ * door runs no `defineStack`, so before `validateRelatedListRefs` the entry
+ * saved `active` and the record page placed nothing for it. The control
+ * differs from the refusal by the child's FK alone.
+ */
+describe('the object save door judges related-list names against the live registry (#27069)', () => {
+    const parent = (extra: Record<string, unknown> = {}) => ({
+        name: 'rl_quote',
+        label: 'Quote',
+        sharingModel: 'private',
+        fields: { title: { type: 'text', label: 'Title' } },
+        ...extra,
+    });
+    const line = (fields: Record<string, unknown>) => ({
+        name: 'rl_quote_line',
+        label: 'Quote Line',
+        sharingModel: 'private',
+        fields: { qty: { type: 'number', label: 'Qty' }, ...fields },
+    });
+    const hostWith = (objects: unknown[]) => {
+        const { engine, rows } = makeStubEngine();
+        engine.registry.listItems = (type: string) => (type === 'object' ? objects : []);
+        const protocol = new ObjectStackProtocolImplementation(engine, () => new Map(), 'env_test') as any;
+        return { protocol, rows };
+    };
+    const quoteRows = (rows: Map<string, Row>) =>
+        Array.from(rows.values()).filter((r) => r.type === 'object' && r.name === 'rl_quote');
+    const save = (protocol: any, item: unknown) => protocol.saveMetaItem({ type: 'object', name: 'rl_quote', item });
+
+    it('REFUSES a relatedLists entry naming a registry child with no FK to the object, with the 422 envelope', async () => {
+        const { protocol, rows } = hostWith([line({})]);
+
+        const err = await save(protocol, parent({ relatedLists: ['rl_quote_line'] })).catch((e: any) => e);
+
+        expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const issue = err.issues.find((i: any) => i.rule === 'related-list-ref-unknown');
+        expect(issue, `issues: ${JSON.stringify(err.issues)}`).toBeDefined();
+        expect(issue.path).toBe('objects.rl_quote.relatedLists[0]');
+        expect(issue.message).toContain("Object 'rl_quote' relatedLists[0] 'rl_quote_line' matches no inbound relationship");
+        expect(quoteRows(rows)).toEqual([]);
+    });
+
+    it('SAVES the same write once the registry child carries the FK — and a body-table group beside it', async () => {
+        const { protocol, rows } = hostWith([line({ quote: { type: 'master_detail', label: 'Quote', reference: 'rl_quote' } })]);
+
+        const result = await save(protocol, parent({
+            relatedLists: ['rl_quote_line'],
+            fieldGroups: [{ key: 'lines', label: 'Lines', relatedList: 'rl_quote_line.quote' }],
+        }));
+
+        expect(result.success).toBe(true);
+        expect(quoteRows(rows).map((r) => r.state)).toEqual(['active']);
+    });
+});
