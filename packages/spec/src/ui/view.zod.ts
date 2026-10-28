@@ -2785,42 +2785,19 @@ const LIST_VIEW_CHART_NEEDS_BINDING =
   + `nothing to plot. ${LIST_VIEW_CHART_BINDING_REMEDY} A view that is not meant to be a chart takes another \`type\`.`;
 
 /**
- * [#22491] `type: 'chart'` whose only binding is the legacy `options.chart`
- * bag, missing a key the `chart` block requires — refused at that key.
- */
-const listViewChartBagMissing = (key: (typeof LIST_CHART_BINDING_KEYS)[number]): string =>
-  "This list view is `type: 'chart'` and its only chart binding is the legacy `options.chart` bag, "
-  + `which names no ${key === 'dataset' ? '`dataset`' : 'measure in `values`'}, so there is nothing to plot. `
-  + 'With no top-level `chart` block the bag IS the binding, so it must carry what that block requires. '
-  + `${LIST_VIEW_CHART_BINDING_REMEDY} The top-level block replaces the bag whole; prefer it to completing the bag.`;
-
-/**
- * [#22491] The keys that make a chart block a binding: the required keys of
- * {@link ListChartConfigSchema} (`chartType` defaults, `dimensions` is
- * optional). Hand-listed for the messages above; `view-chart-binding.test.ts`
- * derives the block's required keys from the schema and fails if the two part.
- */
-const LIST_CHART_BINDING_KEYS = ['dataset', 'values'] as const;
-
-/**
  * [#22491] A `type: 'chart'` list view must bind a dataset — the view's
  * EFFECTIVE chart binding names a `dataset` and at least one measure.
  *
- * The effective binding is read the way the renderer reads it: the top-level
- * `chart` block, else the legacy `options.chart` bag, and the block replaces
- * the bag WHOLE — `schema.chart || schema.options?.chart || {}` (the read
- * point is recorded in `packages/spec/liveness/view.json`, row `list.chart`).
- * So, unlike the merged per-key underlays
- * {@link listViewKindBlocks} describes, the bag is not one layer of the chart
- * block: when no block is declared it is the whole of it, and it owes what
- * the block requires.
+ * The binding is the top-level `chart` block (the read point is recorded in
+ * `packages/spec/liveness/view.json`, row `list.chart`). [#25923] The legacy
+ * `options.chart` bag this check used to read as the binding when no block
+ * was declared is refused at every door now ({@link LIST_OVERLAY_OPTIONS_REFUSED}),
+ * and a stored bag is folded onto `chart` before the row is served, so the
+ * block is the only binding there is.
  *
- * - No block and no bag ⇒ one issue at `chart`.
- * - No block, a bag missing `dataset` / `values` ⇒ one issue per missing key,
- *   at `options.chart.KEY` (the bag lives on the flattened overlay only; the
- *   two authoring doors refuse `options` by name).
+ * - No block ⇒ one issue at `chart`.
  * - A declared `chart` block ⇒ nothing here: its own strict schema already
- *   requires both keys, at `chart.dataset` / `chart.values`.
+ *   requires `dataset` and `values`, at `chart.dataset` / `chart.values`.
  *
  * What such a view renders is a dead screen either way: before objectui#6152
  * round 15 (objectui `0253416`) the renderer fabricated a binding nobody wrote
@@ -2843,23 +2820,11 @@ const LIST_CHART_BINDING_KEYS = ['dataset', 'values'] as const;
  * reason: a mirror built from `ListViewSchema.shape` re-attaches it.
  */
 export function checkListViewChartBinding(
-  view: { type?: unknown; chart?: unknown; options?: unknown },
+  view: { type?: unknown; chart?: unknown },
   ctx: z.RefinementCtx,
 ): void {
   if (view.type !== 'chart' || view.chart !== undefined) return;
-  const bag = view.options !== null && typeof view.options === 'object'
-    ? (view.options as { chart?: unknown }).chart
-    : undefined;
-  if (bag === undefined) {
-    ctx.addIssue({ code: 'custom', path: ['chart'], message: LIST_VIEW_CHART_NEEDS_BINDING });
-    return;
-  }
-  // A bag that is not an object is refused by the bag's own schema.
-  if (bag === null || typeof bag !== 'object') return;
-  for (const key of LIST_CHART_BINDING_KEYS) {
-    if ((bag as Record<string, unknown>)[key] !== undefined) continue;
-    ctx.addIssue({ code: 'custom', path: ['options', 'chart', key], message: listViewChartBagMissing(key) });
-  }
+  ctx.addIssue({ code: 'custom', path: ['chart'], message: LIST_VIEW_CHART_NEEDS_BINDING });
 }
 
 /**
@@ -6248,125 +6213,38 @@ const ViewContainerWireSchema = lazySchema(() =>
 );
 
 /**
- * [#20051] The per-kind blocks of the list-view shape, keyed by kind — the
- * vocabulary of the legacy `options` bag below, each judged KEY BY KEY.
+ * [#25923] The refusal the flattened LIST overlay gives a top-level `options`
+ * bag. The bag is closed: the per-kind blocks are top-level keys of the view
+ * itself (`kanban`, `calendar`, `gantt`, `timeline`, `map`, `gallery`, `chart`,
+ * `tree`), and that is their one spelling (Prime Directive #12).
  *
- * Derived, never hand-listed: a kind is a value of the shape's own `type` enum
- * that ALSO names a block on the shape (`grid` names none), and each entry is
- * the very schema the direct spelling is judged by — the same strict key set,
- * the same per-key schemas, the same unknown-key message — with every key made
- * optional (`.partial()`). So a new kind with a new block is judged under
- * `options` in the same edit, and `options.timeline` can never be judged by
- * anything but `timeline`'s schema.
+ * ⛔ This supersedes ruling direction A on objectui#10380, which kept the bag
+ * as a judged underlay (each `options.KIND` checked key by key by its kind's
+ * own schema, the top-level block winning per key). That ruling refused only
+ * to close the bag WHOLE, and its stated reason was objectui's pinned legacy
+ * `options.map` read. #25923 retires that read and every other reader of the
+ * bag, so the reason no longer holds, and the door refuses the bag by name.
  *
- * Why `.partial()` and not the block as-is (measured, not preferred): the
- * renderer reads `options.KIND` as an UNDERLAY of the top-level block, merged
- * per key with the top-level block winning (objectui `ListView`: kanban,
- * calendar, gallery, timeline, gantt and map spread `options.KIND` first and
- * `KIND` last). A legacy bag that carries only the keys the top-level block
- * does not restate (`kanban: { groupByField }` beside `options.kanban:
- * { titleField }`) is therefore legal config — objectui pins exactly that
- * population (`ObjectView.namedViewProtocolKeys-8980.test.tsx`, "the merge is
- * per-key, not wholesale") — and judging it with the block's REQUIRED keys
- * would refuse it for a key it never meant to carry. What the ruling asks is
- * kept whole: an out-of-contract key is refused by name, and a value the key's
- * own schema refuses is refused at that key. Required-ness belongs to the
- * block the renderer builds, not to one layer of it.
+ * Nothing that already worked is lost. Stored view rows that carry a bag are
+ * folded onto the top-level blocks by the ADR-0087 D2 conversion
+ * `list-view-options-bag-folded` (`conversions/registry.ts`), which every
+ * stored-row read replays: `options.KIND` moves to `KIND`, and where both set a
+ * key the top-level block wins, the precedence the bag was declared with. The
+ * D3 entry of the same family (`ui-list-view-options-bag-folded`) carries what
+ * the fold cannot decide for the author. `migrate meta` lists the edit for
+ * source files.
  *
- * `.partial()` throws on an object that carries refinements (zod 4), which is
- * the loud answer this derivation wants: a kind block that grows a cross-key
- * check forces a decision about how that check reads on a partial underlay,
- * instead of silently losing it.
- *
- * [#19920] The return type is {@link ListViewKindBlocks}, derived by the same
- * rule at the type level. It was `Record<string, z.ZodTypeAny>`, which typed
- * the bag as a string-keyed record of `unknown` on the list overlay member, and
- * so on `ViewMetadata`, `ViewMetadataParsed`, `AssembledViewArtifact` and
- * `AssembledViewArtifactParsed`: `options: { foo: 1, kanban: 42 }` type-checked
- * while this member refuses it. The loop below is unchanged; the one assertion
- * on its result states what the two derivations share, and
- * `view-overlay-options-type.test.ts` pins the runtime key set to the type's.
+ * Declared on the list overlay member only. The form overlay pins the bag
+ * absent with its own text ({@link FORM_OVERLAY_OPTIONS_REFUSED}), and the
+ * view item record with {@link VIEW_ITEM_OPTIONS_REFUSED}.
  */
-function listViewKindBlocks(): ListViewKindBlocks {
-  const shape = (ListViewShapeSchema as unknown as { shape: Record<string, z.ZodTypeAny> }).shape;
-  const blocks: Record<string, z.ZodTypeAny> = {};
-  for (const kind of overlayTypeValues(ListViewShapeSchema)) {
-    const block = shape[kind] as unknown as { unwrap?: () => { partial: () => z.ZodTypeAny } } | undefined;
-    if (block?.unwrap) blocks[kind] = block.unwrap().partial().optional();
-  }
-  return blocks as ListViewKindBlocks;
-}
-
-/**
- * [#19920] What {@link listViewKindBlocks} builds for ONE kind, as a function
- * so its return type is zod's own answer for `.unwrap().partial().optional()`
- * rather than a hand-written copy of it. Only its type is read
- * ({@link ListViewKindBlocks}); the loop above keeps its own duck-typed calls.
- */
-function partialListViewKindBlock<S extends z.ZodRawShape, C extends z.core.$ZodObjectConfig>(
-  block: z.ZodOptional<z.ZodObject<S, C>>,
-) {
-  return block.unwrap().partial().optional();
-}
-
-type ListViewShapeFields = (typeof ListViewShapeSchema)['shape'];
-
-/**
- * [#19920] The kinds that name a block, by {@link listViewKindBlocks}' own rule:
- * a value of the shape's `type` enum that is also a key of the shape (`grid`
- * names none).
- */
-type ListViewKindBlockName = Extract<z.output<ListViewShapeFields['type']>, keyof ListViewShapeFields>;
-
-/**
- * [#19920] The static type of {@link listViewKindBlocks}: per kind, the kind's
- * own block with every key optional. A block that stopped being an optional
- * object would read `never` here, and the pin test's never-check goes red.
- */
-type ListViewKindBlocks = {
-  [K in ListViewKindBlockName]: ListViewShapeFields[K] extends z.ZodOptional<z.ZodObject<infer S, infer C>>
-    ? ReturnType<typeof partialListViewKindBlock<S, C>>
-    : never;
-};
-
-/**
- * [#20051] The legacy `options` bag on a flattened LIST overlay, judged.
- *
- * The renderer still reads `options.KIND` beside the top-level `KIND` block
- * (objectui's `ListView` merges the two per key, and its interface page
- * forwards a stored view's `options` whole), so a stored bag is live config.
- * Before this schema the overlay member's top-level `.strip()` dropped the bag
- * from the parse without looking inside it, `saveMetaItem` stored the request
- * body as sent, and the interface page rendered it: `options.timeline.metaFields`
- * saved `200` while `timeline.metaFields` was refused `unrecognized_keys`.
- *
- * Ruled direction A (objectui#10380, maintainer 「其他同意」): each
- * `options.KIND` is judged by the kind's own strict schema, so an out-of-contract
- * key is refused by NAME, with the same code and the same surface text as the
- * direct spelling — only the path gains the `options` prefix. Key by key: see
- * {@link listViewKindBlocks} for why the block's required keys are not asked of
- * an underlay. The bag itself is closed too: it carries per-kind blocks and
- * nothing else, so `options.foo` is refused rather than dropped (ruled out:
- * refusing the bag WHOLE, which would break the legacy `options.map` path
- * objectui pins).
- *
- * Declared on the list overlay member ONLY — never on the authoring shape (the
- * bag is a legacy wire spelling, not something to teach an author), and the
- * form overlay pins it absent ({@link FORM_OVERLAY_OPTIONS_REFUSED}).
- */
-const ListViewOverlayOptionsSchema = lazySchema(() => strictObject({
-  surface: 'this legacy `options` bag',
-  history:
-    'Until this bag was judged at the view write door it was dropped from the parse unread and '
-    + 'stored as sent, so a key its own block refuses still reached the rendered view.',
-  guidance: {
-    grid: 'A grid has no per-kind block: its settings (`columns`, `sort`, `filter`, …) are top-level keys of the view itself. Remove `options.grid`.',
-  },
-}, listViewKindBlocks()).describe(
-  'Legacy per-kind nesting (`options.kanban`, `options.timeline`, …) a stored list overlay may carry. '
-  + 'Each block is judged key by key by the same schema as the top-level block of that kind, which wins '
-  + 'per key where both set one; prefer the top-level spelling.',
-));
+const LIST_OVERLAY_OPTIONS_REFUSED =
+  "A list view's `options` bag was removed in @objectstack/spec 18.3.0 (ADR-0087 D2) — each per-kind "
+  + 'block is a top-level key of the view itself, its one spelling. Move each `options.KIND` block to '
+  + '`KIND` (for example `options.kanban` to `kanban`), keeping the top-level value where both set the '
+  + 'same key, or remove `options`. A grid has no per-kind block: its settings (`columns`, `sort`, '
+  + '`filter`, …) are top-level keys of the view. Stored views are folded on read. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 /**
  * [#20051] The refusal the flattened FORM overlay gives an `options` bag.
@@ -6565,9 +6443,10 @@ function formOverlayColumnsField(): z.ZodOptional<z.ZodNumber> {
  * sibling) — see {@link flattenedViewOverlayFields} for the ruling and the
  * measured serving filter that decides exactly this pair.
  *
- * [#20051] …and `options` is DECLARED here, judged by
- * {@link ListViewOverlayOptionsSchema}: a bag the renderer reads is not a
- * round-trip key.
+ * [#20051] …and `options` is DECLARED here. [#25923] It is declared to be
+ * refused by name ({@link LIST_OVERLAY_OPTIONS_REFUSED}): the per-kind blocks
+ * are top-level keys, and a stored bag is folded onto them by the
+ * `list-view-options-bag-folded` conversion before a row is served.
  *
  * [#20186] This member judges `viewKind: 'list'` only (the form sibling
  * `'form'` only), and it judges a column-less PATCH as well as a full inline
@@ -6576,8 +6455,8 @@ function formOverlayColumnsField(): z.ZodOptional<z.ZodNumber> {
  * ({@link checkListOverlayTypeNeedsColumns}). The attached checks run in
  * order: that refusal reads the input side, the calendar check is unchanged,
  * the chart-binding check ({@link checkListViewChartBinding}, #22491) reads the
- * input side too and is the one door check that sees the `options.chart` bag,
- * and {@link applyListOverlayTypeDefault} restores the `grid` default last.
+ * input side too, and {@link applyListOverlayTypeDefault} restores the `grid`
+ * default last.
  */
 const ListViewOverlayWireSchema = lazySchema(() =>
   // [#13216] Built from {@link ListViewShapeSchema}, not {@link ListViewSchema}:
@@ -6590,7 +6469,8 @@ const ListViewOverlayWireSchema = lazySchema(() =>
   // three attachment points is dropped.
   closeWireMember(ListViewShapeSchema.extend({
     ...flattenedViewOverlayFields('list'),
-    options: ListViewOverlayOptionsSchema.optional(),
+    // [#25923] The bag is retired: a tombstone that refuses it by name.
+    options: retiredKey(LIST_OVERLAY_OPTIONS_REFUSED),
     ...listOverlayPatchFields(),
     // [#20456] The console's round-trip keys on this row shape, declared so
     // the parse keeps them.

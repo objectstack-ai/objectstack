@@ -239,6 +239,41 @@ describe('getMetaItem — single stored read is canonical (#3903)', () => {
     });
 });
 
+// [#25923] A protocol-18 list view row written while the overlay still took
+// the legacy `options` bag (17.5.0 to 18.2.0 judged it per kind and stored it
+// as sent). The bag is retired now; `list-view-options-bag-folded` is
+// `retiredFromLoadPath`, so only this stored seam replays it.
+const legacyBagViewRow = {
+    type: 'view',
+    name: 'showcase_task.work_map',
+    metadata: {
+        name: 'showcase_task.work_map',
+        object: 'showcase_task',
+        viewKind: 'list',
+        label: 'Work Map',
+        type: 'map',
+        columns: ['title', 'location'],
+        map: { locationField: 'location' },
+        options: { map: { locationField: 'address', titleField: 'legacy_title' } },
+    },
+};
+
+describe('[#25923] a stored list view\'s `options` bag is served folded onto the top-level block', () => {
+    it('the single and the list read move `options.KIND` to `KIND`, the top-level value winning per key', async () => {
+        const { engine, rows } = makeStubEngine([legacyBagViewRow]);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const single: any = await protocol.getMetaItem({ type: 'view', name: 'showcase_task.work_map' });
+        const listed = ((await protocol.getMetaItems({ type: 'view' })).items as any[])
+            .find((i) => i.name === 'showcase_task.work_map');
+        for (const item of [single.item, listed]) {
+            expect(item.map).toEqual({ locationField: 'location', titleField: 'legacy_title' });
+            expect('options' in item).toBe(false);
+        }
+        // The row at rest is not rewritten by the reads.
+        expect(JSON.parse(rows[0]!.metadata).options).toEqual(legacyBagViewRow.metadata.options);
+    });
+});
+
 describe('loadMetaFromDb — boot hydration converts, diagnoses, never drops (#3903)', () => {
     it('registers the CONVERTED body and reports invalid: 0 for chain-owned history', async () => {
         const { engine, registered } = makeStubEngine([legacyObjectRow, legacyActionRow]);
