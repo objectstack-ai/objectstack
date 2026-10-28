@@ -1917,7 +1917,7 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | **subforms** | `{ childObject: string; relationshipField?: string; columns?: object[]; amountField?: string; … }[]` | optional | Inline master-detail child collections |
 | **sharing** | `{ enabled?: boolean; publicLink?: string; password?: string; allowedDomains?: string[]; … }` | optional | Public sharing configuration for this form |
 | **submitBehavior** | `{ kind: 'thank-you'; title?: string; message?: string } \| { kind: 'redirect'; url: string; delayMs?: integer } \| { kind: 'continue' } \| { kind: 'next-record' }` | optional | Post-submit behavior. On the `redirect` arm, `url` is relative-only and interpolates only declared record fields as `{{record.field_name}}`, URL-escaped. |
-| **buttons** | `{ submit?: object; cancel?: object; reset?: object }` | optional | Form action-button visibility & labels; folded onto the flat renderer props by ObjectUI ObjectForm. |
+| **buttons** | `{ submit?: object; cancel?: object }` | optional | Form action-button visibility & labels; folded onto the flat renderer props by ObjectUI ObjectForm. |
 | **defaults** | `Record<string, any>` | optional | Initial field values for create-mode forms (folded into ObjectUI ObjectForm initial values;). |
 
 ### Nested Shape: `GetUiViewResponse.listViews[string]`
@@ -1996,7 +1996,7 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | **subforms** | `{ childObject: string; relationshipField?: string; columns?: object[]; amountField?: string; … }[]` | optional | Inline master-detail child collections |
 | **sharing** | `{ enabled?: boolean; publicLink?: string; password?: string; allowedDomains?: string[]; … }` | optional | Public sharing configuration for this form |
 | **submitBehavior** | `{ kind: 'thank-you'; title?: string; message?: string } \| { kind: 'redirect'; url: string; delayMs?: integer } \| { kind: 'continue' } \| { kind: 'next-record' }` | optional | Post-submit behavior. On the `redirect` arm, `url` is relative-only and interpolates only declared record fields as `{{record.field_name}}`, URL-escaped. |
-| **buttons** | `{ submit?: object; cancel?: object; reset?: object }` | optional | Form action-button visibility & labels; folded onto the flat renderer props by ObjectUI ObjectForm. |
+| **buttons** | `{ submit?: object; cancel?: object }` | optional | Form action-button visibility & labels; folded onto the flat renderer props by ObjectUI ObjectForm. |
 | **defaults** | `Record<string, any>` | optional | Initial field values for create-mode forms (folded into ObjectUI ObjectForm initial values;). |
 
 ### Nested Shape: `GetUiViewResponse.protection`
