@@ -108,10 +108,13 @@ export const fieldForm = defineForm({
           visibleWhen: "data.type == 'currency' || (data.type == 'formula' && data.returnType == 'currency')",
           helpText: 'Which currency this field is in — a currency field, or a formula whose return type is Currency. Unset: dynamic mode. The value is a bare number in either mode.',
           fields: [
-            { field: 'currencyMode', type: 'select', helpText: 'dynamic (the default): the field has no currency of its own, and amounts display in the tenant default currency (the localization.currency setting). fixed: the field has one currency, defaultCurrency.', options: [
+            { field: 'currencyMode', type: 'select', helpText: 'dynamic (the default): the field has no currency of its own, and amounts display in the tenant default currency (the localization.currency setting). fixed: the field has one currency, defaultCurrency. record: each record has its own currency, stored in the field currencyField names.', options: [
               { label: 'Dynamic — the tenant default currency', value: 'dynamic' },
               { label: 'Fixed — one currency for this field', value: 'fixed' },
+              { label: 'Record — each record names its currency', value: 'record' },
             ] },
+            // ADR-0144 D2 — the record-mode pointer.
+            { field: 'currencyField', type: 'text', helpText: 'Record mode only, and required there: the field on this object holding each record\'s ISO 4217 code — a text field with valueDomain iso_4217_currency, conventionally currency_code.' },
             { field: 'defaultCurrency', type: 'text', helpText: 'The one currency of a fixed-mode field, as a three-character ISO 4217 code (e.g. USD, EUR). Defaults to CNY. Not read in dynamic mode.' },
           ],
         },
