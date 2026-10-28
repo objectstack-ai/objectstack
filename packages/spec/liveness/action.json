@@ -204,7 +204,10 @@
     },
     "newTabUrl": {
       "status": "live",
-      "note": "objectui."
+      "verifiedAt": "2026-10-28",
+      "evidenceScope": "in-repo",
+      "evidence": "ui/packages/app-shell/src/utils/consoleServerAction.ts#createConsoleServerActionHandler (behind `takesNewTabUrlFastPath`, drives the pre-opened tab to the backend origin + `newTabUrl` with `{recordId}` substituted, and posts nothing)",
+      "note": "A path on the same backend: the spec refuses at parse any value that does not start with / (an absolute URL opened the backend origin + the whole URL). An external page is a type:'url' action with openIn: 'new-tab'."
     },
     "openIn": {
       "status": "live",

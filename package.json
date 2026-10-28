@@ -39,6 +39,8 @@
     "check:bash32-floor": "node scripts/check-bash32-floor.mjs --self-test && node scripts/check-bash32-floor.mjs",
     "check:stack-collection-maps": "node scripts/check-stack-collection-maps.mjs --self-test && node scripts/check-stack-collection-maps.mjs",
     "check:widget-option-census": "node scripts/check-widget-option-census.mjs --self-test && node scripts/check-widget-option-census.mjs",
+    "check:sdui-reference": "node scripts/gen-sdui-reference.mjs --self-test && node scripts/gen-sdui-reference.mjs --check",
+    "gen:sdui-reference": "node scripts/gen-sdui-reference.mjs",
     "check:doc-authoring": "node scripts/check-doc-authoring.mjs --self-test && node scripts/check-doc-authoring.mjs",
     "check:doc-anchors": "node scripts/check-doc-anchors.mjs --self-test && node scripts/check-doc-anchors.mjs",
     "check:doc-frontmatter": "node scripts/check-doc-frontmatter.mjs --self-test && node scripts/check-doc-frontmatter.mjs",

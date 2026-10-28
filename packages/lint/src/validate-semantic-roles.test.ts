@@ -78,6 +78,31 @@ describe('validateSemanticRoles (ADR-0085)', () => {
     expect(findings[0].message).toContain('unused');
   });
 
+  it('[#27069] a group carrying relatedList is a body table, not an empty section: rules (b) and (d) skip it', () => {
+    // The card's own shape: a group that places a related list holds no
+    // fields, and the parse refuses a field that names it. Before the
+    // exemption rule (b) told the author to assign a field to it.
+    const groups = [
+      { key: 'basics', label: 'Basics' },
+      { key: 'lines', label: 'Lines', relatedList: 'quote_line.quote' },
+    ];
+    const clean = validateSemanticRoles(stack([{
+      name: 'quote',
+      highlightFields: ['name'],
+      fieldGroups: groups,
+      fields: { name: { type: 'text', group: 'basics' }, code: { type: 'text', group: 'basics' } },
+    }]));
+    expect(clean, JSON.stringify(clean)).toEqual([]);
+    // Control: the same group WITHOUT relatedList is still an empty section.
+    const control = validateSemanticRoles(stack([{
+      name: 'quote',
+      highlightFields: ['name'],
+      fieldGroups: [groups[0], { key: 'lines', label: 'Lines' }],
+      fields: { name: { type: 'text', group: 'basics' }, code: { type: 'text', group: 'basics' } },
+    }]));
+    expect(control.map((f) => [f.rule, f.message.includes('"lines"')])).toEqual([[FIELD_GROUP_EMPTY, true]]);
+  });
+
   it('flags a group fully shadowed by the highlight strip (rule d)', () => {
     // `money`'s only member is also a highlight → detail bodies hide it, so
     // the group never renders on detail pages.

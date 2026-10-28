@@ -566,6 +566,27 @@ function refuseCurrencyFieldOutsideRecordMode(
 }
 
 /**
+ * The refusal a `fixed` currency config without a code meets (#27157, ruling
+ * 6464202770 on #27119, Q2 = X). Until this ruling the schema filled the code
+ * in with `'CNY'`, so the field silently became a yuan field.
+ */
+const CURRENCY_CONFIG_FIXED_WITHOUT_CODE =
+  '`currencyConfig.currencyMode: \'fixed\'` needs `defaultCurrency`, the field\'s one currency: '
+  + 'give its ISO 4217 code (e.g. `defaultCurrency: \'USD\'`), or use `currencyMode: \'dynamic\'` '
+  + 'to display amounts in the tenant default currency (the `localization.currency` setting). '
+  + 'Since @objectstack/spec 18 nothing fills a code in; it used to be `\'CNY\'`.';
+
+/** `fixed` ⇒ an authored `defaultCurrency`; `dynamic` reads none, so it needs none. */
+function refuseFixedCurrencyWithoutCode(
+  config: { currencyMode: 'dynamic' | 'fixed' | 'record'; defaultCurrency?: string },
+  ctx: z.RefinementCtx,
+): void {
+  if (config.currencyMode === 'fixed' && config.defaultCurrency === undefined) {
+    ctx.addIssue({ code: 'custom', path: ['defaultCurrency'], message: CURRENCY_CONFIG_FIXED_WITHOUT_CODE });
+  }
+}
+
+/**
  * Currency Configuration Schema
  * Configuration for currency field type supporting multi-currency — and, in the
  * same shape, for a `formula` field whose `returnType` is `currency` (#22727).
@@ -579,6 +600,20 @@ function refuseCurrencyFieldOutsideRecordMode(
  * There is no decimal-places key: a currency's decimal places are its ISO 4217
  * minor unit (see {@link CURRENCY_CONFIG_DECIMAL_PLACES_GUIDANCE} for the
  * removed `precision`).
+ *
+ * `defaultCurrency` has no default (#27157, ruling 6464202770 on #27119, Q2 =
+ * X: an amount whose currency is not known takes the tenant default, and
+ * nothing guesses). It used to be `.default('CNY')`, so a `fixed` config with
+ * no code became a yuan field without anyone writing yuan, and every
+ * `dynamic` config's parse output carried a `'CNY'` its readers had to know to
+ * ignore — a default the #9689 principle forbids materializing. A `fixed`
+ * config now needs its code ({@link CURRENCY_CONFIG_FIXED_WITHOUT_CODE}); a
+ * `dynamic` one parses to output with no `defaultCurrency` unless one was
+ * written. Stored rows and built artifacts that carry the baked `'CNY'` on a
+ * `dynamic` config are stripped on rehydration by the ADR-0087 conversion
+ * `currency-config-dynamic-default-currency-removed`. A `fixed` config is never
+ * converted: one with a code keeps it, and a stored row saved without one (rows
+ * are kept as authored) loads with diagnostics and is refused at its next save.
  */
 export const CurrencyConfigSchema = lazySchema(() => strictObject({
   surface: 'this currency configuration',
@@ -587,20 +622,20 @@ export const CurrencyConfigSchema = lazySchema(() => strictObject({
   guidance: CURRENCY_CONFIG_DECIMAL_PLACES_GUIDANCE,
 }, {
   currencyMode: z.enum(['dynamic', 'fixed', 'record']).default('dynamic').describe('Currency mode. `fixed`: the field has one currency, `defaultCurrency`. `dynamic` (the default): the field has no currency of its own — amounts display in the tenant default currency (the `localization.currency` setting; a plain number when none is set) and `defaultCurrency` is not read. `record`: each record has its own currency, the ISO 4217 code stored in the sibling field `currencyField` names; `defaultCurrency` is not read. The value is a bare number in every mode (ADR-0104 D1).'),
-  defaultCurrency: z.string().length(3).default('CNY').describe('The currency code (ISO 4217, e.g. USD, CNY, EUR) of a `fixed`-mode field: its one currency. Not read under `dynamic` (the default), where amounts display in the tenant default currency, nor under `record`, where each record names its own.'),
+  defaultCurrency: z.string().length(3).optional().describe('The currency code (ISO 4217, e.g. USD, CNY, EUR) of a `fixed`-mode field: its one currency, required under `fixed`. Not read under `dynamic` (the default), where amounts display in the tenant default currency, nor under `record`, where each record names its own.'),
   // ADR-0144 D2 — the pointer of a `record`-mode amount. Optional at the key
   // level; `refuseCurrencyFieldOutsideRecordMode` below makes it required
   // under `record` and refuses it under the other two modes, and the object's
   // `superRefine` (`refuseDishonestRecordCurrencyField`, object.zod.ts) checks
   // what it names, because only the object holds the sibling field map.
   currencyField: z.string().optional().describe('`record` mode only, and required there: the name of the field on the same object that holds each record\'s currency — a `text` field declaring `valueDomain: \'iso_4217_currency\'` (conventionally `currency_code`). Refused under `dynamic` and `fixed`.'),
-  // #19992 — no `.overwrite()` here any more. The #7918 ISO 4217
-  // contradiction check and the #11423 default-materializing `.overwrite()`
-  // both existed only for the removed `precision` key (see
-  // CURRENCY_CONFIG_DECIMAL_PLACES_GUIDANCE above), so parse output is
-  // exactly `{ currencyMode, defaultCurrency }` plus the `currencyField` a
-  // `record`-mode author wrote.
-}).superRefine(refuseCurrencyFieldOutsideRecordMode));
+  // #19992 — no `.overwrite()` here any more: the #7918 ISO 4217 contradiction
+  // check and the #11423 default-materializing `.overwrite()` both existed only
+  // for the removed `precision` key (see CURRENCY_CONFIG_DECIMAL_PLACES_GUIDANCE
+  // above). #27157 — `fixed` ⇒ a code; ADR-0144 D2 — `record` ⇔ a pointer, both
+  // below. Parse output is `{ currencyMode }` plus the `defaultCurrency` and
+  // `currencyField` the author wrote.
+}).superRefine(refuseFixedCurrencyWithoutCode).superRefine(refuseCurrencyFieldOutsideRecordMode));
 
 /**
  * Currency Value Schema
@@ -1734,20 +1769,25 @@ export const FieldSchema = lazySchema(() => {
    * controls its appearance on the parent's detail page (read side). The intent
    * lives here in the data model; the detail page derives the UI.
    *
-   * Tri-state (ADR-0085 semantic-role style — this is a PROMINENCE hint, NOT a
-   * layout switch):
+   * Tri-state (ADR-0085 semantic-role style — a statement about the
+   * relationship, not a layout switch):
    *   - `false`         → suppress this child from the parent's detail page.
-   *   - `true` / absent  → shown; stacks with the other non-primary children
-   *                       under a single shared "Related" tab. Only `'primary'`
-   *                       earns its own tab — there is no count-based auto-split.
-   *   - `'primary'`     → CORE relationship: always surfaced prominently. The
-   *                       detail renderer promotes it to its own tab regardless
-   *                       of child count. This states business intent (true
-   *                       across every surface — detail tab, mobile card, AI
-   *                       summary, search facet); "primary → own tab" is only
-   *                       the DETAIL renderer's interpretation. Being prominence
-   *                       (not a `relatedLayout` switch) is what admits it to the
-   *                       object model under ADR-0085's admission test.
+   *   - `true` / absent  → shown as a supporting list: a side card beside the
+   *                       record (under the tabbed page, the shared "Related"
+   *                       tab). There is no count-based auto-split.
+   *   - `'primary'`     → part of the record's MAIN CONTENT (#27069): drawn in
+   *                       the record's body — the details column, after the
+   *                       field sections — as a full-width table, not as a side
+   *                       card (under the tabbed page, its own tab). A field
+   *                       group's `relatedList` can place it among the field
+   *                       sections instead. `'primary'` no longer ORDERS lists:
+   *                       the parent's `ObjectSchema.relatedLists` does, among
+   *                       the body tables and among the side cards alike.
+   *
+   * Absent on a `master_detail` field that sets `inlineEdit`, the list is
+   * `'primary'` by default: line items edited inside the parent's form are part
+   * of its main content (a quote's lines belong under the quote, not beside
+   * it). Write `relatedList: true` to keep such a list a side card.
    *
    * SORT INHERITANCE (#13294, following #11345's browser-verified acceptance
    * run): a derived related list (`relatedList: 'primary'`) inherits its row
@@ -1760,7 +1800,7 @@ export const FieldSchema = lazySchema(() => {
    * A child object with no list-view sort emits no ordering parameter at all,
    * and rows fall back to record-id order.
    */
-  relatedList: z.union([z.boolean(), z.literal('primary')]).optional().describe('Show this child collection as a related list on the parent\'s detail page (read-side mirror of inlineEdit). false = suppress; true/absent = shown (stacked under the shared "Related" tab); \'primary\' = core relationship, promoted to its own tab. Prominence intent, not a layout switch (ADR-0085). A derived related list (relatedList: \'primary\') inherits its row order from the child object\'s DEFAULT list view sort — the isDefault view, or the first declared list item when none is marked default; wire spelling is sort=<field> / sort=-<field>, never $orderby. A child object with no list-view sort emits no ordering parameter, and rows fall back to record-id order.'),
+  relatedList: z.union([z.boolean(), z.literal('primary')]).optional().describe('Show this child collection as a related list on the parent\'s detail page (read-side mirror of inlineEdit). false = suppress; true/absent = shown as a supporting list, a side card beside the record (the shared "Related" tab on the tabbed page); \'primary\' = part of the record\'s main content, drawn in the record\'s body (the details column, after the field sections) as a full-width table (its own tab on the tabbed page). Absent on a master_detail field that sets inlineEdit, the list is \'primary\' by default; write true to keep it a side card. \'primary\' places a list and does not order it: the parent object\'s relatedLists orders the body tables and the side cards (ADR-0085). A derived related list (relatedList: \'primary\') inherits its row order from the child object\'s DEFAULT list view sort — the isDefault view, or the first declared list item when none is marked default; wire spelling is sort=<field> / sort=-<field>, never $orderby. A child object with no list-view sort emits no ordering parameter, and rows fall back to record-id order.'),
   /** Optional section title for the detail-page related list (defaults to the child object label). */
   relatedListTitle: z.string().optional().describe('Title for the detail-page related list'),
   /**

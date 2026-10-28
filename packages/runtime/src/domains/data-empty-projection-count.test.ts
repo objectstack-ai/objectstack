@@ -112,7 +112,6 @@ describe('[#26644] the dispatcher /data doors — an empty projection and an unr
         ['GET list ?$select=, (the card)', 'GET', '/data/inquiry', { $select: ',' }, undefined, '$select', 'names no field'],
         ['GET list ?select= (the card)', 'GET', '/data/inquiry', { select: '' }, undefined, 'select', 'names no field'],
         ['GET list ?$count=maybe (the card)', 'GET', '/data/inquiry', { $top: '2', $count: 'maybe' }, undefined, '$count', 'must be true or false'],
-        ['POST query {"fields":[]}', 'POST', '/data/inquiry/query', {}, { fields: [] }, 'fields', 'names no field'],
         ['GET by id ?select=', 'GET', '/data/inquiry/r1', { select: '' }, undefined, 'select', 'names no field'],
         ['GET by id ?select=,', 'GET', '/data/inquiry/r1', { select: ',' }, undefined, 'select', 'names no field'],
     ])('%s: 400 VALIDATION_ERROR naming the spelling — no read', async (_name, method, path, query, body, param, sentence) => {
@@ -131,12 +130,18 @@ describe('[#26644] the dispatcher /data doors — an empty projection and an unr
     // naming no field is refused where every other malformed body is: at the
     // schema, `400 VALIDATION_FAILED` naming `query.<key>`, and the member for
     // a blank name (the #25269 precedent for the page window). Still a 400,
-    // still before any read.
+    // still before any read. [#27166] The canonical `fields` (top level and
+    // on an `expand` entry) is the QueryAST's own projection, which now takes
+    // the same array arm, so a body naming no field there is refused at the
+    // schema too, as its `$select` alias is.
     it.each<[string, Record<string, unknown>, string]>([
         ['{"select":""}', { select: '' }, 'query.select'],
         ['{"$select":","}', { $select: ',' }, 'query.$select'],
         ['{"select":[]}', { select: [] }, 'query.select'],
         ['{"select":["name",""]} (the blank member)', { select: ['name', ''] }, 'query.select.1'],
+        ['{"fields":[]}', { fields: [] }, 'query.fields'],
+        ['{"fields":["name",""]} (the blank member)', { fields: ['name', ''] }, 'query.fields.1'],
+        ['{"expand":{"owner":{"fields":[]}}}', { expand: { owner: { object: 'sys_user', fields: [] } } }, 'query.expand.owner.fields'],
     ])('POST query %s: 400 VALIDATION_FAILED naming the body key at the schema — no read', async (_name, body, field) => {
         const before = reads.n;
 

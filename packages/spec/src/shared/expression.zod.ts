@@ -56,7 +56,7 @@ import { cronExpressionInput, templateExpressionInput, type TypedExpressionRefus
  * routed through this schema — they stay driver-native because their security
  * posture and portability story differ.
  *
- * @see content/docs/concepts/north-star.mdx §8 "No private expression DSL"
+ * @see docs/adr/0032-unified-expression-layer.md — "one CEL language"
  */
 
 /**
