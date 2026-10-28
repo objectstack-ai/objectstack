@@ -10,7 +10,7 @@ import {
   type ObjectLike,
   type Logger,
 } from './external-datasource-service.js';
-import { registeredDriverName } from './datasource-connection-service.js';
+import { registeredDriverName, type DatasourceConnectionService } from './datasource-connection-service.js';
 
 // The structural `DataEngineLike` re-declaration that used to live here is
 // DELETED (#11493, part of the fix by the maintainer ruling): the `'data'`
@@ -157,9 +157,27 @@ export class ExternalDatasourceServicePlugin implements Plugin {
       return driverName ? data?.getDriverByName?.(driverName) : undefined;
     };
 
+    /**
+     * [#27100] The retained connect verdict, for the saved datasource's Test:
+     * read from the shared `'datasource-connection'` service, the one store the
+     * admin list's `statusReason` reads too. A host without that service has
+     * no verdicts, and Test keeps the engine's answer.
+     *
+     * Resolved where it is used, never at `init()`, for the reason
+     * `metadataSaveDoor` is (AGENTS.md, "Startup registry reads").
+     */
+    const connectionState: ExternalDatasourceServiceConfig['connectionState'] = (datasource) => {
+      const connection = safeGetService<Partial<Pick<DatasourceConnectionService, 'getConnectionState'>>>(
+        ctx,
+        'datasource-connection',
+      );
+      return typeof connection?.getConnectionState === 'function' ? connection.getConnectionState(datasource) : undefined;
+    };
+
     const config: ExternalDatasourceServiceConfig = {
       introspect,
       liveDriver,
+      connectionState,
       getDatasource: async (n) => (await metadata()?.get('datasource', n)) as DatasourceLike | undefined,
       // [#21842] Both object reads come from the one registry, so the sweep
       // judges the very definitions it listed. See `objectRegistry`.
