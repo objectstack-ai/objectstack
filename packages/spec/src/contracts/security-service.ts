@@ -622,7 +622,17 @@ export interface ISecurityService {
    * row naming it passes field-level security. Like {@link getWritableFields},
    * neither the object grant, the record's row-level write scope (sharing,
    * row-level security, ownership) nor a field's own rules (`readonly`, a
-   * computed type) are part of the answer: a reader ANDs it with those.
+   * computed type) are part of `editable`: a reader ANDs it with `writable`
+   * below and with those rules.
+   *
+   * **`writable` is the write gate's own verdict on the ROW**, ⛔ never a
+   * second evaluator either: whether a by-id update of `recordId` passes the
+   * object grant, record sharing and ownership, row-level security and the
+   * controlled-by-parent master's edit access, judged by running those gates
+   * over that update without performing it. `false` means the update is
+   * refused whole; `true` promises nothing about rules judged on the values a
+   * save sends (a pending approval's record lock, conditional read-only and
+   * validation rules) or about a data source that refuses writes.
    *
    * **`readable` is {@link getReadableFields}' answer**, unchanged: reads are
    * judged row-blind (a `when` reaches the edit vote only).

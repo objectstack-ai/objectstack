@@ -3107,7 +3107,9 @@ export const GetEffectivePermissionsResponseSchema = lazySchema(() => z.object({
  * the answer a record's edit form reads. `editable` is judged on the stored row
  * by the write gate itself, so a field permission whose `when` names only some
  * rows locks the field only on those rows; `/auth/me/permissions`, which holds
- * no row, keeps reporting such an entry as its lock.
+ * no row, keeps reporting such an entry as its lock. `writable` is the row's
+ * own verdict, from the same gate: a form offers an edit only where `writable`
+ * is true, and then only of the fields `editable` lists.
  */
 export const GetRecordFieldAccessResponseSchema = lazySchema(() => z.object({
   object: z.string().describe('Object name'),
@@ -3119,7 +3121,14 @@ export const GetRecordFieldAccessResponseSchema = lazySchema(() => z.object({
     'Fields the caller may write on this record, as field-level security judges an update of the stored row: a '
     + 'row-conditioned field permission locks a field only on the rows its condition names. A field absent here is '
     + 'refused by the write gate. The object grant, the record\'s row-level write scope (sharing, row-level security, '
-    + 'ownership) and a field\'s own rules (readonly, computed types) are not part of it',
+    + 'ownership; see `writable`) and a field\'s own rules (readonly, computed types) are not part of it',
+  ),
+  writable: z.boolean().describe(
+    'Whether the caller may update this record at all, judged by the write gate on the stored row: the object\'s '
+    + 'edit permission, record sharing and ownership, row-level security, and a parent record\'s edit access for a '
+    + 'record controlled by its parent. False means an update of this record is refused whole, whatever it changes. '
+    + 'True does not promise that a save succeeds: a pending approval that locks the record, conditional read-only '
+    + 'and validation rules on the values sent, and a data source that refuses writes are judged when the record is saved',
   ),
 }));
 

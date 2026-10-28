@@ -70,6 +70,14 @@
  * imported from the module `security-plugin.ts` imports it from.
  *
  * Nothing re-exports this module, so the published surface does not move.
+ *
+ * ## [#27175] The handler is also returned
+ *
+ * The function registers the handler and returns it, and `start()` keeps it,
+ * so the record field-access answer's `writable` can run the very handler a
+ * write meets over a synthetic by-id update (`record-row-write-probe.ts`).
+ * The handler knows that operation in one place only: it advances no write
+ * epoch for it.
  */
 import {
   type PluginContext,
@@ -92,6 +100,7 @@ import { crossFieldClassRefusalCarriedBy, findCrossFieldClassRefusal } from '@ob
 import type { SecurityPlugin } from './security-plugin.js';
 import { isGuestEnvelope, requiredCapsForOperation } from './security-plugin.js';
 import { assertFlowSystemIdentityWriteAllowed } from './flow-system-identity-write-refusal.js';
+import { isRowWriteProbe, type AuthzMiddlewareFn } from './record-row-write-probe.js';
 import {
   intersectDelegatedScope,
 } from './explain-engine.js';
@@ -270,8 +279,11 @@ export function registerAuthzMiddleware(
   ctx: PluginContext,
   ql: IObjectQLEngine,
   metadata: IMetadataService,
-): void {
-  ql.registerMiddleware(async (opCtx: any, chainNext: () => Promise<void>) => {
+): AuthzMiddlewareFn {
+  // [#27175] The handler is kept as well as registered: the record
+  // field-access answer's `writable` runs THIS function over a synthetic by-id
+  // update (`record-row-write-probe.ts`), so the verdict is the gate's own.
+  const authzMiddleware: AuthzMiddlewareFn = async (opCtx: any, chainNext: () => Promise<void>) => {
     // [#21771] Whether THIS operation was issued from inside another engine
     // operation's pipeline (a cascade, a hook's `ctx.api` write), read before
     // this operation opens a scope of its own; and the scoped `next` every
@@ -309,8 +321,12 @@ export function registerAuthzMiddleware(
     // (which only compares equality) but not harmless on the bus: the
     // `authz.invalidated` bridge publishes per bump. The guard below is
     // therefore about message count, not about correctness.
+    //
+    // [#27175] A row write probe is no write: it changes no grant, and it
+    // must leave no shared state behind, so it advances nothing.
     if (
       !this.epoch.seamOwnedByEngine &&
+      !isRowWriteProbe(opCtx) &&
       (opCtx.operation === 'insert' || opCtx.operation === 'update' || opCtx.operation === 'delete')
     ) {
       this.epoch.bump('write');
@@ -2381,5 +2397,7 @@ export function registerAuthzMiddleware(
     // {@link maskOperationResult}, which the ADR-0056 public-form grant
     // branch above reads too — one masker for both.
     this.maskOperationResult(opCtx, permissionSets, secMeta, delegatorSets);
-  });
+  };
+  ql.registerMiddleware(authzMiddleware);
+  return authzMiddleware;
 }
