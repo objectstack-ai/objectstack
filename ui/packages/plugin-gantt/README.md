@@ -313,19 +313,16 @@ chart runs its own query, so the node is the only way the term reaches it. They
 are not authored keys: the spec's row does not declare them, so `objectui
 validate` refuses them in the bag.
 
-**2. How the fields map — `getGanttConfig`.** Two spellings, checked in order.
-The **`gantt` block wins whenever it is present**, and it is taken WHOLE — the
-flat top-level keys are not merged into it. The flat spelling is read only when
-there is no `gantt` block, and then only when `startDateField` and
-`endDateField` are both present. A node carrying both spellings renders the
-block's values and gets a dev-mode warning naming the ignored top-level keys.
-**Author the `gantt` block**: an authored node cannot carry the flat spelling —
-`objectui validate` refuses each flat key and names `properties.gantt.KEY`, and
-the spec's row refuses it inside the bag too. Since objectstack#25923
-`ObjectGanttSchema` does not declare the flat keys either, and `ObjectView` and
-`ListView` write the `gantt` block onto the node they compose. The flat read is
-kept for a host that mounts `<ObjectGantt>` directly, typed on this package's
-own hand-off type, `ObjectGanttHandoff`.
+**2. How the fields map — `getGanttConfig`.** One spelling: the **`gantt`
+block**, taken WHOLE and validated against the spec's `GanttConfigSchema`. The
+same keys written flat on the node are not read. A node that carries them and
+no `gantt` block reaches the "Gantt configuration required" screen, and in dev
+a warning names the top-level keys the chart ignored. **Author the `gantt`
+block**: an authored node cannot carry the flat spelling — `objectui validate`
+refuses each flat key and names `properties.gantt.KEY`, and the spec's row
+refuses it inside the bag too. Since objectstack#25923 `ObjectGanttSchema` does
+not declare the flat keys, `ObjectView` and `ListView` write the `gantt` block
+onto the node they compose, and the renderer's flat fallback read is retired.
 
 Precedence follows the maintainer ruling on objectui#5018 (2026-08-17), which
 settled the identical two-faces shape for `plugin-map`; objectui#6469 inherited

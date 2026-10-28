@@ -35,14 +35,18 @@ const INLINE = [
   { id: '2', name: 'Beta', start: '2024-02-01', end: '2024-02-10', status: 'doing' },
 ];
 
-function schema(extra: Record<string, any> = {}) {
+/** `extra` lands on the node; `gantt` adds members to its `gantt` block. */
+function schema(extra: Record<string, any> = {}, gantt: Record<string, any> = {}) {
   return {
     type: 'gantt',
-    startDateField: 'start',
-    endDateField: 'end',
-    titleField: 'name',
+    gantt: {
+      startDateField: 'start',
+      endDateField: 'end',
+      titleField: 'name',
+      quickFilters: [{ field: 'status', label: '状态', options: ['todo', 'doing'] }],
+      ...gantt,
+    },
     data: { provider: 'value', items: INLINE },
-    quickFilters: [{ field: 'status', label: '状态', options: ['todo', 'doing'] }],
     ...extra,
   } as any;
 }
@@ -93,11 +97,10 @@ describe('ObjectGantt tooltip fields skip empty values (悬浮分层字段)', ()
       { id: '1', name: 'Plan', start: '2024-01-01', end: '2024-01-05', category: '排产', qty: 0, owner: '' },
       { id: '2', name: 'Dispatch', start: '2024-02-01', end: '2024-02-10', owner: '张三', tags: [] },
     ];
-    const s = schema({
-      data: { provider: 'value', items },
-      quickFilters: undefined,
-      tooltipFields: ['category', 'qty', 'owner', 'tags', 'missing'],
-    });
+    const s = schema(
+      { data: { provider: 'value', items } },
+      { quickFilters: undefined, tooltipFields: ['category', 'qty', 'owner', 'tags', 'missing'] },
+    );
     const { container, getByTestId } = render(<ObjectGantt schema={s} />);
     await waitFor(() => expect(gv(container).getAttribute('data-count')).toBe('2'));
     // Row 1: category + qty (0 is a real value) survive; empty owner, absent

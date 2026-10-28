@@ -356,18 +356,16 @@ describe('the write package closure reaches the gate (#9612)', () => {
         }
     });
 
-    it('narrows NOTHING when the registry cannot produce the written package', async () => {
+    it('a promotion into a package the registry cannot produce is refused before the closure gate', async () => {
         // Its `manifest.dependencies` is the ONLY declaration of what it may
-        // reference; without it there is no bound, and an unbounded closure is
-        // the whole collection.
-        //
-        // [#20863] A flow SAVE can no longer name a package the registry does
-        // not hold — the one authoring rule refuses it before this gate runs —
-        // so the state is reached the way it still arises: a draft stored into
-        // an installed package, promoted after that package has left the
-        // registry. The promotion names the draft's base, as a package publish
-        // does; the same promotion with the package still installed is the
-        // discriminating control.
+        // reference; without it there is no bound. [#20863] A flow SAVE can no
+        // longer name a package the registry does not hold, and [#26921] nor
+        // can the promotion: a draft stored into an installed package and
+        // promoted after that package left the registry would go live bound
+        // to a package that does not exist, so the named-base rule refuses it
+        // first. This pinned an unnarrowed promotion there until then; the
+        // same promotion with the package still installed is the
+        // discriminating control, and the closure still refuses it.
         const promoted = async (uninstall: boolean) => {
             const { protocol, packages } = makeProtocol();
             await save(protocol, flowOn('crm_on_stranger', 'other_widget'), { packageId: OWN, mode: 'draft' });
@@ -376,16 +374,15 @@ describe('the write package closure reaches the gate (#9612)', () => {
         };
 
         // [#24669] Installed, the closure is in force and the promotion is
-        // refused; uninstalled, nothing narrows and the stranger's object
-        // resolves against the whole collection.
+        // refused by it.
         expectRefusedOutsideClosure(
             await promoted(false).catch((e: any) => e),
             'flows[0].nodes[0].config.objectName',
             'promotion into the installed package',
         );
-        const unnarrowed = await promoted(true);
-        expect(unnarrowed.success).toBe(true);
-        expect(triggerAdvisories(unnarrowed)).toEqual([]);
+        const uninstalled = await promoted(true).catch((e: any) => e);
+        expect({ code: uninstalled?.code, status: uninstalled?.status, packageId: uninstalled?.packageId })
+            .toEqual({ code: 'WRITABLE_PACKAGE_REQUIRED', status: 422, packageId: OWN });
     });
 
     it('narrows NOTHING for the `sys_metadata` overlay sentinel', async () => {
