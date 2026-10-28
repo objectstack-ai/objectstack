@@ -160,7 +160,7 @@ function parseCsv(text: string): string[][] {
 
 async function blobText(blob: Blob): Promise<string> {
   const text = await blob.text();
-  return text.replace(/^﻿/, '');
+  return text.replace(/^\uFEFF/, '');
 }
 
 describe('report export control (exportOptions, #25873)', () => {

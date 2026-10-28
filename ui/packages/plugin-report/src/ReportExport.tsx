@@ -198,7 +198,7 @@ export function ReportExportControl({ exportOptions, label, name, snapshot }: Re
       const fileName = buildExportFileName(format, { prefix, label: reportLabel, objectName: name });
       if (format === 'csv') {
         // The BOM makes Excel open a UTF-8 CSV as UTF-8 (non-Latin labels).
-        downloadBlob(new Blob(['﻿', buildReportCsv(snapshot, includeHeaders)], { type: 'text/csv;charset=utf-8' }), fileName);
+        downloadBlob(new Blob(['\uFEFF', buildReportCsv(snapshot, includeHeaders)], { type: 'text/csv;charset=utf-8' }), fileName);
       } else {
         const bytes = await buildReportXlsx(snapshot, includeHeaders, reportLabel || 'Report');
         downloadBlob(new Blob([bytes], { type: XLSX_MIME }), fileName);
