@@ -3,6 +3,13 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { fetchFlowRuns, errorText, buildStepTree, regionLabel, groupChildren, parallelBranchIndex } from './FlowRunsPanel';
 import type { StepTreeNode } from './FlowRunsPanel';
+// The designer rows this suite reads in zh live in `@object-ui/i18n`'s `studio`
+// namespace, whose `zh` catalogue is fetched on demand (objectstack#25922).
+// Resident before any case: this file runs in the `unit` project, whose shared
+// module graph would otherwise let it pass only when another file had loaded
+// `zh` first.
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+await loadStudioCatalogue('zh');
 
 const RUN = {
   id: 'run-1',
