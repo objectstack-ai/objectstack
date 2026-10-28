@@ -67,6 +67,19 @@ A new presentation-intent key enters `ObjectSchema` only if **both** hold:
 
 Keys that merely hide/re-arrange correct information (`hideRelatedTab`, `showReferenceRail`, `relatedLayout`, `useFieldGroups`, explicit `detail.sections`, or a **modal-vs-page presentation surface** such as a `recordSurface` key) are rejected at this layer. The supported path for per-page control is the one that already exists and is honestly scoped: an **assigned page** (full page schema). A record's *default* surface (full page vs. drawer/modal overlay) is not authored at all: it is **derived** from how heavy the record is — `deriveRecordSurface` (#2578) — because field count is exactly the kind of fact a machine can infer, so a `recordSurface` key fails admission test #1. If a genuine relationship-level need appears (e.g. "this child object is noise on every parent"), it gets modeled at the relationship layer, not as a page toggle.
 
+> **Note (2026-10-28, #27069).** Two keys entered under this test. The parent
+> object's `relatedLists` (the business order of its related lists) passes test
+> 1, since which relationships matter most is business intent no schema
+> carries, and test 2, since it orders the object's relationships on every
+> record surface and names no page, the `highlightFields` precedent. A field
+> group's `relatedList` (a group standing for one list's body table) is a
+> layout-role entry under §5, as `fieldGroups` already is. And the FK's
+> `relatedList: 'primary'`, admitted as a prominence hint, is re-read as a
+> placement (the record body rather than a side card), at the relationship
+> layer this paragraph names; it no longer orders anything
+> ([ADR-0035](./0035-config-driven-master-detail.md)'s amendment of the same
+> date).
+
 ### 3. Deletions (all evidenced zero-author)
 
 - **`detail` block removed from `ObjectSchema`** — all three typed keys. `renderViaSchema` retires *together with* the legacy monolith renderer path in objectui (separate execution PR; the key is only that path's steering wheel, deleting it alone saves nothing). `hideReferenceRail`/`hideRelatedTab` are removed outright (the former is a proven no-op for spec authors; the latter's raison d'être — overriding rail/tab dedup — died with the rail).

@@ -1122,6 +1122,14 @@ export const LifecycleSchema = lazySchema(() => strictObject({
 }));
 
 /**
+ * [#27069] One inbound relationship, as `relatedLists` entries and a field
+ * group's `relatedList` name it: a child object name, or `object.field` for one
+ * FK of a child that points here through several. Both halves are the
+ * snake_case machine-name grammar objects and fields already declare.
+ */
+const RELATED_LIST_ENTRY_PATTERN = /^[a-z_][a-z0-9_]*(\.[a-z_][a-z0-9_]*)?$/;
+
+/**
  * Object Field Group Schema — MVP (data-layer protocol)
  * 
  * Declares the set of logical field groups for an object. A group bundles
@@ -1223,6 +1231,23 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
 
   /** Optional description / help text shown under the group header. */
   description: z.string().optional().describe('Optional description shown under the group header').meta({ title: 'Description' }),
+
+  /**
+   * [#27069] Makes this entry stand for a BODY TABLE instead of a section of
+   * fields: it names one inbound relationship, the way an `ObjectSchema.relatedLists`
+   * entry does (a child object, or `object.field`), and places that related
+   * list's table at this position in the details column, so a quote's line
+   * items can sit under its basic information with its terms after them.
+   *
+   * Such a group carries no fields: a field whose `group` names it is refused
+   * at parse. A name that matches no inbound relationship is refused at
+   * `defineStack`, as a `relatedLists` entry is. Body tables no group places
+   * keep the record page's default position. `relatedList: false` on the FK
+   * still hides the table.
+   */
+  relatedList: z.string().regex(RELATED_LIST_ENTRY_PATTERN, {
+    message: 'A field group\'s relatedList is a child object name (e.g. "task") or object.field (e.g. "event.related_to"), in snake_case',
+  }).optional().describe('Places a related list\'s body table at this position in the record\'s details column instead of a section of fields: names one inbound relationship, as a relatedLists entry does (child object, or object.field when that child has more than one relationship to this object). A group with relatedList holds no fields: a field that names it as its group is refused, and so is a name that matches no inbound lookup / master_detail field. relatedList: false on the relationship still hides the table.').meta({ title: 'Related List' }),
 
   /**
    * [ADR-0085 §5] Section visibility predicate — CEL, the ADR-0089 canonical
@@ -2145,6 +2170,41 @@ function refuseAttachedBlockConflicts(attachedOnRead: unknown, fields: unknown, 
 }
 
 /**
+ * [#27069] A field group that carries `relatedList` stands for a body table,
+ * not a section of fields, so no field may join it. One located issue per
+ * field whose `group` names such a group, at `['fields', <name>, 'group']`.
+ *
+ * Judged here, in the object's `superRefine` beside
+ * {@link refuseAttachedBlockConflicts}, for the reason given there: only the
+ * object holds both the groups and the field map, and the existing callback
+ * adds no check node the JSON Schema projection would have to drop. Whether the
+ * named relationship exists is a cross-object question, judged at
+ * `defineStack` (`validateCrossReferences`, `stack.zod.ts`).
+ */
+function refuseFieldsInRelatedListGroups(fieldGroups: unknown, fields: unknown, ctx: z.RefinementCtx): void {
+  if (!Array.isArray(fieldGroups) || fields === null || typeof fields !== 'object') return;
+  const tableGroups = new Map<string, string>();
+  for (const group of fieldGroups) {
+    if (group !== null && typeof group === 'object' && typeof group.key === 'string' && typeof group.relatedList === 'string') {
+      tableGroups.set(group.key, group.relatedList);
+    }
+  }
+  if (tableGroups.size === 0) return;
+  for (const [name, field] of Object.entries(fields)) {
+    const group = field !== null && typeof field === 'object' ? (field as { group?: unknown }).group : undefined;
+    if (typeof group !== 'string' || !tableGroups.has(group)) continue;
+    ctx.addIssue({
+      code: 'custom',
+      path: ['fields', name, 'group'],
+      message:
+        `Field '${name}' names the field group '${group}', but that group places the related list `
+        + `'${tableGroups.get(group)}' (its \`relatedList\`), so it holds no fields. Put the field in another `
+        + 'group, or declare a group of fields beside the table and name that one.',
+    });
+  }
+}
+
+/**
  * [ADR-0055 §1 · #23100, maintainer ruling B] A `controlled_by_parent` object
  * derives its master from EXACTLY ONE `master_detail` field declared
  * `required: true`. The parse refuses the object otherwise — zero such fields,
@@ -2973,6 +3033,34 @@ const ObjectSchemaBase = strictObject(
   // (framework#2536): authoring it is rejected by `create()` like any unknown
   // key. All first-party consumers read `highlightFields` since objectui#2168.
   /**
+   * [#27069] The business order of this object's RELATED LISTS on its record
+   * page — what `highlightFields` is to fields, for child relationships. Each
+   * entry names one inbound relationship: the child object (`'task'`), or
+   * `object.field` when that child points here through more than one FK
+   * (`'event.related_to'`); a bare child name orders all of that child's lists
+   * together. Listed relationships come first, in this order; every unlisted
+   * one follows in the derived order (owned `master_detail` children, then
+   * `lookup` children, each in declaration order).
+   *
+   * Strict names: an entry that matches no inbound `lookup` / `master_detail`
+   * field of this object is refused at `defineStack` (the cross-object check,
+   * where every child's fields are known), naming the entry and the inbound
+   * relationships that exist. The shape alone is judged at parse.
+   *
+   * It orders; it does not show or hide. `relatedList: false` on the FK still
+   * hides a listed relationship, and a FK's `relatedList: 'primary'` still
+   * decides where its list is drawn (the record's body rather than a side
+   * card): this order applies among the body tables and among the side cards.
+   *
+   * Reader: objectui's record page, through `deriveRelatedLists`
+   * (`ui/packages/app-shell/src/utils/deriveRelatedLists.ts`).
+   */
+  relatedLists: z.array(
+    z.string().regex(RELATED_LIST_ENTRY_PATTERN, {
+      message: 'A relatedLists entry is a child object name (e.g. "task") or object.field (e.g. "event.related_to"), in snake_case',
+    }),
+  ).optional().describe('Business order of this object\'s related lists on its record page, most important first. Each entry is a child object name (e.g. "task"), or object.field when that child has more than one relationship to this object (e.g. "event.related_to"). Listed relationships come first in this order; unlisted ones follow in the derived order (owned master_detail children, then lookup children). An entry that matches no inbound lookup / master_detail field of this object is refused. It orders only: relatedList: false on the relationship still hides a list, and relatedList: \'primary\' still places a list in the record\'s body, so the order applies among the body tables and among the side cards.'),
+  /**
    * [ADR-0085] Semantic role: the field that represents the record's LINEAR
    * lifecycle (an ordered pipeline / stage progression). A string names the
    * field; `false` declares the object's status-like field NON-linear (an
@@ -3405,6 +3493,9 @@ const ObjectSchemaBase = strictObject(
   // [#22211 ruling A] A read attachment names at least one leaf, and is not a
   // field: its block names may not repeat a declared field name.
   refuseAttachedBlockConflicts(object.attachedOnRead, object.fields, ctx);
+  // [#27069] A field group carrying `relatedList` is a body table: no field
+  // joins it. See the helper's docblock.
+  refuseFieldsInRelatedListGroups(object.fieldGroups, object.fields, ctx);
   // [ADR-0055 §1 · #23100 ruling B] Exactly one required `master_detail`
   // under `controlled_by_parent` — the one master relation the runtime derives
   // access from. See the helper's docblock.
