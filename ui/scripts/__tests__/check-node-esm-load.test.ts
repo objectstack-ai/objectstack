@@ -853,8 +853,8 @@ describe('objectstack#26860 — the load leg is graded over the release build', 
     ];
     try {
       const exit = main(['--force-build'], {
-        build: (workspace: string, options: { force?: boolean }) => {
-          calls.push({ workspace, force: options.force });
+        build: (workspace: string, options?: { force?: boolean }) => {
+          calls.push({ workspace, force: options?.force });
           throw new Error('stop before grading: this case reads only which build was asked for');
         },
       });
