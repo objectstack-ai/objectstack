@@ -18,7 +18,8 @@
  * the width. The two groups grow in proportion to the stages they hold (the
  * inline `flex-grow`, which the test DOM does resolve), each stage fills its
  * share (`flex-1 min-w-0`), and a terminal stage's label wraps rather than
- * being cut or pushed past the edge. The mobile row scrolls and is unchanged.
+ * being cut or pushed past the edge. The phone row's equal shares are pinned in
+ * `record-path.phoneRow-26897.test.tsx` (objectstack#26897).
  *
  * The test DOM resolves no Tailwind, so the stage-level half reads class
  * tokens; the group-level half reads the computed inline style.

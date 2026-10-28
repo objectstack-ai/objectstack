@@ -85,8 +85,8 @@
 //      NOT wired into per-PR CI (the maintainer decision recorded in
 //      `.github/workflows/lint.yml` — it runs by hand before a release or after
 //      a large platform surface lands, with
-//      `.github/workflows/platform-checklist-watchdog.yml` sweeping `main`
-//      daily as its only standing caller), so a future out-of-vocabulary anchor
+//      the `platform-checklist-watchdog` job of `.github/workflows/fleet-patrols.yml`
+//      sweeping `main` daily as its only standing caller), so a future out-of-vocabulary anchor
 //      sits unreported until somebody runs this gate. The exit is the ruling's
 //      own: widen the shared vocabulary in `scripts/symbol-anchors.mjs`, and
 //      ⛔ never re-fork a private extension set here.
@@ -485,8 +485,8 @@ const err = (file, id, msg) => errors.push(`${file}${id ? ` · ${id}` : ''}: ${m
 // on a PR would ever reach a `--self-test` leg.
 //
 // ⚠️ CORRECTED (#11730): the second half of that sentence no longer holds, and
-// the first half is unaffected. `.github/workflows/platform-checklist-watchdog.yml`
-// now runs this gate on `main` daily through its package script, so a
+// the first half is unaffected. The `platform-checklist-watchdog` job of
+// `.github/workflows/fleet-patrols.yml` now runs this gate on `main` daily through its package script, so a
 // `--self-test` leg DOES execute somewhere — and the root alias
 // `check:platform-checklist` carries one, which is what `check:self-test-wired`
 // requires of every script CI runs. The gate is still NOT wired into per-PR CI;

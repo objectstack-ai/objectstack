@@ -2294,22 +2294,34 @@ describe('#26146 — ledger rows below the child level are graded and counted', 
 // ── #26548: a report's period and export are declared before the renderer reads them ──
 //
 // `report` joined TYPE_COLLECTIONS with its ledger's first warned rows:
-// `dateRange` and `exportOptions` are `planned` + `authorWarn` until the
-// Console report page reads them. Read off the SHIPPED ledger, so the flip to
-// `live` (which drops `authorWarn`) turns the warning half of this block red
-// on purpose — rewrite it as a silence pin in that same edit.
-describe('report period and export (#26548 — planned until the report renderer reads them)', () => {
+// `dateRange` and `exportOptions` shipped `planned` + `authorWarn` until the
+// Console report page read them. Both are `live` since #25873's renderer
+// slices (the report page draws its period chip and its Export control), so
+// each warning pin turned red at its flip ON PURPOSE and both are re-subjected
+// to the silence. Both keys are authored beside a property that still warns
+// (`object.externalSharingModel`, `dead`) in the SAME call: one ledger load,
+// one warning, so the silence is a reading and not a lint that stopped loading
+// ledgers (which also answers []).
+describe('report period and export (#26548 — both live, read by the report renderer)', () => {
+  const LIT = { objects: [{ name: 'widget', externalSharingModel: 'read' }] };
   const report = (extra: Record<string, unknown> = {}) => ({
     reports: [{ name: 'pipeline', label: 'Pipeline', type: 'summary', dataset: 'sales', rows: ['stage'], values: ['revenue'], ...extra }],
   });
 
-  it('warns on each key, at the report, with the row\'s author hint', () => {
-    const findings = lintLivenessProperties(report({ dateRange: { dimension: 'close_date' }, exportOptions: { formats: ['csv'] } }));
-    const planned = findings.filter((f) => f.rule === 'liveness-planned-property');
-    expect(planned.map((f) => f.message.match(/`(dateRange|exportOptions)`/)?.[1]).sort()).toEqual(['dateRange', 'exportOptions']);
-    for (const f of planned) {
-      expect(f.where).toContain("report 'pipeline'");
-      expect(f.hint).toMatch(/^Keep it, but nothing reads it yet: the Console report page draws no /);
+  it('is silent on an authored `dateRange` and `exportOptions` — both rows are `live`, cite the renderer, and carry no author warning', () => {
+    const findings = lintLivenessProperties({ ...LIT, ...report({ dateRange: { dimension: 'close_date' }, exportOptions: { formats: ['csv'] } }) });
+    expect(ruleOf(findings, 'externalSharingModel')).toBe(LIVENESS_DEAD_PROPERTY);
+    expect(findings.filter((f) => /`(dateRange|exportOptions)`/.test(f.message))).toEqual([]);
+    const props = JSON.parse(readFileSync(join(shippedLedgerDir(), 'report.json'), 'utf8')).props;
+    // Anti-vacuity: each row is the shape this silence pin exists for.
+    for (const [key, evidence] of [
+      ['dateRange', 'ui/packages/plugin-report/src/ReportDateRange.tsx#reportTimeWindow'],
+      ['exportOptions', 'ui/packages/plugin-report/src/ReportExport.tsx#ReportExportControl'],
+    ] as const) {
+      expect(props[key].status).toBe('live');
+      expect(props[key]).not.toHaveProperty('authorWarn');
+      expect(props[key]).not.toHaveProperty('authorHint');
+      expect(props[key].evidence).toContain(evidence);
     }
   });
 

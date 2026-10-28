@@ -1,6 +1,6 @@
 # ADR-0142: An ownership queue is a platform primitive — a queue entity, membership through the existing recipient kinds, claim through the ownership-transfer gate, and declarative assignment rules evaluated on insert
 
-**Status**: Proposed (2026-10-25). `docs/adr/**` is Tier H (Prime Directive #14): this record becomes **Accepted** by the
+**Status**: Proposed (2026-10-25) · **Amended** (2026-10-28, ruling [`6457475657`](https://github.com/objectstack-ai/objectstack/issues/25769#issuecomment-6457475657) on #25769, letter A) — D3's `current_user.queues` producer is `@objectstack/plugin-security`, kernel-side, under the reserved key `queues`; see the note in D3. `docs/adr/**` is Tier H (Prime Directive #14): this record becomes **Accepted** by the
 maintainer's merge, and ⛔ the one PR under [Execution plan](#execution-plan-after-acceptance) is cut after that merge,
 never before it. Until a published `@objectstack/*` release carries that PR, HotCRM keeps the STOPGAP module this record
 exists to retire. **This record declares; it implements nothing** — no schema, no code, no changeset.
@@ -803,7 +803,7 @@ objection names the number.
    `packages/spec/liveness/queue.json` and `packages/spec/liveness/assignment_rule.json`, every property classified with
    evidence (the liveness gate has no generator); regenerated artifacts per AGENTS.md's spec table for the rest. Server:
    `sys_queue`, `sys_queue_member`, `sys_assignment_cursor`, the queue service and its `queues` membership-resolver key
-   in `plugin-sharing`, with the access path at D3's four sites; the `queue` column in `applySystemFields` with its
+   in `plugin-sharing` (*superseded 2026-10-28 by D3 as amended: plugin-security resolves `queues` kernel-side*), with the access path at D3's four sites; the `queue` column in `applySystemFields` with its
    writers and the registration refusal for a declared `queue`; the gate's claim / release / move admissions and explain
    reasons in `plugin-security`; in `objectql`, the by-id write precondition with its readback, the assignment seam and
    the two strategies behind the contract, the two keys in `METADATA_ARRAY_KEYS`, the `kernel:ready` boot refusal and

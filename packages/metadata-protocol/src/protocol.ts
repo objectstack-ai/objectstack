@@ -423,6 +423,10 @@ import { flowRegistrationsOf, resolveFlowCanonicalizer, resolveFlowRegistrationR
 import { isDeclaredCodeDatasource, isHostCodeDatasource } from './protocol-code-datasource-predicates.js';
 // [#25467 cut 29] The legacy-organization row filters: which rows a not-yet-migrated database still holds.
 import { legacyOrganizationRowsOf, withoutLegacyOrganizationRows } from './protocol-legacy-organization-rows.js';
+// [#25467 cut 30] The object-extender fold onto a MetadataService object body.
+import { foldObjectExtendersFromRegistry } from './protocol-object-extender-fold.js';
+// [#25467 cut 31] The disabled-package face of the by-name item read.
+import { readMetaItemFace } from './protocol-meta-item-face.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -675,7 +679,7 @@ export function isItemOfDisabledPackage(registry: any, item: unknown): boolean {
  * finds no draft row and the read of a disabled package's draft, so the two
  * answers are byte-identical.
  */
-function noPendingDraftError(type: string, name: string): Error & { code: 'NO_DRAFT'; status: 404 } {
+export function noPendingDraftError(type: string, name: string): Error & { code: 'NO_DRAFT'; status: 404 } {
     const err = new Error(`No pending draft exists for ${type}/${name}.`) as Error & { code: 'NO_DRAFT'; status: 404 };
     err.code = 'NO_DRAFT';
     err.status = 404;
@@ -8899,24 +8903,12 @@ export class ObjectStackProtocolImplementation implements
      * would duplicate both.
      */
     private foldObjectExtendersFromRegistry(type: string, name: unknown, body: unknown): unknown {
-        const singular = PLURAL_TO_SINGULAR[type] ?? type;
-        if (singular !== 'object') return body;
-        if (body === null || typeof body !== 'object') return body;
-        // [#8027] The list caller reads the name off the ROW rather than off a
-        // request, and a row with no usable `name` has no contributor list to
-        // look up — `mergePackageAwareOverlay` skips such rows too.
-        if (typeof name !== 'string' || name === '') return body;
-        const registry = (this.engine as any)?.registry;
-        // Partial registry doubles in tests predate this method; a host that
-        // cannot fold answers exactly as it did before.
-        if (!registry || typeof registry.foldObjectExtendersOnto !== 'function') return body;
-        try {
-            return registry.foldObjectExtendersOnto(name, body);
-        } catch {
-            // The fold is a read over in-memory contributors; a failure here
-            // must not turn a served schema into a 5xx.
-            return body;
-        }
+        // [#25467 cut 30] The body moved to `protocol-object-extender-fold.ts` (see `ObjectExtenderFoldHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof foldObjectExtendersFromRegistry> = {
+            get engine() { return readEngine(); },
+        };
+        return foldObjectExtendersFromRegistry.call(host, type, name, body);
     }
 
     /**
@@ -10713,17 +10705,13 @@ export class ObjectStackProtocolImplementation implements
         type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
         member?: string,
     }, face: 'served' | 'execution') {
-        if (request.type === 'object' && isObjectOfDisabledPackage(this.engine?.registry, request.name)) {
-            throw objectPackageDisabledError(request.name);
-        }
-        const answer = await this.readMetaItem(request, { face });
-        if (request.type === 'object' || request.type === 'package'
-            || !isItemOfDisabledPackage(this.engine?.registry, answer?.item)) {
-            return answer;
-        }
-        if (request.state === 'draft') throw noPendingDraftError(request.type, request.name);
-        const { item: _withheld, registration: _servedOnly, ...envelope } = answer as typeof answer & { registration?: unknown };
-        return { ...envelope, item: undefined };
+        // [#25467 cut 31] The body moved to `protocol-meta-item-face.ts` (see `MetaItemFaceHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof readMetaItemFace> = {
+            get engine() { return readEngine(); },
+            readMetaItem: (...a) => this.readMetaItem(...a),
+        };
+        return readMetaItemFace.call(host, request, face);
     }
 
     /**

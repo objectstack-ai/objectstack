@@ -766,7 +766,11 @@ export const CEILINGS = new Map([
   // nothing to delete to fund it; the whole addition is raised, pinned AT the measurement.
   // Maintainer ruling 2026-10-27 (Warren, decision card 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」,
   // option A tapped at 01:21Z), verbatim and untranslated: 「A:先削重复,余额按实测提高」.
-  ['skills/objectstack-ui/evals/analytics-inline-vs-dataset.json', 1348],
+  // 1348 -> 1361 (#26602), under the same ruling: the `duration` prompt also asks for the
+  // measure's `polarity`, part funded by deleting two parentheticals that restated an
+  // expected output (eval 2's, and eval 8's own gloss on the asserted value); the balance
+  // is raised, pinned AT the measurement (5443 bytes).
+  ['skills/objectstack-ui/evals/analytics-inline-vs-dataset.json', 1361],
   // INITIAL measurement (#26633): the third authored eval file — ONE
   // report-authoring prompt for `dateRange` on a `type: 'date'` dataset
   // dimension and `exportOptions` csv / xlsx under the base object's
@@ -818,7 +822,9 @@ export const CEILINGS = new Map([
   // is paid in full by deleting 78 tokens of restatement — the example's four-line comment
   // that restated the Dataset-Bound Widgets section — so the file nets -12 and the ceiling
   // follows it down to the new measurement, the ratchet's ordinary direction.
-  ['skills/objectstack-ui/rules/dashboards.md', 6239],
+  // 6239 -> 6221 (#26602): LOWERED. The metric-widget bullet teaches the measure's `polarity`,
+  // paid inside the file; the ceiling follows the file down to the measurement (24881 bytes).
+  ['skills/objectstack-ui/rules/dashboards.md', 6221],
   // 3011 -> 3141 (#19715, card item 4): a 5-line table of contents at the top,
   // anchors to the file's existing headings, nothing else changed. +132 tokens,
   // of which the row's 2 tokens of headroom absorb 2; the CEILING moves 130.
@@ -989,7 +995,25 @@ export const CEILINGS = new Map([
   // pin duplicated case 5's (77 bytes cut, 20 tokens); the remainder is the new
   // case; pinned AT the measurement, zero headroom. The raising PR's body carries
   // the same arithmetic.
-  ['skills/objectstack-i18n/evals/bundles-locales-coverage.json', 1642],
+  // 1642 -> 1790 (2026-10-28, the owed Skills-docs follow-up of the spec PR that
+  // added the `books` translation group): one eval prompt for a doc book's
+  // spine copy — `books.<book>.label` / `.description` and
+  // `books.<book>.groups.<key>.label`. Same ruling as the rows above, tap label
+  // verbatim and untranslated: 「A:先削重复,余额按实测提高」. PAID DOWN FIRST: five
+  // sentences restated a rule whose home the reader already reads — case 1's
+  // "no ICU plural/select" (SKILL.md "No ICU MessageFormat" + its own
+  // `{count, plural` pin), case 3's "retired o.* dialect" (SKILL.md "The
+  // Retired o.* Shape" + its own `o: {` pin), case 5's "extract --check is the
+  // freshness gate" (SKILL.md "os i18n extract --check — freshness, not
+  // coverage"), case 6's "inherited by every field referencing the picklist"
+  // (SKILL.md's `picklists` entry in the top-level group list), case 8's
+  // "neither is a pages.*.components key" (its own `components.open_block`
+  // pin): 227 bytes = 57 units (6567 -> 6340 bytes, 1642 -> 1585); the new case
+  // adds 817 bytes = 205 units (6340 -> 7157 bytes, 1585 -> 1790):
+  //   ceil($(wc -c < skills/objectstack-i18n/evals/bundles-locales-coverage.json) / 4) == ceil(7157 / 4)
+  // pinned AT the measurement, zero headroom. The raising PR's body carries the
+  // same arithmetic.
+  ['skills/objectstack-i18n/evals/bundles-locales-coverage.json', 1790],
   // 1211 -> 1458 (card #26302): one eval for a demo whose seed names people —
   // expected: both in `demoStaff` with a declared `position` /
   // `permissionSets`, created by `os dev`; NO `role:` alias and NO platform

@@ -1082,6 +1082,9 @@ const en = {
     pullToRefresh: 'Pull to refresh',
     refreshing: 'Refreshing…',
     share: 'Share',
+    sharingPersonal: 'Personal view',
+    sharingCollaborative: 'Shared view',
+    sharingLockedBy: 'Locked by {{user}}',
     print: 'Print',
     hideFieldsTitle: 'Hide Fields',
     dataLimitReached: 'Showing first {{limit}} records. More data may be available.',
@@ -1134,6 +1137,7 @@ const en = {
     noCards: 'No cards',
     columnCards: '{{column}} cards',
     laneCards: '{{column}} - {{lane}} cards',
+    dropBlocked: 'A card in {{from}} cannot be moved to {{to}}.',
     cardTitlePlaceholder: 'Enter card title…',
     uncategorized: 'Uncategorized',
     loadMore: 'Load more',
@@ -1447,6 +1451,9 @@ const en = {
     // a possessive particle (ja/zh) writes its own arrangement here.
     recordDetailWithLabel: '{{label}} Detail',
     openAsFullPage: 'Open as full page',
+    // The record page's way back into the drawer it was expanded from
+    // (objectstack#26679).
+    collapseToDrawer: 'Collapse to drawer',
     recordDetailOverlay: 'Record detail overlay for {{title}}.',
     addToFavorites: 'Add to favorites',
     removeFromFavorites: 'Remove from favorites',
@@ -1471,6 +1478,10 @@ const en = {
     new: 'New',
     add: 'Add',
     activity: 'Activity',
+    timeline: 'Timeline',
+    timelineFolded: 'Activity',
+    relatedColumn: 'Related column',
+    panelToggles: 'Panels',
     history: 'History',
     historyEmpty: 'No history yet',
     editRow: 'Edit',
@@ -1679,6 +1690,13 @@ const en = {
     loading: 'Loading…',
     // objectui#12330 — the report's no-access state; its title is `dashboard.widgetForbiddenTitle`.
     forbiddenMessage: 'You don’t have permission to view the data behind this report.',
+    // objectstack-ai/objectstack#25873 — the report period chip (`ReportSchema.dateRange`); its preset labels are `dashboard.filters.*`.
+    dateRange: {
+      from: 'From',
+      to: 'To',
+      datasetUnreadable: 'This report’s date range names no dimension, and the “{{dataset}}” dataset could not be read to find its date dimension ({{reason}}).',
+      noSingleDateDimension: 'This report’s date range names no dimension, and the “{{dataset}}” dataset declares {{total}} date dimensions ({{found}}) where it needs exactly one. Name the date dimension in the report’s dateRange.dimension.',
+    },
     aggregate: {
       count: 'Count',
       countDistinct: 'Distinct Count',
@@ -2229,6 +2247,8 @@ const en = {
       newChat: 'New chat',
       toggleChatsList: 'Toggle conversations list',
       goHome: 'Back to home',
+      toggleTimeline: 'Show / hide timeline',
+      toggleRelated: 'Show / hide related',
     },
     reportIndex: {
       title: 'Reports',

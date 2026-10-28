@@ -17,8 +17,8 @@
 
 | Status | Records |
 |---|---|
-| Accepted | 124 |
-| Proposed | 6 |
+| Accepted | 125 |
+| Proposed | 5 |
 | Superseded | 4 |
 | Draft | 3 |
 | Deferred | 2 |
@@ -95,7 +95,7 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0022](./0022-connectors-vs-messaging-channels.md) | Connectors vs Messaging Channels — Where "Push to Slack" Lives | Accepted — 2026-10-27 (ruled on objectstack#26553, ADR batch 1; proposed 2… | 2026-10-27 | — | — |
 | [ADR-0023](./0023-openapi-to-connector-generator.md) | OpenAPI → Connector Generator — Bulk Connectors From Declarative API Specs | Accepted — library implemented; CLI + examples pending (proposed 2026-06-0… | 2026-06-01 | — | — |
 | [ADR-0024](./0024-mcp-connectors.md) | MCP Servers as Connectors — Adopting an Open, Vendor-Neutral Tool Protocol | Accepted — library implemented; examples pending (proposed 2026-06-01 · ca… | 2026-06-01 | — | — |
-| [ADR-0025](./0025-plugin-package-distribution.md) | Plugin Package Distribution (Code + Dependencies) | Proposed — partially implemented (2026-09-12 audit, superseding 2026-07-16… | 2026-09-12 | — | — |
+| [ADR-0025](./0025-plugin-package-distribution.md) | Plugin Package Distribution (Code + Dependencies) | Accepted — 2026-10-28 (ruled on objectstack#26553, ADR batch 4; proposed 2… | 2026-10-28 | — | — |
 | [ADR-0026](./0026-client-ui-plugin-distribution.md) | Client-Side UI Plugin Distribution | Deferred — 2026-10-27 (ruled on objectstack#26553, ADR batch 1; proposed 2… | 2026-10-27 | — | — |
 | [ADR-0027](./0027-metadata-authoring-lifecycle.md) | `@objectstack/metadata-authoring` — Staged Authoring, Publish & Promotion Lifecycle | Accepted — 2026-10-27 (ruled on objectstack#26553, ADR batch 1; proposed 2… | 2026-10-27 | — | — |
 | [ADR-0028](./0028-metadata-naming-and-namespace-isolation.md) | Metadata Naming & Namespace Isolation — Derived Physical Names, Namespace-Scoped Identity, and a Single Kerne… | Deferred — 2026-07-16; proposed 2026-06-01 — the target model (namespace a… | 2026-07-16 | ADR-0129 | — |
@@ -209,7 +209,7 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0138](./0138-guest-model-anonymous-principal-doors-grants-and-organization.md) | The guest model — one anonymous principal, a closed list of doors, one grants channel, one organization rule,… | Accepted — 2026-10-13, accepted by the maintainer's approval of the pull r… | 2026-10-13 | — | — |
 | [ADR-0139](./0139-engine-internal-semi-join-leaf-readable-parent-ids.md) | One engine-internal semi-join leaf — "the ids of object X this caller may read" — pushed down by ObjectQL, ne… | Accepted — 2026-10-11, accepted by the merge that landed it on `main` | 2026-10-11 | — | — |
 | [ADR-0141](./0141-inter-app-dependency-declared-checked-before-install.md) | An app may depend on another installed app — declared in `manifest.dependencies`, checked once before install… | Proposed — 2026-10-25; first draft 2026-10-24. `docs/adr/` is Tier H (Prim… | 2026-10-25 | — | — |
-| [ADR-0142](./0142-ownership-queue-membership-claim-and-assignment-rules.md) | An ownership queue is a platform primitive — a queue entity, membership through the existing recipient kinds,… | Proposed — 2026-10-25. `docs/adr/` is Tier H (Prime Directive #14): this r… | 2026-10-25 | — | — |
+| [ADR-0142](./0142-ownership-queue-membership-claim-and-assignment-rules.md) | An ownership queue is a platform primitive — a queue entity, membership through the existing recipient kinds,… | Proposed — 2026-10-25 · Amended (2026-10-28, ruling `6457475657` on #25769… | 2026-10-25 | — | — |
 | [ADR-0143](./0143-outbound-connector-auth-is-open-tier.md) | Outbound connector auth is open tier — OAuth2 grants, vendor app-credential exchange and request signing in o… | Proposed — 2026-10-27. `docs/adr/` is Tier H (Prime Directive #14): the ma… | 2026-10-27 | — | — |
 
 ## ObjectUI registry — `ui/docs/adr/` (`ui-` prefix)

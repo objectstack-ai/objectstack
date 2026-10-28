@@ -103,7 +103,7 @@ selects `dimensions` (X / group / split) and `values` (the measures to plot):
 | `layout` | `object` | optional | Grid position and size (auto-flowed into the grid when omitted) |
 | `chartConfig` | `object` | optional | Chart **appearance**: `title`, `subtitle`, `description`, `colors`, `height`, `showLegend`, `showDataLabels`, `annotations`, `interaction`. The bound dataset decides which series exist and which column each one reads, so `type`, `xAxis`, `yAxis` and `series` are refused here — see below |
 | `colorVariant` | `enum` | optional | KPI/card accent color |
-| `compareTo` | `object` | optional | Period-over-period comparison: `{ kind: 'previousPeriod' \| 'previousYear', dimension? }`. Omit `dimension` when the selection dates exactly one time dimension — the runtime resolves it, and errors naming the candidates rather than guessing when it cannot. |
+| `compareTo` | `object` | optional | Period-over-period comparison: `{ kind: 'previousPeriod' \| 'previousYear', dimension? }`. Omit `dimension` when the selection dates exactly one time dimension — the runtime resolves it, and errors naming the candidates rather than guessing when it cannot. The delta is coloured by the measure's `polarity`: `'lower'` draws a rise red and a fall green, `'neutral'` draws neither; undeclared, a rise is green. |
 | `options` | `object` | optional | The query keys below. Presentation does not go here — see below |
 
 ### What `chartConfig` does **not** carry
@@ -147,6 +147,7 @@ Presentation has declared homes instead:
 | You want | Write it here |
 | :--- | :--- |
 | A number's format or currency | The dataset **measure**'s `format` and `currency` |
+| A KPI delta's good/bad colour (lower is better for turnaround, cost) | The dataset **measure**'s `polarity`: `'higher'`, `'lower'` or `'neutral'` |
 | A KPI tile's accent color | The widget's `colorVariant` |
 | A chart's look (colors, legend, data labels, height) | The widget's `chartConfig` |
 
@@ -415,6 +416,45 @@ to `field`; the name `dateRange` is reserved for the built-in date range. The
 filter above names itself `region` for exactly that reason — left to default it
 would be keyed `account.region`, dots and all, in every expression and binding.
 
+### Filter controls and options
+
+Each entry renders one control in the filter bar above the widgets, and its `type` decides
+the condition it adds to every bound widget's query, `AND`-combined with the widget's own
+filter:
+
+| `type` | Control | Condition |
+| :--- | :--- | :--- |
+| `text` | Text input | `{ field: { $contains: value } }` |
+| `number` | Numeric input | `{ field: value }` |
+| `select`, `lookup` | Dropdown | `{ field: value }`, or `$in` for several values |
+| `date` | Preset / custom range | `{ field: { $gte: from, $lte: to } }` |
+
+Static `options` are `{ value, label }` pairs, where `label` is a string or an inline locale
+map (`{ en: 'AMER', 'zh-CN': '美洲' }`). The bare-string shorthand (`options: ['EMEA',
+'APAC']`) is refused at publish, and a stored filter written that way renders with an empty
+option list. Options can instead be read from an object:
+
+{/* os:check */}
+```typescript
+globalFilters: [
+  {
+    name: 'industry',
+    field: 'industry',
+    label: 'Industry',
+    type: 'select',
+    // object, valueField and labelField are all required; with no separate label
+    // column, name the value field again. `filter` is a condition object, not an array.
+    optionsFrom: { object: 'account', valueField: 'industry', labelField: 'industry', filter: { status: 'active' } },
+  },
+]
+```
+
+The Console resolves `optionsFrom` as distinct values on the server, so the list is complete
+whatever the row count. A filter that declares `object` (the object its `field` lives on, not
+the `optionsFrom` source) takes its label and option labels from the app's
+[translation bundle](/docs/ui/translations) (`objects.<object>.fields.<field>.label` and
+`.options.<value>`), as lists and forms do; the authored `label` is then the fallback.
+
 ### Where a Filter's `field` Resolves
 
 A global filter's `field` resolves against the **object behind each bound
@@ -506,6 +546,27 @@ widgets: [
 Binding precedence: an explicit `filterBindings` entry (string override or
 `false` opt-out) → the filter's legacy `targetWidgets` allow-list → the
 filter's own `field`.
+
+### In the Console
+
+- **The filter bar.** The date range and each global filter render as controls above the
+  widgets; a **Reset** button appears once any of them differs from its default. Changing one
+  re-reads every bound widget in place.
+- **Presets stay symbolic.** A preset compiles to date-macro tokens (`{30_days_ago}`,
+  `{current_month_start}`) that each widget resolves at query time, so a dashboard saved
+  today still means "last 30 days" tomorrow.
+- **Values in expressions.** Filter values are dashboard variables, read as `page.<name>`.
+  The date range is an object under `page.dateRange`: `{ preset: 'last_30_days' }` for a
+  preset, `{ from: '2026-01-01', to: '2026-03-31' }` for a custom range (either bound may be
+  absent). A dashboard embedded in a page that declares its own `variables` merges the two
+  scopes: a filter shadows only an outer variable of the same name, and a write goes to the
+  scope that defines the variable.
+- **Bindings in Studio.** The dashboard widget inspector has a **Dashboard filter bindings**
+  section, one row per declared filter, with an apply toggle (the `false` opt-out) and a
+  field picker for the override.
+- **Refresh.** The page header has a **Refresh All** button, and `refreshIntervalSeconds`
+  re-reads the widgets every that many seconds (`0` or unset: no automatic refresh). Widgets
+  re-read in place rather than remounting, single-value tiles included.
 
 ## Complete Example
 

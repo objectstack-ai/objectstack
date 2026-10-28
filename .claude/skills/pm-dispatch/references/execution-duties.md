@@ -175,7 +175,7 @@
 
 - 你是记录在案的复核人:对 GitHub 核验,⛔ 不对报告的自述核验。
 - 逐项判据展开在 `references/review-checklist.md`,每份报告对着它过。
-- 报告 `open_questions`/`out_of_scope_findings` 涉 cloud 车道者,按 `cross-repo-coordination.md` 立 cloud 卡。
+- 报告或复核见涉 cloud ⇒ 整卡 `Release:`+`pm:retriage` 转 cloud 车道,读点留卡;⛔ 不拆半边。
 - 改到已有 `.changeset/*.md` 的 PR ⛔ 不打 `skip-changeset`;确认取同 head 达档 PASS 或维护者原话。
 - 报告在草稿 PR 时点到达,CI 收敛读数只属于复核侧:gate `in_progress` 是诚实读数。
 - 绿色输出≠ 该绿证明了被测风险:拒收断言、全绿方向与时序、pin 翻转、边界后收益。

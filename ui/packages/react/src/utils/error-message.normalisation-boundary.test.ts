@@ -9,7 +9,7 @@
 import { describe, it, expect } from 'vitest';
 
 import { normaliseClientError } from '@object-ui/data-objectstack';
-import { declaredUserMessage } from './error-message';
+import { declaredUserMessage, extractFieldErrors } from './error-message';
 
 /**
  * The two halves of the `userMessage` channel, pinned where they meet.
@@ -92,5 +92,29 @@ describe('userMessage survives the adapter boundary', () => {
     });
     expect(declaredUserMessage(normaliseClientError(validation))).toBeNull();
     expect(declaredUserMessage(normaliseClientError(conflict))).toBeNull();
+  });
+});
+
+describe('a UNIQUE_VIOLATION field survives the adapter boundary', () => {
+  it('reaches extractFieldErrors through the passthrough arm', () => {
+    // `normaliseClientError` re-wraps only VALIDATION_FAILED and
+    // CONCURRENT_UPDATE; a unique-index 409 leaves it untouched, so the single
+    // `details.field` the client parked is what the form reads.
+    const raw = Object.assign(new Error('A record with this SKU already exists'), {
+      code: 'UNIQUE_VIOLATION',
+      httpStatus: 409,
+      details: {
+        error: 'A record with this SKU already exists',
+        code: 'UNIQUE_VIOLATION',
+        field: 'sku',
+        object: 'product',
+      },
+    });
+    const normalised = normaliseClientError(raw) as typeof raw;
+    expect(normalised.code).toBe('UNIQUE_VIOLATION');
+    expect(normalised.httpStatus).toBe(409);
+    expect(extractFieldErrors(normalised)).toEqual([
+      { field: 'sku', message: 'A record with this SKU already exists' },
+    ]);
   });
 });

@@ -56,7 +56,7 @@
  */
 
 import React from 'react';
-import { Maximize2, X } from 'lucide-react';
+import { ArrowLeft, ChevronDown, ChevronUp, Maximize2, X } from 'lucide-react';
 import { cn } from '../lib/utils';
 import {
   Sheet,
@@ -94,9 +94,16 @@ const OVERLAY_DEFAULT_TRANSLATIONS: Record<string, string> = {
   // Default accessible name + tooltip of the icon-only expand button. Hosts
   // may override it via the `expandLabel` prop; this is what ships otherwise.
   'detail.openAsFullPage': 'Open as full page',
-  // VISIBLE overlay heading when the host passes no `title` — not merely an
-  // a11y name.
+  // The drawer's accessible title when the host passes no `title`. Since
+  // objectstack#26679 the drawer bar draws no title text at all (the record
+  // body names the record), so this is an accessible name only; the split
+  // face still draws it as its heading.
   'detail.recordDetail': 'Record Detail',
+  // The bar's back control (`onBack`, objectstack#26679).
+  'detail.goBack': 'Go back',
+  // The bar's previous / next pair (`stepper`, objectstack#26679).
+  'detail.previousRecord': 'Previous record',
+  'detail.nextRecord': 'Next record',
   // sr-only Sheet description used when the host passes no `description`.
   'detail.recordDetailOverlay': 'Record detail overlay for {{title}}.',
 };
@@ -142,9 +149,16 @@ export interface NavigationOverlayProps {
   isOverlay: boolean;
   /** Target view/form name from NavigationConfig */
   view?: string;
-  /** Title for the overlay header */
+  /**
+   * The overlay's title. The split face draws it as its heading; the drawer
+   * keeps it as the accessible name only — its bar draws no title text
+   * (objectstack#26679, maintainer ruling 2).
+   */
   title?: string;
-  /** Description for the overlay header */
+  /**
+   * The overlay's description: drawn under the split face's heading, an
+   * accessible description only on the drawer (objectstack#26679).
+   */
   description?: string;
   /** CSS class for the overlay container */
   className?: string;
@@ -211,7 +225,85 @@ export interface NavigationOverlayProps {
    * prefix again at a call site.
    */
   legacyStorageKey?: string;
+  /**
+   * One level back (drawer mode only, objectstack#26679). When provided the
+   * bar draws a `←` control at its left edge and `Esc` calls this instead of
+   * closing the drawer: a host that opened a record IN PLACE (a related row,
+   * a lookup value) hands it the pop of its stack, so each `←` / `Esc` undoes
+   * one click. Absent at the stack's root, where `Esc` closes as before.
+   */
+  onBack?: () => void;
+  /**
+   * The path drawn after the `←` control (drawer mode only,
+   * objectstack#26679) — the host's ancestors of the record shown, each one a
+   * control that returns to it. Nothing is drawn at the left of the bar when
+   * neither this nor {@link onBack} is passed: the bar names no object and no
+   * position (maintainer rulings 2 and 3 on objectstack#26679).
+   */
+  trail?: React.ReactNode;
+  /**
+   * Previous / next record (drawer mode only, objectstack#26679). When passed
+   * the bar draws the `↑` `↓` pair, and `↑` / `↓` / `k` / `j` step through the
+   * host's sibling set while no text input, menu or grid has the keyboard.
+   * A missing handler draws its control disabled — the ends of the set.
+   */
+  stepper?: {
+    onPrevious?: () => void;
+    onNext?: () => void;
+  };
 }
+
+/**
+ * Whether a key event belongs to the element it was typed in rather than to
+ * the drawer's own shortcuts: a text field, an editable region, or a
+ * composite widget that already moves with the arrow keys (a menu, a list
+ * box, a grid, a tab strip).
+ */
+function keyEventOwnedByTarget(target: EventTarget | null): boolean {
+  if (!target || !(target instanceof Element)) return false;
+  if (target.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"]')) {
+    return true;
+  }
+  return !!target.closest(
+    '[role="menu"], [role="menubar"], [role="listbox"], [role="combobox"], [role="grid"], [role="treegrid"], [role="tree"], [role="tablist"], [role="radiogroup"], [role="slider"], [role="spinbutton"]',
+  );
+}
+
+/**
+ * The drawer's previous / next shortcuts (objectstack#26679): `ArrowUp` / `k`
+ * and `ArrowDown` / `j`, on the document while the drawer is open, never with
+ * a modifier and never while the event belongs to its target
+ * ({@link keyEventOwnedByTarget}).
+ */
+function useStepperKeys(
+  active: boolean,
+  onPrevious: (() => void) | undefined,
+  onNext: (() => void) | undefined,
+) {
+  const handlers = React.useRef({ onPrevious, onNext });
+  handlers.current = { onPrevious, onNext };
+  React.useEffect(() => {
+    if (!active || typeof document === 'undefined') return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+      if (keyEventOwnedByTarget(e.target)) return;
+      let step: (() => void) | undefined;
+      if (e.key === 'ArrowUp' || e.key === 'k') step = handlers.current.onPrevious;
+      else if (e.key === 'ArrowDown' || e.key === 'j') step = handlers.current.onNext;
+      else return;
+      // The key is the drawer's even at an end of the set, so the body does
+      // not scroll under a disabled control.
+      e.preventDefault();
+      step?.();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [active]);
+}
+
+/** The bar's icon-button face, shared by every control on it. */
+const BAR_BUTTON_CLASS =
+  'inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40';
 
 /**
  * The one `storageKey` spelling every record overlay uses, keyed by object.
@@ -374,6 +466,9 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
   expandLabel,
   storageKey,
   legacyStorageKey,
+  onBack,
+  trail,
+  stepper,
 }) => {
   // Every chrome string below is locale-driven (objectstack#5430 for the two
   // close affordances, objectstack#5506 for the rest). Must stay above the
@@ -395,6 +490,11 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
   // Inline-edit dropdowns render in body-level poppers; without this guard the
   // click that closes an open dropdown also dismisses the drawer (#2156).
   const handleInteractOutside = usePopperAwareInteractOutside();
+  useStepperKeys(
+    mode === 'drawer' && isOpen && !!selectedRecord && !!stepper,
+    stepper?.onPrevious,
+    stepper?.onNext,
+  );
 
   // Non-overlay modes don't render anything
   if (mode === 'page' || mode === 'new_window' || mode === 'none') {
@@ -446,6 +546,9 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
           // documented choice rather than dropping it is what "one shared
           // overlay shell" has to mean when the two shells disagreed.
           onOpenAutoFocus={(e) => e.preventDefault()}
+          // objectstack#26679 — below the root of an in-place stack, `Esc`
+          // goes back one level; only the root's `Esc` closes.
+          onEscapeKeyDown={onBack ? (e) => { e.preventDefault(); onBack(); } : undefined}
           className={cn(
             // Mobile: full width (no inline cap, no max-w from base sheet).
             // sm+: honor the host-supplied width via `--ov-w` CSS var with a
@@ -476,32 +579,62 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
               className="hidden sm:block absolute left-0 top-0 bottom-0 z-30 w-1 cursor-col-resize touch-none bg-transparent hover:bg-primary/40 active:bg-primary/60 transition-colors"
             />
           )}
-          {/* Chrome header — subdued breadcrumb-style label that does not
-              compete with the record-title rendered by the embedded content.
-              Buttons live in the same flex row so they share vertical
-              centering with the title text (no absolute positioning, no
-              pixel-perfect math to maintain). */}
+          {/* The bar (objectstack#26679, maintainer rulings 2-5): the left
+              side holds only the in-place path — `←` and the ancestors —
+              and is empty at the root; the right side holds ↑ ↓, ⤢ and ✕.
+              No object name and no position: the title and description stay
+              for assistive technology only (Radix requires the title). */}
           <SheetHeader className="shrink-0 flex-row items-center justify-between gap-2 space-y-0 px-4 py-2 border-b bg-muted/30">
-            <div className="min-w-0 flex-1">
-              <SheetTitle className="truncate text-xs font-medium tracking-wide text-muted-foreground">
-                {resolvedTitle}
-              </SheetTitle>
-              {description ? (
-                <SheetDescription className="truncate text-xs">{description}</SheetDescription>
-              ) : (
-                <SheetDescription className="sr-only">
-                  {overlayDescription}
-                </SheetDescription>
+            <SheetTitle className="sr-only">{resolvedTitle}</SheetTitle>
+            <SheetDescription className="sr-only">
+              {description || overlayDescription}
+            </SheetDescription>
+            <div className="flex min-w-0 flex-1 items-center gap-1" data-testid="record-drawer-leading">
+              {onBack && (
+                <button
+                  type="button"
+                  onClick={onBack}
+                  aria-label={t('detail.goBack')}
+                  title={t('detail.goBack')}
+                  className={BAR_BUTTON_CLASS}
+                >
+                  <ArrowLeft className="h-3.5 w-3.5" />
+                </button>
               )}
+              {trail}
             </div>
             <div className="flex shrink-0 items-center gap-0.5">
+              {stepper && (
+                <>
+                  <button
+                    type="button"
+                    onClick={stepper.onPrevious}
+                    disabled={!stepper.onPrevious}
+                    aria-label={t('detail.previousRecord')}
+                    title={t('detail.previousRecord')}
+                    className={BAR_BUTTON_CLASS}
+                  >
+                    <ChevronUp className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={stepper.onNext}
+                    disabled={!stepper.onNext}
+                    aria-label={t('detail.nextRecord')}
+                    title={t('detail.nextRecord')}
+                    className={BAR_BUTTON_CLASS}
+                  >
+                    <ChevronDown className="h-3.5 w-3.5" />
+                  </button>
+                </>
+              )}
               {onExpand && (
                 <button
                   type="button"
-                  onClick={onExpand}
+                  onClick={() => onExpand()}
                   aria-label={resolvedExpandLabel}
                   title={resolvedExpandLabel}
-                  className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className={BAR_BUTTON_CLASS}
                 >
                   <Maximize2 className="h-3.5 w-3.5" />
                 </button>
@@ -511,7 +644,7 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
                   type="button"
                   aria-label={t('common.close')}
                   title={t('common.close')}
-                  className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className={BAR_BUTTON_CLASS}
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>

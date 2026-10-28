@@ -63,8 +63,12 @@ export interface RelatedRowActionDef {
  * optional: an omitted handler hides its affordance in the list.
  */
 export interface RelatedRecordHandlers {
-  /** Open the child record's detail page (查看详情). */
-  onView?: (recordId: string | number, record?: unknown) => void;
+  /**
+   * Open the child record's detail page (查看详情). `siblings` are the ids of
+   * the rows the list shows beside it, in its order (objectstack#26679): a
+   * host that opens the record in a drawer steps through them with ↑ ↓.
+   */
+  onView?: (recordId: string | number, record?: unknown, siblings?: ReadonlyArray<string | number>) => void;
   /**
    * Open a create form for a new child record. The host pre-links it to the
    * parent (via the relationship field + parent id passed to `resolve`), so no

@@ -113,7 +113,6 @@
     "changeset:check": "node scripts/check-changeset-fixed.mjs && node scripts/check-changeset-no-major.mjs",
     "changeset": "changeset",
     "changeset:version": "changeset version",
-    "changeset:publish": "node scripts/check-published-dist-tooling.mjs && changeset publish",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:live": "playwright test --config=playwright.live.config.ts",

@@ -937,6 +937,18 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "内存（MB）",
         helpText: "单次调用内存上限（MB，最大 256）"
       },
+      refusals: {
+        label: "拒绝目录",
+        helpText: "拒绝目录，以正文抛出的 SCREAMING_SNAKE 错误码为键（例如 CLEAN_VERSION_REQUIRED）。调用方读到声明的提示语（按其语言翻译）和声明的状态码。仅适用于 JavaScript（L2）正文"
+      },
+      "refusals.message": {
+        label: "提示语",
+        helpText: "正文抛出此错误码时用户读到的句子——纯文本，不含占位符"
+      },
+      "refusals.status": {
+        label: "状态码",
+        helpText: "拒绝的 HTTP 状态码（400–499）。不填：400"
+      },
       handler: {
         label: "处理器",
         helpText: "处理器函数名（已废弃——建议使用 body）"
@@ -2094,6 +2106,9 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "measures.currency": {
         label: "货币"
+      },
+      "measures.polarity": {
+        label: "极性"
       },
       "measures.derived": {
         label: "派生自"

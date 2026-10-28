@@ -79,8 +79,13 @@ describe('the coverage gate demands the refusal (#22450)', () => {
     flows: [quoteGeneration],
     translations: [{ 'zh-CN': { ...(flows ? { flows } : {}) } }],
   });
+  // Scoped to the flows bucket: the metadata-form catalogue has `refusals` keys
+  // of its own since the hook form offers its refusal catalogue (#26835), and
+  // this synthetic tree translates no metadata form.
   const zhRefusals = (config: any) =>
-    computeI18nCoverage(config).issues.filter((i) => i.locale === 'zh-CN' && i.key.includes('.refusals.'));
+    computeI18nCoverage(config).issues.filter(
+      (i) => i.locale === 'zh-CN' && i.key.startsWith('flows.') && i.key.includes('.refusals.'),
+    );
 
   it('reports the untranslated refusal in the flow bucket', () => {
     const issues = zhRefusals(tree());

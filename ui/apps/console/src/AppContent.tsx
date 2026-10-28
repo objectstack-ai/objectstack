@@ -11,7 +11,7 @@
 
 import { lazy, Suspense, useMemo, type ReactNode } from 'react';
 import { Route, useParams, useLocation, Navigate } from 'react-router-dom';
-import { DefaultAppContent, ENVIRONMENT_SCOPE_QUERY, LoadingScreen, useAdapter } from '@object-ui/app-shell';
+import { DefaultAppContent, ENVIRONMENT_SCOPE_QUERY, LauncherAppsProvider, LoadingScreen, useAdapter } from '@object-ui/app-shell';
 import { AdapterCtx } from '@object-ui/react';
 import { MePermissionsProvider, ServerReadScope } from '@object-ui/permissions';
 import { createAuthenticatedFetch } from '@object-ui/auth';
@@ -406,7 +406,13 @@ export function ConsolePermissionsScope({ children }: { children: ReactNode }) {
       // error + retry affordance all along.
       errorFallback={(err, retry) => <LoadingScreen error={err.message} onRetry={retry} />}
     >
-      {children}
+      {/* objectstack#26838 — the apps a launcher offers (Home's tiles, the app
+          switcher, the `app:launcher` block) are the `/me/apps` answer, which
+          drops an app the user's permission sets hide. One read for Home and
+          every app, so this common ancestor holds it, beside the answer above. */}
+      <LauncherAppsProvider endpoint={`${serverUrl}/api/v1/me/apps`} fetcher={authFetch}>
+        {children}
+      </LauncherAppsProvider>
     </MePermissionsProvider>
   );
 }
