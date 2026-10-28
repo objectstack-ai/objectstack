@@ -170,8 +170,9 @@ describe('PermissionMatrixEditPage — the PACKAGE door saves onto the pending d
     // Out-of-scope rows come from the draft too: it is what this save replaces.
     expect(body.objects.b_order).toEqual(DRAFT.objects.b_order);
     expect(body.fields).toEqual(DRAFT.fields);
-    // CONTROL: the save-time draft read ran (#1 is the load).
-    expect(server.getDraftCalls).toBe(2);
+    // CONTROL: the save-time draft read ran (#1 is the load). objectstack#26858 —
+    // #3 is the read after the save that refreshes the draft's served verdict.
+    await waitFor(() => expect(server.getDraftCalls).toBe(3));
     expect(server.savedOpts[0]).toMatchObject({ mode: 'draft', packageId: 'app.a' });
     expect(screen.queryByText(REFUSAL)).toBeNull();
   });

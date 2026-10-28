@@ -88,6 +88,16 @@ const DATASET_NO_SQL =
   + 'Joins are compiled from `Dataset.include` — you never write an ON clause.';
 
 /**
+ * [#26602] A boolean "is higher better?" flag has no word for a measure where
+ * neither direction is good news, so the measure's polarity is one key with
+ * three peer values instead.
+ */
+const DATASET_POLARITY_NOT_A_FLAG =
+  'a measure declares which direction is good news with `polarity`, not a boolean: '
+  + "`polarity: 'higher'` (a rise is good), `polarity: 'lower'` (a fall is good: turnaround days, overdue "
+  + "counts, cost) or `polarity: 'neutral'` (neither, the delta is drawn without a good or bad colour).";
+
+/**
  * A dataset dimension's and measure's `field` is a COLUMN REFERENCE, never a
  * SQL expression (#21220; ADR-0021 "zero raw SQL / zero raw expressions",
  * ADR-0049 enforce-or-remove) — the accept set the cube members it compiles to
@@ -220,6 +230,23 @@ export const DerivedMeasureOp = z.enum(['ratio', 'sum', 'difference', 'product']
 export const DatasetDurationUnit = z.enum(['seconds', 'minutes', 'hours', 'days']);
 
 /**
+ * [#26602] Which direction of change is good news for a measure, its
+ * POLARITY. Read by every presentation that colours a period-over-period
+ * delta (a KPI tile's `compareTo` arrow, a cross-tab cell's comparison):
+ *
+ * - `higher`: a rise is good (green), a fall is bad (red). Revenue, deals won.
+ * - `lower`: a fall is good (green), a rise is bad (red). Turnaround days,
+ *   overdue counts, open deviations, cost.
+ * - `neutral`: neither direction is good or bad. The delta keeps its arrow and
+ *   percentage, drawn in the muted text colour, with no green and no red.
+ *
+ * The arrow always shows which way the NUMBER moved; polarity decides only the
+ * colour. The values name the better direction rather than a sign or a
+ * boolean, so `neutral` is a peer value and not a third state of a flag.
+ */
+export const DatasetMeasurePolarity = z.enum(['higher', 'lower', 'neutral']);
+
+/**
  * [#25778] Seconds per {@link DatasetDurationUnit} — the one conversion every
  * consumer divides by (the SQL compiler, the draft-preview evaluator, a
  * renderer suffixing the unit), so no two of them can disagree about a day.
@@ -350,11 +377,19 @@ export const DatasetMeasureSchema = lazySchema(() => strictObject({
     // [#25778] The column-pair measure.
     elapsed: 'duration',
     timeBetween: 'duration',
+    // [#26602] Which direction is good news. `betterWhen` is the spelling the
+    // card that asked for the key proposed.
+    betterWhen: 'polarity',
+    direction: 'polarity',
+    goodDirection: 'polarity',
+    trendDirection: 'polarity',
   },
   guidance: {
     sql: DATASET_NO_SQL,
     expression: DATASET_NO_SQL,
     formula: DATASET_NO_SQL,
+    higherIsBetter: DATASET_POLARITY_NOT_A_FLAG,
+    lowerIsBetter: DATASET_POLARITY_NOT_A_FLAG,
     description:
       'a measure has no `description` — its author-facing text is `label`. `description` is declared on the DATASET itself; put the explanation there.',
   },
@@ -425,6 +460,25 @@ export const DatasetMeasureSchema = lazySchema(() => strictObject({
    * layer) when the aggregated field is a fixed-currency amount.
    */
   currency: z.string().length(3).optional().describe('Display currency code (ISO 4217)').meta({ title: 'Currency' }),
+  /**
+   * [#26602] Which direction of change is good news for this measure — see
+   * {@link DatasetMeasurePolarity}. Carried onto the result column as
+   * `fields[].polarity` (its `__compare` column too), where a presentation
+   * colours the period-over-period delta by it: `lower` draws a rise red and a
+   * fall green, `neutral` draws both muted.
+   *
+   * Declared on the measure, the semantic layer, so every widget over the
+   * measure agrees. A count whose meaning flips with a filter (overdue vs
+   * resolved records) is two measures, each with its own measure `filter` and
+   * its own polarity.
+   *
+   * Undeclared, a delta keeps the colours it always had: a rise green, a fall
+   * red. Nothing infers a polarity from the measure's name or its unit.
+   */
+  polarity: DatasetMeasurePolarity.optional().describe(
+    'Which direction of change is good news: higher (rise green, fall red), lower (fall green, rise red) '
+    + 'or neutral (no good/bad colour). Colours a period-over-period delta; undeclared keeps rise green, fall red.',
+  ).meta({ title: 'Polarity' }),
   /**
    * Derived measure — computed from OTHER measures in this dataset by name
    * only. e.g. `{ op: 'ratio', of: ['won_amount', 'total_amount'] }`.
@@ -707,6 +761,7 @@ export type DatasetDimension = z.input<typeof DatasetDimensionSchema>;
 export type DatasetMeasure = z.input<typeof DatasetMeasureSchema>;
 export type DatasetMeasureDuration = z.input<typeof DatasetMeasureDurationSchema>;
 export type DatasetDurationUnit = z.input<typeof DatasetDurationUnit>;
+export type DatasetMeasurePolarity = z.input<typeof DatasetMeasurePolarity>;
 export type DerivedMeasureOpValue = z.input<typeof DerivedMeasureOp>;
 export type Dataset = z.input<typeof DatasetSchema>;
 

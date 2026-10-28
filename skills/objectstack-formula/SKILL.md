@@ -445,7 +445,9 @@ a bare string (auto-wrapped) or their helper, and read the same variable scope.
 
 `shared/expression.zod.ts` declares both surfaces and their carriers.
 Missing template paths render as the empty string. Move logic into a CEL field:
-a template holds a path and a formatter, nothing else.
+a template holds a path and a formatter, nothing else. A `currency` argument is a
+literal code (`currency:EUR`); only an email template may read it from the send's
+data instead, `{{ amount | currency:@currency_code }}`.
 
 ---
 

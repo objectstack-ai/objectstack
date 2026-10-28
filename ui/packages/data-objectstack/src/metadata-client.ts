@@ -473,6 +473,15 @@ export interface MetadataGetOptions {
    * passes the edited item's owning package). Omit for context-free reads.
    */
   packageId?: string;
+  /**
+   * The bundle member to read (objectstack#26649), sent as `?member=`: for a
+   * type whose identity is a pair (today only `email_template`,
+   * `(name, locale)`), the member's discriminator value (`zh-CN`). Omitted,
+   * the door answers the canonical member, as a bare-name read always did.
+   * OMITTED, never sent empty, when the caller has none: the door refuses a
+   * blank selector, and any selector on a type with no members.
+   */
+  member?: string;
 }
 
 // `surface` is a SAVE input (`?surface=` on `PUT`); the delete door reads no
@@ -485,6 +494,14 @@ export interface MetadataDeleteOptions extends Omit<MetadataClientSaveOptions, '
    * to the artifact default (the legacy behaviour).
    */
   state?: 'active' | 'draft';
+  /**
+   * The bundle member whose row the delete removes (objectstack#26649), as
+   * {@link MetadataGetOptions.member}. Omitted, the door removes the
+   * canonical member's row, never the one an editor opened by `?member=`.
+   * The save carries no such option: it is addressed by its body's own
+   * discriminator field.
+   */
+  member?: string;
 }
 
 /**
@@ -1202,6 +1219,7 @@ export class MetadataClient {
     // redundant (and the dispatcher resolves `state` first), so skip it.
     else if (this.previewDrafts) params.push('preview=draft');
     if (options.packageId) params.push(`package=${encodeURIComponent(options.packageId)}`);
+    if (options.member) params.push(`member=${encodeURIComponent(options.member)}`);
     const qs = params.length ? `?${params.join('&')}` : '';
     const url = `${this.base}/${encodeURIComponent(type)}/${encodeURIComponent(name)}${qs}`;
     return this.shareRead('readItemResponse', url, async () => {
@@ -1277,16 +1295,20 @@ export class MetadataClient {
    * only when the ledger lists the name. The item read answers 404 when there
    * is no draft, so opening every item in Studio used to log one error per
    * item for an answer the ledger gives with a 200.
+   *
+   * objectstack#26649 — `member` reads one bundle member's draft
+   * ({@link MetadataGetOptions.member}); omitted, the canonical member's.
    */
   async getDraft<T = unknown>(
     type: string,
     name: string,
-    options: { packageId?: string } = {},
+    options: { packageId?: string; member?: string } = {},
   ): Promise<T | null> {
-    if (!(await this.draftLedgerMayHold(name))) return null;
+    if (!(await this.draftLedgerMayHold(name, options.member))) return null;
     return this.readItemResponse<T>(type, name, {
       state: 'draft',
       ...(options.packageId ? { packageId: options.packageId } : {}),
+      ...(options.member ? { member: options.member } : {}),
     });
   }
 
@@ -1311,15 +1333,22 @@ export class MetadataClient {
    * A ledger that cannot be read (403 without an authoring capability, 501 on
    * a kernel without drafts, a network fault) is UNKNOWN, not empty: the item
    * read is sent, as before.
+   *
+   * objectstack#26649 — asked for one bundle `member`, a row of that name that
+   * is another member's draft is no answer: the ledger names every draft of a
+   * bundled type with its `member` (objectstack#23073). A row that carries no
+   * `member` may still be it, so it counts.
    */
-  private async draftLedgerMayHold(name: string): Promise<boolean> {
+  private async draftLedgerMayHold(name: string, member?: string): Promise<boolean> {
     let drafts: MetadataDraftHeader[];
     try {
       drafts = await this.listDrafts();
     } catch {
       return true;
     }
-    return drafts.some((d) => d?.name === name);
+    return drafts.some(
+      (d) => d?.name === name && (!member || d.member === undefined || d.member === member),
+    );
   }
 
   /**
@@ -1651,11 +1680,15 @@ export class MetadataClient {
    * answer a different resource under this one's declared shape, so it returns
    * 501 `NOT_IMPLEMENTED` instead — which surfaces here as a thrown error
    * rather than a view with `code` and `overlay` silently blank.
+   *
+   * objectstack#26649 — `member` reads the layers of one bundle member
+   * ({@link MetadataGetOptions.member}), which this door takes since
+   * objectstack#26699; omitted, the canonical member's layers.
    */
   async layered<T = unknown>(
     type: string,
     name: string,
-    options: { packageId?: string } = {},
+    options: { packageId?: string; member?: string } = {},
   ): Promise<MetadataLayered<T>> {
     // ADR-0048 — `?package=` scopes resolution to one installed package (the
     // editor passes the edited item's owning package, not the Studio app's).
@@ -1663,7 +1696,10 @@ export class MetadataClient {
     // keeping the `&` would have appended it to the last PATH segment
     // (`…/layers&package=crm`), which matches no route — a 404 that this
     // method turns into an empty-but-successful layered view.
-    const qs = options.packageId ? `?package=${encodeURIComponent(options.packageId)}` : '';
+    const params: string[] = [];
+    if (options.packageId) params.push(`package=${encodeURIComponent(options.packageId)}`);
+    if (options.member) params.push(`member=${encodeURIComponent(options.member)}`);
+    const qs = params.length ? `?${params.join('&')}` : '';
     const url = `${this.base}/${encodeURIComponent(type)}/${encodeURIComponent(name)}/layers${qs}`;
     const res = await this.fetchImpl(url, { method: 'GET', headers: this.headers, cache: 'no-store' });
     if (res.status === 404) {
@@ -1838,6 +1874,9 @@ export class MetadataClient {
     const params: string[] = [];
     if (options.state === 'draft') params.push('state=draft');
     if (options.packageId) params.push(`package=${encodeURIComponent(options.packageId)}`);
+    // objectstack#26649 — the member whose row this removes; omitted, the
+    // canonical member's (`MetadataDeleteOptions.member`).
+    if (options.member) params.push(`member=${encodeURIComponent(options.member)}`);
     const qs = params.length ? `?${params.join('&')}` : '';
     const url = `${this.base}/${encodeURIComponent(type)}/${encodeURIComponent(name)}${qs}`;
     const headers: Record<string, string> = { ...this.headers };
@@ -1859,11 +1898,15 @@ export class MetadataClient {
    * (#5026 / objectstack#9176), with `door: 'publish'`. This is the door the
    * Studio designer takes on every edit, so it is the one whose findings an
    * author actually sees.
+   *
+   * objectstack#26649 — `member` promotes one bundle member's draft, sent as
+   * `?member=` under the same rule as {@link publishDraft}'s; omitted, the
+   * canonical member's draft.
    */
   async publish<T = unknown>(
     type: string,
     name: string,
-    options: { message?: string; packageId?: string } = {},
+    options: { message?: string; packageId?: string; member?: string } = {},
   ): Promise<T> {
     // objectstack `9e04c3e35` (`@objectstack/rest` 17.2.0) — this door accepts
     // `?package=<id>` and forwards it as the promotion's package binding, so
@@ -1878,7 +1921,10 @@ export class MetadataClient {
     // both mean "env-local overlay, no package"), so this is not a behaviour
     // difference on the current server — it is the shape the save door already
     // follows, and the two calls of one loop must not disagree about it.
-    const qs = options.packageId ? `?package=${encodeURIComponent(options.packageId)}` : '';
+    const params: string[] = [];
+    if (options.packageId) params.push(`package=${encodeURIComponent(options.packageId)}`);
+    if (options.member) params.push(`member=${encodeURIComponent(options.member)}`);
+    const qs = params.length ? `?${params.join('&')}` : '';
     const url = `${this.base}/${encodeURIComponent(type)}/${encodeURIComponent(name)}/publish${qs}`;
     const headers: Record<string, string> = {
       ...this.headers,
@@ -1900,7 +1946,13 @@ export class MetadataClient {
     //
     // `mode` is `'publish'` because the promotion lands the body in the active
     // overlay; `door` is what distinguishes it from a direct active save.
-    this.emitAdvisories(body, { type, name, door: 'publish', mode: 'publish' });
+    this.emitAdvisories(body, {
+      type,
+      name,
+      ...(options.member ? { member: options.member } : {}),
+      door: 'publish',
+      mode: 'publish',
+    });
     return body as T;
   }
 

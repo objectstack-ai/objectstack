@@ -25,6 +25,7 @@ import { SkeletonDetail } from '../skeletons/index.js';
 import { ManagedByBadge, useManagedByNote } from '../components/ManagedByBadge.js';
 import { isSetupAppSegment } from '../console/setupApp.js';
 import { deriveRelatedLists } from '../utils/deriveRelatedLists.js';
+import { pruneUnregisteredRecordPageObjects, recordPageChildObjects } from './recordPageChildObjects.js';
 import { stripDiscussionNodes, hasExplicitAttachments, hasExplicitApprovals } from '../utils/pageSchemaIntrospect.js';
 import { ActionConfirmDialog, type ConfirmDialogState } from './ActionConfirmDialog.js';
 import { ActionParamDialog, type ParamDialogState } from './ActionParamDialog.js';
@@ -794,8 +795,29 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     return isRecordPageOf(named, objectName) ? 'accepted' : 'refused';
   }, [requestedPageName, pageAssignmentLoading, metadataPages, objectName]);
   const namedPageBlocked = namedPageState === 'pending' || namedPageState === 'refused';
-  const assignedPage = namedPageBlocked ? null : resolvedPage;
-  const assignedSlots = namedPageBlocked ? null : resolvedSlots;
+  // objectstack#26988 — a related list or rail entry the page lists for an
+  // object this install does not hold is left out, by the rule `DashboardView`
+  // prunes widgets with: the registered object list. That list is this view's
+  // `objects` — the one `deriveRelatedLists` reads below, and on a scoped
+  // record route the objects the page binds, each asked by name
+  // (objectui#13046). ⛔ Never `useMetadata().objects` here: reading it loads
+  // the whole registry the scope exists to spare (objectui#12811). Both the
+  // authored page and a slotted page's slots are pruned, so every reader
+  // downstream — the effective page, the composed page, and the child-write
+  // subscription (objectstack#26890), which has nothing to watch on an object
+  // that cannot be written — sees one page. Deferred while the list is empty.
+  const registeredObjectNames = useMemo(
+    () => new Set<string>(objects.map((o: any) => o?.name).filter(Boolean)),
+    [objects],
+  );
+  const assignedPage = useMemo(
+    () => (namedPageBlocked ? null : pruneUnregisteredRecordPageObjects(resolvedPage, registeredObjectNames)),
+    [namedPageBlocked, resolvedPage, registeredObjectNames],
+  );
+  const assignedSlots = useMemo(
+    () => (namedPageBlocked ? null : pruneUnregisteredRecordPageObjects(resolvedSlots, registeredObjectNames)),
+    [namedPageBlocked, resolvedSlots, registeredObjectNames],
+  );
   const synthesizedPage = useMemo(() => {
     // Synthesizer drives two cases:
     //   1) no assignedPage at all → pure default detail page
@@ -1851,13 +1873,19 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // knows what it depends on. That covers every child-write path at one seam,
   // and costs one parent read per change, however many lists are mounted.
   //
-  // The children are the page's derived related lists, keyed by CONTENT
-  // (AGENTS.md #10 — `childRelations` is a memo). A change both subscriptions
+  // The children are the page's derived related lists, plus the ones its
+  // author lists on it (objectstack#26890): an authored page's
+  // `record:related_list` blocks and `record:reference_rail` entries may name a
+  // child the graph does not derive — its FK opted out with `relatedList:
+  // false`, the page being the only place it is shown — and a create through
+  // that list left the header's total stale. Keyed by CONTENT (AGENTS.md #10 —
+  // `childRelations` and the page are memos). A change both subscriptions
   // match — a `'*'`, or this record when the object references itself — bumps
   // both nonces from one dispatch; React batches the two updates into one
   // render, so the row is still read once.
+  const authoredChildObjects = useMemo(() => recordPageChildObjects(effectivePage), [effectivePage]);
   const relatedChildObjectsKey = JSON.stringify(
-    Array.from(new Set(childRelations.map((r) => r.childObject))).sort(),
+    Array.from(new Set([...childRelations.map((r) => r.childObject), ...authoredChildObjects])).sort(),
   );
   useEffect(() => {
     const childObjects = JSON.parse(relatedChildObjectsKey) as string[];

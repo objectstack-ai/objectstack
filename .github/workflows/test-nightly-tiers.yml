@@ -49,7 +49,7 @@ name: Nightly Tiers
 # and installs Chromium for it (≈ 5 min, the "Prepare the showcase browser
 # smoke" step), which no other shard pays.
 #
-# ## What lands where — the house idiom of `platform-checklist-watchdog.yml`
+# ## What lands where — the house idiom of `fleet-patrols.yml`'s `platform-checklist-watchdog` job
 #
 # On green this workflow files nothing, edits nothing and closes nothing. On
 # red the `report` job — ONE writer, after both shards, never the shards

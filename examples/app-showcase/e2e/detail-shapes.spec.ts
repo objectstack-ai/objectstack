@@ -154,6 +154,14 @@ test('stageField:false: status renders as a plain field, no stepper', async ({ p
 });
 
 test('ungrouped + related-heavy: flat details and related-list tabs on Contoso', async ({ page }) => {
+  // The synthesized record page lays itself out by the width of the view it
+  // occupies (objectstack#26678): the tab strip this case opens exists only
+  // below the two-column floor (`RECORD_PAGE_TWO_COLUMN_MIN_WIDTH` in
+  // `@object-ui/plugin-detail`). The Desktop Chrome viewport leaves the record
+  // view right at that floor once the console sidebar takes its share — two
+  // columns and a "Related" toggle, no tablist — so the case pins a viewport
+  // that keeps the page in its tabbed tier.
+  await page.setViewportSize({ width: 1200, height: 800 });
   const errors = await openRecord(page, recordUrl('showcase_account', contosoId));
 
   // Heuristic stepper (account.status is a select named "status").

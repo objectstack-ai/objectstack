@@ -1,0 +1,164 @@
+---
+title: The Console — how it renders your metadata
+navTitle: Console
+description: What the Console does with the apps, views and pages you declare — its configuration, the record surfaces, what each user's own state keeps, and how a broken predicate is reported
+---
+
+The **Console** (`/_console/`) is the workspace end users live in, and the renderer for
+everything in this module: it declares no apps, objects or views of its own, and draws
+whatever the server it is connected to publishes. [Build without code](/docs/build-without-code)
+tours it from a user's side; this page is the reference for how it behaves, so an author
+can predict what a declaration will look like.
+
+## Configuration
+
+The Console has no configuration file. It has two inputs:
+
+- **Which server.** A build-time variable, `VITE_SERVER_URL`, names the backend. Empty
+  means same origin, which is how the Console ships inside a server; an absolute origin is
+  for a Console deployed apart from its backend, and opts into CORS. In development the
+  Vite server proxies `/api/*` to `DEV_PROXY_TARGET`, or `http://localhost:3000`.
+- **What the server pushes.** Before it mounts, the Console reads
+  `/api/v1/runtime/config` from that server: product branding, feature flags
+  (marketplace, AI Studio, SSO, custom domain) and the cloud URL. An operator changes
+  them on the server, with no Console rebuild.
+
+Apps, objects and views are metadata, fetched over HTTP when the Console connects and
+loaded on demand. To change what it shows, change the metadata: in code, or in Studio and
+publish.
+
+## Navigating
+
+- **App switcher.** Every app the server serves the user, with an **Edit app in Studio**
+  row at the end for workspace admins. An **Edit app** button in the top bar (the pencil
+  alone on narrow screens) opens the app's owning package in Studio: on a dashboard, page
+  or report it deep-links to that surface's design page in the Interfaces pillar
+  (`/studio/:packageId/interfaces?surface=page:NAME`); elsewhere it opens the package's
+  Data tab. Interfaces are designed in Studio; there is no in-page edit panel.
+- **Navigation.** The sidebar renders the app's `navigation` tree; see
+  [Apps](/docs/ui/apps#navigation-items). A `visible` predicate reads `current_user` and
+  `features`, e.g. `visible: "'admin' in current_user.positions"`.
+- **Command palette.** `⌘K` opens a searchable command bar over the open app. On the
+  Studio landing (`/studio`) it searches the Studio instead: packages, their objects and
+  their flows, by label or machine name.
+
+## Record surfaces
+
+### The record page and its overlay
+
+Clicking a row, card, node, bar or event opens the record in an overlay whose mode is the
+view's `navigation.mode`: `drawer`, `modal`, `split` or `popover`. It means the same on
+every list-type view, and every one of them (grid, tree, kanban, calendar, gantt, list,
+gallery, map and timeline) opens the same record panel, so a record reads with its
+declared labels and typed values, without its `hidden` fields, whichever view it came
+from. In `split` the view moves into the left panel; in `popover` the panel is anchored to
+what was clicked.
+
+The record opened from a list is the root of the drawer, and it is addressable:
+`?recordId=` on the list's URL, so a reload, a shared link or Back reopens it. A record
+opened inside the drawer (a related row, a lookup value) opens one level down in the same
+drawer. Those levels are in-memory: a reload shows the root record. `⤢` on any level opens
+that record's full page, with the levels below it as its `?from=` trail, and the page's
+**Collapse to drawer** returns to the drawer with the stack it left.
+
+A record page's layout is described in [Pages](/docs/ui/pages).
+
+### Approvals on a record
+
+A record with approval requests grows an **Approvals** tab beside Details and Related, with
+a request-count badge: the current step, decision progress, the approvers it is waiting on,
+the merged decision timeline and a remind button for the submitter. Every viewer who can
+read the record sees it, not only approvers. A request opens on its record page through
+the approvals routes rather than the data API, so an approver who is not an administrator
+sees the whole page, decision actions and timeline included, although the data API stays
+closed to them on the approval objects.
+
+### Dashboards and list views a user may not open
+
+The server lists only the dashboards and list views a user may open, so one gated by
+`requiredPermissions` is not in their lists. Opened by its URL, the Console asks the
+server about it by name; a `403 PERMISSION_DENIED` shows "You don't have access" with the
+server's sentence naming the item, not "not found", and the list page does not switch to
+the default view. A name that does not exist still reads "not found" (the list page opens
+the default view).
+
+### Notifications
+
+The header bell reads the server-side inbox (`sys_inbox_message`, with read state in
+`sys_notification_receipt`) through one shared feed: the bell's Notifications tab, its
+unread badge and any bell a page places with a `global:notifications` node read the same
+feed on one cadence, so they cannot disagree about read state.
+
+## What each user's own state keeps
+
+Some state belongs to the user, not to the metadata. It follows them across browsers and
+devices, and never changes anything for anyone else. It is stored in
+`sys_user_preference`, one row per user and key, and cached in the browser, so the first
+paint never waits for it; with no server row the Console runs from the browser copy.
+
+| State | Key | Limit |
+|:---|:---|:---|
+| Favorites (starred records, apps) and sidebar pins | `ui.favorites` | 20 favorites and 20 pins, kept apart |
+| Recently visited items | `ui.recent` | 8 |
+| Flow designer's recently added node types | per user | 5 |
+| A list's view-tab order, and per view its sort, filters, column order and widths, density and hidden fields | `ui.list.<object>` | — |
+
+- **Pins.** The sidebar's **Pinned** section is the only part of the sidebar a user orders:
+  drag a pinned row, or focus it and use Space, the arrow keys and Space again (Escape
+  cancels). The app's own menu keeps the order its author gave it.
+- **Recents store identity, not labels.** An entry keeps its type and name and is labelled
+  when it renders, so a rename or a language switch shows at once.
+- **List state never writes the view.** A header sort, a column drag or resize, a filter
+  change, a density change, Hide Fields and a Manage Views drag write the user's row, never
+  the view metadata, so they work even where the tenant's metadata is read-only. The view's
+  authored `sort`, filter, columns, `rowHeight`, `hiddenFields` and tab order stay the
+  default for every user with no state of their own, and the view editor in Studio is where
+  an author changes them for everyone. A link carrying list state (`uf_*` parameters) wins
+  over the stored state. A user's hidden fields only subtract from the columns the view
+  shows, never add one. **Reset view** in the page header's ⋯ menu drops the active view's
+  stored state, and an administrator can delete the row under Setup → User Preferences.
+- **Overlay width.** The record overlay remembers the width a user dragged it to, per
+  object and across view types, in the browser only. Widths under 360 px are not restored,
+  a drag stops at 95% of the viewport, and double-clicking the handle returns to the
+  authored width.
+
+## When a predicate cannot be evaluated
+
+A predicate that fails to evaluate (a misspelled root, a type error, a missing function)
+never fails silently. The Console warns once per distinct predicate source, in production
+builds as well, naming the node, the key, the predicate and the engine's reason:
+
+```text
+[ObjectUI] A visibility predicate could not be evaluated - node "record:alert" (id: "a1")
+  visibleWhen: "nosuchroot.status == 'draft'"
+  Reason: ... nosuchroot is not defined
+```
+
+What the failure does depends on what the predicate guards:
+
+| Predicate | On failure |
+|:---|:---|
+| A field's `visibleWhen`, `readonlyWhen`, `requiredWhen`; a view's `visibleOn`; an option's `visibleWhen`; list conditional formatting | **Fail open**: the rule's safe default applies, so a broken rule never hides a field. A rule that never fires while its field stays visible is the symptom, usually a bare field name where `record.<field>` was meant |
+| An object field group's `visibleWhen` | **Fail closed**: the whole group, header and members, is hidden on the form and the record page |
+| A page node's `visibleWhen` / `visible` / `hidden`, and a `page:tabs` item's `visibleWhen` | **Fail closed**: the node or tab is withheld. A withheld related list is not counted in its tab badge, and if the active tab is withheld the strip falls back to the first visible one |
+| A navigation item's or area's `visible` | **Fail open**: the item renders for everyone, which is why the warning is reported under `app-shell:visible` |
+
+At **submit** a broken field rule is refused, not passed. A field `visibleWhen` that
+cannot be evaluated refuses the submit on the client (on the record form, the internal and
+public form pages, and a wizard's last step), with a message naming the field and the rule,
+because no server evaluates `visibleWhen`. A broken `requiredWhen` or `readonlyWhen` is
+refused by the server, and the form shows that refusal beside the input. A `visibleWhen`
+that reads `previous` cannot be evaluated on a create form, so such a form is always
+refused.
+
+A **blank** rule (`''`, whitespace, or an envelope whose `source` is blank) is not "no
+rule". A blank field rule is refused when it is authored, and one already stored is refused
+at submit like any rule that cannot be evaluated. A blank gate (`visible`, `hidden`,
+`disabled`, a page node's `visibleWhen`) is read as "no gate" at runtime and reported once
+with the `[blank]` reason.
+
+## Related
+
+- [Studio](/docs/ui/studio) — designing objects and flows, and the metadata diagnostics.
+- [Apps](/docs/ui/apps) · [Pages](/docs/ui/pages) · [Views](/docs/ui/views) · [Forms](/docs/ui/forms)
+- [Build without code](/docs/build-without-code) — the Console, Studio and Setup from a user's side.
