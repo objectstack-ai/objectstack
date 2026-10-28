@@ -214,7 +214,9 @@ import { ConnectionCredentialStore } from './connection-credential-store.js';
 import { readJsonRequestBody } from './request-json-body.js';
 import { MARKETPLACE_INSTALLED_UI_BUNDLE } from './marketplace-ui.js';
 import { matchSeedRows, purgeSeedRows, type PurgeSeedDataset } from './marketplace-install-local-purge.js';
-import type { AuthSessionApi, IAuthService, IHttpServer, IMetadataService, IObjectQLEngine } from '@objectstack/spec/contracts';
+import type {
+    AuthSessionApi, ConnectorCredentialRef, IAuthService, IAutomationService, IHttpServer, IMetadataService, IObjectQLEngine,
+} from '@objectstack/spec/contracts';
 import type {
     DeletePackageRequest,
     UninstallCleanupOutcome,
@@ -734,6 +736,29 @@ interface InstallPrincipal {
  * held key is served again the moment its owner remediates (ruling C′ item
  * 4). `null` when the principal is not held.
  */
+/**
+ * [#27237] One connector credential an installed package names, as the install
+ * answer reports it. `status` is the automation service's (`set` / `missing` /
+ * `rejected`), or `unknown` when it could not be read. Never a value.
+ */
+export interface InstalledCredentialRef {
+    ref: string;
+    connectors: string[];
+    status: ConnectorCredentialRef['status'] | 'unknown';
+    source: ConnectorCredentialRef['source'];
+}
+
+/** [#27237] The install answer's sentence for the credentials not set yet. */
+export function installedCredentialNote(refs: readonly string[]): string {
+    const list = refs.map((r) => `'${r}'`).join(', ');
+    return (
+        `Connector credential${refs.length === 1 ? '' : 's'} ${list} ${refs.length === 1 ? 'needs' : 'need'} an `
+        + "administrator — not set, refused by the upstream, or unreadable now (each entry's `status` says which). The "
+        + 'connector instances naming them are installed degraded and materialize once each is set: '
+        + 'PUT /api/v1/automation/connectors/credential-refs/:ref, or a server environment variable of the same name.'
+    );
+}
+
 function refuseHeldSession(c: any, principal: InstallPrincipal): Response | null {
     if (!principal.authGate) return null;
     const { code, message } = principal.authGate;
@@ -1954,6 +1979,12 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //    would fire on every seeded row, which no boot does.
         await this.announceHotInstall(ctx, manifestId);
 
+        // 7. [#27237] Which connector credentials the package names, and which
+        //    are not set yet — after the re-sync above, so the listing reads
+        //    what the reconcile it triggered saw.
+        const credentialRefs = await this.describeInstalledCredentialRefs(ctx, converted);
+        const unsetRefs = (credentialRefs ?? []).filter((r) => r.status !== 'set').map((r) => r.ref);
+
         return c.json({
             success: true,
             data: {
@@ -1969,6 +2000,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 // ONLY there: omitted, not nulled, on a hot-loaded install, so
                 // the success answer's key set is unchanged.
                 ...(hotLoadError !== undefined ? { hotLoadError } : {}),
+                // [#27237] Omitted, not emptied, for a package whose connectors
+                // name no credential, so that answer's key set is unchanged.
+                ...(credentialRefs !== undefined ? { credentialRefs } : {}),
+                ...(unsetRefs.length > 0 ? { credentialNote: installedCredentialNote(unsetRefs) } : {}),
                 upgradedFrom: conflict === 'marketplace' ? 'previous-marketplace-version' : null,
                 translationsLoaded: seededSummary.translationsLoaded,
                 seeded: seededSummary.seeded,
@@ -3462,6 +3497,55 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             );
         }
         return { jobs: collectJobs ? collectJobs(manifest) : [], hooks: collectHooks ? collectHooks(manifest) : [] };
+    };
+
+    /**
+     * [#27237] The connector credentials an installed package's declarative
+     * connectors name (`connectors[].auth.credentialRef`, ruling A on #27230),
+     * each with its status and source as the automation service's credential
+     * listing answers them — never a value. `undefined` when no connector of
+     * the package names one.
+     *
+     * A reference that is not set does not refuse the install: the instance
+     * naming it installs degraded and materializes when an administrator sets
+     * it (`PUT /api/v1/automation/connectors/credential-refs/:ref`). With no
+     * automation service, or one that cannot list, the status is `unknown`.
+     */
+    private describeInstalledCredentialRefs = async (
+        ctx: PluginContext,
+        converted: unknown,
+    ): Promise<InstalledCredentialRef[] | undefined> => {
+        const connectors = (converted as { connectors?: unknown } | null)?.connectors;
+        const declared = new Map<string, string[]>();
+        for (const raw of Array.isArray(connectors) ? connectors : []) {
+            const entry = raw as { name?: unknown; provider?: unknown; auth?: { credentialRef?: unknown } } | null;
+            if (typeof entry?.name !== 'string' || typeof entry.provider !== 'string') continue;
+            const ref = entry.auth?.credentialRef;
+            if (typeof ref !== 'string' || ref.length === 0) continue;
+            declared.set(ref, [...(declared.get(ref) ?? []), entry.name]);
+        }
+        if (declared.size === 0) return undefined;
+        let listing: Map<string, ConnectorCredentialRef> | undefined;
+        try {
+            const automation = ctx.getService<Pick<IAutomationService, 'listConnectorCredentialRefs'>>('automation');
+            if (typeof automation?.listConnectorCredentialRefs === 'function') {
+                listing = new Map((await automation.listConnectorCredentialRefs()).map((e) => [e.ref, e]));
+            }
+        } catch (err: any) {
+            ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] the connector credential listing could not be read, so the install answer reports `
+                + `each credential the package names as status 'unknown'. Cause: ${err?.message ?? err}`,
+            );
+        }
+        return [...declared.keys()].sort().map((ref) => {
+            const known = listing?.get(ref);
+            return {
+                ref,
+                connectors: declared.get(ref)!,
+                status: listing === undefined ? 'unknown' : (known?.status ?? 'missing'),
+                source: known?.source ?? null,
+            };
+        });
     };
 
     /**

@@ -3,7 +3,9 @@
 /**
  * Resolves a credential REFERENCE to its plaintext secret, or `undefined`/empty
  * when unknown. Two references go through it: a declarative connector's
- * `auth.credentialRef` (at boot — an unresolved one is a hard boot error), and
+ * `auth.credentialRef` (third in its chain, after the environment and the
+ * `sys_connector_credential` store — #27237; an unresolved one degrades the
+ * instance naming it), and
  * an `api` flow's start-node `config.secretRef` (at every inbound post — an
  * unresolved one refuses that post as unavailable). May be async so an
  * enterprise resolver can hit a vault. The open-tier default reads from
