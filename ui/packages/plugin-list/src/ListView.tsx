@@ -865,12 +865,16 @@ export type QueueSittingCondition = readonly [field: string, operator: string, v
  * own definition of a parked record, so the filter states exactly it and
  * nothing about who may see or claim the rows: what comes back is whatever the
  * server's read filter lets this user read (a queue's members read what sits
- * in their queues). Module constants, so the fetch effect sees one identity
- * per state (AGENTS.md #10).
+ * in their queues). "Empty" is the server's own reading on both columns — null
+ * OR `''` (the explain engine and the assignment seam both read it so) — so the
+ * conditions are `is_empty` / `is_not_empty` (lowered to `$empty`), not the
+ * null-only operators, which would list a row whose `queue` is `''` and miss
+ * one whose `owner_id` is `''`. Module constants, so the fetch effect sees one
+ * identity per state (AGENTS.md #10).
  */
 export const QUEUE_SITTING_CONDITIONS: ReadonlyArray<QueueSittingCondition> = [
-  ['owner_id', 'is_null', true],
-  ['queue', 'is_not_null', true],
+  ['owner_id', 'is_empty', true],
+  ['queue', 'is_not_empty', true],
 ];
 const NO_QUEUE_SITTING_CONDITIONS: ReadonlyArray<QueueSittingCondition> = [];
 

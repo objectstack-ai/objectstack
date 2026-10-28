@@ -15,9 +15,11 @@
  *    definition carries the platform-injected `queue` column (`system: true`);
  *    an object without it, or with an author's own non-system `queue` field,
  *    gets no toggle;
- *  - the request: pressing it AND-s exactly `owner_id is_null` and `queue
- *    is_not_null` into the fetch filter, and releasing it drops them. Nothing
- *    about who may see the rows: that stays the server's read filter.
+ *  - the request: pressing it AND-s exactly `owner_id is_empty` and `queue
+ *    is_not_empty` into the fetch filter, and releasing it drops them. Empty is
+ *    the server's reading (null OR ''), so the null-only operators are not
+ *    used. Nothing about who may see the rows: that stays the server's read
+ *    filter.
  */
 
 import * as React from 'react';
@@ -76,15 +78,22 @@ describe('objectHasOwnershipQueue — reads the served definition only', () => {
 describe('buildEffectiveFilter — the queue conditions are AND-ed like the rest', () => {
   const NONE = { logic: 'and', conditions: [] } as any;
 
+  it('states the platform\'s "sits in": owner empty and queue not empty, null or \'\' alike', () => {
+    expect(QUEUE_SITTING_CONDITIONS).toEqual([
+      ['owner_id', 'is_empty', true],
+      ['queue', 'is_not_empty', true],
+    ]);
+  });
+
   it('alone, they are the whole filter', () => {
     expect(buildEffectiveFilter(undefined, NONE, [], QUEUE_SITTING_CONDITIONS)).toEqual([
-      'and', ['owner_id', 'is_null', true], ['queue', 'is_not_null', true],
+      'and', ['owner_id', 'is_empty', true], ['queue', 'is_not_empty', true],
     ]);
   });
 
   it('beside an authored filter, they narrow it', () => {
     expect(buildEffectiveFilter(['status', '=', 'open'], NONE, [], QUEUE_SITTING_CONDITIONS)).toEqual([
-      'and', ['status', '=', 'open'], ['owner_id', 'is_null', true], ['queue', 'is_not_null', true],
+      'and', ['status', '=', 'open'], ['owner_id', 'is_empty', true], ['queue', 'is_not_empty', true],
     ]);
   });
 
@@ -108,7 +117,7 @@ describe('ListView "In a queue" toggle (ADR-0142 D3)', () => {
     fireEvent.click(toggle);
     await waitFor(() => expect(ds.find.mock.calls.length).toBeGreaterThan(before));
     expect(screen.getByTestId('queue-sitting-filter').getAttribute('aria-pressed')).toBe('true');
-    expect(lastFilter(ds)).toEqual(['and', ['owner_id', 'is_null', true], ['queue', 'is_not_null', true]]);
+    expect(lastFilter(ds)).toEqual(['and', ['owner_id', 'is_empty', true], ['queue', 'is_not_empty', true]]);
 
     const pressed = ds.find.mock.calls.length;
     fireEvent.click(screen.getByTestId('queue-sitting-filter'));
