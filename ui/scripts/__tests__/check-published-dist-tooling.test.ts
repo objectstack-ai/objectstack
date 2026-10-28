@@ -20,6 +20,7 @@ import {
   toolingConventionFrom,
 } from '../check-published-dist-tooling.mjs';
 import { jobBlock, rootCi, rootWorkflow, rootWorkflowFiles, uiRun, withoutComments } from './helpers/root-ci';
+import { rootManifest, workspaceRoot } from '../workspace-root.mjs';
 
 /**
  * objectui#4846 — no published package's build output may carry tooling material.
@@ -359,9 +360,20 @@ describe('analyze', () => {
 // ── 4. a build that fails is a failure ───────────────────────────────────────
 
 describe('buildWorkspace', () => {
-  it('runs the repository build and reports how long it took', () => {
+  /** A scratch workspace root whose manifest declares the given scripts. */
+  const workspaceWith = (scripts: Record<string, string>) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'published-dist-build-'));
+    fixtures.push(root);
+    fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: 'fixture-root', scripts }));
+    return root;
+  };
+
+  it("runs the workspace root's `build` script, from the workspace root, and reports how long it took", () => {
+    // objectstack#26860: the gate used to run `turbo run build` from `ui/`,
+    // 128 tasks including the docs app, which is not the build that publishes.
+    const root = workspaceWith({ build: 'turbo run build' });
     const calls: unknown[][] = [];
-    const seconds = buildWorkspace('/repo', {
+    const seconds = buildWorkspace(root, {
       exec: (...args: unknown[]) => {
         calls.push(args);
       },
@@ -369,30 +381,57 @@ describe('buildWorkspace', () => {
     expect(typeof seconds).toBe('number');
     expect(calls).toHaveLength(1);
     expect(calls[0][0]).toBe('pnpm');
-    expect(calls[0][1]).toEqual(['exec', 'turbo', 'run', 'build', '--filter=!@object-ui/site']);
+    expect(calls[0][1]).toEqual(['build']);
+    expect((calls[0][2] as { cwd: string }).cwd).toBe(root);
   });
 
   it('forwards --concurrency and --force when asked', () => {
     const calls: unknown[][] = [];
-    buildWorkspace('/repo', {
+    buildWorkspace(workspaceWith({ build: 'turbo run build' }), {
       concurrency: 2,
       force: true,
       exec: (...args: unknown[]) => {
         calls.push(args);
       },
     });
-    expect(calls[0][1]).toContain('--concurrency=2');
-    expect(calls[0][1]).toContain('--force');
+    expect(calls[0][1]).toEqual(['build', '--concurrency=2', '--force']);
+  });
+
+  it('refuses, naming the manifest, when the workspace root declares no `build` script', () => {
+    // The defect objectstack#26860 was filed from: `check:node-esm-load` ran a
+    // `build` script `ui/package.json` does not have, and pnpm's exit 254 was
+    // the whole diagnosis.
+    const root = workspaceWith({ test: 'vitest' });
+    const exec = () => {
+      throw new Error('must not run');
+    };
+    expect(() => buildWorkspace(root, { exec })).toThrow(/declares no `build` script/);
+    expect(() => buildWorkspace(root, { exec })).toThrow(new RegExp(`${root}/package\\.json`));
   });
 
   it('throws — never returns — when the build fails', () => {
     expect(() =>
-      buildWorkspace('/repo', {
+      buildWorkspace(workspaceWith({ build: 'turbo run build' }), {
         exec: () => {
           throw new Error('turbo exited 1');
         },
       }),
     ).toThrow(/nothing trustworthy to inspect/);
+  });
+
+  it("is the release's build: the workspace root's `build` script, which `pnpm run release` opens with", () => {
+    // What the publish path runs before `scripts/release-publish.sh` reads the
+    // artifacts with `--no-build`. If the release ever builds something else,
+    // this gate's build mode no longer reads what publishes, and this goes red.
+    // `repoRoot` in this file is the objectui root, `ui/` under the monorepo.
+    const workspace = workspaceRoot(repoRoot);
+    const scripts = rootManifest(repoRoot).scripts as Record<string, string>;
+    expect(scripts.build).toEqual(expect.any(String));
+    expect(scripts.release.startsWith('pnpm run build && ')).toBe(true);
+    expect(withoutComments(jobBlock(rootWorkflow('release.yml'), 'publish'))).toContain('run: pnpm run build\n');
+    expect(scripts.build).toBe(
+      JSON.parse(fs.readFileSync(path.join(workspace, 'package.json'), 'utf8')).scripts.build,
+    );
   });
 });
 

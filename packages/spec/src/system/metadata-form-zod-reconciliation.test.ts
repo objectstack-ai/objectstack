@@ -331,6 +331,15 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'requires',
     why: "platform-written, never authored — the schema's own words: `derived from the source at save — omit it`. The key exists only on an `html` / `jsx` page, where, on a server with the deployment's SDUI manifest, the save door stamps the compiled list and refuses a written list that disagrees (`page-requires-disagrees-with-source`); on every other kind the parse refuses it; and the Studio page editor drops the key on every save. A control would invite the list the describe tells every author to omit",
   },
+  // #26170 — a hook's refusal catalogue is a record keyed by the code, and an
+  // entry has no member that echoes its key.
+  {
+    kind: 'omit',
+    type: 'hook',
+    path: ROOT_PATH,
+    key: 'refusals',
+    why: "no record control fits it — the form's `record` editor stamps each entry's key into the entry under `keyField` (`{ ...entry, [keyField]: key }`), and a refusal entry is closed at `message` / `status`: the key IS the code, so a stamped `code` (or the default `name`) is refused by `HookRefusalSchema`. The catalogue is authored beside the body it serves, in the hook's source; offering it needs a key-only record control, a form-face addition rather than a reconciliation",
+  },
   // #22158 — the print declaration (ruling B′ on #8346) lands spec-first:
   // `planned` in the liveness ledger, read by no renderer until card ② (the
   // console's print rendering), which is also where the ruling puts its
