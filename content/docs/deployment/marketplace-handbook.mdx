@@ -1,0 +1,260 @@
+---
+title: Marketplace handbook for app authors
+navTitle: Marketplace Handbook
+description: From a built dist/objectstack.json to an app a customer has installed — the listing file, the README a listing depends on, publishing and review, every screen the customer's administrator meets, and staying current with platform versions.
+---
+
+This page follows one app from a built `dist/objectstack.json` to a customer
+environment and back out again, in the order you meet each step. It owns the
+**listing** and the **customer's path**; the mechanics it touches are owned by
+the pages it links, and are not repeated here.
+
+## What a listing is
+
+A Marketplace listing is an **App** listing: the customer downloads, opens and
+uninstalls exactly one App, and only a `type: 'app'` package is
+consumer-installable
+([ADR-0019](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0019-app-as-consumer-unit.md)
+D1/D2). Modules, plugins and other contributions ship **inside** that App — see
+[Extras](#extras-dependencies-and-modules) below.
+
+The listing is a package row in the catalog plus its versions. The package row
+carries the name, description, category, icon, README and translations; each
+version is an immutable snapshot of your compiled artifact.
+
+## The listing file: `objectstack.manifest.json`
+
+`os package publish` reads `objectstack.manifest.json` from the directory you
+run it in, if one is there, and uses it as the default for the listing. **A
+command-line flag always wins** over the file. The file's full schema is the
+generated [Template Manifest reference](/docs/references/marketplace/template-manifest);
+the declared keys below are the ones publish actually sends.
+
+| Key | What it fills | Flag that overrides it |
+|:---|:---|:---|
+| `manifestId` | The package id (reverse-domain, immutable once published) | `--manifest-id` |
+| `displayName` | The name on the card | `--display-name` |
+| `description` | The short description | `--description` |
+| `category` | The catalog category slug (`crm`, `hr`, `finance`, …) | `--category` |
+| `iconUrl` | A public http(s) icon URL | `--icon-url`, or `--icon-file` to upload one |
+| `homepageUrl` | Your project or docs URL | `--homepage-url` |
+| `license` | An SPDX identifier | `--license` |
+| `readmePath` | A markdown file, relative to the manifest, read at publish time | `--readme-file`, `--readme` |
+| `translations` | Per-locale `displayName`, `description`, `tagline`, `readme` and `screenshotCaptions` | — |
+
+[HotCRM](https://github.com/objectstack-ai/hotcrm/blob/main/objectstack.manifest.json)
+is a worked example for the keys it carries:
+
+```json
+{
+  "manifestId": "app.objectstack.hotcrm",
+  "displayName": "HotCRM",
+  "category": "crm",
+  "license": "Apache-2.0",
+  "iconUrl": "https://raw.githubusercontent.com/objectstack-ai/hotcrm/main/assets/icon.svg",
+  "homepageUrl": "https://github.com/objectstack-ai/hotcrm",
+  "readmePath": "README.md"
+}
+```
+
+HotCRM carries no `translations`. A listing in two locales adds one entry per
+locale; a `readme` entry may be inline markdown or a path to a `.md` file next
+to the manifest:
+
+```json
+{
+  "translations": {
+    "en": { "tagline": "Repair tickets, end to end.", "readme": "README.md" },
+    "zh-CN": {
+      "displayName": "维修工单",
+      "description": "从报修到结单的维修工单应用。",
+      "tagline": "报修到结单，一个应用。",
+      "readme": "README.zh-CN.md"
+    }
+  }
+}
+```
+
+The Console picks the entry for the viewer's language — the exact locale, then
+the bare language (`zh` reaches `zh-CN`), then `en` — and falls back to the base
+columns for a missing key. The per-locale shape is the
+[`translations` entry of CreatePackageRequest](/docs/references/marketplace/package).
+
+<Callout type="warn">
+**Two things the file can say that never reach the listing.** Publish uploads no
+screenshot images, and the Console's marketplace pages render none: a
+`preview.screenshots` list stays on your disk, and `screenshotCaptions` travels
+with no image to caption. The schema also accepts `tags`, `publisher` and
+`isStarter`, but `os package publish` does not send them. Put the icon, the
+description, the tagline and the README where the table above says, and nothing
+else.
+</Callout>
+
+## The README the listing depends on
+
+The README is the long description on the app's marketplace page, and the
+customer's administrator reads it before installing. Publish **never** picks up a
+`README.md` on its own — it sends one only from `readmePath`, `--readme-file` or
+`--readme`, so development notes do not leak into the catalog. Write it for the
+administrator, not for a contributor:
+
+- **What the app does, in business words** — the objects and the work they
+  support, not the folder layout.
+- **The sample data and any demo users** — what installing *with sample data*
+  adds (your [seed datasets](/docs/data-modeling/seed-data)), and what an empty
+  install looks like.
+- **Every credential it needs** — for each one, its name, where the
+  administrator obtains it, and which permissions or scopes it must carry. You
+  write the names; the administrator supplies the values. The platform does not
+  prompt for credentials at install yet: the install-time prompt and the
+  credential store arrive with
+  [#27237](https://github.com/objectstack-ai/objectstack/issues/27237) and the
+  Console credentials page with
+  [#27238](https://github.com/objectstack-ai/objectstack/issues/27238). Until
+  then the README is the whole hand-off. An app that ships declarative
+  connectors gains an offline spec-normalization tool with
+  [#26709](https://github.com/objectstack-ai/objectstack/issues/26709).
+
+## Build and verify before publishing
+
+A scaffolded project carries the scripts; run them before every publish:
+
+```bash
+npm run validate     # os validate — the author-time rules
+npm run lint         # os lint
+npm run typecheck    # tsc --noEmit
+npm test             # vitest run
+npx os verify        # boots the app in-process and proves it through the real HTTP stack
+npm run build        # os build -> dist/objectstack.json
+```
+
+Two declarations name the platform major your app is authored against:
+`engines.protocol` in the `defineStack` manifest, and `specVersion` in
+`objectstack.manifest.json`. A runtime outside the `engines.protocol` range
+refuses the app rather than half-loading it. See
+[Validating metadata](/docs/deployment/validating-metadata) for what the checks
+cover.
+
+## Publish and submit for review
+
+Sign in to the control plane once with `os cloud login` (it writes
+`~/.objectstack/cloud.json`), then publish from the directory that holds the
+manifest:
+
+```bash
+os package publish ./dist/objectstack.json \
+  --version 1.2.0 \
+  --icon-file ./assets/icon.png \
+  --visibility marketplace \
+  --submit \
+  --note "First marketplace release"
+```
+
+The flags that shape a listing, on top of the overrides in the table above:
+
+| Flag | Effect |
+|:---|:---|
+| `--visibility` | `org`, `private` or `marketplace`. Omitted, an existing package keeps its visibility and a new one gets the control plane's default |
+| `--icon-file` | Uploads a PNG, JPEG, WebP or SVG (up to 256 KB) and stores the served URL as the icon. Not together with `--icon-url` |
+| `--readme-file` | Reads the README from that path at publish time. Not together with `--readme` |
+| `--pre-release` | Marks the version a pre-release; a version like `1.3.0-beta.1` is marked one anyway |
+| `--submit` | Submits the new version for marketplace review. Needs `marketplace` visibility and a complete listing |
+| `--note` | Release notes for this version |
+
+What review checks is the control plane's business. What you see is what the CLI
+prints: when a listing is incomplete — the README and the icon are required for
+a marketplace listing unless already stored on the package — the publish
+answers with a list of **Marketplace policy violations**; fix them and publish
+again. On success it prints the version's listing status:
+
+| Status | What it means for you |
+|:---|:---|
+| `draft` | Not submitted. With `marketplace` visibility the CLI reminds you to pass `--submit` |
+| `pending_review` | Waiting for a platform admin to approve or reject it |
+| `approved` | Live in the public catalog |
+
+`--auto-approve` skips the queue for platform admins only. Every other flag, the
+service-mode options and the publish-and-install shortcut are on
+[Publish, versioning and preview](/docs/deployment/publish-and-preview#2-publish-a-package-version).
+
+## The customer's side
+
+What the administrator meets, step by step. Each step names the page that owns
+the detail.
+
+1. **Finding the app.** In the Console, **Setup → Browse Marketplace** opens the
+   **App Marketplace** page, which lists the approved apps; clicking one opens
+   its page with the README, version, category and license. A runtime started
+   with `OS_CLOUD_URL=off` shows **App Marketplace is turned off** instead —
+   [Cloud connection](/docs/deployment/cloud-connection) covers connecting one.
+2. **Installing.** Into a cloud environment, **Install to cloud…** opens a
+   dialog with an environment picker and an **Include sample data** box; only
+   organization owners and admins can install. On a runtime that installs
+   locally, **Install** puts the app into this runtime; the result may say it
+   loads at the next restart. Without a catalog at all, the operator runs
+   `os package install ./dist/objectstack.json` against the runtime
+   ([Publish, versioning and preview](/docs/deployment/publish-and-preview#3-install-a-version)).
+3. **Choosing an install mode**, when your manifest permits more than one:
+   **Managed** keeps the package the authority and receives upgrades; an
+   **Unmanaged copy** is editable and receives none
+   ([Install modes](/docs/deployment/install-modes)).
+4. **The dependency check.** An app that declares a dependency the environment
+   lacks is refused before anything is written, one line per unmet entry
+   ([App dependencies](/docs/deployment/app-dependencies)).
+5. **Credentials.** No screen yet — the administrator follows your README (see
+   above, and #27237 / #27238).
+6. **Sample data.** The **⋯** (More install options) menu on the app's page
+   offers **Add sample data**, then **Re-seed sample data**, and **Purge sample
+   data**, which deletes only the records your seed created. Behind them are
+   `POST /api/v1/marketplace/install-local/:manifestId/reseed-sample-data` and
+   `…/purge-sample-data`, both requiring `manage_metadata`.
+7. **Enable and disable.** **Setup → Installed Apps** lists the apps installed
+   from the marketplace. **Disable** is offered only for a writable package: for a package
+   provided by code or by an installed app, the runtime answers
+   `PATCH /api/v1/packages/:id/disable` with `422 WRITABLE_PACKAGE_REQUIRED`. To
+   take an installed app away, uninstall it.
+8. **Upgrading.** You publish a new version; nothing running changes. An
+   environment installed through the cloud shows **Update available → v…** and
+   an **Update** button; a runtime that installs locally shows **Reinstall**. A
+   managed install takes the upgrade; an unmanaged copy does not. To roll back,
+   install the earlier version.
+9. **Uninstalling.** **Uninstall from this runtime** in the **⋯** menu, or
+   `DELETE /api/v1/marketplace/install-local/:manifestId` (`manage_metadata`).
+   There is no CLI command. It removes the cached manifest, withdraws the app
+   from the running kernel and revokes its permission sets and their grants. The
+   answer's `note` and `cleanups` say whether any part stays loaded until the
+   next restart. **Records stored in the app's objects stay in the database.**
+
+## Staying current with platform versions
+
+The platform ships on its own release train; your app moves when you move it.
+Metadata authored one major behind still loads, with conversion notices in the
+boot log; two or more majors behind, the load rejects the retired shapes. An
+installed app whose `engines.protocol` the runtime does not support is not
+loaded, and the app's page shows **Not loaded** with the protocol range it
+targets.
+
+To move, run `os migrate meta --from <the major you authored against>` on your
+source, apply what it lists, update `engines.protocol` and `specVersion`,
+rebuild, and publish a new version. [Upgrading](/docs/upgrading#the-metadata-app)
+owns the loop.
+
+## Extras: dependencies and modules
+
+An app ships extras in one of two shapes:
+
+- **A separate app it depends on** — a region pack, a shared base app. Declare it
+  in `manifest.dependencies`; install checks it, and the customer installs it
+  first ([App dependencies](/docs/deployment/app-dependencies)).
+- **A module built into the same artifact** — a `type: 'module'` package
+  composed at build time, which travels inside your App and is never listed on
+  its own ([A project is a multi-package artifact](/docs/getting-started/examples#a-project-is-a-multi-package-artifact)).
+
+## Related
+
+- [Publish, versioning and preview](/docs/deployment/publish-and-preview)
+- [Install modes](/docs/deployment/install-modes)
+- [App dependencies](/docs/deployment/app-dependencies)
+- [Cloud connection](/docs/deployment/cloud-connection)
+- [CLI reference](/docs/deployment/cli)
+- [Marketplace protocol reference](/docs/references/marketplace/marketplace)
