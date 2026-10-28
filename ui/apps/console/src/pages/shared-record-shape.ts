@@ -105,11 +105,36 @@ export interface ShareLink {
   label?: string | null;
 }
 
-/** What the page renders. Note `redactedFields` — see {@link normalizeResolvedShare}. */
+/**
+ * The display projection of one field the resolve answer's `record` carries
+ * (objectstack#27121) — the members of `@objectstack/types`'
+ * `ShareLinkFieldDisplay` this page reads. Mirrored rather than imported: the
+ * console does not depend on `@objectstack/types`, and a workspace edge only
+ * for a type is not worth taking. Every member is the authored value the
+ * object schema holds; the server projects nothing else.
+ */
+export interface SharedFieldDisplay {
+  label?: string;
+  type?: string;
+  /** A picklist's options: value, authored label and colour. */
+  options?: Array<{ value: string; label: string; color?: string }>;
+  multiple?: true;
+  currencyConfig?: { currencyMode?: string; defaultCurrency?: string };
+  /** A lookup's target object. The record's value stays the stored id. */
+  reference?: string;
+  displayField?: string;
+}
+
+/**
+ * What the page renders. Note `redactedFields` — see {@link normalizeResolvedShare}.
+ * `fields` is absent when an older server answered without it: the page then
+ * labels and formats each key the way it did before the projection existed.
+ */
 export interface ResolvedShare {
   link: ShareLink;
   record: Record<string, unknown>;
   redactedFields?: string[];
+  fields?: Record<string, SharedFieldDisplay>;
 }
 
 /**
@@ -122,6 +147,11 @@ export interface WireResolvedShare {
   record?: unknown;
   link: ShareLink;
   redactFields?: string[];
+  /**
+   * Keyed by field name, covering exactly the keys `record` carries after
+   * redaction (objectstack#26991). A redacted field is absent from both.
+   */
+  fields?: Record<string, SharedFieldDisplay>;
 }
 
 /** Either producer's body: enveloped (`{ success, data }`) or bare. */
@@ -132,7 +162,7 @@ export type ResolveResponseBody = { data?: WireResolvedShare } & Partial<WireRes
  *
  * Two producers serve this route: the sharing plugin's routes and the runtime
  * dispatcher's `/share-links` domain (the designed primary surface for cloud's
- * per-environment kernels). Both answer the same three fields; only the envelope
+ * per-environment kernels). Both answer the same fields; only the envelope
  * differs, and the dispatcher has always enveloped them — objectstack#3983 moved
  * the plugin onto the same shape, so the bare branch is what a pre-#3983 server
  * still sends.
@@ -149,5 +179,6 @@ export function normalizeResolvedShare(body: ResolveResponseBody): ResolvedShare
     record: (wire.record ?? {}) as Record<string, unknown>,
     link: wire.link,
     redactedFields: wire.redactFields,
+    fields: wire.fields,
   };
 }
