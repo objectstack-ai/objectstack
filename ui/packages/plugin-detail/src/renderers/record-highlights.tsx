@@ -15,6 +15,7 @@ import { useRecordContext, useRegisterHighlightFields } from '@object-ui/react';
 import { useFieldPermissions, usePermissions } from '@object-ui/permissions';
 import type { RecordHighlightsComponentProps } from '@object-ui/types';
 import { HeaderHighlight } from '../HeaderHighlight';
+import { RecordFieldAccessForRecord } from '../recordFieldAccess';
 import { useRecordAriaProps } from './recordComponentAria';
 import { recordBindingBlock } from './recordBinding';
 
@@ -180,13 +181,17 @@ const RecordHighlightsBody: React.FC<RecordHighlightsRendererProps> = ({
 
   return (
     <div className={className} {...designer} {...ariaProps}>
-      <HeaderHighlight
-        fields={highlightFields as any}
-        data={ctx?.data}
-        objectName={ctx?.objectName}
-        objectSchema={ctx?.objectSchema as any}
-        dataSource={ctx?.dataSource}
-      />
+      {/* objectstack#27146 — the in-place edit's field locks are this
+          stored row's, asked of the server (`../recordFieldAccess`). */}
+      <RecordFieldAccessForRecord objectName={ctx?.objectName} recordId={ctx?.recordId} dataSource={ctx?.dataSource}>
+        <HeaderHighlight
+          fields={highlightFields as any}
+          data={ctx?.data}
+          objectName={ctx?.objectName}
+          objectSchema={ctx?.objectSchema as any}
+          dataSource={ctx?.dataSource}
+        />
+      </RecordFieldAccessForRecord>
     </div>
   );
 };
