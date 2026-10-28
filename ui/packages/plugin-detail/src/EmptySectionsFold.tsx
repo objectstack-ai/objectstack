@@ -173,7 +173,7 @@ export const EmptySectionsLine: React.FC<EmptySectionsLineProps> = ({
   if (foldedCount === 0) return <>{sections.map(renderSection)}</>;
 
   const names = sections
-    .filter((section, index) => folded[index])
+    .filter((_section, index) => folded[index])
     .map((section) => (typeof section.title === 'string' ? section.title.trim() : ''))
     .filter((name) => name !== '');
   const line = (

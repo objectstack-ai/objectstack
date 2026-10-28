@@ -894,13 +894,15 @@ export const RecordRelatedListRenderer: React.FC<RecordRelatedListRendererProps>
       </>
     );
     if (scope.isCollapsed(arrangedId)) {
+      // `arrangedId` is set only when the schema names both keys.
+      const block = schema!;
       const node = {
         type: 'record:related_list',
         properties: {
-          objectName: schema.objectName,
-          relationshipField: schema.relationshipField,
-          title: pickLocalized(schema.title, language) || schema.objectName,
-          ...(schema.filter ? { filter: schema.filter } : {}),
+          objectName: block.objectName,
+          relationshipField: block.relationshipField,
+          title: pickLocalized(block.title, language) || block.objectName,
+          ...(block.filter ? { filter: block.filter } : {}),
         },
       };
       return (

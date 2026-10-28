@@ -99,7 +99,7 @@ describe('record:activity on the default record page is the stream', () => {
   const mount = (onDefaultPage: boolean) =>
     render(
       <DefaultRecordPageContext.Provider value={onDefaultPage}>
-        <DiscussionContextProvider items={[call, ...many]} loading={false}>
+        <DiscussionContextProvider items={[call, ...many] as any[]} loading={false}>
           <RecordFieldChangesContext.Provider value={audit}>
             <RecordActivityRenderer schema={{ type: 'record:activity', showCompleted: true } as any} />
           </RecordFieldChangesContext.Provider>

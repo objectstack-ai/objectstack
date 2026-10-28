@@ -232,12 +232,12 @@ export const RelatedCardStack: React.FC<RelatedCardStackProps> = ({
           />
         ) : (
           <RelatedCardChromeContext.Provider key={id} value={chrome}>
-            <SchemaRenderer schema={toRenderableSchema(node)} />
+            <SchemaRenderer schema={toRenderableSchema(node as any)} />
           </RelatedCardChromeContext.Provider>
         );
       })}
       {rest.map((node, index) => (
-        <SchemaRenderer key={`rest-${index}`} schema={toRenderableSchema(node)} />
+        <SchemaRenderer key={`rest-${index}`} schema={toRenderableSchema(node as any)} />
       ))}
       {resolved.hidden.length > 0 && (
         <RelatedHiddenLine count={resolved.hidden.length} onShow={() => edit({ kind: 'show-hidden' })} />
