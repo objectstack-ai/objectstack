@@ -192,57 +192,13 @@ const DOMAIN_LABELS_ZH: Record<string, string> = {
 };
 
 const ENGINE_STRINGS_EN: Record<string, string> = {
-  'engine.translationPreview.empty':
-    'This bundle is empty — add at least one translated string to see the coverage report.',
-  // One heading per group of the per-app `TranslationDataSchema`, in its order (objectui#11765).
-  'engine.translationPreview.category.objects': 'Objects',
-  'engine.translationPreview.category.picklists': 'Picklists',
-  'engine.translationPreview.category.apps': 'Apps',
-  'engine.translationPreview.category.messages': 'Messages',
-  'engine.translationPreview.category.globalActions': 'Global Actions',
-  'engine.translationPreview.category.dashboards': 'Dashboards',
-  'engine.translationPreview.category.datasets': 'Datasets',
-  'engine.translationPreview.category.reports': 'Reports',
-  'engine.translationPreview.category.pages': 'Pages',
-  'engine.translationPreview.category.flows': 'Flows',
-  'engine.translationPreview.category.hooks': 'Hooks',
-  'engine.translationPreview.category.positions': 'Positions',
-  'engine.translationPreview.category.permissions': 'Permission Sets',
-  'engine.translationPreview.category.books': 'Doc Books',
-  'engine.translationPreview.category.metadataForms': 'Metadata Forms',
-  'engine.translationPreview.category.settingsCommon': 'Settings UI',
-  'engine.translationPreview.coverage': 'Category coverage:',
-  'engine.translationPreview.totalKeys': '{count} total keys',
-  'engine.translationPreview.categoryEmpty': 'empty',
-  'engine.translationPreview.more': '+{count} more…',
-  'engine.translationPreview.keyCountOne': '{{count} key}',
-  'engine.translationPreview.keyCountOther': '{{count} keys}',
+  // Empty since #25922 slice S6b: every row lives in `@object-ui/i18n`'s
+  // `studio` namespace. Kept until slice S7 retires the table.
 };
 
 const ENGINE_STRINGS_ZH: Record<string, string> = {
-  'engine.translationPreview.empty': '此语言包为空 —— 至少添加一条译文，即可查看覆盖率报告。',
-  'engine.translationPreview.category.objects': '对象',
-  'engine.translationPreview.category.picklists': '选项列表',
-  'engine.translationPreview.category.apps': '应用',
-  'engine.translationPreview.category.messages': '消息',
-  'engine.translationPreview.category.globalActions': '全局操作',
-  'engine.translationPreview.category.dashboards': '仪表盘',
-  'engine.translationPreview.category.datasets': '数据集',
-  'engine.translationPreview.category.reports': '报表',
-  'engine.translationPreview.category.pages': '页面',
-  'engine.translationPreview.category.flows': '流程',
-  'engine.translationPreview.category.hooks': '钩子',
-  'engine.translationPreview.category.positions': '岗位',
-  'engine.translationPreview.category.permissions': '权限集',
-  'engine.translationPreview.category.books': '文档书',
-  'engine.translationPreview.category.metadataForms': '元数据表单',
-  'engine.translationPreview.category.settingsCommon': '设置界面',
-  'engine.translationPreview.coverage': '分类覆盖率：',
-  'engine.translationPreview.totalKeys': '共 {count} 个键',
-  'engine.translationPreview.categoryEmpty': '空',
-  'engine.translationPreview.more': '另有 {count} 项…',
-  'engine.translationPreview.keyCountOne': '{{count} 个键}',
-  'engine.translationPreview.keyCountOther': '{{count} 个键}',
+  // Empty since #25922 slice S6b: every row lives in `@object-ui/i18n`'s
+  // `studio` namespace. Kept until slice S7 retires the table.
 };
 
 /** Whether a locale resolves to Chinese (the only non-English catalog). */

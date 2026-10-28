@@ -86,6 +86,8 @@ let server: Server;
 
 function makeClient(s: Server) {
   return {
+    // objectstack#26840 — the Access matrix reads its objects through the draft-overlaid door.
+    withPreviewDrafts() { return this; },
     list: vi.fn(async (type: string) => {
       if (type === 'permission') return [{ name: 'set_a', label: 'Set A' }];
       if (type === 'object') return [{ name: 'a_account' }];

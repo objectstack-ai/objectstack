@@ -12,7 +12,9 @@
  * to its own route, `report/NAME`. Which reports, and under which read rule,
  * is `useAppReportEntries`'s answer (`appReportIndex.ts`); the ⌘K palette
  * reads the same one. The sidebar links here from every app, so a report the
- * app's navigation does not name still has a UI path.
+ * app's navigation does not name still has a UI path. A report it names is
+ * listed only when the sidebar's gates show the member an entry naming it
+ * (objectstack#26892).
  */
 
 import { Link, useParams } from 'react-router-dom';
@@ -20,13 +22,15 @@ import { BarChart3, ChevronRight, Loader2 } from 'lucide-react';
 import { Empty, EmptyTitle, EmptyDescription } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { useExpressionContext } from '../providers/ExpressionProvider.js';
+import { useNavMemberGates } from '../hooks/useNavMemberGates.js';
 import { useAppReportEntries } from './appReportIndex.js';
 
 export function AppReportIndexView() {
   const { t } = useObjectTranslation();
   const { appName } = useParams<{ appName: string }>();
   const { app } = useExpressionContext();
-  const { entries, loading } = useAppReportEntries(app, true);
+  const gates = useNavMemberGates();
+  const { entries, loading } = useAppReportEntries(app, true, gates);
   const title = t('console.reportIndex.title', { defaultValue: 'Reports' });
 
   if (loading) {

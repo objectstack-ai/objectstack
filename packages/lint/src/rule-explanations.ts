@@ -1422,8 +1422,8 @@ const RLS_PREDICATE_UNENFORCEABLE_EXPLANATION: RuleExplanation = {
     RLS_UNCOMPILABLE_DROP,
     // The two key lists are held equal to the rule's per-key probe types by the rule's test.
     'A predicate can pass that shape check and still be refused for the TYPE of the value a `current_user` ' +
-      'reference holds on every request. `ExecutionContext` declares, and the kernel resolves, the membership ' +
-      'sets `accessible_org_ids`, `org_user_ids` and `positions` as LISTS and `email`, `id` and ' +
+      'reference holds on every request. The kernel resolves the membership sets `accessible_org_ids`, ' +
+      '`org_user_ids`, `positions` and `queues` as LISTS and `email`, `id` and ' +
       '`organization_id` as one value each, and `current_user` alone is the whole caller context object. A ' +
       'list under `==` / `!=` or handed to a string method, one value on the right of `in`, or the whole ' +
       'context object where one value or one set belongs is refused on EVERY request, so `RLSCompiler` drops ' +
@@ -1478,7 +1478,7 @@ const RLS_PREDICATE_UNENFORCEABLE_EXPLANATION: RuleExplanation = {
       '(`startsWith` / `endsWith` / `contains`) runs only on a field that holds a string, and a date or datetime ' +
       'field only against a value its storage can read. A `{…}` placeholder is saved-filter syntax, and an RLS ' +
       'predicate does not use it: the predicate is CEL, and the caller\'s values are the `current_user` keys ' +
-      '(accessible_org_ids, email, id, org_user_ids, organization_id, positions).',
+      '(accessible_org_ids, email, id, org_user_ids, organization_id, positions, queues).',
   ],
 };
 
@@ -1523,7 +1523,7 @@ const RLS_PREDICATE_UNKNOWN_USER_VARIABLE_EXPLANATION: RuleExplanation = {
   paragraphs: [
     // Held equal to `RESERVED_RLS_MEMBERSHIP_KEYS` by the rule's test.
     'The kernel-resolved `current_user` keys are exactly accessible_org_ids, email, id, org_user_ids, ' +
-      'organization_id, positions. The only other keys that can EVER appear are §7.3.1 membership sets, which ' +
+      'organization_id, positions, queues. The only other keys that can EVER appear are §7.3.1 membership sets, which ' +
       'the runtime stages as ARRAYS and which are therefore usable only as `field in current_user.KEY`. A key ' +
       'outside that list in a scalar position — compared with `==` / `!=` / `<` / `>` or handed to a string ' +
       'method — can therefore never be supplied by any request.',
