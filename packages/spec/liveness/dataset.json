@@ -123,6 +123,14 @@
           "note": "measure-declared currency (ISO 4217) enriched onto result fields alongside label/format, so the renderer formats the amount with a locale-correct Intl symbol rather than a '$' baked into format. 2026-08-28: RE-ANCHORED (commit 9ee2dcfbd) and REPOINTED — `analytics-service.ts:531` had rotted onto a comment about a `400 INVALID_FIELD` refusal, ~830 lines above the chain. Re-closed by hand against c459da6bc; DATED for the first time (this file carried no `verifiedAt` anywhere, which the review accepting that re-anchoring sorts as OLDEST). 2026-09-27: evidence RE-WORDED (#20126) — the chain no longer cites the date/datetime-semantics ADR, which never names currency, and its middle step is the field's FIXED currency, which the plugin relays only under `currencyMode: 'fixed'` (#20091). Verdict unchanged: LIVE. Re-closed by hand against 1c8b320a8.",
           "verifiedAt": "2026-09-27"
         },
+        "polarity": {
+          "status": "live",
+          "verifiedAt": "2026-10-27",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/plugin-dashboard/src/DatasetWidget.tsx#deltaToneClass colours a period-over-period delta by the measure column's `fields[].polarity` (`lower`: a rise red and a fall green; `neutral`: no good/bad colour; `higher` and undeclared: a rise green and a fall red), read off the dataset answer for the metric tile's `compareTo` delta and the cross-tab cell's comparison; the arrow keeps the number's direction",
+          "producer": "packages/services/service-analytics/src/analytics-service.ts#enrichResultColumns — the column-description pass shared by the live query and the draft-data preview relays the authored `m.polarity` onto the measure column's descriptor as `fields[].polarity`, the `__compare` column included; an undeclared measure and every dimension column carry no key",
+          "note": "[#26602] declared on the measure (the semantic layer), not on the widget's `compareTo`: that slot is forwarded verbatim to the closed wire `DatasetCompareToSchema`. A lower-is-better KPI (turnaround days, overdue counts, cost) no longer draws a rise as good news."
+        },
         "derived": {
           "status": "live",
           "evidence": "packages/services/service-analytics/src/dataset-compiler.ts#compileDataset (`derived.push({ name: m.name, op: m.derived.op, of: m.derived.of })` — both members read here, and a derived measure is deliberately NOT compiled into a Cube metric); packages/services/service-analytics/src/dataset-executor.ts#evaluateDerivedMeasures (post-aggregation arithmetic row by row, driven from `compiled.derived`)",

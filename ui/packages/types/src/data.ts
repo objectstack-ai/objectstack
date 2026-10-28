@@ -344,6 +344,27 @@ export interface DeleteViewResult {
 }
 
 /**
+ * The record-scoped field projection (`GET /data/{object}/{id}/field-access`,
+ * `GetRecordFieldAccessResponse` in `@objectstack/spec`), as
+ * {@link DataSource.getRecordFieldAccess} returns it.
+ */
+export interface RecordFieldAccess {
+  /** Object name. */
+  object: string;
+  /** The record the projection was judged on. */
+  recordId: string;
+  /** Fields the caller may read on the object; reads are judged row-blind. */
+  readable: string[];
+  /**
+   * Fields the caller may write on this record, as field-level security
+   * judges an update of the stored row. The object grant, the record's
+   * row-level write scope and a field's own rules (readonly, computed types)
+   * are not part of it.
+   */
+  editable: string[];
+}
+
+/**
  * The backend-agnostic data contract every adapter implements.
  *
  * ## One rule for record ids: a record id is a `string`
@@ -587,6 +608,22 @@ export interface DataSource<T = any> {
     objectName: string,
     recordId: string,
   ): Promise<{ requestId: string; status: string }>;
+
+  /**
+   * The field projection of ONE stored record (objectstack#26594): which
+   * fields the caller may read, and may write on THIS record as field-level
+   * security judges an update of its stored row — so a field permission whose
+   * `when` names only some rows locks the field only on those rows. The
+   * record form's edit dialog reads it through `RecordFieldAccessScope`
+   * (`@object-ui/permissions`).
+   *
+   * `null` means no answer: the record is absent or hidden from the caller,
+   * or the server offers no record-scoped projection. The caller then keeps
+   * the row-blind answer `/auth/me/permissions` gives.
+   *
+   * Optional — adapters that don't speak to an ObjectStack server can omit it.
+   */
+  getRecordFieldAccess?(resource: string, id: string): Promise<RecordFieldAccess | null>;
 
   /**
    * Get object schema/metadata.

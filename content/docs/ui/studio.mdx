@@ -1,0 +1,241 @@
+---
+title: Studio — designing objects, flows and interfaces
+navTitle: Studio
+description: What Studio offers a metadata author — package scope, the object design panels, the Flow Designer, drafts and publishing, and how metadata diagnostics are surfaced
+---
+
+**Studio** (`/studio`) is where metadata is authored without code. Everything it edits is
+the same metadata a package declares in TypeScript: an object's `validations[]` and
+`actions[]`, a `hook`, a `flow`, an app, a page. It saves those edits as **drafts** of the
+package that owns them, and nothing reaches users until the package is published. This
+page describes how Studio behaves; [Build without code](/docs/build-without-code) is the
+tour.
+
+## Access and package scope
+
+- **Access.** Studio needs the `studio.access` capability. A caller without it who opens a
+  Studio URL stays on that URL and sees one sentence saying Studio access is needed, with
+  a **Back to home** link to the declared landing. The builder is not loaded for them.
+- **Package scope.** Studio always works inside one package. Metadata counts, diagnostics
+  and the metadata lists follow the selected package (`?package=` on the metadata
+  directory), and only project packages are offered: system and cloud packages never
+  appear.
+- **Read-only packages.** The Studio home lists code and installed packages under
+  "Installed (read-only · browsable)". A card opens the package for browsing
+  (`/studio/:packageId/data`); its **Customize with an overlay** link opens the package's
+  metadata directory (`/apps/setup/metadata?package=:packageId`). Whether an item can take
+  an environment overlay is decided per metadata type (`allowEnvironmentOverlay`), not per
+  package, and the directory marks each type.
+- **Flows in no package.** A flow that belongs to no package, such as a clone of a packaged
+  flow made from Setup › Packaged automation, is listed and edited at
+  `/studio/~org/automations`, reached from the Studio home ("Not in a package") or the
+  package switcher.
+- **Search.** On the Studio landing, `⌘K` searches packages, their objects and their flows
+  by label or machine name. The Automations pillar's flow rail has its own search box over
+  label and machine name.
+
+## Drafts and publishing
+
+Every Studio edit is a draft of its package. The top bar's **Changes** count lists the
+pending drafts and **Publish** promotes them; leaving a pillar that holds an unsent edit
+asks first. In a package with no app yet, **Create app** saves the new app as a draft and
+opens the **Interfaces** pillar, where apps, pages, dashboards and reports are designed.
+The Console's **Edit app** button deep-links there
+(`/studio/:packageId/interfaces?surface=page:NAME`).
+
+When the AI copilot saves a change to a live app as a draft, its card offers **Review
+changes and publish** and **Undo**. Review opens the **Changes** drawer for the package
+(its link is `/studio/:packageId/:tab?changes=review`); Undo discards the package's
+pending drafts (`POST /api/v1/packages/:id/discard-drafts`) and asks first when other
+drafts are pending.
+
+## Object design
+
+Selecting an object in the **Data** pillar (`/studio/:packageId/data`) opens two tabs over
+it, **Records** and **Form**, and an **Advanced** menu with **Validations**, **Hooks**,
+**Actions**, **API** and **Settings**. Validations, Hooks and Actions are each a list with
+an editor driven by the metadata it edits, and each can add new entries:
+
+| Panel | Edits | Notes |
+|:---|:---|:---|
+| **Validations** | The object's `validations[]` ([Validation rules](/docs/data-modeling/validation-rules)) | Every rule type: `script`, `cross_field`, `state_machine`, `format`, `json_schema`, `conditional`. The **New** menu opens on common rules in plain words (*End date on or after start date*, *Number can't be negative*); a rule whose type carries a condition is saved only once it has one |
+| **Hooks** | The separate `hook` metadata targeting this object | The form is generated from the running server's `hook` schema (`/api/v1/meta/types`), so it always matches the server's contract. Saved per hook |
+| **Actions** | The object's `actions[]` ([Actions](/docs/ui/actions)) | A type-aware inspector, with a **More fields** form generated from the `action` schema so no property is un-editable |
+
+Validations and Actions are saved with the object's own **Save draft**.
+
+### Why a configured action can be missing from the app
+
+An action that is saved, published and placed can still appear on no surface. There are
+two reasons, and the Actions panel states both (the running app states neither, because a
+user should not be told about capabilities they do not have):
+
+- **No placement.** `locations` is empty, so the action surfaces nowhere. A
+  selection-only action is legitimate here: a list view's `bulkActions` places it.
+- **The capability gate.** `requiredPermissions` is enforced with a `403` on the action
+  route and mirrored as a hide: a viewer who lacks any listed capability gets no button,
+  no greyed-out control and no message, at every location at once.
+
+The action inspector's **Placement** section names the gating capabilities, says the
+action is hidden rather than disabled, and says so when the signed-in session itself lacks
+one. A capability string registered nowhere is a different problem, caught by the advisory
+capability-reference lint that runs over pending drafts at **Publish**.
+
+## The Flow Designer
+
+The Flow Designer is the visual editor for `flow` metadata, opened from a flow's
+**Design** tab; the **Form** tab holds the same flow as an editable tree, and the two stay
+in sync. Everything on the canvas is a node or edge of the flow, so the document runs
+unchanged on the automation engine ([Flows](/docs/automation/flows)).
+
+### The canvas
+
+| Gesture | Result |
+|:---|:---|
+| Click a card | Select it and open its inspector |
+| Drag a card | Reposition it |
+| Hover a card, then its bottom **+** | Append a connected child node |
+| Drag a card's connect handle onto another node | Connect the two. Refused, with the reason, for the node itself, a pair another connection already joins, or a node the flow does not have |
+| Zoom controls / **Fit** | Scale and re-center the graph |
+
+A selected connection's **From** and **To** re-point it, under the same refusals.
+Structural problems (an undeclared cycle, an unreachable node) show as a red ring and a
+corner badge on the card and in a banner on the canvas; a banner row selects and pans to
+its element.
+
+### Adding nodes
+
+**Add node** opens the palette: every node type the flow can use, grouped as **Data**
+(create, update, get, delete record), **Logic** (decision, loop, set variables, parallel,
+try / catch), **Human** (approval, screen), **Integration** (HTTP request, connector,
+script) and **Flow** (subflow, wait, end).
+
+- **Search** filters across all groups, matching a node's label, hint and type as a
+  case-insensitive substring. `↑` / `↓` move the highlight, `Enter` inserts, `Esc` closes,
+  and the box takes focus when the palette opens.
+- **Recently used** tops the list while the search is empty: the last five node types the
+  user inserted, kept per user (see [the Console](/docs/ui/console#what-each-users-own-state-keeps)).
+  Types from a plugin since uninstalled drop out.
+- **Server-merged.** The engine publishes its registered actions at
+  `GET /api/v1/automation/actions`, and plugins contribute node types there. The palette
+  overlays them on the built-in list, taking the engine's labels and appending engine-only
+  types, so it matches what the connected server runs. If the endpoint is unreachable the
+  built-in list is used.
+
+### The node inspector
+
+The inspector shows a node's **ID**, **Label**, **Node Type** and **Configuration**. New
+nodes start with the spec's defaults where it has one (a *Wait* node carries a timer, an
+*HTTP* node defaults to `GET`), and what the author must still supply is marked with a red
+`*`: an HTTP node's URL, a record node's object, a decision branch's label and expression,
+a screen field's name. The marker follows the spec, so a key required only in some
+configurations is marked only while it applies, and the spec's error shows on the node and
+in **Problems** until the value is supplied.
+
+- **Server-driven forms.** For a node whose executor publishes a `configSchema`, the
+  inspector renders a form from that schema: scalars, enums as selects, typed references
+  as pickers, maps as key/value editors, and arrays of objects as repeaters (nested arrays
+  as nested repeaters). A plugin's node gets a real form without designer code.
+- **Approval approvers.** The **Value** cell offers candidates from where the row's
+  **Type** says they live: a lookup over the directory object for `user`, `team` and
+  `department`, and a select over the registry's declared items for a registry-bound kind
+  such as `position`. A pencil toggle allows typing a value.
+- **Decision branches.** The Branches editor sets each branch's label, CEL expression and
+  **target node** in one table; the target wires the branch's outgoing edge. The same
+  binding is editable from the edge's **Branch** picker, because routing lives on the
+  edges.
+- **Assignments.** One variable per row, each value either text or a CEL expression,
+  chosen with the row's *Write as a CEL expression* toggle:
+
+```json
+{
+  "assignments": {
+    "label": "{record.name}",
+    "digest": { "dialect": "cel", "source": "joinNonEmpty(names, \", \")" }
+  }
+}
+```
+
+  Text is `{token}` interpolation, stored as typed; an expression is stored as the
+  `{ dialect: 'cel', source }` envelope and evaluated with the CEL standard library. The
+  toggle appears only on maps whose values the spec allows to be an expression.
+
+### Panels
+
+| Panel | Shows |
+|:---|:---|
+| **Variables** | The flow's declared variables |
+| **Problems** | Structural and server validation issues; each one reveals its element on the canvas |
+| **Debug** | A step-through simulator that walks the graph and highlights the active and visited nodes |
+| **Runs** | The published flow's execution history, read from the engine |
+
+## Metadata diagnostics
+
+Every metadata item a package ships is validated against its spec schema when it is
+loaded, and the result travels with the item as a `_diagnostics` envelope:
+
+```ts
+interface MetadataDiagnostics {
+  valid: boolean;
+  errors?: Array<{ path: string; message: string; code?: string }>;
+  warnings?: Array<{ path: string; message: string; code?: string }>;
+}
+```
+
+`valid: false` means at least one error, and whatever depends on the item (rendering,
+queries, automation) is unsafe to use. Warnings are advisory: the item stays valid.
+`path` is dot-delimited (`fields.email.type`, `columns.0.bind`).
+
+### The sweep endpoint
+
+`GET /api/v1/meta/diagnostics` validates every metadata type and item in one request.
+
+| Query | Default | Effect |
+|:---|:---|:---|
+| `severity` | `error` | `error` returns invalid items only; `warning` also returns items that have only warnings |
+| `type` | — | One metadata type |
+| `package` | — | One package |
+
+The response carries `entries` (each `{ type, name, diagnostics }`), `total`,
+`scannedTypes`, `scannedItems`, and `stats`, a per-type `{ count, locked, packages }` that
+lets a directory render counts and a package filter without another request. `total === 0`
+is a usable CI gate; pass `severity=warning` to hold warnings to the same bar.
+
+### Where Studio shows them
+
+1. **The metadata directory** (`/apps/setup/metadata`). Each type tile carries the item
+   count, a red ⚠ count for items with errors, and an amber ⚠ count for warning-only items.
+   A **View all issues** link opens the governance page.
+2. **A type's list.** Invalid rows get a red ⚠ and a tinted row, warning-only rows an amber
+   one; the header shows **Invalid** and **Warnings** counts, and hovering the ⚠ shows the
+   first three messages.
+3. **An item's edit page.** A banner lists the first errors with their paths (and a
+   parallel amber banner the warnings), and the same errors are threaded into the form, so
+   the offending inputs show them before the first save. Typing in an input clears its
+   message until the next save validates again. On an object draft, every field rule
+   (`visibleWhen`, `readonlyWhen`, `requiredWhen`) is also linted as a CEL predicate with
+   the server's validators: an unknown field, or a field read bare instead of as
+   `record.<field>`, shows under `fields.<field>.<rule>`. The field inspector's rule
+   editors give the same verdict as you type, with completion for the object's fields and
+   the `record`, `previous` and `parent` roots. A formula field's `expression` is linted the
+   same way and shows its inferred result type.
+4. **The governance page** (`…/metadata/_diagnostics`). One sortable table of every invalid
+   item across every type, linked to each edit page, with a severity toggle for
+   warning-only items: the page for a release-readiness review.
+
+A predicate that gets past authoring is still reported at runtime; see
+[When a predicate cannot be evaluated](/docs/ui/console#when-a-predicate-cannot-be-evaluated).
+
+### Authoring metadata that validates cleanly
+
+- Author with the `define*` helpers from `@objectstack/spec`, so TypeScript catches most
+  shape errors before they reach a server.
+- Run `os validate` before publishing; it runs the validators the server runs on load.
+- An environment overlay merges first and is validated after, and the edit banner shows
+  the effective item. If only the overlay is wrong, the package's own artifact is fine.
+
+## Related
+
+- [The Console](/docs/ui/console) — how the published metadata renders for users.
+- [Flows](/docs/automation/flows) · [Actions](/docs/ui/actions) · [Validation rules](/docs/data-modeling/validation-rules)
+- [Validating metadata](/docs/deployment/validating-metadata) — every author-time rule.
