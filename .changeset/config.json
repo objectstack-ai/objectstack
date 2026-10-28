@@ -116,8 +116,7 @@
       "@object-ui/providers",
       "@object-ui/react",
       "@object-ui/react-runtime",
-      "@object-ui/types",
-      "object-ui"
+      "@object-ui/types"
     ]
   ],
   "linked": [],
