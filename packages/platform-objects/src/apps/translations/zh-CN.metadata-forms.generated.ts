@@ -616,6 +616,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "货币模式",
         helpText: "dynamic（默认）：字段本身没有货币，金额以租户默认货币显示（localization.currency 设置）。fixed：字段只有一种货币，即 defaultCurrency。"
       },
+      "currencyConfig.currencyField": {
+        label: "币种字段",
+        helpText: "仅用于 record 模式，且在该模式下必填：本对象上保存每条记录 ISO 4217 币种代码的字段——一个声明了 valueDomain iso_4217_currency 的文本字段，惯例命名为 currency_code。"
+      },
       "currencyConfig.defaultCurrency": {
         label: "默认货币",
         helpText: "fixed 模式字段的唯一货币，使用三个字符的 ISO 4217 代码（例如 USD、EUR）。默认为 CNY。dynamic 模式下不读取。"

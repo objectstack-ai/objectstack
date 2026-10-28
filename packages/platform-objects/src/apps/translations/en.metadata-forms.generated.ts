@@ -614,7 +614,11 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "currencyConfig.currencyMode": {
         label: "Currency Mode",
-        helpText: "dynamic (the default): the field has no currency of its own, and amounts display in the tenant default currency (the localization.currency setting). fixed: the field has one currency, defaultCurrency."
+        helpText: "dynamic (the default): the field has no currency of its own, and amounts display in the tenant default currency (the localization.currency setting). fixed: the field has one currency, defaultCurrency. record: each record has its own currency, stored in the field currencyField names."
+      },
+      "currencyConfig.currencyField": {
+        label: "Currency Field",
+        helpText: "Record mode only, and required there: the field on this object holding each record's ISO 4217 code — a text field with valueDomain iso_4217_currency, conventionally currency_code."
       },
       "currencyConfig.defaultCurrency": {
         label: "Default Currency",

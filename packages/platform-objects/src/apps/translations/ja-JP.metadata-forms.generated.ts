@@ -616,6 +616,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "通貨モード",
         helpText: "dynamic（既定）：フィールド自体は通貨を持たず、金額はテナントの既定通貨（localization.currency 設定）で表示されます。fixed：フィールドは 1 つの通貨 defaultCurrency を持ちます。"
       },
+      "currencyConfig.currencyField": {
+        label: "通貨フィールド",
+        helpText: "record モード専用で、同モードでは必須：各レコードの ISO 4217 通貨コードを保持する、このオブジェクト上のフィールド。valueDomain iso_4217_currency を宣言したテキストフィールドで、慣例名は currency_code。"
+      },
       "currencyConfig.defaultCurrency": {
         label: "既定の通貨",
         helpText: "fixed モードのフィールドの通貨。3 文字の ISO 4217 コード（例：USD、EUR）で指定します。既定は CNY です。dynamic モードでは参照されません。"
