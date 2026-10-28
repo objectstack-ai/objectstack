@@ -13,6 +13,11 @@
  * the walk existed. The walk now takes a root set; a by-id delete is a set of
  * one.
  *
+ * One walk of one set also means the matched rows are members of it: a
+ * matched row held only by other matched rows refuses nothing and is cleared
+ * of nothing, the #22305 set exemption, where the row-by-row walk refused or
+ * not depending on which row it met first.
+ *
  * Composition: the real stack `delete-record-predicate-referential-walk`
  * boots (`ObjectKernel`, `ObjectQLPlugin`, `driver-sql` on better-sqlite3
  * `:memory:`, the real `delete_record` executor). Driver calls are counted on
@@ -86,6 +91,17 @@ const MEMBERS = {
   },
 };
 
+/** A self-reference with an authored `restrict`: a report holds its manager. */
+const STAFF = {
+  name: 'pin_batch_staff',
+  label: 'Pin batch staff',
+  fields: {
+    title: { name: 'title', label: 'Title', type: 'text' },
+    grp: { name: 'grp', label: 'Group', type: 'text' },
+    manager: { name: 'manager', label: 'Manager', type: 'lookup', reference: 'pin_batch_staff', deleteBehavior: 'restrict' },
+  },
+};
+
 function makeLogger(): any {
   const l: any = { info() {}, warn() {}, error() {}, debug() {}, trace() {}, fatal() {} };
   l.child = () => l;
@@ -110,7 +126,7 @@ describe('[#27004] a multi delete_record walks its matched rows as a set', () =>
     driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
     await driver.connect();
     ql.registerDriver(driver, true);
-    for (const o of [PARENT, DETAIL, LINK, TAGS, HOLDER, MEMBERS]) ql.registry.registerObject(o as any, 'pin-batch-delete', 'pin-batch-delete');
+    for (const o of [PARENT, DETAIL, LINK, TAGS, HOLDER, MEMBERS, STAFF]) ql.registry.registerObject(o as any, 'pin-batch-delete', 'pin-batch-delete');
     await ql.syncSchemas();
     await installDefaultOrganization(ql);
 
@@ -225,5 +241,22 @@ describe('[#27004] a multi delete_record walks its matched rows as a set', () =>
     const members = new Map((await rows(MEMBERS.name)).map((r) => [r.title, r.holders]));
     expect(members.get('m-keeps')).toEqual([ids[10], other]);
     expect(members.get('m-empties')).toEqual([ids[20], ids[550]]);
+  });
+
+  it('a matched row held only by other matched rows is in the set: the delete goes through, whatever the order', async () => {
+    // The manager first, so a walk of one row at a time met the report while
+    // it still stood beside a set of one, and refused.
+    const manager = await insert(STAFF.name, { title: 'm', grp: 'team' });
+    const report = await insert(STAFF.name, { title: 'r', grp: 'team', manager });
+    const removed = await ql.delete(STAFF.name, { where: { grp: 'team' }, multi: true, context: SYS });
+    expect(removed).toBe(2);
+    expect(await rows(STAFF.name, { id: { $in: [manager, report] } })).toEqual([]);
+
+    // A holder outside the matched rows still refuses, and nothing is deleted.
+    const held = await insert(STAFF.name, { title: 'h', grp: 'team' });
+    await insert(STAFF.name, { title: 'o', grp: 'elsewhere', manager: held });
+    const err: any = await ql.delete(STAFF.name, { where: { grp: 'team' }, multi: true, context: SYS }).catch((e: unknown) => e);
+    expect(err).toMatchObject({ code: 'DELETE_RESTRICTED', dependentObject: STAFF.name, dependentCount: 1 });
+    expect((await rows(STAFF.name, { grp: 'team' })).map((r) => r.id)).toEqual([held]);
   });
 });
