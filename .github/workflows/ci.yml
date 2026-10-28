@@ -2997,9 +2997,22 @@ jobs:
             packages/spec/json-schema/
           retention-days: 30
 
+      # Keeps only the entries the build's run summary (`--summarize`, left in
+      # `.turbo/runs/` by the assertion above) names, as Test Core's prune step
+      # does (#25452): the restore step takes the newest seed by prefix and
+      # turbo never evicts its local cache, so a seed saved whole is every seed
+      # before it plus this run. No summary -- the build never finished --
+      # means no save, and the previous seed stays the newest.
+      - name: Prune the Turbo cache to this run's tasks (main only)
+        id: prune-turbo-cache
+        if: always() && github.event_name == 'push'
+        run: |
+          node scripts/ci/prune-turbo-cache.mjs --site 'Build Core' \
+            --cache .turbo/cache --run-summaries .turbo/runs
+
       # Seed the shared Turbo cache from main only (see the restore step above).
       - name: Save Turbo cache (main only)
-        if: always() && github.event_name == 'push'
+        if: always() && github.event_name == 'push' && steps.prune-turbo-cache.outputs.save == 'true'
         uses: actions/cache/save@v6
         with:
           path: .turbo/cache

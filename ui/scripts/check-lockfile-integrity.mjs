@@ -84,11 +84,12 @@
  * ## Boundary: what this does NOT own
  *
  * ⛔ The absolute invariant "the lockfile resolves exactly one
- * `@objectstack/spec` VERSION" is already owned, and is deliberately not
- * restated here -- `scripts/__tests__/ci-cd-pipeline-doc.test.ts`
- * (`ci-cd-pipeline.md — live-e2e backend pin (#7689)`) asserts it as the
- * precondition of comparing `OBJECTSTACK_VERSION` in `e2e/live/ci/backend.env`
- * against the lockfile. Two definitions of one rule are free to drift, so this
+ * `@objectstack/spec` VERSION" was owned elsewhere, and is deliberately not
+ * restated here -- objectui's CI-guide pin test (its `live-e2e backend pin (#7689)` case)
+ * asserted it as the precondition of comparing `OBJECTSTACK_VERSION` in
+ * `e2e/live/ci/backend.env` against the lockfile, a comparison the import
+ * retired (objectstack#25803, recorded in that file) before objectstack#26058
+ * deleted the test. Two definitions of one rule are free to drift, so this
  * gate asks a DIFFERENT question: not "is the tree in the right state" but "did
  * THIS CHANGE make it worse". That guard is absolute, single-package,
  * version-level, and on the unit lane; this one is a delta, over every package,

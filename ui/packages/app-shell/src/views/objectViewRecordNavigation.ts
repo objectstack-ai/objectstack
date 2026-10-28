@@ -4,9 +4,15 @@
  * `?recordId=` URL state, "expand to full page", and the record links the
  * list publishes, moved out of `ObjectViewInner` verbatim (objectstack#25992,
  * slice 6). Every input is passed in; the component reads the returned values.
+ *
+ * The drawer is a stack since objectstack#26679 (`./recordDrawerStack.tsx`):
+ * `?recordId=` addresses its ROOT — the list row — and the levels a related
+ * row or a lookup opens above it live in memory, so a reload shows the root.
+ * `⤢` at any level opens that record's page, and the page's 「Collapse to
+ * drawer」 returns here with the stack it left (`drawerRestore`).
  */
 
-import { useMemo, useCallback, useEffect } from 'react';
+import { useMemo, useCallback, useEffect, useState } from 'react';
 import type { NavigateFunction, Location, SetURLSearchParams } from 'react-router-dom';
 import { overlayWidthFor } from '@object-ui/plugin-view';
 import { useNavigationOverlay } from '@object-ui/react';
@@ -14,6 +20,12 @@ import type { ViewNavigationConfig } from '@object-ui/types';
 import { RECORD_DRAWER_PARAM } from '../urlParams.js';
 import { viewTabLabel } from './viewTabLabel.js';
 import { listRecordDetailUrl, listRecordActionsValue } from './objectViewRecordLinks.js';
+import {
+    expandedRecordPath,
+    recordDrawerReturnState,
+    useTakenRestore,
+    type RecordDrawerLevel,
+} from './recordDrawerStack.js';
 import type { useServedViewItems } from '../hooks/useServedViewItems.js';
 import type { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import type { buildViewTabs } from './objectViewTabs.js';
@@ -90,7 +102,7 @@ export function useObjectViewRecordNavigation({
     const drawerRecordId = searchParams.get(RECORD_DRAWER_PARAM);
     // Memoize onNavigate to prevent stale closure in useNavigationOverlay's handleClick
     const handleNavOverlayNavigate = useCallback(
-        (recordId: string | number, action?: string) => {
+        (recordId: string | number, action?: string, extraState?: Record<string, unknown>) => {
             if (action === 'new_window') {
                 // Open record detail in a new browser tab with Console-correct URL.
                 // Same builder the list's link column publishes as its href
@@ -113,6 +125,7 @@ export function useObjectViewRecordNavigation({
             // already treated the name and the token identically, which is
             // exactly what made the substitution inaudible on this surface.
             const originState = {
+              ...extraState,
               from: {
                 pathname: location.pathname + (location.search || ''),
                 label: viewTabLabel({ id: activeView?.id, name: activeView?.name, label: activeView?.label }, objectDef.name, servedViews, viewLabel, unlabelledViewText, language),
@@ -151,7 +164,10 @@ export function useObjectViewRecordNavigation({
         objectName: objectDef.name,
         onNavigate: handleNavOverlayNavigate,
     });
+    // A ⤢ return's stack, taken out of the history state once (objectstack#26679).
+    const [drawerRestore, clearDrawerRestore] = useTakenRestore();
     const handleDrawerClose = () => {
+        clearDrawerRestore();
         navOverlay.close();
         const newParams = new URLSearchParams(searchParams);
         newParams.delete(RECORD_DRAWER_PARAM);
@@ -192,17 +208,71 @@ export function useObjectViewRecordNavigation({
         [navOverlay, searchParams, setSearchParams]
     );
     /**
-     * "Expand to full page" — invoked from the drawer header chevron. Closes
-     * the drawer (which clears `?recordId=…`) and router-pushes to the
-     * dedicated `/record/:id` route. Mirrors Linear/Notion peek-to-page.
+     * "Expand to full page" (`⤢`) at any level of the drawer's stack
+     * (objectstack#26679): closes the drawer (which clears `?recordId=…`) and
+     * router-pushes to the record's page. The root keeps its list-relative
+     * route and the list as its origin; a level above it opens
+     * `/apps/:app/:object/record/:id` with the levels below it as its `?from=`
+     * trail. Either way the page is handed the way back to this drawer
+     * (`recordDrawerReturnState`). Mirrors Linear/Notion peek-to-page.
      */
-    const handleExpandDrawer = useCallback(() => {
-        const rec = navOverlay.selectedRecord as Record<string, unknown> | null;
-        const id = rec && ((rec as any).id ?? (rec as any)._id);
-        if (id == null) return;
+    const handleExpandDrawer = useCallback((path?: RecordDrawerLevel[]) => {
+        const levels: RecordDrawerLevel[] = path && path.length > 0
+            ? path
+            : drawerRecordId ? [{ objectName: objectDef.name, recordId: drawerRecordId }] : [];
+        const target = levels[levels.length - 1];
+        if (!target) return;
+        const returnState = recordDrawerReturnState(
+            { pathname: location.pathname, search: location.search, state: location.state },
+            levels,
+        );
+        if (levels.length === 1) {
+            handleDrawerClose();
+            handleNavOverlayNavigate(target.recordId, undefined, returnState);
+            return;
+        }
+        const to = expandedRecordPath(appName, objects, levels);
+        if (to === null) return;
         handleDrawerClose();
-        handleNavOverlayNavigate(id as string | number);
-    }, [navOverlay.selectedRecord, handleNavOverlayNavigate]);
+        navigate(to, { state: returnState });
+    }, [drawerRecordId, objectDef.name, location.pathname, location.search, location.state, handleNavOverlayNavigate, appName, objects, navigate, handleDrawerClose]);
+    /**
+     * The rows the list shows, in its order (`ListView`'s `onRowsChange`,
+     * objectstack#26679): the root level's sibling set, which the drawer's
+     * `↑` `↓` step through. Held as the ids' joined key so an equal report
+     * changes nothing.
+     */
+    const [listRowIds, setListRowIds] = useState<{ key: string; ids: readonly string[] }>({ key: '', ids: [] });
+    const handleListRowsChange = useCallback((rows: ReadonlyArray<Record<string, unknown>>) => {
+        const ids = rows
+            .map((row) => (row?.id ?? row?._id) as string | number | undefined)
+            .filter((id): id is string | number => id != null && id !== '')
+            .map(String);
+        const key = JSON.stringify(ids);
+        setListRowIds((prev) => (prev.key === key ? prev : { key, ids }));
+    }, []);
+    /** `↑` `↓` at the root: the sibling becomes the row `?recordId=` names. */
+    const handleRootStep = useCallback((recordId: string) => {
+        setSearchParams((prev) => {
+            const next = new URLSearchParams(prev);
+            next.set(RECORD_DRAWER_PARAM, recordId);
+            return next;
+        }, { replace: true });
+    }, [setSearchParams]);
+    /**
+     * The drawer's root — the list row `?recordId=` names — or `null`, with the
+     * list's shown rows as its sibling set when the list reported any.
+     */
+    const drawerRoot = useMemo<RecordDrawerLevel | null>(
+        () => (drawerRecordId
+            ? {
+                objectName: objectDef.name,
+                recordId: drawerRecordId,
+                ...(listRowIds.ids.length > 0 ? { siblings: listRowIds.ids } : {}),
+            }
+            : null),
+        [drawerRecordId, objectDef.name, listRowIds],
+    );
     // Sync URL-based recordId to overlay state
     useEffect(() => {
         if (drawerRecordId && !navOverlay.isOpen) {
@@ -211,5 +281,5 @@ export function useObjectViewRecordNavigation({
             navOverlay.close();
         }
     }, [drawerRecordId]);
-    return { listRecordActions, navOverlay, handleDrawerClose, handleRowClick, handleExpandDrawer };
+    return { listRecordActions, navOverlay, handleDrawerClose, handleRowClick, handleExpandDrawer, drawerRoot, drawerRestore, handleListRowsChange, handleRootStep };
 }

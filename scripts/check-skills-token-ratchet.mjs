@@ -989,7 +989,25 @@ export const CEILINGS = new Map([
   // pin duplicated case 5's (77 bytes cut, 20 tokens); the remainder is the new
   // case; pinned AT the measurement, zero headroom. The raising PR's body carries
   // the same arithmetic.
-  ['skills/objectstack-i18n/evals/bundles-locales-coverage.json', 1642],
+  // 1642 -> 1790 (2026-10-28, the owed Skills-docs follow-up of the spec PR that
+  // added the `books` translation group): one eval prompt for a doc book's
+  // spine copy — `books.<book>.label` / `.description` and
+  // `books.<book>.groups.<key>.label`. Same ruling as the rows above, tap label
+  // verbatim and untranslated: 「A:先削重复,余额按实测提高」. PAID DOWN FIRST: five
+  // sentences restated a rule whose home the reader already reads — case 1's
+  // "no ICU plural/select" (SKILL.md "No ICU MessageFormat" + its own
+  // `{count, plural` pin), case 3's "retired o.* dialect" (SKILL.md "The
+  // Retired o.* Shape" + its own `o: {` pin), case 5's "extract --check is the
+  // freshness gate" (SKILL.md "os i18n extract --check — freshness, not
+  // coverage"), case 6's "inherited by every field referencing the picklist"
+  // (SKILL.md's `picklists` entry in the top-level group list), case 8's
+  // "neither is a pages.*.components key" (its own `components.open_block`
+  // pin): 227 bytes = 57 units (6567 -> 6340 bytes, 1642 -> 1585); the new case
+  // adds 817 bytes = 205 units (6340 -> 7157 bytes, 1585 -> 1790):
+  //   ceil($(wc -c < skills/objectstack-i18n/evals/bundles-locales-coverage.json) / 4) == ceil(7157 / 4)
+  // pinned AT the measurement, zero headroom. The raising PR's body carries the
+  // same arithmetic.
+  ['skills/objectstack-i18n/evals/bundles-locales-coverage.json', 1790],
   // 1211 -> 1458 (card #26302): one eval for a demo whose seed names people —
   // expected: both in `demoStaff` with a declared `position` /
   // `permissionSets`, created by `os dev`; NO `role:` alias and NO platform

@@ -252,19 +252,20 @@ describe('ObjectGantt', () => {
     expect(plan.getAttribute('data-has-own-dates')).toBe('true');
   });
 
-  it('forwards summaryExtent from top-level (flattened ListView) config too', async () => {
-    // The console's ListView spreads view.gantt keys at the TOP level of the
-    // object-gantt schema, which getGanttConfig re-picks key by key — a new
-    // key missing from that pick list silently vanishes on the console path.
+  it('does not read a summaryExtent written flat beside the block (objectstack#25923)', async () => {
+    // The console's ListView used to spread view.gantt keys at the TOP level of
+    // the object-gantt node, and getGanttConfig re-picked them key by key. Both
+    // producers hand the block on since objectstack#25923 and the flat fallback
+    // read is retired, so a flat key is ignored even beside a valid block.
     const schema: any = {
       type: 'object-gantt',
-      titleField: 'name', startDateField: 'start_date', endDateField: 'end_date',
+      gantt: { titleField: 'name', startDateField: 'start_date', endDateField: 'end_date' },
       summaryExtent: 'self',
       data: { provider: 'value', items: [{ id: '1', name: 'T', start_date: '2024-01-01', end_date: '2024-01-02' }] },
     };
     render(<ObjectGantt schema={schema} />);
     await waitFor(() => expect(screen.getByTestId('gantt-view')).toBeDefined());
-    expect(screen.getByTestId('gantt-view').getAttribute('data-summary-extent')).toBe('self');
+    expect(screen.getByTestId('gantt-view').getAttribute('data-summary-extent')).not.toBe('self');
   });
 
   it('omits tooltip fields when none configured', async () => {

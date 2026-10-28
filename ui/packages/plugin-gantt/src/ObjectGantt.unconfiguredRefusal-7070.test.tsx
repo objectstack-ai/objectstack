@@ -103,9 +103,10 @@ describe('ObjectGantt — an unconfigured view reaches the refusal screen (objec
   });
 
   it('REFUSES a HALF-declared axis — one date field is not a gantt', async () => {
-    // `getGanttConfig`'s flat branch is taken only when BOTH date fields are
-    // present; a partial spelling falls through to `null`. Pinned because the
-    // fixed faces now emit exactly this shape for a view that declared one rung.
+    // The producers hand the `gantt` block on only once BOTH date fields are
+    // declared, so a view that declared one rung reaches this component with
+    // no block. Written flat here, the one rung is not read either: the flat
+    // fallback branch retired in objectstack#25923.
     render(
       <ObjectGantt
         schema={
@@ -151,9 +152,11 @@ describe('ObjectGantt — an unconfigured view reaches the refusal screen (objec
           {
             type: 'object-gantt',
             objectName: 'crm_leave_request',
-            startDateField: 'start_date',
-            endDateField: 'end_date',
-            titleField: 'name',
+            gantt: {
+              startDateField: 'start_date',
+              endDateField: 'end_date',
+              titleField: 'name',
+            },
           } as any
         }
         dataSource={makeDataSource()}

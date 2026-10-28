@@ -542,6 +542,15 @@ describe('Data actions, email, dataset query, external datasources (#3587 gap cl
         expect(JSON.parse(init.body)).toEqual({ overrides: { name: 'Copy of Acme' } });
     });
 
+    it('[#26594] data.fieldAccess pins GET /data/:object/:id/field-access and unwraps the envelope', async () => {
+        const access = { object: 'lead', recordId: 'rec 1', readable: ['name'], editable: [] };
+        const { client, fetchMock } = createMockClient({ success: true, data: access });
+        await expect(client.data.fieldAccess('lead', 'rec 1')).resolves.toEqual(access);
+        const [url, init] = fetchMock.mock.calls[0];
+        expect(String(url)).toBe('http://localhost:3000/api/v1/data/lead/rec%201/field-access');
+        expect(init?.method ?? 'GET').toBe('GET');
+    });
+
     it('data.export pins GET /data/:object/export and returns the raw Response', async () => {
         const { client, fetchMock } = createMockClient({});
         const res = await client.data.export('lead', { format: 'xlsx', limit: 100, filter: { status: 'open' }, orderby: 'name:asc', header: false });

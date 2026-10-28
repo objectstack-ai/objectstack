@@ -32,17 +32,18 @@ import { UI_COVERAGE, rootWorkflow } from './helpers/root-ci';
  * pushes, both found the same way — a person reading a job log by hand, days
  * later.
  *
- * Nothing else in this repository reads what that step runs.
- * `ci-cd-pipeline-doc.test.ts` pins the pairing between `ci.yml` and the
- * pipeline page, but it compares COMMANDS, not flags — its extractor is
+ * Nothing else in this repository reads what that step runs. objectui's
+ * CI-guide pin test pinned the pairing between `ci.yml` and the pipeline page until
+ * objectstack#26058 deleted it (and objectstack#26944 the page), but it
+ * compared COMMANDS, not flags — its extractor was
  *
  *     for (const m of text.matchAll(/\bpnpm\s+([\w:.-]+)/g)) {
  *       if (rootScripts.has(m[1])) found.add(`pnpm ${m[1]}`);
  *     }
  *
  * whose capture stops at the first space, so `pnpm test:coverage` is all it
- * ever sees. Every flag on that line could be deleted and that file stays
- * green.
+ * ever saw. Every flag on that line could have been deleted and that file
+ * stayed green.
  *
  * ## Both directions, because the failure has two shapes
  *

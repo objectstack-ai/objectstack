@@ -715,12 +715,22 @@ const RecordRelatedListBody: React.FC<RecordRelatedListRendererProps> = ({
         // "View all": the child object's list page, scoped to this parent —
         // see `onViewAll` above for when it is offered.
         onViewAll={onViewAll}
-        // Open the child record's detail page on row click (查看记录详情).
+        // Open the child record's detail page on row click (查看记录详情),
+        // with the ids of the rows on show beside it (objectstack#26679) so a
+        // host drawer can step through them.
         onRowClick={
           handlers?.onView
-            ? (row: any) => {
+            ? (row: any, _event?: any, rows?: readonly any[]) => {
                 const id = rowId(row);
-                if (id != null) handlers.onView!(id, row);
+                if (id == null) return;
+                if (!rows) {
+                  handlers.onView!(id, row);
+                  return;
+                }
+                const siblings = rows
+                  .map(rowId)
+                  .filter((sibling): sibling is string | number => sibling != null);
+                handlers.onView!(id, row, siblings);
               }
             : undefined
         }

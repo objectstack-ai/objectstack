@@ -82,6 +82,7 @@ export interface FieldReadersHost {
   readonly permissionEvaluator: SecurityPlugin['permissionEvaluator'];
   readonly ql: SecurityPlugin['ql'];
   readonly tenancyPosture: SecurityPlugin['tenancyPosture'];
+  computeForbiddenFieldWrites: SecurityPlugin['computeForbiddenFieldWrites'];
   computeQueryGuardFieldPerms: SecurityPlugin['computeQueryGuardFieldPerms'];
   computeReadPartialMaskRules: SecurityPlugin['computeReadPartialMaskRules'];
   foldFieldRequiredPermissions: SecurityPlugin['foldFieldRequiredPermissions'];
@@ -133,7 +134,7 @@ export async function computeReadableFields(
 
 /** The body of `SecurityPlugin#resolveProjectionFieldMask`; the method's docblock there is its contract. */
 export async function resolveProjectionFieldMask(
-  this: Pick<FieldReadersHost, 'computeQueryGuardFieldPerms' | 'computeReadPartialMaskRules' | 'foldFieldRequiredPermissions' | 'getObjectFieldNames' | 'metadata' | 'permissionEvaluator' | 'ql' | 'resolveCallerPosture' | 'resolveFallbackPermissionSets' | 'resolvePermissionSetsForContext' | 'tenancyPosture'>,
+  this: Pick<FieldReadersHost, 'computeForbiddenFieldWrites' | 'computeQueryGuardFieldPerms' | 'computeReadPartialMaskRules' | 'foldFieldRequiredPermissions' | 'getObjectFieldNames' | 'metadata' | 'permissionEvaluator' | 'ql' | 'resolveCallerPosture' | 'resolveFallbackPermissionSets' | 'resolvePermissionSetsForContext' | 'tenancyPosture'>,
   object: string,
   context: any,
   options: { fallbackOnEmptySets: boolean },
@@ -146,6 +147,11 @@ export async function resolveProjectionFieldMask(
     readPartialMaskRules: () => Record<string, FieldMaskingRule>;
     /** [#20935] The middleware's query-guard map for these sets (computeQueryGuardFieldPerms). */
     readQueryGuardPerms: () => Record<string, { readable: boolean; editable: boolean }>;
+    /**
+     * [#26594] The write gate's verdict (computeForbiddenFieldWrites) on an
+     * update of `row` naming every field: the fields it refuses there.
+     */
+    readRowForbiddenWrites: (row: Record<string, unknown>) => Promise<string[]>;
   }
 > {
   const objectName = String(object ?? '');
@@ -224,6 +230,21 @@ export async function resolveProjectionFieldMask(
     ),
     readQueryGuardPerms: () => this.computeQueryGuardFieldPerms(
       objectName, secMeta, permissionSets, delegatorSets,
+    ),
+    // [#26594 / ruling of record 6457467702] The record-scoped projection's
+    // edit half is the step 2.5 gate ITSELF, asked over these sets, this
+    // posture and this delegator's sets, as an update by id of `row` (the
+    // pre-image, read as the caller reads it) naming every field. The gate
+    // refuses per field, so the fields it names are exactly the ones a write
+    // of that row may not touch — a row-conditioned entry judged on `row`,
+    // the rest as `fieldPerms` above reads them.
+    readRowForbiddenWrites: (row) => this.computeForbiddenFieldWrites(
+      objectName,
+      Object.fromEntries(allFields.map((f) => [f, null])),
+      secMeta,
+      permissionSets,
+      delegatorSets,
+      { operation: 'update', context, preImage: async () => row },
     ),
   };
 }

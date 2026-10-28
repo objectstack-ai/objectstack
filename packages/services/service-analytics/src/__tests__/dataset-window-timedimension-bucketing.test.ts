@@ -300,11 +300,13 @@ describe('#5688 — an entry asking to be bucketed still is (#3588/#4033/#4870 g
     // Left unbucketed this would group RAW TIMESTAMPS — one bucket per row,
     // which is the #3588 defect the backfill was introduced to fix.
     expect(groupByOf(calls[0])).toEqual(['owner_id', { field: 'close_date', dateGranularity: 'month' }]);
-    // Chronological by default on the time axis (#3916), ties in grouping order.
+    // Chronological by default on the time axis (#3916), ties in grouping order;
+    // u2 holds no February row, so its empty bucket is filled at 0 (#26893).
     expect(result.rows).toEqual([
       { owner: 'u1', close_date: '2026-01', opp_count: 1 },
       { owner: 'u2', close_date: '2026-01', opp_count: 1 },
       { owner: 'u1', close_date: '2026-02', opp_count: 1 },
+      { owner: 'u2', close_date: '2026-02', opp_count: 0 },
     ]);
     expect(descriptor(result.fields, 'close_date')).toEqual({
       name: 'close_date', type: 'time', label: 'Close Date',

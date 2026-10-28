@@ -4,7 +4,7 @@
     {
       "id": 1,
       "prompt": "Add Simplified Chinese for the `support_case` object: its label and plural, the `status` field with options New / Open / Closed, the `close` action, and a welcome message that greets the user by name.",
-      "expected_output": "A `TranslationData` per locale under `objects.support_case` — `label`, `pluralLabel`, `fields.status.label`, `fields.status.options` keyed by the STORED option value (`new`, `open`, `closed`, never the display label), `_actions.close.label` — assembled with `defineTranslationBundle({ en, 'zh-CN': zhCN })` and registered under `defineStack({ translations })`. The message uses double-brace interpolation, `'welcome.user': '欢迎，{{userName}}！'`; there is no ICU plural/select.",
+      "expected_output": "A `TranslationData` per locale under `objects.support_case` — `label`, `pluralLabel`, `fields.status.label`, `fields.status.options` keyed by the STORED option value (`new`, `open`, `closed`, never the display label), `_actions.close.label` — assembled with `defineTranslationBundle({ en, 'zh-CN': zhCN })` and registered under `defineStack({ translations })`. The message uses double-brace interpolation, `'welcome.user': '欢迎，{{userName}}！'`.",
       "files": [],
       "assertions": {
         "must_contain": ["defineTranslationBundle", "objects", "pluralLabel", "options", "_actions", "{{"],
@@ -24,7 +24,7 @@
     {
       "id": 3,
       "prompt": "A customer admin wants to relabel `account` as 客户 in their Studio without waiting for a redeploy.",
-      "expected_output": "A `translation` metadata item (author with `defineTranslation`, shape `TranslationItemSchema`) carrying `locale: 'zh-CN'` and the same `objects.account.label` group as a file bundle; published items layer over the shipped bundles at boot and on every publish, and deleting the item restores the shipped value. One locale per item; the retired `o.*` dialect is rejected on this door too.",
+      "expected_output": "A `translation` metadata item (author with `defineTranslation`, shape `TranslationItemSchema`) carrying `locale: 'zh-CN'` and the same `objects.account.label` group as a file bundle; published items layer over the shipped bundles at boot and on every publish, and deleting the item restores the shipped value. One locale per item.",
       "files": [],
       "assertions": {
         "must_contain": ["translation", "locale", "objects", "defineTranslation"],
@@ -44,7 +44,7 @@
     {
       "id": 5,
       "prompt": "`os i18n check` reports zh-CN is missing app, navigation and dashboard keys even though we just ran `os i18n extract`. What is wrong?",
-      "expected_output": "Diagnoses that `--objects-only` is on by default, so extract wrote only the `objects` / `globalActions` subtree while check also demands `apps`, `navigation`, `dashboard`, `widget`, `page` and `flow` keys. Re-runs `os i18n extract --no-objects-only` (or hand-authors those groups), re-checks with `os i18n check --locales=zh-CN`, and adds `--strict` / `--threshold` in CI; `extract --check` is the separate freshness gate.",
+      "expected_output": "Diagnoses that `--objects-only` is on by default, so extract wrote only the `objects` / `globalActions` subtree while check also demands `apps`, `navigation`, `dashboard`, `widget`, `page` and `flow` keys. Re-runs `os i18n extract --no-objects-only` (or hand-authors those groups), re-checks with `os i18n check --locales=zh-CN`, and adds `--strict` / `--threshold` in CI.",
       "files": [],
       "assertions": {
         "must_contain": ["--no-objects-only", "os i18n check", "apps", "--strict"],
@@ -54,7 +54,7 @@
     {
       "id": 6,
       "prompt": "Add zh-CN for the `pipeline_by_stage` report, the `sales_manager` permission set, the `regional_lead` position and the `deal_stage` picklist's option labels.",
-      "expected_output": "Top-level groups keyed by name: `reports.pipeline_by_stage` and `positions.regional_lead` (`label`, `description`), `permissions.sales_manager` (the same, spelled as the stack's `permissions[]`, not the camelCase name), `picklists.deal_stage.options` by stored value, inherited by every field referencing the picklist.",
+      "expected_output": "Top-level groups keyed by name: `reports.pipeline_by_stage` and `positions.regional_lead` (`label`, `description`), `permissions.sales_manager` (the same, spelled as the stack's `permissions[]`, not the camelCase name), `picklists.deal_stage.options` by stored value.",
       "files": [],
       "assertions": {
         "must_contain": ["reports", "permissions", "positions", "picklists"],
@@ -74,11 +74,21 @@
     {
       "id": 8,
       "prompt": "In zh-CN the `Products` grid heading on the `crm_opportunity` form and the `Open Tasks` block heading of the joined `showcase_task_overview` report are still English.",
-      "expected_output": "`objects.crm_opportunity_line_item.fields.opportunity.inlineTitle` — the field lives on the child object, so the key is the child's, and an untranslated `inlineTitle` keeps its authored text (no fallback to the child's plural label); `reports.showcase_task_overview.blocks.open_block.label`, keyed by the block's required `name`. Neither is a `pages.*.components` key.",
+      "expected_output": "`objects.crm_opportunity_line_item.fields.opportunity.inlineTitle` — the field lives on the child object, so the key is the child's, and an untranslated `inlineTitle` keeps its authored text (no fallback to the child's plural label); `reports.showcase_task_overview.blocks.open_block.label`, keyed by the block's required `name`.",
       "files": [],
       "assertions": {
         "must_contain": ["inlineTitle", "crm_opportunity_line_item", "blocks", "open_block"],
         "must_not_contain": ["fields.opportunity_line_item", "components.open_block"]
+      }
+    },
+    {
+      "id": 9,
+      "prompt": "Our `crm_manual` doc book ships in English and zh-CN, but the docs sidebar still shows the book title and its `getting_started` section title in English.",
+      "expected_output": "The `books` group, keyed by `Book.name`: `books.crm_manual.label` / `.description` and `books.crm_manual.groups.getting_started.label`, by the group's stable `key` (never its position); `os i18n extract --no-objects-only` seeds all three. The pages' own titles and bodies localize through `doc.translations`, and the inline `translations` map a book once carried stays retired.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["books", "groups", "getting_started", "doc.translations"],
+        "must_not_contain": ["pages.crm_manual", "sections.getting_started"]
       }
     }
   ]

@@ -22,7 +22,9 @@
  * The resolve / messages routes are intentionally public — the token IS
  * the authorisation. The underlying record is fetched with a SYSTEM
  * context (per-env RLS is bypassed because the token gates access), and
- * `redactFields` are stripped before the record leaves the server.
+ * `redactFields` are stripped before the record leaves the server. The answer
+ * also describes the fields the stripped record still carries (`fields`, the
+ * display projection, #26991) and nothing else of the object.
  *
  * Those two faces are ADR-0138 D2's class 2 (share links), on this, the
  * dispatcher twin of the plugin-sharing mount. Every OTHER face is behind the
@@ -73,6 +75,10 @@ import { readInternalColumn } from '@objectstack/objectql/core';
 // reason `isPublicSharingEnabled` above is imported from the spec — and both
 // packages already depend on `@objectstack/types`, so the import adds no edge.
 import { readSharePasswordHeader, SHARE_PASSWORD_VARY, type SharePasswordHeaderReading } from '@objectstack/types';
+// [#26991] The resolve answer — redaction and the field display projection
+// included — from the ONE builder the plugin-sharing mount serves it with; it
+// lives in `@objectstack/types` for the same dependency reason.
+import { buildShareLinkResolveAnswer } from '@objectstack/types';
 
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
@@ -246,15 +252,6 @@ async function handleShareLinksRequestBody(
         return deps.resolveService(context, 'objectql', context.environmentId);
     };
     const asArray = (rows: any): any[] => (Array.isArray(rows) ? rows : Array.isArray(rows?.value) ? rows.value : []);
-    const applyRedaction = (record: any, redactFields: string[]): any => {
-        if (!record || typeof record !== 'object' || redactFields.length === 0) return record;
-        const out: any = {};
-        for (const [k, v] of Object.entries(record)) {
-            if (redactFields.includes(k)) continue;
-            out[k] = v;
-        }
-        return out;
-    };
 
     try {
         // ── PUBLIC: resolve a token → record ──────────────────────────
@@ -366,23 +363,15 @@ async function handleShareLinksRequestBody(
             const record = rows[0] ?? null;
             if (!record) return sendErr(410, 'RECORD_GONE', 'The shared record no longer exists');
 
+            // [#26991] The redacted record, the link, and the display projection
+            // of exactly the fields that record carries (`fields`): the one
+            // place an anonymous holder can read authored labels from, since
+            // the meta door refuses that caller.
             return {
                 handled: true,
-                response: deps.success({
-                    record: applyRedaction(record, resolved.redactFields),
-                    link: {
-                        id: resolved.link.id,
-                        token: resolved.link.token,
-                        object_name: resolved.link.object_name,
-                        record_id: resolved.link.record_id,
-                        permission: resolved.link.permission,
-                        audience: resolved.link.audience,
-                        expires_at: resolved.link.expires_at,
-                        label: resolved.link.label,
-                        created_at: resolved.link.created_at,
-                    },
-                    redactFields: resolved.redactFields,
-                }),
+                response: deps.success(
+                    buildShareLinkResolveAnswer(record, resolved, engine?.getSchema(resolved.link.object_name)),
+                ),
             };
         }
 
