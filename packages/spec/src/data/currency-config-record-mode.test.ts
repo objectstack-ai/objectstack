@@ -115,12 +115,12 @@ describe('the object judges what `currencyField` names', () => {
 
   it('refuses a pointer at a field that is not `text`', () => {
     const issues = objectIssues(invoice({
-      currency_code: { type: 'select', label: 'Currency', options: [{ label: 'USD', value: 'USD' }] },
+      currency_code: { type: 'number', label: 'Currency' },
       amount: { type: 'currency', label: 'Amount', currencyConfig: RECORD },
     }));
     expect(issues).toHaveLength(1);
     expect(issues[0]!.path).toEqual(['fields', 'amount', 'currencyConfig', 'currencyField']);
-    expect(issues[0]!.message).toMatch(/^`amount\.currencyConfig\.currencyField` names `currency_code`, a `select` field/);
+    expect(issues[0]!.message).toMatch(/^`amount\.currencyConfig\.currencyField` names `currency_code`, a `number` field/);
   });
 
   it('refuses a pointer at a `text` field without the ISO 4217 value domain', () => {
