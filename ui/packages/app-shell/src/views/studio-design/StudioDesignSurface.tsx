@@ -7731,6 +7731,7 @@ export function DataPillar({
                 const fieldRailContent = fieldSel.kind === 'group' ? (
                   <ObjectGroupInspector
                     draft={objDraft}
+                    objectName={current.name}
                     groupKey={fieldSel.id}
                     onPatch={onPatch}
                     onClose={() => setFieldSel(null)}
