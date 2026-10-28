@@ -1549,10 +1549,12 @@ describe('packages/*/README.md joined the disk surface — objectui#3622', () =>
     // from the archived objectui repository's CONTRIBUTING.md / ROADMAP.md (a
     // self-repo URL this gate resolves) to the objectstack repository's, which
     // it cannot resolve offline, so they left the decidable count.
-    // 129 measured after objectstack#25910 removed the VS Code extension
-    // package, whose README carried the difference.
-    expect(decidable.length).toBeGreaterThanOrEqual(129);
-    expect(siteAbsolute.length).toBeGreaterThanOrEqual(40);
+    // 126 / 39 measured on objectstack#25910's merge of main: that card removed
+    // the VS Code extension package, whose README carried 12 / 8 of them, and
+    // objectstack#27042 (c59b1bfa) retired `@object-ui/plugin-ai`, whose README
+    // carried 3 / 1 more. Both floors move down by exactly those deletions.
+    expect(decidable.length).toBeGreaterThanOrEqual(126);
+    expect(siteAbsolute.length).toBeGreaterThanOrEqual(39);
   });
 });
 
