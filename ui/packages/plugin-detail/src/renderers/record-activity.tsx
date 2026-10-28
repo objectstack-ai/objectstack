@@ -78,6 +78,13 @@ import {
   type SysActivityRow,
 } from './recordActivityFeed';
 import { useRecordAriaProps } from './recordComponentAria';
+import { useDefaultRecordPage } from '../defaultRecordPage';
+import {
+  RecordFieldChangesContext,
+  filterTimelineStream,
+  mergeTimelineStream,
+  type TimelineStreamFilter,
+} from '../recordTimelineStream';
 
 const splitDesigner = (props: Record<string, any>) => {
   const { 'data-obj-id': id, 'data-obj-type': type, style, ...rest } = props || {};
@@ -262,11 +269,28 @@ export const RecordActivityRenderer: React.FC<RecordActivityRendererProps> = ({
     return () => { cancelled = true; };
   }, [canSelfFetch, dataSource, objectName, recordId, pageSize, systemActorLabel]);
 
+  // objectstack#27055, Target 3 — on the synthesized default record page this
+  // block IS the timeline: ONE stream of the discussion, the activity and the
+  // field changes the host hands over (`RecordFieldChangesContext`), filtered
+  // by the chips 全部 / 活动 / 讨论 / 变更 and paged by 「查看全部 N 条 →」.
+  const asStream = useDefaultRecordPage();
+  const fieldChanges = React.useContext(RecordFieldChangesContext);
+  const [streamFilter, setStreamFilter] = React.useState<TimelineStreamFilter>('all');
+  const [streamShowAll, setStreamShowAll] = React.useState(false);
+
   const discussionItems = discussion?.items as FeedItem[] | undefined;
   const applied = React.useMemo(() => {
     const sourceItems: FeedItem[] = hostItems ?? discussionItems ?? fetched ?? [];
-    return applyFeedConfig(sourceItems, { types, showCompleted, unifiedTimeline }, pageSize, BLOCK_NAME);
-  }, [hostItems, discussionItems, fetched, types, showCompleted, unifiedTimeline, pageSize]);
+    if (!asStream) {
+      return { ...applyFeedConfig(sourceItems, { types, showCompleted, unifiedTimeline }, pageSize, BLOCK_NAME), total: 0 };
+    }
+    // The chip filters the WHOLE stream before the page is cut, so 讨论 is
+    // every comment, not the comments of the first page.
+    const stream = filterTimelineStream(mergeTimelineStream(sourceItems, fieldChanges), streamFilter);
+    const all = applyFeedConfig(stream, { types, showCompleted, unifiedTimeline }, Number.MAX_SAFE_INTEGER, BLOCK_NAME);
+    const shown = streamShowAll ? all : applyFeedConfig(stream, { types, showCompleted, unifiedTimeline }, limit, BLOCK_NAME);
+    return { ...shown, total: all.items.length };
+  }, [hostItems, discussionItems, fetched, types, showCompleted, unifiedTimeline, pageSize, asStream, fieldChanges, streamFilter, streamShowAll, limit]);
   const items = applied.items;
   const hasMore = applied.hasMore || (canSelfFetch && fetchedHasMore);
 
@@ -288,8 +312,9 @@ export const RecordActivityRenderer: React.FC<RecordActivityRendererProps> = ({
   React.useEffect(() => { setFilterMode(defaultFilterMode); }, [defaultFilterMode]);
 
   const handleLoadMore = React.useCallback(() => {
-    setExtraPages((n) => n + 1);
-  }, []);
+    if (asStream) setStreamShowAll(true);
+    else setExtraPages((n) => n + 1);
+  }, [asStream]);
 
   // Write path: whatever the host's DiscussionContext provides, nothing more.
   // `enableMentions: false` withholds the suggestion list, which is what turns
@@ -318,6 +343,18 @@ export const RecordActivityRenderer: React.FC<RecordActivityRendererProps> = ({
         onUploadAttachments={discussion?.onUploadAttachments as any}
         activityDenied={activityDenied}
         commentsDenied={commentsDenied}
+        {...(asStream
+          ? {
+              variant: 'stream' as const,
+              streamFilter,
+              onStreamFilterChange: (next: TimelineStreamFilter) => {
+                setStreamFilter(next);
+                setStreamShowAll(false);
+              },
+              totalCount: applied.total,
+              titleLabel: tt('detail.timeline', 'Timeline'),
+            }
+          : {})}
       />
     </div>
   );

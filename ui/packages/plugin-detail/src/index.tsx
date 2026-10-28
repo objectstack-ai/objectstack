@@ -180,6 +180,7 @@ export {
   buildDefaultDetails,
   buildDefaultTabs,
   buildDefaultDiscussion,
+  buildDefaultTimeline,
   detectStatusField,
   deriveStages,
   deriveHighlightFields,
@@ -222,6 +223,15 @@ export type { RecordPageColumnsProps } from './RecordPageColumns';
 // synthesized default page in its tabbed tier marks it, as the column tiers do.
 export { DefaultRecordPageContext, useDefaultRecordPage } from './defaultRecordPage';
 export { RecordBodyTablesContext } from './relatedListCompact';
+// objectstack#27055, Target 3 — the timeline as ONE stream: the host hands
+// the record's field changes over through this context.
+export {
+  RecordFieldChangesContext,
+  auditEntriesToFeedItems,
+  mergeTimelineStream,
+  filterTimelineStream,
+} from './recordTimelineStream';
+export type { AuditEntryLike, TimelineStreamFilter } from './recordTimelineStream';
 // objectstack#27055 — the reader's arrangement of the related cards: the pure
 // merge rule and the stored record's codec halves, for the host's
 // workspace-preference store.

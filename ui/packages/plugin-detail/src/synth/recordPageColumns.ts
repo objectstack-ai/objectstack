@@ -28,9 +28,9 @@
  * seed carrying it would be refused at save. The layout is therefore read off
  * the synthesized page itself, by the stable semantic `value` every tab item
  * carries (`buildDefaultTabs`, objectui#2257): `details` is the details
- * column, `activity` / `history` join the discussion footer in the timeline
- * column, and every related tab, `approvals` and `attachments` go to the
- * related column. The synthesized page has one region (`main`); a page with
+ * column, `timeline` (the one stream, objectstack#27055) is the timeline
+ * column, and `related`, `approvals` and `attachments` go to the related
+ * column. The synthesized page has one region (`main`); a page with
  * any other region is not the synthesized page (objectstack#27055 removed the
  * opt-in rail and the `rightRail` slot that used to add an `aside`).
  *
@@ -194,7 +194,9 @@ export function recordPageColumnDefaults(object: RecordPageObjectLike | null | u
 export function recordPageColumnOfTab(value: unknown): RecordPageColumn | null {
   if (typeof value !== 'string') return null;
   if (value === 'details') return 'details';
-  if (value === 'activity' || value === 'history') return 'timeline';
+  // `timeline` is the one stream (objectstack#27055); `activity` / `history`
+  // are the values a pre-v3 strip carried, kept so such a page still lays out.
+  if (value === 'timeline' || value === 'activity' || value === 'history') return 'timeline';
   if (value === 'related' || value.startsWith('related:')) return 'related';
   if (value === 'approvals' || value === 'attachments') return 'related';
   return null;
@@ -210,7 +212,7 @@ export interface DefaultPageColumns {
   header: any[];
   /** The Details tab's body. */
   details: any[];
-  /** The discussion footer first (the composer on top), then Activity and History. */
+  /** The Timeline tab's stream (objectstack#27055), after any node the page places below its strip. */
   timeline: any[];
   /** Related lists in the strip's order, then Approvals and Attachments. */
   related: any[];

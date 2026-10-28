@@ -40,6 +40,12 @@ import { useDisplayLocale } from '@object-ui/i18n';
 import { useRecordContext, useSafeFieldLabel } from '@object-ui/react';
 import { useDetailTranslation } from './useDetailTranslation';
 import { foldFeedItems, type ActivityTimelineEntry } from './renderers/recordActivityFeed';
+import {
+  TIMELINE_STREAM_FILTERS,
+  filterTimelineStream,
+  isSystemStreamEntry,
+  type TimelineStreamFilter,
+} from './recordTimelineStream';
 
 /**
  * Which slice of the record feed the timeline shows.
@@ -123,6 +129,19 @@ export interface RecordActivityTimelineProps {
   activityDenied?: boolean;
   /** The same, for the feed's comment read. */
   commentsDenied?: boolean;
+  /**
+   * objectstack#27055, Target 3 — `stream` is the record page v3 timeline:
+   * the filter chips 全部 / 活动 / 讨论 / 变更 on the title row instead of
+   * the dropdown, system entries (field changes, system events) as one
+   * compact muted line each, and 「查看全部 N 条 →」 at the foot. `panel`
+   * (the default) is the block as it has always been.
+   */
+  variant?: 'panel' | 'stream';
+  /** The stream's chip (controlled); `all` when absent. */
+  streamFilter?: TimelineStreamFilter;
+  onStreamFilterChange?: (filter: TimelineStreamFilter) => void;
+  /** How many entries the whole stream holds, for its 「查看全部 N 条 →」. */
+  totalCount?: number;
   className?: string;
 }
 
@@ -285,8 +304,13 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
   emptyLabel,
   activityDenied = false,
   commentsDenied = false,
+  variant = 'panel',
+  streamFilter = 'all',
+  onStreamFilterChange,
+  totalCount,
   className,
 }) => {
+  const isStream = variant === 'stream';
   const { t } = useDetailTranslation();
   // The BCP-47 tag the absolute-date tail formats with (objectui#9786).
   const displayLocale = useDisplayLocale();
@@ -335,8 +359,8 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
   const showSubscription = config?.showSubscriptionToggle ?? false;
 
   const filtered = React.useMemo(
-    () => filterItems(items, activeFilter),
-    [items, activeFilter],
+    () => (isStream ? filterTimelineStream(items, streamFilter) : filterItems(items, activeFilter)),
+    [items, activeFilter, isStream, streamFilter],
   );
 
   // Group replies by parentId.
@@ -372,7 +396,13 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
   // Runs of consecutive updates by one actor, folded into one row each
   // (objectstack#25959). Folded at render from the rows the reader sees; the
   // feed itself keeps every entry.
-  const timelineEntries = React.useMemo(() => foldFeedItems(rootItems), [rootItems]);
+  // The stream draws every entry as its own line (objectstack#27055): a
+  // system entry is already one compact line, so there is nothing to fold.
+  const timelineEntries = React.useMemo(
+    (): ActivityTimelineEntry[] =>
+      isStream ? (rootItems.map((item) => ({ kind: 'item', item })) as ActivityTimelineEntry[]) : foldFeedItems(rootItems),
+    [rootItems, isStream],
+  );
   // Which folded rows the reader has expanded, by the fold's id.
   const [expandedFolds, setExpandedFolds] = React.useState<ReadonlySet<string>>(() => new Set());
   const toggleFold = React.useCallback((id: string) => {
@@ -465,7 +495,41 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
 
   // One feed item's row. A folded run renders each of its entries with this
   // same function when expanded (objectstack#25959).
+  // objectstack#27055 — a system entry of the stream: ONE muted line, the
+  // change itself, then who and when. 「状态 新建 → 已联系 · Dev Admin · 昨天」.
+  const renderSystemLine = (item: FeedItem): React.ReactNode => {
+    const Icon = FEED_TYPE_ICONS[item.type] || Zap;
+    const changes = (item.fieldChanges ?? []).map((change) => {
+      const label = change.fieldLabel || labelOfField(change.field);
+      const from = change.oldDisplayValue ?? (change.oldValue == null ? '' : String(change.oldValue));
+      const to = change.newDisplayValue ?? (change.newValue == null ? '' : String(change.newValue));
+      return `${label} ${from || '—'} → ${to || '—'}`;
+    });
+    const what =
+      changes.length > 0
+        ? changes.join('; ')
+        : item.body && item.body.trim()
+          ? item.body
+          : item.changedFields && item.changedFields.length > 0
+            ? t('detail.foldedUpdates', {
+                fields: item.changedFields.map(labelOfField).join(t('validation.formInvalidJoiner')),
+              })
+            : t('detail.activityUpdated');
+    return (
+      <div key={item.id} className="flex items-start gap-2 py-0.5 text-xs text-muted-foreground" data-stream-system-row="">
+        <span className="z-10 flex h-8 w-8 shrink-0 items-center justify-center">
+          <Icon className="h-3.5 w-3.5" aria-hidden />
+        </span>
+        <p className="min-w-0 flex-1 pt-2 break-words">
+          <span className="text-foreground/80">{what}</span>
+          <span>{` · ${item.actor} · ${formatTimestamp(item.createdAt, t, displayLocale)}`}</span>
+        </p>
+      </div>
+    );
+  };
+
   const renderItem = (item: FeedItem): React.ReactNode => {
+    if (isStream && isSystemStreamEntry(item)) return renderSystemLine(item);
     const Icon = FEED_TYPE_ICONS[item.type] || Zap;
     const colorClass =
       FEED_TYPE_COLORS[item.type] || 'bg-gray-100 text-gray-600';
@@ -706,6 +770,30 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
             </span>
           </h2>
           <div className="flex items-center gap-1">
+            {isStream && (
+              <div
+                role="group"
+                aria-label={t('detail.filterActivity')}
+                className="flex items-center gap-1"
+                data-stream-filters=""
+              >
+                {TIMELINE_STREAM_FILTERS.map((chip) => (
+                  <button
+                    key={chip}
+                    type="button"
+                    aria-pressed={streamFilter === chip}
+                    onClick={() => onStreamFilterChange?.(chip)}
+                    data-stream-filter={chip}
+                    className={cn(
+                      'h-6 rounded-md px-2 text-xs font-normal transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                      streamFilter === chip ? 'bg-primary/10 text-primary' : 'bg-muted text-foreground hover:bg-muted/70',
+                    )}
+                  >
+                    {t(`detail.streamFilter.${chip}`)}
+                  </button>
+                ))}
+              </div>
+            )}
             {showSubscription && subscription && (
               <SubscriptionToggle
                 subscription={subscription}
@@ -716,8 +804,8 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
         </div>
       </header>
       <div className="space-y-4">
-        {/* Filter dropdown */}
-        {showFilter && (
+        {/* Filter dropdown — the stream has its chips instead */}
+        {showFilter && !isStream && (
           <div className="flex items-center gap-2">
             <Select
               value={activeFilter}
@@ -836,14 +924,17 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
               size="sm"
               onClick={handleLoadMore}
               disabled={isLoadingMore}
-              aria-label={t('detail.loadMore')}
+              aria-label={isStream ? undefined : t('detail.loadMore')}
+              data-stream-view-all={isStream ? '' : undefined}
             >
               {isLoadingMore ? (
                 <Loader2 className="h-4 w-4 animate-spin mr-1" />
-              ) : (
+              ) : isStream ? null : (
                 <ChevronDown className="h-4 w-4 mr-1" />
               )}
-              {t('detail.loadMore')}
+              {isStream
+                ? t('detail.viewAllEntries', { count: totalCount ?? filtered.length })
+                : t('detail.loadMore')}
             </Button>
           </div>
         )}

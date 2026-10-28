@@ -10,7 +10,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom';
-import { activityRowToFeedItem, bodyTableIdsOf, DefaultRecordPageContext, EMPTY_RELATED_ARRANGEMENT, InlineEditSaveBar, RecordBodyTablesContext, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordPageColumnDefaults, resolveTitleField, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
+import { activityRowToFeedItem, auditEntriesToFeedItems, bodyTableIdsOf, RecordFieldChangesContext, DefaultRecordPageContext, EMPTY_RELATED_ARRANGEMENT, InlineEditSaveBar, RecordBodyTablesContext, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordPageColumnDefaults, resolveTitleField, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
 import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions, PanelToggles, type PanelToggleItem } from '@object-ui/components';
 import { useAuth, createAuthenticatedFetch } from '@object-ui/auth';
 import { usePermissions } from '@object-ui/permissions';
@@ -249,9 +249,10 @@ const FEED_CONSUMER_TYPES: ReadonlySet<string> = new Set([
 ]);
 /**
  * objectui#13010 part 5 — the block that draws this view's `sys_audit_log`
- * read: the synthesized page's History tab hands it the rows as `entries`.
+ * read: on the synthesized page, the timeline stream (objectstack#27055), a
+ * `record:activity` the field changes reach through `RecordFieldChangesContext`.
  */
-const HISTORY_CONSUMER_TYPES: ReadonlySet<string> = new Set(['record:history']);
+const HISTORY_CONSUMER_TYPES: ReadonlySet<string> = new Set(['record:activity']);
 /** Where a page tree nests nodes: the keys `pageSchemaIntrospect` walks. */
 const PAGE_NODE_KEYS = ['children', 'items', 'body', 'components', 'regions'] as const;
 const PAGE_NODE_PROPERTY_KEYS = ['children', 'items'] as const;
@@ -776,7 +777,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // A record-action flow launch that ended `refused` without pausing (objectui#9973).
   const [flowRefusal, setFlowRefusal] = useState<FlowRefusalState>({ open: false });
   const [historyEntries, setHistoryEntries] = useState<any[] | null>(null);
-  const [historyLoading, setHistoryLoading] = useState(false);
+  const [, setHistoryLoading] = useState(false);
   const [recordTitle, setRecordTitle] = useState<string | undefined>();
   const objectDef = objects.find((o: any) => o.name === objectName);
   // objectui#13385 (maintainer ruling, option B) — a record page inside the
@@ -2268,25 +2269,19 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     return () => observer.disconnect();
   }, [attachmentsFallbackEl, attachmentsFallbackShown]);
 
-  // ── The audit read waits for the History tab (objectui#13010 part 5) ───
+  // ── The audit read waits for the timeline (objectui#13010 part 5) ───────
   //
   // The `sys_audit_log` read below, and the `sys_user` name lookup behind it,
-  // fill only the `record:history` node of the History tab the synthesized
-  // page composes; an assigned page is rendered as authored, and its
-  // `record:history` reads its own source. So, like the feed above, the read
-  // goes out when that node is on screen, judged by `pageShowsNodeOnOpen` on
-  // the page this view synthesizes (the History tab is added only in the
-  // rebuild below, so the judgment synthesizes it here with no rows): at open
-  // when `?tab=` names the History tab, else on the tab switch that mounts it.
-  // Latched for the view's life for the feed's reason.
-  const historyPage = useMemo(() => {
-    if (!historyEnabled || assignedPage || namedPageBlocked || !objectDef) return null;
-    return buildDefaultPageSchema(objectDef, {
-      ...(assignedSlots ? { slots: assignedSlots } : {}),
-      history: { entries: [] },
-    });
-  }, [historyEnabled, assignedPage, namedPageBlocked, objectDef, assignedSlots]);
-  // In a column tier History is a resident block of the timeline column, so
+  // fill only the field changes of the timeline stream the synthesized page
+  // composes (objectstack#27055: one stream, no History tab); an assigned page
+  // is rendered as authored, and its `record:history` reads its own source.
+  // So, like the feed above, the read goes out when the stream is on screen,
+  // judged by `pageShowsNodeOnOpen` on the page this view synthesizes: at open
+  // when the page opens on it (the column tiers, or `?tab=timeline`), else on
+  // the tab switch that mounts it. Latched for the view's life for the feed's
+  // reason.
+  const historyPage = historyEnabled && !assignedPage && !namedPageBlocked && objectDef ? synthesizedPage : null;
+  // In a column tier the stream is a resident block of the timeline column, so
   // its read goes out at open (objectstack#26678).
   const historyConsumerOnScreen = useMemo(
     () =>
@@ -2298,9 +2293,6 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const [historyConsumerShown, setHistoryConsumerShown] = useState(false);
   if (historyConsumerOnScreen && !historyConsumerShown) setHistoryConsumerShown(true);
   const historyWanted = historyConsumerOnScreen || historyConsumerShown;
-  // The read is issued from an effect, after the commit that mounts the tab;
-  // that commit shows the tab's loading state, as the read's own would.
-  const historyPending = historyWanted && !!dataSource && !!pureRecordId;
 
   useEffect(() => {
     if (!dataSource || !pureRecordId || !objectDef || !historyEnabled) {
@@ -3324,7 +3316,6 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         highlightFields?: string[];
         headerActions?: ActionDef[];
         related?: Array<{ title?: string; objectName: string; relationshipField: string; columns?: any[]; icon?: string; isPrimary?: boolean; isBody?: boolean }>;
-        history?: { entries: any[]; loading: boolean; unknownUserText?: string };
         approvals?: { count?: number; node?: Record<string, any> };
       };
     }
@@ -3473,13 +3464,6 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       highlightFields: highlightFields.length > 0 ? highlightFields : undefined,
       headerActions: recordHeaderActions.length > 0 ? (recordHeaderActions as ActionDef[]) : undefined,
       related: related.length > 0 ? related : undefined,
-      ...(historyEnabled && {
-        history: {
-          entries: historyEntries ?? [],
-          loading: (historyLoading || historyPending) && historyEntries === null,
-          unknownUserText: t('detail.unknownUser', { defaultValue: 'Unknown' }),
-        },
-      }),
       // Approvals tab (#3461) — only when the record actually has requests,
       // so approval-free records carry no dead tab. The node carries the
       // LIVE hook result this view already holds (the same read behind the
@@ -3505,7 +3489,17 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // the panel's headline is the pending one. (The decision actions no longer
   // ride this list at all — objectui#3055 moved them to the declared-action
   // bar, which reads the pending row directly.)
-  }, [objectDef?.name, childRelations, t, objectPluralLabel, objects, historyEnabled, historyEntries, historyLoading, historyPending, approvals.available, approvals.pendingRequest, approvals.requests, user?.id]);
+  }, [objectDef?.name, childRelations, t, objectPluralLabel, objects, approvals.available, approvals.pendingRequest, approvals.requests, user?.id]);
+  // objectstack#27055, Target 3 — the record's field changes, as feed items of
+  // the timeline stream. `null` while there are none to give (no
+  // `trackHistory`, an authored page, the read not made or not landed).
+  const timelineFieldChanges = useMemo(
+    () =>
+      historyEnabled && historyEntries
+        ? auditEntriesToFeedItems(historyEntries, { unknownUser: t('detail.unknownUser', { defaultValue: 'Unknown' }) })
+        : null,
+    [historyEnabled, historyEntries, t],
+  );
 
   if (isLoading) {
     return <SkeletonDetail />;
@@ -3877,7 +3871,6 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         highlightFields: synthParts.highlightFields,
         headerActions: synthParts.headerActions,
         related: synthParts.related,
-        history: synthParts.history,
         approvals: synthParts.approvals,
         // ADR-0085 admits no surface hints: the default page is drawn
         // from the object's semantic roles, and per-page layout goes
@@ -4072,8 +4065,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           // handler's presence. The reaction control is the add row on the
           // records store (its take-back asks the remove row per click), and
           // the column row where the deployment stores reactions in a column.
-          onAddComment={feedGates.comment ? (handleAddComment as any) : undefined}
-          onAddReply={feedGates.comment ? (handleAddReply as any) : undefined}
+          // objectstack#27055: the timeline stream is a `record:activity`,
+          // which feeds-off does not strip, so `enable.feeds: false` withholds
+          // the comment writes here (the server refuses them, 403
+          // FEEDS_DISABLED) and the stream shows activity and changes alone.
+          onAddComment={feedsEnabled && feedGates.comment ? (handleAddComment as any) : undefined}
+          onAddReply={feedsEnabled && feedGates.comment ? (handleAddReply as any) : undefined}
           // objectui#12268: the author's Edit and Delete, each under its own
           // grant; the panel offers them only on the rows the read marked
           // `authoredByViewer`.
@@ -4088,6 +4085,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           }
           mentionSuggestions={mentionSuggestions}
         >
+        {/* objectstack#27055 — the field changes of the timeline stream,
+            for the synthesized page's `record:activity`. */}
+        <RecordFieldChangesContext.Provider value={assignedPage ? null : timelineFieldChanges}>
         {/* No `approval` handler in the set below (objectui#3055): the record
             page has no bespoke approval action TYPE any more. A decision is an
             ordinary `type:'api'` action declared on `sys_approval_request` and
@@ -4355,6 +4355,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           </div>
           {modalElement}
         </ActionProvider>
+        </RecordFieldChangesContext.Provider>
         </DiscussionContextProvider>
         </HighlightFieldsProvider>
         </InlineEditProvider>

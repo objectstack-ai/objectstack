@@ -32,6 +32,7 @@ import { detectStatusField } from '@object-ui/types';
 // at this depth, and both spellings resolve to one table and one dedupe set.
 import { isRetiredFieldType, reportRetiredFieldType, resolveNameField } from '@object-ui/core';
 import { inferDetailColumns } from '../autoLayout';
+import { recordTimelineDefaultReason } from './recordPageColumns';
 
 /** Minimal shape of an object definition we read here. We deliberately
  *  duck-type so this helper has zero hard dependency on a specific
@@ -150,7 +151,11 @@ export interface BuildPageOptions {
   /** Override the auto-derived section grouping. The heading rides `label` —
    *  the one slot `@object-ui/types` declares (objectui#6190). */
   sections?: Array<{ label?: string; columns?: number; fields?: any[] }>;
-  /** Suppress the auto-appended `record:discussion` slot. */
+  /**
+   * Suppress the timeline stream (objectstack#27055): no Timeline tab, no
+   * timeline column. It used to suppress the discussion footer the stream
+   * replaced.
+   */
   hideDiscussion?: boolean;
   /** Suppress the auto-emitted Attachments tab (`enable.files`, objectstack#4358). */
   hideAttachments?: boolean;
@@ -233,17 +238,11 @@ export interface BuildPageOptions {
      */
     isBody?: boolean;
   }>;
-  /**
-   * When true, emit an Activity tab that renders `record:activity`.
-   * The activity renderer fetches its own data via RecordContext.
-   */
-  showActivity?: boolean;
-  /**
-   * When provided, emit a History tab containing a `record:history`
-   * renderer. The host supplies the audit-log `entries` and `loading`
-   * flag because the data fetch logic lives in RecordDetailView.
-   */
-  history?: { entries: any[]; loading?: boolean; emptyText?: string; unknownUserText?: string };
+  // objectstack#27055 (Target 3): `showActivity` and `history` are gone too.
+  // The timeline is ONE stream — discussion, activity (`sys_activity`) and
+  // field changes (`trackHistory`) — drawn by the Timeline tab's
+  // `record:activity` node; the host hands the field changes to it through
+  // `RecordFieldChangesContext` instead of building a History tab.
   /**
    * When provided, emit an Approvals tab containing a `record:approvals`
    * renderer (objectui#3461). `node` is spread verbatim onto the node — the
@@ -274,9 +273,9 @@ export interface BuildPageOptions {
    * - `tabs` — replaces the entire `page:tabs` node. Wins over
    *   `details` when both are provided. Use this to add or reorder
    *   tabs.
-   * - `discussion` — replaces `record:discussion`. Fires even when
-   *   `hideDiscussion` is true (the override is explicit intent to
-   *   surface a custom footer).
+   * - `discussion` — replaces the timeline stream (the Timeline tab's
+   *   content, objectstack#27055). Fires even when `hideDiscussion` is true
+   *   (the override is explicit intent to surface a custom feed).
    */
   slots?: {
     header?: any | any[];
@@ -952,8 +951,15 @@ export function bodyTablePlacement(
 export function buildDefaultTabs(
   def: ObjectDefLike | undefined,
   options: Pick<BuildPageOptions,
-    'sections' | 'related' | 'showActivity' | 'history' | 'highlightFields' | 'statusField' | 'hideAttachments' | 'approvals'
-  > = {},
+    'sections' | 'related' | 'highlightFields' | 'statusField' | 'hideAttachments' | 'approvals' | 'hideDiscussion'
+  > & {
+    /**
+     * The Timeline tab's content (objectstack#27055); `buildDefaultPageSchema`
+     * passes the `discussion` slot here. Absent: the default stream, unless
+     * `hideDiscussion`.
+     */
+    timeline?: any[];
+  } = {},
 ): any {
   const statusField = options.statusField ?? detectStatusField(def);
   const highlightFields =
@@ -997,8 +1003,23 @@ export function buildDefaultTabs(
       children: bodyTablePlacement(def, options.sections, highlightFields, bodies),
     },
   ];
-  if (sides.length > 0) {
-    items.push({ label: 'Related', value: 'related', children: sides.map((rel) => relatedNode(rel)) });
+  // objectstack#27055, Targets 3 and 6 — the tab strip is 详情 / 时间线 / 关联 /
+  // （审批）: the timeline stream is ONE tab, second for a worked object (the
+  // object-derived default of the timeline column, `recordTimelineDefaultReason`)
+  // and last otherwise; attachments close the Related tab, as they close the
+  // related column.
+  const timeline = options.timeline ?? (options.hideDiscussion ? [] : [buildDefaultTimeline()]);
+  const timelineTab = timeline.length > 0 ? { label: 'Timeline', value: 'timeline', children: timeline } : null;
+  const worked = recordTimelineDefaultReason(def as never) !== null;
+  if (timelineTab && worked) items.push(timelineTab);
+  // Attachments (objectstack#4358) — for `enable.files: true` objects; the
+  // tab strip's count badge reads the `record:attachments` node.
+  const relatedChildren = [
+    ...sides.map((rel) => relatedNode(rel)),
+    ...(def?.enable?.files === true && !options.hideAttachments ? [buildDefaultAttachments()] : []),
+  ];
+  if (relatedChildren.length > 0) {
+    items.push({ label: 'Related', value: 'related', children: relatedChildren });
   }
   // Approvals tab (objectui#3461) — emitted only when the host reports the
   // record actually HAS approval requests, so approval-free records carry no
@@ -1017,42 +1038,35 @@ export function buildDefaultTabs(
       children: [componentNode('record:approvals', { ...(options.approvals.node || {}) })],
     });
   }
-  // Attachments tab (objectstack#4358) — emitted for `enable.files: true`
-  // objects so the panel is a peer of Details/Related instead of a footer
-  // widget buried under the discussion feed. `PageTabsRenderer` derives the
-  // count badge from the `record:attachments` node the same way it counts
-  // `record:related_list` tabs. The English label goes through the tab
-  // strip's pack lookup (`detail.attachments` → 附件 / 添付ファイル /
-  // Adjuntos …), matching its sibling tabs — see the Approvals tab above for
-  // why this no longer names `KNOWN_LABEL_DICT` (objectui#4645).
-  if (def?.enable?.files === true && !options.hideAttachments) {
-    items.push({ label: 'Attachments', value: 'attachments', children: [buildDefaultAttachments()] });
-  }
-  if (options.showActivity) {
-    items.push({ label: 'Activity', value: 'activity', children: [componentNode('record:activity')] });
-  }
-  if (options.history) {
-    items.push({
-      label: 'History',
-      value: 'history',
-      children: [
-        componentNode('record:history', {
-          entries: options.history.entries,
-          loading: options.history.loading,
-          emptyText: options.history.emptyText,
-          unknownUserText: options.history.unknownUserText,
-        }),
-      ],
-    });
-  }
+  if (timelineTab && !worked) items.push(timelineTab);
   return componentNode('page:tabs', { items });
 }
 
 /**
- * Sub-builder: the inline `record:discussion` footer slot.
+ * Sub-builder: the inline `record:discussion` footer slot. The synthesized
+ * page no longer emits it (objectstack#27055: the timeline stream carries the
+ * discussion); kept for slotted authors composing one.
  */
 export function buildDefaultDiscussion(): any {
   return componentNode('record:discussion');
+}
+
+/**
+ * Sub-builder: the timeline stream (objectstack#27055, Target 3) — ONE
+ * `record:activity` merging the discussion (`enable.feeds`), the activity
+ * (`enable.activities`, `sys_activity`) and the field changes
+ * (`trackHistory`), the composer on top. On the default record page the
+ * block draws its stream face (filter chips 全部 / 活动 / 讨论 / 变更, compact
+ * system lines); its keys are the spec's own `record:activity` inputs:
+ * completed tasks shown (a stream shows what happened), replies and
+ * reactions on.
+ */
+export function buildDefaultTimeline(): any {
+  return componentNode('record:activity', {
+    showCompleted: true,
+    enableThreading: true,
+    enableReactions: true,
+  });
 }
 
 /**
@@ -1132,23 +1146,35 @@ export function buildDefaultPageSchema(
     }));
   }
 
+  // The timeline stream's content (objectstack#27055): an authored
+  // `discussion` slot replaces it; `hideDiscussion` drops it.
+  const timeline =
+    'discussion' in slots && slots.discussion !== undefined
+      ? toNodeArray(slots.discussion)
+      : options.hideDiscussion
+        ? []
+        : [buildDefaultTimeline()];
+
   // 4) Tabs — `tabs` slot wins over `details` slot when both are
   //    provided (broader override). When only `details` is provided,
   //    splice it into the Details tab body and keep Related/Activity/
   //    History tabs synthesized.
   if ('tabs' in slots && slots.tabs !== undefined) {
     components.push(...toNodeArray(slots.tabs));
+    // An authored strip has no Timeline tab of ours: an authored `discussion`
+    // slot beside it keeps its place under the strip.
+    if ('discussion' in slots && slots.discussion !== undefined) components.push(...toNodeArray(slots.discussion));
   } else if ('details' in slots && slots.details !== undefined) {
     const detailsBody = toNodeArray(slots.details);
     const tabsNode = buildDefaultTabs(def, {
       sections: options.sections,
       related: options.related,
-      showActivity: options.showActivity,
-      history: options.history,
       approvals: options.approvals,
       highlightFields: options.highlightFields,
       statusField: options.statusField,
       hideAttachments: options.hideAttachments,
+      hideDiscussion: options.hideDiscussion,
+      timeline,
     });
     // Replace the first tab's children (Details) with the override. The items
     // live in the node's `properties` bag — the canonical carrier per
@@ -1162,22 +1188,13 @@ export function buildDefaultPageSchema(
     components.push(buildDefaultTabs(def, {
       sections: options.sections,
       related: options.related,
-      showActivity: options.showActivity,
-      history: options.history,
       approvals: options.approvals,
       highlightFields: options.highlightFields,
       statusField: options.statusField,
       hideAttachments: options.hideAttachments,
+      hideDiscussion: options.hideDiscussion,
+      timeline,
     }));
-  }
-
-  // 5) Discussion footer. (Attachments are NOT part of this footer: for
-  //    `enable.files` objects buildDefaultTabs emits a peer Attachments tab
-  //    instead — objectstack#4358.)
-  if ('discussion' in slots && slots.discussion !== undefined) {
-    components.push(...toNodeArray(slots.discussion));
-  } else if (!options.hideDiscussion) {
-    components.push(buildDefaultDiscussion());
   }
 
   // ADR-0085 (objectstack#27055): the synthesized page has ONE region. The
