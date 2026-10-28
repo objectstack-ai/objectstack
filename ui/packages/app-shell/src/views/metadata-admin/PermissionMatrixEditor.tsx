@@ -780,6 +780,13 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
     forget: forgetSetVersion,
     dialog: draftConflictDialog,
   } = useDraftSaveGuard(client, reloadSet);
+  // The header's label as the published list serves it: that read is
+  // localized at the REST boundary (the server's permission-set translator),
+  // while the layered read the draft is built from carries the authored text.
+  // Display only — never written into `draft`, so a save keeps the authored
+  // label. `authored` is the published label it stands for; once the draft's
+  // label differs (an edit, a pending draft) the header shows the draft's.
+  const [servedLabel, setServedLabel] = React.useState<{ authored?: string; served: string } | null>(null);
   const [objects, setObjects] = React.useState<ObjectSummary[]>([]);
   const [fieldsByObject, setFieldsByObject] = React.useState<Record<string, FieldSummary[]>>({});
   const [expanded, setExpanded] = React.useState<Set<string>>(new Set());
@@ -833,10 +840,10 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
   // objectui#11799 — the same published read, held for the load below: a set
   // it does not list has never been published. The load runs after this
   // effect, so it reads this request rather than sending one of its own.
-  const publishedSetsRef = React.useRef<Promise<Array<{ name?: string }>> | null>(null);
+  const publishedSetsRef = React.useRef<Promise<Array<{ name?: string; label?: unknown }>> | null>(null);
   React.useEffect(() => {
     let cancelled = false;
-    const published = client.list<{ name?: string }>('permission', {});
+    const published = client.list<{ name?: string; label?: unknown }>('permission', {});
     publishedSetsRef.current = published;
     published
       .then((rows) => {
@@ -869,6 +876,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
     // that copy is the set being opened (the routed hop to it).
     setSaveRefusedAsLocked(null);
     setCloned((c) => (c && c.name === name ? c : null));
+    setServedLabel(null);
     (async () => {
       try {
         // ADR-0086 P2 (D6): under the package door a set is draft/published
@@ -984,6 +992,15 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         // live write is not pinned.
         if (pendingRead && packageId) recordSetRead(type, name, packageId, pendingRead.pin);
         else forgetSetVersion();
+        // A draft-only set has no served row and keeps its draft label.
+        const servedRow = publishedSets
+          ? (await publishedSets.catch(() => null))?.find((r) => r?.name === name)
+          : undefined;
+        if (cancelled) return;
+        const authoredLabel = (lay?.effective ?? lay?.code)?.label;
+        if (typeof servedRow?.label === 'string' && servedRow.label && servedRow.label !== authoredLabel) {
+          setServedLabel({ authored: authoredLabel, served: servedRow.label });
+        }
       } catch (err: any) {
         setError(err?.message ?? String(err));
       } finally {
@@ -1083,6 +1100,9 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
     },
   ).length;
   const saveHeld = celErrorTotal > 0 || rlsUnnamedCount > 0;
+
+  const headerLabel =
+    servedLabel && draft.label === servedLabel.authored ? servedLabel.served : draft.label;
 
   // Dirty detection — cheap JSON snapshot comparison against the last
   // loaded/saved baseline (same approach as ResourceEditPage). Every mutation
@@ -2061,7 +2081,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
           testId="access-item-header"
           leading={chrome.leading}
           icon={Shield}
-          title={draft.label || name}
+          title={headerLabel || name}
           apiName={name}
           chips={
             <>
@@ -2304,7 +2324,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
             )}
             {/* The api-name already sits in the PageShell breadcrumb (font-mono),
                 so the summary carries the human label — no need to repeat it. */}
-            <span className="font-medium truncate">{draft.label || draft.name}</span>
+            <span className="font-medium truncate">{headerLabel || draft.name}</span>
             {provenanceBadgesEl}
             {writable && (
               <span className="text-xs text-muted-foreground shrink-0">{t('perm.basics.editHint')}</span>
