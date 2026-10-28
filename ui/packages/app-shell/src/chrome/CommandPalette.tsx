@@ -52,7 +52,7 @@ import {
 import { useRecordSearch } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import { useTheme } from './ThemeProvider.js';
-import { useNavVisibility } from '../hooks/useNavMemberGates.js';
+import { useNavMemberGates, useNavVisibility } from '../hooks/useNavMemberGates.js';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { resolveKeyedI18nLabel, getRecordDisplayName, appRouteSegment } from '../utils/index.js';
 import { getIcon } from '../utils/getIcon.js';
@@ -161,6 +161,10 @@ function CommandPaletteBody(props: CommandPaletteProps) {
   // `nav:menu`'s: an entry that declares an API `dataSource` reads its bound
   // value as `data`, and is hidden until that read answers (objectui#13029).
   const evalVis = useNavVisibility(activeApp);
+  // objectstack#26892 — the sidebar's member gates: the app's reports beyond
+  // its navigation are listed only when the navigation shows the member an
+  // entry naming them, or names none.
+  const gates = useNavMemberGates();
   const { t, language } = useObjectTranslation();
   // A nav entry's text, the way the sidebar and `nav:menu` name it: an entry
   // with NO `label` shows its target's current label, else its target's machine
@@ -232,7 +236,7 @@ function CommandPaletteBody(props: CommandPaletteProps) {
   const navReportNames = new Set(
     navItems.filter((item) => item.type === 'report').map((item) => item.reportName as string),
   );
-  const appReports = useAppReportEntries(activeApp, open && !inStudio).entries.filter(
+  const appReports = useAppReportEntries(activeApp, open && !inStudio, gates).entries.filter(
     (entry) => !navReportNames.has(entry.name) && matches(entry.label, entry.name),
   );
   const switchableApps = apps.filter((a) => a.active !== false);
