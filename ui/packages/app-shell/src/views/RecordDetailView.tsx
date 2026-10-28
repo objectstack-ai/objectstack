@@ -108,33 +108,45 @@ interface RecordDetailViewProps {
 const FALLBACK_USER = { id: 'current-user', name: 'Demo User' };
 
 /**
- * `⌘⇧T` / `Ctrl+Shift+T` — show or hide the record page's timeline column
+ * `⌘⇧.` / `Ctrl+Shift+.` — show or hide the record page's timeline column
  * (objectstack#27052). The record page owns the listener and advertises this
  * beside it, under the same gate: a full record page in a column tier.
+ *
+ * Not `⌘⇧T` / `⌘⇧R`: Chromium and Firefox keep Ctrl/⌘+Shift+T (reopen the
+ * closed tab) and Ctrl/⌘+Shift+R (hard reload) for themselves, and the page
+ * never receives them.
  */
 const TOGGLE_TIMELINE_SHORTCUT: AdvertisedShortcut = {
   id: 'record-toggle-timeline',
   group: 'general',
-  chord: { key: 't', mod: true, shift: true },
+  chord: { key: '.', mod: true, shift: true },
   label: (t: ShortcutLabelTranslate) => t('console.shortcuts.toggleTimeline'),
 };
 
-/** `⌘⇧R` / `Ctrl+Shift+R` — show or hide the record page's related column (objectstack#27052). */
+/** `⌘⇧,` / `Ctrl+Shift+,` — show or hide the record page's related column (objectstack#27052). */
 const TOGGLE_RELATED_SHORTCUT: AdvertisedShortcut = {
   id: 'record-toggle-related',
   group: 'general',
-  chord: { key: 'r', mod: true, shift: true },
+  chord: { key: ',', mod: true, shift: true },
   label: (t: ShortcutLabelTranslate) => t('console.shortcuts.toggleRelated'),
 };
 
+/**
+ * The physical key of each punctuation chord key. Shift changes the character
+ * those keys type (`.` becomes `>` on a US layout), so a chord that holds
+ * Shift is matched by `KeyboardEvent.code`, the key itself, not by `key`.
+ */
+const PANEL_CHORD_CODES: Readonly<Record<string, string>> = { '.': 'Period', ',': 'Comma' };
+
 function matchesPanelChord(
-  e: Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'shiftKey' | 'altKey'>,
+  e: Pick<KeyboardEvent, 'key' | 'code' | 'metaKey' | 'ctrlKey' | 'shiftKey' | 'altKey'>,
   chord: ShortcutChord,
 ): boolean {
   if (e.altKey) return false;
   if (Boolean(chord.mod) !== (e.metaKey || e.ctrlKey)) return false;
   if (Boolean(chord.shift) !== e.shiftKey) return false;
-  return e.key.toLowerCase() === chord.key;
+  const code = PANEL_CHORD_CODES[chord.key];
+  return code !== undefined ? e.code === code : e.key.toLowerCase() === chord.key;
 }
 
 /**
@@ -890,7 +902,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // gets the object's derived default: the timeline for a worked object
   // (`recordPageColumnDefaults`), the related column always. The tabbed tier
   // does not read them; the choice is kept for when the page widens.
-  const columnDefaults = recordPageColumnDefaults(objectDef as never, objects);
+  const columnDefaults = recordPageColumnDefaults(objectDef as never);
   const columnScope = objectPreferenceScope(objectName ?? '');
   const [timelineSwitch, setTimelineSwitch] = useWorkspacePreference(
     RECORD_TIMELINE_COLUMN_PREFERENCE,

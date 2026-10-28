@@ -123,7 +123,6 @@ export function recordPageArrangementFor(
 
 /** The object-definition shape {@link recordPageColumnDefaults} reads. */
 export interface RecordPageObjectLike {
-  name?: string;
   stageField?: unknown;
   enable?: { files?: unknown } | null;
   fields?: Record<string, unknown> | unknown[] | null;
@@ -136,7 +135,7 @@ function fieldsOf(object: RecordPageObjectLike | null | undefined): Array<Record
 }
 
 /** Why {@link recordPageColumnDefaults} turned the timeline on — or `null`, off. */
-export type RecordTimelineDefaultReason = 'stage-field' | 'option-kinds' | 'files' | 'master-detail-parent' | null;
+export type RecordTimelineDefaultReason = 'stage-field' | 'option-kinds' | 'files' | null;
 
 /**
  * Why an object is "worked" — the reason its record page shows the timeline
@@ -149,13 +148,15 @@ export type RecordTimelineDefaultReason = 'stage-field' | 'option-kinds' | 'file
  *  2. otherwise (and unless `stageField: false` turned the stage role off),
  *     a field whose options declare a lifecycle `kind` (`open` / `won` /
  *     `lost`) — the same declaration a stage path reads;
- *  3. `enable.files: true` — records collect attachments, work products;
- *  4. some object in `objects` has a `master_detail` field whose `reference`
- *     is this object — its records own child work.
+ *  3. `enable.files: true` — records collect attachments, work products.
+ *
+ * Only what the object declares of itself counts. Being the `master_detail`
+ * parent of another object does not: a parent that merely owns child rows (a
+ * price book, a campaign, an event) is a container, not a worked record, and
+ * its middle column would be an empty stream.
  */
 export function recordTimelineDefaultReason(
   object: RecordPageObjectLike | null | undefined,
-  objects: readonly unknown[] = [],
 ): RecordTimelineDefaultReason {
   if (!object) return null;
   if (typeof object.stageField === 'string' && object.stageField.length > 0) return 'stage-field';
@@ -168,27 +169,16 @@ export function recordTimelineDefaultReason(
     if (declaresKinds) return 'option-kinds';
   }
   if (object.enable?.files === true) return 'files';
-  const name = object.name;
-  if (typeof name === 'string' && name.length > 0) {
-    const parent = objects.some((other) =>
-      fieldsOf(other as RecordPageObjectLike).some((field) => field.type === 'master_detail' && field.reference === name),
-    );
-    if (parent) return 'master-detail-parent';
-  }
   return null;
 }
 
 /**
  * The column switches a reader who never chose gets for `object`: the
  * timeline on when the object is worked ({@link recordTimelineDefaultReason}),
- * the related column on. `objects` is the app's object list, read for the
- * `master_detail` parent branch.
+ * the related column on.
  */
-export function recordPageColumnDefaults(
-  object: RecordPageObjectLike | null | undefined,
-  objects: readonly unknown[] = [],
-): RecordPageColumnSwitches {
-  return { timeline: recordTimelineDefaultReason(object, objects) !== null, related: true };
+export function recordPageColumnDefaults(object: RecordPageObjectLike | null | undefined): RecordPageColumnSwitches {
+  return { timeline: recordTimelineDefaultReason(object) !== null, related: true };
 }
 
 /**

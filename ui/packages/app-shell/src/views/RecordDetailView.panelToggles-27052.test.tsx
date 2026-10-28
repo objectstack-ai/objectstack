@@ -19,9 +19,11 @@
  *    the timeline folded into a 「动态」 card, and switching it on restores;
  *  - the choice survives a remount (a reload reads the same storage) and is
  *    per object;
- *  - an object that is not worked opens with the timeline off;
- *  - `⌘⇧T` / `⌘⇧R` flip the switches, and do nothing while a text field has
- *    focus;
+ *  - an object that is not worked opens with the timeline off — including
+ *    one whose only claim is being another object's `master_detail` parent;
+ *  - `⌘⇧.` / `⌘⇧,` flip the switches, matched by the physical key (Shift
+ *    types `>` / `<` there), and do nothing while a text field has focus;
+ *    the browser's own `⌘⇧T` / `⌘⇧R` are not theirs;
  *  - the toggles are drawn only in a column tier: not in the tabbed tier, not
  *    in the drawer / split pane.
  */
@@ -70,6 +72,7 @@ import { RecordDetailView } from './RecordDetailView';
 
 const LEAD = 'crm_lead';
 const PRODUCT = 'crm_product';
+const PRICE_BOOK = 'crm_price_book';
 
 const BASE_FIELDS = {
   id: { type: 'text', label: 'Id' },
@@ -96,6 +99,16 @@ const OBJECTS = [
     },
   },
   { name: PRODUCT, label: 'Product', pluralLabel: 'Products', managedBy: 'platform', fields: BASE_FIELDS },
+  // A container: it owns its entries through their `master_detail`, and
+  // declares no stage, no lifecycle kinds and no files.
+  { name: PRICE_BOOK, label: 'Price Book', pluralLabel: 'Price Books', managedBy: 'platform', fields: BASE_FIELDS },
+  {
+    name: 'crm_price_book_entry',
+    label: 'Price Book Entry',
+    pluralLabel: 'Price Book Entries',
+    managedBy: 'platform',
+    fields: { ...BASE_FIELDS, price_book: { type: 'master_detail', reference: PRICE_BOOK, label: 'Price Book' } },
+  },
   {
     name: 'crm_note',
     label: 'Note',
@@ -153,8 +166,16 @@ function renderPage({ object = LEAD, width = 1440, embedded = false }: { object?
 const shown = (container: HTMLElement) =>
   container.querySelector('[data-record-columns]')?.getAttribute('data-record-columns-shown') ?? null;
 const toggle = (name: RegExp) => screen.getByRole('button', { name });
-const press = (key: string, target: Element = document.body) =>
-  fireEvent.keyDown(target, { key, metaKey: true, shiftKey: true, bubbles: true });
+// What a browser hands the page for ⌘⇧. / ⌘⇧, on a US layout: Shift types
+// `>` / `<`, and `code` names the key itself.
+const CHORD_KEYS = { timeline: { key: '>', code: 'Period' }, related: { key: '<', code: 'Comma' } } as const;
+const press = (chord: keyof typeof CHORD_KEYS | { key: string; code: string }, target: Element = document.body) =>
+  fireEvent.keyDown(target, {
+    ...(typeof chord === 'string' ? CHORD_KEYS[chord] : chord),
+    metaKey: true,
+    shiftKey: true,
+    bubbles: true,
+  });
 
 beforeEach(() => {
   cleanup();
@@ -225,39 +246,52 @@ describe('RecordDetailView — the panel toggles (objectstack#27052)', () => {
     expect(container.querySelector('[data-record-folded-timeline]')).not.toBeNull();
   });
 
-  it('⌘⇧T / ⌘⇧R flip the switches; with a text field focused they do nothing', async () => {
+  it('an object that is only another object\'s `master_detail` parent is not worked: the timeline is off', async () => {
+    const { container } = renderPage({ object: PRICE_BOOK });
+    await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
+    expect(shown(container)).toBe('details related');
+    expect(toggle(/^Timeline$/).getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('⌘⇧. / ⌘⇧, flip the switches; with a text field focused they do nothing', async () => {
     const { container } = renderPage();
     await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
 
     const input = document.createElement('input');
     document.body.appendChild(input);
     input.focus();
-    press('T', input);
-    press('R', input);
+    press('timeline', input);
+    press('related', input);
     expect(shown(container)).toBe('details timeline related');
     input.remove();
 
-    press('T');
+    // The browser's chords are not the page's: reopen-tab and hard-reload.
+    press({ key: 'T', code: 'KeyT' });
+    press({ key: 'R', code: 'KeyR' });
+    expect(shown(container)).toBe('details timeline related');
+    expect(window.localStorage.getItem(`os:pref:record.columns.timeline@object:${LEAD}`)).toBeNull();
+
+    press('timeline');
     await waitFor(() => expect(shown(container)).toBe('details related'));
-    press('R');
+    press('related');
     await waitFor(() => expect(shown(container)).toBe('details'));
     expect(toggle(/^Related column$/).getAttribute('aria-pressed')).toBe('false');
-    press('T');
+    press('timeline');
     await waitFor(() => expect(shown(container)).toBe('details timeline'));
   });
 
   it('the tooltip names each shortcut, and the shortcut is announced', async () => {
     renderPage();
     await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
-    expect(toggle(/^Timeline$/).getAttribute('aria-keyshortcuts')).toMatch(/^(Meta|Control)\+Shift\+T$/);
-    expect(toggle(/^Related column$/).getAttribute('aria-keyshortcuts')).toMatch(/^(Meta|Control)\+Shift\+R$/);
+    expect(toggle(/^Timeline$/).getAttribute('aria-keyshortcuts')).toMatch(/^(Meta|Control)\+Shift\+\.$/);
+    expect(toggle(/^Related column$/).getAttribute('aria-keyshortcuts')).toMatch(/^(Meta|Control)\+Shift\+,$/);
   });
 
   it('not drawn in the tabbed tier, nor in the drawer / split pane; the shortcut does nothing there', async () => {
     const tabbed = renderPage({ width: 900 });
     expect(await screen.findByRole('tablist', undefined, { timeout: 5000 })).toBeTruthy();
     expect(screen.queryByRole('group', { name: 'Panels' })).toBeNull();
-    press('T');
+    press('timeline');
     expect(window.localStorage.getItem(`os:pref:record.columns.timeline@object:${LEAD}`)).toBeNull();
     tabbed.unmount();
 

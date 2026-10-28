@@ -53,22 +53,18 @@ describe('recordTimelineDefaultReason — the timeline is on for a worked object
     expect(recordTimelineDefaultReason({ name: 'account', enable: { files: false }, fields: {} })).toBeNull();
   });
 
-  it('master-detail-parent: another object owns child records through a `master_detail` to it', () => {
-    const objects = [
-      { name: 'quote', fields: {} },
-      { name: 'quote_line', fields: { quote: { type: 'master_detail', reference: 'quote' } } },
-      { name: 'note', fields: { account: { type: 'lookup', reference: 'account' } } },
-    ];
-    expect(recordTimelineDefaultReason(objects[0], objects)).toBe('master-detail-parent');
-    // A lookup is not ownership.
-    expect(recordTimelineDefaultReason({ name: 'account', fields: {} }, objects)).toBeNull();
-    // The child itself is not a parent.
-    expect(recordTimelineDefaultReason(objects[1], objects)).toBeNull();
+  it('a `master_detail` parent and nothing else is off: owning child rows is a container, not a worked record', () => {
+    const priceBook = { name: 'price_book', fields: { name: { type: 'text' } } };
+    const entry = { name: 'price_book_entry', fields: { price_book: { type: 'master_detail', reference: 'price_book' } } };
+    expect(recordTimelineDefaultReason(priceBook)).toBeNull();
+    expect(recordPageColumnDefaults(priceBook)).toEqual({ timeline: false, related: true });
+    // The child that holds the `master_detail` is not worked by it either.
+    expect(recordTimelineDefaultReason(entry)).toBeNull();
   });
 
   it('none of them: off — a product, a price-book entry', () => {
     const product = { name: 'product', fields: { name: { type: 'text' }, family: { type: 'select', options: [{ value: 'a', label: 'A' }] } } };
-    expect(recordTimelineDefaultReason(product, [product])).toBeNull();
+    expect(recordTimelineDefaultReason(product)).toBeNull();
     expect(recordTimelineDefaultReason(undefined)).toBeNull();
   });
 });

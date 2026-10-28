@@ -23,9 +23,9 @@ export interface PanelToggleItem {
   /** Whether the panel is shown. */
   pressed: boolean;
   onPressedChange: (pressed: boolean) => void;
-  /** The keycaps of the shortcut that toggles the panel, drawn in the tooltip (`['⌘', '⇧', 'T']`). */
+  /** The keycaps of the shortcut that toggles the panel, drawn in the tooltip (`['⌘', '⇧', '.']`). */
   shortcut?: readonly string[];
-  /** The same shortcut for assistive technology, in `aria-keyshortcuts` syntax (`Meta+Shift+T`). */
+  /** The same shortcut for assistive technology, in `aria-keyshortcuts` syntax (`Meta+Shift+.`). */
   ariaKeyShortcuts?: string;
 }
 

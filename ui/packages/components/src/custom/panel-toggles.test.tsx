@@ -28,8 +28,8 @@ function Host({ initial = { timeline: true, related: false } }: { initial?: { ti
       icon: Icon,
       pressed: shown.timeline,
       onPressedChange: (timeline) => setShown((s) => ({ ...s, timeline })),
-      shortcut: ['⌘', '⇧', 'T'],
-      ariaKeyShortcuts: 'Meta+Shift+T',
+      shortcut: ['⌘', '⇧', '.'],
+      ariaKeyShortcuts: 'Meta+Shift+.',
     },
     {
       id: 'related',
@@ -52,7 +52,7 @@ describe('PanelToggles (objectstack#27052)', () => {
     const related = screen.getByRole('button', { name: 'Related' });
     expect(timeline.getAttribute('aria-pressed')).toBe('true');
     expect(related.getAttribute('aria-pressed')).toBe('false');
-    expect(timeline.getAttribute('aria-keyshortcuts')).toBe('Meta+Shift+T');
+    expect(timeline.getAttribute('aria-keyshortcuts')).toBe('Meta+Shift+.');
     // The pressed state is tinted.
     expect(timeline.className).toContain('aria-pressed:text-primary');
   });
@@ -74,7 +74,7 @@ describe('PanelToggles (objectstack#27052)', () => {
       expect(el).not.toBeNull();
       return el!;
     });
-    expect(Array.from(tip.querySelectorAll('kbd')).map((k) => k.textContent)).toEqual(['⌘', '⇧', 'T']);
+    expect(Array.from(tip.querySelectorAll('kbd')).map((k) => k.textContent)).toEqual(['⌘', '⇧', '.']);
   });
 
   it('draws nothing with no panels', () => {
