@@ -15,7 +15,8 @@
  *  - Create over a published id another package holds: refused, nothing
  *    written, and no "Open".
  *  - Create over a draft id: refused before the save, and the save still
- *    carries the first-write pin for a draft that lands after the check.
+ *    carries the first-write pin for a draft that lands after the check;
+ *    that pin's refusal reads in the author's words (objectstack#26846).
  *  - A fresh id: created as before.
  *  - Discard: a published set's draft goes and the matrix reads the live
  *    set again; a never-published set leaves the rail.
@@ -221,8 +222,27 @@ describe('objectstack#26836 — "+ New" over a taken identifier', () => {
     const dialog = await openCreate('Project Editor');
     await waitFor(() => expect(clientImpl.save).toHaveBeenCalledTimes(1));
     expect(clientImpl.save.mock.calls[0][3]).toMatchObject({ mode: 'draft', packageId: PKG, ifNoneMatch: '*' });
-    expect(await within(dialog).findByText(/asserted that no draft row exists/)).toBeInTheDocument();
+    // objectstack#26846 — read by its code, in the author's words: the door's
+    // sentence about the pin never reaches the dialog.
+    expect(
+      await within(dialog).findByText(tFormat('engine.studio.access.createDraftTaken', 'en', { name: 'project_editor' })),
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByText(/asserted that no draft row exists/)).toBeNull();
     expect(clientImpl.drafts.project_editor.body.label).toBe('Somebody else');
+  });
+
+  it('CONTROL (objectstack#26846): a refusal with another code keeps its own text', async () => {
+    clientImpl = makeClient();
+    renderAccess();
+    await screen.findByTestId('access-empty', undefined, { timeout: 8000 });
+    clientImpl.save.mockRejectedValueOnce(
+      Object.assign(new Error('permission/project_editor: label is too long'), { status: 422, code: 'VALIDATION_ERROR' }),
+    );
+    const dialog = await openCreate('Project Editor');
+    expect(await within(dialog).findByText(/label is too long/)).toBeInTheDocument();
+    expect(
+      within(dialog).queryByText(tFormat('engine.studio.access.createDraftTaken', 'en', { name: 'project_editor' })),
+    ).toBeNull();
   });
 
   it('a fresh identifier: created as a draft, as before, and opened', async () => {

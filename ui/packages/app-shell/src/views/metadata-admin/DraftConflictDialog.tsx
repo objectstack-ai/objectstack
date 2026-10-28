@@ -164,9 +164,15 @@ export async function readDraftForSave<T = unknown>(
   type: string,
   name: string,
   packageId: string | null | undefined,
+  // objectstack#26649 — the bundle member whose draft this is; omitted, the
+  // canonical member's. The save it pins is addressed by its body's member.
+  member?: string,
 ): Promise<{ answer: T | null; pin: DraftPin | null }> {
   try {
-    const answer = await client.getDraft<T>(type, name, packageId ? { packageId } : {});
+    const answer = await client.getDraft<T>(type, name, {
+      ...(packageId ? { packageId } : {}),
+      ...(member ? { member } : {}),
+    });
     return { answer, pin: draftPinOf(answer) };
   } catch {
     return { answer: null, pin: null };
