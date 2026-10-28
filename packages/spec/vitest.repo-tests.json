@@ -75,6 +75,7 @@
   "src/ui/object-grid-resizable-columns-retirement.test.ts",
   "src/ui/page-header-breadcrumb-retirement.test.ts",
   "src/ui/page-header-show-star-retirement.test.ts",
+  "src/ui/page-slots-tabs-retirement.test.ts",
   "src/ui/view-data-api-provider-retirement.test.ts",
   "src/ui/view-item-owner-hidden-retirement.test.ts",
   "src/ui/view-list-filterable-fields-retirement.test.ts",

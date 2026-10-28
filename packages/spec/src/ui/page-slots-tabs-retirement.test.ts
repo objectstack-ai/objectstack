@@ -234,6 +234,8 @@ describe('tree-scoped absence: no slot map inside the declared radius authors `t
   const EXCLUDED = new Set([
     // This pin authors the slot at the parse to assert the refusal.
     THIS_FILE,
+    // The removal-version pin parses the retired slot to read its prescription.
+    'packages/spec/src/shared/retired-key-removal-version.pin.test.ts',
   ]);
   const EXCLUDED_PREFIXES = [
     // The D2 conversion's fixture authors the pre-retirement page on purpose.

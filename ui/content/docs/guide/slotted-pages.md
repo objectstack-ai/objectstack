@@ -37,7 +37,7 @@ Objects with `enable.files: true` also get a synthesized **Attachments** tab
 slot of its own — pass `hideAttachments: true` to the synthesizer to drop
 it.
 
-There is no `tabs` slot. The tab strip is composed from the object's roles
+There is no `tabs` slot. The tab strip is composed from the object's fields
 and relationship flags: to change which related lists appear or their order,
 set `relatedList` / `relatedList: 'primary'` on the child's reference field;
 to replace the Details body, author `details`; a page that needs its own strip

@@ -210,7 +210,7 @@ synthesizer fills in the rest. A slotted page authors `slots`, not `regions`:
 | `discussion` | The discussion panel |
 
 Each slot takes one component or an array of them, and replaces its part whole: there is no
-deep merge. There is no `tabs` slot: the tab strip is composed from the object's roles and
+deep merge. There is no `tabs` slot: the tab strip is composed from the object's fields and
 relationship flags. To change which related lists appear or their order, set `relatedList` /
 `relatedList: 'primary'` on the child's reference field; a page that needs its own strip is
 `kind: 'full'`, drawn as authored. `slots.tabs`, `slots.related` and `slots.relatedLists` are
