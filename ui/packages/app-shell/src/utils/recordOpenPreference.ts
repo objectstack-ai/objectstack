@@ -78,11 +78,12 @@ export function readRecordOpenPreference(
 }
 
 /**
- * The latest choice made on this page, ahead of storage: a browser whose
+ * A choice storage would not keep, held for this page: a browser whose
  * storage refuses the write (private mode, a full quota, a blocked origin)
  * would otherwise have the reader pick 分屏 and keep reading 抽屉 back.
- * `undefined` until a write; another tab's write clears it (see `subscribe`),
- * so storage answers again.
+ * `undefined` while storage keeps the choice — storage is then the one answer
+ * — and cleared by the next kept write and by another tab's write (see
+ * `subscribe`).
  */
 let pageChoice: RecordOpenPreference | undefined;
 
@@ -108,6 +109,7 @@ export function writeRecordOpenPreference(
   if (storage) {
     try {
       storage.setItem(RECORD_OPEN_PREFERENCE_KEY, next);
+      pageChoice = undefined;
     } catch {
       // Not kept past this page — see above.
     }

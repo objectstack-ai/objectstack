@@ -20,6 +20,7 @@ import {
   DEFAULT_RECORD_OPEN_PREFERENCE,
   RECORD_OPEN_PREFERENCE_KEY,
   readRecordOpenPreference,
+  writeRecordOpenPreference,
 } from './recordOpenPreference';
 
 const storageWith = (value: string | null) => ({ getItem: (key: string) => (key === RECORD_OPEN_PREFERENCE_KEY ? value : null) });
@@ -53,5 +54,31 @@ describe('readRecordOpenPreference (objectstack#26677)', () => {
     // `ObjectView.recordOpenPreference-26677.test.tsx` drives that path.
     expect(typeof window).toBe('undefined');
     expect(readRecordOpenPreference()).toBe('drawer');
+  });
+});
+
+describe('writeRecordOpenPreference (objectstack#26681)', () => {
+  /** A storage double that keeps what it is handed. */
+  const memoryStorage = () => {
+    const kept = new Map<string, string>();
+    return {
+      getItem: (key: string) => kept.get(key) ?? null,
+      setItem: (key: string, value: string) => void kept.set(key, value),
+    };
+  };
+
+  it('keeps the choice under the key the read side reads', () => {
+    const storage = memoryStorage();
+    writeRecordOpenPreference('split', storage);
+    expect(storage.getItem(RECORD_OPEN_PREFERENCE_KEY)).toBe('split');
+    expect(readRecordOpenPreference(storage)).toBe('split');
+    writeRecordOpenPreference('drawer', storage);
+    expect(readRecordOpenPreference(storage)).toBe('drawer');
+  });
+
+  it('writes nothing and throws nothing with no storage, or with a storage that refuses the write', () => {
+    expect(() => writeRecordOpenPreference('split', null)).not.toThrow();
+    const refusing = { setItem: () => { throw new Error('QuotaExceededError'); } };
+    expect(() => writeRecordOpenPreference('split', refusing)).not.toThrow();
   });
 });
