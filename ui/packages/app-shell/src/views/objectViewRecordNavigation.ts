@@ -12,7 +12,7 @@
  * drawer」 returns here with the stack it left (`drawerRestore`).
  */
 
-import { useMemo, useCallback, useEffect } from 'react';
+import { useMemo, useCallback, useEffect, useState } from 'react';
 import type { NavigateFunction, Location, SetURLSearchParams } from 'react-router-dom';
 import { overlayWidthFor } from '@object-ui/plugin-view';
 import { useNavigationOverlay } from '@object-ui/react';
@@ -236,10 +236,42 @@ export function useObjectViewRecordNavigation({
         handleDrawerClose();
         navigate(to, { state: returnState });
     }, [drawerRecordId, objectDef.name, location.pathname, location.search, location.state, handleNavOverlayNavigate, appName, objects, navigate, handleDrawerClose]);
-    /** The drawer's root — the list row `?recordId=` names — or `null`. */
+    /**
+     * The rows the list shows, in its order (`ListView`'s `onRowsChange`,
+     * objectstack#26679): the root level's sibling set, which the drawer's
+     * `↑` `↓` step through. Held as the ids' joined key so an equal report
+     * changes nothing.
+     */
+    const [listRowIds, setListRowIds] = useState<{ key: string; ids: readonly string[] }>({ key: '', ids: [] });
+    const handleListRowsChange = useCallback((rows: ReadonlyArray<Record<string, unknown>>) => {
+        const ids = rows
+            .map((row) => (row?.id ?? row?._id) as string | number | undefined)
+            .filter((id): id is string | number => id != null && id !== '')
+            .map(String);
+        const key = JSON.stringify(ids);
+        setListRowIds((prev) => (prev.key === key ? prev : { key, ids }));
+    }, []);
+    /** `↑` `↓` at the root: the sibling becomes the row `?recordId=` names. */
+    const handleRootStep = useCallback((recordId: string) => {
+        setSearchParams((prev) => {
+            const next = new URLSearchParams(prev);
+            next.set(RECORD_DRAWER_PARAM, recordId);
+            return next;
+        }, { replace: true });
+    }, [setSearchParams]);
+    /**
+     * The drawer's root — the list row `?recordId=` names — or `null`, with the
+     * list's shown rows as its sibling set when the list reported any.
+     */
     const drawerRoot = useMemo<RecordDrawerLevel | null>(
-        () => (drawerRecordId ? { objectName: objectDef.name, recordId: drawerRecordId } : null),
-        [drawerRecordId, objectDef.name],
+        () => (drawerRecordId
+            ? {
+                objectName: objectDef.name,
+                recordId: drawerRecordId,
+                ...(listRowIds.ids.length > 0 ? { siblings: listRowIds.ids } : {}),
+            }
+            : null),
+        [drawerRecordId, objectDef.name, listRowIds],
     );
     // Sync URL-based recordId to overlay state
     useEffect(() => {
@@ -249,5 +281,5 @@ export function useObjectViewRecordNavigation({
             navOverlay.close();
         }
     }, [drawerRecordId]);
-    return { listRecordActions, navOverlay, handleDrawerClose, handleRowClick, handleExpandDrawer, drawerRoot, drawerRestore };
+    return { listRecordActions, navOverlay, handleDrawerClose, handleRowClick, handleExpandDrawer, drawerRoot, drawerRestore, handleListRowsChange, handleRootStep };
 }

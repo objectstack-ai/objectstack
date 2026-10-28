@@ -28,6 +28,7 @@ export function ObjectViewRecordOverlay({
     handleExpandDrawer,
     drawerRoot,
     drawerRestore,
+    handleRootStep,
     t,
     dataSource,
     objects,
@@ -39,12 +40,14 @@ export function ObjectViewRecordOverlay({
     handleExpandDrawer: RecordNavigation['handleExpandDrawer'];
     drawerRoot: RecordNavigation['drawerRoot'];
     drawerRestore: RecordNavigation['drawerRestore'];
+    handleRootStep: RecordNavigation['handleRootStep'];
     t: ReturnType<typeof useObjectTranslation>['t'];
     dataSource: ConsoleObjectViewProps['dataSource'];
     objects: ConsoleObjectViewProps['objects'];
     onEdit: ConsoleObjectViewProps['onEdit'];
 }) {
-    const stack = useRecordDrawerStack({ root: drawerRoot, restoredPath: drawerRestore });
+    // The root steps through the rows the list shows (objectstack#26679).
+    const stack = useRecordDrawerStack({ root: drawerRoot, restoredPath: drawerRestore, onRootStep: handleRootStep });
     return (
              <RecordStackDrawer
                  stack={stack}
