@@ -47,7 +47,8 @@ const OPAQUE_NODE_TYPES = new Set(['subflow', 'map', 'loop']);
  * The approval steps `current`'s run passed before `current`, oldest first:
  * a row of the same run, on another node, `approved`, opened before
  * `current`. A node approved in several rounds is listed once, at its latest.
- * `runRows` is every request row of the run; rows of other runs are ignored.
+ * `runRows` is the run's own request rows: the caller reads them by the run's
+ * `flow_run_id`, and this function does not filter by run.
  */
 export function passedSteps(
   current: { id: string; flow_node_id?: string; created_at?: string },
