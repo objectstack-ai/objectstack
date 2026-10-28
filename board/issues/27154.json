@@ -1,0 +1,38 @@
+{
+  "number": 27154,
+  "kind": "issue",
+  "title": "ci(live-e2e): boot the workspace backend (HEAD console against HEAD backend) and make the four-spec live lane a required context — ruling 6435339772 Q1 A, re-based by #25914 letter D",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "priority:p3",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T08:31:38Z",
+  "updated_at": "2026-10-28T11:48:55Z",
+  "closed_at": "2026-10-28T11:47:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27154",
+  "body": "Unblocked: #25914's ruling D step 1 landed via PR #27167 (`b8615afaba`); note 6465423743.\n\nFiling gate ③ (maintainer-directed). Ruling 6464191239 on #25914 (batch #421 item 1, letter D, maintainer 「其他同意」 2026-10-28): step 2 of D. Filed by the director seat (`session_01QSeKYo7qYsX6HsAneHBMP2`, ledger objectstack#12708). ⛔ Not a claim; triage sets the lane (`domain:devx` expected) and grade.\n\nRuling-ref: 6464191239 (this card) · 6435339772 (Q1 A, the required check)\n\n## 维护者速读\n\n- **改了什么：** live e2e 的四条 spec（`test:e2e:live:ci`）改成用**本树工作区的后端**启动（HEAD console 对 HEAD backend），不再按已发布 npm 版本钉后端；同一个 PR 把它接进 `ci.yml` 并登记为 required。\n- **为什么改：** 您 10-27 裁的「升为 required」建立在「它已经每个 PR 都在跑」上；现在它哪里都不跑，而且按已发布版本钉后端意味着每次发版都要同步抬钉、否则 `ui/` 的 PR 全红（#25914 的实测与再裁）。\n- **风险与回滚：** Tier H（`.github/workflows/ci.yml`）；回滚 = 还原 job 与 `REQUIRED_CONTEXTS` 一行。\n- **先看：** `ui/e2e/live/ci/start-backend.sh` 的 prepare 步骤。\n- **两分钟验证：** PR 上 required 名单里出现该 job 且绿；本地 5 次连续运行全绿。\n- **需要您做的：** ruleset 里勾上该 job 名（席位做不了）。\n\n## Measured (on `origin/main` `e6e41998`, 2026-10-28)\n\n- `git grep -n \"test:e2e:live\\|playwright.live\" origin/main -- .github` → 0 hits: no workflow carries the lane since #26058 removed `ui/.github/workflows/**`.\n- `ui/package.json:120` `test:e2e:live:ci` names 4 of the 22 specs in `ui/e2e/live`.\n- `ui/e2e/live/ci/backend.env` pins `OBJECTSTACK_VERSION=18.1.0`; `packages/cli` is `18.2.0`. The dev's measurement on #25914 (6461924763): 0/5 green on 18.1.0, 5/5 green at about 21 s on 18.2.0, deterministic.\n- `start-backend.sh` boots from PUBLISHED packages by design (\"nothing is built from source\"): release-tag resolve → sparse checkout of `examples/app-showcase` at that tag → `npm install` of published tarballs → `objectstack dev --seed-admin --fresh`. `ci.yml` L2582 already builds `examples/app-showcase` on the workspace packages in the full battery.\n\n## Task\n\n- [ ] Re-shape `ui/e2e/live/ci/start-backend.sh` (and `backend.env`, which then declares no published pin) to boot the workspace backend: the tree's own built `@objectstack/cli` on the checked-out `examples/app-showcase`, seeded admin, same ports and readiness poll. Keep `stop-backend.sh`'s PID contract.\n- [ ] Add a `ci.yml` job that builds the console (`VITE_BASE_PATH=/`), boots that backend, serves `vite preview` with the dev proxy and runs `pnpm test:e2e:live:ci --retries 0` on `pull_request` and `merge_group`, gated on the `ui` path filter the way `Build & E2E UI` is. ⛔ No retry wrapper, no `continue-on-error`, no spec edited or skipped to get green.\n- [ ] Enrol the job's `name:` in `REQUIRED_CONTEXTS` (`scripts/check-required-contexts.mjs`); the ruleset click is the maintainer's.\n- [ ] Measure before wiring: 5 consecutive green runs on this tree, wall time reported in the PR body. A red run is re-ruling input, not a retry.\n\nTier H (`.github/workflows/**`): the PR waits for an authorised approval. `Clause-②: no` · `Metadata-protocol: none`.\n\nSerial: after #25914's pin-bump PR (same files). Dedupe: #25914 thread (6454590103, 6461501278, 6461924763, 6463293878); #26717 row 17 (`live-e2e.yml` roster); no open card asks for a workspace boot.\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 27153,
+  "kind": "issue",
+  "title": "spec(ui): FormViewSchema declares drawerSide / drawerWidth and buttons.reset, but no console entry point renders a drawer form or a reset button; implement or retire them (ADR-0049)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T08:29:03Z",
+  "updated_at": "2026-10-28T14:02:53Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27153",
+  "body": "Filing gate **② follow-up work owed by landed work**: this is the remainder of #26843 that its triage ruling sends to the spec lane. Triage 6450964818, verbatim: \"Render them on every entry point that opens the form. If a key should not exist, its retirement is a spec card, not silence.\" PR #27027 (`Refs #26843`, merged 2026-10-28 08:27Z) made `buttons`, `layout`, `defaults`, `defaultTab` and `tabPosition` reach every console form entry point. ui seat 2 split the three keys below out of it before dispatch and files them here, as its dispatch order on #26843 says.\n\n## What is declared but never rendered (read at `origin/main` `58668776`)\n\n`FormViewSchema`, `packages/spec/src/ui/view.zod.ts`:\n- ≈L4624 `drawerSide: enum(top|bottom|left|right)`, \"Drawer side (drawer forms)\".\n- ≈L4626 `drawerWidth`, already `[DEPRECATED → size buckets]`.\n- ≈L4807 `buttons.reset: FormButtonConfigSchema`, \"Reset button\".\n\nNo console page hands a form view to a drawer renderer: the form opens full page, as the New dialog or as the form page. No form renders a reset button, and `reset.label` is never read. `packages/spec/liveness/view.json` may still mark these `live`; re-read it.\n\n## Expected\n\nPer ADR-0049 (enforce-or-remove), one of:\n- **Implement:** a drawer open mode for a form view and a reset button. A drawer is an open mode in the console navigation overlay (epic #26676 territory), so the ui half would be a `domain:ui` card after this one.\n- **Retire:** narrow `FormViewSchema` (tombstone `drawerSide` / `drawerWidth` / `buttons.reset` with prescriptions) and flip the liveness rows.\n\nThe spec seat picks one and records why. Retiring is a narrowing (`Clause-②`), so it owes the contract review that narrowings owe.\n\n## Business reason\n\nAuthors and agents write `drawerSide: 'right'` or a `reset` button, the schema accepts it, and nothing happens. That is the \"declared ⇒ enforced\" gap #26843 was filed for.\n\n## Reader who acts\n\nThe `domain:spec` seat, after triage. The ui seats can implement only if the spec keeps the keys and the drawer open mode is in reach.\n\n## Dedupe\n\nI listed open `domain:spec` issues and checked titles for drawer / reset / form view: 0 hits. **New.**"
+}

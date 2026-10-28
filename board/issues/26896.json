@@ -2,8 +2,8 @@
   "number": 26896,
   "kind": "issue",
   "title": "On a phone, a grouped list (`grouping`) keeps its desktop grid — titles cut mid-word, other columns behind the pinned Actions column — while the same console turns a plain list into cards",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:records",
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -23,9 +22,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T20:02:43Z",
-  "updated_at": "2026-10-28T04:33:37Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-28T08:39:18Z",
+  "closed_at": "2026-10-28T08:38:38Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 6,
   "locked": false,

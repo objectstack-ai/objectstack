@@ -2,8 +2,8 @@
   "number": 26884,
   "kind": "issue",
   "title": "Setup: the permission-set detail header shows the English label under zh-CN, and the metadata list pages (Positions, Permission Sets, …) stay English under ja-JP and es-ES",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:i18n",
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -23,9 +22,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T19:49:23Z",
-  "updated_at": "2026-10-28T02:10:51Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-28T09:01:47Z",
+  "closed_at": "2026-10-28T09:01:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 6,
   "locked": false,

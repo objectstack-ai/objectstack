@@ -1,0 +1,37 @@
+{
+  "number": 27158,
+  "kind": "issue",
+  "title": "docs+examples(currency): `opportunity.dataset.ts` hard-codes `currency: 'USD'` over a tenant-currency field, and two protocol docs claim exchange rates / a stored currency code — delete the key, rewrite the two sentences (#27119 Q2 X G4 + Q3)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "documentation",
+    "domain:devx",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T08:33:18Z",
+  "updated_at": "2026-10-28T11:19:54Z",
+  "closed_at": "2026-10-28T11:15:47Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27158",
+  "body": "Filing gate ③ (maintainer-directed). Ruling 6464202770 on #27119 (batch #421 item 2, Q2 = X, maintainer 「其他同意」 2026-10-28): G4 and Q3, one family (shipped text that claims a currency the platform does not know), one PR. Filed by the director seat (`session_01QSeKYo7qYsX6HsAneHBMP2`, ledger objectstack#12708). ⛔ Not a claim; triage sets the lane (`domain:devx` expected) and grade.\n\nRuling-ref: 6464202770\n\n## 维护者速读\n\n- **改了什么：** (G4) 删掉 `examples/app-crm/src/datasets/opportunity.dataset.ts:32–33` 两个度量上的 `currency: 'USD'`，度量回到字段 → 组织默认币种链；(Q3) `content/docs/protocol/objectql/index.mdx:121`「Money with exchange rates」与 `types.mdx:30`「Store amount + currency code」改写成实际交付的样子：金额是一个数，币种来自字段的固定币种或组织默认币种。\n- **为什么改：** 示例是 AI 作者照抄的源头；两句文档宣称不存在的能力（ADR-0104 D1：币种值是标量数；仓内零换算实现）。\n- **风险与回滚：** 纯示例与文档；无契约改动。\n- **先看：** 上述三处行号。\n- **两分钟验证：** `git grep -n \"currency: 'USD'\" -- examples/app-crm` → 0；两页文档不再出现 exchange rates / amount + currency code。\n- **需要您做的：** 无。\n\n## Measured (on `origin/main` `e6e41998`, 2026-10-28)\n\n- `git grep -n \"currency: 'USD'\" origin/main -- examples/app-crm/src/datasets/opportunity.dataset.ts` → 2 hits (`total_amount`, `avg_amount`, over `opportunity.amount`, a dynamic field).\n- `git grep -n -i -E \"exchange.?rate|fx_rate|convertCurrency\" origin/main -- packages/ ':!*.test.ts'` → 0 hits (control: `defaultCurrency` → 95).\n- The two docs sentences: measured by #8345's design round (6041378776, H3) and still live.\n\n## Task\n\n- [ ] Delete the two `currency: 'USD'` keys; the dataset's measures inherit the chain.\n- [ ] Rewrite the two sentences to the shipped behaviour; link ADR-0104 D1.\n- [ ] `docs-audit` affected-docs check passes.\n\n`Clause-②: no` · `Metadata-protocol: none`. Dedupe: #27119 (the ruling), #8345 (H3 / Q8 on hold); #26939 (the template formatter, separate card); no open docs card on these two pages."
+}

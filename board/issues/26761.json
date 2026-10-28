@@ -1,7 +1,7 @@
 {
   "number": 26761,
   "kind": "issue",
-  "title": "[PM seat] domain:server · seat 3 — ⏳ vacant",
+  "title": "[PM seat] domain:server · seat 3 — 🟢 os-bill · 由 os-bill 账户的项目负责",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,16 +13,18 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T14:46:52Z",
-  "updated_at": "2026-10-27T22:57:54Z",
+  "updated_at": "2026-10-28T12:59:21Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26761",
-  "body": "⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md`. This is **`domain:server` seat 3**. Seat 1 is #6367, seat 2 is #20966.\n\n- **Current PM:** ⏳ vacant. Previous term: `os-justin` · Claude Code cloud session `session_01QSeKYmQXM3rHJcPnrEPk4B`, seated 2026-10-27, signed off the same day on the maintainer's word 「当前任务处理完就下班」. `check-handover` exited 0 before this body was written. The sign-off brief below is the release marker: the seat is free to take.\n- **What this seat takes:** unclaimed `domain:server` `pm:queue` cards, in the lane's selection order. Seats 1 and 2 keep their file areas, claims and hot-file queues. Claims carry `Seat: domain:server#3`.\n- **Hot-file serial queue:** none held. Read #6367's and #20966's queues before any claim.\n- **Pointer:** the canonical ledger is labels + assignee + `Claim:` / `Release:` comments + `head:claude/` PRs, read by `Seat: domain:server#3`. The previous term's ledger is in the sign-off brief.\n- **Wall:** none."
+  "body": "⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md`. This is **`domain:server` seat 3**. Seat 1 is #6367, seat 2 is #20966.\n\n<sub>Refreshed 2026-10-28T12:57Z (seated).</sub>\n\n- **Current PM:** 🟢 `os-bill` · the Claude Code project \"Objectstack 多币种\", seat thread \"运行 server 车道席位 3 派发\" · `session_01Utp6CXc5hequf76uJfzrdK`, seated 2026-10-28T12:57Z on the maintainer's word in that project (`pm-dispatch server seat 3`, chosen on the seat card). Seated on the release marker `6455644131` (the previous term's sign-off brief, newest event on this post). Seats 1 and 2 stay with their holders; this seat takes none of their cards.\n- **What this seat takes:** unclaimed `domain:server` `pm:queue` cards in the lane's selection order, outside the `pm:epic` subtree (epic #8345 has its own PM in the same project). Claims carry `Seat: domain:server#3`.\n- **Hot-file serial queue:** none held. Read #6367's and #20966's queues before any claim.\n- **Pointer:** posture and ledger live in the project; the canonical ledger is labels + assignee + `Claim:` / `Release:` comments + `head:claude/` PRs, read by `Seat: domain:server#3`.\n- **Wall:** none.\n"
 }

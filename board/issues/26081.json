@@ -2,8 +2,8 @@
   "number": 26081,
   "kind": "issue",
   "title": "[Decision] AGENTS.md is 82 KB with no table of contents and 28% fleet-operations narrative, CONTRIBUTING hands every rule to it, and there is no PR template: how a human contributor is meant to onboard",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:devpath",
     "documentation",
     "domain:skills",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T11:19:28Z",
-  "updated_at": "2026-10-28T08:16:01Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-28T09:09:32Z",
+  "closed_at": "2026-10-28T08:48:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 12,
+  "comments": 13,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26081",
   "body": "Ruled: 6417533492 · letter A · 2026-10-26T13:44Z\n\nFiling gate ②: a maintainer-only decision. Maintainer, 2026-10-26, verbatim: 「完整的评估本项目， 还有哪些可以优化的地方。包括 ci 和文档」 then 「使用 pm-dispatch 技能创建 issue，需要决策的立为决策卡。」 and 「低优先级的先不考虑」. Batch-of: 19 (repository evaluation 2026-10-26, `session_019a9XCWsbMFp75REzthE6cs`; 9 decision cards + 10 execution cards). Reader: the director seat presents this card in a decision batch; after the ruling the lane named under \"After the ruling\" dispatches. ⛔ Not a claim. Dedupe: REST list (439 issues), grep `AGENTS.md` → 4 hits: #26035 (open, dispatched: 32 files prescribe retired objectui pin scripts, AGENTS.md among them), #25712 (open: ui/AGENTS.md nesting), #25919 (open, dispatched, ruled A: narrative cost — its AGENTS.md reading is the ui tree's 630-line file; ruling 「规范核心与事故史分家，注释写不变量不写事故史，存量不横扫」), #17161 (open program: CLAUDE.md is a pointer to AGENTS.md). grep `CONTRIBUTING|PR template` → 0. The root AGENTS.md's shape and the human onboarding path are not on any card. **New.**\n\n## 维护者速读\n\n根 `AGENTS.md` 1,117 行、82,823 字节、17 个 H2、59 个 ⛔，没有目录。「多代理工作纪律」一节 318 行占 28%，内容是 stash、合并队列、车队 bot、页脚字节等席位运维；「Build & Test」143 行多数是 typecheck 棘轮内部实现。`CONTRIBUTING.md` 本身只有 158 行、写得对，但所有真规则都甩给 AGENTS.md（第 12 行「两者冲突以 AGENTS.md 为准」），并使用未解释的术语如「Clause-② 声明」（第 100 行，定义在 AGENTS.md 第 1087 行）。没有 `.github/PULL_REQUEST_TEMPLATE.md` 和 issue 模板，CONTRIBUTING 第 120–129 行的检查清单在 PR 时不强制。两条已有裁决相关：`CLAUDE.md` 写「一套指令只在一处维护，不在别处复述」；#25919 你裁了「规范核心与事故史分家」。拆分 AGENTS.md 与「一处维护」表面冲突，所以是你的决定。请裁：**A** AGENTS.md 保留全部约束性规则并加目录，把「多代理工作纪律」与「Build & Test」的机制说明段迁出到 `docs/agents/*.md`（AGENTS.md 留一行规则 + 指针），CONTRIBUTING 加「人类最小规则」8 条小节（Zod-first、命名、无 prettier、worktree、changeset + Clause-②、spec 再生成、发布归属、英文产物），加 PR 模板镜像该清单；**B** 只加目录与 CONTRIBUTING 小节 + PR 模板，AGENTS.md 正文不迁；**C** 现状。选 A / B / C？\n\n## Governing text\n\n- `CLAUDE.md`: \"One instruction set, maintained in one place: ⛔ no rule, hook roster or guardrail is restated here, and none is added here later.\" — a rule against restating rules, not against moving a rule's explanation.\n- `AGENTS.md:11-16`: \"This file carries principles, binding rules and lookup tables — rules only. A rule states what to do and what never to do, in one executable sentence; it carries no incident narrative\".\n- #25919 ruling A (comment 6386217274): 规范核心与事故史分家；存量不横扫.\n- #17161: CLAUDE.md stays a pointer to AGENTS.md in every repo.\n- Prime Directive 14: `AGENTS.md`, `CLAUDE.md`, `.github/workflows/**` are Tier H; a PR template under `.github/` is not in the register (the register is `.github/workflows/**`), so it is Tier-free unless you say otherwise.\n\n## Premises\n\n- P1 — size and shape: `wc -lc AGENTS.md` → 1117 lines, 82823 bytes; `grep -n '^## ' AGENTS.md` → 17 headings (Communication 23 · Build & Test 36 · Prime Directives 179 · Multi-agent working discipline 325 · Monorepo Layout 643 · Protocol Domains 669 · Kernel 694 · Documentation Guardrails 705 · Context Routing 777 · Skills 803 · Patterns 814 · Route & surface ownership 841 · Degradation log levels 913 · Startup registry reads 1002 · Writing a --self-test 1049 · Post-Task Checklist 1073 · Edit Sizing 1115).\n- P2 — `ls .github/PULL_REQUEST_TEMPLATE* .github/ISSUE_TEMPLATE 2>&1` → none.\n- P3 — `grep -n 'Clause' CONTRIBUTING.md` → line 100 uses the term; `grep -n 'Clause-②' AGENTS.md | head -1` → line 1087 defines it.\n- P4 — the file's own rule mostly holds: 0 ISO dates and 0 `#NNNN` citations in AGENTS.md (`grep -cE '#[0-9]{4,5}' AGENTS.md` → 0), but three \"ruling record <id>\" citations (lines 130, 132, 531) that a reader cannot resolve.\n\n## One-sentence problem\n\nA person who wants to open their first pull request is told to read 82 KB with no table of contents, a quarter of which is about how a fleet of agents shares a git stash, and nothing at PR time checks the eight rules they can actually break.\n\n## Options\n\n| Option | What | Consequence | Workload |\n|---|---|---|---|\n| A | TOC; move mechanism prose of §Multi-agent and §Build & Test to `docs/agents/` leaving one-sentence rules + pointers; \"Human minimum\" section in CONTRIBUTING; `.github/PULL_REQUEST_TEMPLATE.md` mirroring it. | AGENTS.md shrinks by an estimated 40%; rules stay in one place (the explanation moves, not the rule); humans get an eight-rule on-ramp. Governed-prose gates (`check:pm-governed-prose`, `check-published-list-mirrors`) must keep passing — the dev runs them. | skills lane (AGENTS.md is theirs) · 2 PRs Tier H (AGENTS.md; CONTRIBUTING + template non-governed) · precedent: #25919's in-flight PR for ui/AGENTS.md — read its +/− |\n| B | TOC + CONTRIBUTING section + PR template; AGENTS.md body untouched. | Smaller change; the 82 KB stays the first read. | 1 PR Tier H (TOC edit) + 1 non-governed |\n| C | Nothing. | — | 0 |\n\n## Business meaning\n\n- A: the rulebook is a rulebook and the operations manual is a manual.\n- B: a map at the door of the same building.\n- C: the door stays where it is.\n\n## 四维分析\n\n- **实际业务需求**：北极星定义的用户是「第三方开发者，人验收」；CONTRIBUTING 是他们进门的第一页。今天它说「规则都在 AGENTS.md」，而 AGENTS.md 没有目录。\n- **项目长远合理性**：`CLAUDE.md` 的「一处维护」防的是规则复述；A 迁走的是机制说明（为什么、怎么量到的），规则句留在 AGENTS.md——与 #25919「规范核心与事故史分家」同一方向，是把那条裁决用到根文件。\n- **防 AI 犯错**：席位每个会话都加载 AGENTS.md；82 KB 里 28% 与多数任务无关，是每次会话的强制 token 成本（#25919 的原话）。更短的规则文件让席位更难漏读约束。\n- **创业阶段不扩散**：不加门禁；PR 模板是一个静态文件；`docs/agents/` 两份文件承接迁出的段落，不是新的规则源。\n\n## Recommendation\n\n**A.** 只看①选 A；②③④ 是否翻转：否。\n\nConfidence gaps: which paragraphs of §Multi-agent are \"rule\" vs \"mechanism\" is a judgement the dev makes paragraph by paragraph; the PR's 维护者速读 lists every moved paragraph so you can pull any back. #26035 is editing the same file now; A serializes behind it.\n\n## After the ruling\n\n- A: skills seat dispatches PR 1 (AGENTS.md + `docs/agents/`, Tier H) after #26035 lands; devx seat PR 2 (CONTRIBUTING + template).\n- B: skills seat one small Tier H PR; devx seat PR 2.\n\nos-decision-facets\n① 项目长远合理性：规则句留一处，机制说明迁出，与 #25919 裁决同向。\n② 实际业务拉动：人类贡献者进门第一页把他们送进 82 KB 无目录文件。\n③ 防 AI 犯错：更短的规则文件每会话都加载，漏读约束的概率随长度降。\n④ 创业阶段不扩散：零新门禁；模板是静态文件。\nPrior rulings read: AGENTS.md,one place,narrative,CONTRIBUTING → 4 hits (#25919 A, #17161, #26035, #25712); none; thread: none; repo: objectstack-ai/objectstack\n\n## Related\n\n#25919 (open, ruled A), #26035 (open, dispatched), #17161 (open), #25712 (open).\n"

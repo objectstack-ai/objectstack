@@ -1,0 +1,36 @@
+{
+  "number": 27180,
+  "kind": "pull_request",
+  "title": "fix(console): a record page leaves out related lists and rail entries of an object the install does not hold",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/l",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T09:31:57Z",
+  "updated_at": "2026-10-28T09:59:11Z",
+  "closed_at": "2026-10-28T09:59:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-28T09:59:09Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27180",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8GUdk9SEEZXQX6B5hTkWx4K)_\nFixes #26988\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:记录页上,绑定到当前安装里不存在的对象的相关列表和右栏条目不再绘制,也不再为它发 `/meta/object`、`/data` 请求。\n- 为什么改:ADR-0141 之后模块对象可以真实缺席,页面却照画「Crm Quote 0 — No related records found」这类拿原始名拼出的假标题,并打出一串 404。\n- 风险与回滚:只在已注册对象列表非空时裁剪,与仪表盘 `requiresObject` 同一规则;回滚即撤掉 `RecordDetailView.tsx` 里两处 `pruneUnregisteredRecordPageObjects` 调用。\n- 先看:`recordPageChildObjects.ts`(裁剪函数)、`RecordDetailView.tsx`(`assignedPage` / `assignedSlots` 两个 memo)、新测试文件。\n- 两分钟验证:`pnpm --dir ui exec vitest run packages/app-shell/src/views/RecordDetailView.unregisteredObjectLists-26988.test.tsx`,预期 2 个用例通过。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- `recordPageChildObjects.ts` gains `pruneUnregisteredRecordPageObjects(page, registered)`. It reads the same two arms as `recordPageChildObjects` (now shared helpers): a `record:related_list` block whose `properties.objectName` or `dataSource.object` names an object the registered list does not hold is removed; a `record:reference_rail` entry whose `objectName` does is removed, and a rail left with no entries goes with it. Only a string names an object. While the registered list is empty it returns the page untouched (the deferral `DashboardView` makes), and it is identity-preserving: a page or subtree with nothing to leave out is returned itself.\n- `RecordDetailView` prunes the authored page and a slotted page's slots right where `assignedPage` / `assignedSlots` are resolved, so the effective page, the synthesized page, the composed page and the history page all read one pruned page.\n- The registered list is the view's own `objects` prop, the list `deriveRelatedLists` already reads. It is not `useMetadata().objects`: that getter loads the whole registry, which the scoped record route (objectui#13046) exists to avoid. On that route `objects` is the scope: the package's objects plus every object the page binds, each asked by name.\n- The child-write subscription from #26890 reads the pruned page. An object the install does not hold cannot be written, so there is nothing to watch on it.\n- Derived related lists (`deriveRelatedLists`) were already safe: they come from the registered objects only.\n\n## Tests\n\n- `RecordDetailView.unregisteredObjectLists-26988.test.tsx` uses the real page. It has a related list bound by `objectName`, one bound by `dataSource.object`, and a rail entry, all three for absent objects, beside a registered contact list and rail entry.\n  - Absent arm: no humanized name (\"Crm Quote\" and the others), no rows, and no data-source call or `fetch` URL names any of the three objects. The contact list and rail entry still draw and read.\n  - Present arm: the same page draws all three and reads every object.\n- `recordPageChildObjects.test.ts`: pins what is left out and what is kept, the deferral (an empty set prunes nothing), identity preservation, that the authored page is never mutated, and that non-string names are kept.\n- Ablation: `scripts/ablation-replace.mjs` replaced the guard line `if (registered.size === 0) return page;` with an unconditional `return page;`. The absent-arm test went red (`expected '…' not to contain 'Crm Quote'`) and the present arm stayed green. The tool restored the file (blob == HEAD, `git diff HEAD` empty).\n\n## Acceptance notes\n\n- On a scoped record route (a full declared record page in a packaged app), the scope still asks `/meta/object/NAME` once for each name the page binds, absent ones included. That read is how the console learns the object is absent; it is the one existence check, and this PR adds none. Everything the page itself asked (each block's schema read and `/data` read) is gone.\n- A tab or container whose only content was a pruned list stays, now empty. Pruning containers is not part of this card.\n- `record:line_items` (`childObject`) is not pruned. It is outside this card's two arms.\n\n## Verification\n\nGate readings and the head they were taken on are in the os-dev report comment on #26988.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes. (Local: eslint on the four changed files, 0 errors; the repo-wide run is CI's.)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (Nothing publishes here, so no changeset.)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (Not touched.)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n`@object-ui/app-shell` is `private: true` and nothing else changed, so this PR takes `skip-changeset`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbaQJGyCfqGqBduLgbq)_\n"
+}

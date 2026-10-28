@@ -1,0 +1,37 @@
+{
+  "number": 27178,
+  "kind": "issue",
+  "title": "Studio page block inspector: InspectorJsonField's Label is not associated with its textarea, so curated JSON props have no accessible name",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "bug",
+    "domain:ui",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T09:28:48Z",
+  "updated_at": "2026-10-28T13:43:46Z",
+  "closed_at": "2026-10-28T13:42:25Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27178",
+  "body": "## Observed\n\nIn `ui/packages/app-shell/src/views/metadata-admin/inspectors/PageBlockInspector.tsx`, `InspectorJsonField` renders a `Label` as a sibling of its textarea with no `htmlFor` / `id` pairing. Every curated JSON prop of a page block (for example `record:related_list`'s `add`, and the `sort` / `columns` JSON fallback for a stored union arm) therefore exposes a textarea with no accessible name. testing-library reports it as `Found a label with the text of: Sort, however no form control was found associated to that label`.\n\n## Reach\n\nPublic door: Studio → page designer → block inspector, any block prop drawn by `InspectorJsonField`. Screen readers announce an unnamed text box; `getByLabelText` cannot target the field in tests.\n\n## Expected\n\n`Label htmlFor` ↔ textarea `id` (or `aria-labelledby`), the same pairing the inspector's other rows use; one pin that queries the field by its label.\n\n## Dedupe words\n\nInspectorJsonField label htmlFor textarea accessible name PageBlockInspector\n\n<sub>Filed by the epic PM session `session_cdb7a717-def7-4e71-9988-f089fbaa18ff` from PR #27163's out-of-scope findings (class a, reach measured), under epic #26676.</sub>"
+}

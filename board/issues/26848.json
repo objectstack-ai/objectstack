@@ -2,9 +2,9 @@
   "number": 26848,
   "kind": "pull_request",
   "title": "qa(checklist): studio-authoring accuracy fixes + 23 items from the Studio QA run",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "needs-user-decision",
     "size/xl",
     "skip-changeset"
   ],
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T18:25:03Z",
-  "updated_at": "2026-10-28T05:27:43Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 3,
+  "updated_at": "2026-10-28T11:37:19Z",
+  "closed_at": "2026-10-28T11:35:16Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-28T11:35:16Z",
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/26848",
   "body": "## Takeover\n\nTaken over by `session_01QSeKYkS7Zv7Z3r6tzUFzSf` (dispatched by devx seat 2, claim 6459900913). It added two commits on this branch, with no rebase or force-push:\n- `096ba37d` merges `origin/main` `3230bdbf`. It resolves the one conflict, in `studio-authoring.json`: `doc-on-app-menu` was bumped r6 to r7 both here and by #26962. Both edits are kept (main's knownGaps[1] wording and this PR's knownGaps[2] recipe). The item goes to r8. Main's r7 history row stays as written, and this PR's row follows it as r8. No other item collided.\n- `feaeba00` re-verifies all 35 items against `3230bdbf`. Every defect card the pass cited (#26705, #26707, #26708, #26711, #26712, #26718, #26719) is now closed as fixed. So the \"FAILS TODAY\" knownGaps were removed, or narrowed to what still fails. The clauses are unchanged. 17 items gain a revision and a history row, and FOLLOW-UPS.md gains §12b.\n\n## 维护者速读\n- 改了什么：根据 Studio QA 运行（#26715，测于 3fcafcd3）的发现，修正 studio-authoring 区 12 个测试项过时的步骤和条款；新增 23 个 active 测试项，覆盖离开守卫、未完成编辑的发布拒绝、四个板块的各页签、无 Studio 入口的属性矩阵、已移除键的拒绝、未安装包的拒绝；并对账 coverage.json。\n- 为什么改：清单与产品不符会让下一轮误判；运行中实际测过、但清单没有的能力，需要落成可执行的测试项。已坏的能力按正确行为写，并在 knownGaps 记下缺陷卡。\n- 风险与回滚：只改 docs/qa/platform-checklist/ 下三个文件，不发布任何包。回滚即 revert 本 PR。picklist 豁免改为 items 是一项判断，见下文。\n- 先看：\n  - coverage.json 的 picklist 条目；\n  - studio-authoring.removed-key-save-door-refusal（按 HEAD 写：#26599 之后 22 个键改为按未知键拒绝）；\n  - permission-matrix-editor-ux 的 history r6。\n- 两分钟验证：`node scripts/check-platform-checklist.mjs && node scripts/check-platform-checklist.mjs --self-test && node scripts/checklist-select.mjs area:studio-authoring`，预期全部退出 0。\n- 需要你做的：确认是否接受把 picklist 豁免改为 items。\n\nClause-②: no\nMetadata-protocol: none\n\n## What changes\n\nThis is a scoped, single-hunter `checklist-author` pass over the findings of the Studio QA run. The run record is #26715. The run tested `3fcafcd3`; this pass re-read the sources at `43731031`.\n\n**Accuracy fixes (12 items).** Each item gets a revision bump and a `history` row:\n- object-designer-roundtrip\n- view-authoring-live\n- draft-publish-lifecycle\n- authoring-validation-not-persisted\n- org-override-registry-gate\n- expression-editors\n- permission-matrix-editor-ux\n- packaged-automation-studio-lock\n- packaged-display-class-direct-edit\n- doc-on-app-menu\n- picklist-bound-select\n- multi-package-item-rows\n\n**23 new `active` items:**\n- **Cross-pillar:** the leave guard and the held-edit publish refusal.\n- **Automations:** rail and new-flow presets, edge types, the package-less (~org) scope, and Studio status vs `GET /automation/_status`.\n- **Data:** Validations, Hooks, Actions, the API tab, summary fields, and preservation of API-written keys across a Studio save.\n- **Interfaces:** the create dialogs, all 20 widget types and 5 global-filter types, report options, app and nav-entry keys, slotted pages, and page variables.\n- **Access:** the set lifecycle, the facet tabs and their runtime effect, and the OWD and suggestions panels.\n- **Cross-type:** the no-Studio-entry property matrix, removed-key refusal at the save door, and the uninstalled-package refusal.\n\nWhere the run found a capability broken, the clause states the correct behaviour and `knownGaps` cites the defect card (#26705, #26707, #26708, #26711, #26712, #26718, #26719), or \"recorded by QA run #26715\" where no card existed yet.\n\n**Re-verification at `3230bdbf` (takeover).** All seven cards are now closed as fixed on `main`, and several run-recorded defects were fixed through their own cards (#26726, #26728, #26731, #26734, #26735, #26736, #26740, #26745, #26748, #26836). The affected knownGaps are removed or narrowed. The Studio strings moved to `ui/packages/i18n/src/namespaces/studio/en.ts`, so five items' `source` lines follow them there. The per-item table is in the os-dev report comment on this PR.\n\n**coverage.json.** The new items are mapped to their kinds. The `picklist` waiver was re-audited and replaced with items: its premise is stale, because the liveness ledger grades 10 of 11 picklist keys live. The `$comment` states what the mapping does not claim.\n\n**FOLLOW-UPS.md §12.** Records the scope, the liveness-ledger note and the pin-spelling note.\n\n## Deliberately not changed\n\n`studio-authoring.permission-matrix-editor-ux` acceptance[3] and steps[3] stay as written: a QA finding on that question is held under a security card (detail withheld pending maintainer).\n\n## Validation\n\nOn head `feaeba00` (branch merged with `origin/main` `3230bdbf`):\n- `node scripts/check-platform-checklist.mjs` → 0 (16 areas, 352 items).\n- `node scripts/check-platform-checklist.mjs --self-test` → 0 (265 assertions).\n- `node scripts/checklist-select.mjs --self-test` → 0 (31 cases).\n- `node scripts/checklist-select.mjs area:studio-authoring` → 0.\n- `node scripts/check-doc-authoring.mjs` → 0.\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 16 commands. All 16 exit 0. `--ran` reconciles them: 16 derived, 16 run, 0 NOT-MEASURED, 0 UNRUN. `check:doc-formula-expressions` first refused with exit 3 because `@objectstack/formula` and `@objectstack/lint` were not built. It exited 0 once those two were built under the verify lock.\n\nVitest pins were not run, since this diff changes no code. The item re-verification is a reading of the source at `3230bdbf`. It is not a re-run of the items.\n\n## Notes for review\n- Single hunter, run sequentially: this PR makes no claim that nothing else is missing.\n- No changeset: this is a `docs/qa` change that publishes nothing, so it carries `skip-changeset`.\n- Items still carrying a half that fails today, read from source and not measured, with no open card: `flow-edge-type-authoring` (the Studio Automations pillar passes its flow preview no draft diagnostics, and the client check parses no CEL), `summary-field-authoring` (an unconfigured summary is saved rather than held, and sum and avg offer non-numeric fields), and `expression-editors` knownGaps[4] (the RLS editor reads 'Valid CEL' on a formula-field predicate).\n- `app-and-nav-properties` acceptance[5] is unchanged. Neither Studio nor Setup's AppNavInspector edits `requiresObject`, so its knownGap scores that one cell as not judged until a ruling says whether Studio must offer it.\n- Pre-existing, not changed here: `expression-editors` knownGaps[3] looks stale (`lintCelPredicate` now asks the publish rule through `rlsPredicateVerdict`). Some older `source` lines spell objectui paths without `ui/`, or cite `.md` files that are now `.mdx`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01J8VVAkZns5rNnK2rtszzbQ\n"

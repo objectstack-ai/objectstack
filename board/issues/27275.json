@@ -1,0 +1,35 @@
+{
+  "number": 27275,
+  "kind": "pull_request",
+  "title": "chore(ui): remove the vscode-extension package from the monorepo",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "skip-changeset",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T14:16:09Z",
+  "updated_at": "2026-10-28T14:17:06Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27275",
+  "body": "Fixes #25910\n\nClause-②: no\nMetadata-protocol: none\nRuling-ref: 6386223367\n\n## 维护者速读\n\n- 改了什么：按裁决 B（移出）从单仓删除 `ui/packages/vscode-extension/`（25 个文件），并清掉所有引用它的读者：文档页与导航、CONTRIBUTING 两行、changeset 固定组成员、各门禁的豁免条目与钉住它的测试；`pnpm-lock.yaml` 用 `pnpm install` 重新生成。\n- 为什么改：这个扩展号称「official」，却没有构建、没有发布、没有门禁，坏了也没人知道；维护者裁定移出，历史保留在 git 里。\n- 风险与回滚：只删一个 private、无人依赖的包，不改任何已发布包的行为；回滚就是 revert 本 PR。改动行数超过 3,000（主要是删除的文件和锁文件），按规则须经授权批准或维护者亲手合并。\n- 先看：`.changeset/config.json` 与 `scripts/check-changeset-fixed.mjs`（固定组成员删除与 `PRIVATE_FIXED_MEMBERS` 清空）；`ui/scripts/__tests__/check-doc-links.test.ts`（三个下限按实测下调，各自写明原因）；`ui/scripts/check-unused-dependencies.mjs`（删掉扩展的两条豁免）。\n- 两分钟验证：`node scripts/check-changeset-fixed.mjs`，预期输出 `✓ .changeset/config.json \"fixed\" group is in sync with 109 public workspace packages.`\n- 需要你做的：批准或亲手合并（改动行数超过 3,000 的 PR 不能由席位自动落地）。\n\n## What changes\n\n- **Deleted** `ui/packages/vscode-extension/` (25 files) and its docs page `ui/content/docs/utilities/vscode-extension.mdx`. The page also comes out of `utilities/meta.json`, three spots in `utilities/index.md`, and `guide/architecture.md`.\n- **Root:** two `CONTRIBUTING.md` rows; the `object-ui` member of the `.changeset/config.json` `fixed` group; and `PRIVATE_FIXED_MEMBERS` in `scripts/check-changeset-fixed.mjs`, now empty with a rewritten comment. The mechanism stays and is still fixture-tested.\n- **`pnpm-lock.yaml`:** regenerated with `pnpm install` on the tree, then again verified with `--frozen-lockfile` after merging `origin/main`.\n- **ui gates and their tests:**\n  - `check-unused-dependencies.mjs`: the extension's two bundler-inlined allowances go, together with the now-unused `bundlerInlinedAllowance` helper. The gate's own rule 3 reds a row with no subject.\n  - `markdown-test-inputs.mjs`: the extension test's ledger entry goes.\n  - `body-dialect-census.test.ts`: the three deleted reader/producer paths leave their lists, following the runner precedent beside them. The `CompletionProvider` by-name pin is replaced with a note. The population zero and both of its lit controls stay.\n  - `check-changeset-fixed.test.ts`: the \"still keeps the private VS Code extension inside the fixed group\" pin becomes \"puts no private package inside the fixed group\", the shape that is true now.\n  - `check-doc-snippet-emitted-census.test.ts`: the per-package split test moves to a neutral fixture. The repository test keeps its remaining named member and its `>= 2` floor.\n  - `check-doc-component-types.test.ts`: the deleted page leaves the `heading` list.\n- **Measured floors and counts,** each with its reason in the comment:\n  - `check-doc-links.test.ts`: `packages/*` docs 11 → 8 and combined 14 → 11 (the package's `DESIGN.md`, `ICON.md` and `PUBLISHING.md`); README decidable hrefs 135 → 129; `content/docs` site-absolute 6 → 5 (the deleted page); package-dir decidable 2 → 1 (`DESIGN.md`).\n  - `ui/tsconfig.json` / `ui/tsconfig.tier-base.json`: the `extends` graph re-measured with `ts.readConfigFile` at 87 tracked files, 73 of them extending the root (37/38 package `tsconfig.json` and all 35 `tsconfig.test.json`). `packages/runner` is now the only one that extends nothing.\n- **Comments only:** present-tense claims about the extension in `@object-ui/core` (`dataset-format.ts`, `number-display.ts`), `@object-ui/types` (`form.zod.ts`, `package-exports-manifest.test.ts`) and eight `ui/scripts` files are past-tensed. Historical notes, released `CHANGELOG.md` entries and dated `ui/docs/audits/*` are untouched.\n\n## Tests\n\nRead on the merged head `bf73eca0`.\n\n- `pnpm --dir ui exec vitest run --maxWorkers=2 scripts/` (lock VERDICT command-exit 1): Test Files 16 failed / 158 passed, Tests 57 failed / 4672 passed. **That failing set is identical to the untouched baseline at `4d3a077f` (57 failed). This diff adds 0 failures.** All 57 are pre-existing environment failures: the unbuilt `@objectstack/spec` `dist` that ratchets and ledgers import (`spec-symbol-ledger-*`, `check-doc-expression-carriage`, `date-only-zone-pins` …).\n- Before the reader fixes, the deletion alone added 10 failures to that baseline. All 10 are green now.\n\n## Acceptance notes\n\n- Changed lines are 8,704 (+170 / −8,534), almost all deleted files and the lockfile. That is over the 3,000-line threshold, so this PR lands by an authorized approval or the maintainer's own merge.\n- Lowered floors: every one moves down by exactly the content this ruling deletes, with the measured value and its reason in the comment beside it. None is loosened beyond that.\n- The `vscode` row in `HOST_PROVIDED` (`ui/scripts/check-phantom-dependencies.mjs`) stays. It is fixture-tested and generic, and only its comment changed.\n- Left alone on purpose:\n  - `ui/packages/plugin-ai/tsconfig.test.json` L42: open PR #27042 retires that package.\n  - `skills/objectui/README.md` L59: `skills/**` is out of scope here and is forwarded by the seat.\n  - Synthetic fixture paths in `body-dialect-producer-scan.test.ts`.\n- The ruling's \"`ci.yml` comment\" has 0 hits on `main`, so there was nothing to edit under `.github/workflows/**`.\n\n## Verification\n\n<details><summary>Derived gates (dispatch-gates --commands, 75 commands at bf73eca0)</summary>\n\n- 73 non-suite commands run, each exit captured before any pipe:\n  - 69 exit 0.\n  - 4 exit 3 (PREREQUISITE NOT MET: `pnpm build` not run, so nothing was measured): `check:dts-closure`, `check:dual-build-cjs-loads`, `check:lean-entry-closure`, `check:sourcemap-no-sources-content`. All four read built `@objectstack/*` dists this diff does not touch. NOT MEASURED locally; CI's Build Core / Lint run them.\n- `pnpm --dir ui exec vitest run scripts/`: see Tests.\n- `pnpm check:pm-dispatch-gates`: see the report.\n- Also run:\n  - `node scripts/check-changeset-fixed.mjs --self-test`: 12 cases pass.\n  - `node scripts/check-changeset-fixed.mjs`: in sync with 109 public packages.\n  - `ui`'s `check-changeset-fixed`, `check-doc-links` (13 scan roots), `check-doc-component-types`, `check-unused-dependencies` and `check-phantom-dependencies`: all exit 0.\n  - `pnpm install --frozen-lockfile`: exit 0.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QSeKYm29SiQaonK2q8F7CS)_\n"
+}

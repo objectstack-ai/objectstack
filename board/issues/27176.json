@@ -1,0 +1,37 @@
+{
+  "number": 27176,
+  "kind": "issue",
+  "title": "spec/metadata-protocol: a draft change written through the MCP build door is recorded as `by: 'copilot'`; draftChanges cannot say \"an MCP agent (OAuth client X) on behalf of user Y\" (cloud#3302 item 5)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:cloud",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T09:24:24Z",
+  "updated_at": "2026-10-28T12:23:39Z",
+  "closed_at": "2026-10-28T12:23:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27176",
+  "body": "Filing gate: ① a product defect with a named location. cloud#3302 item 5 (maintainer-directed, the 2026-10-27 MCP build batch) is not met because of a missing value in `MetadataAuthoringSurfaceSchema` (`packages/spec/src/api/protocol.zod.ts:490`).\n\n## 维护者速读\n\ncloud 的 MCP build 入口（cloud#3302 / cloud#3345）让开发者自己的 agent 通过 `/api/v1/mcp` 写草稿，由人在 Studio「变更」里发布。卡片第 5 项要求发布的人能看到「哪个入口、哪个 OAuth 客户端、代表谁」写了这条草稿。框架现在的草稿逐键来源 `draftChanges`（#24298）只有 `copilot / studio / api` 三种来源和 `actor`，MCP 写入只能记成 `copilot`，没有客户端。本卡补上来源值和客户端归属，并让 Studio 变更抽屉显示它。\n\n## Facts (objectstack `main`, read 2026-10-28)\n\n- `MetadataAuthoringSurfaceSchema = z.enum(['copilot', 'studio', 'api'])` is at `protocol.zod.ts:490`. `draftChanges[].by` is that enum, and `actor` is the acting user (#24298).\n- `copilot` is stated only by an in-process AI tool calling the save, never by a remote caller (`protocol.zod.ts:~1000`). The cloud MCP door's tools are in-process AI tools, so their saves record `by: 'copilot'`. That is indistinguishable from the in-app chat.\n- The execution context already carries the OAuth performer for the `/mcp` door: `performedByClientId` (ADR-0090 D10 rule 4, `kernel/execution-context.zod.ts:298-315`). It is attribution only, and it is recorded in `sys_audit_log`, but not in `draftChanges`.\n- cloud side (cloud#3345): `/meta/_drafts` `updatedBy` is the token user, which is asserted. The tool context carries `authoringDoor: 'mcp'` and `mcpPrincipal { userId, clientId, organizationId }`, ready to pass into the save.\n\n## Done looks like\n\n1. The draft save can record, in-process only, that a change came through the MCP door and which OAuth client performed it: a new surface value (for example `mcp`) and an optional client attribution on the `draftChanges` entry. The exact shape is the spec owner's call. It stays refused from `?surface=` over HTTP, the way `copilot` is.\n2. Studio's changes drawer and properties source line render it, for example 「由 MCP 客户端 <client name> 代表 <user> 作为草稿加入」, in all locales.\n3. A follow-up cloud half (cloud#3302 stays open, `Blocked-by:` this card) passes `surface` and the client from the MCP door's tool context into `saveMetaItem`.\n\n## Out of scope\n\nWho may write through the door (cloud#3299 and #3303), and any change to authorization. This card is attribution only.\n\nDedup: #24298 (closed; the per-key provenance this extends), #26587 (closed; consent copy for `metadata:write`). There is no open card on draft attribution for MCP.\n\nReader: the spec/metadata-protocol lane plus Studio (ui). Routed `domain:cloud` by involvement (pm-dispatch #26972)."
+}

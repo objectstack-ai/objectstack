@@ -1,0 +1,36 @@
+{
+  "number": 27174,
+  "kind": "pull_request",
+  "title": "test(example-showcase): the related-heavy detail case pins the record page's tabbed tier",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/xs",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T09:17:09Z",
+  "updated_at": "2026-10-28T09:37:36Z",
+  "closed_at": "2026-10-28T09:37:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-28T09:37:34Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27174",
+  "body": "Part of #27114\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 改了什么：showcase 浏览器冒烟里 Contoso 详情页那条用例，开页前把视口定在 1200 px，让记录页留在「标签页」档。\n- 为什么改：#26758 按维护者裁决把默认记录页改成按容器宽度分档，Desktop Chrome 1280 视口减去侧栏落在两栏档，没有标签条，用例找不到 Details 标签，夜间 live 档因此变红。\n- 风险与回滚：只改一个 e2e 用例（+8 行，无产品代码）；回滚即撤这一个 commit。\n- 先看：`examples/app-showcase/e2e/detail-shapes.spec.ts` 中 Contoso 用例开头新加的 `setViewportSize` 与注释。\n- 两分钟验证：`cd examples/app-showcase && CI=1 OS_TEST_TIERS=nightly pnpm exec vitest run test/showcase-smoke.live.test.ts`，预期 53/53 通过（需先 `pnpm console:build`）。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n`examples/app-showcase/e2e/detail-shapes.spec.ts`, the case \"ungrouped + related-heavy: flat details and related-list tabs on Contoso\": it now pins a 1200 x 800 viewport before opening the record. That keeps the synthesized record page in its tabbed tier. No assertion is removed, skipped, retried or moved to another tier.\n\n**Bisect.** The last green nightly ran on `b53322d5`. The first red commit is `0d07de2f` (#26758, \"the default record page is one page at two widths — resident columns on a wide page, the tabs in a drawer\"). Both legs ran under the nightly invocation, each on a full tree at that commit:\n\n- `1f1eda4d` (`0d07de2f^`): 53/53 passed.\n- `0d07de2f`: 52/53, the same case failing at the same assertion (`getByRole('tab', { name: /Details/i })`, L165).\n\n**Why the spec follows, not the product.** #26758 implements the maintainer's ruling 1 on epic #26676, verbatim: 「抽屉和整页是同一张页在两个宽度。」 Its table rules it: a container of 1024 – 1279 px gets \"Details · timeline; the related column folds into a rail opened from a **Related (N)** toggle\", and only below 1024 px does it get \"The tab strip, exactly as before\". The red screenshot on `origin/main` shows exactly that tier: two columns, a **Related 5** toggle, no tablist. Desktop Chrome's 1280 px viewport, less the console sidebar, gives the record view about 1024 px. #26758 handled the same thing in `ui/e2e/live/detail-related-list.spec.ts` and `record-history-display.spec.ts` with a 1200 px viewport (\"each now pins a 1200 px viewport to stay in the tabbed tier they test\"). This PR does the same for the showcase case, which that PR missed. ADR-0085's prominence rule (related lists as tabs) still holds in the tabbed tier, and that tier is the one this case asserts.\n\nThe viewport is pinned per case, not per file. The other three cases in the file pass at the default viewport, so their coverage stays as it was.\n\n## Tests\n\nThe showcase live tier ran under the nightly invocation (`CI=1 OS_TEST_TIERS=nightly`, `vitest run test/showcase-smoke.live.test.ts`, with the dependency closure and `pnpm console:build` built first):\n\n<details><summary>Readings</summary>\n\n- `origin/main` `24351cfe` (reproduction): 1 failed, 52 passed. The failure is `detail-shapes.spec.ts:156` at `getByRole('tab', { name: /Details/i })`, failed on its retry too. Lock VERDICT `command-exit 1`.\n- `9bfc7e48` (fix on `24351cfe`): 53 passed, Test Files 1 passed. VERDICT `command-exit 0`.\n- `f81fbddd` (fix merged with `origin/main` `3346da26`, whose `RecordDetailView.tsx` change is why this ran again): 53 passed, Test Files 1 passed. VERDICT `command-exit 0`.\n- `pnpm --filter @objectstack/example-showcase typecheck` (its tsconfig includes `e2e/**/*`, and `--listFiles` counts the spec once): exit 0.\n\n</details>\n\n## Acceptance notes\n\n- The private package `@objectstack/example-showcase` gets a test-only edit, so it carries `skip-changeset`.\n- No ablation: the diff adds no tested behaviour. It moves an e2e case onto the tier it asserts. The bisect legs above are the before/after proof.\n\n## Verification\n\n<details><summary>Derived gates at f81fbddd</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 37 commands over the 1 changed path. All 37 exit 0, each exit captured before any pipe. `pnpm check:dual-build-cjs-loads` first answered `PREREQUISITE NOT MET` (exit 3: seven packages outside the showcase closure had no `dist/`). After building them it exits 0. `--ran` reports \"37 derived famil(ies) accounted for — 37 run, 0 NOT-MEASURED (a DERIVED zero)\". Every family CI runs beyond these is read from this PR's check-runs.\n\n</details>\n\nSession: `session_01QSeKYobVx7yTf1SUMMbKnP`, dispatched by `session_01QSeKYmTYfaPbLQD4BJfomW` (claim 6463869260).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QSeKYobVx7yTf1SUMMbKnP)_\n"
+}

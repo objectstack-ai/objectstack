@@ -1,0 +1,32 @@
+{
+  "number": 27273,
+  "kind": "pull_request",
+  "title": "refactor(plugin-view): read the three declared object-view keys without a cast",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T14:14:07Z",
+  "updated_at": "2026-10-28T14:15:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27273",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ819oUQ9cjPHsHVoZ112LVMA)_\n\nPart of #25918 (the ListView reads and the lint rule stay open on the card).\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:ObjectView 把三个已声明键(`data`、`navigation`、`searchableFields`)的 `(schema as any)` 读法改成直接 `schema.K`;ObjectGrid 两处读法经核实都有真实生产者,保持不动。\n- 为什么改:类型已经声明的键再走 `as any` 只是遮住类型检查,卡 #25918 要求删掉这类残留写法。\n- 风险与回滚:零运行时变化(去掉 `as any` 后生成的 JS 相同);27 个宿主组合键的读法一个没动;回滚即 revert 本 PR。\n- 先看:`ui/packages/plugin-view/src/ObjectView.tsx` 的 `renderListView` 区段;`objectViewHostSurface.test.tsx` 改过的两条断言。\n- 两分钟验证:`pnpm --dir ui exec vitest run packages/plugin-view/src/__tests__/objectViewHostSurface.test.tsx`,预期全部通过。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- `ui/packages/plugin-view/src/ObjectView.tsx`: inside the `#region object-view HOST-COMPOSITION SURFACE (objectui#5097)` fence, the three keys in `OBJECT_VIEW_DECLARED_FORWARDED_KEYS` (`data`, `navigation`, `searchableFields`) are now read as `schema.K`. All three are declared on `ObjectViewSchema` (`data` through `BaseSchema`), so the cast hid nothing. The 27 `OBJECT_VIEW_HOST_COMPOSITION_KEYS` reads keep their cast, per the objectui#5097 ruling. The fence comment, the two docblocks that described all 30 reads as casts, and the `data` rung comment (which wrongly called node `data` one of the 27) now say what the code does.\n- `objectViewHostSurface.test.tsx`: the fence pin now derives the cast set and the uncast set separately. It asserts the cast reads are exactly the 27 exempt keys, and that each declared key is read uncast. The named-view section's count drops from 27+3 to 27 for the same reason.\n- `object-view-unmirrored-keys-7779.test.ts` (`@object-ui/types`): three literal source-text pins (the `searchableFields` read twice, the `data` read once) follow the new text. Its census regex already matched both spellings, so no count changed.\n\n`ObjectGrid.tsx` is unchanged. Both of its `(schema as any)` reads are on keys that a real producer writes onto an `object-grid` node, so neither read can stop here:\n- `rowActionDefs`: `DevRowActions.tsx` (console dev page, an `object-grid` node literal), `ListView`'s grid hand-off, `RelatedList` and app-shell's `objectViewListRenderer`. The key is declared on `DataTableSchema` but not on `ObjectGridSchema`, and `ComponentPropsMap['object-grid']` refuses it by name.\n- `hideRowHeightToggle`: `ListView`'s `baseProps` set it to `true` on the `object-grid` node it builds. It is declared nowhere.\n\nBoth are already recorded as ruled non-author surface (objectui#5091) and pinned by `gridNonAuthorKeys.test.tsx`. They are reported to the seat as findings and not filed here.\n\n## Tests\n\nRun on head `4c0dabbb` (merge of `origin/main` `1e8e5296`):\n\n- Closure build `pnpm --workspace-concurrency=2 --filter '@object-ui/plugin-view^...' build` under `os-verify-lock`: VERDICT command-exit 0.\n- `pnpm --dir ui exec vitest run --maxWorkers=2 packages/plugin-view/` plus every test outside the package that reads `plugin-view/src/ObjectView.tsx` off disk (six `@object-ui/types` census files, plugin-form `affordanceGrantMap-12082`, plugin-list `ViewSwitcher.i18n-4024`, two plugin-map files, react `navigationOverlayConsumers.onRowClickArity-9357`, schema-catalog `catalog-gallery-render`): Test Files 89 passed (89), Tests 1738 passed (1738).\n- `pnpm --filter @object-ui/plugin-view run type-check` exit 0, and `pnpm --filter @object-ui/types run type-check` exit 0. Both scripts include `tsc -p tsconfig.test.json`, so the edited tests are compiled.\n- No ablation: no read was stopped and no runtime behaviour changed. Dropping an `as any` emits the same JavaScript, and the existing `forwards all 30 reads` render test still pins every value end to end.\n\n## Acceptance notes\n\n- `(activeView as any)?.data` and `(activeView as any)?.rowActionDefs` in the same fence are casts on the host `views` prop entry, not on `schema`. They are outside this card's surface and are left as they are.\n- No changeset (`skip-changeset`): the emitted code of both published packages is unchanged. Only comments and type-level casts moved, and the `@object-ui/types` change is test-only.\n\n## Verification\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 24 gate commands on this diff, and all 24 exited 0 (reconciled with `--ran`). Also `pnpm run check:new-line-citations` (ui): 0 new citations. `dispatch-gates --tier`: no path-derived mandate.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [ ] 3. No formatter ran; `pnpm lint` passes. (No formatter ran; lint was not run locally, CI `Lint UI` reads it.)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [ ] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (Not applicable: nothing published changes; `skip-changeset`.)\n- [ ] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (Not applicable: `packages/spec` untouched.)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [ ] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01JQwxbaGCrvY8peSVMF3rQw\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbaGCrvY8peSVMF3rQw)_\n"
+}

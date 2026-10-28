@@ -1,0 +1,37 @@
+{
+  "number": 27157,
+  "kind": "issue",
+  "title": "spec(field): `fixed`-mode `currencyConfig` with no `defaultCurrency` materialises `'CNY'` — require the code, drop the default (narrowing; #27119 Q2 X, G3)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T08:32:52Z",
+  "updated_at": "2026-10-28T13:24:17Z",
+  "closed_at": "2026-10-28T13:22:22Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27157",
+  "body": "Filing gate ③ (maintainer-directed). Ruling 6464202770 on #27119 (batch #421 item 2, Q2 = X, maintainer 「其他同意」 2026-10-28): G3. Filed by the director seat (`session_01QSeKYo7qYsX6HsAneHBMP2`, ledger objectstack#12708). ⛔ Not a claim; triage sets the lane (`domain:spec` expected) and grade.\n\nRuling-ref: 6464202770\n\n## 维护者速读\n\n- **改了什么：** `currencyConfig.currencyMode: 'fixed'` 必须写 `defaultCurrency`；去掉 schema 里的 `'CNY'` 默认值。没写的在发布时拒收，拒收信息写明「fixed 需要币种代码，或改用 dynamic（组织默认币种）」。\n- **为什么改：** 今天不写代码的 `fixed` 字段静默变成人民币字段；美元 / 欧元应用看到 `¥`。而且这个默认值在**每次 parse** 都被物化，连 `dynamic` 配置也带着它、前端只能刻意忽略——违反已裁原则 #9689「永不物化一个 schema 本不会接受的默认」。\n- **风险与回滚：** BREAKING（narrowing，minor + 迁移 + ADR-0087 处置）。存量调查：`fixed` 且无代码的配置预期 0 条，调查是证明。动态行上物化出的 `defaultCurrency: 'CNY'` 由 ADR-0087 转换剥掉（无读者），固定行保留（曾是生效值）。\n- **先看：** `packages/spec/src/data/field.zod.ts:555–559`。\n- **两分钟验证：** `{ currencyMode: 'fixed' }` 不带代码 ⇒ 发布拒收；`{ currencyMode: 'dynamic' }` parse 结果不再带 `defaultCurrency`。\n- **需要您做的：** 无。\n\n## Measured (on `origin/main` `e6e41998`, 2026-10-28)\n\n- `git grep -n \"default('CNY')\" origin/main -- packages/spec/src/data/field.zod.ts` → 1 hit (L559); `currencyMode` defaults `dynamic` (L558).\n- `ui/packages/i18n/src/currency.ts:34–36`: the display rule already has to ignore the materialised `CNY` on dynamic configs.\n- Principle #9689 (maintainer 2026-08-24, `FieldSchema` docblock): \"NEVER materialize a default the schema itself would refuse as authored\". #8345's design round Q7 recommended the same (6041378776).\n\n## Task\n\n- [ ] `defaultCurrency` loses `.default('CNY')`; a `superRefine` refuses `fixed` without it, with the prescription in the message; `dynamic` output carries no `defaultCurrency`.\n- [ ] The `spec-property-retirement` kit as applicable to a tightened requirement: ADR-0087 disposition in the changeset (strip on dynamic rows, keep on fixed rows), liveness ledger line, generated baselines / forms, pin tests `parse(parse(x))`.\n- [ ] Stored-metadata survey (`examples/**`, `packages/platform-objects/**`, seeds) for `fixed` configs without a code; the count goes in the PR body.\n- [ ] The `formula` field with `returnType: 'currency'` shares the shape (#22727): same refusal.\n\n`Clause-②: no (narrowing)` · `Metadata-protocol: narrowed` · `Skills-docs:` line owed in the PR body. Dedupe: #27119 (the ruling), #8345 Q7 (on hold), #9689, #19992 (`precision` removal); no open card on the `CNY` default."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 27184,
+  "kind": "issue",
+  "title": "spec(field): `currencyMode: 'record'` + `currencyField` — a record-mode amount points at a sibling ISO 4217 code field (multi-currency M0-1, epic #8345)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:spec",
+    "enhancement",
+    "pm:dispatched",
+    "pm:epic",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T09:36:34Z",
+  "updated_at": "2026-10-28T13:55:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27184",
+  "body": "Blocked-by: #27157\nBlocked-by: #27182\nBlocked-by: #27183\n\nFiling gate ③ (maintainer-directed). Ruling 6465431966 on #27119 (batch #421 item 2, Q1 = 乙-现在, maintainer 「同意立专题卡」 2026-10-28): the multi-currency epic resumes on #8345 in shape C′. Part of #8345. Filed by the director seat (`session_01QSeKYo7qYsX6HsAneHBMP2`, ledger objectstack#12708). ⛔ Not a claim. Workload row and precedents: 6464936321; design: 6464438764.\n\nRuling-ref: 6465431966\n\n## 维护者速读\n\n- **改了什么：** `CurrencyConfigSchema` 新增 `record` 模式与 `currencyField` 指针，指向同对象上带 `valueDomain: 'iso_4217_currency'` 的文本字段；对象级校验：存在、类型、值域；`formula` 的 `returnType: currency` 同形。\n- **为什么改：** 平台今天没有任何键承载「这条记录是什么币种」；这是多币种的第一块。\n- **风险与回滚：** 新增可选键（minor，`Metadata-protocol: added`）；不写它的应用零变化。⛔ 不单独发版：R1 与 M0-2/3/4 同一次发布。\n- **先看：** `packages/spec/src/data/field.zod.ts` `CurrencyConfigSchema`；`object.zod.ts` 的 superRefine 臂（先例 L1038 / L2706）。\n- **两分钟验证：** `currencyField` 指向不存在 / 非文本 / 无值域的字段 ⇒ 三种拒收各带处方。\n- **需要您做的：** 无（spec PR 非受管）。\n\n## Task\n\n- [ ] `currencyMode: z.enum(['dynamic','fixed','record'])`; `currencyField` required under `record`, refused under the other modes.\n- [ ] Object-level `superRefine`: the target exists on the same object, is `text`, carries `valueDomain: 'iso_4217_currency'`; messages carry the prescription and list the candidate fields.\n- [ ] Describe / JSDoc / guidance; generated baselines, forms, `packages/spec/docs`; `skills/**` authoring guidance with the naming convention (`currency_code`, `AMOUNT_home`, `AMOUNT_rate`) — `Skills-docs: updated here`.\n- [ ] Pin tests: the three refusals; `parse(parse(x))`; `dynamic` and `fixed` outputs byte-identical to today.\n\nLane: spec · Size: M · Review: CONTRACT_REVIEW_TIER. `Clause-②: yes (widening)` · `Metadata-protocol: added` · `Skills-docs: updated here`.\n\nEpic: #8345 (parent; the epic PM dispatches `pm:epic` children; `domain:spec` children go to the spec seat's queue). Dedupe: #8345 thread, #27119 (ruled), the workload list 6464936321; no open card carries this slice."
+}

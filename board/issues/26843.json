@@ -2,8 +2,8 @@
   "number": 26843,
   "kind": "issue",
   "title": "console forms: form-view keys that save and publish are not rendered — `buttons`, `layout: \"horizontal\"`, `drawerSide` / `drawerWidth`; `defaults` apply only on the full-page /new; a tabbed form with subforms loses `defaultTab` / `tabPosition`",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:records",
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T18:20:15Z",
-  "updated_at": "2026-10-28T02:22:12Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-28T11:45:55Z",
+  "closed_at": "2026-10-28T11:45:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26843",
   "body": "Filing gate: ① product defect, reproduced, landing site named.\nBatch-of: studio-qa-2026-10-27 — 39 cards from one Studio QA run (coordinator session `session_01J8VVAkZns5rNnK2rtszzbQ`; tested at `3fcafcd3`; `origin/main` was `43731031` at filing, so the implementer re-checks the landing site on current main). The run record is the `qa-run` issue filed with this batch.\n\n## Symptom\n\nAuthors declare form behaviour that the console ignores, depending on which entry point opens the form.\n\n## Reproduction\n\n1. `buttons`: ignored on /new and the form page (RecordFormPage passes its own submit/cancel; `foldFormButtons` in ObjectForm.tsx ~126-139 applies only when unset; `reset.label` never applied; apps/console FormPage never reads it).\n2. `defaults`: applied on full-page /new only; the New dialog and public/in-app form pages ignore them (`recordFormNavigation.ts` `resolveFormViewLayout` copies only sections/subforms/modalSize).\n3. Tabbed form + subforms: `defaultTab` / `tabPosition` lost; the New dialog ignores `type: tabbed` (ObjectForm.tsx ~370-395).\n4. `layout: \"horizontal\"`: no effect (RecordFormPage hard-codes vertical).\n5. `drawerSide` / `drawerWidth`: never rendered (no console page hands a form view to the drawer renderer).\n\n## Expected\n\nEach declared key renders on every form entry point, or the spec narrows it (ADR-0049 enforce-or-remove).\n\n## Suspected landing site (the implementer verifies)\n\n`ui/` RecordFormPage, ObjectForm.tsx, recordFormNavigation.ts, apps/console FormPage.\n\n## Filing facts\n\n- reach: Console UI, each measured twice by the view gap-fill card.\n- Business reason: \"Declared ⇒ enforced\": authors and agents configure forms that silently do not behave as written.\n- Reader who acts: the triage seat (first touch: domain, area, level), then that lane's `os-dev` implementer. QA suggestion only: `domain:ui`, `area:records`, p2.\n- Dedupe: semantic search `form view buttons layout horizontal drawerSide defaults defaultTab not rendered` on objectstack-ai/objectstack → 0 hits.\n- QA id: R1"

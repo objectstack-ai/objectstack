@@ -2,8 +2,8 @@
   "number": 27141,
   "kind": "issue",
   "title": "docs(ui-merge): fold objectui.org into objectstack docs, K2 — merge the 46 field, Console-behaviour and schema pages into the existing objectstack pages",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -21,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-28T08:05:48Z",
-  "updated_at": "2026-10-28T08:15:07Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-28T09:32:51Z",
+  "closed_at": "2026-10-28T09:32:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27141",
   "body": "Filing gate ③ (maintainer-directed). In the \"Restore objectui.org docs deploy\" project thread (card thread of #26993), on 2026-10-28:\n\n- 03:24Z, on the decision card \"objectui.org 文档站以后怎么处理?\", Tesla chose 「B 并入 objectstack 文档站」. www.objectui.org stops being a separate site, and its docs fold into the objectstack docs site (`content/docs`, served at objectstack.ai/docs).\n- 03:24Z, Tesla asked 「objectui 文档全部需要保留吗？这需要评估并和我沟通」. The card thread then sorted the 183 pages under `ui/content/docs` one by one into keep, merge, generate and delete, and put four questions to Tesla.\n- 07:58Z, on that evaluation, Tesla answered 「VS Code 扩展 不会发布，其他同意」 and then 「你负责派卡执行」.\n\nThe fold is split into four cards. The first three can run in parallel; the fourth is blocked by them:\n- **K1** moves the SDK pages.\n- **K2** merges pages into existing ones.\n- **K3** generates the component reference.\n- **K4** retires the old site and adds the redirects.\n\nThis is card **K2**.\n\n## 维护者速读\n\nobjectui 文档里有 46 页讲的是 objectstack 本身已有文档的东西:字段、Console 与元数据行为、app/report/theme 等 schema。这些页不单独搬,而是把各页里 objectstack 文档没有的内容(控件、显示行为、Console 交互)合进现有页面,一个主题只留一页。print-pages 和 react-pages 两边各有一份,合成一份。本卡不删 `ui/content/docs` 的原页,删除和跳转由 K4 做。\n\n## Wanted\n\nMerge each page below into the named existing page or section. Paths are relative to `ui/content/docs/`; the targets are in `content/docs/`. \"Merge\" means:\n\n- Carry over what the target lacks, such as the field's widget and display behaviour, the Console interaction, or a worked example. Rewrite live-demo MDX components as plain `json` code blocks.\n- Drop what the target already says, and where the two disagree, keep the target's wording.\n- Where a page has nothing the target lacks, write that in the PR body's row for it and carry nothing.\n\n1. **Fields, 27 pages** → `data-modeling/field-types.mdx` (or its per-type subpages, if the dev finds the page too long and splits it by type with a `meta.json`). The pages are `fields/{auto-number,boolean,currency,date,datetime,email,file,formula,grid,image,location,lookup,number,object,password,percent,phone,rich-text,select,summary,text,textarea,time,url,user,vector,widget-props}`.\n2. **Console and metadata behaviour, 14 pages** → `content/docs/ui/` (or the closer existing chapter):\n   - `guide/{console,metadata-diagnostics,flow-designer,notifications,slotted-pages,record-edit-modes,designing-app-navigation,dashboard-filters,public-forms,user-state-persistence,expressions}`;\n   - `guide/print-pages` → `ui/print-pages.mdx` and `guide/react-pages` → `ui/react-pages.mdx` (these duplicate existing pages: merge them into one);\n   - `guide/agent-skills` → `ai/skills.mdx`.\n3. **Schemas, 5 pages** → the matching `content/docs/ui/` page: `core/app-schema` → `apps.mdx`, `core/report-schema` → `reports.mdx`, `core/enhanced-actions` → `actions.mdx`, `layout/page-header` → `pages.mdx`, and `core/theme-schema` → the `ui/` page that documents themes, or a new `ui/themes.mdx` if none does.\n4. Record the old-path → target pairs in the PR body (46 rows, each with what was carried over or \"nothing new\"). K4 copies the pairs into the redirect map.\n\n⛔ Do not delete or edit pages under `ui/content/docs/`, and do not touch `ui/apps/site` or `content/docs/sdk/`, which is K1's.\n\n## Who acts\n\nA `domain:devx` card thread, with surface `content/docs/{data-modeling,ui,ai}/**`. The pages describe metadata the spec owns, so read each claim against `packages/spec` before carrying it over: an objectui page that contradicts the spec is dropped, not merged. Serial constraint with K3: both may touch `content/docs/ui/meta.json`, so whichever lands second merges `main`.\n\n**Business reason.** Metadata authors and Console users read objectstack.ai/docs. Today they find half of a field's or a page's behaviour there and the other half on www.objectui.org, and that site goes away with this fold.\n\n## Acceptance\n\n- Each of the 46 pages has a row in the PR body naming its target and what was carried.\n- `pnpm --filter @objectstack/docs build` is green, along with the docs gates the derived list names (`check:docs`, doc-authoring, links).\n- No claim carried over contradicts `packages/spec`.\n\n**Duplicate search.** The same query as the fold's other cards: \"objectui docs migrate into objectstack docs site content/docs sdk objectui.org redirect retire ui/apps/site\", 33 hits, the first 10 read (#26993, #27030, #27048, #26140, #26688, #24230, #25677, #26944, #25854, #26035). None merges these pages. **New.**\n\n**Size:** M–L. **Clause-②:** no. **Metadata-protocol:** none."

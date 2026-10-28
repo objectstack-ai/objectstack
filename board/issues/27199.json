@@ -1,0 +1,37 @@
+{
+  "number": 27199,
+  "kind": "pull_request",
+  "title": "feat(console): the shared-record page shows authored field labels, picklist labels and currency from the resolve answer's fields",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T09:51:17Z",
+  "updated_at": "2026-10-28T10:21:31Z",
+  "closed_at": "2026-10-28T10:21:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-28T10:21:29Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27199",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ82jnVCgB5yzt8bWfLcSkizx)_\n\nFixes #27121\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：分享链接页 `/s/:token` 读取 resolve 应答新增的 `fields` 投影，每行显示字段的作者标签；选项字段显示选项标签和颜色，货币字段按 `currencyConfig` 经 `resolveFieldCurrency` 格式化，查找字段显示存储的记录 id。\n- 为什么改：#26991 已让服务端返回字段显示投影，但页面仍用字段名转写的标签和按 JSON 形状格式化的值，匿名访客看不到作者标签、选项标签和货币。\n- 风险与回滚：只改 console 一页的展示层；不多发任何请求，不改 resolve 请求、密码流程和脱敏。旧服务端不返回 `fields` 时页面与之前完全一样。回滚即 revert 本 PR。\n- 先看：`ui/apps/console/src/pages/SharedRecordFields.tsx`（`NO_FETCH_CELL_RENDERERS` 按渲染器身份放行）、`shared-record-shape.ts`（`fields` 折叠）、`SharedRecordPage-27121.test.tsx`。\n- 两分钟验证：`pnpm --dir ui exec vitest run apps/console/src/pages/SharedRecordPage-27121.test.tsx apps/console/src/pages/shared-record-shape.test.ts`，预期 2 个文件、19 个用例全部通过。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- `shared-record-shape.ts`: `WireResolvedShare` and `ResolvedShare` gain `fields`, and `normalizeResolvedShare` folds it through on both the enveloped and the bare body. An answer without `fields` (a server older than #26991) leaves it `undefined`.\n  - **How the console types it: mirrored, not imported.** `@object-ui/console` does not depend on `@objectstack/types`, so `SharedFieldDisplay` mirrors only the members of `ShareLinkFieldDisplay` this page reads (`label`, `type`, `options`, `multiple`, `currencyConfig`, `reference`, `displayField`). No workspace dependency was added.\n- `SharedRecordFields.tsx` takes `fields`:\n  - **Label:** the field's authored `label`; a key with no `fields` entry keeps `humanizeLabel(key)`.\n  - **Value:** through the record detail view's own read-only cell renderer for the field's type (`getCellRenderer`, the call the detail view makes), but only when that renderer is one of `NO_FETCH_CELL_RENDERERS`: `SelectCellRenderer` (authored option label and colour, one badge per value for `multiple`) and `CurrencyCellRenderer` (the code from `resolveFieldCurrency` with the field's `currencyConfig` and the localization context's tenant default, which this route does not mount). The set is matched by renderer identity, the way the detail view matches its own boolean and text faces, so a host-registered face for a type is never picked up.\n  - **Everything else**, a lookup included, keeps the JSON-shape formatting from #26767. A lookup's value is the stored id, so the row reads the authored label and the id.\n- `SharedRecordPage.tsx` passes `data.fields` through.\n- Changeset: `@object-ui/console` patch.\n\n## Tests\n\n- `SharedRecordPage-27121.test.tsx` (7 cases): authored labels; picklist option label and declared colour, both labels for a multi-select; currency equals `formatCurrency(n, resolveFieldCurrency(field), 'en')` for a fixed EUR config (and contains the euro sign) and a plain amount for a dynamic config; a lookup shows its id and the page requests nothing but resolve; a lookup never calls `find`, `findOne` or `getObjectSchema` on a data source a host provides; control: a key with no `fields` entry keeps its humanized label; an answer without `fields` renders exactly as before.\n- `shared-record-shape.test.ts` (+2 cases): `fields` survives both envelopes; it stays absent when the server omits it.\n- Ablation 1 (run before the host-data-source case existed), `fields: wire.fields` deleted through `scripts/ablation-replace.mjs`: 5 of 18 red (the shape carry test and the label, picklist, currency and lookup tests); the control and the no-`fields` test stay green; restore proven by blob equal to HEAD and an empty `git diff HEAD`.\n- Ablation 2, the `NO_FETCH_CELL_RENDERERS` check replaced by the bare registry answer: the host-data-source lookup test goes red (1 of 7); restored the same way. A first attempt was a no-op refused by the tool (its replacement text occurred elsewhere), so it was rerun with a unique replacement; and before the host-data-source test existed this ablation stayed green, which is why that test was added.\n\n## Acceptance notes\n\n- **Lookup display is the stored id.** Nothing serves the target record's name to an anonymous visitor (the meta and data doors refuse one), and the projection carries the target object's api name, not a label. Showing a name would need a server-side change; it is reported to the seat, not built here.\n- **Number, percent, date and date-time values keep the JSON-shape formatting.** Those paths already use the console's one number and date faces; the detail view's number and percent cells additionally read `scale`, which the projection does not carry, so routing them through the cells would not add fidelity.\n- **#27119 is untouched.** No new currency fallback: a dynamic or unconfigured currency field shows whatever `resolveFieldCurrency` answers today, which on this route (no tenant default mounted) is a plain amount.\n- The pending changeset from #26767 says authored labels, picklist labels and currency \"do not show yet\"; this PR's changeset says they now do. Both are unreleased, so the release that compiles them will carry both entries.\n\n## Verification\n\nRun on head `de0b485b` (after merging `origin/main` at `38490dbd`):\n\n<details><summary>Build, tests and type-check</summary>\n\n- `pnpm --workspace-concurrency=2 --filter '@object-ui/console^...' build` under the verify lock: exit 0.\n- `pnpm --dir ui exec vitest run --maxWorkers=2 apps/console/src/pages/`: Test Files 126 passed (126), Tests 904 passed (904).\n- `pnpm --filter @object-ui/console run type-check`: exit 0 (run before the merge; the merge touched no file this diff touches).\n- `pnpm --dir ui run check:new-line-citations`: 0 new citations.\n\n</details>\n\n<details><summary>Derived gates (33, all exit 0)</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 33 families on this diff; each was run and exited 0; `--ran` reconciliation: 33 derived, 33 run, 0 NOT-MEASURED, 0 UNRUN. `--tier`: no path-derived mandate (TIER_DEFAULT). Changed lines: 396, under the 3,000 threshold.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbaGXxC3vCjA46AStCM)_\n"
+}

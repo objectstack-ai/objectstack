@@ -1,0 +1,35 @@
+{
+  "number": 27254,
+  "kind": "pull_request",
+  "title": "fix(app-shell): name the page block inspector's JSON editor by its label",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T13:05:27Z",
+  "updated_at": "2026-10-28T13:42:25Z",
+  "closed_at": "2026-10-28T13:42:23Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-28T13:42:23Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27254",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8D1GfomwtVv1LMaZwNA9aHS)_\nFixes #27178\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:Studio 页面设计器的块检查器里,JSON 编辑框(`InspectorJsonField`)的标签现在用 `htmlFor` 指向它的 textarea(id 由 `React.useId()` 生成)。\n- 为什么改:原来标签和输入框没有关联,读屏器只读出一个没有名字的文本框,测试也无法按标签找到这个字段。\n- 风险与回滚:只加了 label 与 textarea 的 id 配对,不改写入的数据和提交逻辑;回滚即 revert 本 PR。\n- 先看:`PageBlockInspector.tsx` 中的 `InspectorJsonField`;新测试 `PageBlockInspector.jsonFieldLabel-27178.test.tsx`。\n- 两分钟验证:`pnpm --dir ui exec vitest run packages/app-shell/src/views/metadata-admin/inspectors/PageBlockInspector.jsonFieldLabel-27178.test.tsx`,预期 2/2 通过。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n`InspectorJsonField` in `PageBlockInspector.tsx` mints an id with `React.useId()` and pairs it: `Label htmlFor={id}` and the textarea's `id={id}`. This is the same scheme `FilterRulesField` and `ColorPropField` in the same file already use. The id is minted inside the component, not derived from the label or prop name, because `renderField` also draws this editor inside array rows, where a caller-derived id would repeat.\n\nEvery door that draws the editor gets the pairing, because they all go through the one component: a curated `kind: 'json'` prop (for example `record:related_list.add`, `element:button.action`), the JSON fallback for a stored value in another union arm (`sort` stored as a string, `columns` as `ListColumn` objects), and the generic \"Advanced\" editor for object or array props. There was no `aria-describedby` or error wiring on the field to keep; the invalid-JSON message is unchanged.\n\n## Tests\n\nNew `PageBlockInspector.jsonFieldLabel-27178.test.tsx`, on the real inspector inside a host that applies every patch:\n\n- `getByLabelText('Add existing records (picker)')` returns the `add` textarea, its accessible name is that label, and typing JSON and blurring writes `add` in the stored shape.\n- With `sort: 'subject'` stored, `getByLabelText('Sort')` returns the JSON fallback textarea showing `\"subject\"`, and the `Sort` and `add` editors resolve to two different textareas with two different ids.\n\nAt `bc69c4ad`: every `PageBlockInspector*` test file in the directory, 13 files, 86 tests passed. `pnpm --filter @object-ui/app-shell run type-check` (both the source and the test tsconfig): exit 0. `eslint` on the two changed files: exit 0, no new warning.\n\n<details><summary>Ablation (drop the htmlFor / id pair)</summary>\n\nThrough `scripts/ablation-replace.mjs`, on the committed fix: anchor hits 1 to 0, blob `e552a33e` to `1da05b77`. Both new tests turn red with the card's own wording: `Found a label with the text of: Add existing records (picker), however no form control was found associated to that label` and the same for `Sort`. Restore: blob back to the HEAD blob `e552a33e`, `git diff HEAD` empty.\n\n</details>\n\n## Acceptance notes\n\n- Changeset: none. `@object-ui/app-shell` is `private: true`, so the PR carries `skip-changeset`.\n- The `jsonEditorUnder` helper in `PageBlockInspector.relatedListProps-27054.test.tsx` says the label \"is a sibling, not a `for`\". That comment is now out of date; the helper still works because the label and the textarea share a parent. Left as is (outside this card's file surface).\n- Three other labels in the same file still name no control: `FieldListField`'s label, and the `string-list` and `array` labels in `renderField`. Each labels a group of rows, so the fix there is a group name (`role=\"group\"` with `aria-labelledby`), not this `for` pairing. Reported to the seat as a finding; not changed here.\n\n## Verification\n\nDerived gates at `e781cf8f` (`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`, 24 families), every one run locally, exit codes captured before any pipe: all 24 exit 0, including `node scripts/check-sdui-manifest.mjs` and its `--self-test`, and `pnpm --dir ui exec vitest run scripts/` under the verify lock. `dispatch-gates --ran`: 24 derived, 24 run, 0 NOT-MEASURED. `dispatch-gates --tier`: no path-derived mandate. 109 changed lines, under the 3000 threshold; no governed path. Every family CI runs is read from this PR's check-runs.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01JQwxbW6EicqdfE9onssvrp\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbW6EicqdfE9onssvrp)_\n"
+}

@@ -1,0 +1,39 @@
+{
+  "number": 27160,
+  "kind": "pull_request",
+  "title": "feat(app-shell): a key-only record control, and the Studio hook form offers refusals with it (#26835)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:data",
+    "protocol:system",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T08:50:20Z",
+  "updated_at": "2026-10-28T11:01:18Z",
+  "closed_at": "2026-10-28T11:01:16Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-28T11:01:16Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27160",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8G6QZjYQCXktarYR4vyuASc)_\nFixes #26835\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:Studio 钩子表单新增「Refusals」一行,可以逐条填写拒绝码、提示语和状态码;表单的 record 编辑器新增一个通用的「只用键」模式,任何 record 字段声明后都能用。\n- 为什么改:原来的 record 编辑器会把键名写进每个条目,而钩子的拒绝条目是封闭对象,写进去就被 spec 拒收,所以 Studio 里根本没法配置可翻译的拒绝提示。\n- 风险与回滚:只有声明了 `widget: 'key-only-record'` 的字段走新逻辑,其余 record 字段行为不变(有测试钉住);回滚即撤销本 PR。\n- 先看:`ui/packages/app-shell/src/views/metadata-admin/SchemaForm.tsx` 的 RecordField 改动(键名不写入、改名逻辑);`packages/spec/src/data/hook.form.ts` 新增的一行。\n- 两分钟验证:`pnpm --dir ui exec vitest run packages/app-shell/src/views/metadata-admin/SchemaForm.keyOnlyRecord-26835.test.tsx`,预期 8 个测试全绿。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- **Key-only record face** (`SchemaForm.tsx`, `RecordField`). A `type: 'record'` form row that declares `widget: 'key-only-record'` (`KEY_ONLY_RECORD_WIDGET`) edits a map of closed entries: add, rename, remove and reorder keys, and edit each entry's fields, without writing the key into the entry. A key is checked against the record's served key rule (`propertyNames.pattern`, which the server derives from the spec's key schema), so the rule is never restated in the UI. A rename moves the entry in place once the typed key is valid, so an invalid intermediate spelling stays typeable. A record row with no such widget is untouched: the key is still mirrored into the entry.\n- **Hook form** (`packages/spec/src/data/hook.form.ts`). The Body section offers `refusals` with that control, with `message` (textarea, required) and `status` (number) per entry.\n- **Gate ledger** (`metadata-form-zod-reconciliation.test.ts`). The `hook` root omission row for `refusals` that the hook refusal catalogue PR recorded is removed: the form now offers the key, and the reconciliation reads `refusals.message` / `refusals.status` against `HookRefusalSchema`.\n- **i18n.** `engine.form.key` (en `Key`, zh `键名`) names the key column when the form declares no key label.\n- **Translations.** The generated metadata-form bundles carry the three refusals rows, translated in zh-CN, ja-JP and es-ES; three platform-objects census pins and one cli coverage filter move with them.\n- **Changeset.** Patch for `@objectstack/spec`, `@objectstack/platform-objects`, `@object-ui/app-shell`, `@object-ui/i18n`.\n\n## Why\n\nAfter the hook refusal catalogue landed, a hook can declare `refusals: { CODE: { message, status? } }` so its refusal messages are translatable, but the Studio hook form could not author it: the generic record editor stamps each key into its entry (`name` by default), and a refusal entry is closed at `message` / `status`, so the stamped key is refused. The card asked for a generic key-only record control, opted into by declaration, and for the hook form to use it.\n\n## Tests\n\nNew file `SchemaForm.keyOnlyRecord-26835.test.tsx` (8 tests). Everything it reads comes from the spec: the form row is `hookForm`'s own, the field schema is the served derivation of `HookSchema` (`z.toJSONSchema` with `io: 'input'`), and the key rule is checked equal to `HOOK_REFUSAL_CODE_PATTERN.source`.\n\n- the hook form declares `refusals` as a record on the key-only face;\n- adding an entry writes no key into it;\n- a key that breaks the served rule (`clean_version`) is refused and the value is unchanged;\n- a rename moves the entry in place, unstamped, through an invalid intermediate spelling; a rename onto an existing key is refused;\n- round trip: two refusals authored in the form save a body `HookSchema` accepts, the parsed `refusals` serialise byte-identical to the saved ones, and the saved body reloads into the same rows in the same order;\n- control: a record row with no widget still mirrors the key, and `HookSchema` refuses that body with `unrecognized_keys` `['name']` at the entry.\n\nAblation, one-off, restored by `scripts/ablation-replace.mjs` (blob back to HEAD `892c144b`, `git diff HEAD` empty): `const keyOnly = widget === KEY_ONLY_RECORD_WIDGET;` replaced with `const keyOnly = false;` (the hook row falls back to the stamping editor) turns 4 of 8 red, the round trip among them; the 4 that stay green are the declaration, the served-rule and the default-face pins, which do not read the face.\n\n## Acceptance notes\n\n- The control refuses a bad key with the generic `engine.form.keyPattern` text naming the served pattern, not with the sentence `HookSchema` attaches to the record key (\"A refusal code is SCREAMING_SNAKE …\"). That sentence is inline in `hook.zod.ts` and the served JSON Schema does not carry it, so a generic control has no way to read it without restating it. The row's own help text states the spelling.\n- `keyField.field`, `regex` and `immutable` are not read on the key-only face (nothing is stamped, and a key is always renamable). Declaring `keyField` on such a row would also make the reconciliation gate count `keyField.field` as an offered member, so the hook row declares none.\n\n## Verification\n\nLocal, on the branch head named in the report: the new file 8/8; `ui` vitest over `packages/app-shell/src/views/metadata-admin/` and `packages/i18n/` 727 files green; spec vitest over `src/system/`, `src/data/hook*.test.ts`, `src/kernel/repeater-item-titles.test.ts` 65 files / 2208 tests green; `type-check` for `@object-ui/app-shell`, `@object-ui/i18n`, `@objectstack/spec` and `type-check:scripts` exit 0. The derived gate list (84 commands) is reconciled with `dispatch-gates --ran` in the report; `check:i18n` and `check:dual-build-cjs-loads` need a whole-repo build and are left to CI's Lint and Repo Gates.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes (CI).\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: no generated artifact moves (a form row, no schema change).\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01JQwxbaFd8s4eYs6HGFghK3\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbaFd8s4eYs6HGFghK3)_\n"
+}

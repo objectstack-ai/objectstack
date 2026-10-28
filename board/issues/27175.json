@@ -1,0 +1,37 @@
+{
+  "number": 27175,
+  "kind": "issue",
+  "title": "security: the record field-access answer says nothing about whether the row itself is writable (sharing / RLS / ownership / object grant), so the ui edit dialog cannot stop offering an edit the gate refuses whole",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:spec",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T09:17:40Z",
+  "updated_at": "2026-10-28T14:00:37Z",
+  "closed_at": "2026-10-28T13:39:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27175",
+  "body": "Filing gate **① a client advertises an edit the gate refuses**. This is the prerequisite of `domain:ui` card #27138, found while premise-checking it for dispatch. Filed by `domain:ui` seat 2 · `os-warren` · `session_01JQwxbXpF772qWJjojJvRXw`. ⛔ Not a claim. Triage sets the lane(s) and the grade.\n\n## Why the ui cannot close #27138 alone (measured on `origin/main` at the time of filing)\n\n- Triage on #27138 (09:01Z) says the dialog should read \"the record projection or capability the gate already computes\". No read door serves the row's write verdict today:\n  - `GetRecordFieldAccessResponseSchema` (`packages/spec/src/api/protocol.zod.ts` ≈L3112) describes `editable` as field-level only, and states that \"the object grant, the record's row-level write scope (sharing, row-level security, ownership) … are not part of it\".\n  - `SecurityPlugin.getRecordFieldAccess` (`packages/plugins/plugin-security/src/security-plugin.ts` ≈L3013) returns `{ object, recordId, readable, editable }` and nothing else. It is `null` only for a row the caller cannot **read**.\n  - `/auth/me/permissions` holds no row.\n- A client that re-derived sharing / RLS / ownership would be the second evaluator ruling 6457467702 (letter B, #26594) forbids.\n\n## Expected (a proposal; the owning lanes decide the shape)\n\nThe record projection gains one row-level verdict, for example `writable: boolean`. It is true iff a by-id update of this stored row would pass the gate's object grant and its row-level write scope (sharing, RLS, ownership, `checkAuthoredRowWrite`, controlled-by-parent), judged by the gate's own code path, not a copy. A field-level `editable` list stays as it is. The schema change is `packages/spec`, and the verdict is computed in `plugin-security` next to `getRecordFieldAccess`. The dogfood leg `record-field-access-when.dogfood.test.ts` already has the `public_read` row that `PATCH` refuses whole; it would then pin `writable: false` on it.\n\nThen ui seat 2 dispatches #27138: `RecordFieldAccessScope` (`ui/packages/permissions`) reads `writable`, and the edit dialog / drawer / page show the record read-only when it is false.\n\n## Business reason\n\nA user who may read a shared record but not change it opens Edit, fills in the form, presses Save, and loses the work to a refusal of the whole update. The permission contract promises that a client never advertises an edit the gate refuses.\n\n## Reader who acts\n\nThe `domain:spec` seat (schema line) and the `domain:server` seat (`plugin-security`), as triage routes it. Then ui seat 2 on #27138.\n\n## Dedupe\n\n#27138 (the ui half; it asks for this measurement first), #26594 (field-level, ruling B), #27063 (the record projection door), #25934 (closed; approval lock). No open card asks for a row-level write verdict on a read door."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 27220,
+  "kind": "pull_request",
+  "title": "feat(spec): draft provenance records MCP build-door writes and the OAuth client that made them",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T11:03:52Z",
+  "updated_at": "2026-10-28T12:23:40Z",
+  "closed_at": "2026-10-28T12:23:38Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-28T12:23:38Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27220",
+  "body": "Fixes #27176\n\n## What changes\n\nA pending draft's per-key provenance (`draftChanges`, served on the strict `?state=draft` read) can now say that a key was written by an AI agent outside the console, through a deployment's MCP build door, and which OAuth client that agent was.\n\n**Spec (`@objectstack/spec/api`)**\n- `MetadataAuthoringSurfaceSchema` gains `mcp`. All the describes that list the set (`draftChanges[].by`, the save's `surface`, the docblocks) now name it.\n- New `MetadataAuthoringClientSchema` (`{ id, name? }`): the OAuth client the person consented to. `id` is the verified token's client id (opaque). `name` is its registered `client_name`, and it is never the id standing in for a name.\n- `draftChanges[]` gains an optional `client`, present only beside `by: 'mcp'`.\n- `SaveMetaItemRequestSchema` gains an optional `client`. It is stated only by the MCP build door, in-process, from the token it verified. No HTTP door reads it.\n- Pinned as isomorphic in `type-alias-convention.pin.test.ts` (798 → 799). Generated artifacts are regenerated: api-surface, export-origins, declaration-map, authorable-surface and json-schema manifest, reference docs, and the strictness ledger.\n\n**Writer (`@objectstack/metadata-protocol`)**\n- A draft save with `surface: 'mcp'` stamps `by: 'mcp'` and its `client` on every key path it changes (`draftChangesClient` on the repository `put`, beside `draftChangesBy`). `actor` stays the consenting person.\n- A `client` beside any other surface (or with none), or of the wrong shape, is refused `400 INVALID_REQUEST` before anything is read or written. `authoringClientOf` is the one shape check, shared by the save and the stored read.\n- `storedDraftChanges` reads `mcp` entries with or without a client. A stored client beside a non-`mcp` surface, or a malformed one, is malformed, like any other bad entry.\n\n**HTTP doors (`@objectstack/rest`, runtime dispatcher)**\n- `?surface=mcp` is refused `400 VALIDATION_ERROR` with its own sentence, as `?surface=copilot` is. Both doors share `metaSaveRequestOptions`.\n\n**Console**\n- `@object-ui/data-objectstack`: `MetadataClientSaveOptions.surface` excludes `mcp` as it excludes `copilot`. The type now has a `@ts-expect-error` pin for `mcp`.\n- Studio properties (`StudioDraftMark`): the draft chip and the 来源 line mark `mcp` writes as they mark the copilot's. The line names the client: 「由 MCP 客户端「Claude」在 2 分钟前作为草稿加入」 / \"Added as a draft by the MCP client \"Claude\" 2 min ago\". A client with no registered name reads as an unnamed MCP client, never by its id.\n  - `copilotDraftMarkOf` → `agentDraftMarkOf`. Its marks carry `by` and `client`.\n  - The source keys take an `{agent}` hole, with three new `engine.studio.draftMark.agent.*` rows (en + zh, the designer table's two languages).\n- Changes drawer (`DraftChangesPanel`): an entry's drill-in already sends the strict draft read. It now reads that read's `draftChanges` too, and lists which AI tools drafted part of the item: the copilot once, and each MCP client once. Copy is in all ten locale packs (`preview.changes.draftedBy*`).\n  - Provenance stays off the `_drafts` row, as #24298 ruled. The drawer reads it from the per-item draft read it already sends.\n\n## Why\n\ncloud#3302 opened the MCP build door: an agent with a `metadata:write` grant drafts metadata through the same authoring tools the copilot uses. Its writes were recorded as `api`, so a person reviewing the draft could not tell an agent's edit from any other caller's, or tell which agent it was. The cloud half (the door passing `surface: 'mcp'` and the verified client from its principal into the save) follows once the pin carries this change.\n\n## Verification\n\n- `pnpm --filter @objectstack/spec build && pnpm --filter @objectstack/spec check:generated --fix`: the five stale artifacts were regenerated and re-checked green. `check:test-typecheck` is OK after updating `meta-item-response-shapes.test.ts` (the surface set and the client type are pinned; the client shape is refused at `draftChanges[n].client`).\n- spec: `meta-item-response-shapes.test.ts` and `type-alias-convention.pin.test.ts` pass (26).\n- metadata-protocol: `tsc --noEmit` is clean. `draft-changes.test.ts` and `protocol.packageless-save-address.test.ts` pass (103). The new cases cover the client stamp and keep rule, the unnamed client, an `mcp` save without a client, and refusal of a client beside another surface or of the wrong shape, with nothing written.\n- rest: `rest-server-meta-door-closed-sets.test.ts` passes (29), with `?surface=mcp` refused. runtime: `meta-save-preconditions-parity.test.ts` passes (23), with `?surface=mcp` refused on the dispatcher too.\n- ui:\n  - `tsc --noEmit` is clean for `app-shell` and `data-objectstack`.\n  - `StudioDraftMark.test.ts`, the new `DraftChangesPanel.agentSource-27176.test.tsx`, and `draftChanges-12725.test.ts` pass.\n  - Every `DraftChangesPanel.*` suite and every copilot-mark suite (52 files) passes.\n  - `check:i18n-keys`, `check:i18n-drift`, `check:i18n-designer-parity` and `check:i18n-dead-keys` show nothing for the new keys.\n- `pnpm lint` on the touched files: 0 errors.\n\nClause-②: yes (widening)\nMetadata-protocol: added\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QUs3BthV9Hg8gmo8r35XcV)_"
+}

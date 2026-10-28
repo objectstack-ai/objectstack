@@ -1,0 +1,33 @@
+{
+  "number": 27190,
+  "kind": "issue",
+  "title": "import: verify `sys_import_job` serves `sys_exchange_rate` (CSV of currency, rate, effective_date); add the importer only if it does not (multi-currency M1-2, epic #8345)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:server",
+    "enhancement",
+    "pm:blocked",
+    "pm:epic",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T09:39:45Z",
+  "updated_at": "2026-10-28T11:23:48Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27190",
+  "body": "Blocked-by: #27185\n\nFiling gate ③ (maintainer-directed). Ruling 6465431966 on #27119 (batch #421 item 2, Q1 = 乙-现在, maintainer 「同意立专题卡」 2026-10-28): the multi-currency epic resumes on #8345 in shape C′. Part of #8345. Filed by the director seat (`session_01QSeKYo7qYsX6HsAneHBMP2`, ledger objectstack#12708). ⛔ Not a claim. Workload row and precedents: 6464936321; design: 6464438764.\n\nRuling-ref: 6465431966\n\n## 维护者速读\n\n- **改了什么：** 验证现有的按对象导入通道（`POST /data/:object/import/jobs`）能导汇率表；能则只补一行文档，不能则补一个 CSV 导入器。\n- **为什么改：** 财务一年 12 行 × N 币种，一次导完。\n- **风险与回滚：** 零或 S。\n- **先看：** `packages/platform-objects/src/audit/sys-import-job.object.ts`、导入服务。\n- **两分钟验证：** 导入一份 CSV 后列表页出现各行、重复 (currency, date) 被拒。\n- **需要您做的：** 无。\n\n## Task\n\n- [ ] Measure first; report the reading on the card before any code.\n- [ ] If needed: the importer; else the docs line.\n\nLane: server · Size: XS–S · Review: default. `Clause-②: no` · `Metadata-protocol: none`.\n\nEpic: #8345 (parent; the epic PM dispatches `pm:epic` children; `domain:spec` children go to the spec seat's queue). Dedupe: #8345 thread, #27119 (ruled), the workload list 6464936321; no open card carries this slice."
+}

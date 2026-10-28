@@ -1,0 +1,32 @@
+{
+  "number": 27241,
+  "kind": "issue",
+  "title": "Record page: the related switch decides whether the column exists, the panel toggles move into the header action row, and a 1440 px window with the sidebar is three columns",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "domain:ui",
+    "pm:blocked",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T12:07:52Z",
+  "updated_at": "2026-10-28T12:07:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27241",
+  "body": "Blocked-by: #27055\n\nPart of the record-page-v3 epic #26676. Runs after #27055 (the v3 layout rewrites the header and the column arrangement; same files). If #27055's session reads the seat addendum on its card in time and folds these in, this card closes as done by that PR.\n\n## Source (main `9dacccf961`, after #27052)\n\nMeasured by the epic seat on the console: HotCRM contact record page, 1440 × 900 window, sidebar open (content container 1184 px).\n\n1. `recordPageArrangementFor('two-column', switches)` (`ui/packages/plugin-detail/src/synth/recordPageColumns.ts`) fits `details` + `timeline` and sets `relatedRail: true` whether `switches.related` is on or off — the related switch has no visible effect in the two-column tier, and the 「相关 N」 rail toggle still opens the column with the switch OFF. Two controls over one column, with inconsistent state.\n2. The `PanelToggles` group is drawn on the crumb row (`RecordDetailView.tsx`), right side; on a direct open there is no back link, so two 32 px icon buttons float alone at the top right. The pressed tint (`bg-muted`) does not read in the dark theme; the icons are `rows-3` / `layout-grid`.\n3. `RECORD_PAGE_THREE_COLUMN_MIN_WIDTH = 1280` is container-measured, so a 1440 px window with the 256 px sidebar (1184 px of content) is two columns; the v3 design boards draw three columns at 1440.\n\n## Target (maintainer, 2026-10-28, verbatim: 「是：三栏阈值改成 1440 窗口（含侧栏）即三栏；开关改进头部动作行，关联 OFF 就没有栏」)\n\n1. `related: off` ⇒ no related column and no rail; `related: on` with no room in the tier ⇒ the rail (`relatedRail` is `switches.related && !columns.includes('related')`). The rail toggle only opens or closes a column the switch allows. Pin: two-column tier, related OFF, the rail toggle is absent; related ON, the rail toggle is present and opens the column.\n2. The panel toggles become ONE segmented control (icon + label per segment: 「时间线」 with an activity glyph, 「关联」 with a right-panel glyph), drawn at the right end of the record header's action row after the overflow (⋯) and refresh controls, separated from them by a vertical hairline, in every column tier. A segment that is on is filled with the accent tint (`bg-accent` + `text-accent`); a segment that is off is plain muted text — the state reads at a glance without hovering. The crumb row keeps only the back link and `↑` `↓`, and is not drawn when neither exists. Tooltip keycaps and `aria-keyshortcuts` unchanged (`⌘⇧.` / `⌘⇧,`); the matcher accepts `key` `.` / `>` and `,` / `<` beside `code` `Period` / `Comma`. The seat's mock-up (header row, segmented control, three columns with the related column gone when off) is in the epic session's design notes and reproduced on #27055's seat addendum.\n3. Thresholds re-derived so that a 1440 px window with the sidebar open is three columns and a 1024 px window with the sidebar open stays two columns, still container-measured (about 1120 / 760; measure the sidebar's real width on `main` and write the derivation in the constants' docblock); #26758's tier pins updated to the new numbers.\n\nNo metadata key, no spec change.\n\n## File surface\n\n`ui/packages/plugin-detail/src/synth/recordPageColumns.ts` (+ its switches and tier tests), `ui/packages/plugin-detail/src/RecordPageColumns.tsx`, `ui/packages/app-shell/src/views/RecordDetailView.tsx` (toggle placement, chord matcher), `ui/packages/components/src/custom/panel-toggles.tsx` (pressed state), the `page:header` renderer if the action row lives there, i18n if a label changes, tests beside, changeset; ⛔ `packages/spec/**`.\n\n## Acceptance\n\n1. Tests per Target item (rail absent when related OFF; toggles in the header row in both column tiers; the new thresholds with the #26758 pins green).\n2. Screenshots: HotCRM contact at a 1440 window with the sidebar open — three columns with both switches on; related OFF (two columns, no rail toggle); timeline OFF.\n\n<sub>Filed by the epic PM session `session_cdb7a717-def7-4e71-9988-f089fbaa18ff` on 2026-10-28 from the seat's own test of #27052 on `main`, on the maintainer's ruling quoted above. The seat addendum with the same three rulings is on #27055.</sub>"
+}

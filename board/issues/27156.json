@@ -1,0 +1,37 @@
+{
+  "number": 27156,
+  "kind": "issue",
+  "title": "ui(studio): the dataset inspector stores `currency: 'USD'` when the currency format is picked with no currency — store nothing and inherit the field / tenant chain (#27119 Q2 X, G1)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:reports",
+    "bug",
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T08:32:26Z",
+  "updated_at": "2026-10-28T11:46:20Z",
+  "closed_at": "2026-10-28T11:45:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27156",
+  "body": "Filing gate ③ (maintainer-directed). Ruling 6464202770 on #27119 (batch #421 item 2, Q2 = X, maintainer 「其他同意」 2026-10-28): G1. Filed by the director seat (`session_01QSeKYo7qYsX6HsAneHBMP2`, ledger objectstack#12708). ⛔ Not a claim; triage sets the lane (`domain:ui` expected) and grade.\n\nRuling-ref: 6464202770\n\n## 维护者速读\n\n- **改了什么：** Studio 数据集检查器里选「货币」格式但没选币种时，不再往度量上写 `currency: 'USD'`；度量继承字段币种 → 组织默认币种这条既有链。\n- **为什么改：** 度量自带的 `currency` 优先级高于组织默认币种，所以一个人民币组织的仪表盘格子会显示 `$`，没有任何报错。Q2 X：任何地方都不猜币种。\n- **风险与回滚：** 只删一个猜测；回滚一行。\n- **先看：** `ui/packages/app-shell/src/views/metadata-admin/inspectors/DatasetDefaultInspector.tsx:215`（`currency: currency || 'USD'`）。\n- **两分钟验证：** 新建 CNY 组织，Studio 里给度量选「货币」格式不选币种，保存后度量定义里没有 `currency` 键，格子显示 `¥`。\n- **需要您做的：** 无。\n\n## Measured (on `origin/main` `e6e41998`, 2026-10-28)\n\n- `git grep -n \"currency: currency || 'USD'\" origin/main -- ui/packages/app-shell/src/views/metadata-admin/inspectors/DatasetDefaultInspector.tsx` → 1 hit (L215, `buildMeasureFormat`).\n- The analytics chain (`packages/services/service-analytics/src/analytics-service.ts:3114`): explicit measure `currency` → the source field's FIXED currency → `ctx.currency` (tenant). A stored `'USD'` outranks both.\n- Display rule (`ui/packages/i18n/src/currency.ts:55–61`): explicit → fixed → legacy → tenant → no symbol.\n\n## Task\n\n- [ ] `buildMeasureFormat('currency', …)` with an empty currency returns `{ format, currency: undefined }`; the picker's \"inherit\" state is the default.\n- [ ] Any existing stored `currency: 'USD'` the inspector wrote is left as authored (it is explicit on the wire); the PR body states that.\n- [ ] Unit test on the inspector: empty picker ⇒ no `currency` key.\n\n`Clause-②: no` · `Metadata-protocol: none`. Dedupe: #27119 (the ruling), #8345 (on hold), #25495 (closed); no open card on the inspector's default."
+}

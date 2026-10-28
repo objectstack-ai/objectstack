@@ -1,0 +1,37 @@
+{
+  "number": 27177,
+  "kind": "issue",
+  "title": "Page designer canvas draws a location field as \"[Object]\" and a select value raw when an authored record:details names its fields",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "bug",
+    "domain:ui",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T09:28:15Z",
+  "updated_at": "2026-10-28T13:30:16Z",
+  "closed_at": "2026-10-28T13:29:01Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27177",
+  "body": "## Observed\n\nIn Studio's page designer, the Design canvas of a `full` record page whose `record:details` block names its fields draws a `location` field's value as the literal `[Object]` and a `select` field's value as its raw stored value (`amer` instead of the option label). The runtime record page draws both correctly; only the designer canvas is wrong.\n\nEvidence: `e4-after-convert-to-full.png` on the never-merged branch `claude/issue-27054-evidence` (commit `bf202d60`; HEADQUARTERS shows `[Object]`, SALES REGION shows `amer`), taken on the showcase app from PR #27163's branch. The same output comes from the full-create seed that is already on `main`, so this is pre-existing, not introduced by #27163.\n\n## Reach\n\nPublic door: Studio → page designer → Design canvas of any `full` record page with an authored `record:details` block (every page created through the metadata page-create form with `kind: full`, and every page converted with \"Convert to full page\" after #27163). Reproduced on the showcase app.\n\n## Expected\n\nThe canvas renders field values through the same value formatters the record page uses (`location` → formatted address, `select` → option label), or draws a typed placeholder, never `[Object]` or a raw code.\n\n## Dedupe words\n\npage designer canvas record:details authored field names [Object] location select raw value\n\n<sub>Filed by the epic PM session `session_cdb7a717-def7-4e71-9988-f089fbaa18ff` from PR #27163's out-of-scope findings (class a, reach measured), under epic #26676.</sub>"
+}

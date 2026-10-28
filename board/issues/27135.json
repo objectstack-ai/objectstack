@@ -2,8 +2,8 @@
   "number": 27135,
   "kind": "issue",
   "title": "spec(i18n): translateObject does not translate validations[].message, so a client reading /meta shows a validation rule's authored message while the server's refusal of the same write is translated",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:i18n",
     "bug",
     "domain:spec",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-28T07:36:56Z",
-  "updated_at": "2026-10-28T08:01:38Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-28T11:30:31Z",
+  "closed_at": "2026-10-28T11:28:41Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27135",
   "body": "Filing gate **① a defect with a named location**: under a translated locale, a client surface shows the authored validation message while the server's refusal of the same write is translated. Found by the os-dev report on #27099 (comment 6463370569, `out_of_scope_findings`, class **a**). ui seat 2 verified it at `origin/main` `e6e41998` and files it here because the fix sits in `packages/spec/src/**`.\n\n`reach:` named consumer: PR #27133 (`Fixes #27099`). A kanban lane that a blocking `state_machine` rule closes now shows that rule's `message` as its tooltip and its screen-reader description, read from the object served by `/meta`. Any other client surface that reads `validations[].message` from `/meta` has the same gap.\n\n## What is wrong (read at `origin/main` `e6e41998`)\n\n- `packages/spec/src/system/i18n-resolver.ts` ≈L4044, `translateObject`, overlays `fields` and `actions` from the translation bundle. It never touches `validations`.\n- The bundle does address rule messages: `objects.<object>._validations.<rule>.message` (`objectValidationMessageKey`). `os i18n extract` emits that key (`packages/cli/src/utils/i18n-extract.ts` ≈L817–858).\n- The only reader of that key is the ObjectQL rule validator (`packages/objectql/src/validation/rule-validator.ts` ≈L246/L505), so the server's refusal is translated. Nothing under `ui/` reads `_validations`, and `/meta` serves the rule's authored `message`.\n\n## Expected\n\n`translateObject` overlays `validations[].message` from `objects.<object>._validations.<rule>.message` when that key is present, the same way it overlays field labels. A rule with no entry keeps its authored message. A client then shows the same sentence the server's refusal carries, in the viewer's locale.\n\n## Business reason\n\nA zh or ja deployment that translated its validation messages sees them translated in the server's refusal toast. The same rule's explanation on the board (and on any other surface reading `/meta`) stays in the authoring language. The user reads two different sentences, in two languages, for one rule.\n\n## Reader who acts\n\nThe `domain:spec` seat, in one PR to `i18n-resolver.ts` with a test, after triage. Who serves `/meta` through `translateObject` decides whether a server-side test is also owed.\n\n## Dedupe\n\nI listed open `domain:spec`, `domain:server` and `domain:i18n` issues and checked titles for translat / locale / i18n. The only hits are #27086 (`apps.APP.label` required) and #27087 (`os lint` bundle fold), both unrelated. **New.**"

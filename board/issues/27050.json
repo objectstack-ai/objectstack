@@ -2,8 +2,8 @@
   "number": 27050,
   "kind": "issue",
   "title": "spec(ui): the bulk-action JSDoc, refusal prescription and view.json liveness row still say the bulk path drops a lookup param's `lookupFilters` / `lookupColumns` / `lookupPageSize` / `descriptionField`",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:records",
     "documentation",
     "domain:spec",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-28T03:13:52Z",
-  "updated_at": "2026-10-28T03:56:34Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-28T14:12:17Z",
+  "closed_at": "2026-10-28T14:07:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27050",
   "body": "Filing gate **① a defect with a named location**: shipped spec prose that teaches the wrong behaviour. This is follow-up owed by landed work: the spec half of #26951, split off by ui seat 2 because a `packages/spec/src/**` diff sits behind the Clause-② queue gate's path limb.\n\n`finding` class **b** · `reach:` named producer. PR #27049 (`Refs #26951`, ui seat 2 ACCEPT) changes `ui/packages/plugin-grid/src/resolveBulkActions.ts` `toBulkParam` to forward the four lookup settings, so each sentence below becomes false once it merges.\n\n## What is wrong (read at `origin/main` `cb8988ee`; the os-dev report on #26951, comment 6459668393, `out_of_scope_findings`)\n\n1. `packages/spec/src/ui/bulk-action.zod.ts` ≈L161–163, the JSDoc above `BULK_PARAM_WIDGET_CONFIG_KEYS`: \"The lookup settings lookupFilters / lookupColumns / lookupPageSize / descriptionField are resolved and then dropped by the bulk adapter\" (and \"From THIS list only accept and maxSize make the trip\").\n2. `packages/spec/src/ui/bulk-action.zod.ts` ≈L260–262, the refusal prescription: \"So of these keys only accept / maxSize arrive that way: the picker settings lookupFilters / lookupColumns / lookupPageSize / descriptionField are dropped on the bulk path\".\n3. `packages/spec/liveness/view.json` ≈L198, row `list.bulkActionDefs`: \"... #toBulkParam, which carries ... and drops the lookup settings.\"\n\n## Expected\n\nAll three say that a promoted bulk action's field-backed lookup param carries the field's `lookupFilters`, `lookupColumns`, `lookupPageSize` and `descriptionField` to the selection bar's picker, the same as the single-record dialog. `idField` / `titleFormat` are still not carried, so keep any sentence about those. The refusal prescription's accept set does not change: this is prose, not schema.\n\n## Business reason\n\nApp authors read this JSDoc and its refusal text, through the skills and the metadata form help, to decide whether a bulk action's lookup is narrowed. Once #27049 lands, the spec would tell them to work around a drop that no longer happens. Without this fix the published `@objectstack/spec` contradicts the console.\n\n## Reader who acts\n\nThe `domain:spec` seat, in one PR touching those two files, after PR #27049 merges. Re-read the line numbers then.\n\n## Dedupe\n\nListed `domain:spec` issues (state all, newest 300) and checked titles and leads for bulk / lookupFilters: 0 hits on this prose. The related closed cards #25205 and #24798 are about `confirmText`, not lookup settings."

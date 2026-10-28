@@ -1,0 +1,33 @@
+{
+  "number": 27197,
+  "kind": "issue",
+  "title": "examples + QA: showcase `invoice` goes multi-currency (code field, record amount, home field, document date), seeded rates, a rate-sync flow template, a platform-checklist item and a browser dogfood run (multi-currency M3-3, epic #8345)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "enhancement",
+    "pm:blocked",
+    "pm:epic",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T09:44:10Z",
+  "updated_at": "2026-10-28T11:26:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27197",
+  "body": "Blocked-by: #27192\nBlocked-by: #27196\n\nFiling gate ③ (maintainer-directed). Ruling 6465431966 on #27119 (batch #421 item 2, Q1 = 乙-现在, maintainer 「同意立专题卡」 2026-10-28): the multi-currency epic resumes on #8345 in shape C′. Part of #8345. Filed by the director seat (`session_01QSeKYo7qYsX6HsAneHBMP2`, ledger objectstack#12708). ⛔ Not a claim. Workload row and precedents: 6464936321; design: 6464438764.\n\nRuling-ref: 6465431966\n\n## 维护者速读\n\n- **改了什么：** showcase 的 `invoice` 加币种码、record 金额、影子列、单据日期；种子数据设组织币种并塞几条汇率；附一条「定时拉汇率写入 `sys_exchange_rate`」的流程模板（示例，不是平台内置源）；平台测试清单加一项；跑一次浏览器 dogfood。\n- **为什么改：** 是整个功能的活证明，也是 AI 作者照抄的样板。\n- **风险与回滚：** 示例与 QA，无契约。\n- **先看：** `examples/app-showcase/src/data/objects/invoice.object.ts`、种子、`docs/qa/platform-checklist/`。\n- **两分钟验证：** 把组织币种改成 USD 再跑一遍，发票对象零改动仍正确。\n- **需要您做的：** 无。\n\n## Task\n\n- [ ] Metadata + seeds (rates for two foreign currencies).\n- [ ] Flow template: timer + `http` callout + create rows; URL is a setting the customer changes.\n- [ ] Checklist item + run record (`checklist-test`).\n\nLane: devx · Size: M · Review: default. `Clause-②: no` · `Metadata-protocol: none`.\n\nEpic: #8345 (parent; the epic PM dispatches `pm:epic` children; `domain:spec` children go to the spec seat's queue). Dedupe: #8345 thread, #27119 (ruled), the workload list 6464936321; no open card carries this slice."
+}
