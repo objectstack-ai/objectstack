@@ -26,7 +26,6 @@ import {
   findInstalledCopy,
   listDocuments,
   moduleSpecifiersOf,
-  moduleSpecifiersOfBlock,
   nestedPackageReadmePages,
   resolvesOnlyThroughRootManifest,
   ROOT_DOCS,
