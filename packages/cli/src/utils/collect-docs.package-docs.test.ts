@@ -712,9 +712,9 @@ describe('docs/metadata-embed-ref judges a package doc against its package and d
   const lifecycle = (object: string) => ({
     name: object,
     label: object,
-    fields: { status: { type: 'text', label: 'Status' } },
+    fields: { status: { type: 'text' as const, label: 'Status' } },
     validations: [{
-      type: 'state_machine',
+      type: 'state_machine' as const,
       name: `${object}_lifecycle`,
       message: 'Not an allowed status change',
       field: 'status',
