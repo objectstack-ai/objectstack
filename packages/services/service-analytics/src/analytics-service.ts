@@ -98,6 +98,7 @@ import {
 import { findCrossFieldComparand } from './comparand-shape.js';
 import { compileDataset, type CompiledDataset, type RelationshipResolver } from './dataset-compiler.js';
 import { bindDatasetFiltersToObjectFields } from './dataset-filter-field-binding.js';
+import { drillWindowBounds } from './drill-window.js';
 import {
   DatasetExecutor,
   declaredDefaultGranularity,
@@ -2923,18 +2924,38 @@ export class AnalyticsService implements IAnalyticsService {
     // quarter or year got its ranges computed from the dataset's month (or,
     // when the dataset declared none, dropped entirely) — so drilling a bucket
     // opened the wrong span, or the chart lost drill-through altogether.
+    const instantOf = (field: string): boolean | undefined => {
+      const ftype = this.sourceFieldMeta?.(dataset.object, field)?.type;
+      if (ftype === 'datetime') return true;
+      if (ftype === 'date' || rangeTz === 'UTC') return false;
+      return undefined; // unknown field type under a non-UTC reference tz → omit (superset).
+    };
     const rangeDims: Array<{ d: (typeof selectedDims)[number]; granularity: DateGranularityValue; instant: boolean }> = [];
     for (const d of selectedDims) {
       if (!d.field || d.type !== 'date') continue;
       const granularity = resolveDimensionGranularity(selection, d.name, d.dateGranularity);
       if (!granularity) continue;
-      const ftype = this.sourceFieldMeta?.(dataset.object, d.field as string)?.type;
-      if (ftype === 'datetime') rangeDims.push({ d, granularity, instant: true });
-      else if (ftype === 'date') rangeDims.push({ d, granularity, instant: false });
-      else if (rangeTz === 'UTC') rangeDims.push({ d, granularity, instant: false });
-      // else: unknown field type under a non-UTC reference tz → omit (superset).
+      const instant = instantOf(d.field as string);
+      if (instant !== undefined) rangeDims.push({ d, granularity, instant });
     }
-    if (rangeDims.length && result.rows.length) {
+    // #27074 — the WINDOW drill scope. A `timeDimensions[].dateRange` (a
+    // report's picked period) filters the query whether or not its dimension
+    // is grouped, so the drill must stay inside it too: the window rides
+    // `drillRanges` as the `[gte, lt)` the query filtered by, lowered by the
+    // query's own steps (`drill-window.ts`), never re-derived. Tokens resolve
+    // as the executor resolves them, in the same serialisation as the buckets.
+    const windowTokens = filterTokenContextFrom(context, new Date());
+    const windowDims: Array<{ name: string; field: string; gte: string; lt: string }> = [];
+    for (const td of selection.timeDimensions ?? []) {
+      if (td.dateRange == null) continue;
+      const d = dataset.dimensions?.find((dim) => dim.name === td.dimension);
+      if (!d?.field) continue;
+      const instant = instantOf(d.field);
+      if (instant === undefined) continue;
+      const window = drillWindowBounds(resolveFilterTokens(td.dateRange, windowTokens), rangeTz, instant ? 'datetime' : 'date');
+      if (window) windowDims.push({ name: d.name, field: d.field, ...window });
+    }
+    if ((rangeDims.length || windowDims.length) && result.rows.length) {
       const bound = (ymd: string, instant: boolean): string =>
         instant ? new Date(zonedDateStartToUtcMs(ymd, rangeTz)).toISOString() : ymd;
       result.drillRanges = result.rows.map((row) => {
@@ -2945,6 +2966,19 @@ export class AnalyticsService implements IAnalyticsService {
           const cal = bucketKeyToCalendarRange(row[d.name] as string | null, granularity);
           if (cal) {
             ranges[d.name] = { field: d.field as string, gte: bound(cal.start, instant), lt: bound(cal.end, instant) };
+          }
+        }
+        // A window on a field a bucket above already bounds narrows that
+        // entry: an edge bucket can be wider than the window, and a drill
+        // filter keys by FIELD, so a second entry on it would replace the
+        // bucket's bound rather than meet it. One field, one form, so the
+        // bounds order as text. Any other window is an entry of its own.
+        for (const w of windowDims) {
+          const same = Object.values(ranges).filter((r) => r.field === w.field);
+          if (same.length === 0) ranges[w.name] = { field: w.field, gte: w.gte, lt: w.lt };
+          for (const r of same) {
+            if (w.gte > r.gte) r.gte = w.gte;
+            if (w.lt < r.lt) r.lt = w.lt;
           }
         }
         return ranges;

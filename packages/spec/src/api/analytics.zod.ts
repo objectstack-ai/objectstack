@@ -180,16 +180,21 @@ export const AnalyticsResultResponseSchema = lazySchema(() => BaseResponseSchema
     ),
     drillRanges: z.array(z.record(z.string(), z.object({
       field: z.string().describe('The date dimension\'s own `field`'),
-      gte: z.string().describe('Inclusive lower bound of the bucket'),
-      lt: z.string().describe('Exclusive upper bound of the bucket'),
+      gte: z.string().describe('Inclusive lower bound of the range'),
+      lt: z.string().describe('Exclusive upper bound of the range'),
     }))).optional().describe(
-      'Drill-through sidecar for time buckets, aligned to `rows` by index: date '
-      + 'dimension name to the half-open range `[gte, lt)` that row\'s bucket covers. '
-      + 'Bounds are `YYYY-MM-DD` calendar days, or ISO-8601 instants at midnight in the '
-      + 'reference timezone when the source field is `datetime`; a row whose bucket '
-      + 'value is null gets no entry for that dimension. Set only on a dataset answer '
-      + 'that has rows and groups by at least one `type: \'date\'` dimension with a '
-      + '`field` and a granularity; independent of `dimensionFields`. Absent on a cube '
+      'Drill-through sidecar for date ranges, aligned to `rows` by index: date '
+      + 'dimension name to the half-open range `[gte, lt)` that row\'s records fall in '
+      + 'on that dimension\'s field. A time bucket gets the span it covers; a '
+      + '`timeDimensions[].dateRange` window gets the window the query filtered by on '
+      + 'every row, or narrows the bucket entry on the same field to the part inside '
+      + 'the window. Bounds are `YYYY-MM-DD` calendar days, or ISO-8601 instants when '
+      + 'the source field is `datetime` (a bucket\'s at midnight in the reference '
+      + 'timezone); a row whose bucket value is null gets no bucket entry, and a window '
+      + 'whose end is an instant or the last supported day gets none. Set only on a '
+      + 'dataset answer that has rows and groups by at least one `type: \'date\'` '
+      + 'dimension with a `field` and a granularity, or carries a `dateRange` on a '
+      + 'dimension with a `field`; independent of `dimensionFields`. Absent on a cube '
       + 'query answer.',
     ),
   }),
