@@ -1180,8 +1180,9 @@ for a longer walkthrough.
 
 When a record has approval requests, its detail page grows an **Approvals
 tab** — a peer of Details/Related with a request-count badge (#3461):
-which step the approval sits at (with the step line of the route its flow
-run took: the steps it passed, then the pending one), the
+which step the approval sits at (with the step line of the route the
+approvals read serves for it: the steps its flow run passed, the pending one,
+then the steps ahead that the flow's graph decides), the
 server-computed decision progress (quorum tally, per-group 会签 ticks), the
 **waiting-on** approvers resolved to display names (group approvers labeled
 with their group), one chronological decision timeline merged across all of
@@ -1252,12 +1253,16 @@ summary is not drawn.
 Two more parts come from the same request row. A request no person submitted
 (its `submitter_id` absent or null, as the approvals get serves a request a
 flow run opened with no user context) is marked "Flow-initiated", above the
-summary; a request a person submitted carries no marker. The block draws no
-step line: the row's `flow_steps` is the flow graph's first branch at every
-decision, not the route this request takes, and the row proves only its own
-step, which the page header names. The record approvals panel draws the line
-from the run's own request rows instead. The marker is the Approval Center's
-`approvalsInbox.flowOrigin` row.
+summary; a request a person submitted carries no marker. Below the summary,
+the block draws the vertical step line of the request's own route
+(`flow_route`, served by the approvals get) when it has more than one step,
+at any status: the steps the request's flow run passed, its own step, and,
+while it is pending, the steps ahead that the flow's graph alone decides.
+Past an undecided branch nothing is drawn. The line is the same stepper the
+record approvals panel draws, it never scrolls sideways, and it never draws
+the row's `flow_steps`, the flow graph's first branch at every decision. The
+marker and the line's accessible name are the Approval Center's
+`approvalsInbox.*` rows.
 
 ## User-scoped state (favorites, recent items)
 
@@ -1544,8 +1549,8 @@ const request: Pick<AppShellRuntimeConfig, 'hideSingleAppSwitcher'> = {
 - 📦 [npm package](https://www.npmjs.com/package/@object-ui/app-shell)
 - 📝 [Changelog](./CHANGELOG.md)
 - 🐛 [Report an issue](https://github.com/objectstack-ai/objectui/issues)
-- 🤝 [Contributing Guide](https://github.com/objectstack-ai/objectui/blob/main/CONTRIBUTING.md)
-- 🗺️ [Roadmap](https://github.com/objectstack-ai/objectui/blob/main/ROADMAP.md)
+- 🤝 [Contributing Guide](https://github.com/objectstack-ai/objectstack/blob/main/CONTRIBUTING.md)
+- 🗺️ [Roadmap](https://github.com/objectstack-ai/objectstack/blob/main/ROADMAP.md)
 
 ## License
 

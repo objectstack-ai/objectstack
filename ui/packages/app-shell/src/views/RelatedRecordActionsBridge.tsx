@@ -15,7 +15,12 @@
  * create/edit form pages, or the per-object lifecycle affordances. This bridge
  * (mounted inside the page's `ActionProvider`) closes that gap:
  *
- *   - 查看详情 → navigate to the child record's detail route
+ *   - 查看详情 → under a record drawer host (objectstack#26679), open the
+ *                 child record in that drawer, one level down, with the rows
+ *                 its list showed as the level's ↑ ↓ set — unless the child
+ *                 object declares another way of opening; elsewhere, navigate
+ *                 to the child record's detail route. A lookup value takes
+ *                 the same door (`openRecord`).
  *   - 增 / 改   → open the child form as an OVERLAY on the parent detail
  *                 (objectstack-ai/objectstack#2604 D3: a child task's return target is ALWAYS the parent
  *                 detail with the subtable refreshed — never a route, which
@@ -91,6 +96,7 @@ import { RECORD_FORM_PARAM, RECORD_FORM_OBJECT_PARAM, RECORD_FORM_LINK_PARAM, RE
 import { documentHref } from './documentHref.js';
 import { exactRecordListFilter, recordListPath } from './useOpenRecordList.js';
 import { resolveRecordFormTarget } from '../utils/recordFormNavigation.js';
+import { opensInRecordDrawer, useRecordDrawer } from './recordDrawerContext.js';
 
 /**
  * Notify open related lists for `objectName` to refetch.
@@ -383,16 +389,32 @@ export function RelatedRecordActionsBridge({
     [recordPath, routerRootHref],
   );
 
+  /** The record drawer host this bridge sits under, if any (objectstack#26679). */
+  const drawer = useRecordDrawer();
+
   /**
-   * SPA-navigate to the destination {@link recordHref} addresses — by its
-   * router path, because `navigate` applies the basename itself.
+   * Open the record {@link recordHref} addresses. Under a record drawer host
+   * — the list's drawer, a record drawn in it, or a record page — a record
+   * whose object opens in the drawer opens there, one level down
+   * (objectstack#26679), with `siblings` as its ↑ ↓ set and this bridge's
+   * record as the level being left. Otherwise SPA-navigate by its router
+   * path, because `navigate` applies the basename itself. Either way only a
+   * routable target opens, as before: the drawer's ⤢ goes to that route.
    */
   const openRecord = useCallback(
-    (objectName: string, recordId: string | number) => {
+    (objectName: string, recordId: string | number, siblings?: ReadonlyArray<string | number>) => {
       const path = recordPath(objectName, recordId);
-      if (path) navigate(path);
+      if (!path) return;
+      if (drawer && opensInRecordDrawer(objects.find((o: any) => o?.name === objectName))) {
+        drawer.open(objectName, recordId, {
+          ...(siblings ? { siblings } : {}),
+          ...(parentTitle ? { fromTitle: parentTitle } : {}),
+        });
+        return;
+      }
+      navigate(path);
     },
-    [recordPath, navigate],
+    [recordPath, navigate, drawer, objects, parentTitle],
   );
 
   // objectstack-ai/objectstack#2604 D3 — open a child create/edit task as the console's global record
@@ -550,7 +572,7 @@ export function RelatedRecordActionsBridge({
         const handlers: RelatedRecordHandlers = {
           // Viewing a child record is always allowed when the list is visible.
           // Same route the lookup links address — `recordPath` above.
-          onView: (id) => openRecord(objectName, id),
+          onView: (id, _record, siblings) => openRecord(objectName, id, siblings),
         };
 
         /**
@@ -653,7 +675,7 @@ export function RelatedRecordActionsBridge({
         return handlers;
       },
       recordHref,
-      openRecord,
+      openRecord: (objectName: string, recordId: string | number) => openRecord(objectName, recordId),
     }),
     // `parentRecord` / `parentObjectFields` / `predicateScope` join the deps for
     // the #4646 create predicates: a parent record that changes (a save, a

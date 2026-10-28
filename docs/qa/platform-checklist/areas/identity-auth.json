@@ -660,7 +660,7 @@
       "title": "Personal API key: minted show-once on Connect-an-Agent, authenticates as its owner, revoke kills it and restore brings it back — mine-view scoped",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["a signed-in member (key owner)", "platform admin", "the key itself (machine caller via x-api-key)"],
@@ -672,13 +672,13 @@
         ]
       },
       "steps": [
-        "as a signed-in member, open the developer Integrations page (/_console/apps/com.objectstack.account/developer/integrations) → 'Connect an AI agent (MCP)' (AgentConnectSection), type a key name and click Generate key; screenshot the show-once dialog",
+        "as a signed-in member, open the developer Integrations page (/_console/apps/com.objectstack.account/developer/integrations) → 'Connect an AI agent (MCP)' (AgentConnectSection), type a key name and click Generate key, then confirm (minting is two clicks); screenshot the show-once dialog",
         "capture the mint response: POST /api/v1/keys returns data.key (the raw secret) exactly once, plus id / name / prefix",
-        "record the raw secret, close the dialog, then re-open the API Keys list (sys_api_key `mine` view) and confirm the row shows only the prefix — the raw key is never shown again (the stored `key` column is hashed + hidden)",
+        "record the raw secret, close the dialog, then re-open the API Keys list (sys_api_key `mine` view, /_console/apps/com.objectstack.account/sys_api_key/view/mine — its nav entry sits in the collapsed Developer group) and confirm the row shows only the prefix — the raw key is never shown again (the stored `key` column is hashed + hidden)",
         "call a data route as the machine caller: GET /api/v1/data/sys_session with header x-api-key: RAW_SECRET (NOT a session cookie/Bearer) and capture the 200 + that the rows returned are the OWNER's row-level-security view (the key acts as the user): only the owner's own sessions, as the owner reads with a session — while an admin's session read of the same route returns other users' rows too",
         "revoke the key via the row action revoke_api_key (PATCH /api/v1/data/sys_api_key/{id} bodyExtra {revoked:true}); immediately re-call the data route with x-api-key and capture the 403 whose body's error.code is API_KEY_REVOKED and which carries no rows (a recognised key its own lifecycle refuses — only an UNKNOWN key gets the generic 401)",
         "restore via restore_api_key (PATCH … {revoked:false}); re-call and capture the 200 again — the lifecycle is reversible",
-        "mine-view scoping: sign in as a DIFFERENT member and confirm the sys_api_key `mine` view (filter user_id={current_user_id}) does NOT list the first user's key; then as admin open Setup → API Keys (the `all_keys` view, nav gated on manage_platform_settings) and confirm every user's key is listed",
+        "mine-view scoping: sign in as a DIFFERENT member and confirm the sys_api_key `mine` view (filter user_id={current_user_id}) does NOT list the first user's key; then as admin open Setup → API Keys (the `all_keys` view, /_console/apps/com.objectstack.setup/sys_api_key/view/all_keys, nav gated on manage_platform_settings) and confirm every user's key is listed",
         "attempt to read the raw secret back via the data API (GET /api/v1/data/sys_api_key/{id}) and confirm the `key` field is absent/hidden — only the prefix is ever returned"
       ],
       "acceptance": [
@@ -742,6 +742,12 @@
           "date": "2026-10-19",
           "change": "source[2] corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24538, identity-auth.api-key-ui-lifecycle; wave anchor #24579 §3): the citation said sys_api_key declares apiMethods ['get','list']; packages/platform-objects/src/identity/sys-api-key.object.ts declares ['get','list','update'], which is why the revoke/restore PATCH answers 200. Citation only; behaviour and clauses unchanged",
           "ref": "#24632"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-27",
+          "change": "steps[0], steps[2] and steps[6] name the two API Keys routes and the mint's confirm click. Checklist-accuracy findings of the 18.2.0 wave 2 (QA run #26456, release-18.2.0-w2-manual-browser, at 756220c4; wave anchor #25807, slice A): the API Keys nav sits in a collapsed Developer group, so the run navigated by route, and minting takes Generate key then a confirm. No clause changed",
+          "ref": "#25807"
         }
       ]
     },
@@ -1490,7 +1496,7 @@
       "title": "Enrollment is inert until one correct TOTP verifies on the session lane — and the run records what sys_two_factor.verified actually carries in between",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": ["a signed-in user mid-enrollment (session lane)", "the same user at the sign-in challenge (cookie lane)"],
@@ -1498,7 +1504,7 @@
         "app": "showcase",
         "requires": [
           "2FA armed BEFORE boot (OS_AUTH_TWO_FACTOR=true precedes bootStack, or the Setup mfa_required toggle forces plugins.twoFactor on — see identity-auth.two-factor-enrollment-reveal's fixtures for the full arming note; every clause here sits behind the same assert-armed guard)",
-          "an in-process harness (bootStack + an ObjectQL system read, exactly the lockout pin's rig) — sys_two_factor's REST surface is get-by-id only (apiMethods ['get']), so reading the enrollment row's verified flag needs the system-context read, not a REST list",
+          "an in-process harness (bootStack + an ObjectQL system read, exactly the lockout pin's rig) — sys_two_factor's REST surface is get-by-id only (apiMethods ['get']), so reading the enrollment row's verified flag needs the system-context read, not a REST list. On a live boot a read-only read of the row from the boot's DB file is equivalent (QA run #26476 read verified that way; identity-auth.two-factor-backup-codes fixtures.requires[2] names the file)",
           "TOTP codes from the copied RFC 6238 helper (two-factor-lockout.dogfood.test.ts); no OTP dependency may be added"
         ],
         "knownGaps": [
@@ -1562,7 +1568,13 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-20", "change": "authored in the scoped scan-functionality (扫描功能) coverage sweep: the enable→verify→active transition existed only as uncited test SETUP in the lockout pin. Encodes the inert-until-verified contract, the session-lane/cookie-lane split, and the verified-defaultValue:true latent-default probe (observe-and-flag, worded as suspicion not fact)", "ref": "claude/new-session-0pv25p" },
-        { "revision": 2, "date": "2026-10-17", "change": "steps[3] and acceptance[1] (clause, verify, evidence) re-pointed (checklist-accuracy finding of the identity-auth slice report on #23878 (6216631966)). The cookie-lane verify-totp the step asked for cannot be driven: an unverified enrolment interposes no challenge at the password stage, so there is no two-factor cookie and the TOTP_NOT_ENABLED branch is unreachable over HTTP. Inertness is now read where it shows — the password sign-in answers without twoFactorRedirect and two_factor_enabled stays false — and the in-process refusal is cited from the lockout pin. Not loosened: an unverified factor that takes part in a sign-in still FAILS", "ref": "#24036" }
+        { "revision": 2, "date": "2026-10-17", "change": "steps[3] and acceptance[1] (clause, verify, evidence) re-pointed (checklist-accuracy finding of the identity-auth slice report on #23878 (6216631966)). The cookie-lane verify-totp the step asked for cannot be driven: an unverified enrolment interposes no challenge at the password stage, so there is no two-factor cookie and the TOTP_NOT_ENABLED branch is unreachable over HTTP. Inertness is now read where it shows — the password sign-in answers without twoFactorRedirect and two_factor_enabled stays false — and the in-process refusal is cited from the lockout pin. Not loosened: an unverified factor that takes part in a sign-in still FAILS", "ref": "#24036" },
+        {
+          "revision": 3,
+          "date": "2026-10-27",
+          "change": "fixtures.requires[1] names the DB-file read as the live-boot equivalent of the system-context read. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26476, release-18.2.0-w2-manual-api, at 756220c4; wave anchor #25807, slice A): the run read sys_two_factor.verified from the DB file, which the item did not name. No clause changed",
+          "ref": "#25807"
+        }
       ]
     },
     {
@@ -1681,7 +1693,7 @@
       "title": "Disable tears the factor down completely — row gone, flag off, next sign-in unchallenged, stale backup codes dead — is password-gated server-side, and under mfa_required re-gates through the grace-clock machinery",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": ["a user with an ACTIVE (verified) enrollment disabling it", "the same user post-disable at a fresh sign-in", "for the mfa_required clause: the same user under an enforced-MFA boot"],
@@ -1690,7 +1702,7 @@
         "requires": [
           "2FA armed BEFORE boot + an ACTIVE enrollment with retained backup codes (run the enrollment items' sequence first on the same boot)",
           "for the re-gate clause: a boot (or Setup patch) with mfa_required on — the toggle itself forces plugins.twoFactor on (auth-plugin.ts), so this variant needs no separate env arming",
-          "in-process system reads (sys_two_factor REST is get-by-id only; post-disable the row's ABSENCE is the assertion, which needs the system-context find)"
+          "in-process system reads (sys_two_factor REST is get-by-id only; post-disable the row's ABSENCE is the assertion, which needs the system-context find). On a live boot a read-only read of the boot's DB file is equivalent (QA run #26476 read it that way; identity-auth.two-factor-backup-codes fixtures.requires[2] names the file)"
         ],
         "knownGaps": [
           "browser lane blocked(dependency) — same standing gap as the sibling two-factor items (no app mounts sys_two_factor; the sys_user disable action is navigable but the item's teardown proofs are all API/row assertions anyway)"
@@ -1704,7 +1716,7 @@
         "fresh password sign-in: the response is a full session with NO twoFactorRedirect and no two-factor cookie — the challenge is gone, not just the row",
         "fire POST /two-factor/verify-backup-code with a retained unspent code anyway (no challenge cookie exists to carry it) and capture the refusal — stale codes are dead, not dormant",
         "re-enable + verify to confirm the lifecycle is repeatable (a fresh secret, fresh codes — the old secret's TOTP codes must not verify the new enrollment)",
-        "mfa_required variant (separate boot or Setup patch): with enforced MFA on, disable the active enrollment and record what ACTUALLY happens next, against the source's machinery (auth-manager.ts computeAuthGate): the disable itself is NOT refused anywhere in the source; on the next request the gate sees required-but-unenrolled and answers 403 MFA_REQUIRED only once mfa_grace_period_days (default 7) have elapsed from sys_user.mfa_required_at — a stamp written LAZILY the first time the user is seen unenrolled and, as far as the source shows, never cleared on enrollment. So the post-disable posture depends on that stamp: an old elapsed stamp gates immediately; no stamp opens a fresh grace window. Record the stamp value and the observed branch",
+        "mfa_required variant (separate boot or Setup patch — the settings door is PUT /api/settings/auth with mfa_required and mfa_grace_period_days, outside /api/v1, where /api/v1/settings/auth answers 404; restore both values afterwards): with enforced MFA on, disable the active enrollment and record what ACTUALLY happens next, against the source's machinery (auth-manager.ts computeAuthGate): the disable itself is NOT refused anywhere in the source; on the next request the gate sees required-but-unenrolled and answers 403 MFA_REQUIRED only once mfa_grace_period_days (default 7) have elapsed from sys_user.mfa_required_at — a stamp written LAZILY the first time the user is seen unenrolled and, as far as the source shows, never cleared on enrollment. So the post-disable posture depends on that stamp: an old elapsed stamp gates immediately; no stamp opens a fresh grace window. Record the stamp value and the observed branch",
         "while gated (if the gate engaged), confirm the /two-factor/* enrollment endpoints still answer — the re-gate must leave the compliance path open (the mfa_required toggle forces the plugin on for exactly this reason, per its own comment)"
       ],
       "acceptance": [
@@ -1741,7 +1753,7 @@
         {
           "clause": "OBSERVE-AND-RECORD — the mfa_required re-gate follows the grace-clock machinery, not a hard block on disable: the source refuses the disable nowhere; re-gating is computeAuthGate answering 403 MFA_REQUIRED for a required-but-unenrolled user once the grace window from sys_user.mfa_required_at elapses, and that stamp is written lazily on first sight of non-enrollment and (per the source) never cleared afterward — so whether the gate bites immediately after a disable or opens a fresh grace window depends on the stamp the user already carries. The run records the stamp, the branch observed, and — the 'not stranded' half — that the /two-factor/* enrollment endpoints remain reachable while gated (mfa_required forces plugins.twoFactor on so gated users can comply). An accurate record satisfies the clause; a gated user whose enrollment endpoints 404 is the FAIL",
           "oracle": "api",
-          "verify": "under an mfa_required boot: disable 200 → read sys_user.mfa_required_at → drive an authed request and record 2xx-in-grace vs 403 MFA_REQUIRED → while gated (or with the grace shrunk via mfa_grace_period_days=0), POST /two-factor/enable answers non-404. Source: auth-manager.ts computeAuthGate (lazy stamp, fail-open catch) + auth-plugin.ts (the forcing)",
+          "verify": "under an mfa_required boot: disable 200 → read sys_user.mfa_required_at → drive an authed request and record 2xx-in-grace vs 403 MFA_REQUIRED, and the gate the session reports at user.authGate → while gated (or with the grace shrunk via mfa_grace_period_days=0), POST /two-factor/enable answers non-404. Source: auth-manager.ts computeAuthGate (lazy stamp, fail-open catch) + auth-plugin.ts (the forcing)",
           "evidence": "the recorded branch + stamp + the enrollment-endpoint reachability probe"
         }
       ],
@@ -1760,7 +1772,13 @@
         "packages/qa/dogfood/test/two-factor-lockout.dogfood.test.ts (arming + challenge rig + TOTP helper precedent, as on the sibling items)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-20", "change": "authored in the scoped scan-functionality (扫描功能) coverage sweep: disable had zero coverage. Encodes full teardown (row/flag/challenge/stale codes), the server-side password gate with negative-first ordering, and the mfa_required re-gate clause worded against the ACTUAL source machinery (lazy never-cleared grace stamp, computeAuthGate) rather than an assumed hard block", "ref": "claude/new-session-0pv25p" }
+        { "revision": 1, "date": "2026-08-20", "change": "authored in the scoped scan-functionality (扫描功能) coverage sweep: disable had zero coverage. Encodes full teardown (row/flag/challenge/stale codes), the server-side password gate with negative-first ordering, and the mfa_required re-gate clause worded against the ACTUAL source machinery (lazy never-cleared grace stamp, computeAuthGate) rather than an assumed hard block", "ref": "claude/new-session-0pv25p" },
+        {
+          "revision": 2,
+          "date": "2026-10-27",
+          "change": "fixtures.requires[2] names the DB-file read; steps[7] names the settings door; acceptance[5].verify names user.authGate. Checklist-accuracy findings of the 18.2.0 wave 2 (QA run #26476, release-18.2.0-w2-manual-api, at 756220c4; wave anchor #25807, slice A): the run read the rows from the DB file, toggled mfa_required at /api/settings/auth after /api/v1/settings/auth answered 404, and found the gate at user.authGate. Re-read at base e4ba846f (service-settings auth.manifest.ts: namespace auth, keys mfa_required and mfa_grace_period_days; settings-service-plugin.ts: routes at /api/settings). No clause's assertion changed",
+          "ref": "#25807"
+        }
       ]
     },
     {
@@ -1768,7 +1786,7 @@
       "title": "Zero-user first-run: the /setup owner wizard serves even under OS_DISABLE_SIGNUP, creates the owner + names the personal org through a full-document exit, and every bootstrap bypass closes the moment an owner exists",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["anonymous visitor on a zero-user boot (the would-be owner)", "the created owner (post-bootstrap)", "a second anonymous visitor (post-bootstrap forger)"],
@@ -1785,12 +1803,12 @@
         ]
       },
       "steps": [
-        "boot zero-user with OS_DISABLE_SIGNUP=true exported and --no-seed-admin on a fresh DB; wait for the serving line (first-boot compile/seed work reads as downtime — trap)",
+        "boot zero-user with OS_DISABLE_SIGNUP=true exported and --no-seed-admin on a fresh DB (such a boot seeds no demo personas either, so a step needing a second user mints one); wait for the serving line (first-boot compile/seed work reads as downtime — trap)",
         "as anonymous, GET /api/v1/auth/bootstrap-status — public, no credentials — and capture {hasOwner:false} (the route is exempted from the plugin's auth wall alongside /config, auth-plugin.ts; ledgered GET /api/v1/auth/bootstrap-status = auth.bootstrapStatus, auth-route-ledger.ts)",
         "open /setup in a fresh browser context: the first-run wizard renders (SetupRoute mode 'first-run'; the verdict comes from useSetupEntryMode over the same bootstrap-status probe, gated on being unauthenticated — objectui#2794)",
         "fill owner name/email/password AND an organization name — run at least once with a CJK-or-emoji-only org name (slugify('') guard: the DISPLAY rename must still apply, SetupPage keeps the slug) — and submit",
         "capture the network: the wizard drives POST /api/v1/auth/sign-up/email and it SUCCEEDS despite OS_DISABLE_SIGNUP=true — the before-hook flips disableSignUp off for exactly this request when isBootstrapCreation() (auth-manager.ts; comment), and the audience gate's isBootstrap arm admits it under the default invite_only posture (audience-posture.ts)",
-        "capture the exit: a FULL-DOCUMENT navigation (window.location.assign), never a SPA route change — the landing console renders the owner's world, not the anonymous-era empty app list (the objectui#4181 hazard, SetupPage.tsx)",
+        "capture the exit: a FULL-DOCUMENT navigation (window.location.assign), never a SPA route change — the run saw two document loads, to /_console/ and then landing on /_console/home — the landing console renders the owner's world, not the anonymous-era empty app list (the objectui#4181 hazard, SetupPage.tsx)",
         "verify server state: GET /api/v1/auth/get-session identifies the owner; GET /api/v1/auth/organization/list shows the auto-provisioned org carrying the TYPED display name (the wizard renames the bootstrap org — it must NOT create a second one; single-org mode forbids createOrganization)",
         "bypass closed, door 1: on the same OS_DISABLE_SIGNUP=true boot, now that a human user exists, forge POST /api/v1/auth/sign-up/email from TWO addresses: an UNINVITED anonymous address is refused first by the audience gate, 403 SELF_REGISTRATION_CLOSED (invite_only), so it cannot show the toggle; have the owner invite a second address and forge that one — it passes the audience gate and the re-enforced toggle refuses it, 400 EMAIL_PASSWORD_SIGN_UP_DISABLED. The invited address is the one that proves door 1",
         "bypass closed, door 2: on the stock contrast boot (owner exists, no OS_DISABLE_SIGNUP), the same forge refuses 403 SELF_REGISTRATION_CLOSED — the default audience posture invite_only closes it (audience-posture.ts); record WHICH door refused on each boot",
@@ -1854,7 +1872,13 @@
       "history": [
         { "revision": 1, "date": "2026-08-30", "change": "authored in the 2026-08-30 coverage sweep ([x2] hit, angles 1+4): the zero-user first-run wizard had no item. Encodes the public bootstrap-status door, the deliberate disableSignUp + audience-gate bypass scoped to the zero-user state, the full-document exit hazard (objectui#4181), the rename-not-create org contract, both closed-door contrasts, and /setup's two meanings (objectui#2794); recorded the rows-vs-humans divergence between the two bootstrap probes as observe-and-record", "ref": "#sweep-2026-08-30" },
         { "revision": 2, "date": "2026-10-17", "change": "steps[7] and acceptance[4] (verify, evidence) corrected (checklist-accuracy finding of the identity-auth slice report on #23878 (6216631966)). On the OS_DISABLE_SIGNUP boot an uninvited forge is refused first by the audience gate (403 SELF_REGISTRATION_CLOSED, invite_only), so door 1 — the re-enforced toggle — was never reached by the step's anonymous visitor; only an invited address reaches it, answering 400 EMAIL_PASSWORD_SIGN_UP_DISABLED. The step adds the owner's invitation and the clause names which address proves which door. Not loosened: every forged sign-up after the owner exists must still be refused with no row written", "ref": "#24036" },
-        { "revision": 3, "date": "2026-10-20", "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). acceptance[0].verify cited lines 1936-1949 of auth-plugin.ts and source[6] line 339 of the cli dev.ts in the comma-range spelling (authored in 45397edf53 as the lists 1895 and 1936-1949, and 141-142 and 339). At that commit 1936-1949 were the ADR-0069 D5 network-gating middleware in registerAuthRoutes that lets /config and /bootstrap-status through, and 339 was the seedAdmin default; at this base both have moved. acceptance[0].verify now anchors auth-plugin.ts#registerAuthRoutes and source[6] anchors dev.ts#seedAdmin. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed", "ref": "#24752" }
+        { "revision": 3, "date": "2026-10-20", "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). acceptance[0].verify cited lines 1936-1949 of auth-plugin.ts and source[6] line 339 of the cli dev.ts in the comma-range spelling (authored in 45397edf53 as the lists 1895 and 1936-1949, and 141-142 and 339). At that commit 1936-1949 were the ADR-0069 D5 network-gating middleware in registerAuthRoutes that lets /config and /bootstrap-status through, and 339 was the seedAdmin default; at this base both have moved. acceptance[0].verify now anchors auth-plugin.ts#registerAuthRoutes and source[6] anchors dev.ts#seedAdmin. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed", "ref": "#24752" },
+        {
+          "revision": 4,
+          "date": "2026-10-27",
+          "change": "steps[0] says a --no-seed-admin boot has no demo personas; steps[5] records the exit's two document loads. Checklist-accuracy findings of the 18.2.0 wave 2 (QA run #26456, release-18.2.0-w2-manual-browser, at 756220c4; wave anchor #25807, slice A). No clause changed",
+          "ref": "#25807"
+        }
       ]
     },
     {
@@ -1862,7 +1886,7 @@
       "title": "Self-signup gate: the default audience posture (invite_only) refuses at the server with a LOUD code, a pending invitation carves through, and OS_DISABLE_SIGNUP bounces the UI AND the endpoint — the console offers the register form only to a visitor the server would admit (an invitation redirect, or a deployment with no owner) and explains the by-invitation rule to everyone else; the form is never the gate",
       "since": "v17",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["anonymous uninvited registrant", "an invited email's registrant", "org admin (mints the invitation)", "env owner (sets OS_DISABLE_SIGNUP)"],
@@ -1880,7 +1904,7 @@
         ]
       },
       "steps": [
-        "stock boot (the seeded admin exists, so the deployment has an owner): GET /api/v1/auth/config and record features.audiencePosture ('invite_only') and emailPassword.disableSignUp (false) — then confirm the login page offers NO generic sign-up link and /register renders the by-invitation notice (data-testid register-by-invitation — judge the testid and the absent form, not the notice's sentence, whose wording moves between console builds: the step used to quote 'not open on this environment', and the console pin 4016370a reads 'not open on this system') with NO form. The form is offered only where the server would admit the visitor: a visitor bounced from an invitation (/login?redirect=/accept-invitation/ID, which the login page forwards to /register) or a deployment with no owner yet (GET /api/v1/auth/bootstrap-status answers hasOwner false) — objectui decideSignUpOffer (objectui#11691, objectui#11705). The server side is unchanged and DELIBERATE: the posture does not force disableSignUp, because hiding the form outright would dead-end invited users (getPublicConfig comment, auth-manager.ts); the console reads both keys instead",
+        "stock boot (the seeded admin exists, so the deployment has an owner): GET /api/v1/auth/config and record features.audiencePosture ('invite_only') and emailPassword.disableSignUp (false) — then confirm the login page offers NO generic sign-up link and /register renders the by-invitation notice (data-testid register-by-invitation — judge the testid and the absent form, not the notice's sentence, whose wording moves between console builds: the step used to quote 'not open on this environment', and the console pin 4016370a reads 'not open on this system') with NO form. The form is offered only where the server would admit the visitor: a visitor bounced from an invitation (/login?redirect=/accept-invitation/ID renders an 'Accept your invitation' card whose 'Create an account and join' link leads to /register; it does not forward there by itself) or a deployment with no owner yet (GET /api/v1/auth/bootstrap-status answers hasOwner false) — objectui decideSignUpOffer (objectui#11691, objectui#11705). The server side is unchanged and DELIBERATE: the posture does not force disableSignUp, because hiding the form outright would dead-end invited users (getPublicConfig comment, auth-manager.ts); the console reads both keys instead",
         "POST /api/v1/auth/sign-up/email directly for an UNINVITED address (the stock /register offers an uninvited visitor no form — step 1): capture the 403 with code SELF_REGISTRATION_CLOSED — a loud, deterministic refusal, NOT a synthetic 200. The sign-up route raises the audience refusal BEFORE better-auth's anti-enumeration shield can swallow a creation-seam 403 into a fake success (auth-manager.ts — the measured black-hole this ordering exists to prevent)",
         "confirm no sys_user row was created for the refused address (admin read)",
         "carve-out: as admin mint an invitation for a fresh email, then sign up with EXACTLY that email on the same stock boot — admitted (a pending, unexpired sys_invitation trumps the posture; audience-posture.ts)",
@@ -1960,6 +1984,12 @@
           "date": "2026-10-20",
           "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). variants[0] and variants[1] cited lines 398-402 and 411-421 of audience-posture.ts, and source[3] and source[4] objectui RegisterPage.tsx 69-88 and LoginPage.tsx 136 and 298, in the comma-range spelling (authored in 45397edf53). At that commit the audience-posture lines were decideAudienceAdmission's pending-invitation branch and its email_domain case; at this base both have moved, and the variants now anchor audience-posture.ts#decideAudienceAdmission and #emailDomainAllowed. At the objectui pin 45397edf53 shipped, 9602dc820450, the RegisterPage lines were its getAuthConfig probe that bounced to /login on disableSignUp, and the LoginPage lines its signUpDisabled state and the registerUrl it withheld. At the shipped pin 12dc7b47c340 both pages decide through decideSignUpOffer, whose 'closed' answer is disableSignUp, and the signUpDisabled state is gone; source[3] and source[4] now say so. objectui is read at the shipped pin 12dc7b47c340 and cited in prose, because no objectui anchor resolves in this gate. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed",
           "ref": "#24752"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-27",
+          "change": "steps[0] stops saying the login page forwards an invitation bounce to /register. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26456, release-18.2.0-w2-manual-browser, at 756220c4; wave anchor #25807, slice A): the console renders an 'Accept your invitation' card with a 'Create an account and join' link and no automatic forward. No clause changed",
+          "ref": "#25807"
         }
       ]
     },

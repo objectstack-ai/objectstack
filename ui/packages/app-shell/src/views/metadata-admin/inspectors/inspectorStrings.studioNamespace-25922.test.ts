@@ -1,12 +1,14 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * objectstack#25922 slices S2 to S5 — the designer rows that moved into
+ * objectstack#25922 slices S2 to S6b — the designer rows that moved into
  * `@object-ui/i18n`'s `studio` namespace (every `engine.inspector.*` row;
- * `engine.packages.*`, `engine.form.*`, `engine.edit.*`; `engine.studio.*` but
- * its inspector; the data source pages, the field types and the metadata
- * preview panes), and app-shell's `t()` / `tOptional()` still answer every one
- * of them the way they did when the rows sat in its own table.
+ * `engine.packages.*`, `engine.form.*`, `engine.edit.*`; all of
+ * `engine.studio.*`; the data source pages, the field types, the metadata
+ * preview panes, the flow designer, the rest of the Studio chrome and, last,
+ * the translation preview), and
+ * app-shell's `t()` / `tOptional()` still answer every one of them the way they
+ * did when the rows sat in its own table.
  *
  * What would break it:
  *   - a row copied back into the app-shell table with a different value — the
@@ -78,15 +80,68 @@ const FAMILY_FLOOR: Readonly<Record<string, number>> = Object.freeze({
   'engine.viewPreview.': 4,
   'engine.objectPreview.': 1,
   'engine.previewShell.': 1,
+  // S6 — the rest of the table (engine.translationPreview aside): the flow
+  // designer, the page-block canvas, the doc and book previews, the Studio
+  // inspector and the remaining chrome
+  'engine.studio.inspector.': 30,
+  'engine.flowSim.': 60,
+  'engine.flowCanvas.': 20,
+  'engine.flowRuns.': 18,
+  'engine.flowPreview.': 15,
+  'engine.flowScope.': 15,
+  'engine.flowValidate.': 15,
+  'engine.flowProblems.': 9,
+  'engine.flowPalette.': 8,
+  'engine.flowExpr.': 6,
+  'engine.flowRef.': 5,
+  'engine.flowRegion.': 4,
+  'engine.pageBlockCanvas.': 55,
+  'engine.list.': 30,
+  'engine.docPreview.': 25,
+  'engine.catalog.': 25,
+  'engine.bookPreview.': 20,
+  'engine.sharingRule.': 15,
+  'engine.widgetPicker.': 15,
+  'engine.layers.': 15,
+  'engine.diagnostics.': 15,
+  'engine.directory.': 14,
+  'engine.draftConflict.': 10,
+  'engine.validation.': 10,
+  'engine.position.': 9,
+  'engine.appNav.': 8,
+  'engine.embedded.': 7,
+  'engine.quickfind.': 5,
+  'engine.badge.': 3,
+  'engine.fieldsListEditor.': 3,
+  'engine.typeAction.': 2,
+  'engine.celTest.': 2,
+  'engine.sourcePageEditor.': 2,
+  'engine.condition.': 2,
+  'engine.celLint.': 1,
+  'engine.package.': 1,
+  'engine.breadcrumb.': 1,
+  'engine.repeater.': 1,
+  'engine.viewColumnPanes.': 1,
+  'engine.home.': 1,
+  'engine.cancel': 1,
+  'engine.close': 1,
+  // S6b — the translation preview, the table's last family
+  'engine.translationPreview.': 20,
 });
 
 /**
- * The one zh-only family among the moved rows: the package form's help text,
- * whose English is the producer's own `.describe()` sentence and is read
- * through `tOptional` (`ZH_ONLY_FAMILIES` in
- * `ui/scripts/check-i18n-designer-table-parity.mjs` carries the reason).
+ * The zh-only families among the moved rows, with the fewest keys each may
+ * carry. The package form's help text reads its English from the producer's own
+ * `.describe()` sentence; the flow node labels and hints and the flow enum
+ * values read theirs from the engine descriptor or the value itself. Each is
+ * read through `tOptional` or a `lookupString` fallback (`ZH_ONLY_FAMILIES` in
+ * `ui/scripts/check-i18n-designer-table-parity.mjs` carries the reasons).
  */
-const ZH_ONLY_PREFIX = 'engine.packages.form.help.';
+const ZH_ONLY_FLOOR: Readonly<Record<string, number>> = Object.freeze({
+  'engine.packages.form.help.': 9,
+  'engine.flowNode.': 40,
+  'engine.enum.': 4,
+});
 
 const familyKeys = (prefix: string): string[] => Object.keys(EN).filter((key) => key.startsWith(prefix));
 
@@ -110,9 +165,9 @@ describe('moved designer rows answer from the studio namespace (objectstack#2592
     expect(wrong).toEqual([]);
   });
 
-  it('the zh-only package help rows stay optional lookups: zh answers, en finds nothing', () => {
-    const keys = Object.keys(ZH).filter((key) => key.startsWith(ZH_ONLY_PREFIX));
-    expect(keys.length).toBeGreaterThanOrEqual(9);
+  it.each(Object.entries(ZH_ONLY_FLOOR))('%s: the zh-only rows stay optional lookups: zh answers, en finds nothing', (prefix, floor) => {
+    const keys = Object.keys(ZH).filter((key) => key.startsWith(prefix));
+    expect(keys.length).toBeGreaterThanOrEqual(floor);
     expect(keys.filter((key) => key in EN)).toEqual([]);
     expect(keys.filter((key) => tOptional(key, 'zh-CN') !== ZH[key])).toEqual([]);
     expect(keys.filter((key) => tOptional(key, 'en-US') !== undefined)).toEqual([]);

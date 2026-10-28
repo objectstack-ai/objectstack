@@ -52,7 +52,7 @@ import {
 import { useRecordSearch } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import { useTheme } from './ThemeProvider.js';
-import { useNavVisibility } from '../hooks/useNavMemberGates.js';
+import { navEntriesShownToMember, useNavMemberGates, type NavMemberGates } from '../hooks/useNavMemberGates.js';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { resolveKeyedI18nLabel, getRecordDisplayName, appRouteSegment } from '../utils/index.js';
 import { getIcon } from '../utils/getIcon.js';
@@ -73,6 +73,7 @@ import { fetchPackages, type PkgEntry } from '../views/studio-design/packages-io
 import { isPackageLessItem, studioOrgScopePath } from '../views/studio-design/studioScope.js';
 import { DESIGNER_SURFACE_PARAM, formatSurfaceParam } from '../views/metadata-admin/nav-selection.js';
 import { flattenNavigation, useAppReportEntries } from '../views/appReportIndex.js';
+import { useServedApps } from '../hooks/useLauncherApps.js';
 
 /** The palette of the active app: the frame `ConsoleLayout` draws for `/apps/APP`. */
 interface AppCommandPaletteProps {
@@ -144,12 +145,29 @@ export function CommandPalette(props: CommandPaletteProps) {
         setOpen(false);
       }}
     >
-      <CommandPaletteBody {...props} />
+      {props.scope === 'studio' ? <CommandPaletteBody {...props} gates={null} /> : <AppCommandPaletteBody {...props} />}
     </ErrorBoundary>
   );
 }
 
-function CommandPaletteBody(props: CommandPaletteProps) {
+/**
+ * The app scope's palette, with the member's navigation gates, the sidebar's
+ * (objectstack#26892), for the app it lists: inside an app that is the
+ * frame's app; on Home, whose expression scope binds none, it is the host app.
+ * Built here, not in the body: the `studio` scope has no app, so it asks for
+ * no gate and reads nothing until it opens.
+ */
+function AppCommandPaletteBody(props: AppCommandPaletteProps) {
+  const gates = useNavMemberGates(props.activeApp ?? undefined);
+  return <CommandPaletteBody {...props} gates={gates} />;
+}
+
+/**
+ * `gates`: the member's navigation gates in the app scope, `null` in the
+ * `studio` scope, which has no navigation and lists no app report.
+ */
+function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates | null }) {
+  const { gates } = props;
   const inStudio = props.scope === 'studio';
   const { apps, activeApp, objects, onAppChange, dataSource } = inStudio ? NO_APP : props;
   const { open, setOpen } = useCommandPalette();
@@ -157,10 +175,6 @@ function CommandPaletteBody(props: CommandPaletteProps) {
   const navigate = useNavigate();
   const { appName } = useParams();
   const { setTheme } = useTheme();
-  // The shell's one navigation `visible` evaluator, the sidebar's and
-  // `nav:menu`'s: an entry that declares an API `dataSource` reads its bound
-  // value as `data`, and is hidden until that read answers (objectui#13029).
-  const evalVis = useNavVisibility(activeApp);
   const { t, language } = useObjectTranslation();
   // A nav entry's text, the way the sidebar and `nav:menu` name it: an entry
   // with NO `label` shows its target's current label, else its target's machine
@@ -204,14 +218,17 @@ function CommandPaletteBody(props: CommandPaletteProps) {
   // its edits; OK, or a clean page, goes at once.
   const leaveTo = (to: string) => runCommand(() => confirmUnsavedLeave(() => navigate(to)));
 
-  // Extract navigation items from active app, filtering by the spec's one
-  // navigation gate, `visible`. The `?? item.visibleOn` fallback this read
-  // once carried was a consumer-side alias of a key the spec never declared on
-  // a navigation entry (`NavigationItem.visible` is the gate) — dropped with the
-  // node-level dialects.
-  const navItems = flattenNavigation(activeApp?.navigation || []).filter(
-    (item) => evalVis(item.visible, item)
-  );
+  // The active app's navigation entries as the sidebar shows them to this
+  // member (objectstack#26892): `navEntriesShownToMember` under the sidebar's
+  // gates, the ones `UnifiedSidebar` draws with (the object-read prune, and per
+  // entry its `visible`, through the shell's one evaluator, so an entry that
+  // declares an API `dataSource` is hidden until its read answers,
+  // objectui#13029; its `requiredPermissions`; its runtime-capability gates),
+  // then flattened. Filtering the flattened leaves by their own `visible`
+  // alone, as this once did, offered an entry the sidebar hides by
+  // `requiredPermissions`, by a runtime-capability gate, or by its group's
+  // `visible`, and opened it empty.
+  const navItems = gates ? flattenNavigation(navEntriesShownToMember(activeApp?.navigation || [], gates)) : [];
 
   // The entries the palette shows for the query: a navigation entry or app by
   // its label and its machine name, a built-in command by its value. They are
@@ -232,10 +249,13 @@ function CommandPaletteBody(props: CommandPaletteProps) {
   const navReportNames = new Set(
     navItems.filter((item) => item.type === 'report').map((item) => item.reportName as string),
   );
-  const appReports = useAppReportEntries(activeApp, open && !inStudio).entries.filter(
+  const appReports = useAppReportEntries(activeApp, open && !inStudio, gates).entries.filter(
     (entry) => !navReportNames.has(entry.name) && matches(entry.label, entry.name),
   );
-  const switchableApps = apps.filter((a) => a.active !== false);
+  // Every active app, `hidden` ones included, minus an app the user's
+  // permission sets hide: the palette offers none that Home's tiles and the
+  // switcher withhold for that reason (objectstack#26838).
+  const switchableApps = useServedApps(apps.filter((a) => a.active !== false));
   const appItems =
     switchableApps.length > 1
       ? switchableApps.filter((app) => matches(resolveKeyedI18nLabel(app.label, t), app.name))

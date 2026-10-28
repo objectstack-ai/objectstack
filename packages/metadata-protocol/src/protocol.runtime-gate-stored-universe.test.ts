@@ -239,6 +239,9 @@ function makeHarness() {
             registerItem: () => {},
             registerObject: () => {},
             getItem: () => undefined,
+            // [#26708] The package this file's saves name is installed: a save
+            // naming one no installed package has is refused before the gate.
+            getPackage: (id: string) => (id === 'com.pin2008.smoke' ? { manifest: { id } } : undefined),
             isPackageDisabled: () => false,
             // A BOOT-time universe: the code packages, and nothing a runtime
             // author writes. That is not a simplification of the harness — it

@@ -46,7 +46,7 @@
     "@objectstack/driver-sql": "workspace:*",
     "@objectstack/metadata-core": "workspace:*",
     "@objectstack/objectql": "workspace:*",
-    "@types/node": "^26.6.3",
+    "@types/node": "^26.6.5",
     "hono": "^4.13.9",
     "tsx": "^4.23.15",
     "typescript": "^6.0.3",

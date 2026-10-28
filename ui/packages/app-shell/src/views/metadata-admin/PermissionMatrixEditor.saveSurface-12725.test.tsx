@@ -51,6 +51,8 @@ const wire = new MetadataClient({ baseUrl: '', fetch: vi.fn(serve) as unknown as
 
 /** The reads both hosts make, answered in memory; the save is the real client's. */
 const client = {
+  // objectstack#26840 — the package door reads its objects through the draft-overlaid door.
+  withPreviewDrafts() { return this; },
   list: async (type: string) => {
     if (type === 'permission') return [{ name: SET.name, label: SET.label }];
     if (type === 'object') return [{ name: 'a_account', label: 'Account' }];

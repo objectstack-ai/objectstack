@@ -60,12 +60,19 @@ export interface PackageSurface {
  * `listDrafts` failures are tolerated (an older server without the drafts
  * endpoint, or a transient error) — the rail still renders the published set
  * rather than erroring out, matching the sibling pillars' `.catch(() => [])`.
+ *
+ * `keep` narrows the PUBLISHED rows, which carry the item's body: the type's
+ * own list filter (a `MetadataResourceConfig.listFilter`), so a rail lists
+ * what Setup › Metadata lists — `view`'s leaves out the aggregated container
+ * the server keeps beside its expanded items (objectstack#26889). A draft
+ * header carries no body, so no filter reads it.
  */
 export async function loadPackageSurfaces(
   client: PackageSurfaceClient,
   type: string,
   packageId: string,
   locale?: string,
+  keep?: (item: Record<string, unknown>) => boolean,
 ): Promise<PackageSurface[]> {
   const [published, draftHeaders] = await Promise.all([
     client.list(type, { packageId }) as Promise<Array<Record<string, unknown>> | null | undefined>,
@@ -73,7 +80,7 @@ export async function loadPackageSurfaces(
       .listDrafts({ packageId, type })
       .catch(() => [] as DraftRow[]),
   ]);
-  return mergeSurfaces(type, published, draftHeaders, locale);
+  return mergeSurfaces(type, keep ? (published || []).filter(keep) : published, draftHeaders, locale);
 }
 
 /**

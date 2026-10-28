@@ -100,10 +100,10 @@
  *
  * `ComponentPropsMap['object-gantt']` refuses every `GanttConfig` key written
  * flat on the node, so a published flat member was an authorable spelling the
- * spec refuses. The 24 moved to `plugin-gantt`'s package-local hand-off type
- * (`ObjectGanttFlatFields`, DERIVED from `GanttConfig` there, so the "one
- * vocabulary" invariant below holds by construction on that side and is pinned
- * in `plugin-gantt`'s `ganttHandoffFlatFields-25923.test.ts`). What this file
+ * spec refuses. The 24 moved to `plugin-gantt`'s package-local hand-off type,
+ * and left it again when the same card retired the renderer's flat fallback
+ * read, so the `gantt` block is the one spelling anywhere (pinned in
+ * `plugin-gantt`'s `ganttHandoff-25923.test.ts`). What this file
  * pins now: the 24 are members of NEITHER published face, the three query keys
  * still are (and are still value-validated), and the `gantt` block is unchanged.
  * The paragraphs above are this card's reading at the time, kept as written.

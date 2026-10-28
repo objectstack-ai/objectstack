@@ -3668,6 +3668,26 @@ export function flowRefusalMessageKey(flowName: string, nodeId: string): string 
 }
 
 /**
+ * Dot-notation i18n key for a hook's declared refusal message —
+ * `hooks.<hook>.refusals.<CODE>.message` (#26170, maintainer ruling 6431311681
+ * letter A).
+ *
+ * A sibling of {@link objectValidationMessageKey} and
+ * {@link flowRefusalMessageKey}, spelled here for the same reason: its consumer
+ * holds an `II18nService` (which takes a key), not a `TranslationBundle`. Used
+ * by the sandboxed body runner, which answers a body's throw of a declared code
+ * (`HookSchema.refusals`) with this translation in the caller's locale
+ * (`HookContext.session.locale`), the declared message on a miss.
+ *
+ * `hookName` is `Hook.name` and `code` the catalogue's key — by hook, never by
+ * object, so a hook bound to several objects or to `'*'` owns one translation
+ * per code.
+ */
+export function hookRefusalMessageKey(hookName: string, code: string): string {
+  return `hooks.${hookName}.refusals.${code}.message`;
+}
+
+/**
  * Dot-notation i18n key for a screen's heading or body text —
  * `flows.<flow>.screens.<node_id>.title` / `.description` (#22507).
  *

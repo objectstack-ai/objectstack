@@ -1,6 +1,6 @@
 # ADR-0142: An ownership queue is a platform primitive — a queue entity, membership through the existing recipient kinds, claim through the ownership-transfer gate, and declarative assignment rules evaluated on insert
 
-**Status**: Proposed (2026-10-25). `docs/adr/**` is Tier H (Prime Directive #14): this record becomes **Accepted** by the
+**Status**: Proposed (2026-10-25) · **Amended** (2026-10-28, ruling [`6457475657`](https://github.com/objectstack-ai/objectstack/issues/25769#issuecomment-6457475657) on #25769, letter A) — D3's `current_user.queues` producer is `@objectstack/plugin-security`, kernel-side, under the reserved key `queues`; see the note in D3. `docs/adr/**` is Tier H (Prime Directive #14): this record becomes **Accepted** by the
 maintainer's merge, and ⛔ the one PR under [Execution plan](#execution-plan-after-acceptance) is cut after that merge,
 never before it. Until a published `@objectstack/*` release carries that PR, HotCRM keeps the STOPGAP module this record
 exists to retire. **This record declares; it implements nothing** — no schema, no code, no changeset.
@@ -353,8 +353,12 @@ seed claim, to ADR-0117's future stamp. Merge question 1 states what the two oth
 
 **Who sees it.** The members of Q read and edit the records sitting in Q through one more pre-resolved membership set,
 `current_user.queues` — the queue names the caller belongs to in the active organization, computed by the queue service
-from the caller's positions, teams and units against the queues' member specifications; the queue service is the
-registered `IRlsMembershipResolver` for that one key, so an authored policy or view can read it too. The disjunct
+from the caller's positions, teams and units against the queues' member specifications; `queues` is a reserved key
+(`RESERVED_RLS_MEMBERSHIP_KEYS`) that `@objectstack/plugin-security` resolves kernel-side from the queue service, the way
+it resolves `positions`, so an authored policy or view can read it too, and an app `IRlsMembershipResolver` that answers
+`queues` is screened out and fails closed (**Amended** 2026-10-28, ruling
+[`6457475657`](https://github.com/objectstack-ai/objectstack/issues/25769#issuecomment-6457475657) on #25769, letter A;
+this sentence first made the queue service the registered `IRlsMembershipResolver` for the key). The disjunct
 `owner_id IS NULL AND queue IN (current_user.queues)` lands at four sites: beside the `ownerMatch` of `buildReadFilter`;
 in `buildWriteFilter`'s update arm beside the share ids, never its delete arm; in `checkEdit` as a positive basis of its
 own, tested before the public-OWD `abstain` and apart from `matchesOwnerScope`, the fast path `checkDelete` shares; and
@@ -799,7 +803,7 @@ objection names the number.
    `packages/spec/liveness/queue.json` and `packages/spec/liveness/assignment_rule.json`, every property classified with
    evidence (the liveness gate has no generator); regenerated artifacts per AGENTS.md's spec table for the rest. Server:
    `sys_queue`, `sys_queue_member`, `sys_assignment_cursor`, the queue service and its `queues` membership-resolver key
-   in `plugin-sharing`, with the access path at D3's four sites; the `queue` column in `applySystemFields` with its
+   in `plugin-sharing` (*superseded 2026-10-28 by D3 as amended: plugin-security resolves `queues` kernel-side*), with the access path at D3's four sites; the `queue` column in `applySystemFields` with its
    writers and the registration refusal for a declared `queue`; the gate's claim / release / move admissions and explain
    reasons in `plugin-security`; in `objectql`, the by-id write precondition with its readback, the assignment seam and
    the two strategies behind the contract, the two keys in `METADATA_ARRAY_KEYS`, the `kernel:ready` boot refusal and

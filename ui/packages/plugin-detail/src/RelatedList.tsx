@@ -147,8 +147,12 @@ export interface RelatedListProps {
    * annotated it `React.MouseEvent` — which a narrower declaration refuses
    * contravariantly. `BaseSchema`'s own `onClick` / `onChange` / `onSubmit`
    * already use this spelling for exactly this situation.
+   *
+   * The THIRD parameter (objectstack#26679) is the rows the list shows at the
+   * moment of the click, in its order — the clicked row's siblings, which a
+   * host that opens the row in a drawer steps through with ↑ ↓.
    */
-  onRowClick?: (row: any, event?: any) => void;
+  onRowClick?: (row: any, event?: any, rows?: readonly any[]) => void;
   /**
    * Child-object row actions (`locations` `list_item`, or `record_related`
    * inside a parent record — objectui#11270), already localized by the host.
@@ -2347,6 +2351,13 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // column's edge. Display only — the read, filter and sort are unchanged.
   const compact = React.useContext(RelatedListCompactContext);
 
+  // The row click hands the host the rows on show beside the clicked one
+  // (objectstack#26679), so its drawer can step through them.
+  const handleRowClick = React.useMemo(
+    () => (onRowClick ? (row: any, event?: any) => onRowClick(row, event, paginatedData) : undefined),
+    [onRowClick, paginatedData],
+  );
+
   const viewSchema = React.useMemo(() => {
     if (schema) return schema;
 
@@ -2373,7 +2384,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
           coverField: MOBILE_GALLERY_COVER_FIELD,
           cardSize: 'medium',
         },
-        onRowClick,
+        onRowClick: handleRowClick,
       };
     }
 
@@ -2416,7 +2427,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
           onRowDelete: onRowDelete ? handleDeleteRow : undefined,
           rowEditPredicates,
           rowDeletePredicates,
-          onRowClick,
+          onRowClick: handleRowClick,
           // Child-object row actions (`list_item`, or `record_related` inside a
           // parent record) rendered in the same overflow menu, dispatched with
           // the clicked row as target.
@@ -2431,7 +2442,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       default:
         return { type: 'div', children: 'No view configured' };
     }
-  }, [type, paginatedData, tableColumns, effectiveColumns, schema, effectivePageSize, hasRowActions, hasCustomRowActions, rowActions, onRowAction, onRowEdit, onRowDelete, handleDeleteRow, onRowClick, isMobile, compact, api, objectSchema, activeSort, handleTableSort]);
+  }, [type, paginatedData, tableColumns, effectiveColumns, schema, effectivePageSize, hasRowActions, hasCustomRowActions, rowActions, onRowAction, onRowEdit, onRowDelete, handleDeleteRow, handleRowClick, isMobile, compact, api, objectSchema, activeSort, handleTableSort]);
 
   const headerClassName = collapsible ? 'cursor-pointer select-none' : undefined;
   const handleHeaderClick = collapsible ? () => setCollapsed((c) => !c) : undefined;

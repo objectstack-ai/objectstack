@@ -161,6 +161,13 @@ export interface ExprIssue {
    * condition, which might be a flow variable). Absent ⇒ treat as `error`.
    */
   severity?: 'error' | 'warning';
+  /**
+   * [#26858] The judged slot's key path in the stack, in the spelling the other
+   * rules' findings carry (`flows[0].edges[1].condition`), beside the human
+   * `where`. Set only where the slot has one: a top-level flow edge's
+   * `condition`. Absent, the finding is located by `where` alone.
+   */
+  path?: string;
 }
 
 type AnyRec = Record<string, unknown>;
@@ -2511,6 +2518,10 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     objectWrite || runtimeGateWrite ? new Map() : flowCelEntrances(stack, fieldIndex);
   for (const flow of objectWrite ? [] : recordsOf(stack.flows)) {
     const flowName = typeof flow.name === 'string' ? flow.name : '(unnamed flow)';
+    // [#26858] The flow's index in the authored list, for a finding's key path
+    // (`recordsOf` hands an array's own members back). A map-form `flows` has
+    // no index to spell, so its findings keep `where` alone.
+    const flowIndex = Array.isArray(stack.flows) ? stack.flows.indexOf(flow) : -1;
     // `Array.isArray` proves the LIST, never its MEMBERS — the sentence #15742
     // removed from one reader below in this same file. A YAML `nodes:` item
     // left empty deserialises to `null`, and `nodes.find(n => n.type === …)` on
@@ -2897,11 +2908,22 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       // and not a check.
       for (const edge of recordsOf(graph.edges)) {
         const edgeCondWhere = `${at} · edge '${edge.id}' (${edge.source}→${edge.target}) condition`;
+        const first = issues.length;
         if (!checkStructuralCondition(edgeCondWhere, edge.condition).refused) {
           const from = issues.length;
           check(edgeCondWhere, edge.condition, objectName);
           warnShadowedFieldReads(edgeCondWhere, edge.condition);
           refuseUnboundRoots(edgeCondWhere, edge.condition, from, 'predicate');
+        }
+        // [#26858] A top-level edge's findings also carry the slot's key path,
+        // indexed over the list the author wrote (the coerced one drops `null`
+        // members and would renumber). A nested region's edge keeps `where`.
+        const edgeIndex = flowIndex >= 0 && graph.path.length === 0 && Array.isArray(flow.edges)
+          ? flow.edges.indexOf(edge)
+          : -1;
+        if (edgeIndex >= 0) {
+          const path = `flows[${flowIndex}].edges[${edgeIndex}].condition`;
+          for (let k = first; k < issues.length; k++) issues[k] = { ...issues[k]!, path };
         }
       }
       // No `checkNullGuards` on node/edge conditions — and NOT for the reason

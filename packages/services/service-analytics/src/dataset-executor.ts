@@ -43,6 +43,8 @@ export type CompareTo = DatasetCompareTo;
  *     EVERY window it runs, the `compareTo` one included (#4820) — and keeps the
  *     assembled grid's `fields` describing its DIMENSION columns even when there
  *     was no primary query to carry them (#5537),
+ *   - invents the time buckets a grouped query emitted no row for, inside the
+ *     selection's window (#26893), so a trend keeps its empty months,
  *   - fills the empty-group value into columns no query reported, by aggregate
  *     kind (#4708) — a count/sum over an excluded group is 0, avg/min/max null,
  *   - evaluates derived measures (ratio/sum/difference/product) row-by-row (Q1),
@@ -233,9 +235,13 @@ export function evaluateDerivedMeasures(
  * kind→identity mapping is `emptyGroupValueFor` in `@objectstack/spec/data`,
  * shared with the authoring-side coherence checks so the two cannot drift.
  *
- * **Only rows that already exist are touched** — no group is invented. A
+ * **Only rows that already exist are touched** — no group is invented here. A
  * dimension value no query reported at all has genuinely no data and stays out
- * of the grid; this fills the cell, never the row.
+ * of the grid; this fills the cell, never the row. The one place a row IS
+ * invented is {@link fillEmptyTimeBuckets} (#26893), which runs just before this
+ * pass and leaves its rows' measure cells empty for this pass to fill — so an
+ * invented time bucket reads exactly what an empty group reads, from this one
+ * table.
  *
  * Deliberately NOT a `?? 0` in the widget or a `coalesce` in the measure: a
  * consumer-side patch must be repeated by every author of every ratio widget
@@ -1019,6 +1025,157 @@ export function alignedCompareBucketKey(
   return bucketKeyAtOrdinal(targetOrdinal, granularity);
 }
 
+// ── zero-filled time buckets (#26893) ────────────────────────────────────────
+
+/**
+ * The most rows one {@link fillEmptyTimeBuckets} call may leave in the grid —
+ * the window's bucket count times the number of other-dimension combinations.
+ *
+ * A fill whose grid would be larger does not run AT ALL: the answer is the
+ * grouped rows exactly as they came back, never a fill cut off part-way, which
+ * would draw a series that is dense up to an arbitrary bucket and sparse after
+ * it. 2,000 lets a `day` axis span five years as one series (or a year per five
+ * series) and stops a `day` axis over ten years, the shape the fill exists for
+ * least.
+ */
+export const MAX_ZERO_FILLED_GRID_ROWS = 2000;
+
+/** What {@link fillEmptyTimeBuckets} walks — built by `DatasetExecutor`. */
+export interface TimeBucketFillPlan {
+  /** The grid's one bucketed time dimension: the axis the fill walks. */
+  axis: string;
+  /** Its EFFECTIVE bucket size (`DatasetExecutor.granularityOf`). */
+  granularity: DateGranularityValue;
+  /** Every grid dimension, in selection order — the merge key, axis included. */
+  dimensions: string[];
+  /**
+   * The bounded window, as the INCLUSIVE `[first, last]` calendar days it
+   * covers in the reference zone. Absent when the selection states none, and
+   * then only the gaps between the first and last bucket returned are filled.
+   */
+  window?: [string, string];
+}
+
+/**
+ * Invent the time buckets a `GROUP BY` never emitted — the ones no row fell in
+ * (#26893).
+ *
+ * A grouped query answers one row per bucket that HOLDS rows, so a month with
+ * no closed-won deal is not a zero in a 12-month revenue trend: it is absent,
+ * and a category axis then draws the months either side of it as neighbours,
+ * the area between them reading as revenue. Only the executor knows the bucket
+ * vocabulary and the window, so the gap is closed here, from the same calendar
+ * helpers `compareTo` alignment counts with — {@link bucketOrdinalOfDay} to
+ * place a bucket, {@link bucketKeyAtOrdinal} to spell it (core's
+ * `bucketDateKey`, the labeller the grouping itself uses) — and ⛔ never by a
+ * second date walker in a renderer.
+ *
+ * **Which buckets.** Every bucket of the plan's `window`, or, with no window,
+ * every bucket between the first and last one the rows hold. ⛔ Never beyond
+ * what is known: no window and no rows means no buckets, and the leading and
+ * trailing edges of an unbounded series stay as they came back.
+ *
+ * **Other dimensions.** Each combination of the other grid dimensions that
+ * already holds a row is filled across the axis once; a combination no row
+ * holds is not invented (that would be a group, and groups are only ever the
+ * query's to report). The null bucket (#3839) is not a calendar position: its
+ * rows count for their combination and are left as they are.
+ *
+ * **Values.** An invented row carries only its dimension columns. Its measure
+ * cells are filled by {@link fillEmptyGroups}, which runs after this, so they
+ * read what any empty group reads: `0` for count and sum, and avg, min and max
+ * left unset (`emptyGroupValueFor` has no value for them). ⛔ No second
+ * empty-value table.
+ *
+ * **Declines** (the rows are returned untouched): an axis key that is not a
+ * bucket key of the plan's granularity, and a filled grid larger than
+ * {@link MAX_ZERO_FILLED_GRID_ROWS}.
+ *
+ * Mutates `rows` in place (they are already this pipeline's own copies) and
+ * returns them for chaining; invented rows are appended, and the executor's
+ * ordering pass places them.
+ */
+export function fillEmptyTimeBuckets(
+  rows: Record<string, unknown>[],
+  plan: TimeBucketFillPlan,
+): Record<string, unknown>[] {
+  const { axis, granularity, dimensions, window } = plan;
+  const others = dimensions.filter((d) => d !== axis);
+
+  const present = new Set<string>();
+  const combinations = new Map<string, Record<string, unknown>>();
+  let first = Infinity;
+  let last = -Infinity;
+  for (const row of rows) {
+    present.add(dimensionKeyOf(row, dimensions));
+    const combination = dimensionKeyOf(row, others);
+    if (!combinations.has(combination)) {
+      combinations.set(combination, Object.fromEntries(others.map((d) => [d, row[d]])));
+    }
+    const key = row[axis];
+    if (key == null) continue;
+    const span = typeof key === 'string' ? bucketKeyToCalendarRange(key, granularity) : null;
+    if (!span) return rows;
+    const ordinal = bucketOrdinalOfDay(span.start, granularity);
+    if (ordinal < first) first = ordinal;
+    if (ordinal > last) last = ordinal;
+  }
+  if (window) {
+    first = bucketOrdinalOfDay(window[0], granularity);
+    last = bucketOrdinalOfDay(window[1], granularity);
+    // A single series over a known window is filled even when no row came back.
+    if (others.length === 0 && combinations.size === 0) combinations.set('', {});
+  }
+  if (!(last >= first) || combinations.size === 0) return rows;
+  if ((last - first + 1) * combinations.size > MAX_ZERO_FILLED_GRID_ROWS) return rows;
+
+  for (const combination of combinations.values()) {
+    for (let ordinal = first; ordinal <= last; ordinal++) {
+      const bucket = bucketKeyAtOrdinal(ordinal, granularity);
+      const row = Object.fromEntries(dimensions.map((d) => [d, d === axis ? bucket : combination[d]]));
+      const key = dimensionKeyOf(row, dimensions);
+      if (present.has(key)) continue;
+      present.add(key);
+      rows.push(row);
+    }
+  }
+  return rows;
+}
+
+/**
+ * The calendar day one explicit `dateRange` bound names, in `timezone`: a bare
+ * `YYYY-MM-DD` is that day (the query reads it as the whole day, #3777), and an
+ * instant is the day it falls on in the reference zone — the zone the query's
+ * own buckets are keyed in. `undefined` for a bound that is neither; the fill
+ * then reads no window rather than refusing a query the strategy has already
+ * answered.
+ */
+function calendarDayOfBound(bound: string, timezone: string): string | undefined {
+  if (bound.length === 10) {
+    const ms = zonedDateStartToUtcMs(bound);
+    return !Number.isNaN(ms) && calendarDayAt(ms) === bound ? bound : undefined;
+  }
+  const ms = Date.parse(bound);
+  return Number.isNaN(ms) ? undefined : calendarDayAt(ms, timezone);
+}
+
+/**
+ * The inclusive calendar days a time dimension's `dateRange` covers in
+ * `timezone` — the {@link TimeBucketFillPlan} window. A preset goes through the
+ * one lowering `compareTo` uses ({@link lowerDatasetCompareDateRange}, then
+ * {@link inclusiveCalendarDayWindow}), so a preset's window is the one the
+ * query path filtered by; an explicit pair is read bound by bound.
+ */
+function timeBucketFillWindow(dateRange: unknown, timezone: string): [string, string] | undefined {
+  if (!Array.isArray(dateRange)) {
+    return inclusiveCalendarDayWindow(lowerDatasetCompareDateRange(dateRange as string, timezone), timezone);
+  }
+  const [start, end] = explicitDateRangeWindow(dateRange);
+  const first = calendarDayOfBound(start, timezone);
+  const last = calendarDayOfBound(end, timezone);
+  return first != null && last != null ? [first, last] : undefined;
+}
+
 export class DatasetExecutor {
   /**
    * @param service - The analytics service the executor issues its queries to.
@@ -1165,6 +1322,12 @@ export class DatasetExecutor {
       );
       for (const m of baseMeasures) result.fields.push({ name: `${m}__compare`, type: 'number' });
     }
+
+    // [#26893] Empty time buckets — the rows a `GROUP BY` never emitted for a
+    // bucket no row fell in. Before the empty-group fill below, which gives
+    // the invented rows' measure cells their value.
+    const bucketFill = this.timeBucketFillPlan(compiled, selection, dimensions, order, context);
+    if (bucketFill) fillEmptyTimeBuckets(result.rows, bucketFill);
 
     // Empty-group fill (#4708) — a group a query never reported reads `0` for a
     // count/sum and stays null for avg/min/max. See {@link fillEmptyGroups} for
@@ -1372,6 +1535,54 @@ export class DatasetExecutor {
     const cd = compiled.cube.dimensions[name];
     if (cd?.type !== 'time') return undefined;
     return resolveDimensionGranularity(selection, name, declaredDefaultGranularity(cd));
+  }
+
+  /**
+   * Whether this selection's answer gets its empty time buckets filled, and
+   * over which window (#26893) — `undefined` when it does not.
+   *
+   * Filled: a grid with exactly ONE bucketed time dimension (bucketed by the
+   * same {@link granularityOf} the `GROUP BY` reads). Two bucketed time axes
+   * name no single axis to walk, and a raw-timestamp axis has no buckets.
+   *
+   * Not filled, because filling would change which rows the caller asked for:
+   *   - a `limit` or `offset` — a top-N or a page is a choice OF rows, and an
+   *     invented bucket would compete for its slots;
+   *   - an `order` on anything but a dimension — a measure, a `__compare`
+   *     column or a derived measure ranks rows, and a column of invented
+   *     zeros reorders the ranking;
+   *   - a `compareTo` — its answer keeps the shape it has (its own empty
+   *     buckets are a separate question).
+   *
+   * The window is the axis's own `timeDimensions[].dateRange`, read in the
+   * zone {@link buildQuery} resolves the query in. A window stated only in
+   * `runtimeFilter` is not read: no seam here lowers a filter into a window,
+   * and a one-bound filter (`{ $gte: '{12_months_ago}' }`) states none — those
+   * series get their interior gaps filled.
+   */
+  private timeBucketFillPlan(
+    compiled: CompiledDataset,
+    selection: DatasetSelection,
+    dimensions: string[],
+    order: Record<string, 'asc' | 'desc'> | undefined,
+    context?: ExecutionContext,
+  ): TimeBucketFillPlan | undefined {
+    if (selection.compareTo || selection.limit != null || selection.offset != null) return undefined;
+    if (Object.keys(order ?? {}).some((key) => !dimensions.includes(key))) return undefined;
+    const bucketed = dimensions.flatMap((d) => {
+      const granularity = this.granularityOf(compiled, selection, d);
+      return granularity ? [{ axis: d, granularity }] : [];
+    });
+    if (bucketed.length !== 1) return undefined;
+    const [{ axis, granularity }] = bucketed;
+    const td = (selection.timeDimensions ?? []).find((t) => t.dimension === axis && t.dateRange != null);
+    const timezone = selection.timezone ?? context?.timezone ?? 'UTC';
+    return {
+      axis,
+      granularity,
+      dimensions,
+      window: td ? timeBucketFillWindow(td.dateRange, timezone) : undefined,
+    };
   }
 
   private buildQuery(

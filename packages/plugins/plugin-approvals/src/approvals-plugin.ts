@@ -35,6 +35,7 @@ import {
 import { bindSnapshotRedactionMiddleware } from './payload-redaction-middleware.js';
 import { bindSnapshotPredicateGuard } from './payload-predicate-guard.js';
 import { bindRequestChildReadGates, bindRequestReadGate } from './request-read-gate.js';
+import { bindReaderLocaleLabelsMiddleware } from './reader-locale-labels-middleware.js';
 import type { FieldVisibilitySource } from './payload-redaction.js';
 import { registerApprovalNode, type ApprovalAutomationSurface } from './approval-node.js';
 import { backfillActionSlots } from './action-slot-backfill.js';
@@ -380,6 +381,11 @@ export class ApprovalsServicePlugin implements Plugin {
       const visibility = requestVisibilitySourceOf(this.service);
       bindRequestReadGate(engine as any, visibility, ctx.logger);
       bindRequestChildReadGates(engine as any, visibility, ctx.logger);
+      // [#27041] …and the flow and step labels in the reader's language, by
+      // the approvals door's own lookup (`reader-locale-labels-middleware.ts`).
+      // Bound beside the gate, not behind `disableAutoHooks`, for the gate's
+      // reason: the approvals door localizes whenever the service runs.
+      bindReaderLocaleLabelsMiddleware(engine as any, i18nService, ctx.logger);
     } else {
       ctx.logger.warn(
         'ApprovalsServicePlugin: the ObjectQL engine has no middleware seam — reads of sys_approval_request, '

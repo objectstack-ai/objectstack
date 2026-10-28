@@ -195,6 +195,10 @@ describe('#23645 — a runtime object hydrated at boot, then deleted', () => {
         await kernel.use(new ObjectQLPlugin({ ql: engine }));
         beforeBoot?.(engine);
         await kernel.bootstrap();
+        // [#26708] The workspaces the saves below name are installed, as
+        // authored bases: a save naming a package no installed package has
+        // is refused before it is written.
+        for (const id of [P, Q]) engine.registry.installPackage({ id, name: id, version: '1.0.0' } as any, 'authored');
         return {
             kernel,
             engine,

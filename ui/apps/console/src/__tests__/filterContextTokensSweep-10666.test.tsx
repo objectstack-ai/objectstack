@@ -209,7 +209,7 @@ const ROWS: NodeRow[] = [
     // this block (objectui#8348); its `data` row is the array arm.
     withFilter: top({ type: 'object-calendar', calendar: CALENDAR, staticData: [{ ...ROW }] }) },
   { node: 'object-gantt', shape: 'tuple', path: 'dataSource', filterParam: '$filter',
-    withFilter: top({ type: 'object-gantt', objectName: OBJECT, titleField: 'name', startDateField: 'start', endDateField: 'end' }) },
+    withFilter: top({ type: 'object-gantt', objectName: OBJECT, gantt: { titleField: 'name', startDateField: 'start', endDateField: 'end' } }) },
   { node: 'object-kanban', shape: 'tuple', path: 'dataSource', filterParam: '$filter',
     withFilter: top({ type: 'object-kanban', objectName: OBJECT, groupBy: 'status', columns: [{ id: 'open', title: 'Open' }] }) },
   { node: 'object-map (object)', shape: 'tuple', path: 'dataSource', filterParam: '$filter',

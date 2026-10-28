@@ -3603,8 +3603,11 @@ function selfTest() {
   // a real key of `ObjectSchemaBase`, present in the ratchet and absent from the anchor.
   check('liveContainerSurface', 'a key added since the anchor commit is still authorable — the live ratchet is read too', 'data/Object:editMode',
     true, live.isAuthorable('data/Object', 'editMode'));
-  check('liveContainerSurface', 'and a tombstoned key of a mapped container is authorable through the live ratchet as well', 'ui/PageCardProps:body',
-    true, live.isAuthorable('ui/PageCardProps', 'body'));
+  // The specimen must still be ON the live ratchet. `ui/PageCardProps:body`, the first one,
+  // aged out in #26599 and passed only through the stale anchor until #27015 re-anchored it;
+  // `ui/Dashboard:refreshInterval` is a 18.x tombstone, so it stays until major 20.
+  check('liveContainerSurface', 'and a tombstoned key of a mapped container is authorable through the live ratchet as well', 'ui/Dashboard:refreshInterval',
+    true, live.isAuthorable('ui/Dashboard', 'refreshInterval'));
   for (const [src, line, want, label] of [
     [authorableSource, 2, ['userActions'], 'userActions at its declaration form still mints — ruled true positive 1'],
     [datasourceDefSourceLive, 2, ['schemaMode'], 'schemaMode at its declaration form still mints — ruled true positive 2'],

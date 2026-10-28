@@ -105,9 +105,24 @@ const TERMINAL_LABEL_CLASS = 'text-center [overflow-wrap:anywhere]';
 // right edge while two forward stages took the rest. Now both groups start
 // from zero and grow by the number of stages they hold, and each stage fills
 // its share, so a terminal stage is exactly as wide as any other. Its label
-// wraps instead of being cut, so it stays legible on a narrow rail too. The
-// mobile row scrolls horizontally and keeps its content-width stages.
+// wraps instead of being cut, so it stays legible on a narrow rail too.
 const shareOf = (stageCount: number): React.CSSProperties => ({ flexGrow: stageCount, flexShrink: 1, flexBasis: '0%' });
+
+// ── The phone row FITS its stages, and a label that does not fit ellipsises
+// (objectstack#26897) ─────────────────────────────────────────────────────
+//
+// The row below `sm` used to hold content-width, `whitespace-nowrap` stages
+// in a sideways scroller with its scrollbar hidden, so at 390px the stage at
+// the right edge was cut mid-word ("Resolu") with nothing to say the row
+// scrolled. Now every stage starts from zero and takes an equal share, as on
+// the desktop rail; an ordinary label truncates with an ellipsis and keeps
+// its full text in `title`, and a terminal label wraps, as on desktop
+// (#25895). The `min-w-10` floor keeps a stage from collapsing to a bare
+// ellipsis: a path too long for every stage to keep 2.5rem still scrolls
+// rather than drawing unreadable cells. Geometry pinned in Chromium by
+// `e2e/record-path-phone-row.spec.ts`, which reads these two constants.
+const PHONE_STAGE_CLASS = 'flex-1 min-w-10';
+const PHONE_LABEL_CLASS = 'text-center truncate';
 
 type StageState = 'completed' | 'current' | 'upcoming';
 
@@ -553,6 +568,8 @@ export const RecordPathRenderer: React.FC<RecordPathRendererProps> = ({
     terminal?: 'won' | 'lost';
     className?: string;
     labelClassName?: string;
+    /** The label's full text as a `title`, for a row whose labels can be cut. */
+    labelTitle?: string;
   }) => (
     <div
       key={o.key}
@@ -564,7 +581,7 @@ export const RecordPathRenderer: React.FC<RecordPathRendererProps> = ({
       className={cn('flex flex-col gap-1.5', o.className)}
     >
       <span aria-hidden="true" data-stage-rail="" className={railClass(o.state, o.terminal)} />
-      <span className={cn(labelClass(o.state, o.terminal), o.labelClassName)}>
+      <span className={cn(labelClass(o.state, o.terminal), o.labelClassName)} title={o.labelTitle}>
         {o.terminal === 'lost' && <span aria-hidden="true" className="mr-1 opacity-70">✗</span>}
         {o.terminal !== 'lost' && o.state === 'completed' && (
           <span aria-hidden="true" className="mr-1 text-emerald-600 dark:text-emerald-400 font-semibold">✓</span>
@@ -646,7 +663,7 @@ export const RecordPathRenderer: React.FC<RecordPathRendererProps> = ({
         )}
       </div>
 
-      {/* Mobile: horizontally scrollable rail row — same treatment, no chips */}
+      {/* Mobile: one row of equal shares (PHONE_STAGE_CLASS above), scrolling only past the floor */}
       <div
         className="flex sm:hidden w-full items-start gap-2 overflow-x-auto pb-1 -mx-1 px-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         {...railAria}
@@ -661,8 +678,9 @@ export const RecordPathRenderer: React.FC<RecordPathRendererProps> = ({
             stage,
             state: isCurrent ? 'current' : isCompleted ? 'completed' : 'upcoming',
             terminal,
-            className: 'shrink-0',
-            labelClassName: 'whitespace-nowrap',
+            className: PHONE_STAGE_CLASS,
+            labelClassName: terminal ? TERMINAL_LABEL_CLASS : PHONE_LABEL_CLASS,
+            labelTitle: stage.label,
           });
         })}
       </div>

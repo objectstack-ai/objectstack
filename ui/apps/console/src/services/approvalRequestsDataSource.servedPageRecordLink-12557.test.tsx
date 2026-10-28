@@ -25,9 +25,15 @@
  *
  * Links are counted by the pathname their href resolves to, so the pins hold
  * whatever query string the record page's builder adds (its `?from=` trail).
+ *
+ * Since objectstack#26679 the record page is a record drawer host: a plain
+ * click on the target opens it in a drawer over the request page (the invoice
+ * declares no `navigation.mode`, so it opens the drawer, maintainer ruling 5 on
+ * that card), while the href stays the record path for a new tab or a copied
+ * link, and a modified click is left to the browser.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, cleanup, waitFor, fireEvent, within } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
 
 vi.mock('@object-ui/auth', async (importOriginal) => ({
@@ -284,15 +290,36 @@ describe('the served request page links a readable target to its record (objectu
     expect(screen.getByRole('link', { name: TARGET_TITLE })).toBe(links[0]);
   });
 
-  it('readable: a plain click navigates in-app to the record path', async () => {
+  it('readable: a plain click opens the record in a drawer over the page, and the page stays put', async () => {
+    const id = 'Rd4bl3RecordQQQQ';
+    targetAnswer = async (rid) => ({ id: rid, name: TARGET_TITLE, amount: 12500 });
+    const { container } = openServedPage({ record_id: id, status: 'pending', record_title: TARGET_TITLE });
+    await settledCard(container);
+    const requestPath = `/apps/${APP}/${APPROVAL_REQUEST_OBJECT}/record/${REQ}`;
+
+    const notPrevented = fireEvent.click(screen.getByRole('link', { name: TARGET_TITLE }), { button: 0 });
+    expect(notPrevented).toBe(false);
+    // The drawer opens with the target record in it …
+    const drawer = await screen.findByRole('dialog', undefined, { timeout: 8000 });
+    await waitFor(() => expect(within(drawer).getAllByText(TARGET_TITLE).length).toBeGreaterThan(0), { timeout: 8000 });
+    expect(host.findOne.mock.calls.some(([resource, rid]) => resource === 'invoice' && rid === id)).toBe(true);
+    // … over the request page: the router did not move.
+    expect(screen.getByTestId('router-pathname').textContent).toBe(requestPath);
+    // The href still names the record path, for a new tab or a copied link.
+    expect(linksTo(recordPath(id))).toHaveLength(1);
+  });
+
+  it('readable: a modified click is the browser\'s — not intercepted, no drawer', async () => {
     const id = 'Rd4bl3RecordQQQQ';
     targetAnswer = async (rid) => ({ id: rid, name: TARGET_TITLE, amount: 12500 });
     const { container } = openServedPage({ record_id: id, status: 'pending', record_title: TARGET_TITLE });
     await settledCard(container);
 
-    const notPrevented = fireEvent.click(screen.getByRole('link', { name: TARGET_TITLE }), { button: 0 });
-    expect(notPrevented).toBe(false);
-    await waitFor(() => expect(screen.getByTestId('router-pathname').textContent).toBe(recordPath(id)));
+    const link = screen.getByRole('link', { name: TARGET_TITLE });
+    const notPrevented = fireEvent.click(link, { button: 0, metaKey: true });
+    expect(notPrevented).toBe(true);
+    expect(new URL(link.getAttribute('href') as string, 'http://test.local').pathname).toBe(recordPath(id));
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 
   it('CONTROL: refused (the target read rejects 403) draws no link to the target anywhere', async () => {

@@ -57,7 +57,7 @@ const renderBlock = (schema: Record<string, unknown>, ds: ReturnType<typeof make
     </SchemaRendererProvider>,
   );
 
-const BLOCK = { type: 'object-calendar', objectName: 'event', dateField: 'due', titleField: 'name' };
+const BLOCK = { type: 'object-calendar', objectName: 'event', calendar: { startDateField: 'due', titleField: 'name' } };
 
 describe('object-calendar re-reads on the data-invalidation bus (objectui#10572)', () => {
   it('an unscoped change (objectName "*") re-runs its query once', async () => {

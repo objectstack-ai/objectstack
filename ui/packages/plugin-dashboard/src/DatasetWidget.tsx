@@ -684,7 +684,19 @@ function MetricHeadingRow({ heading, label }: { heading: DatasetMetricHeading; l
   );
 }
 
-export function DatasetWidget({ widget, dataSource, heading }: { widget: any; dataSource: unknown; heading?: DatasetMetricHeading }) {
+export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
+  widget: any;
+  dataSource: unknown;
+  heading?: DatasetMetricHeading;
+  /**
+   * Called when the server refuses this widget's query as a READ refusal
+   * (`classifyLoadError(e) === 'forbidden'`). A host that can leave the tile
+   * out of its layout does so for a viewer (objectstack#26971); the widget
+   * itself still draws its no-access state (objectui#10899) for a host that
+   * keeps it on screen. The 403 stays the enforcement: this only reports it.
+   */
+  onForbidden?: () => void;
+}) {
   const datasetName = String(widget?.dataset ?? '');
   const dimensions: string[] = useMemo(() => (Array.isArray(widget?.dimensions) ? widget.dimensions.filter(Boolean) : []), [widget]);
   const values: string[] = useMemo(() => (Array.isArray(widget?.values) ? widget.values.filter(Boolean) : []), [widget]);
@@ -977,6 +989,7 @@ export function DatasetWidget({ widget, dataSource, heading }: { widget: any; da
         // agnostic `classifyLoadError`, never by matching the message text.
         if (classifyLoadError(e) === 'forbidden') {
           setState({ status: 'error', rows: [], forbidden: true });
+          onForbidden?.();
           return;
         }
         setState({ status: 'error', rows: [], error: String((e as Error)?.message ?? e) });

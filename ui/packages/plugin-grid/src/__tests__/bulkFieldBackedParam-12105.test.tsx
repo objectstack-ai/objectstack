@@ -38,6 +38,10 @@
  *     the selection bar's dialog, the confirm step shows the record's LABEL, the
  *     run sends the id — and the grid awaits the session's object metadata before
  *     resolving, so an `objectOverride` target that loads late is waited for.
+ *  5. objectstack-ai/objectstack#26951: the field's lookup settings
+ *     (`lookupFilters`, `lookupColumns`, `lookupPageSize`, `descriptionField`)
+ *     reach the bulk picker as they reach the single-record one, so the
+ *     selection bar does not offer a record the field's filter excludes.
  */
 
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
@@ -76,6 +80,24 @@ const CAMPAIGN_MEMBER = {
       required: true,
       defaultValue: 'c1',
     },
+  },
+};
+
+/**
+ * objectstack-ai/objectstack#26951 — the same junction field, declaring the
+ * picker settings HotCRM's `crm_campaign_member.crm_campaign` declares: only
+ * campaigns still open may be picked.
+ */
+const LOOKUP_SETTINGS = {
+  lookupFilters: [{ field: 'status', operator: 'in', value: ['planning', 'in_progress'] }],
+  lookupColumns: ['name', 'status'],
+  lookupPageSize: 7,
+  descriptionField: 'status',
+};
+const FILTERED_CAMPAIGN_MEMBER = {
+  name: 'crm_campaign_member',
+  fields: {
+    crm_campaign: { ...CAMPAIGN_MEMBER.fields.crm_campaign, ...LOOKUP_SETTINGS },
   },
 };
 
@@ -147,6 +169,26 @@ describe('resolvePromotedBulkParams — the shared resolver on the bulk path (ob
       object: single.referenceTo,
       labelField: single.displayField,
     });
+  });
+
+  it("carries the field's lookup settings to the picker, as the single-record path does (objectstack-ai/objectstack#26951)", () => {
+    const context = ctx([FILTERED_CAMPAIGN_MEMBER]);
+    const single = resolveActionParam(ADD_TO_CAMPAIGN.params[0], context);
+    const [bulk] = resolvePromotedBulkParams(promote(ADD_TO_CAMPAIGN), context).params ?? [];
+    const field = bulkParamToField(bulk, false);
+
+    type LookupSettings = Partial<Record<keyof typeof LOOKUP_SETTINGS, unknown>>;
+    const settings = (src: LookupSettings) => ({
+      lookupFilters: src.lookupFilters,
+      lookupColumns: src.lookupColumns,
+      lookupPageSize: src.lookupPageSize,
+      descriptionField: src.descriptionField,
+    });
+    // The single-record resolver's answer is the field's declaration…
+    expect(settings(single)).toEqual(LOOKUP_SETTINGS);
+    // …and the widget field the bulk dialog hands `LookupField` carries the
+    // same four values under the same names app-shell's `paramToField` emits.
+    expect(settings(field)).toEqual(settings(single));
   });
 
   it('CONTROL: a literal-typed param is unchanged', () => {
@@ -242,7 +284,20 @@ const LEADS = [
   { id: 'l1', name: 'Ada Lovelace' },
   { id: 'l2', name: 'Grace Hopper' },
 ];
-const CAMPAIGNS = [{ id: 'c1', name: 'Spring Launch' }];
+const CAMPAIGNS = [
+  { id: 'c1', name: 'Spring Launch', status: 'planning' },
+  // objectstack-ai/objectstack#26951 — the record a `lookupFilters` on
+  // `status` must keep out of the picker.
+  { id: 'c7', name: 'Autumn Close', status: 'completed' },
+];
+
+/** Applies a `$filter` record's `{ field: { $in } }` members, the shape `lookupFiltersToRecord` emits for `in`. */
+function applyInFilter<T extends Record<string, unknown>>(rows: T[], filter: unknown): T[] {
+  if (!filter || typeof filter !== 'object') return rows;
+  return rows.filter((row) =>
+    Object.entries(filter as Record<string, any>).every(([field, cond]) =>
+      cond && typeof cond === 'object' && Array.isArray(cond.$in) ? cond.$in.includes(row[field]) : true));
+}
 
 /**
  * A session store whose `object` type is NOT loaded until `ensureType('object')`
@@ -276,8 +331,8 @@ function lateLoadingMetadata(objects: unknown[]) {
 
 async function openBulkDialog(action: Record<string, unknown>, metadataObjects: unknown[]) {
   const dataSource: any = {
-    find: vi.fn(async (resource: string) => {
-      const data = resource === 'crm_campaign' ? CAMPAIGNS : LEADS;
+    find: vi.fn(async (resource: string, params?: any) => {
+      const data = resource === 'crm_campaign' ? applyInFilter(CAMPAIGNS, params?.$filter) : LEADS;
       return { data: data.map((r) => ({ ...r })), total: data.length, hasMore: false, pageSize: 50 };
     }),
     findOne: vi.fn(async (resource: string, id: string) =>
@@ -350,6 +405,34 @@ describe('ObjectGrid bulk dialog — a field-backed param on the selection bar (
       return el as HTMLInputElement;
     });
     expect(input.type).toBe('text');
+  });
+
+  it("does not offer a record the field's lookupFilters excludes (objectstack-ai/objectstack#26951)", async () => {
+    // The picker's popover lists rows under its trigger; read them by name.
+    const openPicker = async () => {
+      fireEvent.click(await screen.findByTestId('lookup-trigger-crm_campaign'));
+      await waitFor(() => expect(screen.getByText('Spring Launch')).toBeInTheDocument());
+    };
+
+    // CONTROL — the field declares no filter, so the completed campaign IS
+    // offered: "absent" below cannot be a picker that never loaded.
+    await openBulkDialog(ADD_TO_CAMPAIGN, [CAMPAIGN_MEMBER]);
+    await openPicker();
+    expect(screen.getByText('Autumn Close')).toBeInTheDocument();
+    cleanup();
+
+    // SUBJECT — the field's `status in (planning, in_progress)` reaches the
+    // picker's query, as it does from the row menu, so only the open campaign
+    // is a candidate.
+    const { dataSource } = await openBulkDialog(ADD_TO_CAMPAIGN, [FILTERED_CAMPAIGN_MEMBER]);
+    await openPicker();
+    expect(screen.queryByText('Autumn Close')).not.toBeInTheDocument();
+    expect(
+      dataSource.find.mock.calls.some(
+        ([resource, params]: [string, any]) =>
+          resource === 'crm_campaign' && Array.isArray(params?.$filter?.status?.$in),
+      ),
+    ).toBe(true);
   });
 
   it('refuses a field-backed param whose field is missing, and blocks the run', async () => {
