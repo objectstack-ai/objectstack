@@ -413,6 +413,10 @@ for (const [doorName, boot] of DOORS) {
             const refused = await door.save('s_cop', 'never', { query: { mode: 'draft', surface: 'copilot' } });
             expect({ status: refused.status, code: refused.code }).toEqual({ status: 400, code: 'VALIDATION_ERROR' });
             expect(refused.message).toContain('copilot');
+            // [#27176] `mcp` likewise: only the MCP build door states it, in-process.
+            const mcp = await door.save('s_cop', 'never', { query: { mode: 'draft', surface: 'mcp' } });
+            expect({ status: mcp.status, code: mcp.code }).toEqual({ status: 400, code: 'VALIDATION_ERROR' });
+            expect(mcp.message).toContain('mcp');
             const misspelt = await door.save('s_cop', 'never', { query: { mode: 'draft', surface: 'Studio' } });
             expect({ status: misspelt.status, code: misspelt.code }).toEqual({ status: 400, code: 'VALIDATION_ERROR' });
             expect(await door.stored('s_cop', 'draft')).toEqual([]);

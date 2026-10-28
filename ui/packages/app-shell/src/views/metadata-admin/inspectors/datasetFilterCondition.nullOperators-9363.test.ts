@@ -177,7 +177,7 @@ describe('conditionToGroup — the read half round-trips the new shape (objectui
  * silent data loss rather than a rendering gap.
  *
  * The offering is read from the builder's own bucket function with NO
- * `extraOperators`, which is exactly what `DatasetFilterField` passes, so a
+ * `extraOperators`, which is exactly what `FilterConditionField` passes, so a
  * future opt-in granted at that call site has to come through here.
  */
 const PROBE_FIELD_TYPES: ReadonlyArray<string | undefined> = [

@@ -1550,9 +1550,19 @@ export class DatasetExecutor {
    *     invented bucket would compete for its slots;
    *   - an `order` on anything but a dimension — a measure, a `__compare`
    *     column or a derived measure ranks rows, and a column of invented
-   *     zeros reorders the ranking;
-   *   - a `compareTo` — its answer keeps the shape it has (its own empty
-   *     buckets are a separate question).
+   *     zeros reorders the ranking.
+   *
+   * A `compareTo` answer is filled by this same plan (#27111), and the
+   * PRIMARY window decides the buckets: the plan reads the axis's own
+   * `dateRange`, never the shifted one. It runs after the comparison merge —
+   * when the axis is the anchor, {@link alignedCompareBucketKey} has already
+   * restated the comparison rows in primary bucket keys — so every bucket
+   * either window holds is a row already, left as the merge made it, and what
+   * the fill adds is only a bucket empty in BOTH windows. {@link fillEmptyGroups}
+   * then gives that row's `<measure>__compare` cells the empty values its
+   * primary cells get. An axis with no `dateRange` of its own (the anchor is
+   * another, window-only dimension) gets its interior gaps filled, as a plain
+   * series does. Every other guard holds for `compareTo` as for a plain series.
    *
    * The window is the axis's own `timeDimensions[].dateRange`, read in the
    * zone {@link buildQuery} resolves the query in. A window stated only in
@@ -1567,7 +1577,7 @@ export class DatasetExecutor {
     order: Record<string, 'asc' | 'desc'> | undefined,
     context?: ExecutionContext,
   ): TimeBucketFillPlan | undefined {
-    if (selection.compareTo || selection.limit != null || selection.offset != null) return undefined;
+    if (selection.limit != null || selection.offset != null) return undefined;
     if (Object.keys(order ?? {}).some((key) => !dimensions.includes(key))) return undefined;
     const bucketed = dimensions.flatMap((d) => {
       const granularity = this.granularityOf(compiled, selection, d);

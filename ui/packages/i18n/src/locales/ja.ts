@@ -4320,6 +4320,10 @@ const ja = {
       detailLoading: '詳細を読み込み中…',
       detailLoadFailed: '変更の詳細を読み込めませんでした：',
       detailNone: '差分は検出されませんでした — ドラフトは公開版と一致しています。',
+      // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
+      draftedByCopilot: 'AI コパイロットが下書きした変更を含みます',
+      draftedByMcpClient: 'MCP クライアント「{{client}}」が下書きした変更を含みます',
+      draftedByMcp: 'MCP クライアントが下書きした変更を含みます',
       detailChangedKeys: 'その他の変更：',
       detailNewKeys: '含まれるもの：',
       generatedGroup: 'プラットフォームが生成（{{n}}）',

@@ -147,11 +147,18 @@ export function formContainerContractPins(): void {
     collapsible: true,
     collapsed: true,
     columns: '3',
-    pane: 'secondary',
     visibleWhen: '${data.kind == "deal"}',
     fields: ['name', { field: 'amount', colSpan: 2 }],
   };
   void wasUndeclarableOnOneSide;
+  // `pane` was on this list until `@objectstack/spec` 18.3.0 retired it with the
+  // `split` form type it served; the derived type follows the spec and refuses it.
+  const paneIsRetired: FormSectionSpec = {
+    fields: ['name'],
+    // @ts-expect-error — `pane` is a retired key on the spec's `FormSection`
+    pane: 'secondary',
+  };
+  void paneIsRetired;
 
   const viewWasUndeclarableHere: FormViewSpec = {
     type: 'tabbed',
@@ -346,7 +353,6 @@ describe('objectui#5596 — the converged containers render what the spec accept
           name: 'advanced_options',
           label: 'Advanced',
           description: 'Rarely-used options',
-          pane: 'secondary',
           columns: 2,
           fields: [{ field: 'a' }],
         },
@@ -356,10 +362,9 @@ describe('objectui#5596 — the converged containers render what the spec accept
 
     expect(screen.getByText('Advanced')).toBeInTheDocument();
     expect(screen.getByText('Field A')).toBeInTheDocument();
-    // `name` and `pane` are authored-document keys with no reader in this repo
-    // yet — declared because the document carries them, honoured by nobody.
-    // Asserted inert so a future reader has to arrive deliberately.
+    // `name` is an authored-document key with no reader in this repo yet —
+    // declared because the document carries it, honoured by nobody. Asserted
+    // inert so a future reader has to arrive deliberately.
     expect(screen.queryByText('advanced_options')).not.toBeInTheDocument();
-    expect(screen.queryByText('secondary')).not.toBeInTheDocument();
   });
 });

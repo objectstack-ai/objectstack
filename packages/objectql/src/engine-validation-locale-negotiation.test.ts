@@ -244,6 +244,30 @@ describe('#15757 the validation-message bridge negotiates the locale like every 
   });
 
   /**
+   * #27135 — the RULE itself, not only its neighbours. A client explaining a
+   * rule reads `validations[].message` from the served object (`/meta` runs
+   * `translateObject`, with the deployment's fallback as its chain), and the
+   * refusal of the same write carries the evaluator's sentence. Both read
+   * `objectValidationMessageKey`, so for every header they are one string.
+   * `de` has no bundle: both answer through the `en` fallback.
+   */
+  it('serves the rule message the refusal of the same write carries', async () => {
+    const i18n = servedI18n(BUNDLE);
+    const table: Record<string, { served: string; refusal: string }> = {};
+    for (const header of ['zh-CN', 'zh', 'en', 'de']) {
+      const locale = preferredLocaleFromHeader(header);
+      const served = translateObject(DUTY_SCHEMA as any, BUNDLE, { locale, fallbackChain: ['en'] }) as any;
+      table[header] = { served: served.validations[0].message, refusal: await refusalFor(header, i18n) };
+    }
+    expect(table).toEqual({
+      'zh-CN': { served: AUTHORED_ZH, refusal: AUTHORED_ZH },
+      zh: { served: AUTHORED_ZH, refusal: AUTHORED_ZH },
+      en: { served: AUTHORED_EN, refusal: AUTHORED_EN },
+      de: { served: AUTHORED_EN, refusal: AUTHORED_EN },
+    });
+  });
+
+  /**
    * The mechanism, asserted rather than inferred: the bridge asks the service
    * for `zh-CN`, the locale `resolveBundleLocale` picked out of what the
    * service reports it HAS. `preferredLocaleFromHeader` still returns the bare

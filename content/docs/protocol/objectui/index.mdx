@@ -231,7 +231,7 @@ import { defineView } from '@objectstack/spec/ui';
 
 defineView({
   form: {
-    type: 'tabbed', // or 'simple' | 'wizard' | 'split' | 'drawer' | 'modal'
+    type: 'tabbed', // or 'simple' | 'wizard' — the layout; where it opens is the caller's choice
     data: { provider: 'object', object: 'project' },
     // In tabbed forms each section renders as its own tab.
     sections: [

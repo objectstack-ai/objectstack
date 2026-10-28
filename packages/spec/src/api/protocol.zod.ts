@@ -486,14 +486,47 @@ const MetadataProtectionEnvelopeFields = {
  * {@link GetMetaItemResponseSchema}'s `draftChanges[].by` (what the draft read
  * reports a key was last changed through) are spelled in, so the value a save
  * states and the value a read serves cannot drift apart.
+ *
+ * [#27176] `mcp` joins it: an agent outside the console (an MCP client a person
+ * consented to with `metadata:write`) building through a deployment's MCP
+ * build door. Like `copilot` it is an AI tool writing on a person's behalf, and
+ * like `copilot` only an in-process caller states it: the MCP door runs the
+ * same authoring tools in the server process, after verifying the client's
+ * token, so no HTTP save can claim it.
  */
-export const MetadataAuthoringSurfaceSchema = z.enum(['copilot', 'studio', 'api']).describe(
+export const MetadataAuthoringSurfaceSchema = z.enum(['copilot', 'mcp', 'studio', 'api']).describe(
   'The authoring surface of a metadata write. Closed: `copilot` is an AI assistant\'s tool writing on a '
-  + 'person\'s behalf (Studio\'s AI copilot); `studio` is a person editing in Studio; `api` is any other '
-  + 'caller of the save door. It names the surface, not the person: a copilot write and a Studio write of '
-  + 'the same user carry the same `actor`.',
+  + 'person\'s behalf (Studio\'s AI copilot); `mcp` is an AI agent outside the console writing on a '
+  + 'person\'s behalf through the MCP build door, as the OAuth client the person consented to; `studio` '
+  + 'is a person editing in Studio; `api` is any other caller of the save door. It names the surface, '
+  + 'not the person: a copilot write, an MCP write and a Studio write of the same user carry the same '
+  + '`actor`.',
 );
 export type MetadataAuthoringSurface = z.input<typeof MetadataAuthoringSurfaceSchema>;
+
+/**
+ * [#27176] The OAuth client an `mcp` write was made by: the client the person
+ * consented to, as the MCP build door verified it from the request's token.
+ * `actor` already answers WHO (the consenting person); this answers WHICH
+ * AGENT, so a draft two clients of one person contributed to tells them apart.
+ * Stated server-side only, by the door that verified the token: the save's
+ * `client` is never read off a wire request, so no caller can attribute its
+ * write to another client.
+ */
+export const MetadataAuthoringClientSchema = z.object({
+  id: z.string().min(1).describe(
+    'The OAuth client id the verified token was issued to. Opaque — compare it, never parse it.',
+  ),
+  name: z.string().min(1).optional().describe(
+    'The client\'s registered display name (its OAuth `client_name`) when it registered one, as '
+    + 'registered. Absent when it registered none; ⛔ never the id standing in for it.',
+  ),
+}).strict().describe(
+  'The OAuth client an MCP build-door write was made by: the client a person consented to with '
+  + '`metadata:write`, as the MCP build door verified it from the request\'s token. Closed: a member '
+  + 'other than `id` and `name` is refused, never stripped.',
+);
+export type MetadataAuthoringClient = z.input<typeof MetadataAuthoringClientSchema>;
 
 /**
  * Get Metadata Item Response
@@ -565,13 +598,15 @@ export type MetadataAuthoringSurface = z.input<typeof MetadataAuthoringSurfaceSc
  *
  * [#24298] `draftChanges` is a pending draft's per-key provenance: for each
  * changed key path of the draft body, which authoring surface (`copilot`,
- * `studio`, `api`) last changed it, under which actor, and when. It is what
+ * `mcp`, `studio`, `api`) last changed it, under which actor, and when. It is what
  * lets Studio's properties mark a field or a view setting the AI copilot
  * changed, with the draft chip and the source line objectui#12725 rules
  * (「由 AI 副驾在 2 分钟前作为草稿加入」). It carries ADR-0033's provenance
  * item, "attribute each AI draft to the acting user + mark it AI-sourced",
  * at the grain of a key: `actor` is the acting user and `by: 'copilot'` the
  * AI-sourced mark, two members because one user makes both kinds of edit.
+ * [#27176] An `mcp` entry also names the OAuth `client` the write was made
+ * by, the agent a person consented to; `actor` stays that person.
  * Four measured choices:
  *
  * - **On this read, not on the `_drafts` row.** The reader is Studio's
@@ -669,13 +704,20 @@ export const GetMetaItemResponseSchema = lazySchema(() => z.object({
     by: MetadataAuthoringSurfaceSchema.describe(
       'The authoring surface of the write that last changed this path: the `surface` that save declared '
       + '(`SaveMetaItemRequestSchema.surface`), `api` when it declared none. Closed: `copilot` is an AI '
-      + 'assistant\'s tool writing on a person\'s behalf (Studio\'s AI copilot); `studio` is a person '
-      + 'editing in Studio; `api` is any other caller of the save door. It names the surface, not the '
-      + 'person: a copilot write and a Studio write of the same user carry the same `actor`.',
+      + 'assistant\'s tool writing on a person\'s behalf (Studio\'s AI copilot); `mcp` is an AI agent '
+      + 'outside the console writing on a person\'s behalf through the MCP build door; `studio` is a '
+      + 'person editing in Studio; `api` is any other caller of the save door. It names the surface, not '
+      + 'the person: a copilot write, an MCP write and a Studio write of the same user carry the same '
+      + '`actor`.',
     ),
     actor: z.string().nullable().describe(
       'The identity that write was recorded under: the save\'s `actor`, the value its history event '
       + 'carries. `null` when the write recorded none, never a sentinel string.',
+    ),
+    client: MetadataAuthoringClientSchema.optional().describe(
+      'The OAuth client that write was made by: the save\'s `client`, which only the MCP build door '
+      + 'states, so it is present only beside `by: \'mcp\'`. ABSENT on every other surface, and on an '
+      + '`mcp` entry whose save stated none: absence means "not recorded", never "no client".',
     ),
     at: z.string().datetime().describe(
       'When that write happened: an ISO-8601 instant in UTC, written with `Z` (the form '
@@ -902,7 +944,11 @@ export const RuntimeAuthoringIssueSchema = lazySchema(() => z.object({
  * `draftChanges[].by` reports (`MetadataAuthoringSurfaceSchema`). Unlike
  * `writeFace` it IS caller-stated, and that is why the HTTP doors read it
  * with a narrower set than this schema's: a remote caller may say `studio`
- * or `api`, and only an in-process tool may say `copilot`.
+ * or `api`, and only an in-process tool may say `copilot` or `mcp`.
+ *
+ * [#27176] `client` is the OAuth client an `mcp` save is made by, and it is
+ * server-stated like `writeFace`: only the MCP build door sets it, from the
+ * token it verified, and no HTTP door reads it.
  *
  * `writeFace` IS declared, and the distinction with `source` is the point:
  * both are server-stated, but `writeFace` is sent by three doors (the two
@@ -1002,10 +1048,20 @@ export const SaveMetaItemRequestSchema = lazySchema(() => z.object({
     + 'save (`mode: \'draft\'`) stamps it as `by` on every key path it changes, the entries the strict '
     + 'draft read serves as `draftChanges`; an active save records no per-key provenance. ABSENT stamps '
     + '`api`. On the REST door and the runtime dispatcher it is the `?surface=` query parameter, which '
-    + 'takes `studio` or `api` and refuses every other value `400 VALIDATION_ERROR`, `copilot` '
-    + 'included: `copilot` is stated only by an in-process AI tool calling the save, never by a remote '
-    + 'caller, so an HTTP request cannot mark its own write as the copilot\'s. A value outside the set '
-    + 'in-process is refused `400 INVALID_REQUEST`, before anything is written.',
+    + 'takes `studio` or `api` and refuses every other value `400 VALIDATION_ERROR`, `copilot` and '
+    + '`mcp` included: `copilot` is stated only by an in-process AI tool calling the save and `mcp` '
+    + 'only by the MCP build door after it verified the client\'s token, never by a remote caller, so '
+    + 'an HTTP request cannot mark its own write as the copilot\'s or an MCP agent\'s. A value outside '
+    + 'the set in-process is refused `400 INVALID_REQUEST`, before anything is written.',
+  ),
+  client: MetadataAuthoringClientSchema.optional().describe(
+    'The OAuth client this save is made by (see `MetadataAuthoringClientSchema`), stated only by the '
+    + 'MCP build door, in-process, from the token it verified. Only with `surface: \'mcp\'`: a `client` '
+    + 'beside any other surface, or a malformed one, is refused `400 INVALID_REQUEST` before anything '
+    + 'is written. A draft save stamps it as `client` beside `by: \'mcp\'` on every key path it '
+    + 'changes; an active save records it nowhere. No HTTP door reads it: the REST door and the '
+    + 'dispatcher build this request member by member, so a `client` in a wire body or query is never '
+    + 'read.',
   ),
 }));
 
@@ -2101,7 +2157,8 @@ export const GetPublishedMetaItemResponseSchema = lazySchema(() => z.unknown().d
  * and when) is deliberately NOT on this row: it is
  * {@link GetMetaItemResponseSchema}'s `draftChanges`, on the strict draft read
  * Studio's properties load the item from. `updatedBy` here stays the row's
- * last actor, the same person for a copilot write and a hand edit.
+ * last actor, the same person for a copilot write, an MCP write (#27176) and
+ * a hand edit.
  */
 export const ListDraftsResponseSchema = lazySchema(() => z.object({
   drafts: z.array(z.object({

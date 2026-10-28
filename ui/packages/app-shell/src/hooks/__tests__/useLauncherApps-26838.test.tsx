@@ -95,9 +95,11 @@ describe('useLauncherApps narrows by /me/apps (objectstack#26838)', () => {
     renderWith(fetcher as unknown as typeof fetch, <><Probe /><Entries /></>);
     await waitFor(() => expect(screen.getByTestId('probe')).toHaveTextContent(/^setup,crm$/));
     expect(screen.getByTestId('probe')).toHaveAttribute('data-pending', 'false');
-    // The entries are `/meta/app`'s own objects, not the answer's.
+    // The entries are `/meta/app`'s own objects, not the answer's. `seen` is
+    // written by a passive effect, which can flush after the commit the DOM
+    // wait above saw: wait on the recording itself, not on the DOM.
+    await waitFor(() => expect(seen.mock.lastCall?.[0]).toEqual([SETUP, CRM]));
     const entries = seen.mock.lastCall?.[0];
-    expect(entries).toEqual([SETUP, CRM]);
     expect(entries?.[0]).toBe(SETUP);
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(fetcher.mock.calls[0][0]).toBe(ENDPOINT);
