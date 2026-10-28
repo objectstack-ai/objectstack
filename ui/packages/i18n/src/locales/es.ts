@@ -3609,35 +3609,6 @@ const es = {
   cloudWorkspaceTimezoneNotice: {
     seeded: "La zona horaria del entorno se configuró en {{zone}} a partir de su navegador al crearlo. Puede cambiarla en Configuración → Localización.",
   },
-  ai: {
-    nlQuery: {
-      placeholder: "Haga una pregunta sobre sus datos…",
-      ask: "Preguntar",
-      results: "Resultados",
-      match: "Coincidencia: {{percent}}",
-      simulatedSummary: "Resultados de: {{query}}",
-      noResults: "No se encontraron registros coincidentes",
-      recentQueries: "Consultas recientes",
-    },
-    formAssist: {
-      title: "Sugerencias de IA",
-      suggestionCount: "{{count}} sugerencias",
-      suggestionCount_one: "{{count}} sugerencia",
-      suggestionCount_many: "{{count}} de sugerencias",
-      suggestionCount_other: "{{count}} sugerencias",
-      applyAll: "Aplicar todo",
-      confidence: "Confianza: {{percent}}",
-      appliedCount: "{{count}} sugerencias aplicadas",
-      appliedCount_one: "{{count}} sugerencia aplicada",
-      appliedCount_many: "{{count}} de sugerencias aplicadas",
-      appliedCount_other: "{{count}} sugerencias aplicadas",
-    },
-    recommendations: {
-      title: "Recomendaciones",
-      generating: "Generando recomendaciones…",
-      empty: "No hay recomendaciones disponibles",
-    },
-  },
   aiApprovals: {
     title: "Aprobaciones de IA",
     description: "Acciones propuestas por un agente de IA que necesitan revisión humana antes de ejecutarse.",

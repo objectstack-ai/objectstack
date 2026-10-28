@@ -3686,37 +3686,6 @@ const ru = {
   cloudWorkspaceTimezoneNotice: {
     seeded: "Часовой пояс окружения был задан по вашему браузеру при его создании: {{zone}}. Его можно изменить в разделе «Настройки → Локализация».",
   },
-  ai: {
-    nlQuery: {
-      placeholder: "Задайте вопрос о своих данных…",
-      ask: "Спросить",
-      results: "Результаты",
-      match: "Совпадение: {{percent}}",
-      simulatedSummary: "Результаты по запросу: {{query}}",
-      noResults: "Подходящие записи не найдены",
-      recentQueries: "Недавние запросы",
-    },
-    formAssist: {
-      title: "Предложения ИИ",
-      suggestionCount: "Предложений: {{count}}",
-      suggestionCount_one: "{{count}} предложение",
-      suggestionCount_few: "{{count}} предложения",
-      suggestionCount_many: "{{count}} предложений",
-      suggestionCount_other: "{{count}} предложения",
-      applyAll: "Применить все",
-      confidence: "Уверенность: {{percent}}",
-      appliedCount: "Применено предложений: {{count}}",
-      appliedCount_one: "Применено {{count}} предложение",
-      appliedCount_few: "Применено {{count}} предложения",
-      appliedCount_many: "Применено {{count}} предложений",
-      appliedCount_other: "Применено {{count}} предложения",
-    },
-    recommendations: {
-      title: "Рекомендации",
-      generating: "Формирование рекомендаций…",
-      empty: "Нет доступных рекомендаций",
-    },
-  },
   aiApprovals: {
     title: "Согласования ИИ",
     description: "Действия, предложенные ИИ-агентом: перед выполнением их должен проверить человек.",
