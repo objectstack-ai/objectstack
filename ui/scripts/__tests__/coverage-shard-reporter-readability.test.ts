@@ -32,8 +32,8 @@ import { UI_COVERAGE, rootWorkflow } from './helpers/root-ci';
  * pushes, both found the same way — a person reading a job log by hand, days
  * later.
  *
- * Nothing else in this repository reads what that step runs. objectui's CI-guide pin test
- * pinned the pairing between `ci.yml` and the pipeline page until
+ * Nothing else in this repository reads what that step runs. objectui's
+ * CI-guide pin test pinned the pairing between `ci.yml` and the pipeline page until
  * objectstack#26058 deleted it (and objectstack#26944 the page), but it
  * compared COMMANDS, not flags — its extractor was
  *
