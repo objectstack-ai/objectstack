@@ -612,6 +612,19 @@ describe('GetDataRequestSchema (select/expand)', () => {
     }
   });
 
+  // [#26909] The by-id door reads `select` through the list door's
+  // projection rule and refuses a list naming no field; every member is then
+  // checked against the object's fields, where a blank name is never one.
+  it.each([[[]], [['', ' ']], [['name', '']]])('refuses select=%j — names no field', (select) => {
+    expect(GetDataRequestSchema.safeParse({ object: 'contact', id: 'c1', select }).success).toBe(false);
+  });
+
+  it.each([[['name']], [['name', 'email']]])('keeps select=%j unchanged', (select) => {
+    const result = GetDataRequestSchema.safeParse({ object: 'contact', id: 'c1', select });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.select).toEqual(select);
+  });
+
   it('should strip unknown query parameters via strict parsing', () => {
     const result = GetDataRequestSchema.strict().safeParse({
       object: 'contact',
@@ -716,6 +729,15 @@ describe('HttpFindQueryParamsSchema', () => {
     const result = HttpFindQueryParamsSchema.safeParse({ select: value });
     expect(result.success).toBe(true);
     if (result.success) expect(result.data.select).toBe(value);
+  });
+
+  // [#26909] The body side of the same door (`FindDataRequestSchema.query`,
+  // the `POST /data/:object/query` body) now refuses what this one refuses.
+  it.each(['', '   ', ',', ' , ', []])('the body-side declaration refuses select=%j too', (select) => {
+    for (const key of ['select', '$select']) {
+      const parsed = FindDataRequestSchema.safeParse({ object: 'contact', query: { object: 'contact', [key]: select } });
+      expect(parsed.success, key).toBe(false);
+    }
   });
 
   it('rejects ?distinct — the querystring spelling of the removed query.distinct', () => {

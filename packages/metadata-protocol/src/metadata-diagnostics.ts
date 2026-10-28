@@ -41,6 +41,8 @@ import { redactMetadataItem } from './metadata-redaction.js';
 // runtime gate's own answer, so the publish verdict below is re-spelled
 // against the same prefix the gate wrote it with.
 import { stackKeyForType } from '@objectstack/lint/runtime';
+// [#26886] The resolution's mark on options it derived from a shared picklist.
+import { isResolvedPicklistOptions } from '@objectstack/metadata-core';
 import type { RuntimeAuthoringIssue } from '@objectstack/spec/api';
 
 /**
@@ -175,6 +177,52 @@ function copyDiagnostics(verdict: MetadataDiagnostics): MetadataDiagnostics {
     return copy;
 }
 
+// ---------------------------------------------------------------------------
+// [#26886] Options the runtime resolved from a shared picklist
+// ---------------------------------------------------------------------------
+//
+// A field authors `picklist: '<name>'` and no `options`; every object read
+// serves it with the list's options written beside `picklist` (the registry's
+// picklist resolution, `PicklistServedFieldSchema`). Diagnostics judge what the
+// author wrote, so the field schema's rule that refuses `picklist` and
+// `options` together must not read the copy the runtime wrote: it flagged
+// every picklist-bound field of every app.
+//
+// The resolution therefore MARKS the options array it derived
+// (`markResolvedPicklistOptions`, `@objectstack/metadata-core`), and only a
+// marked array is left out here. A field that authored its own `options`
+// beside `picklist` arrives unmarked and is still flagged, with the same
+// message and severity. The mark is a non-enumerable property, so it is no
+// part of the memo key either: the key is the content of the candidate the
+// mark has already shaped.
+
+function withoutResolvedOptions(field: unknown): unknown {
+    if (!field || typeof field !== 'object') return field;
+    const { picklist, options } = field as { picklist?: unknown; options?: unknown };
+    if (typeof picklist !== 'string' || !isResolvedPicklistOptions(options)) return field;
+    const { options: _resolved, ...authored } = field as Record<string, unknown>;
+    return authored;
+}
+
+/**
+ * A document with the resolved `options` left out of every picklist-bound
+ * field of its name-keyed `fields` (the only spelling the object schema
+ * accepts). By reference when no field carries resolved options.
+ */
+function withoutResolvedPicklistOptions(document: unknown): unknown {
+    if (!document || typeof document !== 'object') return document;
+    const fields = (document as { fields?: unknown }).fields;
+    if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return document;
+    let next: Record<string, unknown> | undefined;
+    for (const [name, field] of Object.entries(fields as Record<string, unknown>)) {
+        const judged = withoutResolvedOptions(field);
+        if (judged === field) continue;
+        next ??= { ...(fields as Record<string, unknown>) };
+        next[name] = judged;
+    }
+    return next ? { ...(document as object), fields: next } : document;
+}
+
 /**
  * Compute spec diagnostics for a single metadata document.
  *
@@ -224,7 +272,10 @@ export function computeMetadataDiagnostics(
     // says. Same class as #6810 (`indexed`), different remedy — that key did
     // not belong on the served body at all and left at its injection site,
     // whereas this one is read by the UI and belongs on the response.
-    const candidate = stripReadDecorations(item);
+    // [#26886] …and judge each picklist-bound field as its author wrote it:
+    // the `options` the runtime resolved onto it are not part of that shape
+    // ({@link withoutResolvedPicklistOptions}).
+    const candidate = withoutResolvedPicklistOptions(stripReadDecorations(item));
 
     // [#25783] A document parsed before against this same schema is answered
     // from the memo — see "The verdict memo" above.
