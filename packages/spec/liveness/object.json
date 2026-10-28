@@ -1,6 +1,6 @@
 {
   "type": "object",
-  "_note": "ObjectSchema (top-level). Seeded from docs/audits/2026-06-objectschema-property-liveness.md. Roughly half dead — a large aspirational enterprise-data-management tier with zero runtime. Framework evidence cited with paths; objectui-renderer evidence as prose.",
+  "_note": "ObjectSchema (top-level). Seeded from docs/audits/archive/2026-06/2026-06-objectschema-property-liveness.md. Roughly half dead — a large aspirational enterprise-data-management tier with zero runtime. Framework evidence cited with paths; objectui-renderer evidence as prose.",
   "props": {
     "name": {
       "status": "live",

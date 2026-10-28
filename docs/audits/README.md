@@ -2,6 +2,8 @@
 
 > **Lifecycle of a file in `docs/audits/`:** an audit is *open* while its findings are being worked and *closed* once each one is fixed, ruled out or carried into a tracked ledger or issue; a closed audit moves to `docs/audits/archive/`, and git history keeps every version.
 
+> **Closed but kept in place:** a closed audit that an ADR cites by path stays where it is, because ADRs are append-only and a move would leave a dead link in their text. So does one cited by path from a published `CHANGELOG.md`, which is release-owned. In the 2026-06 series that holds `2026-06-handwritten-docs-accuracy-followups`, `2026-06-metadata-functional-completeness`, `2026-06-react-blocks-conformance`, `2026-06-react-tier-authoring-dogfood`, `2026-06-record-search-liveness` and `2026-06-security-identity-property-liveness` (ADR-cited), and `2026-06-appschema-property-liveness`, `2026-06-dead-surface-disposition-plan` and `2026-06-validationschema-property-liveness` (cited from `packages/spec/CHANGELOG.md`).
+
 A protocol-level audit of **every ObjectStack metadata type**: for each schema property, cross-reference its spec definition against its **actual consumers** (`file:line`) in the runtime and renderers, to answer two questions in order — **(1) does the property take effect?** and **(2) is it necessary / reasonable?**
 
 Liveness is judged by **code consumption**, not browser observation (an unreactive UI can't distinguish "dead property" from "data didn't trigger it"). "DEAD" = parsed but read by no non-spec/non-test consumer → a **silent no-op** for authors.
@@ -9,20 +11,20 @@ Liveness is judged by **code consumption**, not browser observation (an unreacti
 ## Per-type reports
 | Type | Doc | Health |
 |---|---|---|
-| field | `2026-06-fieldschema-property-liveness.md` | ~half dead |
-| object | `2026-06-objectschema-property-liveness.md` | ~half dead |
-| view | `2026-06-viewschema-property-liveness.md` | list-family healthy; chart/form-variants broken |
+| field | `archive/2026-06/2026-06-fieldschema-property-liveness.md` | ~half dead |
+| object | `archive/2026-06/2026-06-objectschema-property-liveness.md` | ~half dead |
+| view | `archive/2026-06/2026-06-viewschema-property-liveness.md` | list-family healthy; chart/form-variants broken |
 | app | `2026-06-appschema-property-liveness.md` | nav core healthy; aspirational tail |
 | page | `archive/2026-06/2026-06-pageschema-property-liveness.md` | drift breaks layouts |
-| dashboard | `2026-06-dashboardschema-property-liveness.md` | ADR-0021 half-done |
-| report | `2026-06-reportschema-property-liveness.md` | dataset live; chart dead |
+| dashboard | `archive/2026-06/2026-06-dashboardschema-property-liveness.md` | ADR-0021 half-done |
+| report | `archive/2026-06/2026-06-reportschema-property-liveness.md` | dataset live; chart dead |
 | dataset | `archive/2026-06/2026-06-datasetschema-property-liveness.md` | live; Studio under-covers |
-| action | `2026-06-actionschema-property-liveness.md` | disabled-CEL ignored; form/shortcut dead |
-| flow | `2026-06-flowschema-property-liveness.md` | enum out of sync; runAs unenforced |
-| agent | `2026-06-agentschema-property-liveness.md` | autonomy + access-control aspirational |
-| tool | `2026-06-toolschema-property-liveness.md` | **write-only metadata** |
-| skill | `2026-06-skillschema-property-liveness.md` | triggerPhrases display-only |
-| hook | `2026-06-hookschema-property-liveness.md` | **healthy** (near-total) |
+| action | `archive/2026-06/2026-06-actionschema-property-liveness.md` | disabled-CEL ignored; form/shortcut dead |
+| flow | `archive/2026-06/2026-06-flowschema-property-liveness.md` | enum out of sync; runAs unenforced |
+| agent | `archive/2026-06/2026-06-agentschema-property-liveness.md` | autonomy + access-control aspirational |
+| tool | `archive/2026-06/2026-06-toolschema-property-liveness.md` | **write-only metadata** |
+| skill | `archive/2026-06/2026-06-skillschema-property-liveness.md` | triggerPhrases display-only |
+| hook | `archive/2026-06/2026-06-hookschema-property-liveness.md` | **healthy** (near-total) |
 | validation | `2026-06-validationschema-property-liveness.md` | **healthy** (all 6 types enforced) |
 | security/identity (role, permission, policy, sharing) | `2026-06-security-identity-property-liveness.md` | **policy 100% dead** |
 | system/integration (email/i18n/theme/job/webhook/portal) | `archive/2026-06/2026-06-system-integration-property-liveness.md` | email + portal dead |
@@ -44,7 +46,7 @@ The most serious cluster — properties that imply a security boundary but enfor
 ### 2. 🔴 ADR-0021 analytics migration debt
 Spec moved to `dataset`+`values`/`dimensions`, but: the **chart view variant** + **dashboard renderer + Studio WidgetConfigPanel** still read the *removed* legacy `object/valueField/categoryField/aggregate` shape. (Same debt that invalidated the showcase dashboard/report seeds.)
 
-**✅ Report slice resolved (#3463 + 2026-07 close-out).** `report.chart` is **wired** (`DatasetReportRenderer` plots `chart.xAxis`/`yAxis` via `DatasetReportChart`, now dogfooded by the showcase `…_chart` report); `ReportColumn`/`ReportGrouping` (+ objectui `SpecReport*` re-exports) and the unread `chart.groupBy` + dead `aria`/`performance` are **removed**; the legacy `ReportViewer` chart fallback is **retired**. See [`2026-06-reportschema-property-liveness.md`](./2026-06-reportschema-property-liveness.md). The **chart-view / dashboard / WidgetConfigPanel** legacy-shape readers above remain open.
+**✅ Report slice resolved (#3463 + 2026-07 close-out).** `report.chart` is **wired** (`DatasetReportRenderer` plots `chart.xAxis`/`yAxis` via `DatasetReportChart`, now dogfooded by the showcase `…_chart` report); `ReportColumn`/`ReportGrouping` (+ objectui `SpecReport*` re-exports) and the unread `chart.groupBy` + dead `aria`/`performance` are **removed**; the legacy `ReportViewer` chart fallback is **retired**. See [`2026-06-reportschema-property-liveness.md`](./archive/2026-06/2026-06-reportschema-property-liveness.md). The **chart-view / dashboard / WidgetConfigPanel** legacy-shape readers above remain open.
 
 ### 3. 🟠 Naming drift → silent no-ops (spec key ≠ consumed key)
 field `maxLength`/`minLength`/`referenceFilters`/`maxRating`; page `type`→`pageType` & `label`→`title` & `visibility`; dashboard `title` vs `label`; app `accentColor`/`badgeVariant`/`separator` (renderer reads, **not in spec**); action `disabled`→`enabled`; flow `http` vs `http_request`; skill `requiredPermissions` vs `permissions`; agent `knowledge.{topics→sources}`; webhook `object`→`object_name`, `isActive`→`active`.
