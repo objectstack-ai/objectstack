@@ -16247,19 +16247,20 @@ export class ObjectStackProtocolImplementation implements
         if (!namedBase || namedBase === 'sys_metadata') return null;
         if (this.resolveWritePackageScope(namedBase) !== undefined) return null;
         const type = PLURAL_TO_SINGULAR[request.type] ?? request.type;
-        const storedWayOut = `Create a package with that id first, or remove the ${type}'s rows bound to it `
-            + `(delete the ${type} naming that package, and discard its drafts there) and save the ${type} again, `
-            + `into an installed writable package or without naming a package.`;
+        // Kept under the REST door's client-message bound (`truncateClientMessage`)
+        // for ordinary names, so the last sentence reaches the caller.
+        const storedWayOut = `Create a package with that id first, or remove the rows bound to it (a delete naming `
+            + `that package; discard-drafts for drafts) and save again, into an installed writable package or with `
+            + `no package.`;
         const err = new Error(
             how.verb === 'publish'
                 ? `Cannot publish ${type} '${request.name}' into package '${namedBase}': no package with that id `
-                    + `is installed in this deployment, so the ${type} would be served bound to a package that does `
+                    + `is installed in this deployment, so the ${type} would go live bound to a package that does `
                     + `not exist. ${storedWayOut} Nothing was published.`
                 : how.inherited
                     ? `Cannot save ${type} '${request.name}' without naming a package: its stored rows are bound to `
-                        + `package '${namedBase}', and no package with that id is installed in this deployment, so the `
-                        + `save would extend a binding to a package that does not exist. ${storedWayOut} Nothing was `
-                        + `written.`
+                        + `package '${namedBase}', which is not installed in this deployment, and this save would `
+                        + `extend that binding. ${storedWayOut} Nothing was written.`
                     : `Cannot save ${type} '${request.name}' into package '${namedBase}': no package with that id is `
                         + `installed in this deployment, so the ${type} would be stored bound to a package that does not `
                         + `exist. Name an installed writable package as the ${type}'s base (or create one first), or save `

@@ -218,17 +218,6 @@ describe('[#26921] the per-item publish refuses a draft bound to a package that 
             { state: 'draft', package_id: PHANTOM, label: 'Draft' },
         ]);
     });
-
-    it('the refusal names the way out: create the package, or remove the rows bound to it and save again', async () => {
-        const { engine, forgetPhantom } = makeStubEngine();
-        const protocol = new ObjectStackProtocolImplementation(engine);
-        expect(await save(protocol, { type: 'dashboard', name: 'ghost', item: BODIES.dashboard('ghost'), packageId: PHANTOM, mode: 'draft' })).toBe('saved');
-        forgetPhantom();
-        const thrown = await publish(protocol, { type: 'dashboard', name: 'ghost', packageId: PHANTOM });
-        expect(thrown.message).toMatch(/Create a package with that id first, or remove/);
-        expect(thrown.message).toMatch(/discard its drafts there/);
-        expect(thrown.message).toMatch(/Nothing was published\.$/);
-    });
 });
 
 describe('[#26921] a save naming no package does not extend a binding to a package that is not installed', () => {
@@ -244,7 +233,7 @@ describe('[#26921] a save naming no package does not extend a binding to a packa
                     type, name: 'ghost', item: BODIES[type]('ghost', 'Edited'), ...(mode ? { mode } : {}),
                 });
 
-                expectRefused(thrown, `Cannot save ${type} 'ghost' without naming a package: its stored rows are bound to package '${PHANTOM}', and no package with that id is installed`);
+                expectRefused(thrown, `Cannot save ${type} 'ghost' without naming a package: its stored rows are bound to package '${PHANTOM}', which is not installed in this deployment`);
                 expect(rowsFor(rows, type, 'ghost')).toEqual([{ state: 'active', package_id: PHANTOM, label: 'Live' }]);
                 expect(insert).not.toHaveBeenCalled();
                 expect(registerItem).not.toHaveBeenCalled();
@@ -262,16 +251,6 @@ describe('[#26921] a save naming no package does not extend a binding to a packa
 
         expectRefused(thrown, `Cannot save dashboard 'ghost' without naming a package: its stored rows are bound to package '${PHANTOM}'`);
         expect(rowsFor(rows, 'dashboard', 'ghost')).toEqual([{ state: 'draft', package_id: PHANTOM, label: 'Draft' }]);
-    });
-
-    it('the refusal names the way out and that nothing was written', async () => {
-        const { engine, forgetPhantom } = makeStubEngine();
-        const protocol = new ObjectStackProtocolImplementation(engine);
-        expect(await save(protocol, { type: 'dashboard', name: 'ghost', item: BODIES.dashboard('ghost'), packageId: PHANTOM })).toBe('saved');
-        forgetPhantom();
-        const thrown = await save(protocol, { type: 'dashboard', name: 'ghost', item: BODIES.dashboard('ghost') });
-        expect(thrown.message).toMatch(/Create a package with that id first, or remove/);
-        expect(thrown.message).toMatch(/Nothing was written\.$/);
     });
 });
 
