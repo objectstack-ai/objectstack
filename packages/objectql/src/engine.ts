@@ -26,9 +26,6 @@ import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
 // engine is what `metadata-protocol.validateData` returns, so letting the two
 // drift would put a translation layer between a verdict and its contract.
 import type { ValidateDataResponse } from '@objectstack/spec/api';
-// [#22646] The ADR-0112 catalog — `rejectCredentialAggregation`'s refusal
-// envelope carries `INVALID_FIELD` from it rather than a bare `Error`.
-import { StandardErrorCode } from '@objectstack/spec/api';
 import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readAutonumberCounter, missingFieldValues, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, referenceCarrierOf, isCurrentUserDefaultToken, isNowDefaultToken, isMultiValueField, driverSupportsTransactions, AUDIT_PROVENANCE_FIELDS, resolveInjectedColumnProvenance } from '@objectstack/spec/data';
 // [#5158] Door 2's lowering sink — the SAME pair the protocol face (Door 1)
 // runs, so `FilterArray` has exactly one lowering in the product.
@@ -235,7 +232,13 @@ import { resolveAllowDriverConnectFailure } from '@objectstack/types';
 // vocabulary of "benign driver error" is the exact debt that module exists to
 // retire, and `check:durability-log-level` exempts only this declared name.
 import { isMissingTableError } from '@objectstack/metadata/errors';
-import { applyArtifactForwardConversions, resolveDeclaredRange } from '@objectstack/metadata-core';
+// [#25522 cut 17] The registration door's forward conversion, the
+// nested-plugin registration and its navigation resolution; the methods of the
+// same names below hand each body the members it reads
+// (`PackageRegistrationHost`). Imported where this file imported
+// `@objectstack/metadata-core`, which only those bodies read, so the
+// evaluation order of every module and external package is what it was.
+import { convertPackageBodyForward, registerPlugin, resolveNavObjectNames } from './engine-package-registration.js';
 // [#6806] The ONE shared "is this driver error a unique-constraint violation?"
 // predicate, and its narrower companion "which column conflicted" (#6250 /
 // #6544, both landed in `@objectstack/types`). The engine's autonumber
@@ -294,11 +297,15 @@ import {
   collectInternalReadFields,
   collectCredentialFields,
 } from './secret-fields.js';
+// [#25522 cut 18] `count` and `aggregate()`'s credential guard
+// (`rejectCredentialAggregation`); the methods of the same names below hand
+// each body the members it reads (`CountAggregateHost`).
+import { count, rejectCredentialAggregation } from './engine-count-aggregate.js';
 import { assertGroupByNamesNoJsonStoredField } from './group-by-structured-json-door.js';
 import { assertAggregationFieldTypesAccepted } from './aggregate-field-type-door.js';
 import { assertAggregatedColumnsAreDistinct, assertDateBucketTargetsAreTemporal } from './aggregate-query-shape-door.js';
 import { applyProtection, pluralToSingular, ExternalWriteForbiddenError } from '@objectstack/spec/shared';
-import { SchemaRegistry, computeFQN, type ArtifactInstallScope } from './registry.js';
+import { SchemaRegistry, type ArtifactInstallScope } from './registry.js';
 import { expandSearchToFilter, normalizeSearch, SEARCHABLE_ENUM_TYPES, SEARCHABLE_TEXTUAL_TYPES } from './search-filter.js';
 import { stripSearchCompanion } from './search-companion.js';
 import { ExpressionEngine, analyzeRelationshipTraversals, type EvalError, type EvalOptionLabels, type EvalPermissions } from '@objectstack/formula';
@@ -593,7 +600,7 @@ export const HOOK_EVENT_DISPATCH_VOCABULARY = {
  * lowering (`sort` records, `populate` lists) that belongs to those layers, so
  * the engine deliberately does not fold them.
  */
-const ENGINE_WHERE_SLOTS: readonly QueryAliasSlot[] =
+export const ENGINE_WHERE_SLOTS: readonly QueryAliasSlot[] =
   RPC_QUERY_ALIAS_SLOTS.filter((slot) => slot.canonical === 'where');
 const ENGINE_QUERY_SLOTS: readonly QueryAliasSlot[] =
   RPC_QUERY_ALIAS_SLOTS.filter((slot) => slot.canonical === 'where' || slot.canonical === 'limit');
@@ -692,7 +699,7 @@ const ENGINE_DELETE_OPTION_KEYS: ReadonlySet<string> = new Set([
 // Before their schemas declared them they were refused here, and the wire paths
 // left them out: the unsearched groups answered, and a paged list's `total`
 // under a search was a page-local estimate (#22790).
-const ENGINE_COUNT_OPTION_KEYS: ReadonlySet<string> = new Set(['context', 'where', 'search', 'searchFields']);
+export const ENGINE_COUNT_OPTION_KEYS: ReadonlySet<string> = new Set(['context', 'where', 'search', 'searchFields']);
 const ENGINE_AGGREGATE_OPTION_KEYS: ReadonlySet<string> = new Set([
   'context', 'where', 'groupBy', 'aggregations', 'having', 'timezone',
   'search', 'searchFields',
@@ -789,9 +796,12 @@ export function writeFailureLogMeta(
 
 /**
  * [#24948] The refusal of a predicate (`multi`) delete of `sys_organization`:
- * the standard `DELETE_RESTRICTED`, saying to delete by id. Only the by-id
- * delete runs the referential pass that refuses an organization still owning
- * rows and keeps every row's reference to it.
+ * the standard `DELETE_RESTRICTED`, saying to delete by id. An organization is
+ * deleted one at a time, through plugin-auth's organization delete: its
+ * refusal of an organization that still owns records and its
+ * `beforeDeleteOrganization` clean-up of the organization's teams, team members
+ * and admin grants run there, once per organization. A delete matching
+ * organizations by a filter runs neither, and no caller needs one.
  */
 function organizationPredicateDeleteRefusal(): Error {
   const err: any = new Error(
@@ -799,9 +809,10 @@ function organizationPredicateDeleteRefusal(): Error {
       'Delete each organization by its id.',
   );
   err.developerMessage =
-    `A predicate delete of ${ORGANIZATION_OBJECT} is refused: it runs no referential pass, so it could neither ` +
-    'refuse an organization that still owns rows nor keep the rows naming it. Delete each organization by id ' +
-    `(engine.delete('${ORGANIZATION_OBJECT}', { where: { id } })).`;
+    `A predicate delete of ${ORGANIZATION_OBJECT} is refused: organizations are deleted one at a time, because ` +
+    "plugin-auth's organization delete refuses an organization that still owns records and removes its teams, " +
+    'team members and admin grants per organization, and a predicate delete runs neither. Delete each organization ' +
+    `by id (engine.delete('${ORGANIZATION_OBJECT}', { where: { id } })).`;
   err.code = 'DELETE_RESTRICTED';
   err.status = 409;
   err.httpStatus = 409;
@@ -901,7 +912,7 @@ export const ENGINE_OPTION_KEY_SETS: Readonly<Record<string, ReadonlySet<string>
  * (`cursor`/`distinct`) quote their tombstone. Everything else gets the legal
  * key set, so the error carries the fix.
  */
-function rejectUnknownEngineOptions(
+export function rejectUnknownEngineOptions(
   object: string,
   operation: string,
   bag: object | undefined,
@@ -943,7 +954,7 @@ function rejectUnknownEngineOptions(
  * shallow copy, because the bag belongs to the caller and may be reused (view
  * metadata, flow node config).
  */
-function foldEngineOptionAliases<T extends object | undefined>(
+export function foldEngineOptionAliases<T extends object | undefined>(
   object: string,
   operation: string,
   bag: T,
@@ -1101,7 +1112,7 @@ const UNAPPLIED_WHERE_CONSEQUENCE: Readonly<Record<string, string>> = {
  * common path allocates nothing), otherwise a shallow copy: the bag belongs to
  * the caller and may be reused (view metadata, flow node config).
  */
-function lowerWhereFilterArray<T extends object | undefined>(
+export function lowerWhereFilterArray<T extends object | undefined>(
   object: string,
   operation: string,
   bag: T,
@@ -1399,7 +1410,7 @@ function resolveThenLowerWhere<W>(
  * copies, and with them gone that reading would have dropped the whole-day
  * bound on every such read.
  */
-function declaredDatetimeLowering(schema: unknown): FilterLoweringOptions {
+export function declaredDatetimeLowering(schema: unknown): FilterLoweringOptions {
   const fields = (schema as { fields?: unknown } | undefined)?.fields;
   if (fields === null || typeof fields !== 'object') return {};
   return {
@@ -1790,6 +1801,8 @@ function planFormulaProjection(
  * on driver-sql (a projection is exactly the named columns — no `id` unless it
  * is named) and pinned against it in `engine-formula-projection-trim.test.ts`.
  * `id` is cut like any other widened column when the caller did not name it.
+ * [#26672] The `id` {@link withFileOwnerKey} adds for a file field's owner
+ * verdict is cut the same way.
  *
  * ## Where it runs, and why there
  *
@@ -1825,6 +1838,35 @@ function withoutFormulaWidening<T>(row: T, widened: ReadonlySet<string> | undefi
 function rowsWithoutFormulaWidening<T>(rows: T, widened: ReadonlySet<string> | undefined): T {
   if (!widened || !Array.isArray(rows)) return rows;
   return rows.map((row) => withoutFormulaWidening(row, widened)) as unknown as T;
+}
+
+/**
+ * [#26672] A projection that names a file field reads the record's `id` too,
+ * and the key is cut back off the answer like the formula widening is.
+ *
+ * File-reference hydration judges a reader refused `sys_file` read by the
+ * record that OWNS each file (#22637, `readParentDerivedFiles`), matched on
+ * that record's `id`. A projection that left `id` out handed it rows with no
+ * key, so a file the reader may read answered `{ id, metadataRefused: true }`
+ * to `select=<file field>` and the full value to `select=id,<file field>`. The
+ * verdict must not depend on whether the caller listed `id`, so the driver is
+ * asked for it here and {@link withoutFormulaWidening} trims it at the
+ * `return`: the caller still gets exactly the columns it named, and a reader
+ * the verdict refuses is still refused.
+ *
+ * Touches only an explicit projection that names a file field and not `id`;
+ * a projection the formula planner widened already carries `id`.
+ */
+function withFileOwnerKey(
+  schema: any,
+  requestedFields: string[] | undefined,
+  planned: { projected?: string[]; widened?: string[] },
+): { projected?: string[]; widened?: string[] } {
+  if (!schema?.fields || !Array.isArray(requestedFields) || requestedFields.length === 0) return planned;
+  const projected = planned.projected ?? requestedFields;
+  if (projected.includes('id')) return planned;
+  if (!requestedFields.some((f) => FILE_REFERENCE_TYPES.has((schema.fields as any)[f]?.type))) return planned;
+  return { projected: [...projected, 'id'], widened: [...(planned.widened ?? []), 'id'] };
 }
 
 /**
@@ -4050,7 +4092,7 @@ export function servedAsStored(served: unknown, stored: unknown, depth = 0): boo
 }
 
 /** Merge read-path execution context from the query and the trailing options. */
-function mergeReadContext(
+export function mergeReadContext(
   fromQuery?: ExecutionContext,
   fromOptions?: ExecutionContext,
 ): ExecutionContext | undefined {
@@ -4525,6 +4567,36 @@ interface CascadeDeleteSet {
    * read the same relations, file each record once between them.
    */
   readonly elevationsFiled: Set<string>;
+  /**
+   * [#26718] Member key ({@link cascadeMemberKey}) → the members a
+   * CASCADING relation reaches from it directly, every edge the collection
+   * walk read, a row reached by two paths included. The reach of one member
+   * inside the set ({@link cascadeReachOf}) is read from it: which rows the
+   * delete removes only BECAUSE that member goes.
+   */
+  readonly cascadeEdges: Map<string, Array<{ object: string; id: string | number }>>;
+}
+
+/** [#26718] One member of a {@link CascadeDeleteSet}, as a single key. */
+function cascadeMemberKey(object: string, id: unknown): string {
+  return JSON.stringify([object, String(id)]);
+}
+
+/**
+ * [#26718] Every member a cascade reaches from `object`/`id` through the
+ * set's own {@link CascadeDeleteSet.cascadeEdges}: its details, theirs, and so
+ * on, indexed like {@link CascadeDeleteSet.members}. The member itself is in
+ * it only when a cycle in the data leads back.
+ */
+function cascadeReachOf(set: CascadeDeleteSet, object: string, id: unknown): Map<string, Set<string>> {
+  const reach = new Map<string, Set<string>>();
+  const queue: Array<{ object: string; id: unknown }> = [{ object, id }];
+  for (const from of queue) {
+    for (const next of set.cascadeEdges.get(cascadeMemberKey(from.object, from.id)) ?? []) {
+      if (cascadeSetAdd(reach, next.object, next.id)) queue.push(next);
+    }
+  }
+  return reach;
 }
 
 /** Is `id` of `object` in this index of a {@link CascadeDeleteSet}? */
@@ -4570,7 +4642,7 @@ interface CascadeIssuedDelete {
  * stamped here is the one the item keeps. With no version this does nothing:
  * the registry stamps the id, exactly as before.
  */
-function stampPackage<T>(item: T, packageId: string, packageVersion: string | undefined): T {
+export function stampPackage<T>(item: T, packageId: string, packageVersion: string | undefined): T {
   if (packageVersion !== undefined) applyProtection(item as any, { packageId, packageVersion });
   return item;
 }
@@ -4619,7 +4691,7 @@ function permissionSetOwnerRegistrationRefusal(
  * shows the same objects both times. `applyProtection` writes top-level keys
  * only, so a shallow copy holds every key it touches.
  */
-function stampObjectPackage(def: ServiceObject, packageId: string, packageVersion: string | undefined): ServiceObject {
+export function stampObjectPackage(def: ServiceObject, packageId: string, packageVersion: string | undefined): ServiceObject {
   return packageVersion === undefined ? def : stampPackage({ ...def }, packageId, packageVersion);
 }
 
@@ -8480,34 +8552,14 @@ export class ObjectQL implements IObjectQLEngine {
    * structured `OS_METADATA_CONVERTED` record every conversion emits.
    */
   convertPackageBodyForward(body: any): any {
-      if (!body || typeof body !== 'object' || Array.isArray(body)) return body;
-      if (resolveDeclaredRange(body) === null) return body;
-      const result = applyArtifactForwardConversions(body);
-      if (result.notices.length === 0) return result.definition;
-
-      const id = String(body.id || body.name || '(unnamed)');
-      const byConversion = new Map<string, { count: number; firstPath: string; message: string }>();
-      for (const n of result.notices) {
-          const existing = byConversion.get(n.conversionId);
-          if (existing) existing.count += 1;
-          else byConversion.set(n.conversionId, { count: 1, firstPath: n.path, message: n.message });
-      }
-      const retiredAfter = new Map(result.replayedRetirements.map((r) => [r.conversionId, r.retiredAfter]));
-      for (const [conversionId, agg] of byConversion) {
-          const key = `${id}|${conversionId}`;
-          if (this.registrationConversionWarned.has(key)) continue;
-          this.registrationConversionWarned.add(key);
-          const pastFloor = retiredAfter.get(conversionId);
-          this.logger.warn(
-              `[ObjectQL] package '${id}' registered with declared protocol floor ${result.authoredFloor ?? '(unreadable)'} `
-              + `on @objectstack/spec ${result.runtimeSpecVersion ?? '(unknown)'} (${result.verdict}) — ADR-0087 conversion `
-              + `'${conversionId}'${pastFloor !== undefined ? ` (a retirement this runtime enforces past the body's floor; the shape was last accepted by @objectstack/spec ${pastFloor})` : ''} `
-              + `converted ${agg.count} site(s) forward (first at ${agg.firstPath}). ${agg.message} `
-              + `The installed body itself is unchanged, so it converts again at every registration until the package `
-              + `is rebuilt ('os build') and re-published with tooling from a release that ships this retirement.`,
-          );
-      }
-      return result.definition;
+    // [#25522 cut 17] The body moved to `engine-package-registration.ts` (see `PackageRegistrationHost`).
+    const readRegistrationConversionWarned = () => this.registrationConversionWarned;
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof convertPackageBodyForward> = {
+      get registrationConversionWarned() { return readRegistrationConversionWarned(); },
+      get logger() { return readLogger(); },
+    };
+    return convertPackageBodyForward.call(host, body);
   }
 
   /**
@@ -8715,21 +8767,8 @@ export class ObjectQL implements IObjectQLEngine {
    * expansion is applied.
    */
   private resolveNavObjectNames(app: any, namespace: string): any {
-      if (!app.navigation) return app;
-
-      const resolveItems = (items: any[]): any[] =>
-          items.map((item: any) => {
-              const resolved = { ...item };
-              if (resolved.objectName && !resolved.objectName.includes('__')) {
-                  resolved.objectName = computeFQN(namespace, resolved.objectName);
-              }
-              if (Array.isArray(resolved.children)) {
-                  resolved.children = resolveItems(resolved.children);
-              }
-              return resolved;
-          });
-
-      return { ...app, navigation: resolveItems(app.navigation) };
+    // [#25522 cut 17] The body moved to `engine-package-registration.ts`; it reads no member of the class.
+    return resolveNavObjectNames(app, namespace);
   }
 
   /**
@@ -8744,61 +8783,16 @@ export class ObjectQL implements IObjectQLEngine {
    * @param parentNamespace - The parent package's namespace (for FQN resolution)
    */
   private registerPlugin(plugin: any, parentId: string, parentNamespace?: string, parentVersion?: string) {
-      // `parentVersion` is the owning package's version, stamped like `parentId`.
-      const pluginName = plugin.name || plugin.id || 'unnamed';
-      const pluginNamespace = plugin.namespace || parentNamespace;
-
-      // Use parentId as the owning package for namespace consistency.
-      // The parent package already claimed the namespace — nested plugins
-      // contribute objects UNDER the parent's ownership.
-      const ownerId = parentId;
-
-      // Register objects (supports both Array and Map formats)
-      if (plugin.objects) {
-          try {
-              if (Array.isArray(plugin.objects)) {
-                  this.logger.debug('Registering plugin objects (Array)', { pluginName, count: plugin.objects.length });
-                  for (const objDef of plugin.objects) {
-                      const fqn = this._registry.registerObject(stampObjectPackage(objDef, ownerId, parentVersion), ownerId, pluginNamespace, 'own');
-                      this.logger.debug('Registered Object', { fqn, from: pluginName });
-                  }
-              } else {
-                  // Same contract statement as the manifest map branch above —
-                  // authored `ServiceObject`s (INPUT shape, ADR-0122 phase 2).
-                  const entries = Object.entries(plugin.objects) as [string, ServiceObject][];
-                  this.logger.debug('Registering plugin objects (Map)', { pluginName, count: entries.length });
-                  for (const [name, objDef] of entries) {
-                      objDef.name = name;
-                      const fqn = this._registry.registerObject(stampObjectPackage(objDef, ownerId, parentVersion), ownerId, pluginNamespace, 'own');
-                      this.logger.debug('Registered Object', { fqn, from: pluginName });
-                  }
-              }
-          } catch (err: any) {
-              this.logger.warn('Failed to register plugin objects', { pluginName, error: err.message });
-          }
-      }
-
-      // Register plugin as app if it has navigation (for sidebar display)
-      if (plugin.name && plugin.navigation) {
-          try {
-              const resolved = pluginNamespace ? this.resolveNavObjectNames(plugin, pluginNamespace) : plugin;
-              this._registry.registerApp(stampPackage(resolved, ownerId, parentVersion), ownerId);
-              this.logger.debug('Registered plugin-as-app', { app: plugin.name, from: pluginName });
-          } catch (err: any) {
-              this.logger.warn('Failed to register plugin as app', { pluginName, error: err.message });
-          }
-      }
-
-      // Register metadata arrays (actions, views, triggers, etc.) through the
-      // SAME seam the manifest path uses — same stamping seam, one level down: a
-      // nested plugin's declarations must carry the parent package's ADR-0010
-      // provenance too, or the declared-≠-enforced hole reopens for packages
-      // that ship a collection from a nested plugin (`capabilities` #5870;
-      // `jobs` / `emailTemplates` / `tools` / `skills` #7049, which is why the
-      // list is no longer copied here to be patched one name at a time; the
-      // aggregated-view expansion, #7163, for why the loop BODY is no longer
-      // copied here either).
-      this.registerMetadataCollections(plugin, ownerId, 'nested plugin', parentVersion);
+    // [#25522 cut 17] The body moved to `engine-package-registration.ts` (see `PackageRegistrationHost`).
+    const readLogger = () => this.logger;
+    const readRegistry = () => this._registry;
+    const host: ThisParameterType<typeof registerPlugin> = {
+      get logger() { return readLogger(); },
+      get _registry() { return readRegistry(); },
+      resolveNavObjectNames: (...a) => this.resolveNavObjectNames(...a),
+      registerMetadataCollections: (...a) => this.registerMetadataCollections(...a),
+    };
+    return registerPlugin.call(host, plugin, parentId, parentNamespace, parentVersion);
   }
 
   /**
@@ -12992,9 +12986,11 @@ export class ObjectQL implements IObjectQLEngine {
    * Returns, per allowed file id, the owning record's id and its servable row
    * — `null` when the row is owned and allowed but not servable, which the
    * caller reads as the bare id a `sys_file` reader would see. An id absent
-   * from the map keeps the refused marker. Unwired, no record ids (a
-   * projection that left out `id`), or a failure: an empty map — every id
-   * stays refused, the answer before this existed.
+   * from the map keeps the refused marker. Unwired, no record ids, or a
+   * failure: an empty map — every id stays refused, the answer before this
+   * existed. [#26672] `find` / `findOne` read `id` for any projection that
+   * names a file field ({@link withFileOwnerKey}), so a caller's projection
+   * that leaves `id` out does not land here.
    */
   private async readParentDerivedFiles(
     objectName: string,
@@ -13543,10 +13539,12 @@ export class ObjectQL implements IObjectQLEngine {
     // driver, where the #3821 ladder answered it with EVERY field.
     assertProjectionHasNoDottedPaths(object, 'find', _findSchema, ast.fields);
     const _findFormula = planFormulaProjection(_findSchema, ast.fields);
-    if (_findFormula.projected) ast.fields = _findFormula.projected;
+    // [#26672] …and a file field's owner key — see `withFileOwnerKey`.
+    const _findProjection = withFileOwnerKey(_findSchema, ast.fields, _findFormula);
+    if (_findProjection.projected) ast.fields = _findProjection.projected;
     // [#22300] The columns that widening added, cut back off the answer at the
     // `return` — see `withoutFormulaWidening`.
-    const _findWidened = _findFormula.widened ? new Set(_findFormula.widened) : undefined;
+    const _findWidened = _findProjection.widened ? new Set(_findProjection.widened) : undefined;
 
     // Drop any requested PLAIN field that doesn't exist on the schema.
     // Without this, drivers (notably SqlDriver) emit `SELECT unknown_col
@@ -13862,9 +13860,11 @@ export class ObjectQL implements IObjectQLEngine {
     // [#7642] Caller's own projection, before planning rewrites it — see `find`.
     const _findOneRequestedFields = Array.isArray(ast.fields) ? [...ast.fields] : undefined;
     const _findOneFormula = planFormulaProjection(_findOneSchema, ast.fields);
-    if (_findOneFormula.projected) ast.fields = _findOneFormula.projected;
+    // [#26672] Same as `find`: a file field's owner key is read too.
+    const _findOneProjection = withFileOwnerKey(_findOneSchema, ast.fields, _findOneFormula);
+    if (_findOneProjection.projected) ast.fields = _findOneProjection.projected;
     // [#22300] Same as `find`: what the widening added is cut at the `return`.
-    const _findOneWidened = _findOneFormula.widened ? new Set(_findOneFormula.widened) : undefined;
+    const _findOneWidened = _findOneProjection.widened ? new Set(_findOneProjection.widened) : undefined;
 
     // Drop unknown PLAIN fields — see the equivalent block in `find()` for
     // the rationale, and for why this tolerance is plain-columns-only ([#7589]
@@ -18210,8 +18210,9 @@ export class ObjectQL implements IObjectQLEngine {
    * required lookup that escalation is decided per ROW after the dependents
    * probe (#9688): a row that keeps another member takes the member removal,
    * a row the removal would EMPTY keeps the refusal, and the refusal counts
-   * only those rows. Only runs for single-id deletes — multi/predicate
-   * deletes skip cascade (logged).
+   * only those rows. A by-id delete runs it for its one record; a predicate
+   * delete (`multi: true`) runs it for every row it matched ([#26871], see
+   * `delete()`'s predicate arm).
    *
    * [#22305] Two phases, so the walk knows its own set before it judges
    * anything:
@@ -18224,6 +18225,13 @@ export class ObjectQL implements IObjectQLEngine {
    *      OUTSIDE the set. A row in the set is about to be deleted by this same
    *      cascade: it cannot be left dangling, so it refuses nothing, and
    *      clearing its reference would be a write against a row about to go.
+   * [#26718] Between the two, {@link refuseRestrictsInsideOwnCascade}, also
+   * read-only: an AUTHORED `restrict` held by a member the cascade reaches
+   * only THROUGH the record that restrict protects (a child holding a
+   * master_detail and a restrict lookup to one parent; a grandchild under it)
+   * refuses the delete before the first write. The row is in the set, so phase
+   * 2 alone would let the cascade delete it.
+   *
    * Before this, the outcome depended on registration order: with the
    * contacts registered ahead of the contracts, deleting an account refused
    * on a contract's required lookup to a contact, a contract the same delete
@@ -18271,6 +18279,9 @@ export class ObjectQL implements IObjectQLEngine {
       return;
     }
     const cascadeSet = await this.collectCascadeDeleteSet(object, id, context, objects);
+    // [#26718] Every restrict a member's own cascade would override is judged
+    // here, before the first write.
+    await this.refuseRestrictsInsideOwnCascade(cascadeSet, { object, id }, context, objects);
     await this.cascadeDeleteSets.run(cascadeSet, () =>
       this.walkReferencingRelations(object, id, context, objects, cascadeSet),
     );
@@ -18307,7 +18318,9 @@ export class ObjectQL implements IObjectQLEngine {
     objects: ServiceObject[],
     opts: { fileElevations: boolean } = { fileElevations: true },
   ): Promise<CascadeDeleteSet> {
-    const set: CascadeDeleteSet = { members: new Map(), entered: new Map(), elevationsFiled: new Set() };
+    const set: CascadeDeleteSet = {
+      members: new Map(), entered: new Map(), elevationsFiled: new Set(), cascadeEdges: new Map(),
+    };
     cascadeSetAdd(set.members, object, id);
     // The cascading relations pointing at each object, scanned once per object
     // rather than once per record: a wide cascade has many records of few
@@ -18344,7 +18357,14 @@ export class ObjectQL implements IObjectQLEngine {
         );
         for (const row of rows) {
           const depId = row?.id;
-          if (depId != null && cascadeSetAdd(set.members, childName, depId)) {
+          if (depId == null) continue;
+          // [#26718] The edge is kept even for a row already in the set: a
+          // row reached by two paths is in the reach of both.
+          const from = cascadeMemberKey(target.object, target.id);
+          let edges = set.cascadeEdges.get(from);
+          if (!edges) { edges = []; set.cascadeEdges.set(from, edges); }
+          edges.push({ object: childName, id: depId });
+          if (cascadeSetAdd(set.members, childName, depId)) {
             queue.push({ object: childName, id: depId });
           }
         }
@@ -18748,6 +18768,11 @@ export class ObjectQL implements IObjectQLEngine {
         // is done. `cascade` keeps every row: its rows ARE the set, and the
         // walk deletes them below.
         //
+        // [#26718] …except an AUTHORED restrict held by a row the cascade reaches
+        // only through the record that restrict protects: that one was judged
+        // before the cascade wrote anything ({@link refuseRestrictsInsideOwnCascade}),
+        // so a row in the set reaching here refuses nothing.
+        //
         // After `probedIds`, on purpose: the disclosure check still compares
         // the caller's own view against every row the elevated probe read, so a
         // count is disclosed only to a caller who can see the whole relation,
@@ -18788,84 +18813,10 @@ export class ObjectQL implements IObjectQLEngine {
         }
 
         if (behavior === 'restrict') {
-          // [#7307] TWO messages, two audiences — because this error has two
-          // and they were sharing one string.
-          //
-          // `message` is what a BUSINESS USER reads: REST ships it verbatim as
-          // `body.error` in the flat 409 envelope (`mapDataError`), and Console
-          // renders that as-is in a toast. It was composed English-only with the
-          // API names concatenated in and a metadata-authoring instruction on
-          // the end, so an operator deleting a 部门 in a fully Chinese app got an
-          // English sentence naming two tables and a column they have never
-          // seen, ending in advice only a developer can act on. It is now
-          // rendered through the operation-message catalog in the caller's
-          // locale against resolved LABELS — the same fix #3957 made one layer
-          // down for field constraints, reached from the operation side.
-          //
-          // `developerMessage` is what the DEVELOPER reads, and is the previous
-          // sentence unchanged, byte for byte: English, API names, and the
-          // `deleteBehavior:'cascade'` hint — which is correct and useful, and
-          // is not lost, it is addressed. It rides the structured half of the
-          // envelope alongside `dependentObject` / `dependentCount`, which
-          // already carry API names, so it discloses nothing new; no
-          // user-facing surface reads it.
-          //
-          // The wire code does NOT split: one `DELETE_RESTRICTED` (ADR-0112),
-          // two SENTENCES, exactly as the field catalog splits a message key
-          // without splitting `FieldErrorCode`.
-          const required = fdef.deleteBehavior !== 'restrict' && fdef.required === true;
-          const msgCtx = this.validationMessageContext(object, context);
-          const parent = objects.find((o) => (o as any)?.name === object);
-          // [#12166, ruling constraint 2] Whether this refusal may carry the
-          // row COUNT — see `dependentCountIsDisclosable` for why the elevation
-          // above is what makes the question exist, and why the answer is "only
-          // if the caller's own identity would have produced the same rows".
-          // The OBJECT is named either way: that half is what the ruling
-          // requires the caller to learn.
-          const discloseCount = await this.dependentCountIsDisclosable(
-            childName, probeWhere, probedIds, fieldName, multiValued, id, context,
-          );
-          const err: any = new Error(
-            renderOperationMessage(
-              {
-                messageKey: discloseCount
-                  ? (required ? 'delete_restricted_required' : 'delete_restricted')
-                  : (required ? 'delete_restricted_required_opaque' : 'delete_restricted_opaque'),
-                params: {
-                  object: this.objectDisplayLabel(object, (parent as any)?.label, msgCtx),
-                  dependentObject: this.objectDisplayLabel(childName, (child as any)?.label, msgCtx),
-                  field: resolveFieldLabel(fieldName, fdef, { ...msgCtx, objectName: childName }),
-                  ...(discloseCount ? { count: dependents.length } : {}),
-                },
-              },
-              { locale: msgCtx.locale, translate: msgCtx.translate },
-            ),
-          );
-          // The DEVELOPER half is subject to the same rule, and the reason is
-          // measured rather than assumed: for `DELETE_RESTRICTED` (unlike the
-          // #7414 permission denial) this sentence RIDES THE ENVELOPE — REST's
-          // `mapDataError` ships it — so a count withheld from `message` and
-          // left here would not be withheld at all.
-          err.developerMessage =
-            `Cannot delete ${object} (${id}): ` +
-            `${discloseCount ? `${dependents.length} dependent ${childName} record(s) reference it` : `dependent ${childName} record(s) reference it`} via ${fieldName}` +
-            `${required ? ` (${fieldName} is required, so it cannot be cleared)` : ''}. ` +
-            `Delete or reassign them first, or set deleteBehavior:'cascade' on ${childName}.${fieldName}.`;
-          err.code = 'DELETE_RESTRICTED';
-          err.status = 409;
-          err.httpStatus = 409;
-          err.object = object;
-          // Constraint 2's REQUIRED half — the referenced object is named
-          // unconditionally, because "which table is blocking me" is the one
-          // thing the reporting deployment's admins could not self-diagnose.
-          err.dependentObject = childName;
-          // …and its withheld half. Absent rather than zeroed: `0` would be a
-          // false statement about the rows (there is at least one, or this
-          // branch would not have been reached), and REST's envelope builder
-          // already omits the key for a non-number, so an absent count reaches
-          // the client as an absent key rather than as a lie.
-          if (discloseCount) err.dependentCount = dependents.length;
-          throw err;
+          throw await this.deleteRestrictedError({
+            object, id, child, childName, fieldName, fdef, dependents, probeWhere, probedIds, multiValued,
+            objects, context,
+          });
         }
 
         for (const dep of dependents) {
@@ -18958,6 +18909,200 @@ export class ObjectQL implements IObjectQLEngine {
         }
       }
     }
+  }
+
+  /**
+   * [#26718] Before the cascade writes anything: refuse the delete when an
+   * AUTHORED `restrict` is held by a row the cascade would remove only because
+   * the record that restrict protects is removed.
+   *
+   * The deleting walk judges a `restrict` against rows OUTSIDE the cascade set
+   * alone (#22305), and a row inside it was exempt whatever put it there. That
+   * exemption is right for a row the cascade reaches through ANOTHER record (a
+   * contract and the contact it restricts, both details of the account being
+   * deleted: the account's delete removes both, and neither is left dangling).
+   * It was wrong for a row reached THROUGH the very record it protects: a child
+   * holding a `master_detail` and a `restrict` lookup to the same parent is in
+   * that parent's set by its own master_detail, so the restrict was never
+   * asked and the cascade deleted the child — the record the author declared
+   * undeletable. A grandchild under that parent holding the restrict is the
+   * same case one level down.
+   *
+   * So for every member, every relation whose RESOLVED behaviour is `restrict`
+   * ({@link cascadeRelationBehavior}, an authored `restrict` on a lookup,
+   * tree or master_detail) is probed here when its object has a member in the
+   * reach of that member ({@link cascadeReachOf}); a referencing row in the
+   * reach refuses with the walk's own `DELETE_RESTRICTED`
+   * ({@link deleteRestrictedError}). Every restrict is judged before the
+   * first cascade, so the outcome no longer depends on the order the fields or
+   * objects are declared in, and nothing has been written when it refuses.
+   *
+   * ⛔ The required-lookup escalation (`set_null` on a required field read as
+   * `restrict`) is not judged here: it restricts because a required reference
+   * cannot be CLEARED, and a row the cascade deletes is never cleared. It keeps
+   * the #22305 rule. Neither does this replace the walk's judgement of rows
+   * outside the set, which is unchanged.
+   */
+  private async refuseRestrictsInsideOwnCascade(
+    cascadeSet: CascadeDeleteSet,
+    root: { object: string; id: string | number },
+    context: ExecutionContext | undefined,
+    objects: ServiceObject[],
+  ): Promise<void> {
+    // The members with the ids as the rows carried them (the set's own index
+    // holds strings), so each probe below spells its filter as the walk does.
+    const members: Array<{ object: string; id: string | number }> = [];
+    const seen = new Set<string>();
+    for (const member of [root, ...[...cascadeSet.cascadeEdges.values()].flat()]) {
+      const key = cascadeMemberKey(member.object, member.id);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      members.push(member);
+    }
+    // The restrict relations pointing at each object whose own object has a
+    // member, scanned once per object.
+    const restricting = new Map<string, Array<{ child: ServiceObject; childName: string; fieldName: string; fdef: any }>>();
+    const restrictingInto = (target: string) => {
+      let relations = restricting.get(target);
+      if (!relations) {
+        relations = [];
+        for (const child of objects) {
+          const childName = (child as any)?.name as string | undefined;
+          const fields = (child as any)?.fields as Record<string, any> | undefined;
+          if (!childName || !fields || !cascadeSet.members.has(childName)) continue;
+          for (const [fieldName, fdef] of Object.entries(fields)) {
+            if (this.cascadeRelationBehavior(target, child, fieldName, fdef) === 'restrict') {
+              relations.push({ child, childName, fieldName, fdef });
+            }
+          }
+        }
+        restricting.set(target, relations);
+      }
+      return relations;
+    };
+    for (const { object, id } of members) {
+      const relations = restrictingInto(object);
+      if (relations.length === 0) continue;
+      const reach = cascadeReachOf(cascadeSet, object, id);
+      for (const { child, childName, fieldName, fdef } of relations) {
+        if (!reach.has(childName)) continue;
+        const probeWhere = this.referenceProbeFilter(fieldName, fdef, id);
+        this.fileReferenceCheckElevation(cascadeSet, object, id, childName, fieldName, context);
+        const rows = await this.probeReferencingRows(childName, fieldName, fdef, id, probeWhere, context);
+        const dependents = rows.filter((row) => cascadeSetHas(reach, childName, row?.id));
+        if (dependents.length === 0) continue;
+        throw await this.deleteRestrictedError({
+          object, id, child, childName, fieldName, fdef, dependents, probeWhere,
+          probedIds: rows.map((r: any) => String(r?.id)),
+          multiValued: declaredMultiValued(fdef),
+          objects, context,
+        });
+      }
+    }
+  }
+
+  /**
+   * The `DELETE_RESTRICTED` refusal of deleting `object`/`id` because
+   * `dependents` of `childName` reference it via `fieldName`. One builder for
+   * the deleting walk ({@link walkReferencingRelations}) and the judgement
+   * before it ({@link refuseRestrictsInsideOwnCascade}), so the two answer one
+   * envelope.
+   */
+  private async deleteRestrictedError(args: {
+    object: string;
+    id: string | number;
+    child: ServiceObject;
+    childName: string;
+    fieldName: string;
+    fdef: any;
+    dependents: readonly any[];
+    probeWhere: Record<string, unknown>;
+    probedIds: readonly string[];
+    multiValued: boolean;
+    objects: ServiceObject[];
+    context: ExecutionContext | undefined;
+  }): Promise<Error> {
+    const {
+      object, id, child, childName, fieldName, fdef, dependents, probeWhere, probedIds, multiValued, objects, context,
+    } = args;
+    // [#7307] TWO messages, two audiences — because this error has two
+    // and they were sharing one string.
+    //
+    // `message` is what a BUSINESS USER reads: REST ships it verbatim as
+    // `body.error` in the flat 409 envelope (`mapDataError`), and Console
+    // renders that as-is in a toast. It was composed English-only with the
+    // API names concatenated in and a metadata-authoring instruction on
+    // the end, so an operator deleting a 部门 in a fully Chinese app got an
+    // English sentence naming two tables and a column they have never
+    // seen, ending in advice only a developer can act on. It is now
+    // rendered through the operation-message catalog in the caller's
+    // locale against resolved LABELS — the same fix #3957 made one layer
+    // down for field constraints, reached from the operation side.
+    //
+    // `developerMessage` is what the DEVELOPER reads, and is the previous
+    // sentence unchanged, byte for byte: English, API names, and the
+    // `deleteBehavior:'cascade'` hint — which is correct and useful, and
+    // is not lost, it is addressed. It rides the structured half of the
+    // envelope alongside `dependentObject` / `dependentCount`, which
+    // already carry API names, so it discloses nothing new; no
+    // user-facing surface reads it.
+    //
+    // The wire code does NOT split: one `DELETE_RESTRICTED` (ADR-0112),
+    // two SENTENCES, exactly as the field catalog splits a message key
+    // without splitting `FieldErrorCode`.
+    const required = fdef.deleteBehavior !== 'restrict' && fdef.required === true;
+    const msgCtx = this.validationMessageContext(object, context);
+    const parent = objects.find((o) => (o as any)?.name === object);
+    // [#12166, ruling constraint 2] Whether this refusal may carry the
+    // row COUNT — see `dependentCountIsDisclosable` for why the elevation
+    // above is what makes the question exist, and why the answer is "only
+    // if the caller's own identity would have produced the same rows".
+    // The OBJECT is named either way: that half is what the ruling
+    // requires the caller to learn.
+    const discloseCount = await this.dependentCountIsDisclosable(
+      childName, probeWhere, probedIds, fieldName, multiValued, id, context,
+    );
+    const err: any = new Error(
+      renderOperationMessage(
+        {
+          messageKey: discloseCount
+            ? (required ? 'delete_restricted_required' : 'delete_restricted')
+            : (required ? 'delete_restricted_required_opaque' : 'delete_restricted_opaque'),
+          params: {
+            object: this.objectDisplayLabel(object, (parent as any)?.label, msgCtx),
+            dependentObject: this.objectDisplayLabel(childName, (child as any)?.label, msgCtx),
+            field: resolveFieldLabel(fieldName, fdef, { ...msgCtx, objectName: childName }),
+            ...(discloseCount ? { count: dependents.length } : {}),
+          },
+        },
+        { locale: msgCtx.locale, translate: msgCtx.translate },
+      ),
+    );
+    // The DEVELOPER half is subject to the same rule, and the reason is
+    // measured rather than assumed: for `DELETE_RESTRICTED` (unlike the
+    // #7414 permission denial) this sentence RIDES THE ENVELOPE — REST's
+    // `mapDataError` ships it — so a count withheld from `message` and
+    // left here would not be withheld at all.
+    err.developerMessage =
+      `Cannot delete ${object} (${id}): ` +
+      `${discloseCount ? `${dependents.length} dependent ${childName} record(s) reference it` : `dependent ${childName} record(s) reference it`} via ${fieldName}` +
+      `${required ? ` (${fieldName} is required, so it cannot be cleared)` : ''}. ` +
+      `Delete or reassign them first, or set deleteBehavior:'cascade' on ${childName}.${fieldName}.`;
+    err.code = 'DELETE_RESTRICTED';
+    err.status = 409;
+    err.httpStatus = 409;
+    err.object = object;
+    // Constraint 2's REQUIRED half — the referenced object is named
+    // unconditionally, because "which table is blocking me" is the one
+    // thing the reporting deployment's admins could not self-diagnose.
+    err.dependentObject = childName;
+    // …and its withheld half. Absent rather than zeroed: `0` would be a
+    // false statement about the rows (there is at least one, or this
+    // branch would not have been reached), and REST's envelope builder
+    // already omits the key for a non-number, so an absent count reaches
+    // the client as an absent key rather than as a lie.
+    if (discloseCount) err.dependentCount = dependents.length;
+    return err;
   }
 
   /**
@@ -19471,11 +19616,11 @@ export class ObjectQL implements IObjectQLEngine {
       // update twin says why; for every pre-#11009 input the two spellings
       // agree.
       const isPredicatePath = !isByIdDelete && dispatch.kind === 'multi' && typeof driver.deleteMany === 'function';
-      // [#24948] An organization is deleted by id or not at all. The predicate
-      // arm runs no referential cascade, so it could neither refuse an
-      // organization that still owns rows nor keep a single row from naming a
-      // deleted one; any delete not by id is refused here, whatever the driver
-      // offers, before any hook or write.
+      // [#24948] An organization is deleted by id or not at all: plugin-auth's
+      // organization delete refuses one that still owns records and removes its
+      // auth structure per organization, which a predicate delete would skip
+      // (see `organizationPredicateDeleteRefusal`). Any delete not by id is
+      // refused here, whatever the driver offers, before any hook or write.
       if (!isByIdDelete && object === ORGANIZATION_OBJECT) {
         throw organizationPredicateDeleteRefusal();
       }
@@ -19683,7 +19828,64 @@ export class ObjectQL implements IObjectQLEngine {
                // [#2982] The AST asserted present and already used for the
                // pre-phase row read above.
                // `deleteMany` presence is part of the ladder verdict resolved above.
-               result = await driver.deleteMany!(object, opCtx.ast!, hookContext.input.options as any);
+               //
+               // [#26871] A predicate delete honours `deleteBehavior` as the
+               // by-id branch does: a `restrict` refuses, a `cascade` (a
+               // `master_detail` by default) deletes the dependents, a
+               // `set_null` clears them. This arm used to go straight to
+               // `deleteMany`, so a flow's `delete_record` with `multi: true`
+               // skipped every declared rule the same delete done record by
+               // record honours.
+               //
+               // `planCascadeAtomicity` is the by-id branch's own question:
+               // `'none'` means no relation of the delete family points at
+               // this object, so the walk could write nothing and the arm keeps
+               // its single `deleteMany`, no rows read and no transaction.
+               const plan = this.planCascadeAtomicity(object);
+               if (plan === 'none') {
+                 result = await driver.deleteMany!(object, opCtx.ast!, hookContext.input.options as any);
+               } else {
+                 // Otherwise: resolve the matched rows through the composed,
+                 // row-scoped AST, run `cascadeDeleteRelations` for each, then
+                 // delete exactly those rows by id. By id, not by re-running the
+                 // predicate: the walk's own writes (a `set_null` on a
+                 // self-reference) can move a row into or out of the predicate,
+                 // and the rows deleted must be the rows walked. The ids were
+                 // read under this caller's scope inside the same unit of work,
+                 // as the by-id branch deletes its id after reading its
+                 // pre-image under that scope. The unit of work is the by-id
+                 // branch's, for the same reasons (#7413).
+                 const runPredicateDelete = async (writeContext?: ExecutionContext): Promise<unknown> => {
+                   const writeOptions = this.buildDriverOptions(object, writeContext, hookContext.input.options as any);
+                   const matched = ((await driver.find(object, { ...opCtx.ast!, fields: ['id'] }, writeOptions)) ?? []) as Array<Record<string, unknown>>;
+                   const matchedIds = matched.map((row) => row?.id).filter((v): v is string | number => v != null);
+                   for (const matchedId of matchedIds) {
+                     await this.cascadeDeleteRelations(object, matchedId, writeContext);
+                   }
+                   // The id set rides an `$in`; batched so one statement never
+                   // outgrows a driver's bind-parameter limit.
+                   const batchSize = 500;
+                   let removed = 0;
+                   for (let i = 0; i < matchedIds.length; i += batchSize) {
+                     const batchAst: QueryAST = { object, where: { id: { $in: matchedIds.slice(i, i + batchSize) } } };
+                     const count = await driver.deleteMany!(object, batchAst, writeOptions);
+                     // A non-count answer goes back as the driver gave it, so
+                     // the `isDeleteResultShape` check below refuses it.
+                     if (typeof count !== 'number') return count;
+                     removed += count;
+                   }
+                   return removed;
+                 };
+                 if (plan === 'atomic') {
+                   result = await this.transaction(
+                     async (trxCtx: any) => await runPredicateDelete(trxCtx as ExecutionContext),
+                     opCtx.context,
+                   );
+                 } else {
+                   this.warnCascadeNotAtomic(object);
+                   result = await runPredicateDelete(opCtx.context);
+                 }
+               }
                isPredicateWrite = true;
           }
 
@@ -19792,64 +19994,22 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   async count(object: string, query?: EngineCountOptions, options?: EngineReadOptions): Promise<number> {
-     object = this.resolveObjectName(object);
-     // Fold the `filter` alias into `where` (#4346) — the AST below reads
-     // `query.where` only, so an unfolded `{ filter }` counted the whole table.
-     query = foldEngineOptionAliases(object, 'count', query, ENGINE_WHERE_SLOTS);
-     rejectUnknownEngineOptions(object, 'count', query, ENGINE_COUNT_OPTION_KEYS);
-     query = lowerWhereFilterArray(object, 'count', query, this._registry.getObject(object), this.relatedSchemaOf);
-     // [#22790] ADR-0061 `search` → the rows are searched before they are
-     // counted, by the one expander `find` runs, at the same point in the
-     // sequence — so the count is the number of rows `find` returns for the bag.
-     if (query) query = await this.expandSearchOnOptions(object, query, options);
-     const driver = this.getDriver(object);
-
-     // The AST must ride on the opCtx so the security/sharing middlewares can
-     // inject their read filters (RLS, OWD/sharing scope) into `ast.where` —
-     // exactly like find(). Building it locally inside the executor (#2737)
-     // discarded every injected filter: `total` counted the RAW table while
-     // `records` were scoped, leaking invisible-row counts and breaking
-     // pagination.
-     const opCtx: OperationContext = {
-       object,
-       operation: 'count',
-       ast: { object, where: query?.where },
-       options: query,
-       context: mergeReadContext(query?.context, options?.context),
-     };
-     // [ADR-0053 D-D1, amended — #5930] Resolve, then lower. [#20802] …with
-     // the nested-relation step between the two.
-     await this.resolveWhereTokens(
-       opCtx.ast as QueryAST,
-       opCtx.context,
-       declaredDatetimeLowering(this._registry.getObject(object)),
-       'where',
-       'count',
-     );
-     // The caller's own `where`, placeholders expanded — captured BEFORE the
-     // middleware chain scopes `opCtx.ast.where`, so the find() fallback below
-     // still passes the unscoped filter (find() applies the read filters itself).
-     const callerWhere = (opCtx.ast as QueryAST).where;
-
-     await this.executeWithMiddleware(opCtx, async () => {
-       const countOpts = this.buildDriverOptions(object, opCtx.context, undefined, { recordedVerdict: opCtx.tenantLayer0Verdict });
-       if (driver.count) {
-           // [ADR-0139 D2] The executor boundary, as in `find` (`count` has no
-           // before-hook): the AST is final once the chain has run. The
-           // `find()` fallback below composes at its own boundary.
-           return driver.count(
-             object,
-             await this.composeReadableIdsAtBoundary(object, 'count', opCtx.ast as QueryAST, opCtx.context),
-             countOpts,
-           );
-       }
-       // Fallback to find().length — find() applies the read filters itself,
-       // so pass the caller's original where, not the already-scoped ast.
-       const res = await this.find(object, { where: callerWhere, fields: ['id'], context: opCtx.context });
-       return res.length;
-     });
-
-     return opCtx.result as number;
+    // [#25522 cut 18] The body moved to `engine-count-aggregate.ts` (see `CountAggregateHost`).
+    const readRegistry = () => this._registry;
+    const readRelatedSchemaOf = () => this.relatedSchemaOf;
+    const host: ThisParameterType<typeof count> = {
+      resolveObjectName: (...a) => this.resolveObjectName(...a),
+      get _registry() { return readRegistry(); },
+      get relatedSchemaOf() { return readRelatedSchemaOf(); },
+      expandSearchOnOptions: (...a) => this.expandSearchOnOptions(...a),
+      getDriver: (...a) => this.getDriver(...a),
+      resolveWhereTokens: (...a) => this.resolveWhereTokens(...a),
+      executeWithMiddleware: (...a) => this.executeWithMiddleware(...a),
+      buildDriverOptions: (...a) => this.buildDriverOptions(...a),
+      composeReadableIdsAtBoundary: (...a) => this.composeReadableIdsAtBoundary(...a),
+      find: (...a) => this.find(...a),
+    };
+    return count.call(host, object, query, options);
   }
 
   /**
@@ -19894,44 +20054,12 @@ export class ObjectQL implements IObjectQLEngine {
    * case too, which shared the bare `Error`.
    */
   private rejectCredentialAggregation(object: string, query: EngineAggregateOptions): void {
-    const schema = this._registry.getObject(object);
-    // Deduped: one field can be reachable through both collectors (a `secret`
-    // column that is also flagged `internal`), and it must be named once.
-    const protectedFields = [
-      ...new Set([...collectCredentialFields(schema), ...collectInternalReadFields(schema)]),
-    ];
-    if (protectedFields.length === 0) return;
-
-    const referenced = new Set<string>();
-    for (const agg of query?.aggregations ?? []) {
-      const field = (agg as { field?: string })?.field;
-      if (field && field !== '*') referenced.add(field);
-    }
-    for (const g of query?.groupBy ?? []) {
-      const field = typeof g === 'string' ? g : g?.field;
-      if (field) referenced.add(field);
-    }
-
-    const hit = protectedFields.filter((f) => referenced.has(f));
-    if (hit.length > 0) {
-      const err = new Error(
-        `Cannot aggregate credential field(s) ${hit.map((f) => `"${object}.${f}"`).join(', ')}: `
-          + 'secret/password fields are masked on read and `internal: true` fields are omitted '
-          + 'outright, so the value never leaves the engine on the generic data path; aggregating '
-          + 'them (group-by, min/max, array_agg, …) would surface it. '
-          + 'Refusing (fail-closed) — see ADR-0100.',
-      ) as Error & { code?: string; status?: number; httpStatus?: number; field?: string; fields?: string[]; object?: string };
-      // ADR-0112 envelope, the same number under D5's two spellings — `status`
-      // for the HTTP doors, `httpStatus` for a consumer holding the thrown
-      // error (the CLI `--json` envelope).
-      err.code = StandardErrorCode.enum.INVALID_FIELD;
-      err.status = 400;
-      err.httpStatus = 400;
-      err.field = hit[0];
-      err.fields = hit;
-      err.object = object;
-      throw err;
-    }
+    // [#25522 cut 18] The body moved to `engine-count-aggregate.ts` (see `CountAggregateHost`).
+    const readRegistry = () => this._registry;
+    const host: ThisParameterType<typeof rejectCredentialAggregation> = {
+      get _registry() { return readRegistry(); },
+    };
+    return rejectCredentialAggregation.call(host, object, query);
   }
 
   async aggregate(object: string, query: EngineAggregateOptions, options?: EngineReadOptions): Promise<any[]> {

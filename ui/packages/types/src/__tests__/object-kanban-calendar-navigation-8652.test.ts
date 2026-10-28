@@ -62,7 +62,7 @@ import type {
 /** The slice of a zod `safeParse` result these rows read — no zod internals. */
 type ParseResult = {
   success: boolean;
-  error?: { issues: Array<{ path: PropertyKey[]; code: string }> };
+  error?: { issues: Array<{ path: PropertyKey[]; code: string; message?: string }> };
   data?: unknown;
 };
 type Parser = { safeParse: (doc: unknown) => ParseResult };
@@ -133,10 +133,21 @@ describe.each(ARMS)('`$type` declares `navigation` (objectui#8652)', (arm) => {
 
   it('a valid block parses, and so does every mode the spec declares', () => {
     expect(issuesOf(arm, withNav({ mode: 'drawer' }))).toEqual([]);
-    expect(issuesOf(arm, withNav({ mode: 'modal', size: 'lg' }))).toEqual([]);
+    expect(issuesOf(arm, withNav({ mode: 'drawer', size: 'lg' }))).toEqual([]);
+    expect(issuesOf(arm, withNav({ mode: 'new_window' }))).toEqual([]);
     expect(issuesOf(arm, withNav({ mode: 'page', openNewTab: true }))).toEqual([]);
     expect(issuesOf(arm, withNav({ mode: 'none', preventNavigation: true }))).toEqual([]);
     expect(issuesOf(arm, withNav({ mode: 'drawer', width: '720px' }))).toEqual([]);
+  });
+
+  it('a retired `mode` is refused at `navigation.mode`, with the spec\'s prescription (objectstack#26677)', () => {
+    for (const mode of ['modal', 'split', 'popover']) {
+      const doc = withNav({ mode, size: 'lg' });
+      expect(issuesOf(arm, doc), mode).toEqual(['navigation.mode|invalid_value']);
+      expect(specIssuesOf(arm.type, { mode }), mode).toEqual(['navigation.mode|invalid_value']);
+      const msg = specEntry(arm.type).safeParse({ navigation: { mode } }).error?.issues[0]?.message ?? '';
+      expect(msg.startsWith(`\`navigation.mode: '${mode}'\` was removed in @objectstack/spec 18.3.0`), msg).toBe(true);
+    }
   });
 
   it('a bad `mode` is refused at `navigation.mode` — as the spec refuses it', () => {
@@ -230,7 +241,18 @@ export const KANBAN_WITH_NAVIGATION: ObjectKanbanSchema = {
   type: 'object-kanban',
   objectName: 'task',
   groupBy: 'status',
-  navigation: { mode: 'modal', size: 'lg' },
+  // `drawer`, not the `modal` this row used to spell: objectstack#26677
+  // retired `modal`, `split` and `popover` from the spec's `NavigationMode`.
+  navigation: { mode: 'drawer', size: 'lg' },
+};
+
+/** A retired member is refused on both arms at compile time (objectstack#26677). */
+export const KANBAN_RETIRED_MODE_IS_REFUSED_AT_COMPILE_TIME: ObjectKanbanSchema = {
+  type: 'object-kanban',
+  objectName: 'task',
+  groupBy: 'status',
+  // @ts-expect-error — `modal` left the spec's `NavigationMode` vocabulary.
+  navigation: { mode: 'modal' },
 };
 
 export const CALENDAR_WITH_NAVIGATION: ObjectCalendarSchema = {

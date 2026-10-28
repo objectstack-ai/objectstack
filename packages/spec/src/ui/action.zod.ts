@@ -1583,7 +1583,7 @@ const actionObject = () => strictObject({
    * Why the action is greyed — the reason `disabled` gives the user. Display
    * only; the contract is on {@link actionDisabledReason}.
    */
-  disabledReason: actionDisabledReason().optional().describe('Display-only reason for a greyed action, for its hover title and accessible description while `disabled` evaluates TRUE (declared ahead of its console reader: no renderer shows it yet) — the default-language string, or an inline locale map; translated at `objects.OBJECT._actions.ACTION.disabledReason` (`globalActions.ACTION.disabledReason` for an object-less action). Not a gate: the server refuses a call on its own rules (hooks, `requiredPermissions`), and nothing reads this as a condition. Omit = the default reason, "Not available for this record". A blank reason is refused.'),
+  disabledReason: actionDisabledReason().optional().describe('Display-only reason a greyed action shows (its hover title and accessible description, or a menu item\'s second line) while `disabled` evaluates TRUE — the default-language string, or an inline locale map; translated at `objects.OBJECT._actions.ACTION.disabledReason` (`globalActions.ACTION.disabledReason` for an object-less action). Not a gate: the server refuses a call on its own rules (hooks, `requiredPermissions`), and nothing reads this as a condition. Omit = the default reason, "Not available for this record". A blank reason is refused.'),
 
   /**
    * [ADR-0066 D4] System capabilities required to INVOKE this action — a

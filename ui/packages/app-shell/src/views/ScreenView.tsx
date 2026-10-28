@@ -84,6 +84,18 @@
  * form's `BooleanField` in its checkbox face, with the label BESIDE the control
  * and the help text under the row. The generic layout put the label on one line
  * and a lone checkbox on the next, which read as an empty radio button.
+ *
+ * ## A refused field says so under its control (objectstack#26882)
+ *
+ * `errors` maps a field name to the message the caller refused it with (the
+ * runtime's `required` check). The message is drawn under the control as the
+ * record form's `FormMessage` draws it, and the control is marked the way the
+ * record form marks it: `aria-invalid`, and the message's id in its
+ * `aria-describedby` beside any help text. A platform widget (picker, upload,
+ * lookup, checkbox) receives the message as its published `error` slot, which
+ * it reads only to set `aria-invalid` on its own control; the text stays here,
+ * so it is drawn once. A field absent from `errors` renders as before, and the
+ * Studio preview passes none.
  */
 import { Suspense } from 'react';
 import { Link, useInRouterContext, useParams } from 'react-router-dom';
@@ -343,6 +355,19 @@ function screenFieldHelpId(name: string): string {
   return `ff-${name}-help`;
 }
 
+/** The id of a screen field's refusal message, which its control names in `aria-describedby`. */
+function screenFieldErrorId(name: string): string {
+  return `ff-${name}-error`;
+}
+
+/**
+ * The id of the control a screen field draws, the one its label points at.
+ * Exported so the runtime can move focus to a refused field (objectstack#26882).
+ */
+export function screenFieldControlId(name: string): string {
+  return `ff-${name}`;
+}
+
 /** Submit/cancel wiring for the object-form body — runtime persists & resumes;
  *  the design preview hides the bar (`showSubmit`/`showCancel` false). */
 export interface ScreenObjectFormActions {
@@ -372,10 +397,15 @@ export interface ScreenViewProps {
    */
   objects?: any[];
   objectForm?: ScreenObjectFormActions;
+  /**
+   * The message each refused field is drawn with, by field name (see the
+   * header, objectstack#26882). Absent, or a field not in it, draws no message.
+   */
+  errors?: Readonly<Record<string, string>>;
   className?: string;
 }
 
-export function ScreenView({ screen, values, onValueChange, dataSource, objects, objectForm, className }: ScreenViewProps) {
+export function ScreenView({ screen, values, onValueChange, dataSource, objects, objectForm, errors, className }: ScreenViewProps) {
   if (isObjectFormScreen(screen)) {
     const objectDef = Array.isArray(objects) ? objects.find((o: any) => o?.name === screen.objectName) : undefined;
     const subforms = objectDef
@@ -422,15 +452,24 @@ export function ScreenView({ screen, values, onValueChange, dataSource, objects,
         // placeholder (which the browser clears on the first keystroke), and
         // the control names it in `aria-describedby` so it is announced too.
         const helpId = f.inlineHelpText ? screenFieldHelpId(f.name) : undefined;
+        // A refused field names its message too, after the help text, as the
+        // record form's control does (objectstack#26882).
+        const error = errors?.[f.name] || undefined;
+        const errorId = error ? screenFieldErrorId(f.name) : undefined;
+        const describedBy = [helpId, errorId].filter(Boolean).join(' ') || undefined;
         const input = (
           <ScreenFieldInput
             field={f}
             value={values[f.name]}
             onChange={(v) => onValueChange(f.name, v)}
-            describedBy={helpId}
+            describedBy={describedBy}
+            error={error}
             dataSource={dataSource}
             objects={objects}
           />
+        );
+        const message = errorId && (
+          <p id={errorId} className="text-sm font-medium text-destructive" data-screen-field-error={f.name}>{error}</p>
         );
         // The boolean control sits BESIDE its label, `ActionParamDialog`'s
         // inline row; the help text lines up under the label.
@@ -449,6 +488,7 @@ export function ScreenView({ screen, values, onValueChange, dataSource, objects,
               {helpId && (
                 <p id={helpId} className="text-xs text-muted-foreground ml-6">{f.inlineHelpText}</p>
               )}
+              {message && <div className="ml-6">{message}</div>}
             </div>
           );
         }
@@ -467,6 +507,7 @@ export function ScreenView({ screen, values, onValueChange, dataSource, objects,
             {helpId && (
               <p id={helpId} className="text-xs text-muted-foreground">{f.inlineHelpText}</p>
             )}
+            {message}
           </div>
         );
       })}
@@ -489,21 +530,29 @@ export function ScreenFieldInput({
   value,
   onChange,
   describedBy,
+  error,
   dataSource,
   objects,
 }: {
   field: ScreenFieldSpec;
   value: unknown;
   onChange: (v: unknown) => void;
-  /** Id of the element describing this control (its help text), for `aria-describedby`. */
+  /** Ids of the elements describing this control (its help text, its refusal), for `aria-describedby`. */
   describedBy?: string;
+  /**
+   * The message this field was refused with (objectstack#26882). A platform
+   * widget takes it as its `error` slot, which sets `aria-invalid` on its own
+   * control; a plain control gets `aria-invalid` here. The text itself is
+   * drawn by {@link ScreenView}.
+   */
+  error?: string;
   /** Data source a `type: 'lookup'` picker queries its `reference` object through. */
   dataSource?: unknown;
   /** The console's object definitions: the objects a `record_link` field may link to a page of. */
   objects?: ReadonlyArray<unknown>;
 }) {
   const { t } = useObjectTranslation();
-  const id = `ff-${field.name}`;
+  const id = screenFieldControlId(field.name);
   const kind = (field.type || 'text').toLowerCase();
   // The required STATE, announced on the control itself — the label's `*` is
   // visual-only (objectui#10367). `aria-required`, not native `required`: the
@@ -512,6 +561,8 @@ export function ScreenFieldInput({
   // browser's own verdict beside it — on a checkbox it means "must be checked".
   // `undefined` when optional, so the attribute is omitted rather than "false".
   const ariaRequired = field.required ? true : undefined;
+  // The refused STATE, for the plain controls below; omitted when not refused.
+  const ariaInvalid = error ? true : undefined;
 
   // The read-only record link (objectstack#25872): the record's display name,
   // drawn by the lookup widget's `readonly` branch, inside a link to its page.
@@ -538,6 +589,7 @@ export function ScreenFieldInput({
           onChange={onChange}
           field={{ name: field.name, label: field.label, type: 'lookup', reference: field.reference, placeholder: field.placeholder }}
           dataSource={dataSource}
+          error={error}
           aria-required={ariaRequired}
           aria-describedby={describedBy}
         />
@@ -558,6 +610,7 @@ export function ScreenFieldInput({
           value={value ?? null}
           onChange={onChange}
           field={{ name: field.name, label: field.label, type: 'file', placeholder: field.placeholder }}
+          error={error}
           aria-required={ariaRequired}
           aria-describedby={describedBy}
         />
@@ -583,7 +636,7 @@ export function ScreenFieldInput({
     };
     return (
       <Select value={value != null ? flowScreenFieldOptionKey(value) : undefined} onValueChange={pickOption}>
-        <SelectTrigger id={id} aria-required={ariaRequired} aria-describedby={describedBy}><SelectValue placeholder={placeholder} /></SelectTrigger>
+        <SelectTrigger id={id} aria-required={ariaRequired} aria-invalid={ariaInvalid} aria-describedby={describedBy}><SelectValue placeholder={placeholder} /></SelectTrigger>
         <SelectContent>
           {options.map((o, i) => (
             <SelectItem key={i} value={flowScreenFieldOptionKey(o.value)}>{o.label}</SelectItem>
@@ -606,6 +659,7 @@ export function ScreenFieldInput({
           onChange={(checked: unknown) => onChange(checked === true)}
           field={{ name: field.name, label: field.label, type: 'boolean', widget: 'checkbox' }}
           className="mt-0.5"
+          error={error}
           aria-required={ariaRequired}
           aria-describedby={describedBy}
         />
@@ -624,6 +678,7 @@ export function ScreenFieldInput({
           value={value ?? null}
           onChange={onChange}
           field={{ name: field.name, label: field.label, type: kind }}
+          error={error}
           aria-required={ariaRequired}
           aria-describedby={describedBy}
         />
@@ -631,7 +686,7 @@ export function ScreenFieldInput({
     );
   }
   if (kind === 'textarea' || kind === 'markdown') {
-    return <Textarea id={id} aria-required={ariaRequired} aria-describedby={describedBy} value={(value as string) ?? ''} placeholder={field.placeholder} onChange={(e) => onChange(e.target.value)} />;
+    return <Textarea id={id} aria-required={ariaRequired} aria-invalid={ariaInvalid} aria-describedby={describedBy} value={(value as string) ?? ''} placeholder={field.placeholder} onChange={(e) => onChange(e.target.value)} />;
   }
   const htmlType = kind === 'number' || kind === 'currency' ? 'number' : kind === 'email' ? 'email' : 'text';
   // The declared bound pair goes on a NUMERIC input only, as the native
@@ -642,6 +697,7 @@ export function ScreenFieldInput({
     <Input
       id={id}
       aria-required={ariaRequired}
+      aria-invalid={ariaInvalid}
       aria-describedby={describedBy}
       type={htmlType}
       min={numeric ? field.min : undefined}

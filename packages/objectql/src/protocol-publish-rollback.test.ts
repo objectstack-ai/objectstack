@@ -344,16 +344,17 @@ describe('publishMetaItem / rollbackMetaItem / diffMetaItem', () => {
         });
         await protocol.saveMetaItem({
             type: 'view', name: 'case_grid',
-            item: { name: 'case_grid', type: 'grid', label: 'B', columns: ['id', 'title'], rowHeight: 'compact', extra: 1, object: 'case', viewKind: 'list' }, // [#7741] the inline arm requires the object binding pair
+            item: { name: 'case_grid', type: 'grid', label: 'B', columns: ['id', 'title'], rowHeight: 'compact', object: 'case', viewKind: 'list' }, // [#7741] the inline arm requires the object binding pair
         });
         const diff = await protocol.diffMetaItem({
             type: 'view', name: 'case_grid',
             fromVersion: 1, toVersion: 2,
         });
         // [#20051] Re-judged at stage (iv): the added key is a DECLARED one
-        // (`rowHeight`). The undeclared `extra` never reaches a version — a
+        // (`rowHeight`). The undeclared `extra` never reached a version — a
         // view stores the parsed value of every key its body carried — so no
-        // diff can show it.
+        // diff could show it. [#26711] The `view` write door now refuses an
+        // undeclared top-level key, so the fixture no longer carries `extra`.
         expect((diff as any).added.map((e: any) => e.path)).toEqual(['rowHeight']);
         expect((diff as any).changed.map((e: any) => e.path).sort()).toEqual(['columns', 'label']);
     });

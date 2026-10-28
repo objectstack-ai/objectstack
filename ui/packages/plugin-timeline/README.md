@@ -113,13 +113,12 @@ locale: Sunday under `en-US`, Monday under `en-GB` or `zh-CN`. `rowLabel`, `minD
 authored `items`.
 
 `navigation` is what an entry click opens — the spec's `NavigationConfig` by
-reference, `ViewNavigationConfig` in `@object-ui/types`: `mode` (`page`,
-`drawer`, `modal`, `split`, `popover`, `new_window` or `none`) with `size`,
-`openNewTab` and `preventNavigation`. `drawer`, `modal` and `popover` open the
-entry's record in that overlay, `new_window` and `openNewTab: true` open the
+reference, `ViewNavigationConfig` in `@object-ui/types`: `mode` (`drawer`,
+`page`, `new_window` or `none`) with `size`, `openNewTab` and
+`preventNavigation`. `drawer`, and a block written without `mode` (it takes
+the spec's `drawer` default), open the entry's record in the drawer, `new_window` and `openNewTab: true` open the
 record page in a new tab, `preventNavigation: true` opens nothing, and `size`
-sets the overlay width. `page`, and a block written without `mode` (it takes
-the spec's `page` default), open the record page of the timeline's `objectName`
+sets the overlay width. `page` opens the record page of the timeline's `objectName`
 through the record navigator the host publishes (the console publishes one on
 its custom pages, record pages and list views); under a host that publishes
 none, such as an embedded renderer, or on a timeline that names no
@@ -128,8 +127,7 @@ none, such as an embedded renderer, or on a timeline that names no
 the tab opens at a slash and the entry's `id` alone (its `_id` when it has no
 `id`, `undefined` when it has neither). A click handler from a parent view
 outranks the whole key. ⚠️ With the key absent a click opens nothing: this renderer supplies no
-drawer default. `split` opens nothing on this block either, because the
-timeline gives the split shell no main panel.
+drawer default.
 
 ## Links
 

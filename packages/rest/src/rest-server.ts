@@ -216,9 +216,9 @@ import {
     // `META_ITEM_PUBLISHED_PARAMS` is read only by the `/published` door, which moved to
     // `meta-item-history-routes.ts` (#23050 slice 13e); the re-export below still names it.
     META_ITEM_MEMBER_PARAM,
-    // `metaMemberSelector`, the member selector's one reading, is read only by the history
+    // `metaMemberSelector`, the member selector's one reading, is read by the history
     // family's `?member=` doors, which moved to `meta-item-history-routes.ts` (#23050
-    // slice 13d).
+    // slice 13d), and [#26699] by `serveMetaItemLayered` below, through `metaReadGate`.
 } from './meta-item-read-gate.js';
 // [#22141] `metaSaveRequestOptions`, the `PUT /meta/:type/:name` door's precondition and
 // lifecycle mapping, moved with that door to `meta-item-write-routes.ts` (#23050 slice 13c).
@@ -4214,10 +4214,16 @@ export class RestServer {
         // a different spelling. Typing the literal (spec shape + the
         // transport-level `environmentId`, see `TransportScopedMetaRequest`)
         // makes an undeclared key a compile error here too.
+        //
+        // [#26699] The bundle member selector, through its one reading: `/layers`
+        // carries it in its closed set, and the protocol judges its value. The
+        // deprecated `?layers=` spelling never reaches here with one (rule 3 of
+        // `metaItemQueryRefusal` refuses it first), so its request is unchanged.
         const layeredRequest: TransportScopedMetaRequest<GetMetaItemLayeredRequest> = {
             type: req.params.type,
             name: req.params.name,
             ...(layeredPackageId ? { packageId: layeredPackageId } : {}),
+            ...metaReadGate.metaMemberSelector(req.query),
             ...(environmentId ? { environmentId } : {}),
         };
         const layered = await p.getMetaItemLayered(layeredRequest);

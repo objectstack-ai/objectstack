@@ -33,6 +33,7 @@ import * as React from 'react';
 import {
   AppWindow,
   BarChart3,
+  BookOpen,
   ClipboardList,
   Database,
   FileText,
@@ -102,6 +103,7 @@ const CATEGORY_DEFS = {
   hooks: { label: 'engine.translationPreview.category.hooks', icon: Webhook, flat: false },
   positions: { label: 'engine.translationPreview.category.positions', icon: Users, flat: false },
   permissions: { label: 'engine.translationPreview.category.permissions', icon: ShieldCheck, flat: false },
+  books: { label: 'engine.translationPreview.category.books', icon: BookOpen, flat: false },
   metadataForms: { label: 'engine.translationPreview.category.metadataForms', icon: FileText, flat: false },
   settingsCommon: { label: 'engine.translationPreview.category.settingsCommon', icon: Settings2, flat: false },
 } satisfies Record<TranslationGroup, Omit<CategoryDef, 'key'>>;

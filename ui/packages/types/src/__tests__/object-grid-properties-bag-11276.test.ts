@@ -287,9 +287,10 @@ describe('object-grid validates in the spec\'s `properties` bag (objectui#11276)
   // `navigation`, whose spec row writes defaults too.
   it('the parse authors no default into the document (objectui#8317): `navigation` keeps no `mode`', () => {
     const doc = { type: 'object-grid', properties: { objectName: 'task', navigation: {} } };
-    // Control: the spec's own row writes a default `mode` into its output.
+    // Control: the spec's own row writes a default `mode` into its output —
+    // `drawer` since objectstack#26677 (it was `page`).
     const specOut = SpecObjectGridPropsSchema.parse(doc.properties) as unknown as { navigation: Record<string, unknown> };
-    expect(specOut.navigation.mode).toBe('page');
+    expect(specOut.navigation.mode).toBe('drawer');
     const parsed = safeValidateSchema(doc);
     expect(parsed.success).toBe(true);
     const navigation = (parsed.data as unknown as { properties: { navigation: Record<string, unknown> } }).properties.navigation;

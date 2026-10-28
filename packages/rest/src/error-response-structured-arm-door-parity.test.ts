@@ -188,15 +188,17 @@ const CASES: readonly Case[] = [
     {
         covers: ['DUPLICATE_RECORD'],
         what: "objectql's DuplicateRecordError (#14095/#14389; readonly `status = 409`)",
-        error: () => new DuplicateRecordError('duly_note', new Error('SQLITE_CONSTRAINT_UNIQUE'), 'email'),
+        // [#26867] With the label the engine resolves for a labelled field: the
+        // user-facing sentence names it by that label, `field` by its key.
+        error: () => new DuplicateRecordError('duly_note', new Error('SQLITE_CONSTRAINT_UNIQUE'), 'email', { field: 'Email' }),
         restored: ['field', 'object', 'developerMessage'],
         expect: {
             status: 409,
             body: {
-                error: 'A record with this email already exists',
+                error: 'A record with this Email already exists',
                 code: 'UNIQUE_VIOLATION',
                 developerMessage: "Duplicate record refused on 'duly_note': a unique constraint on "
-                    + "'email' already holds this value. No record was written.",
+                    + "'Email' already holds this value. No record was written.",
                 field: 'email',
                 object: 'duly_note',
             },
@@ -1062,11 +1064,13 @@ describe('#14541 · structured arms are consulted by BOTH doors', () => {
             err.status = 409;
             err.object = 'sys_record_share';
             err.field = 'token';
+            err.fieldLabel = 'Share token';
             const refusal = classifiedRefusalAnswer(err);
             expect(refusal).toBeDefined();
             expect(refusal!.status).toBe(409);
             expect(refusal!.body.code).toBe('UNIQUE_VIOLATION');
-            expect(refusal!.body.error).toBe('A record with this token already exists');
+            // [#26867] Named by the envelope's label, never by the key `token`.
+            expect(refusal!.body.error).toBe('A record with this Share token already exists');
         });
     });
 });

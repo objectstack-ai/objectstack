@@ -127,7 +127,7 @@ import {
 } from './error-response.js';
 import type { MetaRouteScope, TransportScopedMetaRequest } from './meta-collection-routes.js';
 import * as metaReadGate from './meta-item-read-gate.js';
-import { META_ITEM_LAYERS_PARAMS, metaMemberSelector, type MetaReadGatePolicy } from './meta-item-read-gate.js';
+import { metaMemberSelector, type MetaReadGatePolicy } from './meta-item-read-gate.js';
 import { refuseUnknownQueryParams } from './query-allowlist.js';
 import { refuseRepeatedQueryParams } from './query-multiplicity.js';
 import {
@@ -311,7 +311,19 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                     // [#23072] Recognition first, over the measured closed
                     // set; `serveMetaItemLayered` keeps the multiplicity
                     // rule it shares with the deprecated `?layers=` spelling.
-                    if (refuseUnknownQueryParams(req, res, META_ITEM_LAYERS_PARAMS)) return;
+                    // [#26699] Recognition AND arity are now the one decision
+                    // both transports ask (`metaItemQueryRefusal`, ruling
+                    // 6138588561), as on the item read: the set gained the
+                    // bundle member selector, read once, which the
+                    // multiplicity rule below never named. Answered in the
+                    // nested body `refuseUnknownQueryParams` wrote here.
+                    const queryRefusal = metaReadGate.metaItemQueryRefusal('layers', req.query);
+                    if (queryRefusal) {
+                        res.status(queryRefusal.status).json({
+                            error: { code: queryRefusal.code, message: queryRefusal.message },
+                        });
+                        return;
+                    }
                     const environmentId = isScoped ? req.params?.environmentId : undefined;
                     const p = await this.resolveProtocol(environmentId, req);
                     // [ADR-0106 D2/D5] The dedicated path is its own
@@ -389,6 +401,8 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                                 return prot.getMetaItems(request);
                             },
                             requestLocale: (i18n) => this.extractLocale(req, i18n),
+                            // [#26690] The book's own labels, from the bundle's `books` group.
+                            resolveI18nService: () => this.resolveI18nService(environmentId, req),
                         },
                         { name: req.params.name, packageId },
                     );
@@ -536,9 +550,11 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                     // helper prescribes for a transport that cannot say where
                     // it serves the item.
                     const wantLayered = metaReadGate.wantsMetaItemLayers(req.query);
-                    // [#22877] The layered view reads no member, so a member
-                    // named on it is refused rather than answered with the
-                    // canonical member's layers. [#23072] The decision's
+                    // [#22877] The deprecated `?layers=` spelling reads no
+                    // member, so a member named beside it is refused rather
+                    // than answered with the canonical member's layers; a
+                    // member's layers are `/layers?member=` (#26699).
+                    // [#23072] The decision's
                     // third rule (`layered-member`), the only one that can
                     // still be pending here; thrown to `handleRouteError` as
                     // it always was.

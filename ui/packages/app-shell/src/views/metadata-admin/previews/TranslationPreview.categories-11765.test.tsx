@@ -74,6 +74,11 @@ const ONE_ENTRY: Record<string, { data: Record<string, unknown>; key: string; ro
     key: 'contract_reviewer',
     row: () => keys(2),
   },
+  books: {
+    data: { crm_manual: { label: 'Manuel', groups: { start: { label: 'Démarrage' } } } },
+    key: 'crm_manual',
+    row: () => keys(2),
+  },
   metadataForms: { data: { object: { label: 'Objet' } }, key: 'object', row: () => keys(1) },
   // `settingsCommon` is one strict object, not a record of author-named nodes:
   // its members (`sourceLabels`) are what the card counts and samples.

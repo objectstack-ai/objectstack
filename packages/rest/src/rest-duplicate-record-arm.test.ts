@@ -68,8 +68,15 @@ const VALUE = 'zq7-distinctive-value@example.test';
 /** The index name the SQL dialects put in their prose — never a column. */
 const INDEX = 'idx_duly_note_email';
 
-const CURATED_NAMED = 'A record with this email already exists';
+/**
+ * [#26867] The named sentence names the field by its LABEL — the envelope's
+ * `fieldLabel`, the one the engine resolved for `message` — never by its API
+ * key (`email`), which stays on `field` for programs.
+ */
+const CURATED_NAMED = 'A record with this Email already exists';
 const CURATED_UNNAMED = 'A record with this value already exists';
+/** The display labels the engine hands the envelope for `duly_note` / `email`. */
+const LABELS = { object: 'Duly note', field: 'Email' } as const;
 
 /* --------------------------------------------------------------------------
  * The measured raw driver errors, each the shape the real driver emitted.
@@ -139,6 +146,11 @@ function envelope(object: string, raw: Error): DuplicateRecordError {
     return new DuplicateRecordError(object, raw, uniqueViolationColumn(raw));
 }
 
+/** The same envelope as the engine builds it for an object whose field declares a label. */
+function labelled(object: string, raw: Error): DuplicateRecordError {
+    return new DuplicateRecordError(object, raw, uniqueViolationColumn(raw), LABELS);
+}
+
 interface Leg {
     readonly label: string;
     readonly object: string;
@@ -195,16 +207,31 @@ describe('#14389 §0 — controls', () => {
  * ----------------------------------------------------------------------- */
 
 describe('#14389 §1 — the engine\'s DUPLICATE_RECORD envelope answers 409 UNIQUE_VIOLATION with `field` restored', () => {
-    it.each(NAMED.map((l) => [l.label, l] as const))('%s: names the field and curates the sentence', (_n, leg) => {
-        const env = envelope(leg.object, leg.raw());
+    it.each(NAMED.map((l) => [l.label, l] as const))('%s: names the field by its label in `error`, by its key on `field`', (_n, leg) => {
+        const env = labelled(leg.object, leg.raw());
         const r = mapDataError(env, leg.object);
 
         // `code` AND `status` — never "it stopped being the passthrough".
         expect(r.status).toBe(409);
         expect(r.body.code).toBe('UNIQUE_VIOLATION');
         expect(r.body.field).toBe(leg.field);
-        expect(r.body.error).toBe(`A record with this ${leg.field} already exists`);
+        expect(env.fieldLabel).toBe(LABELS.field);
+        expect(r.body.error).toBe(CURATED_NAMED);
         expect(r.body.object).toBe(leg.object);
+    });
+
+    it.each(NAMED.map((l) => [l.label, l] as const))('%s, no label in hand: the unnamed sentence, `field` still the key', (_n, leg) => {
+        // [#26867] A field that declares no label (and has no translation)
+        // leaves the envelope without `fieldLabel`; the API key is never the
+        // end user's sentence.
+        const env = envelope(leg.object, leg.raw());
+        expect(env).not.toHaveProperty('fieldLabel');
+        const r = mapDataError(env, leg.object);
+
+        expect(r.status).toBe(409);
+        expect(r.body.code).toBe('UNIQUE_VIOLATION');
+        expect(r.body.field).toBe(leg.field);
+        expect(r.body.error).toBe(CURATED_UNNAMED);
     });
 
     it.each(UNNAMED.map((l) => [l.label, l] as const))('%s: degrades to the unnamed sentence and NO `field` key', (_n, leg) => {
@@ -226,13 +253,15 @@ describe('#14389 §1 — the engine\'s DUPLICATE_RECORD envelope answers 409 UNI
     });
 
     it('the DELETE_RESTRICTED split: curated sentence on `error`, the engine\'s sentence on `developerMessage`', () => {
-        const env = envelope('duly_note', sqliteRaw());
+        const env = labelled('duly_note', sqliteRaw());
         const r = mapDataError(env, 'duly_note');
 
         expect(r.body.error).toBe(CURATED_NAMED);
         expect(r.body.developerMessage).toBe(env.message);
+        // One label resolution feeds both sentences: `error` and
+        // `developerMessage` name the field alike.
         expect(r.body.developerMessage).toBe(
-            "Duplicate record refused on 'duly_note': a unique constraint on 'email' already holds this value. " +
+            "Duplicate record refused on 'Duly note': a unique constraint on 'Email' already holds this value. " +
                 'No record was written.',
         );
         // The envelope's OWN `developerMessage` addresses the in-process caller
@@ -244,7 +273,8 @@ describe('#14389 §1 — the engine\'s DUPLICATE_RECORD envelope answers 409 UNI
     });
 
     it('the body is exactly these keys — nothing from the envelope rides that is not named here', () => {
-        const env = envelope('duly_note', sqliteRaw());
+        // `fieldLabel` is read into the sentence, never relayed as a key.
+        const env = labelled('duly_note', sqliteRaw());
         expect(mapDataError(env, 'duly_note').body).toEqual({
             error: CURATED_NAMED,
             code: 'UNIQUE_VIOLATION',
@@ -280,8 +310,8 @@ describe('#14389 §1 — the engine\'s DUPLICATE_RECORD envelope answers 409 UNI
         expect(wire).not.toContain('duly_pair.tenant');
     });
 
-    it('the sentence is assembled from fixed text — exactly two sentences, one bare identifier apart', () => {
-        const sentences = new Set(LEGS.map((l) => String(mapDataError(envelope(l.object, l.raw()), l.object).body.error)));
+    it('the sentence is assembled from fixed text — exactly two sentences, one label apart', () => {
+        const sentences = new Set(LEGS.map((l) => String(mapDataError(labelled(l.object, l.raw()), l.object).body.error)));
         expect(sentences).toEqual(new Set([CURATED_NAMED, CURATED_UNNAMED]));
     });
 });
@@ -346,6 +376,8 @@ describe('#14389 §2 — a real insert conflict, real engine on real better-sqli
         expect(env.code).toBe('DUPLICATE_RECORD');
         expect(env.status).toBe(409);
         expect(env.field).toBe('email');
+        // [#26867] The label the engine resolved off the registry, beside the key.
+        expect(env.fieldLabel).toBe('Email');
         // [#21274] The value no longer reaches this boundary at all: the engine cuts
         // it from the propagated `cause` where the error leaves the engine, keeping
         // the database's diagnostic (which is all this arm's `field` needs).
@@ -411,8 +443,10 @@ describe('#14389 §3 — the envelope and the raw error it carries answer the sa
 
     it('the raw error\'s arm is untouched: no `declaredCode`, no `developerMessage` on the pre-existing body', () => {
         const before = mapDataError(sqliteRaw(), 'duly_note');
+        expect(before.status).toBe(409);
         expect(before.body).toEqual({
-            error: CURATED_NAMED,
+            // [#26867] A raw driver error carries no label: the unnamed sentence.
+            error: CURATED_UNNAMED,
             code: 'UNIQUE_VIOLATION',
             field: 'email',
             object: 'duly_note',

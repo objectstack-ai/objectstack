@@ -1,11 +1,12 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * objectstack#25922 slices S2 and S3 — the designer rows that moved into
- * `@object-ui/i18n`'s `studio` namespace (every `engine.inspector.*` row, and
- * `engine.packages.*`, `engine.form.*`, `engine.edit.*`), and app-shell's `t()`
- * / `tOptional()` still answer every one of them the way they did when the rows
- * sat in its own table.
+ * objectstack#25922 slices S2 to S5 — the designer rows that moved into
+ * `@object-ui/i18n`'s `studio` namespace (every `engine.inspector.*` row;
+ * `engine.packages.*`, `engine.form.*`, `engine.edit.*`; `engine.studio.*` but
+ * its inspector; the data source pages, the field types and the metadata
+ * preview panes), and app-shell's `t()` / `tOptional()` still answer every one
+ * of them the way they did when the rows sat in its own table.
  *
  * What would break it:
  *   - a row copied back into the app-shell table with a different value — the
@@ -41,6 +42,42 @@ const FAMILY_FLOOR: Readonly<Record<string, number>> = Object.freeze({
   'engine.packages.': 120,
   'engine.form.': 90,
   'engine.edit.': 90,
+  // S4 — five Studio pillars, the data source pages, the field types
+  'engine.studio.access.': 120,
+  'engine.studio.if.': 50,
+  'engine.studio.data.': 45,
+  'engine.studio.auto.': 40,
+  'engine.studio.settings.': 35,
+  'engine.datasource.': 50,
+  'engine.externalDatasource.': 45,
+  'engine.datasourcePreview.': 10,
+  'engine.fieldType.': 45,
+  'engine.fieldTypeDesc.': 45,
+  'engine.fieldCategory.': 9,
+  // S5 — the rest of engine.studio (its inspector aside) and the preview panes
+  'engine.studio.': 600,
+  'engine.studio.rules.': 55,
+  'engine.studio.interfaces.': 30,
+  'engine.studio.designer.': 20,
+  'engine.actionPreview.': 50,
+  'engine.permissionPreview.': 35,
+  'engine.validationPreview.': 30,
+  'engine.jobPreview.': 18,
+  'engine.agentPreview.': 15,
+  'engine.skillPreview.': 15,
+  'engine.datasetPreview.': 12,
+  'engine.toolPreview.': 12,
+  'engine.picklistPreview.': 12,
+  'engine.dashboardPreview.': 9,
+  'engine.appPreview.': 9,
+  'engine.emailTemplatePreview.': 9,
+  'engine.pagePreview.': 8,
+  'engine.screenPreview.': 7,
+  'engine.positionPreview.': 6,
+  'engine.reportPreview.': 6,
+  'engine.viewPreview.': 4,
+  'engine.objectPreview.': 1,
+  'engine.previewShell.': 1,
 });
 
 /**

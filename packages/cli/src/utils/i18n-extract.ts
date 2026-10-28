@@ -127,6 +127,8 @@
  *   hooks.<hook>.refusals.<CODE>.message                       (#26170)
  *   positions.<position>.label / .description
  *   permissions.<permission_set>.label / .description
+ *   books.<book>.label / .description
+ *   books.<book>.groups.<group_key>.label   (a doc book's section title, #26690)
  *   metadataForms.<type>.label / .description
  *   metadataForms.<type>.sections.<section>.label / .description
  *   metadataForms.<type>.fields.<dotPath>.label / .helpText / .placeholder
@@ -234,6 +236,7 @@ export interface ExpectedEntry {
     | 'hook'
     | 'position'
     | 'permission'
+    | 'book'
     | 'metadataType'
     | 'metadataFormSection'
     | 'metadataFormField';
@@ -1640,6 +1643,9 @@ export function collectExpectedEntries(
   // ── Security catalog (`positions.<name>.…`, `permissions.<name>.…`) ─
   walkSecurityCatalog(config, out);
 
+  // ── Doc books (`books.<name>.…`) ──────────────────────────────────
+  walkBooks(config, out);
+
   // ── Pages + their `page:header` copy ──────────────────────────────
   const pages: any[] = Array.isArray(config?.pages) ? config.pages : [];
   for (const page of pages) {
@@ -1954,6 +1960,34 @@ function walkSecurityCatalog(config: any, out: ExpectedEntry[]): void {
       if (typeof name !== 'string' || name.length === 0) continue;
       pushOptional(out, [group, name, 'label'], item.label, source);
       pushOptional(out, [group, name, 'description'], item.description, source);
+    }
+  }
+}
+
+// ─── Doc books (`books.<name>.…`) ──────────────────────────────────────
+
+/**
+ * [#26690] Emit a doc book's spine copy: `books.<book>.label` /
+ * `.description` and `books.<book>.groups.<key>.label`, the keys
+ * `translateBook` reads. A group is addressed by its stable `key`, never its
+ * position. The book's own label and description are optional on the schema,
+ * so they are recorded with {@link pushOptional}; a group's label is required,
+ * so it is the author's literal ({@link pushEntry}).
+ */
+function walkBooks(config: any, out: ExpectedEntry[]): void {
+  const books: any[] = Array.isArray(config?.books) ? config.books : [];
+  for (const book of books) {
+    if (!book || typeof book !== 'object') continue;
+    const name = book.name;
+    if (typeof name !== 'string' || name.length === 0) continue;
+    pushOptional(out, ['books', name, 'label'], book.label, 'book');
+    pushOptional(out, ['books', name, 'description'], book.description, 'book');
+    const groups: any[] = Array.isArray(book.groups) ? book.groups : [];
+    for (const group of groups) {
+      if (!group || typeof group !== 'object') continue;
+      const key = group.key;
+      if (typeof key !== 'string' || key.length === 0) continue;
+      pushEntry(out, ['books', name, 'groups', key, 'label'], group.label, 'book');
     }
   }
 }

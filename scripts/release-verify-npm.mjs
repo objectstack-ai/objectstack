@@ -317,7 +317,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '13. The backfill builds from the version commit\'s tree, as the publish does': 13,
   '14. The 18.0.0 publish window: console readable at +16m22s, past the old 900 s': 14,
   '15. Lag or loss: npm\'s own answer per package, parsed from its real log': 26,
-  '16. release-publish.sh keeps npm\'s record, prints it, and still pushes tags only after a clean publish': 8,
+  '16. release-publish.sh keeps npm\'s record, prints it, and still pushes tags only after a clean publish': 12,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -3014,9 +3014,13 @@ export async function selfTest() {
   battery('16. release-publish.sh keeps npm\'s record, prints it, and still pushes tags only after a clean publish');
   {
     // The script runs from this repository's root (it calls this file by its
-    // repo path), with `changeset` and `git` stubbed on PATH. The stub
+    // repo path), with `changeset`, `git` and `npm` stubbed on PATH. The stub
     // changeset records what npm would see and writes one npm log, for the
-    // anchor, into the logs dir it was handed.
+    // anchor, into the logs dir it was handed. The stub npm answers the
+    // published-dist scan's `npm pack --dry-run --json` for every published
+    // @object-ui package: one build-output file, plus a test file under
+    // `dist/` when STUB_PACK_TOOLING is set, which is the defect that scan
+    // refuses (objectui#4846).
     const box = mkdtempSync(join(tmpdir(), 'release-verify-npm-publish-sh-'));
     try {
       const bin = join(box, 'bin');
@@ -3030,10 +3034,23 @@ export async function selfTest() {
         'exit "${STUB_CHANGESET_EXIT:-0}"',
       ].join('\n'));
       writeFileSync(join(bin, 'git'), '#!/bin/sh\necho "git $*" >> "$STUB_LOG"\n');
+      writeFileSync(join(bin, 'npm'), [
+        '#!/bin/sh',
+        'echo "npm $1" >> "$STUB_LOG"',
+        // Real npm writes a debug log of every run into its logs dir; so does
+        // this stub, so a scan moved inside npm's record would be counted.
+        '[ -z "$npm_config_logs_dir" ] || echo "0 verbose cli node npm" > "$npm_config_logs_dir/stub-npm-$$-debug-0.log"',
+        'if [ -n "$STUB_PACK_TOOLING" ]; then',
+        '  echo \'[{"files":[{"path":"package.json"},{"path":"dist/index.js"},{"path":"dist/__tests__/index.test.js"}]}]\'',
+        'else',
+        '  echo \'[{"files":[{"path":"package.json"},{"path":"dist/index.js"}]}]\'',
+        'fi',
+      ].join('\n'));
       chmodSync(join(bin, 'changeset'), 0o755);
       chmodSync(join(bin, 'git'), 0o755);
+      chmodSync(join(bin, 'npm'), 0o755);
 
-      const run = (exitCode) => {
+      const run = (exitCode, { packTooling = false } = {}) => {
         const runnerTemp = mkdtempSync(join(box, 'runner-'));
         const recordDir = npmRecordDir({ RUNNER_TEMP: runnerTemp });
         mkdirSync(recordDir, { recursive: true });
@@ -3049,6 +3066,7 @@ export async function selfTest() {
             STUB_SEEN: seen,
             STUB_LOG: stubLog,
             STUB_CHANGESET_EXIT: String(exitCode),
+            ...(packTooling ? { STUB_PACK_TOOLING: '1' } : {}),
             npm_config_globalconfig: '/home/runner/.config/pnpm/rc',
           },
           encoding: 'utf8',
@@ -3059,6 +3077,7 @@ export async function selfTest() {
           seen: existsSync(seen) ? readFileSync(seen, 'utf8') : '',
           calls: existsSync(stubLog) ? readFileSync(stubLog, 'utf8').trim().split('\n') : [],
           stale: existsSync(join(recordDir, '2026-01-01T00_00_00_000Z-debug-0.log')),
+          recordLogs: readdirSync(recordDir),
           recordDir,
         };
       };
@@ -3073,11 +3092,24 @@ export async function selfTest() {
         good.out.includes(`${ANCHOR_PACKAGE}@${cli.version} — npm ACCEPTED the upload: PUT 200 in 812 ms`) && /npm's answers: 1 of \d+ package\(s\) accepted/.test(good.out),
         good.out.split('\n').filter((l) => l.includes('npm\'s answers')).join(' | '),
       );
-      t('tags are pushed after the publish, in one push', good.calls.join(' ; ') === 'changeset ; git push origin --tags', good.calls.join(' ; '));
+      const notPack = (calls) => calls.filter((c) => c !== 'npm pack');
+      t('tags are pushed after the publish, in one push', notPack(good.calls).join(' ; ') === 'changeset ; git push origin --tags', good.calls.join(' ; '));
+      const packs = good.calls.filter((c) => c === 'npm pack').length;
+      t(
+        'the published-dist scan packs every published @object-ui package BEFORE the publish',
+        packs > 0 && good.calls.lastIndexOf('npm pack') < good.calls.indexOf('changeset') && good.out.includes(`Inspected ${packs} published package(s)`),
+        `${packs} npm pack call(s); ${good.out.split('\n').filter((l) => l.startsWith('Inspected ')).join(' | ')}`,
+      );
+      t('and its npm runs stay out of npm\'s record: the publish\'s log is the only one in it', good.recordLogs.length === 1 && !good.recordLogs.some((f) => f.startsWith('stub-npm-')), good.recordLogs.join(', '));
 
       const bad = run(1);
       t('a failed publish still fails the script, with npm\'s answers printed first', bad.status === 1 && bad.out.includes('npm\'s answer per package'), `status=${bad.status}`);
       t('and pushes no tag', !bad.calls.some((c) => c.startsWith('git')), bad.calls.join(' ; '));
+
+      // The defect the scan exists for: a test file inside a published `dist/`.
+      const tooling = run(0, { packTooling: true });
+      t('a tarball carrying tooling material fails the script, naming the scan', tooling.status === 1 && tooling.out.includes('tooling-in-published-output') && tooling.out.includes('Refusing to publish'), `status=${tooling.status} ${tooling.out.slice(-300)}`);
+      t('and changeset publish never runs, so nothing reaches npm and no tag is pushed', notPack(tooling.calls).length === 0, tooling.calls.join(' ; '));
     } finally {
       rmSync(box, { recursive: true, force: true });
     }

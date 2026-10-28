@@ -27,7 +27,13 @@
  *      `rows` / `columns` / `values`) is still checked, below.
  *   2. **List-view charts** — `ListChartConfigSchema` (`dataset` +
  *      `dimensions` + `values`), reachable through `views[].list`,
- *      `views[].listViews.<key>`, and `objects[].listViews.<key>`.
+ *      `views[].listViews.<key>`, `objects[].listViews.<key>`, and the two
+ *      standalone `views[]` shapes `PUT /api/v1/meta/view` carries: the
+ *      flattened list overlay (`viewKind: 'list'`, the chart at the TOP
+ *      level) and the ViewItem record (`viewKind: 'list'`, one level down
+ *      inside `config`). Without those two rungs a view written through the
+ *      publish door is a shape this walk never opens, so crossing the rule
+ *      onto `view` writes would have been a no-op that reads as coverage.
  *   3. **Dataset-bound page chart components** — a `PageComponent` whose
  *      `properties` carry a `dataset` (the `object-chart` component). Same
  *      binding shape as a list chart, but it arrives through the untyped
@@ -363,7 +369,7 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
   if (!stack || typeof stack !== 'object') return findings;
 
   const datasets = indexDatasets(stack);
-  if (datasets.size === 0 && !stack.reports && !stack.views && !stack.pages) return findings;
+  if (datasets.size === 0 && !stack.reports && !stack.views && !stack.objects && !stack.pages) return findings;
 
   /**
    * Resolve one bound dataset NAME, reporting `chart-dataset-unknown` when it
@@ -624,6 +630,16 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
     const view = views[vi];
     if (!isRec(view)) continue;
     const viewName = strName(view.name) ?? strName(view.objectName) ?? `#${vi}`;
+    // The two standalone shapes, recognised as `validateListViewFieldRefs`
+    // recognises them: a flattened overlay carries its chart on the view
+    // itself, a ViewItem record inside `config`.
+    if (view.viewKind === 'list') {
+      if (isRec(view.config)) {
+        checkListChart(view.config, `view "${viewName}" (ViewItem record) · chart`, `views[${vi}].config`);
+      } else {
+        checkListChart(view, `view "${viewName}" (flattened list overlay) · chart`, `views[${vi}]`);
+      }
+    }
     checkListChart(view.list, `view "${viewName}" · list chart`, `views[${vi}].list`);
     if (isRec(view.listViews)) {
       for (const [key, lv] of Object.entries(view.listViews)) {

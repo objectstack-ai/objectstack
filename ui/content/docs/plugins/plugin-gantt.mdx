@@ -382,9 +382,9 @@ wire: clicking a row already opens the standard detail drawer.
 ### Task click navigation
 
 `navigation` in the `properties` bag decides what a task click opens. With the
-key absent it is the drawer. `drawer`, `modal` and `popover` open the task's
-record in that overlay, and `split` opens it beside the chart. `page`, and a
-block written without `mode`, open the record page in the same tab, and
+key absent it is the drawer. `drawer`, and a block written without `mode` (the
+spec's `drawer` default), open the task's record in the drawer. `page` opens
+the record page in the same tab, and
 `new_window` opens it in a new tab. `none` opens nothing, `preventNavigation:
 true` opens nothing whatever the mode, `openNewTab: true` opens the record page
 in a new tab and outranks every mode except `none`, and `size` sets the overlay
@@ -396,7 +396,7 @@ width.
   "properties": {
     "objectName": "project_task",
     "gantt": { "startDateField": "start_date", "endDateField": "end_date", "titleField": "name" },
-    "navigation": { "mode": "modal", "size": "lg" }
+    "navigation": { "mode": "drawer", "size": "lg" }
   }
 }
 ```

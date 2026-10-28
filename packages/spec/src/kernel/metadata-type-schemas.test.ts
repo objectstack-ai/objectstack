@@ -92,6 +92,9 @@
  *   regime C), closed — `SharingRuleSchema` is `.strict()` and an authoring
  *   surface only. This was the last bump: closed 27 of 28 when the counts were
  *   replaced by the rule.
+ * - `STILL_STRIP` emptied on 2026-10-27: `view` closed (#26711). Its open union
+ *   members were the wire shapes, and the reason they stayed open (Studio's
+ *   round-trip keys) had been paid by declaring those keys; see that list's note.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -520,7 +523,20 @@ describe('each bound entry IS its stack collection\'s schema', () => {
  * type fails this suite until the list shrinks, so the list cannot outlive the
  * debt and start exempting types that no longer need exempting.
  *
- * ## `view` is the end state, not the last item of debt
+ * ## `view` closed (#26711) — the "end state" below was a premise, and it moved
+ *
+ * The next paragraphs are kept as history. They said `view` would never close,
+ * because three union members carried Studio's round-trip keys and the save
+ * persisted the body verbatim. Both halves stopped being true: #20456 declared
+ * every round-trip key the console writes (`VIEW_CONSOLE_ROUND_TRIP_KEYS`), and
+ * #20051 made the save store the PARSED body, so an open member no longer kept
+ * an undeclared key — it answered success and lost it. Closing the three wire
+ * members then refused nothing the platform writes (measured: every example
+ * view body, and every view a showcase boot serves, round-tripped through the
+ * closed door), and `STILL_STRIP` is empty. A new entry still has to answer the
+ * question below before it is accepted.
+ *
+ * ### History: `view` as the end state
  *
  * Every other registered type is closed and `view` will not be, for a reason
  * worth stating so nobody "finishes the job" by force. The registered `view` schema is a UNION
@@ -588,7 +604,7 @@ describe('each bound entry IS its stack collection\'s schema', () => {
  * envelope had a layer that could own it. A future entry on this list should be
  * asked which of the two it is before it is accepted as permanent.
  */
-const STILL_STRIP = new Set<string>(['view']);
+const STILL_STRIP = new Set<string>([]);
 
 /** The registered schema's own top-level posture: `.strict()` sets a `never` catchall. */
 function topLevelPosture(schema: unknown, depth = 0): 'strict' | 'strip' | null {
@@ -644,12 +660,17 @@ describe('registered-type closure is derived, not tallied', () => {
     ).toBe('strict');
   });
 
-  it.each([...STILL_STRIP])('%s is still on the strip list (remove it once closed)', (type) => {
-    expect(types).toContain(type);
-    expect(
-      topLevelPosture(getMetadataTypeSchema(type)),
-      `'${type}' is now strict — remove it from STILL_STRIP.`,
-    ).toBe('strip');
+  // One test over the whole list, not one per entry: the list is empty since
+  // `view` closed (#26711), and the open-set rule below pins that empty set on
+  // purpose. Kept as the reverse pin for the next exception, if one is accepted.
+  it('every STILL_STRIP entry is registered and still strips (remove it once closed)', () => {
+    for (const type of STILL_STRIP) {
+      expect(types).toContain(type);
+      expect(
+        topLevelPosture(getMetadataTypeSchema(type)),
+        `'${type}' is now strict — remove it from STILL_STRIP.`,
+      ).toBe('strip');
+    }
   });
 
   it('the open set, computed from the registry, IS `STILL_STRIP` — no count to bump', () => {

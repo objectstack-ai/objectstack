@@ -3326,6 +3326,21 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'semantic entry `ui-record-line-items-props-closed`.',
   },
   {
+    id: 'ui-record-open-overlay-modes-retired',
+    order: 111,
+    text:
+      'It gives an object one default way to open a record (the maintainer\'s record-page model): '
+      + '`navigation.mode` keeps `drawer`, `page`, `new_window` and `none`, and defaults to `drawer` '
+      + 'instead of `page` — the drawer expands to the full page, the same record page at two widths, '
+      + 'and `page` is declared only for an object whose record should open as a full page. `modal`, '
+      + '`split` and `popover` leave the mode, and `modal` leaves a list page\'s `recordAction`; a '
+      + 'side-by-side pane becomes a reader\'s own preference rather than metadata. Each retired '
+      + 'member is refused at parse with its prescription, and the D2 conversion '
+      + '`navigation-mode-overlay-values-removed` deletes it from existing sources and stored rows, '
+      + 'which lands the block on the drawer. Its D3 record is the semantic entry '
+      + '`ui-record-open-overlay-modes-retired`.',
+  },
+  {
     id: 'ui-report-joined-block-dataset-required',
     order: 77,
     text:

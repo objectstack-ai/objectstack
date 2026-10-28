@@ -119,7 +119,10 @@ import { ManifestSchema, SEMVER_2_0_0_VERSION_PATTERN, manifestIdRefusal } from 
 // domain calls: it writes the bare `{ error: { code, message } }` body onto a
 // `res`, and every error body on this surface is `deps.error`'s. See the
 // `@objectstack/rest` barrel entry that publishes the pair.
-import { repeatedQueryParamMessage } from '@objectstack/rest';
+// [#26713] …and its recognition sibling, the one sentence for a query
+// parameter a door does not read (`packages/rest/src/query-allowlist.ts`),
+// asked by every write door (`refusePackageWriteDoorQuery`, #26857).
+import { repeatedQueryParamMessage, unknownQueryParamRefusalMessage } from '@objectstack/rest';
 // [commit 0862063ba] The repo's ONE coercion for a query parameter its schema declares
 // `z.boolean()`, from the module whose header is the authority on the rule
 // (`packages/runtime/src/query-param.ts`). Imported, never restated: the list
@@ -1063,6 +1066,59 @@ function refuseRepeatedWriteFlag(
 }
 
 /**
+ * [#26857] The closed query set of `POST /packages` (install). **Measured**:
+ * `overwrite` alone, the query spelling of the wrapped body's own option;
+ * every other install option rides the body (`PackageInstallBodySchema`).
+ */
+const PACKAGE_INSTALL_QUERY_PARAMS: readonly string[] = Object.freeze(['overwrite']);
+
+/**
+ * [#26857] The closed query set of `DELETE /packages/:id` (uninstall).
+ * **Measured**: `keepData` alone, the flag that keeps the object tables.
+ */
+const PACKAGE_DELETE_QUERY_PARAMS: readonly string[] = Object.freeze(['keepData']);
+
+/**
+ * [#26713 · #26857] The closed query set of every other package write door —
+ * `PATCH /packages/:id`, `…/enable`, `…/disable`, `POST …/publish`,
+ * `…/publish-drafts`, `…/discard-drafts`, `…/revert`, `…/rollback`,
+ * `…/commits/:commitId/revert`, `…/adopt-orphans` and `…/duplicate`.
+ * **Measured**: EMPTY. Each reads the path, the session and the body (an
+ * `actor`, a `commitId`, a target id, a manifest patch); none reads a query
+ * parameter, and neither does any helper they call.
+ */
+const PACKAGE_WRITE_NO_QUERY_PARAMS: readonly string[] = Object.freeze([]);
+
+/**
+ * [#26713 · #26857] AGENTS.md route rule 5 at the package write doors: a query
+ * parameter outside the door's `declared` set is refused `400
+ * VALIDATION_ERROR` with the recognition sentence every closed-query door
+ * answers ({@link unknownQueryParamRefusalMessage}), in this domain's
+ * envelope, as the `/meta` doors write it (#23072). Each door asks it after
+ * the capability and wall gates and before the registry or the protocol is
+ * read or called, so a refused call deletes, installs or changes nothing.
+ * Recognition runs before the arity rule ({@link refuseRepeatedWriteFlag}),
+ * which keeps its place on the two doors that declare a flag.
+ *
+ * Every door ignored the names it does not read. On the draft doors,
+ * `publish-drafts?dryRun=true` published the drafts for real (#26713). On
+ * uninstall, `?keepdata=true` or `?keep_data=true` was not `keepData`, so
+ * the protocol dropped the object tables the caller asked to keep and the
+ * door answered `200` (#26857).
+ *
+ * @returns the refusal to answer, or `null` when the query names nothing outside `declared`.
+ */
+function refusePackageWriteDoorQuery(
+    deps: DomainHandlerDeps,
+    query: unknown,
+    declared: readonly string[],
+): HttpDispatcherResult | null {
+    const message = unknownQueryParamRefusalMessage(query, declared);
+    if (message === undefined) return null;
+    return { handled: true, response: deps.error(message, 400, { code: 'VALIDATION_ERROR' }) };
+}
+
+/**
  * Whether a registry row counts as enabled, for {@link readEnabledFilter}'s
  * comparison (commit 0862063ba).
  *
@@ -1220,6 +1276,9 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, 'Installing a package');
             if (walled) return walled;
+            // [#26857] Recognition first, over the measured closed set, ahead of
+            // the body parse and the registry read.
+            const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_INSTALL_QUERY_PARAMS); if (queryRefused) return queryRefused;
             // [#19328] ⭐ THE DOOR PARSES THE WHOLE BODY — once, here, through
             // the union `@objectstack/spec` declares for it
             // (`PackageInstallBodySchema`: the wrapped request, or a bare
@@ -1631,6 +1690,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Enabling package "${id}"`);
             if (walled) return walled;
+            const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_WRITE_NO_QUERY_PARAMS); if (queryRefused) return queryRefused;
             const pkg = registry.enablePackage(id);
             if (!pkg) return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
             try {
@@ -1648,6 +1708,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Disabling package "${id}"`);
             if (walled) return walled;
+            const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_WRITE_NO_QUERY_PARAMS); if (queryRefused) return queryRefused;
             // [#7560] ADR-0070: a platform package is not the operator's to
             // switch off. BEFORE `disablePackage`, and before
             // `setPackageDisabled` writes the choice to disk — a disable that
@@ -1670,6 +1731,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Publishing package "${id}"`);
             if (walled) return walled;
+            const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_WRITE_NO_QUERY_PARAMS); if (queryRefused) return queryRefused;
             // [#22113] ADR-0070 D2: a code or installed package is read-only, so
             // this door refuses it BEFORE `publishPackage`, which would otherwise
             // snapshot and re-register the package's items as published (measured:
@@ -1699,6 +1761,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Publishing the drafts of package "${id}"`);
             if (walled) return walled;
+            const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_WRITE_NO_QUERY_PARAMS); if (queryRefused) return queryRefused;
             const protocol = await resolveProtocol(deps, _context);
             if (protocol && typeof protocol.publishPackageDrafts === 'function') {
                 try {
@@ -2059,6 +2122,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Discarding the drafts of package "${id}"`);
             if (walled) return walled;
+            const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_WRITE_NO_QUERY_PARAMS); if (queryRefused) return queryRefused;
             const protocol = await resolveProtocol(deps, _context);
             if (protocol && typeof protocol.discardPackageDrafts === 'function') {
                 try {
@@ -2120,6 +2184,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Reverting commit "${commitId}"`);
             if (walled) return walled;
+            const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_WRITE_NO_QUERY_PARAMS); if (queryRefused) return queryRefused;
             const protocol = await resolveProtocol(deps, _context);
             if (protocol && typeof protocol.revertCommit === 'function') {
                 try {
@@ -2142,6 +2207,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Rolling back package "${decodeURIComponent(parts[0])}"`);
             if (walled) return walled;
+            const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_WRITE_NO_QUERY_PARAMS); if (queryRefused) return queryRefused;
             const protocol = await resolveProtocol(deps, _context);
             if (protocol && typeof protocol.rollbackToPackageCommit === 'function') {
                 if (!body?.commitId) {
@@ -2167,6 +2233,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Reverting package "${id}"`);
             if (walled) return walled;
+            const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_WRITE_NO_QUERY_PARAMS); if (queryRefused) return queryRefused;
             // [#22090] A package's members live in one of two places, and each
             // is reverted by the service that holds it. A Studio-authored
             // package is `sys_metadata` rows bound by `package_id` — the rows
@@ -2226,6 +2293,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Adopting orphaned metadata into package "${id}"`);
             if (walled) return walled;
+            const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_WRITE_NO_QUERY_PARAMS); if (queryRefused) return queryRefused;
             // [#24813] ADR-0070 D2: a package the deployment ships is not a
             // base, so nothing is adopted into it. `reassignOrphanedMetadata`
             // asks no writability question and rebinds every package-less row
@@ -2269,6 +2337,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Duplicating package "${id}"`);
             if (walled) return walled;
+            const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_WRITE_NO_QUERY_PARAMS); if (queryRefused) return queryRefused;
             const protocol = await resolveProtocol(deps, _context);
             if (!protocol || typeof protocol.duplicatePackage !== 'function') {
                 return { handled: true, response: deps.error('Package duplication not supported', 501) };
@@ -2351,6 +2420,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Updating package "${id}"`);
             if (walled) return walled;
+            const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_WRITE_NO_QUERY_PARAMS); if (queryRefused) return queryRefused;
             // [#24705] ADR-0070 D2: the manifest of a package the deployment
             // ships is the deployment's, so this door refuses it with the
             // answer install-overwrite, disable, publish, revert and delete
@@ -2448,6 +2518,9 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Deleting package "${id}"`);
             if (walled) return walled;
+            // [#26857] `?keepdata=true` is not `keepData`: refused here, before
+            // anything is deleted, rather than read as absent (drop the tables).
+            const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_DELETE_QUERY_PARAMS); if (queryRefused) return queryRefused;
             // [#23214] A repeated `?keepData=` is refused before the registry or
             // the protocol is touched: read as absent, it dropped the tables
             // the caller asked to keep (`refuseRepeatedWriteFlag`).

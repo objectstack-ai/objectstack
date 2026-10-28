@@ -532,11 +532,14 @@ export type {
 // name with the tombstone's prescription (`os lint` never parses).
 // [#25786] Its SIXTH: a grouping level's `orderBy` naming a field the group
 // header query cannot order by (`min` / `max` refused for its type).
+// [#26719] Its SEVENTH: a list view whose `chart` binds a dataset declared
+// over another object than the one the list view lists.
 export {
   validateListViewFieldRefs,
   LIST_VIEW_FIELD_UNKNOWN,
   LIST_VIEW_FIELD_DOTTED,
   LIST_VIEW_GROUP_ORDER_UNORDERABLE,
+  LIST_VIEW_CHART_DATASET_FOREIGN_OBJECT,
   LIST_VIEW_OBJECT_OUTSIDE_CLOSURE,
   LIST_VIEW_OBJECT_UNKNOWN,
   LIST_VIEW_KEY_RETIRED,
