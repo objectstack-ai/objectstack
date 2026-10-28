@@ -35,7 +35,9 @@
  * `accessible_org_ids` (ADR-0105 D2) is CORE-resolved, not an app resolver: it
  * is the `group` posture's Layer 0 wall, and a wall an app could redefine would
  * not be a wall. The same goes for `org_user_ids` — the one well-known
- * membership set, resolved by `resolveAuthzContext`. This seam is for
+ * membership set, resolved by `resolveAuthzContext`, and for `queues` — the
+ * ownership queues the caller sits in, which the security plugin resolves from
+ * the ownership-queue service, never from a registered resolver. This seam is for
  * app-shaped sets: the accounts in a rep's territories, the records a case team
  * can touch, the cost centres a controller reviews.
  */
@@ -67,8 +69,8 @@ export interface IRlsMembershipResolver {
    * is auditable and a policy referencing an unowned key is distinguishable
    * from a typo. Keys are `snake_case` and must not collide with the named
    * context fields (`id`, `organization_id`, `positions`, `org_user_ids`,
-   * `accessible_org_ids`, `email`) — the compiler never lets a membership key
-   * clobber those.
+   * `accessible_org_ids`, `email`, `queues`) — the compiler never lets a
+   * membership key clobber those.
    */
   readonly keys: readonly string[];
 
@@ -85,6 +87,15 @@ export interface IRlsMembershipResolver {
 /**
  * Context keys a membership resolver may never supply — they are resolved by
  * the kernel and carry authorization meaning an app must not be able to redefine.
+ *
+ * `queues` (ADR-0142 D3) is the machine names of the ownership queues the
+ * caller belongs to in the active organization — directly, or through a
+ * position, team or unit, as the queue's member specifications define. The
+ * security plugin resolves it from the ownership-queue service
+ * (`IOwnershipQueueService.queuesOf`, the same membership answer the claim
+ * gate's `isMember` reads), so records sitting in a queue are reachable only
+ * through the platform's own answer: a resolver that could supply it could
+ * seat any caller in any queue.
  */
 export const RESERVED_RLS_MEMBERSHIP_KEYS: readonly string[] = [
   'id',
@@ -93,4 +104,5 @@ export const RESERVED_RLS_MEMBERSHIP_KEYS: readonly string[] = [
   'org_user_ids',
   'accessible_org_ids',
   'email',
+  'queues',
 ] as const;

@@ -42,11 +42,12 @@
  * have left wide open.
  */
 
-import { describe, it, expect } from 'vitest';
+import { beforeAll, describe, it, expect } from 'vitest';
 import { RESERVED_RLS_MEMBERSHIP_KEYS } from '@objectstack/spec/contracts';
 import type { PermissionSet } from '@objectstack/spec/security';
 
 import { RLSCompiler, RLS_DENY_FILTER } from './rls-compiler.js';
+import { stageKernelQueues } from './kernel-queue-membership.js';
 import { SecurityPlugin } from './security-plugin.js';
 
 const policy = (using: string): never =>
@@ -125,10 +126,27 @@ const CELLS: Record<
     kernelCtx: { userId: 'usr_a', email: 'real@e.example' },
     kernelWins: { owner_email: 'real@e.example' },
   },
+  // [ADR-0142 D3] No `ExecutionContext` field carries it: the kernel value is
+  // the security plugin's own staging, put on `kernelCtx` in `beforeAll` below.
+  // A `queues` field a caller sets on the context is never read either.
+  queues: {
+    using: 'queue IN (current_user.queues)',
+    bagValue: ['vip_escalations'],
+    absentCtx: { userId: 'usr_a', queues: ['vip_escalations'] },
+    kernelCtx: { userId: 'usr_a' },
+    kernelWins: { queue: { $in: ['support_tier1'] } },
+  },
 };
 
 describe('RESERVED_RLS_MEMBERSHIP_KEYS — refused BY NAME at the compiler merge', () => {
   const compiler = new RLSCompiler();
+
+  beforeAll(async () => {
+    await stageKernelQueues(
+      { logger: undefined, ownershipQueueMembership: () => ({ queuesOf: async () => ['support_tier1'] }) },
+      CELLS.queues!.kernelCtx,
+    );
+  });
 
   /**
    * The cell table is the acceptance criterion "one cell per reserved key", and
