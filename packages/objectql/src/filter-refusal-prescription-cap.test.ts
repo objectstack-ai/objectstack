@@ -10,10 +10,9 @@
  * a client. So the producer orders each refusal verdict, prescription, then
  * consequence, and this file reads every arm the way a client does — through
  * `mapDataError` — and requires the whole prescription in what survives the
- * cut, ahead of "NOT applied". Measured on `origin/main` `4d3a077f` before the
- * reorder, every arm below but `time` junk and the short-name cases put the
- * prescription last, and on these fixtures the client read none or only the
- * head of it.
+ * cut, ahead of "NOT applied". Run against the two producers as they stood on
+ * `origin/main` `4d3a077f`, all 31 cases here go red: every arm printed its
+ * prescription last, after "NOT applied" and the consequence.
  *
  * The fixtures are long on purpose — a 12-character object and field, a path
  * through an aggregation's filter and a nested `$and` / `$or` — so the pin
