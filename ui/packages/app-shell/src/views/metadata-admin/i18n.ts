@@ -610,7 +610,10 @@ export function translateMetadataDomain(
  * `fallback` — typically the engine descriptor's server-authoritative `name`,
  * or the hardcoded NODE_PALETTE label offline — covers plugin / unknown types
  * and the English locale (whose table intentionally carries no `flowNode.*`
- * keys, keeping the server descriptor authoritative in English).
+ * keys, keeping the server descriptor authoritative in English). The
+ * `engine.flowNode.*` rows are resolved by translateNodeLabel/Hint through
+ * `lookupString`, so they answer from the `studio` namespace's `zh` catalogue
+ * (objectstack#25922).
  */
 export function translateNodeLabel(
   type: string,

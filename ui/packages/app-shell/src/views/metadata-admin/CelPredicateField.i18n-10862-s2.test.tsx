@@ -36,6 +36,11 @@ import { fieldRuleRootIssue, validateRlsPredicateEnforceability } from '@objects
 import { t, tFormat } from './i18n';
 import { CelPredicateField } from './CelPredicateField';
 import { lintCelPredicate, type CelSchemaHint } from './celAuthoring';
+// The designer rows this suite reads in zh live in `@object-ui/i18n`'s `studio`
+// namespace, whose `zh` catalogue is fetched on demand (objectstack#25922).
+// Resident before any case, so the zh rows below read synchronously.
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+await loadStudioCatalogue('zh');
 
 afterEach(cleanup);
 
