@@ -63,7 +63,9 @@ fields: {
   **that** record, and its `editable` list is the write gate's own verdict on
   an update of the stored row. So a lock that applies from a stage onward
   disables the field only on the rows its condition names — this is the
-  answer a record's edit form reads. A row that is absent or that the caller
+  answer a record's edit form and the record page's in-place edit read. A
+  list view's inline edit locks a whole column, which cannot split per row,
+  so it keeps the row-blind answer. A row that is absent or that the caller
   cannot read answers the record read's `404`. The answer is field-level
   only: the object grant and the record's row-level write scope (sharing,
   row-level security, ownership) are not part of it, so on a row the caller
