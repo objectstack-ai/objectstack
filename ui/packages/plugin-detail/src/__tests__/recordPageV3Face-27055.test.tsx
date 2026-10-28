@@ -116,11 +116,11 @@ describe('EmptySectionsLine — entirely empty sections fold into one line (obje
     section('Conversion', ['converted_at'], { hideEmpty: false }),
     section('Extra', ['notes'], { hideEmpty: false }),
   ];
-  const schema: DetailViewSchema = { type: 'detail-view', objectName: 'lead', showHeader: false, sections } as any;
   const data = { id: 'L-1', name: 'Mira', email: 'm@x.io' };
+  const schema: DetailViewSchema = { type: 'detail-view', data, sections } as any;
 
   it('names the empty sections, counts them, and draws only the sections with a value', () => {
-    const { container } = render(onDefaultPage(<DetailView schema={schema} data={data} />));
+    const { container } = render(onDefaultPage(<DetailView schema={schema} />));
     const line = container.querySelector('[data-empty-sections-line]') as HTMLElement;
     expect(line).toBeTruthy();
     expect(line.getAttribute('data-empty-sections-count')).toBe('3');
@@ -130,7 +130,7 @@ describe('EmptySectionsLine — entirely empty sections fold into one line (obje
   });
 
   it('expands them back in place, and collapses again', () => {
-    const { container } = render(onDefaultPage(<DetailView schema={schema} data={data} />));
+    const { container } = render(onDefaultPage(<DetailView schema={schema} />));
     const toggle = container.querySelector('[data-empty-sections-line] button') as HTMLButtonElement;
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
     fireEvent.click(toggle);
@@ -151,7 +151,7 @@ describe('EmptySectionsLine — entirely empty sections fold into one line (obje
   });
 
   it('CONTROL — outside the default page no line draws (the whole-body fold keeps its rule)', () => {
-    const { container } = render(<DetailView schema={schema} data={data} />);
+    const { container } = render(<DetailView schema={schema} />);
     expect(container.querySelector('[data-empty-sections-line]')).toBeNull();
   });
 });

@@ -73,9 +73,10 @@ describe('RecordPageColumns — the column switches (objectstack#27052)', () => 
     expect(folded).not.toBeNull();
     expect(folded.getAttribute('aria-label')).toBe('Activity');
     expect(nodesIn(folded)).toEqual(['record:discussion', 'record:history']);
-    // Lists first, the folded card after them, the footer last.
+    // Lists first, the folded card after them; the meta line closes the
+    // details column (objectstack#27055).
     expect(nodesIn(related)).toEqual(['record:related_list', 'record:related_list', 'record:discussion', 'record:history']);
-    expect(related.lastElementChild?.getAttribute('data-testid')).toBe('meta-footer');
+    expect(column(container, 'details')!.lastElementChild?.getAttribute('data-testid')).toBe('meta-footer');
     // The related lists stay siblings of one parent (one empty-fold stack).
     const lists = related.querySelectorAll('[data-node="record:related_list"]');
     expect(lists[0].parentElement).toBe(lists[1].parentElement);

@@ -41,6 +41,7 @@ import {
   AlertTriangle,
   ShieldAlert,
   RotateCw,
+  Maximize2,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { DataSource, FieldMetadata } from '@object-ui/types';
@@ -76,7 +77,9 @@ import { useSafeFieldLabel } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import { useDetailTranslation } from './useDetailTranslation';
 import { isMaskedDetailFieldType } from './fieldEnrichment';
-import { RelatedListCompactContext } from './relatedListCompact';
+import { COMPACT_RELATED_ROWS, RELATED_CARD_DROP_LINE, RelatedCardChromeContext, RelatedListCompactContext } from './relatedListCompact';
+import { RelatedCardMenu } from './RelatedCardMenu';
+import { detectStatusField } from '@object-ui/types';
 
 export interface RelatedListProps {
   title: string;
@@ -2350,6 +2353,10 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // second column does not fit beside it and the table would be cut off at the
   // column's edge. Display only — the read, filter and sort are unchanged.
   const compact = React.useContext(RelatedListCompactContext);
+  // objectstack#27055 — the reader's controls over this card (drag, ⋯ menu,
+  // enlarge), handed down by the arranged stack that draws it; `null`
+  // anywhere else.
+  const cardChrome = React.useContext(RelatedCardChromeContext);
 
   // The row click hands the host the rows on show beside the clicked one
   // (objectstack#26679), so its drawer can step through them.
@@ -2496,6 +2503,233 @@ export const RelatedList: React.FC<RelatedListProps> = ({
           </div>
         </CardContent>
       </Card>
+    );
+  }
+
+  // The confirm / picker dialogs and the add error, shared by both faces.
+  const trailingDialogs = (
+    <>
+        <AlertDialog
+          open={deleteTarget !== null}
+          onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {t('detail.deleteRowTitle', { defaultValue: 'Delete record' })}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {/* objectui#13333 — the sentence names the row by its title, the
+                    ONE ADR-0079 resolver over this list's object schema (a
+                    grant's `nameField` formula names the grant and its user). */}
+                {deleteTarget !== null &&
+                  t('detail.deleteRowConfirmation', {
+                    name: getRecordDisplayName(objectSchema, deleteTarget),
+                  })}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>
+                {t('detail.cancel', { defaultValue: 'Cancel' })}
+              </AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleConfirmDelete}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                {t('detail.delete', { defaultValue: 'Delete' })}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+        {addError && (
+          <div
+            className="mx-4 mb-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+            role="alert"
+          >
+            {addError}
+          </div>
+        )}
+        {/* Same gate as the Add button above — `pickerObject` (i.e.
+            `add?.picker?.object`, computed once near the picker-schema fetch) is
+            what the dialog needs, so requiring it here removes the last
+            render-path bare read of `add.picker` rather than optional-chaining
+            it: off-spec `add` still does nothing at all, so no second dialect
+            appears (AGENTS.md #0.1). #3838. */}
+        {add && pickerObject && dataSource && addGranted && (
+          <RecordPickerDialog
+            open={pickerOpen}
+            onOpenChange={(o) => setPickerOpen(o)}
+            multiple
+            dataSource={dataSource as any}
+            objectName={pickerObject}
+            title={add.label || t('detail.add', { defaultValue: 'Add' })}
+            displayField={pickerDisplayField}
+            columns={pickerColumns}
+            cellRenderer={getCellRenderer}
+            fieldsMeta={pickerSchema?.fields}
+            // The author's candidate restriction, handed over VERBATIM (#3831).
+            // `baseFilter` — never `lookupFilters`, which renders its entries as
+            // filter-bar rows the user can edit, i.e. demotes the restriction to a
+            // suggestion. The picker lowers the rule array through the repo's
+            // single filter sink, so no conversion belongs on this side.
+            baseFilter={add.picker.filter}
+            onSelect={() => {}}
+            onSelectRecords={(records: any[]) => { void handleAddRecords(records); }}
+          />
+        )}
+    </>
+  );
+
+  // objectstack#27055, Target 4 — the compact card of the record page's
+  // related column: title + count + ＋ in one row, no table header, up to
+  // three rows of the record's name and ONE status / date chip, ⤢ to enlarge
+  // the list in place. The read, filter and sort are the list's own; only the
+  // face changes. No 「查看全部」 footer: the one way to the whole list is ⤢
+  // (Target 9) — the child's list page is reached from navigation.
+  if (compact) {
+    const rows = paginatedData.slice(0, COMPACT_RELATED_ROWS);
+    const statusField = detectStatusField(objectSchema as any);
+    const chipOf = (row: any): React.ReactNode => {
+      const fields: Record<string, any> = (objectSchema?.fields as any) ?? {};
+      if (statusField && !isEmptyValue(row?.[statusField])) {
+        const raw = row[statusField];
+        const option = Array.isArray(fields[statusField]?.options)
+          ? fields[statusField].options.find((o: any) => o?.value === raw)
+          : undefined;
+        return (
+          <Badge variant="secondary" className="h-5 shrink-0 px-1.5 text-[11px] font-normal" data-related-card-chip="status">
+            {option?.label ?? String(raw)}
+          </Badge>
+        );
+      }
+      for (const col of effectiveColumns ?? []) {
+        const key = col?.accessorKey || columnIdentity(col);
+        const type = key ? fields[key]?.type : undefined;
+        if (!key || (type !== 'date' && type !== 'datetime') || isEmptyValue(row?.[key])) continue;
+        const date = new Date(row[key]);
+        if (Number.isNaN(date.getTime())) continue;
+        return (
+          <span className="shrink-0 text-[11px] text-muted-foreground" data-related-card-chip="date">
+            {date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+          </span>
+        );
+      }
+      return null;
+    };
+    const enlarge = cardChrome?.onEnlarge;
+    return (
+      <section
+        className={cn('rounded-[10px] border border-border bg-card', RELATED_CARD_DROP_LINE, className)}
+        data-related-card=""
+        data-related-card-id={cardChrome?.id}
+        aria-label={title}
+      >
+        <div
+          className={cn(
+            'flex h-9 items-center gap-1.5 px-3 text-[12.5px] font-semibold',
+            cardChrome?.dragHandleProps?.draggable && 'cursor-grab active:cursor-grabbing',
+          )}
+          {...(cardChrome?.dragHandleProps ?? {})}
+        >
+          <span className={cn('min-w-0 truncate', isEmpty && 'text-muted-foreground font-medium')}>{title}</span>
+          {cardChrome?.fresh && (
+            <Badge className="h-4 shrink-0 px-1 text-[10px] font-normal" data-related-card-new="">
+              {t('detail.relatedCardNew', { defaultValue: 'New' })}
+            </Badge>
+          )}
+          {!loadFailure && (
+            enlarge ? (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); enlarge(); }}
+                className="inline-flex h-5 shrink-0 items-center rounded bg-muted px-1.5 text-[11.5px] font-normal text-foreground hover:bg-muted/70"
+                aria-label={t('detail.relatedCardCount', { count: recordCount, defaultValue: '{{count}} records — enlarge' })}
+                data-related-card-count=""
+              >
+                {recordCount}
+              </button>
+            ) : (
+              <span className="inline-flex h-5 shrink-0 items-center rounded bg-muted px-1.5 text-[11.5px] font-normal" data-related-card-count="">
+                {recordCount}
+              </span>
+            )
+          )}
+          <span className="ml-auto flex shrink-0 items-center gap-0.5">
+            {onNew && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 w-6 p-0 text-muted-foreground"
+                disabled={newDisabled}
+                aria-label={t('detail.new')}
+                data-testid="related-list-new"
+                onClick={(e) => { e.stopPropagation(); onNew(); }}
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </Button>
+            )}
+            {add && pickerObject && dataSource && addGranted && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 w-6 p-0 text-muted-foreground"
+                disabled={addBusy}
+                aria-label={add.label || t('detail.add', { defaultValue: 'Add' })}
+                onClick={(e) => { e.stopPropagation(); setAddError(null); setPickerOpen(true); }}
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </Button>
+            )}
+            {enlarge && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 w-6 p-0 text-muted-foreground"
+                aria-label={t('detail.relatedCardEnlarge', { defaultValue: 'Enlarge' })}
+                data-related-card-enlarge=""
+                onClick={(e) => { e.stopPropagation(); enlarge(); }}
+              >
+                <Maximize2 className="h-3.5 w-3.5" />
+              </Button>
+            )}
+            {cardChrome && <RelatedCardMenu chrome={cardChrome} title={title} collapsed={false} />}
+          </span>
+        </div>
+        {loadFailure ? (
+          <div className="border-t border-border px-3 py-2">
+            <RelatedListLoadFailed error={loadFailure.error} onRetry={handleRetryRead} />
+          </div>
+        ) : loading && relatedData.length === 0 ? (
+          <div className="border-t border-border px-3 py-2 text-xs text-muted-foreground">{t('detail.loading')}</div>
+        ) : isEmpty ? (
+          <div className="border-t border-border px-3 py-2 text-xs text-muted-foreground">{t('detail.noRelatedRecords')}</div>
+        ) : (
+          rows.map((row: any, index: number) => {
+            const name = getRecordDisplayName(objectSchema, row) || String(row?.id ?? '');
+            return (
+              <div
+                key={row?.id ?? index}
+                className="flex h-8 items-center justify-between gap-2 border-t border-border px-3 text-[12.5px]"
+                data-related-card-row=""
+              >
+                {handleRowClick ? (
+                  <button
+                    type="button"
+                    className="min-w-0 truncate text-left text-primary hover:underline"
+                    onClick={(e) => handleRowClick(row, e)}
+                  >
+                    {name}
+                  </button>
+                ) : (
+                  <span className="min-w-0 truncate">{name}</span>
+                )}
+                {chipOf(row)}
+              </div>
+            );
+          })
+        )}
+        {trailingDialogs}
+      </section>
     );
   }
 
@@ -2731,74 +2965,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
           </div>
         )}
       </CardContent>}
-      <AlertDialog
-        open={deleteTarget !== null}
-        onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {t('detail.deleteRowTitle', { defaultValue: 'Delete record' })}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {/* objectui#13333 — the sentence names the row by its title, the
-                  ONE ADR-0079 resolver over this list's object schema (a
-                  grant's `nameField` formula names the grant and its user). */}
-              {deleteTarget !== null &&
-                t('detail.deleteRowConfirmation', {
-                  name: getRecordDisplayName(objectSchema, deleteTarget),
-                })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>
-              {t('detail.cancel', { defaultValue: 'Cancel' })}
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleConfirmDelete}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              {t('detail.delete', { defaultValue: 'Delete' })}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-      {addError && (
-        <div
-          className="mx-4 mb-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
-          role="alert"
-        >
-          {addError}
-        </div>
-      )}
-      {/* Same gate as the Add button above — `pickerObject` (i.e.
-          `add?.picker?.object`, computed once near the picker-schema fetch) is
-          what the dialog needs, so requiring it here removes the last
-          render-path bare read of `add.picker` rather than optional-chaining
-          it: off-spec `add` still does nothing at all, so no second dialect
-          appears (AGENTS.md #0.1). #3838. */}
-      {add && pickerObject && dataSource && addGranted && (
-        <RecordPickerDialog
-          open={pickerOpen}
-          onOpenChange={(o) => setPickerOpen(o)}
-          multiple
-          dataSource={dataSource as any}
-          objectName={pickerObject}
-          title={add.label || t('detail.add', { defaultValue: 'Add' })}
-          displayField={pickerDisplayField}
-          columns={pickerColumns}
-          cellRenderer={getCellRenderer}
-          fieldsMeta={pickerSchema?.fields}
-          // The author's candidate restriction, handed over VERBATIM (#3831).
-          // `baseFilter` — never `lookupFilters`, which renders its entries as
-          // filter-bar rows the user can edit, i.e. demotes the restriction to a
-          // suggestion. The picker lowers the rule array through the repo's
-          // single filter sink, so no conversion belongs on this side.
-          baseFilter={add.picker.filter}
-          onSelect={() => {}}
-          onSelectRecords={(records: any[]) => { void handleAddRecords(records); }}
-        />
-      )}
+      {trailingDialogs}
     </Card>
   );
 };

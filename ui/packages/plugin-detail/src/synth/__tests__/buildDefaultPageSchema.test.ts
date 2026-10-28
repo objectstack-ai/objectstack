@@ -172,7 +172,8 @@ describe('deriveHighlightFields', () => {
     expect(fields).not.toContain('status');
     expect(fields).not.toContain('created_at');
     expect(fields).toContain('owner_id');
-    expect(fields.length).toBeLessThanOrEqual(4);
+    // Six since objectstack#27055 (「要点 6 项等宽」).
+    expect(fields.length).toBeLessThanOrEqual(6);
   });
 
   it('falls back to any field order when preferred names absent, minus the H1 field', () => {

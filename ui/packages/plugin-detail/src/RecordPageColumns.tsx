@@ -18,6 +18,8 @@ import {
 import { useDetailTranslation } from './useDetailTranslation';
 import { RelatedListCompactContext } from './relatedListCompact';
 import { DefaultRecordPageContext } from './defaultRecordPage';
+import { RelatedCardStack } from './RelatedCardStack';
+import type { RelatedArrangement, RelatedCardId } from './synth/relatedArrangement';
 
 export interface RecordPageColumnsProps {
   /** The column tier to draw; the tabbed tier is the page itself, drawn by its host. */
@@ -36,6 +38,16 @@ export interface RecordPageColumnsProps {
    * related column into the rail (`recordPageArrangementFor`). Absent: both on.
    */
   switches?: RecordPageColumnSwitches;
+  /**
+   * The reader's arrangement of the related cards (objectstack#27055,
+   * Targets 7 and 10) — order, collapsed, hidden — from the host's workspace
+   * preference store, and the setter that keeps a new one. Absent: the
+   * reader's choices hold for this view only.
+   */
+  relatedArrangement?: RelatedArrangement;
+  onRelatedArrangementChange?: (next: RelatedArrangement) => void;
+  /** Enlarge a related card's list in place (Target 9, the host's `?related=`). */
+  onEnlargeRelated?: (id: RelatedCardId) => void;
   className?: string;
 }
 
@@ -63,10 +75,6 @@ function drawNodes(nodes: any[]): React.ReactNode {
   ));
 }
 
-/** The related column's nodes: its lists draw as compact cards. */
-function drawRelatedNodes(nodes: any[]): React.ReactNode {
-  return <RelatedListCompactContext.Provider value>{drawNodes(nodes)}</RelatedListCompactContext.Provider>;
-}
 
 /**
  * A column stacks its blocks 16 px apart. A related list folded into its
@@ -106,6 +114,9 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
   columns,
   footer,
   switches = ALL_COLUMNS_ON,
+  relatedArrangement,
+  onRelatedArrangementChange,
+  onEnlargeRelated,
   className,
 }) => {
   const { t } = useDetailTranslation();
@@ -140,7 +151,16 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
   ) : null;
   const relatedContent = (
     <>
-      {drawRelatedNodes(columns.related)}
+      {/* The related column's lists draw as compact cards the reader
+          arranges (objectstack#27055). */}
+      <RelatedListCompactContext.Provider value>
+        <RelatedCardStack
+          nodes={columns.related}
+          arrangement={relatedArrangement}
+          onArrangementChange={onRelatedArrangementChange}
+          onEnlarge={onEnlargeRelated}
+        />
+      </RelatedListCompactContext.Provider>
       {foldTimeline && (
         <section
           className="flex flex-col gap-4 rounded-lg border border-border bg-card p-4"

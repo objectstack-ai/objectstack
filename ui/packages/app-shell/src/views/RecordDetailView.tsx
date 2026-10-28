@@ -10,7 +10,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom';
-import { activityRowToFeedItem, DefaultRecordPageContext, InlineEditSaveBar, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordPageColumnDefaults, resolveTitleField, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
+import { activityRowToFeedItem, DefaultRecordPageContext, EMPTY_RELATED_ARRANGEMENT, InlineEditSaveBar, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordPageColumnDefaults, resolveTitleField, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
 import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions, PanelToggles, type PanelToggleItem } from '@object-ui/components';
 import { useAuth, createAuthenticatedFetch } from '@object-ui/auth';
 import { usePermissions } from '@object-ui/permissions';
@@ -72,6 +72,7 @@ import { useFavorites } from '../hooks/useFavorites.js';
 import {
   RECORD_RELATED_COLUMN_PREFERENCE,
   RECORD_TIMELINE_COLUMN_PREFERENCE,
+  RECORD_RELATED_ARRANGEMENT_PREFERENCE,
   objectPreferenceScope,
   useWorkspacePreference,
 } from '../utils/workspacePreference.js';
@@ -936,6 +937,14 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     columnDefaults.related ? 'on' : 'off',
   );
   const columnSwitches = { timeline: timelineSwitch === 'on', related: relatedSwitch === 'on' };
+  // objectstack#27055 — the reader's arrangement of the related cards (order,
+  // collapsed, hidden), per object, in the same store as the switches. Laid
+  // over the default order by `RelatedCardStack`; never metadata.
+  const [relatedArrangement, setRelatedArrangement] = useWorkspacePreference(
+    RECORD_RELATED_ARRANGEMENT_PREFERENCE,
+    columnScope,
+    EMPTY_RELATED_ARRANGEMENT,
+  );
   // Which switches the toolbar draws — the columns the page has content for —
   // set at render below and read by the shortcuts, so a shortcut never flips
   // a switch the reader cannot see.
@@ -4194,6 +4203,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                     tier={recordPageTier}
                     columns={pageColumns}
                     switches={columnSwitches}
+                    relatedArrangement={relatedArrangement}
+                    onRelatedArrangementChange={setRelatedArrangement}
                     footer={
                       <RecordMetaFooter
                         data={readablePageRecord}

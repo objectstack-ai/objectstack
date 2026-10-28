@@ -220,6 +220,25 @@ export type { RecordPageColumnsProps } from './RecordPageColumns';
 // objectstack#27055 — the record page v3 face: a host drawing the
 // synthesized default page in its tabbed tier marks it, as the column tiers do.
 export { DefaultRecordPageContext, useDefaultRecordPage } from './defaultRecordPage';
+// objectstack#27055 — the reader's arrangement of the related cards: the pure
+// merge rule and the stored record's codec halves, for the host's
+// workspace-preference store.
+export {
+  EMPTY_RELATED_ARRANGEMENT,
+  RELATED_CARD_NEW_BADGE_MS,
+  editRelatedArrangement,
+  relatedArrangementFromRecord,
+  relatedArrangementToRecord,
+  relatedCardId,
+  relatedDefaultOrderHash,
+  resolveRelatedArrangement,
+} from './synth/relatedArrangement';
+export type {
+  RelatedArrangement,
+  RelatedArrangementEdit,
+  RelatedCardId,
+  ResolvedRelatedArrangement,
+} from './synth/relatedArrangement';
 
 /**
  * The registry face of `detail-view` — objectui#5378 item 1.
