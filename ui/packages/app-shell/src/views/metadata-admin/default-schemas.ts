@@ -358,4 +358,8 @@ export function registerDefaultMetadataSchemas(): void {
     type: 'position',
     createFields: ['label', 'name', 'description', 'permissionSets'],
   });
+
+  // objectstack#26649 — two locales of one template are two members of one
+  // name; the list tells them apart by `locale` and opens each by it.
+  registerMetadataResource({ type: 'email_template', bundleMemberField: 'locale' });
 }
