@@ -1110,6 +1110,7 @@ const ja = {
     recordDetail: "レコード詳細",
     recordDetailWithLabel: "{{label}}の詳細",
     openAsFullPage: "フルページで開く",
+    collapseToDrawer: "ドロワーに戻す",
     recordDetailOverlay: "{{title}} のレコード詳細オーバーレイ。",
     addToFavorites: "お気に入りに追加",
     removeFromFavorites: "お気に入りから削除",

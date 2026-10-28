@@ -23,6 +23,11 @@
  * The object list handed to the view carries the invoice's and the account's
  * definitions, as the console's metadata catalog does: the record page links
  * only to an object it can route to.
+ *
+ * Since objectstack#26679 the record page is a record drawer host, so "opens
+ * the account" means: in a drawer over the request page (the account declares
+ * no `navigation.mode`, so it opens the drawer, maintainer ruling 5 on that
+ * card), the router unmoved, the link's href still the account's record path.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor, within, fireEvent } from '@testing-library/react';
@@ -207,7 +212,9 @@ const host = {
   findOne: vi.fn(async (resource: string, id: string) =>
     resource === 'invoice'
       ? { id, name: TARGET_TITLE, amount: 12500, account_id: { id: ACCOUNT_ID, name: ACCOUNT_TITLE } }
-      : null),
+      : resource === 'account' && id === ACCOUNT_ID
+        ? { id, name: ACCOUNT_TITLE }
+        : null),
   create: vi.fn(), update: vi.fn(), delete: vi.fn(),
   getObjectSchema: vi.fn(async (name: string) => DEFS[name] ?? null),
 };
@@ -310,7 +317,13 @@ describe('the served request page: Enter on the target card lookup link (objectu
     expect(document.activeElement).toBe(link);
     await user.keyboard('{Enter}');
 
-    await waitFor(() => expect(screen.getByTestId('router-pathname').textContent).toBe(accountPath));
+    // The account opens in a drawer over the request page …
+    const drawer = await screen.findByRole('dialog', undefined, { timeout: 8000 });
+    await waitFor(() => expect(within(drawer).getAllByText(ACCOUNT_TITLE).length).toBeGreaterThan(0), { timeout: 8000 });
+    expect(host.findOne.mock.calls.some(([resource, id]) => resource === 'account' && id === ACCOUNT_ID)).toBe(true);
+    // … the router did not move, and the link still addresses the account's page.
+    expect(screen.getByTestId('router-pathname').textContent).toBe(`/apps/${APP}/${APPROVAL_REQUEST_OBJECT}/record/${REQ}`);
+    expect(new URL(link.getAttribute('href') as string, 'http://test.local').pathname).toBe(accountPath);
     expect(writeText).not.toHaveBeenCalled();
   });
 

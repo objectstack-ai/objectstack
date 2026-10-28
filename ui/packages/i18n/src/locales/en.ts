@@ -1447,6 +1447,9 @@ const en = {
     // a possessive particle (ja/zh) writes its own arrangement here.
     recordDetailWithLabel: '{{label}} Detail',
     openAsFullPage: 'Open as full page',
+    // The record page's way back into the drawer it was expanded from
+    // (objectstack#26679).
+    collapseToDrawer: 'Collapse to drawer',
     recordDetailOverlay: 'Record detail overlay for {{title}}.',
     addToFavorites: 'Add to favorites',
     removeFromFavorites: 'Remove from favorites',
