@@ -170,6 +170,7 @@ const zh = {
     noPermissionToSave: '您没有权限保存这条记录。',
     noPermissionToCreate: '您没有创建{{object}}的权限，字段均为只读。',
     noPermissionToEdit: '您没有编辑{{object}}的权限，字段均为只读。',
+    noPermissionToEditRecord: '您没有编辑此记录的权限，字段均为只读。',
     submitFailed: '保存失败，请重试。',
     uploadInFlight: '请等待上传完成后再保存。',
     clearedOnHide: '已清空不再适用于当前取值的字段：{{fields}}',

@@ -27,7 +27,7 @@
  */
 
 import '@testing-library/jest-dom/vitest';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 import React from 'react';
 import { render, cleanup, waitFor } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
@@ -125,6 +125,16 @@ vi.mock('@object-ui/react', async (importOriginal) => ({
   useGlobalUndo: () => {},
   useMutationInvalidationBridge: () => {},
 }));
+
+// objectstack#27138 — an edit dialog reads the approvals state of the record it
+// edits (`useRecordApprovals`). No approval runs in this file: the approvals
+// routes answer empty from one double, installed for the whole file so no read
+// can reach a socket after a test body returns, and handed back in `afterAll`.
+vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ data: [] }), {
+  status: 200,
+  headers: { 'Content-Type': 'application/json' },
+})));
+afterAll(() => vi.unstubAllGlobals());
 
 import { AppContent } from '../AppContent';
 
