@@ -1,7 +1,7 @@
 ---
 title: Dataset schema — UI Protocol reference
 navTitle: Dataset
-description: "Analytics Dataset — the one semantic layer. Reference for Dataset, DatasetDimension, DatasetDurationUnit and 3 more: every property with its type and default."
+description: "Analytics Dataset — the one semantic layer. Reference for Dataset, DatasetDimension, DatasetDurationUnit and 4 more: every property with its type and default."
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -34,8 +34,8 @@ layer is absorbed/retired in a later phase (D-A).
 ## TypeScript Usage
 
 ```typescript
-import { DatasetSchema, DatasetDimensionSchema, DatasetDurationUnit, DatasetMeasureSchema, DatasetMeasureDurationSchema, DerivedMeasureOp } from '@objectstack/spec/ui';
-import type { Dataset, DatasetDimension, DatasetDurationUnit, DatasetMeasure, DatasetMeasureDuration } from '@objectstack/spec/ui';
+import { DatasetSchema, DatasetDimensionSchema, DatasetDurationUnit, DatasetMeasureSchema, DatasetMeasureDurationSchema, DatasetMeasurePolarity, DerivedMeasureOp } from '@objectstack/spec/ui';
+import type { Dataset, DatasetDimension, DatasetDurationUnit, DatasetMeasure, DatasetMeasureDuration, DatasetMeasurePolarity } from '@objectstack/spec/ui';
 
 // Validate data
 const result = DatasetSchema.parse(data);
@@ -88,6 +88,7 @@ const result = DatasetSchema.parse(data);
 | **filter** | `any` | optional |  |
 | **format** | `string` | optional | Numeral pattern for a NUMERIC measure — grouping, decimals, percent; e.g. "0,0.00", "0.0%". An amount takes its symbol from `currency`, not from a "$" in the pattern. A DATE-valued measure never reads a date pattern: `"YYYY-MM-DD"` renders that arm's default face. A date or datetime value reads `format` as a display style — `short` or `relative`, honoured on both. |
 | **currency** | `string` | optional | Display currency code (ISO 4217) |
+| **polarity** | `Enum<'higher' \| 'lower' \| 'neutral'>` | optional | Which direction of change is good news: higher (rise green, fall red), lower (fall green, rise red) or neutral (no good/bad colour). Colours a period-over-period delta; undeclared keeps rise green, fall red. |
 | **derived** | `{ op: Enum<'ratio' \| 'sum' \| 'difference' \| 'product'>; of: string[] }` | optional |  |
 | **duration** | `{ from: string; to: string; unit: Enum<'seconds' \| 'minutes' \| 'hours' \| 'days'> }` | optional | Time between two datetime columns of each record (`{ from, to, unit }`), reduced by `aggregate` (avg / min / max / sum). Records with either instant null are excluded. Replaces `field`. |
 
@@ -143,6 +144,7 @@ const result = DatasetSchema.parse(data);
 | **filter** | `any` | optional |  |
 | **format** | `string` | optional | Numeral pattern for a NUMERIC measure — grouping, decimals, percent; e.g. "0,0.00", "0.0%". An amount takes its symbol from `currency`, not from a "$" in the pattern. A DATE-valued measure never reads a date pattern: `"YYYY-MM-DD"` renders that arm's default face. A date or datetime value reads `format` as a display style — `short` or `relative`, honoured on both. |
 | **currency** | `string` | optional | Display currency code (ISO 4217) |
+| **polarity** | `Enum<'higher' \| 'lower' \| 'neutral'>` | optional | Which direction of change is good news: higher (rise green, fall red), lower (fall green, rise red) or neutral (no good/bad colour). Colours a period-over-period delta; undeclared keeps rise green, fall red. |
 | **derived** | `{ op: Enum<'ratio' \| 'sum' \| 'difference' \| 'product'>; of: string[] }` | optional |  |
 | **duration** | `{ from: string; to: string; unit: Enum<'seconds' \| 'minutes' \| 'hours' \| 'days'> }` | optional | Time between two datetime columns of each record (`{ from, to, unit }`), reduced by `aggregate` (avg / min / max / sum). Records with either instant null are excluded. Replaces `field`. |
 
@@ -166,6 +168,17 @@ const result = DatasetSchema.parse(data);
 | **from** | `string` | ✅ | The earlier instant: a datetime field of the dataset's own object, by its bare name. |
 | **to** | `string` | ✅ | The later instant: a datetime field of the dataset's own object, by its bare name. |
 | **unit** | `Enum<'seconds' \| 'minutes' \| 'hours' \| 'days'>` | ✅ | Unit of the result: the measure answers a number of these (1.5 with "days" is a day and a half). |
+
+
+---
+
+## DatasetMeasurePolarity
+
+### Allowed Values
+
+* `higher`
+* `lower`
+* `neutral`
 
 
 ---

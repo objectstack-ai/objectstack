@@ -152,6 +152,10 @@ export function registerBuiltinAnchors(): void {
     createFields: ['label', 'name', 'object', 'type', 'kind'],
     createDerive: [
       { from: 'label', to: 'name', transform: 'slugify', untilUserEdits: true },
+      // The kind follows the page type until the author picks one: a record
+      // page starts `slotted` with no slot overridden (= the synthesized
+      // default page), every other type `full` (`pageKindForType`).
+      { from: 'type', to: 'kind', transform: 'page-kind', untilUserEdits: true },
     ],
     createSchema: {
       type: 'object',
@@ -185,14 +189,20 @@ export function registerBuiltinAnchors(): void {
           title: 'Kind',
           enum: ['full', 'slotted'],
           default: 'full',
-          description: 'full = the whole page; slotted = override only named slots of the default.',
+          description: 'A record page starts slotted: no slot is overridden, so it shows the default record page and keeps up with the object. Choose full to own the whole layout, starting from a copy of the default.',
         },
       },
     },
     createDefaults: { type: 'list', kind: 'full', regions: [] },
-    // Seed a record page's regions from the bound object's synthesized default
-    // detail page, so authoring starts from the auto-generated layout (the same
-    // one the runtime renders by default) instead of a blank canvas.
+    // A record page is created `slotted` with no slots — the synthesized
+    // default page, which keeps following the object (its fields, sections and
+    // related lists) until the author overrides a slot. Its regions are copied
+    // only when the author explicitly asks for a `full` page: choosing `full`
+    // in this form (the `page-kind` derive above makes `slotted` the record
+    // default, so `full` here is the author's own pick), or the page
+    // designer's "Convert to full page" action (`PagePreview`). Seeding every
+    // record page with the synthesized regions forked it from the default on
+    // the day it was created.
     createSeed: async (draft, { client }) => {
       // List/interface page: pre-bind the chosen object as the data source so
       // the new page renders immediately (the author then curates columns,
@@ -200,7 +210,13 @@ export function registerBuiltinAnchors(): void {
       if (draft?.type === 'list') {
         return draft?.object ? { interfaceConfig: { source: String(draft.object) } } : {};
       }
-      if (draft?.type !== 'record' || !draft?.object) return {};
+      if (draft?.type !== 'record') return {};
+      // Not an explicit `full`: the empty slotted page. The body's `kind` is
+      // stated here rather than left to the draft, so a record page reaching
+      // this hook without a kind (the spec create seed says `full`) still
+      // starts as the default page.
+      if (draft.kind !== 'full') return { kind: 'slotted' };
+      if (!draft?.object) return {};
       try {
         const objectDef = await client.get('object', String(draft.object));
         if (!objectDef || typeof objectDef !== 'object') return {};

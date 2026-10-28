@@ -26,7 +26,8 @@
  *     are two different questions, and this comment used to answer only the
  *     first (`7a90afdf9`).
  *  3. Semantic roles (ADR-0085) — the cross-surface presentation roles:
- *     `nameField`, `stageField` (string | false | unset), `highlightFields`.
+ *     `nameField`, `stageField` (string | false | unset), `highlightFields`
+ *     (an ordered list with a strip preview — `HighlightFieldsEditor`).
  *     These are the ONLY presentation knobs the protocol carries, so the
  *     builder must make them directly editable — otherwise designers fall
  *     back to guessing which heuristic picked their title/stepper/columns.
@@ -40,7 +41,7 @@
  */
 
 import React from 'react';
-import { Settings2, ShieldCheck, Sparkles, ToggleRight, X } from 'lucide-react';
+import { Settings2, ShieldCheck, Sparkles, ToggleRight } from 'lucide-react';
 import {
   Select,
   SelectContent,
@@ -50,8 +51,9 @@ import {
 } from '@object-ui/components';
 import { useRegisteredMetadataDefaultInspector } from '../metadata-admin/default-inspector-registry.js';
 import { readFields, type FieldEntry } from '../metadata-admin/previews/object-fields-io.js';
-import { t, tFormat, type SupportedLocale } from '../metadata-admin/i18n.js';
+import { t, type SupportedLocale } from '../metadata-admin/i18n.js';
 import { cbpMasterRefusal, requireCbpMasterDetails } from './owd-sharing.js';
+import { HighlightFieldsEditor } from './HighlightFieldsEditor.js';
 
 /** The item a stored value none of a picker's options carries is shown by. */
 const OUTSIDE_OPTIONS = 'outside';
@@ -361,26 +363,13 @@ export function ObjectSettingsPanel({
             <span className="mb-1 block text-[11px] text-muted-foreground">
               {t('engine.studio.settings.highlightFields', locale)}
             </span>
-            <div className="flex flex-wrap items-center gap-1.5">
-              {highlightFields.map((f) => (
-                <span
-                  key={f}
-                  className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] text-primary"
-                >
-                  {f}
-                  {!disabled && (
-                    <button
-                      type="button"
-                      aria-label={tFormat('engine.studio.settings.removeField', locale, { field: f })}
-                      onClick={() => onPatch({ highlightFields: highlightFields.filter((x) => x !== f) })}
-                      className="rounded-full hover:bg-primary/20"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  )}
-                </span>
-              ))}
-              {!disabled && highlightCandidates.length > 0 && (
+            <HighlightFieldsEditor
+              value={highlightFields}
+              fields={fields}
+              onChange={(next) => onPatch({ highlightFields: next })}
+              disabled={disabled}
+              locale={locale}
+              renderAdd={() => highlightCandidates.length > 0 && (
                 <SettingsPicker
                   testId="highlight-add-select"
                   value=""
@@ -395,10 +384,7 @@ export function ObjectSettingsPanel({
                   ]}
                 />
               )}
-              {highlightFields.length === 0 && (
-                <span className="text-[11px] text-muted-foreground">{t('engine.studio.settings.undeclared', locale)}</span>
-              )}
-            </div>
+            />
           </div>
         </div>
       </section>

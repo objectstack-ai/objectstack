@@ -422,6 +422,10 @@ const READS: Readonly<Record<string, ReadRow>> = {
     reads: 'top-level',
     why: 'the artifact\'s own top-level `docs`; the same function reads each package\'s docs off its body (`bodyDocsOf(stack.packages, …)`) and lints them against that package.',
   },
+  'utils/collect-docs.ts :: stack.books': {
+    reads: 'top-level',
+    why: '`lintDocNavTargets` resolves a nav item\'s `book` against the artifact\'s own top-level `books` AND each package body\'s (`addBooks(body.books)` over `artifactPackages(stack)`), so the top-level read is one half of the union on purpose (#27090 measured it: the read was there before, hidden from this census by `codeOnly` losing its place in a nested template literal).',
+  },
   'utils/format.ts :: stack': {
     reads: 'resolved',
     evidence: [{ code: 'const stack: any = authoringRuleUnionStack(config);' }],

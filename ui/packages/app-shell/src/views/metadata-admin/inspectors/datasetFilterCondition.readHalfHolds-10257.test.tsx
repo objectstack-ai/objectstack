@@ -6,7 +6,7 @@
  *
  * ## The defect: two ways to open a row the builder cannot hold
  *
- * The inspector commits on every change (`DatasetFilterField.commitFilterGroup`),
+ * The inspector commits on every change (`FilterConditionField.commitFilterGroup`),
  * so every row `conditionToGroup` opens is re-serialized by `groupToCondition`
  * the next time the author edits ANY row in the group. A row the builder cannot
  * hold faithfully is therefore rewritten or dropped by an edit to a SIBLING.
@@ -94,7 +94,7 @@ import { DatasetDefaultInspector } from './DatasetDefaultInspector';
 
 afterEach(cleanup);
 
-/** The inspector's filter columns, as `DatasetFilterField` hands them to both halves. */
+/** The inspector's filter columns, as `FilterConditionField` hands them to both halves. */
 const FIELDS: BuilderFieldDef[] = [
   { value: 'stage', label: 'Stage', type: 'text' },
   { value: 'name', label: 'Name', type: 'text' },

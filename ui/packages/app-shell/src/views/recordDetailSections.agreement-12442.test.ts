@@ -17,11 +17,20 @@
  * draws only the object's `highlightFields` (or nothing). Both now take the
  * sections from `recordDetailSections.ts`.
  *
- * - an object with no `fieldGroups`: the seed's `record:details` carries the
- *   runtime's sections, written in the persisted shape (field names), and that
- *   shape parses under the spec's `RecordDetailsProps`;
- * - CONTROL: an object with `fieldGroups` seeds exactly what the synthesizer
- *   alone writes, the `{ group }` references it has written since objectui#11630;
+ * A record page is created `kind: 'slotted'` with no regions (#27054): it IS
+ * the synthesized default page, so it agrees with the runtime by carrying no
+ * copy at all. The seed copies regions only when the author explicitly creates
+ * a `full` page, and that copy is where the two must agree:
+ *
+ * - the default (no explicit `full`): the seed is the empty slotted page, with
+ *   no `record:details` of its own to drift from the runtime's;
+ * - an explicit `full`, on an object with no `fieldGroups`: the seed's
+ *   `record:details` carries the runtime's sections, written in the persisted
+ *   shape (field names), and that shape parses under the spec's
+ *   `RecordDetailsProps`;
+ * - CONTROL: an explicit `full` on an object with `fieldGroups` seeds exactly
+ *   what the synthesizer alone writes, the `{ group }` references it has
+ *   written since objectui#11630;
  * - the three call sites go through the one derivation, and no second copy of
  *   the split exists.
  *
@@ -102,20 +111,40 @@ function theDetailsNode(doc: unknown): Record<string, any> {
   return nodes[0];
 }
 
-async function seedFor(def: unknown): Promise<Record<string, any>> {
+/**
+ * The page-create seed for a record page on `def`, with `kind` as the create
+ * form left it (`undefined`: a draft that never chose one).
+ */
+async function seedFor(def: unknown, kind: 'full' | 'slotted' | undefined): Promise<Record<string, any>> {
   const cfg = resolveResourceConfig('page');
   const client = { get: async () => def };
-  return (await cfg.createSeed!({ type: 'record', object: (def as any).name }, { client })) as Record<string, any>;
+  return (await cfg.createSeed!({ type: 'record', object: (def as any).name, kind }, { client })) as Record<string, any>;
 }
 
-describe('objectui#12442 — the page-create seed carries the runtime detail sections', () => {
+/** The seed of a record page the author explicitly created `full` — the copy. */
+const fullSeedFor = (def: unknown) => seedFor(def, 'full');
+
+describe('objectui#12442 — the default record page is the runtime page itself', () => {
+  it('a record page created without an explicit full seeds kind slotted with no regions', async () => {
+    for (const def of [flatDef, groupedDef]) {
+      for (const kind of [undefined, 'slotted'] as const) {
+        const seeded = await seedFor(def, kind);
+        expect(seeded, `${def.name} kind=${String(kind)}`).toEqual({ kind: 'slotted' });
+        // No copied record:details exists to drift from the runtime's sections.
+        expect(detailsNodes(seeded)).toHaveLength(0);
+      }
+    }
+  });
+});
+
+describe('objectui#12442 — an explicit full page-create seed carries the runtime detail sections', () => {
   it('an object with no fieldGroups: the seed carries the runtime sections, not a bare record:details', async () => {
     const runtimeSections = deriveRecordDetailSections(flatDef, LABELS);
     // Firing control: the fixture really exercises the split (two sections),
     // so an equality below cannot hold between two empty bodies.
     expect(runtimeSections).toHaveLength(2);
 
-    const seeded = theDetailsNode(await seedFor(flatDef));
+    const seeded = theDetailsNode(await fullSeedFor(flatDef));
     expect(seeded.properties?.sections, 'the seed wrote a bare record:details').toBeDefined();
     expect(seeded.properties.sections).toEqual(toAuthoredDetailSections(runtimeSections));
 
@@ -128,7 +157,7 @@ describe('objectui#12442 — the page-create seed carries the runtime detail sec
   });
 
   it('the seeded sections are spec-legal: they parse under RecordDetailsProps', async () => {
-    const seeded = theDetailsNode(await seedFor(flatDef));
+    const seeded = theDetailsNode(await fullSeedFor(flatDef));
     // Firing control: an absent `sections` parses too, and would say nothing.
     expect(seeded.properties?.sections).toHaveLength(2);
     const parsed = RecordDetailsProps.safeParse({ sections: seeded.properties.sections });
@@ -139,13 +168,13 @@ describe('objectui#12442 — the page-create seed carries the runtime detail sec
     const runtimePage = buildDefaultPageSchema(flatDef as any, {
       sections: toAuthoredDetailSections(deriveRecordDetailSections(flatDef, LABELS)) as any,
     });
-    expect(theDetailsNode(await seedFor(flatDef))).toEqual(theDetailsNode(runtimePage));
+    expect(theDetailsNode(await fullSeedFor(flatDef))).toEqual(theDetailsNode(runtimePage));
   });
 
   it('CONTROL: an object with fieldGroups seeds exactly what the synthesizer alone writes', async () => {
     expect(deriveStudioDetailSections(groupedDef, LABELS)).toBeUndefined();
     const today = buildDefaultPageSchema(groupedDef as any) as Record<string, any>;
-    const seeded = await seedFor(groupedDef);
+    const seeded = await fullSeedFor(groupedDef);
     expect(seeded.regions).toEqual(today.regions);
     // Firing control: that body is the `{ group }` reference form, not bare.
     expect(theDetailsNode(seeded).properties.sections[0]).toEqual(
