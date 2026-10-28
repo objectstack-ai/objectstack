@@ -90,6 +90,12 @@ export function hasTemplateHoles(text: string): boolean {
  * channel: a `{{ amount | currency }}` hole with no argument formats in it.
  * Omitted, the engine refuses such a sentence and it is returned as written,
  * like any sentence the engine refuses — never with a guessed currency.
+ *
+ * A refused sentence is shown as written, and the engine's refusal — which
+ * names the hole and the remedy (for a missing default: set
+ * `localization.currency`, or write `currency:CODE`) — goes to
+ * `console.warn`, once per distinct refusal, so it reaches whoever reads the
+ * console rather than nobody.
  */
 export function fillTemplateHoles(
   source: string,
@@ -101,5 +107,18 @@ export function fillTemplateHoles(
     { dialect: 'template', source },
     { extra: roots, locale, ...(currency ? { currency } : {}) },
   );
-  return filled.ok && typeof filled.value === 'string' ? filled.value : source;
+  if (filled.ok && typeof filled.value === 'string') return filled.value;
+  if (!filled.ok) warnRefusedCopy(source, filled.error.message);
+  return source;
+}
+
+/** Refusals already logged, so a dialog that re-renders does not repeat one. */
+const warnedRefusals = new Set<string>();
+
+function warnRefusedCopy(source: string, refusal: string): void {
+  const key = `${source}\u0000${refusal}`;
+  if (warnedRefusals.has(key)) return;
+  if (warnedRefusals.size >= 200) warnedRefusals.clear();
+  warnedRefusals.add(key);
+  console.warn(`[action copy] the sentence "${source}" is shown as written: ${refusal}`);
 }

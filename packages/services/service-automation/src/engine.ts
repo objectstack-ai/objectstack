@@ -5636,6 +5636,11 @@ export class AutomationEngine implements IAutomationService {
      * permission sets, so its data operations fall back to the baseline member
      * set — narrower, never the trigger user's grants (see the warning in
      * {@link seedRunGrants}).
+     *
+     * A segment whose persisted context carries no
+     * {@link AutomationContext.currency} — a run parked before run setup
+     * seeded one — is seeded here the way {@link resolveRunContext} seeds a
+     * new run, on a copy: the persisted `run.context` is left as it parked.
      */
     private resolveDecisionSegmentContext(
         run: SuspendedRun,
@@ -5644,6 +5649,7 @@ export class AutomationEngine implements IAutomationService {
         // The body lives in ./run-resume.ts (#25222).
         const host: ThisParameterType<typeof resolveDecisionSegmentContext> = {
             seedRunGrants: (...a) => this.seedRunGrants(...a),
+            tenantCurrencyResolver: this.tenantCurrencyResolver,
         };
         return resolveDecisionSegmentContext.call(host, run, signal);
     }

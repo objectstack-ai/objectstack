@@ -113,7 +113,7 @@ export function renderRefusalMessage(
     );
 }
 
-/** The body of {@link AutomationEngine.renderFlowTextSlot}, moved unedited; that method's docblock is its contract. */
+/** The body of {@link AutomationEngine.renderFlowTextSlot}; that method's docblock is its contract. */
 export function renderFlowTextSlot(
     this: Pick<NodeTextRenderingHost, 'translatedFlowTemplate' | 'logger'>,
     slot: FlowTextSlotTranslation,
@@ -121,19 +121,28 @@ export function renderFlowTextSlot(
     context: AutomationContext,
 ): string | undefined {
     const translated = this.translatedFlowTemplate(slot, context.locale);
+    let translationRefusal: FlowTextTemplateError | undefined;
     if (translated !== undefined) {
         try {
             return renderTextSlot(translated.template, variables, context.currency);
         } catch (err: unknown) {
             if (!(err instanceof FlowTextTemplateError)) throw err;
-            this.logger.warn(
-                `[automation] ${slot.subject}: the '${translated.locale}' translation at '${slot.key}' does not ` +
-                `compile (${err.message}), so ${slot.shownAs} shows its authored text instead. Fix the ` +
-                `translation's holes to match the authored text.`,
-            );
+            translationRefusal = err;
         }
     }
-    return renderTextSlot(slot.authored, variables, context.currency);
+    // The authored text renders before the translation is blamed: when it
+    // throws too (a `{{ amount | currency }}` hole that meets no tenant
+    // default refuses both alike), its own refusal is the answer, and no line
+    // tells anyone to fix a translation that is not at fault.
+    const authored = renderTextSlot(slot.authored, variables, context.currency);
+    if (translated !== undefined && translationRefusal !== undefined) {
+        this.logger.warn(
+            `[automation] ${slot.subject}: the '${translated.locale}' translation at '${slot.key}' does not ` +
+            `compile (${translationRefusal.message}), so ${slot.shownAs} shows its authored text instead. Fix the ` +
+            `translation's holes to match the authored text.`,
+        );
+    }
+    return authored;
 }
 
 /** The body of {@link AutomationEngine.translatedFlowTemplate}, moved unedited; that method's docblock is its contract. */

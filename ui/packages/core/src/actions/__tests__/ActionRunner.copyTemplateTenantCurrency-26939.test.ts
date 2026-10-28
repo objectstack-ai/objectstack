@@ -46,6 +46,23 @@ describe('fillTemplateHoles: a no-argument currency hole reads the tenant defaul
     expect(fillTemplateHoles(source, { amount: AMOUNT }, 'en-US')).toBe(source);
   });
 
+  it('a refused sentence logs the refusal, naming the hole and the remedy, once', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const source = 'Logged {{ amount | currency }}?';
+      expect(fillTemplateHoles(source, { amount: AMOUNT }, 'en-US')).toBe(source);
+      expect(fillTemplateHoles(source, { amount: AMOUNT }, 'en-US')).toBe(source);
+      expect(warn).toHaveBeenCalledTimes(1);
+      const line = String(warn.mock.calls[0][0]);
+      expect(line).toContain(source);
+      expect(line).toContain('{{ amount | currency }}');
+      expect(line).toContain('localization.currency');
+      expect(line).toContain('currency:EUR');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('a hole that names its code needs no tenant default', () => {
     expect(fillTemplateHoles('{{ amount | currency:EUR }}', { amount: AMOUNT }, 'en-US')).toBe(money('en-US', 'EUR'));
   });

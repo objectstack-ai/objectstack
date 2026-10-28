@@ -12,6 +12,8 @@
 
 import { beforeEach, describe, expect, it } from 'vitest';
 import { AutomationEngine } from '../engine.js';
+import { InMemorySuspendedRunStore } from '../suspended-run-store.js';
+import { installBuiltinNodes } from './index.js';
 import { registerNotifyNode } from './notify-node.js';
 import type { MessagingServiceSurface } from './notify-node.js';
 import { FlowTextTemplateError, renderTextSlot } from './template.js';
@@ -105,6 +107,57 @@ describe('notify — a no-argument currency hole formats in the run organization
         expect(String(result.error)).toContain('localization.currency');
         expect(String(result.error)).not.toContain('$');
         expect(messaging.emitted).toHaveLength(0);
+    });
+});
+
+describe('a run parked before run setup seeded a currency resumes in the organization\'s default', () => {
+    const PARKED = {
+        name: 'deal_review',
+        label: 'Deal Review',
+        type: 'screen' as const,
+        variables: [{ name: 'amount', type: 'number' as const, isInput: true }],
+        nodes: [
+            { id: 'start', type: 'start' as const, label: 'Start' },
+            { id: 'ask', type: 'screen' as const, label: 'Ask', config: { waitForInput: true, title: 'Confirm', fields: [{ name: 'ok', label: 'OK', type: 'checkbox' }] } },
+            { id: 'notify', type: 'notify' as const, label: 'Notify', config: { recipients: ['user_1'], title: 'Won {{ amount | currency }}', message: 'x' } },
+            { id: 'end', type: 'end' as const, label: 'End' },
+        ],
+        edges: [
+            { id: 'e1', source: 'start', target: 'ask' },
+            { id: 'e2', source: 'ask', target: 'notify' },
+            { id: 'e3', source: 'notify', target: 'end' },
+        ],
+    };
+
+    function engineOver(store: InMemorySuspendedRunStore, messaging: ReturnType<typeof fakeMessaging>) {
+        const engine = new AutomationEngine(createTestLogger(), store);
+        installBuiltinNodes(engine, {
+            logger: createTestLogger(),
+            getService: (name: string) => (name === 'messaging' ? messaging.service : undefined),
+        } as never);
+        engine.registerFlow('deal_review', PARKED);
+        return engine;
+    }
+
+    it('a cold resume seeds the default the persisted context lacks, and leaves the persisted context as it parked', async () => {
+        const store = new InMemorySuspendedRunStore();
+        const before = engineOver(store, fakeMessaging());
+        // Parked by an engine with no resolver: the persisted context carries no currency.
+        const paused = await before.execute('deal_review', { params: { amount: 1234.5 }, tenantId: 'org_cn' } as any);
+        expect(paused.status).toBe('paused');
+        const parked = await store.load(paused.runId!);
+        expect(parked?.context).not.toHaveProperty('currency');
+
+        const messaging = fakeMessaging();
+        const after = engineOver(store, messaging);
+        const reads: Array<string | undefined> = [];
+        after.setTenantCurrencyResolver((tenantId) => { reads.push(tenantId); return 'CNY'; });
+        const resumed = await after.resume(paused.runId!, { variables: { ok: true } } as never);
+
+        expect(resumed.success, JSON.stringify(resumed)).toBe(true);
+        expect(reads).toEqual(['org_cn']);
+        expect(messaging.emitted[0]?.payload).toMatchObject({ title: 'Won CN¥1,234.50' });
+        expect(parked?.context).not.toHaveProperty('currency');
     });
 });
 

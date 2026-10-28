@@ -262,8 +262,37 @@ export async function seedRunGrants(
     }
 }
 
-/** The body of {@link AutomationEngine.resolveDecisionSegmentContext}, moved unedited; that method's docblock is its contract. */
+/** The body of {@link AutomationEngine.resolveDecisionSegmentContext}; that method's docblock is its contract. */
 export async function resolveDecisionSegmentContext(
+    this: Pick<RunResumeHost, 'seedRunGrants' | 'tenantCurrencyResolver'>,
+    run: SuspendedRun,
+    signal: ResumeSignal,
+): Promise<AutomationContext> {
+    return withTenantCurrency.call(this, await deciderSegmentContext.call(this, run, signal));
+}
+
+/**
+ * A resumed segment's context with the organization's default currency, when
+ * the persisted one carries none: a run parked before run setup seeded
+ * `currency` would otherwise refuse a `{{ amount | currency }}` hole whose
+ * remedy, the setting, is already in place. A copy, never the persisted
+ * context; a failed or empty read leaves it as it was.
+ */
+async function withTenantCurrency(
+    this: Pick<RunResumeHost, 'tenantCurrencyResolver'>,
+    context: AutomationContext,
+): Promise<AutomationContext> {
+    if (context?.currency !== undefined || !this.tenantCurrencyResolver) return context;
+    try {
+        const currency = await this.tenantCurrencyResolver(context?.tenantId);
+        if (typeof currency === 'string' && currency !== '') return { ...(context ?? {}), currency } as AutomationContext;
+    } catch {
+        // Tolerated, as at run setup: the hole's own refusal is the loud answer.
+    }
+    return context;
+}
+
+async function deciderSegmentContext(
     this: Pick<RunResumeHost, 'seedRunGrants'>,
     run: SuspendedRun,
     signal: ResumeSignal,
