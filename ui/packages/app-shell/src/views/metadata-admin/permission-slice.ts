@@ -26,6 +26,8 @@ export interface ObjectPerm {
   allowRead?: boolean;
   allowEdit?: boolean;
   allowDelete?: boolean;
+  /** Bulk export of the object's records — an opt-in grant no bulk button sets. */
+  allowExport?: boolean;
   allowTransfer?: boolean;
   // `allowRestore` / `allowPurge` were REMOVED here (objectui#6595). Both gated
   // `restore` / `purge` ObjectQL operations that have never existed — a

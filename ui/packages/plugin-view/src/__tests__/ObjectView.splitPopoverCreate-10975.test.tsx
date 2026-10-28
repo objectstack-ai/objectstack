@@ -7,25 +7,22 @@
  */
 
 /**
- * objectui#10975 — under a `split` or `popover` navigation, the New button opens
- * a create form.
+ * objectui#10975, re-pinned by objectstack#26677 — `split` and `popover` left
+ * the spec's `NavigationMode`, and with them the faces that drew a form beside
+ * the list or in a popover.
  *
- * Both surfaces draw a form only beside a selected record: the `split` branch
- * renders its `NavigationOverlay` under `isFormOpen && selectedRecord`, and the
- * `popover` overlay requires `selectedRecord` too. `handleCreate` sets the form
- * mode to `create`, clears the record and opens the form, so under either mode
- * New set state that nothing rendered.
+ * objectui#10975 fixed New under those two modes: both faces drew a form only
+ * beside a selected record, so the create form opened on the surface
+ * `formLayout` falls back to — the modal for `layout: 'modal'`, the drawer
+ * otherwise. objectstack#26677 retired both values (a side-by-side pane is a
+ * reader's own preference, drawn by the console's object page, not metadata),
+ * so an authored one is refused at parse and a stored one is converted before
+ * it reaches a renderer. These rows pin what a body still carrying one does
+ * when it reaches this component past a cast: every verb — New, a row click,
+ * Edit — opens on that same fallback surface, and NOTHING opens beside the
+ * list any more. The rows that pinned the beside-the-list face are FLIPPED.
  *
- * The create form now opens on the surface `formLayout` falls back to with no
- * `navigation`: the modal for `layout: 'modal'`, the drawer otherwise. That is
- * the same whether the mode comes from the node's own `navigation` or, since
- * objectui#10885 member 4, from the active named view's. A named view's
- * `navigation` replaces the node's as a whole, so the node's own `navigation`
- * does not pick the create surface while the named view is active.
- *
- * Controls: a `drawer` navigation's New is unchanged, and an existing record,
- * opened to view by a row click or to edit through the grid, still opens
- * beside the list under `split`.
+ * Control: a `drawer` navigation's New opens the drawer, as before.
  *
  * `ObjectGrid` is a sink that keeps the `onRowClick` and `onEdit` route 2 hands
  * it. `ObjectForm` is a sink that shows the mode it was built for.
@@ -103,22 +100,22 @@ const inDrawer = (el: HTMLElement) =>
   el.closest('[role="dialog"].inset-y-0.right-0') !== null || el.closest('[data-vaul-drawer]') !== null;
 const inDialog = (el: HTMLElement) => el.closest('[role="dialog"]') !== null;
 
-describe('objectui#10975 — New opens a create form under `split` and `popover`', () => {
-  it('THE FIX: the node\'s own `split` — New opens the create form in the drawer', async () => {
+describe('objectstack#26677 — a stale `split` / `popover` opens on the fallback surface, never beside the list', () => {
+  it('a node\'s stale `split` — New opens the create form in the drawer', async () => {
     await clickNew(nodeSchema({ navigation: { mode: 'split' } }));
     const form = await formIn('create');
     expect(inDrawer(form), 'the create form is not inside the drawer').toBe(true);
   });
 
-  it('THE FIX: the node\'s own `popover` with `layout: \'modal\'` — New opens the create form in the modal', async () => {
+  it('a node\'s stale `popover` with `layout: \'modal\'` — New opens the create form in the modal', async () => {
     await clickNew(nodeSchema({ navigation: { mode: 'popover' }, layout: 'modal' }));
     const form = await formIn('create');
     expect(inDialog(form), 'the create form is not inside a dialog').toBe(true);
     expect(inDrawer(form), 'the create form opened in the drawer, not the `layout` modal').toBe(false);
   });
 
-  it('THE FIX: a named view\'s `split` — New opens the create form in the drawer, not on the node\'s replaced `modal` navigation', async () => {
-    await clickNew(namedSchema({ mode: 'split' }, { navigation: { mode: 'modal' } }));
+  it('a named view\'s stale `split` — New opens the create form in the drawer', async () => {
+    await clickNew(namedSchema({ mode: 'split' }, { navigation: { mode: 'drawer' } }));
     const form = await formIn('create');
     expect(inDrawer(form), 'the create form is not inside the drawer').toBe(true);
   });
@@ -129,23 +126,23 @@ describe('objectui#10975 — New opens a create form under `split` and `popover`
     expect(inDrawer(form), 'the create form is not inside the drawer').toBe(true);
   });
 
-  it('CONTROL: under `split`, a row click still opens the existing record beside the list', async () => {
+  it('FLIPPED: under a stale `split`, a row click opens the record in the drawer — not beside the list', async () => {
     await mount(nodeSchema({ navigation: { mode: 'split' } }));
     act(() => gridProps[gridProps.length - 1].onRowClick(ROW));
     const form = await formIn('view');
-    expect(inDialog(form), 'the record opened in a dialog, not beside the list').toBe(false);
-    expect(await screen.findByText('Tasks Detail')).toBeTruthy();
-    expect(screen.getByTestId('object-grid')).toBeTruthy();
+    expect(inDrawer(form), 'the record did not open in the drawer').toBe(true);
+    // The split panel's heading and close control are gone with the face.
+    expect(screen.queryByText('Tasks Detail')).toBeNull();
+    expect(screen.queryByLabelText('Close panel')).toBeNull();
   });
 
-  it('CONTROL: under `split`, Edit still opens the existing record beside the list', async () => {
+  it('FLIPPED: under a stale `split`, Edit opens the record in the drawer — not beside the list', async () => {
     await mount(nodeSchema({ navigation: { mode: 'split' } }));
     const { onEdit } = gridProps[gridProps.length - 1];
     expect(onEdit, 'route 2 handed the grid no `onEdit`').toBeTypeOf('function');
     act(() => onEdit!(ROW));
     const form = await formIn('edit');
-    expect(inDialog(form), 'the record opened in a dialog, not beside the list').toBe(false);
-    expect(await screen.findByText('Tasks Detail')).toBeTruthy();
-    expect(screen.getByTestId('object-grid')).toBeTruthy();
+    expect(inDrawer(form), 'the record did not open in the drawer').toBe(true);
+    expect(screen.queryByText('Tasks Detail')).toBeNull();
   });
 });

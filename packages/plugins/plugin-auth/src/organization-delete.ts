@@ -262,9 +262,10 @@ export async function isDefaultOrganizationTarget(
  * request's transaction, so a later failure rolls it back.
  *
  * Team members first, by their team: `sys_team_member` reaches the
- * organization only through `team_id`, and a multi-row delete runs no cascade.
- * Then each team by id, so the engine's cascade clears what still points at it
- * (a session's active team). The grants go explicitly, here, rather than
+ * organization only through `team_id`, a required lookup, so a team still
+ * holding members would refuse its own delete (a required reference is
+ * restricted, never cleared). Then each team by id, so the engine's cascade
+ * clears what still points at it (a session's active team). The grants go explicitly, here, rather than
  * waiting on plugin-security's member-delete reconcile: measured on a booted
  * showcase, they were still present when the organization row was deleted.
  */

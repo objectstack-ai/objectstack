@@ -26,8 +26,8 @@
  *
  * The permission entries are the same EMIT-SIDE check as everywhere else, and
  * deliberately so: `ObjectPerm` is a hand-written SUBSET of the spec's
- * `ObjectPermission` (it omits `allowExport`, `readScope`, `writeScope` —
- * objectui#6605). Under-coverage is a different question from the one this gate
+ * `ObjectPermission` (it omits the retired `allowRestore` / `allowPurge`,
+ * which the spec still accepts — objectui#6605, objectui#6595). Under-coverage is a different question from the one this gate
  * answers and stays a separate card; a key the shape can EMIT that the schema
  * refuses is this one.
  *

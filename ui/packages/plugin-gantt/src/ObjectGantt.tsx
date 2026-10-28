@@ -60,7 +60,6 @@ import {
   RefreshIndicator,
   legacyRecordDrawerWidthKey,
   recordOverlayWidthStorageKey,
-  useOverlayAnchor,
   cn,
 } from '@object-ui/components';
 import {
@@ -2026,7 +2025,9 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
   // unification ever becomes a product direction that is a fresh ruling, with
   // visual-regression evidence across all four surfaces in one stroke.
   const navConfig = schema.navigation ?? { mode: 'drawer' };
-  const navIsOverlay = navConfig.mode === 'drawer' || navConfig.mode === 'modal' || navConfig.mode === 'split' || navConfig.mode === 'popover';
+  // `drawer` is the one overlay mode the spec keeps (objectstack#26677), and
+  // the hook's own default for a block written without `mode`.
+  const navIsOverlay = (navConfig.mode ?? 'drawer') === 'drawer';
 
   // objectui#7334 — the NON-OVERLAY half of an authored `navigation`, and the
   // reason this component needed one at all.
@@ -2096,11 +2097,6 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
     onNavigate: navigateToRecord,
     onRowClick: navIsOverlay ? undefined : onRowClick,
   });
-
-  // objectui#9299 item 3 — `popover` anchors to the bar/row the user clicked.
-  // The capture handler goes on this component's own container below, because
-  // `GanttView` hands `onTaskClick` a task and not a DOM event.
-  const { anchorRef, anchorCaptureProps } = useOverlayAnchor();
 
   // #2473: a foreign-object row (its `objectField` names another object than
   // the bound one) has no schema loaded, so the drawer degraded to humanized
@@ -2410,22 +2406,16 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
   }
 
   /**
-   * The record overlay — ONE payload in whichever shell the author declared.
+   * The record overlay — the drawer.
    *
    * ⭐ objectui#9299. This used to be `<RecordDetailDrawer>`, which brought its
-   * own `Sheet` and had no `mode` parameter to receive the resolved
-   * `navigation.mode` — so an authored `modal`, `split` or `popover` silently
-   * rendered the drawer (measured on PR objectui#9296). The payload now mounts
-   * through the shared `NavigationOverlay`, which is the same shell `ObjectGrid`
-   * and `ObjectTree` use, so the four declared modes mean the same thing on
-   * every view type.
-   *
-   * `mainContent` is what `split` needs: the overlay puts it in the left panel
-   * beside the record panel, and here that is the chart itself (item 2).
-   * `popoverAnchorRef` is what `popover` needs: the bar the user clicked
-   * (item 3).
+   * own `Sheet`; the payload mounts through the shared `NavigationOverlay`, the
+   * same shell `ObjectGrid` and `ObjectTree` use. The `modal`, `split` and
+   * `popover` shells it also drew here were retired with their spec values
+   * (objectstack#26677): the drawer, which expands to the full page, is the
+   * one overlay an authored `navigation` opens.
    */
-  const renderRecordOverlay = (mainContent?: React.ReactNode): React.ReactNode => {
+  const renderRecordOverlay = (): React.ReactNode => {
     if (!navigation.isOverlay || !navigation.isOpen || !navigation.selectedRecord) return null;
     const rec = navigation.selectedRecord as Record<string, any>;
     const detail = recordDetailHref(rec);
@@ -2454,8 +2444,6 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
       <NavigationOverlay
         {...navigation}
         title={titleText}
-        mainContent={mainContent}
-        popoverAnchorRef={anchorRef}
         // One drag-resize implementation, one key, and the width a user had
         // already chosen under the retired `objectui.drawerWidth.OBJECT`
         // carries over (item 4).
@@ -2523,7 +2511,7 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
   };
 
   const ganttView = (
-    <div className={cn('flex h-full min-h-0 flex-col', className)} {...anchorCaptureProps}>
+    <div className={cn('flex h-full min-h-0 flex-col', className)}>
       {resolvedQuickFilters.length > 0 && (
         <QuickFilterBar
           filters={resolvedQuickFilters}
@@ -2697,23 +2685,6 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
       </AlertDialog>
     </div>
   );
-
-  // `split` (item 2): the chart IS the main content — it moves into the
-  // overlay's left panel with the record panel beside it, rather than being
-  // covered by a drawer. Guarded on an OPEN overlay because the split shell
-  // renders nothing when closed; with nothing open the chart renders on its
-  // own exactly as before.
-  if (
-    navigation.isOverlay
-    && navigation.mode === 'split'
-    && navigation.isOpen
-    && navigation.selectedRecord
-  ) {
-    const splitOverlay = renderRecordOverlay(ganttView);
-    // `null` here means this record has no overlay at all (a synthetic group
-    // row) — the chart still has to render.
-    if (splitOverlay) return <>{splitOverlay}</>;
-  }
 
   return (
     <>

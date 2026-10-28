@@ -155,18 +155,27 @@ describe('object-grid `navigation` members decide the row click (objectui#8071)'
     expect(onNavigate).toHaveBeenCalledWith('7', 'view');
   });
 
-  it('`mode` defaults to `page`, and a RETIRED `view` member does not become the action (objectui#9874)', async () => {
-    // No `mode` member at all — legal authored metadata, because the spec
-    // defaults it. This row used to assert `('7', 'summary_view')` under the
-    // comment "`view` rides through as the second argument"; it did, into the
-    // slot that carries the navigation MODE token, where a host reading it
-    // against `edit`/`view` matched no branch and the row click went quiet.
+  it('a RETIRED `view` member does not become the action (objectui#9874)', async () => {
+    // This row used to assert `('7', 'summary_view')` under the comment
+    // "`view` rides through as the second argument"; it did, into the slot that
+    // carries the navigation MODE token, where a host reading it against
+    // `edit`/`view` matched no branch and the row click went quiet.
     // `@objectstack/spec` 17.5.0 retired the key for that (ADR-0049), so the
     // authored name is now inert here and the dispatched action is the literal.
-    const { onNavigate } = await clickRow({ view: 'summary_view' });
+    // `mode: 'page'` is spelled out since objectstack#26677: an omitted mode now
+    // takes the `drawer` default (the row below), which dispatches nothing.
+    const { onNavigate } = await clickRow({ mode: 'page', view: 'summary_view' });
     await waitFor(() => expect(onNavigate).toHaveBeenCalledTimes(1));
     expect(onNavigate).toHaveBeenCalledWith('7', 'view');
     expect(onNavigate).not.toHaveBeenCalledWith('7', 'summary_view');
+  });
+
+  it('`mode` defaults to `drawer`: a block without it opens the drawer and dispatches nothing (objectstack#26677)', async () => {
+    // FLIPPED: the spec defaulted `mode` to `page` until objectstack#26677,
+    // and a mode-less block dispatched `('7', 'view')` here.
+    const { onNavigate, container } = await clickRow({ size: 'lg' });
+    await waitFor(() => expect(container.ownerDocument.querySelector('[role="dialog"]')).not.toBeNull());
+    expect(onNavigate).not.toHaveBeenCalled();
   });
 
   it('an omitted `view` dispatches the literal `view`, not undefined', async () => {
