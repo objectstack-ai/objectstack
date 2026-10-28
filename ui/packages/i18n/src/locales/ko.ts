@@ -3541,33 +3541,6 @@ const ko = {
   cloudWorkspaceTimezoneNotice: {
     seeded: "환경 시간대는 생성 시 브라우저에 맞춰 {{zone}}(으)로 설정되었습니다. 설정 → 현지화에서 변경할 수 있습니다.",
   },
-  ai: {
-    nlQuery: {
-      placeholder: "데이터에 대해 질문하세요…",
-      ask: "질문",
-      results: "결과",
-      match: "일치도 {{percent}}",
-      simulatedSummary: "검색 결과: {{query}}",
-      noResults: "일치하는 레코드가 없습니다",
-      recentQueries: "최근 쿼리",
-    },
-    formAssist: {
-      title: "AI 제안",
-      suggestionCount: "제안 {{count}}개",
-      suggestionCount_one: "제안 {{count}}개",
-      suggestionCount_other: "제안 {{count}}개",
-      applyAll: "모두 적용",
-      confidence: "신뢰도 {{percent}}",
-      appliedCount: "제안 {{count}}개 적용됨",
-      appliedCount_one: "제안 {{count}}개 적용됨",
-      appliedCount_other: "제안 {{count}}개 적용됨",
-    },
-    recommendations: {
-      title: "추천",
-      generating: "추천을 생성하는 중…",
-      empty: "추천 항목이 없습니다",
-    },
-  },
   aiApprovals: {
     title: "AI 승인",
     description: "AI 에이전트가 제안한 작업으로, 실행 전에 사람의 검토가 필요합니다.",

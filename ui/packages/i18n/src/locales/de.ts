@@ -3542,33 +3542,6 @@ const de = {
   cloudWorkspaceTimezoneNotice: {
     seeded: "Die Zeitzone der Umgebung wurde beim Erstellen anhand Ihres Browsers auf {{zone}} festgelegt. Sie können sie unter Einstellungen → Lokalisierung ändern.",
   },
-  ai: {
-    nlQuery: {
-      placeholder: "Stellen Sie eine Frage zu Ihren Daten…",
-      ask: "Fragen",
-      results: "Ergebnisse",
-      match: "{{percent}} Übereinstimmung",
-      simulatedSummary: "Ergebnisse für: {{query}}",
-      noResults: "Keine passenden Datensätze gefunden",
-      recentQueries: "Letzte Abfragen",
-    },
-    formAssist: {
-      title: "KI-Vorschläge",
-      suggestionCount: "{{count}} Vorschläge",
-      suggestionCount_one: "{{count}} Vorschlag",
-      suggestionCount_other: "{{count}} Vorschläge",
-      applyAll: "Alle übernehmen",
-      confidence: "{{percent}} Konfidenz",
-      appliedCount: "{{count}} Vorschläge übernommen",
-      appliedCount_one: "{{count}} Vorschlag übernommen",
-      appliedCount_other: "{{count}} Vorschläge übernommen",
-    },
-    recommendations: {
-      title: "Empfehlungen",
-      generating: "Empfehlungen werden generiert…",
-      empty: "Keine Empfehlungen verfügbar",
-    },
-  },
   aiApprovals: {
     title: "KI-Genehmigungen",
     description: "Von einem KI-Agenten vorgeschlagene Aktionen, die vor der Ausführung eine menschliche Prüfung benötigen.",

@@ -3728,33 +3728,6 @@ const zh = {
   cloudWorkspaceTimezoneNotice: {
     seeded: '环境时区在创建时已按你的浏览器设为 {{zone}}，可在「设置 → 本地化」中修改。',
   },
-  ai: {
-    nlQuery: {
-      placeholder: '就您的数据提问…',
-      ask: '提问',
-      results: '结果',
-      match: '匹配度 {{percent}}',
-      simulatedSummary: '查询结果:{{query}}',
-      noResults: '未找到匹配的记录',
-      recentQueries: '最近的查询',
-    },
-    formAssist: {
-      title: 'AI 建议',
-      suggestionCount: '{{count}} 条建议',
-      suggestionCount_one: '{{count}} 条建议',
-      suggestionCount_other: '{{count}} 条建议',
-      applyAll: '全部应用',
-      confidence: '置信度 {{percent}}',
-      appliedCount: '已应用 {{count}} 条建议',
-      appliedCount_one: '已应用 {{count}} 条建议',
-      appliedCount_other: '已应用 {{count}} 条建议',
-    },
-    recommendations: {
-      title: '推荐',
-      generating: '正在生成推荐…',
-      empty: '暂无推荐',
-    },
-  },
   aiApprovals: {
     title: 'AI 审批',
     description: 'AI 智能体提出的操作，需要人工审核后才会执行。',

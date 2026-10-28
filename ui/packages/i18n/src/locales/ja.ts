@@ -3544,33 +3544,6 @@ const ja = {
   cloudWorkspaceTimezoneNotice: {
     seeded: "環境のタイムゾーンは、作成時にブラウザーに合わせて {{zone}} に設定されました。「設定 → ローカリゼーション」で変更できます。",
   },
-  ai: {
-    nlQuery: {
-      placeholder: "データについて質問してください…",
-      ask: "質問",
-      results: "結果",
-      match: "一致度 {{percent}}",
-      simulatedSummary: "検索結果: {{query}}",
-      noResults: "一致するレコードが見つかりません",
-      recentQueries: "最近のクエリ",
-    },
-    formAssist: {
-      title: "AI の提案",
-      suggestionCount: "{{count}} 件の提案",
-      suggestionCount_one: "{{count}} 件の提案",
-      suggestionCount_other: "{{count}} 件の提案",
-      applyAll: "すべて適用",
-      confidence: "信頼度 {{percent}}",
-      appliedCount: "{{count}} 件の提案を適用しました",
-      appliedCount_one: "{{count}} 件の提案を適用しました",
-      appliedCount_other: "{{count}} 件の提案を適用しました",
-    },
-    recommendations: {
-      title: "おすすめ",
-      generating: "おすすめを生成しています…",
-      empty: "おすすめはありません",
-    },
-  },
   aiApprovals: {
     title: "AI 承認",
     description: "AI エージェントが提案した操作です。実行前に人による確認が必要です。",
