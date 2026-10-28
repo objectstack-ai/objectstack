@@ -3036,7 +3036,7 @@ describe('doc version claims - the workflow-version assertion', () => {
       workflowVersionChecks.reduce((n, check) => n + check.stated.length, 0),
       'the workflow-version assertion compared no doc lines at all - the claim resolution ' +
         'collapsed and it is now green over nothing',
-    ).toBeGreaterThanOrEqual(3);
+    ).toBeGreaterThanOrEqual(2); // 3 until objectstack#26944 deleted the CI guide page's entry
 
     for (const check of workflowVersionChecks) {
       expect(
@@ -3316,7 +3316,7 @@ describe('doc version claims - the workflow-version assertion', () => {
       'no inventory entry carries workflowVersionKey - the workflow-anchored entries lost ' +
         'the field and are back to being recorded rather than checked, which is the state ' +
         'objectui#6400 found them in',
-    ).toBeGreaterThanOrEqual(3);
+    ).toBeGreaterThanOrEqual(2); // 3 until objectstack#26944 deleted the CI guide page's entry
   });
 });
 

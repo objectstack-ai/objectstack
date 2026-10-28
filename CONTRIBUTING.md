@@ -270,7 +270,7 @@ Its "repository root" is `ui/`. The guard is `ui/scripts/vitest-invocation-guard
 ### UI CI
 
 GitHub runs only the workflows in the repository root's
-[`.github/workflows/`](./.github/workflows/), so a `ui/` change is checked by the same
+[workflow directory](./.github/workflows/), so a `ui/` change is checked by the same
 `ci.yml` as the rest of the repository: its `Lint UI`, `Type Check UI`, `Test UI` and
 `Build & E2E UI` jobs run when a pull request changes `ui/`. Read those jobs for what each one
 runs; `ui/` keeps no CI guide of its own.
