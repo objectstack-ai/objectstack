@@ -272,6 +272,12 @@ export interface RenderTemplateInput {
   /** Render context — placeholders in subject/body are resolved against this object. */
   data?: Record<string, unknown>;
   /**
+   * The tenant default currency for a `currency` hole with no argument. Same
+   * semantics as {@link SendTemplateInput.currency}: unset, such a hole
+   * refuses the render with `TEMPLATE_INVALID`.
+   */
+  currency?: string;
+  /**
    * Preferred BCP-47 locale. Resolution is the SAME ladder as
    * {@link SendTemplateInput.locale} — exact match, then `'en-US'`, then
    * (no-locale calls only) the bundle's deterministic single-locale answer.
@@ -283,12 +289,6 @@ export interface RenderTemplateInput {
    * {@link SendTemplateInput.timezone}.
    */
   timezone?: string;
-  /**
-   * The tenant default currency for a `currency` hole with no argument. Same
-   * semantics as {@link SendTemplateInput.currency}: unset, such a hole
-   * refuses the render with `TEMPLATE_INVALID`.
-   */
-  currency?: string;
 }
 
 /**
