@@ -373,4 +373,26 @@ describe('FileI18nAdapter keeps the owner\'s app label across a module bundle (#
     expect(i18n.getTranslations('zh-CN')).toEqual(MERGED);
     expect(i18n.t('apps.crm_enterprise.navigation.nav_case.label', 'zh-CN')).toBe('工单');
   });
+
+  // A TS/JS literal can spell the optional label as present-but-`undefined`,
+  // and the schema keeps that key; it must not erase the owner's label.
+  const MODULE_UNDEFINED_LABEL = {
+    apps: { crm_enterprise: { label: undefined, navigation: { nav_case: { label: '工单' } } } },
+  };
+
+  it('owner first, then a module bundle whose label is present but undefined', () => {
+    const i18n = new FileI18nAdapter();
+    i18n.loadTranslations('zh-CN', OWNER);
+    i18n.loadTranslations('zh-CN', MODULE_UNDEFINED_LABEL);
+    expect(i18n.getTranslations('zh-CN')).toEqual(MERGED);
+    expect(i18n.t('apps.crm_enterprise.label', 'zh-CN')).toBe('企业 CRM');
+  });
+
+  it('a module bundle whose label is present but undefined first, then the owner', () => {
+    const i18n = new FileI18nAdapter();
+    i18n.loadTranslations('zh-CN', MODULE_UNDEFINED_LABEL);
+    i18n.loadTranslations('zh-CN', OWNER);
+    expect(i18n.getTranslations('zh-CN')).toEqual(MERGED);
+    expect(i18n.t('apps.crm_enterprise.label', 'zh-CN')).toBe('企业 CRM');
+  });
 });

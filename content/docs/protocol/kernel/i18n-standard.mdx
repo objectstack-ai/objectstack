@@ -1070,8 +1070,8 @@ beneath an action entry are judged the same way under either.
 | `{action}.outcomeMessages.{outcome}` | an outcome the action's own `outcomeMessages` declares |
 | `{action}.resultDialog.fields.{path}` | the literal `path` of a field the action's `resultDialog.fields[]` declares — dots included, so `client.secret` is one key |
 | `{action}.resultDialog.title` / `.description` / `.acknowledge` | an action that declares a `resultDialog`, whether or not the dialog sets that text itself — for an action that declares none, nothing reads the dialog's copy |
-| `apps.{app}` | an app declared, or one a `navigationContributions` entry anywhere in the artifact contributes into — including an app owned outside the artifact |
-| `apps.{app}.navigation.{id}` | a navigation item `id` the app declares (nested `children` and `areas[]` included) or one contributed into it; under an app that is only contributed into, the contributed ids alone, and `apps.{app}.label` may be left out (the owning package's label survives the merge) |
+| `apps.{app}` | an app declared, or one a `navigationContributions` entry anywhere in the artifact contributes into — including an app owned outside the artifact; under an app that is only contributed into, `apps.{app}.label` may be left out (the owning package's label survives the merge) |
+| `apps.{app}.navigation.{id}` | a navigation item `id` the app declares (nested `children` and `areas[]` included) or one contributed into it; under an app that is only contributed into, the contributed ids alone |
 | `dashboards.{dash}` / `.widgets.{id}` / `.actions.{actionUrl}` | a dashboard declared / a widget `id` on it / a header action's `actionUrl` on it |
 | `flows.{flow}` | a flow's machine `name`, declared |
 | `positions.{name}` | a position's `name`, declared, or an audience anchor (`everyone`, `guest`) |
