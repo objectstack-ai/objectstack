@@ -76,7 +76,7 @@ lists in three packages, or silently corrupting data.
 The spec does export three per-type value schemas — and they make things
 worse, not better, because **all three are dead and two contradict reality**:
 
-- `CurrencyValueSchema` (`packages/spec/src/data/field.zod.ts#CurrencyValueSchema`) declares `{value, currency}`;
+- `CurrencyValueSchema` (in `data/field.zod.ts`; deleted 2026-10-28, see the note under "Reality wins") declares `{value, currency}`;
   the validator, the SQL driver, import-coerce, and the field-zoo round-trip
   all treat currency as a **bare number**.
 - `LocationCoordinatesSchema` (`packages/spec/src/data/field.zod.ts#LocationCoordinatesSchema`) declares
