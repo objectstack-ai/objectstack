@@ -123,7 +123,7 @@ export function renderFlowTextSlot(
     const translated = this.translatedFlowTemplate(slot, context.locale);
     if (translated !== undefined) {
         try {
-            return renderTextSlot(translated.template, variables);
+            return renderTextSlot(translated.template, variables, context.currency);
         } catch (err: unknown) {
             if (!(err instanceof FlowTextTemplateError)) throw err;
             this.logger.warn(
@@ -133,7 +133,7 @@ export function renderFlowTextSlot(
             );
         }
     }
-    return renderTextSlot(slot.authored, variables);
+    return renderTextSlot(slot.authored, variables, context.currency);
 }
 
 /** The body of {@link AutomationEngine.translatedFlowTemplate}, moved unedited; that method's docblock is its contract. */

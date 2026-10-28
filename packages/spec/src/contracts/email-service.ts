@@ -203,6 +203,16 @@ export interface SendTemplateInput {
    * behavior). Calendar-day `date` holes are unaffected (tz-naive).
    */
   timezone?: string;
+  /**
+   * The tenant default currency (ISO 4217, e.g. `CNY`) a `currency` hole with
+   * no argument formats in — `{{ amount | currency }}`. The caller supplies the
+   * organization's `localization.currency` setting, read the way a currency
+   * field reads it (typically the resolved `ExecutionContext.currency`). Unset
+   * → such a hole refuses the send with `TEMPLATE_INVALID` and nothing is
+   * sent: the amount is never formatted in a currency nobody chose. A hole
+   * that names its code (`currency:EUR`) does not read this.
+   */
+  currency?: string;
   // `org` ("Tenant id for org-overlay resolution (when supported)") was REMOVED
   // 2026-08-25 (#11832, ADR-0049 enforce-or-remove). No implementation ever read
   // it — template resolution keys on `(name, locale)` only — so the key was
@@ -273,6 +283,12 @@ export interface RenderTemplateInput {
    * {@link SendTemplateInput.timezone}.
    */
   timezone?: string;
+  /**
+   * The tenant default currency for a `currency` hole with no argument. Same
+   * semantics as {@link SendTemplateInput.currency}: unset, such a hole
+   * refuses the render with `TEMPLATE_INVALID`.
+   */
+  currency?: string;
 }
 
 /**
@@ -323,7 +339,11 @@ export interface IEmailService {
    *   `currency` argument that is not a literal ISO 4217 code). It is refused
    *   at render, as `TEMPLATE_INVALID: email template <name> (locale=<l>):
    *   <hole and rule>`, so nothing is delivered. Permanent: retrying cannot
-   *   succeed until the template is re-published without that hole.
+   *   succeed until the template is re-published without that hole. The same
+   *   code refuses a `currency` hole with no argument when the call carries no
+   *   tenant default currency ({@link SendTemplateInput.currency}); that one
+   *   clears once the organization sets its default currency, or the hole
+   *   names its code.
    */
   sendTemplate(input: SendTemplateInput): Promise<SendEmailResult>;
 
@@ -348,7 +368,9 @@ export interface IEmailService {
    *   `currency` argument that is not a literal ISO 4217 code). It is refused
    *   at render, as `TEMPLATE_INVALID: email template <name> (locale=<l>):
    *   <hole and rule>`, so nothing is rendered. Permanent: retrying cannot
-   *   succeed until the template is re-published without that hole.
+   *   succeed until the template is re-published without that hole. The same
+   *   code refuses a `currency` hole with no argument when the call carries no
+   *   tenant default currency ({@link RenderTemplateInput.currency}).
    */
   renderTemplate(input: RenderTemplateInput): Promise<RenderTemplateResult>;
 

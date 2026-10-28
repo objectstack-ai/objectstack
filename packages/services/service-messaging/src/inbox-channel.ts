@@ -53,6 +53,16 @@ export interface InboxChannelOptions {
      * in `recipient-locale.ts` exactly as the email channel composes it.
      */
     getDefaultTemplateLocale?(): string | undefined;
+    /**
+     * The tenant default currency (ISO 4217, the `localization.currency`
+     * setting) of the delivery's organization, read the way a currency field
+     * reads it (`resolveLocalizationContext` in `@objectstack/core`). Handed to
+     * the template render as its `currency`, the code a `{{ amount | currency }}`
+     * hole with no argument formats in. `undefined` (no default set, or not
+     * wired) leaves the render without one, so such a hole refuses the delivery
+     * with `TEMPLATE_INVALID` instead of formatting in a guessed currency.
+     */
+    getTenantCurrency?(organizationId: string | undefined): Promise<string | undefined>;
     /** User identity object the recipient's locale is read from (default `sys_user`). */
     userObject?: string;
 }
@@ -185,10 +195,12 @@ export function createInboxChannel(opts: InboxChannelOptions): MessagingChannel 
                 );
                 const templateData = (payload.templateData ?? undefined) as Record<string, unknown> | undefined;
                 try {
+                    const currency = await opts.getTenantCurrency?.(n.organizationId);
                     const rendered = await email.renderTemplate({
                         template: templateName,
                         ...(templateData !== undefined ? { data: templateData } : {}),
                         ...(templateLocale ? { locale: templateLocale } : {}),
+                        ...(currency ? { currency } : {}),
                     });
                     title = rendered.subject;
                     bodyMd = rendered.text;

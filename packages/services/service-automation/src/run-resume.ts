@@ -66,6 +66,7 @@ export interface RunResumeHost {
     readonly logger: AutomationEngine['logger'];
     readonly expandDeclaredLookups: AutomationEngine['expandDeclaredLookups'];
     readonly userGrantsResolver: AutomationEngine['userGrantsResolver'];
+    readonly tenantCurrencyResolver: AutomationEngine['tenantCurrencyResolver'];
     readonly recordExpander: AutomationEngine['recordExpander'];
     readonly refuseGatedResume: AutomationEngine['refuseGatedResume'];
     readonly resumeInternal: AutomationEngine['resumeInternal'];
@@ -106,7 +107,7 @@ export interface RunResumeHost {
 }
 
 /** The body of {@link AutomationEngine.resolveRunContext}, moved unedited; that method's docblock is its contract. */
-export async function resolveRunContext(this: Pick<RunResumeHost, 'seedRunGrants' | 'logger' | 'expandDeclaredLookups'>, flow: FlowParsed, context?: AutomationContext, runId?: string): Promise<AutomationContext> {
+export async function resolveRunContext(this: Pick<RunResumeHost, 'seedRunGrants' | 'logger' | 'expandDeclaredLookups' | 'tenantCurrencyResolver'>, flow: FlowParsed, context?: AutomationContext, runId?: string): Promise<AutomationContext> {
     // `flowRunId` is stamped alongside `runAs` because it shares that field's
     // lifetime and its single construction point: set once here, copied into
     // every data node's ObjectQL context by `resolveRunDataContext`, and
@@ -158,6 +159,21 @@ export async function resolveRunContext(this: Pick<RunResumeHost, 'seedRunGrants
     // same user's request reads and writes. A context that already carries
     // an email keeps it verbatim, as the request path keeps a session's.
     await this.seedRunGrants(flow.name, runContext, 'triggering');
+
+    // The organization's default currency, for a text slot's
+    // `{{ amount | currency }}` hole with no argument — seeded once here, for
+    // every trigger type, like the identity above. A context that already
+    // carries one (a `subflow` / `map` child, a resumed leg) keeps it. A failed
+    // or empty read leaves it unset: such a hole then refuses by name, and no
+    // currency is guessed.
+    if (runContext.currency === undefined && this.tenantCurrencyResolver) {
+        try {
+            const currency = await this.tenantCurrencyResolver(runContext.tenantId);
+            if (typeof currency === 'string' && currency !== '') runContext.currency = currency;
+        } catch {
+            // Tolerated, like the grants resolver: the hole's own refusal is the loud answer.
+        }
+    }
 
     if (runIsUnscopedUserMode(runContext) && flowTouchesData(flow)) {
         this.logger.warn(

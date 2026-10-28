@@ -19,7 +19,7 @@ import {
   type ParamCollectionHandler,
   type ResultDialogHandler,
 } from '@object-ui/core';
-import { useActionRunnerDisplayLocale, useActionRunnerTranslator } from '../context/actionRunnerTranslator.js';
+import { useActionRunnerDisplayLocale, useActionRunnerTenantCurrency, useActionRunnerTranslator } from '../context/actionRunnerTranslator.js';
 
 export interface UseActionRunnerOptions {
   context?: ActionContext;
@@ -73,11 +73,14 @@ export function useActionRunner(
   const translate = useActionRunnerTranslator();
   // Its copy templates' formatters in the viewer's display locale (#26232).
   const displayLocale = useActionRunnerDisplayLocale();
+  // Their no-argument `currency` holes in the tenant default currency.
+  const tenantCurrency = useActionRunnerTenantCurrency();
 
   const runner = useMemo(() => {
     const r = new ActionRunner(context);
     r.setTranslator(translate);
     r.setDisplayLocale(displayLocale);
+    r.setTenantCurrency(tenantCurrency);
     if (onConfirm) r.setConfirmHandler(onConfirm);
     if (onToast) r.setToastHandler(onToast);
     if (onModal) r.setModalHandler(onModal);

@@ -65,6 +65,9 @@ export type {
 export { cronEngine } from './cron-engine';
 export { templateEngine, TEMPLATE_FORMATTERS, formatValue, judgeHoleFormatter } from './template-engine';
 export type { TemplateHoleGrammarRefusal, TemplateHoleGrammarRule } from './template-engine';
+// A `currency` hole with no argument formats in the tenant default currency the
+// caller supplies; with none, every renderer refuses it with this sentence.
+export { currencyDefaultRefusal } from './template-engine';
 // The mail template hole grammar — one copy, read by `@objectstack/plugin-email`'s
 // renderer, the placement judge below and `@objectstack/lint`'s grammar rule.
 export { mailHolePattern, parseMailHole, judgeMailHoleGrammar } from './mail-hole-grammar';

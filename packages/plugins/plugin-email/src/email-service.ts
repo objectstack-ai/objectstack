@@ -1452,6 +1452,9 @@ export class EmailService implements IEmailService {
     const renderOpts = {
       ...(locale ? { locale } : {}),
       ...(input.timezone ? { timeZone: input.timezone } : {}),
+      // The tenant default a `{{ amount | currency }}` hole formats in. The
+      // caller supplies it; absent, such a hole refuses below, never USD.
+      ...(input.currency ? { currency: input.currency } : {}),
     };
     // Each face is rendered in ITS OWN encoding. Only `body_html` is markup,
     // so only it HTML-escapes its `{{x}}` holes. The subject (a mail header,

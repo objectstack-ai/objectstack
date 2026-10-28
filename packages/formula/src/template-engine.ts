@@ -37,6 +37,7 @@ type Formatter = (
   arg: string | undefined,
   locale: string,
   timeZone?: string,
+  currency?: string,
 ) => string;
 
 function asNumber(v: unknown): number | undefined {
@@ -68,18 +69,23 @@ const FORMATTERS: Record<string, Formatter> = {
     return new Intl.NumberFormat(locale, digits !== undefined && !Number.isNaN(digits)
       ? { minimumFractionDigits: digits, maximumFractionDigits: digits } : {}).format(n);
   },
-  // currency | currency:EUR  → no argument formats in USD; an argument is a
-  // literal ISO 4217 code. An argument that is not one (a path such as
+  // currency | currency:EUR  → no argument formats in the tenant default
+  // currency (`localization.currency`, handed in by the caller); an argument
+  // is a literal ISO 4217 code. An argument that is not one (a path such as
   // `currency_code`, a lowercase or empty code) is refused when the template
   // is compiled or published (`judgeHoleFormatter`), and refused here too: it
-  // throws rather than format the amount in a currency nobody wrote.
-  currency: (v, arg, locale) => {
+  // throws rather than format the amount in a currency nobody wrote. With no
+  // argument and no tenant default it throws as well, whatever the value:
+  // there is no currency to format in, and none is guessed.
+  currency: (v, arg, locale, _timeZone, currency) => {
     if (arg !== undefined && !isCurrencyCode(arg)) {
       throw new RangeError(currencyArgumentRefusal(`currency:${arg}`, arg));
     }
+    const refusal = arg === undefined ? currencyDefaultRefusal('`currency`', currency) : null;
+    if (refusal) throw new RangeError(refusal);
     const n = asNumber(v);
     if (n === undefined) return baseString(v);
-    const code = arg !== undefined ? arg.trim() : 'USD';
+    const code = (arg ?? currency!).trim();
     return new Intl.NumberFormat(locale, { style: 'currency', currency: code }).format(n);
   },
   // percent | percent:1  → 0.42 → "42%" (value is a 0..1 ratio)
@@ -172,6 +178,27 @@ function isCurrencyCode(arg: string): boolean {
   return CURRENCY_CODE_RE.test(arg.trim());
 }
 
+/**
+ * Why a `currency` hole with no argument cannot be formatted, or `null` when
+ * it can: such a hole formats in the tenant default currency
+ * (`localization.currency`), so it is formatted only when the caller supplied
+ * one that is an ISO 4217 code in three capitals. Every renderer that refuses
+ * such a hole (the in-app engine, the mail renderer) shows this sentence.
+ *
+ * @param hole     the hole as written, braces included, or the formatter's name when no hole text is at hand
+ * @param currency the tenant default currency the caller supplied, if any
+ */
+export function currencyDefaultRefusal(hole: string, currency: unknown): string | null {
+  if (typeof currency === 'string' && isCurrencyCode(currency)) return null;
+  return (
+    `the hole ${hole} has no currency argument, so it formats in the tenant default currency (the `
+    + '`localization.currency` setting), and no tenant default currency reached this render: the '
+    + 'organization has none set, or the caller did not supply it. The amount is not formatted in any '
+    + 'currency. Set the default currency in Setup → Localization, or name the currency in the hole with '
+    + 'a literal ISO 4217 code in three capital letters (`currency:EUR`).'
+  );
+}
+
 function currencyArgumentRefusal(hole: string, arg: string): string {
   return (
     `the hole ${hole} gives the currency formatter the argument '${arg.trim()}', which is not an ISO 4217 `
@@ -239,16 +266,20 @@ export function judgeHoleFormatter(
  * Exported so renderers that don't run the full CEL template engine — notably
  * the email pipeline (ADR-0053 Phase 2 slice 4) — format dates, money, etc.
  * identically to in-app templates, including reference-timezone `datetime`.
+ *
+ * `opts.currency` is the tenant default currency a `currency` with no
+ * argument formats in. Without one, that call throws a `RangeError` carrying
+ * {@link currencyDefaultRefusal}'s sentence: it never picks a currency.
  */
 export function formatValue(
   name: string,
   value: unknown,
   arg: string | undefined,
-  opts: { locale?: string; timeZone?: string } = {},
+  opts: { locale?: string; timeZone?: string; currency?: string } = {},
 ): string | undefined {
   const fmt = FORMATTERS[name];
   if (!fmt) return undefined;
-  return fmt(value, arg, opts.locale ?? 'en-US', opts.timeZone);
+  return fmt(value, arg, opts.locale ?? 'en-US', opts.timeZone, opts.currency);
 }
 
 function baseString(value: unknown): string {
@@ -325,6 +356,15 @@ function parseHole(inner: string): ParsedHole | null {
   return { path, filter: { name, arg }, ...(refusal ? { refusal } : {}) };
 }
 
+/** The first hole of `source` that is `currency` with no argument, as written, braces included. */
+function firstTenantCurrencyHole(source: string): string | undefined {
+  for (const m of source.matchAll(HOLE_RE)) {
+    const parsed = parseHole(m[1]);
+    if (parsed?.filter?.name === 'currency' && parsed.filter.arg === undefined) return m[0];
+  }
+  return undefined;
+}
+
 function compileTemplate(source: string): EvalResult<ParsedHole[]> {
   const open = (source.match(/\{\{/g) ?? []).length;
   const close = (source.match(/\}\}/g) ?? []).length;
@@ -376,6 +416,16 @@ export const templateEngine: DialectEngine = {
     const check = compileTemplate(expr.source);
     if (!check.ok) return check as EvalResult<T>;
 
+    // Tenant default currency for a `currency` hole with no argument: the
+    // context's reserved `currency` channel only, never a root. Without one
+    // such a hole refuses the whole sentence, before anything is rendered.
+    const currency = typeof ctx.currency === 'string' ? ctx.currency : undefined;
+    const currencyHole = firstTenantCurrencyHole(expr.source);
+    const currencyRefusal = currencyHole === undefined ? null : currencyDefaultRefusal(currencyHole, currency);
+    if (currencyRefusal) {
+      return { ok: false, error: { kind: 'runtime', message: `invalid template hole: ${currencyRefusal}` } };
+    }
+
     const scope = buildScope(ctx);
     // Formatter locale: the context's reserved `locale` channel only, never a
     // root — a root named `locale` is a value like any other (#26232).
@@ -389,7 +439,7 @@ export const templateEngine: DialectEngine = {
       if (!parsed) return _match; // compile already validated; defensive
       const value = resolvePath(scope, parsed.path);
       if (parsed.filter) {
-        return FORMATTERS[parsed.filter.name](value, parsed.filter.arg, locale, timeZone);
+        return FORMATTERS[parsed.filter.name](value, parsed.filter.arg, locale, timeZone, currency);
       }
       return baseString(value);
     });
