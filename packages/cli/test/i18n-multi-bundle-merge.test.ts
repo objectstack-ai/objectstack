@@ -27,7 +27,7 @@
 // one on every `apps.APP` entry.
 
 import { describe, it, expect } from 'vitest';
-import { composeStacks } from '@objectstack/spec';
+import { composeStacks, defineStack } from '@objectstack/spec';
 import { createMemoryI18n } from '@objectstack/core';
 
 import { collectExpectedEntries } from '../src/utils/i18n-extract.js';
@@ -45,16 +45,19 @@ const object = (name: string, label: string) => ({
 /** One package's own surface: every family HotCRM's false findings named. */
 const surface = (ns: string, objectName: string) => ({
   objects: [object(objectName, `${ns} Record`)],
-  dashboards: [{ name: `${ns}_board`, label: `${ns} Board`, widgets: [{ id: `${ns}_won`, title: `${ns} Won` }] }],
+  dashboards: [{ name: `${ns}_board`, label: `${ns} Board`, widgets: [{
+    id: `${ns}_won`, title: `${ns} Won`, type: 'metric', dataset: `${ns}_metrics`, values: ['total'],
+    layout: { x: 0, y: 0, w: 3, h: 2 },
+  }] }],
   datasets: [{
     name: `${ns}_metrics`,
     label: `${ns} Metrics`,
     object: objectName,
     dimensions: [{ name: 'stage', label: 'Stage', field: 'name', type: 'string' }],
-    measures: [{ name: 'n', label: 'Count', aggregate: 'count' }],
+    measures: [{ name: 'total', label: 'Count', aggregate: 'count' }],
   }],
   pages: [{ name: `${ns}_home`, label: `${ns} Home` }],
-  reports: [{ name: `${ns}_summary`, label: `${ns} Summary`, type: 'summary', dataset: `${ns}_metrics`, values: ['n'] }],
+  reports: [{ name: `${ns}_summary`, label: `${ns} Summary`, type: 'summary', dataset: `${ns}_metrics`, values: ['total'] }],
   flows: [{
     name: `${ns}_wizard`,
     label: `${ns} Wizard`,
@@ -98,8 +101,8 @@ const moduleStack = {
 };
 
 /** Every path the walker expects of ONE package, read on that package alone. */
-const ownedPaths = (stack: Record<string, unknown>) =>
-  collectExpectedEntries(stack)
+const ownedPaths = (input: Record<string, unknown>) =>
+  collectExpectedEntries(defineStack(input as any))
     .filter((e) => e.inline !== undefined && !e.path[0].startsWith('metadataForm'))
     .map((e) => e.path);
 
@@ -122,13 +125,14 @@ const MODULE_APP_LABEL = { apps: { mba_desk: { label: 'zh:apps.mba_desk.label' }
 
 /** Module first, as HotCRM composes it: the top-level manifest is the app's. */
 function composed(drop?: string): Record<string, unknown> {
-  const app = { ...appStack, translations: [bundleOf(APP_PATHS, {}, drop)] };
-  const mod = { ...moduleStack, translations: [bundleOf(MODULE_PATHS, MODULE_APP_LABEL, drop)] };
-  return authoringRuleUnionStack(composeStacks([mod, app] as any, { manifest: 'preserve' }) as any);
+  const app = defineStack({ ...appStack, translations: [bundleOf(APP_PATHS, {}, drop)] } as any);
+  const mod = defineStack({ ...moduleStack, translations: [bundleOf(MODULE_PATHS, MODULE_APP_LABEL, drop)] } as any);
+  return authoringRuleUnionStack(composeStacks([mod, app], { manifest: 'preserve' }) as any);
 }
 
+/** `os lint` folds the platform's `metadataForms` baseline away; so does this. */
 const zhIssueKeys = (config: Record<string, unknown>) =>
-  computeI18nCoverage(config, { strict: true }).issues
+  computeI18nCoverage(config, { strict: true, platformMetadataForms: 'exclude' }).issues
     .filter((i) => i.locale === 'zh-CN')
     .map((i) => i.key);
 
@@ -158,7 +162,8 @@ describe('coverage reads two packages\' bundles as the runtime merges them (#270
   // Acceptance 1, in both directions: one deleted key, exactly one finding.
   for (const [owner, paths] of [['app', APP_PATHS], ['module', MODULE_PATHS]] as const) {
     for (const family of ['dashboards', 'datasets', 'pages', 'flows', 'reports', 'apps']) {
-      const victim = paths.find((p) => p[0] === family)!.join('.');
+      // `apps.APP.label` is required by the schema, so the `apps` victim is a navigation label.
+      const victim = paths.find((p) => p[0] === family && (family !== 'apps' || p[2] === 'navigation'))!.join('.');
       it(`reports exactly the key deleted from the ${owner}'s bundle: ${victim}`, () => {
         expect(zhIssueKeys(composed(victim))).toEqual([victim]);
       });
@@ -225,10 +230,10 @@ describe('the lint\'s merge is the runtime\'s merge (#27087)', () => {
 
 describe('controls (#27087)', () => {
   it('a single-bundle stack reads as before', () => {
-    const single = { ...appStack, translations: [bundleOf(APP_PATHS)] };
-    expect(zhIssueKeys(single)).toEqual([]);
+    const single = (drop?: string) => defineStack({ ...appStack, translations: [bundleOf(APP_PATHS, {}, drop)] } as any);
+    expect(zhIssueKeys(single())).toEqual([]);
     const victim = 'objects.mba_account.fields.name.label';
-    expect(zhIssueKeys({ ...appStack, translations: [bundleOf(APP_PATHS, {}, victim)] })).toEqual([victim]);
+    expect(zhIssueKeys(single(victim))).toEqual([victim]);
   });
 
   it('a later bundle still overrides a leaf an earlier one set (last write wins)', () => {
