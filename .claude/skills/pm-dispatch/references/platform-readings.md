@@ -385,9 +385,9 @@
 - 强制档不因临缺授权降档:临缺非退役,退役唯维护者裁;不达档起隔离达档子代理或等档。
 - 本车道强制多是过宽的回忆:`dispatch-gates.mjs --tier PATH` 逐路径现推,路径线是下限非放行。
 - 该脚本只答自己那棵树:姊妹仓路径回 absent from this tree,姊妹仓的档位与条款②只能手推。
-- required checks 的名单是每仓事实,objectstack 九个:
+- required checks 的名单是每仓事实,objectstack 十个:
   `TypeScript Type Check` · `Lint & Repo Gates` · `Test Core` · `Build Core` · `Lint UI` ·
-  `Governed Surface Queue Guard` · `Type Check UI` · `Test UI` · `Build & E2E UI`。
+  `Governed Surface Queue Guard` · `Type Check UI` · `Test UI` · `Build & E2E UI` · `Live E2E UI`。
 - ⭐ 本表的 `mustName` 声明 `statesTheSet` ⇒ 必须逐字等于注册表,加注册行不跟改本表即红。
 - ⇒ 门绿即名单逐字齐全的读数;⛔ 但数量词未钉:实测 七→六 照绿,只能手跟改。
 - ⛔ 聚合命令同样不作判定:`check:type-check-debt` 可在包级 typecheck 绿时红。

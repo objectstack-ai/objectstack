@@ -1046,6 +1046,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.inspector.dataset.displayFormat': '显示格式',
   'engine.inspector.dataset.decimals': '小数位数',
   'engine.inspector.dataset.currency': '货币',
+  'engine.inspector.dataset.currencyInherit': '继承 —— 字段或组织的默认币种',
+  'engine.inspector.dataset.currencyChoose': '选择币种',
   'engine.inspector.dataset.sample': '示例：{sample}',
   'engine.inspector.dataset.relWarning': '关联 {rel} 不在「包含的关联」中。',
   'engine.inspector.dataset.relWarningAdd': '添加它',
