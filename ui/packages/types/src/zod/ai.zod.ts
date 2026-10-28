@@ -44,14 +44,14 @@ import { retiredNodeType } from './tombstone.zod.js';
 
 /** The remedy every refusal in this module carries — one string, both channels. */
 const PLUGIN_AI_RETIRED =
-  'It retired with `@object-ui/plugin-ai` (objectstack#25921): nothing registers it, so the page rendered '
+  'It retired with `@object-ui/plugin-ai`: nothing registers it, so the page rendered '
   + 'the "Unknown component type" panel in its place. Remove the node from the page; there is no '
   + 'replacement node type.';
 
 /** A published name kept as a `never` tombstone: every parse fails, naming the remedy. */
 const retiredExport = (name: string) => {
-  const text = `RETIRED — \`${name}\` mirrored a node type of \`@object-ui/plugin-ai\`, which retired `
-    + '(objectstack#25921), and accepts nothing. Remove the reference.';
+  const text = `RETIRED — \`${name}\` mirrored a node type of \`@object-ui/plugin-ai\`, which retired, `
+    + 'and accepts nothing. Remove the reference.';
   return z.never({ error: text }).describe(text);
 };
 
