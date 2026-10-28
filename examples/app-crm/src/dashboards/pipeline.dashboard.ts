@@ -35,9 +35,10 @@ export const PipelineDashboard: Dashboard = {
   columns: 12,
   widgets: [
     // --- Row 1: KPI tiles -------------------------------------------------
-    // No `options` on these tiles: the currency face comes from the dataset
-    // measure (`total_amount` / `avg_amount` declare `format` + `currency` in
-    // `opportunity.dataset.ts`). A dataset-bound widget reads only the `options`
+    // No `options` on these tiles: the number face comes from the dataset
+    // measure (`total_amount` / `avg_amount` declare `format` in
+    // `opportunity.dataset.ts`; their currency is the `amount` field's, the
+    // tenant default). A dataset-bound widget reads only the `options`
     // keys the spec declares (plus the `description` sub-caption), so an
     // `options.format` / `options.currency` here was inert.
     {
