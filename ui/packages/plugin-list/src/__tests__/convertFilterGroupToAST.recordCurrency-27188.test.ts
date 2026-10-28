@@ -9,7 +9,7 @@ import type { FilterBuilderRowGroup } from '@object-ui/components';
 import { recordCurrencyField } from '@object-ui/i18n';
 import { convertFilterGroupToAST } from '../ListView';
 
-const AMOUNT = { type: 'currency', currencyConfig: { currencyMode: 'record', currencyField: 'currency_code' } };
+const AMOUNT = { type: 'currency', currencyConfig: { currencyMode: 'record' as const, currencyField: 'currency_code' } };
 
 describe('record-mode amount filter → AST', () => {
   it('lowers the pair to amount op X AND code = C', () => {

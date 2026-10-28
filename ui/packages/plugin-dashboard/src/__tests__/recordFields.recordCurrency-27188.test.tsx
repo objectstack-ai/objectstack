@@ -22,7 +22,7 @@ afterEach(cleanup);
 const DEF = { type: 'currency', currencyConfig: { currencyMode: 'record', currencyField: 'currency_code' } };
 const text = (node: React.ReactNode) => {
   const { container, unmount } = render(<>{node}</>);
-  const out = (container.textContent ?? '').replace(/ /g, ' ');
+  const out = (container.textContent ?? '').replace(/\u00a0/g, ' ');
   unmount();
   return out;
 };

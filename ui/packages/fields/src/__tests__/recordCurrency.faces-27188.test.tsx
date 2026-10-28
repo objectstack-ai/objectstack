@@ -30,7 +30,7 @@ const AMOUNT = {
   type: 'currency',
   currencyConfig: { currencyMode: 'record', currencyField: 'currency_code' },
 } as any;
-const text = (s: string | null) => (s ?? '').replace(/ /g, ' ');
+const text = (s: string | null) => (s ?? '').replace(/\u00a0/g, ' ');
 
 function cell(row: Record<string, unknown> | undefined): string {
   const { container, unmount } = render(
