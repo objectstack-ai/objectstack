@@ -79,9 +79,15 @@ export function buildSession(execCtx?: ExecutionContext): HookContext['session']
   // Nothing to say about the caller → say nothing. An object whose every
   // property is `undefined` conveys no more than no session at all, and
   // returning it would turn "no caller" into "an anonymous caller".
-  return Object.values(session as Record<string, unknown>).some((v) => v !== undefined)
-    ? session
-    : undefined;
+  if (!Object.values(session as Record<string, unknown>).some((v) => v !== undefined)) return undefined;
+  // [#26170] The caller's locale rides on a session that exists, so the
+  // sandboxed body runner can answer a declared hook refusal in the caller's
+  // language. It is asked AFTER the presence test on purpose: a locale alone
+  // says how to speak, not who is speaking, and must not turn "no caller"
+  // into a session either.
+  const locale = (execCtx as { locale?: unknown }).locale;
+  if (typeof locale === 'string' && locale.length > 0) (session as { locale?: string }).locale = locale;
+  return session;
 }
 
 /** The body of `ObjectQL#buildProvenance`; the method's docblock there is its contract. */

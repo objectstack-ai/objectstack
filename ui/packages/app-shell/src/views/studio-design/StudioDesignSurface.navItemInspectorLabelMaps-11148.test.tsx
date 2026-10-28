@@ -36,6 +36,9 @@ import { StudioNavItemInspector } from './StudioDesignSurface';
 
 afterEach(cleanup);
 
+/** The Label field, by its label in either designer locale (objectstack#26740 added the Badge text input beside it). */
+const labelBox = () => screen.getByRole('textbox', { name: /^(Label|标签)$/ });
+
 const ITEM_LABEL = { en: 'Accounts', 'zh-CN': '客户' };
 const OBJECTS = [{ name: 'account', label: 'Account' }];
 
@@ -97,7 +100,7 @@ describe('StudioNavItemInspector shows a locale-map label in the designer locale
     it(`shows a map label as its ${language} text, never as [object Object]`, () => {
       renderInspector({ id: 'accounts', type: 'object', label: ITEM_LABEL, objectName: 'account' }, language);
 
-      expect(screen.getByRole('textbox')).toHaveValue(shown);
+      expect(labelBox()).toHaveValue(shown);
       expect(screen.queryByDisplayValue('[object Object]')).toBeNull();
     });
   }
@@ -105,14 +108,14 @@ describe('StudioNavItemInspector shows a locale-map label in the designer locale
   it('does not read `title` / `name` as the label', () => {
     renderInspector({ id: 'accounts', type: 'object', title: 'Accounts title', name: 'accounts_name' }, 'en');
 
-    expect(screen.getByRole('textbox')).toHaveValue('');
+    expect(labelBox()).toHaveValue('');
   });
 });
 
 describe('StudioNavItemInspector edits only the designer locale entry of a map (objectui#11148)', () => {
   it('an edit under zh changes only `zh-CN`, and `en` survives', () => {
     const onNavPatch = renderInspector({ id: 'accounts', type: 'object', label: ITEM_LABEL, objectName: 'account' }, 'zh');
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: '客户账户' } });
+    fireEvent.change(labelBox(), { target: { value: '客户账户' } });
 
     expect(onNavPatch).toHaveBeenCalledTimes(1);
     expect(writtenLabel(onNavPatch)).toEqual({ en: 'Accounts', 'zh-CN': '客户账户' });
@@ -120,7 +123,7 @@ describe('StudioNavItemInspector edits only the designer locale entry of a map (
 
   it('an edit under en writes the `en` entry the input read, not a second `en-US` key', () => {
     const onNavPatch = renderInspector({ id: 'accounts', type: 'object', label: ITEM_LABEL, objectName: 'account' }, 'en');
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Customers' } });
+    fireEvent.change(labelBox(), { target: { value: 'Customers' } });
 
     expect(writtenLabel(onNavPatch)).toEqual({ en: 'Customers', 'zh-CN': '客户' });
   });
@@ -135,7 +138,7 @@ describe('StudioNavItemInspector edits only the designer locale entry of a map (
         />
       </I18nProvider>,
     );
-    const input = screen.getByRole('textbox');
+    const input = labelBox();
     // Under zh-CN the input falls back to the `en` text, which is not the
     // zh-CN entry. Each keystroke is one `change` with the input's whole value.
     expect(input).toHaveValue('Accounts');
@@ -153,7 +156,7 @@ describe('StudioNavItemInspector edits only the designer locale entry of a map (
 
   it('a plain-string label edits to a plain string, as before (the control)', () => {
     const onNavPatch = renderInspector({ id: 'accounts', type: 'object', label: 'Accounts', objectName: 'account' }, 'zh');
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Customers' } });
+    fireEvent.change(labelBox(), { target: { value: 'Customers' } });
 
     expect(writtenLabel(onNavPatch)).toBe('Customers');
   });

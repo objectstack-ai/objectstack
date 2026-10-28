@@ -5078,7 +5078,10 @@ describe('AuthManager', () => {
         dataEngine: makeEngine([OWNER_ROW]),
         autoActiveOrganization: false,
       });
-      expect(hooks.session?.create?.before).toBeUndefined();
+      // [#26638] `create.before` is always installed (it stamps the session's
+      // client address); with the default off it fills no organization.
+      const result = await hooks.session.create.before({ userId: 'u1' });
+      expect(result?.data?.activeOrganizationId).toBeUndefined();
     });
 
     it('never breaks session create on engine errors', async () => {

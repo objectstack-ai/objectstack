@@ -75,27 +75,33 @@ async function boot() {
   const plugin = new SecurityPlugin();
   await plugin.init(ctx);
   await plugin.start(ctx);
+  // [#26596, #26698] `start()` itself subscribes the metadata-derived cache
+  // invalidation; the listeners this suite pins are the ones the bootstrap
+  // adds after it, at `kernel:ready`.
+  const atStart = listeners.length;
+  const bootstrapListeners = () => listeners.slice(atStart);
   const fire = async (event: string) => {
     for (const [, cb] of hook.mock.calls.filter((c: any[]) => c[0] === event)) await cb();
   };
   const settle = async () => { for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0)); };
-  return { ctx, fire, settle, listeners, derive };
+  return { ctx, fire, settle, bootstrapListeners, derive };
 }
 
 describe('[#22801 → A] a landed permission mutation re-derives everyone', () => {
   it('registers ONE listener, and a bootstrap re-run never adds a second', async () => {
-    const { ctx, fire, listeners } = await boot();
+    const { ctx, fire, bootstrapListeners } = await boot();
     await fire('kernel:ready');
     // Positive control: the bootstrap really completed.
     expect(ctx.logger.info.mock.calls.filter((c: any[]) => String(c[0]).includes('platform bootstrap complete'))).toHaveLength(1);
-    expect(listeners).toHaveLength(1);
+    expect(bootstrapListeners()).toHaveLength(1);
     await fire('kernel:ready');
-    expect(listeners).toHaveLength(1);
+    expect(bootstrapListeners()).toHaveLength(1);
   });
 
   it('a published or deleted permission derives everyone again — whatever the body said', async () => {
-    const { fire, settle, listeners, derive } = await boot();
+    const { fire, settle, bootstrapListeners, derive } = await boot();
     await fire('kernel:ready');
+    const listeners = bootstrapListeners();
     const before = derive.mock.calls.length;
 
     listeners[0]!({ type: 'permission', name: 'crm_sales_user', state: 'active' });
@@ -108,8 +114,9 @@ describe('[#22801 → A] a landed permission mutation re-derives everyone', () =
   });
 
   it('a draft, or a mutation of another type, derives nothing', async () => {
-    const { fire, settle, listeners, derive } = await boot();
+    const { fire, settle, bootstrapListeners, derive } = await boot();
     await fire('kernel:ready');
+    const listeners = bootstrapListeners();
     const before = derive.mock.calls.length;
 
     listeners[0]!({ type: 'permission', name: 'crm_sales_user', state: 'draft' });

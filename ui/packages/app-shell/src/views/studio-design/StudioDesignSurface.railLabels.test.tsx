@@ -546,7 +546,8 @@ describe('StudioDesignSurface.navRailLabels-11862', () => {
           />
         </MetadataCtx.Provider>,
       );
-      return screen.getByRole('textbox') as HTMLInputElement;
+      // objectstack#26740 — the inspector also has a Badge textbox, so the Label field is found by its name.
+      return screen.getByRole('textbox', { name: 'Label' }) as HTMLInputElement;
     }
 
     it("an unbound entry's Label placeholder is \"Item N\" by its place, not its id", () => {

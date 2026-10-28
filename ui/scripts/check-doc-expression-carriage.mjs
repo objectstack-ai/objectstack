@@ -372,9 +372,14 @@ export { APP_DOCS, appDocsDirs, PACKAGE_READMES, packageReadmePages, ROOT_PAGES 
  * bodies and issue comments, and GitHub's body sanitizer eats tag-shaped
  * fragments (AGENTS.md, "GitHub 会改写你写进 issue/PR 正文的字节").
  */
-export const SURFACE_LABEL =
-  `${DOCS_ROOT}, ${APP_DOCS.dir}/*/${APP_DOCS.subdir}, ` +
-  `${PACKAGE_READMES.dir}/*/${PACKAGE_READMES.name} and ${ROOT_PAGES.join(', ')}`;
+export const SURFACE_LABEL = [
+  DOCS_ROOT,
+  `${APP_DOCS.dir}/*/${APP_DOCS.subdir}`,
+  `${PACKAGE_READMES.dir}/*/${PACKAGE_READMES.name}`,
+  // Empty since objectstack#26080 moved the root README's examples into the
+  // guide tree; a root page named later is spelled here again by itself.
+  ...ROOT_PAGES,
+].reduce((label, leg, i, legs) => (i === 0 ? leg : `${label}${i === legs.length - 1 ? ' and ' : ', '}${leg}`), '');
 
 /** The renderer whose evaluation legs define "carried". */
 export const RENDERER_SOURCE = 'packages/react/src/SchemaRenderer.tsx';

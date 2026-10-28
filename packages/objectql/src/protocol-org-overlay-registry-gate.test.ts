@@ -419,6 +419,13 @@ describe('#6780 — the registry heal is org-gated: an org DELETE never evicts t
         registry = new SchemaRegistry({ multiTenant: false });
         registry.logLevel = 'silent';
         engine = makeEngine(registry);
+        // [#26708] The package that ships the artifact is installed, as its
+        // boot installs it: a save naming a package no installed package has
+        // is refused before it is written.
+        registry.installPackage({ id: PKG, name: PKG, version: '1.0.0' } as any, 'code');
+        // …with the object its grid binds: an installed package's write is
+        // judged against its closure.
+        registry.registerObject({ name: 'showcase_task', label: 'Task', fields: { name: { type: 'text', label: 'Name' } } } as never, PKG);
         // No environmentId — the unscoped control-plane kernel #5086 measured
         // the flagship showcase booting with, and the one whose registry every
         // org in the process shares.

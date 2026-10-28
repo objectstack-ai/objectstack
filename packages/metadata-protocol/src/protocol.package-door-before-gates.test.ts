@@ -43,6 +43,16 @@ import { assertEngineFindOnePredicate, isCodeArtifactBody } from '@objectstack/m
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import { resetEnvWritableMetadataTypes } from './sys-metadata-repository.js';
 
+/**
+ * [#26708] The packages this file's saves name, installed: a save naming a
+ * package no installed package has is refused (`WRITABLE_PACKAGE_REQUIRED`)
+ * before any gate this file pins is reached. Each answers a manifest that
+ * declares no dependencies, as an authored base does.
+ */
+const INSTALLED_PACKAGES: ReadonlySet<string> = new Set(['com.example.pkg']);
+const installedPackage = (id: string) => (INSTALLED_PACKAGES.has(id) ? { manifest: { id } } : undefined);
+
+
 const PACKAGE_ID = 'com.example.pkg';
 const ENV_ID = 'env_1';
 
@@ -97,7 +107,7 @@ function harness(environmentId: string | undefined) {
         getObject: () => undefined,
         registerObject: () => undefined,
         registerItem: () => undefined,
-        getPackage: () => undefined,
+        getPackage: installedPackage,
         isPackageDisabled: () => false,
         applyNavContributions: (app: unknown) => app,
     };

@@ -233,6 +233,31 @@ capability — drivers, server, auth, security, automation, AI — is a plugin.
 Design details, the plugin lifecycle state machine, and the dependency graph are
 in [ARCHITECTURE.md](./ARCHITECTURE.md).
 
+### ObjectUI (`ui/`)
+
+`ui/` is the view layer of ObjectStack: a schema-driven React renderer that turns a JSON
+schema or ObjectStack metadata into production React UI, usable on its own through the
+MIT-licensed `@object-ui/*` packages, and the source of the Console. Its components follow
+Shadcn's DOM structure and Tailwind utilities, it talks to any backend through one
+`DataSource` interface, heavy views (grid, kanban, calendar, gantt, dashboards, visual
+designers) are lazy-loaded plugins, and every schema is a TypeScript type in
+`@object-ui/types`, derived from `@objectstack/spec`. It builds on ideas from
+[Amis](https://github.com/baidu/amis), [Formily](https://github.com/alibaba/formily),
+[shadcn/ui](https://ui.shadcn.com/) and [Tailwind CSS](https://tailwindcss.com/).
+
+<p align="center">
+  <img src="ui/docs/screenshots/hero-sdui.png" alt="A kanban JSON schema on the left renders into a live kanban board on the right">
+</p>
+
+| You want to… | Start here | Install |
+| :--- | :--- | :--- |
+| Render a JSON schema inside your React app | [Quick Start](./ui/content/docs/guide/quick-start.md) | `npm install @object-ui/react @object-ui/components` |
+| Build a UI from a JSON file, no React code at all | [`@object-ui/cli`](./ui/packages/cli) | `npm install -g @object-ui/cli` |
+
+The guides are published at [objectui.org](https://www.objectui.org); working on `ui/` itself
+is covered in [CONTRIBUTING.md](./CONTRIBUTING.md#ui-workspace-ui), and its packages are listed
+in the [package directory](./CONTRIBUTING.md#package-directory).
+
 ### CLI
 
 The CLI binary ships as both `os` and `objectstack`; `os --help` lists everything.
@@ -267,7 +292,7 @@ Every package in `packages/`, grouped by layer, plus the example apps, is in
 - ⭐ **Star this repo** if ObjectStack is useful — it helps others find it.
 - 🐛 Questions, bugs, or feature requests → [open an issue](https://github.com/objectstack-ai/objectstack/issues).
 - 💬 Ideas and open-ended questions → [GitHub Discussions](https://github.com/objectstack-ai/objectstack/discussions).
-- 🤝 Want to contribute? Start with [CONTRIBUTING.md](./CONTRIBUTING.md); [North Star](https://objectstack.ai/docs/concepts/north-star) says where the project is headed.
+- 🤝 Want to contribute? Start with [CONTRIBUTING.md](./CONTRIBUTING.md); [North Star](./docs/NORTH-STAR.md) says where the project is headed.
 - 📖 Full documentation at [objectstack.ai/docs](https://objectstack.ai/docs); upgrading between majors is covered in the [upgrade guide](https://objectstack.ai/docs/upgrading).
 - ☁️ Want it hosted, with Build & Ask AI built in? [ObjectOS](https://www.objectos.ai) Cloud runs these definitions for you — [objectstack-ai/objectos](https://github.com/objectstack-ai/objectos) is its public home.
 

@@ -496,9 +496,6 @@ describe('the repo it guards', () => {
     expect(Object.keys(scanned)).toEqual([
       'content/docs',
       'examples',
-      'README.md',
-      'CONTRIBUTING.md',
-      'ROADMAP.md',
       'docs',
       'packages/*/README.md',
       'apps/*/README.md',
@@ -510,11 +507,10 @@ describe('the repo it guards', () => {
       'CHANGELOG.md',
       'CLAUDE.md',
       'LICENSE-THIRD-PARTY.md',
-      'QUICK_REFERENCE.md',
     ]);
-    expect(scanned['README.md']).toBe(1);
-    expect(scanned['CONTRIBUTING.md']).toBe(1);
-    expect(scanned['ROADMAP.md']).toBe(1);
+    // `README.md`, `CONTRIBUTING.md`, `ROADMAP.md` and `QUICK_REFERENCE.md` left
+    // the table with the files themselves (objectstack#26080): folded into the
+    // repository root's documents, outside this tree.
     // A floor against an empty scan, not a census: three READMEs today (the
     // index, hello-world and schema-catalog, measured on objectstack 6a7c0fe3),
     // so deleting one example leaves it green.
@@ -551,7 +547,7 @@ describe('the repo it guards', () => {
     // requires every one of them to be opened, so an `apps/*` row that stopped
     // expanding would fail there the day it started mattering.
     expect(scanned['packages/*/*']).toBeGreaterThanOrEqual(4);
-    for (const rootFile of ['AGENTS.md', 'CHANGELOG.md', 'CLAUDE.md', 'LICENSE-THIRD-PARTY.md', 'QUICK_REFERENCE.md']) {
+    for (const rootFile of ['AGENTS.md', 'CHANGELOG.md', 'CLAUDE.md', 'LICENSE-THIRD-PARTY.md']) {
       expect(scanned[rootFile], `${rootFile} is a SCAN_ROOTS row that opened no file`).toBe(1);
     }
   });
@@ -568,6 +564,10 @@ describe('the repo it guards', () => {
     // objectui#3622 added the package READMEs, `disk` for the same reason and
     // one more: they are read on **npm** as well, where a leading `/` is no
     // more this repo's root than it is on github.com.
+    //
+    // objectstack#26080 removed four rows: the tree's `README.md`,
+    // `CONTRIBUTING.md`, `ROADMAP.md` and `QUICK_REFERENCE.md` were folded into
+    // the repository root's documents.
     //
     // objectui#4148 added the app READMEs and the rest of the root-level
     // markdown, every one `disk`. `@object-ui/console` is a published package,
@@ -592,9 +592,6 @@ describe('the repo it guards', () => {
     expect(SCAN_ROOTS).toEqual([
       { path: 'content/docs', rule: 'docs' },
       { path: 'examples', rule: 'disk' },
-      { path: 'README.md', rule: 'disk' },
-      { path: 'CONTRIBUTING.md', rule: 'disk' },
-      { path: 'ROADMAP.md', rule: 'disk' },
       { path: 'docs', rule: 'disk' },
       { path: 'packages/*/README.md', rule: 'disk' },
       { path: 'apps/*/README.md', rule: 'disk' },
@@ -606,7 +603,6 @@ describe('the repo it guards', () => {
       { path: 'CHANGELOG.md', rule: 'disk' },
       { path: 'CLAUDE.md', rule: 'disk' },
       { path: 'LICENSE-THIRD-PARTY.md', rule: 'disk' },
-      { path: 'QUICK_REFERENCE.md', rule: 'disk' },
     ]);
   });
 
@@ -800,6 +796,12 @@ describe('relative hrefs may not leave the collection — objectui#3490 A-class'
 
 describe('examples/** and the root README are scanned as DISK paths — objectui#3536 extension 1', () => {
   const EXAMPLE = 'examples/hello-world/README.md';
+  // The root README these cases were written against was folded into the
+  // repository root's README by objectstack#26080 and left SCAN_ROOTS with it.
+  // `AGENTS.md` stands in: a root-level file on the same `disk` rule, read on
+  // GitHub exactly as the README was, so every case below still judges a page
+  // the real table scans.
+  const ROOT_FILE = 'AGENTS.md';
 
   it('reports the #3486 shape: a link to an example directory that was deleted', () => {
     // `examples/hello-world/README.md` really carried `../crm/` and `../todo/`
@@ -819,7 +821,7 @@ describe('examples/** and the root README are scanned as DISK paths — objectui
   it('reports the PR #3485 shape: a dead example entry in the root README', () => {
     expect(
       rejections({
-        'README.md': '- [Todo](./examples/todo)\n- [Hello World](./examples/hello-world)',
+        [ROOT_FILE]: '- [Todo](./examples/todo)\n- [Hello World](./examples/hello-world)',
         'examples/hello-world/README.md': '# Hello World',
       }),
     ).toEqual([['./examples/todo', 'example-relative']]);
@@ -830,12 +832,13 @@ describe('examples/** and the root README are scanned as DISK paths — objectui
     // nothing about: the docs rule would reject every one of them.
     expect(
       rejections({
-        'README.md': '[pkg](./packages/core) [vite](./vite.config.ts) [licence](./LICENSE)',
+        [ROOT_FILE]: '[pkg](./packages/core) [vite](./vite.config.ts) [licence](./LICENSE) [gone](./NOWHERE.md)',
         'packages/core/index.ts': 'export {}',
         'vite.config.ts': 'export default {}',
         LICENSE: 'MIT',
       }),
-    ).toEqual([]);
+      // The dead control is what keeps this from passing on a page nothing scans.
+    ).toEqual([['./NOWHERE.md', 'example-relative']]);
   });
 
   it('rejects an extensionless spelling of a markdown file — the docs rule accepts it', () => {
@@ -882,7 +885,7 @@ describe('examples/** and the root README are scanned as DISK paths — objectui
     // root README links to https://github.com/packages/core, not to this repo.
     expect(
       rejections({
-        'README.md': '[core](/packages/core)',
+        [ROOT_FILE]: '[core](/packages/core)',
         'packages/core/index.ts': 'export {}',
       }),
     ).toEqual([['/packages/core', 'example-absolute']]);
@@ -949,13 +952,18 @@ describe('examples/** and the root README are scanned as DISK paths — objectui
 });
 
 describe('CONTRIBUTING.md, ROADMAP.md and docs/** joined the disk surface — objectui#3572', () => {
+  // `CONTRIBUTING.md` and `ROADMAP.md` were folded into the repository root's
+  // documents by objectstack#26080 and left SCAN_ROOTS with them. The cases they
+  // carried — a dead relative link, the fence boundary, the table-of-contents
+  // anchors — are pinned on `CLAUDE.md` and `CHANGELOG.md`, root-level files on
+  // the same `disk` rule, so each still judges a page the real table scans.
   it('reports the #3545 shape: the dead links CONTRIBUTING.md really carried', () => {
     // The two CONTRIBUTING.md links PR #3571 fixed were of exactly this shape —
     // a relative path to a file that is not there. Nothing could have caught
     // them: the file sat outside SCAN_ROOTS, and lychee does not gate.
     expect(
       rejections({
-        'CONTRIBUTING.md': '[architecture](./content/docs/guide/architecture.md) and [gone](./docs/NOWHERE.md)',
+        'CLAUDE.md': '[architecture](./content/docs/guide/architecture.md) and [gone](./docs/NOWHERE.md)',
         'content/docs/guide/architecture.md': '# Architecture',
       }),
     ).toEqual([['./docs/NOWHERE.md', 'example-relative']]);
@@ -964,7 +972,7 @@ describe('CONTRIBUTING.md, ROADMAP.md and docs/** joined the disk surface — ob
   it('reports the third one: a dead link in ROADMAP.md', () => {
     expect(
       rejections({
-        'ROADMAP.md': '[adr](./docs/adr/0001-master-detail-subform.md) and [gone](./docs/adr/9999-nope.md)',
+        'CHANGELOG.md': '[adr](./docs/adr/0001-master-detail-subform.md) and [gone](./docs/adr/9999-nope.md)',
         'docs/adr/0001-master-detail-subform.md': '# ADR 1',
       }),
     ).toEqual([['./docs/adr/9999-nope.md', 'example-relative']]);
@@ -1038,7 +1046,7 @@ describe('CONTRIBUTING.md, ROADMAP.md and docs/** joined the disk surface — ob
     // control disappears too, turning this red.
     expect(
       rejections({
-        'CONTRIBUTING.md': [
+        'CLAUDE.md': [
           'Link docs pages like this:',
           FENCE + 'md',
           '[Quick Start](/guide/quick-start)',
@@ -1057,7 +1065,7 @@ describe('CONTRIBUTING.md, ROADMAP.md and docs/** joined the disk surface — ob
     // one — the rest are its own table-of-contents anchors and external URLs.
     expect(
       rejections({
-        'CONTRIBUTING.md': [
+        'CLAUDE.md': [
           '[Getting Started](#getting-started)',
           '[Commit Guidelines](#commit-guidelines)',
           '[Conventional Commits](https://www.conventionalcommits.org/)',
@@ -1075,7 +1083,7 @@ describe('CONTRIBUTING.md, ROADMAP.md and docs/** joined the disk surface — ob
     // objectui#7644 added, on the surface that is mostly such links.
     expect(
       rejections({
-        'CONTRIBUTING.md': ['[Getting Started](#getting-started)', '## Commit Guidelines'].join('\n\n'),
+        'CLAUDE.md': ['[Getting Started](#getting-started)', '## Commit Guidelines'].join('\n\n'),
       }),
     ).toEqual([['#getting-started', 'anchor']]);
   });
@@ -1299,13 +1307,15 @@ describe("this site's own absolute URLs are resolved as internal routes — obje
     const repo = repoWith({
       ...SITE_FIXTURE,
       'content/docs/guide/a.md': '[gone](https://www.objectui.org/docs/gone)',
-      'README.md': '[gone](https://objectui.org/docs/gone)',
+      // A root-level file on the disk rule; the root README was one until
+      // objectstack#26080 folded it into the repository root's.
+      'AGENTS.md': '[gone](https://objectui.org/docs/gone)',
       'examples/hello-world/README.md': '[live](https://www.objectui.org/docs/guide/a)',
     });
 
     expect(scan(repo).map((item) => [path.relative(repo, item.file), item.reason])).toEqual([
       [path.join('content', 'docs', 'guide', 'a.md'), 'site-absolute-url'],
-      ['README.md', 'site-absolute-url'],
+      ['AGENTS.md', 'site-absolute-url'],
     ]);
   });
 
@@ -1530,7 +1540,11 @@ describe('packages/*/README.md joined the disk surface — objectui#3622', () =>
       }
     }
 
-    expect(decidable.length).toBeGreaterThanOrEqual(150);
+    // 141 measured on objectstack#26080's branch: that card repointed 71 links
+    // from the archived objectui repository's CONTRIBUTING.md / ROADMAP.md (a
+    // self-repo URL this gate resolves) to the objectstack repository's, which
+    // it cannot resolve offline, so they left the decidable count.
+    expect(decidable.length).toBeGreaterThanOrEqual(135);
     expect(siteAbsolute.length).toBeGreaterThanOrEqual(40);
   });
 });
@@ -1600,8 +1614,10 @@ describe('objectui#4148 — the app READMEs and the rest of the repo root', () =
 
   it('judges a dead link in a root-level file the header used to list as unscanned', () => {
     // objectui#4149 had resolved QUICK_REFERENCE.md's links inside its own pin
-    // test, explicitly as a stopgap until this row existed. This is the row; that
-    // block was deleted with it, so this is now the only thing making the claim.
+    // test, explicitly as a stopgap until this row existed. That file was folded
+    // into the repository root's CONTRIBUTING.md by objectstack#26080 and its row
+    // left with it; the four root-level files that remain are judged here, and a
+    // QUICK_REFERENCE.md written into a fixture is not.
     expect(
       rejections({
         'QUICK_REFERENCE.md': '[gone](./NOWHERE.md)',
@@ -1611,7 +1627,6 @@ describe('objectui#4148 — the app READMEs and the rest of the repo root', () =
         'LICENSE-THIRD-PARTY.md': '[also gone](./NOWHERE.md)',
       }),
     ).toEqual([
-      ['./NOWHERE.md', 'example-relative'],
       ['./NOWHERE.md', 'example-relative'],
       ['./NOWHERE.md', 'example-relative'],
       ['./NOWHERE.md', 'example-relative'],
@@ -1645,8 +1660,10 @@ describe('objectui#4148 — the app READMEs and the rest of the repo root', () =
     ).toEqual([]);
 
     // Floor under the floor: if `git ls-files` ever returned nothing, the
-    // assertion above would pass while proving nothing at all.
-    expect(tracked.length).toBeGreaterThanOrEqual(8);
+    // assertion above would pass while proving nothing at all. Four since
+    // objectstack#26080 folded `README.md`, `CONTRIBUTING.md`, `ROADMAP.md` and
+    // `QUICK_REFERENCE.md` into the repository root's documents.
+    expect(tracked.length).toBeGreaterThanOrEqual(4);
   });
 });
 
@@ -1770,7 +1787,12 @@ describe('objectui#4938 — the rest of each package/app directory', () => {
         if (decidableScheme || !/^(?:#|[a-zA-Z][a-zA-Z0-9+.-]*:)/.test(href)) decidable++;
       }
     }
-    expect(decidable).toBeGreaterThanOrEqual(4);
+    // 2 measured on objectstack#26080's branch: that card repointed the two
+    // relative links `packages/plugin-gantt/ROADMAP.md` and
+    // `packages/vscode-extension/DESIGN.md` carried into the tree's folded
+    // ROADMAP.md / CONTRIBUTING.md at the repository root's, which a relative
+    // path cannot reach from inside `ui/`, so they are URLs this gate does not judge.
+    expect(decidable).toBeGreaterThanOrEqual(2);
   });
 });
 

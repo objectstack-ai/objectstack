@@ -430,6 +430,139 @@ export const PREVIOUS_FILE_SHARDED_PACKAGES = Object.freeze({
   '@objectstack/cli': 3,
 });
 
+// ── THE SLICE THAT READS BUILT DECLARATIONS CARRIES THEIR CLOSURE (#25870) ──
+//
+// A Test Core shard builds its dependency closure without `.d.ts`
+// (`OS_SKIP_DTS=1`) unless it tests a package whose tests compile against
+// built declarations (ci.yml "Choose this shard's declaration build",
+// DTS_READERS). The CLI is one, and only a handful of its files read them;
+// its vitest config pins those files into one slice (DECLARATION_READER_FILES
+// and DeclarationReaderSequencer in packages/cli/vitest.config.ts), so only the
+// shard carrying that slice builds declarations, and every other CLI slice's
+// shard skips them. This map names that slice per package.
+//
+// That shard then pays a closure the other slice shards do not: measured on
+// spec-touching pull_request run 40423632426, "Build this shard's dependency
+// closure" took 4.2-5.8 min on the shards that kept declarations against
+// 0.5-0.9 min on the ones that skipped them, so ~4.5 min
+// (DECLARATION_CLOSURE_WALL_SECONDS). It is serial wall, before the tests, and
+// the bins here are sums of test seconds that a shard's whole leg runs four at
+// a time -- a shard's step reads close to wholeSum / 2.9 + slice (the
+// SHARD_COUNT docblock's calibration). So the slice is charged the closure
+// in that unit, 270s x 2.9: the whole-package seconds that take as long on its
+// shard as the closure does. Charged anything less, LPT gives that shard back
+// most of the whole leg the closure displaces, and it stays the slowest shard
+// by the difference; charged this, its shard and the other slice shards come
+// out equal in the wall model.
+//
+// ⛔ Packing weight only: the charge is no test load, so wholeLegProblems()
+// (pin 3d) grades the whole legs it moves exactly as before -- the whole
+// packages the reader slice's shard gives up land on the other shards, and
+// WHOLE_LEG_CAP_SECONDS and LOAD_SENSITIVE_APART still bound where they land.
+// The self-test reads ci.yml's DTS_READERS / DTS_READER_SLICE and the CLI
+// config's DECLARATION_READER_SLICE back against this map, so the three
+// spellings of the index cannot drift apart.
+//
+// A WHOLE package that reads declarations keeps them on its shard too
+// (`@objectstack/metadata` today), and a second shard building them would hand
+// back the minutes the slice pin saved. So in a run that carries the reader
+// slice, every whole package in DECLARATION_READER_PACKAGES rides with it, onto
+// the one shard that builds declarations anyway (`rideWith`, partition()). A
+// run with no reader slice -- the CLI whole, or not in the run -- charges and
+// moves nothing, and splits as it always did.
+export const DECLARATION_READER_SLICES = Object.freeze({
+  '@objectstack/cli': 1,
+});
+export const DECLARATION_READER_PACKAGES = Object.freeze(['@objectstack/cli', '@objectstack/metadata']);
+export const DECLARATION_READERS = Object.freeze({
+  slices: DECLARATION_READER_SLICES,
+  packages: DECLARATION_READER_PACKAGES,
+});
+export const NO_DECLARATION_READERS = Object.freeze({ slices: Object.freeze({}), packages: Object.freeze([]) });
+export const DECLARATION_CLOSURE_WALL_SECONDS = 270;
+export const WHOLE_LEG_WALL_DIVISOR = 2.9;
+export const DECLARATION_CLOSURE_CHARGE_SECONDS = DECLARATION_CLOSURE_WALL_SECONDS * WHOLE_LEG_WALL_DIVISOR;
+
+// What an item weighs in a bin: its test seconds plus any closure it is charged.
+export function packedWeight(item) {
+  return item.weight + (item.closure ?? 0);
+}
+
+// The three spellings of the reader slice, judged against each other. Pure:
+// `ciYml` is the workflow's text, `configSources` maps each package
+// DECLARATION_READER_SLICES names to its vitest config's text (or null). Read
+// back, in order: ci.yml's DTS_READERS names exactly DECLARATION_READER_PACKAGES;
+// its DTS_READER_SLICE is the index every DECLARATION_READER_SLICES entry names;
+// each such package's vitest config pins the same index through the sequencer,
+// in code position; and every package that is both sliced (`sliced`) and a
+// reader has a reader slice -- without one its slices past the first skip the
+// declarations its readers need, wherever sha1 puts them.
+export function judgeDeclarationReaders({
+  ciYml,
+  configSources,
+  slices = DECLARATION_READER_SLICES,
+  packages = DECLARATION_READER_PACKAGES,
+  sliced = FILE_SHARDED_PACKAGES,
+}) {
+  const problems = [];
+  const readersAt = /^\s*DTS_READERS='([^']*)'\s*$/m.exec(ciYml);
+  const sliceAt = /^\s*DTS_READER_SLICE='([1-9]\d*)'\s*$/m.exec(ciYml);
+  if (!readersAt) problems.push("ci.yml: no `DTS_READERS='...'` line in \"Choose this shard's declaration build\"");
+  if (!sliceAt) problems.push("ci.yml: no `DTS_READER_SLICE='N'` line in \"Choose this shard's declaration build\"");
+  if (readersAt) {
+    const named = readersAt[1].split(/\s+/).filter(Boolean).sort();
+    const here = [...packages].sort();
+    if (named.join(' ') !== here.join(' ')) {
+      problems.push(`ci.yml DTS_READERS is [${named.join(', ')}] but DECLARATION_READER_PACKAGES is [${here.join(', ')}]`);
+    }
+  }
+  for (const [name, index] of Object.entries(slices)) {
+    if (!packages.includes(name)) problems.push(`${name}: has a reader slice but is not in DECLARATION_READER_PACKAGES`);
+    if (sliceAt && Number(sliceAt[1]) !== index) {
+      problems.push(`${name}: DECLARATION_READER_SLICES says slice ${index}, ci.yml DTS_READER_SLICE says ${sliceAt[1]}`);
+    }
+    const source = configSources.get(name) ?? null;
+    if (source === null) {
+      problems.push(`${name}: no vitest config to read its DECLARATION_READER_SLICE from`);
+      continue;
+    }
+    const code = maskCommentsAndLiterals(source);
+    const pinned = /\bconst\s+DECLARATION_READER_SLICE\s*=\s*([1-9]\d*)\s*;/.exec(code);
+    if (!pinned || Number(pinned[1]) !== index) {
+      problems.push(
+        `${name}: its vitest config pins its readers to slice ${pinned ? pinned[1] : '(none)'}, ` +
+          `DECLARATION_READER_SLICES says ${index}`
+      );
+    }
+    if (!/\bsequencer\s*:\s*DeclarationReaderSequencer\b/.test(code)) {
+      problems.push(`${name}: its vitest config does not install DeclarationReaderSequencer as \`sequence.sequencer\``);
+    }
+  }
+  for (const name of packages) {
+    if ((sliced[name] ?? 1) > 1 && !Object.hasOwn(slices, name)) {
+      problems.push(
+        `${name}: sliced ${sliced[name]} ways and a declaration reader, but it has no reader slice, so ` +
+          'its slices past the first skip the declarations its tests read'
+      );
+    }
+  }
+  return problems;
+}
+
+// judgeDeclarationReaders() on the live tree's vitest configs, against the
+// workflow text the caller read (the self-test hands in the ci.yml it already
+// reads for pin 2, so this module names no workflow path of its own).
+export function declarationReaderProblems(ciYml, root = REPO_ROOT) {
+  const dirOf = new Map(workspacePackages(root).map(({ dir, manifest }) => [manifest?.name, dir]));
+  const configSources = new Map();
+  for (const name of Object.keys(DECLARATION_READER_SLICES)) {
+    const dir = dirOf.get(name);
+    const file = dir === undefined ? undefined : VITEST_CONFIG_NAMES.find((f) => existsSync(path.join(root, dir, f)));
+    configSources.set(name, file ? readFileSync(path.join(root, dir, file), 'utf8') : null);
+  }
+  return judgeDeclarationReaders({ ciYml, configSources });
+}
+
 // The item grammar. A shard item is a package (`@objectstack/cli`) or a SLICE
 // of one (`@objectstack/cli 1/2`), and this pair of functions is the only place
 // that spelling is written or read -- ci.yml builds the turbo invocation from
@@ -593,7 +726,17 @@ export function sliceWiringProblems(root = REPO_ROOT, sliced = FILE_SHARDED_PACK
 // package's suite runs as (testTaskCount). A slice leg runs `test` alone, so a
 // slice is one task. A caller that knows no manifest -- the fixtures -- passes
 // none and is weighed as a single-task suite.
-export function expandSlices(items) {
+//
+// `closure` rides along on the one slice DECLARATION_READER_SLICES names: the
+// declaration closure that slice's shard builds and no other slice's does. It
+// is packing weight only (packedWeight), never test weight, so `weight` --
+// what serialFloorOf(), the slice-count derivation and the drift step read --
+// is the same with or without it. `rideWith` names that slice on each whole
+// package of DECLARATION_READER_PACKAGES, when the expansion carries the slice.
+// `readers` is the live pair everywhere but the fixtures and a run whose
+// document states its own slicing (planRun()).
+export function expandSlices(items, readers = DECLARATION_READERS) {
+  const readerSlices = readers.slices;
   const out = [];
   for (const it of items) {
     const count = it.sliceCount ?? sliceCountFor(it.name);
@@ -601,6 +744,7 @@ export function expandSlices(items) {
       out.push({ name: it.name, weight: it.weight, pkg: it.name, slice: null, tasks: it.tasks ?? 1 });
       continue;
     }
+    const readerIndex = Object.hasOwn(readerSlices, it.name) ? readerSlices[it.name] : null;
     for (let index = 1; index <= count; index++) {
       const slice = { index, count };
       out.push({
@@ -609,7 +753,14 @@ export function expandSlices(items) {
         pkg: it.name,
         slice,
         tasks: 1,
+        ...(index === readerIndex ? { closure: DECLARATION_CLOSURE_CHARGE_SECONDS } : {}),
       });
+    }
+  }
+  const anchor = out.find((i) => i.closure !== undefined);
+  if (anchor) {
+    for (const i of out) {
+      if (!i.slice && readers.packages.includes(i.name)) i.rideWith = anchor.name;
     }
   }
   return out;
@@ -905,19 +1056,29 @@ function readManifest(dir) {
 
 // LPT greedy: heaviest package into the currently lightest bin. Deterministic:
 // input order never matters because both the package sort and the bin choice
-// break ties explicitly (by name / by lowest bin index).
+// break ties explicitly (by name / by lowest bin index). An item weighs its
+// packedWeight(): its test seconds, plus the declaration closure on the one
+// slice charged it (DECLARATION_READER_SLICES). An item that `rideWith`s that
+// slice goes into the slice's bin, straight after it (DECLARATION_READER_PACKAGES);
+// a rider whose slice is not in `items` is placed like any other item.
 export function partition(items, shardCount) {
-  const sorted = [...items].sort(
-    (a, b) => b.weight - a.weight || a.name.localeCompare(b.name, 'en')
-  );
+  const present = new Set(items.map((i) => i.name));
+  const rides = (it) => it.rideWith !== undefined && present.has(it.rideWith);
+  const byWeight = (a, b) => packedWeight(b) - packedWeight(a) || a.name.localeCompare(b.name, 'en');
+  const sorted = items.filter((i) => !rides(i)).sort(byWeight);
+  const riders = items.filter(rides).sort(byWeight);
   const bins = Array.from({ length: shardCount }, () => ({ total: 0, names: [] }));
+  const put = (it, at) => {
+    bins[at].names.push(it.name);
+    bins[at].total += packedWeight(it);
+  };
   for (const it of sorted) {
     let best = 0;
     for (let i = 1; i < bins.length; i++) {
       if (bins[i].total < bins[best].total) best = i;
     }
-    bins[best].names.push(it.name);
-    bins[best].total += it.weight;
+    put(it, best);
+    for (const r of riders) if (r.rideWith === it.name) put(r, best);
   }
   return bins;
 }
@@ -1053,10 +1214,18 @@ export function densityCapOf(timings, excluded, shardCount) {
 // Deterministic (candidates in bin and item order, the first strictly best
 // kept), and it terminates: every accepted move lowers the sum of squared bin
 // totals. A split already within the cap comes back unchanged.
+//
+// ⛔ A whole package that rides with the declaration-reading slice (`rideWith`,
+// DECLARATION_READER_PACKAGES) stays put like the slice itself: moved off, it
+// would take declarations to a second shard, which then builds the closure the
+// slice pin exists to build once.
 export function refineToCap(bins, items, cap) {
   const weightOf = new Map(items.map((i) => [i.name, i.weight]));
-  const slices = new Set(items.filter((i) => i.slice).map((i) => i.name));
-  const movable = (name) => !slices.has(name);
+  const present = new Set(items.map((i) => i.name));
+  const fixed = new Set(
+    items.filter((i) => i.slice || (i.rideWith !== undefined && present.has(i.rideWith))).map((i) => i.name)
+  );
+  const movable = (name) => !fixed.has(name);
   const out = bins.map((b) => ({ total: b.total, names: [...b.names] }));
   const EPSILON = 1e-9;
   for (let step = 0; step < 10_000; step++) {
@@ -1127,10 +1296,17 @@ export function placeItems(items, shardCount, cap = Infinity) {
 // decisions already made. Returns the items, the split main() runs (placed the
 // way the decision was judged) and one decision per configured package present
 // in the run, which main() prints.
-export function planShards(weighed, shardCount, { bound = MAX_SHARD_OVER_MEAN, cap = Infinity } = {}) {
+export function planShards(
+  weighed,
+  shardCount,
+  { bound = MAX_SHARD_OVER_MEAN, cap = Infinity, readers = DECLARATION_READERS } = {}
+) {
   const chosen = new Map(weighed.map((p) => [p.name, 1]));
   const expandWith = (name, n) =>
-    expandSlices(weighed.map((p) => ({ ...p, sliceCount: p.name === name ? n : chosen.get(p.name) })));
+    expandSlices(
+      weighed.map((p) => ({ ...p, sliceCount: p.name === name ? n : chosen.get(p.name) })),
+      readers
+    );
   const decisions = [];
   const configured = weighed
     .filter((p) => (p.sliceCount ?? 1) > 1)
@@ -1158,7 +1334,7 @@ export function planShards(weighed, shardCount, { bound = MAX_SHARD_OVER_MEAN, c
     chosen.set(pkg.name, count);
     decisions.push({ name: pkg.name, configured: pkg.sliceCount, count, needed, spreads, withinCap, own, target, densest, cap });
   }
-  const items = expandSlices(weighed.map((p) => ({ ...p, sliceCount: chosen.get(p.name) })));
+  const items = expandSlices(weighed.map((p) => ({ ...p, sliceCount: chosen.get(p.name) })), readers);
   return { items, bins: placeItems(items, shardCount, cap), decisions };
 }
 
@@ -1528,7 +1704,11 @@ export function planRun(parsed, listPath, shardCount, { excluded = new Set(), ti
   // run's list (densityCap): the density proven green is a fact about the
   // dataset, and the run's own list is what is graded against it.
   const cap = densityCapOf(dataset, excluded, shardCount);
-  const { items: weighted, bins: placed, decisions } = planShards(weighed, shardCount, { cap });
+  // A document that states its own slicing is no Test Core run, and its shards
+  // skip no declarations (test-nightly-tiers.yml sets no OS_SKIP_DTS), so no
+  // slice of it is charged the declaration closure and nothing rides with one.
+  const readers = acrossShards === null ? DECLARATION_READERS : NO_DECLARATION_READERS;
+  const { items: weighted, bins: placed, decisions } = planShards(weighed, shardCount, { cap, readers });
   const bins = assertSlicesSpread(placed);
   return { bins, weighted, decisions, estimated, packages, cap, acrossShards, uiTree };
 }
@@ -1573,6 +1753,10 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the balancing pins (#10472)': 25,
   // 1 grades the committed dataset's split; 4 are fixtures, both directions.
   'the whole-package leg cap and the load-sensitive pair (#25870)': 5,
+  // 4 grade the committed dataset and the live tree, 1 drives planRun() on
+  // both document shapes, 11 are fixtures (7 of the three spellings, 3 of the
+  // placement, 1 of the cap repair).
+  'the declaration-reading slice carries the closure (#25870)': 16,
   'predicted-vs-measured drift (#16173)': 9,
   'drift warning tier under the red (#16465)': 12,
   'file-level slice items (#16173)': 20,
@@ -1589,7 +1773,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 16;
+const SELF_TEST_BATTERY_FLOOR = 17;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -2112,6 +2296,188 @@ function selfTest() {
     const r = leg([['p', 'r'], ['big 1/2']], { apart: ['p', 'gone'] });
     if (!r.problems.some((m) => m.includes('gone is not a whole package'))) {
       throw new Error('whole leg: a pair member missing from the split was graded as apart');
+    }
+  });
+
+  // 3e. THE DECLARATION-READING SLICE CARRIES THE CLOSURE (#25870) -- see
+  //     DECLARATION_READER_SLICES. The committed dataset as CI splits it first:
+  //     one item is charged, it is the reader slice, the whole readers ride with
+  //     it, and its shard carries less whole-package work than every other
+  //     slice shard; then the three spellings of the index read back from the
+  //     tree; then fixtures for each half, both directions.
+  battery('the declaration-reading slice carries the closure (#25870)');
+  const readerLabel = (name) =>
+    formatShardItem(name, { index: DECLARATION_READER_SLICES[name], count: FILE_SHARDED_PACKAGES[name] });
+  const binOf = (bins, label) => bins.findIndex((b) => b.names.includes(label));
+  check(() => {
+    const charged = datasetItems.filter((i) => i.closure !== undefined);
+    const expected = Object.keys(DECLARATION_READER_SLICES).map(readerLabel);
+    if (charged.map((i) => i.name).join('|') !== expected.join('|') ||
+        charged.some((i) => i.closure !== DECLARATION_CLOSURE_CHARGE_SECONDS)) {
+      throw new Error(
+        `declaration closure: the committed dataset charged [${charged.map((i) => `${i.name} ${i.closure}s`).join(', ')}], ` +
+          `expected [${expected.join(', ')}] at ${DECLARATION_CLOSURE_CHARGE_SECONDS}s`
+      );
+    }
+  });
+  check(() => {
+    for (const name of Object.keys(DECLARATION_READER_SLICES)) {
+      const at = binOf(real, readerLabel(name));
+      for (const rider of DECLARATION_READER_PACKAGES.filter((p) => p !== name && datasetItems.some((i) => i.name === p))) {
+        if (binOf(real, rider) !== at) {
+          throw new Error(`declaration closure: ${rider} is on shard ${binOf(real, rider) + 1}, not with ${readerLabel(name)} on shard ${at + 1}`);
+        }
+      }
+    }
+  });
+  // A literal, not the charge: a charge refreshed to nothing must red here.
+  // 300s is well under the ~780s today's charge makes room for.
+  const ROOM_SECONDS = 300;
+  check(() => {
+    for (const name of Object.keys(DECLARATION_READER_SLICES)) {
+      const at = binOf(real, readerLabel(name));
+      const others = real
+        .map((b, i) => ({ i, sliced: b.names.some((n) => parseShardItem(n).name === name) }))
+        .filter((b) => b.sliced && b.i !== at)
+        .map((b) => wholeLeg.sums[b.i]);
+      if (others.length === 0 || !(wholeLeg.sums[at] + ROOM_SECONDS < Math.min(...others))) {
+        throw new Error(
+          `declaration closure: ${readerLabel(name)}'s shard carries ${wholeLeg.sums[at].toFixed(0)}s of whole packages ` +
+            `against [${others.map((s) => s.toFixed(0)).join(', ')}]s on the other slice shards, not ${ROOM_SECONDS}s less -- ` +
+            'the closure it builds alone is not making room for itself'
+        );
+      }
+    }
+  });
+  check(() => {
+    const problems = declarationReaderProblems(ciYml);
+    if (problems.length > 0) throw new Error(`declaration readers, live tree:\n${problems.map((p) => `  - ${p}`).join('\n')}`);
+  });
+  {
+    const ciOk = "          DTS_READERS='a m'\n          DTS_READER_SLICE='1'\n";
+    const cfgOk = 'const DECLARATION_READER_SLICE = 1;\nexport default { test: { sequence: { sequencer: DeclarationReaderSequencer } } };';
+    const judge = (over) =>
+      judgeDeclarationReaders({
+        ciYml: ciOk,
+        configSources: new Map([['a', cfgOk]]),
+        slices: { a: 1 },
+        packages: ['a', 'm'],
+        sliced: { a: 4 },
+        ...over,
+      });
+    const refused = (label, over, needle) =>
+      check(() => {
+        const r = judge(over);
+        if (!r.some((m) => m.includes(needle))) {
+          throw new Error(`declaration readers: ${label} was accepted (${r.join(' | ') || 'no problem named'})`);
+        }
+      });
+    check(() => {
+      const r = judge({});
+      if (r.length > 0) throw new Error(`declaration readers: a consistent fixture was refused: ${r.join(' | ')}`);
+    });
+    refused('a ci.yml slice index that differs', { ciYml: ciOk.replace("'1'", "'2'") }, 'DTS_READER_SLICE says 2');
+    refused('a ci.yml reader list missing a package', { ciYml: ciOk.replace("'a m'", "'a'") }, 'DTS_READERS is [a]');
+    refused('a config pinning another slice', { configSources: new Map([['a', cfgOk.replace('= 1;', '= 2;')]]) }, 'slice 2');
+    refused(
+      'a config pin that only a comment spells',
+      { configSources: new Map([['a', `// const DECLARATION_READER_SLICE = 1;\n${cfgOk.split('\n')[1]}`]]) },
+      'slice (none)'
+    );
+    refused('a config without the sequencer', { configSources: new Map([['a', cfgOk.split('\n')[0]]]) }, 'does not install');
+    refused('a sliced reader with no reader slice', { slices: {}, configSources: new Map() }, 'a: sliced 4 ways');
+  }
+  {
+    // Two shards. `a` cut in two, its first half the reader slice, `m` a whole
+    // reader. Charged, a 1/2's shard gives whole-package work to a 2/2's and
+    // `m` rides with it; with no readers declared the halves split the wholes
+    // evenly.
+    const readers = { slices: { a: 1 }, packages: ['a', 'm'] };
+    const pkgs = [
+      { name: 'a', weight: 2000, sliceCount: 2 },
+      mk('m', 50),
+      mk('w1', 600),
+      mk('w2', 600),
+      mk('w3', 400),
+      mk('w4', 400),
+      mk('w5', 200),
+      mk('w6', 200),
+    ];
+    const wholeOn = (bins, items, label) => {
+      const w = new Map(items.map((i) => [i.name, i.weight]));
+      return bins[binOf(bins, label)].names.filter((n) => !parseShardItem(n).slice).reduce((s, n) => s + w.get(n), 0);
+    };
+    const charged = expandSlices(pkgs, readers);
+    const chargedBins = partition(charged, 2);
+    const plain = expandSlices(pkgs, NO_DECLARATION_READERS);
+    const plainBins = partition(plain, 2);
+    check(() => {
+      if (binOf(chargedBins, 'm') !== binOf(chargedBins, 'a 1/2')) {
+        throw new Error(`declaration closure: the whole reader did not ride with the reader slice: ${JSON.stringify(chargedBins)}`);
+      }
+    });
+    check(() => {
+      const [one, two] = ['a 1/2', 'a 2/2'].map((l) => wholeOn(chargedBins, charged, l));
+      const [p1, p2] = ['a 1/2', 'a 2/2'].map((l) => wholeOn(plainBins, plain, l));
+      if (!(two - one >= 500) || !(Math.abs(p1 - p2) <= 100)) {
+        throw new Error(
+          `declaration closure: whole work beside a 1/2 / a 2/2 is ${one}/${two}s charged and ${p1}/${p2}s plain -- ` +
+            'the charge is not moving whole packages off the reader slice\'s shard'
+        );
+      }
+    });
+    check(() => {
+      // No reader slice in the run (the package whole): nothing is charged,
+      // nothing rides, and the split is the plain one, byte for byte.
+      const whole = pkgs.map((p) => ({ ...p, sliceCount: 1 }));
+      const items = expandSlices(whole, readers);
+      if (items.some((i) => i.closure !== undefined || i.rideWith !== undefined) ||
+          JSON.stringify(partition(items, 2)) !== JSON.stringify(partition(expandSlices(whole, NO_DECLARATION_READERS), 2))) {
+        throw new Error('declaration closure: a run with no reader slice was charged or re-placed');
+      }
+    });
+    check(() => {
+      // The cap repair moves whole packages off the densest bin; the whole
+      // reader riding with the reader slice is not one it may move. Here moving
+      // `m` would strictly lower the 800s bin (to 600s / 500s), so only the
+      // rider rule keeps it beside `a 1/2`.
+      const items = [
+        { name: 'a 1/2', weight: 500, pkg: 'a', slice: { index: 1, count: 2 }, tasks: 1 },
+        { name: 'a 2/2', weight: 300, pkg: 'a', slice: { index: 2, count: 2 }, tasks: 1 },
+        { name: 'm', weight: 300, pkg: 'm', slice: null, tasks: 1, rideWith: 'a 1/2' },
+      ];
+      const bins = [
+        { total: 800, names: ['a 1/2', 'm'] },
+        { total: 300, names: ['a 2/2'] },
+      ];
+      const out = refineToCap(bins, items, 600);
+      if (binOf(out, 'm') !== binOf(out, 'a 1/2')) {
+        throw new Error(`declaration closure: the cap repair moved the whole reader off the reader slice's shard: ${JSON.stringify(out)}`);
+      }
+    });
+  }
+  check(() => {
+    // Through planRun(), the function main() runs: a Test Core document charges
+    // the CLI's reader slice and seats metadata beside it; a document that
+    // states its own slicing (the nightly's) charges nothing.
+    const items = [
+      { name: '@objectstack/cli', path: 'packages/cli' },
+      { name: '@objectstack/metadata', path: 'packages/metadata' },
+    ];
+    const core = planRun({ packages: { count: 2, items } }, 'test core fixture', SHARD_COUNT, { timings });
+    const nightly = planRun(
+      { packages: { count: 2, items }, [SLICE_ACROSS_SHARDS_KEY]: ['@objectstack/cli'] },
+      'nightly fixture',
+      2,
+      { timings }
+    );
+    const label = readerLabel('@objectstack/cli');
+    if (binOf(core.bins, '@objectstack/metadata') !== binOf(core.bins, label) ||
+        !core.weighted.some((i) => i.name === label && i.closure === DECLARATION_CLOSURE_CHARGE_SECONDS)) {
+      throw new Error(`declaration closure: a Test Core document split as [${core.bins.map((b) => b.names.join(',')).join(' | ')}]`);
+    }
+    if (nightly.weighted.some((i) => i.closure !== undefined || i.rideWith !== undefined)) {
+      throw new Error('declaration closure: a document that states its own slicing was charged the declaration closure');
     }
   });
 

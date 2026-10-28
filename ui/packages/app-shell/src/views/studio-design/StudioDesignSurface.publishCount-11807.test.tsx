@@ -221,9 +221,12 @@ describe('the package publish names how many items went live, and what was refus
     await waitFor(() => expect(toast.error).toHaveBeenCalled());
     expect(toasts().success).toEqual([]);
     expect(toasts().info).toEqual([]);
-    expect(toasts().error).toHaveLength(1);
-    expect(toasts().error[0]).toContain('object/visit');
-    expect(toasts().error[0]).toContain(reason);
+    expect(toasts().error).toEqual([tFormat('engine.studio.publishRefusedOne', 'en', { count: 1 })]);
+    // objectstack#26730 — the item and its reason ride in the description; the
+    // reason is also kept on the item's Pending changes entry.
+    const description = (vi.mocked(toast.error).mock.calls[0][1] as { description?: string } | undefined)?.description;
+    expect(description).toContain('visit');
+    expect(description).toContain(reason);
   });
 });
 

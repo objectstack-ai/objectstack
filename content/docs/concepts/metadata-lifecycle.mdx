@@ -92,7 +92,12 @@ Every runtime-authored item lives inside a **writable package** — there are no
 orphans. Code-defined and installed packages are **read-only** at runtime, so the
 first step of any Studio/API authoring action is to target a *writable* package (a
 "base"): a create aimed at a read-only package is rejected, and the author is asked
-to pick or create a writable base first. An in-place edit of an item the read-only
+to pick or create a writable base first. A save naming a package id this deployment
+has not installed is refused the same way, draft or active and for every type
+(`422 WRITABLE_PACKAGE_REQUIRED`, nothing written), and
+`POST /packages/:id/publish-drafts` on such an id answers `404`, publishing nothing;
+drafts stored under one before that rule can still be removed with
+`POST /packages/:id/discard-drafts`. An in-place edit of an item the read-only
 package ships is refused too; for a flow, an action or a permission set the refusal
 names that type's sanctioned path instead (see [ADR-0126](#packaged-flows-actions-and-permission-sets-adr-0126)). New objects, fields, views, and
 flows are namespaced into that package — which is exactly what `os package publish`
@@ -171,7 +176,7 @@ The hash is `sha256:` + 64-hex of a canonical JSON serialization of the body, wi
 - [ADR-0008 §0 amendment (2026-04): project/branch removal](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0008-metadata-repository-and-change-log.md#0-2026-04-13-amendment--drop-project-and-branch-from-metaref) — why `MetaRef.project` and `MetaRef.branch` are dead.
 - [ADR-0008: Metadata Repository & Change Log](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0008-metadata-repository-and-change-log.md) — the four-primitive architecture.
 - [IMetadataService Contract](/docs/kernel/contracts/metadata-service) — the runtime API plugins call.
-- [North Star](/docs/concepts/north-star) — the product shape these primitives serve.
+- [Architecture Overview](/docs/concepts/architecture-overview) — the product shape these primitives serve.
 
 ---
 

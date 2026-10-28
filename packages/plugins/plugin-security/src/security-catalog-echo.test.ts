@@ -95,7 +95,9 @@ function makeEngine() {
     getArtifactItem: (type: string, name: string) =>
       (type === 'permission' ? codeArtifacts.find((item) => item.name === name) : undefined),
     isPackageDisabled: () => false,
-    getPackage: () => undefined,
+    // [#26708] The runtime package is installed: a save naming a package the
+    // registry does not hold is refused.
+    getPackage: (id: string) => (id === RUNTIME_PKG ? { manifest: { id, name: id, version: '1.0.0' } } : undefined),
     getAllPackages: () => [],
     registerItem: (type: string, item: Row, _key: string, packageId?: string) => {
       if (type === 'position') positions.set(String(item.name), { ...item, _packageId: packageId });

@@ -913,16 +913,29 @@ jobs:
       # hash in one namespace (turbo.json `globalEnv`).
       #
       # ⛔ EXCEPT a shard carrying a package in DTS_READERS, whose tests compile
-      # against BUILT declarations and go red without them (TS7016). Measured
-      # on 830a63a, the whole Test Core list under `OS_SKIP_DTS=1`: red only in
+      # against BUILT declarations and go red without them (TS7016, or ENOENT
+      # on a `dist/*.d.ts`). Measured on 830a63a, the whole Test Core list under
+      # `OS_SKIP_DTS=1`, re-measured for the CLI on 43731031 (#25870): red only in
       #   @objectstack/cli       published-subpath-console/-hook-body.pin (its
       #                          own dist/*.d.ts), scaffold-emission-typechecks,
-      #                          scaffold-test-script-passes (spec's .d.ts)
+      #                          scaffold-test-script-passes,
+      #                          create-in-repo-scaffold-typechecks (spec's .d.ts)
       #   @objectstack/metadata  typescript-serializer-annotation (spec's .d.ts)
-      # A new test that reads a built `.d.ts` reds the same loud way on a
-      # skipping shard: add its package here. Every other package's counts
-      # matched the DTS-on run but one: spec's root-entry-type-nameability
-      # pin skips (by its own design) and runs in lint.yml's built-dist step.
+      # Every other package's counts matched the DTS-on run but one: spec's
+      # root-entry-type-nameability pin skips (by its own design) and runs in
+      # lint.yml's built-dist step.
+      #
+      # ⛔ A SLICED reader keeps declarations on ONE slice, DTS_READER_SLICE
+      # (#25870). The CLI's vitest config pins its reader files into slice 1/n
+      # (DECLARATION_READER_FILES, packages/cli/vitest.config.ts), so its other
+      # slices read no `.d.ts` and skip them like any other shard; the
+      # partitioner charges slice 1/n the closure and puts the whole readers
+      # here on its shard (DECLARATION_READER_SLICES / DECLARATION_READER_PACKAGES,
+      # scripts/partition-test-shards.mjs, whose self-test reads this step back).
+      # A whole reader, or the CLI unsliced, keeps them as before. A new test
+      # that reads a built `.d.ts` reds the same loud way on a skipping shard:
+      # add its package here, or, for the CLI, its file to
+      # DECLARATION_READER_FILES.
       #
       # Local cold closure, 65 packages, 4 cores, `--force`: 5m59s with
       # declarations, 1m24s without. The cost is replay: a skipping shard
@@ -931,10 +944,14 @@ jobs:
       - name: Choose this shard's declaration build
         run: |
           DTS_READERS='@objectstack/cli @objectstack/metadata'
+          DTS_READER_SLICE='1'
           KEEP=""
-          while read -r PKG _; do
+          while read -r PKG SLICE; do
             for R in $DTS_READERS; do
-              [ "$PKG" = "$R" ] && KEEP="$KEEP $PKG"
+              [ "$PKG" = "$R" ] || continue
+              case "$SLICE" in
+                ''|"$DTS_READER_SLICE"/*) KEEP="$KEEP $PKG${SLICE:+ $SLICE}" ;;
+              esac
             done
           done < "$RUNNER_TEMP/shard-packages.txt"
           if [ -n "$KEEP" ]; then
@@ -3417,6 +3434,32 @@ jobs:
       # so without it a package that lacks one reads as passing.
       - name: Verify type-check coverage
         run: pnpm --dir ui run type-check:coverage
+
+      # objectui's `lockfile-integrity.yml` (objectui#8326), row 19 of the
+      # objectstack#25697 workflow roster, ported by objectstack#26717: a pull
+      # request's `pnpm-lock.yaml` may not give any package a second physical
+      # copy. The script's header has the mechanism and its boundary.
+      #
+      # It lives here because this job already checks out with
+      # `fetch-depth: 0`, so `origin/<base>` and the merge base are in the
+      # clone, and because it runs on every change to `pnpm-lock.yaml` (the
+      # `ui` filter lists it). Before the install on purpose: the gate reads
+      # two text files with Node builtins only, which Lint UI's pre-install
+      # import graph check holds. `pull_request` only, because the gate's
+      # subject is the pull request's delta against its base; a push or queue
+      # run has none of its own.
+      #
+      # ⛔ `continue-on-error` keeps it an ALARM, as objectui ran it: a finding
+      # prints an `::error::` annotation naming the packages on the pull
+      # request and does NOT fail this required job. Making it blocking is a
+      # maintainer decision (`NOT_A_GATE` in `ui/scripts/dependabot-merge-gate.mjs`
+      # says why), not a step edit.
+      - name: check:lockfile-integrity — compare this pull request's lockfile with its merge base
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: pnpm --dir ui run check:lockfile-integrity --base-ref "origin/${BASE_REF}"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

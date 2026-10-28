@@ -38,6 +38,16 @@ import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFin
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import type { MetaItemPublishedEvent } from './protocol.js';
 
+/**
+ * [#26708] The packages this file's saves name, installed: a save naming a
+ * package no installed package has is refused (`WRITABLE_PACKAGE_REQUIRED`)
+ * before any gate this file pins is reached. Each answers a manifest that
+ * declares no dependencies, as an authored base does.
+ */
+const INSTALLED_PACKAGES: ReadonlySet<string> = new Set(['app.ops']);
+const installedPackage = (id: string) => (INSTALLED_PACKAGES.has(id) ? { manifest: { id } } : undefined);
+
+
 interface Row {
     id: string;
     type: string;
@@ -167,7 +177,10 @@ function makeStubEngine() {
             registerObject: () => {},
             // No declared package namespace → the ADR-0028 prefix check is
             // skipped (legacy-grandfathered path).
-            getPackage: () => undefined,
+            getPackage: installedPackage,
+            // [#26708] The tenant object the views here bind: a save naming
+            // an installed package is judged against its closure.
+            listItems: (type: string) => (type === 'object' ? [{ name: 'customer', fields: { name: { type: 'text' } } }] : []),
         },
     };
     return { engine, rows, historyRows };
