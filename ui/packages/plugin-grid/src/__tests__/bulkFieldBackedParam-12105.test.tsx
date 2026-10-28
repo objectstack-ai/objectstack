@@ -177,17 +177,18 @@ describe('resolvePromotedBulkParams — the shared resolver on the bulk path (ob
     const [bulk] = resolvePromotedBulkParams(promote(ADD_TO_CAMPAIGN), context).params ?? [];
     const field = bulkParamToField(bulk, false);
 
-    const settings = (src: Record<string, unknown>) => ({
+    type LookupSettings = Partial<Record<keyof typeof LOOKUP_SETTINGS, unknown>>;
+    const settings = (src: LookupSettings) => ({
       lookupFilters: src.lookupFilters,
       lookupColumns: src.lookupColumns,
       lookupPageSize: src.lookupPageSize,
       descriptionField: src.descriptionField,
     });
     // The single-record resolver's answer is the field's declaration…
-    expect(settings(single as Record<string, unknown>)).toEqual(LOOKUP_SETTINGS);
+    expect(settings(single)).toEqual(LOOKUP_SETTINGS);
     // …and the widget field the bulk dialog hands `LookupField` carries the
     // same four values under the same names app-shell's `paramToField` emits.
-    expect(settings(field)).toEqual(settings(single as Record<string, unknown>));
+    expect(settings(field)).toEqual(settings(single));
   });
 
   it('CONTROL: a literal-typed param is unchanged', () => {
