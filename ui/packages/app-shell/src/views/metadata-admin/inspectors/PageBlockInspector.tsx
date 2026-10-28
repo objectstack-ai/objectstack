@@ -180,6 +180,10 @@ function InspectorJsonField({ label, value, onCommit, disabled, placeholder, loc
   // message is resolved at render and follows a locale switch instead of
   // freezing whatever language was active when the parse failed.
   const [invalid, setInvalid] = React.useState(false);
+  // Minted here, not derived from the label or the prop name: `renderField`
+  // draws this editor inside array rows too, where a caller-derived id would
+  // repeat and `for` would resolve to the first row's textarea.
+  const id = React.useId();
   React.useEffect(() => { setText(initial); setInvalid(false); }, [initial]);
   const commit = () => {
     if (disabled) return;
@@ -195,8 +199,9 @@ function InspectorJsonField({ label, value, onCommit, disabled, placeholder, loc
   };
   return (
     <div className="space-y-1">
-      <Label className="text-xs text-muted-foreground">{label}</Label>
+      <Label htmlFor={id} className="text-xs text-muted-foreground">{label}</Label>
       <textarea
+        id={id}
         value={text}
         onChange={(e) => setText(e.target.value)}
         onBlur={commit}

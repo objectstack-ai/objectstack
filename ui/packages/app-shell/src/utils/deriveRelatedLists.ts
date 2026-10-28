@@ -18,9 +18,12 @@
  * Rules (kept in lockstep with the relationship-level `relatedList` spec flag):
  *   - Owned children (`master_detail`) and `lookup` children are SHOWN by
  *     default. Set `relatedList: false` on the FK field to suppress a noisy
- *     association/audit link; set `relatedList: 'primary'` to mark a CORE
- *     relationship — the detail page promotes it to its own tab (the tab-vs-
- *     Related split is decided downstream in `buildDefaultTabs`).
+ *     association/audit link; set `relatedList: 'primary'` to make the list
+ *     part of the record's MAIN CONTENT (objectstack#27069) — a body table
+ *     rather than a side card; under the tabbed page it gets its own tab (the
+ *     tab-vs-Related split is decided downstream in `buildDefaultTabs`). Absent
+ *     on a `master_detail` FK that sets `inlineEdit`, the list is primary by
+ *     default; `relatedList: true` keeps it a side card.
  *   - `relatedListTitle` / `relatedListColumns` on the FK field override the
  *     derived title / columns (columns default to the child object's own list
  *     columns when omitted — resolved by the renderer).
@@ -51,8 +54,14 @@
  *   - Self-references are allowed (e.g. `account.parent_account` → `account`):
  *     the parent record lists the records whose self-FK points back at it
  *     ("Child Accounts"). Suppress with `relatedList: false` if unwanted.
- *   - Owned (`master_detail`) children are ordered before plain `lookup`
- *     children, preserving discovery order within each group.
+ *   - ORDER is the parent's declared business order first: the parent object's
+ *     `relatedLists` (objectstack#27069) names inbound relationships — a child
+ *     object, or `object.field` for one FK — and those lists come first, in
+ *     that order ({@link resolveRelatedListOrder}). Every unlisted list follows
+ *     in the derived order: owned (`master_detail`) children before plain
+ *     `lookup` children, preserving discovery order within each group. The
+ *     primary flag places a list and no longer orders it; consumers that split
+ *     body tables from side cards keep this order within each half.
  *   - Object-level READ permission gates the whole list (objectui#2359): the
  *     relationship graph says nothing about the CURRENT USER, so callers pass
  *     a `canRead` predicate (wired from `usePermissions().can`) and children
@@ -103,9 +112,13 @@ export interface DerivedRelatedList {
   /** True when the child→parent link is a `master_detail` (owned) relationship. */
   isOwned: boolean;
   /**
-   * True when the FK declares `relatedList: 'primary'`. A prominence hint
-   * (ADR-0085): the detail page promotes this relationship to its OWN tab,
-   * while non-primary lists collapse into a single "Related" tab.
+   * True when the list is part of the record's MAIN CONTENT: the FK declares
+   * `relatedList: 'primary'`, or it is a `master_detail` FK that sets
+   * `inlineEdit` and declares no `relatedList` at all (objectstack#27069 — line
+   * items edited inside the parent's form are drawn under it, not beside it).
+   * A placement, not an order: the body draws primary lists as full-width
+   * tables, the tabbed page gives each its OWN tab, and non-primary lists are
+   * the side cards (a single "Related" tab on the tabbed page).
    */
   isPrimary: boolean;
   /**
@@ -154,6 +167,12 @@ export interface DerivedRelatedList {
 interface MergedObjectLike {
   name?: string;
   label?: string;
+  /**
+   * The spec's optional `relatedLists` (objectstack#27069): the business order
+   * of THIS object's related lists, read when it is the parent. Each entry is
+   * a child object name or `object.field`; see {@link resolveRelatedListOrder}.
+   */
+  relatedLists?: string[];
   /** The spec's optional `pluralLabel`, read by a caller's `listLabel` only. */
   pluralLabel?: string;
   fields?: Record<string, any> | any[];
@@ -211,6 +230,58 @@ function isDeclaredFilter(value: unknown): value is Record<string, any> {
   );
 }
 
+/**
+ * Is this FK's list part of the record's main content (`isPrimary`)?
+ *
+ * `relatedList: 'primary'` says so explicitly. Left unset, a `master_detail`
+ * FK that sets `inlineEdit` (any arm: `true`, `'grid'`, `'form'`) is primary
+ * by default — the spec's own reading of the key (objectstack#27069). An
+ * explicit `true` is the author keeping the list a side card, so the default
+ * applies only to an ABSENT `relatedList`.
+ */
+export function isMainContentList(type: string, fieldDef: Record<string, any>): boolean {
+  if (fieldDef.relatedList === 'primary') return true;
+  if (fieldDef.relatedList !== undefined) return false;
+  const inlineEdit = fieldDef.inlineEdit;
+  return type === 'master_detail' && (inlineEdit === true || inlineEdit === 'grid' || inlineEdit === 'form');
+}
+
+/**
+ * The ONE resolution of related-list order (objectstack#27069): the parent's
+ * declared `relatedLists` first, in the declared order; every list no entry
+ * names after it, in the order `lists` already carries (the derived order).
+ *
+ * An entry names a child object (`'task'` — every list of that child, in their
+ * derived order) or one FK (`'event.related_to'`). A list takes the position of
+ * the FIRST entry that names it, so naming it again later changes nothing. An
+ * entry that names no list here — a relationship hidden by `relatedList:
+ * false`, a child the reader may not read, or a name the spec's `defineStack`
+ * check would have refused — places nothing; it is not guessed at.
+ *
+ * Pure and order-stable: with no declared entries it returns `lists` as given.
+ */
+export function resolveRelatedListOrder<T extends { childObject: string; referenceField: string }>(
+  lists: readonly T[],
+  declared: readonly unknown[] | null | undefined,
+): T[] {
+  if (!Array.isArray(declared) || declared.length === 0) return [...lists];
+  const placed = new Set<T>();
+  const head: T[] = [];
+  for (const entry of declared) {
+    if (typeof entry !== 'string') continue;
+    const dot = entry.indexOf('.');
+    const child = dot === -1 ? entry : entry.slice(0, dot);
+    const field = dot === -1 ? undefined : entry.slice(dot + 1);
+    for (const list of lists) {
+      if (placed.has(list) || list.childObject !== child) continue;
+      if (field !== undefined && list.referenceField !== field) continue;
+      placed.add(list);
+      head.push(list);
+    }
+  }
+  return [...head, ...lists.filter((list) => !placed.has(list))];
+}
+
 /** Normalize an object's `fields` (record or array) into `[name, def]` pairs. */
 function fieldEntries(fields: MergedObjectLike['fields']): Array<[string, any]> {
   if (!fields) return [];
@@ -244,7 +315,8 @@ export interface DeriveRelatedListsOptions {
 
 /**
  * Derive the detail-page related lists for `objectDef` from the full object
- * registry. Returns owned (`master_detail`) children first, then `lookup`
+ * registry. Returns the lists `objectDef.relatedLists` names first, in that
+ * order, then the rest: owned (`master_detail`) children, then `lookup`
  * children; deterministic and side-effect free (safe to memoize).
  */
 export function deriveRelatedLists(
@@ -299,7 +371,7 @@ export function deriveRelatedLists(
         childLabel,
         referenceField: fieldName,
         isOwned: type === 'master_detail',
-        isPrimary: fieldDef.relatedList === 'primary',
+        isPrimary: isMainContentList(type, fieldDef),
         ...(inheritedSort ? { sort: inheritedSort } : {}),
         _fkLabel: (typeof fieldDef.label === 'string' && fieldDef.label) || fieldName,
         _listLabel: childListLabel,
@@ -325,7 +397,7 @@ export function deriveRelatedLists(
     }
   }
 
-  const all = [...owned, ...referenced];
+  const all = resolveRelatedListOrder([...owned, ...referenced], objectDef.relatedLists);
   // Multi-FK disambiguation: when a child object points here through more than
   // one relationship and gave no explicit title, suffix the FK label so the two
   // lists are distinguishable (e.g. "Opportunities · Partner Account"; the list

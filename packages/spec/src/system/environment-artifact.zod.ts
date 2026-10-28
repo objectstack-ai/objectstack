@@ -43,8 +43,8 @@ import { PluginPermissionsSchema } from '../kernel/manifest.zod';
  *   `metadata`, outside the `checksum` digest. Absent ≠ `{}` — see the
  *   key's docblock.
  *
- * See {@link content/docs/concepts/north-star.mdx} §6.3 for the
- * runtime-inputs boundary.
+ * See `content/docs/concepts/architecture-overview.mdx` § "Environment
+ * Artifact" for the runtime-inputs boundary.
  *
  * ## History (#4740)
  *
