@@ -18,6 +18,7 @@ import {
 } from '@objectstack/spec/ui';
 import type { FilterCondition } from '@objectstack/spec/data';
 import { datasetInvalidError } from './dataset-refusal.js';
+import { assertMeasureCurrenciesCoherent, type DeclaredCurrency } from './measure-currency-coherence.js';
 import { TEMPORAL_SOURCE_FIELD_TYPES } from './measure-result-type.js';
 import type { DurationMeasureSpec } from './strategies/types.js';
 
@@ -194,6 +195,16 @@ export interface DatasetCompileOptions {
    * `declaredFieldType` (the type alone) until then.
    */
   declaredValueShape?: (objectName: string, field: string) => ValueShapeFieldDef | undefined;
+  /**
+   * [ADR-0144, M0-3] The declared CURRENCY of `field` on `objectName` — its
+   * type, its `fixed` code and its `record` code field — or `undefined` when
+   * nothing authoritative can answer. Supplied by the host from the same
+   * `AnalyticsServiceConfig.sourceFieldMeta` the result-column currency chain
+   * reads, so the compile-time guards of `measure-currency-coherence.ts` judge
+   * the currency the column would print. Absent → only an explicit measure
+   * `currency` is known, and the guards judge what that alone proves.
+   */
+  declaredCurrency?: (objectName: string, field: string) => DeclaredCurrency | undefined;
 }
 
 /** Map a dataset measure's aggregate to the Cube metric `type`. */
@@ -842,6 +853,11 @@ export function compileDataset(
     measures[m.name] = metric;
     if (m.filter) measureFilters[m.name] = m.filter;
   }
+
+  // [ADR-0144, M0-3] A measure `currency` contradicting its field, and a
+  // derived measure across differing currencies, are refused HERE: both are
+  // properties of the document, decidable from metadata before any query runs.
+  assertMeasureCurrenciesCoherent(dataset, options?.declaredCurrency);
 
   const cube: Cube = {
     name: dataset.name,
