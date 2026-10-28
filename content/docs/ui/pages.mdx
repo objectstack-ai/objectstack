@@ -64,6 +64,7 @@ const homePage = {
 | `template` | `enum` | optional | Layout template: `'default'` (the default), `'header-sidebar-main'`, `'three-column'` or `'dashboard'` — see [Templates](#templates). Any other name is refused |
 | `kind` | `enum` | optional | Page override mode (default `'full'`). `full` \| `slotted` = structured authoring; `html` = author-written constrained JSX/HTML compiled (parsed, never executed) to the tree (ADR-0080; ADR-0081 named it `html`); `react` = real-React source executed at render by the runtime (ADR-0081) — it runs author JS, so it is gated by a host capability that defaults ON and is disabled server-side via `OS_PAGE_REACT=off`. See [Authoring modes](#authoring-modes) |
 | `regions` | `PageRegion[]` | optional | Layout regions with components (default `[]` — `list` pages render via `interfaceConfig`, and an empty `record`/`home`/`app` page falls back to the synthesized default layout) |
+| `slots` | `object` | optional | Slot overrides for a `kind: 'slotted'` record page — see [Slotted pages](#slotted-pages) |
 | `source` | `string` | optional | Page source text — required (and authoritative over `regions`) when `kind` is `'html'` or `'react'`. For `kind: 'html'` it is constrained JSX/HTML compiled to the tree by `@objectstack/sdui-parser` at save time (parse, never execute). For `kind: 'react'` it is real React/JSX executed at render by `@object-ui/react-runtime` (trusted tier). See [React Pages](/docs/ui/react-pages) |
 | `variables` | `PageVariable[]` | optional | Local state variables |
 | `isDefault` | `boolean` | optional | The default record page of its `object` — the page that object's record view opens. At most one `isDefault: true` record page per object per deployment: a second is refused by `defineStack` / `os validate`, at package registration and at metadata save, naming both pages. Saving a page under the existing default's own name is that page, not a second default. **Refused on any other page** (a `home`, `app`, `utility` or `list` page, or a record page with no `object`): nothing reads it there. A page does not choose where an app opens — see [Page Types](#page-types) |
@@ -174,6 +175,126 @@ and is refused the same way. `full-width` is no
 longer a template name: it was a second name for `default`, and is refused with that
 replacement.
 
+## Record pages
+
+### The synthesized default
+
+A record page needs no authoring. With no page assigned, the Console synthesizes one from
+the object: a header, the highlights strip, a tab strip and the discussion panel. The strip
+is **Details**, then one tab per relationship whose child field declares
+`relatedList: 'primary'`, then a shared **Related** tab for the other related lists, then
+**History**; an object with `enable: { files: true }` also gets an **Attachments** tab with a
+count badge. Promoting a child table to its own tab is therefore a one-word change on the
+relationship field, not a page-authoring task, and `relatedList: false` leaves a child off
+the page.
+
+The Console lays the page out by the width of the surface it occupies (the drawer, the
+split pane or the full page), never by the viewport. From 1280 px the tabs become three
+columns: details, a timeline (the discussion composer, then Activity and History) and the
+related lists as cards with Approvals, Attachments and the created/updated line. From
+1024 px the related column folds into a rail behind a **Related (N)** toggle. Below that, and
+always in a drawer or split pane, the tab strip is drawn. `?tab=` selects a tab in the strip.
+
+### Slotted pages
+
+`kind: 'slotted'` overrides only the parts of the synthesized page you name, and the
+synthesizer fills in the rest. A slotted page authors `slots`, not `regions`:
+
+| Slot | Replaces |
+| :--- | :--- |
+| `header` | The `page:header` node |
+| `actions` | The action bar (`record:quick_actions`) |
+| `alerts` | The alert banners above the body |
+| `highlights` | The highlights strip |
+| `details` | The body of the Details tab; the other tabs stay synthesized |
+| `tabs` | The whole tab strip, to add, remove or reorder tabs |
+| `discussion` | The discussion panel |
+
+Each slot takes one component or an array of them, and replaces its part whole: there is no
+deep merge. `details` and `tabs` are refused together, because the Details tab lives inside
+the strip `tabs` replaces; to replace both, put `record:details` in the first `tabs` item
+and author no `details` slot. A slotted `tabs` strip stays a strip at every width.
+
+{/* os:check */}
+```typescript
+const accountDetailPage = {
+  name: 'account_detail_page',
+  label: 'Account Detail',
+  type: 'record',
+  object: 'account',
+  kind: 'slotted',
+  regions: [],
+  slots: {
+    header: {
+      type: 'page:header',
+      properties: { title: '{name}', subtitle: '{industry} · {type}' },
+    },
+  },
+};
+```
+
+Use a slotted page to change one or two parts of an otherwise standard record page, and a
+`full` page for a record page that looks nothing like the default.
+
+### The discussion panel is composed, never appended
+
+A record page shows a discussion panel if and only if the page composes a
+`record:discussion` node (or `record:chatter`, the same block under another name).
+Synthesized and slotted pages compose it for you; a `full` page places it like any other
+block, and the node's own properties are honoured, so
+`{ type: 'record:discussion', properties: { feed: { showCommentInput: false } } }` draws the
+conversation without a composer. The object outranks the page: `enable: { feeds: false }`
+suppresses the panel whether or not the page composes it, and the server refuses comments on
+such an object (`403 FEEDS_DISABLED`).
+
+### Related lists
+
+- **Permission-gated.** A relationship whose child object the user cannot read produces no
+  tab and no section, and a `record:related_list` on an authored page hides itself the same
+  way.
+- **Paged.** A related list shows `limit` rows per page (5 unless set), fetched a page at a
+  time with the count badge showing the whole collection; `sort` pins the initial order, and
+  a user's column sort is sent to the server. A list that declares `columns` fetches only the
+  declared columns the user can read.
+- **Actions are ids.** By default a related list draws the child object's own actions: those
+  placed at `list_toolbar` as header buttons, and those at `list_item` or `record_related` in
+  each row's menu (`record_related` shows only inside a parent record). Declaring
+  `actions: ['export_contacts', 'send_welcome']` in the block's `properties` replaces that
+  set, in that order; each action is still placed by its own `locations`, and `[]` shows
+  none. New, Edit, Delete and opening a row are not actions: they follow the object's
+  `userActions` and the user's permissions. An id that names no action of the child, or one
+  with no list location, shows a notice naming it rather than being dropped.
+
+### The page header
+
+`page:header` is the title bar. Its props go in `properties`, and the shape is closed, so an
+unknown or retired key (`description`, `icon`, `breadcrumb`, `showStar`) is refused by name.
+
+| Property | Default | Description |
+| :--- | :--- | :--- |
+| `title` | Derived from the record on a record page | Heading; `{field}` tokens interpolate against the record, and a token that resolves to nothing renders empty. Set it on a non-record page |
+| `subtitle` | — | The line under the title, interpolated the same way |
+| `actions` | — | Ids of actions declared on the page's object. An authored list is the whole set: an action that declares `record_header` but is not named is not drawn, and omitting the key draws none of the object's actions. Only the synthesized page draws every `record_header` / `record_more` action |
+| `recordChrome` | `true` | Draw the title as the record chip (object label, copy-id button, the record's picture when the object names an `imageField`); `false` keeps a bare heading |
+| `showCopyId` | `true` | The copy-record-id button in the chip |
+| `maxVisible` / `mobileMaxVisible` | 3 / 1 | How many actions render inline before the rest fold into the `⋯` menu |
+| `aria` | — | `ariaLabel`, `ariaDescribedBy`, `role` for the `<header>` element |
+
+A named action renders only if its `locations` include `record_header` (inline) or
+`record_more` (straight into `⋯`); an id that names no action renders nothing and is reported
+once in the browser console. Which actions take the inline slots is metadata too: actions are
+sorted by `order` (lower first; the host's Edit / Share / Delete use 100 and above, so
+authored actions outrank them), `variant: 'primary'` breaks ties, `variant: 'danger'` draws a
+red button or a red row at the foot of the `⋯` menu, and `component: 'action:menu'` pins an
+action inside `⋯`. Past the `⋯` menu a record page shows a **⟳ refresh** button: it is
+chrome, not an action, so it has no metadata key, is never folded into `⋯`, and re-reads the
+record, its related lists and tab badges in place without losing the open tab or an inline
+edit.
+
+A page has one `<h1>`. On a record page the header owns it; on another page type a
+`page:header` with a literal title becomes the page heading. `page:header` draws no
+children: anything that belongs beside it goes in a sibling node.
+
 ## Components
 
 Components are the building blocks placed inside regions.
@@ -257,6 +378,42 @@ The API binding's rules:
 - **No credentials in metadata.** The console reads the endpoint with its own signed-in fetch, so the read block has no `headers`, and a credential key such as `headers`, `credentials` or `token` is refused.
 - **Reads only.** `read.method` is optional and accepts `GET` alone; there is no `write` block.
 - **Rendered by the console.** The console reads the binding on every page element and binds the selected value as `data`: in the element's expression holes (`${data.used}`), in its `visibleWhen`, and in every element nested inside it. The console's generic `hero`, `stat`, `usage-bar`, `checklist` and `tile-grid` blocks are built to take it as their `dataSource`. While the read is in flight the element shows a loading panel, and a refused binding or a failed read shows an error panel instead.
+
+### Expression holes in element properties
+
+A string in an element's `properties` may carry `${…}` holes, which the Console fills when
+it renders: `"content": "Welcome back, ${current_user.name}"`. The roots are `record` (the
+page's row), `current_user`, `page.<var>` for page variables and, under an element with an
+API `dataSource`, `data`. An inline locale map is filled member by member and then drawn in
+the viewer's language:
+
+```json
+{
+  "type": "element:text",
+  "properties": {
+    "content": { "en": "Welcome back, ${current_user.name}", "zh-CN": "欢迎回来,${current_user.name}" }
+  }
+}
+```
+
+A hole whose member is missing renders empty; a hole whose root does not exist renders as
+its own source text, with one line in the browser console. Holes fill copy; they are not
+gates. A component's `visibleWhen` is a CEL predicate over the same roots
+(`"'sales_manager' in current_user.positions"`), not a `${…}` template.
+
+### List blocks in a region
+
+A region page sizes each block to its region, measured from the rendered width (no key sets
+it). A `list-view` in a region narrower than half the page, such as an `aside` beside `main`,
+renders a compact list: the title and record count, then two-line rows from the view's first
+two visible columns. A region half the page or wider renders a capped table: at most the
+block's `dataSource.limit` rows (5 when unset) and the view's first four visible columns.
+Neither draws a toolbar, view tabs or a pager; both end with a **View all** link, to the
+saved view's page when the block binds `dataSource.view` and to the object's list otherwise
+(the block's own filter and sort are not carried, so bind a saved view to link to exactly
+what the block shows). `html` and `react` pages have no regions, so their list blocks render
+the whole list. A `page:tabs` block whose tabs hold list blocks badges each tab with its
+list's record count before it is opened; a tab item's own `count` wins.
 
 ## Variables
 
