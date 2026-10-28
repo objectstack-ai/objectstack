@@ -1837,7 +1837,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       newTabUrl: {
         label: "新标签页 URL 模板",
-        helpText: "直接使用的新标签页 URL 模板，可用 {recordId} 占位符。与 `opensInNewTab` 同时设置时，渲染端会立即把预开的标签页导航到这里，不再发起动作请求——因此该端点必须自行校验鉴权。"
+        helpText: "本后端上的路径，必须以 / 开头（如 /sso-open/{recordId}），可用 {recordId} 占位符。与 `opensInNewTab` 同时设置时，渲染端会立即把预开的标签页导航到“后端地址 + 该路径”，不再发起动作请求——因此该端点必须自行校验鉴权。绝对 URL 会被拒绝；要打开外部页面，请用 url 类型的动作，并把“链接打开位置”设为 new-tab。"
       },
       locations: {
         label: "位置",
