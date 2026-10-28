@@ -8,6 +8,19 @@ import { fileURLToPath } from 'node:url';
 /**
  * objectui#4149: `QUICK_REFERENCE.md`'s command and layout sections were dead.
  *
+ * ## Where the page lives now (objectstack#26080)
+ *
+ * `QUICK_REFERENCE.md` was folded into the repository root's `CONTRIBUTING.md`,
+ * as its "UI Workspace (`ui/`)" section, and deleted. Every pin below holds that
+ * section to the same anchors as before — the ui `package.json` scripts, the ui
+ * workspace packages, the paths in this tree — and reads nothing else of the
+ * root file. Inside that file the section spells its paths from the repository
+ * root, `ui/packages/*` rather than `packages/*`, so a path claim must start
+ * with `ui/` and is resolved in this tree with that prefix taken off; a claim
+ * outside `ui/` is a finding, because this file cannot see it. The commands are
+ * run from `ui/`, as the section says, so they are still checked against this
+ * tree's root `package.json`.
+ *
  * objectui#4143 repaired and pinned the file's "Current Release" block, and argued the
  * rest of the page was observation-class because "no copy-pasteable instruction is
  * wrong". On the tree that landed it, four of them were — and this is the worse class,
@@ -61,9 +74,26 @@ import { fileURLToPath } from 'node:url';
  * card is about is a documented command that does not exist, not an existing command
  * that is undocumented.
  */
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const docRel = 'QUICK_REFERENCE.md';
-const doc = fs.readFileSync(path.join(repoRoot, docRel), 'utf8');
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(HERE, '../..');
+const docRel = 'CONTRIBUTING.md (UI Workspace section, at the repository root)';
+const UI_SECTION_HEADING = '## UI Workspace (`ui/`)';
+const contributing = fs.readFileSync(path.resolve(HERE, '../../../CONTRIBUTING.md'), 'utf8');
+
+/** The root CONTRIBUTING's UI section, from its heading to the next `## ` heading. */
+function uiSection(text: string): string {
+  const lines = text.split('\n');
+  const start = lines.findIndex((line) => line.trim() === UI_SECTION_HEADING);
+  if (start === -1) throw new Error(`the root CONTRIBUTING.md must still have a "${UI_SECTION_HEADING}" heading`);
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((line) => /^## /.test(line));
+  return (end === -1 ? rest : rest.slice(0, end)).join('\n');
+}
+
+const doc = uiSection(contributing);
+
+/** A path claim the section spells from the repository root, as a path in this tree. */
+const UI_PREFIX = 'ui/';
 
 interface Manifest {
   name?: string;
@@ -177,7 +207,7 @@ const commands = documentedCommands();
 /** pnpm's own subcommands, which are not root scripts and are not ours to check. */
 const PNPM_BUILTINS = new Set(['install', 'exec', 'dlx', 'add', 'remove', 'run', 'why', 'ls', 'store']);
 
-describe('QUICK_REFERENCE.md — every documented `pnpm` command exists', () => {
+describe('the UI workspace guide — every documented `pnpm` command exists', () => {
   it('finds commands to check at all', () => {
     // Guards the parser, not the doc: a fence-syntax change that made
     // `documentedCommands()` return nothing would turn every assertion below into a
@@ -235,7 +265,7 @@ describe('QUICK_REFERENCE.md — every documented `pnpm` command exists', () => 
   });
 });
 
-describe('QUICK_REFERENCE.md — the "Examples" section covers the examples that run', () => {
+describe('the UI workspace guide — the "UI examples" section covers the examples that run', () => {
   /**
    * The reverse direction, and the one that would have caught this card before it was
    * filed. The forward test above only says the documented examples exist; it stays
@@ -255,8 +285,8 @@ describe('QUICK_REFERENCE.md — the "Examples" section covers the examples that
    */
   it('documents a dev command for every `examples/*` package that declares one', () => {
     const runnable = workspacePackages.filter((p) => p.dir.startsWith('examples/') && p.scripts.has('dev'));
-    const block = section('### Examples');
-    const noneRuns = 'No directory under `examples/` is a dev server';
+    const block = section('### UI examples');
+    const noneRuns = 'No directory under `ui/examples/` is a dev server';
     if (runnable.length === 0) {
       expect(block, `${docRel}'s "Examples" section must say that no example is a dev server`).toContain(noneRuns);
       expect(block, `${docRel}'s "Examples" section documents a dev command for an example that has none`).not.toMatch(
@@ -277,7 +307,7 @@ describe('QUICK_REFERENCE.md — the "Examples" section covers the examples that
   });
 });
 
-describe('QUICK_REFERENCE.md — every path it names is in the tree', () => {
+describe('the UI workspace guide — every path it names is in the tree', () => {
   /**
    * A path claim, in the spellings this page uses: an inline-code span with no
    * whitespace and at least one `/`. Placeholders (`packages/<pkg>/`) and package names
@@ -304,7 +334,11 @@ describe('QUICK_REFERENCE.md — every path it names is in the tree', () => {
 
     const dead: string[] = [];
     for (const claim of claims) {
-      const cleaned = claim.replace(/\/$/, '');
+      if (!claim.startsWith(UI_PREFIX)) {
+        dead.push(`${claim}   (not spelled from the repository root as ui/…, so this tree cannot check it)`);
+        continue;
+      }
+      const cleaned = claim.slice(UI_PREFIX.length).replace(/\/$/, '');
       if (cleaned.includes('*')) {
         const dir = path.dirname(cleaned);
         const pattern = new RegExp(`^${path.basename(cleaned).replace(/\*/g, '.*')}$`);
@@ -330,14 +364,14 @@ describe('QUICK_REFERENCE.md — every path it names is in the tree', () => {
    * deleted; this catches an app that was added and never listed — the same rot, one
    * direction over.
    */
-  it('gives every directory under `apps/` a row in the Repository Layout table', () => {
-    const layout = section('## Repository Layout');
+  it('gives every directory under `apps/` a row in the UI layout table', () => {
+    const layout = section('### UI layout');
     const apps = fs
       .readdirSync(path.join(repoRoot, 'apps'), { withFileTypes: true })
       .filter((e) => e.isDirectory())
       .map((e) => `apps/${e.name}`);
 
-    const unlisted = apps.filter((app) => !layout.includes(`\`${app}\``));
+    const unlisted = apps.filter((app) => !layout.includes(`\`${UI_PREFIX}${app}\``));
     expect(
       unlisted,
       `${docRel}'s Repository Layout table has no row for ${JSON.stringify(unlisted)}. The table ` +
@@ -346,7 +380,7 @@ describe('QUICK_REFERENCE.md — every path it names is in the tree', () => {
   });
 });
 
-describe('QUICK_REFERENCE.md — the published-package count is not written by hand', () => {
+describe('the UI workspace guide — the published-package count is not written by hand', () => {
   /**
    * The row used to state the count ("39 published packages", later 36, then 35), and
    * this test derived the true number to hold the prose to it. The first hand-written
@@ -358,9 +392,9 @@ describe('QUICK_REFERENCE.md — the published-package count is not written by h
    * that way; the private packages it must still name are checked below.
    */
   const packagesRow = (): string => {
-    const layout = section('## Repository Layout');
-    const row = layout.split('\n').find((line) => line.startsWith('| `packages/*` |'));
-    expect(row, `${docRel}'s Repository Layout table must still have a \`packages/*\` row`).toBeDefined();
+    const layout = section('### UI layout');
+    const row = layout.split('\n').find((line) => line.startsWith('| `ui/packages/*` |'));
+    expect(row, `${docRel}'s UI layout table must still have a \`ui/packages/*\` row`).toBeDefined();
     return row as string;
   };
 
@@ -417,7 +451,7 @@ describe('QUICK_REFERENCE.md — the published-package count is not written by h
   });
 });
 
-describe('QUICK_REFERENCE.md — the quoted vitest-guard message is still what the guard prints', () => {
+describe('the UI workspace guide — the quoted vitest-guard message is still what the guard prints', () => {
   /**
    * The page quotes the guard's rejection box so a reader recognises it. Two of the five
    * quoted lines are built by interpolation in `canonicalLines()`

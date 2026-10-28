@@ -199,6 +199,7 @@ import { TransactionUnsupportedError } from './transaction-errors.js';
 import {
   aggregateSummaryValue,
   summaryEmptySetValue,
+  withoutDeletedSelfParents,
   type SummaryDescriptor,
 } from './summary-aggregate.js';
 import { ReadonlyFieldRejectedError } from './readonly-strict-errors.js';
@@ -12402,6 +12403,14 @@ export class ObjectQL implements IObjectQLEngine {
     return this.summaryIndex!.get(childObject) ?? [];
   }
 
+  /** [#26950] The child-side foreign-key columns the roll-ups over
+   *  `childObject` read: what a predicate write must read off its matched rows,
+   *  before it writes, to hand {@link recomputeSummaries} the parents to
+   *  recompute. Empty when no roll-up aggregates `childObject`. */
+  private summaryForeignKeyColumns(childObject: string): string[] {
+    return [...new Set(this.getSummaryDescriptors(childObject).map((desc) => desc.fkField))];
+  }
+
   /** Roll-up descriptors for the summary fields `parentObject` OWNS (#5749) —
    *  i.e. the ones a NEW row of `parentObject` must have seeded.
    *
@@ -16735,6 +16744,11 @@ export class ObjectQL implements IObjectQLEngine {
            // driver returning a row from `updateMany` would silently reroute a
            // bulk write onto the per-record contract if we inferred it.
            let isPredicateWrite = false;
+           // [#26950] The roll-up input a predicate write hands
+           // `recomputeSummaries`: each matched row as it was (`previous`) and
+           // as the write leaves it (`next`). `null` when no roll-up aggregates
+           // this object, and on the by-id branch, which passes its own row.
+           let summaryRows: { previous: Record<string, unknown>[]; next: Record<string, unknown>[] } | null = null;
            const mediaValueShapeStrict = await this.mediaValueShapeStrictFor(updateSchema);
            const valueShapeStrict = await this.valueShapeStrictFor(updateSchema);
            const updateMsgCtx = this.validationMessageContext(object, opCtx.context);
@@ -17504,6 +17518,23 @@ export class ObjectQL implements IObjectQLEngine {
                // the N matched rows conflicted — a fabricated row attribution
                // is worse than an absent one (triage ruling, 2026-09-02),
                // exactly as the composite-index case already behaves on insert.
+               //
+               // [#26950] The parents this write moves a roll-up of, read BEFORE
+               // the write: the matched rows' foreign keys as they are, and as
+               // the payload leaves them, so a reparent recomputes the old parent
+               // and the new one, as the by-id branch does with `priorRecord`.
+               // Only the descriptors' FK columns are read, through this write's
+               // own row-scoped AST and driver options; the memoized matched-row
+               // read serves instead when a consumer above already made it. An
+               // object no roll-up aggregates reads nothing here.
+               const summaryKeyColumns = this.summaryForeignKeyColumns(object);
+               if (summaryKeyColumns.length > 0) {
+                   const previous = priorRowsRead
+                     ? ((await readPriorRows()) ?? [])
+                     : (((await driver.find(object, { ...ast, fields: summaryKeyColumns }, hookContext.input.options as Parameters<IDataDriver['find']>[2])) ?? []) as Record<string, unknown>[]);
+                   const payload = hookContext.input.data as Record<string, unknown>;
+                   summaryRows = { previous, next: previous.map((row) => ({ ...row, ...payload })) };
+               }
                try {
                    result = await driver.updateMany!(object, ast, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
                } catch (driverError) {
@@ -17591,7 +17622,10 @@ export class ObjectQL implements IObjectQLEngine {
 
            // Roll-up: recompute parent summaries; pass priorRecord too so a child
            // that moved to a different parent updates BOTH old and new parent.
-           const summaryFailures = await this.recomputeSummaries(object, result, priorRecord, opCtx.context);
+           // [#26950] A predicate write passes its matched rows, old and new.
+           const summaryFailures = summaryRows
+             ? await this.recomputeSummaries(object, summaryRows.next, summaryRows.previous, opCtx.context)
+             : await this.recomputeSummaries(object, result, priorRecord, opCtx.context);
 
            // Publish the update event under whichever contract this write can
            // honour: per-record `data.record.updated` (#4626), or the aggregate
@@ -19607,6 +19641,12 @@ export class ObjectQL implements IObjectQLEngine {
       // `record-after-delete` flow must see each deleted row rather than one
       // context that names none of them.
       let bulkPerRowRows: Record<string, unknown>[] | null = null;
+      // [#26950] The predicate path's matched rows as the per-row hook read
+      // below took them (`null` when no delete-side hook asked for them), and
+      // the rows whose foreign keys `recomputeSummaries` is handed after the
+      // delete (`null` when no roll-up aggregates this object).
+      let predicateMatchedRows: Record<string, unknown>[] | null = null;
+      let summaryPriorRows: Record<string, unknown>[] | null = null;
 
       // [#5574] The dispatch ladder, resolved BEFORE the before phase — see
       // update()'s twin for the full reasoning. Keyed on the SAME falsy-`id`
@@ -19746,6 +19786,7 @@ export class ObjectQL implements IObjectQLEngine {
             (await driver.find(object, ast, preOpts) as Record<string, unknown>[]) ?? [],
             declaredDeleteColumns,
           );
+          predicateMatchedRows = doomed;
           // [D6] One ceiling, both phases, BEFORE the first per-row dispatch
           // and before the driver call.
           this.assertBulkPerRowHookBudget(
@@ -19841,8 +19882,23 @@ export class ObjectQL implements IObjectQLEngine {
                // `'none'` means no relation of the delete family points at
                // this object, so the walk could write nothing and the arm keeps
                // its single `deleteMany`, no rows read and no transaction.
+               //
+               // [#26950] A roll-up over this object needs the matched rows'
+               // foreign keys, read BEFORE the delete, to find the parents to
+               // recompute after it: the by-id branch hands `recomputeSummaries`
+               // its pre-image, and this arm hands it the matched rows. Only the
+               // descriptors' FK columns are read, through the composed AST and
+               // the write's driver options, and only once: the walk's own id
+               // read carries them below, and with no walk the per-row hook
+               // read serves when it was made. An object no roll-up aggregates
+               // reads nothing new.
+               const summaryKeyColumns = this.summaryForeignKeyColumns(object);
                const plan = this.planCascadeAtomicity(object);
                if (plan === 'none') {
+                 if (summaryKeyColumns.length > 0) {
+                   summaryPriorRows = predicateMatchedRows
+                     ?? (((await driver.find(object, { ...opCtx.ast!, fields: summaryKeyColumns }, hookContext.input.options as Parameters<IDataDriver['find']>[2])) ?? []) as Record<string, unknown>[]);
+                 }
                  result = await driver.deleteMany!(object, opCtx.ast!, hookContext.input.options as any);
                } else {
                  // Otherwise: resolve the matched rows through the composed,
@@ -19857,8 +19913,9 @@ export class ObjectQL implements IObjectQLEngine {
                  // branch's, for the same reasons (#7413).
                  const runPredicateDelete = async (writeContext?: ExecutionContext): Promise<unknown> => {
                    const writeOptions = this.buildDriverOptions(object, writeContext, hookContext.input.options as any);
-                   const matched = ((await driver.find(object, { ...opCtx.ast!, fields: ['id'] }, writeOptions)) ?? []) as Array<Record<string, unknown>>;
+                   const matched = ((await driver.find(object, { ...opCtx.ast!, fields: ['id', ...summaryKeyColumns] }, writeOptions)) ?? []) as Array<Record<string, unknown>>;
                    const matchedIds = matched.map((row) => row?.id).filter((v): v is string | number => v != null);
+                   if (summaryKeyColumns.length > 0) summaryPriorRows = withoutDeletedSelfParents(object, matched, matchedIds, this.getSummaryDescriptors(object));
                    for (const matchedId of matchedIds) {
                      await this.cascadeDeleteRelations(object, matchedId, writeContext);
                    }
@@ -19926,9 +19983,11 @@ export class ObjectQL implements IObjectQLEngine {
           // from the row's FK values captured BEFORE deletion. [#5272] That
           // capture is now the same single pre-image read `previous` rides on
           // (it used to be its own later `findOne`), which is also what
-          // `update()` passes here.
-          const summaryFailures = priorRecord
-            ? await this.recomputeSummaries(object, null, priorRecord, opCtx.context)
+          // `update()` passes here. [#26950] A predicate delete passes the
+          // matched rows it read before the delete.
+          const summaryPrevious = priorRecord ?? summaryPriorRows;
+          const summaryFailures = summaryPrevious
+            ? await this.recomputeSummaries(object, null, summaryPrevious, opCtx.context)
             : [];
 
           // Same split as update(): per-record `data.record.deleted` (#4626),

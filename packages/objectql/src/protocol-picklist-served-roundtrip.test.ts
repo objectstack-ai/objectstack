@@ -184,3 +184,52 @@ describe('picklist — the protocol object read and the authoring door', () => {
         expect(err.message).toContain('`picklist` and `options` cannot both be declared');
     });
 });
+
+// [#26886] Every door that shows a load-time diagnostic judges a
+// picklist-bound field as its author wrote it: the item's `_diagnostics`, the
+// list's, and `GET /meta/diagnostics`. The read itself keeps serving both keys.
+describe('picklist — the load-time diagnostics judge the authored field, not the served copy', () => {
+    const BOTH_KEYS = '`picklist` and `options` cannot both be declared';
+    let protocol: ObjectStackProtocolImplementation;
+
+    beforeEach(async () => {
+        const engine = new ObjectQL();
+        engine.registerDriver(makeStubDriver().driver, true);
+        await engine.init();
+        engine.registry.registerObject(sysMetadataObject);
+        for (const o of [SysMetadataHistoryObject, SysMetadataAuditObject, SysMetadataCommitObject]) engine.registry.registerObject(o as any);
+        engine.registerApp({
+            id: 'com.test.lists', name: 'lists',
+            picklists: [{ name: 'industry', label: 'Industry', options: [{ label: 'Tech', value: 'tech' }] }],
+            objects: [{
+                name: 'pd_obj', label: 'Probe', sharingModel: 'public_read_write',
+                fields: {
+                    name: { name: 'name', type: 'text', label: 'Name' },
+                    industry: { name: 'industry', type: 'select', label: 'Industry', picklist: 'industry' },
+                    stage: { name: 'stage', type: 'select', label: 'Stage', options: [{ label: 'Open', value: 'open' }] },
+                    both: { name: 'both', type: 'select', label: 'Both', picklist: 'industry', options: [{ label: 'Own', value: 'own' }] },
+                },
+            }],
+        } as any);
+        protocol = new ObjectStackProtocolImplementation(engine);
+    });
+
+    const bothKeysPaths = (diagnostics: any): string[] =>
+        (diagnostics?.errors ?? []).filter((e: any) => String(e.message).startsWith(BOTH_KEYS)).map((e: any) => e.path);
+
+    it('the item read: only the field that authored both keys is flagged, and both keys are still served', async () => {
+        const served: any = await protocol.getMetaItem({ type: 'object', name: 'pd_obj' } as any);
+        expect(served.item.fields.industry).toMatchObject({ picklist: 'industry', options: [{ label: 'Tech', value: 'tech' }] });
+        expect(bothKeysPaths(served.item._diagnostics)).toEqual(['fields.both.options']);
+        expect(served.item._diagnostics.errors.map((e: any) => e.path)).toEqual(['fields.both.options']);
+    });
+
+    it('the list read and `GET /meta/diagnostics` agree with the item read', async () => {
+        const listed: any = await protocol.getMetaItems({ type: 'object' } as any);
+        const item = (listed.items ?? listed).find((i: any) => i.name === 'pd_obj');
+        expect(bothKeysPaths(item._diagnostics)).toEqual(['fields.both.options']);
+        const sweep: any = await (protocol as any).getMetaDiagnostics({ type: 'object' });
+        const entry = sweep.entries.find((e: any) => e.name === 'pd_obj');
+        expect(entry.diagnostics.errors.map((e: any) => e.path)).toEqual(['fields.both.options']);
+    });
+});

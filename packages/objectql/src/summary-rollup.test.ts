@@ -45,11 +45,33 @@ function makeDriver() {
     });
   };
   let n = 0;
+  // [#26950] Every row read and predicate write, in order, so a test can count
+  // the reads a write made BEFORE its driver write.
+  const log: Array<{ op: 'find' | 'updateMany' | 'deleteMany'; object: string; ast: any }> = [];
   const driver: any = {
     name: 'memory', version: '0.0.0', supports: {},
     async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
     async find(object: string, ast: any) {
-      return Array.from(storeFor(object).values()).filter((r) => matches(r, ast?.where));
+      log.push({ op: 'find', object, ast });
+      return Array.from(storeFor(object).values()).filter((r) => matches(r, ast?.where)).map((r) => ({ ...r }));
+    },
+    async updateMany(object: string, ast: any, data: Record<string, unknown>) {
+      log.push({ op: 'updateMany', object, ast });
+      const s = storeFor(object);
+      let count = 0;
+      for (const [id, r] of Array.from(s.entries())) {
+        if (matches(r, ast?.where)) { s.set(id, { ...r, ...data, id }); count += 1; }
+      }
+      return count;
+    },
+    async deleteMany(object: string, ast: any) {
+      log.push({ op: 'deleteMany', object, ast });
+      const s = storeFor(object);
+      let count = 0;
+      for (const [id, r] of Array.from(s.entries())) {
+        if (matches(r, ast?.where)) { s.delete(id); count += 1; }
+      }
+      return count;
     },
     async findOne(object: string, ast: any) {
       for (const r of storeFor(object).values()) if (matches(r, ast?.where)) return r;
@@ -77,7 +99,7 @@ function makeDriver() {
     async beginTransaction() { return { __trx: true, commit: async () => {}, rollback: async () => {} }; },
     async commit() {}, async rollback() {},
   };
-  return { driver, storeFor };
+  return { driver, storeFor, log };
 }
 
 describe('roll-up summary fields', () => {
@@ -446,5 +468,140 @@ describe('roll-up summary seeding on the PARENT insert (#5749)', () => {
 
     const s = await engine.insert('sprint', { name: 'S1' });
     expect(storeFor('sprint').get(s.id).story_count).toBe(0);
+  });
+});
+
+describe('[#26950] a predicate update or delete hands recomputeSummaries its matched rows', () => {
+  let engine: ObjectQL;
+  let storeFor: ReturnType<typeof makeDriver>['storeFor'];
+  let log: ReturnType<typeof makeDriver>['log'];
+
+  beforeEach(async () => {
+    engine = new ObjectQL();
+    const d = makeDriver();
+    storeFor = d.storeFor;
+    log = d.log;
+    engine.registerDriver(d.driver, true);
+    await engine.init();
+    engine.registry.registerObject({
+      name: 'inv',
+      fields: {
+        name: { type: 'text' },
+        line_total: { type: 'summary', summaryOperations: { object: 'inv_line', field: 'amount', function: 'sum' } },
+        line_count: { type: 'summary', summaryOperations: { object: 'inv_line', field: 'amount', function: 'count' } },
+      },
+    } as any);
+    engine.registry.registerObject({
+      name: 'inv_line',
+      fields: {
+        grp: { type: 'text' },
+        amount: { type: 'number' },
+        inv: { type: 'master_detail', reference: 'inv' },
+      },
+    } as any);
+    // No roll-up aggregates it and nothing points at it: the control.
+    engine.registry.registerObject({
+      name: 'plain',
+      fields: { grp: { type: 'text' }, amount: { type: 'number' } },
+    } as any);
+  });
+
+  const parent = (id: string) => storeFor('inv').get(id);
+  /** The row reads of `object` made before the first predicate driver write. */
+  const readsBeforeWrite = (object: string) => {
+    const at = log.findIndex((e) => e.op !== 'find');
+    return log.slice(0, at === -1 ? log.length : at).filter((e) => e.object === object);
+  };
+  const seed = async () => {
+    const a = await engine.insert('inv', { name: 'A' });
+    const b = await engine.insert('inv', { name: 'B' });
+    await engine.insert('inv_line', { inv: a.id, grp: 'x', amount: 10 });
+    await engine.insert('inv_line', { inv: a.id, grp: 'x', amount: 32 });
+    await engine.insert('inv_line', { inv: b.id, grp: 'y', amount: 5 });
+    log.length = 0;
+    return { a: a.id as string, b: b.id as string };
+  };
+
+  it('control: a predicate write on an object no roll-up aggregates reads no row', async () => {
+    await engine.insert('plain', { grp: 'x', amount: 1 });
+    await engine.insert('plain', { grp: 'x', amount: 2 });
+    log.length = 0;
+
+    expect(await engine.update('plain', { amount: 9 }, { where: { grp: 'x' }, multi: true })).toBe(2);
+    expect(await engine.delete('plain', { where: { grp: 'x' }, multi: true })).toBe(2);
+    expect(log.map((e) => `${e.op} ${e.object}`)).toEqual(['updateMany plain', 'deleteMany plain']);
+  });
+
+  it('a predicate update reads only the FK columns, once, and recomputes the old and the new parent', async () => {
+    const { a, b } = await seed();
+    expect(await engine.update('inv_line', { inv: b }, { where: { grp: 'x' }, multi: true })).toBe(2);
+
+    const reads = readsBeforeWrite('inv_line');
+    expect(reads).toHaveLength(1);
+    expect(reads[0].ast.fields).toEqual(['inv']);
+    expect(reads[0].ast.where).toEqual({ grp: 'x' });
+    expect(parent(a)).toMatchObject({ line_total: 0, line_count: 0 });
+    expect(parent(b)).toMatchObject({ line_total: 47, line_count: 3 });
+  });
+
+  it('a predicate delete reads only the FK columns, once, and recomputes the parent its rows named', async () => {
+    const { a, b } = await seed();
+    expect(await engine.delete('inv_line', { where: { grp: 'x' }, multi: true })).toBe(2);
+
+    const reads = readsBeforeWrite('inv_line');
+    expect(reads).toHaveLength(1);
+    expect(reads[0].ast.fields).toEqual(['inv']);
+    expect(parent(a)).toMatchObject({ line_total: 0, line_count: 0 });
+    expect(parent(b)).toMatchObject({ line_total: 5, line_count: 1 });
+  });
+
+  it('reuses the matched-row read the per-row hooks already made: no second read', async () => {
+    const { a, b } = await seed();
+    engine.registerHook('afterUpdate', () => {}, { object: 'inv_line' } as any);
+    engine.registerHook('afterDelete', () => {}, { object: 'inv_line' } as any);
+
+    await engine.update('inv_line', { inv: b }, { where: { grp: 'x' }, multi: true });
+    expect(readsBeforeWrite('inv_line'), 'update: the hooks\' one read').toHaveLength(1);
+    expect(parent(a)).toMatchObject({ line_count: 0 });
+    expect(parent(b)).toMatchObject({ line_count: 3 });
+
+    log.length = 0;
+    await engine.delete('inv_line', { where: { inv: b }, multi: true });
+    expect(readsBeforeWrite('inv_line'), 'delete: the hooks\' one read').toHaveLength(1);
+    expect(parent(b)).toMatchObject({ line_total: 0, line_count: 0 });
+  });
+
+  it('a delete that runs the referential walk carries the FK columns on the walk\'s own id read', async () => {
+    engine.registry.registerObject({
+      name: 'inv_note',
+      fields: { line: { type: 'lookup', reference: 'inv_line' } },
+    } as any);
+    const { a } = await seed();
+    expect(await engine.delete('inv_line', { where: { grp: 'x' }, multi: true })).toBe(2);
+
+    expect(readsBeforeWrite('inv_line').map((e) => e.ast.fields)).toEqual([['id', 'inv']]);
+    expect(parent(a)).toMatchObject({ line_total: 0, line_count: 0 });
+  });
+
+  it('a roll-up over its own object does not recompute a parent the same delete removed', async () => {
+    // A self roll-up: a node counts the nodes whose `up` names it. Deleting a
+    // node and its child in one predicate delete leaves the child naming a
+    // parent that is gone; only the surviving root is recomputed, and the
+    // delete answers its count instead of a recompute failure.
+    engine.registry.registerObject({
+      name: 'node',
+      fields: {
+        grp: { type: 'text' },
+        up: { type: 'lookup', reference: 'node' },
+        kids: { type: 'summary', summaryOperations: { object: 'node', field: 'grp', function: 'count', relationshipField: 'up' } },
+      },
+    } as any);
+    const root = await engine.insert('node', { grp: 'keep' });
+    const mid = await engine.insert('node', { grp: 'x', up: root.id });
+    await engine.insert('node', { grp: 'x', up: mid.id });
+    expect(storeFor('node').get(root.id).kids).toBe(1);
+
+    expect(await engine.delete('node', { where: { grp: 'x' }, multi: true })).toBe(2);
+    expect(storeFor('node').get(root.id).kids).toBe(0);
   });
 });

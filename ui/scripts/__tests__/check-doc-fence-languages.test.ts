@@ -355,14 +355,19 @@ describe('check-doc-fence-languages: the scan surface is check-doc-snippet-types
    * install-free reason; comparing the copies is what keeps "copy freely" honest.
    */
   it('all three doc gates carry the same ROOT_PAGES — the surface objectui#7115 widened', () => {
-    expect([...FENCE_ROOT_PAGES]).toEqual(['README.md']);
+    // Empty since objectstack#26080 folded the root README into the repository's
+    // root README and moved its examples to the quick-start page; the three
+    // copies are emptied together, and stay compared.
+    expect([...FENCE_ROOT_PAGES]).toEqual([]);
     expect([...SNIPPET_ROOT_PAGES]).toEqual([...FENCE_ROOT_PAGES]);
     expect([...COMPONENT_ROOT_PAGES]).toEqual([...FENCE_ROOT_PAGES]);
   });
 
-  it('the root README is really in this gate’s walk — the widening, pinned', () => {
-    // Not implied by the equality above: both lists could lose it together.
-    expect(fenceDocuments(ROOT)).toContain('README.md');
+  it('the root README examples are really in this gate’s walk, on the quick-start page', () => {
+    // Not implied by the equality above: the README's examples left the root
+    // pages for `content/docs/guide/quick-start.md`, and only the guide-tree walk
+    // can still reach them.
+    expect(fenceDocuments(ROOT)).toContain('content/docs/guide/quick-start.md');
   });
 
   /**

@@ -30,6 +30,7 @@ import {
   nestedPackageReadmePages,
   resolvesOnlyThroughRootManifest,
   ROOT_DOCS,
+  ROOT_PAGES,
   adrDocsPages,
   auditDocsPages,
   rootDeclaredSpecifiers,
@@ -612,29 +613,40 @@ describe('this repository', () => {
  * at all, which is coverage of nothing, and only the second half tells the two
  * apart.
  */
-describe('objectui#7115 — the root README is in the scan set', () => {
-  it('listDocuments reaches it', () => {
-    expect(listDocuments(repoRoot)).toContain('README.md');
+/*
+ * objectstack#26080 folded the root README into the repository's root README,
+ * outside this tree, and moved its examples — every ts/tsx block this pin was
+ * about — to `content/docs/guide/quick-start.md`, so `ROOT_PAGES` is empty and
+ * the far end of the walk above is pinned on that page: in the scan set, off the
+ * ledger, and contributing blocks to the compiled tier.
+ */
+const QUICK_START = 'content/docs/guide/quick-start.md';
+
+describe('objectui#7115 — the root README examples are in the scan set, on the quick-start page', () => {
+  it('listDocuments reaches the page they moved to', () => {
+    expect(listDocuments(repoRoot)).toContain(QUICK_START);
   });
 
   it('is COVERED and actually judged — off the ledger, with blocks in the compiled tier', () => {
-    expect(Object.keys(UNGATED_DOCS as Record<string, string>)).not.toContain('README.md');
+    expect(Object.keys(UNGATED_DOCS as Record<string, string>)).not.toContain(QUICK_START);
     const state = analyze({});
-    expect(state.covered as string[]).toContain('README.md');
+    expect(state.covered as string[]).toContain(QUICK_START);
     expect(
-      (state.compiled as Array<{ doc: string }>).filter((b) => b.doc === 'README.md').length,
+      (state.compiled as Array<{ doc: string }>).filter((b) => b.doc === QUICK_START).length,
       'off the ledger with no block left would be coverage of nothing',
     ).toBeGreaterThan(0);
   });
 
-  it('root pages are collected BY NAME, not by the packages walk', () => {
+  it('root pages are collected BY NAME, not by any walk — and none is named now', () => {
     // The mechanism, isolated: a tree with no `content/docs` and no `packages`
-    // still lists its root page, which is what makes the entry independent of
-    // the two walks it sits between.
+    // lists exactly the root pages `ROOT_PAGES` names. It names none since
+    // objectstack#26080, so a stray root README is not collected — the entry is
+    // what decides, never the file's presence.
+    expect([...ROOT_PAGES]).toEqual([]);
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'check-doc-snippet-types-rootpages-'));
     try {
       fs.writeFileSync(path.join(dir, 'README.md'), '# root\n');
-      expect(listDocuments(dir)).toEqual(['README.md']);
+      expect(listDocuments(dir)).toEqual([]);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
