@@ -620,8 +620,9 @@ export interface ISecurityService {
    * (`FieldPermissionSchema.when`) contributes its lock only on the rows its
    * condition names, and a field is in `editable` iff a by-id update of that
    * row naming it passes field-level security. Like {@link getWritableFields},
-   * neither the object grant nor a field's own rules (`readonly`, a computed
-   * type) are part of the answer.
+   * neither the object grant, the record's row-level write scope (sharing,
+   * row-level security, ownership) nor a field's own rules (`readonly`, a
+   * computed type) are part of the answer: a reader ANDs it with those.
    *
    * **`readable` is {@link getReadableFields}' answer**, unchanged: reads are
    * judged row-blind (a `when` reaches the edit vote only).

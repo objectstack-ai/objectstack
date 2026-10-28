@@ -1756,7 +1756,7 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | **object** | `string` | ✅ | Object name |
 | **recordId** | `string` | ✅ | The record the projection was judged on |
 | **readable** | `string[]` | ✅ | Fields the caller may read on this object. Reads are judged row-blind, so this equals the object-wide read projection |
-| **editable** | `string[]` | ✅ | Fields the caller may write on this record, as field-level security judges an update of the stored row: a row-conditioned field permission locks a field only on the rows its condition names. A field absent here is refused by the write gate. The object grant and a field's own rules (readonly, computed types) are not part of it |
+| **editable** | `string[]` | ✅ | Fields the caller may write on this record, as field-level security judges an update of the stored row: a row-conditioned field permission locks a field only on the rows its condition names. A field absent here is refused by the write gate. The object grant, the record's row-level write scope (sharing, row-level security, ownership) and a field's own rules (readonly, computed types) are not part of it |
 
 
 ---

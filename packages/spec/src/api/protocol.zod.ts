@@ -3118,7 +3118,8 @@ export const GetRecordFieldAccessResponseSchema = lazySchema(() => z.object({
   editable: z.array(z.string()).describe(
     'Fields the caller may write on this record, as field-level security judges an update of the stored row: a '
     + 'row-conditioned field permission locks a field only on the rows its condition names. A field absent here is '
-    + 'refused by the write gate. The object grant and a field\'s own rules (readonly, computed types) are not part of it',
+    + 'refused by the write gate. The object grant, the record\'s row-level write scope (sharing, row-level security, '
+    + 'ownership) and a field\'s own rules (readonly, computed types) are not part of it',
   ),
 }));
 
