@@ -479,8 +479,8 @@ describe('objectui#7051 — @objectstack/spec is the enforcing door for the two 
     // `split` form type it served: refused by name, beside `group` or not.
     const pane = FormSectionSchema.safeParse({ group: 'contact_info', pane: 'primary' });
     expect(pane.success).toBe(false);
-    expect((pane as any).error.issues.map((i: any) => i.path.join('.'))).toEqual(['pane']);
-    expect((pane as any).error.issues[0].message).toContain('was removed in @objectstack/spec 18.3.0');
+    expect(pane.error?.issues.map((i) => i.path.join('.'))).toEqual(['pane']);
+    expect(pane.error?.issues[0]?.message).toContain('was removed in @objectstack/spec 18.3.0');
   });
 
   it('refuses `group` on a wizard step, and accepts it on every other form type', () => {
