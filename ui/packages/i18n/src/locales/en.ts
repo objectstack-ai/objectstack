@@ -1471,6 +1471,9 @@ const en = {
     new: 'New',
     add: 'Add',
     activity: 'Activity',
+    timeline: 'Timeline',
+    timelineFolded: 'Activity',
+    panelToggles: 'Panels',
     history: 'History',
     historyEmpty: 'No history yet',
     editRow: 'Edit',
@@ -2229,6 +2232,8 @@ const en = {
       newChat: 'New chat',
       toggleChatsList: 'Toggle conversations list',
       goHome: 'Back to home',
+      toggleTimeline: 'Show / hide timeline',
+      toggleRelated: 'Show / hide related',
     },
     reportIndex: {
       title: 'Reports',

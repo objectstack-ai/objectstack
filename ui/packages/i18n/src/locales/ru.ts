@@ -1201,6 +1201,9 @@ const ru = {
     new: "Создать",
     add: "Добавить",
     activity: "Активность",
+    timeline: "Хронология",
+    timelineFolded: "Активность",
+    panelToggles: "Панели",
     editRow: "Редактировать",
     deleteRow: "Удалить",
     deleteRowConfirmation: "Удалить «{{name}}»?",
@@ -2178,6 +2181,8 @@ const ru = {
       newChat: "Новый чат",
       toggleChatsList: "Переключить список чатов",
       goHome: "Вернуться на главную",
+      toggleTimeline: "Показать / скрыть хронологию",
+      toggleRelated: "Показать / скрыть связанные",
     },
     reportIndex: {
       title: "Отчёты",

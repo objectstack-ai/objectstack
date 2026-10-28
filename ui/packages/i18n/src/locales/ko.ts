@@ -1287,6 +1287,9 @@ const ko = {
     concurrentUpdateRecordLabel: "이 레코드",
     openInNewTab: "새 탭에서 열기",
     activity: "활동",
+    timeline: "타임라인",
+    timelineFolded: "활동",
+    panelToggles: "패널",
     history: "기록",
     historyEmpty: "아직 기록이 없습니다",
     editRow: "편집",
@@ -2072,6 +2075,8 @@ const ko = {
       newChat: "새 채팅",
       toggleChatsList: "채팅 목록 전환",
       goHome: "홈으로 돌아가기",
+      toggleTimeline: "타임라인 표시 / 숨기기",
+      toggleRelated: "관련 표시 / 숨기기",
     },
     reportIndex: {
       title: "보고서",

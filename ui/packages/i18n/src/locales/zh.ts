@@ -1209,6 +1209,9 @@ const zh = {
     new: '新建',
     add: '添加',
     activity: '活动',
+    timeline: '时间线',
+    timelineFolded: '动态',
+    panelToggles: '面板',
     history: '历史',
     historyEmpty: '暂无历史记录',
     editRow: '编辑',
@@ -1854,6 +1857,8 @@ const zh = {
       newChat: '新建对话',
       toggleChatsList: '切换对话列表',
       goHome: '返回首页',
+      toggleTimeline: '显示 / 隐藏时间线',
+      toggleRelated: '显示 / 隐藏相关',
     },
     reportIndex: {
       title: '报表',

@@ -1287,6 +1287,9 @@ const de = {
     concurrentUpdateRecordLabel: "diesem Datensatz",
     openInNewTab: "In neuem Tab öffnen",
     activity: "Aktivität",
+    timeline: "Zeitleiste",
+    timelineFolded: "Aktivität",
+    panelToggles: "Bereiche",
     history: "Verlauf",
     historyEmpty: "Noch kein Verlauf",
     editRow: "Bearbeiten",
@@ -2072,6 +2075,8 @@ const de = {
       newChat: "Neuer Chat",
       toggleChatsList: "Chatliste umschalten",
       goHome: "Zurück zur Startseite",
+      toggleTimeline: "Zeitleiste ein- / ausblenden",
+      toggleRelated: "Verknüpfte ein- / ausblenden",
     },
     reportIndex: {
       title: "Berichte",

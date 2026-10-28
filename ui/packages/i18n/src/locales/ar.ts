@@ -1441,6 +1441,9 @@ const ar = {
     concurrentUpdateRecordLabel: "هذا السجل",
     openInNewTab: "فتح في علامة تبويب جديدة",
     activity: "النشاط",
+    timeline: "الخط الزمني",
+    timelineFolded: "النشاط",
+    panelToggles: "اللوحات",
     history: "السجل",
     historyEmpty: "لا يوجد سجل بعد",
     editRow: "تعديل",
@@ -2271,6 +2274,8 @@ const ar = {
       newChat: "محادثة جديدة",
       toggleChatsList: "تبديل قائمة المحادثات",
       goHome: "العودة إلى الرئيسية",
+      toggleTimeline: "إظهار / إخفاء الخط الزمني",
+      toggleRelated: "إظهار / إخفاء العناصر ذات الصلة",
     },
     reportIndex: {
       title: "التقارير",

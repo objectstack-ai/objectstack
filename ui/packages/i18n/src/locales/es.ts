@@ -1327,6 +1327,9 @@ const es = {
     concurrentUpdateRecordLabel: "este registro",
     openInNewTab: "Abrir en nueva pestaña",
     activity: "Actividad",
+    timeline: "Cronología",
+    timelineFolded: "Actividad",
+    panelToggles: "Paneles",
     history: "Historial",
     historyEmpty: "Aún no hay historial",
     editRow: "Editar",
@@ -2124,6 +2127,8 @@ const es = {
       newChat: "Nuevo chat",
       toggleChatsList: "Alternar lista de chats",
       goHome: "Volver al inicio",
+      toggleTimeline: "Mostrar / ocultar la cronología",
+      toggleRelated: "Mostrar / ocultar relacionados",
     },
     reportIndex: {
       title: "Informes",

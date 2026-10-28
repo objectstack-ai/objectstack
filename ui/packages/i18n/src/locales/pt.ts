@@ -1324,6 +1324,9 @@ const pt = {
     concurrentUpdateRecordLabel: "este registro",
     openInNewTab: "Abrir em nova aba",
     activity: "Atividade",
+    timeline: "Linha do tempo",
+    timelineFolded: "Atividade",
+    panelToggles: "Painéis",
     history: "Histórico",
     historyEmpty: "Nenhum histórico ainda",
     editRow: "Editar",
@@ -2119,6 +2122,8 @@ const pt = {
       newChat: "Nova conversa",
       toggleChatsList: "Alternar lista de conversas",
       goHome: "Voltar ao início",
+      toggleTimeline: "Mostrar / ocultar a linha do tempo",
+      toggleRelated: "Mostrar / ocultar relacionados",
     },
     reportIndex: {
       title: "Relatórios",

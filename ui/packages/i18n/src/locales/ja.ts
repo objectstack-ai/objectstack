@@ -1134,6 +1134,9 @@ const ja = {
     new: "新規",
     add: "追加",
     activity: "アクティビティ",
+    timeline: "タイムライン",
+    timelineFolded: "アクティビティ",
+    panelToggles: "パネル",
     editRow: "編集",
     deleteRow: "削除",
     deleteRowConfirmation: "「{{name}}」を削除してもよろしいですか？",
@@ -2074,6 +2077,8 @@ const ja = {
       newChat: "新しいチャット",
       toggleChatsList: "チャット一覧を切り替え",
       goHome: "ホームに戻る",
+      toggleTimeline: "タイムラインの表示 / 非表示",
+      toggleRelated: "関連の表示 / 非表示",
     },
     reportIndex: {
       title: "レポート",

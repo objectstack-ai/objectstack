@@ -1324,6 +1324,9 @@ const fr = {
     concurrentUpdateRecordLabel: "cet enregistrement",
     openInNewTab: "Ouvrir dans un nouvel onglet",
     activity: "Activité",
+    timeline: "Chronologie",
+    timelineFolded: "Activité",
+    panelToggles: "Panneaux",
     history: "Historique",
     historyEmpty: "Aucun historique pour le moment",
     editRow: "Modifier",
@@ -2120,6 +2123,8 @@ const fr = {
       newChat: "Nouvelle discussion",
       toggleChatsList: "Basculer la liste des discussions",
       goHome: "Retour à l'accueil",
+      toggleTimeline: "Afficher / masquer la chronologie",
+      toggleRelated: "Afficher / masquer les éléments associés",
     },
     reportIndex: {
       title: "Rapports",
