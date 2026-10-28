@@ -198,10 +198,21 @@ export {
   RECORD_PAGE_THREE_COLUMN_MIN_WIDTH,
   RECORD_PAGE_TWO_COLUMN_MIN_WIDTH,
   recordPageTierFor,
+  recordPageArrangementFor,
+  recordPageColumnDefaults,
+  recordTimelineDefaultReason,
   recordPageColumnOfTab,
   buildDefaultPageColumns,
 } from './synth/recordPageColumns';
-export type { RecordPageTier, RecordPageColumn, DefaultPageColumns } from './synth/recordPageColumns';
+export type {
+  RecordPageTier,
+  RecordPageColumn,
+  DefaultPageColumns,
+  RecordPageColumnSwitches,
+  RecordPageArrangement,
+  RecordPageObjectLike,
+  RecordTimelineDefaultReason,
+} from './synth/recordPageColumns';
 export { useRecordPageTier } from './useRecordPageTier';
 export type { UseRecordPageTierOptions } from './useRecordPageTier';
 export { RecordPageColumns } from './RecordPageColumns';

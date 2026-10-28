@@ -6,7 +6,13 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { useCallback, useSyncExternalStore } from 'react';
+import {
+  defineWorkspacePreference,
+  readWorkspacePreference,
+  useWorkspacePreference,
+  writeWorkspacePreference,
+  workspacePreferenceStorage,
+} from './workspacePreference.js';
 
 /**
  * How the console's object page opens a record a reader clicks, when the
@@ -34,6 +40,13 @@ import { useCallback, useSyncExternalStore } from 'react';
  * It never overrides a declaration: an object whose resolved mode is `page`,
  * `new_window` or `none` ignores it, because the host reads it only for a
  * drawer-mode record.
+ *
+ * A thin alias over the console's one preference store,
+ * `workspacePreference.ts` (objectstack#27052): the preference is
+ * {@link RECORD_OPEN_PREFERENCE} there, in the `user` scope, and it keeps the
+ * spelling it was first stored with — a bare `drawer` / `split` under
+ * {@link RECORD_OPEN_PREFERENCE_KEY} — so a reader's earlier choice reads
+ * back unchanged.
  */
 export type RecordOpenPreference = 'drawer' | 'split';
 
@@ -49,15 +62,19 @@ export type RecordOpenPreferenceStorage = Pick<Storage, 'getItem'>;
 /** The storage surface this module writes — `localStorage`, or a test double. */
 export type RecordOpenPreferenceWriteStorage = Pick<Storage, 'setItem'>;
 
-function defaultStorage(): Storage | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    return window.localStorage;
-  } catch {
-    // Accessing `localStorage` itself throws on a blocked origin.
-    return null;
-  }
-}
+/**
+ * The preference in the console's store: one key for every object (`user`
+ * scope), stored as the bare value. Any other stored spelling — an unknown
+ * value, a retired mode name, another case — is no choice.
+ */
+export const RECORD_OPEN_PREFERENCE = defineWorkspacePreference<RecordOpenPreference>({
+  name: 'record.open-mode',
+  storageKey: () => RECORD_OPEN_PREFERENCE_KEY,
+  codec: {
+    decode: (stored) => (stored === 'split' || stored === 'drawer' ? stored : undefined),
+    encode: (value) => value,
+  },
+});
 
 /**
  * The reader's record-open preference, or {@link DEFAULT_RECORD_OPEN_PREFERENCE}
@@ -66,29 +83,10 @@ function defaultStorage(): Storage | null {
  * says there is none.
  */
 export function readRecordOpenPreference(
-  storage: RecordOpenPreferenceStorage | null = defaultStorage(),
+  storage: RecordOpenPreferenceStorage | null = workspacePreferenceStorage(),
 ): RecordOpenPreference {
-  if (!storage) return DEFAULT_RECORD_OPEN_PREFERENCE;
-  try {
-    const stored = storage.getItem(RECORD_OPEN_PREFERENCE_KEY);
-    return stored === 'split' || stored === 'drawer' ? stored : DEFAULT_RECORD_OPEN_PREFERENCE;
-  } catch {
-    return DEFAULT_RECORD_OPEN_PREFERENCE;
-  }
+  return readWorkspacePreference(RECORD_OPEN_PREFERENCE, 'user', storage) ?? DEFAULT_RECORD_OPEN_PREFERENCE;
 }
-
-/**
- * A choice storage would not keep, held for this page: a browser whose
- * storage refuses the write (private mode, a full quota, a blocked origin)
- * would otherwise have the reader pick 分屏 and keep reading 抽屉 back.
- * `undefined` while storage keeps the choice — storage is then the one answer
- * — and cleared by the next kept write and by another tab's write (see
- * `subscribe`).
- */
-let pageChoice: RecordOpenPreference | undefined;
-
-/** The live {@link useRecordOpenPreference} callers on this page. */
-const listeners = new Set<() => void>();
 
 /**
  * Keep the reader's choice. `storage` defaults to the browser's
@@ -103,42 +101,9 @@ const listeners = new Set<() => void>();
  */
 export function writeRecordOpenPreference(
   next: RecordOpenPreference,
-  storage: RecordOpenPreferenceWriteStorage | null = defaultStorage(),
+  storage: RecordOpenPreferenceWriteStorage | null = workspacePreferenceStorage(),
 ): void {
-  pageChoice = next;
-  if (storage) {
-    try {
-      storage.setItem(RECORD_OPEN_PREFERENCE_KEY, next);
-      pageChoice = undefined;
-    } catch {
-      // Not kept past this page — see above.
-    }
-  }
-  for (const listener of Array.from(listeners)) listener();
-}
-
-function subscribe(onChange: () => void): () => void {
-  listeners.add(onChange);
-  const onStorage = (event: StorageEvent) => {
-    // `key === null` is a `clear()` in another tab.
-    if (event.key === RECORD_OPEN_PREFERENCE_KEY || event.key === null) {
-      pageChoice = undefined;
-      onChange();
-    }
-  };
-  if (typeof window !== 'undefined') window.addEventListener('storage', onStorage);
-  return () => {
-    listeners.delete(onChange);
-    if (typeof window !== 'undefined') window.removeEventListener('storage', onStorage);
-  };
-}
-
-function snapshot(): RecordOpenPreference {
-  return pageChoice ?? readRecordOpenPreference();
-}
-
-function serverSnapshot(): RecordOpenPreference {
-  return DEFAULT_RECORD_OPEN_PREFERENCE;
+  writeWorkspacePreference(RECORD_OPEN_PREFERENCE, 'user', next, storage);
 }
 
 /**
@@ -148,7 +113,5 @@ function serverSnapshot(): RecordOpenPreference {
  * object page decides its split face from the value the reader just chose.
  */
 export function useRecordOpenPreference(): [RecordOpenPreference, (next: RecordOpenPreference) => void] {
-  const preference = useSyncExternalStore(subscribe, snapshot, serverSnapshot);
-  const setPreference = useCallback((next: RecordOpenPreference) => writeRecordOpenPreference(next), []);
-  return [preference, setPreference];
+  return useWorkspacePreference(RECORD_OPEN_PREFERENCE, 'user', DEFAULT_RECORD_OPEN_PREFERENCE);
 }
