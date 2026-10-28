@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { ConnectorProviderFactory, ResolvedConnectorAuth } from '@objectstack/spec/integration';
-import { ConnectorUpstreamUnavailableError } from '@objectstack/spec/integration';
+import { ConnectorCredentialRejectedError, ConnectorUpstreamUnavailableError } from '@objectstack/spec/integration';
 import { createMcpConnector, type McpConnectorOptions, type McpTransport } from './mcp-connector.js';
 
 /**
@@ -204,8 +204,9 @@ async function credentialRejectionStatus(err: unknown): Promise<number | undefin
  * materializer turns into a degraded instance that is retried with backoff
  * instead of aborting the whole app boot. The one exception past transport
  * validation is a **rejected credential**: an HTTP 401 / 403 during connect,
- * handshake or `tools/list` throws plain — a configuration fault, fatal at boot
- * and never retried (see {@link credentialRejectionStatus}).
+ * handshake or `tools/list` throws {@link ConnectorCredentialRejectedError} —
+ * a configuration fault the materializer degrades the instance for, never
+ * retried on a timer (see {@link credentialRejectionStatus}, #27237).
  */
 export function createMcpProviderFactory(deps: McpProviderDeps = {}): ConnectorProviderFactory {
   return async (ctx) => {
@@ -243,15 +244,21 @@ export function createMcpProviderFactory(deps: McpProviderDeps = {}): ConnectorP
       // missing or under-scoped credential valid, and a degraded instance
       // retried with backoff reads as "server down", hiding the misconfiguration
       // the author has to fix. Credential-protected remote servers are the
-      // common case, so it is told apart by the SDK's HTTP status and thrown
-      // plain — fatal at boot, a skipped entry on reload.
+      // common case, so it is told apart by the SDK's HTTP status. [#27237]
+      // Thrown as `ConnectorCredentialRejectedError` (ruling on #27237,
+      // comment 6470087293): the materializer degrades the instance naming the
+      // refusal and marks a stored credential `rejected`, instead of failing
+      // boot — and, like the plain throw before it, does not retry it on a
+      // timer. The next attempt is the next change of the credential.
       const status = await credentialRejectionStatus(err);
       if (status !== undefined) {
-        throw new Error(
+        throw new ConnectorCredentialRejectedError(
           `connector-mcp provider: connector '${ctx.name}' was refused by its MCP server (HTTP ${status}): the ` +
             `credential it sent (the instance auth, or providerConfig.transport.headers) is missing, wrong or not ` +
-            `authorized. This is a configuration fault and is not retried — fix the credential and reload. ` +
+            `authorized. This is a configuration fault and is not retried — fix the credential. ` +
             `${(err as Error).message}`,
+          status,
+          { cause: err },
         );
       }
       // Everything else past transport validation is talking to the server

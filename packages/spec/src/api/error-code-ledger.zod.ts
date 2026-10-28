@@ -1558,6 +1558,13 @@ export const ERROR_CODE_LEDGER = {
     'INVALID_REQUEST',
   ],
   '@objectstack/spec': [
+    // [#27237] `door: 'none'` — `ConnectorCredentialRejectedError`
+    // (`integration/connector-provider-errors.ts`), thrown by a connector
+    // provider factory whose upstream refused the instance's credential (401 /
+    // 403, carried as `status`). The automation materializer catches it and
+    // degrades the instance; no HTTP door on this tree answers with it, the
+    // thrown value is the boundary.
+    'CONNECTOR_CREDENTIAL_REJECTED',
     'CONNECTOR_UPSTREAM_UNAVAILABLE',
     'EXTERNAL_SCHEMA_MISMATCH',
     'EXTERNAL_SCHEMA_MODE_VIOLATION',

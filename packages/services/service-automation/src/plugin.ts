@@ -9,8 +9,9 @@ import type {
     ConnectorInstanceAuth,
     ResolvedConnectorAuth,
     ConnectorProviderContext,
+    ConnectorMaterializationHandler,
 } from '@objectstack/spec/integration';
-import { isConnectorUpstreamUnavailable, RetryConfigSchema } from '@objectstack/spec/integration';
+import { isConnectorCredentialRejected, isConnectorUpstreamUnavailable, RetryConfigSchema } from '@objectstack/spec/integration';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import type { MetadataMutationEvent } from '@objectstack/metadata-protocol';
 import { AutomationEngine } from './engine.js';
@@ -36,10 +37,13 @@ import {
     ConnectorCredentialStore,
     ConnectorCredentialUnavailableError,
     connectorCredentialFingerprint,
+    credentialRejectedOnCallReason,
+    credentialRejectionStatusOf,
     isSuppliedByEnv,
     missingCredentialReason,
     probeConnectorCredential,
     resolveConnectorCredential,
+    upstreamRefusalMessage,
     withoutCredentialThrown,
     type ConnectorCredentialChain,
     type ConnectorCredentialRecord,
@@ -724,8 +728,13 @@ export class AutomationServicePlugin implements Plugin {
      * Disjoint from {@link materializedConnectors} EXCEPT when a *changed*
      * entry's re-materialization failed — then the old live connector keeps
      * serving (still tracked there) while the retry is pending here.
+     *
+     * [#27237] `held` marks an instance whose upstream refused its credential:
+     * degraded like the others, but neither the retry timer nor a reconcile
+     * re-attempts it while its signature — which carries the credential's
+     * source and revision — stays the same.
      */
-    private degradedInstances = new Map<string, { attempts: number; signature: string; reason: string }>();
+    private degradedInstances = new Map<string, { attempts: number; signature: string; reason: string; held?: boolean }>();
     private declarativeRetryTimer?: ReturnType<typeof setTimeout>;
     /**
      * [#7742] The connector collection carried by the most recent
@@ -2086,6 +2095,11 @@ export class AutomationServicePlugin implements Plugin {
                 continue;
             }
 
+            // [#27237] Held: its upstream refused this very credential. The
+            // next attempt is the next change of the credential or the entry.
+            const held = this.degradedInstances.get(name);
+            if (held?.held && held.signature === signature) continue;
+
             const provider = entry.provider;
 
             // §4 conflict: the name is held by a plugin-registered connector (not
@@ -2201,6 +2215,24 @@ export class AutomationServicePlugin implements Plugin {
                 // echoes the credential back must not carry it into the husk's
                 // reason, a log record or the thrown boot error.
                 const thrown = withoutCredentialThrown(err, credential?.value);
+                // [#27237] The upstream refused the credential (ruling on
+                // #27237, comment 6470087293): degrade the instance and mark a
+                // stored credential `rejected` — never a failed boot, never a
+                // retry loop against the same value.
+                if (isConnectorCredentialRejected(thrown)) {
+                    await this.holdConnectorForRejectedCredential(engine, ctx, {
+                        name,
+                        entry,
+                        provider,
+                        signature,
+                        live: existing,
+                        takeDown: false,
+                        credential,
+                        reason: (thrown as Error).message,
+                        cause: thrown,
+                    });
+                    continue;
+                }
                 if (isConnectorUpstreamUnavailable(thrown)) {
                     this.degradeConnectorInstance(engine, ctx, {
                         name,
@@ -2246,8 +2278,16 @@ export class AutomationServicePlugin implements Plugin {
             // what the factory named its def, so discovery, dispatch, and the
             // conflict rule all agree with the metadata the author wrote.
             const def = { ...materialization.def, name };
-            engine.registerConnector(def, materialization.handlers, 'declarative');
-            this.materializedConnectors.set(name, { signature, provider, close: materialization.close });
+            const tracked = { signature, provider, close: materialization.close };
+            // [#27237] A credentialed instance's calls are watched for the
+            // upstream's 401 / 403 (rest and openapi answer them as a result).
+            const handlers = credential && ref !== undefined
+                ? this.watchForCredentialRejection(engine, ctx, {
+                    name, entry, provider, signature, ref, credential, tracked,
+                }, materialization.handlers)
+                : materialization.handlers;
+            engine.registerConnector(def, handlers, 'declarative');
+            this.materializedConnectors.set(name, tracked);
             // Success clears any pending degraded retry — including replacing a
             // registered husk (registerConnector above overwrote it).
             const recovered = this.degradedInstances.delete(name);
@@ -2614,9 +2654,10 @@ export class AutomationServicePlugin implements Plugin {
     private async clearConnectorCredential(ctx: PluginContext, request: ConnectorCredentialClearRequest): Promise<ConnectorCredentialRef> {
         const ref = this.credentialRefOfRequest(request?.ref);
         const chain = this.connectorCredentialChain();
+        const userId = request?.context?.userId;
         let cleared: boolean;
         try {
-            cleared = await chain.store.clear(ref);
+            cleared = await chain.store.clear(ref, userId);
         } catch {
             throw new ConnectorCredentialUnavailableError(
                 `Credential '${ref}' could not be cleared: the connector credential store could not be read or written. Nothing was changed.`,
@@ -2625,11 +2666,140 @@ export class AutomationServicePlugin implements Plugin {
         if (!cleared) {
             throw credentialDoorRefusal(`Nothing is stored for credential '${ref}'.`, 'RESOURCE_NOT_FOUND', 404);
         }
-        const userId = request.context?.userId;
         ctx.logger.info(`[Automation] connector credential '${ref}' cleared${userId ? ` by user '${userId}'` : ''}.`);
         await this.materializeDeclaredConnectors(ctx, { fatal: false });
         const declared = await this.declaredCredentialRefs(ctx);
         return this.describeCredentialRef(chain, ref, declared.get(ref), await this.readCredentialRowsForDoor(chain));
+    }
+
+    /**
+     * [#27237] Degrade one instance whose upstream refused its credential —
+     * at materialization (`ConnectorCredentialRejectedError`, the mcp
+     * provider) or on a call (a 401 / 403 result, rest and openapi) — and
+     * mark a stored credential `rejected` with the upstream's message, which
+     * the caller has already scrubbed of the value. Held, not retried: the
+     * signature carries the credential's revision, so setting it again is
+     * what re-attempts the instance.
+     *
+     * A refusal at materialization leaves a live connector serving, as every
+     * failed re-materialization does; a refusal on a call takes the connector
+     * that made it down (`takeDown`).
+     */
+    private async holdConnectorForRejectedCredential(
+        engine: AutomationEngine,
+        ctx: PluginContext,
+        info: {
+            name: string;
+            entry: DeclaredConnectorItem;
+            provider: string;
+            signature: string;
+            live?: { close?: () => void | Promise<void> };
+            takeDown: boolean;
+            credential?: Extract<ConnectorCredentialResolution, { kind: 'resolved' }>;
+            reason: string;
+            cause?: unknown;
+        },
+    ): Promise<void> {
+        let hasLive = info.live !== undefined;
+        if (info.takeDown && info.live) {
+            await this.dematerializeConnector(engine, info.name, info.live, ctx, 'its upstream refused its credential');
+            hasLive = false;
+        }
+        this.degradedInstances.set(info.name, { attempts: 1, signature: info.signature, reason: info.reason, held: true });
+        if (!hasLive) {
+            try {
+                engine.registerDegradedConnector(this.buildDegradedHuskDef(info.name, info.entry), info.reason, 'declarative', info.cause);
+            } catch (err) {
+                ctx.logger.warn(
+                    `[Automation] could not register degraded husk for '${info.name}' — the instance stays absent from the ` +
+                        `connector registry until its credential changes.`,
+                    describeThrownForLog(err),
+                );
+            }
+        }
+        if (info.credential?.source === 'object' && info.credential.record) {
+            try {
+                await this.connectorCredentialChain().store.markRejected(info.credential.record, info.reason);
+            } catch (markErr) {
+                ctx.logger.warn(
+                    `[Automation] connector instance '${info.name}': its credential row could not be marked rejected.`,
+                    describeThrownForLog(markErr),
+                );
+            }
+        }
+        // #5575 — the reason quotes the upstream, foreign text: it rides `meta`.
+        ctx.logger.warn(
+            `[Automation] connector instance '${info.name}' (provider '${info.provider}') is degraded: its upstream refused ` +
+                `its credential. ` +
+                (hasLive
+                    ? 'The previously-materialized connector keeps serving.'
+                    : 'Not retried until its credential or its declaration changes.'),
+            { reason: info.reason },
+        );
+    }
+
+    /**
+     * [#27237] Wrap a credentialed instance's handlers so the first call its
+     * upstream answers 401 / 403 degrades the instance and marks its stored
+     * credential `rejected` (ruling on #27237, comment 6470087293). The call's
+     * own result is returned unchanged. Only the materialization these
+     * handlers belong to is taken down, once, through the reconcile queue, so
+     * a refusal never races a reconcile that already replaced it.
+     */
+    private watchForCredentialRejection(
+        engine: AutomationEngine,
+        ctx: PluginContext,
+        info: {
+            name: string;
+            entry: DeclaredConnectorItem;
+            provider: string;
+            signature: string;
+            ref: string;
+            credential: Extract<ConnectorCredentialResolution, { kind: 'resolved' }>;
+            tracked: { signature: string; provider: string; close?: () => void | Promise<void> };
+        },
+        handlers: Record<string, ConnectorMaterializationHandler>,
+    ): Record<string, ConnectorMaterializationHandler> {
+        let refused = false;
+        const watched: Record<string, ConnectorMaterializationHandler> = {};
+        for (const [key, handler] of Object.entries(handlers)) {
+            watched[key] = async (input, callCtx) => {
+                const result = await handler(input, callCtx);
+                const status = credentialRejectionStatusOf(result);
+                if (status === undefined || refused) return result;
+                refused = true;
+                const reason = credentialRejectedOnCallReason(
+                    info.name,
+                    info.ref,
+                    status,
+                    upstreamRefusalMessage((result as { body?: unknown }).body, info.credential.value),
+                );
+                const run = this.reconcileQueue.then(async () => {
+                    if (this.destroyed || this.materializedConnectors.get(info.name) !== info.tracked) return;
+                    await this.holdConnectorForRejectedCredential(engine, ctx, {
+                        name: info.name,
+                        entry: info.entry,
+                        provider: info.provider,
+                        signature: info.signature,
+                        live: info.tracked,
+                        takeDown: true,
+                        credential: info.credential,
+                        reason,
+                    });
+                });
+                this.reconcileQueue = run.catch(() => undefined);
+                try {
+                    await run;
+                } catch (err) {
+                    ctx.logger.warn(
+                        `[Automation] connector instance '${info.name}' was refused its credential on a call, and could not be degraded.`,
+                        describeThrownForLog(err),
+                    );
+                }
+                return result;
+            };
+        }
+        return watched;
     }
 
     /** The action-less def a degraded instance registers (#3017). */
@@ -2671,10 +2841,11 @@ export class AutomationServicePlugin implements Plugin {
      */
     private scheduleDeclarativeRetry(ctx: PluginContext): void {
         this.clearDeclarativeRetryTimer();
-        if (this.destroyed || this.degradedInstances.size === 0) return;
-        const delay = Math.min(
-            ...[...this.degradedInstances.values()].map((d) => declarativeRetryDelayMs(d.attempts)),
-        );
+        // [#27237] A held instance (its credential was refused) is not retried
+        // on a timer: the same value would be refused again.
+        const retrying = [...this.degradedInstances.values()].filter((d) => !d.held);
+        if (this.destroyed || retrying.length === 0) return;
+        const delay = Math.min(...retrying.map((d) => declarativeRetryDelayMs(d.attempts)));
         const timer = setTimeout(() => {
             this.declarativeRetryTimer = undefined;
             // Always soft: a background retry must never crash a running server.
@@ -2683,7 +2854,7 @@ export class AutomationServicePlugin implements Plugin {
         (timer as unknown as { unref?: () => void }).unref?.();
         this.declarativeRetryTimer = timer;
         ctx.logger.info(
-            `[Automation] ${this.degradedInstances.size} degraded connector instance(s); next retry in ${delay}ms`,
+            `[Automation] ${retrying.length} degraded connector instance(s); next retry in ${delay}ms`,
         );
     }
 

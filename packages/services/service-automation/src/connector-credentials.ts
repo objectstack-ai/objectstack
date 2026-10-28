@@ -269,18 +269,20 @@ export class ConnectorCredentialStore {
                         + '(setCryptoProvider — LocalCryptoProvider in development, a KMS-backed provider in production) and set it again.',
                 );
             }
-            throw err;
+            // Whatever else refused the write answers without the value it was handed.
+            throw withoutCredentialThrown(err, args.value);
         }
         return { created: !existing, revision };
     }
 
-    /** Remove the row for `ref`. `false` when none was stored. */
-    async clear(ref: string): Promise<boolean> {
+    /** Remove the row for `ref`, under the caller's user id for the audit. `false` when none was stored. */
+    async clear(ref: string, userId?: string): Promise<boolean> {
         const engine = this.resolveEngine();
         if (!engine) return false;
         const existing = await this.read(ref);
         if (!existing) return false;
-        await engine.delete(CONNECTOR_CREDENTIAL_OBJECT, { where: { id: existing.id }, context: SYSTEM_CONTEXT });
+        const context = { ...SYSTEM_CONTEXT, ...(userId ? { userId } : {}) };
+        await engine.delete(CONNECTOR_CREDENTIAL_OBJECT, { where: { id: existing.id }, context });
         return true;
     }
 
@@ -468,4 +470,52 @@ export async function probeConnectorCredential(
         if (present) return { source: 'vault', status: 'set' };
     }
     return { source: null, status: 'missing' };
+}
+
+/**
+ * The HTTP status of a connector call's `{ status }` result when the upstream
+ * refused the credential — 401 or 403 (ruling on #27237, comment 6470087293).
+ * The rest and openapi providers answer every response as `{ status, ok,
+ * body }` rather than throwing, so a refusal is read off the result.
+ */
+export function credentialRejectionStatusOf(result: unknown): 401 | 403 | undefined {
+    if (typeof result !== 'object' || result === null) return undefined;
+    const status = (result as { status?: unknown }).status;
+    return status === 401 || status === 403 ? status : undefined;
+}
+
+/** The bound on an upstream's words kept in a reason or a row. */
+export const UPSTREAM_REFUSAL_MESSAGE_MAX_LENGTH = 500;
+
+/**
+ * The upstream's own words from a refused call's body — the body itself when
+ * it is text, else its usual `message` / `error_description` / `error` /
+ * `error.message` / `detail` / `title` key — on one line, bounded, and with
+ * `secret` withheld BEFORE the bound is applied, so a cut can never leave part
+ * of it behind.
+ */
+export function upstreamRefusalMessage(body: unknown, secret: string | undefined): string | undefined {
+    let text: unknown;
+    if (typeof body === 'string') {
+        text = body;
+    } else if (typeof body === 'object' && body !== null) {
+        const b = body as Record<string, unknown>;
+        const nested = typeof b.error === 'object' && b.error !== null ? (b.error as Record<string, unknown>).message : b.error;
+        text = [b.message, b.error_description, nested, b.detail, b.title].find(
+            (v): v is string => typeof v === 'string' && v.trim().length > 0,
+        );
+    }
+    if (typeof text !== 'string') return undefined;
+    const flat = withoutCredential(text, secret).replace(/\s+/g, ' ').trim();
+    if (flat.length === 0) return undefined;
+    return flat.length > UPSTREAM_REFUSAL_MESSAGE_MAX_LENGTH ? `${flat.slice(0, UPSTREAM_REFUSAL_MESSAGE_MAX_LENGTH)}…` : flat;
+}
+
+/** The degraded reason for an instance whose upstream refused its credential on a call. */
+export function credentialRejectedOnCallReason(name: string, ref: string, status: number, upstream: string | undefined): string {
+    return (
+        `connector '${name}' was refused by its upstream (HTTP ${status}) on a call: credential '${ref}' is missing, wrong ` +
+        `or not authorized${upstream ? ` (the upstream said: ${upstream})` : ''}. The instance stays degraded, without ` +
+        `retrying, until credential '${ref}' changes.`
+    );
 }
