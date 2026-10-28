@@ -326,9 +326,8 @@
  * `pull_request:` trigger with a `paths:` filter naming its own script, so
  * "changes to the patrol itself get exercised before they merge"
  * (`half-state-patrol.yml`'s own comment, and the same words in
- * `fleet-patrols.yml` — whose `required-set-patrol` and
- * `release-coverage-patrol` jobs carried them in their own files before the
- * fold — and `merged-branch-reaper.yml`). The card's own specimen is one of those ten:
+ * `fleet-patrols.yml`'s `required-set-patrol` and `release-coverage-patrol`
+ * jobs, and `merged-branch-reaper.yml`). The card's own specimen is one of those ten:
  * `half-state-patrol.yml` already carried that trigger on the day the card was
  * filed. Three of the ten are `validate-deps.yml`'s, including
  * `check:override-consistency` — a gate every dependency card must run. So
