@@ -155,8 +155,7 @@ import { uiRoot } from './ui-root.mjs';
  * ⚠️ Changing this value changes whether a pull request can be merged, so it is
  * a decision and not a tidy-up. `check-new-cross-file-line-citations.test.ts`
  * reads it and states the landed state in its own assertion, so the flip cannot
- * happen without the pin moving with it, and the row in
- * `content/docs/guide/ci-cd-pipeline.md` says report-only in prose.
+ * happen without the pin moving with it.
  *
  * WHAT FLIPS IT (objectui#8875, ruling clause 2): once this gate has read ZERO
  * new citations across the in-flight population -- i.e. it is no longer

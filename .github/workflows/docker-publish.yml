@@ -127,6 +127,31 @@ jobs:
           console.log(`npm serves @objectstack/cli@${version} and ${seen.size - 1} @objectstack/* dependencies.`);
           NODE
 
+      - name: Decide which rolling tags this version may move
+        # A rebuild of an older version must not move `latest`, `X.Y` or `X`
+        # back onto it. Each rolling tag moves only when no stable
+        # @objectstack/cli version on npm in that tag's range is newer, so a
+        # release, or a rebuild of the current version, moves all three as
+        # before. When npm cannot be read, a dispatch pushes only the exact tag,
+        # and the release lane moves every rolling tag as before. The rules,
+        # and both fail directions, are in the script's header (#26961).
+        #
+        # LANE cannot come from `github.event_name`. In a workflow_call run the
+        # `github` context is the CALLER's, and release.yml's repair lane is a
+        # workflow_dispatch too. `github.workflow_ref` names this file only
+        # when it was dispatched directly.
+        #
+        # The self-test runs first. A pull request never runs this step, so
+        # this is the last point where the decision can be checked before it
+        # takes effect.
+        id: rolling
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          LANE: ${{ contains(github.workflow_ref, '/.github/workflows/docker-publish.yml@') && 'dispatch' || 'release' }}
+        run: |
+          node scripts/ci/docker-rolling-tags.mjs --self-test
+          node scripts/ci/docker-rolling-tags.mjs --version "$VERSION" --lane "$LANE"
+
       - name: Set up QEMU (arm64 emulation)
         uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
 
@@ -145,13 +170,22 @@ jobs:
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.IMAGE }}
-          # Tag = CLI version. Rolling minor/major/latest tags move with every
-          # publish; prereleases (x.y.z-rc.1) get only their exact tag.
+          # Tag = CLI version. The rolling minor/major/latest tags move only as
+          # far as the step above allows; prereleases (x.y.z-rc.1) get only
+          # their exact tag.
+          #
+          # `latest` has TWO sources in this action: the raw line below, and
+          # `flavor: latest=auto` (the default), which adds `latest` by itself
+          # for any stable `type=semver` value. Both read the same output, so
+          # gating only one of them still moves `latest`. For the newest
+          # version the tag list is exactly what it was before this change.
+          flavor: |
+            latest=${{ steps.rolling.outputs.latest }}
           tags: |
             type=semver,pattern={{version}},value=${{ steps.version.outputs.version }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ steps.version.outputs.version }}
-            type=semver,pattern={{major}},value=${{ steps.version.outputs.version }}
-            type=raw,value=latest,enable=${{ !contains(steps.version.outputs.version, '-') }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.version.outputs.version }},enable=${{ steps.rolling.outputs.minor }}
+            type=semver,pattern={{major}},value=${{ steps.version.outputs.version }},enable=${{ steps.rolling.outputs.major }}
+            type=raw,value=latest,enable=${{ steps.rolling.outputs.latest }}
 
       - name: Build and push
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
