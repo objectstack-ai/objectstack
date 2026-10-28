@@ -30,17 +30,12 @@ import {
   resolveStudioLanguage,
   studioString,
 } from '../namespaces/studio/index.js';
+// The `zh`-only families, each one-sided on purpose; the list's one home.
+import { STUDIO_ZH_ONLY_FAMILIES } from './studio-zh-only-families.js';
 
 /** `tFormat()`'s own placeholder pattern (app-shell `views/metadata-admin/i18n.ts`). */
 const PLACEHOLDER = /\{(\w+)\}/g;
 const placeholders = (value: string) => [...new Set(Array.from(value.matchAll(PLACEHOLDER), (m) => m[1]))].sort();
-
-/**
- * The `zh`-only families, each one-sided on purpose. `ZH_ONLY_REASONS` in
- * app-shell's `inspectorStrings.studioNamespace-25922.test.ts` carries the
- * reason and the consumer for each, and checks that its citation still locates it.
- */
-const ZH_ONLY_FAMILIES = ['engine.flowNode.', 'engine.enum.type.', 'engine.packages.form.help.'];
 
 function flatKeys(node: unknown, prefix = ''): string[] {
   if (typeof node !== 'object' || node === null) return [prefix];
@@ -69,7 +64,7 @@ describe('studio namespace — scoped parity', () => {
 
   it('a zh-only key belongs to a documented family', () => {
     const stray = zhKeys.filter(
-      (key) => !(key in STUDIO_EN) && !ZH_ONLY_FAMILIES.some((family) => key.startsWith(family)),
+      (key) => !(key in STUDIO_EN) && !STUDIO_ZH_ONLY_FAMILIES.some((family) => key.startsWith(family)),
     );
     expect(stray).toEqual([]);
   });
