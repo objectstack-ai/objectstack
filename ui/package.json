@@ -58,7 +58,6 @@
     "check:i18n-keys": "node scripts/check-i18n-call-site-keys.mjs",
     "check:i18n-drift": "node scripts/check-i18n-en-drift.mjs",
     "check:i18n-dead-keys": "node scripts/check-i18n-dead-keys.mjs",
-    "check:i18n-designer-parity": "node scripts/check-i18n-designer-table-parity.mjs",
     "check:skills-paths": "node scripts/check-skills-paths.mjs",
     "check:skill-examples": "node scripts/check-skill-examples.mjs",
     "check:skill-eval-tokens": "node scripts/check-skill-eval-tokens.mjs",

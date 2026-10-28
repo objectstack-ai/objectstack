@@ -44,24 +44,26 @@
  * 6431234244) reopened the objectui#4662 carve-out: this table becomes the
  * `studio` namespace of `@object-ui/i18n` (`packages/i18n/src/namespaces/studio/`),
  * one lazy namespace carrying the existing `en` and `zh` text, every other
- * language falling back to `en`. It moves in slices. Until the last one, a key
- * lives either here or there, never both, and every lookup below asks this
- * table first and the namespace second (`lookupString`), so no call site
- * changes. `packages/i18n/README.md`, section "Scope — the Studio designer
- * strings", is the conventions-side record; keep the two in step.
+ * language falling back to `en`. It moved in slices, and the last one (S7)
+ * deleted the engine-string table from this module: every designer string now
+ * answers from the namespace alone (`lookupString`), with no call site changed.
+ * `packages/i18n/README.md`, section "Scope — the Studio designer strings", is
+ * the conventions-side record; keep the two in step.
  *
- * What has not changed for the keys still here: only `en` and `zh` exist, so
- * the other eight shipped locales render English on these screens, and the
- * pack gates do not read this module (`scripts/check-i18n-call-site-keys.mjs`
- * skips it by declaration). `check:i18n-designer-parity` reads both homes.
+ * Only `en` and `zh` exist, so the other eight shipped locales render English
+ * on these screens, and the pack gates do not read the namespace
+ * (`scripts/check-i18n-call-site-keys.mjs` skips this module by declaration).
+ * The namespace's own parity is `packages/i18n/src/__tests__/studio-namespace.test.ts`;
+ * the type and domain label tables below keep theirs in
+ * `ui/scripts/__tests__/check-i18n-dead-keys.test.ts`.
  */
 
 import { useObjectTranslation } from '@object-ui/i18n';
 // The designer strings' new home. Its `en` catalogue is resident; its other
 // catalogues are fetched on demand, and `useMetadataLocale()` re-renders its
 // caller when one lands. ⚠️ `ui/scripts/check-i18n-dead-keys.mjs` reads the
-// namespace's catalogues as part of this table BECAUSE this module imports it:
-// drop the import and the gates stop reading them.
+// namespace's catalogues as this module's engine strings BECAUSE this module
+// imports it: drop the import and the gates stop reading them.
 import { studioString, useStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
 // Type-only (erased at build): the overlay-scope and lock-state label tables
 // below are keyed by their producer's own union rather than by hand — see
@@ -189,16 +191,6 @@ const DOMAIN_LABELS_ZH: Record<string, string> = {
   identity: '身份',
   security: '安全',
   other: '其他',
-};
-
-const ENGINE_STRINGS_EN: Record<string, string> = {
-  // Empty since #25922 slice S6b: every row lives in `@object-ui/i18n`'s
-  // `studio` namespace. Kept until slice S7 retires the table.
-};
-
-const ENGINE_STRINGS_ZH: Record<string, string> = {
-  // Empty since #25922 slice S6b: every row lives in `@object-ui/i18n`'s
-  // `studio` namespace. Kept until slice S7 retires the table.
 };
 
 /** Whether a locale resolves to Chinese (the only non-English catalog). */
@@ -515,27 +507,25 @@ export function flowFieldZh(type: string, id: string): FlowFieldZh | undefined {
 
 function pickTable(
   locale: SupportedLocale | string | undefined,
-): { types: Record<string, string>; domains: Record<string, string>; strings: Record<string, string> } {
+): { types: Record<string, string>; domains: Record<string, string> } {
   const lower = (locale ?? '').toLowerCase();
   if (lower.startsWith('zh')) {
-    return { types: TYPE_LABELS_ZH, domains: DOMAIN_LABELS_ZH, strings: ENGINE_STRINGS_ZH };
+    return { types: TYPE_LABELS_ZH, domains: DOMAIN_LABELS_ZH };
   }
-  return { types: TYPE_LABELS_EN, domains: DOMAIN_LABELS_EN, strings: ENGINE_STRINGS_EN };
+  return { types: TYPE_LABELS_EN, domains: DOMAIN_LABELS_EN };
 }
 
 /**
- * The value of one designer string: this module's own table for the locale
- * first, then the `studio` namespace in `@object-ui/i18n`, which the table is
- * moving into slice by slice (objectstack#25922, ruling 6431032267 Q2 = A).
- * A key lives in exactly one of the two homes — `check:i18n-designer-parity`
- * fails on a key in both — so the order decides nothing but cost.
+ * The value of one designer string, from the `studio` namespace in
+ * `@object-ui/i18n` (objectstack#25922, ruling 6431032267 Q2 = A), which holds
+ * every row this module's own table used to.
  *
  * The namespace answers a language it has no catalogue for, and a catalogue
- * still being fetched, from its `en` catalogue; this table keeps its own
- * behaviour for the keys it still holds (a key its zh half lacks echoes back).
+ * still being fetched, from its `en` catalogue; a zh-only row (a flow node
+ * label, an enum value, a package form help text) is `undefined` outside zh.
  */
 function lookupString(key: string, locale: SupportedLocale | string | undefined): string | undefined {
-  return pickTable(locale).strings[key] ?? studioString(key, locale);
+  return studioString(key, locale);
 }
 
 export function translateMetadataType(
