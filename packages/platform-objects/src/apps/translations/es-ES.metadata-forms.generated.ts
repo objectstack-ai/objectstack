@@ -74,7 +74,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       relatedLists: {
         label: "Orden de listas relacionadas",
-        helpText: "Orden de negocio de las listas relacionadas de este objeto en su página de registro, de la más importante a la menos. Cada entrada es el nombre de un objeto hijo (p. ej., task), u objeto.campo cuando ese hijo tiene más de una relación con este objeto. Las listas indicadas van primero; el resto sigue en el orden derivado. Un nombre que no coincide con ninguna relación que apunte a este objeto no coloca nada, y os validate lo rechaza."
+        helpText: "Orden de negocio de las listas relacionadas de este objeto en su página de registro, de la más importante a la menos. Cada entrada es el nombre de un objeto hijo (p. ej., task), u objeto.campo cuando ese hijo tiene más de una relación con este objeto. Las listas indicadas van primero; el resto sigue en el orden derivado. Un nombre que no coincide con ninguna relación que apunte a este objeto no coloca nada, y se rechaza al guardar o validar el objeto."
       },
       searchableFields: {
         label: "Campos buscables",
@@ -102,7 +102,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fieldGroups.relatedList": {
         label: "Lista relacionada",
-        helpText: "Convierte esta entrada en la tabla de una lista relacionada en lugar de una sección de campos: indica el objeto hijo (u objeto.campo) cuya lista se dibuja en esta posición de la columna de detalles del registro. Un grupo así no contiene campos; se rechaza un campo que lo indique como su grupo."
+        helpText: "Convierte esta entrada en la tabla de una lista relacionada en lugar de una sección de campos: indica el objeto hijo (u objeto.campo) cuya lista se dibuja en esta posición de la columna de detalles del registro. Un grupo así no contiene campos; se rechaza un campo que lo indique como su grupo, y también un nombre que no coincide con ninguna relación que apunte a este objeto. La página de registro aún no dibuja esta ubicación."
       },
       "fieldGroups.collapse": {
         label: "Contraer",

@@ -74,7 +74,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       relatedLists: {
         label: "相关列表顺序",
-        helpText: "本对象记录页上相关列表的业务顺序，按重要性从高到低排列。每一项是子对象名称（例如 task），当该子对象与本对象有多个关系时写 object.field。列出的列表排在前面，其余按派生顺序排在后面。不对应任何指向本对象的关系的名称不起作用，os validate 会拒绝它。"
+        helpText: "本对象记录页上相关列表的业务顺序，按重要性从高到低排列。每一项是子对象名称（例如 task），当该子对象与本对象有多个关系时写 object.field。列出的列表排在前面，其余按派生顺序排在后面。不对应任何指向本对象的关系的名称不起作用，保存或校验对象时会被拒绝。"
       },
       searchableFields: {
         label: "可搜索字段",
@@ -102,7 +102,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fieldGroups.relatedList": {
         label: "相关列表",
-        helpText: "让该条目代表一个相关列表的表格，而不是一组字段：填写子对象（或 object.field），其列表就显示在记录详情栏的这个位置。这样的分组不包含字段；把它填为自身分组的字段会被拒绝。"
+        helpText: "让该条目代表一个相关列表的表格，而不是一组字段：填写子对象（或 object.field），其列表就显示在记录详情栏的这个位置。这样的分组不包含字段；把它填为自身分组的字段会被拒绝，不对应任何指向本对象的关系的名称也会被拒绝。记录页目前还不会绘制这种位置。"
       },
       "fieldGroups.collapse": {
         label: "折叠",

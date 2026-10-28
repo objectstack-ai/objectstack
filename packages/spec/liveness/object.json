@@ -51,8 +51,8 @@
       "status": "live",
       "verifiedAt": "2026-10-28",
       "evidenceScope": "in-repo",
-      "evidence": "ui/packages/app-shell/src/utils/deriveRelatedLists.ts#resolveRelatedListOrder (the one resolution: the parent's declared entries first, in order — a child object takes all of its lists, `object.field` one FK — then every unlisted list in the derived owned → lookup order); ui/packages/app-shell/src/utils/deriveRelatedLists.ts#deriveRelatedLists (hands `objectDef.relatedLists` to it); packages/spec/src/stack.zod.ts#collectRelatedListNameErrors (the AUTHORING judgement: an entry that matches no inbound lookup / master_detail field is refused at defineStack, naming the entry and the relationships that exist)",
-      "note": "#27069, maintainer ruling A (an ordered list on the parent object). The record page reads it through deriveRelatedLists, whose output RecordDetailView renders in order (the tabbed page's own tabs and its Related tab keep this order within each). `relatedList: false` on the FK still hides a listed relationship, and `relatedList: 'primary'` places a list rather than ordering it. The cross-object strict-name check runs where the children's fields are known (`defineStack`, so `os validate` / `os build`); a one-object save at the publish door does not see the children, and the reader then ignores a dangling name. `fieldGroups[].relatedList` (a field group standing for a body table) sits under the undrilled `object/fieldGroups` container; its reader is the record page v3 body layout, #27055."
+      "evidence": "ui/packages/app-shell/src/utils/deriveRelatedLists.ts#resolveRelatedListOrder (the one resolution: the parent's declared entries first, in order — a child object takes all of its lists, `object.field` one FK — then every unlisted list in the derived owned → lookup order); ui/packages/app-shell/src/utils/deriveRelatedLists.ts#deriveRelatedLists (hands `objectDef.relatedLists` to it); packages/spec/src/stack.zod.ts#collectRelatedListNameErrors (the AUTHORING judgement: an entry that matches no inbound lookup / master_detail field is refused at defineStack, naming the entry and the relationships that exist); packages/lint/src/validate-related-list-refs.ts#validateRelatedListRefs (the same judgement at the runtime object publish door, `related-list-ref-unknown` at error, against the children the live registry and stored rows hold)",
+      "note": "#27069, maintainer ruling A (an ordered list on the parent object). The record page reads it through deriveRelatedLists, whose output RecordDetailView renders in order (the tabbed page's own tabs and its Related tab keep this order within each). `relatedList: false` on the FK still hides a listed relationship, and `relatedList: 'primary'` places a list rather than ordering it. The cross-object strict-name check runs where the children's fields are known: `defineStack` (so `os validate` / `os build`), and the object publish door, whose snapshot carries the registry's objects and the stored rows. `fieldGroups[].relatedList` has its own row under the drilled `fieldGroups`, graded `planned` until the record page v3 body layout (#27055) draws it."
     },
     "stageField": {
       "status": "live",
@@ -66,7 +66,77 @@
     "fieldGroups": {
       "status": "live",
       "proof": "packages/qa/dogfood/test/semantic-roles.dogfood.test.ts#semantic-roles-served",
-      "note": "objectui form layout order."
+      "note": "objectui form layout order.",
+      "children": {
+        "key": {
+          "status": "live",
+          "verifiedAt": "2026-10-28",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/spec/src/data/field-group-layout.ts#readGroup (a group without a string `key` is dropped); packages/spec/src/data/field-group-layout.ts#deriveFieldGroupLayout (a field joins the group whose `key` its `group` names; sections come back in declared order)",
+          "note": "The join key between a group and its fields, read by the one shared derivation every form and detail surface consumes."
+        },
+        "label": {
+          "status": "live",
+          "verifiedAt": "2026-10-28",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/spec/src/data/field-group-layout.ts#deriveFieldGroupLayout (`label ?? key`); ui/packages/plugin-form/src/fieldGroups.ts#deriveFieldGroupSections (the form section title); ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts#deriveFieldGroupDetailEntries (the detail section label)",
+          "note": "The group heading on forms and detail pages."
+        },
+        "icon": {
+          "status": "live",
+          "verifiedAt": "2026-10-28",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/spec/src/data/field-group-layout.ts#readGroup; ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts#deriveFieldGroupDetailEntries (passes it onto the detail section); ui/packages/plugin-detail/src/DetailSection.tsx (renders it beside the section title)",
+          "note": "Read on detail pages only: the form section declares no icon, so `deriveFieldGroupSections` does not copy it."
+        },
+        "description": {
+          "status": "live",
+          "verifiedAt": "2026-10-28",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/spec/src/data/field-group-layout.ts#readGroup; ui/packages/plugin-form/src/fieldGroups.ts#deriveFieldGroupSections; ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts#deriveFieldGroupDetailEntries",
+          "note": "The blurb under the group heading, on forms and detail pages."
+        },
+        "relatedList": {
+          "status": "planned",
+          "verifiedAt": "2026-10-28",
+          "note": "#27069. A group carrying it stands for one related list's table in the record's details column (an inbound relationship, a child object name or `object.field`, as `relatedLists` spells one) instead of a section of fields; a field naming such a group as its `group` is refused at parse, and a name matching no inbound lookup / master_detail field is refused by `defineStack` (`collectRelatedListNameErrors`) and at the object publish door (`related-list-ref-unknown`, packages/lint/src/validate-related-list-refs.ts#validateRelatedListRefs). PLANNED: no renderer draws the placement yet — the shared derivation drops a group no field references, so such a group draws nothing, as any empty group does. The reader is the record page v3 body layout, #27055, which re-grades this row when it lands."
+        },
+        "visibleWhen": {
+          "status": "live",
+          "verifiedAt": "2026-10-28",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/spec/src/data/field-group-layout.ts#readGroup (carried verbatim, bare CEL or envelope); ui/packages/plugin-form/src/fieldGroups.ts#deriveFieldGroupSections (onto the form section, with `visibleWhenFault: 'hidden'`); ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts#deriveFieldGroupDetailEntries (beside the detail section for `record:details` to evaluate per record)",
+          "note": "ADR-0089 group predicate, fail-closed: FALSE hides the whole group, header included."
+        },
+        "collapse": {
+          "status": "live",
+          "verifiedAt": "2026-10-28",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/spec/src/data/field-group-layout.ts#readGroup; ui/packages/plugin-form/src/fieldGroups.ts#deriveFieldGroupSections (onto `collapsible` / `collapsed`); ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts#deriveFieldGroupDetailEntries (onto `collapsible` / `defaultCollapsed`)",
+          "note": "The ADR-0085 collapse enum."
+        },
+        "defaultExpanded": {
+          "status": "live",
+          "verifiedAt": "2026-10-28",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/spec/src/data/field-group-layout.ts#readGroup",
+          "note": "Deprecated alias of `collapse` (ADR-0085), mapped onto it at parse; `readGroup` still honours it for a row that reaches a consumer un-normalized (a bare DB row), so it stays `live` until the alias is retired."
+        },
+        "collapsible": {
+          "status": "live",
+          "verifiedAt": "2026-10-28",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/spec/src/data/field-group-layout.ts#readGroup",
+          "note": "Deprecated alias of `collapse` (ADR-0085), mapped onto it at parse; `readGroup` still honours it for a row that reaches a consumer un-normalized (a bare DB row), so it stays `live` until the alias is retired."
+        },
+        "collapsed": {
+          "status": "live",
+          "verifiedAt": "2026-10-28",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/spec/src/data/field-group-layout.ts#readGroup",
+          "note": "Deprecated alias of `collapse` (ADR-0085), mapped onto it at parse; `readGroup` still honours it for a row that reaches a consumer un-normalized (a bare DB row), so it stays `live` until the alias is retired."
+        }
+      }
     },
     "listViews": {
       "status": "live",

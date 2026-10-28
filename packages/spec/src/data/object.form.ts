@@ -73,7 +73,7 @@ export const objectForm = defineForm({
         // on the `highlightFields` row's face. The cross-object check that
         // refuses a dangling name runs where the children are known —
         // `defineStack`, so `os validate` / `os build` — not at a one-object save.
-        { field: 'relatedLists', widget: 'string-tags', colSpan: 2, helpText: 'Business order of this object\'s related lists on its record page, most important first. Each entry is a child object name (e.g. task), or object.field when that child has more than one relationship to this object. Listed lists come first; the rest follow in the derived order. A name that matches no relationship pointing at this object places nothing, and os validate refuses it.' },
+        { field: 'relatedLists', widget: 'string-tags', colSpan: 2, helpText: 'Business order of this object\'s related lists on its record page, most important first. Each entry is a child object name (e.g. task), or object.field when that child has more than one relationship to this object. Listed lists come first; the rest follow in the derived order. A name that matches no relationship pointing at this object places nothing, so saving or validating the object refuses it.' },
         { field: 'searchableFields', widget: 'string-tags', colSpan: 2, helpText: 'Field names the $search query matches (ADR-0061): the default for the record picker, list quick-search and global search; a view may narrow it. Unset, search uses the name/title field plus short-text fields. Each entry must name a stored field of this object — an unknown name or a virtual formula field is refused at publish.' },
         // #19332 (flight G2a of ruling record 5861442317) — the object's field
         // groups, the ADR-0085 layout role beside `nameField` / `highlightFields`.
@@ -110,7 +110,7 @@ export const objectForm = defineForm({
             { field: 'label', label: 'Label', type: 'text', required: true, helpText: 'Header text of the group\'s section.' },
             { field: 'icon', label: 'Icon', type: 'text', helpText: 'Lucide icon name shown beside the header on the record detail page (e.g. "banknote"). The entry form does not show it.' },
             { field: 'description', label: 'Description', type: 'textarea', helpText: 'Text shown under the header, on the entry form and the record detail page.' },
-            { field: 'relatedList', label: 'Related List', type: 'text', helpText: 'Makes this entry a related list\'s table instead of a section of fields: name the child object (or object.field) whose list is drawn at this position in the record\'s details column. Such a group holds no fields; a field that names it as its group is refused.' },
+            { field: 'relatedList', label: 'Related List', type: 'text', helpText: 'Makes this entry a related list\'s table instead of a section of fields: name the child object (or object.field) whose list is drawn at this position in the record\'s details column. Such a group holds no fields; a field that names it as its group is refused, and so is a name that matches no relationship pointing at this object. The record page does not draw this placement yet.' },
             { field: 'collapse', label: 'Collapse', type: 'select', helpText: 'Whether the section can be collapsed, on the entry form and the record detail page. Unset: none.', options: [
               { label: 'None — always open, no toggle', value: 'none' },
               { label: 'Expanded — collapsible, starts open', value: 'expanded' },
