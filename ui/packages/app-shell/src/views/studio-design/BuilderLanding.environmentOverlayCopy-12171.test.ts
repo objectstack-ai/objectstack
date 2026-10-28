@@ -14,8 +14,8 @@
  *
  * ## The population
  *
- * Every string table the designer module declares, read through the extractor
- * `check:i18n-designer-parity` reads with (`readDesignerPairs`), then narrowed
+ * Every designer string table, read through their shared extractor
+ * (`readDesignerPairs` in `ui/scripts/check-i18n-dead-keys.mjs`), then narrowed
  * to the tables that carry these keys. No list of locales is kept here: a table
  * added for another language joins the population by itself.
  *
@@ -35,7 +35,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 // @ts-expect-error — plain-JS gate script, intentionally untyped (`allowJs: false`)
-import { readDesignerPairs } from '../../../../../scripts/check-i18n-designer-table-parity.mjs';
+import { readDesignerPairs } from '../../../../../scripts/check-i18n-dead-keys.mjs';
 import { t, type SupportedLocale } from '../metadata-admin/i18n';
 // The designer's `designer.*` / `perm.*` rows live in `@object-ui/i18n`'s `studio`
 // namespace, whose `zh` catalogue is fetched on demand (objectstack#25922).

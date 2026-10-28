@@ -5,7 +5,7 @@
  *
  * `./index.ts` imports this module only through its lazy loader, so a viewer
  * whose language is not Chinese never downloads it. A key this catalogue does
- * not define renders the `en` row (`./en.ts`); `pnpm check:i18n-designer-parity`
+ * not define renders the `en` row (`./en.ts`); `../../__tests__/studio-namespace.test.ts`
  * holds every `en` key to a row here, with the same `{placeholders}`.
  *
  * ⛔ Keep the declaration `const STUDIO_ZH: Record<string, string> = { … }`

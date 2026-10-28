@@ -4,7 +4,8 @@
  *
  * TWO corpora, one question, one report — `sweep()` over the ten locale packs
  * (objectui#4658), and `sweepDesignerTable()` over the metadata-admin
- * designer's module-local `ENGINE_STRINGS_*` table (objectui#8388). They are
+ * designer's `ENGINE_STRINGS_*` strings (objectui#8388; read from the `studio`
+ * namespace since objectstack#25922 deleted the module-local table). They are
  * one script because they ask the same mirror question from the same side, not
  * because they share a walker: the pack half reads the call-site gate's own
  * AST pass, the designer half has its own, because no call-site walker in this
@@ -1715,7 +1716,10 @@ export function sweep(root) {
 /**
  * The SECOND corpus this file sweeps: the metadata-admin designer's own
  * module-local string table, `ENGINE_STRINGS_EN` / `ENGINE_STRINGS_ZH` in
- * `packages/app-shell/src/views/metadata-admin/i18n.ts`.
+ * `packages/app-shell/src/views/metadata-admin/i18n.ts`. Since objectstack#25922
+ * slice S7 the module declares neither: both names stand for the `studio`
+ * namespace catalogues (`DESIGNER_NAMESPACE_HOMES` below), the one home the
+ * runtime reads.
  *
  * ## Why it needs its own leg at all — both i18n gates are blind BY CONSTRUCTION
  *
@@ -1766,8 +1770,8 @@ export function sweep(root) {
  *   2. DYNAMIC HEAD — the static head of every template expression in the same
  *      files whose head starts with one of the roots, INCLUDING the ones inside
  *      the table's own module (`translateNodeLabel` and `translateEnumOption`
- *      index `pickTable(locale).strings[...]` directly, with no `t()` call for
- *      any call-site walker to see). Blind to: a head composed across modules,
+ *      hand a template-built key to `lookupString(...)` directly, with no `t()`
+ *      call for any call-site walker to see). Blind to: a head composed across modules,
  *      or built by concatenation rather than a template literal.
  *   3. TEXT SAFETY NET — `textFootprint()`, the same whole-repo grep the pack
  *      sweep uses, minus the property-chain probe. It splits the survivors into
@@ -1791,17 +1795,46 @@ export const DESIGNER_TABLE = 'packages/app-shell/src/views/metadata-admin/i18n.
 
 /** The two table constants whose PROPERTY NAMES are the corpus. Their own
  *  initializers are skipped by the reader walk: a key's definition line is not
- *  evidence that anything reads it. */
+ *  evidence that anything reads it. Since objectstack#25922 slice S7 the module
+ *  declares neither: each NAMES the namespace catalogue that holds its keys
+ *  (see {@link DESIGNER_NAMESPACE_HOMES}), so every reader keeps one spelling
+ *  for "the designer's engine strings, en" and "…, zh". */
 export const DESIGNER_TABLE_CONSTS = ['ENGINE_STRINGS_EN', 'ENGINE_STRINGS_ZH'];
 
 /**
- * The table's SECOND home: the `studio` namespace of `@object-ui/i18n`, which
- * the table moves into slice by slice (objectstack#25922, maintainer ruling
+ * The designer's paired string tables, as `{ label, en, zh }` — the population
+ * the designer leg of `check-i18n-en-drift.mjs` reads, and the one
+ * `__tests__/check-i18n-dead-keys.test.ts` holds to en ⊆ zh and placeholder
+ * parity on the real tree. ITS OWN list, deliberately not
+ * {@link DESIGNER_TABLE_CONSTS}: that constant is the dead-keys sweep's own
+ * corpus, and {@link DESIGNER_KEY_ROOTS} (`engine.` / `designer.` / `perm.`)
+ * does not cover `TYPE_LABELS_*` or `DOMAIN_LABELS_*` keys, which are bare
+ * identifiers such as `object` and `data`. Widening it to reach them would
+ * change what this file's sweep reads, as a side effect nobody asked for.
+ *
+ * Moved here from the retired `check-i18n-designer-table-parity.mjs`
+ * (objectstack#25922 slice S7), so the one reader of these tables also owns
+ * the pair list its callers share.
+ */
+export const DESIGNER_TABLE_PAIRS = Object.freeze([
+  Object.freeze({ label: 'ENGINE_STRINGS', en: 'ENGINE_STRINGS_EN', zh: 'ENGINE_STRINGS_ZH' }),
+  Object.freeze({ label: 'TYPE_LABELS', en: 'TYPE_LABELS_EN', zh: 'TYPE_LABELS_ZH' }),
+  Object.freeze({ label: 'DOMAIN_LABELS', en: 'DOMAIN_LABELS_EN', zh: 'DOMAIN_LABELS_ZH' }),
+]);
+
+/** Every constant {@link DESIGNER_TABLE_PAIRS} names, in declaration order. */
+export const DESIGNER_PAIR_CONSTS = DESIGNER_TABLE_PAIRS.flatMap((pair) => [pair.en, pair.zh]);
+
+/**
+ * The engine strings' home: the `studio` namespace of `@object-ui/i18n`, which
+ * the table moved into slice by slice (objectstack#25922, maintainer ruling
  * 6431032267 Q2 = A). Each entry names one namespace catalogue, the constant it
- * declares, and the table constant it is a part of: its keys are read as
- * members of that table, so every reader of this extractor — the dead-keys
- * sweep, `check-i18n-designer-table-parity.mjs` and the designer population of
- * `check-i18n-en-drift.mjs` — sees ONE table whichever home a key sits in.
+ * declares, and the table constant it stands for: its keys are read as members
+ * of that table, so every reader of this extractor — the dead-keys sweep, the
+ * designer population of `check-i18n-en-drift.mjs` and the pair-parity pin in
+ * this file's test — sees ONE table. Since slice S7 the table module declares no
+ * `ENGINE_STRINGS_*` literal at all, and a constant a home stands for is that
+ * home alone; a commit from before S7 still reads its table rows beside it.
  *
  * ⭐ The homes are read only when the table module IMPORTS
  * {@link DESIGNER_NAMESPACE_SPECIFIER}, because that import is the edge the
@@ -1811,8 +1844,8 @@ export const DESIGNER_TABLE_CONSTS = ['ENGINE_STRINGS_EN', 'ENGINE_STRINGS_ZH'];
  * home; a table that imports the namespace and a home that cannot be read is
  * the stale-extractor throw.
  *
- * ⛔ A key in BOTH homes throws. The runtime would serve the table's copy and
- * the namespace's would be dead text a translator could edit to no effect.
+ * ⛔ A key in BOTH homes throws: a table literal brought back beside the
+ * namespace would be dead text a translator could edit to no effect.
  */
 export const DESIGNER_NAMESPACE_SPECIFIER = '@object-ui/i18n/namespaces/studio';
 
@@ -1852,8 +1885,8 @@ function isDesignerKeyShape(text) {
  * ## The optional second argument (objectui#8834)
  *
  * This extractor is the ONLY reader of these tables, and it stays that way on
- * purpose. `check-i18n-designer-table-parity.mjs` and the designer population
- * of `check-i18n-en-drift.mjs` both call it rather than growing a second copy:
+ * purpose. {@link readDesignerPairs} and the designer population of
+ * `check-i18n-en-drift.mjs` both call it rather than growing a second copy:
  * `changeset-guard.yml:63-72` records what the second copy costs here — the
  * base-ref resolver's second copy, in `check-i18n-en-drift.mjs`, inherited a
  * real defect from the first draft and had to be fixed to match under
@@ -1983,14 +2016,6 @@ export function collectDesignerKeys(root, options = {}) {
     if (withValues) values.set(name, texts);
   }
 
-  if (require) {
-    for (const name of consts) {
-      if (!tables.has(name)) {
-        throw new Error(`${label}: \`const ${name} = { … }\` not found — the extractor is stale`);
-      }
-    }
-  }
-
   // The namespace homes, read only through the import the runtime follows —
   // see DESIGNER_NAMESPACE_SPECIFIER.
   const importsNamespace = source.statements.some(
@@ -1999,6 +2024,26 @@ export function collectDesignerKeys(root, options = {}) {
       ts.isStringLiteral(statement.moduleSpecifier) &&
       statement.moduleSpecifier.text === DESIGNER_NAMESPACE_SPECIFIER,
   );
+  // A table constant the module no longer declares (objectstack#25922 slice
+  // S7 deleted both) is its namespace home alone. Only through the import: a
+  // module that neither declares the constant nor imports the namespace is
+  // still the stale-extractor throw below.
+  if (importsNamespace) {
+    for (const home of DESIGNER_NAMESPACE_HOMES) {
+      if (!consts.includes(home.table) || tables.has(home.table)) continue;
+      tables.set(home.table, new Set());
+      if (withValues) values.set(home.table, new Map());
+    }
+  }
+
+  if (require) {
+    for (const name of consts) {
+      if (!tables.has(name)) {
+        throw new Error(`${label}: \`const ${name} = { … }\` not found — the extractor is stale`);
+      }
+    }
+  }
+
   if (importsNamespace) {
     for (const home of DESIGNER_NAMESPACE_HOMES) {
       if (!consts.includes(home.table) || !tables.has(home.table)) continue;
@@ -2031,8 +2076,8 @@ export function collectDesignerKeys(root, options = {}) {
         if (tableKeys.has(key)) {
           throw new Error(
             `${JSON.stringify(key)} is in both ${label} (${home.table}) and ${home.file} — a designer ` +
-              'key lives in exactly one home. Delete the copy that is not being served: the table ' +
-              'answers first, so the namespace copy is the dead one unless the table row is the stray.',
+              'key lives in exactly one home. The runtime reads only the namespace, so the table row ' +
+              'is the stray: delete it.',
           );
         }
         tableKeys.add(key);
@@ -2044,6 +2089,32 @@ export function collectDesignerKeys(root, options = {}) {
   const corpus = new Set();
   for (const keys of tables.values()) for (const key of keys) corpus.add(key);
   return { tables, corpus, values };
+}
+
+/**
+ * Both halves of every {@link DESIGNER_TABLE_PAIRS} pair, as
+ * `constant name -> (key -> value)`, through {@link collectDesignerKeys}.
+ *
+ * Moved here from the retired `check-i18n-designer-table-parity.mjs`
+ * (objectstack#25922 slice S7) with its options unchanged.
+ */
+export function readDesignerPairs(
+  root,
+  { source = null, label = DESIGNER_TABLE, require = true, readHome = null } = {},
+) {
+  const { values } = collectDesignerKeys(root, {
+    consts: DESIGNER_PAIR_CONSTS,
+    source,
+    label,
+    withValues: true,
+    require,
+    readHome,
+  });
+  // Unreachable — `withValues` is requested right above. Asserted rather than
+  // coerced to an empty map: an empty map would compare nothing and pass, which
+  // is the one failure mode every reader of these tables is built to refuse.
+  if (values === null) throw new Error(`${label}: values were requested and not returned`);
+  return values;
 }
 
 /**

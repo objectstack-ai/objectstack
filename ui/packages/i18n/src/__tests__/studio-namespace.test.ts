@@ -8,7 +8,8 @@
  *      own section of the parity suite: `all-locales-key-parity.test.ts` does
  *      not read it — that suite iterates `builtInLocales`, the ten packs, and
  *      these catalogues are not packs — and `check:i18n-designer-parity`
- *      retires with the app-shell table.
+ *      retired with the app-shell table (objectstack#25922 slice S7), so this
+ *      section is the only parity check the namespace has.
  *   2. NOT IN THE EAGER CATALOGUE. No namespace key is defined by
  *      `locales/en.ts`, the console's one eager catalogue, so moving a key here
  *      adds nothing to the first load's translation bytes.
@@ -35,9 +36,9 @@ const PLACEHOLDER = /\{(\w+)\}/g;
 const placeholders = (value: string) => [...new Set(Array.from(value.matchAll(PLACEHOLDER), (m) => m[1]))].sort();
 
 /**
- * The `zh`-only families the designer table documents, each one-sided on
- * purpose — `ZH_ONLY_FAMILIES` in `ui/scripts/check-i18n-designer-table-parity.mjs`
- * carries the reason and the consumer for each.
+ * The `zh`-only families, each one-sided on purpose. `ZH_ONLY_REASONS` in
+ * app-shell's `inspectorStrings.studioNamespace-25922.test.ts` carries the
+ * reason and the consumer for each, and checks that its citation still locates it.
  */
 const ZH_ONLY_FAMILIES = ['engine.flowNode.', 'engine.enum.type.', 'engine.packages.form.help.'];
 
