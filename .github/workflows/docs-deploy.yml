@@ -248,14 +248,15 @@ jobs:
   # and are unchanged from objectui: `pnpm i` installs this whole workspace from
   # any member directory, and its build command's `cd ../..` lands in `ui/`,
   # from which turbo resolves this repository's root and builds
-  # `@object-ui/site` with its full closure (67 tasks, read from
-  # `turbo run --dry=json` there).
+  # `@object-ui/site` with its full closure (65 tasks, all built, on the
+  # local run measured below).
   deploy-ui-site:
     name: Deploy objectui docs to Vercel (production)
     runs-on: ubuntu-latest
-    # A cold `vercel build` of the site (the site, its @object-ui packages and
-    # their @objectstack closure) measured BUILD_MINUTES_PLACEHOLDER on a
-    # 2-way local run; the runner adds install and upload.
+    # The build behind `vercel.json`'s command (the site, its @object-ui
+    # packages and their @objectstack closure: 65 turbo tasks, none cached)
+    # measured 596 s at `--concurrency=2` on a shared dev container; the runner
+    # adds install and upload.
     timeout-minutes: 30
     env:
       # Identifiers, not credentials, as in `deploy`: the same team, and the
