@@ -139,7 +139,8 @@ describe('#3916 — matrix date columns arrive chronological end-to-end', () => 
       { dimensions: ['closed_quarter'], measures: ['task_count'] },
       CTX,
     );
-    expect(result.rows.map((r) => r.closed_quarter)).toEqual(['2025-Q4', '2026-Q1', '2026-Q3']);
+    // 2026-Q2 holds no row and is filled in its place (#26893).
+    expect(result.rows.map((r) => r.closed_quarter)).toEqual(['2025-Q4', '2026-Q1', '2026-Q2', '2026-Q3']);
   });
 
   it('emits a real ORDER BY when native SQL serves the query', async () => {

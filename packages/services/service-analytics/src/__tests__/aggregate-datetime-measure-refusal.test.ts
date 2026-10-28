@@ -403,7 +403,9 @@ describe('#16737 negative controls — aggregation only, and only the incoherent
   });
 
   it('⭐ a `datetime` used as a DIMENSION is untouched — date-range filtering', async () => {
-    const { svc, calls } = makeBucketService([{ submitted: '2026-05', row_count: 3 }]);
+    // Keyed by the FIELD, as the engine answers: the strategy maps it onto the
+    // `submitted` dimension, so the bucket is a real May rather than the null one.
+    const { svc, calls } = makeBucketService([{ submitted_at: '2026-05', row_count: 3 }]);
     const result: any = await svc.queryDataset(
       dataset(
         [{ name: 'row_count', aggregate: 'count' }],
@@ -415,7 +417,9 @@ describe('#16737 negative controls — aggregation only, and only the incoherent
         timeDimensions: [{ dimension: 'submitted', dateRange: ['2026-01-01', '2026-12-31'] }],
       },
     );
-    expect(result.rows.length).toBe(1);
+    // #26893 — every month of the window comes back, the empty ones at 0.
+    expect(result.rows.length).toBe(12);
+    expect(result.rows.filter((r: any) => r.row_count > 0)).toEqual([{ submitted: '2026-05', row_count: 3 }]);
     // The window reached the engine as a resolved bound on the datetime column
     // — the dimension path this card must not have touched.
     expect(JSON.stringify(calls[0])).toContain('2026-01-01');
