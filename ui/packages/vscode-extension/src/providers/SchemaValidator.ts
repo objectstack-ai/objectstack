@@ -229,7 +229,8 @@ export class SchemaValidator {
       }
     }
 
-    // Validate button variants
+    // Validate button variants — the `button` component draws the Button
+    // primitive, whose destructive arm is its own word, `destructive`.
     if (type === 'button' && schema.variant) {
       const validVariants = [
         'default',
@@ -249,6 +250,41 @@ export class SchemaValidator {
             vscode.DiagnosticSeverity.Warning
           )
         );
+      }
+    }
+
+    // Validate action block variants — the action blocks speak the action
+    // dialect: the destructive arm is `danger`, the word `ActionSchema.variant`
+    // uses, and `destructive` is refused (objectstack#26779). `primary` is
+    // accepted on `action:button`, `action:icon` and each container member,
+    // not on a container's own trigger.
+    const ACTION_BLOCK_VARIANTS = ['default', 'danger', 'outline', 'secondary', 'ghost', 'link'];
+    const ACTION_CONTAINER_TYPES = ['action:group', 'action:menu'];
+    const validateActionVariant = (variant: unknown, at: string, allowPrimary: boolean) => {
+      if (variant === undefined) return;
+      const valid = allowPrimary ? [...ACTION_BLOCK_VARIANTS, 'primary'] : ACTION_BLOCK_VARIANTS;
+      if (typeof variant === 'string' && valid.includes(variant)) return;
+      const range = this.findPropertyRange(document, at, 'variant');
+      const hint = variant === 'destructive' ? " `destructive` was renamed `danger` on the action blocks: write variant: 'danger'." : '';
+      diagnostics.push(
+        new vscode.Diagnostic(
+          range,
+          `Invalid variant "${String(variant)}". Must be one of: ${valid.join(', ')}.${hint}`,
+          vscode.DiagnosticSeverity.Warning
+        )
+      );
+    };
+    if (type === 'action:button' || type === 'action:icon') {
+      validateActionVariant(schema.variant, path, true);
+    }
+    if (ACTION_CONTAINER_TYPES.includes(type)) {
+      validateActionVariant(schema.variant, path, false);
+      if (Array.isArray(schema.actions)) {
+        schema.actions.forEach((member: any, index: number) => {
+          if (member && typeof member === 'object') {
+            validateActionVariant(member.variant, `${path}.actions[${index}]`, true);
+          }
+        });
       }
     }
 

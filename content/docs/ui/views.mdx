@@ -400,12 +400,16 @@ form: {
 
 | Type | Description |
 | :--- | :--- |
-| `simple` | Single-page form |
+| `simple` | Single-page form (the default) |
 | `tabbed` | Form with tab navigation |
 | `wizard` | Multi-step wizard |
-| `split` | Split-pane layout |
-| `drawer` | Side drawer form |
-| `modal` | Modal dialog form |
+
+`type` is the form's layout only. Where a form opens is not part of the form:
+a list opens a clicked record as its `navigation.mode` says (the drawer by
+default), and the console's New and Edit entries open the record form
+themselves. The old `split`, `drawer` and `modal` values were removed in
+`@objectstack/spec` 18.3.0 and are refused with the fix; run
+`os migrate meta --from 17` to rewrite existing sources.
 
 ### Section Configuration
 

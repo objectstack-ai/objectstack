@@ -517,9 +517,9 @@ describe('placeholders that must NOT be translated (#3979)', () => {
  *      own chrome key list rather than hand-copying it.
  *
  * Since objectstack#25922 slice S2 the prefix lives in the `studio` namespace
- * of `@object-ui/i18n` (`packages/i18n/src/namespaces/studio/{en,zh}.ts`), so
- * a locale's key set is read from BOTH homes — the app-shell table and the
- * namespace catalogue — and a key is retired only when it has left both.
+ * of `@object-ui/i18n` (`packages/i18n/src/namespaces/studio/{en,zh}.ts`), and
+ * since slice S7 the app-shell table is gone, so a locale's key set is read
+ * from its namespace catalogue alone.
  *
  * Measured on this checkout: every one of the 171 `engine.inspector.pageBlock.*`
  * keys in each table is covered by one of those two, and no key is constructed
@@ -574,13 +574,10 @@ interface EngineStringTable {
   name: string;
   /** Every key the table declares, in file order. */
   keys: string[];
-  /** 1-based line range of the object literal, for the disjointness guard. */
-  from: number;
-  to: number;
 }
 
 /**
- * The KEYS of one `ENGINE_STRINGS_*` table, read out of the source by LINE
+ * The KEYS of one `STUDIO_*` catalogue, read out of the source by LINE
  * RANGE rather than by scanning the whole file.
  *
  * Table membership is the whole question here: a key that MOVED from one locale
@@ -601,7 +598,7 @@ function engineStringTable(source: string, name: string): EngineStringTable {
     const m = /^ {2}'((?:[^'\\]|\\.)*)':/.exec(lines[i]);
     if (m) keys.push(m[1]);
   }
-  return { name, keys, from: open + 1, to: close + 1 };
+  return { name, keys };
 }
 
 /**
@@ -646,17 +643,8 @@ function shippedLiteralKeys(): Map<string, string[]> {
 }
 
 const I18N_SOURCE = readFileSync(I18N_SOURCE_PATH, 'utf8');
-const EN_TABLE = engineStringTable(I18N_SOURCE, 'ENGINE_STRINGS_EN');
-const ZH_TABLE = engineStringTable(I18N_SOURCE, 'ENGINE_STRINGS_ZH');
-const EN_HOME = engineStringTable(readFileSync(STUDIO_HOME_PATH.en, 'utf8'), 'STUDIO_EN');
-const ZH_HOME = engineStringTable(readFileSync(STUDIO_HOME_PATH.zh, 'utf8'), 'STUDIO_ZH');
-
-/** One locale's keys across both homes: the app-shell table and the namespace. */
-function bothHomes(table: EngineStringTable, home: EngineStringTable): EngineStringTable {
-  return { name: `${table.name} + ${home.name}`, keys: [...table.keys, ...home.keys], from: table.from, to: table.to };
-}
-const EN_KEYS = bothHomes(EN_TABLE, EN_HOME);
-const ZH_KEYS = bothHomes(ZH_TABLE, ZH_HOME);
+const EN_KEYS = engineStringTable(readFileSync(STUDIO_HOME_PATH.en, 'utf8'), 'STUDIO_EN');
+const ZH_KEYS = engineStringTable(readFileSync(STUDIO_HOME_PATH.zh, 'utf8'), 'STUDIO_ZH');
 
 /** The keys `SITES` implies — the complete BLOCK_CONFIG-derived vocabulary. */
 const DERIVED = new Set(SITES.map((s) => s.derived));
@@ -682,26 +670,15 @@ function pageBlockKeys(table: EngineStringTable): string[] {
 }
 
 describe('a retired key leaves BOTH locale tables (objectui#8368)', () => {
-  it('reads two disjoint tables out of i18n.ts, both emptied into the namespace', () => {
+  it('reads both locale catalogues out of the studio namespace, the app-shell table retired', () => {
     // The extractor is a source parser, so its silent failure mode is finding
     // FEWER keys — which would make every assertion below vacuously green over
-    // an empty corpus. Ranges first: overlapping ones would mean the `};`
-    // scan ran past a table and both sets became the same set.
-    // The table drained slice by slice into the namespace (objectstack#25922)
-    // and is empty since slice S6b: a key back in it would shadow the
-    // namespace's copy. The 3,000-key floor, held over both homes together
-    // below, is what keeps an empty table from reading as a parser gone quiet.
-    expect(EN_TABLE.to).toBeLessThan(ZH_TABLE.from);
-    expect(EN_TABLE.keys).toEqual([]);
-    expect(ZH_TABLE.keys).toEqual([]);
+    // an empty corpus. The table drained slice by slice into the namespace
+    // (objectstack#25922) and slice S7 deleted it: i18n.ts declaring one again
+    // would be a second home this census cannot see.
+    expect(I18N_SOURCE).not.toMatch(/\bconst ENGINE_STRINGS_/);
     // No duplicates: a key declared twice would be a silent overwrite, and the
     // set arithmetic below would hide it.
-    expect(EN_TABLE.keys.length).toBe(new Set(EN_TABLE.keys).size);
-    expect(ZH_TABLE.keys.length).toBe(new Set(ZH_TABLE.keys).size);
-    // The namespace homes are read the same way, and a key in both homes of
-    // one locale would be counted twice below.
-    expect(EN_HOME.keys.length).toBeGreaterThan(150);
-    expect(ZH_HOME.keys.length).toBeGreaterThan(150);
     expect(EN_KEYS.keys.length).toBe(new Set(EN_KEYS.keys).size);
     expect(ZH_KEYS.keys.length).toBe(new Set(ZH_KEYS.keys).size);
     expect(EN_KEYS.keys.length).toBeGreaterThan(3000);
