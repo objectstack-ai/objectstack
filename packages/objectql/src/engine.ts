@@ -305,6 +305,8 @@ import { count, rejectCredentialAggregation } from './engine-count-aggregate.js'
 import { assertGroupByNamesNoJsonStoredField } from './group-by-structured-json-door.js';
 import { assertProjectionNamesAField } from './empty-projection-door.js';
 import { assertAggregationFieldTypesAccepted } from './aggregate-field-type-door.js';
+import { assertRecordCurrencyAggregatesGrouped } from './record-currency-aggregate-door.js';
+import { assertRecordCurrencyCodes, touchesRecordCurrency } from './validation/record-currency-code.js';
 import { assertAggregatedColumnsAreDistinct, assertDateBucketTargetsAreTemporal } from './aggregate-query-shape-door.js';
 import { applyProtection, pluralToSingular, ExternalWriteForbiddenError } from '@objectstack/spec/shared';
 import { SchemaRegistry, type ArtifactInstallScope } from './registry.js';
@@ -15382,6 +15384,9 @@ export class ObjectQL implements IObjectQLEngine {
             normalizeMultiValueFields(schemaForValidation, rows[i], 'include');
             // [#22183] `keptOptionValues`: the option values an import kept for this write.
             validateRecordInScope(schemaForValidation, rows[i], 'insert', 'include', { mediaValueShapeStrict, valueShapeStrict, messages: msgCtx, onAdmittedValueShapeViolation, keptOptionValues: opCtx.context?.keptOptionValues });
+            // [ADR-0144 D8 rule 4] A `record`-mode amount is stored with its
+            // currency code, or the row is refused (`ERR_CURRENCY_CODE_REQUIRED`).
+            assertRecordCurrencyCodes(object, (schemaForValidation as { fields?: unknown } | undefined)?.fields, rows[i], 'insert');
             emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx, parent: insertParentForRow?.(rows[i]), related: batchSummaries ? batchSummaries.overlay(insertRelatedForRow(rows[i])) : insertRelatedForRow(rows[i]), permissions: insertPermissionsFor(rows[i]) }), this.logger, object);
             await this.assertReferencesResolve(
               schemaForValidation, rows[i], suppliedPerRow[i], opCtx.context, msgCtx,
@@ -17099,6 +17104,14 @@ export class ObjectQL implements IObjectQLEngine {
                // because those are already judged. See `ReadonlyValueScope`.
                normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>, 'only');
                validateRecordInScope(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', 'only', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation });
+               // [ADR-0144 D8 rule 4] The stored row with the FINAL payload laid
+               // over it keeps a currency code beside a record-mode amount the
+               // payload touches (`ERR_CURRENCY_CODE_REQUIRED`).
+               assertRecordCurrencyCodes(
+                 object, (updateSchema as { fields?: unknown } | undefined)?.fields,
+                 { ...(priorRecord ?? {}), ...(hookContext.input.data as Record<string, unknown>) },
+                 'update', hookContext.input.data as Record<string, unknown>, hookContext.input.id,
+               );
                // ── [#19989] The post-image seam on the BY-ID path ─────────────
                //
                // The by-id twin of the predicate-path call below, placed at the
@@ -17418,6 +17431,20 @@ export class ObjectQL implements IObjectQLEngine {
                // N rows are written.
                normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>, 'only');
                validateRecordInScope(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', 'only', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation });
+               // [ADR-0144 D8 rule 4] The predicate-path twin: every matched row,
+               // with the FINAL payload laid over it, keeps a currency code beside
+               // a record-mode amount the payload touches. The matched rows are
+               // read only for such a payload (`readPriorRows` is the memo the
+               // seams below share).
+               {
+                   const currencyPayload = hookContext.input.data as Record<string, unknown>;
+                   const currencyFields = (updateSchema as { fields?: unknown } | undefined)?.fields;
+                   if (touchesRecordCurrency(currencyFields, currencyPayload)) {
+                       for (const row of (await readPriorRows()) ?? []) {
+                           assertRecordCurrencyCodes(object, currencyFields, { ...row, ...currencyPayload }, 'update', currencyPayload, row?.id);
+                       }
+                   }
+               }
                // ── [#19950] The post-image seam on the PREDICATE path ─────────
                //
                // An enforcement layer's write `check` must hold for EVERY row a
@@ -20343,6 +20370,11 @@ export class ObjectQL implements IObjectQLEngine {
       // string on SQLite and a 500 on PostgreSQL; `sum` over one answered `0`,
       // `0` and a 500. Every row of the table is asked (see the door's header).
       assertAggregationFieldTypesAccepted(object, this._registry.getObject(object), query.aggregations);
+      // [ADR-0144 D6] …and a `sum` / `avg` / `min` / `max` over a `record`-mode
+      // amount that does not group by its code field: the rows hold amounts in
+      // different currencies, which add into one number under one label.
+      // After the type door, so a type it refuses keeps that door's words.
+      assertRecordCurrencyAggregatesGrouped(object, this._registry.getObject(object), query.groupBy, query.aggregations);
       // [#25818] …and the two shapes that answered a plausible wrong table: a
       // `dateGranularity` over a field declared neither a date nor a datetime
       // (every row in one null bucket), and two columns of the aggregated row

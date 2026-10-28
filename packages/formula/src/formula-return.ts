@@ -79,15 +79,25 @@ export interface FormulaSourceField {
  *
  * - `returnType` — absent when no concrete type can be proven.
  * - `currencyConfig` — present only for a `currency` result whose currency is
- *   `fixed`. A `dynamic` result (the tenant default currency) declares no config,
- *   exactly as a `dynamic` currency field may carry none.
+ *   `fixed`, or `record` (ADR-0144 D2: each record's own currency, carried as
+ *   the same `currencyField` its source amounts name). A `dynamic` result (the
+ *   tenant default currency) declares no config, exactly as a `dynamic`
+ *   currency field may carry none.
  */
 export interface FormulaReturnDeclaration {
   readonly returnType?: NonNullable<Field['returnType']>;
-  readonly currencyConfig?: { readonly currencyMode: 'fixed'; readonly defaultCurrency: string };
+  readonly currencyConfig?:
+    | { readonly currencyMode: 'fixed'; readonly defaultCurrency: string }
+    | { readonly currencyMode: 'record'; readonly currencyField: string };
 }
 
-type MoneyCurrency = { readonly mode: 'dynamic' } | { readonly mode: 'fixed'; readonly code: string };
+type MoneyCurrency =
+  | { readonly mode: 'dynamic' }
+  | { readonly mode: 'fixed'; readonly code: string }
+  // [ADR-0144 D2] Each record's own currency, the code in the sibling field
+  // `field` names. Two record-mode amounts are one currency only when they
+  // name the same code field.
+  | { readonly mode: 'record'; readonly field: string };
 
 type Dim =
   | { readonly kind: 'money'; readonly currency: MoneyCurrency }
@@ -125,17 +135,23 @@ function isNode(v: unknown): v is Node {
 }
 
 function sameCurrency(a: MoneyCurrency, b: MoneyCurrency): boolean {
-  if (a.mode === 'dynamic' || b.mode === 'dynamic') return a.mode === b.mode;
-  return a.code === b.code;
+  if (a.mode === 'fixed' && b.mode === 'fixed') return a.code === b.code;
+  if (a.mode === 'record' && b.mode === 'record') return a.field === b.field;
+  return a.mode === b.mode;
 }
 
 /** A field's currency, read through the schema a currency field is parsed with — or `null` when it does not parse. */
 function currencyOf(config: unknown): MoneyCurrency | null {
   const parsed = CurrencyConfigSchema.safeParse(config ?? {});
   if (!parsed.success) return null;
-  return parsed.data.currencyMode === 'fixed'
-    ? { mode: 'fixed', code: parsed.data.defaultCurrency }
-    : { mode: 'dynamic' };
+  if (parsed.data.currencyMode === 'fixed') return { mode: 'fixed', code: parsed.data.defaultCurrency };
+  // [ADR-0144 D2] A `record`-mode amount is in the currency its sibling code
+  // field holds — never the tenant default a `dynamic` stamp would claim. The
+  // schema requires the pointer under `record`, so a parsed config carries it.
+  if (parsed.data.currencyMode === 'record') {
+    return parsed.data.currencyField ? { mode: 'record', field: parsed.data.currencyField } : null;
+  }
+  return { mode: 'dynamic' };
 }
 
 /** Is `d` a number that is not an amount (a quantity or a constant)? */
@@ -253,8 +269,10 @@ function sourceOf(input: ExprInput): string | null {
  *
  * - Provably money ⇒ `{ returnType: 'currency' }`, plus
  *   `currencyConfig: { currencyMode: 'fixed', defaultCurrency }` when the
- *   source amounts are in one fixed currency. Sources in two different
- *   currencies are not provably one amount, and fall through.
+ *   source amounts are in one fixed currency, or
+ *   `currencyConfig: { currencyMode: 'record', currencyField }` when they are
+ *   record-mode amounts naming one code field (ADR-0144 D2). Sources in two
+ *   different currencies are not provably one amount, and fall through.
  * - Otherwise ⇒ the {@link inferExpressionType} answer as `returnType`
  *   (`number` / `text` / `boolean` / `date`), or `{}` when that is `unknown` —
  *   unchanged from before this function existed, so a numeric formula stays
@@ -278,9 +296,13 @@ export function inferFormulaReturn(
     if (celType !== null && MONEY_CEL_TYPES.has(celType)) {
       const dim = dimOf(parseCelToAst(source), fields);
       if (dim.kind === 'money') {
-        return dim.currency.mode === 'fixed'
-          ? { returnType: 'currency', currencyConfig: { currencyMode: 'fixed', defaultCurrency: dim.currency.code } }
-          : { returnType: 'currency' };
+        if (dim.currency.mode === 'fixed') {
+          return { returnType: 'currency', currencyConfig: { currencyMode: 'fixed', defaultCurrency: dim.currency.code } };
+        }
+        if (dim.currency.mode === 'record') {
+          return { returnType: 'currency', currencyConfig: { currencyMode: 'record', currencyField: dim.currency.field } };
+        }
+        return { returnType: 'currency' };
       }
     }
   }
