@@ -62,8 +62,8 @@ function renderInspector(node: Record<string, unknown>) {
   return onNavPatch;
 }
 
-/** The Label field: the inspector's one text input. */
-const labelField = () => screen.getByRole('textbox') as HTMLInputElement;
+/** The Label field, by its label (objectstack#26740 added the Badge text input beside it). */
+const labelField = () => screen.getByRole('textbox', { name: 'Label' }) as HTMLInputElement;
 
 /** The entry the one `onNavPatch` call wrote. */
 function written(onNavPatch: ReturnType<typeof vi.fn>): Record<string, unknown> {

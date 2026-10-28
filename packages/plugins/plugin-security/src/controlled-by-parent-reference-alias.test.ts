@@ -62,26 +62,32 @@ function detailSchema(field: string, value: unknown, extra: Record<string, unkno
  * Boot a real `SecurityPlugin` over a fake registry, through the plugin's OWN
  * lifecycle — `start()` is what binds `this.logger` to the host sink and what
  * subscribes the cache invalidation, so both facts under test here are only
- * true of a started plugin. Returns the metadata `watch` callback so a test can
- * drive a real metadata-change invalidation rather than reaching into the cache.
+ * true of a started plugin. Returns the protocol's `onMetadataMutation` listener
+ * the plugin subscribed, so a test can drive a real metadata-change
+ * invalidation rather than reaching into the cache.
  */
 async function boot(schemas: Record<string, any>) {
   const warn = vi.fn();
-  let onMetadataChange: (() => void) | undefined;
+  // Every listener the plugin subscribes, fired together as the protocol does:
+  // `start()` wires more than one (the `everyone` re-derivation listens too).
+  const mutationListeners: Array<(evt: { type: string; name: string; state: string }) => void> = [];
   const ql: any = {
     getSchema: (object: string) => schemas[object],
     registerMiddleware: () => {},
   };
   const metadata: any = {
-    watch: (_pattern: string, cb: () => void) => {
-      onMetadataChange = cb;
+    list: async () => [],
+  };
+  const protocol: any = {
+    onMetadataMutation: (listener: (typeof mutationListeners)[number]) => {
+      mutationListeners.push(listener);
       return () => {};
     },
-    list: async () => [],
   };
   const services: Record<string, any> = {
     objectql: ql,
     metadata,
+    protocol,
     manifest: { register: () => {} },
   };
   const ctx: any = {
@@ -99,10 +105,10 @@ async function boot(schemas: Record<string, any>) {
     plugin,
     warn,
     resolve: (object: string) => (plugin as any).resolveCbpRelation(object),
-    /** Fire the real `metadata.watch('*')` subscription `start()` installed. */
+    /** Fire the real metadata-mutation subscription `start()` installed. */
     changeMetadata: () => {
-      if (!onMetadataChange) throw new Error('plugin did not subscribe to metadata changes');
-      onMetadataChange();
+      if (mutationListeners.length === 0) throw new Error('plugin did not subscribe to metadata changes');
+      for (const listener of mutationListeners) listener({ type: 'object', name: 'crm_contact', state: 'active' });
     },
   };
 }
@@ -238,7 +244,7 @@ describe('resolveCbpRelation — the tolerance is LOUD (#13250)', () => {
     resolve('crm_contact');
     expect(aliasWarns(warn)).toHaveLength(1);
 
-    // Studio / AI authoring edited metadata: `start()`'s `metadata.watch('*')`
+    // Studio / AI authoring edited metadata: `start()`'s metadata-mutation
     // subscription clears `cbpRelCache`, and the report rides that same
     // lifecycle deliberately — a process-lifetime "already warned" set would
     // stay silent here, which is the one moment the author is listening.
