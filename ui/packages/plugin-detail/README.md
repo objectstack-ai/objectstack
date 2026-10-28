@@ -813,8 +813,8 @@ each tab's stable `value` (`buildDefaultPageColumns`), so Studio's page-create
 seed, a slotted page and the running page never disagree, and no metadata key
 or node type says "columns". `?tab=` addresses the strip, so it is honoured
 in the tabbed tier and ignored in the column tiers. An authored record page
-(`kind: 'full'`) and an authored `slots.tabs` strip are drawn as authored at
-every width.
+(`kind: 'full'`) is drawn as authored at every width; a slotted page keeps the
+synthesized strip, so it takes the tiers.
 
 A host wires it with three exports:
 

@@ -10,12 +10,12 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom';
-import { activityRowToFeedItem, InlineEditSaveBar, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordPageColumnDefaults, resolveTitleField, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
+import { activityRowToFeedItem, claimQueuedRecord, InlineEditSaveBar, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordPageColumnDefaults, recordSitsInQueue, resolveTitleField, useQueueClaimOffered, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
 import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions, PanelToggles, type PanelToggleItem } from '@object-ui/components';
 import { useAuth, createAuthenticatedFetch } from '@object-ui/auth';
 import { usePermissions } from '@object-ui/permissions';
 import { useDisplayLocale } from '@object-ui/i18n';
-import { ActionProvider, useObjectTranslation, useObjectLabel, useActionTextLocalizer, usePageAssignment, isRecordPageOf, useMetadata, RecordContextProvider, SchemaRenderer, DiscussionContextProvider, HighlightFieldsProvider, InlineEditProvider, resolveApprovalLock, useGlobalUndo, useDataInvalidation, notifyDataChanged, subscribeDataChanges, dataChangeMatches, useRowPredicate, classifyLoadError } from '@object-ui/react';
+import { ActionProvider, useObjectTranslation, useObjectLabel, useActionTextLocalizer, usePageAssignment, isRecordPageOf, useMetadata, RecordContextProvider, SchemaRenderer, DiscussionContextProvider, HighlightFieldsProvider, InlineEditProvider, resolveApprovalLock, useGlobalUndo, useDataInvalidation, notifyDataChanged, subscribeDataChanges, dataChangeMatches, useRowPredicate, classifyLoadError, extractWriteErrorMessage } from '@object-ui/react';
 import { buildExpandFields, captureUpdateUndoData, recordDelete, resolveAffordance, resolveRecordIdParamSeed, userActionPredicates, withoutDeniedFields, type AffordanceGrantPrincipal, type SchemaLike } from '@object-ui/core';
 import { toast } from 'sonner';
 import { useRecordPresence, PresenceAvatars, isCommentAuthor } from '@object-ui/collaboration';
@@ -902,18 +902,18 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   }, [assignedPage, assignedSlots, objectDef, namedPageBlocked]);
   const effectivePage = assignedPage || synthesizedPage;
   // ─── One page at two widths (objectstack#26678) ──────────────────────
-  // The synthesized default page — and a slotted page that keeps the default
-  // tab strip — is laid out by the width of the container it occupies: three
-  // resident columns from 1280 px, two from 1024 px, the tab strip below that
-  // and whenever this view is embedded (drawer / split pane), whatever the
+  // The synthesized default page — and a slotted page, which always keeps the
+  // default tab strip — is laid out by the width of the container it occupies:
+  // three resident columns from 1280 px, two from 1024 px, the tab strip below
+  // that and whenever this view is embedded (drawer / split pane), whatever the
   // screen. Measured on this view's root, never the viewport. An authored full
-  // page and an authored `slots.tabs` strip are drawn as authored, so they
-  // never measure. `null` until the first reading lands (a layout effect, so
-  // never painted): the page body is held for that one commit rather than
-  // mounting the tab strip only to replace it.
+  // page is drawn as authored, so it never measures (the slotted `tabs` slot
+  // that once opted a page out too retired, objectstack#27053). `null` until
+  // the first reading lands (a layout effect, so never painted): the page body
+  // is held for that one commit rather than mounting the tab strip only to
+  // replace it.
   const [pageRootEl, setPageRootEl] = useState<HTMLDivElement | null>(null);
-  const pageColumnsEligible =
-    !assignedPage && !namedPageBlocked && !(assignedSlots && (assignedSlots as { tabs?: unknown }).tabs !== undefined);
+  const pageColumnsEligible = !assignedPage && !namedPageBlocked;
   const recordPageTier = useRecordPageTier(pageRootEl, { embedded: !!embedded, enabled: pageColumnsEligible });
   const pageInColumnTier = recordPageTier === 'two-column' || recordPageTier === 'three-column';
   // ─── The reader's column switches (objectstack#27052) ────────────────
@@ -2039,6 +2039,45 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     'delete',
     !!objectDef?.name && !!pureRecordId && !deleteOffByObject,
   );
+
+  // [objectstack ADR-0142 D4] Claim — a record that SITS IN an ownership queue
+  // (`owner_id` empty, `queue` set) offers its queue's members a Claim button.
+  // Whether THIS user may claim it is the server's answer alone: the explain
+  // engine's `queue_claim` verdict for a transfer, read by
+  // `useQueueClaimOffered`, which offers nothing until it says `admits`. The
+  // claim itself is `{ owner_id: <self> }` through the normal update; a lost
+  // race comes back `409 CONCURRENT_UPDATE` and is said as "someone else
+  // claimed it", never pre-judged here.
+  const sittingInQueue = recordSitsInQueue(pageRecord);
+  const claimOffered = useQueueClaimOffered(objectDef?.name, pureRecordId, sittingInQueue !== null);
+  const [claiming, setClaiming] = useState(false);
+  const claimingRef = useRef(false);
+  const handleClaim = useCallback(async () => {
+    const objectName = objectDef?.name;
+    const self = perms.userId;
+    if (!dataSource || !objectName || !pureRecordId || !self || claimingRef.current) return;
+    claimingRef.current = true;
+    setClaiming(true);
+    try {
+      const result = await claimQueuedRecord(dataSource, objectName, pureRecordId, self);
+      if (result.outcome === 'claimed') {
+        toast.success(t('detail.claimed', { defaultValue: 'You own this record now.' }));
+      } else if (result.outcome === 'taken') {
+        toast.error(t('detail.claimTaken', { defaultValue: 'Someone else claimed this record first.' }));
+      } else {
+        toast.error(
+          extractWriteErrorMessage(result.error)
+            ?? t('detail.claimFailed', { defaultValue: 'The claim was not accepted.' }),
+        );
+      }
+      // Every answer moved or confirmed who owns the row: re-read it in place,
+      // so the page shows the owner the server now holds (AGENTS.md #8).
+      notifyDataChanged({ objectName, recordId: pureRecordId });
+    } finally {
+      claimingRef.current = false;
+      setClaiming(false);
+    }
+  }, [dataSource, objectDef?.name, pureRecordId, perms.userId, t]);
 
   // ── Per-record `userActions` predicates — the header's FOURTH gate ────────
   //
@@ -3646,6 +3685,21 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       delete: objectAffordances.delete && recordDeleteAllowed && deleteVisible,
     };
     const items: ActionDef[] = [];
+    // [objectstack ADR-0142 D4] Claim, ahead of Edit: on a record sitting in a
+    // queue it is the gesture a queue member came for. Offered only on the
+    // server's `queue_claim` admission (see `useQueueClaimOffered` above).
+    if (sittingInQueue !== null && claimOffered && perms.userId) {
+      items.push({
+        name: 'sys_claim',
+        label: t('detail.claim', { defaultValue: 'Claim' }),
+        icon: 'hand',
+        type: 'script',
+        locations: ['record_header'],
+        order: 95,
+        disabled: claiming,
+        onClick: handleClaim,
+      } as any);
+    }
     if (affordances.edit) {
       // Single primary Edit CTA → opens the full record form. Inline editing
       // is no longer a standalone header button; it is entered by

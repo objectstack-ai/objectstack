@@ -159,6 +159,23 @@ export interface AutomationContext {
      */
     locale?: string;
     /**
+     * The tenant default currency of the run's organization (ISO 4217, e.g.
+     * `CNY`): the `localization.currency` setting, read the way a currency
+     * field reads it. Seeded by the engine at run setup when the context does
+     * not already carry one (the automation plugin bridges the read to
+     * `@objectstack/core`'s `resolveLocalizationContext`), and kept for the
+     * run's life like {@link locale}: persisted with a suspended run, inherited
+     * by a `subflow` / `map` child.
+     *
+     * Its reader is the flow's text renderer: a `{{ amount | currency }}` hole
+     * with no argument formats in it. Absent (the organization has no default,
+     * or the engine is not bridged), such a hole refuses the node by name
+     * instead of formatting in a guessed currency.
+     *
+     * Presentation, not authorization: no security middleware keys on it.
+     */
+    currency?: string;
+    /**
      * Effective execution identity for the run's DATA operations, established by
      * the engine from {@link FlowParsed.runAs} at run setup (ADR-0049 / #1888):
      *  - `'system'` runs elevated — a full-access, RLS-bypassing system principal;

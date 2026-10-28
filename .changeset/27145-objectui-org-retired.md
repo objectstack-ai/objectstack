@@ -13,7 +13,6 @@
 '@object-ui/layout': patch
 '@object-ui/mobile': patch
 '@object-ui/permissions': patch
-'@object-ui/plugin-ai': patch
 '@object-ui/plugin-calendar': patch
 '@object-ui/plugin-charts': patch
 '@object-ui/plugin-chatbot': patch

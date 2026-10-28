@@ -68,8 +68,9 @@ export function ObjectRefCellFace({ value, field }: CellRendererProps) {
 }
 
 /**
- * `recipient-picker`: the label of the user, team, business unit, position or
- * user column the stored value names — the label the picker shows for it.
+ * `recipient-picker`: the label of the user, team, business unit, position,
+ * queue or user column the stored value names — the label the picker shows for
+ * it.
  * Which of those it names is the row's `recipient_type`, so the face reads
  * `dependentValues`; without them it draws the stored text as the text cell
  * does.

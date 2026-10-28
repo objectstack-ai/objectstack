@@ -79,6 +79,34 @@ export const RECIPIENT_REGISTRY_KINDS: Readonly<Record<string, RegistryRecipient
 };
 
 /**
+ * A recipient kind whose candidates come from BOTH the registry and the data
+ * API, named by one machine name (ADR-0142 D1/D7).
+ */
+export interface RegistryAndRecordRecipientMapping {
+  /** The metadata type listed — the registry's `GET /api/v1/meta/<type>`. */
+  type: string;
+  /** The object whose rows are the organization's own items. */
+  object: string;
+  /** Both sources are referenced by machine name. */
+  storeField: 'name';
+  /** Candidate display-label keys, in preference order. */
+  labelFields: string[];
+  /** i18n key for the "choose one" placeholder (see {@link RecipientMapping}). */
+  placeholderKey: string;
+}
+
+/**
+ * The recipient kinds with two sources (ADR-0142 D7): a `queue` recipient
+ * names a queue a package declares (the `queue` registry type) or one the
+ * organization authored as a `sys_queue` row, and stores its machine name
+ * either way. The picker lists both through `mergeQueueCandidates`, so a
+ * declared queue and an organization's own queue are equally pickable.
+ */
+export const RECIPIENT_REGISTRY_AND_RECORD_KINDS: Readonly<Record<string, RegistryAndRecordRecipientMapping>> = {
+  queue: { type: 'queue', object: 'sys_queue', storeField: 'name', labelFields: ['label', 'name'], placeholderKey: 'fields.recipient.selectQueue' },
+};
+
+/**
  * The RECORD-RELATIVE recipient kind (maintainer ruling objectstack#14103,
  * executor objectstack#15072). It is deliberately absent from
  * `RECIPIENT_RECORD_KINDS`: there is no target object to query and no record id to

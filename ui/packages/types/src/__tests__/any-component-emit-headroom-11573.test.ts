@@ -82,7 +82,6 @@ import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import type { z } from 'zod';
 import { AnyComponentSchema } from '../zod/index.zod.js';
-import type { AIComponentZodType } from '../zod/ai.zod.js';
 import type { ComplexZodType } from '../zod/complex.zod.js';
 import type { CRUDComponentZodType } from '../zod/crud.zod.js';
 import type { DataDisplayZodType } from '../zod/data-display.zod.js';
@@ -310,7 +309,9 @@ describe('`AnyComponentSchema` declaration emit headroom (objectui#11573)', () =
       { member: 'CRUDComponentSchema', kind: 'category union', printsAs: 'CRUDComponentZodType' },
       { member: 'ReportUnionSchema', kind: 'category union', printsAs: 'ReportUnionZodType' },
       { member: 'ViewComponentSchema', kind: 'category union', printsAs: 'ViewComponentZodType' },
-      { member: 'AIComponentSchema', kind: 'category union', printsAs: 'AIComponentZodType' },
+      { member: 'RetiredAIFormAssistNodeSchema', kind: 'arm', printsAs: 'inline' },
+      { member: 'RetiredAIRecommendationsNodeSchema', kind: 'arm', printsAs: 'inline' },
+      { member: 'RetiredNLQueryNodeSchema', kind: 'arm', printsAs: 'inline' },
       { member: 'DesignerUnionSchema', kind: 'category union', printsAs: 'DesignerUnionZodType' },
       { member: 'PublicBlockComponentSchema', kind: 'category union', printsAs: 'PublicBlockComponentZodType' },
       { member: 'RetiredCloudPlanStatusNodeSchema', kind: 'arm', printsAs: 'inline' },
@@ -369,7 +370,6 @@ type _ObjectQLPublicBlockComponent = Assert<NamesItsUnion<ObjectQLPublicBlockCom
 type _CRUDComponent = Assert<NamesItsUnion<CRUDComponentZodType>>;
 type _ReportUnion = Assert<NamesItsUnion<ReportUnionZodType>>;
 type _ViewComponent = Assert<NamesItsUnion<ViewComponentZodType>>;
-type _AIComponent = Assert<NamesItsUnion<AIComponentZodType>>;
 type _DesignerUnion = Assert<NamesItsUnion<DesignerUnionZodType>>;
 type _PublicBlockComponent = Assert<NamesItsUnion<PublicBlockComponentZodType>>;
 

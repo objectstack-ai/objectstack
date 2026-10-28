@@ -502,7 +502,6 @@ Atoms and fields stay light; heavy widgets live in lazy-loaded plugins.
 | [`@object-ui/plugin-editor`](ui/packages/plugin-editor) | Rich text editor powered by Monaco |
 | [`@object-ui/plugin-markdown`](ui/packages/plugin-markdown) | Markdown rendering |
 | [`@object-ui/plugin-chatbot`](ui/packages/plugin-chatbot) | Chatbot interface |
-| [`@object-ui/plugin-ai`](ui/packages/plugin-ai) | Schema generation and conversational assistants (Vercel AI SDK) |
 
 #### Tooling
 

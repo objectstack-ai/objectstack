@@ -16,8 +16,8 @@
  * (`validateAuthoredDocument`, objectui#5250), whose root is the strict twin of
  * `AnyComponentSchema` — a union discriminated on `type`. A registered type
  * with no arm in that union is refused with one `invalid_union` issue at
- * `['type']`, whatever else the document says: `ai-form-assist`, which
- * `packages/plugin-ai/README.md` teaches, was one of them. The mirror-parity
+ * `['type']`, whatever else the document says: `ai-form-assist`, which the
+ * since-retired `@object-ui/plugin-ai` README taught, was one of them. The mirror-parity
  * ratchet in `@object-ui/types` counts declaration↔mirror PAIRS and the keys
  * inside them; a registered type with no mirror at all is in neither, so
  * nothing counted this family until this file.
@@ -379,7 +379,7 @@ describe('registered component types refused at `type` — a ratchet (objectui#1
     // was 200 until objectui#10859 batch 8 unregistered thirty bare keys.)
     expect(BARE_KEYS.length).toBeGreaterThan(150);
     expect(BARE_KEYS).toContain('timeline');
-    expect(BARE_KEYS).toContain('ai-form-assist');
+    expect(BARE_KEYS).toContain('pivot');
   });
 
   it('tells a claimed type from an unclaimed one — both instrument controls fire', () => {
@@ -392,11 +392,24 @@ describe('registered component types refused at `type` — a ratchet (objectui#1
     expect(refusedAtType('no-such-component-10859')).toBe(true);
   });
 
-  it('counts the three plugin-ai keys as armed (objectui#10859 batch 1)', () => {
+  it('refuses the three plugin-ai keys BY NAME at `type` — the package retired and their arms became refusals (objectstack#25921)', () => {
+    // objectui#10859 batch 1 armed them; the registrations left with
+    // `@object-ui/plugin-ai`, so registration and arm leaving in one change move
+    // neither count. Each arm stays as `retiredNodeType()`'s refusal, the
+    // `cloud:plan-status` shape below.
     for (const key of ['ai-form-assist', 'ai-recommendations', 'nl-query']) {
-      expect(BARE_KEYS, key).toContain(key);
+      expect(BARE_KEYS, key).not.toContain(key);
+      const result = validateAuthoredDocument({ type: key });
+      expect(result.success, key).toBe(false);
+      const named = (result.success ? [] : result.error.issues).filter(
+        (issue) => issue.code === 'custom' && issue.path.length === 1 && issue.path[0] === 'type',
+      );
+      expect(named, key).toHaveLength(1);
+      expect(named[0]?.message, key).toContain('@object-ui/plugin-ai');
       expect(refusedAtType(key), key).toBe(false);
     }
+    // Control: an unknown bare literal still takes the generic path.
+    expect(refusedAtType('ai-no-such-node-25921')).toBe(true);
   });
 
   it('counts the three keys batch 2 armed (objectui#10859 batch 2)', () => {
@@ -712,7 +725,6 @@ describe('registered NAMESPACED component types refused at `type` — a ratchet 
 
 /** Rooted on this file, never on `process.cwd()`. */
 const HERE = dirname(fileURLToPath(import.meta.url));
-const PLUGIN_AI_README = join(HERE, '..', '..', '..', 'plugin-ai', 'README.md');
 const QUICK_START = join(HERE, '..', '..', '..', '..', '..', 'content', 'docs', 'frontend', 'quick-start.mdx');
 
 /** See `validate-root-path-line.test.ts` — the escape byte is never spelled. */
@@ -748,26 +760,6 @@ beforeEach(() => {
 afterEach(() => {
   restore();
   rmSync(dir, { recursive: true, force: true });
-});
-
-describe('objectui validate — the plugin-ai README document (objectui#10859)', () => {
-  it('validates the "Schema-Driven Usage" `ai-form-assist` document', async () => {
-    const readme = readFileSync(PLUGIN_AI_README, 'utf8');
-    const section = readme.slice(readme.indexOf('## Schema-Driven Usage'));
-    const fence = /```json\n([\s\S]*?)\n```/.exec(section);
-    expect(fence, 'no ```json fence under "## Schema-Driven Usage"').not.toBeNull();
-    const file = join(dir, 'ai-form-assist.json');
-    writeFileSync(file, (fence as RegExpExecArray)[1], 'utf-8');
-    // Lit control on the extraction: it is the taught node.
-    expect(JSON.parse((fence as RegExpExecArray)[1]).type).toBe('ai-form-assist');
-
-    await validate(file);
-
-    const text = out.join('\n').replace(ANSI, '');
-    expect(text).not.toContain('Schema validation failed');
-    expect(text).toContain('Schema is valid');
-    expect(exitCodes).toEqual([0]);
-  });
 });
 
 /* ── End to end: a page of public blocks through `objectui validate` ─────── */

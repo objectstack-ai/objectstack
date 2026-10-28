@@ -139,6 +139,11 @@ const REFERENCE_KINDS: ReadonlySet<string> = new Set<ReferenceKind>([
  * a server on that spec binds `position` to it, and dropping it sent the
  * picker back to the local fallback — under the installed spec a lookup over
  * `sys_position` rows, a mirror a fresh environment leaves empty.
+ *
+ * `registry-and-data` (ADR-0142 D6) is read too: a server on that spec binds
+ * `queue` to it, and the queue picker lists both of its halves. It is kept only
+ * whole — a type, an object and a committed column — because one half alone
+ * would offer half of what the value can name.
  */
 function sourceOf(raw: unknown): RefValueSource | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
@@ -150,6 +155,13 @@ function sourceOf(raw: unknown): RefValueSource | undefined {
   }
   if (s.source === 'registry') {
     return typeof s.type === 'string' && s.type ? { source: 'registry', type: s.type } : undefined;
+  }
+  if (s.source === 'registry-and-data') {
+    return typeof s.type === 'string' && s.type
+      && typeof s.object === 'string' && s.object
+      && typeof s.valueField === 'string' && s.valueField
+      ? { source: 'registry-and-data', type: s.type, object: s.object, valueField: s.valueField }
+      : undefined;
   }
   if (s.source === 'enum') {
     const values = Array.isArray(s.values) ? s.values.filter((v): v is string => typeof v === 'string') : [];

@@ -508,6 +508,14 @@ export const COMPOUND_ANCHOR_LEDGER = [
  * a card can edit, the `check-expected-skips` shape exactly. It is DECLARED
  * (`self-test-reads`), so a card touching that file derives
  * `check:pm-record-recognisers`.
+ *
+ * ## The sixth row: the review claim line's spelling pin
+ *
+ * The same self-test reads the pm-dispatch references' `contract-review.md`
+ * to pin the `Contract-review-claim:` template and its two-hour lapse verbatim
+ * in the rule text — the same population claim, on a second governed file. The
+ * one `self-test-reads` line names both paths, so a card touching either file
+ * derives `check:pm-record-recognisers`.
  */
 export const GOVERNED_READ_FLOOR = Object.freeze([
   Object.freeze({ script: 'scripts/check-commit-card-trailers.mjs', file: '.claude/agents/os-dev.md', declared: false }),
@@ -529,6 +537,11 @@ export const GOVERNED_READ_FLOOR = Object.freeze([
   Object.freeze({
     script: 'scripts/pm/record-recognisers.mjs',
     file: '.claude/skills/pm-dispatch/references/project-forms.md',
+    declared: true,
+  }),
+  Object.freeze({
+    script: 'scripts/pm/record-recognisers.mjs',
+    file: '.claude/skills/pm-dispatch/references/contract-review.md',
     declared: true,
   }),
 ]);

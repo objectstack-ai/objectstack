@@ -409,7 +409,9 @@ one that silently resolves to nobody when it's mistaken for a business
 hierarchy. A `queue` entry names an ownership queue by its machine name — one
 an installed app declares, or one of the organization's own — and resolves to
 the queue's members at node entry, through the same expansion that decides who
-may claim the queue's records (ADR-0142 D6). `field`, `manager`, and `expression` resolve against the record's
+may claim the queue's records (ADR-0142 D6) — how to declare a queue, and what
+its members can do with the records parked in it, is in
+[Queues and assignment rules](/docs/automation/queues-and-assignment-rules). `field`, `manager`, and `expression` resolve against the record's
 **live** state at node entry (#3447); `manager` additionally depends on
 `sys_user.manager_id`, which a platform admin sets from **Setup → Users → ⋯ →
 Set Manager** — see [the `manager` callout above](#3-the-approval-node). `position`, `department`,

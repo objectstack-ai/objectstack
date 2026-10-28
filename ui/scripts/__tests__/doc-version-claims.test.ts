@@ -1136,7 +1136,6 @@ const KNOWN_CLAIMS: KnownClaim[] = [
   { file: 'packages/layout/README.md', claim: PEER_19, kind: 'restatement', why: PEER_RESTATEMENT_OK },
   { file: 'packages/mobile/README.md', claim: PEER_19, kind: 'restatement', why: PEER_RESTATEMENT_OK },
   { file: 'packages/permissions/README.md', claim: PEER_19, kind: 'restatement', why: PEER_RESTATEMENT_OK },
-  { file: 'packages/plugin-ai/README.md', claim: PEER_19, kind: 'restatement', why: PEER_RESTATEMENT_OK },
   { file: 'packages/plugin-designer/README.md', claim: PEER_19, kind: 'restatement', why: PEER_RESTATEMENT_OK },
   { file: 'packages/plugin-report/README.md', claim: PEER_19, kind: 'restatement', why: PEER_RESTATEMENT_OK },
   { file: 'packages/react/README.md', claim: PEER_19, kind: 'restatement', why: PEER_RESTATEMENT_OK },
