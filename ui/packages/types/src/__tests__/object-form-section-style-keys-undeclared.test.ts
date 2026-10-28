@@ -84,7 +84,6 @@ const DECLARED_KEYS = [
   'collapsible',
   'collapsed',
   'columns',
-  'pane',
   'fields',
   'group',
   'visibleWhen',
