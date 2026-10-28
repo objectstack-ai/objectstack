@@ -72,6 +72,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Highlight Fields",
         helpText: "Field names of this object, most important first — the first entry wins where only one fits (ADR-0085). Drives the default list columns, cards, child-record previews and the detail highlight strip. A name that is not a field of this object is refused at publish."
       },
+      relatedLists: {
+        label: "Related Lists",
+        helpText: "Business order of this object's related lists on its record page, most important first. Each entry is a child object name (e.g. task), or object.field when that child has more than one relationship to this object. Listed lists come first; the rest follow in the derived order. A name that matches no relationship pointing at this object places nothing, and os validate refuses it."
+      },
       searchableFields: {
         label: "Searchable Fields",
         helpText: "Field names the $search query matches (ADR-0061): the default for the record picker, list quick-search and global search; a view may narrow it. Unset, search uses the name/title field plus short-text fields. Each entry must name a stored field of this object — an unknown name or a virtual formula field is refused at publish."
@@ -95,6 +99,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "fieldGroups.description": {
         label: "Description",
         helpText: "Text shown under the header, on the entry form and the record detail page."
+      },
+      "fieldGroups.relatedList": {
+        label: "Related List",
+        helpText: "Makes this entry a related list's table instead of a section of fields: name the child object (or object.field) whose list is drawn at this position in the record's details column. Such a group holds no fields; a field that names it as its group is refused."
       },
       "fieldGroups.collapse": {
         label: "Collapse",

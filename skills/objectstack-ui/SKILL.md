@@ -106,9 +106,9 @@ and the form's `taxRateField` overrides which parent field drives the totals.
 related list on the parent's record DETAIL page. You don't author it: every
 child relationship is shown as a related list by default (owned `master_detail`
 children first). Refine on the relationship:
-- `relatedList: 'primary'` — mark a CORE relationship; the detail page promotes
-  it to its **own tab** (see layout below). A *prominence* intent, not a layout
-  switch (ADR-0085).
+- `relatedList: 'primary'` — main content: a body table, its **own tab** on the
+  tabbed page (see layout below); it places, it does not order — the parent's
+  `relatedLists` orders (ADR-0085).
 - `relatedList: false` — suppress a noisy child from the detail page.
 - `relatedListTitle` / `relatedListColumns` — override the derived title /
   columns (both optional; columns otherwise auto-derive from the child object's

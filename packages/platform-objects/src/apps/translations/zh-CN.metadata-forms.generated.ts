@@ -72,6 +72,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "重点字段",
         helpText: "本对象的字段名，按重要性从高到低排列——只能放下一个时取第一项（ADR-0085）。决定默认列表列、卡片、子记录预览和详情页的重点信息条。不是本对象字段的名称会在发布时被拒绝。"
       },
+      relatedLists: {
+        label: "相关列表顺序",
+        helpText: "本对象记录页上相关列表的业务顺序，按重要性从高到低排列。每一项是子对象名称（例如 task），当该子对象与本对象有多个关系时写 object.field。列出的列表排在前面，其余按派生顺序排在后面。不对应任何指向本对象的关系的名称不起作用，os validate 会拒绝它。"
+      },
       searchableFields: {
         label: "可搜索字段",
         helpText: "$search 查询匹配的字段名（ADR-0061）：记录选择器、列表快速搜索和全局搜索的默认范围，视图可以再收窄。未设置时，搜索使用名称/标题字段加上短文本字段。每一项都必须是本对象已存储的字段——未知的名称或虚拟的 formula 字段会在发布时被拒绝。"
@@ -95,6 +99,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "fieldGroups.description": {
         label: "描述",
         helpText: "显示在标题下方的文字，出现在录入表单和记录详情页上。"
+      },
+      "fieldGroups.relatedList": {
+        label: "相关列表",
+        helpText: "让该条目代表一个相关列表的表格，而不是一组字段：填写子对象（或 object.field），其列表就显示在记录详情栏的这个位置。这样的分组不包含字段；把它填为自身分组的字段会被拒绝。"
       },
       "fieldGroups.collapse": {
         label: "折叠",

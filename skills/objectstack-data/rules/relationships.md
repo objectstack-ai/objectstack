@@ -333,7 +333,7 @@ project: {
   type: 'master_detail',
   reference: 'project',
   inlineEdit: true,                 // write side: edit inline in the Project form
-  relatedList: 'primary',           // read side: promote to its OWN detail-page tab
+  relatedList: 'primary',           // read side: a body table (default with inlineEdit)
   relatedListTitle: 'Tasks',        // title of the detail-page list
   relatedListColumns: ['title', 'status', 'priority', 'due_date'],
 },
@@ -342,15 +342,14 @@ project: {
 audit_ref: { type: 'master_detail', reference: 'invoice', relatedList: false },
 ```
 
-`relatedList` is tri-state — a *prominence* hint, not a layout switch (ADR-0085):
+`relatedList` is tri-state — placement (ADR-0085):
 
-- `'primary'` — CORE relationship: the detail page gives it its **own tab**.
-  Every non-primary related list stacks under a single shared **Related** tab,
-  so `'primary'` is the one-word way to promote a child table to a first-class
-  tab without a custom page.
-- `false` — suppress this child from the parent's detail page (chatty
-  association/log children you don't want surfaced).
-- `true` / omitted — shown in the shared **Related** tab.
+- `'primary'` — main content: a full-width table in the record's body (its own
+  tab on the tabbed page). Default for a `master_detail` FK with `inlineEdit`.
+- `false` — suppress this child from the parent's detail page.
+- `true` / omitted — a side card (the shared **Related** tab).
+- Order is the parent's: `relatedLists: ['task', 'event.related_to']` (child, or
+  `object.field`) lists those first; a name matching no inbound FK is refused.
 
 `relatedListTitle` / `relatedListColumns` override the derived title / columns;
 both are optional — when omitted, columns auto-derive from the child object's

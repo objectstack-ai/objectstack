@@ -47,6 +47,13 @@
       "proof": "packages/qa/dogfood/test/semantic-roles.dogfood.test.ts#semantic-roles-served",
       "note": "ADR-0085 semantic role (renamed from compactLayout): objectui default list/grid columns (ObjectGrid/ObjectView/InterfaceListPage), child-record previews (first entry), record:details auto layout, detail highlight strip (first 4)."
     },
+    "relatedLists": {
+      "status": "live",
+      "verifiedAt": "2026-10-28",
+      "evidenceScope": "in-repo",
+      "evidence": "ui/packages/app-shell/src/utils/deriveRelatedLists.ts#resolveRelatedListOrder (the one resolution: the parent's declared entries first, in order — a child object takes all of its lists, `object.field` one FK — then every unlisted list in the derived owned → lookup order); ui/packages/app-shell/src/utils/deriveRelatedLists.ts#deriveRelatedLists (hands `objectDef.relatedLists` to it); packages/spec/src/stack.zod.ts#collectRelatedListNameErrors (the AUTHORING judgement: an entry that matches no inbound lookup / master_detail field is refused at defineStack, naming the entry and the relationships that exist)",
+      "note": "#27069, maintainer ruling A (an ordered list on the parent object). The record page reads it through deriveRelatedLists, whose output RecordDetailView renders in order (the tabbed page's own tabs and its Related tab keep this order within each). `relatedList: false` on the FK still hides a listed relationship, and `relatedList: 'primary'` places a list rather than ordering it. The cross-object strict-name check runs where the children's fields are known (`defineStack`, so `os validate` / `os build`); a one-object save at the publish door does not see the children, and the reader then ignores a dangling name. `fieldGroups[].relatedList` (a field group standing for a body table) sits under the undrilled `object/fieldGroups` container; its reader is the record page v3 body layout, #27055."
+    },
     "stageField": {
       "status": "live",
       "proof": "packages/qa/dogfood/test/semantic-roles.dogfood.test.ts#semantic-roles-served",
