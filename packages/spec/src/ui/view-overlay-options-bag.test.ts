@@ -1,45 +1,37 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#20051] A flattened list overlay's legacy `options` bag is JUDGED at the
- * view write door, by the same per-kind schemas the direct spelling is judged
- * by — the door half of ruling A on objectui#10380.
+ * [#25923] A flattened list overlay carries no `options` bag: the view write
+ * door refuses it by name, and a STORED bag is folded onto the top-level
+ * per-kind blocks by the ADR-0087 D2 conversion `list-view-options-bag-folded`
+ * before the row is served.
  *
- * ## What was measured before the change (`origin/main` @ `8d1f7ab`)
+ * ## What changed (supersedes direction A on objectui#10380)
  *
- * The list overlay member is `ListViewShapeSchema.extend(…).strip()`, and
- * `.strip()` dropped a top-level `options` from the parse without looking
- * inside it:
- *
- * - `timeline.metaFields` on a flat overlay ⇒ refused, `unrecognized_keys`
- *   at `timeline`;
- * - the same key as `options.timeline.metaFields` ⇒ ACCEPTED, `options` absent
- *   from the output — and `saveMetaItem` stored the request body with the bag
- *   in it (measured through the real save; the save-door pins live in
- *   `metadata-protocol`'s `protocol.graft-folded-form-sections.test.ts`, whose
- *   engine double they ride, and the `PUT /api/v1/meta/view` pins in `rest`'s
- *   `meta-view-overlay-options-bag.test.ts`).
+ * From #20051 until this card the list overlay member DECLARED the bag and
+ * judged each `options.KIND` key by key with the kind's own schema (every key
+ * optional), as an underlay the top-level block wins over per key. That ruling
+ * refused only to close the bag whole, for objectui's pinned `options.map`
+ * read; #25923 retires every reader of the bag, so the door closes it.
  *
  * ## What this file pins
  *
- * 1. An out-of-contract key gets the SAME refusal in both spellings — same
- *    code, same keys, same message — and only the path gains the `options`
- *    prefix; a value a key's own schema refuses is refused at that key too.
- *    Asserted for every kind the bag declares, so no kind is judged by
- *    anything but its own block. The underlay is judged KEY BY KEY: a partial
- *    bag (the per-key merge population objectui pins) parses.
- * 2. The bag is closed: `options.foo` is refused by name, not dropped.
- * 3. A legal `options.KIND` still parses and round-trips — including the
- *    legacy `options.map` bag objectui pins
- *    (`InterfaceListPage.mapConfig.test.tsx`, "CONTROL: the legacy
- *    `options.map` bag is still forwarded on its own path").
- * 4. The form overlay cannot accept the bag the list overlay refused (the
- *    column-less fall-through), and says why.
+ * 1. The list overlay refuses `options` by name, whatever it holds (a legal
+ *    `options.map`, an empty bag, a non-object), at `options`, with the
+ *    move-to-the-top-level prescription; the union refuses it too.
+ * 2. The authoring funnel does not replay the fold (the entry is retired from
+ *    the load path): an author meets the refusal and is taught.
+ * 3. A stored row replays it: `options.KIND` moves to `KIND`, the top-level
+ *    value wins per key, `chart`'s block wins whole, and the folded row parses.
+ * 4. What the fold cannot decide stays as stored, with a TODO.
+ * 5. The form overlay and the view item record keep their own refusals.
  */
 
 import { describe, it, expect } from 'vitest';
-import { z } from 'zod';
 import { ViewMetadataSchema, VIEW_METADATA_MEMBERS, diagnoseViewMetadata } from './view.zod';
+import { applyConversionsToStoredItem } from '../conversions/stored';
+import { applyConversions } from '../conversions/apply';
+import type { ConversionNotice, ConversionTodoNotice } from '../conversions/types';
 
 /** A bound flat list overlay — the shape a `PUT /api/v1/meta/view` carries. */
 const overlay = (extra: Record<string, unknown> = {}) => ({
@@ -50,158 +42,152 @@ const overlay = (extra: Record<string, unknown> = {}) => ({
   ...extra,
 });
 
-/** The kinds the bag declares, read off the published member's JSON Schema. */
-function declaredBagKinds(): string[] {
-  const json = z.toJSONSchema(VIEW_METADATA_MEMBERS.listOverlay as unknown as z.ZodTypeAny, { io: 'input', unrepresentable: 'any' }) as {
-    properties?: Record<string, { properties?: Record<string, unknown> }>;
-  };
-  return Object.keys(json.properties?.options?.properties ?? {}).sort();
-}
-
 type Issue = { code: string; path: PropertyKey[]; message: string; keys?: string[] };
 
-/** The list overlay's own issues for a body (the branch the body claims). */
-function listOverlayIssues(body: unknown): Issue[] {
+/** The list overlay's own issue at `options` for a body (the branch the body claims). */
+function listOverlayOptionsIssue(body: unknown): Issue {
   const d = diagnoseViewMetadata(body);
   expect(d.success, `expected a refusal for ${JSON.stringify(body)}`).toBe(false);
-  if (d.success) return [];
+  if (d.success) throw new Error('unreachable');
   expect(d.branch).toBe('listOverlay');
-  return d.issues as unknown as Issue[];
+  const hit = (d.issues as unknown as Issue[]).find((i) => i.path.length === 1 && i.path[0] === 'options');
+  expect(hit, JSON.stringify(d.issues)).toBeDefined();
+  return hit!;
 }
 
-/** Issues under `prefix`, with the prefix removed — for comparing two spellings. */
-function under(issues: Issue[], prefix: PropertyKey[]): Array<Omit<Issue, 'path'> & { path: string }> {
-  return issues
-    .filter((i) => prefix.every((p, n) => i.path[n] === p))
-    .map((i) => ({ code: i.code, message: i.message, keys: i.keys, path: i.path.slice(prefix.length).join('.') }))
-    .sort((a, b) => `${a.path}|${a.code}`.localeCompare(`${b.path}|${b.code}`));
+/** Replay the chain over one stored `view` row, as every stored-row read does. */
+function storedRead(row: Record<string, unknown>) {
+  const notices: ConversionNotice[] = [];
+  const todos: ConversionTodoNotice[] = [];
+  const out = applyConversionsToStoredItem('view', row, {
+    onNotice: (n) => notices.push(n),
+    onTodo: (t) => todos.push(t),
+  }) as Record<string, unknown>;
+  const mine = (n: { conversionId: string }) => n.conversionId === 'list-view-options-bag-folded';
+  return { out, notices: notices.filter(mine), todos: todos.filter(mine) };
 }
 
-describe('the bag declares exactly the list kinds, derived from the shape', () => {
-  it('declares one block per list-view kind that has a block — `grid` has none', () => {
-    // A pin on the DERIVATION (`listViewKindBlocks`): the list is not
-    // hand-maintained in the schema, so it is stated once here, where a new
-    // kind shows up as a deliberate one-line edit.
-    expect(declaredBagKinds()).toEqual(
-      ['calendar', 'chart', 'gallery', 'gantt', 'kanban', 'map', 'timeline', 'tree'],
-    );
-  });
-});
-
-describe('a direct and an `options`-wrapped out-of-contract key get the same refusal', () => {
-  it('the card\'s headline: `options.timeline.metaFields` is refused by name, as `timeline.metaFields` is', () => {
-    const timeline = { startDateField: 'created_at', titleField: 'name', metaFields: ['region'] };
-    const direct = listOverlayIssues(overlay({ type: 'timeline', timeline }));
-    const wrapped = listOverlayIssues(overlay({ type: 'timeline', options: { timeline } }));
-
-    const directHit = direct.find((i) => i.code === 'unrecognized_keys');
-    const wrappedHit = wrapped.find((i) => i.code === 'unrecognized_keys');
-    expect(directHit?.path).toEqual(['timeline']);
-    expect(wrappedHit?.path).toEqual(['options', 'timeline']);
-    expect(wrappedHit?.keys).toEqual(['metaFields']);
-    expect(wrappedHit?.keys).toEqual(directHit?.keys);
-    // The refusal names the key the author wrote, on the same surface text.
-    expect(wrappedHit?.message).toBe(directHit?.message);
-    expect(wrappedHit?.message).toContain('`metaFields`');
+describe('the list overlay refuses the `options` bag by name', () => {
+  it.each([
+    ['a legal legacy `options.map`, the read objectui pinned', { map: { locationField: 'location', titleField: 'legacy_title' } }],
+    ['an `options.kanban` / `options.calendar` pair', { kanban: { groupByField: 'status', columns: ['name'] }, calendar: { startDateField: 'created_at' } }],
+    ['an empty bag', {}],
+    ['`options.grid`', { grid: {} }],
+    ['a non-object bag', 'map'],
+  ])('%s is refused at `options` with the prescription', (_label, options) => {
+    const hit = listOverlayOptionsIssue(overlay({ type: 'map', options }));
+    expect(hit.message).toMatch(/^A list view's `options` bag was removed in @objectstack\/spec 18\.3\.0/);
+    expect(hit.message).toContain('Move each `options.KIND` block to `KIND`');
+    expect(ViewMetadataSchema.safeParse(overlay({ type: 'map', options })).success).toBe(false);
+    expect(VIEW_METADATA_MEMBERS.listOverlay.safeParse(overlay({ type: 'map', options })).success).toBe(false);
   });
 
-  it.each(['calendar', 'chart', 'gallery', 'gantt', 'kanban', 'map', 'timeline', 'tree'])(
-    '`options.%s` refuses an out-of-contract key with its own block\'s refusal — same code, keys and message',
-    (kind) => {
-      const block = { zz_not_a_key: 1 };
-      const unknownKey = (issues: ReturnType<typeof under>) => issues.filter((i) => i.code === 'unrecognized_keys');
-      const direct = unknownKey(under(listOverlayIssues(overlay({ [kind]: block })), [kind]));
-      const wrapped = under(listOverlayIssues(overlay({ options: { [kind]: block } })), ['options', kind]);
-      expect(direct).toHaveLength(1);
-      // The ONLY complaint about the wrapped block is the unknown key — the
-      // underlay is judged key by key, so the block's required keys are not
-      // asked of it (see the per-key case below).
-      expect(wrapped).toEqual(direct);
-      expect(wrapped[0]!.keys).toEqual(['zz_not_a_key']);
-    },
-  );
-
-  it('a value the key\'s own schema refuses is refused at the same key under `options`', () => {
-    // `map.zoom` is `min(1).max(20)`: the key-level schema travels with the key.
-    const direct = under(listOverlayIssues(overlay({ map: { zoom: 99 } })), ['map']);
-    const wrapped = under(listOverlayIssues(overlay({ options: { map: { zoom: 99 } } })), ['options', 'map']);
-    expect(wrapped).toEqual(direct);
-    expect(wrapped.map((i) => i.path)).toEqual(['zoom']);
-  });
-
-  it('the union refuses both spellings — the verdict, not only the diagnosis', () => {
-    const timeline = { startDateField: 'created_at', titleField: 'name', metaFields: ['region'] };
-    expect(ViewMetadataSchema.safeParse(overlay({ type: 'timeline', timeline })).success).toBe(false);
-    expect(ViewMetadataSchema.safeParse(overlay({ type: 'timeline', options: { timeline } })).success).toBe(false);
-  });
-});
-
-describe('the bag itself is closed', () => {
-  it('`options.foo` is refused by name at `options`, not dropped', () => {
-    const issues = listOverlayIssues(overlay({ options: { foo: 1 } }));
-    const hit = issues.find((i) => i.code === 'unrecognized_keys');
-    expect(hit?.path).toEqual(['options']);
-    expect(hit?.keys).toEqual(['foo']);
-    expect(hit?.message).toContain('legacy `options` bag');
-  });
-
-  it('`options.grid` is answered with the prescription, not a typo guess', () => {
-    const hit = listOverlayIssues(overlay({ options: { grid: {} } })).find((i) => i.code === 'unrecognized_keys');
-    expect(hit?.keys).toEqual(['grid']);
-    expect(hit?.message).toContain('top-level keys of the view itself');
-  });
-
-  it('a non-object bag is refused, not dropped', () => {
-    const hit = listOverlayIssues(overlay({ options: 'map' })).find((i) => i.path[0] === 'options');
-    expect(hit?.code).toBe('invalid_type');
-  });
-});
-
-describe('a legal `options.KIND` still parses and round-trips', () => {
-  it('CONTROL: the legacy `options.map` bag objectui pins is accepted and kept in the parse output', () => {
-    // objectui's own control — "the legacy `options.map` bag is still
-    // forwarded on its own path" (recorded in `packages/spec/liveness/view.json`,
-    // row `list.map`).
-    const options = { map: { locationField: 'location', titleField: 'legacy_title' } };
-    const body = overlay({ name: 'showcase_task.work_map', object: 'showcase_task', type: 'map', columns: ['title', 'location'], options });
-    const parsed = ViewMetadataSchema.safeParse(body);
+  it('CONTROL: the same keys written top-level parse', () => {
+    const parsed = ViewMetadataSchema.safeParse(overlay({ type: 'map', map: { locationField: 'location', titleField: 'legacy_title' } }));
     expect(parsed.success, JSON.stringify(!parsed.success && parsed.error.issues)).toBe(true);
-    expect((parsed as { data: { options?: unknown } }).data.options).toEqual(options);
   });
 
-  it('a legal legacy `options.kanban` / `options.calendar` pair round-trips byte-for-byte', () => {
-    const options = { kanban: { groupByField: 'status', columns: ['name'] }, calendar: { startDateField: 'created_at' } };
-    const parsed = ViewMetadataSchema.safeParse(overlay({ type: 'kanban', options }));
-    expect(parsed.success, JSON.stringify(!parsed.success && parsed.error.issues)).toBe(true);
-    const out = (parsed as { data: { options?: Record<string, unknown> } }).data.options;
-    expect(out).toEqual(options);
-    // …and re-parsing the parse output is a fixed point.
-    expect(ViewMetadataSchema.safeParse((parsed as { data: unknown }).data)).toMatchObject({ success: true });
-  });
-
-  it('a PARTIAL underlay parses — the per-key merge population objectui pins', () => {
-    // objectui `ObjectView.namedViewProtocolKeys-8980.test.tsx`: "a key the
-    // canonical block does NOT restate survives from the legacy nesting — the
-    // merge is per-key, not wholesale". `kanban.groupByField` and
-    // `kanban.columns` are REQUIRED on the top-level block; the underlay here
-    // carries only the key the top-level block leaves to it.
-    const body = overlay({
-      type: 'kanban',
-      kanban: { groupByField: 'status', columns: ['name'] },
-      options: { kanban: { titleField: 'subject' } },
-    });
-    const parsed = ViewMetadataSchema.safeParse(body);
-    expect(parsed.success, JSON.stringify(!parsed.success && parsed.error.issues)).toBe(true);
-    // …while the SAME partial block written directly is still refused for the
-    // required keys it omits: the top-level block is the one the renderer
-    // completes, the underlay is not.
-    expect(ViewMetadataSchema.safeParse(overlay({ type: 'kanban', kanban: { titleField: 'subject' } })).success).toBe(false);
-  });
-
-  it('CONTROL: an overlay with no `options` parses exactly as before, with no `options` key', () => {
+  it('CONTROL: an overlay with no `options` parses, with no `options` key', () => {
     const parsed = ViewMetadataSchema.safeParse(overlay({ type: 'grid' }));
     expect(parsed.success).toBe(true);
     expect('options' in (parsed as { data: Record<string, unknown> }).data).toBe(false);
+  });
+});
+
+describe('the authoring funnel does not fold the bag — the author is taught', () => {
+  it('`applyConversions` without retired entries leaves the bag, so the parse refuses it', () => {
+    const stack = { views: [overlay({ type: 'kanban', options: { kanban: { groupByField: 'status', columns: ['name'] } } })] };
+    const notices: ConversionNotice[] = [];
+    const out = applyConversions(structuredClone(stack), { onNotice: (n) => notices.push(n) });
+    expect(out).toEqual(stack);
+    expect(notices.filter((n) => n.conversionId === 'list-view-options-bag-folded')).toHaveLength(0);
+  });
+});
+
+describe('a stored row replays the fold', () => {
+  it('`options.KIND` with no top-level block becomes the block, and the row parses', () => {
+    const row = overlay({ type: 'kanban', options: { kanban: { groupByField: 'status', columns: ['name'] } } });
+    const { out, notices, todos } = storedRead(row);
+    expect(out).toEqual(overlay({ type: 'kanban', kanban: { groupByField: 'status', columns: ['name'] } }));
+    expect(notices.map((n) => n.path)).toEqual(['views[0].options.kanban']);
+    expect(todos).toEqual([]);
+    expect(ViewMetadataSchema.safeParse(out).success).toBe(true);
+  });
+
+  it('both present: the top-level value wins per key, and a key only the bag set is kept', () => {
+    // objectui's per-key population (`ObjectView.namedViewProtocolKeys-8980`):
+    // the top-level block restates `groupByField`, the bag adds `titleField`.
+    const row = overlay({
+      type: 'kanban',
+      kanban: { groupByField: 'status', columns: ['name'] },
+      options: { kanban: { groupByField: 'owner', titleField: 'subject' } },
+    });
+    const { out } = storedRead(row);
+    expect(out.kanban).toEqual({ groupByField: 'status', columns: ['name'], titleField: 'subject' });
+    expect('options' in out).toBe(false);
+    expect(ViewMetadataSchema.safeParse(out).success).toBe(true);
+  });
+
+  it('`chart` is the exception: its block replaced the bag WHOLE, so a bag beside a block is dropped', () => {
+    const row = overlay({
+      type: 'chart',
+      chart: { dataset: 'deals', values: ['amount'] },
+      options: { chart: { dataset: 'old', values: ['amount'], dimensions: ['stage'] } },
+    });
+    const { out, notices } = storedRead(row);
+    expect(out.chart).toEqual({ dataset: 'deals', values: ['amount'] });
+    expect('options' in out).toBe(false);
+    expect(notices).toHaveLength(1);
+    expect(notices[0]!.to).toContain('replaces it whole');
+  });
+
+  it('a bag block can fold into a block still missing a required key — the row is served badged invalid', () => {
+    // The bag was judged with every key optional; the D3 entry names the remedy.
+    const { out } = storedRead(overlay({ type: 'gantt', options: { gantt: { startDateField: 's', endDateField: 'e' } } }));
+    expect(out.gantt).toEqual({ startDateField: 's', endDateField: 'e' });
+    const d = diagnoseViewMetadata(out);
+    expect(d.success).toBe(false);
+  });
+
+  it('the fold is idempotent: a second read changes nothing and says nothing', () => {
+    const once = storedRead(overlay({ type: 'map', options: { map: { locationField: 'location' } } })).out;
+    const twice = storedRead(once);
+    expect(twice.out).toEqual(once);
+    expect(twice.notices).toEqual([]);
+  });
+});
+
+describe('what the fold cannot decide stays as stored, with a TODO', () => {
+  it('`options.grid` stays in the bag (a grid has no block); the folded kinds still move', () => {
+    const { out, todos } = storedRead(overlay({ type: 'grid', options: { grid: { striped: true }, kanban: { titleField: 'name' } } }));
+    expect(out.options).toEqual({ grid: { striped: true } });
+    expect(out.kanban).toEqual({ titleField: 'name' });
+    expect(todos).toHaveLength(1);
+    expect(todos[0]!.path).toBe('views[0].options');
+    expect(todos[0]!.reason).toContain('`grid`');
+  });
+
+  it('a non-object bag is left as stored, with a TODO', () => {
+    const row = overlay({ options: 'map' });
+    const { out, todos, notices } = storedRead(row);
+    expect(out).toEqual(row);
+    expect(notices).toEqual([]);
+    expect(todos).toHaveLength(1);
+  });
+
+  it('a bag on a FORM overlay is left as stored, with a TODO — its blocks have no home on a form', () => {
+    const row = { name: 'lead.contact_us', object: 'lead', viewKind: 'form', type: 'simple', options: { kanban: { groupByField: 'status' } } };
+    const { out, todos } = storedRead(row);
+    expect(out).toEqual(row);
+    expect(todos.map((t) => t.reason).join(' ')).toContain('form view');
+  });
+
+  it('CONTROL: a view item record (`config` present) is not this conversion\'s business', () => {
+    const row = { name: 'crm_lead.board', object: 'crm_lead', viewKind: 'list', config: { columns: ['name'] }, options: { kanban: {} } };
+    const { out, notices, todos } = storedRead(row);
+    expect(out).toEqual(row);
+    expect(notices).toEqual([]);
+    expect(todos).toEqual([]);
   });
 });
 

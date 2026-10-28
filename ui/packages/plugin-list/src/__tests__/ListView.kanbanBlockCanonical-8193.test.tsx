@@ -45,6 +45,13 @@
  * handled. That asymmetry is the point: a "fix" that pushed `kanban` whenever
  * it was whitelisted would also pass the positive arms, so the refusal arms at
  * the bottom are load-bearing.
+ *
+ * objectstack#25923 retired the bag: a stored `options.kanban` is folded onto
+ * the view's `kanban` block by the server before the row is served, the object
+ * page relays the block at the top level, and the gate reads the block alone.
+ * So the arms below are the same bindings written where they live now
+ * (renamed from `ListView.kanbanOptionsBagCanonical-8193`), plus one arm
+ * pinning that a bag no longer resolves the capability.
  */
 
 import React from 'react';
@@ -97,50 +104,39 @@ const kanbanOffered = (view: Record<string, unknown>) => {
   return Boolean(queryViewOption('Kanban'));
 };
 
-describe('the capability gate resolves kanban from the CANONICAL key in the options bag (objectui#8193)', () => {
-  // THE DISCRIMINATING ARM. This read `false` before the fix — and it is
-  // exactly the bag `app-shell`'s ObjectView now emits.
-  it('offers Kanban for `options.kanban.groupByField`', () => {
-    expect(kanbanOffered({ options: { kanban: { groupByField: 'stage' } } })).toBe(true);
+describe('the capability gate resolves kanban from the CANONICAL key of the `kanban` block (objectui#8193, objectstack#25923)', () => {
+  // THE DISCRIMINATING ARM of objectui#8193, written where the binding lives now.
+  it('offers Kanban for `kanban.groupByField`', () => {
+    expect(kanbanOffered({ kanban: { groupByField: 'stage' } })).toBe(true);
   });
 
-  it('offers Kanban for the bag ObjectView actually writes', () => {
+  it('offers Kanban for the block ObjectView actually writes', () => {
     // The end-to-end shape. ⚠️ This fixture used to carry `groupBy` and call
     // itself "the producer's real output"; objectui#8213 retired that write, so
-    // the producer claim lives here and the `groupBy`-bearing bag moved to the
+    // the producer claim lives here and the `groupBy`-bearing block moved to the
     // arm below, as what it always really was — a robustness arm.
     // ⛔ One `kanbanOffered` per test: it renders into the shared screen, and a
     // second render in the same test makes every `queryByRole` ambiguous.
-    expect(
-      kanbanOffered({ options: { kanban: { groupByField: 'stage', titleField: 'name' } } }),
-    ).toBe(true);
+    expect(kanbanOffered({ kanban: { groupByField: 'stage', titleField: 'name' } })).toBe(true);
   });
 
-  it('CONTROL: a bag that ALSO carries a stray `groupBy` is answered the same', () => {
-    // Stored metadata written before objectui#8213 still carries the key, and
-    // this repo's `KanbanConfig` mirror is `.passthrough()`, so the gate must
-    // keep answering identically for a bag that has it and one that does not.
-    expect(
-      kanbanOffered({
-        options: { kanban: { groupBy: 'stage', groupByField: 'stage', titleField: 'name' } },
-      }),
-    ).toBe(true);
+  it('CONTROL: a block that ALSO carries a stray `groupBy` is answered the same', () => {
+    // Stored metadata written before objectui#8213 may still carry the key; the
+    // gate must keep answering identically for a block that has it and one
+    // that does not (the door's refusal of it is `strayGroupByRefused-8365`'s).
+    expect(kanbanOffered({ kanban: { groupBy: 'stage', groupByField: 'stage', titleField: 'name' } })).toBe(true);
   });
 
-  it('does NOT offer Kanban for the retired LEGACY `options.kanban.groupField` (objectui#6152 round 14)', () => {
-    // This card's CONTROL here proved the fix ADDED a rung rather than swapping
-    // one out. Round 14 retired the alias rung: a stored bag `groupField` names
-    // no lane, so the gate must not offer a board for it.
-    expect(kanbanOffered({ options: { kanban: { groupField: 'stage' } } })).toBe(false);
-  });
-
-  it('CONTROL: still offers Kanban for the declared `kanban.groupByField`', () => {
-    expect(kanbanOffered({ kanban: { groupByField: 'stage' } })).toBe(true);
+  it('RETIRED (objectstack#25923): does NOT offer Kanban for a lane bound in the legacy `options.kanban` bag', () => {
+    // The bag was this file's subject. It is folded onto `kanban` before a
+    // stored row is served, so one that still reaches the gate binds nothing.
+    expect(kanbanOffered({ options: { kanban: { groupByField: 'stage' } } })).toBe(false);
   });
 
   it('does NOT offer Kanban for the retired declared-path `kanban.groupField` (objectui#6152 round 14)', () => {
     // It did while `normalizeListViewSchema` folded a TOP-LEVEL alias onto
     // `groupByField` before the gate read anything; round 14 retired that fold.
+    // (The bag's `groupField` arm, retired the same round, is the bag arm above.)
     expect(kanbanOffered({ kanban: { groupField: 'stage' } })).toBe(false);
   });
 
@@ -151,8 +147,8 @@ describe('the capability gate resolves kanban from the CANONICAL key in the opti
     expect(kanbanOffered({})).toBe(false);
   });
 
-  it('does NOT offer Kanban for an options bag carrying no lane key', () => {
-    expect(kanbanOffered({ options: { kanban: { titleField: 'name' } } })).toBe(false);
+  it('does NOT offer Kanban for a kanban block carrying no lane key', () => {
+    expect(kanbanOffered({ kanban: { titleField: 'name' } })).toBe(false);
   });
 
   it('does NOT offer Kanban for an empty declared block', () => {
@@ -162,7 +158,7 @@ describe('the capability gate resolves kanban from the CANONICAL key in the opti
   it('does NOT offer Kanban for `groupBy` alone', () => {
     // `groupBy` is not a lane binding the gate recognizes in any nesting, and
     // objectui#8213 measured that the spec does not declare it either. Pinned
-    // so the new canonical rung is not quietly widened into a third spelling.
-    expect(kanbanOffered({ options: { kanban: { groupBy: 'stage' } } })).toBe(false);
+    // so the canonical rung is not quietly widened into a third spelling.
+    expect(kanbanOffered({ kanban: { groupBy: 'stage' } })).toBe(false);
   });
 });

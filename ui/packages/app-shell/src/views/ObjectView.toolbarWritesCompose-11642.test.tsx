@@ -288,7 +288,7 @@ async function openView(meta: any, viewId: string) {
 async function reload(meta: any, viewId: string) {
   cleanup();
   await openView(meta, viewId);
-  await waitFor(() => expect(listSchema?.options).toBeTruthy());
+  await waitFor(() => expect(listSchema?.kanban).toBeTruthy());
   return {
     rowHeight: (normalizeListViewSchema(listSchema) as { rowHeight?: unknown }).rowHeight,
     hiddenFields: listSchema.hiddenFields,

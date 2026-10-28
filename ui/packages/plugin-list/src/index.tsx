@@ -313,12 +313,8 @@ const LIST_VIEW_INPUTS: ComponentInput[] = [
       'Full bulk-action definitions, the spec\'s `BulkActionDef`: a mass update (`operation: "update"` with a `patch`) or delete, or a named action run once for the whole selection.',
   },
   // ── each kind's own block ─────────────────────────────────────────────────
-  {
-    name: 'options',
-    type: 'object',
-    description:
-      'Per-kind settings, `{ kanban, calendar, gantt, gallery, timeline, map, tree, chart }`, each judged by that kind\'s own block. The top-level block of the same name is the canonical spelling.',
-  },
+  // (#25923: no `options` input. The legacy per-kind bag is retired; each block
+  // below is its kind's one spelling.)
   {
     name: 'kanban',
     type: 'object',

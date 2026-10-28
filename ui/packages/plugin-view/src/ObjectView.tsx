@@ -227,6 +227,21 @@ function pickFlatMapConfig(
   );
 }
 
+/** The eight per-kind blocks a list view carries at its top level. */
+const LIST_VIEW_KIND_BLOCKS = ['kanban', 'calendar', 'gallery', 'timeline', 'gantt', 'map', 'chart', 'tree'] as const;
+
+/**
+ * [#25923] The per-kind blocks a host `views` entry declares, by reference,
+ * for the `renderListView` relay. An absent block stays absent.
+ */
+function hostViewKindBlocks(view: unknown): Record<string, unknown> {
+  if (!view || typeof view !== 'object') return {};
+  const source = view as Record<string, unknown>;
+  return Object.fromEntries(
+    LIST_VIEW_KIND_BLOCKS.filter((kind) => source[kind] !== undefined).map((kind) => [kind, source[kind]]),
+  );
+}
+
 /**
  * `table.columns` as a FIELD-NAME list — the shape the non-grid field slot
  * declares (objectui#5269).
@@ -2059,10 +2074,11 @@ export const ObjectView: React.FC<ObjectViewProps> = ({
     // on a named view (`ObjectViewSchema.listViews` is its strict
     // `ObjectListViewSchema` by reference), so the canonical top-level blocks
     // below are the named view's only source. A stored body that still carries
-    // `options.KIND` is folded onto `KIND` at the door that relays it into
-    // `listViews` — `@object-ui/app-shell`'s `ViewPreview` — so it arrives here
-    // already canonical. ⛔ Do not restore the read: that would re-open a
-    // dialect the contract refuses. The host `views` entry keeps this rung.
+    // `options.KIND` is folded onto `KIND` by the server before it is served
+    // (the spec's D2 conversion `list-view-options-bag-folded`, #25923; app-shell's
+    // `ViewPreview` folded it until then), so it arrives here already
+    // canonical. ⛔ Do not restore the read: that would re-open a dialect the
+    // contract refuses. The host `views` entry keeps this rung.
     const legacyViewOptions: Record<string, any> = activeView || {};
 
     // ⭐ objectui#8980 — THE CANONICAL, PROTOCOL-DECLARED PLACE FOR THE EIGHT
@@ -2084,7 +2100,7 @@ export const ObjectView: React.FC<ObjectViewProps> = ({
     // block wins key-by-key over the legacy one for the same kind. A partially
     // declared canonical block therefore does not blank its legacy neighbour.
     // ⚠️ Since objectui#7928 the legacy side is the host `views` entry only; a
-    // named view's own `options` bag is folded at `ViewPreview` instead (see
+    // named view's own `options` bag is folded before it is served (see
     // `legacyViewOptions` above).
     //
     // ⚠️ IDENTITY IS PRESERVED WHEN NOTHING CANONICAL IS DECLARED — the `else`
@@ -3034,9 +3050,12 @@ export const ObjectView: React.FC<ObjectViewProps> = ({
           // no rung here at all. Canonical source first, host `views` entry
           // second — the precedence every other pair on this branch uses.
           grouping: currentNamedViewConfig?.grouping ?? activeView?.grouping,
-          // objectui#7928 — the host `views` entry only; a named view's legacy
-          // `options` bag is no longer read (see `legacyViewOptions` above).
-          options: activeView,
+          // [#25923] The host `views` entry's per-kind blocks, at the TOP
+          // level, each by reference (so `ListView`'s fetch effect, which
+          // names each block by identity, sees no new object per render).
+          // They rode `options: activeView` (objectui#7928) until the spec
+          // retired the bag, and `ListView` reads no bag now.
+          ...hostViewKindBlocks(activeView),
           // Toolbar policy — one vocabulary (#2890). The host node and the
           // active view may still carry the legacy bare `show*` flags, so both
           // go through `normalizeListViewSchema` (the single fold) and merge,

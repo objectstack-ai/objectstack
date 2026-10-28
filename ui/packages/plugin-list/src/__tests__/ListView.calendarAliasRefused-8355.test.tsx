@@ -198,9 +198,10 @@ describe('objectui#8355 · half 1 — the generated node carries the canonical k
     expect(bindingOf(node)).not.toHaveProperty('defaultView');
   });
 
-  it('CONTROL: the LEGACY `options.calendar` nesting is stripped on the same path', async () => {
-    // app-shell's `calendarViewOptions` forwards a view's declared block into
-    // this nesting, so a stored view carries the aliases here too.
+  it('CONTROL: the LEGACY `options.calendar` nesting binds nothing on the same path', async () => {
+    // app-shell's `calendarViewOptions` forwarded a view's declared block into
+    // this nesting until objectstack#25923 retired the bag; `ListView` reads
+    // none of it now, aliases or not.
     const node = await generatedCalendarNode({
       options: { calendar: { dateField: 'kickoff', titleField: 'name' } },
     });
@@ -222,11 +223,12 @@ describe('objectui#8355 · half 2 — the retired spellings are REFUSED at the r
     expect(issues[0].message).toContain('Did you mean `endField` → `endDateField`?');
   });
 
-  it('the LEGACY nesting is refused too, with the same message', () => {
+  it('the LEGACY nesting is refused whole: the bag is retired (objectstack#25923), so the door names `options` itself', () => {
     const doc = { ...ALIASED_VIEW, calendar: undefined, options: { calendar: { dateField: 'kickoff' } } };
-    const issues = issuesAt(doc, 'options.calendar.dateField');
+    const issues = issuesAt(doc, 'options');
     expect(issues).toHaveLength(1);
-    expect(issues[0].message).toContain('Did you mean `dateField` → `startDateField`?');
+    expect(issues[0].message).toContain("A list view's `options` bag was removed");
+    expect(issuesAt(doc, 'options.calendar.dateField')).toHaveLength(0);
   });
 
   it('DARK CONTROL: the canonical fixture parses GREEN through the same door', () => {
