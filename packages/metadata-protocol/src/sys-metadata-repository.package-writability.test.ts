@@ -121,8 +121,12 @@ function makeFakeEngine() {
     manifests: new Map<string, unknown>([[READ_ONLY_PKG, { id: READ_ONLY_PKG }]]),
     registry: {
       // Installed / platform packages, read-only by manifest scope.
+      // [#26708] The other two are installed as well — the booted code package
+      // and the authored workspace (no scope, so still writable) — since a
+      // save naming a package no installed package has is refused first.
       getPackage: (id: string) =>
-        id === PLATFORM_PKG ? { manifest: { id, scope: 'system' } } : undefined,
+        id === PLATFORM_PKG ? { manifest: { id, scope: 'system' } }
+          : id === READ_ONLY_PKG || id === WRITABLE_PKG ? { manifest: { id } } : undefined,
     },
     async find(table: string, opts: { where: Record<string, unknown> }) {
       if (table === 'sys_metadata_history') return historyRows.filter((h) => matchesHistory(h, opts.where));
@@ -762,7 +766,11 @@ describe('#8184 — the scoped kernel answers the same code as the host-config k
       ...(engine.registry as Record<string, unknown>),
       registerItem: () => {},
       registerObject: () => {},
-      listItems: () => [],
+      // [#26708] The code package's `showcase_task`, which `case_grid` binds: a
+      // save naming the installed package is judged against its closure.
+      listItems: (type: string) => (type === 'object'
+        ? [{ name: 'showcase_task', _packageId: READ_ONLY_PKG, _provenance: 'package', fields: { name: { type: 'text' } } }]
+        : []),
       getItem: () => undefined,
       getArtifactItem: (type: string, name: string) =>
         (type === 'object' && name === 'showcase_task')

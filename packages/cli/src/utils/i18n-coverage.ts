@@ -71,6 +71,7 @@ export interface CoverageIssue {
     | 'picklist'
     | 'page'
     | 'flow'
+    | 'hook'
     | 'position'
     | 'permission'
     | 'book'
@@ -379,6 +380,12 @@ const COVERAGE_SOURCE: Record<ExpectedEntry['source'], CoverageIssue['source']> 
   // locales (#11485). Its six approval flows stayed that invisible until
   // #24916.
   flow: 'flow',
+  // A hook's declared refusal messages (`hooks.<h>.refusals.<CODE>.message`,
+  // #26170) — the sentence a user reads when the app says "not yet", so it
+  // keeps its own bucket and reports as `i18n/missing-hook`. Until the
+  // catalogue existed a hook refusal had no key at all, and the family reported
+  // `0 missing` while a zh-CN user read every refusal in English.
+  hook: 'hook',
   // Security-catalog copy (`positions.<p>.label` / `.description`,
   // `permissions.<s>.label` / `.description`) — the author's own positions and
   // permission sets, read in Setup and on every approval step that waits on a
@@ -412,6 +419,7 @@ const SOURCE_NOUN: Record<CoverageIssue['source'], string> = {
   picklist: 'Picklist',
   page: 'Page',
   flow: 'Flow',
+  hook: 'Hook',
   position: 'Position',
   permission: 'Permission set',
   book: 'Book',
@@ -458,6 +466,7 @@ const SOURCE_SURFACE: Record<CoverageIssue['source'], string> = {
   picklist: 'picklists',
   page: 'pages',
   flow: 'flow screens, approval steps, toasts and refusals',
+  hook: 'hook refusals',
   position: 'positions',
   permission: 'permission sets',
   book: 'doc books',

@@ -1,7 +1,7 @@
 ---
 title: Hook schema — Data Protocol property reference
 navTitle: Hook
-description: "Hook schemas of the ObjectStack Data Protocol: Hook, HookContext, HookEvent — each property with its type, default and a TypeScript example."
+description: "Hook schemas of the ObjectStack Data Protocol: Hook, HookContext, HookEvent, HookRefusal — each property with its type, default and a TypeScript example."
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -13,8 +13,8 @@ description: "Hook schemas of the ObjectStack Data Protocol: Hook, HookContext, 
 ## TypeScript Usage
 
 ```typescript
-import { HookSchema, HookContextSchema, HookEvent } from '@objectstack/spec/data';
-import type { Hook, HookContext } from '@objectstack/spec/data';
+import { HookSchema, HookContextSchema, HookEvent, HookRefusalSchema } from '@objectstack/spec/data';
+import type { Hook, HookContext, HookRefusal } from '@objectstack/spec/data';
 
 // Validate data
 const result = HookSchema.parse(data);
@@ -42,6 +42,7 @@ const result = HookSchema.parse(data);
 | **timeoutMs** | `number` | optional | Maximum execution time in milliseconds before the hook is aborted |
 | **timeout** | `never` | optional | [REMOVED] `hook.timeout` was removed in @objectstack/spec 17 — its unit (milliseconds) lived only in the description, beside a body-level `timeoutMs` and a `retryPolicy.backoffMs` that spell theirs, so the same number read as two conventions on one surface. Rename the key to `timeoutMs`; the value (milliseconds) is unchanged. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **onError** | `Enum<'abort' \| 'log'>` | optional (default: `"abort"`) | Error handling strategy. abort: refuse the operation; a blocking hook's abort rolls the write back inside a unit of work, which the write door opens for an after* hook on an object on the default datasource whose driver declares transactions (elsewhere the caller is refused and the row stays stored). log: log the error and continue |
+| **refusals** | `Record<string, { message: string; status?: integer }>` | optional | Refusal catalogue keyed by the SCREAMING_SNAKE code the body throws: `{ message, status? }`. The body refuses by code only; the runtime answers with the declared message (translated through hooks.`<hook>`.refusals.`<CODE>`.message in the caller's locale) and status. A code not declared here is refused loudly — at save when the body throws it literally, otherwise at run time |
 | **runAs** | `Enum<'system' \| 'user' \| 'inherit'>` | optional (default: `"inherit"`) | Execution identity for the hook's ctx.api data operations: system = elevated (bypasses RLS), user = the triggering user (RLS-respecting), inherit = the context of the write that fired the hook (the pre-runAs behaviour; the default). A hook with no trigger user has no identity to scope to, so under user its ctx.api data operations are REFUSED — declare system to make the elevation explicit. This covers any hook fired by a write that carried no user (an isSystem plugin/service write; a system-elevated flow node). Elevation does not reach identity assignment: a system hook's governed writes (insert, update, delete, transfer, restore, purge) to sys_user_position, sys_user_permission_set, sys_invitation and sys_member are refused with PERMISSION_DENIED, and a system hook whose body names such a write is refused at save; declare user for position holdings and permission-set grants (the ADR-0090 D12 delegated-administration gate then judges the user the hook acts for), and change invitations and memberships through the organization endpoints. Scope: ctx.api only — condition evaluation, the readonly strip on ctx.input, ctx.session and async are unchanged. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
@@ -78,6 +79,13 @@ L2 sandboxed JS body — runs inside an isolated VM with declared capabilities
 | :--- | :--- | :--- | :--- |
 | **maxRetries** | `number` | optional (default: `3`) | Maximum retry attempts on failure |
 | **backoffMs** | `number` | optional (default: `1000`) | Backoff delay between retries in milliseconds |
+
+### Nested Shape: `Hook.refusals[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **message** | `string` | ✅ | The sentence the user reads when the body throws this code — plain text in the source locale, translated whole through hooks.`<hook>`.refusals.`<CODE>`.message in the caller's locale; a `{{ }}` hole is refused |
+| **status** | `integer` | optional | HTTP status the refusal is answered with (4xx; a refusal is never a fault). Absent: 400. A status the body itself sets on the throw is not read — the catalogue decides |
 
 
 ---
@@ -126,6 +134,7 @@ L2 sandboxed JS body — runs inside an isolated VM with declared capabilities
 | **skipAutomations** | `boolean` | optional | True when metadata-bound automation hooks must be suppressed for this write — e.g. a data import the system principal runs with "run automations" unchecked, or the system principal's import undo. Implies skipTriggers; code-registered system hooks (audit, security) still run. Only the system principal may take an app's declared controls off a write, and the import undo door is not an exception: an undo by any other caller runs under the object's hooks, record-change triggers and state machine. |
 | **positions** | `string[]` | optional | Position names held by the caller (ADR-0090 D3; formerly `roles`), copied from ExecutionContext.positions. For hook READS only — e.g. tailoring a message, or branching a business rule the hook runs through its own `ctx.api` channel. Authorization is decided by the security service on the ExecutionContext (permissions / positions / derived posture); this is NOT an authorization input and a hook must not gate a write by testing it. A hook context carries no `services` key, so the sharing service cannot be called from one either — the sharing gates already ran inside the engine before the hook chain. |
 | **preserveAudit** | `boolean` | optional | True when this write is a historical import that must KEEP its caller-supplied updated_at/updated_by (and the readonly audit family) instead of being stamped with the import instant. Server-set, opt-in, absent on normal writes; read by the built-in audit hook. A stamping policy, not an authorization input. |
+| **locale** | `string` | optional | The caller's locale (BCP-47), copied from ExecutionContext.locale: the request's Accept-Language, else the localization setting; absent on a write no person asked for. The body runner answers a declared refusal (HookSchema.refusals) in it. Descriptive only — not an authorization input. |
 | **roles** | `never` | optional | [REMOVED] `HookContext.session.roles` was removed in @objectstack/spec 17.0.0 (ADR-0049 D2) — it was declared, read by two dead exemption branches, and never produced: ObjectQL's `buildSession()` builds the session field by field and has never written `roles`, so every read resolved `undefined` and a guard keyed on it was dead code that merely LOOKED like an authorization decision. Delete the key. To gate a hook on the caller, read `ctx.session.userId` / `ctx.session.isSystem`; to judge PRIVILEGE, ask the security service, which evaluates the ADR-0095 vocabulary on the execution context — capability grants (`permissions`), placements (`positions`) and the derived posture — never a role-name string comparison (ADR-0090 D3 bans the `role` spelling outright). Nothing to migrate: a HookContext is built per operation by the engine and never stored, so no metadata source carries this key. NOTE an ACTION body's `ctx.session` is a different object and still carries its own `roles` array today; that surface is tracked separately and is not what this key was. |
 
 ### Nested Shape: `HookContext.provenance`
@@ -160,6 +169,18 @@ L2 sandboxed JS body — runs inside an isolated VM with declared capabilities
 * `afterUpdate`
 * `beforeDelete`
 * `afterDelete`
+
+
+---
+
+## HookRefusal
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **message** | `string` | ✅ | The sentence the user reads when the body throws this code — plain text in the source locale, translated whole through hooks.`<hook>`.refusals.`<CODE>`.message in the caller's locale; a `{{ }}` hole is refused |
+| **status** | `integer` | optional | HTTP status the refusal is answered with (4xx; a refusal is never a fault). Absent: 400. A status the body itself sets on the throw is not read — the catalogue decides |
 
 
 ---

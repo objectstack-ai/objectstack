@@ -60,8 +60,16 @@ function protocolFor(arrangement: Arrangement, order: readonly string[]) {
             ...(lock ? { protection: { lock, reason: `Packaged lock of ${packageId}.` } } : {}),
         } as Record<string, unknown>, 'name' as never, packageId);
     }
-    for (const packageId of arrangement.disabled ?? []) {
+    // [#26708] Every package that ships the view is installed, as its boot
+    // installs it: a save naming a package no installed package has is
+    // refused before the lock this file pins is reached.
+    for (const packageId of order) {
         registry.installPackage({ id: packageId, name: packageId, version: '1.0.0', type: 'app' } as never, 'code');
+    }
+    for (const packageId of arrangement.disabled ?? []) {
+        if (!order.includes(packageId)) {
+            registry.installPackage({ id: packageId, name: packageId, version: '1.0.0', type: 'app' } as never, 'code');
+        }
         registry.disablePackage(packageId);
     }
     const rows = arrangement.rowLock === undefined ? [] : [{

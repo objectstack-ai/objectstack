@@ -47,6 +47,8 @@ import {
   signInFailureEventFor,
   SIGN_IN_EMAIL_PATH,
 } from './auth-session-audit.js';
+import { canonicalClientAddress } from './client-address-canonical.js';
+import { readRequestClientAddress } from './request-client-address.js';
 
 /**
  * The `AuthManager` members the functions below read — every one of them, and
@@ -87,7 +89,7 @@ export async function assertAccountNotLocked(this: Pick<SignInLockoutHost, 'conf
         signInFailureEventFor(lockedUserId, {
           path: SIGN_IN_EMAIL_PATH,
           reason: 'ACCOUNT_LOCKED',
-          fingerprint: signInClientFingerprint(ctx),
+          fingerprint: signInClientFingerprint(ctx, await readRequestClientAddress()),
         }),
       );
     }
@@ -164,7 +166,7 @@ export async function auditRefusedSignIn(
   if (!sink) return;
   const userId = lockStamped?.userId ?? (await this.resolveSignInAccountId(email));
   if (!userId) return;
-  const fingerprint = signInClientFingerprint(ctx);
+  const fingerprint = signInClientFingerprint(ctx, await readRequestClientAddress());
   await emitAuthSessionAuditEvent(
     sink,
     signInFailureEventFor(userId, {
@@ -242,9 +244,11 @@ export async function stampLastLogin(this: Pick<SignInLockoutHost, 'getDataEngin
   try {
     const SYSTEM_CTX = { isSystem: true, attributedUserId: userId, positions: [], permissions: [] };
     const patch: Record<string, unknown> = { id: userId, last_login_at: new Date() };
-    // Cap to the column width (IPv6 textual max 45) — a malformed/oversized
-    // forwarded header must not blow up the write.
-    if (ip) patch.last_login_ip = ip.slice(0, 45);
+    // [#26638] In the RFC 5952 text the session row stores for the same
+    // sign-in (`client-address-canonical.ts`). Cap to the column width (IPv6
+    // textual max 45) — a malformed/oversized forwarded header must not blow
+    // up the write.
+    if (ip) patch.last_login_ip = canonicalClientAddress(ip).slice(0, 45);
     await engine.update('sys_user', patch, { context: SYSTEM_CTX } as any);
   } catch (e) {
     // Never break the auth response. [#12981] But this write is the ONLY

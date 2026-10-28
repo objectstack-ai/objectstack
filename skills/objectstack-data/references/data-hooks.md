@@ -4,7 +4,7 @@
 - [Hook Definition Schema](#hook-definition-schema) · [Key Properties Explained](#key-properties-explained)
 - [Sandboxed Hook Bodies (`body`)](#sandboxed-hook-bodies-body--what-the-sandbox-ctx-can-call) · [Capabilities — the complete list](#capabilities--the-complete-list) · [Sandbox restrictions](#sandbox-restrictions)
 - [Hook Context API](#hook-context-api) · [Common Patterns](#common-patterns) · [Registration Methods](#registration-methods)
-- [Best Practices](#best-practices) · [Error Handling](#error-handling) · [Testing Hooks](#testing-hooks) · [References](#references)
+- [Best Practices](#best-practices) · [Error Handling](#error-handling) · [References](#references)
 
 Reference companion to `objectstack-data/SKILL.md`, and the catalog's anchor for
 data hooks. Covers the 8 lifecycle events, the inline `handler` and sandboxed
@@ -935,56 +935,30 @@ hook re-trigger itself; use `object: '*'` unless you mean every object; throw in
 
 ## Error Handling
 
-### Throwing Errors (Abort Operation)
+A throw aborts the operation and rolls back its transaction; `onError: 'log'`
+(above) makes an `after*` hook log and continue instead.
+
+### Declared refusals (`refusals`)
+
+With a `refusals` catalogue, a sandboxed `body` refuses **by code only** and the
+runtime answers with that entry:
 
 ```typescript
-handler: async (ctx) => {
-  if (!ctx.input.email) {
-    // Aborts operation, rolls back transaction
-    throw new Error('Email is required');
-  }
-}
+refusals: {
+  CREDIT_LIMIT: { message: 'Over the credit limit.' },
+  ON_HOLD: { message: 'Account on hold.', status: 409 }, // default 400
+},
+body: { language: 'js', source: `
+  if (ctx.input.amount > 100000) throw Object.assign(new Error(), { code: 'CREDIT_LIMIT' });
+` },
 ```
 
-### Logging Errors (Continue)
-
-```typescript
-{
-  onError: 'log',  // Log error, don't abort
-  handler: async (ctx) => {
-    try {
-      await sendEmail(ctx.input.email);
-    } catch (error) {
-      // Error is logged, operation continues
-      console.error('Failed to send email', error);
-    }
-  }
-}
-```
-
-### Custom Error Messages
-
-```typescript
-handler: async (ctx) => {
-  if (ctx.input.annual_revenue < 0) {
-    throw new Error('Annual revenue cannot be negative');
-  }
-
-  if (ctx.input.annual_revenue > 1000000000) {
-    throw new Error('Annual revenue exceeds maximum allowed value (1B)');
-  }
-}
-```
-
----
-
-## Testing Hooks
-
-Hook test harnesses — vitest units and `LiteKernel` integration setups — are the
-**objectstack-platform** skill's surface (its frontmatter claims "test harnesses via
-LiteKernel"): see [objectstack-platform/SKILL.md](../../objectstack-platform/SKILL.md).
-
----
+- Codes are SCREAMING_SNAKE; the envelope carries one as `declaredCode`.
+- Refused at save without a `js` body (e.g. a bare `handler`).
+- The message is plain text (a `{{ }}` hole is refused), translated via
+  `hooks.<hook>.refusals.<CODE>.message`; the body's own text and `status` are unused.
+- An undeclared code, or none, is refused: at save if thrown literally, else as
+  a `500`. Unchanged `ctx.api` errors and crashes pass through.
 
 ---
 
@@ -994,5 +968,6 @@ LiteKernel"): see [objectstack-platform/SKILL.md](../../objectstack-platform/SKI
 - [Project hooks pattern](../SKILL.md#lifecycle-hooks) — Hook integration in the data skill
 - [objectstack-platform/references/plugin-hooks.md](../../objectstack-platform/references/plugin-hooks.md) — plugin/kernel hooks (a different extension point)
 - [objectstack-automation](../../objectstack-automation/SKILL.md) — Flows and Workflows
+- [objectstack-platform/SKILL.md](../../objectstack-platform/SKILL.md) — hook test harnesses (vitest units, `LiteKernel`)
 
 ---
