@@ -113,10 +113,23 @@ export interface ApprovalRequestLite {
   /**
    * Owning flow's approval steps in graph order (single reads only). ⚠️ The
    * server walks one trunk of the graph, so this is NOT the route the request
-   * takes past a decision, and no surface draws it (objectstack#26563): the
-   * record's step line is read off `flow_run_id` / `flow_node_id` instead.
+   * takes past a decision, and no surface draws it (objectstack#26563): a step
+   * line draws `flow_route`.
    */
   flow_steps?: Array<{ id: string; label: string; state: 'done' | 'current' | 'upcoming' }>;
+  /**
+   * This request's own route, as the server serves it on single reads
+   * (objectstack#26668): the steps its run passed (from the run's own request
+   * rows), its own step, and, while it is pending, the steps ahead that the
+   * flow's graph alone decides. `ahead` says what lies past the last step:
+   * `end` (nothing more), `undecided` (a branch not yet decided, steps past it
+   * not listed) or `decided` (the request is decided, nothing walked past it).
+   * Every step line draws this, and never re-derives it.
+   */
+  flow_route?: {
+    steps: Array<{ id: string; label: string; state: 'done' | 'current' | 'upcoming' }>;
+    ahead: 'end' | 'undecided' | 'decided';
+  };
   /** The flow run that opened this request; every request of one run shares it. */
   flow_run_id?: string;
   /** The approval node of the run this request was opened for. */

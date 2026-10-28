@@ -281,7 +281,7 @@ const ROOT = uiRoot();
 /**
  * The AUTHORED corpus: the examples and the schema catalog, the docs site, the published
  * skills, the docs tree, the apps (the console's fixtures among them), and every package
- * README. Test files are NOT corpus: they pin refusals on purpose.
+ * README. (The root README's examples moved under `content/` with objectstack#26080.) Test files are NOT corpus: they pin refusals on purpose.
  */
 const CORPUS_DIRS = ['examples', 'content', 'skills', 'docs', 'apps'];
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', 'out', 'coverage', '.next', '.source', '.turbo', '__tests__', '__mocks__', 'test', 'tests', 'e2e']);
@@ -308,7 +308,8 @@ function walk(dir: string, out: string[]): void {
 function corpusFiles(): string[] {
   const files: string[] = [];
   for (const dir of CORPUS_DIRS) walk(join(ROOT, dir), files);
-  files.push(join(ROOT, 'README.md'));
+  // The tree's root README left with objectstack#26080; its examples are under
+  // `content/`, which the walk above already reads.
   for (const pkg of readdirSync(join(ROOT, 'packages'))) {
     const readme = join(ROOT, 'packages', pkg, 'README.md');
     if (existsSync(readme)) files.push(readme);

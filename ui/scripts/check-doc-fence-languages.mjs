@@ -198,8 +198,16 @@ export function appDocsDirs(root) {
  * hoped for — `check-doc-fence-languages.test.ts` pins this array against the
  * other two gates', which is the same bargain `TS_FENCE_LANGUAGES` and the
  * document walk already make: copy freely, compare always.
+ *
+ * ⭐ objectstack#26080 emptied it. The root `README.md` was folded into the
+ * repository's root README, which lives outside this tree, and its examples —
+ * the flagship "Basic Usage" page, the four copy-paste schemas — moved to
+ * `content/docs/guide/quick-start.md`, which the `DOCS_ROOT` walk already
+ * reads: the same fences, judged on the guide leg instead. Re-pointing the
+ * entry there would list that page twice. The array stays, with the guard over
+ * it, so a page added at the root later joins the way objectui#7115's did.
  */
-export const ROOT_PAGES = ['README.md'];
+export const ROOT_PAGES = [];
 
 /** Every document in the scan set, in a stable order. */
 export function listDocuments(root = repoRoot) {

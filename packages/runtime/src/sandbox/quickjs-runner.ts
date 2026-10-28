@@ -486,6 +486,9 @@ export class QuickJSScriptRunner implements ScriptRunner {
           // as a CRASH and answers 500 through `errorFromThrown`, instead of
           // the 400 a denial used to get — and the client sees the capability
           // text without the `SandboxError: ` debug prefix.
+          // [#26903] A HOOK body's capability denial does not arrive here: it
+          // crosses as a coded refusal (`throwCapabilityDenial`) and takes the
+          // relay below like a body's own coded throw.
           if (info?.sandboxFault) {
             throw new SandboxError(withoutSandboxErrorPrefix(String(errStr)));
           }
@@ -713,8 +716,10 @@ export class QuickJSScriptRunner implements ScriptRunner {
     const installTxLeaf = (name: string, run: () => Promise<void>): void => {
       const fn = vm.newFunction(name, () => {
         if (!caps.has('api.transaction')) {
-          throwSandboxFault(
+          throwCapabilityDenial(
             vm,
+            origin,
+            'api.transaction',
             `capability 'api.transaction' not granted to ${origin.kind} '${origin.name}' (called ctx.api.transaction)`,
           );
         }
@@ -809,7 +814,7 @@ export class QuickJSScriptRunner implements ScriptRunner {
     for (const level of ['debug', 'info', 'warn', 'error'] as const) {
       const fn = vm.newFunction(level, (msgH, dataH) => {
         if (!caps.has('log')) {
-          throwSandboxFault(vm, `capability 'log' not granted to ${origin.kind} '${origin.name}'`);
+          throwCapabilityDenial(vm, origin, 'log', `capability 'log' not granted to ${origin.kind} '${origin.name}'`);
         }
         const msg = vm.getString(msgH);
         // [#7448] `vm.dump`, NOT `vm.getString` — the marshalling every other
@@ -835,7 +840,12 @@ export class QuickJSScriptRunner implements ScriptRunner {
     const cryptoObj = vm.newObject();
     const uuidFn = vm.newFunction('randomUUID', () => {
       if (!caps.has('crypto.uuid')) {
-        throwSandboxFault(vm, `capability 'crypto.uuid' not granted to ${origin.kind} '${origin.name}'`);
+        throwCapabilityDenial(
+          vm,
+          origin,
+          'crypto.uuid',
+          `capability 'crypto.uuid' not granted to ${origin.kind} '${origin.name}'`,
+        );
       }
       const v = ctx.crypto?.randomUUID?.() ?? cryptoRandomUUID();
       return vm.newString(v);
@@ -885,8 +895,10 @@ export class QuickJSScriptRunner implements ScriptRunner {
         // "[object Object]".
         const fieldName = field === undefined || field === null ? undefined : String(field);
         if (fieldName !== undefined && !caps.has('api.read')) {
-          throwSandboxFault(
+          throwCapabilityDenial(
             vm,
+            origin,
+            'api.read',
             `capability 'api.read' not granted to ${origin.kind} '${origin.name}' ` +
               `(called ctx.title('${fieldName}'), which reads the related record). ` +
               `ctx.title() with no argument needs no capability.`,
@@ -1284,8 +1296,10 @@ function installApiMethod(
     // Capability gate — throw synchronously so the VM sees a normal exception at
     // the call site (mirrors ctx.log / ctx.crypto gating).
     if (!caps.has(required)) {
-      throwSandboxFault(
+      throwCapabilityDenial(
         vm,
+        origin,
+        required,
         `capability '${required}' not granted to ${origin.kind} '${origin.name}' (called ctx.api.object('${objectName}').${method})`,
       );
     }
@@ -1787,6 +1801,52 @@ function throwSandboxFault(vm: QuickJSContext, message: string): never {
 }
 
 /**
+ * [#26903] The code and status a HOOK body's capability denial is answered
+ * with: the standard catalog's `INSUFFICIENT_PRIVILEGES` ("operation requires
+ * higher privileges", `@objectstack/spec` `errors.zod.ts`), at its 403.
+ */
+const HOOK_CAPABILITY_REFUSAL_CODE = 'INSUFFICIENT_PRIVILEGES';
+const HOOK_CAPABILITY_REFUSAL_STATUS = 403;
+
+/**
+ * [#26903] Throw a capability gate's denial OUT OF a host function.
+ *
+ * In a HOOK body the denial is a REFUSAL, not the sandbox faulting: the hook's
+ * metadata did not grant what its body called, and the caller whose save fired
+ * the hook is owed a coded answer naming the hook and the capability, not the
+ * sanitised `500 INTERNAL_ERROR` {@link throwSandboxFault} reaches. So the VM
+ * error carries `code` and `status` the way a body's own
+ * `throw Object.assign(new Error(…), { code, status })` does, and the pump loop
+ * builds the same `SandboxError` (with `innerMessage`) it builds for that
+ * throw. Every door then answers it through `mapDataError`'s sandbox unwrap
+ * arm — `403 INSUFFICIENT_PRIVILEGES` with this sentence — and the BodyRunner
+ * logs it on the refusal side of its band, and `onError: 'log'` records it
+ * where it records any hook error.
+ *
+ * ⛔ The gate is exactly as strict as before: only how its denial is answered
+ * changed. ⛔ A plain `Error`, never a `SandboxError` instance: an instance is
+ * what {@link hostErrorToVm} marks as a fault, and a host error with an
+ * `innerMessage` is what it relays as a NESTED body's refusal (which the outer
+ * catch then does not log). Neither is true of this denial.
+ *
+ * An action or job body's denial keeps the #4431 fault contract
+ * ({@link SANDBOX_FAULT_PROP}); this card ruled on hooks only.
+ */
+function throwCapabilityDenial(
+  vm: QuickJSContext,
+  origin: ScriptOrigin,
+  capability: HookBodyCapability,
+  message: string,
+): never {
+  if (origin.kind !== 'hook') throwSandboxFault(vm, message);
+  const refusal = Object.assign(
+    new Error(`${message.replace(/\.$/, '')}. Grant it by adding '${capability}' to the hook's body.capabilities.`),
+    { name: 'SandboxError', code: HOOK_CAPABILITY_REFUSAL_CODE, status: HOOK_CAPABILITY_REFUSAL_STATUS },
+  );
+  throw hostErrorToVm(vm, refusal);
+}
+
+/**
  * Strip the `SandboxError: ` name prefix the VM's flattening prepends.
  *
  * The runner's own doc says only the business message should reach a client;
@@ -1960,6 +2020,11 @@ export class SandboxError extends Error {
    * the wrapped `.message` stays for server logs. Undefined for the sandbox's
    * own internal errors (capability denials, timeouts, marshalling failures),
    * which have no user-meaningful inner message.
+   *
+   * [#26903] Except a HOOK body's capability denial: that is a refusal naming
+   * the hook and the capability, so it carries this field and its `code`/
+   * `status` (see `throwCapabilityDenial`). An action or job body's denial is
+   * still the fault described above.
    */
   readonly innerMessage?: string;
   /**
