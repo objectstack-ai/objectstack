@@ -1644,6 +1644,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.form.masterDetailSchemaError': 'master-detail widget requires items.properties on the JSON schema (or an anyOf branch that has them).',
   'engine.form.missingField': 'Field {field} declared in form layout but missing from schema. Skipping.',
   'engine.form.fallbackJson': 'widget {widget} — falling back to JSON until a custom renderer is registered.',
+  'engine.form.key': 'Key',
   'engine.form.keyRequired': 'Key is required',
   'engine.form.keyExists': 'Key "{key}" already exists',
   'engine.form.keyPattern': 'Key must match {pattern}',
