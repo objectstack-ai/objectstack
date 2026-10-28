@@ -74,7 +74,7 @@ one build-time Vite variable:
 Apps and objects **are** authored declaratively — but in the ObjectStack **server** project
 (`objectstack.config.ts` there, or through Studio), not in this repo. The console is a pure
 consumer of whatever that server publishes; see
-[ObjectOS Integration](/docs/guide/objectos-integration) for the server-side shape.
+[Apps](https://objectstack.ai/docs/ui/apps) for the server-side shape.
 
 ## Routing
 
@@ -260,5 +260,5 @@ in production, `ObjectStackAdapter` talks over HTTP to a live ObjectStack server
 `VITE_SERVER_URL`, and everything above the adapter in the data flow depends on that call
 succeeding: no server, no discovery, no apps in the sidebar.
 
-See [Console App → Quick Start](/docs/guide/console#quick-start) for the dev server port, the
+See the Console's [README](../../apps/console/README.md) for the dev server port, the
 default `VITE_SERVER_URL`, and how to point the console at a different backend.

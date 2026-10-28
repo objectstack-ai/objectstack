@@ -220,7 +220,7 @@ a JSON document, because JSON has no function value.
 
 ## Links
 
-- 📚 [Documentation](https://www.objectui.org/docs/plugins/plugin-ai)
+- 📚 [Documentation](https://objectstack.ai/docs/frontend/plugins)
 - 📦 [npm package](https://www.npmjs.com/package/@object-ui/plugin-ai)
 - 📝 [Changelog](./CHANGELOG.md)
 - 🐛 [Report an issue](https://github.com/objectstack-ai/objectui/issues)

@@ -648,7 +648,7 @@ The ListView automatically persists the user's view type preference in localStor
 
 ## Links
 
-- 📚 [Documentation](https://www.objectui.org/docs/plugins/plugin-list)
+- 📚 [Documentation](https://objectstack.ai/docs/frontend/plugins/plugin-list)
 - 📦 [npm package](https://www.npmjs.com/package/@object-ui/plugin-list)
 - 📝 [Changelog](./CHANGELOG.md)
 - 🐛 [Report an issue](https://github.com/objectstack-ai/objectui/issues)

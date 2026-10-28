@@ -56,7 +56,7 @@ Common values:
 - \`input\` - Input field
 - \`form\` - Form container
 
-[View all component types](https://www.objectui.org/docs/components)`,
+[View all component types](https://objectstack.ai/docs/ui/components)`,
 
       className: `**className** (string)
 

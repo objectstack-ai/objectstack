@@ -137,7 +137,7 @@ This results in significantly faster initial page loads for applications that do
 
 ## Links
 
-- 📚 [Documentation](https://www.objectui.org/docs/plugins/plugin-charts)
+- 📚 [Documentation](https://objectstack.ai/docs/frontend/plugins/plugin-charts)
 - 📦 [npm package](https://www.npmjs.com/package/@object-ui/plugin-charts)
 - 📝 [Changelog](./CHANGELOG.md)
 - 🐛 [Report an issue](https://github.com/objectstack-ai/objectui/issues)

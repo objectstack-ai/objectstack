@@ -762,13 +762,6 @@ export const ADJUDICATED = new Map([
     },
   ],
   [
-    'scripts/__tests__/check-doc-example-ids.test.ts',
-    {
-      reads: ['content/docs/**'],
-      notRead: ['examples/README.md'],
-    },
-  ],
-  [
     'scripts/__tests__/check-doc-expression-carriage.test.ts',
     {
       // `packages/**` for the same reason as the entry above: this census takes
@@ -807,16 +800,6 @@ export const ADJUDICATED = new Map([
     {
       reads: ['apps/console/docs/UI_IMPROVEMENT_PROPOSAL.md', 'apps/console/docs/deployment.md', 'apps/console/docs/error-tracking.md', 'content/docs/**', 'docs/adr/**', 'docs/audits/**', 'packages/**'],
       walker: 'markdown-tree',
-    },
-  ],
-  // Reads no markdown: its one markdown literal is a probe of the root `ci.yml`
-  // `ui` filter's globs, asserting a docs-only change still starts Lint UI
-  // (objectstack#25712).
-  [
-    'scripts/__tests__/check-docs-route-eager-closure.test.ts',
-    {
-      reads: [],
-      notRead: ['content/docs/guide/deployment.md'],
     },
   ],
   // Reads no markdown: the root-document literals are fixture INPUTS to a pure path classifier.

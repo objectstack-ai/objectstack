@@ -488,7 +488,8 @@ Per Rule #2 (Documentation Driven Development):
 > the `ImportWizard` parsers in `@object-ui/plugin-grid`. Read the paths in this
 > section as the plan, not as pages you can open.
 
-1. **This RFC** (`content/docs/rfcs/0001-clipboard-paste.md`) — frozen on
+1. **This RFC** (`ui/docs/rfcs/0001-clipboard-paste.md`, first published as
+   `content/docs/rfcs/0001-clipboard-paste.md`) — frozen on
    acceptance.
 2. **User guide** (`content/docs/guide/clipboard-paste.md`) — written
    alongside implementation; covers enabling the feature, supported types,

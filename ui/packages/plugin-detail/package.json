@@ -3,8 +3,8 @@
   "version": "18.2.0",
   "type": "module",
   "license": "MIT",
-  "description": "DetailView plugin for Object UI - comprehensive detail page with sections, tabs, and related lists",
-  "homepage": "https://www.objectui.org/docs/plugins/plugin-detail",
+  "description": "DetailView plugin for ObjectUI - comprehensive detail page with sections, tabs, and related lists",
+  "homepage": "https://objectstack.ai/docs/frontend/plugins/plugin-detail",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/objectstack-ai/objectstack.git",

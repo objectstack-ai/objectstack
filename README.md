@@ -251,10 +251,10 @@ designers) are lazy-loaded plugins, and every schema is a TypeScript type in
 
 | You want to… | Start here | Install |
 | :--- | :--- | :--- |
-| Render a JSON schema inside your React app | [Quick Start](./ui/content/docs/guide/quick-start.md) | `npm install @object-ui/react @object-ui/components` |
+| Render a JSON schema inside your React app | [Quick Start](https://objectstack.ai/docs/frontend/quick-start) | `npm install @object-ui/react @object-ui/components` |
 | Build a UI from a JSON file, no React code at all | [`@object-ui/cli`](./ui/packages/cli) | `npm install -g @object-ui/cli` |
 
-The guides are published at [objectui.org](https://www.objectui.org); working on `ui/` itself
+The guides are published under [Custom front-end](https://objectstack.ai/docs/frontend) on the docs site; working on `ui/` itself
 is covered in [CONTRIBUTING.md](./CONTRIBUTING.md#ui-workspace-ui), and its packages are listed
 in the [package directory](./CONTRIBUTING.md#package-directory).
 

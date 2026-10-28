@@ -47,7 +47,7 @@
     "vite-plugin-dts": "^5.1.2",
     "vitest": "^4.1.10"
   },
-  "description": "AI-driven UI plugin for Object UI — schema generation, conversational assistants and Vercel AI SDK integration",
+  "description": "AI-driven UI plugin for ObjectUI — schema generation, conversational assistants and Vercel AI SDK integration",
   "keywords": [
     "objectui",
     "sdui",
@@ -72,7 +72,7 @@
   "bugs": {
     "url": "https://github.com/objectstack-ai/objectui/issues"
   },
-  "homepage": "https://www.objectui.org/docs/plugins/plugin-ai",
+  "homepage": "https://objectstack.ai/docs/frontend/plugins",
   "publishConfig": {
     "access": "public"
   }

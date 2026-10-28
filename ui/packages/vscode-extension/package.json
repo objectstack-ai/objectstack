@@ -1,7 +1,7 @@
 {
   "name": "object-ui",
   "displayName": "Object UI",
-  "description": "VSCode extension for Object UI - Schema-driven UI development with IntelliSense, validation, and live preview",
+  "description": "VSCode extension for ObjectUI - Schema-driven UI development with IntelliSense, validation, and live preview",
   "version": "18.2.0",
   "publisher": "objectui",
   "private": true,
@@ -216,5 +216,5 @@
   "bugs": {
     "url": "https://github.com/objectstack-ai/objectui/issues"
   },
-  "homepage": "https://www.objectui.org/docs/utilities/vscode-extension"
+  "homepage": "https://objectstack.ai/docs/frontend"
 }

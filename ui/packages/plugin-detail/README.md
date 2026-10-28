@@ -96,8 +96,8 @@ declared actions against the bound row's id. The binding resolves as on
 every bound block (a named `view`, an AND-combined `filter`, its `sort`), and the
 row is re-read when a write to its object is announced. Declare `limit: 1`:
 `objectui validate` warns on a record block whose binding does not. See
-**Per-element data binding on a page** in the data-source guide
-(`content/docs/guide/data-source.md`). `record:related_list`'s `dataSource` is
+[**Per-element data binding on a page**](https://objectstack.ai/docs/frontend/data-source#per-element-data-binding-on-a-page-datasource)
+in the data-source guide. `record:related_list`'s `dataSource` is
 different: it binds the rows the list shows.
 
 `emptyState` is the spec's empty-state shape, the one `object-grid` takes:
@@ -787,7 +787,7 @@ shared draft (`InlineEditProvider` from `@object-ui/react`), committed by
 
 ## Links
 
-- 📚 [Documentation](https://www.objectui.org/docs/plugins/plugin-detail)
+- 📚 [Documentation](https://objectstack.ai/docs/frontend/plugins/plugin-detail)
 - 📦 [npm package](https://www.npmjs.com/package/@object-ui/plugin-detail)
 - 📝 [Changelog](./CHANGELOG.md)
 - 🐛 [Report an issue](https://github.com/objectstack-ai/objectui/issues)

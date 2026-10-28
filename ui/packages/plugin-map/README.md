@@ -285,7 +285,7 @@ component.
 
 ## Links
 
-- 📚 [Documentation](https://www.objectui.org/docs/plugins/plugin-map) — the full
+- 📚 [Documentation](https://objectstack.ai/docs/frontend/plugins/plugin-map) — the full
   authoring reference for the schema and the `map` block
 - 📦 [npm package](https://www.npmjs.com/package/@object-ui/plugin-map)
 - 📝 [Changelog](./CHANGELOG.md)

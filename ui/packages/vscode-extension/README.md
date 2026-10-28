@@ -1,6 +1,6 @@
 # Object UI VSCode Extension
 
-The official VSCode extension for [Object UI](https://www.objectui.org) - the universal schema-driven UI engine.
+The official VSCode extension for [Object UI](https://objectstack.ai/docs/frontend) - the universal schema-driven UI engine.
 
 ## ✨ Features
 
@@ -184,9 +184,9 @@ pnpm publish
 
 ## 📚 Documentation
 
-- [Object UI Documentation](https://www.objectui.org)
-- [Schema Reference](https://www.objectui.org/docs/api/schema-reference)
-- [Component Library](https://www.objectui.org/docs/components)
+- [Object UI Documentation](https://objectstack.ai/docs/frontend)
+- [Schema Reference](https://objectstack.ai/docs/ui/components)
+- [Component Library](https://objectstack.ai/docs/ui/components)
 - [Examples](https://github.com/objectstack-ai/objectui/tree/main/examples)
 
 ## 🤝 Contributing
@@ -205,7 +205,7 @@ MIT License - see [LICENSE](../../LICENSE) for details.
 
 Built with:
 - [VSCode Extension API](https://code.visualstudio.com/api)
-- [Object UI](https://www.objectui.org)
+- [Object UI](https://objectstack.ai/docs/frontend)
 - [Tailwind CSS](https://tailwindcss.com)
 
 ---
@@ -214,13 +214,13 @@ Built with:
 
 **Made with ❤️ by the [Object UI Team](https://github.com/objectstack-ai)**
 
-[Website](https://www.objectui.org) · [Documentation](https://www.objectui.org/docs) · [GitHub](https://github.com/objectstack-ai/objectui)
+[Website](https://objectstack.ai/docs/frontend) · [Documentation](https://objectstack.ai/docs/frontend) · [GitHub](https://github.com/objectstack-ai/objectui)
 
 </div>
 
 ## Links
 
-- 📚 [Documentation](https://www.objectui.org/docs/utilities/vscode-extension)
+- 📚 [Documentation](https://objectstack.ai/docs/frontend)
 - 📦 [npm package](https://www.npmjs.com/package/object-ui)
 - 📝 [Changelog](./CHANGELOG.md)
 - 🐛 [Report an issue](https://github.com/objectstack-ai/objectui/issues)
