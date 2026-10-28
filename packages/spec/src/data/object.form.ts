@@ -70,9 +70,9 @@ export const objectForm = defineForm({
         { field: 'highlightFields', widget: 'string-tags', colSpan: 2, helpText: 'Field names of this object, most important first — the first entry wins where only one fits (ADR-0085). Drives the default list columns, cards, child-record previews and the detail highlight strip. A name that is not a field of this object is refused at publish.' },
         // #27069 — the business order of the record page's related lists: a
         // list of inbound relationship names (child object, or `object.field`)
-        // on the `highlightFields` row's face. The cross-object check that
-        // refuses a dangling name runs where the children are known —
-        // `defineStack`, so `os validate` / `os build` — not at a one-object save.
+        // on the `highlightFields` row's face. A dangling name is refused at
+        // the publish door (`related-list-ref-unknown`, `error`, judged against
+        // the registry's children) and by `os validate` / `os build`.
         { field: 'relatedLists', widget: 'string-tags', colSpan: 2, helpText: 'Business order of this object\'s related lists on its record page, most important first. Each entry is a child object name (e.g. task), or object.field when that child has more than one relationship to this object. Listed lists come first; the rest follow in the derived order. A name that matches no relationship pointing at this object places nothing, so saving or validating the object refuses it.' },
         { field: 'searchableFields', widget: 'string-tags', colSpan: 2, helpText: 'Field names the $search query matches (ADR-0061): the default for the record picker, list quick-search and global search; a view may narrow it. Unset, search uses the name/title field plus short-text fields. Each entry must name a stored field of this object — an unknown name or a virtual formula field is refused at publish.' },
         // #19332 (flight G2a of ruling record 5861442317) — the object's field

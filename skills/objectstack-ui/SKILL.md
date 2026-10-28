@@ -114,11 +114,12 @@ children first). Refine on the relationship:
   columns (both optional; columns otherwise auto-derive from the child object's
   `highlightFields`). See objectstack-data → Relationships → Detail-page related lists.
 
-**Related-list layout.** On the synthesized record detail page, each
-`relatedList: 'primary'` child gets its **own tab**; every other related list
-stacks under a single shared **Related** tab, both in the object's
-`relatedLists` order. Promoting a child table to a first-class tab is a one-word
-change on the relationship. The object still declares no per-surface *layout* hints: the old
+**Related-list layout.** On the synthesized record page, each
+`relatedList: 'primary'` child (default: inline-edited `master_detail`) gets its
+**own tab**; every other list stacks under one shared **Related** tab, both in
+the object's `relatedLists` order. Promoting a child table to a tab is a
+one-word change on the relationship. The object still declares no per-surface
+*layout* hints: the old
 `detail.relatedLayout` toggle and object-level `detail: {...}` block stay
 **removed** (ADR-0085); `relatedLayout: 'tabs' | 'stack'` survives only as an
 app-level default override, not an object key. For arrangements the
