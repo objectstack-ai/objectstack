@@ -3081,8 +3081,17 @@ function MetadataResourceEditPageImpl({
                           onSelectionChange={setSelection}
                           locale={locale}
                           diagnostics={previewDiagnostics}
-                          onPatch={(patch) =>
-                            handleDraftChange((d) => ({ ...(d as Record<string, unknown>), ...patch }))
+                          // objectstack#26888 — an item this page cannot write (a
+                          // locked package item, a caller without the capability)
+                          // gets no `onPatch`: per the preview contract the canvas
+                          // is then read-only, as Studio does for a read-only
+                          // package (objectui#11136). A live canvas here took
+                          // edits the page offers no Save for, and dropped them.
+                          onPatch={
+                            readOnly
+                              ? undefined
+                              : (patch) =>
+                                  handleDraftChange((d) => ({ ...(d as Record<string, unknown>), ...patch }))
                           }
                         />
                       </div>

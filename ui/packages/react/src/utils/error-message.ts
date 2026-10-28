@@ -174,6 +174,9 @@ export function delegationScopeMessage(err: unknown): string | null {
   return extractWriteErrorMessage(err);
 }
 
+/** The ADR-0112 code a write answers (409) when a unique index refuses it. */
+const UNIQUE_VIOLATION = 'UNIQUE_VIOLATION';
+
 /** One field the server rejected, normalised for `form.setError`. */
 export interface WriteFieldError {
   /** Field name, matching the form control's `name`. */
@@ -204,6 +207,14 @@ export interface WriteFieldError {
  *
  * Entries without a usable `field` are dropped rather than guessed at: a wrong
  * mark on an innocent input is worse than the generic toast we already show.
+ *
+ * One refusal is field-scoped without a list: a `409 UNIQUE_VIOLATION` names
+ * the ONE field whose unique index refused the write, on a single string
+ * `field` (`details.field` on the raw client error, `field` on a hand-rolled
+ * one), with the server's end-user sentence on `error`. It becomes a single
+ * entry carrying that sentence. The server omits `field` whenever it cannot
+ * tell which column collided (an index name, a composite key), and the same
+ * rule holds here: no `field`, no entry, and the caller keeps its banner.
  */
 export function extractFieldErrors(err: unknown): WriteFieldError[] | null {
   const e = err as Record<string, any> | null | undefined;
@@ -214,7 +225,11 @@ export function extractFieldErrors(err: unknown): WriteFieldError[] | null {
     (Array.isArray(e.details?.fields) && e.details.fields) ||
     (Array.isArray(e.fields) && e.fields) ||
     null;
-  if (!raw || !Array.isArray(raw)) return null;
+  if (!raw || !Array.isArray(raw)) {
+    if (!errorCodeIs(e, UNIQUE_VIOLATION) && !errorCodeIs(e.details, UNIQUE_VIOLATION)) return null;
+    const field = firstString(e.details?.field, e.field);
+    return field ? [{ field, message: extractWriteErrorMessage(err) ?? '' }] : null;
+  }
 
   const out: WriteFieldError[] = [];
   for (const entry of raw) {

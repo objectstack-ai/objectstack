@@ -2294,23 +2294,27 @@ describe('#26146 — ledger rows below the child level are graded and counted', 
 // ── #26548: a report's period and export are declared before the renderer reads them ──
 //
 // `report` joined TYPE_COLLECTIONS with its ledger's first warned rows:
-// `dateRange` and `exportOptions` are `planned` + `authorWarn` until the
-// Console report page reads them. Read off the SHIPPED ledger, so the flip to
-// `live` (which drops `authorWarn`) turns the warning half of this block red
-// on purpose — rewrite it as a silence pin in that same edit.
-describe('report period and export (#26548 — planned until the report renderer reads them)', () => {
+// `dateRange` and `exportOptions` shipped `planned` + `authorWarn` until the
+// Console report page read them. `dateRange` is `live` since #25873's renderer
+// slice (the report page draws its chip and windows every query), so its
+// warning pin turned red at that flip ON PURPOSE and is re-subjected to the
+// silence. `exportOptions` is still `planned` and is authored in the SAME call:
+// one ledger load, one warning, so the silence is a reading and not a lint
+// that stopped loading ledgers (which also answers []).
+describe('report period and export (#26548 — dateRange live, exportOptions planned until the renderer reads it)', () => {
   const report = (extra: Record<string, unknown> = {}) => ({
     reports: [{ name: 'pipeline', label: 'Pipeline', type: 'summary', dataset: 'sales', rows: ['stage'], values: ['revenue'], ...extra }],
   });
 
-  it('warns on each key, at the report, with the row\'s author hint', () => {
+  it('warns on exportOptions only, at the report, with the row\'s author hint; dateRange is silent', () => {
     const findings = lintLivenessProperties(report({ dateRange: { dimension: 'close_date' }, exportOptions: { formats: ['csv'] } }));
     const planned = findings.filter((f) => f.rule === 'liveness-planned-property');
-    expect(planned.map((f) => f.message.match(/`(dateRange|exportOptions)`/)?.[1]).sort()).toEqual(['dateRange', 'exportOptions']);
+    expect(planned.map((f) => f.message.match(/`(dateRange|exportOptions)`/)?.[1]).sort()).toEqual(['exportOptions']);
     for (const f of planned) {
       expect(f.where).toContain("report 'pipeline'");
       expect(f.hint).toMatch(/^Keep it, but nothing reads it yet: the Console report page draws no /);
     }
+    expect(findings.filter((f) => /`dateRange`/.test(f.message))).toEqual([]);
   });
 
   it('CONTROL — a report declaring neither key draws no warning', () => {
