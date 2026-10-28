@@ -156,7 +156,7 @@ export const TEMPLATE_FORMATTERS: string[] = Object.keys(FORMATTERS);
 //   function does not make.
 
 /** The rule a refused hole breaks. */
-export type TemplateHoleGrammarRule = 'one-formatter' | 'currency-code-literal';
+export type TemplateHoleGrammarRule = 'one-formatter' | 'known-formatter' | 'currency-code-literal';
 
 /** A hole the shared grammar refuses, with the sentence an author is shown. */
 export interface TemplateHoleGrammarRefusal {
@@ -164,6 +164,9 @@ export interface TemplateHoleGrammarRefusal {
   /** Names the hole as written, the rule it breaks and the remedy. */
   message: string;
 }
+
+/** A formatter name as a hole writes one; any other text after the `|` names no formatter. */
+const WORD_RE = /^\w+$/;
 
 /** An ISO 4217 alphabetic code: three capital letters, the form `Intl` formats with. */
 const CURRENCY_CODE_RE = /^[A-Z]{3}$/;
@@ -202,6 +205,12 @@ function chainsASecondFormatter(formatterPart: string): boolean {
 /**
  * Judge one hole's formatter against the grammar both template dialects share.
  *
+ * A formatter the hole names must be one {@link TEMPLATE_FORMATTERS} holds
+ * (`known-formatter`). The mail renderer used to print the raw value for any
+ * other name, so `{{ amount | curency:EUR }}` sent `1234.5` where money was
+ * meant; the in-app dialect refuses such a hole in its own parse, before this
+ * rule's sentence is read, and keeps its own wording.
+ *
  * @param hole          the hole as written, braces included — the refusal names it
  * @param formatterPart the text after the hole's first `|`, trimmed
  * @param formatter     the formatter name the dialect parsed
@@ -222,6 +231,15 @@ export function judgeHoleFormatter(
         + '`{{ path | formatter[:arg] }}`, and the text after the second `|` is never applied. Keep one '
         + 'formatter here, and do any further formatting or branching in the caller that supplies the data, '
         + 'passing the finished value as its own variable.',
+    };
+  }
+  if (WORD_RE.test(formatter) && !TEMPLATE_FORMATTERS.includes(formatter)) {
+    return {
+      rule: 'known-formatter',
+      message:
+        `the hole ${hole} names the formatter '${formatter}', which is not a template formatter, so it would `
+        + `never format the value. Known formatters: ${TEMPLATE_FORMATTERS.join(', ')}. Correct the name, or `
+        + 'format the value in the caller that supplies the data and pass the finished text as its own variable.',
     };
   }
   if (formatter === 'currency' && arg !== undefined && !isCurrencyCode(arg)) {
