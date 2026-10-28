@@ -22,8 +22,9 @@
  *   `log` is recorded (the hook wrapper's `[hook] handler failed` line), naming
  *   the hook and the capability, and the save proceeds as `log` promises.
  * - Control: the same body WITH the capability runs as it always has.
- * - An ACTION body's denial keeps the #4431 fault contract
- *   (`capability-denial-is-a-fault.test.ts`); this card ruled on hooks only.
+ * - [#26965] An ACTION or JOB body's denial is the same refusal, its remedy
+ *   naming that body's own `body.capabilities`
+ *   (`action-job-capability-denial-is-a-refusal.integration.test.ts`).
  *
  * Measured in composition — a real `ObjectQL`, a real SQLite driver, the real
  * `QuickJSScriptRunner` and hook wrapper — and read off `mapDataError`, the

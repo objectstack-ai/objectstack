@@ -4576,6 +4576,15 @@ interface CascadeDeleteSet {
    * delete removes only BECAUSE that member goes.
    */
   readonly cascadeEdges: Map<string, Array<{ object: string; id: string | number }>>;
+  /**
+   * [#27004] Relation key ({@link cascadeMemberKey} of the referencing object
+   * and its field) → the ids of the referenced object whose walk has finished
+   * that relation: every row outside the set has had them cleared. A walk
+   * over a root SET reads each relation once for many records, so a
+   * multi-valued row read for one of them may still list a member an earlier
+   * one has removed from it; the remainder written leaves those out too.
+   */
+  readonly cleared: Map<string, Set<string>>;
 }
 
 /** [#26718] One member of a {@link CascadeDeleteSet}, as a single key. */
@@ -10369,7 +10378,7 @@ export class ObjectQL implements IObjectQLEngine {
   ): Promise<Array<{ object: string; id: string }>> {
     const resolved = this.resolveObjectName(object);
     const set = await this.collectCascadeDeleteSet(
-      resolved, id, undefined, this._registry.getAllObjects(), { fileElevations: false },
+      resolved, [id], undefined, this._registry.getAllObjects(), { fileElevations: false },
     );
     const root = { object: resolved, id: String(id) };
     const members = [root];
@@ -18016,10 +18025,18 @@ export class ObjectQL implements IObjectQLEngine {
    * row a dependent. A non-array value is normalized to the array spelling
    * rather than dismissed, for the same reason the narrowing compares it: an
    * off-shape bare scalar in a `multiple: true` slot is still a reference.
+   *
+   * [#27004] `cleared` are the members this cascade has already removed from
+   * the relation ({@link CascadeDeleteSet.cleared}): a row read once for a
+   * whole root set may still list them, and they are not written back.
    */
-  private static remainderAfterMemberRemoval(stored: unknown, id: string | number): unknown[] {
+  private static remainderAfterMemberRemoval(
+    stored: unknown,
+    id: string | number,
+    cleared?: ReadonlySet<string>,
+  ): unknown[] {
     const current: unknown[] = Array.isArray(stored) ? stored : [stored];
-    return current.filter((v) => String(v) !== String(id));
+    return current.filter((v) => String(v) !== String(id) && !cleared?.has(String(v)));
   }
 
   /**
@@ -18248,6 +18265,15 @@ export class ObjectQL implements IObjectQLEngine {
    * delete (`multi: true`) runs it for every row it matched ([#26871], see
    * `delete()`'s predicate arm).
    *
+   * [#27004] It takes a ROOT SET: the by-id delete passes a set of one, the
+   * predicate arm the ids it matched. Every phase below reads a relation once
+   * per {@link REFERENCE_PROBE_BATCH} records of the set
+   * ({@link probeReferencingRowsOfSet}), not once per record, and judges and
+   * writes per record as before. One walk of one set: a matched row another
+   * matched row's cascade reaches is in the set like any other member, so it
+   * refuses nothing and is cleared of nothing (#22305), and the predicate
+   * arm's own `deleteMany` removes it.
+   *
    * [#22305] Two phases, so the walk knows its own set before it judges
    * anything:
    *   1. {@link collectCascadeDeleteSet} — read-only. Every record the cascade
@@ -18279,11 +18305,18 @@ export class ObjectQL implements IObjectQLEngine {
    */
   private async cascadeDeleteRelations(
     object: string,
-    id: string | number,
+    ids: ReadonlyArray<string | number>,
     context?: ExecutionContext,
     depth = 0,
   ): Promise<void> {
-    if (id == null || depth >= ObjectQL.MAX_CASCADE_DEPTH) return;
+    const roots: Array<string | number> = [];
+    const seen = new Set<string>();
+    for (const id of ids) {
+      if (id == null || seen.has(String(id))) continue;
+      seen.add(String(id));
+      roots.push(id);
+    }
+    if (roots.length === 0 || depth >= ObjectQL.MAX_CASCADE_DEPTH) return;
     // [#9002] The registry read is UNGUARDED, deliberately — and this is the
     // statement that decides whether the cascade runs AT ALL.
     //
@@ -18308,18 +18341,27 @@ export class ObjectQL implements IObjectQLEngine {
     // set. Any other delete is the root of its own cascade, and collects the
     // set first: before one refusal is judged and before one row is written.
     const inherited = this.cascadeDeleteSets.getStore();
-    if (inherited && cascadeSetHas(inherited.members, object, id)) {
-      await this.walkReferencingRelations(object, id, context, objects, inherited);
-      return;
+    const joining = inherited ? roots.filter((id) => cascadeSetHas(inherited.members, object, id)) : [];
+    if (inherited && joining.length > 0) {
+      await this.walkReferencingRelations(object, joining, context, objects, inherited);
     }
-    const cascadeSet = await this.collectCascadeDeleteSet(object, id, context, objects);
+    const fresh = joining.length > 0 ? roots.filter((id) => !cascadeSetHas(inherited!.members, object, id)) : roots;
+    if (fresh.length === 0) return;
+    const cascadeSet = await this.collectCascadeDeleteSet(object, fresh, context, objects);
     // [#26718] Every restrict a member's own cascade would override is judged
     // here, before the first write.
-    await this.refuseRestrictsInsideOwnCascade(cascadeSet, { object, id }, context, objects);
+    await this.refuseRestrictsInsideOwnCascade(cascadeSet, fresh.map((id) => ({ object, id })), context, objects);
     await this.cascadeDeleteSets.run(cascadeSet, () =>
-      this.walkReferencingRelations(object, id, context, objects, cascadeSet),
+      this.walkReferencingRelations(object, fresh, context, objects, cascadeSet),
     );
   }
+
+  /**
+   * [#27004] How many records of one object a single dependents probe asks
+   * about: the predicate arm's `$in` delete batch, so neither statement
+   * outgrows a driver's bind-parameter limit.
+   */
+  private static readonly REFERENCE_PROBE_BATCH = 500;
 
   /**
    * [#22305] Phase 1 of {@link cascadeDeleteRelations}: every record a by-id
@@ -18344,18 +18386,26 @@ export class ObjectQL implements IObjectQLEngine {
    * `fileElevations: false`: that record says "read as system FOR THE DELETE
    * of" the record, and an inspection deletes nothing, so filing it there would
    * put a delete that never happened in the log. The reads are the same.
+   *
+   * [#27004] From a root SET, level by level: the records found at one depth
+   * are probed together, per object and per relation, through
+   * {@link probeReferencingRowsOfSet}. The set and its edges are the ones the
+   * record-by-record walk collected.
    */
   private async collectCascadeDeleteSet(
     object: string,
-    id: string | number,
+    ids: ReadonlyArray<string | number>,
     context: ExecutionContext | undefined,
     objects: ServiceObject[],
     opts: { fileElevations: boolean } = { fileElevations: true },
   ): Promise<CascadeDeleteSet> {
     const set: CascadeDeleteSet = {
-      members: new Map(), entered: new Map(), elevationsFiled: new Set(), cascadeEdges: new Map(),
+      members: new Map(), entered: new Map(), elevationsFiled: new Set(), cascadeEdges: new Map(), cleared: new Map(),
     };
-    cascadeSetAdd(set.members, object, id);
+    let frontier = new Map<string, Array<string | number>>([[object, []]]);
+    for (const id of ids) {
+      if (cascadeSetAdd(set.members, object, id)) frontier.get(object)!.push(id);
+    }
     // The cascading relations pointing at each object, scanned once per object
     // rather than once per record: a wide cascade has many records of few
     // objects.
@@ -18378,31 +18428,39 @@ export class ObjectQL implements IObjectQLEngine {
       }
       return relations;
     };
-    // A queue the loop appends to while it iterates: an array iterator reads
-    // `length` on every step, so each record pushed below is visited in turn.
-    const queue: Array<{ object: string; id: string | number }> = [{ object, id }];
-    for (const target of queue) {
-      for (const { childName, fieldName, fdef } of cascadingInto(target.object)) {
-        if (opts.fileElevations) {
-          this.fileReferenceCheckElevation(set, target.object, target.id, childName, fieldName, context);
-        }
-        const rows = await this.probeReferencingRows(
-          childName, fieldName, fdef, target.id, this.referenceProbeFilter(fieldName, fdef, target.id), context,
-        );
-        for (const row of rows) {
-          const depId = row?.id;
-          if (depId == null) continue;
-          // [#26718] The edge is kept even for a row already in the set: a
-          // row reached by two paths is in the reach of both.
-          const from = cascadeMemberKey(target.object, target.id);
-          let edges = set.cascadeEdges.get(from);
-          if (!edges) { edges = []; set.cascadeEdges.set(from, edges); }
-          edges.push({ object: childName, id: depId });
-          if (cascadeSetAdd(set.members, childName, depId)) {
-            queue.push({ object: childName, id: depId });
+    // Breadth-first, one depth at a time: the records each depth adds are the
+    // next one's targets, grouped by object.
+    while (frontier.size > 0) {
+      const next = new Map<string, Array<string | number>>();
+      for (const [target, targetIds] of frontier) {
+        if (targetIds.length === 0) continue;
+        for (const { childName, fieldName, fdef } of cascadingInto(target)) {
+          if (opts.fileElevations) {
+            for (const id of targetIds) {
+              this.fileReferenceCheckElevation(set, target, id, childName, fieldName, context);
+            }
+          }
+          const referencing = await this.probeReferencingRowsOfSet(childName, fieldName, fdef, targetIds, context);
+          for (const id of targetIds) {
+            for (const row of referencing.get(String(id)) ?? []) {
+              const depId = row?.id;
+              if (depId == null) continue;
+              // [#26718] The edge is kept even for a row already in the set: a
+              // row reached by two paths is in the reach of both.
+              const from = cascadeMemberKey(target, id);
+              let edges = set.cascadeEdges.get(from);
+              if (!edges) { edges = []; set.cascadeEdges.set(from, edges); }
+              edges.push({ object: childName, id: depId });
+              if (cascadeSetAdd(set.members, childName, depId)) {
+                let found = next.get(childName);
+                if (!found) { found = []; next.set(childName, found); }
+                found.push(depId);
+              }
+            }
           }
         }
       }
+      frontier = next;
     }
     return set;
   }
@@ -18524,7 +18582,7 @@ export class ObjectQL implements IObjectQLEngine {
     childName: string,
     fieldName: string,
     fdef: any,
-    id: string | number,
+    id: string | number | ReadonlyArray<string | number>,
     probeWhere: Record<string, unknown>,
     context: ExecutionContext | undefined,
   ): Promise<any[]> {
@@ -18619,12 +18677,99 @@ export class ObjectQL implements IObjectQLEngine {
     // recursion, the `set_null` write — and the set the collection walk
     // gathers read this answer, so narrowing anywhere later would leave one of
     // them acting on a row that never referenced this record.
+    // [#27004] Over a set of ids (`probeReferencingRowsOfSet`), a row is kept
+    // when it holds any of them.
     if (declaredMultiValued(fdef) && dependents) {
+      const wanted: ReadonlyArray<string | number> = Array.isArray(id) ? id : [id as string | number];
       dependents = dependents.filter((row) =>
-        ObjectQL.storedReferenceIncludes(row?.[fieldName], id),
+        wanted.some((w) => ObjectQL.storedReferenceIncludes(row?.[fieldName], w)),
       );
     }
     return dependents ?? [];
+  }
+
+  /**
+   * [#27004] {@link referenceProbeFilter} for a SET of records: the rows that
+   * reference any of `ids`. A single-valued reference asks `$in`; a
+   * multi-valued one ORs each id's own limbs, the spelling the nested-relation
+   * lowering already sends for a multiple lookup. One id is that id's own
+   * filter, byte for byte.
+   */
+  private referenceProbeFilterOfSet(
+    fieldName: string,
+    fdef: { type?: unknown; multiple?: unknown },
+    ids: ReadonlyArray<string | number>,
+  ): Record<string, unknown> {
+    if (ids.length === 1) return this.referenceProbeFilter(fieldName, fdef, ids[0]);
+    if (!declaredMultiValued(fdef)) return { [fieldName]: { $in: [...ids] } };
+    return {
+      $or: ids.flatMap((id) => {
+        const limb = this.referenceProbeFilter(fieldName, fdef, id);
+        return Array.isArray(limb.$or) ? (limb.$or as Array<Record<string, unknown>>) : [limb];
+      }),
+    };
+  }
+
+  /**
+   * [#27004] The dependents probe ({@link probeReferencingRows}) for a SET of
+   * records of one object: the rows of `childName` referencing each of `ids`,
+   * keyed by `String(id)`. One read per {@link REFERENCE_PROBE_BATCH} ids, so a
+   * walk over a predicate delete's matched rows costs one probe per relation
+   * per batch rather than one per row; a batch of one is the by-id probe,
+   * filter and all.
+   *
+   * Each row is then given to the ids it references: its stored value on a
+   * single-valued field, its members on a multi-valued one (the #9362 exact
+   * reading, {@link storedReferenceIncludes}). A row of a single-valued field
+   * whose value names none of the batch (a driver comparing ids in a way
+   * `String()` does not) is never dropped: that batch is asked again id by
+   * id, which is the by-id answer.
+   */
+  private async probeReferencingRowsOfSet(
+    childName: string,
+    fieldName: string,
+    fdef: any,
+    ids: ReadonlyArray<string | number>,
+    context: ExecutionContext | undefined,
+  ): Promise<Map<string, any[]>> {
+    const byId = new Map<string, any[]>();
+    const multiValued = declaredMultiValued(fdef);
+    const batchSize = ObjectQL.REFERENCE_PROBE_BATCH;
+    for (let i = 0; i < ids.length; i += batchSize) {
+      const batch = ids.slice(i, i + batchSize);
+      const rows = await this.probeReferencingRows(
+        childName, fieldName, fdef, batch.length === 1 ? batch[0] : batch,
+        this.referenceProbeFilterOfSet(fieldName, fdef, batch), context,
+      );
+      if (batch.length === 1) {
+        byId.set(String(batch[0]), rows);
+        continue;
+      }
+      const found = new Map<string, any[]>(batch.map((id) => [String(id), []]));
+      let unattributed = false;
+      for (const row of rows) {
+        // The members' reading is `storedReferenceIncludes`'s, element by
+        // element; a single value is compared as one.
+        const stored = row?.[fieldName];
+        const values: unknown[] = multiValued && Array.isArray(stored) ? stored : [stored];
+        const held = new Set<string>();
+        for (const v of values) {
+          if (v == null || typeof v === 'object') continue;
+          if (found.has(String(v))) held.add(String(v));
+        }
+        if (held.size === 0) { unattributed = true; break; }
+        for (const key of held) found.get(key)!.push(row);
+      }
+      if (unattributed) {
+        for (const id of batch) {
+          found.set(String(id), await this.probeReferencingRows(
+            childName, fieldName, fdef, id, this.referenceProbeFilter(fieldName, fdef, id), context,
+          ));
+        }
+      }
+      for (const [key, held] of found) byId.set(key, held);
+    }
+    return byId;
   }
 
   /**
@@ -18636,17 +18781,18 @@ export class ObjectQL implements IObjectQLEngine {
    */
   private async walkReferencingRelations(
     object: string,
-    id: string | number,
+    ids: ReadonlyArray<string | number>,
     context: ExecutionContext | undefined,
     objects: ServiceObject[],
     cascadeSet: CascadeDeleteSet,
   ): Promise<void> {
-    // Entered before the first nested `delete()` can come back here.
-    cascadeSetAdd(cascadeSet.entered, object, id);
+    // Entered before the first nested `delete()` can come back here: every
+    // record of the set, so one member's cascade never deletes another.
+    for (const id of ids) cascadeSetAdd(cascadeSet.entered, object, id);
     // [#24948] An organization that still owns rows is refused here, whole,
     // before the first relation below is cascaded or cleared.
     if (object === ORGANIZATION_OBJECT) {
-      await this.refuseOrganizationDeleteWhileOwned(id, context, objects, cascadeSet);
+      for (const id of ids) await this.refuseOrganizationDeleteWhileOwned(id, context, objects, cascadeSet);
     }
     for (const child of objects) {
       const childName = (child as any)?.name as string | undefined;
@@ -18663,7 +18809,7 @@ export class ObjectQL implements IObjectQLEngine {
         // naming the deleted organization: never cleared, never counted.
         if (object === ORGANIZATION_OBJECT && resolvedBehavior === 'set_null' &&
             ObjectQL.keepsOrganizationReference(child, fieldName)) continue;
-        let behavior: string = resolvedBehavior;
+        let relationBehavior: string = resolvedBehavior;
 
         // [#9689] (maintainer ruling 2026-08-19, Q3 = B): the judgement the
         // #9625 comment in `cascadeRelationBehavior` deferred is now taken — `FieldSchema` REJECTS an
@@ -18684,17 +18830,19 @@ export class ObjectQL implements IObjectQLEngine {
         // imprecision is the materialized-default defect tracked as #9784, not
         // a reason to soften this log.
         if (fdef.type === 'master_detail' && fdef.deleteBehavior === 'set_null') {
-          const msg =
-            `[cascade-delete] ${childName}.${fieldName} declares deleteBehavior: 'set_null' on a ` +
-            `master_detail referencing '${object}' — that value is NOT honored on master_detail: the ` +
-            `delete of ${object}/${String(id)} CASCADES its referencing child rows, the opposite of what ` +
-            `the declaration asks (children kept). FieldSchema now rejects this combination at parse time; ` +
-            `this row reached the engine around the parse seam (raw registration, or metadata stored ` +
-            `before the tightening). Re-declare the field: 'restrict' refuses the parent delete while ` +
-            `children exist (no data loss), 'cascade' (or omitting the key) accepts the cascade ` +
-            `deliberately, or make it a lookup if children must survive the parent.`;
-          if (typeof this.logger.error === 'function') this.logger.error(msg);
-          else this.logger.warn(msg);
+          for (const id of ids) {
+            const msg =
+              `[cascade-delete] ${childName}.${fieldName} declares deleteBehavior: 'set_null' on a ` +
+              `master_detail referencing '${object}' — that value is NOT honored on master_detail: the ` +
+              `delete of ${object}/${String(id)} CASCADES its referencing child rows, the opposite of what ` +
+              `the declaration asks (children kept). FieldSchema now rejects this combination at parse time; ` +
+              `this row reached the engine around the parse seam (raw registration, or metadata stored ` +
+              `before the tightening). Re-declare the field: 'restrict' refuses the parent delete while ` +
+              `children exist (no data loss), 'cascade' (or omitting the key) accepts the cascade ` +
+              `deliberately, or make it a lookup if children must survive the parent.`;
+            if (typeof this.logger.error === 'function') this.logger.error(msg);
+            else this.logger.warn(msg);
+          }
         }
 
         // A REQUIRED foreign key cannot be nulled — set_null would issue an
@@ -18752,16 +18900,10 @@ export class ObjectQL implements IObjectQLEngine {
         // — since #9688 — this escalation all turn on it.
         // [#18408] Was `fdef.multiple === true`. See {@link declaredMultiValued}.
         const multiValued = declaredMultiValued(fdef);
-        const requiredSetNull = behavior === 'set_null' && fdef.required === true;
+        const requiredSetNull = relationBehavior === 'set_null' && fdef.required === true;
         if (requiredSetNull && !multiValued) {
-          behavior = 'restrict';
+          relationBehavior = 'restrict';
         }
-
-        // [#12166] The probe filter, hoisted: the DISCLOSURE re-probe below has
-        // to ask the identical question under the caller's own identity, and a
-        // second call to `referenceProbeFilter` would be a second spelling of
-        // "which rows reference this record" that could drift from this one.
-        const probeWhere = this.referenceProbeFilter(fieldName, fdef, id);
 
         // [#12166, ruling constraint 3] File the elevation BEFORE it happens,
         // and file BOTH halves — triggered-by = the deleting operator,
@@ -18773,173 +18915,192 @@ export class ObjectQL implements IObjectQLEngine {
         // none, refuses the delete, or fails — and a record written only on the
         // success path would be missing exactly the runs an auditor goes
         // looking for.
-        this.fileReferenceCheckElevation(cascadeSet, object, id, childName, fieldName, context);
+        for (const id of ids) this.fileReferenceCheckElevation(cascadeSet, object, id, childName, fieldName, context);
 
-        let dependents = await this.probeReferencingRows(childName, fieldName, fdef, id, probeWhere, context);
-        if (dependents.length === 0) continue;
-
-        // [#12166] The elevated probe's row IDENTITY, captured here — after the
-        // multi-value narrowing and BEFORE the `requiredSetNull && multiValued`
-        // narrowing below reduces `dependents` to the emptied subset. This is
-        // the set the disclosure decision compares against, and the stage
-        // matters: the emptied subset is computed from these rows' own stored
-        // values, so a caller who can see exactly these rows can derive the
-        // emptied count too, while a caller who cannot see them can derive
-        // neither. Comparing at the later stage would leak the difference.
-        const probedIds: readonly string[] = dependents.map((r: any) => String(r?.id));
-
-        // [#22305] A row the cascade itself deletes refuses nothing and is
-        // cleared of nothing: the triage ruling on #22305 is that a child in the
-        // cascade set never restricts a sibling in the same set. Such a row is
-        // not left dangling, because this same unit of work removes it, and
-        // clearing its reference would be a write against a row about to go.
-        // (The one cascade that is not one unit of work is
-        // `planCascadeAtomicity`'s `'split'`: there a later refusal can strand
-        // such a row, the partial outcome `warnCascadeNotAtomic` already
-        // declares for every row that path deletes.) So `restrict` (authored,
-        // or either half of the required escalation) and `set_null` judge only
-        // the rows OUTSIDE the set, and a relation whose rows are all inside it
-        // is done. `cascade` keeps every row: its rows ARE the set, and the
-        // walk deletes them below.
-        //
-        // [#26718] …except an AUTHORED restrict held by a row the cascade reaches
-        // only through the record that restrict protects: that one was judged
-        // before the cascade wrote anything ({@link refuseRestrictsInsideOwnCascade}),
-        // so a row in the set reaching here refuses nothing.
-        //
-        // After `probedIds`, on purpose: the disclosure check still compares
-        // the caller's own view against every row the elevated probe read, so a
-        // count is disclosed only to a caller who can see the whole relation,
-        // as before; what it counts is the rows that actually refuse.
-        if (behavior !== 'cascade') {
-          dependents = dependents.filter((row) => !cascadeSetHas(cascadeSet.members, childName, row?.id));
+        // [#27004] One probe per batch of the set; each record then takes its
+        // own rows, in the set's order.
+        const referencing = await this.probeReferencingRowsOfSet(childName, fieldName, fdef, ids, context);
+        const clearedKey = cascadeMemberKey(childName, fieldName);
+        let cleared = cascadeSet.cleared.get(clearedKey);
+        if (!cleared) { cleared = new Set(); cascadeSet.cleared.set(clearedKey, cleared); }
+        for (const id of ids) {
+          let behavior: string = relationBehavior;
+          let dependents = referencing.get(String(id)) ?? [];
           if (dependents.length === 0) continue;
-        }
 
-        // [#9688] The deferred half of the required escalation, decided per
-        // ROW now that the rows are read and exactly narrowed — every row
-        // here genuinely holds `id`, so its remainder is its set minus that
-        // one member.
-        //
-        // The emptiness question is asked through
-        // `remainderAfterMemberRemoval`, which is the SAME computation the
-        // set_null write below performs. One function, two call sites, so the
-        // judgement cannot predict a shape the write would not produce: a
-        // predicate that computed the remainder even slightly differently
-        // could clear the delete and then let the write land the very `[]`
-        // this judgement exists to prevent.
-        //
-        // ANY row that would be emptied refuses the WHOLE delete — a delete
-        // either happens or it does not, and a partial cascade is not on
-        // offer. `dependents` is reduced to those rows first, because every
-        // number the refusal reports reads it: `dependentCount`, the
-        // localized message's `count`, and the developerMessage. Counting the
-        // rows this delete no longer refuses over is the second defect the
-        // card names, and it is fixed by the same statement.
-        if (requiredSetNull && multiValued) {
-          const emptied = dependents.filter(
-            (row) => ObjectQL.remainderAfterMemberRemoval(row?.[fieldName], id).length === 0,
-          );
-          if (emptied.length > 0) {
-            behavior = 'restrict';
-            dependents = emptied;
+          // [#12166] The one record's probe filter: the DISCLOSURE re-probe in
+          // `deleteRestrictedError` asks the identical question under the
+          // caller's own identity. [#27004] The batched probe above is built from
+          // this same filter, id by id ({@link referenceProbeFilterOfSet}), and
+          // narrowed by the same reading, so the two cannot disagree about which
+          // rows reference this record.
+          const probeWhere = this.referenceProbeFilter(fieldName, fdef, id);
+
+          // [#12166] The elevated probe's row IDENTITY, captured here — after the
+          // multi-value narrowing and BEFORE the `requiredSetNull && multiValued`
+          // narrowing below reduces `dependents` to the emptied subset. This is
+          // the set the disclosure decision compares against, and the stage
+          // matters: the emptied subset is computed from these rows' own stored
+          // values, so a caller who can see exactly these rows can derive the
+          // emptied count too, while a caller who cannot see them can derive
+          // neither. Comparing at the later stage would leak the difference.
+          const probedIds: readonly string[] = dependents.map((r: any) => String(r?.id));
+
+          // [#22305] A row the cascade itself deletes refuses nothing and is
+          // cleared of nothing: the triage ruling on #22305 is that a child in the
+          // cascade set never restricts a sibling in the same set. Such a row is
+          // not left dangling, because this same unit of work removes it, and
+          // clearing its reference would be a write against a row about to go.
+          // (The one cascade that is not one unit of work is
+          // `planCascadeAtomicity`'s `'split'`: there a later refusal can strand
+          // such a row, the partial outcome `warnCascadeNotAtomic` already
+          // declares for every row that path deletes.) So `restrict` (authored,
+          // or either half of the required escalation) and `set_null` judge only
+          // the rows OUTSIDE the set, and a relation whose rows are all inside it
+          // is done. `cascade` keeps every row: its rows ARE the set, and the
+          // walk deletes them below.
+          //
+          // [#26718] …except an AUTHORED restrict held by a row the cascade reaches
+          // only through the record that restrict protects: that one was judged
+          // before the cascade wrote anything ({@link refuseRestrictsInsideOwnCascade}),
+          // so a row in the set reaching here refuses nothing.
+          //
+          // After `probedIds`, on purpose: the disclosure check still compares
+          // the caller's own view against every row the elevated probe read, so a
+          // count is disclosed only to a caller who can see the whole relation,
+          // as before; what it counts is the rows that actually refuse.
+          if (behavior !== 'cascade') {
+            dependents = dependents.filter((row) => !cascadeSetHas(cascadeSet.members, childName, row?.id));
+            if (dependents.length === 0) continue;
           }
-        }
 
-        if (behavior === 'restrict') {
-          throw await this.deleteRestrictedError({
-            object, id, child, childName, fieldName, fdef, dependents, probeWhere, probedIds, multiValued,
-            objects, context,
-          });
-        }
-
-        for (const dep of dependents) {
-          const depId = dep?.id;
-          if (depId == null) continue;
-          if (behavior === 'cascade') {
-            // [#22305] Entered already: an ancestor of this delete, still in
-            // progress up the stack (a cycle in the data), or a row an earlier
-            // branch of this cascade has deleted (a row reached by two paths).
-            // Either way this cascade removes it once, and re-entering would
-            // loop forever on the first and answer 404 on the second.
-            if (cascadeSetHas(cascadeSet.entered, childName, depId)) continue;
-            // Recurse via the public delete so the child's own cascade,
-            // hooks and events fire.
-            //
-            // [#23221] Inside a token naming exactly this child, which that
-            // delete claims and projects onto the DECLARED
-            // `HookContext.referentialCascadeDelete` (see
-            // claimReferentialCascadeDelete): on the real request path the
-            // caller's context reaches the child unchanged, so without it a
-            // freeze guard cannot tell this delete from a hand delete of the
-            // same row. The context is passed as before, by reference and
-            // unmarked — see `cascadeIssuedDeletes` for why the marker is not
-            // a context key. A grandchild is issued by the child's own walk,
-            // inside a token of its own.
-            await this.cascadeIssuedDeletes.run(
-              { object: childName, id: String(depId), claimed: false },
-              () => this.delete(childName, { where: { id: depId }, context } as any),
+          // [#9688] The deferred half of the required escalation, decided per
+          // ROW now that the rows are read and exactly narrowed — every row
+          // here genuinely holds `id`, so its remainder is its set minus that
+          // one member.
+          //
+          // The emptiness question is asked through
+          // `remainderAfterMemberRemoval`, which is the SAME computation the
+          // set_null write below performs. One function, two call sites, so the
+          // judgement cannot predict a shape the write would not produce: a
+          // predicate that computed the remainder even slightly differently
+          // could clear the delete and then let the write land the very `[]`
+          // this judgement exists to prevent.
+          //
+          // ANY row that would be emptied refuses the WHOLE delete — a delete
+          // either happens or it does not, and a partial cascade is not on
+          // offer. `dependents` is reduced to those rows first, because every
+          // number the refusal reports reads it: `dependentCount`, the
+          // localized message's `count`, and the developerMessage. Counting the
+          // rows this delete no longer refuses over is the second defect the
+          // card names, and it is fixed by the same statement.
+          if (requiredSetNull && multiValued) {
+            const emptied = dependents.filter(
+              (row) => ObjectQL.remainderAfterMemberRemoval(row?.[fieldName], id, cleared).length === 0,
             );
-          } else {
-            // [#3023] Clear the FK as an engine-internal referential-integrity
-            // write, tagged so plugin-security's ownership-anchor guard (#3004)
-            // treats an `owner_id = null` cascade as integrity maintenance, not
-            // a user-initiated disown — otherwise deleting the referenced record
-            // trips the transfer guard and aborts the cascade mid-way. Marker
-            // rides a server-DERIVED context (set here, never from client input
-            // — same trust model as `__expandRead`), so it cannot be forged from
-            // a request to bypass the guard on an ordinary write.
-            //
-            // [commit 34ce8e7db] This same marker is what `update()`'s hook-context
-            // assembly projects onto the DECLARED `HookContext.
-            // referentialFieldClear` (see buildReferentialFieldClear), so an
-            // app guard can recognise the cleanup without reading an
-            // operation-private key — on the real request path the inherited
-            // caller envelope makes the cleanup otherwise indistinguishable
-            // from a hand-clear of the same lookup.
-            //
-            // [#20006] `__referentialFieldClearCause` rides beside it: the
-            // delete this cleanup serves and the reference it clears, which a
-            // traversing rule's refusal of the cleanup names (see
-            // `resolvePredicateRelated`). It authorizes nothing — it is read
-            // only where the marker already holds, and only to word a refusal —
-            // and the referencing row's id in it never reaches that text.
-            const referentialCtx = {
-              ...(context ?? {}),
-              __referentialFieldClear: true,
-              __referentialFieldClearCause: {
-                object, id: String(id), referencingObject: childName, referencingId: String(depId), field: fieldName,
-              },
-            } as ExecutionContext;
-            if (multiValued) {
-              // The FK is a SET, so `set_null` clears the deleted MEMBER, not
-              // the slot: filter the stored array and write what remains.
-              // Nulling the slot instead discarded every other live reference
-              // (measured: `["acc_a","acc_b"]` re-read as `null` after
-              // `acc_a` was deleted).
-              //
-              // The residual shape when the last member goes is not this
-              // engine's call to make: `FieldSchema` pins it —
-              // `packages/spec/src/data/field.zod.ts`, the `multiple` and
-              // `required` doc blocks (#9447, maintainer ruling 2026-08-18) —
-              // and this write consumes that contract: the emptied set is
-              // written as `[]`, which `Array.prototype.filter` already
-              // yields, never `null`.
-              //
-              // [#9688] The remainder is computed by
-              // `remainderAfterMemberRemoval`, which the per-row required
-              // judgement above calls on the same row: this write is only
-              // reached for a row that judgement measured as keeping at least
-              // one other member, and the two must agree by construction.
-              // The reading it applies — `String(v) !== String(id)`, and an
-              // off-shape bare scalar normalized to the array spelling — is
-              // documented there.
-              const next = ObjectQL.remainderAfterMemberRemoval(dep?.[fieldName], id);
-              await this.update(childName, { id: depId, [fieldName]: next }, { context: referentialCtx } as any);
-            } else {
-              await this.update(childName, { id: depId, [fieldName]: null }, { context: referentialCtx } as any);
+            if (emptied.length > 0) {
+              behavior = 'restrict';
+              dependents = emptied;
             }
           }
+
+          if (behavior === 'restrict') {
+            throw await this.deleteRestrictedError({
+              object, id, child, childName, fieldName, fdef, dependents, probeWhere, probedIds, multiValued,
+              objects, context,
+            });
+          }
+
+          for (const dep of dependents) {
+            const depId = dep?.id;
+            if (depId == null) continue;
+            if (behavior === 'cascade') {
+              // [#22305] Entered already: an ancestor of this delete, still in
+              // progress up the stack (a cycle in the data), or a row an earlier
+              // branch of this cascade has deleted (a row reached by two paths).
+              // Either way this cascade removes it once, and re-entering would
+              // loop forever on the first and answer 404 on the second.
+              if (cascadeSetHas(cascadeSet.entered, childName, depId)) continue;
+              // Recurse via the public delete so the child's own cascade,
+              // hooks and events fire.
+              //
+              // [#23221] Inside a token naming exactly this child, which that
+              // delete claims and projects onto the DECLARED
+              // `HookContext.referentialCascadeDelete` (see
+              // claimReferentialCascadeDelete): on the real request path the
+              // caller's context reaches the child unchanged, so without it a
+              // freeze guard cannot tell this delete from a hand delete of the
+              // same row. The context is passed as before, by reference and
+              // unmarked — see `cascadeIssuedDeletes` for why the marker is not
+              // a context key. A grandchild is issued by the child's own walk,
+              // inside a token of its own.
+              await this.cascadeIssuedDeletes.run(
+                { object: childName, id: String(depId), claimed: false },
+                () => this.delete(childName, { where: { id: depId }, context } as any),
+              );
+            } else {
+              // [#3023] Clear the FK as an engine-internal referential-integrity
+              // write, tagged so plugin-security's ownership-anchor guard (#3004)
+              // treats an `owner_id = null` cascade as integrity maintenance, not
+              // a user-initiated disown — otherwise deleting the referenced record
+              // trips the transfer guard and aborts the cascade mid-way. Marker
+              // rides a server-DERIVED context (set here, never from client input
+              // — same trust model as `__expandRead`), so it cannot be forged from
+              // a request to bypass the guard on an ordinary write.
+              //
+              // [commit 34ce8e7db] This same marker is what `update()`'s hook-context
+              // assembly projects onto the DECLARED `HookContext.
+              // referentialFieldClear` (see buildReferentialFieldClear), so an
+              // app guard can recognise the cleanup without reading an
+              // operation-private key — on the real request path the inherited
+              // caller envelope makes the cleanup otherwise indistinguishable
+              // from a hand-clear of the same lookup.
+              //
+              // [#20006] `__referentialFieldClearCause` rides beside it: the
+              // delete this cleanup serves and the reference it clears, which a
+              // traversing rule's refusal of the cleanup names (see
+              // `resolvePredicateRelated`). It authorizes nothing — it is read
+              // only where the marker already holds, and only to word a refusal —
+              // and the referencing row's id in it never reaches that text.
+              const referentialCtx = {
+                ...(context ?? {}),
+                __referentialFieldClear: true,
+                __referentialFieldClearCause: {
+                  object, id: String(id), referencingObject: childName, referencingId: String(depId), field: fieldName,
+                },
+              } as ExecutionContext;
+              if (multiValued) {
+                // The FK is a SET, so `set_null` clears the deleted MEMBER, not
+                // the slot: filter the stored array and write what remains.
+                // Nulling the slot instead discarded every other live reference
+                // (measured: `["acc_a","acc_b"]` re-read as `null` after
+                // `acc_a` was deleted).
+                //
+                // The residual shape when the last member goes is not this
+                // engine's call to make: `FieldSchema` pins it —
+                // `packages/spec/src/data/field.zod.ts`, the `multiple` and
+                // `required` doc blocks (#9447, maintainer ruling 2026-08-18) —
+                // and this write consumes that contract: the emptied set is
+                // written as `[]`, which `Array.prototype.filter` already
+                // yields, never `null`.
+                //
+                // [#9688] The remainder is computed by
+                // `remainderAfterMemberRemoval`, which the per-row required
+                // judgement above calls on the same row: this write is only
+                // reached for a row that judgement measured as keeping at least
+                // one other member, and the two must agree by construction.
+                // The reading it applies — `String(v) !== String(id)`, and an
+                // off-shape bare scalar normalized to the array spelling — is
+                // documented there.
+                const next = ObjectQL.remainderAfterMemberRemoval(dep?.[fieldName], id, cleared);
+                await this.update(childName, { id: depId, [fieldName]: next }, { context: referentialCtx } as any);
+              } else {
+                await this.update(childName, { id: depId, [fieldName]: null }, { context: referentialCtx } as any);
+              }
+            }
+          }
+          // [#27004] Every row outside the set has had `id` cleared from it.
+          cleared.add(String(id));
         }
       }
     }
@@ -18979,19 +19140,24 @@ export class ObjectQL implements IObjectQLEngine {
    */
   private async refuseRestrictsInsideOwnCascade(
     cascadeSet: CascadeDeleteSet,
-    root: { object: string; id: string | number },
+    roots: ReadonlyArray<{ object: string; id: string | number }>,
     context: ExecutionContext | undefined,
     objects: ServiceObject[],
   ): Promise<void> {
     // The members with the ids as the rows carried them (the set's own index
-    // holds strings), so each probe below spells its filter as the walk does.
+    // holds strings), so each probe below spells its filter as the walk does:
+    // the roots, then every member in the order the collection found it.
     const members: Array<{ object: string; id: string | number }> = [];
     const seen = new Set<string>();
-    for (const member of [root, ...[...cascadeSet.cascadeEdges.values()].flat()]) {
+    const visit = (member: { object: string; id: string | number }) => {
       const key = cascadeMemberKey(member.object, member.id);
-      if (seen.has(key)) continue;
+      if (seen.has(key)) return;
       seen.add(key);
       members.push(member);
+    };
+    for (const root of roots) visit(root);
+    for (const member of members) {
+      for (const next of cascadeSet.cascadeEdges.get(cascadeMemberKey(member.object, member.id)) ?? []) visit(next);
     }
     // The restrict relations pointing at each object whose own object has a
     // member, scanned once per object.
@@ -19014,24 +19180,43 @@ export class ObjectQL implements IObjectQLEngine {
       }
       return relations;
     };
+    // [#27004] Which member asks which relation, in the order it is judged:
+    // a relation is asked about a member only when its object has a member in
+    // that member's reach.
+    type Relation = { child: ServiceObject; childName: string; fieldName: string; fdef: any };
+    const asks: Array<{ object: string; id: string | number; relation: Relation; reach: Map<string, Set<string>> }> = [];
+    const askedOf = new Map<Relation, { object: string; ids: Array<string | number> }>();
     for (const { object, id } of members) {
       const relations = restrictingInto(object);
       if (relations.length === 0) continue;
       const reach = cascadeReachOf(cascadeSet, object, id);
-      for (const { child, childName, fieldName, fdef } of relations) {
-        if (!reach.has(childName)) continue;
-        const probeWhere = this.referenceProbeFilter(fieldName, fdef, id);
-        this.fileReferenceCheckElevation(cascadeSet, object, id, childName, fieldName, context);
-        const rows = await this.probeReferencingRows(childName, fieldName, fdef, id, probeWhere, context);
-        const dependents = rows.filter((row) => cascadeSetHas(reach, childName, row?.id));
-        if (dependents.length === 0) continue;
-        throw await this.deleteRestrictedError({
-          object, id, child, childName, fieldName, fdef, dependents, probeWhere,
-          probedIds: rows.map((r: any) => String(r?.id)),
-          multiValued: declaredMultiValued(fdef),
-          objects, context,
-        });
+      for (const relation of relations) {
+        if (!reach.has(relation.childName)) continue;
+        asks.push({ object, id, relation, reach });
+        let asked = askedOf.get(relation);
+        if (!asked) { asked = { object, ids: [] }; askedOf.set(relation, asked); }
+        asked.ids.push(id);
       }
+    }
+    // One probe per relation per batch of the members asking it.
+    const referencing = new Map<Relation, Map<string, any[]>>();
+    for (const [relation, { object, ids }] of askedOf) {
+      const { childName, fieldName, fdef } = relation;
+      for (const id of ids) this.fileReferenceCheckElevation(cascadeSet, object, id, childName, fieldName, context);
+      referencing.set(relation, await this.probeReferencingRowsOfSet(childName, fieldName, fdef, ids, context));
+    }
+    for (const { object, id, relation, reach } of asks) {
+      const { child, childName, fieldName, fdef } = relation;
+      const rows = referencing.get(relation)!.get(String(id)) ?? [];
+      const dependents = rows.filter((row) => cascadeSetHas(reach, childName, row?.id));
+      if (dependents.length === 0) continue;
+      throw await this.deleteRestrictedError({
+        object, id, child, childName, fieldName, fdef, dependents,
+        probeWhere: this.referenceProbeFilter(fieldName, fdef, id),
+        probedIds: rows.map((r: any) => String(r?.id)),
+        multiValued: declaredMultiValued(fdef),
+        objects, context,
+      });
     }
   }
 
@@ -19838,7 +20023,7 @@ export class ObjectQL implements IObjectQLEngine {
               // are still `undefined`, so re-running it adds the handle and
               // changes nothing else.
               const runByIdDelete = async (writeContext?: ExecutionContext) => {
-                await this.cascadeDeleteRelations(object, hookContext.input.id as string | number, writeContext);
+                await this.cascadeDeleteRelations(object, [hookContext.input.id as string | number], writeContext);
                 return await driver.delete(
                   object,
                   hookContext.input.id as string,
@@ -19902,8 +20087,9 @@ export class ObjectQL implements IObjectQLEngine {
                  result = await driver.deleteMany!(object, opCtx.ast!, hookContext.input.options as any);
                } else {
                  // Otherwise: resolve the matched rows through the composed,
-                 // row-scoped AST, run `cascadeDeleteRelations` for each, then
-                 // delete exactly those rows by id. By id, not by re-running the
+                 // row-scoped AST, run `cascadeDeleteRelations` once over them
+                 // as one root set (#27004), then delete exactly those rows by
+                 // id. By id, not by re-running the
                  // predicate: the walk's own writes (a `set_null` on a
                  // self-reference) can move a row into or out of the predicate,
                  // and the rows deleted must be the rows walked. The ids were
@@ -19916,12 +20102,11 @@ export class ObjectQL implements IObjectQLEngine {
                    const matched = ((await driver.find(object, { ...opCtx.ast!, fields: ['id', ...summaryKeyColumns] }, writeOptions)) ?? []) as Array<Record<string, unknown>>;
                    const matchedIds = matched.map((row) => row?.id).filter((v): v is string | number => v != null);
                    if (summaryKeyColumns.length > 0) summaryPriorRows = withoutDeletedSelfParents(object, matched, matchedIds, this.getSummaryDescriptors(object));
-                   for (const matchedId of matchedIds) {
-                     await this.cascadeDeleteRelations(object, matchedId, writeContext);
-                   }
+                   // [#27004] One walk, rooted at the whole matched set.
+                   await this.cascadeDeleteRelations(object, matchedIds, writeContext);
                    // The id set rides an `$in`; batched so one statement never
                    // outgrows a driver's bind-parameter limit.
-                   const batchSize = 500;
+                   const batchSize = ObjectQL.REFERENCE_PROBE_BATCH;
                    let removed = 0;
                    for (let i = 0; i < matchedIds.length; i += batchSize) {
                      const batchAst: QueryAST = { object, where: { id: { $in: matchedIds.slice(i, i + batchSize) } } };

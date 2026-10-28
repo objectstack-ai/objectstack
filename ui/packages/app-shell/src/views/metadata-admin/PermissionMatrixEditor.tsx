@@ -125,7 +125,13 @@ import {
   applyFieldBulk,
   fieldRuleCell,
   fieldRuleSeed,
+  objectRuleCell,
+  objectRuleSeed,
+  objectRowGrantsAny,
+  OBJECT_WILDCARD_KEY,
   type FieldBulkAction,
+  type ObjectAccessDefault,
+  type ObjectRuleCell,
   type ObjectPerm,
   type ObjectPermFlag,
   type FieldPerm,
@@ -190,8 +196,9 @@ interface ObjectSummary {
    * access requires an explicit per-object grant (or the superuser
    * viewAllRecords/modifyAllRecords bypass). Surfaced as a row badge so
    * admins editing the matrix know a wildcard-only set does not reach it.
+   * A row reads it to draw the grant the runtime resolves ({@link objectRuleCell}).
    */
-  accessDefault?: 'public' | 'private';
+  accessDefault?: ObjectAccessDefault;
   /**
    * [ADR-0090 D1] The object's authored OWD. Record-level baseline
    * context for the grants edited here: object CRUD in this matrix gates the
@@ -331,6 +338,7 @@ const SCOPE_OUTSIDE = 'outside';
 function ScopePicker({
   objectName,
   perm,
+  inherited = false,
   axis,
   writable,
   t,
@@ -338,6 +346,8 @@ function ScopePicker({
 }: {
   objectName: string;
   perm: ObjectPerm;
+  /** objectstack#27010 — the row draws the `'*'` entry: the trigger wears the inherited look. */
+  inherited?: boolean;
   axis: (typeof SCOPE_AXES)[number];
   writable: boolean;
   t: (key: string) => string;
@@ -362,7 +372,8 @@ function ScopePicker({
         data-testid={`perm-scope-${axis.testId}-${objectName}`}
         aria-label={`${objectName} ${t(axis.labelKey)}`}
         title={title}
-        className="h-7 w-full gap-1 px-2 text-xs"
+        data-object-rule={inherited ? 'inherited' : undefined}
+        className={cn('h-7 w-full gap-1 px-2 text-xs', inherited && 'border-dashed border-muted-foreground/60 text-muted-foreground')}
       >
         {/* The trigger shows the bare label; the hint lives on the items. */}
         <SelectValue>{known ? label(value) : value}</SelectValue>
@@ -1073,9 +1084,26 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
   }
 
   /* ── Mutators ───────────────────────────────────────────── */
+  // objectstack#27010 — every object-row and field-row edit starts from the
+  // object entry the row DRAWS (`objectRuleCell`): its own entry, or the `'*'`
+  // entry where the runtime applies that to the object. The object's posture
+  // decides the second case, read from the catalog the rows are listed from.
+  const accessDefaultByObject = React.useMemo(
+    () => new Map<string, ObjectAccessDefault | undefined>(objects.map((o) => [o.name, o.accessDefault])),
+    [objects],
+  );
+  const objectAccessDefault = React.useCallback(
+    (objectName: string) => accessDefaultByObject.get(objectName),
+    [accessDefaultByObject],
+  );
+  const drawnObjectPerm = (set: PermissionSetDraft, objectName: string): ObjectPerm =>
+    objectRuleCell(set.objects, objectName, accessDefaultByObject.get(objectName)).perm;
+  const objectEditSeed = (set: PermissionSetDraft, objectName: string): ObjectPerm =>
+    objectRuleSeed(set.objects, objectName, accessDefaultByObject.get(objectName));
+
   function updateObjectPerm(objectName: string, action: ObjectPermFlag, value: boolean) {
     setDraft((prev) => {
-      const cur = prev.objects[objectName] ?? {};
+      const cur = objectEditSeed(prev, objectName);
       const nextObj: ObjectPerm = { ...cur, [action]: value };
       // Cascade: viewAllRecords implies allowRead.
       if (action === 'viewAllRecords' && value) nextObj.allowRead = true;
@@ -1107,7 +1135,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
     value: ObjectAccessScope | undefined,
   ) {
     setDraft((prev) => {
-      const next: ObjectPerm = { ...(prev.objects[objectName] ?? {}) };
+      const next: ObjectPerm = objectEditSeed(prev, objectName);
       if (value === undefined) delete next[axis];
       else next[axis] = value;
       return { ...prev, objects: { ...prev.objects, [objectName]: next } };
@@ -1125,7 +1153,9 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
       // on the button labelled "None" — a permissive outcome that does not
       // exist today. What an admin's "None" means is a behaviour decision, not
       // a mechanical merge; pinned by
-      // `PermissionMatrixEditor.bulkMergeKeys.test.tsx`.
+      // `PermissionMatrixEditor.bulkMergeKeys.test.tsx`. On a row that draws
+      // the `'*'` entry, `{}` is an entry of its own: the resolver returns it
+      // instead of `'*'`, so the object gets nothing, as the row then shows.
       if (action === 'none') {
         return { ...prev, objects: { ...prev.objects, [objectName]: {} } };
       }
@@ -1142,8 +1172,9 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
       // environment door writes the whole record, and at package scope
       // `mergePermissionSlice` takes in-scope rows entirely from `edited`
       // (ADR-0086 P0), so `base` cannot restore what a bulk click dropped.
-      const cur = prev.objects[objectName] ?? {};
-      const next: ObjectPerm = { ...cur };
+      // objectstack#27010 — "the current row" is the row as drawn, so on a
+      // row drawing the `'*'` entry the merge starts from that entry.
+      const next: ObjectPerm = objectEditSeed(prev, objectName);
       const bulkKeys = OBJECT_ACTIONS.filter((a) => !a.optIn).map((a) => a.key);
       for (const key of bulkKeys) delete next[key];
       const grants: ObjectPermFlag[] =
@@ -1171,7 +1202,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
       const fields = { ...(prev.fields ?? {}) };
       // objectstack#26597 — a row without an entry starts from the bits it
       // draws (the object grant), so the click changes only the box it lands on.
-      const cur = fieldRuleSeed(fields[key], prev.objects[objectName]);
+      const cur = fieldRuleSeed(fields[key], drawnObjectPerm(prev, objectName));
       const next: FieldPerm = { ...cur, [action]: value };
       // Cascade: !readable implies !editable — and no row condition: the spec
       // refuses `when` beside `readable: false` (objectstack#25866), so Read
@@ -1197,7 +1228,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
       const fields = { ...(prev.fields ?? {}) };
       // objectstack#26597 — the condition alone changes no box: the entry
       // starts from the bits the row draws.
-      const cur = fieldRuleSeed(fields[key], prev.objects[objectName]);
+      const cur = fieldRuleSeed(fields[key], drawnObjectPerm(prev, objectName));
       const next: FieldPerm = { ...cur };
       if (when.trim() === '') delete next.when;
       else {
@@ -1231,7 +1262,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
     if (fieldNames.length === 0) return;
     setDraft((prev) => ({
       ...prev,
-      fields: applyFieldBulk(prev.fields ?? {}, objectName, prev.objects[objectName], action, fieldNames),
+      fields: applyFieldBulk(prev.fields ?? {}, objectName, drawnObjectPerm(prev, objectName), action, fieldNames),
     }));
   }
 
@@ -1470,9 +1501,9 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
   const filteredObjects = React.useMemo(() => {
     const q = filter.trim().toLowerCase();
     return objects.filter((o) => {
-      if (showOnlyEnabled) {
-        const perm = draft.objects[o.name];
-        if (!perm || !Object.values(perm).some(Boolean)) return false;
+      // objectstack#27010 — "Only granted" keeps a row by what it draws.
+      if (showOnlyEnabled && !objectRowGrantsAny(objectRuleCell(draft.objects, o.name, o.accessDefault).perm)) {
+        return false;
       }
       if (!q) return true;
       return (
@@ -1482,16 +1513,35 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
     });
   }, [objects, filter, showOnlyEnabled, draft.objects]);
 
+  // objectstack#27010 — counted by what the rows draw: every object entry that
+  // grants anything, plus every listed object without one that the `'*'` entry
+  // grants. The `'*'` entry itself names no object.
+  const grantedObjectCount =
+    Object.entries(draft.objects).filter(([key, p]) => key !== OBJECT_WILDCARD_KEY && objectRowGrantsAny(p)).length +
+    objects.filter((o) => {
+      const cell = objectRuleCell(draft.objects, o.name, o.accessDefault);
+      return cell.inherited && objectRowGrantsAny(cell.perm);
+    }).length;
   const stats = [
     {
       label: t('perm.stat.objectsGranted'),
-      value: Object.values(draft.objects).filter((p) => Object.values(p).some(Boolean)).length,
+      value: grantedObjectCount,
     },
     {
       label: t('perm.stat.fieldOverrides'),
       value: Object.keys(draft.fields ?? {}).length,
     },
   ];
+
+  // objectstack#27010 — what a grey object box means, said once above the rows,
+  // whenever a listed row draws the `'*'` entry.
+  const objectInheritedLegendEl = filteredObjects.some(
+    (o) => objectRuleCell(draft.objects, o.name, o.accessDefault).inherited,
+  ) ? (
+    <p className="shrink-0 border-b px-6 py-2 text-xs text-muted-foreground" data-testid="perm-object-inherited-legend">
+      {t('perm.object.inherited.legend')}
+    </p>
+  ) : null;
 
   // objectui#5987 — one element, two seats: the header slot Save would occupy
   // when the artifact tier locks the surface, and the refused-save strip when a
@@ -2026,6 +2076,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
                 locale={locale}
                 t={t}
               />
+              {objectInheritedLegendEl}
               <div className="min-h-0 flex-1 overflow-auto">
                 <StudioObjectMatrix
                   objects={filteredObjects}
@@ -2066,6 +2117,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
                 t={t}
                 only={facetTab}
                 packageBound={!!packageId}
+                objectAccessDefault={objectAccessDefault}
               />
             </div>
           </div>
@@ -2210,6 +2262,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
             </span>
           ))}
         </div>
+        {objectInheritedLegendEl}
 
         {/* Matrix */}
         <div className="flex-1 overflow-auto">
@@ -2243,6 +2296,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
             onCelErrorsChange={setCelErrorCount}
             t={t}
             packageBound={!!packageId}
+            objectAccessDefault={objectAccessDefault}
           />
           {/* ADR-0056 P4 — assigning users is a Setup act, so the DESIGN surface
               (Studio, embedded) never shows it. objectui#7611 — the Setup catalog
@@ -2348,7 +2402,9 @@ function PermissionTable({
           </tr>
         )}
         {objects.map((o) => {
-          const perm = draft.objects[o.name] ?? {};
+          // objectstack#27010 — the row draws the entry the runtime resolves.
+          const cell = objectRuleCell(draft.objects, o.name, o.accessDefault);
+          const perm = cell.perm;
           const open = expanded.has(o.name);
           return (
             <React.Fragment key={o.name}>
@@ -2407,17 +2463,28 @@ function PermissionTable({
                 </td>
                 {objectActions.map((a) => (
                   <td key={a.key as string} className="text-center px-2 py-1.5">
-                    <Checkbox
+                    <ObjectRuleBox
+                      objectName={o.name}
+                      action={a}
                       checked={!!perm[a.key]}
-                      disabled={!writable}
-                      onCheckedChange={(v) => onObjectPerm(o.name, a.key, !!v)}
-                      aria-label={`${o.name} ${a.tip}`}
+                      source={cell.source}
+                      writable={writable}
+                      t={t}
+                      onObjectPerm={onObjectPerm}
                     />
                   </td>
                 ))}
                 {SCOPE_AXES.map((s) => (
                   <td key={s.axis} className="px-2 py-1.5">
-                    <ScopePicker objectName={o.name} perm={perm} axis={s} writable={writable} t={t} onChange={onObjectScope} />
+                    <ScopePicker
+                      objectName={o.name}
+                      perm={perm}
+                      inherited={cell.inherited}
+                      axis={s}
+                      writable={writable}
+                      t={t}
+                      onChange={onObjectScope}
+                    />
                   </td>
                 ))}
                 <td className="px-2 py-1.5 text-right space-x-1">
@@ -2624,7 +2691,7 @@ function StudioObjectMatrix({
           <StudioObjectRow
             key={o.name}
             object={o}
-            perm={draft.objects[o.name] ?? {}}
+            cell={objectRuleCell(draft.objects, o.name, o.accessDefault)}
             open={expanded.has(o.name)}
             fieldsState={draft.fields ?? {}}
             fields={fieldsByObject[o.name]}
@@ -2650,7 +2717,7 @@ function StudioObjectMatrix({
 
 function StudioObjectRow({
   object: o,
-  perm,
+  cell,
   open,
   fieldsState,
   fields,
@@ -2669,7 +2736,8 @@ function StudioObjectRow({
   onOpenOwd,
 }: {
   object: ObjectSummary;
-  perm: ObjectPerm;
+  /** objectstack#27010 — the entry the row draws (`objectRuleCell`). */
+  cell: ObjectRuleCell;
   open: boolean;
   fieldsState: Record<string, FieldPerm>;
   fields: FieldSummary[] | undefined;
@@ -2693,6 +2761,7 @@ function StudioObjectRow({
   const [hovered, setHovered] = React.useState(false);
   const [focused, setFocused] = React.useState(false);
   const active = hovered || focused;
+  const perm = cell.perm;
   const bulk: Array<{ action: 'read' | 'crud' | 'all' | 'none'; key: string }> = [
     { action: 'read', key: 'perm.bulk.read' },
     { action: 'crud', key: 'perm.bulk.crud' },
@@ -2767,18 +2836,29 @@ function StudioObjectRow({
         </td>
         {objectActions.map((a, i) => (
           <td key={a.key as string} className={cn('px-1 py-1 text-center align-middle', divider(i))}>
-            <Checkbox
+            <ObjectRuleBox
+              objectName={o.name}
+              action={a}
               checked={!!perm[a.key]}
-              disabled={!writable}
-              onCheckedChange={(v) => onObjectPerm(o.name, a.key, !!v)}
-              aria-label={`${o.name} ${a.tip}`}
+              source={cell.source}
+              writable={writable}
+              t={t}
+              onObjectPerm={onObjectPerm}
               className="h-[18px] w-[18px] rounded border-muted-foreground/40 align-middle data-[state=checked]:border-primary"
             />
           </td>
         ))}
         {SCOPE_AXES.map((s, i) => (
           <td key={s.axis} className={cn('px-2 py-1 align-middle', i === 0 && 'border-l')}>
-            <ScopePicker objectName={o.name} perm={perm} axis={s} writable={writable} t={t} onChange={onObjectScope} />
+            <ScopePicker
+              objectName={o.name}
+              perm={perm}
+              inherited={cell.inherited}
+              axis={s}
+              writable={writable}
+              t={t}
+              onChange={onObjectScope}
+            />
           </td>
         ))}
         <td className="border-l px-3 py-1 align-middle">
@@ -2819,6 +2899,58 @@ function StudioObjectRow({
         </tr>
       )}
     </>
+  );
+}
+
+/**
+ * The inherited look, shared by object and field boxes: grey with a dashed
+ * edge, so a box that draws a grant the set inherits never reads as one the
+ * set declares for that row.
+ */
+const INHERITED_BOX_CLASS =
+  'border-dashed border-muted-foreground/60 data-[state=checked]:bg-muted-foreground/40 data-[state=checked]:text-foreground';
+
+/**
+ * objectstack#27010 — one boolean box of an object row, drawn from
+ * {@link objectRuleCell}. A row without an entry of its own that draws the
+ * `'*'` entry wears the inherited look (`data-object-rule="inherited"`) and says
+ * so in its tooltip; a click writes an entry for the object that starts from
+ * the drawn bits (`objectRuleSeed`).
+ */
+function ObjectRuleBox({
+  objectName,
+  action,
+  checked,
+  source,
+  writable,
+  t,
+  onObjectPerm,
+  className,
+}: {
+  objectName: string;
+  action: { key: ObjectPermFlag; tip: string };
+  checked: boolean;
+  source: ObjectRuleCell['source'];
+  writable: boolean;
+  t: (key: string) => string;
+  onObjectPerm: (objectName: string, action: ObjectPermFlag, value: boolean) => void;
+  className?: string;
+}) {
+  const inherited = source === 'wildcard';
+  return (
+    <Checkbox
+      checked={checked}
+      disabled={!writable}
+      onCheckedChange={(v) => onObjectPerm(objectName, action.key, !!v)}
+      aria-label={`${objectName} ${action.tip}`}
+      title={inherited ? t('perm.object.inherited.tip') : undefined}
+      data-object-rule={source}
+      className={cn(
+        className,
+        // The Studio row's own class pins a checked border; the inherited one replaces it.
+        inherited && [INHERITED_BOX_CLASS, 'data-[state=checked]:border-muted-foreground/60'],
+      )}
+    />
   );
 }
 
@@ -2864,11 +2996,7 @@ function FieldRuleBox({
       title={title}
       data-field-rule={inherited ? 'inherited' : 'rule'}
       data-capped={capped || undefined}
-      className={cn(
-        inherited &&
-          'border-dashed border-muted-foreground/60 data-[state=checked]:bg-muted-foreground/40 data-[state=checked]:text-foreground',
-        capped && 'ring-1 ring-amber-500/70 ring-offset-1',
-      )}
+      className={cn(inherited && INHERITED_BOX_CLASS, capped && 'ring-1 ring-amber-500/70 ring-offset-1')}
     />
   );
 }

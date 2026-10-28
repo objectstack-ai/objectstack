@@ -71,6 +71,8 @@ const STUDIO_ZH: Record<string, string> = {
   'perm.field.inherited.tip': '该字段没有规则：跟随对象的“读”“改”权限。点击即写入一条规则。',
   'perm.field.capped.read': '该规则授予了“读”，但对象未授予：仅持有本权限集的用户无法读取此字段。',
   'perm.field.capped.edit': '该规则授予了“改”，但对象未授予：仅持有本权限集的用户无法编辑此字段。',
+  'perm.object.inherited.legend': '灰色框：权限集没有该对象的显式授权，因此适用 “*” 通配授权。在此点击会为该对象写入一条显式授权，从该行当前显示的内容开始；此后 “*” 不再适用于该对象。',
+  'perm.object.inherited.tip': '该对象没有显式授权：适用权限集的 “*” 通配授权。点击会为该对象写入一条显式授权，从此行当前显示的内容开始；此后该对象适用这条显式授权，不再适用 “*”。',
   'perm.field.col.name': '字段',
   'perm.field.read': '读',
   'perm.field.edit': '改',

@@ -283,10 +283,14 @@ contradicts it, and correct it here when it does.
   before scoring any connector clause, prove where the live dispatch lands: create a
   `showcase_task`, read the `showcase_declarative_connector_ping` run it fires, and confirm
   it completed with a `ping.body` whose uptime matches THIS boot, not another server's.
-  ⛔ Do not read the instance metadata for it: `os dev` boots the prebuilt
-  `dist/objectstack.json` unless `--compile` is passed (`packages/cli/src/commands/dev.ts`),
-  so `GET /api/v1/meta/connector/showcase_status_api`'s `item.providerConfig.baseUrl` can
-  carry the build-time value. QA run #25817 at `6679644a` measured it: with `OS_PORT=41302`
+  ⛔ Do not read the instance metadata for it: an `os dev --no-compile` boot serves the
+  existing `dist/objectstack.json` as built, so `GET /api/v1/meta/connector/showcase_status_api`'s
+  `item.providerConfig.baseUrl` can carry the build-time value. Since #26130 a default
+  `os dev` compiles the config under the boot's own environment first
+  (`packages/cli/src/commands/dev.ts`, the `compile` flag, default on), so on a default
+  boot that read can follow an exported `OS_PORT` — the dispatch check above stays the
+  proof on either boot. Before #26130 `os dev` booted the prebuilt artifact unless
+  `--compile` was passed, and QA run #25817 at `6679644a` measured that old default: with `OS_PORT=41302`
   exported, that read still answered `http://127.0.0.1:3000`, while the live
   `connector_action` reached 41302 (`ping.body` uptime matched the boot, and nothing
   listened on 3000) — so the metadata read misreports the fixture in both directions.
@@ -347,6 +351,23 @@ contradicts it, and correct it here when it does.
   wrote a CRM manifest there for 25 s before removing it through
   `DELETE /api/v1/marketplace/install-local/<id>` (#23163).
 
+- **A per-boot `-d file:…` database does NOT isolate the showcase's upload root or its
+  external datasource either — the same class as the install-local entry above.** Two
+  more paths resolve against the server's working directory: the local storage root,
+  whose settings-manifest default is `./.objectstack/data/uploads` unless
+  `OS_STORAGE_LOCAL_ROOT` is exported (only `--fresh` sets it, to its own temp home:
+  `packages/cli/src/commands/dev.ts`), and the showcase's external datasource file
+  `.objectstack/data/showcase_external.db`
+  (`examples/app-showcase/src/system/datasources/showcase-external.datasource.ts`). So a
+  tree boot with only `-d` writes uploads into `examples/app-showcase/.objectstack/data/uploads/`
+  and creates `showcase_external.db` beside it, and even a boot that writes neither leaves
+  `.objectstack/data/` behind, empty. All of it is git-ignored, so a clean `git status` is
+  no evidence (QA runs #26456, #26476 and #26481 met all three). **Fix:** export
+  `OS_STORAGE_LOCAL_ROOT=/tmp/RUN/uploads` beside `OS_PORT` for any item that uploads, and
+  boot from a scratch copy of the app for any item that writes the external datasource.
+  An empty `.objectstack/data/` left by a tree boot is harmless and is not the
+  installed-packages trap.
+
 - **`ss` is not installed in these containers — read liveness with `curl`, never a socket
   table.** `ss` and `netstat` are both absent (`command not found`); `lsof` and `fuser`
   are present. The trap is that the usual spelling hides the cause: `ss -ltn | grep`
@@ -376,6 +397,11 @@ contradicts it, and correct it here when it does.
   read the group from the listener, `PGID=$(ps -o pgid= -p "$(lsof -ti tcp:PORT)" | tr -d ' ')`;
   stop it with `kill -TERM -- -$PGID`, and confirm `lsof -ti tcp:PORT` then prints nothing.
   ⛔ Never stop a server by name (`pkill`), and never a group you did not start.
+  ⚠️ Run that stop as a command of its own: the repo's PreToolUse hook
+  `.claude/hooks/guard-process-kill.sh` refuses any one Bash command that runs `ps` and
+  `grep` and also kills, judged over the whole command rather than per pipeline (its
+  header says why), so a stop chained after a `ps … | grep` look at the process table is
+  refused although its `kill` is group-scoped (QA run #26476 met it).
 
 - **Console session auth is a bearer token in `localStorage`, and a form sign-in ALSO
   sets a cookie — you need both halves.** The console's auth client stores the session

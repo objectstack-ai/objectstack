@@ -481,9 +481,9 @@ export class QuickJSScriptRunner implements ScriptRunner {
           const budget = budgetError(pumps);
           if (budget) throw budget;
           const info = readErrorInfo(vm);
-          // [#4431] A SANDBOX fault that crossed `__error` — a capability
-          // denial thrown synchronously inside a host function, an unavailable
-          // `ctx.api`, a marshalling failure. It is not an outcome the body
+          // [#4431] A SANDBOX fault that crossed `__error` — an unavailable
+          // `ctx.api`, a marshalling failure, any other host-side fault thrown
+          // synchronously inside a host function. It is not an outcome the body
           // chose to report, so it gets neither the `<kind> '<name>' threw:`
           // wrapper (nothing threw — the sandbox refused) nor an
           // `innerMessage` (there is no business message; `SandboxError`'s own
@@ -492,9 +492,10 @@ export class QuickJSScriptRunner implements ScriptRunner {
           // as a CRASH and answers 500 through `errorFromThrown`, instead of
           // the 400 a denial used to get — and the client sees the capability
           // text without the `SandboxError: ` debug prefix.
-          // [#26903] A HOOK body's capability denial does not arrive here: it
-          // crosses as a coded refusal (`throwCapabilityDenial`) and takes the
-          // relay below like a body's own coded throw.
+          // [#26903/#26965] A capability denial does not arrive here, whatever
+          // the body's origin: it crosses as a coded refusal
+          // (`throwCapabilityDenial`) and takes the relay below like a body's
+          // own coded throw.
           if (info?.sandboxFault) {
             throw new SandboxError(withoutSandboxErrorPrefix(String(errStr)));
           }
@@ -1705,6 +1706,11 @@ function releaseEngineRefusalHandles(vm: QuickJSContext, bodyPromise: QuickJSHan
  * denials — `ctx.api.*`, `ctx.log`, `ctx.crypto`, `ctx.api.transaction` — were
  * misclassified.
  *
+ * [#26903/#26965] Capability denials have since left this marker for every
+ * origin: they cross as a coded `403` refusal ({@link throwCapabilityDenial}).
+ * The marker still carries the other host-side faults (an unavailable
+ * `ctx.api`, a marshalling failure).
+ *
  * ## Why a marker and not the name
  *
  * `__error` is a FLATTENED `<name>: <message>` string by design (every existing
@@ -1836,20 +1842,22 @@ function throwSandboxFault(vm: QuickJSContext, message: string): never {
 }
 
 /**
- * [#26903] The code and status a HOOK body's capability denial is answered
- * with: the standard catalog's `INSUFFICIENT_PRIVILEGES` ("operation requires
- * higher privileges", `@objectstack/spec` `errors.zod.ts`), at its 403.
+ * [#26903/#26965] The code and status a body's capability denial is answered
+ * with, for every origin: the standard catalog's `INSUFFICIENT_PRIVILEGES`
+ * ("operation requires higher privileges", `@objectstack/spec`
+ * `errors.zod.ts`), at its 403.
  */
-const HOOK_CAPABILITY_REFUSAL_CODE = 'INSUFFICIENT_PRIVILEGES';
-const HOOK_CAPABILITY_REFUSAL_STATUS = 403;
+const CAPABILITY_REFUSAL_CODE = 'INSUFFICIENT_PRIVILEGES';
+const CAPABILITY_REFUSAL_STATUS = 403;
 
 /**
  * [#26903] Throw a capability gate's denial OUT OF a host function.
  *
- * In a HOOK body the denial is a REFUSAL, not the sandbox faulting: the hook's
- * metadata did not grant what its body called, and the caller whose save fired
- * the hook is owed a coded answer naming the hook and the capability, not the
- * sanitised `500 INTERNAL_ERROR` {@link throwSandboxFault} reaches. So the VM
+ * The denial is a REFUSAL, not the sandbox faulting: the body's own metadata
+ * did not grant what it called, and the caller (whose save fired the hook, or
+ * who invoked the action) is owed a coded answer naming the body and the
+ * capability, not the sanitised `500 INTERNAL_ERROR` {@link throwSandboxFault}
+ * reaches. So the VM
  * error carries `code` and `status` the way a body's own
  * `throw Object.assign(new Error(…), { code, status })` does, and the pump loop
  * builds the same `SandboxError` (with `innerMessage`) it builds for that
@@ -1864,8 +1872,11 @@ const HOOK_CAPABILITY_REFUSAL_STATUS = 403;
  * `innerMessage` is what it relays as a NESTED body's refusal (which the outer
  * catch then does not log). Neither is true of this denial.
  *
- * An action or job body's denial keeps the #4431 fault contract
- * ({@link SANDBOX_FAULT_PROP}); this card ruled on hooks only.
+ * [#26965] One gate, one answer: an action or job body's denial is the same
+ * refusal (it was the #4431 fault, a bare 500, until that card). The remedy
+ * names the owner from the origin — the hook's, the action's or the job's
+ * `body.capabilities` — here, once. A job reaches no HTTP caller; its run
+ * records this sentence, and the BodyRunner keeps its `error` line for it.
  */
 function throwCapabilityDenial(
   vm: QuickJSContext,
@@ -1873,10 +1884,9 @@ function throwCapabilityDenial(
   capability: HookBodyCapability,
   message: string,
 ): never {
-  if (origin.kind !== 'hook') throwSandboxFault(vm, message);
   const refusal = Object.assign(
-    new Error(`${message.replace(/\.$/, '')}. Grant it by adding '${capability}' to the hook's body.capabilities.`),
-    { name: 'SandboxError', code: HOOK_CAPABILITY_REFUSAL_CODE, status: HOOK_CAPABILITY_REFUSAL_STATUS },
+    new Error(`${message.replace(/\.$/, '')}. Grant it by adding '${capability}' to the ${origin.kind}'s body.capabilities.`),
+    { name: 'SandboxError', code: CAPABILITY_REFUSAL_CODE, status: CAPABILITY_REFUSAL_STATUS },
   );
   throw hostErrorToVm(vm, refusal);
 }
@@ -2053,13 +2063,12 @@ export class SandboxError extends Error {
    * message without the `<kind> '<name>' threw:` debug wrapper that lives in
    * `.message`. Safe to surface to end users (e.g. an action's error toast);
    * the wrapped `.message` stays for server logs. Undefined for the sandbox's
-   * own internal errors (capability denials, timeouts, marshalling failures),
-   * which have no user-meaningful inner message.
+   * own internal errors (timeouts, marshalling failures), which have no
+   * user-meaningful inner message.
    *
-   * [#26903] Except a HOOK body's capability denial: that is a refusal naming
-   * the hook and the capability, so it carries this field and its `code`/
-   * `status` (see `throwCapabilityDenial`). An action or job body's denial is
-   * still the fault described above.
+   * [#26903/#26965] A capability denial is not one of those: it is a refusal
+   * naming the body and the capability, so it carries this field and its
+   * `code`/`status` (see `throwCapabilityDenial`), whatever the body's origin.
    */
   readonly innerMessage?: string;
   /**
@@ -2112,8 +2121,8 @@ export interface SandboxErrorInfo {
   /** [commit 79c46da90] See {@link SandboxError.userMessage}. */
   userMessage?: string;
   /**
-   * [#4431] The error that crossed `__error` was the SANDBOX's own fault — a
-   * denied capability, an unavailable `ctx.api`, a marshalling failure — not
+   * [#4431] The error that crossed `__error` was the SANDBOX's own fault — an
+   * unavailable `ctx.api`, a marshalling failure — not
    * user code rejecting. Read by the pump loop, which then leaves
    * `innerMessage` undefined so the #3951 crash contract's "SandboxError with
    * no innerMessage → 500" holds for in-VM host-call denials too.
