@@ -15,25 +15,27 @@ import type { ConversionNotice } from './types.js';
  * #27119, Q2 = X).
  *
  * Every parse before this change baked `defaultCurrency: 'CNY'` into a
- * currency config, so a stored object row carries it on a `dynamic` config
- * nobody wrote a code for. The conversion strips it there (no reader takes a
- * `dynamic` config's code) and leaves a `fixed` config's code alone (it is the
- * currency the field displayed). The fixture pair in `conversions.test.ts`
- * proves before → after over the whole table; this file pins it on a STORED
- * row, the seam that replays it.
+ * currency config, so a built artifact (and a stored row copied from a parsed
+ * body) carries it on a `dynamic` config nobody wrote a code for. The
+ * conversion strips it there (no reader takes a `dynamic` config's code) and
+ * never touches a `fixed` config. A stored row is kept as authored, so a
+ * `fixed` one saved without a code has none: the conversion does not guess
+ * one, and the row stays refused by the current schema (the last test pins
+ * that). The fixture pair in `conversions.test.ts` proves before → after over
+ * the whole table; this file pins it on a STORED row, the seam that replays it.
  */
 
 const ID = 'currency-config-dynamic-default-currency-removed';
 const D3_ID = 'currency-config-fixed-default-currency-required';
 
-/** An object row as an earlier parse stored it: every currency config carries a code. */
+/** An object row whose currency configs all carry a code, as a parsed body does. */
 function storedObject() {
   return {
     name: 'billing_invoice',
     label: 'Invoice',
     fields: {
       amount: { name: 'amount', type: 'currency', currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' } },
-      // `{ currencyMode: 'fixed' }` as authored: the old parse filled in CNY.
+      // `{ currencyMode: 'fixed' }` through the old parse, which filled in CNY.
       legacy_fixed: { name: 'legacy_fixed', type: 'currency', currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'CNY' } },
       tax: { name: 'tax', type: 'currency', currencyConfig: { currencyMode: 'dynamic', defaultCurrency: 'CNY' } },
       net: {
@@ -103,5 +105,34 @@ describe('currency-config-dynamic-default-currency-removed (ADR-0087 D2)', () =>
     expect(notices.filter((n) => n.conversionId === ID)).toEqual([]);
     expect((out as typeof stack).objects[0]!.fields.tax.currencyConfig)
       .toEqual({ currencyMode: 'dynamic', defaultCurrency: 'CNY' });
+  });
+
+  it('leaves a stored fixed row with no code unconverted; the current schema refuses it with the prescription', () => {
+    // A sys_metadata row is kept as authored (saveMetaItem stores the payload
+    // verbatim), so `{ currencyMode: 'fixed' }` saved before spec 18 has no
+    // code. No code is guessed: on load the row registers as it is, counted
+    // invalid with a `[metadata_spec_invalid]` line at this path, and its next
+    // save is refused at the same path until a code is written.
+    const row = {
+      name: 'billing_invoice',
+      label: 'Invoice',
+      fields: {
+        amount: { name: 'amount', type: 'currency', currencyConfig: { currencyMode: 'fixed' } },
+      },
+    };
+    const before = structuredClone(row);
+    const { item, notices } = convertStored(row);
+    expect(notices).toEqual([]);
+    expect(item).toEqual(before);
+    expect((item.fields.amount as { currencyConfig: unknown }).currencyConfig).toEqual({ currencyMode: 'fixed' });
+
+    const result = ObjectSchema.safeParse(item);
+    expect(result.success).toBe(false);
+    const issues = result.success ? [] : result.error.issues;
+    expect(issues.map((i) => [i.path.join('.'), i.code])).toEqual([
+      ['fields.amount.currencyConfig.defaultCurrency', 'custom'],
+    ]);
+    expect(issues[0]!.message).toMatch(/give its ISO 4217 code .* or use `currencyMode: 'dynamic'`/);
+    expect(issues[0]!.message).not.toContain('ADR-0049');
   });
 });

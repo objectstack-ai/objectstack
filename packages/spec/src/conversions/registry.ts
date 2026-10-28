@@ -13635,16 +13635,28 @@ const formLayoutInlineGridToVertical: MetadataConversion = {
  * ignore. The default is gone, and the parse now refuses `fixed` without a
  * code instead of filling one in.
  *
- * **Why data at rest needs this entry.** Stored `sys_metadata` object rows and
- * built artifacts were all written by a parse that baked the `'CNY'` in, so a
- * `dynamic` row carries it whether or not anyone wrote it; JSON cannot say
- * which. This entry strips it from every config whose mode is `dynamic` (or
- * absent, which parses to `dynamic`), so those rows read as a parse of their
- * source now does. **Lossless against the runtime:** no reader takes a
- * `dynamic` config's code (the console's `resolveFieldCurrency`, the analytics
- * field-currency relay and the formula return inference all read it under
- * `fixed` only). A `fixed` row is left alone: its code, authored or baked, is
- * the currency it displayed, and it satisfies the new refinement.
+ * **Why data at rest needs this entry.** A built artifact holds the parsed
+ * stack, so every `dynamic` config in it carries the baked `'CNY'`; a stored
+ * `sys_metadata` object row is kept as authored, so its `dynamic` config may
+ * carry a code (written, or copied from a parsed body) or none. JSON cannot
+ * say which code was written. This entry strips it from every config whose
+ * mode is `dynamic` (or absent, which parses to `dynamic`), so those rows read
+ * as a parse of their source now does. **Lossless against the runtime:** no
+ * reader takes a `dynamic` config's code (the console's `resolveFieldCurrency`,
+ * the analytics field-currency relay and the formula return inference all
+ * read it under `fixed` only).
+ *
+ * **A `fixed` config is never touched.** One with a code keeps it (in an
+ * artifact, the code the old parse filled in). A stored row saved as
+ * `{ currencyMode: 'fixed' }` has NO code, because the row is kept as
+ * authored, and this entry does not write one: a guessed `'CNY'` is exactly
+ * what the ruling forbids. That row loads and registers unchanged, is counted
+ * invalid with a `[metadata_spec_invalid]` boot line at
+ * `fields.<f>.currencyConfig.defaultCurrency`, and its next save is refused
+ * with the prescription. Its display does not change (the console reads a
+ * `fixed` code only when one is present, so it showed the tenant default
+ * before too); `@objectstack/formula` reads a formula over it as an unproven
+ * currency instead of fixed CNY.
  *
  * **Retired from the load path, from day one.** An authored `defaultCurrency`
  * on a `dynamic` config is legal and unread, so the authoring funnel does not
@@ -13665,7 +13677,7 @@ const currencyConfigDynamicDefaultCurrencyRemoved: MetadataConversion = {
   summary:
     "currency field key 'currencyConfig.defaultCurrency' removed from a 'dynamic' config "
     + '(no reader takes a dynamic config\'s code — amounts display in the tenant default currency; '
-    + 'the `\'CNY\'` an earlier parse baked in goes, and a `fixed` config keeps its code)',
+    + 'the `\'CNY\'` an earlier parse baked in goes; a `fixed` config is never touched)',
   apply(stack, emit) {
     const stripOn = (input: Dict, collection: string): Dict =>
       mapCollection(input, collection, (owner, path) => {
@@ -13697,8 +13709,8 @@ const currencyConfigDynamicDefaultCurrencyRemoved: MetadataConversion = {
         name: 'billing_ledger',
         label: 'Ledger',
         fields: {
-          // The baked default on a dynamic config — what a stored row carries
-          // without anyone having written it.
+          // The baked default on a dynamic config — what a built artifact
+          // carries without anyone having written it.
           tax: { type: 'currency', currencyConfig: { currencyMode: 'dynamic', defaultCurrency: 'CNY' } },
           // No mode: parses to dynamic, so its code is unread too.
           fee: { type: 'currency', currencyConfig: { defaultCurrency: 'EUR' } },

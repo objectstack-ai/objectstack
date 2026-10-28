@@ -543,7 +543,7 @@ const CURRENCY_CONFIG_FIXED_WITHOUT_CODE =
   '`currencyConfig.currencyMode: \'fixed\'` needs `defaultCurrency`, the field\'s one currency: '
   + 'give its ISO 4217 code (e.g. `defaultCurrency: \'USD\'`), or use `currencyMode: \'dynamic\'` '
   + 'to display amounts in the tenant default currency (the `localization.currency` setting). '
-  + 'Since @objectstack/spec 18 (ADR-0049) nothing fills a code in; it used to be `\'CNY\'`.';
+  + 'Since @objectstack/spec 18 nothing fills a code in; it used to be `\'CNY\'`.';
 
 /** `fixed` ⇒ an authored `defaultCurrency`; `dynamic` reads none, so it needs none. */
 function refuseFixedCurrencyWithoutCode(
@@ -580,8 +580,9 @@ function refuseFixedCurrencyWithoutCode(
  * `dynamic` one parses to output with no `defaultCurrency` unless one was
  * written. Stored rows and built artifacts that carry the baked `'CNY'` on a
  * `dynamic` config are stripped on rehydration by the ADR-0087 conversion
- * `currency-config-dynamic-default-currency-removed`; a `fixed` row keeps its
- * code, which was the live value.
+ * `currency-config-dynamic-default-currency-removed`. A `fixed` config is never
+ * converted: one with a code keeps it, and a stored row saved without one (rows
+ * are kept as authored) loads with diagnostics and is refused at its next save.
  */
 export const CurrencyConfigSchema = lazySchema(() => strictObject({
   surface: 'this currency configuration',

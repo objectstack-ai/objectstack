@@ -1604,8 +1604,9 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'guesses). A `fixed` config without a code is refused with the prescription instead of '
       + 'becoming a yuan field, and a `dynamic` config parses to output with no code. The D2 '
       + 'conversion `currency-config-dynamic-default-currency-removed` strips the unread code an '
-      + 'earlier parse baked into `dynamic` stored rows and built artifacts; a `fixed` row keeps '
-      + 'its code. Retired from the load path.',
+      + 'earlier parse baked into `dynamic` stored rows and built artifacts; a `fixed` config is '
+      + 'never converted, so a stored row saved without a code loads with diagnostics and is '
+      + 'refused at its next save. Retired from the load path.',
   },
   {
     id: 'currency-config-precision-retired',

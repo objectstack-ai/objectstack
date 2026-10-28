@@ -631,9 +631,13 @@ export const DEFAULT_CHANGES_BY_MAJOR: Readonly<Record<number, readonly Declared
         + 'that omits `defaultCurrency` is now refused at parse with a prescription instead of silently '
         + 'becoming a yuan field; a `dynamic` config (the default) parses with no code, and nothing read '
         + 'its code anyway — its amounts display in the tenant default currency. A consumer that read the '
-        + 'PARSED code of a dynamic config sees no key where it saw `CNY`. A stored row or built artifact '
-        + 'is not refused: every earlier parse baked the code in, so a fixed row keeps it, and the D2 '
-        + 'conversion `currency-config-dynamic-default-currency-removed` strips it from dynamic rows. To '
+        + 'PARSED code of a dynamic config sees no key where it saw `CNY`. A built artifact holds the '
+        + 'parsed stack, so its fixed configs keep the code the old parse filled in. A stored sys_metadata '
+        + 'object row is kept as authored, so a fixed one may have no code; nothing converts one in. It '
+        + 'still loads and registers unchanged, counted invalid with a `[metadata_spec_invalid]` boot line, '
+        + 'and its next save is refused with the prescription; its display (the tenant default) does not '
+        + 'change. The D2 conversion `currency-config-dynamic-default-currency-removed` strips the code '
+        + 'from dynamic rows. To '
         + 'keep a yuan field, write `currencyConfig: { currencyMode: \'fixed\', defaultCurrency: \'CNY\' }`.',
     },
     {
