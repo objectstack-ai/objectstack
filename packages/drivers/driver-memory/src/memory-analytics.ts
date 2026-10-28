@@ -30,6 +30,10 @@ import {
   // the ONE refusal for a string outside it, shared with the SQL analytics
   // path so the two backends cannot answer one input differently again.
   resolveAnalyticsDateRangeString,
+  // [#27272] ADR-0053's one window rule — a `date` column compares the
+  // calendar days the period covers in the reference zone — shared with
+  // service-analytics' faces (#27172) for the same reason as the lowering.
+  dateRangeWindowBounds,
   // [#17596] The ONE constructor for that envelope, reused for the ARRAY arm's
   // own refusal: the shared conformance kit reads `code` + `status`, so the
   // pair must have a single origin across every face. ⛔ Only the SENTENCE is
@@ -1196,7 +1200,11 @@ export class MemoryAnalyticsService implements IAnalyticsService {
           // the aggregation with NO time predicate emitted at all.
           const resolved: ResolvedDateRange = Array.isArray(timeDim.dateRange)
             ? { bounds: explicitDateRangeWindow(timeDim.dateRange), endExclusive: false }
-            : this.parseDateRangeString(timeDim.dateRange, query.timezone);
+            : this.parseDateRangeString(
+              timeDim.dateRange,
+              query.timezone,
+              this.driver.isDeclaredDateField(this.extractTableName(cube.sql), fieldPath),
+            );
           const range = resolved.bounds;
 
           // The window matches BOTH stored forms of a datetime value — the
@@ -2243,13 +2251,26 @@ export class MemoryAnalyticsService implements IAnalyticsService {
    * explicit `[a, b]` array arm never arrives here at all: it is discriminated
    * at the call site and keeps its published `$lte` reading.
    *
+   * [#27272] On a column the driver holds as declared `date` (`dateColumn`)
+   * the window is instead the calendar days it covers, with an inclusive end.
+   *
    * @throws the ADR-0112 `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED` envelope for
    *   a string outside `DATE_RANGE_PRESETS` — the same code, status and
    *   wording the schema door and the SQL analytics path answer with, since
    *   all three call one constructor.
    */
-  private parseDateRangeString(range: string, timezone?: string): ResolvedDateRange {
+  private parseDateRangeString(range: string, timezone: string | undefined, dateColumn: boolean): ResolvedDateRange {
     const window = resolveAnalyticsDateRangeString(range, { timezone });
+    if (dateColumn) {
+      // [#27272] A declared `date` column holds bare days, and the preset's
+      // instants (the zone's midnight) compared to them as TEXT dropped the
+      // first day and counted the day after the last from UTC westward. ADR-0053's
+      // one rule, through its one spelling: the calendar days the period covers
+      // in the reference zone, as the inclusive day pair — which the bound
+      // construction then reads exactly as a caller's bare-day `[a, b]`.
+      const days = dateRangeWindowBounds(window, timezone, true);
+      return { bounds: [days.$gte, days.$lte], endExclusive: false };
+    }
     return { bounds: [window.start, window.end], endExclusive: window.endExclusive };
   }
 
