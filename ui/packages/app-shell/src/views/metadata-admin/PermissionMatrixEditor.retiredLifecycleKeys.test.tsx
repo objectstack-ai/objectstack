@@ -39,8 +39,8 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
-/** The object-permission keys the matrix may author, in column order. */
-const LIVE_COLUMN_SHORTS = ['C', 'R', 'U', 'D', 'Tr', 'VA', 'MA'];
+/** The object-permission keys the matrix may author, in column order (Export since objectstack#26885). */
+const LIVE_COLUMN_SHORTS = ['C', 'R', 'U', 'D', 'E', 'Tr', 'VA', 'MA'];
 
 let clientImpl: any;
 let saved: Record<string, any> | null = null;
@@ -130,6 +130,8 @@ describe('PermissionMatrixEditor · retired lifecycle keys (objectui#6595)', () 
     expect(screen.getByLabelText('a_account Transfer ownership')).toBeTruthy();
   });
 
+  // Export is a live column that "All" leaves alone (objectstack#26885: an
+  // opt-in grant, made only by its own checkbox), so it is absent here too.
   it('"Grant all" writes exactly the live keys — the retired pair cannot ride along', async () => {
     await renderSet({ a_account: {} });
 

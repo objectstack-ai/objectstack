@@ -157,6 +157,7 @@ import {
   ShieldCheck,
   ShieldQuestion,
   Menu,
+  Undo2,
   PanelRightClose,
   PanelRightOpen,
   Play,
@@ -2678,6 +2679,8 @@ export function StudioNavItemInspector({
   const targetLabel = useNavTargetLabel();
   const typeGroupName = React.useId();
   const iconFieldId = React.useId();
+  const objectFieldId = React.useId();
+  const labelFieldId = React.useId();
   const idx = React.useMemo(() => {
     const m = /^navigation\[(\d+)\]$/.exec(navId);
     return m ? Number(m[1]) : -1;
@@ -2796,8 +2799,11 @@ export function StudioNavItemInspector({
       : inheritedNavEntryText(node as NavEntryLike, targetLabel);
   const labelField = (
     <div>
-      <label className="mb-1 block text-[11px] font-medium text-muted-foreground">{t('engine.studio.nav.label', locale)}</label>
+      <label htmlFor={labelFieldId} className="mb-1 block text-[11px] font-medium text-muted-foreground">
+        {t('engine.studio.nav.label', locale)}
+      </label>
       <input
+        id={labelFieldId}
         value={navItemLabelText(label, locale)}
         onChange={(e) => editLabel(e.target.value)}
         placeholder={placeholderText}
@@ -2836,8 +2842,11 @@ export function StudioNavItemInspector({
       </fieldset>
       {(kind === 'object' || kind === null) && (
         <div>
-          <label className="mb-1 block text-[11px] font-medium text-muted-foreground">{t('engine.studio.nav.linkObject', locale)}</label>
+          <label htmlFor={objectFieldId} className="mb-1 block text-[11px] font-medium text-muted-foreground">
+            {t('engine.studio.nav.linkObject', locale)}
+          </label>
           <StudioPicker
+            id={objectFieldId}
             value={boundObject}
             options={[
               { value: '', label: t('engine.studio.nav.chooseObject', locale) },
@@ -3108,7 +3117,8 @@ const PICKER_XS = 'h-auto rounded px-2 py-1 text-xs';
  *   opens there.
  * - Each caller keeps the name its native control had: a `<label htmlFor>`
  *   names the trigger by `id`, and a wrapping `<label>` names it as it named
- *   the native control. The object picker had none and still has none.
+ *   the native control. The nav-item inspector's object picker is named by
+ *   its *Link to object* label the same way.
  */
 function StudioPicker({
   id,
@@ -4209,12 +4219,19 @@ export function InterfacesPillar({
   const [createError, setCreateError] = React.useState<string | null>(null);
   const [reportBinding, setReportBinding] = React.useState<ReportBinding>(NO_REPORT_BINDING);
   const [pageKind, setPageKind] = React.useState<PageSourceKind>(DEFAULT_PAGE_SOURCE_KIND);
-  const openCreate = React.useCallback((kind: InterfaceCreateKind) => {
-    setCreateError(null);
-    setReportBinding(NO_REPORT_BINDING);
-    setPageKind(DEFAULT_PAGE_SOURCE_KIND);
-    setCreateKind(kind);
-  }, []);
+  const openCreate = React.useCallback(
+    (kind: InterfaceCreateKind) => {
+      // objectstack#26845 — the created item opens at once, and its load
+      // replaces the buffer a held widget lives in: asked before the dialog
+      // opens, so Cancel costs nothing and the create itself asks nothing.
+      if (!confirmDropUnsavedWork(leafHeld !== null, locale)) return;
+      setCreateError(null);
+      setReportBinding(NO_REPORT_BINDING);
+      setPageKind(DEFAULT_PAGE_SOURCE_KIND);
+      setCreateKind(kind);
+    },
+    [leafHeld, locale],
+  );
   // objectui#12455 — the "+" kind picker's other kinds: the entry is added
   // where "Add nav item" adds one (the end of the top level, an id minted the
   // way `AppNavCanvas` mints it), born with no label (objectui#11196) and, for
@@ -5548,15 +5565,10 @@ export function DataPillar({
   // they had since selected, which is the regression the mount-time ref exists
   // to prevent — so the id is marked spent as soon as the loaded rail has been
   // consulted, whether or not it held a match.
+  //
+  // Applied below `objHeld`, which it asks about (objectstack#26845).
   const requestedSurface = useRequestedSurface();
   const appliedRequestRef = React.useRef(0);
-  React.useEffect(() => {
-    if (!requestedSurface || !objectsLoaded) return;
-    if (requestedSurface.id === appliedRequestRef.current) return;
-    appliedRequestRef.current = requestedSurface.id;
-    const match = resolveSurfaceDeepLink(objects, requestedSurface.target, 'object');
-    if (match) setCurrent(match);
-  }, [requestedSurface, objects, objectsLoaded]);
   const [objDraft, setObjDraft] = React.useState<Record<string, unknown>>({});
   // objectui#11272 — the object `objDraft` was loaded for, `object:NAME`:
   // written where the load below installs it, and nowhere else.
@@ -6110,6 +6122,26 @@ export function DataPillar({
   const fieldCopilotMark =
     objLoaded && fieldSel?.kind === 'field' ? copilotDraftMarkOf(objDraftChanges, ['fields', fieldSel.id]) : null;
   useHeldEditReport(onHeldEditChange, objHeld?.clause ?? null);
+  // The live request's apply (see `requestedSurface` above). objectstack#26845
+  // — another object's load replaces the buffer a held edit lives in, so it
+  // asks first, as the rail does; declined, the request is spent and the held
+  // edit stays. A request for the open object drops nothing and asks nothing.
+  React.useEffect(() => {
+    if (!requestedSurface || !objectsLoaded) return;
+    if (requestedSurface.id === appliedRequestRef.current) return;
+    appliedRequestRef.current = requestedSurface.id;
+    const match = resolveSurfaceDeepLink(objects, requestedSurface.target, 'object');
+    if (!match) return;
+    if (match.name !== current?.name && !confirmDropUnsavedWork(objHeld !== null, locale)) return;
+    setCurrent(match);
+  }, [requestedSurface, objects, objectsLoaded, current, objHeld, locale]);
+  // objectstack#26845 — a created object opens at once, and its load replaces
+  // the buffer a held edit lives in: asked before the dialog opens, so Cancel
+  // costs nothing and the create itself asks nothing.
+  const openCreateObject = () => {
+    if (!confirmDropUnsavedWork(objHeld !== null, locale)) return;
+    openCreateDialog();
+  };
   // objectui#12725 — the header's draft line reads the badge's ledger.
   const objDraftStatus = useStudioItemDraftStatus(
     current ? { type: 'object', name: current.name } : null,
@@ -6343,6 +6375,11 @@ export function DataPillar({
     </>
   ) : undefined;
 
+  const objectNeedle = query.trim().toLowerCase();
+  const shownObjects = objects.filter(
+    (o) => !objectNeedle || o.label.toLowerCase().includes(objectNeedle) || o.name.toLowerCase().includes(objectNeedle),
+  );
+
   return (
     <div ref={pillarRef} className="flex h-full flex-col">
       {objConflictDialog}
@@ -6358,10 +6395,15 @@ export function DataPillar({
           testId="studio-rail-data"
           heading={t('engine.studio.data.objects', locale)}
           count={objects.length}
-          onAdd={readOnly ? undefined : openCreateDialog}
+          onAdd={readOnly ? undefined : openCreateObject}
           addLabel={t('engine.studio.data.newObject', locale)}
           addTestId="studio-rail-add"
-          search={{ value: query, onChange: setQuery, placeholder: t('engine.studio.data.searchObjects', locale) }}
+          search={{
+            value: query,
+            onChange: setQuery,
+            placeholder: t('engine.studio.data.searchObjects', locale),
+            matchCount: shownObjects.length,
+          }}
           isMobile={isMobile}
           open={railOpen}
         >
@@ -6370,32 +6412,25 @@ export function DataPillar({
               {error ? t('engine.studio.loadFailed', locale) : objectsLoaded ? t('engine.studio.data.noObjects', locale) : t('engine.studio.loading', locale)}
             </p>
           )}
-          {objects
-            .filter(
-              (o) =>
-                !query.trim() ||
-                o.label.toLowerCase().includes(query.trim().toLowerCase()) ||
-                o.name.toLowerCase().includes(query.trim().toLowerCase()),
-            )
-            .map((o) => {
-              const Icon = getIcon(o.icon);
-              return (
-                <StudioRailRow
-                  key={o.name}
-                  active={current?.name === o.name}
-                  onClick={() => {
-                    // objectstack#26705 — another object's load replaces the
-                    // buffer the held edit lives in; the open one keeps it.
-                    if (current?.name !== o.name && !confirmDropUnsavedWork(objHeld !== null, locale)) return;
-                    setCurrent(o);
-                    if (isMobile) setRailOpen(false);
-                  }}
-                  icon={<Icon className="h-4 w-4 shrink-0" />}
-                >
-                  {o.label}
-                </StudioRailRow>
-              );
-            })}
+          {shownObjects.map((o) => {
+            const Icon = getIcon(o.icon);
+            return (
+              <StudioRailRow
+                key={o.name}
+                active={current?.name === o.name}
+                onClick={() => {
+                  // objectstack#26705 — another object's load replaces the
+                  // buffer the held edit lives in; the open one keeps it.
+                  if (current?.name !== o.name && !confirmDropUnsavedWork(objHeld !== null, locale)) return;
+                  setCurrent(o);
+                  if (isMobile) setRailOpen(false);
+                }}
+                icon={<Icon className="h-4 w-4 shrink-0" />}
+              >
+                {o.label}
+              </StudioRailRow>
+            );
+          })}
         </StudioRail>
 
         <div className={cn('flex min-w-0 flex-1 flex-col overflow-hidden', DATA_CONTENT_CONTAINER)} data-testid="data-content-column">
@@ -6483,7 +6518,7 @@ export function DataPillar({
                   <button
                     type="button"
                     data-testid="empty-state-new-object"
-                    onClick={openCreateDialog}
+                    onClick={openCreateObject}
                     className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
                   >
                     <Plus className="h-3.5 w-3.5" /> {t('engine.studio.data.newObject', locale)}
@@ -7705,6 +7740,10 @@ export function AutomationsPillar({
   const openCreateFlow =
     !readOnly && packageId !== null
       ? () => {
+          // objectstack#26845 — the created flow opens at once, and its load
+          // replaces the buffer a held step lives in: asked before the dialog
+          // opens, so Cancel costs nothing and the create itself asks nothing.
+          if (!confirmDropUnsavedWork(flowHeld !== null, locale)) return;
           setError(null);
           setNewTrigger('');
           setNewTriggerObject('');
@@ -7990,6 +8029,7 @@ export function AutomationsPillar({
             onChange: setRailQuery,
             placeholder: t('engine.studio.designer.search', locale),
             testId: 'auto-rail-search',
+            matchCount: shownFlows.length,
           }}
           footer={railLegend}
           isMobile={isMobile}
@@ -8051,11 +8091,6 @@ export function AutomationsPillar({
               </StudioRailGroup>
             );
           })}
-          {flows.length > 0 && shownFlows.length === 0 && (
-            <p className="px-2 py-3 text-[11px] text-muted-foreground">
-              {tFormat('engine.list.emptyQuery', locale, { query: railQuery.trim() })}
-            </p>
-          )}
           {flows.length === 0 && !creating && (error || !listed || openCreateFlow) && (
             <p className="px-2 py-3 text-[11px] text-muted-foreground">
               {error
@@ -8520,6 +8555,17 @@ export function AccessPillar({
   const [creating, setCreating] = React.useState(false);
   const [createErr, setCreateErr] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
+  // objectstack#26836 — a create refused because the name is taken: which set
+  // holds it, and whether it is this package's, so the dialog can open it.
+  const [createTaken, setCreateTaken] = React.useState<{ name: string; label: string; here: boolean } | null>(null);
+  // Which of the rail's sets are published, and which hold a pending draft:
+  // the draft discard's two inputs, read by `load` with the rail.
+  const [publishedNames, setPublishedNames] = React.useState<ReadonlySet<string>>(() => new Set());
+  const [draftNames, setDraftNames] = React.useState<ReadonlySet<string>>(() => new Set());
+  const [discarding, setDiscarding] = React.useState(false);
+  // Bumped by a discard: the open matrix re-reads as it does after a publish,
+  // since in both its draft is gone (added to `publishNonce` below).
+  const [draftGoneNonce, setDraftGoneNonce] = React.useState(0);
   // [ADR-0090 D6] "why can this user access?" — right-side explain sheet.
   const [explainOpen, setExplainOpen] = React.useState(false);
   // objectui#12456 — the open set's tab (epic objectui#12446, decision C):
@@ -8599,6 +8645,10 @@ export function AccessPillar({
       }
       const scoped = [...byName.values()];
       setPerms(scoped);
+      setPublishedNames(new Set((list || []).map((p) => String(p.name ?? (p as Record<string, unknown>).id ?? ''))));
+      setDraftNames(
+        new Set(((drafts as Array<{ name?: string }>) || []).map((d) => String(d?.name ?? '')).filter(Boolean)),
+      );
       // A `?surface=owd:overview` deep-link opens the OWD overview instead of a
       // permission set; `current` still defaults to the first set so switching
       // back to the matrix has a target. Applied once — a later publish re-runs
@@ -8627,11 +8677,37 @@ export function AccessPillar({
     async (label: string, name: string) => {
       setBusy(true);
       setCreateErr(null);
+      setCreateTaken(null);
       try {
+        // A name a permission set already holds, published or as a draft, in
+        // this package or any other, is refused here and nothing is written.
+        // The first-write pin below asserts "no DRAFT row" only (the spec's
+        // `parentVersion: null` is lifecycle-scoped), so over a published set
+        // it would write this blank skeleton as that set's pending draft, and
+        // publishing the package would replace the live set's grants with it.
+        const [published, drafts] = await Promise.all([
+          client.list<Record<string, unknown>>('permission'),
+          client.listDrafts({ type: 'permission' }) as Promise<Array<{ name?: string; label?: I18nLabel | null }>>,
+        ]);
+        const publishedRow = (published ?? []).find((row) => row?.name === name);
+        const draftRow = (drafts ?? []).find((row) => row?.name === name);
+        if (publishedRow || draftRow) {
+          const takenLabel = navItemLabelText(
+            (publishedRow?.label as I18nLabel | undefined) ?? draftRow?.label ?? undefined,
+            locale,
+          );
+          setCreateTaken({
+            name,
+            label: takenLabel.trim() || name,
+            here: perms.some((p) => p.name === name),
+          });
+          return;
+        }
         // Package door → create as a DRAFT stamped with this package (D6/D7),
         // published atomically with the rest of the package.
-        // objectui#11773 — a create is the first-write pin: refused where the
-        // name already holds a draft, instead of written over it.
+        // objectui#11773 — and the door refuses a draft row too (the
+        // first-write pin), for one that lands between the check above and
+        // this save. A set published in that window is not refused by it.
         await client.save('permission', name, buildPermissionSkeleton(name, label), {
           mode: 'draft',
           packageId,
@@ -8652,7 +8728,61 @@ export function AccessPillar({
         setBusy(false);
       }
     },
-    [client, load, packageId, onDraftSaved, locale],
+    [client, load, packageId, onDraftSaved, locale, perms],
+  );
+
+  // The refusal's way out: the taken set is this package's, so it opens in
+  // the matrix instead of a second one being made. The "+ New" gate already
+  // confirmed any discard of unsaved edits.
+  const openTakenSet = React.useCallback((name: string) => {
+    setCreating(false);
+    setCreateTaken(null);
+    setOwdOpen(false);
+    setCurrent(name);
+  }, []);
+
+  // Discard the open set's pending draft (`DELETE ?state=draft` at this
+  // package's address, the door the metadata editor's "Discard draft" uses).
+  // A published set goes back to its live body; a set that was never
+  // published has nothing left, so it leaves the rail.
+  const discardDraft = React.useCallback(
+    async (name: string) => {
+      const row = perms.find((p) => p.name === name);
+      const item = row?.label || name;
+      const neverPublished = !publishedNames.has(name);
+      // One confirm: an unsaved edit on the open matrix is an unpublished
+      // change of this same set, and the discard removes it with the rest.
+      if (
+        !window.confirm(
+          tFormat(
+            neverPublished ? 'engine.studio.access.discardConfirmUnpublished' : 'engine.studio.access.discardConfirm',
+            locale,
+            { item },
+          ),
+        )
+      ) {
+        return;
+      }
+      setDiscarding(true);
+      try {
+        await client.reset('permission', name, { state: 'draft', packageId });
+        toast.success(tFormat('engine.edit.draftDiscarded', locale, { item }));
+        if (neverPublished) setCurrent((c) => (c === name ? null : c));
+        // The open matrix holds the discarded draft and the pin it was read
+        // with: read it again, as after a publish (its draft is gone).
+        setDraftGoneNonce((n) => n + 1);
+        onDraftSaved?.();
+        await load();
+      } catch (e) {
+        toast.error(t('engine.studio.access.discardFailed', locale), {
+          description: formatMetadataError(e),
+          classNames: { description: 'whitespace-pre-line' },
+        });
+      } finally {
+        setDiscarding(false);
+      }
+    },
+    [perms, publishedNames, locale, client, packageId, onDraftSaved, load],
   );
 
   const filtered = perms.filter(
@@ -8717,8 +8847,25 @@ export function AccessPillar({
     : () => {
         if (!confirmDiscardEdits()) return;
         setCreateErr(null);
+        setCreateTaken(null);
         setCreating(true);
       };
+  // objectstack#26836 — the open set's pending draft can be discarded where
+  // the set is edited; nothing in Studio offered it, so a blank draft over a
+  // live set could only be published.
+  const accessDiscardEl =
+    !readOnly && current && !owdOpen && draftNames.has(current) ? (
+      <button
+        type="button"
+        data-testid="access-discard-draft"
+        onClick={() => void discardDraft(current)}
+        disabled={discarding}
+        className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-[12px] text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+      >
+        <Undo2 className="h-3.5 w-3.5" />
+        {t('engine.edit.discardDraft', locale)}
+      </button>
+    ) : null;
   const accessHeaderEl = (
     <StudioItemHeader
       testId="access-item-header"
@@ -8796,7 +8943,12 @@ export function AccessPillar({
           onAdd={openCreateSet}
           addLabel={t('engine.studio.access.new', locale)}
           addTestId="studio-rail-add"
-          search={{ value: query, onChange: setQuery, placeholder: t('engine.studio.access.search', locale) }}
+          search={{
+            value: query,
+            onChange: setQuery,
+            placeholder: t('engine.studio.access.search', locale),
+            matchCount: filtered.length,
+          }}
           pinned={
             // Pinned sibling surface: the package-wide Record Sharing Baseline
             // (OWD) overview (objectui#2505). Same package-author ownership as
@@ -8894,8 +9046,12 @@ export function AccessPillar({
               type="permission"
               name={current}
               packageId={packageId}
-              publishNonce={publishNonce}
-              onDraftSaved={onDraftSaved}
+              publishNonce={(publishNonce ?? 0) + draftGoneNonce}
+              onDraftSaved={() => {
+                // The set now holds a pending draft, so its discard shows.
+                setDraftNames((names) => (names.has(current) ? names : new Set(names).add(current)));
+                onDraftSaved?.();
+              }}
               readOnly={readOnly}
               onDirtyChange={setMatrixDirty}
               embedded
@@ -8904,7 +9060,12 @@ export function AccessPillar({
                 onTabChange: setAccessTab,
                 leading: accessRailToggleEl,
                 chips: accessNoteEl,
-                actions: accessExplainEl,
+                actions: (
+                  <>
+                    {accessDiscardEl}
+                    {accessExplainEl}
+                  </>
+                ),
               }}
               onOpenOwd={(objectName) => {
                 // The badge deep-link swaps this page out for the OWD
@@ -8953,6 +9114,29 @@ export function AccessPillar({
         busy={busy}
         error={createErr}
         locale={locale}
+        extra={
+          createTaken && (
+            <div className="space-y-2" data-testid="access-create-taken">
+              <p className="text-sm text-destructive">
+                {tFormat(
+                  createTaken.here ? 'engine.studio.access.createTaken' : 'engine.studio.access.createTakenElsewhere',
+                  locale,
+                  { label: createTaken.label, name: createTaken.name },
+                )}
+              </p>
+              {createTaken.here && (
+                <button
+                  type="button"
+                  data-testid="access-create-open-existing"
+                  onClick={() => openTakenSet(createTaken.name)}
+                  className="text-sm font-medium text-primary underline-offset-4 hover:underline"
+                >
+                  {tFormat('engine.studio.access.openExisting', locale, { label: createTaken.label })}
+                </button>
+              )}
+            </div>
+          )
+        }
         onSubmit={({ label, name }) => void doCreate(label, name)}
       />
     </div>

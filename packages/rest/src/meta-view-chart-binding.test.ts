@@ -11,6 +11,9 @@
  * list overlay member accepted `type: 'chart'` with no `chart` block, and an
  * `options.chart` bag holding only `chartType`.
  *
+ * #26847 extends the file one binding deeper: a chart whose `dataset` names no
+ * declared dataset, or whose `values` names no measure of it, is refused too.
+ *
  * Refusal cases assert the ADR-0112 envelope — `code` AND `status` — and that
  * no row reached `sys_metadata`. The last case measures the READ side of the
  * narrowing on a row stored before it: served as stored, flagged in its
@@ -97,15 +100,27 @@ async function boot() {
         if (!route) throw new Error(`${method} ${META_ITEM} is not registered`);
         return route;
     };
-    const call = async (method: string, name: string, body?: unknown) => {
+    const call = async (method: string, name: string, body?: unknown, type = 'view') => {
         const res = makeRes();
-        await routeFor(method).handler({ params: { type: 'view', name }, query: {}, headers: {}, body } as any, res);
+        await routeFor(method).handler({ params: { type, name }, query: {}, headers: {}, body } as any, res);
         return res;
     };
+    // [#26847] The dataset the fixture views bind, published through its own
+    // door: the view door resolves a chart's `dataset` and `values` against the
+    // live datasets, so a binding nobody declares is refused.
+    const published = await call('PUT', DATASET.name, DATASET, 'dataset');
+    if (published._status !== 200) throw new Error(`dataset fixture refused: ${JSON.stringify(published._json)}`);
     const storedRows = async (name: string) => engine.find('sys_metadata', { where: { type: 'view', name } });
     return { engine, put: (name: string, body: unknown) => call('PUT', name, body), get: (name: string) => call('GET', name), storedRows };
 }
 
+const DATASET = {
+    name: 'lead_metrics',
+    label: 'Lead metrics',
+    object: 'crm_lead',
+    dimensions: [{ name: 'stage', field: 'stage', type: 'string' }],
+    measures: [{ name: 'amount_sum', aggregate: 'sum', field: 'amount' }],
+};
 const BINDING = { chartType: 'bar', dataset: 'lead_metrics', dimensions: ['stage'], values: ['amount_sum'] };
 const chartView = (name: string, extra: Record<string, unknown>) => ({
     name,
@@ -117,7 +132,7 @@ const chartView = (name: string, extra: Record<string, unknown>) => ({
     ...extra,
 });
 
-type Issue = { path?: string; code?: string; message?: string };
+type Issue = { path?: string; code?: string; message?: string; rule?: string };
 const issuesOf = (res: any): Issue[] => (res._json?.issues ?? []) as Issue[];
 
 const NO_BLOCK_VERDICT =
@@ -192,5 +207,70 @@ describe("#22491 PUT /api/v1/meta/view refuses a `type: 'chart'` list view that 
         expect(again._status, JSON.stringify(again._json)).toBe(422);
         expect(again._json?.code).toBe('INVALID_METADATA');
         expect(issuesOf(again).some((i) => i.path === 'chart')).toBe(true);
+    });
+});
+
+// [#26847] The same door, one binding deeper: a chart that DOES name a dataset,
+// but one nobody declares, or a measure its dataset lacks. Measured on main
+// `20457f6f` before the change: all six refusals below answered 200 and were
+// stored, while `os validate` refused the same file.
+describe('#26847 PUT /api/v1/meta/view refuses a chart list view whose dataset or measure does not resolve', () => {
+    const chartConfig = (chart: Record<string, unknown>) => ({
+        type: 'chart',
+        label: 'Pipeline by stage',
+        columns: ['stage', 'amount'],
+        chart: { ...BINDING, ...chart },
+    });
+    const SHAPES: Array<[string, string, (chart: Record<string, unknown>) => Record<string, unknown>, string]> = [
+        [
+            'a view item (`config`)',
+            'crm_lead.pipeline_item',
+            (chart) => ({ name: 'crm_lead.pipeline_item', object: 'crm_lead', viewKind: 'list', label: 'Pipeline', config: chartConfig(chart) }),
+            'views[0].config.chart',
+        ],
+        [
+            'a flattened list overlay',
+            'crm_lead.pipeline_flat',
+            (chart) => ({ name: 'crm_lead.pipeline_flat', object: 'crm_lead', viewKind: 'list', ...chartConfig(chart) }),
+            'views[0].chart',
+        ],
+        [
+            'a container `listViews` member',
+            'crm_lead',
+            (chart) => ({ name: 'crm_lead', object: 'crm_lead', list: { type: 'grid', columns: ['stage'] }, listViews: { pipeline: chartConfig(chart) } }),
+            'views[0].listViews.pipeline.chart',
+        ],
+    ];
+
+    describe.each(SHAPES)('%s', (_label, name, body, at) => {
+        it('`chart.dataset` naming no declared dataset: 422 INVALID_METADATA, chart-dataset-unknown at `chart.dataset`, nothing stored', async () => {
+            const { put, storedRows } = await boot();
+            const res = await put(name, body({ dataset: 'no_such_dataset' }));
+
+            expect(res._status, JSON.stringify(res._json)).toBe(422);
+            expect(res._json?.code).toBe('INVALID_METADATA');
+            expect(await storedRows(name)).toEqual([]);
+            const hit = issuesOf(res).find((i) => i.rule === 'chart-dataset-unknown');
+            expect(hit?.path, JSON.stringify(res._json)).toBe(`${at}.dataset`);
+        });
+
+        it('`chart.values` naming no measure of its dataset: 422 INVALID_METADATA, chart-measure-unknown at `chart.values[0]`, nothing stored', async () => {
+            const { put, storedRows } = await boot();
+            const res = await put(name, body({ values: ['ghost_measure'] }));
+
+            expect(res._status, JSON.stringify(res._json)).toBe(422);
+            expect(res._json?.code).toBe('INVALID_METADATA');
+            expect(await storedRows(name)).toEqual([]);
+            const hit = issuesOf(res).find((i) => i.rule === 'chart-measure-unknown');
+            expect(hit?.path, JSON.stringify(res._json)).toBe(`${at}.values[0]`);
+        });
+
+        it('the control: the same view bound to the declared dataset and measure answers 200 and is stored', async () => {
+            const { put, storedRows } = await boot();
+            const res = await put(name, body({}));
+
+            expect(res._status, JSON.stringify(res._json)).toBe(200);
+            expect(await storedRows(name)).toHaveLength(1);
+        });
     });
 });

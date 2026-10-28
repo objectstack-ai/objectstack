@@ -4445,12 +4445,13 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           //
           // `ObjectGantt` owns a record drawer of its own and resolves
           // `const navConfig = schema.navigation ?? { mode: 'drawer' }`, then
-          // classifies four overlay modes (`drawer`/`modal`/`split`/`popover`)
-          // to decide whether to suppress the host's `onRowClick`. Nothing put
-          // `navigation` on the node it receives, so that `??` was the ONLY
-          // branch ever taken: a view authoring `navigation: { mode: 'page' }`
-          // got a drawer, with no diagnostic. The component knows four modes
-          // and was only ever handed the default.
+          // classifies the overlay mode (`drawer`, the one the spec keeps since
+          // objectstack#26677) to decide whether to suppress the host's
+          // `onRowClick`. Nothing put `navigation` on the node it receives, so
+          // that `??` was the ONLY branch ever taken: a view authoring
+          // `navigation: { mode: 'page' }` got a drawer, with no diagnostic.
+          // The component knows every mode and was only ever handed the
+          // default.
           //
           // ⭐ ON THE BRANCH, NOT ON `baseProps`, and that is a measurement
           // rather than a preference. SEVEN other child views read
@@ -6672,7 +6673,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
         </div>
       )}
 
-      {/* Navigation Overlay (drawer/modal/popover) */}
+      {/* Navigation Overlay (the drawer) */}
       {navigation.isOverlay && (
         <NavigationOverlay
           {...navigation}

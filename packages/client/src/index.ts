@@ -417,6 +417,39 @@ function canonicalExpandParam(expand: QueryOptionsV2['expand']): string | undefi
   return names.length > 0 ? names.join(',') : undefined;
 }
 
+/**
+ * The `select` value `data.find()` puts on the wire, or the list door's own
+ * refusal, raised before any request.
+ *
+ * The door (`findData` in `@objectstack/metadata-protocol`) splits `select` on
+ * commas, trims each member and refuses a value naming NO field with
+ * `400 VALIDATION_ERROR`: an empty projection read as no projection answers
+ * every column. An empty array is truthy, so `{ select: [] }` used to reach the
+ * wire as `?select=` and come back as that 400 after a round trip. Dropping
+ * the parameter instead is the one thing this must never do — absent means
+ * "every column", the widening the door exists to refuse.
+ *
+ * The rule and the sentence are the door's, applied to the exact value this
+ * client would have sent, so the caller gets the same `code`, `httpStatus`
+ * and message either way. The sentence is restated here because the door's
+ * copy is private to a server package this SDK does not depend on;
+ * `client.hono.test.ts` holds the two equal against the real door.
+ *
+ * Shared by both `data.find` copies so they cannot diverge.
+ */
+function projectionSelectParam(select: readonly string[]): string {
+  const value = select.join(',');
+  if (value.split(',').some((name) => name.trim() !== '')) return value;
+  const error = new Error(
+    `Query parameter 'select' names no field; got ${JSON.stringify(value)}. The query was not run: `
+    + 'an empty projection was read as no projection, which answers every column. Name at least one '
+    + 'field, or leave the parameter out to read every column.',
+  ) as Error & { code: string; httpStatus: number };
+  error.code = 'VALIDATION_ERROR';
+  error.httpStatus = 400;
+  throw error;
+}
+
 export interface PaginatedResult<T = any> {
   /** Spec-compliant: array of matching records */
   records: T[];
@@ -7056,9 +7089,10 @@ export class ObjectStackClient {
             }
         }
         
-        // 3. Handle Select
+        // 3. Handle Select — a projection naming no field is refused here,
+        // never dropped (see projectionSelectParam).
         if (normalizedOptions.select) {
-            queryParams.set('select', normalizedOptions.select.join(','));
+            queryParams.set('select', projectionSelectParam(normalizedOptions.select));
         }
 
         // 4. Handle Filters (Simple vs AST)
@@ -7944,7 +7978,7 @@ export class ScopedEnvironmentClient {
         }
       }
       if (normalizedOptions.select) {
-        queryParams.set('select', normalizedOptions.select.join(','));
+        queryParams.set('select', projectionSelectParam(normalizedOptions.select));
       }
       const filterValue = normalizedOptions.filter ?? normalizedOptions.filters;
       if (filterValue) {

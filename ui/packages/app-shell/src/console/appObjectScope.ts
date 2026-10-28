@@ -39,8 +39,11 @@
  *
  * Everywhere else the route reads the whole registry, as before. For the
  * related lists' reason a record overlay (`?recordId=`, `?form=`) reads the
- * whole registry, and so does a list whose views open records in an in-page
- * overlay the URL does not carry (`modal`, `split`, `popover`). An app item
+ * whole registry. (So did a list whose views opened records in an in-page
+ * overlay the URL did not carry — `modal`, `split`, `popover` — until
+ * objectstack#26677 retired those modes: every record overlay a list opens is
+ * now the drawer, or the split pane a reader prefers, and both are carried by
+ * `?recordId=`.) An app item
  * without a package id has no package to scope by.
  *
  * Two readers ask the same question with the same answer: `AppContent`, which
@@ -271,18 +274,6 @@ function hasRecordOverlay(search: string): boolean {
   return sp.has(RECORD_DRAWER_PARAM) || sp.has(RECORD_FORM_PARAM) || sp.has(RECORD_FORM_OBJECT_PARAM);
 }
 
-const IN_PAGE_RECORD_OVERLAYS = new Set(['modal', 'split', 'popover']);
-
-/**
- * Whether a list of this object opens a record in an overlay the URL does not
- * carry: `ObjectView` mounts `RecordDetailView` inside it with the list's
- * objects, so such a list reads the whole registry.
- */
-function opensRecordsInPageOverlay(def: any): boolean {
-  const views = [def?.list, ...Object.values((def?.listViews ?? {}) as Record<string, any>)];
-  return views.some((view) => IN_PAGE_RECORD_OVERLAYS.has(view?.navigation?.mode));
-}
-
 /** The objects an object's lookup and master-detail fields point at. */
 function lookupTargetNames(def: any): string[] {
   const fields = def?.fields;
@@ -427,7 +418,6 @@ export function readAppObjectScope(
   }
   const first = readObjectScope({ packageId, names });
   const routeDef = route.objectName ? first.objects.find((o: any) => o?.name === route.objectName) : undefined;
-  if (routeDef && opensRecordsInPageOverlay(routeDef)) return { candidate, scope: null, ready: false, ...NOT_READ };
   const lookups = routeDef ? lookupTargetNames(routeDef) : [];
   return {
     candidate,

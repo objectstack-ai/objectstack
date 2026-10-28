@@ -244,10 +244,19 @@ describe('a flattened list overlay at the runtime publish gate (#9313)', () => {
     // #9313 failure inverted: the standalone list view a Studio tenant or an
     // MCP/AI author writes goes through `PUT /api/v1/meta/view` and no CLI, so
     // a build-time-only rule never reaches the author who made the typo.
+    // [#26847] The fifth crossing, a different collection on purpose: a list
+    // view's chart binding (`dataset` / `dimensions` / `values`), resolved
+    // against `stack.datasets`, which every per-write snapshot also carries.
+    // The rule's list-view walk opens the flattened overlay and the ViewItem
+    // `config` for it; its report and page surfaces find nothing on a view
+    // snapshot. Measured over the shipped view corpus before crossing (two
+    // chart list views, 0 findings); the door pins live in
+    // `validate-chart-bindings.test.ts`.
     expect(crossed).toEqual([
       'validateSearchableFields',
       'validateSortableFields',
       'validateListViewFieldRefs',
+      'validateChartBindings',
     ]);
     // And every member still judges flow snapshots — the #4463 P1 surface is
     // not narrowed by the member axis existing.

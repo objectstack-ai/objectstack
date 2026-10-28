@@ -71,6 +71,7 @@
   "src/ui/element-text-variant-heading-retirement.test.ts",
   "src/ui/form-field-public-picker-retirement.test.ts",
   "src/ui/master-detail-detail-sort-field-retirement.test.ts",
+  "src/ui/navigation-mode-retirement.test.ts",
   "src/ui/object-grid-resizable-columns-retirement.test.ts",
   "src/ui/page-header-breadcrumb-retirement.test.ts",
   "src/ui/page-header-show-star-retirement.test.ts",

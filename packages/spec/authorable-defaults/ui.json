@@ -56,7 +56,7 @@
     "ui/JoinedReportBlock:type = \"tabular\"",
     "ui/ListChartConfig:chartType = \"bar\"",
     "ui/ListView:type = \"grid\"",
-    "ui/NavigationConfig:mode = \"page\"",
+    "ui/NavigationConfig:mode = \"drawer\"",
     "ui/NavigationConfig:openNewTab = false",
     "ui/NavigationConfig:preventNavigation = false",
     "ui/NavigationConfig:size = \"auto\"",

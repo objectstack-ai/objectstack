@@ -4825,3 +4825,116 @@ describe('runtime authoring gate on PERMISSION writes — hierarchy scope withou
         expect(rowsOf(rows, 'active')).toHaveLength(1);
     });
 });
+
+/**
+ * [#26646] The object save door gives the build's verdict on a field group's
+ * `visibleWhen`.
+ *
+ * The form renderer gates the whole group on `fieldGroups[].visibleWhen`,
+ * fail-closed, and no pass of the build's expression rule read the slot, so
+ * the card's body (a read of a field the object does not declare) saved with
+ * a 200 and the group vanished from every form, while the same text on a
+ * field's `visibleWhen` or an action's `visible` was refused 422 here.
+ *
+ * The lift is in `@objectstack/lint` (the field-group pass of the object
+ * walk); no code here moves. Pinned through the REAL `saveMetaItem` /
+ * `publishMetaItem`:
+ *
+ *  (a) the door refuses the card's probe body — a 422 `INVALID_METADATA`
+ *      carrying the build's finding located at the group's key — on an active
+ *      save and on a draft's promotion, and nothing lands;
+ *  (b) a group whose predicate reads a declared field still saves;
+ *  (d) the door's issues and the build's findings are the same findings.
+ *
+ * The rest of the pass's findings are pinned in `@objectstack/lint`'s
+ * `runtime-gate.object-field-group-visibility-writes.test.ts`.
+ *
+ * ⚠️ As in the #22019 block above: this package reaches `@objectstack/lint`
+ * through its built `dist/`, so an edit to the rule is invisible here until
+ * `pnpm --filter @objectstack/lint build` has run.
+ */
+describe('runtime authoring gate on OBJECT writes — the field group visibleWhen verdict (#26646)', () => {
+    /** The card's probe body, verbatim but for the predicate under test. */
+    const fxGroup = (visibleWhen: unknown) => ({
+        name: 'qa_fg_probe',
+        label: 'QA',
+        sharingModel: 'private',
+        fields: {
+            name: { type: 'text', label: 'Name' },
+            stage: { type: 'text', label: 'Stage', group: 'g1' },
+        },
+        fieldGroups: [{ key: 'g1', label: 'G1', visibleWhen }],
+    });
+    const CARD_BODY = "record.no_such_field == 'x'";
+    const VALID = "record.stage == 'won'";
+    /** Where the build locates the finding — the group the author edits. */
+    const WHERE = "object 'qa_fg_probe' · field group 'g1' visibleWhen";
+
+    const groupRows = (rows: Map<string, Row>) =>
+        Array.from(rows.values()).filter((r) => r.type === 'object' && r.name === 'qa_fg_probe');
+
+    /** The build's findings for one object, through the build's own entry. */
+    const buildFindings = (obj: unknown) => {
+        const stack = { objects: [obj] };
+        return runAuthoringRules('build', { normalized: stack, parsed: stack })
+            .filter((f) => f.rule === EXPRESSION_INVALID);
+    };
+
+    it("(a) REFUSES an active save of the card's probe with a 422 carrying the build's finding, located at the group", async () => {
+        const { protocol, rows } = makeProtocol();
+
+        const err = await protocol
+            .saveMetaItem({ type: 'object', name: 'qa_fg_probe', item: fxGroup(CARD_BODY) })
+            .catch((e: any) => e);
+
+        expect(err, 'the save resolved — the door still accepts the group predicate').toBeInstanceOf(Error);
+        expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expect(err.rulesRun).toContain('validateStackExpressions');
+        const issues = err.issues.filter((i: any) => i.rule === EXPRESSION_INVALID);
+        expect(issues, `issues: ${JSON.stringify(err.issues)}`).toHaveLength(1);
+        expect(issues[0].path).toBe(WHERE);
+        expect(issues[0].where).toBe(WHERE);
+        expect(issues[0].severity).toBe('error');
+        expect(issues[0].message).toContain('unknown field `no_such_field`');
+        // And nothing landed.
+        expect(groupRows(rows)).toEqual([]);
+    });
+
+    it("(a) REFUSES the card's probe on a draft's PROMOTION — the draft door is not a bypass", async () => {
+        const { protocol, rows } = makeProtocol();
+        await expect(
+            protocol.saveMetaItem({ type: 'object', name: 'qa_fg_probe', item: fxGroup(CARD_BODY), mode: 'draft' }),
+        ).resolves.toMatchObject({ success: true });
+
+        const err = await protocol.publishMetaItem({ type: 'object', name: 'qa_fg_probe' }).catch((e: any) => e);
+
+        expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const issue = err.issues.find((i: any) => i.rule === EXPRESSION_INVALID);
+        expect(issue, `issues: ${JSON.stringify(err.issues)}`).toBeDefined();
+        expect(issue.path).toBe(WHERE);
+        expect(groupRows(rows).map((r) => r.state)).toEqual(['draft']);
+    });
+
+    it('(b) a group whose predicate reads a declared field still saves, and the row lands', async () => {
+        const { protocol, rows } = makeProtocol();
+
+        const result = await protocol.saveMetaItem({ type: 'object', name: 'qa_fg_probe', item: fxGroup(VALID) });
+
+        expect(result.success).toBe(true);
+        expect(groupRows(rows).map((r) => r.state)).toEqual(['active']);
+        expect(buildFindings(fxGroup(VALID))).toEqual([]);
+    });
+
+    it("(d) the door's issues ARE the build's findings for the card's probe", async () => {
+        const { protocol } = makeProtocol();
+        const atBuild = buildFindings(fxGroup(CARD_BODY));
+
+        const err = await protocol
+            .saveMetaItem({ type: 'object', name: 'qa_fg_probe', item: fxGroup(CARD_BODY) })
+            .catch((e: any) => e);
+
+        // Non-vacuous: the build refuses it.
+        expect(atBuild).toHaveLength(1);
+        expect(err.issues.filter((i: any) => i.rule === EXPRESSION_INVALID)).toEqual(atBuild);
+    });
+});
