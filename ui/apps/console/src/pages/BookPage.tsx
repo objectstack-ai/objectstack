@@ -45,12 +45,12 @@ export function DocRefusal({ name, message }: { name?: string; message?: string 
 export default function BookPage() {
   const { slug, appName } = useParams<{ slug: string; appName?: string }>();
   const { t } = useObjectTranslation();
-  const { books, docs, state } = useBookData();
+  const { books, authoredBooks, docs, state } = useBookData();
 
   const found = useMemo(() => books.find((b) => bookSlug(b) === slug), [books, slug]);
   const opensTo = useMemo(
-    () => (found ? firstDoc(resolveBookTree(found, docs)) : undefined),
-    [found, docs],
+    () => (found ? firstDoc(resolveBookTree(found, docs, undefined, authoredBooks)) : undefined),
+    [found, docs, authoredBooks],
   );
 
   if (state === 'loading') {
