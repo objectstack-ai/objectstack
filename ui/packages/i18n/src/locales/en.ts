@@ -445,6 +445,7 @@ const en = {
       selectTeam: 'Select a team',
       selectBusinessUnit: 'Select a business unit',
       selectPosition: 'Select a position',
+      selectQueue: 'Select a queue',
       selectUnitAndSubordinates: 'Select a business unit',
       selectField: 'Select a user field',
       noUserFields: 'No user fields on this object',
@@ -1001,6 +1002,8 @@ const en = {
     viewAllCount_other: 'View all {{count}} records',
     tabs: 'Tabs',
     allRecords: 'All Records',
+    sittingInQueue: 'In a queue',
+    sittingInQueueHint: 'Show only records waiting in a queue for someone to claim them',
     // objectui#13405 — the synthetic trailing tab a `showAllRecords` user-filter bar adds.
     userFilters: {
       allRecords: 'All records',
@@ -1408,6 +1411,10 @@ const en = {
     commentEditFailed: 'Your edit was not saved. The comment keeps its previous text.',
     commentDeleteFailed: 'The comment was not deleted. Please try again.',
     linkCopyFailed: 'Failed to copy link',
+    claim: 'Claim',
+    claimed: 'You own this record now.',
+    claimTaken: 'Someone else claimed this record first.',
+    claimFailed: 'The claim was not accepted.',
     cancel: 'Cancel',
     cancelEdit: 'Discard changes',
     sectionMoreDetails: 'More details',

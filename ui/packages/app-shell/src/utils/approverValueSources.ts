@@ -67,6 +67,30 @@ export function registryValueSourceOf(raw: unknown): RegistryValueSource | undef
     : undefined;
 }
 
+/**
+ * The two-source member of the spec's approver value binding (ADR-0142 D6):
+ * the value is one machine name that resolves among the items of metadata
+ * `type` AND the organization's rows of `object`, committed as `valueField`.
+ * `queue` is bound that way.
+ */
+export type RegistryAndDataValueSource = Extract<ApproverValueSource, { source: 'registry-and-data' }>;
+
+/**
+ * Read one binding as the two-source member, or `undefined`. An entry missing
+ * either half is not this member: a picker that lists one source would offer
+ * half of what the value can name.
+ */
+export function registryAndDataValueSourceOf(raw: unknown): RegistryAndDataValueSource | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const s = raw as { source?: unknown; type?: unknown; object?: unknown; valueField?: unknown };
+  return s.source === 'registry-and-data'
+    && typeof s.type === 'string' && s.type
+    && typeof s.object === 'string' && s.object
+    && typeof s.valueField === 'string' && s.valueField
+    ? { source: 'registry-and-data', type: s.type, object: s.object, valueField: s.valueField }
+    : undefined;
+}
+
 /** Approver kind → the metadata type its value names, for every registry-bound kind in `sources`. */
 export function registryTypesOf(sources: Readonly<Record<string, unknown>>): Record<string, string> {
   return Object.fromEntries(
@@ -84,3 +108,16 @@ export function registryTypesOf(sources: Readonly<Record<string, unknown>>): Rec
  */
 export const APPROVER_REGISTRY_TYPES: Readonly<Record<string, string>> =
   registryTypesOf(APPROVER_VALUE_SOURCES);
+
+/**
+ * The two-source approver kinds of the bundled spec, kind → binding —
+ * `{ queue: { type: 'queue', object: 'sys_queue', valueField: 'name' } }` on a
+ * spec carrying ADR-0142 D6. Read off the published binding, never listed here.
+ */
+export const APPROVER_TWO_SOURCE_BINDINGS: Readonly<Record<string, RegistryAndDataValueSource>> =
+  Object.fromEntries(
+    Object.entries(APPROVER_VALUE_SOURCES).flatMap(([kind, source]) => {
+      const twoSource = registryAndDataValueSourceOf(source);
+      return twoSource ? [[kind, twoSource]] : [];
+    }),
+  );
