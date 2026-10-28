@@ -487,7 +487,7 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 /** Documentation surfaces read by this gate. Kept identical in spirit to
  *  `check-doc-links.mjs`: the pages a reader lands on, plus every published
  *  package README (which ships to npm inside the package's `files`). */
-const DOCS_ROOT = 'content/docs';
+const DOCS_ROOT = '../content/docs/frontend';
 const PACKAGES_DIR = 'packages';
 
 /**

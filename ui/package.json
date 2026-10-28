@@ -22,8 +22,6 @@
     "test": "vitest run",
     "test:unit": "vitest run --project unit",
     "test:integration": "vitest run --project dom --project dom-heavy",
-    "site:dev": "pnpm --filter @object-ui/site dev",
-    "site:start": "pnpm --filter @object-ui/site start",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage",

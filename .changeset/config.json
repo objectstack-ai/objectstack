@@ -124,6 +124,6 @@
   "access": "public",
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
-  "ignore": ["@object-ui/example-*", "@object-ui/site", "@object-ui/runner", "@object-ui/test-support"],
+  "ignore": ["@object-ui/example-*", "@object-ui/runner", "@object-ui/test-support"],
   "privatePackages": { "version": true, "tag": false }
 }

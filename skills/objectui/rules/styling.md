@@ -315,6 +315,6 @@ channel triples, not finished colours:
 }
 ```
 
-See `content/docs/guide/theming.md` for the full token list and the `ThemeProvider` route.
+See https://objectstack.ai/docs/frontend/theming for the full token list and the `ThemeProvider` route.
 
 **Without these imports, ObjectUI components will render but look completely unstyled.**

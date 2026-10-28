@@ -248,7 +248,7 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 // ── Configuration ────────────────────────────────────────────────────────────
 
 /** The content tree — the first leg of `SCAN_SURFACE`. */
-export const DOCS_ROOT = 'content/docs';
+export const DOCS_ROOT = '../content/docs/frontend';
 
 /** Page extensions collected under `DOCS_ROOT` — both, as the sibling gate collects. */
 export const DOC_EXTENSIONS = ['.mdx', '.md'];

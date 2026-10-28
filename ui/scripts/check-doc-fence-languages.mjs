@@ -154,7 +154,7 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 // ── The scan surface — kept identical to check-doc-snippet-types by test ─────
 
-const DOCS_ROOT = 'content/docs';
+const DOCS_ROOT = '../content/docs/frontend';
 const PACKAGES_DIR = 'packages';
 const DOC_EXTENSIONS = ['.mdx', '.md'];
 

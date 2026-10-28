@@ -59,5 +59,5 @@ source of truth for that mapping.
 - Console routes: `packages/app-shell/src/console/AppContent.tsx`
 - Bare data surface decision record: `docs/adr/0055-parameterized-bare-data-surface.md`
   (amends ADR-0053's context table)
-- Human-facing version: `content/docs/guide/designing-app-navigation.md`
+- Human-facing version: https://objectstack.ai/docs/ui/apps#designing-the-navigation
   (derived from this guide — update both together)

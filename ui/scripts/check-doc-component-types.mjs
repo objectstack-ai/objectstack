@@ -308,7 +308,7 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
  *  for. The full ownership map for all three doc gates — including the trees NO
  *  gate reads, and why `skills/**` is deliberately not one of them — is stated
  *  once in `check-doc-snippet-types.mjs`, beside `UNGATED_DOCS`. */
-const DOCS_ROOT = 'content/docs';
+const DOCS_ROOT = '../content/docs/frontend';
 
 /**
  * Per-app documentation trees, `apps/<app>/docs/**` (objectui#6600).
