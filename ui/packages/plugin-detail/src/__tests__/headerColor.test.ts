@@ -134,9 +134,10 @@ describe('headerColor — (1) the scanner can extract every class it can emit', 
     }
     // …and the call sites do go through the resolver, so the check above is
     // not passing because `headerColor` stopped being read at all.
-    // Three faces read it: the card face (open and collapsible) and the
-    // record page v3 frameless face (objectstack#27055).
-    expect(callSiteSource.match(/headerColorClass\(section\.headerColor\)/g) ?? []).toHaveLength(3);
+    // Four sites read it: the card face (open and collapsible) and the
+    // record page v3 frameless face (collapsible and plain heading,
+    // objectstack#27055).
+    expect(callSiteSource.match(/headerColorClass\(section\.headerColor\)/g) ?? []).toHaveLength(4);
   });
 });
 

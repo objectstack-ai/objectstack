@@ -371,6 +371,9 @@ describe('RecordDetailView — the feed does not follow the user to the next rec
 });
 
 describe('RecordDetailView — optimistic comments ride with their own record (#3268)', () => {
+  // These mount an AUTHORED `record:discussion`, whose empty copy is the
+  // discussion's own — not the synthesized page's timeline stream.
+  const EMPTY_COMMENTS = DETAIL_DEFAULT_TRANSLATIONS['detail.noCommentsYet'];
   /** Post a comment through the real composer on the authored panel. */
   async function postComment(text: string) {
     const box = await screen.findByPlaceholderText(COMMENT_PLACEHOLDER);
