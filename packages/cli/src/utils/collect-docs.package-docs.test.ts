@@ -685,20 +685,147 @@ describe('same-prefix links resolve ARTIFACT-WIDE, not per package (C2)', () => 
     expect(brokenLinks(issues)).toEqual([]);
   });
 
-  it('metadata embeds and links are partitioned the SAME way — artifact-wide', () => {
-    // The inconsistency the review named: embeds already resolved artifact-wide
-    // while links did not. One fixture, both halves, one verdict.
+  it('a link resolves artifact-wide while an embed resolves in its OWNER\'s scope (#27090)', () => {
+    // One fixture, both halves. `crm_onboard` sits on the artifact's top level,
+    // which the door registers under the artifact's `manifest.id` — `core`'s
+    // id — so `core` owns it and its doc may embed it. ⚠️ Before #27090 the
+    // embed resolved against the whole stack, the same as the link.
     const FENCE = '```';
     const embed = [`${FENCE}metadata`, 'type: flow\nname: crm_onboard', FENCE].join('\n');
     writePackageDoc('core', 'crm_core_guide', `Link: [o](./crm_orders_guide.md)\n\n${embed}`);
-    writePackageDoc('orders', 'crm_orders_guide', '# Orders');
+    writePackageDoc('orders', 'crm_orders_guide', `Back: [c](./crm_core_guide.md)\n\n${embed}`);
 
-    const { issues } = collectAndLintDocs(configPath, sharedStack({
-      // `crm_onboard` is owned by the artifact, not by `core` — an embed has
-      // always resolved against the whole stack, and now a link does too.
-      flows: [{ name: 'crm_onboard' }],
-    }));
+    const { issues } = collectAndLintDocs(configPath, sharedStack({ flows: [{ name: 'crm_onboard' }] }));
+    // Both links resolve; only `orders`' embed is refused — `orders` neither owns
+    // the top level nor declares `core`.
+    expect(issues.filter((i) => i.severity === 'error').map((i) => [i.rule, i.path])).toEqual([
+      ['docs/metadata-embed-ref', 'packages[1].docs/crm_orders_guide'],
+    ]);
+  });
+});
+
+// ── #27090: an embed is judged against the package that ships the doc ──────
+describe('docs/metadata-embed-ref judges a package doc against its package and declared dependencies', () => {
+  const FENCE = '```';
+  const smEmbed = (object: string, name: string) =>
+    [`${FENCE}metadata`, `type: state_machine\nobject: ${object}\nname: ${name}`, FENCE].join('\n');
+  const lifecycle = (object: string) => ({
+    name: object,
+    label: object,
+    fields: { status: { type: 'text' as const, label: 'Status' } },
+    validations: [{
+      type: 'state_machine' as const,
+      name: `${object}_lifecycle`,
+      message: 'Not an allowed status change',
+      field: 'status',
+      transitions: { new: ['closed'] },
+    }],
+  });
+  const embedRefs = (issues: readonly DocIssue[]) => issues.filter((i) => i.rule === 'docs/metadata-embed-ref');
+
+  /** Two packages of one artifact, the way `composeStacks(…, { manifest: 'preserve' })` writes them. */
+  const composed = (serviceDependsOnApp = false, appDependsOnService = false) => composeStacks([
+    defineStack({
+      manifest: {
+        id: 'com.example.split.service', name: 'service', version: '1.0.0', type: 'module', namespace: 'crm',
+        ...(serviceDependsOnApp ? { dependencies: { 'com.example.split.app': '^1.0.0' } } : {}),
+      },
+      objects: [lifecycle('crm_case')],
+    }),
+    defineStack({
+      manifest: {
+        id: 'com.example.split.app', name: 'app', version: '1.0.0', type: 'app', namespace: 'crm',
+        ...(appDependsOnService ? { dependencies: { 'com.example.split.service': '^1.0.0' } } : {}),
+      },
+      objects: [lifecycle('crm_account')],
+    }),
+  ], { manifest: 'preserve' }) as unknown as Record<string, unknown>;
+
+  it('a package doc embedding its OWN package\'s object builds — the card\'s acceptance 1', () => {
+    writePackageDoc('service', 'crm_case_guide', smEmbed('crm_case', 'crm_case_lifecycle'));
+    const artifact = composed();
+    // The measured premise: the composed artifact carries no top-level copy, so
+    // the old pass (the artifact's top level) had nothing to resolve against.
+    expect(artifact.objects).toBeUndefined();
+
+    const { issues, packageDocs } = collectAndLintDocs(configPath, artifact);
+    expect(packageDocs.map((set) => [set.dir, set.docs.map((d) => d.name)])).toEqual([
+      ['src/service/docs', ['crm_case_guide']],
+    ]);
     expect(issues.filter((i) => i.severity === 'error')).toEqual([]);
+  });
+
+  it('...and a dead reference in that same doc is still refused, naming the scope it judged', () => {
+    writePackageDoc('service', 'crm_case_guide', smEmbed('crm_cas', 'crm_case_lifecycle'));
+    const refused = embedRefs(collectAndLintDocs(configPath, composed()).issues);
+    expect(refused).toHaveLength(1);
+    expect(refused[0]).toMatchObject({ severity: 'error', path: 'packages[0].docs/crm_case_guide' });
+    expect(refused[0].message).toContain('which does not exist in this package — did you mean `crm_case`?');
+  });
+
+  it('a doc embedding a SIBLING\'s object it does not declare is refused — the card\'s acceptance 2', () => {
+    writePackageDoc('app', 'crm_app_guide', smEmbed('crm_case', 'crm_case_lifecycle'));
+    const refused = embedRefs(collectAndLintDocs(configPath, composed()).issues);
+    expect(refused).toHaveLength(1);
+    expect(refused[0]).toMatchObject({ severity: 'error', path: 'packages[1].docs/crm_app_guide' });
+  });
+
+  it('...and builds once that package DECLARES the sibling in manifest.dependencies', () => {
+    writePackageDoc('app', 'crm_app_guide', smEmbed('crm_case', 'crm_case_lifecycle'));
+    const { issues } = collectAndLintDocs(configPath, composed(false, true));
+    expect(issues.filter((i) => i.severity === 'error')).toEqual([]);
+  });
+
+  it('⛔ a declaration is one-way: the declared package does not reach back', () => {
+    // `service` declares `app`; `app` declares nothing. `app`'s doc embedding
+    // `service`'s object stays refused, and the message names `app`'s scope.
+    writePackageDoc('app', 'crm_app_guide', smEmbed('crm_case', 'crm_case_lifecycle'));
+    writePackageDoc('service', 'crm_case_guide', smEmbed('crm_account', 'crm_account_lifecycle'));
+    const refused = embedRefs(collectAndLintDocs(configPath, composed(true, false)).issues);
+    expect(refused.map((i) => i.path)).toEqual(['packages[1].docs/crm_app_guide']);
+  });
+
+  it('a refusal in a package that declares dependencies names them as the scope it judged', () => {
+    writePackageDoc('service', 'crm_case_guide', smEmbed('crm_lead', 'crm_lead_lifecycle'));
+    const refused = embedRefs(collectAndLintDocs(configPath, composed(true, false)).issues);
+    expect(refused).toHaveLength(1);
+    expect(refused[0].message).toContain(
+      'which does not exist in this package or its declared dependencies (com.example.split.app)',
+    );
+  });
+
+  it('a package\'s INLINE body doc is judged in the same scope — it was not judged at all before', () => {
+    const artifact = composed();
+    const packages = artifact.packages as Array<{ manifest: Record<string, unknown> }>;
+    packages[0].manifest.docs = [{ name: 'crm_case_inline', content: smEmbed('crm_case', 'crm_case_lifecycle') }];
+    packages[1].manifest.docs = [{ name: 'crm_app_inline', content: smEmbed('crm_case', 'crm_case_lifecycle') }];
+
+    const refused = embedRefs(collectAndLintDocs(configPath, artifact).issues);
+    // `service`'s own embed builds; `app`'s embed of `service`'s object does not.
+    expect(refused.map((i) => i.path)).toEqual(['packages[1].docs/crm_app_inline']);
+  });
+
+  it('a flat src/docs/ doc ships on the package the artifact manifest names, and resolves in its scope', () => {
+    // `composeStacks` picks the LAST input's manifest, so the flat docs belong to
+    // `app` (#22190): its own object resolves, `service`'s does only once `app`
+    // declares it.
+    writeFlatDoc('crm_index', `${smEmbed('crm_account', 'crm_account_lifecycle')}\n\n${smEmbed('crm_case', 'crm_case_lifecycle')}`);
+    const refused = embedRefs(collectAndLintDocs(configPath, composed()).issues);
+    expect(refused.map((i) => [i.path, i.message.includes('"crm_case"')])).toEqual([['docs/crm_index', true]]);
+
+    expect(embedRefs(collectAndLintDocs(configPath, composed(false, true)).issues)).toEqual([]);
+  });
+
+  it('a stack-level doc embedding a stack object is unchanged, in a stack with no packages[]', () => {
+    writeFlatDoc('crm_index', smEmbed('crm_lead', 'crm_lead_lifecycle'));
+    const single = { manifest: { namespace: 'crm' }, objects: [lifecycle('crm_lead')] };
+    expect(collectAndLintDocs(configPath, single).issues).toEqual([]);
+
+    writeFlatDoc('crm_index', smEmbed('crm_leed', 'crm_lead_lifecycle'));
+    const refused = embedRefs(collectAndLintDocs(configPath, single).issues);
+    expect(refused).toHaveLength(1);
+    expect(refused[0]).toMatchObject({ path: 'docs/crm_index' });
+    expect(refused[0].message).toContain('which does not exist in this package — did you mean `crm_lead`?');
   });
 });
 

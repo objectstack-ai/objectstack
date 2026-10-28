@@ -63,6 +63,8 @@
 import fs from 'fs';
 import path from 'path';
 
+import { declaredDependencyIds } from '@objectstack/core';
+
 import { artifactPackages } from './artifact-packages.js';
 import { declaredPackageEntries } from './stack-collections.js';
 
@@ -764,9 +766,12 @@ export function collectDocsFromSrc(
  * artifact may SHARE a namespace. Resolved against one package's own names, a
  * link from package A to package B's doc under the namespace they share reads
  * as broken and an artifact that built green stops building. So the caller
- * hands in every name the artifact carries and links resolve artifact-wide —
- * the same scope `lintMetadataEmbeds` already uses for the same docs, so the
- * two halves of one lint are partitioned the same way rather than two ways.
+ * hands in every name the artifact carries and links resolve artifact-wide.
+ * ⚠️ Metadata embeds do NOT share that scope since #27090: an embed is judged
+ * against the package that ships the doc plus the packages it declares
+ * ({@link lintMetadataEmbeds}). A link to a sibling's prose degrades to a
+ * "doc not found" notice when it dangles; an embed renders that sibling's live
+ * metadata, which ADR-0051 resolves through the dependency set only.
  *
  * ⚠️ Omitted, it falls back to this set's own names: the pre-#18431 behaviour,
  * and exactly right for the caller that omits it — a stack with no `packages[]`,
@@ -969,21 +974,53 @@ function nearest(name: string, candidates: string[]): string | undefined {
   return best !== undefined && bestD <= Math.max(2, Math.floor(name.length / 3)) ? best : undefined;
 }
 
+/** A package of this artifact that a doc's owner declares in `manifest.dependencies`. */
+export interface EmbedDependency {
+  readonly id: string;
+  readonly body: Record<string, unknown>;
+}
+
 /**
- * Lint ```metadata embeds (ADR-0051): body shape + reference liveness against
- * the package's OWN metadata. A broken embed degrades to a placeholder at
- * render time (never crashes), but a dead same-package reference is a build
- * error here — the same posture as `docs/broken-link`. Cross-package embeds
- * are out of v1 scope, so every reference must resolve within this stack.
+ * Lint ```metadata embeds (ADR-0051): body shape + reference liveness. A broken
+ * embed degrades to a placeholder at render time (never crashes), but a dead
+ * reference is a build error here — the same posture as `docs/broken-link`.
+ *
+ * ## What a reference resolves against (#27090)
+ *
+ * The package that ships the doc, then the packages it DECLARES it depends on —
+ * ADR-0051's "resolves within the doc's own package, then its dependencies",
+ * the set ADR-0046 §3.3 resolves doc links against. `own` is what the owner
+ * carries: a stack's top level, a package body, or both (the package the
+ * artifact's `manifest.id` names, whose body the door also registers the
+ * top level under). `dependencies` are the declared packages this artifact
+ * carries; {@link collectAndLintDocs} resolves them.
+ *
+ * ⛔ Not "anything in the artifact": a package that declares no edge to a
+ * sibling cannot reach it, so an embed of the sibling's item is still refused.
+ * A declared dependency the artifact does not carry is an installed package's
+ * business and is not judged here.
+ *
+ * Called with a stack and nothing else — every single-package stack — the scope
+ * is that stack's own collections, exactly as it always was.
  */
-export function lintMetadataEmbeds(docs: DocItem[], stack: Record<string, unknown>): DocIssue[] {
+export function lintMetadataEmbeds(
+  docs: DocItem[],
+  own: Record<string, unknown> | readonly Record<string, unknown>[],
+  dependencies: readonly EmbedDependency[] = [],
+): DocIssue[] {
   const issues: DocIssue[] = [];
-  const objects = Array.isArray(stack.objects) ? (stack.objects as AnyRec[]) : [];
-  const flows = Array.isArray(stack.flows) ? (stack.flows as AnyRec[]) : [];
-  const permissions = Array.isArray(stack.permissions) ? (stack.permissions as AnyRec[]) : [];
-  const objByName = new Map(objects.map((o) => [String(o?.name), o]));
-  const flowNames = flows.map((f) => String(f?.name));
-  const permNames = permissions.map((p) => String(p?.name));
+  // Dependencies first and the owner last, so an owner's object wins a name a
+  // dependency also carries (`new Map` keeps the last entry for a key).
+  const sources = [...dependencies.map((dep) => dep.body), ...(Array.isArray(own) ? own : [own])];
+  const collection = (key: string): AnyRec[] =>
+    sources.flatMap((source) => (Array.isArray(source[key]) ? (source[key] as AnyRec[]) : []));
+  const objByName = new Map(collection('objects').map((o) => [String(o?.name), o]));
+  const flowNames = collection('flows').map((f) => String(f?.name));
+  const permNames = collection('permissions').map((p) => String(p?.name));
+  // The scope the verdict names, so "does not exist in …" says what was judged.
+  const scope = dependencies.length === 0
+    ? 'this package'
+    : `this package or its declared dependencies (${quotedList(dependencies.map((dep) => dep.id))})`;
 
   const scan = (docName: string, content: string, locale?: string): void => {
     const where = `docs/${docName}${locale ? ` (${locale})` : ''}`;
@@ -1008,7 +1045,7 @@ export function lintMetadataEmbeds(docs: DocItem[], stack: Record<string, unknow
         continue;
       }
 
-      // ── reference liveness (same-package) ──
+      // ── reference liveness (the owner + its declared dependencies) ──
       if (type === 'state_machine') {
         if (!f.object) {
           err('docs/metadata-embed', `state_machine embed "${f.name}" in "${docName}" is missing \`object\` (a state machine is a rule on an object).`);
@@ -1017,7 +1054,7 @@ export function lintMetadataEmbeds(docs: DocItem[], stack: Record<string, unknow
         const obj = objByName.get(f.object);
         if (!obj) {
           const s = nearest(f.object, [...objByName.keys()]);
-          err('docs/metadata-embed-ref', `state_machine embed in "${docName}" references object "${f.object}", which does not exist in this package${s ? ` — did you mean \`${s}\`?` : ''}.`);
+          err('docs/metadata-embed-ref', `state_machine embed in "${docName}" references object "${f.object}", which does not exist in ${scope}${s ? ` — did you mean \`${s}\`?` : ''}.`);
           continue;
         }
         const rules = obj.validations ?? obj.validationRules;
@@ -1031,12 +1068,12 @@ export function lintMetadataEmbeds(docs: DocItem[], stack: Record<string, unknow
       } else if (type === 'flow') {
         if (!flowNames.includes(f.name)) {
           const s = nearest(f.name, flowNames);
-          err('docs/metadata-embed-ref', `flow embed in "${docName}" references flow "${f.name}", which does not exist in this package${s ? ` — did you mean \`${s}\`?` : ''}.`);
+          err('docs/metadata-embed-ref', `flow embed in "${docName}" references flow "${f.name}", which does not exist in ${scope}${s ? ` — did you mean \`${s}\`?` : ''}.`);
         }
       } else if (type === 'permission') {
         if (!permNames.includes(f.name)) {
           const s = nearest(f.name, permNames);
-          err('docs/metadata-embed-ref', `permission embed in "${docName}" references permission set "${f.name}", which does not exist in this package${s ? ` — did you mean \`${s}\`?` : ''}.`);
+          err('docs/metadata-embed-ref', `permission embed in "${docName}" references permission set "${f.name}", which does not exist in ${scope}${s ? ` — did you mean \`${s}\`?` : ''}.`);
         }
       }
     }
@@ -1309,10 +1346,10 @@ function underPackage(issues: readonly DocIssue[], index: number): DocIssue[] {
  *
  * ⛔ The OWNERSHIP question and the EXISTENCE question are not the same
  * question, and only the first one is partitioned. Same-prefix link resolution
- * and metadata-embed reference liveness both resolve across the WHOLE artifact:
- * a doc's namespace prefix says who judges its NAME, while a link asks whether
- * the target is there, and ADR-0130 D1 exists precisely so that N packages of
- * one artifact may share a namespace and cross-link inside it.
+ * resolves across the WHOLE artifact: a doc's namespace prefix says who judges
+ * its NAME, while a link asks whether the target is there, and ADR-0130 D1
+ * exists precisely so that N packages of one artifact may share a namespace and
+ * cross-link inside it.
  *
  * Partitioning links too would have turned an ordinary cross-package link into
  * `docs/broken-link` and stopped an artifact that built green from building —
@@ -1320,9 +1357,28 @@ function underPackage(issues: readonly DocIssue[], index: number): DocIssue[] {
  * pinned by `a link across two packages sharing one namespace` in
  * `collect-docs.package-docs.test.ts`.
  *
+ * ## Metadata embeds follow the OWNERSHIP partition (#27090)
+ *
+ * An embed is not a link: it renders another item's live metadata, and ADR-0051
+ * resolves it within the doc's own package, then its declared dependencies. So
+ * {@link lintMetadataEmbeds} runs once per owner, over the same sets `lintDocs`
+ * judges, against that owner's scope:
+ *
+ *   - a package's docs (body and directory alike) against its own body plus the
+ *     packages of this artifact its `manifest.dependencies` names;
+ *   - the stack-level docs against the stack's own top level, plus — when the
+ *     artifact's `manifest.id` names one of its packages ({@link flatDocsOwner})
+ *     — that package's body and declared dependencies, because that is the
+ *     package those docs ship on and the top level registers under.
+ *
+ * Before this, both passes read the artifact's top level, which a composed
+ * multi-package artifact leaves empty (#14512): a package doc could not embed
+ * its own package's object, and a body doc was never judged at all.
+ *
  * ⚠️ A stack with no `packages[]` — every single-package app — takes exactly
- * the old path: nothing is claimed, so the stack-level set IS the whole set and
- * the issue list is unchanged, item for item.
+ * the old path: nothing is claimed, so the stack-level set IS the whole set,
+ * its embed scope is the stack itself, and the issue list is unchanged, item
+ * for item.
  */
 export function collectAndLintDocs(
   configPath: string,
@@ -1359,17 +1415,33 @@ export function collectAndLintDocs(
       .filter((name): name is string => typeof name === 'string'),
   );
 
+  // [#27090] What an embed in an owner's docs resolves against: the owner, then
+  // the packages of this artifact it declares in `manifest.dependencies`. The
+  // package `flatDocsOwner` names also owns the top level, which the door
+  // registers under the artifact's `manifest.id`.
+  const bodies = artifactPackages({ packages: declaredPackageEntries(stack.packages) });
+  const bodyById = new Map(bodies.map((entry) => [entry.id, entry]));
+  const flatOwner = flatDocsOwner(stack);
+  const embedScope = (index: number | undefined): [Record<string, unknown>[], EmbedDependency[]] => {
+    const body = index === undefined ? undefined : bodies[index]?.body;
+    if (body === undefined) return [[stack], []];
+    const own = index === flatOwner?.index ? [stack, body] : [body];
+    const dependencies = declaredDependencyIds(body).flatMap((id) => {
+      const dep = bodyById.get(id);
+      return dep !== undefined && dep.index !== index ? [{ id, body: dep.body }] : [];
+    });
+    return [own, dependencies];
+  };
+
   const issues: DocIssue[] = [
     ...collected.issues,
     ...lintDocs(stackScoped, namespace, artifactNames),
-    ...lintMetadataEmbeds(docs, stack),
+    ...lintMetadataEmbeds(stackScoped, ...embedScope(flatOwner?.index)),
     ...lintDocNavTargets(stack, artifactNames),
   ];
   for (const entry of owned) {
     issues.push(...underPackage(lintDocs(entry.all, entry.ref.namespace, artifactNames), entry.ref.index));
-    // Only the docs read off disk need an embed pass here: a doc already on the
-    // body is also in `docs` above, where `lintMetadataEmbeds` has judged it.
-    issues.push(...underPackage(lintMetadataEmbeds(entry.fromDisk, stack), entry.ref.index));
+    issues.push(...underPackage(lintMetadataEmbeds(entry.all, ...embedScope(entry.ref.index)), entry.ref.index));
   }
   issues.push(...lintDocNamesAcrossOwners([
     { label: 'the stack itself', docs: stackScoped },

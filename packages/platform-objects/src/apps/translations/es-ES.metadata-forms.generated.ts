@@ -945,6 +945,18 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Memoria (MB)",
         helpText: "Límite de memoria por invocación (MB, máx. 256)"
       },
+      refusals: {
+        label: "Rechazos",
+        helpText: "Catálogo de rechazos, indexado por el código SCREAMING_SNAKE que lanza el cuerpo (p. ej. CLEAN_VERSION_REQUIRED). Quien llama recibe el mensaje declarado, traducido a su idioma, con el estado declarado. Solo cuerpos JavaScript (L2)"
+      },
+      "refusals.message": {
+        label: "Mensaje",
+        helpText: "La frase que lee el usuario cuando el cuerpo lanza este código — texto plano, sin marcadores"
+      },
+      "refusals.status": {
+        label: "Estado",
+        helpText: "Estado HTTP del rechazo (400–499). Si se omite: 400"
+      },
       handler: {
         label: "Manejador",
         helpText: "Nombre de función manejadora (obsoleto — preferir `body`)"

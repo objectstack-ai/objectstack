@@ -74,6 +74,22 @@ export function firstToken(input: string): string {
   return m ? m[0] : '';
 }
 
+/**
+ * The `kind` a new page of this `type` starts as.
+ *
+ * A record page starts `slotted` with no slot overridden: what it renders is
+ * exactly the synthesized default page, so it stays in step with the object
+ * (new fields, related lists, sections) until the author overrides a slot.
+ * Seeding a `full` page with a copy of the synthesized regions forked every
+ * authored record page from the default on the day it was created. Owning
+ * the whole layout is an explicit act — choosing `full` here, or the
+ * page designer's "Convert to full page" action. Every other page type is a
+ * `full` page: `slotted` is a record-page mode only.
+ */
+export function pageKindForType(type: unknown): 'slotted' | 'full' {
+  return type === 'record' ? 'slotted' : 'full';
+}
+
 export function applyTransform(
   transform: CreateDeriveRule['transform'],
   value: unknown,
@@ -88,6 +104,8 @@ export function applyTransform(
       return titlecase(str);
     case 'first-token':
       return firstToken(str);
+    case 'page-kind':
+      return pageKindForType(value);
     default:
       return str;
   }
