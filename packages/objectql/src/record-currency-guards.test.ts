@@ -18,6 +18,7 @@
 // `record-currency-probes.dogfood.test.ts`.
 
 import { describe, it, expect, beforeEach } from 'vitest';
+import type { EngineAggregateOptions, EngineUpdateOptions } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
 
 function makeDriver() {
@@ -42,7 +43,8 @@ function makeDriver() {
     name: 'memory', version: '0.0.0', supports: {},
     async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
     async find(object: string, ast: any) {
-      return Array.from(storeFor(object).values()).filter((r) => matches(r, ast?.where)).map((r) => ({ ...r }));
+      const rows = Array.from(storeFor(object).values()).filter((r) => matches(r, ast?.where)).map((r) => ({ ...r }));
+      return typeof ast?.limit === 'number' ? rows.slice(0, ast.limit) : rows;
     },
     async findOne(object: string, ast: any) {
       for (const r of storeFor(object).values()) if (matches(r, ast?.where)) return { ...r };
@@ -102,6 +104,9 @@ const INVALID_FIELD = { code: 'INVALID_FIELD', status: 400, httpStatus: 400 };
 const INVALID_METADATA = { code: 'INVALID_METADATA', status: 422, httpStatus: 422 };
 
 const RECORD = { currencyMode: 'record', currencyField: 'currency_code' } as const;
+/** Typed at the call, never asserted (`check:query-options-erasure`). */
+const aggregateQuery = (query: EngineAggregateOptions): EngineAggregateOptions => query;
+const BATCH: EngineUpdateOptions = { where: { title: 'batch' }, multi: true };
 
 const FX_INVOICE = {
   name: 'fx_invoice',
@@ -180,13 +185,13 @@ describe('a record-mode amount is stored with its currency code (ERR_CURRENCY_CO
     const a = await engine.insert('fx_invoice', { title: 'batch', amount: 1, currency_code: 'EUR' });
     const b = await engine.insert('fx_invoice', { title: 'batch' });
 
-    const err = await refusalOf(engine.update('fx_invoice', { amount: 9 }, { where: { title: 'batch' }, multi: true } as any));
+    const err = await refusalOf(engine.update('fx_invoice', { amount: 9 }, BATCH));
     expect(envelopeOf(err)).toEqual(CODE_REQUIRED);
     expect(err?.message).toContain(`(record ${b.id})`);
     expect(storeFor('fx_invoice').get(a.id).amount).toBe(1);
 
     // The control: the same write carrying the code.
-    await engine.update('fx_invoice', { amount: 9, currency_code: 'EUR' }, { where: { title: 'batch' }, multi: true } as any);
+    await engine.update('fx_invoice', { amount: 9, currency_code: 'EUR' }, BATCH);
     expect(storeFor('fx_invoice').get(b.id)).toMatchObject({ amount: 9, currency_code: 'EUR' });
   });
 });
@@ -202,10 +207,10 @@ describe('a raw aggregate over a record-mode amount groups by its code field (PR
   });
 
   it('sum / avg / min / max ungrouped is refused INVALID_FIELD, with the route first', async () => {
-    for (const fn of ['sum', 'avg', 'min', 'max']) {
-      const err = await refusalOf(engine.aggregate('fx_invoice', {
+    for (const fn of ['sum', 'avg', 'min', 'max'] as const) {
+      const err = await refusalOf(engine.aggregate('fx_invoice', aggregateQuery({
         aggregations: [{ function: fn, field: 'amount', alias: 'v' }],
-      } as any));
+      })));
       expect(envelopeOf(err), fn).toEqual(INVALID_FIELD);
       expect(err?.field).toBe('amount');
       expect(err?.param).toBe('aggregations');
@@ -215,31 +220,32 @@ describe('a raw aggregate over a record-mode amount groups by its code field (PR
   });
 
   it('grouped by a field other than the code is still refused', async () => {
-    const err = await refusalOf(engine.aggregate('fx_invoice', {
+    const err = await refusalOf(engine.aggregate('fx_invoice', aggregateQuery({
       groupBy: ['title'],
       aggregations: [{ function: 'sum', field: 'amount', alias: 'v' }],
-    } as any));
+    })));
     expect(envelopeOf(err)).toEqual(INVALID_FIELD);
   });
 
   it('grouped by the code field answers one correct total per currency', async () => {
-    for (const groupBy of [['currency_code'], [{ field: 'currency_code' }]]) {
-      const rows = await engine.aggregate('fx_invoice', {
+    const groupings: Array<EngineAggregateOptions['groupBy']> = [['currency_code'], [{ field: 'currency_code' }]];
+    for (const groupBy of groupings) {
+      const rows = await engine.aggregate('fx_invoice', aggregateQuery({
         groupBy,
         aggregations: [{ function: 'sum', field: 'amount', alias: 'total' }],
-      } as any);
+      }));
       const byCode = Object.fromEntries(rows.map((r: any) => [r.currency_code, r.total]));
       expect(byCode).toEqual({ USD: 100, EUR: 100 });
     }
   });
 
   it('count, and a fixed-currency amount, are not judged', async () => {
-    const rows = await engine.aggregate('fx_invoice', {
+    const rows = await engine.aggregate('fx_invoice', aggregateQuery({
       aggregations: [
         { function: 'count', field: 'amount', alias: 'n' },
         { function: 'sum', field: 'amt_usd', alias: 'usd' },
       ],
-    } as any);
+    }));
     expect(rows[0]).toMatchObject({ n: 2, usd: 100 });
   });
 });

@@ -21,6 +21,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
+import type { EngineAggregateOptions } from '@objectstack/spec/data';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { installDefaultOrganization } from './default-organization.testkit.js';
@@ -36,6 +37,9 @@ const DRIVERS = [
     make: (): SqlDriver => new SqliteWasmDriver({ filename: ':memory:' }),
   },
 ];
+
+/** Typed at the call, never asserted (`check:query-options-erasure`). */
+const aggregateQuery = (query: EngineAggregateOptions): EngineAggregateOptions => query;
 
 const SYS = { context: { isSystem: true, userId: 'usr_system' } };
 
@@ -99,17 +103,17 @@ describe.each(DRIVERS)('record-currency probes: $name', ({ make }) => {
     await engine.insert('fx_invoice', { name: 'i1', currency_code: 'USD', amount: 100 }, SYS);
     await engine.insert('fx_invoice', { name: 'i2', currency_code: 'EUR', amount: 100 }, SYS);
 
-    for (const fn of ['sum', 'avg', 'min', 'max']) {
-      const err = await refusalOf(() => engine.aggregate('fx_invoice', {
+    for (const fn of ['sum', 'avg', 'min', 'max'] as const) {
+      const err = await refusalOf(() => engine.aggregate('fx_invoice', aggregateQuery({
         aggregations: [{ function: fn, field: 'amount', alias: 'v' }],
-      } as never, SYS));
+      }), SYS));
       expect(envelope(err), fn).toEqual({ code: 'INVALID_FIELD', status: 400, field: 'amount' });
     }
 
-    const rows = await engine.aggregate('fx_invoice', {
+    const rows = await engine.aggregate('fx_invoice', aggregateQuery({
       groupBy: ['currency_code'],
       aggregations: [{ function: 'sum', field: 'amount', alias: 'total' }],
-    } as never, SYS);
+    }), SYS);
     const byCode = Object.fromEntries((rows as Array<Record<string, unknown>>).map((r) => [r.currency_code, Number(r.total)]));
     expect(byCode).toEqual({ USD: 100, EUR: 100 });
   });
