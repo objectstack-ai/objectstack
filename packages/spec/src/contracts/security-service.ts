@@ -61,6 +61,7 @@
  * defensively and keep a fallback path — rather than assume registration.
  */
 
+import type { GetRecordFieldAccessResponse } from '../api/protocol.zod.js';
 import type { FilterCondition } from '../data/filter.zod.js';
 import type { ExecutionContext } from '../kernel/execution-context.zod.js';
 import type { ExplainDecision, ExplainOperation } from '../security/explain.zod.js';
@@ -603,6 +604,47 @@ export interface ISecurityService {
    * Nothing is written past the gate either way: the write path still refuses.
    */
   getWritableFields?(object: string, context?: SecurityContext): Promise<string[] | undefined>;
+
+  /**
+   * The field projection of ONE record: which fields `context` may read on
+   * `object`, and which it may write on the stored row `recordId` — the
+   * record-scoped twin of {@link getReadableFields} and
+   * {@link getWritableFields}, for a reader that holds the row (a record's
+   * edit form).
+   *
+   * **`editable` is the write gate's own verdict on that row, ⛔ never a
+   * second evaluator.** It is the complement of the fields the field-level
+   * write gate refuses on an update of `recordId` naming every field, judged
+   * on the stored row read as the caller reads it — the same pre-image an
+   * update by id is judged on. So a row-conditioned field permission
+   * (`FieldPermissionSchema.when`) contributes its lock only on the rows its
+   * condition names, and a field is in `editable` iff a by-id update of that
+   * row naming it passes field-level security. Like {@link getWritableFields},
+   * neither the object grant nor a field's own rules (`readonly`, a computed
+   * type) are part of the answer.
+   *
+   * **`readable` is {@link getReadableFields}' answer**, unchanged: reads are
+   * judged row-blind (a `when` reaches the edit vote only).
+   *
+   * **Never wider than the read path.** `null` means there is no row for this
+   * caller — absent, or one the caller cannot read — and the two are
+   * deliberately the same answer, so the projection discloses no existence the
+   * read refuses. `undefined` is "no answer — use your own fallback" (the
+   * object schema could not be resolved), as on the object-wide projections.
+   * A system context bypasses field-level security and is answered every
+   * field, for a row that exists.
+   *
+   * **OPTIONAL, and absence is a defined state.** A security service that
+   * predates it omits it; consumers feature-detect
+   * (`typeof svc.getRecordFieldAccess === 'function'`) and keep the row-less
+   * reader, which applies every row-conditioned entry as its lock and so is
+   * never wider than the gate.
+   */
+  getRecordFieldAccess?(
+    object: string,
+    recordId: string,
+    context?: SecurityContext,
+  ): Promise<GetRecordFieldAccessResponse | null | undefined>;
 
   /**
    * The effective permission-set NAMES for `context` — positions expanded and

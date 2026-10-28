@@ -3102,6 +3102,26 @@ export const GetEffectivePermissionsResponseSchema = lazySchema(() => z.object({
   systemPermissions: z.array(z.string()).describe('Effective system-level permissions'),
 }));
 
+/**
+ * The field projection of ONE record (`GET /data/{object}/{id}/field-access`):
+ * the answer a record's edit form reads. `editable` is judged on the stored row
+ * by the write gate itself, so a field permission whose `when` names only some
+ * rows locks the field only on those rows; `/auth/me/permissions`, which holds
+ * no row, keeps reporting such an entry as its lock.
+ */
+export const GetRecordFieldAccessResponseSchema = lazySchema(() => z.object({
+  object: z.string().describe('Object name'),
+  recordId: z.string().describe('The record the projection was judged on'),
+  readable: z.array(z.string()).describe(
+    'Fields the caller may read on this object. Reads are judged row-blind, so this equals the object-wide read projection',
+  ),
+  editable: z.array(z.string()).describe(
+    'Fields the caller may write on this record, as field-level security judges an update of the stored row: a '
+    + 'row-conditioned field permission locks a field only on the rows its condition names. A field absent here is '
+    + 'refused by the write gate. The object grant and a field\'s own rules (readonly, computed types) are not part of it',
+  ),
+}));
+
 // ==========================================
 // Workflow Operations — REMOVED (#4451, v17)
 // ==========================================
@@ -3915,6 +3935,7 @@ export type GetObjectPermissionsResponse = z.input<typeof GetObjectPermissionsRe
 export type GetObjectPermissionsResponseParsed = z.infer<typeof GetObjectPermissionsResponseSchema>;
 export type GetEffectivePermissionsRequest = z.input<typeof GetEffectivePermissionsRequestSchema>;
 export type GetEffectivePermissionsResponse = z.input<typeof GetEffectivePermissionsResponseSchema>;
+export type GetRecordFieldAccessResponse = z.input<typeof GetRecordFieldAccessResponseSchema>;
 
 // Workflow Types — removed with the schemas (#4451, v17); see the block comment
 // at "Workflow Operations — REMOVED" above.
