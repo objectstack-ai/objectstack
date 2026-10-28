@@ -207,11 +207,6 @@
     "src/system/worker.test.ts": {
       "TS2538: Type 'undefined' cannot be used as an index type.": 2
     },
-    "src/type-alias-convention.pin.test.ts": {
-      "TS2339: Property 'DataEngineExecuteRequestSchema' does not exist on type '…'.": 2,
-      "TS2339: Property '…' does not exist on type '…'.": 2,
-      "TS2551: Property 'DataEngineInsertRequestSchema' does not exist on type '…'. Did you mean 'DataEngineSortSchema'?": 2
-    },
     "src/ui/action.test.ts": {
       "TS4104: The type '…' is 'readonly' and cannot be assigned to the mutable type '…'.": 1
     },
