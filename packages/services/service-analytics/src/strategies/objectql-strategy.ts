@@ -9,6 +9,7 @@ import { StandardErrorCode } from '@objectstack/spec/api';
 import type { AnalyticsStrategy, StrategyContext, DatasetScopedStrategyContext } from './types.js';
 import {
   declaredDatetimeLowering,
+  declaredDateColumn,
   invalidFilterError,
   lowerAnalyticsWhere,
   NO_DATETIME_COLUMNS,
@@ -35,7 +36,7 @@ import { invalidMemberError } from '../dataset-refusal.js';
 import { projectedDimensions } from '../order-key-door.js';
 // [#21316] The package's one row comparator and window, shared with the
 // dataset door's post-pass (#3588) — this face orders by it, never by a copy.
-import { applyOrdering, applyWindow } from '../dataset-executor.js';
+import { applyOrdering, applyWindow, dateRangeWindowBounds } from '../dataset-executor.js';
 import { type LikeShape } from '../like-pattern.js';
 import { textMatchPredicateSql, sqlDialectFor, type AnalyticsSqlDialect } from '../text-match-sql.js';
 import { resolveAnalyticsDateRangeString } from '@objectstack/core';
@@ -327,7 +328,11 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // #3650 — and the time-dimension WINDOWS, through the SAME merge, so a
     // `dateRange` and a caller `where` bound on one field compose instead of
     // clobbering each other.
-    for (const { field, bounds } of this.dateRangeBounds(cube, query)) {
+    const dateColumn = declaredDateColumn(
+      ctx,
+      (member) => this.resolveStorageTarget(cube, member, objectName, relationshipReferenceOf(ctx)),
+    );
+    for (const { field, bounds } of this.dateRangeBounds(cube, query, dateColumn)) {
       const extra = this.mergeFilterOperand(filter, field, bounds);
       if (extra) conjuncts.push(extra);
     }
@@ -766,7 +771,11 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // the inclusive `<=` the engine runs there. This echo kept its own
     // type-blind copy of the rule, which rendered `< day+1` on every column,
     // until #5930 step 4.
-    for (const { member, bounds } of this.dateRangeBounds(cube, query)) {
+    const echoDateColumn = declaredDateColumn(
+      ctx,
+      (member) => this.resolveStorageTarget(cube, member, this.extractObjectName(cube), relationshipReferenceOf(ctx)),
+    );
+    for (const { member, bounds } of this.dateRangeBounds(cube, query, echoDateColumn)) {
       const windowSql = this.renderFilterNodeSql(normalizeDateRangeWindow(member, bounds, echoLowering), cube, params, ctx);
       if (windowSql) whereParts.push(windowSql);
     }
@@ -2071,6 +2080,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
   private dateRangeBounds(
     cube: Cube,
     query: AnalyticsQuery,
+    dateColumn: (member: string) => boolean,
   ): Array<{ member: string; field: string; bounds: Record<string, unknown> }> {
     const out: Array<{ member: string; field: string; bounds: Record<string, unknown> }> = [];
     for (const td of query.timeDimensions ?? []) {
@@ -2089,10 +2099,10 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
           // preset stops BEFORE its end instant (`$lt`, so two adjacent windows
           // cannot both count a row stamped on the boundary — #16179's
           // memory-side repair, same rule on this side), the three rolling ones
-          // before tomorrow begins, as `today` does.
-          bounds: window.endExclusive
-            ? { $gte: window.start, $lt: window.end }
-            : { $gte: window.start, $lte: window.end },
+          // before tomorrow begins, as `today` does. [#27172] On a `date`
+          // column it is the calendar days it covers in the reference zone,
+          // the pair `dateRangeWindowBounds` spells for every face.
+          bounds: dateRangeWindowBounds(window, query.timezone, dateColumn(td.dimension)),
         });
         continue;
       }
