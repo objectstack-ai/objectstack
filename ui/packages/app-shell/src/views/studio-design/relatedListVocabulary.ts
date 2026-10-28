@@ -127,9 +127,8 @@ export function useRelatedListCatalog(name: string, draft: ObjectDoc): RelatedLi
   // Read the list first: on the console's store the read is what asks for it.
   const objects = metadata.objects;
   const ready = (metadata.getTypeStatus?.('object') ?? 'ready') === 'ready';
-  const list = Array.isArray(objects) ? objects : [];
   return React.useMemo(() => {
-    const catalog = catalogWithDraft(list, name, draft);
+    const catalog = catalogWithDraft(Array.isArray(objects) ? objects : [], name, draft);
     return { catalog, relationships: inboundRelationships(name, catalog), ready };
-  }, [list, name, draft, ready]);
+  }, [objects, name, draft, ready]);
 }
