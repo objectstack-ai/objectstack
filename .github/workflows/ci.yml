@@ -162,7 +162,8 @@ jobs:
       # filter below and the `test` job's `if:` (#9829, #10015).
       crosspkg: ${{ github.event_name != 'merge_group' && steps.changes.outputs.crosspkg || 'true' }}
       # The objectui tree under `ui/` (objectstack#25677). Three outputs, read
-      # together by the four `* UI` jobs at the bottom of this file:
+      # together by the five `* UI` jobs at the bottom of this file (Type Check
+      # UI, Test UI, Lint UI, Build & E2E UI and Live E2E UI):
       #   ui            — a path under ui/, a root file the ui jobs build from
       #                   (the lockfile, the workspace, turbo.json), or a root
       #                   the ui gates read (every root workflow, the prompts,
@@ -175,7 +176,7 @@ jobs:
       # On merge_group `ui` and `ui_consumers` come from the queue diff
       # (objectstack#25867): an entry whose merged diff against
       # `merge_group.base_sha` touches no ui path and none of the seven
-      # packages skips the four ui jobs, exactly as the same diff does on its
+      # packages skips the five ui jobs, exactly as the same diff does on its
       # PR head; an entry that touches one runs them. If the step fails (the
       # base cannot be fetched, the diff errors), it is `continue-on-error`
       # there, its outputs are empty and `|| 'true'` runs every ui job.
