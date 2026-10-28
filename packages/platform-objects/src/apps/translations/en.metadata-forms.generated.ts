@@ -618,7 +618,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "currencyConfig.defaultCurrency": {
         label: "Default Currency",
-        helpText: "The one currency of a fixed-mode field, as a three-character ISO 4217 code (e.g. USD, EUR). Defaults to CNY. Not read in dynamic mode."
+        helpText: "The one currency of a fixed-mode field, as a three-character ISO 4217 code (e.g. USD, EUR). Required in fixed mode; nothing fills one in. Not read in dynamic mode."
       },
       step: {
         label: "Step",

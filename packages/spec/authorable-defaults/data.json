@@ -12,7 +12,6 @@
     "data/CrossFieldValidation:severity = \"error\"",
     "data/Cube:public = true",
     "data/CurrencyConfig:currencyMode = \"dynamic\"",
-    "data/CurrencyConfig:defaultCurrency = \"CNY\"",
     "data/DataEngineDeleteOptions:multi = false",
     "data/DataEngineInsertOptions:returning = true",
     "data/DataEngineUpdateOptions:multi = false",
