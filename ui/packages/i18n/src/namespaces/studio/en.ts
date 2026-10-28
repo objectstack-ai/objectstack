@@ -2838,6 +2838,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.pagePreview.sampleOther': '{count} samples',
   'engine.pagePreview.recordFallback': '(record)',
   'engine.pagePreview.addComponents': 'Add components to the page to see a preview.',
+  'engine.pagePreview.slottedDefault': 'This page is the default record page: it keeps up with the object, and each slot you override replaces just that part.',
+  'engine.pagePreview.convertToFull': 'Convert to full page',
   'engine.pagePreview.blockN': 'block {n}',
   'engine.validationPreview.empty': 'Give the validation a name to see the preview.',
   'engine.validationPreview.active': 'Active',

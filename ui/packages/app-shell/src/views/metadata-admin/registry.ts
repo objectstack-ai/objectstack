@@ -49,8 +49,12 @@ export interface CreateDeriveRule {
    *                     Non-Latin inputs returned unchanged.
    *   - `titlecase`   — "sales_order" → "Sales Order".
    *   - `first-token` — strip everything past the first separator.
+   *   - `page-kind`   — a page `type` → the `kind` a new page of that type
+   *                     starts as: `record` → `slotted` (no slot overridden,
+   *                     so the page IS the synthesized default), every other
+   *                     type → `full`.
    */
-  transform: 'slugify' | 'plural-en' | 'titlecase' | 'first-token';
+  transform: 'slugify' | 'plural-en' | 'titlecase' | 'first-token' | 'page-kind';
   /**
    * When true (default), the rule stops firing once the user manually
    * edits the `to` field. Lets us auto-suggest a name and then get out

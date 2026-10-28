@@ -2538,6 +2538,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.pagePreview.sampleOther': '{count} 条示例',
   'engine.pagePreview.recordFallback': '（记录）',
   'engine.pagePreview.addComponents': '向页面添加组件即可查看预览。',
+  'engine.pagePreview.slottedDefault': '此页即默认记录页：随对象自动更新，覆盖某个槽位只替换该部分。',
+  'engine.pagePreview.convertToFull': '转成整页',
   'engine.pagePreview.blockN': '区块 {n}',
   'engine.validationPreview.empty': '为校验规则命名即可查看预览。',
   'engine.validationPreview.active': '已启用',
