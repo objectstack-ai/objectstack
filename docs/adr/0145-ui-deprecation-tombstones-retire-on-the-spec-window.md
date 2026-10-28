@@ -86,9 +86,10 @@ Spelled on ADR-0087's clock, with **R** the protocol major the retirement belong
   application batch takes it.
 - **The tombstone names a ui-only retirement** (an objectui or ui card, no spec key behind it): the same window runs
   from the ui's own retirement, on the fixed group's clock (D1): R is read off the first `@objectstack/spec` release tag
-  whose tree carries the tombstone's introducing commit (for a commit the ui merge did not import, the first cut after
-  its date — step 2), on the convention the bullets above use: first carried by a major's `.0.0` cut counts in the major
-  before it. ⛔ Never off `@object-ui/types`' own tags: a major's first tag there need not be a `.0.0` cut.
+  whose tree carries the tombstone's introducing commit (for a commit the ui merge did not import, the first
+  `@objectstack/spec` release cut at or after its date — step 2), on the convention the bullets above use: first carried
+  by a major's `.0.0` cut counts in the major before it. ⛔ Never off `@object-ui/types`' own tags: a major's first tag
+  there need not be a `.0.0` cut.
   > **Amended 2026-10-28 (#27291) — the ui-only clock reads the group's tags.** Was: "R is the major of the first
   > `@object-ui/types` release tag (or the first release of the package that publishes the `.d.ts`) whose tree carries
   > the tombstone, on the same convention: first carried by a major's `.0.0` cut counts in the major before it."
@@ -150,9 +151,12 @@ what it could not date. ⛔ No count is written here: the population moves, and 
 2. **Date.** Per member, find the commit that introduced the tombstone with `git log -S'<the member line>' --reverse`
    on a **full** clone, then the first release tag that contains it (`git tag --contains`). The ui tree's history before
    the ui merge was not imported into this repository: a tombstone older than the merge is dated on a full clone of
-   `objectstack-ai/objectui`, whose `@object-ui/types@*` tags carry that era. On a shallow clone the reading is refused,
-   ⛔ never read as "no history" (`git rev-parse --is-shallow-repository`, with a control leg of known age). For a
-   tombstone that names a spec retirement, read R from the spec (D2), not from the ui commit.
+   `objectstack-ai/objectui`, whose `@object-ui/types@*` tags carry that era — that clone gives the introducing commit
+   and its date, and R is then read on the group's clock (D2): the first `@objectstack/spec` release cut at or after
+   that date, a `.0.0` cut counting in the major before it, ⛔ never the `@object-ui/types` tag the clone's
+   `git tag --contains` names. On a shallow clone the reading is refused, ⛔ never read as "no history"
+   (`git rev-parse --is-shallow-repository`, with a control leg of known age). For a tombstone that names a spec
+   retirement, read R from the spec (D2), not from the ui commit.
 3. **Judge.** Due ⇔ the current major (D1) ≥ R + 2 and D3 does not hold the key. Report three lists — due, held by
    D3 (with the container), undated — and remove only the first.
 4. **Remove and re-pin.** Delete the member, its JSDoc and its zod twin together (D3); move any test that pins
