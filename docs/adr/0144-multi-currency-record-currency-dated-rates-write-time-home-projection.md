@@ -195,7 +195,8 @@ pairing.
 
 - **Parameter 3 as arithmetic.** An amount `A` in currency `X`, whose rate row says `r`, is `A ÷ r` home units. The
   home amount is the record amount **divided by** `rate`. Workload row M2-2 writes the projection as
-  "amount × rate", which is the inverse convention. #27192 follows parameter 3.
+  "amount × rate", which is the inverse convention, and #27192's card body repeats the product. That card's own
+  two-minute check is the division: USD 10,000 at 0.1389 gives ¥71,994.24. #27192 follows parameter 3.
 - **Parameter 1 governs the recompute and backfill** (M2-3, #27193). It does not govern the write path, where D5's
   refusal holds.
 - The wording of parameter 4 leaves its unit open ([Open item](#open-items) 5).
