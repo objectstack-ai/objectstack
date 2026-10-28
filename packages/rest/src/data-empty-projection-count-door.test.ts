@@ -73,6 +73,9 @@ const REFUSED_POST_AT_SCHEMA: ReadonlyArray<readonly [string, Record<string, unk
   // so it answers what its `$select` alias answers.
   ['fields: []', { fields: [] }, 'query.fields'],
   ['fields: ["label", " "] (the blank member)', { fields: ['label', ' '] }, 'query.fields.1'],
+  // An `expand` entry is the same `QuerySchema`, so its empty projection is
+  // refused at the body schema too, before the engine door would see it.
+  ['expand entry fields: []', { expand: { owner: { object: 'sys_user', fields: [] } } }, 'query.expand.owner.fields'],
 ];
 
 function createMockServer() {
