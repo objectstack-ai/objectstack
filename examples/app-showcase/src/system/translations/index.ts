@@ -782,6 +782,9 @@ export const ShowcaseTranslationBundle = {
       showcase_expense_line: {
         fields: {
           incurred_at: { label: '发生时间' },
+          // The inline grid heading on the expense report's form — a key born
+          // with its slot, so it is translated at birth like the label above.
+          expense_report: { inlineTitle: '费用明细' },
         },
       },
       // See the `en` side for why this entry translates exactly ONE field and
@@ -789,6 +792,8 @@ export const ShowcaseTranslationBundle = {
       showcase_invoice_line: {
         fields: {
           service_start: { label: '服务开始时间' },
+          // The inline grid heading on the invoice form, translated at birth.
+          invoice: { inlineTitle: '发票明细' },
         },
       },
       showcase_preference: {
@@ -1349,8 +1354,30 @@ export const ShowcaseTranslationBundle = {
     reports: {
       showcase_hours_by_status: { label: '按状态统计工时（汇总）', description: '按任务状态分组的预计工时。' },
       showcase_status_priority_matrix: { label: '状态 × 优先级（矩阵）', description: '按状态和优先级交叉统计的预计工时。' },
-      showcase_task_overview: { label: '任务概览（联合）', description: '将多个任务子报表堆叠在一个联合视图中。' },
+      showcase_task_overview: {
+        label: '任务概览（联合）',
+        description: '将多个任务子报表堆叠在一个联合视图中。',
+        // The joined report's block headings, keyed by block `name`.
+        blocks: {
+          open_block: { label: '未完成任务' },
+          done_block: { label: '已完成任务' },
+        },
+      },
       showcase_hours_by_status_chart: { label: '按状态统计工时（图表）', description: '以柱状图展示按状态统计的预计工时。' },
+    },
+    // The docs book: its title and the docs sidebar's section titles, keyed by
+    // the book's `name` and each group's `key`. The docs themselves localize
+    // through `doc.translations` and `<name>.zh-CN.md` variants.
+    books: {
+      showcase_manual: {
+        label: '示例手册',
+        description: '这个综合示例工作区里的一切。',
+        groups: {
+          start: { label: '入门' },
+          tour: { label: '导览' },
+          guides: { label: '指南' },
+        },
+      },
     },
   },
 };

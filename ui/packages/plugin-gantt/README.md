@@ -50,10 +50,9 @@ When used through `ObjectGantt` (the wiring the framework uses for the
   (objectui#11168 slice 4):
 
   - **absent** — the drawer above, this renderer's own default;
-  - `drawer`, `modal`, `popover` — the task's record in that overlay; `split` —
-    the record beside the chart, which stays drawn;
-  - `page`, and a block written without `mode` (the spec's `page` default) —
-    the record page in the same tab; `new_window` — the same page in a new tab;
+    - `drawer`, and a block written without `mode` (the spec's `drawer`
+    default) — the task's record in the drawer;
+  - `page` — the record page in the same tab; `new_window` — the same page in a new tab;
   - `none` — nothing; `preventNavigation: true` — nothing, whatever the mode;
     `openNewTab: true` — the record page in a new tab, outranking every mode
     except `none`; `size` — the overlay width.
@@ -937,8 +936,8 @@ spelling.
 - 📦 [npm package](https://www.npmjs.com/package/@object-ui/plugin-gantt)
 - 📝 [Changelog](./CHANGELOG.md)
 - 🐛 [Report an issue](https://github.com/objectstack-ai/objectui/issues)
-- 🤝 [Contributing Guide](https://github.com/objectstack-ai/objectui/blob/main/CONTRIBUTING.md)
-- 🗺️ [Roadmap](https://github.com/objectstack-ai/objectui/blob/main/ROADMAP.md)
+- 🤝 [Contributing Guide](https://github.com/objectstack-ai/objectstack/blob/main/CONTRIBUTING.md)
+- 🗺️ [Roadmap](https://github.com/objectstack-ai/objectstack/blob/main/ROADMAP.md)
 
 ## License
 

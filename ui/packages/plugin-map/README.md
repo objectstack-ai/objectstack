@@ -175,7 +175,7 @@ takes its title from the record-title precedence above.
 | --- | --- |
 | `mapStyle` | MapLibre style URL or spec, replacing the deployment's default style and the demo tiles. Read before `map.style`, so it wins when both are written. Not the node's base `style`, which is an inline CSS record. |
 | `enableClustering` | `true` groups nearby markers into numbered clusters. Absent, the map clusters only above 100 markers; `false` turns clustering off at any count. |
-| `navigation` | What a marker click opens — the spec's `NavigationConfig`. `drawer`, `modal` and `popover` open the marker's record; `new_window` (or `openNewTab: true`, which outranks every mode except `none`) opens the record page in a new tab; `preventNavigation: true` opens nothing. An absent key, `none` and `split` open nothing (the map hands the split shell no main panel). `page`, and a block without `mode` (the spec's `page` default), open the record page of the map's `objectName` through the record navigator the host publishes (the console publishes one on its custom pages, record pages and list views); under a host that publishes none, or on a map that names no `objectName`, the click opens nothing. A parent view's click handler outranks the whole key. |
+| `navigation` | What a marker click opens — the spec's `NavigationConfig`. `drawer`, and a block without `mode` (the spec's `drawer` default), open the marker's record in the drawer; `new_window` (or `openNewTab: true`, which outranks every mode except `none`) opens the record page in a new tab; `preventNavigation: true` opens nothing. An absent key and `none` open nothing. `page` opens the record page of the map's `objectName` through the record navigator the host publishes (the console publishes one on its custom pages, record pages and list views); under a host that publishes none, or on a map that names no `objectName`, the click opens nothing. A parent view's click handler outranks the whole key. |
 
 ## Which style draws
 
@@ -290,8 +290,8 @@ component.
 - 📦 [npm package](https://www.npmjs.com/package/@object-ui/plugin-map)
 - 📝 [Changelog](./CHANGELOG.md)
 - 🐛 [Report an issue](https://github.com/objectstack-ai/objectui/issues)
-- 🤝 [Contributing Guide](https://github.com/objectstack-ai/objectui/blob/main/CONTRIBUTING.md)
-- 🗺️ [Roadmap](https://github.com/objectstack-ai/objectui/blob/main/ROADMAP.md)
+- 🤝 [Contributing Guide](https://github.com/objectstack-ai/objectstack/blob/main/CONTRIBUTING.md)
+- 🗺️ [Roadmap](https://github.com/objectstack-ai/objectstack/blob/main/ROADMAP.md)
 
 ## License
 

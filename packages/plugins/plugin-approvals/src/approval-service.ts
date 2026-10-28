@@ -58,6 +58,7 @@ import type {
 // fields the caller had already supplied.
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
+import type { IOwnershipQueueService } from '@objectstack/spec/contracts';
 import {
   canServeApiOperation, isFileIdToken, referenceTargetOf, SINGLE_OPTION_TYPES, MULTI_OPTION_TYPES,
 } from '@objectstack/spec/data';
@@ -96,6 +97,7 @@ import {
   type ActingCaller,
 } from './approver-address.js';
 import { labelOrMachineName, requestDisplayLabels, slateLabelOf } from './display-labels.js';
+import { flowRoute, type RouteFlowGraph } from './approval-route.js';
 import {
   ADMIN_RESCUE_NOTE_SNAPSHOT_KEY,
   adminRescueNoteOf,
@@ -1519,7 +1521,21 @@ export interface ApprovalServiceOptions {
    * authored text the request snapshotted when it opened.
    */
   i18nServiceSource?: () => ReaderLabelI18n | undefined;
+  /**
+   * [ADR-0142 D6] The `ownership-queue` service, through which a `queue`
+   * approver expands to the queue's members at node entry. Resolved LAZILY
+   * per expansion, for the reason {@link ApprovalServiceOptions.tenancyPosture}
+   * is: plugin-sharing registers it and may start after this plugin.
+   *
+   * Absent (or resolving to `undefined`), a `queue` approver expands to nobody
+   * and says so — it contributes no slot, and the node's `onEmptyApprovers`
+   * decides a slate it leaves empty.
+   */
+  ownershipQueues?: () => ApproverQueueSource | undefined;
 }
+
+/** [ADR-0142 D6] The slice of the queue service a `queue` approver reads. */
+export type ApproverQueueSource = Pick<IOwnershipQueueService, 'expandMembers'>;
 
 /**
  * The stored row request `requestId` names inside `tenantOrg` (every
@@ -1620,6 +1636,8 @@ export class ApprovalService implements IApprovalService {
   private messageTranslator?: () => ValidationMessageTranslator | undefined;
   /** [#24863] Lazily-resolved `i18n` service for the reader-locale display labels. */
   private i18nServiceSource?: () => ReaderLabelI18n | undefined;
+  /** [ADR-0142 D6] Lazily-resolved `ownership-queue` service a `queue` approver expands through. */
+  private ownershipQueues?: () => ApproverQueueSource | undefined;
   /**
    * [#8652] The HOST-named object set for the record-reader visibility tier
    * (the constructor option). EMPTY is the default, and the tier is then off
@@ -1660,6 +1678,7 @@ export class ApprovalService implements IApprovalService {
     this.fieldVisibility = opts.fieldVisibility;
     this.messageTranslator = opts.messageTranslator;
     this.i18nServiceSource = opts.i18nServiceSource;
+    this.ownershipQueues = opts.ownershipQueues;
     this.recordReaderVisibleObjects = new Set(
       (Array.isArray(opts.recordReaderVisibleObjects) ? opts.recordReaderVisibleObjects : [])
         .map((n) => String(n ?? '').trim())
@@ -2272,6 +2291,9 @@ export class ApprovalService implements IApprovalService {
    *                  → users with `sys_member.role = value` in tenant — the
    *                    better-auth MEMBERSHIP TIER (owner/admin/member), not a
    *                    position; author `position` for org positions
+   *   - `queue`      → the queue's members at node entry, through the
+   *                    `ownership-queue` service (ADR-0142 D6); an empty
+   *                    expansion adds no slot, like a PERSON type
    *   - `manager`    → `sys_user.manager_id` of `record[value] ?? record.owner_id`
    *   - `field`      → literal user id stored in `record[value]`
    *   - `user`       → literal value
@@ -2448,6 +2470,13 @@ export class ApprovalService implements IApprovalService {
       } else if (type === 'org_membership_level') {
         const users = await bounded(await this.expandMembershipTierUsers(String(a.value), directoryOrg));
         if (users.length) return users;
+      } else if (type === 'queue') {
+        // [ADR-0142 D6] The queue's members at node entry, in the directory
+        // organization (a queue is an organization's: APPROVER_ORG_SCOPED), on
+        // the ADDRESSING purpose — the slate routes work, so the holders of a
+        // switched-off position stay on it (D2).
+        const users = await bounded(await this.expandQueueUsers(String(a.value), directoryOrg));
+        if (users.length) return users;
       } else if (type === 'manager' && record) {
         const subject = (record as any)[a.value] ?? (record as any).owner_id;
         managerSubject = subject;
@@ -2490,20 +2519,25 @@ export class ApprovalService implements IApprovalService {
       }
       return [];
     }
-    // #3508: `queue` is declared-but-unenforced — there is no queue branch
-    // above, so a queue approver always lands here and the `queue:<id>` slot
-    // routes to nobody. The spec marks it non-authorable
-    // (NON_AUTHORABLE_APPROVER_TYPES) so designers stop offering it; warn for
-    // the stored flows that still carry one, so the silent dead slot is at
-    // least visible to operators.
+    // [ADR-0142 D6] A queue that expanded to nobody warns as the graph types
+    // do and then contributes NO slot, as the person types do — a combination
+    // of its own. The `queue:<name>` literal is never written: no acting path
+    // admits a caller under it (`approver-address.ts`), and the queue's members
+    // are read at node entry, so a member who joins later is not owed this
+    // request. A `queue:` slot a stored request already holds stays as stored,
+    // decidable by the override (the ADR-0090 D3 `role:` precedent).
     if (type === 'queue') {
       this.logger?.warn?.(
-        `[approvals] approver type 'queue' is not implemented — the slot resolves to nobody, because the `
-        + `platform has no ownership queue to expand it from (the type is deprecated and no longer offered `
-        + `for authoring). Route this step to a team, department or position instead.`,
-        { value: a.value },
+        `[approvals] approver 'queue:${a.value}' expanded to nobody — `
+        + (this.queueSource()
+          ? `the queue has no members in this organization, or no queue of that name exists there`
+          : `no ownership-queue service is registered, so no queue can be expanded`)
+        + `. It adds no slot to this request; a slate left naming no one is decided by the node's onEmptyApprovers.`,
+        { type, value: a.value ?? null, organizationId: directoryOrg ?? null },
       );
-    } else if (GRAPH_APPROVER_TYPES.has(type)) {
+      return [];
+    }
+    if (GRAPH_APPROVER_TYPES.has(type)) {
       // #3807 follow-up — every OTHER way to land here is a graph type whose
       // lookup produced nobody, and the literal below is a slot no user can
       // ever act on. That silence is what let #3807 hide: a `department`
@@ -3029,6 +3063,35 @@ export class ApprovalService implements IApprovalService {
       } as any);
     } catch { rows = []; }
     return Array.from(new Set((rows ?? []).map((r: any) => String(r.user_id ?? '')).filter(Boolean)));
+  }
+
+  /**
+   * [ADR-0142 D6] The live `ownership-queue` service, or `undefined` when none
+   * is registered (or the registered one has no `expandMembers`).
+   */
+  private queueSource(): ApproverQueueSource | undefined {
+    try {
+      const svc = this.ownershipQueues?.();
+      return svc && typeof svc.expandMembers === 'function' ? svc : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * [ADR-0142 D6] A `queue` approver's slate: the members of the queue named
+   * `queueName` in `organizationId`, through the queue service's one expander
+   * on the ADDRESSING purpose (D2 — the approver slate routes work, so the
+   * holders of a switched-off position are kept; dropping them would be
+   * fail-open). The service resolves the name registry-first, then the
+   * organization's own `sys_queue` row, and answers `[]` for a name that
+   * resolves nowhere. With no service registered there is nothing to expand.
+   */
+  private async expandQueueUsers(queueName: string, organizationId?: string | null): Promise<string[]> {
+    if (!queueName) return [];
+    const queues = this.queueSource();
+    if (!queues) return [];
+    return queues.expandMembers(queueName, organizationId ?? null, { purpose: 'addressing' });
   }
 
   /**
@@ -9027,6 +9090,10 @@ export class ApprovalService implements IApprovalService {
    * approval trunk; conditional side-steps show as part of the potential
    * path. Display-only and best-effort.
    *
+   * [#26668] The trunk is not this request's route, so a step line never
+   * draws it: the same read attaches the route itself, `flow_route`
+   * ({@link attachFlowRoute}), from the one flow lookup.
+   *
    * [#24863] A step is named the way the request's own step is: in the
    * reader's locale when `labels` picks its `flows.<flow>.approvals.<node_id>.label`,
    * else by the node's authored label. So the progress strip and the request's
@@ -9039,6 +9106,7 @@ export class ApprovalService implements IApprovalService {
       const flow: any = await this.automation.getFlow(flowName);
       if (!flow?.nodes?.length) return;
       const nodesById = new Map<string, any>(flow.nodes.map((n: any) => [n.id, n]));
+      await this.attachFlowRoute(row, flowName, flow, nodesById, labels);
       const steps: Array<{ id: string; label: string }> = [];
       const seen = new Set<string>();
       let cur: any = flow.nodes.find((n: any) => n.type === 'start');
@@ -9064,6 +9132,47 @@ export class ApprovalService implements IApprovalService {
           : i === currentIdx ? (row.status === 'approved' ? 'done' : 'current')
           : 'upcoming',
       }));
+    } catch { /* display-only — never fail the read */ }
+  }
+
+  /**
+   * [#26668] This request's own route (`flow_route`): the steps its run has
+   * passed, read off the run's own request rows, then its node, then — while
+   * it is pending — the steps the graph alone decides ahead. `flowRoute`
+   * (`approval-route.ts`) is the rule; this reads what it needs. The run's
+   * rows are read as the system: the route names steps and their labels,
+   * which `flow_steps` already served to the same reader.
+   *
+   * A step is named as `flow_steps` names it ([#24863]): the reader's label,
+   * else the node's authored label; a node no longer in the graph by the
+   * label its request stored. Display-only and best-effort.
+   */
+  private async attachFlowRoute(
+    row: ApprovalRequestRow,
+    flowName: string,
+    flow: RouteFlowGraph,
+    nodesById: Map<string, any>,
+    labels: ReaderLabels | undefined,
+  ): Promise<void> {
+    try {
+      if (!row.flow_run_id || !row.flow_node_id) return;
+      const runRows = await this.engine.find('sys_approval_request', {
+        where: { flow_run_id: row.flow_run_id },
+        fields: ['id', 'flow_node_id', 'status', 'created_at', 'current_step_label'],
+        limit: 1000,
+        context: SYSTEM_CTX,
+      });
+      const rows = Array.isArray(runRows) ? runRows : [];
+      const stored = new Map<string, string>();
+      for (const r of rows) {
+        if (typeof r?.flow_node_id === 'string' && typeof r?.current_step_label === 'string' && r.current_step_label) {
+          stored.set(r.flow_node_id, r.current_step_label);
+        }
+      }
+      const label = (nodeId: string): string =>
+        labels?.stepLabel(flowName, nodeId) ?? (nodesById.get(nodeId)?.label || stored.get(nodeId) || nodeId);
+      const route = flowRoute(row, flow, rows, label);
+      if (route) (row as any).flow_route = route;
     } catch { /* display-only — never fail the read */ }
   }
 

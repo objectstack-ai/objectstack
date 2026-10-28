@@ -15,6 +15,7 @@
  *   objects.<object>._actions.<action_name>.description
  *   objects.<object>._actions.<action_name>.confirmText
  *   objects.<object>._actions.<action_name>.successMessage
+ *   objects.<object>._actions.<action_name>.disabledReason
  *   objects.<object>._actions.<action_name>.outcomeMessages.<outcome>
  *   objects.<object>._actions.<action_name>.params.<param_name>.label
  *   objects.<object>._actions.<action_name>.params.<param_name>.helpText
@@ -46,8 +47,8 @@
  * object-less action (no `objectName`) reads only:
  *
  *   globalActions.<action_name>.label / .description / .confirmText /
- *     .successMessage / .outcomeMessages.<outcome> / .params.<param_name>.* /
- *     .resultDialog.*
+ *     .successMessage / .disabledReason / .outcomeMessages.<outcome> /
+ *     .params.<param_name>.* / .resultDialog.*
  *
  * That is the declaration `TranslationDataSchema.globalActions` makes: global
  * translations are for object-less actions. A `globalActions` entry that names
@@ -222,6 +223,11 @@ export interface ActionLike {
    */
   confirmText?: string | { dialect: 'template'; source: string };
   successMessage?: string | { dialect: 'template'; source: string };
+  /**
+   * `ActionSchema.disabledReason` (#26619) — the display-only reason a greyed
+   * action shows. Narrowed to `string` for the same reason `description` is.
+   */
+  disabledReason?: string;
   /**
    * `ActionSchema.outcomeMessages` — success copy per handler `outcome`,
    * narrowed to `string` values for the same reason `successMessage` is.
@@ -648,7 +654,7 @@ function actionTranslationNode(
 function lookupActionField(
   bundle: TranslationBundle | undefined,
   action: ActionLike,
-  field: 'label' | 'description' | 'confirmText' | 'successMessage',
+  field: 'label' | 'description' | 'confirmText' | 'successMessage' | 'disabledReason',
   opts?: ResolveOptions,
 ): string | undefined {
   if (!bundle) return undefined;
@@ -1427,9 +1433,9 @@ export function translateView<T extends ViewLike>(
 
 /**
  * Apply the active locale to an action metadata document by overwriting
- * `label`, `description`, `confirmText`, `successMessage`, each declared
- * `outcomeMessages` entry, the `params[]` copy and the `resultDialog` copy with
- * translated values when available. The
+ * `label`, `description`, `confirmText`, `successMessage`, `disabledReason`,
+ * each declared `outcomeMessages` entry, the `params[]` copy and the
+ * `resultDialog` copy with translated values when available. The
  * original document is not mutated; a shallow copy is returned.
  *
  * ## Why `description` and `params` are overlaid HERE
@@ -1458,6 +1464,9 @@ export function translateAction<T extends ActionLike>(
   const description = lookupActionField(bundle, action, 'description', opts) ?? action.description;
   const confirmText = resolveActionConfirm(bundle, action, opts);
   const successMessage = resolveActionSuccess(bundle, action, opts);
+  // [#26619] Display-only copy, overlaid exactly like `description`: the
+  // bundle's sentence when there is one, else the authored value as written.
+  const disabledReason = lookupActionField(bundle, action, 'disabledReason', opts) ?? action.disabledReason;
   const outcomeMessages = resolveActionOutcomeMessages(bundle, action, opts);
   const resultDialog = resolveActionResultDialog(bundle, action, opts);
   const params = translateActionParams(action, bundle, opts);
@@ -1467,6 +1476,7 @@ export function translateAction<T extends ActionLike>(
     ...(description !== undefined ? { description } : {}),
     ...(confirmText !== undefined ? { confirmText } : {}),
     ...(successMessage !== undefined ? { successMessage } : {}),
+    ...(disabledReason !== undefined ? { disabledReason } : {}),
     ...(outcomeMessages !== action.outcomeMessages ? { outcomeMessages } : {}),
     ...(resultDialog !== undefined ? { resultDialog } : {}),
     ...(params !== action.params ? { params } : {}),
@@ -1508,6 +1518,10 @@ const METADATA_DOCUMENT_TRANSLATORS: Record<
   // The console's report index and report page both read `GET /meta/report`,
   // so registering here is the whole wiring.
   report: translateReport,
+  // A doc book's title and section titles: the console's docs portal builds
+  // its sidebar from `GET /meta/book`, and the tree route translates the book
+  // it resolves through this same table (`createMetaBookTreeAnswer`).
+  book: translateBook,
 };
 
 /**
@@ -1769,7 +1783,7 @@ function isOptionValue(value: unknown): value is string | number | boolean {
  */
 function packagedPart(
   parent: Record<string, unknown> | undefined,
-  key: 'widgets' | 'globalFilters' | 'options' | 'bulkActionDefs' | 'params' | 'sections' | 'fields',
+  key: 'widgets' | 'globalFilters' | 'options' | 'bulkActionDefs' | 'params' | 'sections' | 'fields' | 'blocks',
   matches: (candidate: Record<string, any>) => boolean,
 ): Record<string, unknown> | undefined {
   if (parent === undefined) return undefined;
@@ -2223,14 +2237,116 @@ export function translatePermissionSet<T extends SecurityCatalogItemLike>(
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// Doc-book resolver (label + description + group labels)
+// ────────────────────────────────────────────────────────────────────────────
+
+/** Minimal book-group shape consumed by {@link translateBook}. */
+export interface BookGroupLike {
+  key?: string;
+  label?: string;
+  [key: string]: any;
+}
+
+/** Minimal doc-book shape consumed by {@link translateBook}. */
+export interface BookLike {
+  name: string;
+  label?: string;
+  description?: string;
+  groups?: BookGroupLike[];
+  [key: string]: any;
+}
+
+function lookupBookAttr(
+  bundle: TranslationBundle | undefined,
+  bookName: string,
+  attr: 'label' | 'description',
+  opts?: ResolveOptions,
+): string | undefined {
+  if (!bundle) return undefined;
+  for (const code of localeChain(opts)) {
+    const candidate = pickData(bundle, code)?.books?.[bookName]?.[attr];
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+  }
+  return undefined;
+}
+
+function lookupBookGroupLabel(
+  bundle: TranslationBundle | undefined,
+  bookName: string,
+  groupKey: string,
+  opts?: ResolveOptions,
+): string | undefined {
+  if (!bundle) return undefined;
+  for (const code of localeChain(opts)) {
+    const candidate = pickData(bundle, code)?.books?.[bookName]?.groups?.[groupKey]?.label;
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+  }
+  return undefined;
+}
+
+/**
+ * Apply the active locale to a doc-book metadata document — its `label` and
+ * `description` against `books.<name>.label` / `.description`, and each
+ * group's `label` against `books.<name>.groups.<key>.label`, addressed by the
+ * group's stable `key` as an app's navigation node is by its `id`. The input
+ * document is not mutated; it comes back as the same reference when the
+ * bundle carries none of its keys, and a key the bundle does not carry leaves
+ * the authored string.
+ *
+ * Registered in {@link METADATA_DOCUMENT_TRANSLATORS}, so the REST boundary
+ * localizes every served book (`GET /meta/book`, list and item — the list the
+ * console's docs portal builds its sidebar from), and the book tree route
+ * (`GET /meta/book/:name/tree`) translates the book it resolves through the
+ * same table before the spine is rendered.
+ */
+export function translateBook<T extends BookLike>(
+  doc: T,
+  bundle: TranslationBundle | undefined,
+  opts?: ResolveOptions,
+): T {
+  if (!doc || typeof doc !== 'object') return doc;
+  const bookName = doc.name;
+  if (typeof bookName !== 'string' || bookName.length === 0 || !bundle) return doc;
+  const label = lookupBookAttr(bundle, bookName, 'label', opts);
+  const description = lookupBookAttr(bundle, bookName, 'description', opts);
+  let groupsMoved = false;
+  const groups = Array.isArray(doc.groups)
+    ? doc.groups.map((group) => {
+      if (!group || typeof group !== 'object' || typeof group.key !== 'string') return group;
+      const translated = lookupBookGroupLabel(bundle, bookName, group.key, opts);
+      if (translated === undefined) return group;
+      groupsMoved = true;
+      return { ...group, label: translated };
+    })
+    : doc.groups;
+  if (label === undefined && description === undefined && !groupsMoved) return doc;
+  return {
+    ...doc,
+    ...(label !== undefined ? { label } : {}),
+    ...(description !== undefined ? { description } : {}),
+    ...(groupsMoved ? { groups } : {}),
+  };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Report metadata resolver (label + description)
 // ────────────────────────────────────────────────────────────────────────────
+
+/** Minimal shape of a joined report block consumed by {@link translateReport}. */
+export interface ReportBlockLike {
+  /** `JoinedReportBlockSchema.name` — the key `reports.<name>.blocks` addresses. */
+  name?: string;
+  label?: unknown;
+  description?: unknown;
+  [key: string]: any;
+}
 
 /** Minimal shape of a report document consumed by {@link translateReport}. */
 export interface ReportLike {
   name: string;
   label?: unknown;
   description?: unknown;
+  blocks?: ReportBlockLike[];
   [key: string]: any;
 }
 
@@ -2248,17 +2364,73 @@ function lookupReportAttr(
   return undefined;
 }
 
+function lookupReportBlockAttr(
+  bundle: TranslationBundle | undefined,
+  name: string,
+  blockName: string,
+  attr: 'label' | 'description',
+  opts?: ResolveOptions,
+): string | undefined {
+  if (!bundle) return undefined;
+  for (const code of localeChain(opts)) {
+    const candidate = pickData(bundle, code)?.reports?.[name]?.blocks?.[blockName]?.[attr];
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+  }
+  return undefined;
+}
+
+/**
+ * Overlay `reports.<name>.blocks.<block_name>.{label,description}` onto a
+ * joined report's `blocks[]`, judging each block against its packaged
+ * counterpart (matched by `name`). Returns `undefined` when no block changed,
+ * so {@link translateReport} can keep handing back the input reference.
+ */
+function translateReportBlocks(
+  blocks: unknown,
+  bundle: TranslationBundle,
+  name: string,
+  base: Record<string, unknown> | undefined,
+  opts?: ResolveOptions,
+): ReportBlockLike[] | undefined {
+  if (!Array.isArray(blocks)) return undefined;
+  let changed = false;
+  const rebuilt = blocks.map((block: ReportBlockLike) => {
+    if (!block || typeof block !== 'object') return block;
+    const blockName = block.name;
+    if (typeof blockName !== 'string' || blockName.length === 0) return block;
+    const packagedBlock = packagedPart(base, 'blocks', (candidate) => candidate.name === blockName);
+    const label = valueOverridesPackagedBase(packagedBlock, 'label', block.label)
+      ? undefined
+      : lookupReportBlockAttr(bundle, name, blockName, 'label', opts);
+    const description = valueOverridesPackagedBase(packagedBlock, 'description', block.description)
+      ? undefined
+      : lookupReportBlockAttr(bundle, name, blockName, 'description', opts);
+    if (label === undefined && description === undefined) return block;
+    changed = true;
+    return {
+      ...block,
+      ...(label !== undefined ? { label } : {}),
+      ...(description !== undefined ? { description } : {}),
+    };
+  });
+  return changed ? rebuilt : undefined;
+}
+
 /**
  * Apply the active locale to a report metadata document — its `label` and
- * `description` against `reports.<name>.label` / `.description`. The input
- * document is not mutated, and it comes back as the same reference when the
- * bundle carries neither key (or the served value overrides both).
+ * `description` against `reports.<name>.label` / `.description`, and each
+ * joined block's against `reports.<name>.blocks.<block_name>.label` /
+ * `.description`. The input document is not mutated, and it comes back as
+ * the same reference when the bundle carries none of those keys (or the
+ * served values override them).
  *
  * These are the two strings the console lists a report by on the app's report
  * index, and the report page's heading. Registered in
  * {@link METADATA_DOCUMENT_TRANSLATORS}, so the REST boundary localizes every
  * served report (`GET /meta/report`, list and item) with nothing else to
- * remember.
+ * remember. A joined report's block `label` / `description` are the heading
+ * and caption its renderer draws above each block, read off the served
+ * document as is — so serving them translated here is the whole wiring.
  *
  * ## The catalog loses to an explicit override — ADR-0029 D9.2a
  *
@@ -2292,11 +2464,13 @@ export function translateReport<T extends ReportLike>(
   const description = valueOverridesPackagedBase(base, 'description', doc.description)
     ? undefined
     : lookupReportAttr(bundle, name, 'description', opts);
-  if (label === undefined && description === undefined) return doc;
+  const blocks = translateReportBlocks(doc.blocks, bundle, name, base, opts);
+  if (label === undefined && description === undefined && blocks === undefined) return doc;
   return {
     ...doc,
     ...(label !== undefined ? { label } : {}),
     ...(description !== undefined ? { description } : {}),
+    ...(blocks !== undefined ? { blocks } : {}),
   };
 }
 
@@ -3233,6 +3407,8 @@ export interface ObjectFieldLike {
   name?: string;
   label?: string;
   description?: string;
+  /** `FieldSchema.inlineTitle` — the inline child grid's heading on the parent's form. */
+  inlineTitle?: string;
   options?: Array<{ label?: string; value: string | number | boolean }>;
   [key: string]: any;
 }
@@ -3256,7 +3432,7 @@ function lookupObjectFieldAttr(
   bundle: TranslationBundle | undefined,
   objectName: string,
   fieldName: string,
-  attr: 'label' | 'help' | 'description',
+  attr: 'label' | 'help' | 'description' | 'inlineTitle',
   opts?: ResolveOptions,
 ): string | undefined {
   if (!bundle) return undefined;
@@ -3492,6 +3668,26 @@ export function flowRefusalMessageKey(flowName: string, nodeId: string): string 
 }
 
 /**
+ * Dot-notation i18n key for a hook's declared refusal message —
+ * `hooks.<hook>.refusals.<CODE>.message` (#26170, maintainer ruling 6431311681
+ * letter A).
+ *
+ * A sibling of {@link objectValidationMessageKey} and
+ * {@link flowRefusalMessageKey}, spelled here for the same reason: its consumer
+ * holds an `II18nService` (which takes a key), not a `TranslationBundle`. Used
+ * by the sandboxed body runner, which answers a body's throw of a declared code
+ * (`HookSchema.refusals`) with this translation in the caller's locale
+ * (`HookContext.session.locale`), the declared message on a miss.
+ *
+ * `hookName` is `Hook.name` and `code` the catalogue's key — by hook, never by
+ * object, so a hook bound to several objects or to `'*'` owns one translation
+ * per code.
+ */
+export function hookRefusalMessageKey(hookName: string, code: string): string {
+  return `hooks.${hookName}.refusals.${code}.message`;
+}
+
+/**
  * Dot-notation i18n key for a screen's heading or body text —
  * `flows.<flow>.screens.<node_id>.title` / `.description` (#22507).
  *
@@ -3556,7 +3752,8 @@ function lookupObjectFieldOption(
  * `injectedSystemColumnDefs` (`../data/injected-system-column-provenance`)
  * spreads onto every eligible object with English labels: the tenant scope
  * anchor `organization_id`, the audit family `created_*` / `updated_*`,
- * `owner_id` and `owning_business_unit_id`. Custom objects carry no
+ * `owner_id`, `owning_business_unit_id` and the ownership `queue` (ADR-0142
+ * D3). Custom objects carry no
  * per-object translation entries for these, so without a fallback every
  * localized surface — list headers, export files, import templates, the
  * `/meta` read exits — leaks the English default (e.g. an otherwise
@@ -3593,6 +3790,7 @@ const SYSTEM_FIELD_LABELS: Record<string, Record<string, string>> = {
     'ja-JP': '所属ビジネスユニット',
     'es-ES': 'Unidad de negocio propietaria',
   },
+  queue: { en: 'Queue', 'zh-CN': '队列', 'ja-JP': 'キュー', 'es-ES': 'Cola' },
 };
 
 /**
@@ -3833,6 +4031,15 @@ function translateObjectListViews(
  * the base does not declare was authored after the fact, and its description
  * counts as diverged; no base supplied means nothing is inferred and the
  * catalog applies.
+ *
+ * ## A field's `inlineTitle` — the inline child grid's heading
+ *
+ * `objects.<child>.fields.<field>.inlineTitle` overlays the field's own
+ * `inlineTitle` under that same rule. The field sits on the CHILD object, but
+ * its heading is drawn on the PARENT's form: the console's inline-subform pass
+ * copies the served child field's `inlineTitle` as is, so serving it
+ * translated here is the whole wiring. An authored heading with no entry keeps
+ * its text; the child's plural label is never swapped in for it.
  */
 export function translateObject<T extends ObjectLike>(
   doc: T,
@@ -3873,6 +4080,14 @@ export function translateObject<T extends ObjectLike>(
     if (!valueOverridesPackagedBase(packagedObjectField(packagedObject, name), 'description', def.description)) {
       const translatedDescription = lookupObjectFieldAttr(bundle, objectName, name, 'help', opts);
       if (translatedDescription) next.description = translatedDescription;
+    }
+    // The inline child grid's heading, under the same divergence rule. The
+    // console's inline-subform pass copies the served value onto the parent's
+    // form, so this is the one place it is localized. An untranslated heading
+    // keeps its authored text — never the child's plural label in its place.
+    if (!valueOverridesPackagedBase(packagedObjectField(packagedObject, name), 'inlineTitle', def.inlineTitle)) {
+      const translatedInlineTitle = lookupObjectFieldAttr(bundle, objectName, name, 'inlineTitle', opts);
+      if (translatedInlineTitle) next.inlineTitle = translatedInlineTitle;
     }
     if (Array.isArray(def.options)) {
       // A picklist-bound field is served with its list's options resolved

@@ -866,11 +866,18 @@ export const NOT_DRIVER_MANAGED = Object.freeze([
   {
     path: 'docs/audits/**',
     why:
-      'hand-written audit ledgers — Class verdicts, evidence, findings logs. The ONE exception is '
-      + 'the strictness ledger\'s `.counts.md`, declared above: #5107 split the ledger\'s numbers out '
-      + 'precisely so the prose could keep text-merging (it always merged cleanly) while the numbers '
-      + 'stopped (they merged clean and WRONG). Regenerating a ledger would discard evidence, which is '
-      + 'the opposite trade — so this exclusion covers the prose and must stay.',
+      'hand-written audit ledgers — Class verdicts, evidence, findings logs. Two files here are '
+      + 'generated whole instead. The strictness ledger\'s `.counts/` shards are the ROUTED one, '
+      + 'declared above: #5107 split the ledger\'s numbers out precisely so the prose could keep '
+      + 'text-merging (it always merged cleanly) while the numbers stopped (they merged clean and '
+      + 'WRONG). `2026-08-tenant-audit-write-call-sites.counts.md` (`node '
+      + 'scripts/tenant-audit-census.mjs --write`) is NOT routed: a row needs a `gen:`/`check:` pair '
+      + 'in the manifest it names as owner, and no manifest declares one for that census, which runs '
+      + 'straight from the lint workflow; the driver runs only in a local merge anyway, and '
+      + '`check-tenant-audit-census.mjs` holds the file to its `--write` output on every PR, so a '
+      + 'clean-and-wrong text merge is red, never silent (the file\'s own header says the same). '
+      + 'Regenerating a ledger would discard evidence, which is the opposite trade — so this '
+      + 'exclusion covers the prose and must stay.',
   },
   // ── the objectui tree under ui/ (objectstack#25677) ──────────────────────────
   {

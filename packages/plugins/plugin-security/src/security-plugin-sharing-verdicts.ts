@@ -280,6 +280,7 @@ export async function resolvePreImageFloorDrop(
   context: any,
   permissionSets: PermissionSet[],
   delegated: boolean,
+  onVerdict?: (verdict: SharingWriteVerdict) => void,
 ): Promise<boolean> {
   if (delegated) return false;
   const floorApplies = this.collectRLSPolicies(
@@ -290,10 +291,11 @@ export async function resolvePreImageFloorDrop(
     context,
   ).some(isPlatformOwnershipFloorPolicy);
   if (!floorApplies) return false;
-  return (
-    (await this.resolveSharingWriteVerdict(rlsOperation, object, recordId, context, permissionSets)) ===
-    'allow'
-  );
+  const verdict = await this.resolveSharingWriteVerdict(rlsOperation, object, recordId, context, permissionSets);
+  // [ADR-0142 D4] Handed back to a caller that reads the verdict itself (the
+  // ownership gate's claim admission), so it is asked once per write.
+  onVerdict?.(verdict);
+  return verdict === 'allow';
 }
 
 /** The body of `SecurityPlugin#delegatorOwnWriteFloorOptions`; the method's docblock there is its contract. */

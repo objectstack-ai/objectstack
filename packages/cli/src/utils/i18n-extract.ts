@@ -84,12 +84,14 @@
  *   objects.<name>._actions.<action>.description
  *   objects.<name>._actions.<action>.confirmText
  *   objects.<name>._actions.<action>.successMessage
+ *   objects.<name>._actions.<action>.disabledReason
  *   objects.<name>._actions.<action>.outcomeMessages.<outcome>
  *   objects.<name>._actions.<action>.params.<param>.label / .helpText / .placeholder
  *   objects.<name>._actions.<action>.params.<param>.options.<value>
  *   objects.<name>._actions.<action>.resultDialog.title / .description / .acknowledge
  *   objects.<name>._actions.<action>.resultDialog.fields.<path>
  *   globalActions.<action>.label / .description / .confirmText / .successMessage
+ *                          / .disabledReason
  *   globalActions.<action>.outcomeMessages.<outcome>
  *   globalActions.<action>.params.<param>.* / .resultDialog.* (same shape as object actions)
  *   apps.<app>.label / .description
@@ -122,8 +124,11 @@
  *     ^ walked because the ledger's `flows` row is `live` and warns no
  *       author; a group the ledger does warn on is left out of the walk
  *       (see `authorWarnedTranslationGroups`)
+ *   hooks.<hook>.refusals.<CODE>.message                       (#26170)
  *   positions.<position>.label / .description
  *   permissions.<permission_set>.label / .description
+ *   books.<book>.label / .description
+ *   books.<book>.groups.<group_key>.label   (a doc book's section title, #26690)
  *   metadataForms.<type>.label / .description
  *   metadataForms.<type>.sections.<section>.label / .description
  *   metadataForms.<type>.fields.<dotPath>.label / .helpText / .placeholder
@@ -228,8 +233,10 @@ export interface ExpectedEntry {
     | 'picklist'
     | 'page'
     | 'flow'
+    | 'hook'
     | 'position'
     | 'permission'
+    | 'book'
     | 'metadataType'
     | 'metadataFormSection'
     | 'metadataFormField';
@@ -1390,6 +1397,9 @@ export function collectExpectedEntries(
           { objectName },
         );
         pushOptional(out, ['objects', objectName, 'fields', fieldName, 'placeholder'], field.placeholder, 'field', { objectName });
+        // The inline child grid's heading, drawn on the PARENT's form but
+        // addressed by the child field that declares it (`translateObject`).
+        pushOptional(out, ['objects', objectName, 'fields', fieldName, 'inlineTitle'], field.inlineTitle, 'field', { objectName });
 
         // Options — accept either `{value, label}[]` arrays or a record map.
         //
@@ -1449,6 +1459,7 @@ export function collectExpectedEntries(
         pushOptional(out, [...aroot, 'description'], action.description, 'action', { objectName });
         pushOptional(out, [...aroot, 'confirmText'], actionCopy(action.confirmText), 'action', { objectName });
         pushOptional(out, [...aroot, 'successMessage'], actionCopy(action.successMessage), 'action', { objectName });
+        pushOptional(out, [...aroot, 'disabledReason'], action.disabledReason, 'action', { objectName });
         pushActionOutcomeMessages(out, aroot, action, 'action', objectName);
         pushActionParams(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
         pushActionResultDialog(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
@@ -1542,6 +1553,10 @@ export function collectExpectedEntries(
     pushOptional(out, [...root, 'description'], action.description, kind, { objectName });
     pushOptional(out, [...root, 'confirmText'], actionCopy(action.confirmText), kind, { objectName });
     pushOptional(out, [...root, 'successMessage'], actionCopy(action.successMessage), kind, { objectName });
+    // [#26619] OPTIONAL-not-derived like `description`: an action that gives no
+    // reason shows the console's own default sentence, so there is no gap to
+    // seed for it.
+    pushOptional(out, [...root, 'disabledReason'], action.disabledReason, kind, { objectName });
     pushActionOutcomeMessages(out, root, action, kind, objectName);
     pushActionParams(out, root, action, kind, objectName);
     pushActionResultDialog(out, root, action, kind, objectName);
@@ -1628,6 +1643,9 @@ export function collectExpectedEntries(
   // ── Security catalog (`positions.<name>.…`, `permissions.<name>.…`) ─
   walkSecurityCatalog(config, out);
 
+  // ── Doc books (`books.<name>.…`) ──────────────────────────────────
+  walkBooks(config, out);
+
   // ── Pages + their `page:header` copy ──────────────────────────────
   const pages: any[] = Array.isArray(config?.pages) ? config.pages : [];
   for (const page of pages) {
@@ -1672,6 +1690,9 @@ export function collectExpectedEntries(
 
   // ── Screen flows (`flows.<flow>.screens.<node>.…`, #7646 / #11287) ─
   walkScreenFlows(config, out);
+
+  // ── Hook refusal catalogues (`hooks.<hook>.refusals.<CODE>.message`) ─
+  walkHookRefusals(config, out);
 
   // ── Object sections (fieldGroups + authored form/page sections) ───
   // Deliberately a pass of its own: the two authoring surfaces live in
@@ -1871,8 +1892,9 @@ function walkPicklists(config: any, out: ExpectedEntry[]): void {
  * Emit the report copy surface:
  *
  *   reports.<name>.label / .description
+ *   reports.<name>.blocks.<block_name>.label / .description
  *
- * Read off the stack's `reports[]`. Served through `translateReport`,
+ * Read off the stack's `reports[]` and each joined report's `blocks[]`. Served through `translateReport`,
  * registered in `METADATA_DOCUMENT_TRANSLATORS`, so the REST boundary
  * localizes `GET /meta/report` (the list the console's report index and report
  * page read); this pass is the half that writes the skeleton and lets
@@ -1881,8 +1903,9 @@ function walkPicklists(config: any, out: ExpectedEntry[]): void {
  * `pushOptional` for both keys: a report's `description` is optional at the
  * authoring site, so a string nobody wrote is recorded without an `inline` and
  * never demanded as a translation. A report's `label` is required, so it is
- * always authored text. A joined report's block labels and the embedded
- * chart's copy are not on this face.
+ * always authored text. A block's `label` is optional (the renderer falls back
+ * to the block's machine `name`), so a block without one is recorded the same
+ * way and never demanded. The embedded chart's copy is not on this face.
  */
 function walkReports(config: any, out: ExpectedEntry[]): void {
   const reports: any[] = Array.isArray(config?.reports) ? config.reports : [];
@@ -1892,6 +1915,14 @@ function walkReports(config: any, out: ExpectedEntry[]): void {
     if (typeof name !== 'string' || name.length === 0) continue;
     pushOptional(out, ['reports', name, 'label'], report.label, 'report');
     pushOptional(out, ['reports', name, 'description'], report.description, 'report');
+    const blocks: any[] = Array.isArray(report.blocks) ? report.blocks : [];
+    for (const block of blocks) {
+      if (!block || typeof block !== 'object') continue;
+      const blockName = block.name;
+      if (typeof blockName !== 'string' || blockName.length === 0) continue;
+      pushOptional(out, ['reports', name, 'blocks', blockName, 'label'], block.label, 'report');
+      pushOptional(out, ['reports', name, 'blocks', blockName, 'description'], block.description, 'report');
+    }
   }
 }
 
@@ -1929,6 +1960,34 @@ function walkSecurityCatalog(config: any, out: ExpectedEntry[]): void {
       if (typeof name !== 'string' || name.length === 0) continue;
       pushOptional(out, [group, name, 'label'], item.label, source);
       pushOptional(out, [group, name, 'description'], item.description, source);
+    }
+  }
+}
+
+// ─── Doc books (`books.<name>.…`) ──────────────────────────────────────
+
+/**
+ * [#26690] Emit a doc book's spine copy: `books.<book>.label` /
+ * `.description` and `books.<book>.groups.<key>.label`, the keys
+ * `translateBook` reads. A group is addressed by its stable `key`, never its
+ * position. The book's own label and description are optional on the schema,
+ * so they are recorded with {@link pushOptional}; a group's label is required,
+ * so it is the author's literal ({@link pushEntry}).
+ */
+function walkBooks(config: any, out: ExpectedEntry[]): void {
+  const books: any[] = Array.isArray(config?.books) ? config.books : [];
+  for (const book of books) {
+    if (!book || typeof book !== 'object') continue;
+    const name = book.name;
+    if (typeof name !== 'string' || name.length === 0) continue;
+    pushOptional(out, ['books', name, 'label'], book.label, 'book');
+    pushOptional(out, ['books', name, 'description'], book.description, 'book');
+    const groups: any[] = Array.isArray(book.groups) ? book.groups : [];
+    for (const group of groups) {
+      if (!group || typeof group !== 'object') continue;
+      const key = group.key;
+      if (typeof key !== 'string' || key.length === 0) continue;
+      pushEntry(out, ['books', name, 'groups', key, 'label'], group.label, 'book');
     }
   }
 }
@@ -2235,6 +2294,32 @@ function walkScreenFlows(config: any, out: ExpectedEntry[]): void {
       // No id, no key: the request's `current_step` could not name the node.
       if (!nodeId) continue;
       pushOptional(out, ['flows', flowName, 'approvals', nodeId, 'label'], node.label, 'flow', scope);
+    }
+  }
+}
+
+/**
+ * Emit `hooks.<hook>.refusals.<CODE>.message` for every entry a hook's refusal
+ * catalogue declares (#26170, maintainer ruling 6431311681 letter A), seeded
+ * with the declared message.
+ *
+ * The sandboxed body runner reads exactly that key (`hookRefusalMessageKey`)
+ * in the caller's locale when the body throws the entry's code, so each
+ * declared entry is one demand, counted by the coverage gate under its own
+ * `hook` bucket. Keyed by hook name, not by the objects the hook binds, so a
+ * hook bound to several objects or to `'*'` is asked for one translation per
+ * code. A hook that declares no `refusals` has no key here: its throws carry
+ * no address a bundle could reach.
+ */
+function walkHookRefusals(config: any, out: ExpectedEntry[]): void {
+  const hooks: any[] = Array.isArray(config?.hooks) ? config.hooks : [];
+  for (const hook of hooks) {
+    const hookName = typeof hook?.name === 'string' && hook.name.length > 0 ? hook.name : undefined;
+    if (!hookName) continue;
+    const refusals = hook.refusals;
+    if (!refusals || typeof refusals !== 'object' || Array.isArray(refusals)) continue;
+    for (const [code, entry] of Object.entries<any>(refusals)) {
+      pushOptional(out, ['hooks', hookName, 'refusals', code, 'message'], inlineText(entry?.message), 'hook');
     }
   }
 }

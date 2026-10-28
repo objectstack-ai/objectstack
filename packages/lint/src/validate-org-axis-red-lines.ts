@@ -124,7 +124,7 @@ const ORG_PARENT_FIELD = 'parent_organization_id';
  * Cross-checked word-for-word against the authoring enum `ShareRecipientType`
  * (`@objectstack/spec/security`, `sharing.zod.ts`) — the only vocabulary an
  * author can write, since `sharedWith` is `.strict()` and rejects everything
- * else by name. That enum has SIX members; this list intercepts two, and the
+ * else by name. That enum has SEVEN members; this list intercepts two, and the
  * difference is deliberate, not an oversight (it is exactly the oversight
  * #4991 was filed for — ② shipped naming only `business_unit` while ADR-0105
  * D6 ②'s own text names `unit_and_subordinates`):
@@ -137,20 +137,18 @@ const ORG_PARENT_FIELD = 'parent_organization_id';
  * | `team`                  | — | `sys_team` is a FLAT collaboration grouping (ADR-0090 D3 renamed `group` → `team`); `TeamGraphService`, not the BU graph. |
  * | `position`              | — | Flat holder expansion (ADR-0090 D3 finalized the retirement of the position hierarchy); `PositionGraphService`, not the BU graph. The BU *depth scopes* D6 ② also names are a SCOPE mechanism, not a sharing-rule recipient. |
  * | `field`                 | — | RECORD-RELATIVE (#14103, maintainer ruling 2026-09-02): the user or users a user-typed column on the matched record names — read off the row itself, no tree walked, so no organization needed to resolve one in. Per-record expansion is `plugin-sharing`'s (#15072). |
+ * | `queue`                 | — | Re-decided here as ADR-0142 D7 directs: a work-distribution list, not a BU node. A DECLARED queue's members are positions (D1), a flat kind this table already admits. An organization's own queue (`sys_queue_member`) is not readable at lint time; one whose members include a BU kind expands them through the same org-predicated BU graph a direct BU recipient does, so on a global object (no organization) the runtime refuses them by that predicate, read through the queue. |
  *
- * The four allowed recipients are the sanctioned way to share a
+ * The five allowed recipients are the sanctioned way to share a
  * platform-global object (ADR-0066): naming a user, a flat team, a flat
- * position audience, or the users a column on the record itself names grants
- * those people the catalog, which is the entire point of
- * `tenancy.enabled: false`. What ② forbids is not "sharing a global object"
+ * position audience, the users a column on the record itself names, or a
+ * queue's people grants those people the catalog, which is the entire point
+ * of `tenancy.enabled: false`. What ② forbids is not "sharing a global object"
  * but "resolving a BU SUBTREE with no organization to resolve it within".
  *
- * The runtime contract `SharingRuleRecipientType`
- * (`spec/contracts/sharing-service.ts`) additionally carries `queue`; it is
- * deliberately NOT authorable ("no `sys_queue` yet") and `expandRecipient`
- * returns `[]` for it, so no author can reach it and it grants nothing. If it
- * ever becomes authorable it is a work-distribution list, not a BU node — but
- * this table is the place to re-decide that, in `ShareRecipientType` order.
+ * The authoring enum and the runtime contract `SharingRuleRecipientType`
+ * (`spec/contracts/sharing-service.ts`) are the same seven members since
+ * ADR-0142 D7 made `queue` authorable.
  */
 const BU_TREE_RECIPIENT_TYPES = new Set(['business_unit', 'unit_and_subordinates']);
 

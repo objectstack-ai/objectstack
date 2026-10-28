@@ -122,6 +122,10 @@ import {
   scopePermissionSet,
   OBJECT_ACCESS_SCOPES,
   isHierarchyScope,
+  applyFieldBulk,
+  fieldRuleCell,
+  fieldRuleSeed,
+  type FieldBulkAction,
   type ObjectPerm,
   type ObjectPermFlag,
   type FieldPerm,
@@ -279,17 +283,6 @@ interface FieldSummary {
 }
 
 /**
- * objectstack#25866 — a bulk shortcut rewrites the two booleans and keeps an
- * authored row condition, so it never silently widens a conditioned entry into
- * an unconditioned one. Clearing a condition is its own act, in the row.
- */
-function withFieldBits(cur: FieldPerm | undefined, readable: boolean, editable: boolean): FieldPerm {
-  const next: FieldPerm = { readable, editable };
-  if (cur?.when !== undefined) next.when = cur.when;
-  return next;
-}
-
-/**
  * objectstack#26187 — the #16870 pairs, in the direction the matrix needs: a
  * super-user bit already answers `org` before the resolver reads a scope, so
  * the BASE schema (`checkScopeAgainstSuperUserBits`) refuses `readScope`
@@ -388,14 +381,23 @@ function ScopePicker({
   );
 }
 
+/**
+ * The boolean columns, in column order (the position summary's order,
+ * `previews/PermissionPreview`'s `CAPS`). `optIn` marks an axis no bulk
+ * button touches: Export is a deliberate, high-privilege grant
+ * (`@objectstack/spec` `security/high-privilege.ts`, the opt-in export axis),
+ * so only its own checkbox grants or clears it — "None" excepted, which
+ * empties the whole row.
+ */
 function getObjectActions(
   locale: string,
-): Array<{ key: ObjectPermFlag; short: string; tip: string }> {
+): Array<{ key: ObjectPermFlag; short: string; tip: string; optIn?: true }> {
   return [
     { key: 'allowCreate', short: 'C', tip: translate('perm.action.create', locale) },
     { key: 'allowRead', short: 'R', tip: translate('perm.action.read', locale) },
     { key: 'allowEdit', short: 'U', tip: translate('perm.action.edit', locale) },
     { key: 'allowDelete', short: 'D', tip: translate('perm.action.delete', locale) },
+    { key: 'allowExport', short: 'E', tip: translate('perm.action.export', locale), optIn: true },
     { key: 'allowTransfer', short: 'Tr', tip: translate('perm.action.transfer', locale) },
     // No `Re` (allowRestore) / `Pu` (allowPurge) columns: both keys are retired
     // (objectui#6595 — see the tombstone on `ObjectPerm` in `permission-slice`
@@ -1128,21 +1130,25 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         return { ...prev, objects: { ...prev.objects, [objectName]: {} } };
       }
       // The granting arms MERGE (#6605): start from the current row, reset the
-      // boolean columns this matrix authors (`OBJECT_ACTIONS`), then set the
-      // granted ones. Keys the matrix does not model — `allowExport`, anything
-      // an older or newer editor wrote — ride through exactly as they do on
-      // the per-checkbox path (`updateObjectPerm`'s spread), and so do the
-      // scopes on "CRUD" and "R". Replacing the row wholesale is what silently
+      // boolean columns the bulk buttons author (`OBJECT_ACTIONS` less the
+      // `optIn` Export column), then set the granted ones. Export keeps its
+      // value on every granting arm, "All" included (objectstack#26885): it is
+      // a deliberate grant, made or withdrawn only by its own checkbox. Keys
+      // the matrix does not model — anything an older or newer editor wrote —
+      // ride through exactly as they do on the per-checkbox path
+      // (`updateObjectPerm`'s spread), and so do the scopes on "CRUD" and "R".
+      // Replacing the row wholesale is what silently
       // deleted them, and both save doors persist the row as-is: the
       // environment door writes the whole record, and at package scope
       // `mergePermissionSlice` takes in-scope rows entirely from `edited`
       // (ADR-0086 P0), so `base` cannot restore what a bulk click dropped.
       const cur = prev.objects[objectName] ?? {};
       const next: ObjectPerm = { ...cur };
-      for (const a of OBJECT_ACTIONS) delete next[a.key];
+      const bulkKeys = OBJECT_ACTIONS.filter((a) => !a.optIn).map((a) => a.key);
+      for (const key of bulkKeys) delete next[key];
       const grants: ObjectPermFlag[] =
         action === 'all'
-          ? OBJECT_ACTIONS.map((a) => a.key)
+          ? bulkKeys
           : action === 'crud'
           ? ['allowCreate', 'allowRead', 'allowEdit', 'allowDelete']
           : ['allowRead'];
@@ -1163,7 +1169,9 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
     const key = `${objectName}.${fieldName}`;
     setDraft((prev) => {
       const fields = { ...(prev.fields ?? {}) };
-      const cur = fields[key] ?? { readable: true, editable: false };
+      // objectstack#26597 — a row without an entry starts from the bits it
+      // draws (the object grant), so the click changes only the box it lands on.
+      const cur = fieldRuleSeed(fields[key], prev.objects[objectName]);
       const next: FieldPerm = { ...cur, [action]: value };
       // Cascade: !readable implies !editable — and no row condition: the spec
       // refuses `when` beside `readable: false` (objectstack#25866), so Read
@@ -1187,7 +1195,9 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
     const key = `${objectName}.${fieldName}`;
     setDraft((prev) => {
       const fields = { ...(prev.fields ?? {}) };
-      const cur = fields[key] ?? { readable: true, editable: false };
+      // objectstack#26597 — the condition alone changes no box: the entry
+      // starts from the bits the row draws.
+      const cur = fieldRuleSeed(fields[key], prev.objects[objectName]);
       const next: FieldPerm = { ...cur };
       if (when.trim() === '') delete next.when;
       else {
@@ -1214,19 +1224,15 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
   // objectui#2600 B4 — field-level bulk over the fields currently VISIBLE in the
   // sub-table (i.e. after the field filter), mirroring the per-object row's
   // read/all/none shortcuts. `readable` sets read-only, `writable` grants R+W,
-  // `clear` drops the explicit overrides so those fields fall back to default.
-  function bulkSetFields(objectName: string, action: 'readable' | 'writable' | 'clear', fieldNames: string[]) {
+  // `clear` drops the entries so those rows draw the object grant again.
+  // objectstack#26597 — a row already drawing the target is left as it is, so
+  // the shortcut writes only the rows whose boxes change (`applyFieldBulk`).
+  function bulkSetFields(objectName: string, action: FieldBulkAction, fieldNames: string[]) {
     if (fieldNames.length === 0) return;
-    setDraft((prev) => {
-      const fields = { ...(prev.fields ?? {}) };
-      for (const fieldName of fieldNames) {
-        const key = `${objectName}.${fieldName}`;
-        if (action === 'clear') delete fields[key];
-        else if (action === 'readable') fields[key] = withFieldBits(fields[key], true, false);
-        else fields[key] = withFieldBits(fields[key], true, true);
-      }
-      return { ...prev, fields };
-    });
+    setDraft((prev) => ({
+      ...prev,
+      fields: applyFieldBulk(prev.fields ?? {}, objectName, prev.objects[objectName], action, fieldNames),
+    }));
   }
 
   /**
@@ -2130,7 +2136,12 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         </>
       }
     >
-      <div className="flex flex-col h-full overflow-hidden">
+      {/* From `md` up the matrix scrolls inside the page and the chrome above
+          it stays put. On a phone the chrome alone is taller than the screen
+          (objectstack#26885: the grid's own box was ~120px tall at 390×844),
+          so there the column takes its content's height and the page body
+          (`PageShell`) scrolls it as one. */}
+      <div className="flex flex-col md:h-full md:overflow-hidden">
         {noticesEl}
 
         {/* Identity summary — collapsible (objectui#2600 B1). Name/label change
@@ -2166,13 +2177,14 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
 
         {capabilitiesEl}
 
-        {/* Filter bar */}
-        <div className="px-6 py-3 border-b flex items-center gap-3">
+        {/* Filter bar — wraps on a phone (objectstack#26885), where the
+            fixed-width input pushed "Only granted" off the right edge. */}
+        <div className="px-6 py-3 border-b flex flex-wrap items-center gap-3">
           <Input
             placeholder={t('perm.filter.placeholder')}
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            className="h-8 w-72"
+            className="h-8 w-full sm:w-72"
           />
           <div className="flex items-center gap-2">
             <Switch
@@ -2232,16 +2244,19 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
             t={t}
             packageBound={!!packageId}
           />
+          {/* ADR-0056 P4 — assigning users is a Setup act, so the DESIGN surface
+              (Studio, embedded) never shows it. objectui#7611 — the Setup catalog
+              IS this editor in the environment scope (ADR-0131 D3), so there the
+              set's holders render under its definition, by name.
+              objectstack#26885 — in the matrix's own scroll, after the grid: a
+              strip pinned beneath it took up to 35vh off the grid's height, so
+              a laptop showed about five object rows and a phone none. */}
+          {showAssignments && (
+            <div className="mx-4 my-4 rounded-md border" data-testid="perm-assignments">
+              <AssignedUsersSection permissionSetName={name} onHoldersRead={onHoldersRead} />
+            </div>
+          )}
         </div>
-        {/* ADR-0056 P4 — assigning users is a Setup act, so the DESIGN surface
-            (Studio, embedded) never shows it. objectui#7611 — the Setup catalog
-            IS this editor in the environment scope (ADR-0131 D3), so there the
-            set's holders render under its definition, by name. */}
-        {showAssignments && (
-          <div className="mx-4 mb-4 shrink-0 max-h-[35vh] overflow-y-auto rounded-md border" data-testid="perm-assignments">
-            <AssignedUsersSection permissionSetName={name} onHoldersRead={onHoldersRead} />
-          </div>
-        )}
       </div>
 
       {dialogsEl}
@@ -2268,7 +2283,7 @@ interface PermissionTableProps {
   onFieldPerm: (objectName: string, fieldName: string, action: keyof FieldPerm, value: boolean) => void;
   onBulkSet: (objectName: string, action: 'all' | 'none' | 'crud' | 'read') => void;
   /** objectui#2600 B4 — field-level bulk over the filtered field set. */
-  onFieldBulk: (objectName: string, action: 'readable' | 'writable' | 'clear', fieldNames: string[]) => void;
+  onFieldBulk: (objectName: string, action: FieldBulkAction, fieldNames: string[]) => void;
   /** objectstack#25866 — the row condition on a field's edit vote; blank clears it. */
   onFieldWhen: (objectName: string, fieldName: string, when: string) => void;
   /** objectstack#25866 — blocking lint findings on a field's `when`, so Save can hold. */
@@ -2301,8 +2316,9 @@ function PermissionTable({
     // squishing the CRUD grid and clipping the Bulk column off the right edge.
     // The min-width is deliberately unchanged by the two columns objectui#6595
     // retired: it is a floor, so the grid simply has more room to breathe.
-    // objectstack#26187 adds the two scope pickers (~2 × 9rem) to the floor.
-    <table className="w-full min-w-[1248px] text-sm">
+    // objectstack#26187 adds the two scope pickers (~2 × 9rem) to the floor,
+    // objectstack#26885 the Export column (one more w-14).
+    <table className="w-full min-w-[1304px] text-sm">
       <thead className="sticky top-0 bg-background border-b z-10">
         <tr>
           <th className="text-left px-4 py-2 font-medium w-72">{t('perm.col.object')}</th>
@@ -2429,6 +2445,7 @@ function PermissionTable({
                     className="h-6 px-1.5 text-xs"
                     disabled={!writable}
                     onClick={() => onBulkSet(o.name, 'all')}
+                    title={t('perm.bulk.allTip')}
                   >
                     {t('perm.bulk.all')}
                   </Button>
@@ -2448,6 +2465,7 @@ function PermissionTable({
                   <td colSpan={objectActions.length + SCOPE_AXES.length + 2} className="px-12 py-3">
                     <FieldsSubTable
                       objectName={o.name}
+                      objectPerm={perm}
                       fields={fieldsByObject[o.name]}
                       fieldsState={draft.fields ?? {}}
                       writable={writable}
@@ -2478,6 +2496,7 @@ const STUDIO_LEGEND_KEYS: Partial<Record<keyof ObjectPerm, string>> = {
   allowRead: 'engine.studio.access.legend.read',
   allowEdit: 'engine.studio.access.legend.edit',
   allowDelete: 'engine.studio.access.legend.delete',
+  allowExport: 'engine.studio.access.legend.export',
   allowTransfer: 'engine.studio.access.legend.transfer',
   viewAllRecords: 'engine.studio.access.legend.viewAll',
   modifyAllRecords: 'engine.studio.access.legend.modifyAll',
@@ -2573,7 +2592,7 @@ function StudioObjectMatrix({
   const sharingStart = objectActions.findIndex((a) => a.key === STUDIO_SHARING_GROUP_START);
   const divider = (i: number) => (i === 0 || i === sharingStart ? 'border-l' : '');
   return (
-    <table className="w-full min-w-[1248px] border-collapse text-[13px]" data-testid="perm-studio-matrix">
+    <table className="w-full min-w-[1304px] border-collapse text-[13px]" data-testid="perm-studio-matrix">
       <thead className="sticky top-0 z-10">
         <tr className="h-9 border-y bg-sidebar text-xs font-medium text-muted-foreground">
           <th className="pl-6 pr-3 text-left font-medium">{t('perm.col.object')}</th>
@@ -2663,7 +2682,7 @@ function StudioObjectRow({
   onObjectScope: (objectName: string, axis: ScopeAxis, value: ObjectAccessScope | undefined) => void;
   onFieldPerm: (objectName: string, fieldName: string, action: keyof FieldPerm, value: boolean) => void;
   onBulkSet: (objectName: string, action: 'all' | 'none' | 'crud' | 'read') => void;
-  onFieldBulk: (objectName: string, action: 'readable' | 'writable' | 'clear', fieldNames: string[]) => void;
+  onFieldBulk: (objectName: string, action: FieldBulkAction, fieldNames: string[]) => void;
   onFieldWhen: (objectName: string, fieldName: string, when: string) => void;
   onFieldWhenLint: (objectName: string, fieldName: string, issues: CelLintIssue[]) => void;
   onOpenOwd?: (objectName: string) => void;
@@ -2771,6 +2790,7 @@ function StudioObjectRow({
                   type="button"
                   disabled={!writable}
                   onClick={() => onBulkSet(o.name, b.action)}
+                  title={b.action === 'all' ? t('perm.bulk.allTip') : undefined}
                   className="inline-flex h-6 items-center rounded border bg-background px-2 text-[11px] font-medium text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {t(b.key)}
@@ -2785,6 +2805,7 @@ function StudioObjectRow({
           <td colSpan={objectActions.length + SCOPE_AXES.length + 3} className="py-3 pl-12 pr-6">
             <FieldsSubTable
               objectName={o.name}
+              objectPerm={perm}
               fields={fields}
               fieldsState={fieldsState}
               writable={writable}
@@ -2801,8 +2822,60 @@ function StudioObjectRow({
   );
 }
 
+/**
+ * objectstack#26597 — one Read or Edit box of a field row, drawn from
+ * {@link fieldRuleCell}. A row without an entry draws the object grant in grey
+ * with a dashed edge (`data-field-rule="inherited"`), so it never reads as a
+ * rule the set declares; a rule bit the object row does not back carries an
+ * amber ring and says why (`data-capped`).
+ */
+function FieldRuleBox({
+  objectName,
+  fieldName,
+  bit,
+  checked,
+  inherited,
+  capped,
+  writable,
+  t,
+  onFieldPerm,
+}: {
+  objectName: string;
+  fieldName: string;
+  bit: 'readable' | 'editable';
+  checked: boolean;
+  inherited: boolean;
+  capped: boolean;
+  writable: boolean;
+  t: (key: string) => string;
+  onFieldPerm: (objectName: string, fieldName: string, action: keyof FieldPerm, value: boolean) => void;
+}) {
+  const title = inherited
+    ? t('perm.field.inherited.tip')
+    : capped
+      ? t(bit === 'readable' ? 'perm.field.capped.read' : 'perm.field.capped.edit')
+      : undefined;
+  return (
+    <Checkbox
+      checked={checked}
+      disabled={!writable}
+      onCheckedChange={(v) => onFieldPerm(objectName, fieldName, bit, !!v)}
+      aria-label={`${objectName}.${fieldName} ${bit}`}
+      title={title}
+      data-field-rule={inherited ? 'inherited' : 'rule'}
+      data-capped={capped || undefined}
+      className={cn(
+        inherited &&
+          'border-dashed border-muted-foreground/60 data-[state=checked]:bg-muted-foreground/40 data-[state=checked]:text-foreground',
+        capped && 'ring-1 ring-amber-500/70 ring-offset-1',
+      )}
+    />
+  );
+}
+
 function FieldsSubTable({
   objectName,
+  objectPerm,
   fields,
   fieldsState,
   writable,
@@ -2813,12 +2886,14 @@ function FieldsSubTable({
   onFieldWhenLint,
 }: {
   objectName: string;
+  /** The object row this sub-table sits under: a field without an entry draws its grant. */
+  objectPerm: ObjectPerm;
   fields: FieldSummary[] | undefined;
   fieldsState: Record<string, FieldPerm>;
   writable: boolean;
   t: (key: string) => string;
   onFieldPerm: (objectName: string, fieldName: string, action: keyof FieldPerm, value: boolean) => void;
-  onFieldBulk: (objectName: string, action: 'readable' | 'writable' | 'clear', fieldNames: string[]) => void;
+  onFieldBulk: (objectName: string, action: FieldBulkAction, fieldNames: string[]) => void;
   onFieldWhen: (objectName: string, fieldName: string, when: string) => void;
   onFieldWhenLint: (objectName: string, fieldName: string, issues: CelLintIssue[]) => void;
 }) {
@@ -2901,6 +2976,12 @@ function FieldsSubTable({
           {visible.length} / {fields.length}
         </span>
       </div>
+      {/* objectstack#26597 — what a grey box means, said once per sub-table. */}
+      {visible.some((f) => fieldsState[`${objectName}.${f.name}`] === undefined) && (
+        <p className="text-[11px] text-muted-foreground" data-testid={`perm-field-inherited-legend-${objectName}`}>
+          {t('perm.field.inherited.legend')}
+        </p>
+      )}
       {visible.length === 0 ? (
         <div className="text-xs text-muted-foreground">{t('perm.field.filterEmpty')}</div>
       ) : (
@@ -2916,9 +2997,10 @@ function FieldsSubTable({
           <tbody>
             {visible.map((f) => {
               const key = `${objectName}.${f.name}`;
-              const cur = fieldsState[key] ?? { readable: true, editable: false };
-              const whenText = cur.when ?? '';
-              const whenOpen = openWhen.has(key) && cur.readable !== false;
+              const entry: FieldPerm | undefined = fieldsState[key];
+              const cell = fieldRuleCell(entry, objectPerm);
+              const whenText = entry?.when ?? '';
+              const whenOpen = openWhen.has(key) && entry?.readable !== false;
               return (
                 <React.Fragment key={f.name}>
                   <tr className="border-t border-muted">
@@ -2929,26 +3011,36 @@ function FieldsSubTable({
                       )}
                     </td>
                     <td className="px-2 py-1 text-center">
-                      <Checkbox
-                        checked={!!cur.readable}
-                        disabled={!writable}
-                        onCheckedChange={(v) => onFieldPerm(objectName, f.name, 'readable', !!v)}
-                        aria-label={`${objectName}.${f.name} readable`}
+                      <FieldRuleBox
+                        objectName={objectName}
+                        fieldName={f.name}
+                        bit="readable"
+                        checked={cell.readable}
+                        inherited={cell.inherited}
+                        capped={cell.readCapped}
+                        writable={writable}
+                        t={t}
+                        onFieldPerm={onFieldPerm}
                       />
                     </td>
                     <td className="px-2 py-1 text-center">
-                      <Checkbox
-                        checked={!!cur.editable}
-                        disabled={!writable}
-                        onCheckedChange={(v) => onFieldPerm(objectName, f.name, 'editable', !!v)}
-                        aria-label={`${objectName}.${f.name} editable`}
+                      <FieldRuleBox
+                        objectName={objectName}
+                        fieldName={f.name}
+                        bit="editable"
+                        checked={cell.editable}
+                        inherited={cell.inherited}
+                        capped={cell.editCapped}
+                        writable={writable}
+                        t={t}
+                        onFieldPerm={onFieldPerm}
                       />
                     </td>
                     {/* objectstack#25866 — the row condition on the edit vote.
                         Read off shows no affordance: the spec refuses `when`
                         beside `readable: false`, and the cascade has cleared it. */}
                     <td className="px-2 py-1 text-left">
-                      {cur.readable === false ? (
+                      {entry?.readable === false ? (
                         <span className="text-muted-foreground" title={t('perm.field.when.readOff')}>
                           —
                         </span>

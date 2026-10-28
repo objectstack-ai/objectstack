@@ -104,6 +104,35 @@ export function parsePackages(payload: unknown): PkgEntry[] {
 }
 
 /**
+ * [objectstack#26708] Every package id `GET /api/v1/packages` lists, the
+ * kernel packages {@link parsePackages} hides from the switcher included —
+ * the answer to "is this id installed here?", which is not the switcher's
+ * question: a kernel package is installed, only not offered.
+ */
+export function parseListedPackageIds(payload: unknown): ReadonlySet<string> {
+  const root = (payload as { data?: unknown })?.data ?? payload;
+  const raw = Array.isArray(root) ? root : ((root as { packages?: unknown[] })?.packages ?? []);
+  const ids = new Set<string>();
+  for (const p of raw as Array<Record<string, unknown>>) {
+    if (!p || typeof p !== 'object') continue;
+    const m = (p.manifest ?? {}) as Record<string, unknown>;
+    const id = String(m.id ?? p.id ?? '');
+    if (id) ids.add(id);
+  }
+  return ids;
+}
+
+/**
+ * The ids of {@link parseListedPackageIds}, read from the same request
+ * {@link fetchPackages} sends: a caller asking both at once sends one
+ * (see {@link readPackagesPayload}). Studio's builder reads it to tell an id
+ * no package has from one it merely cannot open — ⛔ no second endpoint.
+ */
+export async function fetchListedPackageIds(): Promise<ReadonlySet<string>> {
+  return parseListedPackageIds(await readPackagesPayload());
+}
+
+/**
  * The package list every Studio surface reads — the switcher, the writability
  * courtesy gate, the namespace lookup and the builder landing page.
  *

@@ -96,6 +96,7 @@ vi.mock('./RecordDetailView', () => ({ RecordDetailView: () => null }));
 
 import { ObjectView } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
+import { RECORD_OPEN_PREFERENCE_KEY } from '../utils/recordOpenPreference';
 
 const OBJECT_NAME = 'clm_contract';
 const LEGAL_CAP = 'clm_legal_workbench.view';
@@ -143,14 +144,17 @@ function makeDataSource() {
 }
 
 /**
- * The same object, opened in split navigation with a record open: the list
- * sits in the overlay's left pane, the page's other place the list is drawn.
+ * The same object, opened in the split pane with a record open: the list sits
+ * in the overlay's left pane, the page's other place the list is drawn. The
+ * pane is the READER's preference since objectstack#26677 (`split` left
+ * `navigation.mode`), so the object declares nothing and the browser
+ * remembers `split`.
  */
-const SPLIT_OBJECTS = [{ ...OBJECTS[0], navigation: { mode: 'split' } }];
-
 function openView(viewId: string, access: Record<string, unknown>, opts: { split?: boolean } = {}) {
   const probeMetaItemAccess = vi.fn(async () => access);
-  const objects = opts.split ? SPLIT_OBJECTS : OBJECTS;
+  const objects = OBJECTS;
+  if (opts.split) window.localStorage.setItem(RECORD_OPEN_PREFERENCE_KEY, 'split');
+  else window.localStorage.removeItem(RECORD_OPEN_PREFERENCE_KEY);
   render(
     <I18nProvider instance={createI18n({ defaultLanguage: 'en', detectBrowserLanguage: false })}>
       <AdapterCtx.Provider value={{ probeMetaItemAccess } as never}>
@@ -178,7 +182,10 @@ async function settle() {
 }
 
 describe('objectui#12112 — a refused list view, opened by name, says it was refused', () => {
-  afterEach(() => cleanup());
+  afterEach(() => {
+    cleanup();
+    window.localStorage.removeItem(RECORD_OPEN_PREFERENCE_KEY);
+  });
 
   it('a view the server refuses: a permission refusal in the server\'s words, not the default view', async () => {
     const probe = openView('clm_contract.legal_review', { verdict: 'denied', message: REFUSAL });

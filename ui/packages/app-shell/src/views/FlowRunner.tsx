@@ -232,12 +232,50 @@
  * step wrote nothing here, and the next screen appearing is its whole answer.
  * The terminal toasts are untouched.
  *
- * The flat footer's button still reads Submit on every step, and that is a
- * measured limit, not a choice. "Next" on a step that is not the last needs to
- * know which step IS the last, and nothing on the wire says so: the paused
- * screen (`ScreenSpec` in `@objectstack/spec/contracts`) carries no final-step
- * or step-count member, and a flow can branch after any screen, so only the
- * engine could tell from the graph. The same gap keeps a step counter out.
+ * ## A step says Next or Submit, and counts itself only when it can (objectstack#26657)
+ *
+ * The flat footer's button used to read Submit on every step, so a requester
+ * believed the whole wizard was submitted on step 1. Which step is the last
+ * is a fact of the flow graph, and a flow can branch after any screen, so
+ * the engine answers it on the paused screen (`ScreenSpec.progress`) and
+ * this dialog ⛔ never walks the graph itself:
+ * - `nextScreen` `'certain'` or `'possible'` reads `common.next` — a later
+ *   screen may still come, and a step that turns out to finish the run is
+ *   answered by the completion toast; `'none'` reads `common.submit`.
+ * - The step counter (`form.stepOf`, the wording the form wizard already
+ *   uses) is drawn beside the flow's name only when the engine served both
+ *   `step` and `stepCount`, which it does only where every path agrees. A
+ *   branch or a loop leaves the count out rather than drawing a wrong one.
+ * - No `progress` at all — a server that predates it, or a screen of a child
+ *   run whose graph cannot see the parent's — keeps Submit and no counter,
+ *   exactly as before.
+ * The `object-form` step's own button (`flowRunner.saveAndContinue`) is the
+ * form's, and is not relabelled here.
+ *
+ * ## An empty required field is refused AT the field (objectstack#26882)
+ *
+ * Submit with a required field left empty used to answer with one toast
+ * naming the fields and nothing else: no message at the field, no
+ * `aria-invalid`, focus left on Submit. A toast is transient and sits apart
+ * from the dialog, so the refusal read as a button that did nothing. The
+ * dialog now answers the way the record form does, and only that way: each
+ * missing field shows `validation.required` ("Due Date is required") under its
+ * control, the control is marked `aria-invalid` and names the message in its
+ * `aria-describedby` ({@link ScreenView}), and focus moves to the first missing
+ * field in screen order. There is no toast — the record form raises none for a
+ * client-side refusal either, since every field it refuses carries its own
+ * message. Submit stays where it was, and no resume request is made. Editing a
+ * field retires its own message; the next Submit checks again.
+ *
+ * What this does NOT cover, on purpose: a refusal that comes back from the
+ * ENGINE. A retryable one (`INVALID_SCREEN_INPUT`, the declared field
+ * contract, checked before the suspension is consumed) keeps the screen, the
+ * values and Submit, with the sentence in the banner above — the envelope
+ * names no field in a structured slot, so placing it at a field would mean
+ * parsing prose. A terminal one (a `refused` end, or a node failing after the
+ * resume consumed the suspension) withdraws Submit as the sections above say:
+ * the run is over, and only a new run, or an operator's
+ * `restore-suspension`, can accept input again.
  */
 import { Suspense, useEffect, useState } from 'react';
 import {
@@ -269,6 +307,7 @@ import {
   isObjectFormScreen,
   initialScreenValues,
   screenFieldBoundViolations,
+  screenFieldControlId,
   screenFields,
   screenResumeValues,
   visibleScreenFields,
@@ -458,6 +497,9 @@ export function FlowRunner({ state, authFetch, baseUrl, onClose, onComplete, dat
   const [submitting, setSubmitting] = useState(false);
   const [resumeError, setResumeError] = useState<ResumeError | null>(null);
   const [refused, setRefused] = useState<RefusedOutcome | null>(null);
+  // The message each field the last Submit refused is drawn with, by field
+  // name (objectstack#26882 — see the header).
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   // Every upload widget in the screen body reports into this scope, so Submit
   // can wait for a file field's id (objectstack#25801 — see the header).
   const uploads = useUploadingScope();
@@ -472,6 +514,7 @@ export function FlowRunner({ state, authFetch, baseUrl, onClose, onComplete, dat
       // A fresh run must not open under the previous run's refusal.
       setResumeError(null);
       setRefused(null);
+      setFieldErrors({});
     }
   }, [state]);
 
@@ -482,7 +525,7 @@ export function FlowRunner({ state, authFetch, baseUrl, onClose, onComplete, dat
   // it follows the live resource tree and a language switch with no identity
   // to keep stable (AGENTS.md §5 #10). `screen` stays the payload the run is
   // driven by; `shown` differs from it in copy only, so every DISPLAY read —
-  // including the names in the missing-fields toast below — goes through it.
+  // including the labels the required refusal below names — goes through it.
   const bundle = activeFlowsBundle(i18n, language, flowName);
   const shown = localizeScreen(screen, flowName, bundle, language);
   // The flow's name as the user reads it (objectui#11092), from the same bundle.
@@ -494,6 +537,14 @@ export function FlowRunner({ state, authFetch, baseUrl, onClose, onComplete, dat
     // where a retry exists. A terminal refusal must stay on screen: its whole
     // job is to explain why the (now absent) Submit is not coming back.
     setResumeError((e) => (e && e.retryable ? null : e));
+    // The field's own refusal goes with the edit that answers it; the others
+    // stay until they are answered too.
+    setFieldErrors((p) => {
+      if (!(name in p)) return p;
+      const next = { ...p };
+      delete next[name];
+      return next;
+    });
   };
 
   // Resume the paused run with `inputs` (applied as bare flow variables) and
@@ -548,6 +599,7 @@ export function FlowRunner({ state, authFetch, baseUrl, onClose, onComplete, dat
       setRunId(outcome.runId || runId);
       setFlowLabel(outcome.flowLabel);
       setValues(initialScreenValues(outcome.screen));
+      setFieldErrors({});
       // Only a step that saved a record says so; a flat step's answer is the
       // next screen itself (objectstack#26578 — see the header).
       if (savedRecord) toast.success(t('flowRunner.nextStep', { defaultValue: 'Saved — next step' }));
@@ -588,15 +640,26 @@ export function FlowRunner({ state, authFetch, baseUrl, onClose, onComplete, dat
     const missing = visibleScreenFields(shown, values).filter(
       (f) => f.required && (values[f.name] === undefined || values[f.name] === '' || values[f.name] === null),
     );
+    // Refused at each field, as the record form refuses it, with no toast and
+    // no request (objectstack#26882 — see the header). The names come from
+    // `shown`, so the message reads the field's label in the user's language.
     if (missing.length) {
-      toast.error(
-        t('wizard.missingRequired', {
-          fields: missing.map((f) => f.label || f.name).join(', '),
-          defaultValue: 'Please complete the required fields: {{fields}}',
-        }),
+      setFieldErrors(
+        Object.fromEntries(
+          missing.map((f) => [
+            f.name,
+            t('validation.required', { field: f.label || f.name, defaultValue: '{{field}} is required' }),
+          ]),
+        ),
       );
+      // The first missing field in screen order takes focus, so the refusal is
+      // where the user is looking, on a long screen too.
+      const first = document.getElementById(screenFieldControlId(missing[0].name));
+      first?.focus({ preventScroll: true });
+      first?.scrollIntoView?.({ block: 'center' });
       return;
     }
+    setFieldErrors({});
     // The declared `min` / `max` (objectstack#17306), refused here naming the
     // field, beside `required` and over the same on-screen list. A courtesy,
     // not the enforcement: the engine re-checks the bounds on resume, and
@@ -665,6 +728,14 @@ export function FlowRunner({ state, authFetch, baseUrl, onClose, onComplete, dat
   // A long flat screen widens to two columns (objectui#12080 — see the header).
   const isLongScreen = !isObjectForm && screenFields(screen).length > NARROW_SCREEN_MAX_FIELDS;
   const isWide = showScreenBody && (isObjectForm || isLongScreen);
+  // The engine's word on what follows this step (objectstack#26657 — see the
+  // header): Next while another screen may come, Submit on the last or when
+  // the server says nothing, and a counter only from an exact count.
+  const progress = screen.progress;
+  const anotherScreen = progress !== undefined && progress.nextScreen !== 'none';
+  const stepCounter = progress?.step !== undefined && progress.stepCount !== undefined
+    ? t('form.stepOf', { current: progress.step, total: progress.stepCount, defaultValue: 'Step {{current}} of {{total}}' })
+    : undefined;
 
   return (
     <Dialog open onOpenChange={(o) => { if (!o && !submitting) onClose(); }}>
@@ -677,7 +748,12 @@ export function FlowRunner({ state, authFetch, baseUrl, onClose, onComplete, dat
         <DialogHeader>
           {/* The flow being run (objectui#11092), above the step's own heading,
               which stays the dialog's title. */}
-          <p className="text-xs font-medium text-muted-foreground">{shownFlowLabel}</p>
+          <div className="flex flex-wrap items-baseline justify-center gap-x-2 sm:justify-start">
+            <p className="text-xs font-medium text-muted-foreground">{shownFlowLabel}</p>
+            {stepCounter && (
+              <p className="text-xs text-muted-foreground" data-testid="flow-step-counter">{stepCounter}</p>
+            )}
+          </div>
           <DialogTitle>{shown.title || t('flowRunner.title', { defaultValue: 'Input' })}</DialogTitle>
           {/* Heading and body text are drawn as served: the engine already
               translated both in the run's locale (objectstack#22507 ruling A,
@@ -722,6 +798,7 @@ export function FlowRunner({ state, authFetch, baseUrl, onClose, onComplete, dat
                   screen={shown}
                   values={values}
                   onValueChange={setVal}
+                  errors={fieldErrors}
                   dataSource={dataSource}
                   objects={objects}
                   // Two columns from `sm` up; `space-y-0` replaces the body's own
@@ -760,7 +837,9 @@ export function FlowRunner({ state, authFetch, baseUrl, onClose, onComplete, dat
                     ? t('flowRunner.submitting', { defaultValue: 'Submitting…' })
                     : uploads.anyUploading
                       ? t('fields.file.uploading', { defaultValue: 'Uploading…' })
-                      : t('common.submit', { defaultValue: 'Submit' })}
+                      : anotherScreen
+                        ? t('common.next', { defaultValue: 'Next' })
+                        : t('common.submit', { defaultValue: 'Submit' })}
                 </Button>
               </>
             )}

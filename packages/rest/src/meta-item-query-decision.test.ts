@@ -35,9 +35,11 @@ const LAYERED_MEMBER = 'The "member" selector is not served by the layered view 
 const refusal = (rule: string, message: string) => ({ status: 400, code: 'VALIDATION_ERROR', message, rule });
 
 describe('[#23072] metaItemQueryRefusal — each door\'s closed set', () => {
-    it('the measured sets: the item read\'s six, `/layers`\' one, `/published`\' none, and the dispatcher save\'s three (no `force`)', () => {
+    it('the measured sets: the item read\'s six, `/layers`\' two, `/published`\' none, and the dispatcher save\'s three (no `force`)', () => {
         expect([...META_ITEM_READ_PARAMS].sort()).toEqual(['layers', 'locale', 'member', 'package', 'preview', 'state']);
-        expect([...META_ITEM_LAYERS_PARAMS]).toEqual(['package']);
+        // [#26699] The bundle member selector joined `/layers` (ruling 6116165299's
+        // door list, extended to the layered read by the option-A ruling on #26649).
+        expect([...META_ITEM_LAYERS_PARAMS]).toEqual(['package', 'member']);
         expect([...META_ITEM_PUBLISHED_PARAMS]).toEqual([]);
         // RestServer's own save door reads `force`; the dispatcher's does not.
         // [#24395] `surface` joined both save doors' sets.
@@ -76,11 +78,13 @@ describe('[#23072] metaItemQueryRefusal — each door\'s closed set', () => {
         });
     }
 
-    it('`member` is refused by every door that does not read it — the layered view, the published document and the body-addressed save', () => {
-        for (const door of ['layers', 'published', 'save'] as const) {
+    it('`member` is refused by every door that does not read it — the published document and the body-addressed save', () => {
+        for (const door of ['published', 'save'] as const) {
             expect(metaItemQueryRefusal(door, { member: 'zh-CN' })?.rule, door).toBe('unknown-parameter');
         }
         expect(metaItemQueryRefusal('item', { member: 'zh-CN' })).toBeUndefined();
+        // [#26699] The layered view reads it now.
+        expect(metaItemQueryRefusal('layers', { member: 'zh-CN' })).toBeUndefined();
     });
 });
 
@@ -91,6 +95,10 @@ describe('[#23072] metaItemQueryRefusal — arity, and the order of the three ru
         ));
         expect(metaItemQueryRefusal('layers', { package: ['a', 'b', 'c'] })).toEqual(refusal(
             'repeated-parameter', repeatedQueryParamMessage('package', 3),
+        ));
+        // [#26699] …and the member the layered view now reads, once.
+        expect(metaItemQueryRefusal('layers', { member: ['zh-CN', 'ja-JP'] })).toEqual(refusal(
+            'repeated-parameter', repeatedQueryParamMessage('member', 2),
         ));
         expect(metaItemQueryRefusal('save', { mode: ['draft', 'active'] })?.message)
             .toBe(repeatedQueryParamMessage('mode', 2));

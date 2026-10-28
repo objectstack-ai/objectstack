@@ -332,6 +332,41 @@
  * nothing is judged at `orderBy` there: the `field` position already judges
  * the name.
  *
+ * ## [#26719] A chart bound to a dataset over ANOTHER object is REFUSED
+ *
+ * A list view's `chart` block names an ADR-0021 dataset, and the dataset
+ * declares its own base `object`. The chart draws the rows of THAT object: the
+ * list view hands `queryDataset` the dataset name, its dimensions and its
+ * measures and nothing else (the list's filter has no door into that query,
+ * objectui#10327). So a chart under `showcase_project`'s list bound to a
+ * dataset over `showcase_task` plots tasks, labelled as a view of projects.
+ * Measured at the runtime save door before this landed: such a view, written
+ * into one package and bound to a dataset over another package's object, saved
+ * and published `200` with no advisory.
+ *
+ * So when the bound object resolves and the chart's dataset is declared over a
+ * different object, the list view is reported once, at `chart.dataset`, as
+ * {@link LIST_VIEW_CHART_DATASET_FOREIGN_OBJECT}, `error`: the publish door
+ * refuses it (`422`), and `os validate` / `os build` fail on it. The verdict
+ * names the view (`where`), the dataset and both objects.
+ *
+ * **A dataset that reaches the view's object through a declared relation is
+ * refused too.** `include` lists to-one relationships FROM the dataset's base
+ * object, so a dataset over `crm_opportunity` that includes `account` still
+ * counts and sums opportunities: the relation adds columns to group by, never
+ * a second row set. Nothing maps the list's object onto the dataset either —
+ * that mapping was refused (objectui#10327, option B). The equality of the two
+ * object names is the one test that says the chart plots the rows the list
+ * lists. Such a chart belongs on the list view of the dataset's own object, or
+ * on a dashboard.
+ *
+ * Not judged here, each with an owner: a dataset that resolves to nothing
+ * (`chart-dataset-unknown`), a dataset that declares no `object`, and a list
+ * view whose binding does not resolve (skip 1 below, or the two binding
+ * verdicts above). The package a dataset comes from is not judged: when its
+ * object is the view's own, that object is already inside the written
+ * package's closure.
+ *
  * ## Skips — the same three every field-existence rule in this package takes
  *
  * Resolution is {@link resolveFieldPath}'s and its `unknowable` verdicts are
@@ -366,6 +401,7 @@ import {
   describeFieldPathVerdict,
   indexObjectGraph,
   isUnjudgeable,
+  recordsOf,
   resolveFieldPath,
   suggestName,
   type ObjectGraph,
@@ -403,6 +439,13 @@ export const LIST_VIEW_FIELD_DOTTED = 'list-view-field-dotted';
  * group renders. See the section of that name on this module.
  */
 export const LIST_VIEW_GROUP_ORDER_UNORDERABLE = 'list-view-group-order-unorderable';
+
+/**
+ * [#26719] A list view whose `chart` binds a dataset declared over another
+ * object than the one the list view lists. See the section of that name on
+ * this module.
+ */
+export const LIST_VIEW_CHART_DATASET_FOREIGN_OBJECT = 'list-view-chart-dataset-foreign-object';
 
 /**
  * A list view that still carries a key `@objectstack/spec` retired — reported
@@ -890,6 +933,39 @@ export function validateListViewFieldRefs(
   // empty graph only switches the field positions off.
   const noUniverse = graph.size === 0 && !scope;
 
+  // [#26719] Each declared dataset's base object, by dataset name — what a
+  // list view's `chart.dataset` is judged against. A dataset that declares no
+  // object is absent here and so not judged.
+  const datasetObjects = new Map<string, string>();
+  for (const ds of recordsOf(stack.datasets)) {
+    const name = strName(ds.name);
+    const object = strName(ds.object);
+    if (name && object) datasetObjects.set(name, object);
+  }
+
+  /**
+   * [#26719] A list view's chart bound to a dataset over another object than
+   * the one the list view lists — see the section of that name on this module.
+   */
+  const checkChartDataset = (listView: AnyRec, object: string, where: string, path: string): void => {
+    const chart = listView.chart;
+    if (!isRec(chart)) return;
+    const dataset = strName(chart.dataset);
+    if (!dataset) return;
+    const datasetObject = datasetObjects.get(dataset);
+    if (!datasetObject || datasetObject === object) return;
+    findings.push({
+      severity: 'error',
+      rule: LIST_VIEW_CHART_DATASET_FOREIGN_OBJECT,
+      where,
+      path: `${path}.chart.dataset`,
+      message:
+        `chart binds dataset "${dataset}" over object "${datasetObject}", but this list view lists ` +
+        `"${object}": the chart would plot "${datasetObject}" records under "${object}"`,
+      hint: `Bind a dataset whose \`object\` is "${object}", or move the chart to a list view of "${datasetObject}" or to a dashboard`,
+    });
+  };
+
   /**
    * [#24563] One list view whose binding is not in the stated closure — see
    * the section of that name on this module. One finding per list view, at
@@ -1110,6 +1186,9 @@ export function validateListViewFieldRefs(
       else if (whole) reportUnknownObject(object, where, bindingPath);
       return;
     }
+    // [#26719] Before skip 2: the chart's dataset is judged by its object's
+    // NAME, so an object with no readable field map is judged too.
+    checkChartDataset(listView, object, where, path);
     if (!graph.get(object)) return;
     // Bound to a `const` so the narrowing survives into the nested closures
     // below (a parameter's narrowing does not).

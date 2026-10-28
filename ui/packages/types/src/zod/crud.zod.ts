@@ -62,6 +62,15 @@ const ActionConditionPredicateSchema = z.union([
 /**
  * Action Schema - Enhanced with Phase 2 features
  *
+ * RENAMED from `ActionSchema` (objectstack#25923, work item 4). That name is
+ * `@objectstack/spec/ui`'s action metadata type, and this legacy `type: 'action'`
+ * node shares none of its vocabulary, so `import { ActionSchema } from
+ * '@object-ui/types/zod'` validated a different contract from the one the name
+ * promises. The accept set is unchanged; only the export name moved, to the
+ * `CRUD…` prefix its union (`CRUDComponentSchema`) and sibling
+ * (`CRUDDialogSchema`) already carry. Its TypeScript twin keeps the @deprecated
+ * `ActionSchema` name in `../crud.ts`.
+ *
  * INPUT FACE: both type arguments carry this mirror's existing TypeScript
  * declaration (objectui#7760, maintainer ruling, decision batch #69) — the annotation
  * still breaks the recursion in the initializer below, but it no longer publishes
@@ -69,7 +78,7 @@ const ActionConditionPredicateSchema = z.union([
  * declaration unchanged. The reasoning lives once, on `SchemaNodeSchema` in
  * `base.zod.ts` — read it there before changing this line.
  */
-export const ActionSchema: z.ZodType<ActionDeclaration, ActionDeclaration> = z.lazy(() => BaseSchema.extend({
+export const CRUDActionSchema: z.ZodType<ActionDeclaration, ActionDeclaration> = z.lazy(() => BaseSchema.extend({
   type: z.literal('action'),
   label: z.string().describe('Action label'),
   level: z.enum(['primary', 'secondary', 'success', 'warning', 'danger', 'info', 'default']).optional().describe('Action type/level'),
@@ -93,7 +102,7 @@ export const ActionSchema: z.ZodType<ActionDeclaration, ActionDeclaration> = z.l
     title: z.string().optional().describe('Dialog title'),
     content: z.union([SchemaNodeSchema, z.array(SchemaNodeSchema)]).optional().describe('Dialog content'),
     size: z.enum(['sm', 'default', 'lg', 'xl', 'full']).optional().describe('Dialog size'),
-    actions: z.array(ActionSchema).optional().describe('Dialog actions'),
+    actions: z.array(CRUDActionSchema).optional().describe('Dialog actions'),
   }).optional().describe('Dialog configuration (for dialog actions)'),
   successMessage: z.string().optional().describe('Success message after execution'),
   errorMessage: z.string().optional().describe('Error message on failure'),
@@ -123,7 +132,7 @@ export const ActionSchema: z.ZodType<ActionDeclaration, ActionDeclaration> = z.l
     + 'publish as an unrecognized key). A failure notice is `errorMessage`. Retired under ADR-0049 '
     + 'enforce-or-remove with no deprecation window (maintainer ruling option 1, 2026-09-05).',
   ),
-  chain: z.array(ActionSchema).optional().describe('Action chaining - actions to execute after this one'),
+  chain: z.array(CRUDActionSchema).optional().describe('Action chaining - actions to execute after this one'),
   chainMode: ActionExecutionModeSchema.optional().describe('Chain execution mode'),
   condition: ActionConditionPredicateSchema.optional().describe('Execution gate — the action runs only while this predicate holds'),
   reload: z.boolean().optional().describe('Whether to reload data after action'),
@@ -193,7 +202,7 @@ export const DetailSchema = BaseSchema.extend({
       render: SchemaNodeSchema.optional(),
     })),
   })).optional().describe('Field groups for organized display'),
-  actions: z.array(ActionSchema).optional().describe('Actions available in detail view'),
+  actions: z.array(CRUDActionSchema).optional().describe('Actions available in detail view'),
   tabs: z.array(z.looseObject({
     key: z.string(),
     label: z.string(),
@@ -264,7 +273,7 @@ export const CRUDDialogSchema = BaseSchema.extend({
   description: z.string().optional().describe('Dialog description'),
   content: z.union([SchemaNodeSchema, z.array(SchemaNodeSchema)]).optional().describe('Dialog content'),
   size: z.enum(['sm', 'default', 'lg', 'xl', 'full']).optional().describe('Dialog size'),
-  actions: z.array(ActionSchema).optional().describe('Dialog actions/buttons'),
+  actions: z.array(CRUDActionSchema).optional().describe('Dialog actions/buttons'),
   open: z.boolean().optional().describe('Whether dialog is open'),
   // RETIRED (objectui#7344): no renderer is registered for `crud-dialog`;
   // nothing reads the key. Was `z.any()`.
@@ -285,16 +294,16 @@ export const CRUDDialogSchema = BaseSchema.extend({
  * distinct `z.literal` (`action` · `detail` · `crud-dialog`).
  */
 const CRUDComponentSchemaInferred = z.discriminatedUnion('type', [
-  // `ActionSchema`'s `z.ZodType<ActionDeclaration, ActionDeclaration>` annotation
+  // `CRUDActionSchema`'s `z.ZodType<ActionDeclaration, ActionDeclaration>` annotation
   // is a maintainer ruling (objectui#7760, decision batch #69) and ⛔ does not
   // move here. That type declares `_zod.propValues` as `PropValues | undefined`,
   // so `tsc` cannot see through the `z.lazy` to the `type: z.literal('action')`
   // the body really declares — the RUNTIME can, measured:
-  // `ActionSchema._zod.propValues.type` is `Set { 'action' }`. The intersection
+  // `CRUDActionSchema._zod.propValues.type` is `Set { 'action' }`. The intersection
   // asserts that one fact and nothing else, leaving the output type intact so
   // this union infers what it always did; `__tests__/any-component-union-fanout
   // .test.ts` pins the fact at runtime so the cast cannot rot into a lie.
-  ActionSchema as typeof ActionSchema & z.core.$ZodTypeDiscriminable<'type'>,
+  CRUDActionSchema as typeof CRUDActionSchema & z.core.$ZodTypeDiscriminable<'type'>,
   DetailSchema,
   CRUDDialogSchema,
 ]);
@@ -316,6 +325,6 @@ export const CRUDComponentSchema: CRUDComponentZodType = CRUDComponentSchemaInfe
  * Export type inference helpers
  */
 export type ActionExecutionModeSchemaType = z.infer<typeof ActionExecutionModeSchema>;
-export type ActionSchemaType = z.infer<typeof ActionSchema>;
+export type CRUDActionSchemaType = z.infer<typeof CRUDActionSchema>;
 export type DetailSchemaType = z.infer<typeof DetailSchema>;
 export type CRUDDialogSchemaType = z.infer<typeof CRUDDialogSchema>;

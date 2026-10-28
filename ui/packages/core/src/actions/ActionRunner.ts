@@ -1076,6 +1076,61 @@ function crossesObjectBoundary(viewName: string, contextObject: string | undefin
 }
 
 /**
+ * Does the action declare a behaviour the runner performs itself, without a
+ * dispatch route — a `navigate`, an `api` / `endpoint` call, an `onClick`, a
+ * `redirect`, or an EXPLICIT `reload` / `close`?
+ *
+ * These are runner keys, not `ActionSchema` keys: the legacy fallbacks of
+ * `dispatchCollected` and `executeActionSchema` run them. `reload` / `close`
+ * default to true downstream, so only an explicit `true` counts as declared
+ * intent — otherwise every empty schema would look like it asked for one.
+ */
+function declaresRunnerBehavior(action: ActionDef): boolean {
+  return !!(action.navigate || action.api || action.endpoint || action.onClick || action.redirect)
+    || action.reload === true || action.close === true;
+}
+
+/**
+ * The route an action is dispatched on — the key `dispatchCollected` looks up
+ * a registered handler and a built-in executor under. This is the ONE place
+ * the runner picks it:
+ *
+ * 1. The authored `type`, else the `action:*` block's `actionType`.
+ * 2. Neither: the action's `name`, when a handler is registered under it — the
+ *    by-name dispatch hosts wire custom actions through, and the leg an
+ *    `action:button` that declares no `actionType` lands on — or when the
+ *    action declares a runner behaviour of its own
+ *    ({@link declaresRunnerBehavior}), which the legacy fallbacks run.
+ * 3. Otherwise a named action is a declaration that left `type` to its
+ *    default: `@objectstack/spec`'s `ActionSchema.type` is
+ *    `.default('script')`. A stored row reaches the console UNPARSED
+ *    (objectstack-ai/objectstack#3903), so nothing has materialized that
+ *    default; it is applied here, where the route is read, and ⛔ never by
+ *    writing `type` into each producer. Without it the action fell back to its
+ *    NAME, matched no executor, and was refused as "not executable" — a
+ *    spec-valid script action, dead in the console.
+ * 4. Nothing named: `''`, which `executeActionSchema` refuses (objectui#2960).
+ *
+ * An unknown `type` is step 1's answer and stays unknown: it is never read as
+ * the default, so it is refused as before.
+ */
+function resolveDispatchType(action: ActionDef, hasHandler: (name: string) => boolean): string {
+  const declared = action.type || action.actionType;
+  if (declared) return declared;
+  const name = action.name || '';
+  if (!name || hasHandler(name) || declaresRunnerBehavior(action)) return name;
+  return SPEC_DEFAULT_ACTION_TYPE;
+}
+
+/**
+ * `ActionSchema.type`'s default in `@objectstack/spec` — the platform action
+ * route. Read by {@link resolveDispatchType} alone;
+ * `ActionRunner.specDefaultType-26879.test.ts` holds it equal to the type the
+ * spec materializes on a typeless action.
+ */
+const SPEC_DEFAULT_ACTION_TYPE: RunnableActionType = 'script';
+
+/**
  * Is this the declarative single-record field write?
  *
  * Asks the AUTHORED key, not `type`: the spec materializes `type: 'script'`
@@ -1452,8 +1507,9 @@ export class ActionRunner {
       // two apart. Dev-only, warn-once, changes nothing.
       warnOnDeprecatedObjectParams(action);
 
-      // Resolve the action type
-      const actionType = action.type || action.actionType || action.name || '';
+      // Resolve the dispatch route — a typeless declaration takes the spec's
+      // default `type` (see `resolveDispatchType`).
+      const actionType = resolveDispatchType(action, (name) => this.handlers.has(name));
 
       // Conditional execution. Ask "is a `condition` gate DECLARED?" — not "is
       // the raw value truthy?" (objectui#3872). Truthiness cannot answer that
@@ -1680,7 +1736,18 @@ export class ActionRunner {
       // Check for a registered custom handler first
       if (actionType && this.handlers.has(actionType)) {
         const handler = this.handlers.get(actionType)!;
-        return handler(action, this.context);
+        // An `api` target is interpolated HERE, by the runner, before a host
+        // handler sees it — the same `interpolateTarget` the built-in
+        // `executeAPI` and `executeUrl` run. A registered `api` handler (the
+        // console's) replaces `executeAPI` wholesale, so without this the spec's
+        // documented `${ctx.recordId}` went out on the wire as the literal
+        // placeholder while a `url` target with the same token resolved. One
+        // substitution, one vocabulary, one encoding, whoever sends the request.
+        // A target with no token reaches the handler as the same object.
+        const target = actionType === 'api' && typeof action.target === 'string'
+          ? this.interpolateTarget(action.target, action)
+          : action.target;
+        return handler(target === action.target ? action : { ...action, target }, this.context);
       }
 
       // Built-in action execution by type.
@@ -2549,13 +2616,9 @@ export class ActionRunner {
    */
   private async executeActionSchema(action: ActionDef): Promise<ActionResult> {
     const hasApi = !!(action.api || action.endpoint);
-    // `reload`/`close` default to true downstream, so only an EXPLICIT `true`
-    // counts as declared intent — otherwise every empty schema would look like
-    // it asked for a reload and slip back through this guard.
-    const declaresBehavior =
-      hasApi || !!action.onClick || !!action.redirect
-      || action.reload === true || action.close === true;
-    if (!declaresBehavior) {
+    // Only an EXPLICIT `reload`/`close` counts (see `declaresRunnerBehavior`),
+    // or every empty schema would slip back through this guard.
+    if (!declaresRunnerBehavior(action)) {
       const label = action.name || action.type || action.actionType || 'action';
       return {
         success: false,
@@ -2802,7 +2865,8 @@ export class ActionRunner {
   /**
    * Substitute `${param.X}` and `${ctx.X}` tokens in an action target.
    *
-   * Used by executeUrl and executeAPI so metadata can produce dynamic
+   * Used by executeUrl and executeAPI — and on an `api` target before a
+   * registered `api` handler receives it — so metadata can produce dynamic
    * URLs without coupling to the wider ExpressionEvaluator surface
    * (which would also evaluate operators, member access, etc. — overkill
    * and unsafe for URL-position values).
@@ -2867,7 +2931,8 @@ export class ActionRunner {
     //
     // `result` (the handler's own return value) is passed by exactly one caller:
     // the `ActionSchema.onSuccess` post-success hop, where a response exists.
-    // Every other caller — `executeUrl`, `executeAPI` — interpolates a target
+    // Every other caller — `executeUrl`, `executeAPI`, the registered `api`
+    // handler hand-off in `dispatchCollected` — interpolates a target
     // BEFORE the request, so there is no result to read; admitting `${result.*}`
     // there would widen the authorable surface with nothing behind it and
     // silently blank the token instead of leaving the author's mistake visible.

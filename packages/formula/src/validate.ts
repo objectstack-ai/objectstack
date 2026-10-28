@@ -1243,17 +1243,18 @@ export function inferExpressionType(input: ExprInput, schema?: ExprSchemaHint): 
  *
  * ## This is a CURATED SUBSET of what the environment resolves — by construction
  *
- * The evaluation `Environment` resolves **75** distinct function names. This list
- * carries 37 of them, and the 38-name gap is NOT staleness. Measured decomposition
+ * The evaluation `Environment` resolves **77** distinct function names. This list
+ * carries 38 of them, and the 39-name gap is NOT staleness. Measured decomposition
  * (`cel-stdlib-drift.test.ts` re-measures all four numbers on every run):
  *
- *   75 registered names
- *    = 41 callable BARE, as `fn(x)`            -> the only shape this list may carry
- *    + 34 callable only on a RECEIVER, `x.fn()` -> structurally ineligible
- *                                                 (cel-js's 33, plus our `can`)
+ *   77 registered names
+ *    = 42 callable BARE, as `fn(x)`            -> the only shape this list may carry
+ *    + 35 callable only on a RECEIVER, `x.fn()` -> structurally ineligible
+ *                                                 (cel-js's 33, plus our `can`
+ *                                                 and `hasCapability`)
  *
- *   41 bare-callable
- *    = 29 added by `registerStdLib`   -> ALL advertised (one per registration site)
+ *   42 bare-callable
+ *    = 30 added by `registerStdLib`   -> ALL advertised (one per registration site)
  *    +  8 cel-js built-ins            -> advertised: has size int string bool double
  *                                        timestamp duration
  *    +  4 cel-js built-ins WITHHELD   -> bytes dyn type uint
@@ -1276,7 +1277,7 @@ export function inferExpressionType(input: ExprInput, schema?: ExprSchemaHint): 
  * cel-js built-in cannot arrive unnoticed.
  *
  * ⛔ This list is NOT an oracle for rejecting unknown functions. A gate that
- * rejects what is absent here would reject 38 names that resolve and evaluate
+ * rejects what is absent here would reject 39 names that resolve and evaluate
  * today. The unknown-function verdict belongs to the engine's own `check()`
  * (ruling on #13594); `@objectstack/lint` uses that and never reads this list.
  */
@@ -1290,6 +1291,8 @@ export const CEL_STDLIB_FUNCTIONS: string[] = [
   'upper', 'lower', 'trim', 'contains', 'startsWith', 'endsWith', 'matches', 'joinNonEmpty',
   // Collections / null-ish (registered stdlib)
   'isBlank', 'isEmpty', 'coalesce', 'len',
+  // Options (registered stdlib) — `label(record.<field>)`, a select value's label
+  'label',
   // cel-js built-ins (verified to resolve)
   'size', 'has', 'int', 'string', 'bool', 'double', 'timestamp', 'duration',
 ];

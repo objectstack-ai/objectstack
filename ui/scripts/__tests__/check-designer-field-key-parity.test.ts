@@ -594,7 +594,11 @@ describe('the permission oracles — objectui#6606', () => {
     const shape = PAYLOAD_SHAPES.find((s) => s.id === 'ObjectPerm')!;
     const { keys } = declaredKeys(repoRoot, shape);
     const omitted = [...accept].filter((k) => !keys.includes(k));
-    expect(omitted).toContain('allowExport');
+    // `allowExport` was the omission named here until the matrix gained its
+    // Export column (objectstack#26885); the retired lifecycle pair is what
+    // the shape still omits while the spec accepts it. When that bump lands,
+    // name whatever the shape omits then — an empty list proves nothing.
+    expect(omitted).toContain('allowRestore');
     const { violations, uiOnly } = await analyze(repoRoot);
     for (const key of omitted) {
       expect(violations.map((v) => v.key), `${key} reported as a violation`).not.toContain(key);

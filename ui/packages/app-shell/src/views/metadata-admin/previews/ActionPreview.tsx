@@ -207,7 +207,10 @@ export function ActionPreview({ name, draft, locale }: MetadataPreviewProps) {
   // tombstones, so a preview of them could only ever render for metadata the
   // platform now refuses to parse. See ActionDefaultInspector's RETIRED_FIELDS.
   const refreshAfter = !!d.refreshAfter;
-  const aiExposed = d.aiExposed;
+  // objectstack#26728 — the spec's nested `ai` block, the one the inspector
+  // writes. The flat `aiExposed` this read before is a key the spec refuses.
+  const ai = d.ai && typeof d.ai === 'object' && !Array.isArray(d.ai) ? (d.ai as { exposed?: unknown }) : undefined;
+  const aiExposed = ai?.exposed;
   const confirmText = localize(d.confirmText);
   const successMessage = localize(d.successMessage);
   const params: ActionParam[] = Array.isArray(d.params) ? (d.params as ActionParam[]) : [];

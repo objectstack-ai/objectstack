@@ -10,8 +10,11 @@
  * NavigationOverlay
  *
  * A reusable component that renders record detail overlays based on
- * ViewNavigationConfig mode. Supports drawer (Sheet), modal (Dialog),
- * split (ResizablePanelGroup), and popover modes.
+ * ViewNavigationConfig mode: the drawer (Sheet), and the split pane
+ * (ResizablePanelGroup) a host draws from a reader's own preference.
+ * `modal` and `popover` were retired from the spec's `NavigationModeSchema`
+ * (objectstack#26677), and with them the Dialog and Popover faces: no caller
+ * could reach either once the values left metadata.
  *
  * Works in conjunction with useNavigationOverlay hook from @object-ui/react —
  * the hook manages state while this component handles the visual presentation.
@@ -64,23 +67,6 @@ import {
   SheetClose,
 } from '../ui/sheet';
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from '../ui/dialog';
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '../ui/popover';
-// `PopoverAnchor` is NOT re-exported by `../ui/popover`, and that file is a
-// no-touch Shadcn-synced file (AGENTS.md #7) — so the anchor part is taken
-// from the primitive here, in the custom wrapper, which is exactly what that
-// rule prescribes.
-import * as PopoverPrimitive from '@radix-ui/react-popover';
-import {
   ResizablePanelGroup,
   ResizablePanel,
   ResizableHandle,
@@ -111,8 +97,7 @@ const OVERLAY_DEFAULT_TRANSLATIONS: Record<string, string> = {
   // VISIBLE overlay heading when the host passes no `title` — not merely an
   // a11y name.
   'detail.recordDetail': 'Record Detail',
-  // sr-only Sheet/Dialog description used when the host passes no
-  // `description`. Rendered in three places (drawer / modal / popover).
+  // sr-only Sheet description used when the host passes no `description`.
   'detail.recordDetailOverlay': 'Record detail overlay for {{title}}.',
 };
 
@@ -126,13 +111,17 @@ const useOverlayTranslation = createSafeTranslation(
   'common.close',
 );
 
-/** Navigation mode type — matches ViewNavigationConfig.mode */
+/**
+ * Navigation mode type — the spec's `NavigationMode` (`drawer | page |
+ * new_window | none`, objectstack#26677) plus `split`: the side-by-side pane is
+ * no longer metadata but a reader's own preference, which a host (the
+ * console's object page) turns into this mode when it draws an open record
+ * beside its list.
+ */
 export type NavigationOverlayMode =
   | 'page'
   | 'drawer'
-  | 'modal'
   | 'split'
-  | 'popover'
   | 'new_window'
   | 'none';
 
@@ -145,9 +134,9 @@ export interface NavigationOverlayProps {
   mode: NavigationOverlayMode;
   /** Close the overlay */
   close: () => void;
-  /** Set open state (for controlled Sheet/Dialog onOpenChange) */
+  /** Set open state (for the controlled Sheet's onOpenChange) */
   setIsOpen: (open: boolean) => void;
-  /** Width for the overlay (drawer/modal/split) */
+  /** Width for the overlay (drawer / split) */
   width?: string | number;
   /** Whether navigation is an overlay mode */
   isOverlay: boolean;
@@ -176,39 +165,8 @@ export interface NavigationOverlayProps {
    */
   mainContent?: React.ReactNode;
   /**
-   * Popover trigger element (for popover mode).
-   *
-   * Rendered through Radix's `PopoverTrigger asChild`, so it is mounted HERE,
-   * inside the overlay's own subtree. That makes it the right carrier only for
-   * a host that has no element of its own to point at — a host wanting the
-   * popover to sit on an element it already rendered elsewhere (a grid row, a
-   * tree node, a gantt bar, a kanban card, a calendar event) must use
-   * {@link NavigationOverlayProps.popoverAnchorRef}, because re-rendering that
-   * element here would draw a SECOND copy of it in the overlay rather than
-   * anchor to the first.
-   */
-  popoverTrigger?: React.ReactNode;
-  /**
-   * The already-rendered element the popover should be anchored to
-   * (popover mode).
-   *
-   * ⭐ This is how the five list-type renderers honour `navigation.mode:
-   * 'popover'` after objectui#9299: the click handler stores
-   * `event.currentTarget` — the row / node / bar / card / event the user
-   * actually clicked — on this ref in the same turn that opens the overlay,
-   * and the popover is positioned against it through Radix's virtual-anchor
-   * shape (`Popper.Anchor virtualRef`). No element is re-rendered, so nothing
-   * is duplicated and the renderer keeps ownership of its own DOM.
-   *
-   * When neither this nor `popoverTrigger` is supplied the overlay falls back
-   * to a compact `Dialog`. ⛔ After objectui#9299 none of the five renderers is
-   * allowed to reach that fallback — it survives only for a host that genuinely
-   * has no anchor to offer.
-   */
-  popoverAnchorRef?: React.RefObject<HTMLElement | null>;
-  /**
    * Optional handler invoked when the user clicks the "Expand to full page"
-   * affordance in the drawer/modal header. Mirrors Linear / Notion / Airtable
+   * affordance in the drawer header. Mirrors Linear / Notion / Airtable
    * peek-to-full-page behavior — the consumer is responsible for closing the
    * overlay and router-pushing to the full record route.
    *
@@ -278,80 +236,12 @@ export function legacyRecordDrawerWidthKey(objectName: string): string {
 }
 
 /**
- * Remember the element a click landed on, so `popover` mode can anchor to it.
- *
- * ⭐ objectui#9299 item 3: `popover` is anchored to the clicked element — the
- * row, node, bar, card or event the user actually pressed. That element is
- * rendered by the RENDERER, not by this overlay, so the overlay cannot find it
- * on its own, and `popoverTrigger` (which MOUNTS an element of its own inside
- * the overlay) is the wrong carrier for it — passing the row there would draw
- * a second copy of the row instead of pointing at the first.
- *
- * Two carriers, same recorder. Spread `anchorCaptureProps` on the renderer's
- * own container when the click reaches it without a DOM event (a chart, a
- * calendar grid); call `captureAnchor(event)` directly at a click site that
- * already HAS one (a kanban card, a tree row). Either way hand `anchorRef` to
- * {@link NavigationOverlayProps.popoverAnchorRef}. The container form uses the
- * capture phase deliberately: it runs before the bubbling `onClick` that opens
- * the overlay, so by the time the popover renders the anchor is recorded.
- *
- * It reads `target`, not `currentTarget`, because the handler sits on the
- * CONTAINER: `currentTarget` there is the whole view, and a popover anchored
- * to the whole board is not anchored to anything. `target` is the deepest
- * element under the pointer — the bar, the card, the cell — which is what the
- * user pointed at.
- *
- * ⚠️ Read synchronously, which is what this does: React nulls its event fields
- * out once the handler returns, so stashing the event rather than the element
- * would hand the overlay a dead reference.
- *
- * Clicks that do not open anything (a toolbar button, a filter) also land here
- * and are harmless: `anchorRef` is only ever read while the popover is open,
- * and the click that opened it is by construction the last one recorded.
- */
-export function useOverlayAnchor(): {
-  anchorRef: React.RefObject<HTMLElement | null>;
-  captureAnchor: (event: { target?: unknown } | null | undefined) => void;
-  anchorCaptureProps: { onClickCapture: (event: { target?: unknown }) => void };
-} {
-  const anchorRef = React.useRef<HTMLElement | null>(null);
-  const captureAnchor = React.useCallback((event: { target?: unknown } | null | undefined) => {
-    const el = event?.target as HTMLElement | null | undefined;
-    if (el && typeof el.getBoundingClientRect === 'function') {
-      anchorRef.current = el;
-    }
-  }, []);
-  const anchorCaptureProps = React.useMemo(
-    () => ({ onClickCapture: captureAnchor }),
-    [captureAnchor],
-  );
-  return { anchorRef, captureAnchor, anchorCaptureProps };
-}
-
-/**
  * Resolve width to CSS-compatible value
  */
 function resolveWidth(width: string | number | undefined): string | undefined {
   if (width == null) return undefined;
   if (typeof width === 'number') return `${width}px`;
   return width;
-}
-
-/**
- * Compute CSS style from NavigationConfig width.
- *
- * Exposes the requested width as a `--ov-w` CSS variable rather than
- * setting `maxWidth` directly. This lets the overlay's className apply the
- * cap only above the `sm` breakpoint (`sm:max-w-[var(--ov-w)]`), so on
- * mobile the drawer can occupy the full viewport — matching the Linear /
- * Notion / Salesforce mobile peek pattern. Setting an inline maxWidth
- * unconditionally caps the drawer at e.g. 70vw even on a 390px phone,
- * leaving an unusable empty strip on the side.
- */
-function getWidthStyle(width: string | number | undefined): React.CSSProperties {
-  const resolved = resolveWidth(width);
-  if (!resolved) return {};
-  return { ['--ov-w' as any]: resolved };
 }
 
 /** Hard floor for drag-resize — narrower than this and the body becomes unusable. */
@@ -463,9 +353,7 @@ function useDrawerResize(
  *
  * Supports:
  * - **drawer**: Right-side Sheet panel
- * - **modal**: Center Dialog overlay
- * - **split**: Side-by-side ResizablePanelGroup
- * - **popover**: Hoverable/clickable popover card
+ * - **split**: Side-by-side ResizablePanelGroup (a host's preference face)
  * - **page / new_window / none**: No overlay rendered (handled by hook)
  */
 export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
@@ -482,14 +370,11 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
   children,
   renderView,
   mainContent,
-  popoverTrigger,
-  popoverAnchorRef,
   onExpand,
   expandLabel,
   storageKey,
   legacyStorageKey,
 }) => {
-  const widthStyle = getWidthStyle(width);
   // Every chrome string below is locale-driven (objectstack#5430 for the two
   // close affordances, objectstack#5506 for the rest). Must stay above the
   // conditional returns — rules-of-hooks.
@@ -499,7 +384,7 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
   // for hosts that pass the prop: a default parameter also only fires on
   // `undefined`, and `ObjectView` already supplies its own translated label.
   const resolvedExpandLabel = expandLabel ?? t('detail.openAsFullPage');
-  // sr-only Sheet/Dialog description, used in three modes below.
+  // sr-only Sheet description for the drawer below.
   const overlayDescription = t('detail.recordDetailOverlay', { title: resolvedTitle });
   // Keep hooks above all conditional returns. Opening a record changes
   // selectedRecord from null to an object, but hook order must stay stable.
@@ -508,7 +393,7 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
     mode === 'drawer' ? legacyStorageKey : undefined,
   );
   // Inline-edit dropdowns render in body-level poppers; without this guard the
-  // click that closes an open dropdown also dismisses the drawer/modal (#2156).
+  // click that closes an open dropdown also dismisses the drawer (#2156).
   const handleInteractOutside = usePopperAwareInteractOutside();
 
   // Non-overlay modes don't render anything
@@ -641,47 +526,6 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
     );
   }
 
-  // --- Modal Mode (Dialog) ---
-  if (mode === 'modal') {
-    return (
-      <Dialog open={isOpen} onOpenChange={setIsOpen}>
-        <DialogContent
-          onInteractOutside={handleInteractOutside}
-          className={cn(
-            'w-[calc(100vw-1rem)] max-w-none sm:max-w-[var(--ov-w,42rem)] max-h-[90vh] overflow-y-auto',
-            className,
-          )}
-          style={widthStyle}
-        >
-          {onExpand && (
-            <button
-              type="button"
-              onClick={onExpand}
-              aria-label={resolvedExpandLabel}
-              title={resolvedExpandLabel}
-              className="absolute right-12 top-4 z-10 inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
-            >
-              <Maximize2 className="h-4 w-4" />
-            </button>
-          )}
-          <DialogHeader>
-            <DialogTitle>{resolvedTitle}</DialogTitle>
-            {description ? (
-              <DialogDescription>{description}</DialogDescription>
-            ) : (
-              <DialogDescription className="sr-only">
-                {overlayDescription}
-              </DialogDescription>
-            )}
-          </DialogHeader>
-          <div className="mt-4">
-            {renderContent(selectedRecord)}
-          </div>
-        </DialogContent>
-      </Dialog>
-    );
-  }
-
   // --- Split Mode (Resizable Panels) ---
   if (mode === 'split') {
     if (!isOpen || !mainContent) {
@@ -734,70 +578,6 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
           </div>
         </ResizablePanel>
       </ResizablePanelGroup>
-    );
-  }
-
-  // --- Popover Mode ---
-  if (mode === 'popover') {
-    if (!popoverTrigger && !popoverAnchorRef) {
-      // Fallback: a compact floating card when the host offers NO anchor at
-      // all — neither an element for us to render as the trigger, nor a
-      // reference to one it rendered itself.
-      //
-      // ⛔ objectui#9299 item 3: this is no longer the path any of the five
-      // list-type renderers takes. It measured as the path ALL of them took —
-      // `popover` was honoured on no surface, because nothing ever passed a
-      // trigger — and the ruling closed that. It survives for a host that
-      // genuinely has nothing to point at.
-      if (!isOpen) return null;
-      return (
-        <Dialog open={isOpen} onOpenChange={setIsOpen}>
-          <DialogContent
-            className={cn('w-96 max-h-[80vh] overflow-y-auto p-4', className)}
-            style={widthStyle}
-          >
-            <DialogHeader>
-              <DialogTitle className="text-sm">{resolvedTitle}</DialogTitle>
-              {description ? (
-                <DialogDescription className="text-xs">{description}</DialogDescription>
-              ) : (
-                <DialogDescription className="sr-only">
-                  {overlayDescription}
-                </DialogDescription>
-              )}
-            </DialogHeader>
-            <div className="mt-2">
-              {renderContent(selectedRecord)}
-            </div>
-          </DialogContent>
-        </Dialog>
-      );
-    }
-    return (
-      <Popover open={isOpen} onOpenChange={setIsOpen}>
-        {popoverTrigger ? (
-          <PopoverTrigger asChild>
-            {popoverTrigger}
-          </PopoverTrigger>
-        ) : (
-          // Virtual anchor: position against the element the host ALREADY
-          // rendered and the user actually clicked. Nothing is mounted for it,
-          // so the row / node / bar / card / event is not duplicated here.
-          <PopoverPrimitive.Anchor virtualRef={popoverAnchorRef} />
-        )}
-        <PopoverContent
-          className={cn('w-96 max-h-[400px] overflow-y-auto p-4', className)}
-          style={widthStyle}
-        >
-          <div className="space-y-2">
-            <h4 className="text-sm font-semibold">{resolvedTitle}</h4>
-            {description && (
-              <p className="text-xs text-muted-foreground">{description}</p>
-            )}
-            {renderContent(selectedRecord)}
-          </div>
-        </PopoverContent>
-      </Popover>
     );
   }
 

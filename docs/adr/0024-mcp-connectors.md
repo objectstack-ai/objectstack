@@ -4,6 +4,7 @@
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0011](./0011-actions-as-ai-tools.md) (actions as AI tools), [ADR-0015](./0015-external-datasource-federation.md) (open mechanism / enterprise lifecycle split), [ADR-0018](./0018-unified-node-action-registry.md) (`connector_action` baseline dispatch + connector registry), [ADR-0022](./0022-connectors-vs-messaging-channels.md) (Connector = transport/integration mechanism), [ADR-0023](./0023-openapi-to-connector-generator.md) (OpenAPI → Connector generator)
 **Consumers**: `@objectstack/spec` (`integration/connector.zod.ts`), `@objectstack/service-automation` (connector registry on the engine), `@objectstack/runtime` (the `GET /api/v1/automation/connectors` discovery route), new `@objectstack/connector-mcp`, `@objectstack/service-ai` (the same MCP tools double as AI tools, ADR-0011), the Studio flow palette
+**Amended by**: [ADR-0143](./0143-outbound-connector-auth-is-open-tier.md) (2026-10-27) — the MCP authorization flow and per-connection grants are open tier; see the note under §4.
 
 ---
 
@@ -112,6 +113,15 @@ An MCP server owns its own auth (e.g. a GitHub token passed via `env` on the std
 | Marketplace / paid MCP server catalog | **enterprise** |
 
 Running a community MCP server with an operator-provided token is open-source; *managing* those servers and their secrets at scale, multi-tenant, is the enterprise line — the identical split ADR-0022/0023 drew.
+
+> **Amendment note (2026-10-27, ADR-0143).** This record names no OAuth, but its "per-tenant MCP
+> connection lifecycle" row is where an OAuth-protected http server's grant would fall, and that
+> part is reversed. The MCP authorization flow on the http transport is open tier: protected-resource
+> discovery, dynamic client registration, PKCE, and refresh per dispatch against a per-connection
+> grant. §3's "we do not model the upstream's auth in `ConnectorSchema`" is amended to match: a
+> declarative instance's `auth` may now be `oauth2`. The curated registry, one-click install, the
+> vault backend, sandboxed stdio execution and the paid catalog keep this record's placement. Every
+> other decision here stands.
 
 ### 5. Anti-patterns this rules out
 

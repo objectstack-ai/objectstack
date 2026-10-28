@@ -220,6 +220,7 @@ describe.each([true, false])('[#6562] /meta object read — effective schema (mu
             'created_at', 'created_by',
             'organization_id',
             'owner_id', 'owning_business_unit_id',
+            'queue',
             'updated_at', 'updated_by',
         ]);
     });

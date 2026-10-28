@@ -309,6 +309,33 @@ describe('ObjectStackClient (with Hono Server)', () => {
         expect(resultsResponse.records[0].name).toBe('Hono User');
     });
 
+    // `data.find` refuses a projection naming no field before the request, with
+    // a restated copy of the list door's sentence (the door's own is private to
+    // the server). This holds the copy equal to the REAL door: the same request
+    // sent raw through the client's transport — which is what `find` did before
+    // it refused — must fail with the same message, code and status.
+    it('refuses an empty select with the list door\'s own answer, before the request', async () => {
+        const client = new ObjectStackClient({ baseUrl });
+        await client.connect();
+
+        for (const select of [[], ['', ' ']]) {
+            const wire = new URLSearchParams({ select: select.join(',') }).toString();
+            const door = await client._fetch(`${baseUrl}/api/v1/data/customer?${wire}`).then(
+                () => { throw new Error(`the door served ?${wire}`); },
+                (err: any) => err,
+            );
+            expect(door.httpStatus).toBe(400);
+            expect(door.code).toBe('VALIDATION_ERROR');
+
+            const refused = await client.data.find('customer', { select }).then(
+                () => { throw new Error('find resolved'); },
+                (err: any) => err,
+            );
+            expect({ message: refused.message, code: refused.code, httpStatus: refused.httpStatus })
+                .toEqual({ message: door.message, code: door.code, httpStatus: door.httpStatus });
+        }
+    });
+
     // [#5638] The one method whose declared return shape this suite never
     // exercised — and the one that was wrong. `DeleteDataResult` claimed
     // `deleted: boolean`; the schema it names declares `success`. This is the

@@ -1638,10 +1638,10 @@ export const RecordRelatedListProps = strictObject({
    * binding: the ruling's own exclusion (a new gate defaults to no).
    *
    * RENDERED by the console. The block hands this key to its parent read
-   * (objectui: packages/plugin-detail/src/renderers/record-related-list.tsx,
+   * (ui/packages/plugin-detail/src/renderers/record-related-list.tsx,
    * whose `RecordRelatedListRenderer` passes `schema.parentDataSource` to
    * `ParentRecordBinding`; the read itself is
-   * objectui: packages/plugin-detail/src/renderers/recordBinding.tsx). Its
+   * ui/packages/plugin-detail/src/renderers/recordBinding.tsx). Its
    * `BoundRecordProvider` asks the page's own adapter, so under the caller's
    * identity, for one row (`$top: 1`) by the binding's `sort`, and provides
    * that row as the record context the list body reads. No row, or a read the
@@ -7356,7 +7356,7 @@ export const ObjectMapPropsSchema = lazySchema(() => strictObject({
    * page, whatever they named.
    */
   navigation: NavigationConfigSchema.optional()
-    .describe('Marker-click navigation config — the same block `ListViewSchema.navigation` declares ({ mode, size, openNewTab, preventNavigation }), `mode` one of the seven `NavigationModeSchema` values'),
+    .describe('Marker-click navigation config — the same block `ListViewSchema.navigation` declares ({ mode, size, openNewTab, preventNavigation }), `mode` one of the four `NavigationModeSchema` values (`drawer` by default)'),
   enableClustering: z.boolean().optional()
     .describe('Group nearby markers into clusters. Absent, the renderer clusters only above 100 markers'),
 }));
@@ -7551,7 +7551,7 @@ export const ObjectGanttPropsSchema = lazySchema(() => strictObject({
    * named.
    */
   navigation: NavigationConfigSchema.optional()
-    .describe("Task-click navigation config — the same block `ListViewSchema.navigation` declares ({ mode, size, openNewTab, preventNavigation }), `mode` one of the seven `NavigationModeSchema` values. The renderer's own default is `{ mode: 'drawer' }` when the key is absent"),
+    .describe("Task-click navigation config — the same block `ListViewSchema.navigation` declares ({ mode, size, openNewTab, preventNavigation }), `mode` one of the four `NavigationModeSchema` values (`drawer` by default). The renderer's own default is `{ mode: 'drawer' }` when the key is absent"),
   label: I18nLabelSchema.optional()
     .describe('Gantt label — the second link of the exported PNG/PDF file-name chain, after `gantt.exportFileName` and before the bound object\'s own label'),
   skipWeekends: z.boolean().optional()
@@ -7758,7 +7758,7 @@ export const ObjectTreePropsSchema = lazySchema(() => strictObject({
    * named.
    */
   navigation: NavigationConfigSchema.optional()
-    .describe('Row-click navigation config — the same block `ListViewSchema.navigation` declares ({ mode, size, openNewTab, preventNavigation }), `mode` one of the seven `NavigationModeSchema` values'),
+    .describe('Row-click navigation config — the same block `ListViewSchema.navigation` declares ({ mode, size, openNewTab, preventNavigation }), `mode` one of the four `NavigationModeSchema` values (`drawer` by default)'),
 }));
 /** Author state (ADR-0122: the bare name is the author state). */
 export type ObjectTreeProps = z.input<typeof ObjectTreePropsSchema>;

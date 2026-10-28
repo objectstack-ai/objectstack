@@ -10,14 +10,16 @@
  * objectui#11015 — a `page` record surface with no `onNavigate` opens create,
  * edit and view on the drawer.
  *
- * With no authored `layout`, `ObjectView` derives the record surface with
- * `deriveRecordSurface`: `page` on a mobile viewport, and on an object with at
- * least `RECORD_SURFACE_PAGE_THRESHOLD` authorable fields. A page hands the
+ * With no authored `layout`, `ObjectView` picks the record surface from the
+ * viewport: `page` on a mobile viewport, the drawer otherwise. (Until
+ * objectstack#26677 it also paged an object with at least
+ * `RECORD_SURFACE_PAGE_THRESHOLD` authorable fields — `deriveRecordSurface`'s
+ * field-count rule, a surface no author chose; that rule is retired from this
+ * path, and the rows that pinned it are FLIPPED below.) A page hands the
  * record to `onNavigate`, and the registered `object-view` renderer has none:
  * a JSON schema cannot carry a function. New, a row click and Edit set the
  * form state, and no render branch drew a `page` form, so each opened nothing.
- * They now open on the drawer, the surface objectui#10975 gave create under
- * `split` / `popover` for a page.
+ * They now open on the drawer.
  *
  * The fix rows mount the REGISTERED renderer through the real `SchemaRenderer`
  * and `SchemaRendererProvider`, so no `onNavigate` reaches the view. The heavy
@@ -25,9 +27,10 @@
  * reads the loaded object schema, so the surface was chosen after the field
  * count was known, when the derived surface is `page`.
  *
- * Controls: with an `onNavigate` the same object and viewport still route every
- * verb to it and open no form, which is also the proof that the derived surface
- * is `page` there; a light object on a desktop still opens the drawer.
+ * Controls: with an `onNavigate` a mobile viewport still routes every verb to it
+ * and opens no form, which is also the proof that the derived surface is `page`
+ * there; a light object on a desktop still opens the drawer, and so — the
+ * flipped rows — does a field-heavy one, even with an `onNavigate` to route to.
  *
  * `ObjectGrid` is a sink that keeps the `onRowClick` and `onEdit` route 2 hands
  * it. `ObjectForm` is a sink that shows the mode it was built for.
@@ -190,13 +193,16 @@ describe('objectui#11015 — a derived `page` with no `onNavigate` opens each ve
   });
 
   for (const verb of VERBS) {
-    it(`CONTROL: a field-heavy object with an \`onNavigate\` still routes ${verb} and opens no form`, async () => {
+    it(`FLIPPED (objectstack#26677): a field-heavy object with an \`onNavigate\` opens ${verb} in the drawer — the field count picks no page`, async () => {
+      // This row used to assert the routed page: a field-heavy object paged by
+      // itself. A page is now a declaration only, so the same object, viewport
+      // and `onNavigate` open the drawer and never route.
       const onNavigate = vi.fn();
       await mountRouted(heavyFields(), onNavigate);
       run(verb);
-      await waitFor(() => expect(onNavigate).toHaveBeenCalledTimes(1));
-      expect(onNavigate.mock.calls[0]).toEqual(ROUTED[verb]);
-      expect(screen.queryByTestId('object-form')).toBeNull();
+      const drawer = await formInDrawer(verb);
+      expect(within(drawer).getByText(TITLES[verb])).toBeTruthy();
+      expect(onNavigate).not.toHaveBeenCalled();
     });
 
     it(`CONTROL: a mobile viewport with an \`onNavigate\` still routes ${verb} and opens no form`, async () => {

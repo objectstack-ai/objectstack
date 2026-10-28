@@ -63,7 +63,7 @@ import { useAuth } from '@object-ui/auth';
 import { resolveViewId } from '@object-ui/core';
 import { extractDraftBody, readDraftChanges, type DraftChange, type MetadataClient } from '@object-ui/data-objectstack';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
-import { NavigationModeSchema, resolveI18nLabel, type I18nLabel } from '@objectstack/spec/ui';
+import { NavigationModeSchema, resolveI18nLabel, type I18nLabel, type NavigationMode } from '@objectstack/spec/ui';
 import { InspectorReorderButtons, InspectorShell } from '../metadata-admin/inspectors/_shared.js';
 import { FieldsListEditor } from '../metadata-admin/previews/FieldsListEditor.js';
 import { useObjectFields } from '../metadata-admin/previews/useObjectFields.js';
@@ -626,13 +626,16 @@ const KANBAN_FIELDS_LABEL_ID = 'studio-list-view-kanban-fields';
 /** The Select value for "no key written": a Select item cannot carry `''`. */
 const UNSET = '__unset__';
 
-/** The copy of each `navigation.mode` the spec declares (`NavigationModeSchema`). */
-const NAVIGATION_MODE_LABEL_KEYS: Record<string, string> = {
-  page: 'engine.studio.inspector.listView.kanbanCard.mode.page',
+/**
+ * The copy of each `navigation.mode` the spec declares (`NavigationModeSchema`).
+ * Keyed by the spec's own union, so a member the spec adds or retires is a
+ * compile error here — `modal`, `split` and `popover` left with
+ * objectstack#26677 (a side-by-side pane is a reader's preference, not
+ * metadata).
+ */
+const NAVIGATION_MODE_LABEL_KEYS: Record<NavigationMode, string> = {
   drawer: 'engine.studio.inspector.listView.kanbanCard.mode.drawer',
-  modal: 'engine.studio.inspector.listView.kanbanCard.mode.modal',
-  split: 'engine.studio.inspector.listView.kanbanCard.mode.split',
-  popover: 'engine.studio.inspector.listView.kanbanCard.mode.popover',
+  page: 'engine.studio.inspector.listView.kanbanCard.mode.page',
   new_window: 'engine.studio.inspector.listView.kanbanCard.mode.newWindow',
   none: 'engine.studio.inspector.listView.kanbanCard.mode.none',
 };
@@ -796,7 +799,7 @@ function KanbanCardSection({
             )}
             {NavigationModeSchema.options.map((m) => (
               <SelectItem key={m} value={m}>
-                {t(NAVIGATION_MODE_LABEL_KEYS[m] ?? m, locale)}
+                {t(NAVIGATION_MODE_LABEL_KEYS[m], locale)}
               </SelectItem>
             ))}
           </SelectContent>

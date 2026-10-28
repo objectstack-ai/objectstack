@@ -50,6 +50,7 @@ import {
 import { useDatasetCatalog, useDatasetSemantics } from '../previews/useDatasetCatalog.js';
 import type { ObjectFieldInfo } from '../previews/useObjectFields.js';
 import { widgetMissingInputs } from '../../studio-design/metadataError.js';
+import { WIDGET_TYPE_IDS, WIDGET_TYPE_META } from '../previews/widget-types.js';
 
 // ADR-0021: dashboard widgets author the semantic-layer dataset shape only
 // (dataset + dimensions + values). The pre-ADR-0021 inline single-object query
@@ -57,28 +58,19 @@ import { widgetMissingInputs } from '../../studio-design/metadataError.js';
 // at @objectstack/spec 9.0.0 and is no longer authored here — its fields are
 // gone so no Studio surface can emit the dead shape (framework#3251).
 /**
- * The widget families this inspector offers. TYPED to `DashboardWidgetTypeName`
- * (objectui#4600, which closed the widget `type` vocabulary) so the inspector
- * cannot offer a type validation refuses — every entry here is a spec
- * visualization family. A hand-written SUBSET is fine; offering something
- * outside the vocabulary is not.
+ * The widget families this inspector's Type select offers: the ONE registry
+ * the Add-widget menu reads too (`../previews/widget-types`, objectstack#26745),
+ * which derives the set from the spec's `ChartTypeSchema` instead of keeping a
+ * list here. The two pickers used to keep their own lists and disagreed (10
+ * here, 11 in the menu, 20 in the spec). ⛔ No hand-kept list in this file.
  *
  * Each label is a catalogue key, resolved in the designer locale at render
  * (objectui#10748, the objectui#10586 `KeyedOption` shape); the stored `value`
  * never moves.
  */
-const WIDGET_TYPES: ReadonlyArray<{ value: DashboardWidgetTypeName; labelKey: string }> = [
-  { value: 'metric', labelKey: 'engine.inspector.widget.type.metric' },
-  { value: 'bar', labelKey: 'engine.inspector.widget.type.bar' },
-  { value: 'horizontal-bar', labelKey: 'engine.inspector.widget.type.horizontalBar' },
-  { value: 'line', labelKey: 'engine.inspector.widget.type.line' },
-  { value: 'area', labelKey: 'engine.inspector.widget.type.area' },
-  { value: 'pie', labelKey: 'engine.inspector.widget.type.pie' },
-  { value: 'donut', labelKey: 'engine.inspector.widget.type.donut' },
-  { value: 'funnel', labelKey: 'engine.inspector.widget.type.funnel' },
-  { value: 'table', labelKey: 'engine.inspector.widget.type.table' },
-  { value: 'pivot', labelKey: 'engine.inspector.widget.type.pivot' },
-];
+const WIDGET_TYPES: ReadonlyArray<{ value: DashboardWidgetTypeName; labelKey: string }> = WIDGET_TYPE_IDS.map(
+  (id) => ({ value: id, labelKey: WIDGET_TYPE_META[id].selectLabelKey }),
+);
 
 const COLORS = [
   'default',

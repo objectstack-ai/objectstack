@@ -196,6 +196,10 @@ async function boot(opts: { channel?: MetadataAuthoringChannel; envWritableObjec
         objects: [SysMetadata, SysMetadataHistoryObject, SysMetadataAuditObject],
     });
     engine.registry.registerObject(PACKAGED_ACCOUNT as any, 'demo_pkg');
+    // [#26708] The package the `?package=demo_pkg` door names is installed: a
+    // save naming a package no installed package has is refused before the lint
+    // door this file pins.
+    engine.registry.installPackage({ id: 'demo_pkg', name: 'demo_pkg', version: '1.0.0' } as any, 'authored');
     await engine.syncSchemas();
 
     const protocol = channel === undefined

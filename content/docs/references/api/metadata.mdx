@@ -640,7 +640,7 @@ Metadata query with filtering, sorting, and pagination
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **types** | `Enum<'object' \| 'field' \| 'hook' \| 'seed' \| 'mapping' \| 'picklist' \| 'view' \| 'page' \| 'dashboard' \| 'app' \| 'action' \| 'report' \| 'dataset' \| 'flow' \| 'job' \| 'datasource' \| 'external_catalog' \| 'translation' \| 'api' \| 'email_template' \| 'doc' \| 'book' \| 'permission' \| 'position' \| 'capability' \| 'sharing_rule' \| 'agent' \| 'tool' \| 'skill'>[]` | optional | Filter by metadata types |
+| **types** | `Enum<'object' \| 'field' \| 'hook' \| 'seed' \| 'mapping' \| 'picklist' \| 'view' \| 'page' \| 'dashboard' \| 'app' \| 'action' \| 'report' \| 'dataset' \| 'flow' \| 'job' \| 'datasource' \| 'external_catalog' \| 'translation' \| 'api' \| 'email_template' \| 'doc' \| 'book' \| 'permission' \| 'position' \| 'capability' \| 'sharing_rule' \| 'queue' \| 'assignment_rule' \| 'agent' \| 'tool' \| 'skill'>[]` | optional | Filter by metadata types |
 | **namespaces** | `string[]` | optional | Filter by namespaces |
 | **packageId** | `string` | optional | Filter by owning package |
 | **search** | `string` | optional | Full-text search query |
@@ -707,7 +707,7 @@ Metadata query with filtering, sorting, and pagination
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'object' \| 'field' \| 'hook' \| 'seed' \| 'mapping' \| 'picklist' \| 'view' \| 'page' \| 'dashboard' \| 'app' \| 'action' \| 'report' \| 'dataset' \| 'flow' \| 'job' \| … +14 more>` | ✅ | Metadata type |
+| **type** | `Enum<'object' \| 'field' \| 'hook' \| 'seed' \| 'mapping' \| 'picklist' \| 'view' \| 'page' \| 'dashboard' \| 'app' \| 'action' \| 'report' \| 'dataset' \| 'flow' \| 'job' \| … +16 more>` | ✅ | Metadata type |
 | **name** | `string` | ✅ | Item name (snake_case) |
 | **data** | `Record<string, any>` | ✅ | Metadata payload |
 | **namespace** | `string` | optional | Optional namespace |
@@ -740,6 +740,8 @@ Metadata query with filtering, sorting, and pagination
 * `position`
 * `capability`
 * `sharing_rule`
+* `queue`
+* `assignment_rule`
 * `agent`
 * `tool`
 * `skill`

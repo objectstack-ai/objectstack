@@ -34,6 +34,7 @@ import { resolveIcon } from './resolve-icon';
 import { hasDeclaredVisibilityGate } from './visibility-gate';
 import { useAutoTriggerOnce } from './auto-trigger';
 import { readActionEntryParamValues } from './static-params';
+import { toRunnerVariant } from './runner-variant';
 import { DisabledReasonMenuLabel, menuItemReasonAria, useDisabledReason } from './disabled-reason';
 import type { RendererHostProps } from '../../lib/renderer-host-props';
 
@@ -115,6 +116,7 @@ export const ActionMenuItem: React.FC<{
   // description. See `./disabled-reason`.
   const disabledReason = useDisabledReason(
     hasDeclaredVisibilityGate(action.disabled) && isDisabledPred,
+    action.disabledReason,
   );
 
   const iconElement = useMemo(() => {
@@ -304,6 +306,9 @@ const ActionMenuRenderer = forwardRef<HTMLButtonElement, { schema: ActionMenuSch
             // `patch` (objectui#13022).
             operation: action.operation,
             confirmText: action.confirmText,
+            // See action-button.tsx — the member's own `variant` in the runner's
+            // dialect (objectstack#26665).
+            variant: toRunnerVariant(action.variant),
             successMessage: action.successMessage,
             // See action-button.tsx — success copy per handler outcome, the
             // toast's first rung (objectui#11344).

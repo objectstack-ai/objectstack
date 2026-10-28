@@ -104,7 +104,7 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 import {
-  ActionSchema,
+  CRUDActionSchema,
   AppMenuItemSchema,
   FilterBuilderConditionSchema,
   FilterGroupSchema,
@@ -143,7 +143,7 @@ const MEMOISED: ReadonlyArray<readonly [string, unknown]> = [
 ];
 /** ⛔ Do not "fix" these — each one's `z.lazy` dodges a real ReferenceError. */
 const TDZ_BOUND: ReadonlyArray<readonly [string, unknown]> = [
-  ['ActionSchema', ActionSchema],
+  ['CRUDActionSchema', CRUDActionSchema],
   ['AppMenuItemSchema', AppMenuItemSchema],
   ['MenuItemSchema', MenuItemSchema],
   ['NavLinkSchema', NavLinkSchema],

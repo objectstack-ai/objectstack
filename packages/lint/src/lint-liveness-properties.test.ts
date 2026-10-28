@@ -1695,11 +1695,11 @@ const fieldLedgerDir = () => ledgerDirWith((dir) => writeLedger(dir, 'field', SY
 
 describe('the object/field walk, against a synthetic ledger directory (#19268)', () => {
   // The state that makes this block necessary, asserted rather than recalled.
-  // If `field.json` ever warns on a STABLE subject again, the first assertion
-  // below names it, and the block above ("field walk: a malformed `fields`
+  // While `field.json` warns on a STABLE subject (`externalId` since #25753),
+  // the first assertion below names it, and the block above ("field walk: a malformed `fields`
   // array …") can take its real subject back — but this block keeps working
   // either way, which is the point.
-  it('the SHIPPED field ledger warns on no stable subject — which is why the walk needs a subject of its own', () => {
+  it('the SHIPPED field ledger warns on one stable subject at most — which is why the walk keeps a subject of its own', () => {
     // `picklist` was the last opted-in row (`planned` + `authorWarn`) and left
     // when the server began resolving picklist references (`live`). The last
     // `dead` row, `conditionalRequired`, warned on its own since #16094 — a
@@ -1709,9 +1709,12 @@ describe('the object/field walk, against a synthetic ledger directory (#19268)',
     // `planned` + `authorWarn` — the inbound-mail correspondent flag on an email
     // field, declared ahead of the mailbox ingest that reads it — and left this
     // set when that reader landed and the row flipped `live` (#22871): a
-    // verdict that moved, so it was never a stable subject either. The
-    // synthetic slot below is warned by nothing shipped.
-    expect([...authorWarnedProperties('field')]).toEqual([]);
+    // verdict that moved, so it was never a stable subject either.
+    // `externalId` is the one row in the set: #25753 graded it `dead` (no upsert
+    // reads it). It parses, so it is a stable subject the block above could take
+    // back; this block keeps its synthetic slot so it does not move with the
+    // next verdict. The synthetic slot below is warned by nothing shipped.
+    expect([...authorWarnedProperties('field')]).toEqual(['externalId']);
     expect(
       lintLivenessProperties({
         objects: [{ name: 'widget', fields: [{ name: 'a', synthWarnedSlot: true }] }],
@@ -2285,5 +2288,60 @@ describe('#26146 — ledger rows below the child level are graded and counted', 
     expect([...ledgerStatusesIn(shippedLedgerDir())].sort()).toEqual([...shipped].sort());
     expect(shipped.has('synth-depth-two')).toBe(false);
     expect(shipped.has('synth-depth-three')).toBe(false);
+  });
+});
+
+// ── #26548: a report's period and export are declared before the renderer reads them ──
+//
+// `report` joined TYPE_COLLECTIONS with its ledger's first warned rows:
+// `dateRange` and `exportOptions` are `planned` + `authorWarn` until the
+// Console report page reads them. Read off the SHIPPED ledger, so the flip to
+// `live` (which drops `authorWarn`) turns the warning half of this block red
+// on purpose — rewrite it as a silence pin in that same edit.
+describe('report period and export (#26548 — planned until the report renderer reads them)', () => {
+  const report = (extra: Record<string, unknown> = {}) => ({
+    reports: [{ name: 'pipeline', label: 'Pipeline', type: 'summary', dataset: 'sales', rows: ['stage'], values: ['revenue'], ...extra }],
+  });
+
+  it('warns on each key, at the report, with the row\'s author hint', () => {
+    const findings = lintLivenessProperties(report({ dateRange: { dimension: 'close_date' }, exportOptions: { formats: ['csv'] } }));
+    const planned = findings.filter((f) => f.rule === 'liveness-planned-property');
+    expect(planned.map((f) => f.message.match(/`(dateRange|exportOptions)`/)?.[1]).sort()).toEqual(['dateRange', 'exportOptions']);
+    for (const f of planned) {
+      expect(f.where).toContain("report 'pipeline'");
+      expect(f.hint).toMatch(/^Keep it, but nothing reads it yet: the Console report page draws no /);
+    }
+  });
+
+  it('CONTROL — a report declaring neither key draws no warning', () => {
+    expect(lintLivenessProperties(report())).toEqual([]);
+  });
+});
+
+// ── #26619: a greyed action's reason, declared spec-first, now read by the console ──
+//
+// `disabledReason` shipped `planned` + `authorWarn` with the spec half (#26786)
+// and is `live` since the console half: the greyed-action readers show it. The
+// warning pin turned red at that flip ON PURPOSE and is re-subjected to the
+// silence — a `live` row never warns. The key is authored beside a property
+// that still warns (`object.externalSharingModel`, `dead`) in the SAME call:
+// one ledger load, one warning, so the silence is a reading and not a lint
+// that stopped loading ledgers (which also answers []).
+describe('action disabled reason (#26619 — live, read by the console)', () => {
+  const LIT = { objects: [{ name: 'widget', externalSharingModel: 'read' }] };
+  const action = (extra: Record<string, unknown> = {}) => ({
+    actions: [{ name: 'submit_for_approval', label: 'Submit for approval', objectName: 'clm_contract', disabled: "record.legal_review_status != 'approved'", ...extra }],
+  });
+
+  it('is silent on an authored `disabledReason` — the row is `live`, cites the console readers, and carries no author warning', () => {
+    const findings = lintLivenessProperties({ ...LIT, ...action({ disabledReason: 'An approved legal review is required first.' }) });
+    expect(ruleOf(findings, 'externalSharingModel')).toBe(LIVENESS_DEAD_PROPERTY);
+    expect(ruleOf(findings, 'disabledReason')).toBeUndefined();
+    const row = JSON.parse(readFileSync(join(shippedLedgerDir(), 'action.json'), 'utf8')).props.disabledReason;
+    // Anti-vacuity: the row is the shape this pin now exists for.
+    expect(row.status).toBe('live');
+    expect(row).not.toHaveProperty('authorWarn');
+    expect(row).not.toHaveProperty('authorHint');
+    expect(row.evidence).toContain('ui/packages/components/src/renderers/layout/containers.tsx#disabledReasonFor');
   });
 });

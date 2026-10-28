@@ -262,7 +262,8 @@ describe('SORT over an unprovisioned injected anchor on a federated object (prem
     for (const anchor of ANCHORS) {
       const type = String((ANCHOR_DEFS as any)[anchor]?.type ?? '');
       expect(type).not.toBe('formula');
-      expect(['datetime', 'lookup']).toContain(type);
+      // `text`: the ownership `queue` anchor (ADR-0142 D3), a queue machine name.
+      expect(['datetime', 'lookup', 'text']).toContain(type);
     }
   });
 

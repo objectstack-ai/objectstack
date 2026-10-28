@@ -40,6 +40,12 @@ import { SkillPreview } from './SkillPreview';
 import { ToolPreview } from './ToolPreview';
 import { JobPreview } from './JobPreview';
 
+// The designer rows this suite reads in zh live in `@object-ui/i18n`'s `studio`
+// namespace, whose `zh` catalogue is fetched on demand (objectstack#25922).
+// Resident before any case, so the zh rows below read synchronously.
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+await loadStudioCatalogue('zh');
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -125,7 +131,7 @@ const ACTION_API = {
   objectName: 'account',
   variant: 'primary',
   refreshAfter: true,
-  aiExposed: false,
+  ai: { exposed: false },
   locations: ['record_header', 'list_toolbar', 'list_item', 'record_section', 'record_more'],
   requiredPermissions: ['account.sync'],
   visible: "record.status == 'open'",
@@ -225,7 +231,7 @@ describe('ActionPreview — the designer words read engine.actionPreview.* (obje
     });
 
     it(`${lang}: an inline script body, exposed to AI`, () => {
-      mountAction(lang, { name: 'recalc', label: 'Recalc', type: 'script', aiExposed: true, body: { source: 'record.total = 1' } });
+      mountAction(lang, { name: 'recalc', label: 'Recalc', type: 'script', ai: { exposed: true }, body: { source: 'record.total = 1' } });
       expectSites(lang, [
         { key: 'engine.actionPreview.pill.type', vars: { type: 'script' } },
         { key: 'engine.actionPreview.pill.aiExposed' },

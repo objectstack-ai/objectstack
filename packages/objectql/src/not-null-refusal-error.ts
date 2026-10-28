@@ -113,6 +113,7 @@ export function envelopeNotNullViolation(
  * declared field this module's `ValidationError`, and anything else leaves as
  * the driver threw it. The two cannot both answer: the unique predicate refuses
  * NOT NULL text at its gate, and an envelope it built carries no NOT NULL code.
+ * Both name the field in the writer's locale, from the same `messages`.
  */
 export function envelopeDriverWriteRefusal(
   error: unknown,
@@ -121,6 +122,6 @@ export function envelopeDriverWriteRefusal(
   verb: NotNullRefusalVerb,
   messages: ValidationMessageContext | undefined,
 ): unknown {
-  const unique = envelopeUniqueViolation(error, object, schema);
+  const unique = envelopeUniqueViolation(error, object, schema, messages);
   return unique !== error ? unique : envelopeNotNullViolation(error, object, schema, verb, messages);
 }

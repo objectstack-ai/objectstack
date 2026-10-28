@@ -380,7 +380,12 @@ describe('posture reading, with a red control for each', () => {
     // console-written inner key must not 422 against an older server). Wire,
     // not debt; the ledger row carries the intent, and the authoring doors
     // reject the carrier key by name (`view-metadata-schema.test.ts` §#9933).
-    expect(countStripSites(at('ui/view.zod.ts'))).toBe(4);
+    //
+    // 4 → 2 at #26711: the two `ViewItemWireSchema` arms closed with the rest
+    // of the `view` write door (the save stores the parsed body, so a strip
+    // there lost a key silently). The two sites left are `ViewColumnStateSchema`
+    // (above) and the form field's `base` shape, both unchanged by #26711.
+    expect(countStripSites(at('ui/view.zod.ts'))).toBe(2);
   });
 
   it('lets a chained posture override the idiom in either direction (#5072)', () => {

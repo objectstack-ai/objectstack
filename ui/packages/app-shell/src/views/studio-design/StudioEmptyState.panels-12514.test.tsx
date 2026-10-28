@@ -102,15 +102,22 @@ describe('objectui#12514 — Validations: the empty block opens the header’s N
     expect(menuIds('rule-preset-')).toEqual(fromEmpty);
   });
 
-  it('a pick from it writes the rule the header’s pick writes', () => {
+  it('a pick from it writes the rule the header’s pick writes', async () => {
     const fromEmpty = vi.fn();
     render(<Harness onPatch={fromEmpty} />);
     fireEvent.click(screen.getByTestId('rules-empty-new'));
     fireEvent.click(screen.getByRole('button', { name: 'Advanced' }));
     fireEvent.click(screen.getByRole('button', { name: t('engine.studio.rules.typeFormat', 'en') }));
-    expect(fromEmpty).toHaveBeenCalledTimes(1);
     // The rule is listed and open: the block gave way to the list.
     expect(screen.queryByTestId('rules-empty')).toBeNull();
+    // objectstack#26731 — a new Format rule is written once it has a field and a message.
+    expect(fromEmpty).not.toHaveBeenCalled();
+    fireEvent.keyDown(screen.getByTestId('rule-field'), { key: 'ArrowDown' });
+    fireEvent.click(within(await screen.findByRole('listbox')).getByRole('option', { name: 'Name (name)' }));
+    fireEvent.change(screen.getByPlaceholderText(t('engine.studio.rules.messagePlaceholder', 'en')), {
+      target: { value: 'Bad name' },
+    });
+    expect(fromEmpty).toHaveBeenCalledTimes(1);
   });
 
   it('once the first rule lists, the menu hands focus to the header’s New', async () => {

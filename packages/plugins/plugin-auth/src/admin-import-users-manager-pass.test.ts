@@ -77,7 +77,15 @@ function matchesWhere(row: Row, where: Record<string, unknown>): boolean {
       throw new Error(`engineDouble: unsupported WHERE combinator '${key}' — implement it or stop issuing it`);
     }
     if (value !== null && typeof value === 'object') {
-      throw new Error(`engineDouble: unsupported operator object on '${key}' — implement it or stop issuing it`);
+      // `$in` is the one operator issued (the delegate's depth-cap subordinate
+      // reads); anything else, or `$in` beside another operator, is refused.
+      const ops = Object.keys(value);
+      const list = (value as { $in?: unknown }).$in;
+      if (ops.length !== 1 || ops[0] !== '$in' || !Array.isArray(list)) {
+        throw new Error(`engineDouble: unsupported operator object on '${key}' — implement it or stop issuing it`);
+      }
+      if (!list.some((v) => String(row[key] ?? '') === String(v ?? ''))) return false;
+      continue;
     }
     if (String(row[key] ?? '') !== String(value ?? '')) return false;
   }

@@ -10,6 +10,8 @@ import {
 
 const SYSTEM = 'usr_system';
 const ADMIN = 'usr_admin_human';
+/** [#26825] Seeded ids one NULL-arm write carries: the claim's hand-over batch. */
+const HANDOVER_ROWS = 50;
 
 /** One recorded call to `ql.update` — the shape, not just the payload. */
 interface RecordedWrite {
@@ -275,10 +277,12 @@ describe('claimSeedOwnership', () => {
 
   // ── [#14530] the predicate-write shape ────────────────────────────────────
 
-  it('issues ONE predicate write per unowned shape — never one write per row', async () => {
+  it('issues ONE predicate write per unowned shape and hand-over batch — never one write per row', async () => {
     // The whole point of the card: N rows used to cost N single-id writes, so
     // the batch existed only in this caller's loop and nothing downstream could
-    // see it. The write COUNT is the pin, and it must not scale with N.
+    // see it. The write COUNT is the pin: [#26825] the NULL arm writes one batch
+    // of HANDOVER_ROWS seeded ids per write, so it scales with N / HANDOVER_ROWS,
+    // and the seed-identity arm is still one write.
     const schemas = [{ name: 'crm_lead', fields: [{ name: 'owner_id' }] }];
     const rows = Array.from({ length: 500 }, (_, i) => ({
       id: `l${i}`,
@@ -290,17 +294,16 @@ describe('claimSeedOwnership', () => {
     const result = await claimSeedOwnership(ql, ADMIN, { seededRecordIds: seededIds({ crm_lead: seeded }) });
 
     expect(result).toEqual([{ object: 'crm_lead', count: 500 }]);
-    expect(writes).toHaveLength(2);
+    expect(writes).toHaveLength(250 / HANDOVER_ROWS + 1);
     expect(writes.every((w) => w.multi)).toBe(true);
     // The set fits in one write per predicate, so the paged fallback never
     // engages and this pass issues NO read at all — the predicate write IS the
     // scan.
     expect(ql.find).not.toHaveBeenCalled();
     // [#23354] The NULL arm carries the seed's ids; the seed identity arm does not.
-    expect(writes.map((w) => w.where)).toEqual([
-      { owner_id: null, id: { $in: seeded } },
-      { owner_id: SYSTEM },
-    ]);
+    const batches = Array.from({ length: 250 / HANDOVER_ROWS }, (_, b) =>
+      ({ owner_id: null, id: { $in: seeded.slice(b * HANDOVER_ROWS, (b + 1) * HANDOVER_ROWS) } }));
+    expect(writes.map((w) => w.where)).toEqual([...batches, { owner_id: SYSTEM }]);
     // Every write carries the payload only — no `id` in `data`, which is what
     // routes the engine down `updateMany` instead of the single-id door.
     expect(writes.every((w) => Object.keys(w.data).join() === 'owner_id')).toBe(true);
@@ -491,9 +494,12 @@ describe('claimSeedOwnership', () => {
     // path never does — and it converged back onto whole-set writes rather than
     // paging to the end.
     expect(reads.length).toBeGreaterThan(0);
-    // Still batched, not per row: a handful of writes, none of them over the
-    // ceiling that refused the unpaged attempt.
-    expect(writes.length).toBeLessThan(10);
+    // Still batched, not per row: the seed-identity arm took a handful of
+    // writes, none of them over the ceiling that refused the unpaged attempt.
+    // [#26825] The NULL arm's 6 000 seeded ids are hand-over batches.
+    const nullArm = writes.filter((w) => (w.where as any).owner_id === null);
+    expect(nullArm).toHaveLength(6_000 / HANDOVER_ROWS);
+    expect(writes.length - nullArm.length).toBeLessThan(10);
     expect(writes.every((w) => w.matched.length <= MAX_BULK_PER_ROW_HOOK_ROWS)).toBe(true);
     // A page is big enough that plugin-sharing's 1000-row recompute cap still
     // sees these writes as batches rather than recomputing them row by row.
@@ -716,10 +722,11 @@ describe('claimSeedOwnership — the NULL arm re-owns only the rows the seed rep
     expect(info.mock.calls[0]![1].seededRows).toBe(1);
   });
 
-  it('chunks the seeded ids, so no IN list is longer than half the per-row hook ceiling and none is refused', async () => {
+  it('writes the seeded ids in hand-over batches, far under half the per-row hook ceiling, and none is refused', async () => {
     // The chunk keeps the list inside a driver's bound-parameter limit and
     // under the ceiling, so the engine never refuses a NULL-arm write whole
-    // and the arm issues no read.
+    // and the arm issues no read. [#26825] Each chunk is written in batches of
+    // HANDOVER_ROWS ids, the bound on how long a request waits behind it.
     const schemas = [{ name: 'crm_case', fields: [{ name: 'owner_id' }] }];
     const rows = Array.from({ length: 12_000 }, (_, i) => ({ id: `c${i}`, owner_id: null as string | null }));
     const { ql, writes, reads } = makeQL(schemas, { crm_case: rows });
@@ -728,11 +735,10 @@ describe('claimSeedOwnership — the NULL arm re-owns only the rows the seed rep
 
     expect(result).toEqual([{ object: 'crm_case', count: 12_000 }]);
     const nullArm = writes.filter((w) => (w.where as any).owner_id === null);
-    expect(nullArm.map((w) => (w.where as any).id.$in.length)).toEqual([
-      MAX_BULK_PER_ROW_HOOK_ROWS / 2,
-      MAX_BULK_PER_ROW_HOOK_ROWS / 2,
-      12_000 - MAX_BULK_PER_ROW_HOOK_ROWS,
-    ]);
+    expect(nullArm.map((w) => (w.where as any).id.$in.length)).toEqual(
+      Array.from({ length: 12_000 / HANDOVER_ROWS }, () => HANDOVER_ROWS),
+    );
+    expect(HANDOVER_ROWS).toBeLessThan(MAX_BULK_PER_ROW_HOOK_ROWS / 2);
     expect(reads).toEqual([]);
   });
 });
