@@ -58,7 +58,7 @@ describe('framelessSectionColumns — 1–3 columns by the fields a section show
 });
 
 describe('DetailSection — the frameless face (objectstack#27055)', () => {
-  const identity = section('Identity', ['first_name', 'last_name', 'email', 'phone', 'title']);
+  const identity = section('Identity', ['first_name', 'last_name', 'email', 'phone', 'title'], { collapsible: true });
   const data = { first_name: 'Mira', last_name: 'Costa', email: 'm@x.io', phone: '1', title: 'Dir' };
 
   it('draws a title row over a hairline and the grid — no card', () => {
@@ -92,6 +92,13 @@ describe('DetailSection — the frameless face (objectstack#27055)', () => {
     expect(gridOf(container)).toBeNull();
   });
 
+  it("a section its group declares `collapse: 'none'` keeps a plain heading, no disclosure", () => {
+    const fixed = section('Address', ['street'], { collapsible: false });
+    render(onDefaultPage(<DetailSection section={fixed} data={{ street: 'Main St' }} />));
+    expect(screen.queryByRole('button', { name: 'Address' })).toBeNull();
+    expect(screen.getByRole('heading', { name: 'Address' })).toBeTruthy();
+  });
+
   it('CONTROL — outside the default page the card face draws', () => {
     const { container } = render(<DetailSection section={identity} data={data} />);
     expect(container.querySelector('[data-detail-section-face="frameless"]')).toBeNull();
@@ -111,10 +118,10 @@ describe('DetailSection — the frameless face (objectstack#27055)', () => {
 
 describe('EmptySectionsLine — entirely empty sections fold into one line (objectstack#27055)', () => {
   const sections: DetailViewSection[] = [
-    section('Basic', ['name', 'email']),
-    section('Address', ['street', 'city'], { hideEmpty: false }),
-    section('Conversion', ['converted_at'], { hideEmpty: false }),
-    section('Extra', ['notes'], { hideEmpty: false }),
+    section('Basic', ['name', 'email'], { collapsible: true }),
+    section('Address', ['street', 'city'], { hideEmpty: false, collapsible: true }),
+    section('Conversion', ['converted_at'], { hideEmpty: false, collapsible: true }),
+    section('Extra', ['notes'], { hideEmpty: false, collapsible: true }),
   ];
   const data = { id: 'L-1', name: 'Mira', email: 'm@x.io' };
   const schema: DetailViewSchema = { type: 'detail-view', data, sections } as any;

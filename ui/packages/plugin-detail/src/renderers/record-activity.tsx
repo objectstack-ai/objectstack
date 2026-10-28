@@ -287,9 +287,13 @@ export const RecordActivityRenderer: React.FC<RecordActivityRendererProps> = ({
     // The chip filters the WHOLE stream before the page is cut, so 讨论 is
     // every comment, not the comments of the first page.
     const stream = filterTimelineStream(mergeTimelineStream(sourceItems, fieldChanges), streamFilter);
+    // Filtered only (no window): `applyFeedConfig` windows a chronological
+    // feed from its tail, but the stream is newest first, so its window is the
+    // HEAD — the newest `limit` entries, not the oldest.
     const all = applyFeedConfig(stream, { types, showCompleted, unifiedTimeline }, Number.MAX_SAFE_INTEGER, BLOCK_NAME);
-    const shown = streamShowAll ? all : applyFeedConfig(stream, { types, showCompleted, unifiedTimeline }, limit, BLOCK_NAME);
-    return { ...shown, total: all.items.length };
+    const total = all.items.length;
+    if (streamShowAll || total <= limit) return { items: all.items, hasMore: false, total };
+    return { items: all.items.slice(0, limit), hasMore: true, total };
   }, [hostItems, discussionItems, fetched, types, showCompleted, unifiedTimeline, pageSize, asStream, fieldChanges, streamFilter, streamShowAll, limit]);
   const items = applied.items;
   const hasMore = applied.hasMore || (canSelfFetch && fetchedHasMore);

@@ -114,8 +114,14 @@ describe('record:activity on the default record page is the stream', () => {
     expect(viewAll).toBeTruthy();
     // 25 notes + the call + the audit change.
     expect(viewAll.textContent).toContain('27');
+    // The page is the NEWEST twenty (newest first): the call, the change, Note 24 … Note 7.
+    expect(screen.getByText('Note 24')).toBeTruthy();
+    expect(screen.getByText('Note 7')).toBeTruthy();
+    expect(screen.queryByText('Note 6')).toBeNull();
+    expect(screen.queryByText('Note 0')).toBeNull();
     fireEvent.click(viewAll);
     expect(container.querySelector('[data-stream-view-all]')).toBeNull();
+    expect(screen.getByText('Note 0')).toBeTruthy();
   });
 
   it('a chip filters the whole stream, not the first page', () => {

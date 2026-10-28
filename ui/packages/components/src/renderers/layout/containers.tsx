@@ -210,6 +210,7 @@ const KNOWN_LABEL_DICT: Record<string, Record<string, string>> = {
   'zh-TW': {
     Details: '詳情',
     Related: '相關',
+    Timeline: '時間線',
     Activity: '活動',
     History: '歷史',
     Notes: '備註',
@@ -257,6 +258,8 @@ const KNOWN_LABEL_KEYS: Record<string, string> = {
   Related: 'detail.related',
   Activity: 'detail.activity',
   History: 'detail.history',
+  // The synthesized record page's one timeline stream tab (objectstack#27055).
+  Timeline: 'detail.timeline',
   Attachments: 'detail.attachments',
   Approvals: 'detail.approvalsPanelTitle',
   Discussion: 'detail.discussion',

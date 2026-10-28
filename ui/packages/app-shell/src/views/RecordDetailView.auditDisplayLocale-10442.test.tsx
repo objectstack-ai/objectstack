@@ -26,7 +26,7 @@
 
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { MetadataCtx } from '@object-ui/react';
 import { I18nProvider, LocalizationProvider } from '@object-ui/i18n';
@@ -135,7 +135,7 @@ function renderHistory(locale: string) {
   return render(
     <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }} persistLanguage={false}>
       <LocalizationProvider value={{ locale }}>
-        <MemoryRouter initialEntries={[`/app/demo/${OBJECT_NAME}/${RECORD_ID}?tab=history`]}>
+        <MemoryRouter initialEntries={[`/app/demo/${OBJECT_NAME}/${RECORD_ID}?tab=timeline`]}>
           <MetadataCtx.Provider value={makeMetadata()}>
             <RecordDetailView
               dataSource={makeDataSource()}
@@ -152,17 +152,28 @@ function renderHistory(locale: string) {
   );
 }
 
-/** The rendered diff line for `close_date`, under an ENGLISH UI with `locale` as the display locale. */
+/**
+ * The rendered diff line for `close_date`, under an ENGLISH UI with `locale` as
+ * the display locale. Since objectstack#27055 the record page draws the audit
+ * entries in the Timeline tab's one stream, each change as one compact line
+ * (`data-stream-change`).
+ */
 async function diffLine(locale: string): Promise<string> {
   renderHistory(locale);
-  const label = await screen.findByText('Close date', { selector: 'li > span' });
-  const text = (label.closest('li')?.textContent ?? '').replace(/\s+/g, ' ').trim();
+  let text = '';
+  await waitFor(() => {
+    const line = Array.from(document.querySelectorAll('[data-stream-change]')).find((el) =>
+      (el.textContent ?? '').startsWith('Close date'),
+    );
+    expect(line).toBeTruthy();
+    text = (line!.textContent ?? '').replace(/\s+/g, ' ').trim();
+  });
   cleanup();
   return text;
 }
 
 const expected = (locale: string) =>
-  `Close date: ${new Date(`${FROM_DATE}T00:00:00Z`).toLocaleDateString(locale)} → ${new Date(`${TO_DATE}T00:00:00Z`).toLocaleDateString(locale)}`;
+  `Close date ${new Date(`${FROM_DATE}T00:00:00Z`).toLocaleDateString(locale)} → ${new Date(`${TO_DATE}T00:00:00Z`).toLocaleDateString(locale)}`;
 
 beforeEach(() => {
   // Unrelated chrome on this view reaches for the platform API; answering it
@@ -187,13 +198,13 @@ afterEach(() => {
 describe('RecordDetailView — the audit history dates follow the display locale (objectui#10442)', () => {
   it('formats the date diff as de-CH under an English UI with a de-CH display locale', async () => {
     const text = await diffLine('de-CH');
-    expect(text, `got: ${text}`).toBe('Close date: 3.3.2020 → 4.3.2020');
+    expect(text, `got: ${text}`).toBe('Close date 3.3.2020 → 4.3.2020');
     expect(text).toBe(expected('de-CH'));
   });
 
   it('control: formats the date diff as en-US under an en-US display locale', async () => {
     const text = await diffLine('en-US');
-    expect(text, `got: ${text}`).toBe('Close date: 3/3/2020 → 3/4/2020');
+    expect(text, `got: ${text}`).toBe('Close date 3/3/2020 → 3/4/2020');
     expect(text).toBe(expected('en-US'));
   });
 

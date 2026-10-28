@@ -529,8 +529,11 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
           <Icon className="h-3.5 w-3.5" aria-hidden />
         </span>
         <p className="min-w-0 flex-1 pt-2 break-words">
-          <span className="text-foreground/80">{what}</span>
-          <span>{` · ${item.actor} · ${formatTimestamp(item.createdAt, t, displayLocale)}`}</span>
+          <span className="text-foreground/80" data-stream-change="">{what}</span>
+          <span aria-hidden>{' · '}</span>
+          <span>{item.actor}</span>
+          <span aria-hidden>{' · '}</span>
+          <span>{formatTimestamp(item.createdAt, t, displayLocale)}</span>
         </p>
       </div>
     );
@@ -769,7 +772,9 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
       aria-label={title}
     >
       <header className="mb-4">
-        <div className="flex items-center justify-between">
+        {/* Wraps: in a 320 px foot card the stream's chips go under the title
+            rather than past the card's edge (objectstack#27055). */}
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="flex items-center gap-2 text-base font-semibold leading-none tracking-tight">
             <Activity className="h-4 w-4" />
             {title}
@@ -782,7 +787,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
               <div
                 role="group"
                 aria-label={t('detail.filterActivity')}
-                className="flex items-center gap-1"
+                className="flex flex-wrap items-center gap-1"
                 data-stream-filters=""
               >
                 {TIMELINE_STREAM_FILTERS.map((chip) => (

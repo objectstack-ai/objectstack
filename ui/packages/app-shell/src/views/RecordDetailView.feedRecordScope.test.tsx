@@ -75,7 +75,8 @@ vi.mock('./MetadataInspector', () => ({
 
 import { RecordDetailView } from './RecordDetailView';
 
-const EMPTY_COMMENTS = DETAIL_DEFAULT_TRANSLATIONS['detail.noCommentsYet'];
+// The feed is the Timeline tab's one stream (objectstack#27055); its empty copy is the stream's.
+const EMPTY_COMMENTS = DETAIL_DEFAULT_TRANSLATIONS['detail.noActivity'];
 const COMMENT_PLACEHOLDER = DETAIL_DEFAULT_TRANSLATIONS['detail.leaveCommentPlaceholder'];
 const SUBMIT_COMMENT = DETAIL_DEFAULT_TRANSLATIONS['detail.submitComment'];
 const OBJECT_NAME = 'crm_account';
@@ -215,7 +216,7 @@ function makeMetadata(pages: any[]) {
  */
 function tree(dataSource: any, recordId: string, pages: any[] = []) {
   return (
-    <MemoryRouter initialEntries={[`/app/demo/${OBJECT_NAME}/${recordId}`]}>
+    <MemoryRouter initialEntries={[`/app/demo/${OBJECT_NAME}/${recordId}?tab=timeline`]}>
       <MetadataCtx.Provider value={makeMetadata(pages)}>
         <RecordDetailView
           dataSource={dataSource}
