@@ -68,6 +68,80 @@ export interface ObjectPerm {
 export type ObjectPermFlag = Exclude<keyof ObjectPerm, 'readScope' | 'writeScope'>;
 
 /**
+ * The `objects` key whose entry a permission set applies to an object it has
+ * no entry of its own for (ADR-0066 D2, `resolveObjectPermission` in
+ * `@objectstack/plugin-security`'s `permission-evaluator.ts`).
+ */
+export const OBJECT_WILDCARD_KEY = '*';
+
+/** An object's `access.default` posture, as the object catalog serves it. */
+export type ObjectAccessDefault = 'public' | 'private';
+
+/**
+ * objectstack#27010 — what one object row of the matrix draws: the entry the
+ * runtime applies for this object, resolved exactly as `resolveObjectPermission`
+ * resolves it.
+ *
+ * - The object's own entry, when the set has one (any entry, `{}` included:
+ *   the resolver returns it and never merges two entries).
+ * - Otherwise the `'*'` entry, for an object whose `access.default` is not
+ *   `'private'` (the runtime reads exactly `access.default === 'private'`).
+ *   For a private object, only a `'*'` entry carrying `viewAllRecords` or
+ *   `modifyAllRecords` applies.
+ * - Otherwise nothing.
+ *
+ * `inherited` marks the second case: the row has no entry of its own and draws
+ * the `'*'` entry. The row draws that entry's bits as an entry of its own
+ * would, so the boxes and the scope pickers read the same keys either way.
+ *
+ * The runtime half of this reading is pinned in plugin-security's
+ * `object-grant-wildcard.test.ts`; change the two together.
+ */
+export interface ObjectRuleCell {
+  /** Where the drawn entry comes from: the object's own, the `'*'` entry, or none applies. */
+  source: 'entry' | 'wildcard' | 'none';
+  /** `source === 'wildcard'`: no entry of its own, and the row draws the `'*'` entry. */
+  inherited: boolean;
+  perm: ObjectPerm;
+}
+
+export function objectRuleCell(
+  objects: Readonly<Record<string, ObjectPerm>> | undefined,
+  objectName: string,
+  accessDefault: ObjectAccessDefault | undefined,
+): ObjectRuleCell {
+  const entry = objects?.[objectName];
+  if (entry) return { source: 'entry', inherited: false, perm: entry };
+  const wildcard = objects?.[OBJECT_WILDCARD_KEY];
+  if (wildcard && (accessDefault !== 'private' || wildcard.viewAllRecords || wildcard.modifyAllRecords)) {
+    return { source: 'wildcard', inherited: true, perm: wildcard };
+  }
+  return { source: 'none', inherited: false, perm: {} };
+}
+
+/**
+ * The entry an edit of an object row starts from: what the row draws
+ * ({@link objectRuleCell}), as a fresh copy. On a row without an entry of its
+ * own, the first edit writes the drawn bits with the one change the admin made,
+ * so every other bit is written as the admin saw it.
+ */
+export function objectRuleSeed(
+  objects: Readonly<Record<string, ObjectPerm>> | undefined,
+  objectName: string,
+  accessDefault: ObjectAccessDefault | undefined,
+): ObjectPerm {
+  return { ...objectRuleCell(objects, objectName, accessDefault).perm };
+}
+
+/**
+ * Does the row grant anything at all? The "Only granted" filter and the
+ * granted-object count read the row as it is drawn ({@link objectRuleCell}).
+ */
+export function objectRowGrantsAny(perm: ObjectPerm): boolean {
+  return Object.values(perm).some(Boolean);
+}
+
+/**
  * objectstack#26187 — `ObjectAccessScopeSchema`'s values, narrowest first, in
  * the spec's own order. Restated rather than imported for the reason
  * `useTenancyPosture` gives: the `@objectstack/spec/security` value entry adds
@@ -284,6 +358,12 @@ function asScopeSet(scope: Iterable<string>): Set<string> {
  * Narrow a permission set down to just the rows whose object is in `scope`.
  * Used to drive the matrix display so a package panel lists only its own
  * objects (and their field overrides), never the whole environment.
+ *
+ * objectstack#27010 — the `'*'` entry is kept beside them: the runtime applies
+ * it to the package's objects too, and a row without an entry of its own draws
+ * it ({@link objectRuleCell}). It is display input only. The matrix has no row
+ * that edits it, and {@link mergePermissionSlice} takes it from the fresh base
+ * like every other key outside the scope.
  */
 export function scopePermissionSet(
   set: Pick<PermissionSetDraft, 'objects' | 'fields'>,
@@ -292,7 +372,7 @@ export function scopePermissionSet(
   const scopeSet = asScopeSet(scope);
   const objects: Record<string, ObjectPerm> = {};
   for (const [k, v] of Object.entries(set.objects ?? {})) {
-    if (scopeSet.has(k)) objects[k] = v;
+    if (scopeSet.has(k) || k === OBJECT_WILDCARD_KEY) objects[k] = v;
   }
   const fields: Record<string, FieldPerm> = {};
   for (const [k, v] of Object.entries(set.fields ?? {})) {

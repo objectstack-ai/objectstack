@@ -80,6 +80,9 @@ const STUDIO_EN: Record<string, string> = {
   'perm.field.inherited.tip': 'No rule for this field: it follows the object’s Read and Edit. A click writes a rule.',
   'perm.field.capped.read': 'This rule grants Read, but the object does not: a holder of this set alone cannot read the field.',
   'perm.field.capped.edit': 'This rule grants Edit, but the object does not: a holder of this set alone cannot edit the field.',
+  // objectstack#27010 — an object row with no entry of its own draws the set's “*” entry.
+  'perm.object.inherited.legend': 'Grey boxes: the set has no explicit grant on that object, so its “*” wildcard grant applies. A click there writes an explicit grant for the object, starting from what the row shows; from then on “*” no longer applies to it.',
+  'perm.object.inherited.tip': 'No explicit grant on this object: the set’s “*” wildcard grant applies. A click writes an explicit grant for this object, starting from what this row shows; from then on that grant, not “*”, applies to the object.',
   'perm.field.col.name': 'Field',
   'perm.field.read': 'Read',
   'perm.field.edit': 'Edit',
