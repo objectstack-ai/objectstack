@@ -96,10 +96,15 @@ function makeDataSource(): DataSource {
 const TITLE_MAP = { en: 'Contact card', 'zh-CN': '联系人卡片' };
 const DESCRIPTION_MAP = { en: 'Who to call', 'zh-CN': '联系谁' };
 
+/**
+ * The drawer through `navigation.mode: 'drawer'`; the modal through
+ * `layout: 'modal'` — `navigation.mode: 'modal'` was retired by
+ * objectstack#26677, and the validator row below refuses it.
+ */
 const node = (mode: 'drawer' | 'modal', form: Record<string, unknown>) => ({
   type: 'object-view',
   objectName: 'contacts',
-  navigation: { mode },
+  ...(mode === 'modal' ? { layout: 'modal' } : { navigation: { mode } }),
   form,
 });
 
@@ -121,6 +126,9 @@ describe('ObjectView — the form slot\'s `title` / `description` are I18nLabel 
       const parsed = safeValidateSchema(node(mode, { title: TITLE_MAP, description: DESCRIPTION_MAP }));
       expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
     }
+    // …and the retired spelling of the modal is not one (objectstack#26677).
+    const retired = safeValidateSchema({ type: 'object-view', objectName: 'contacts', navigation: { mode: 'modal' }, form: { title: 'x' } });
+    expect(retired.success).toBe(false);
   });
 
   it.each(['drawer', 'modal'] as const)(

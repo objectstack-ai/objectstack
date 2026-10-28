@@ -622,7 +622,7 @@ describe('an ABSENT `navigation` is not a `page` block (objectui#11168, the `Obj
     return { value, openRecord };
   }
 
-  it('under a host that publishes a record navigator, the absent key opens nothing, where `{ size: "lg" }` (mode-less, so `page`) opens the record page through it', async () => {
+  it('under a host that publishes a record navigator, the absent key opens nothing, where `{ size: "lg" }` (mode-less, so the spec\'s `drawer` default) opens the drawer', async () => {
     const open = vi.fn();
     vi.stubGlobal('open', open);
     const absent = recordNavigatorHost();
@@ -632,11 +632,15 @@ describe('an ABSENT `navigation` is not a `page` block (objectui#11168, the `Obj
     expect(absent.openRecord).not.toHaveBeenCalled();
     expect(document.querySelector('[role="dialog"]')).toBeNull();
     cleanup();
+    // FLIPPED (objectstack#26677): the mode-less block took the spec's `page`
+    // default and navigated through the host; it now takes `drawer` and opens
+    // the drawer, the host's navigator untouched.
     const modeless = recordNavigatorHost();
     await mount(bag({ objectName: OBJECT, timeline: TL, data: RECORDS, navigation: { size: 'lg' } }), { host: modeless.value, waitFor: 'Kickoff' });
     fireEvent.click(screen.getByText('Kickoff'));
     await settle();
-    expect(modeless.openRecord).toHaveBeenCalledWith(OBJECT, 1);
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(modeless.openRecord).not.toHaveBeenCalled();
     expect(open).not.toHaveBeenCalled();
   });
 });
