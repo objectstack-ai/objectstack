@@ -28,13 +28,13 @@ describe('walkPageComponents — where components actually live', () => {
         kind: 'slotted',
         slots: {
           highlights: { type: 'a' },
-          tabs: [{ type: 'b' }, { type: 'c' }],
+          details: [{ type: 'b' }, { type: 'c' }],
         },
       }),
     ).toEqual([
       'pages[0].slots.highlights',
-      'pages[0].slots.tabs[0]',
-      'pages[0].slots.tabs[1]',
+      'pages[0].slots.details[0]',
+      'pages[0].slots.details[1]',
     ]);
   });
 

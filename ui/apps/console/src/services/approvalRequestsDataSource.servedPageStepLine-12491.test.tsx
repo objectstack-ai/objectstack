@@ -189,51 +189,56 @@ const SERVED_PAGE = {
   type: 'record',
   object: 'sys_approval_request',
   template: 'default',
-  kind: 'slotted',
+  kind: 'full',
   isDefault: true,
-  regions: [],
-  slots: {
-    actions: [{ type: 'record:approval_decision' }],
-    highlights: {
-      type: 'record:highlights',
-      properties: {
-        fields: ['process_label', 'status', 'current_step_label', 'submitter_id', 'updated_at'],
-      },
-    },
-    tabs: {
-      type: 'page:tabs',
-      properties: {
-        tabStyle: 'line',
-        position: 'top',
-        items: [
-          {
-            label: { en: 'Details', 'zh-CN': '详情', 'ja-JP': '詳細', 'es-ES': 'Detalles' },
-            icon: 'file-text',
-            children: [{ type: 'record:details' }],
+  regions: [
+    {
+      name: 'main',
+      width: 'full',
+      components: [
+        { type: 'page:header' },
+        { type: 'record:approval_decision' },
+        {
+          type: 'record:highlights',
+          properties: {
+            fields: ['process_label', 'status', 'current_step_label', 'submitter_id', 'updated_at'],
           },
-          {
-            label: { en: 'Timeline', 'zh-CN': '时间线', 'ja-JP': 'タイムライン', 'es-ES': 'Cronología' },
-            icon: 'history',
-            children: [
+        },
+        {
+          type: 'page:tabs',
+          properties: {
+            tabStyle: 'line',
+            position: 'top',
+            items: [
               {
-                type: 'record:related_list',
-                properties: {
-                  objectName: 'sys_approval_action',
-                  relationshipField: 'request_id',
-                  columns: ['created_at', 'action', 'actor_id', 'step_name', 'comment', 'attachments'],
-                  sort: [{ field: 'created_at', order: 'desc' }],
-                  limit: 50,
-                  showViewAll: true,
-                  title: { en: 'Timeline', 'zh-CN': '时间线', 'ja-JP': 'タイムライン', 'es-ES': 'Cronología' },
-                },
+                label: { en: 'Details', 'zh-CN': '详情', 'ja-JP': '詳細', 'es-ES': 'Detalles' },
+                icon: 'file-text',
+                children: [{ type: 'record:details' }],
+              },
+              {
+                label: { en: 'Timeline', 'zh-CN': '时间线', 'ja-JP': 'タイムライン', 'es-ES': 'Cronología' },
+                icon: 'history',
+                children: [
+                  {
+                    type: 'record:related_list',
+                    properties: {
+                      objectName: 'sys_approval_action',
+                      relationshipField: 'request_id',
+                      columns: ['created_at', 'action', 'actor_id', 'step_name', 'comment', 'attachments'],
+                      sort: [{ field: 'created_at', order: 'desc' }],
+                      limit: 50,
+                      showViewAll: true,
+                      title: { en: 'Timeline', 'zh-CN': '时间线', 'ja-JP': 'タイムライン', 'es-ES': 'Cronología' },
+                    },
+                  },
+                ],
               },
             ],
           },
-        ],
-      },
+        },
+      ],
     },
-    discussion: [],
-  },
+  ],
 };
 
 function json(status: number, body: unknown): Response {
@@ -310,7 +315,7 @@ describe('the served request page shows the flow origin (objectui#12491) and the
   it('the served page parses as a spec page, with no node or prop added for either', () => {
     const parsed = PageSchema.safeParse(SERVED_PAGE);
     expect(parsed.success, JSON.stringify(parsed.error?.issues ?? [])).toBe(true);
-    expect(SERVED_PAGE.slots.actions).toEqual([{ type: 'record:approval_decision' }]);
+    expect(SERVED_PAGE.regions[0].components[1]).toEqual({ type: 'record:approval_decision' });
   });
 
   it('a multi-step request draws its served route as a vertical line, the current step marked, none of the trunk\'s other rungs', async () => {

@@ -71,6 +71,9 @@ export {
   CURRENCY_ARGUMENT_RULE,
   currencyCodePath,
   currencyCodeValueRefusal,
+  // A `currency` hole with no argument formats in the tenant default currency the
+  // caller supplies; with none, every renderer refuses it with this sentence.
+  currencyDefaultRefusal,
 } from './template-engine';
 export type { TemplateHoleDialect, TemplateHoleGrammarRefusal, TemplateHoleGrammarRule } from './template-engine';
 // The mail template hole grammar — one copy, read by `@objectstack/plugin-email`'s

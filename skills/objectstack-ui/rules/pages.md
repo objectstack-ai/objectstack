@@ -37,6 +37,8 @@ five) or `dashboard` (`header`, `footer`; other regions are grid cells);
 `full-width` is retired (a second name for `default`). On a `kind: 'full'` page a region
 the template does not place, or a second one for a filled slot, is refused at
 its `name` — the left column is `sidebar`, the right `aside`.
+A `slotted` record page has no `tabs` slot: shape the strip with `relatedList` /
+`relatedList: 'primary'` on the child's reference field, or author `kind: 'full'`.
 
 ### Component Catalogue (selection)
 
@@ -233,12 +235,9 @@ at render behind an error boundary, so always test a react page in the browser.
 
 To style a metadata-authored block, give it a **`responsiveStyles`** object — a
 per-breakpoint map of CSS properties. The renderer compiles each styled node to
-**id-scoped CSS** at render time. **Do NOT put Tailwind classes in `className`**
-expecting them to render: Tailwind is compiled at the *renderer's* build over the
-*renderer's* source, never over your metadata, so a class only happens to work if
-objectui already uses it — arbitrary classes (`text-[27px]`, `bg-[#1a2b3c]`,
-`grid-cols-7`) silently do nothing. `responsiveStyles` has no such trap (values
-are compiled from your data at render).
+**id-scoped CSS** at render time. **Do NOT put Tailwind classes in `className`**:
+Tailwind is compiled over the renderer's source, never over your metadata, so
+arbitrary classes (`text-[27px]`, `grid-cols-7`) silently do nothing.
 
 Rules:
 - **`responsiveStyles` and `id` are top-level** envelope fields; **child nodes go
@@ -396,9 +395,10 @@ name: crm_task_status_flow
 `os build` lints every fence: `type` must be one of the three (typo →
 did-you-mean), `name` is required, `state_machine` also needs `object`, and
 the referenced object-rule / flow / permission set **must exist in this
-package** — a dead same-package reference fails the build (same posture as
-a broken link). At render time a missing or forbidden reference degrades to
-a placeholder, never a crash.
+package or in a package of the same artifact that it declares in
+`manifest.dependencies`** (direct only; one-way) — anything else fails the
+build (same posture as a broken link). At render time a missing or forbidden
+reference degrades to a placeholder, never a crash.
 
 Embedding an `object` (data model) or an arbitrary SDUI
 component is **not** supported. **`permission` caveat:** the matrix is not

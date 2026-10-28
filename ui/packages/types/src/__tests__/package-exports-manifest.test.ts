@@ -20,10 +20,11 @@
  * `require` condition rather than adding a second build format — is the
  * contract-honest fix; see the PR body for the full premise verification
  * (nothing in-repo `require()`s this package, and the one in-repo CJS-format
- * bundle consumer, `packages/vscode-extension` via `tsup --format cjs` with
- * `noExternal: ['@object-ui/types', ...]`, builds byte-identically with the
- * condition present or absent — it resolves the value imports it re-exports
- * via the `import` condition regardless of its own output format).
+ * bundle consumer of the time, the VS Code extension via `tsup --format cjs`
+ * with `noExternal: ['@object-ui/types', ...]`, built byte-identically with the
+ * condition present or absent — it resolved the value imports it re-exported
+ * via the `import` condition regardless of its own output format; that
+ * package has since left the workspace, objectstack#25910).
  *
  * ## What this test is, and is not
  *

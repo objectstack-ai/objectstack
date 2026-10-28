@@ -132,13 +132,19 @@ export function bulkConfirmTemplateScope(scope: BulkConfirmScope): Record<string
  * locale channel, apart from the roots, so a param named `locale` stays a
  * value the sentence prints. ⛔ No second resolution of it here: absent, the
  * engine formats in `en-US`.
+ *
+ * `currency` is the tenant default currency (`useLocalization().currency`)
+ * that a `{{ amount | currency }}` hole with no argument formats in, on
+ * `fillTemplateHoles`'s own currency channel. Absent, such a sentence is shown
+ * as written.
  */
 export function bulkConfirmText(
   confirmText: BulkActionDef['confirmText'] | null | undefined,
   scope: BulkConfirmScope,
   locale?: string,
+  currency?: string,
 ): string | undefined {
   const source = bulkConfirmTextSource(confirmText);
   if (source === undefined || !hasTemplateHoles(source)) return source;
-  return fillTemplateHoles(source, bulkConfirmTemplateScope(scope), locale);
+  return fillTemplateHoles(source, bulkConfirmTemplateScope(scope), locale, currency);
 }

@@ -140,6 +140,12 @@ export interface DerivedRelatedList {
    * the related list's query stays byte-identical to what it sent before.
    */
   sort?: Array<{ field: string; order: 'asc' | 'desc' }>;
+  /**
+   * True when the FK declares `relatedList: false` — present only when the
+   * caller asked for hidden relationships ({@link DeriveRelatedListsOptions.includeHidden}).
+   * The record page never asks, so a hidden list never reaches it.
+   */
+  isHidden?: true;
 }
 
 /**
@@ -269,17 +275,28 @@ export function resolveRelatedListOrder<T extends { childObject: string; referen
   const head: T[] = [];
   for (const entry of declared) {
     if (typeof entry !== 'string') continue;
-    const dot = entry.indexOf('.');
-    const child = dot === -1 ? entry : entry.slice(0, dot);
-    const field = dot === -1 ? undefined : entry.slice(dot + 1);
     for (const list of lists) {
-      if (placed.has(list) || list.childObject !== child) continue;
-      if (field !== undefined && list.referenceField !== field) continue;
+      if (placed.has(list) || !relatedListEntryNames(entry, list)) continue;
       placed.add(list);
       head.push(list);
     }
   }
   return [...head, ...lists.filter((list) => !placed.has(list))];
+}
+
+/**
+ * Does one `relatedLists` entry (or a field group's `relatedList`) name this
+ * list? A bare child object name names every list of that child; `object.field`
+ * names the one FK. The ONE reading of an entry, shared by
+ * {@link resolveRelatedListOrder} and the Studio editors that author entries.
+ */
+export function relatedListEntryNames(
+  entry: string,
+  list: { childObject: string; referenceField: string },
+): boolean {
+  const dot = entry.indexOf('.');
+  if (dot === -1) return list.childObject === entry;
+  return list.childObject === entry.slice(0, dot) && list.referenceField === entry.slice(dot + 1);
 }
 
 /** Normalize an object's `fields` (record or array) into `[name, def]` pairs. */
@@ -311,6 +328,14 @@ export interface DeriveRelatedListsOptions {
    * the title keeps `childLabel`.
    */
   listLabel?: (child: MergedObjectLike & { name: string }) => string;
+  /**
+   * Keep the relationships whose FK declares `relatedList: false`, flagged
+   * `isHidden`. For an AUTHORING surface only (Studio's `relatedLists`
+   * editor): such a relationship is still one an entry may name (the spec's
+   * `defineStack` check and `packages/lint` `validate-related-list-refs` count
+   * it), so the editor lists it. The record page never sets this.
+   */
+  includeHidden?: boolean;
 }
 
 /**
@@ -364,7 +389,8 @@ export function deriveRelatedLists(
       if (fieldDef.reference !== parentName) continue;
       if (AUDIT_FK_FIELDS.has(fieldName)) continue;
       // Explicit opt-out lives on the relationship.
-      if (fieldDef.relatedList === false) continue;
+      const hidden = fieldDef.relatedList === false;
+      if (hidden && !options?.includeHidden) continue;
 
       const entry: Working = {
         childObject: child.name,
@@ -373,6 +399,7 @@ export function deriveRelatedLists(
         isOwned: type === 'master_detail',
         isPrimary: isMainContentList(type, fieldDef),
         ...(inheritedSort ? { sort: inheritedSort } : {}),
+        ...(hidden ? { isHidden: true as const } : {}),
         _fkLabel: (typeof fieldDef.label === 'string' && fieldDef.label) || fieldName,
         _listLabel: childListLabel,
         ...(typeof fieldDef.relatedListTitle === 'string' && fieldDef.relatedListTitle

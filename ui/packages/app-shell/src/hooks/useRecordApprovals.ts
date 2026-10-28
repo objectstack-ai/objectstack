@@ -238,6 +238,24 @@ export function recordLockedByApproval(request: ApprovalRequestLite | null | und
 }
 
 /**
+ * The open approval on the record as the approvals read found it, reduced to
+ * its lock policy — `resolveApprovalLock`'s `openApproval` input
+ * (`@object-ui/react`). A pending request the viewer can read decides with its
+ * own node's `lock_record`; without one, the server's record lock
+ * (objectstack#25934) stands in for a reader outside the slate. `null` when
+ * neither shows an open approval.
+ *
+ * The record page and the console's edit dialog (objectstack#27138) both read
+ * the lock through this, so the dialog cannot offer an edit the page locks.
+ */
+export function openApprovalOf(
+  approvals: Pick<UseRecordApprovalsResult, 'pendingRequest' | 'recordLock'>,
+): { locked: boolean } | null {
+  if (approvals.pendingRequest) return { locked: recordLockedByApproval(approvals.pendingRequest) };
+  return approvals.recordLock?.locked === true ? { locked: true } : null;
+}
+
+/**
  * Did the current viewer submit this approval request?
  *
  * The submitter's levers — Remind on the approvals panel, Recall on the record

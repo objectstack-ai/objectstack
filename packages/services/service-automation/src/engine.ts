@@ -804,6 +804,21 @@ export type FlowUserGrantsResolver = (
 ) => Promise<FlowUserGrants | undefined> | FlowUserGrants | undefined;
 
 /**
+ * Resolves the tenant default currency (ISO 4217, the `localization.currency`
+ * setting) of a run's organization, so a flow text slot's
+ * `{{ amount | currency }}` hole with no argument formats in it. Injected by
+ * the host — the automation plugin bridges it to `@objectstack/core`'s
+ * `resolveLocalizationContext`, the read a request resolves
+ * `ExecutionContext.currency` with. Returns `undefined` (or throws, tolerated)
+ * when the organization has none; run setup then leaves
+ * {@link AutomationContext.currency} unset, and such a hole refuses the node by
+ * name. When unwired, the same: nothing is guessed.
+ */
+export type FlowTenantCurrencyResolver = (
+  tenantId: string | undefined,
+) => Promise<string | undefined> | string | undefined;
+
+/**
  * Re-reads the specified single-hop lookup relations of a record-change flow's
  * triggering record so `{record.<lookup>.<field>}` templates can traverse them
  * (#3475). Injected by the host — the automation plugin bridges it to a
@@ -2799,6 +2814,9 @@ export class AutomationEngine implements IAutomationService {
     /** Bridge to a host data read that expands declared lookup relations on the
      *  run record (#3475), if wired. See {@link FlowRecordExpander}. */
     private recordExpander: FlowRecordExpander | null = null;
+    /** Bridge to the host's localization read so a run carries its organization's
+     *  default currency, if wired. See {@link FlowTenantCurrencyResolver}. */
+    private tenantCurrencyResolver: FlowTenantCurrencyResolver | null = null;
     private executionLogs: ExecutionLogEntry[] = [];
     private readonly maxLogSize: number;
     /** Level for the per-run summary line (#4354). See {@link RunSummaryLogLevel}. */
@@ -4055,6 +4073,19 @@ export class AutomationEngine implements IAutomationService {
      */
     setUserGrantsResolver(resolver: FlowUserGrantsResolver | null): void {
         this.userGrantsResolver = resolver;
+    }
+
+    /**
+     * Wire the engine to the host's localization read so run setup seeds
+     * {@link AutomationContext.currency} — the organization's default currency,
+     * the code a text slot's `{{ amount | currency }}` hole with no argument
+     * formats in. The automation plugin bridges it to `@objectstack/core`'s
+     * `resolveLocalizationContext`. Passing `null` detaches it: a run then
+     * carries only a currency its trigger supplied, and such a hole refuses
+     * without one.
+     */
+    setTenantCurrencyResolver(resolver: FlowTenantCurrencyResolver | null): void {
+        this.tenantCurrencyResolver = resolver;
     }
 
     /**
@@ -5549,6 +5580,12 @@ export class AutomationEngine implements IAutomationService {
      * explicit (the build-time lint `flow-runas-unscoped` rejects the
      * statically-decidable shapes earlier — but NOT the record-change shape, which
      * is only knowable at run time).
+     *
+     * Also seeds {@link AutomationContext.currency} — the organization's
+     * default currency — through {@link setTenantCurrencyResolver} when the
+     * context carries none, so a text slot's `{{ amount | currency }}` hole
+     * with no argument formats in it; with none it stays unset and such a hole
+     * refuses by name.
      */
     private resolveRunContext(flow: FlowParsed, context?: AutomationContext, runId?: string): Promise<AutomationContext> {
         // The body lives in ./run-resume.ts (#25222).
@@ -5556,6 +5593,7 @@ export class AutomationEngine implements IAutomationService {
             seedRunGrants: (...a) => this.seedRunGrants(...a),
             logger: this.logger,
             expandDeclaredLookups: (...a) => this.expandDeclaredLookups(...a),
+            tenantCurrencyResolver: this.tenantCurrencyResolver,
         };
         return resolveRunContext.call(host, flow, context, runId);
     }
@@ -5648,6 +5686,11 @@ export class AutomationEngine implements IAutomationService {
      * permission sets, so its data operations fall back to the baseline member
      * set — narrower, never the trigger user's grants (see the warning in
      * {@link seedRunGrants}).
+     *
+     * A segment whose persisted context carries no
+     * {@link AutomationContext.currency} — a run parked before run setup
+     * seeded one — is seeded here the way {@link resolveRunContext} seeds a
+     * new run, on a copy: the persisted `run.context` is left as it parked.
      */
     private resolveDecisionSegmentContext(
         run: SuspendedRun,
@@ -5656,6 +5699,7 @@ export class AutomationEngine implements IAutomationService {
         // The body lives in ./run-resume.ts (#25222).
         const host: ThisParameterType<typeof resolveDecisionSegmentContext> = {
             seedRunGrants: (...a) => this.seedRunGrants(...a),
+            tenantCurrencyResolver: this.tenantCurrencyResolver,
         };
         return resolveDecisionSegmentContext.call(host, run, signal);
     }

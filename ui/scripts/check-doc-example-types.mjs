@@ -224,14 +224,14 @@
  *
  *   - The extraction the card imagines ALREADY EXISTS and already runs on this
  *     exact tree. `--emit-census` reports 20 recognised templates across
- *     `packages/cli`, `packages/create-plugin` and `packages/vscode-extension`,
- *     compiled through the same `compileSnippets()`. Building a second extractor
+ *     `packages/cli`, `packages/create-plugin` and the since-removed VS Code
+ *     extension (objectstack#25910), compiled through the same `compileSnippets()`. Building a second extractor
  *     here would put two readers on one population, which is how the two answers
  *     start disagreeing.
  *   - objectui#7977 is CLOSED (by objectui#8112, which corrected the prose).
  *   - objectui#7976's residue is NOT a template-parsing problem. It is
- *     `packages/vscode-extension/DESIGN.md` holding a hand-copied MIRROR of a
- *     template's text. Compiling the template — which `--emit-census` already
+ *     the VS Code extension's `DESIGN.md` holding a hand-copied MIRROR of a
+ *     template's text (both left the workspace with objectstack#25910). Compiling the template — which `--emit-census` already
  *     does, at 0 diagnostics — says nothing about whether the mirror still
  *     matches it. That card needs an equality pin between two texts, which is a
  *     different instrument from a type-checker and belongs on that card.

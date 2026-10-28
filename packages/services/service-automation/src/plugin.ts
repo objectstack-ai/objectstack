@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
-import { resolveUserAuthzGrants } from '@objectstack/core';
+import { resolveLocalizationContext, resolveUserAuthzGrants } from '@objectstack/core';
 import type { IJobService } from '@objectstack/spec/contracts';
 import type { FlowFunctionEffect } from '@objectstack/spec/automation';
 import type {
@@ -1400,6 +1400,18 @@ export class AutomationServicePlugin implements Plugin {
                     '[Automation] runAs:user grant resolver bridged to @objectstack/core resolveUserAuthzGrants ' +
                     '(a user-mode run carries the triggering user\'s positions and permission sets)',
                 );
+
+                // The organization's default currency (`localization.currency`)
+                // for a text slot's `{{ amount | currency }}` hole with no
+                // argument: the read a request resolves `ExecutionContext.currency`
+                // with, over the same engine and the `settings` service, probed at
+                // run setup so a late-registered settings service is seen.
+                this.engine.setTenantCurrencyResolver(async (tenantId) => {
+                    let settings: unknown;
+                    try { settings = ctx.getService('settings'); } catch { settings = undefined; }
+                    const localization = await resolveLocalizationContext({ ql: engineQl, settings, organizationId: tenantId });
+                    return localization.currency;
+                });
 
                 // #3475 — bridge the lookup expander for record-change flow
                 // templates. Re-reads the relations a flow declares in its start

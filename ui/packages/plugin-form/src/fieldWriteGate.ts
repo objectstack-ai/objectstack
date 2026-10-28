@@ -201,6 +201,13 @@ export function applyFieldPermissions<T extends Record<string, any>>(
 export interface FormFieldPrincipal extends FieldWritePrincipal {
   can(object: string, action: 'create' | 'update' | 'delete'): boolean;
   getObjectApiOperations?: (object: string) => readonly string[] | undefined;
+  /**
+   * The verdict `can` is read from, with its reason. Read only to say WHY an
+   * edit form's lock engaged: below `RecordFieldAccessScope`
+   * (`@object-ui/permissions`) a row that refuses the update answers `update`
+   * refused with a row reason (objectstack#27138).
+   */
+  check?(object: string, action: 'update'): { allowed: boolean; reason?: string };
 }
 
 export interface GateFormFieldsOptions extends ApplyFieldPermissionsOptions {
@@ -260,8 +267,35 @@ function managedModeLocked(
   return !resolveAffordance(affordance, { objectSchema, objectName, perms }).allowed;
 }
 
-/** The form-level affordance {@link closedFormAffordance} can report closed. */
-export type ClosedFormAffordance = 'create' | 'edit';
+/**
+ * Why {@link closedFormAffordance} found the form's affordance closed: the
+ * mode's affordance for the object (`create`, `edit`), or, on an edit form,
+ * THIS record refusing the update while the object allows it (objectstack#27138)
+ * — `record` when the server's record projection answered `writable: false`
+ * (sharing, ownership, row-level security), `approval` when the host reported
+ * a pending approval that locks the record.
+ */
+export type ClosedFormAffordance = 'create' | 'edit' | 'record' | 'approval';
+
+/**
+ * The row reasons `RecordFieldAccessScope` (`@object-ui/permissions`) answers
+ * a refused `update` with, mapped to the affordance they close. Spelled in
+ * both packages; the scope tests here mount the real scope, so a rename on
+ * either side reds them.
+ */
+const ROW_REFUSALS: ReadonlyMap<string, ClosedFormAffordance> = new Map<string, ClosedFormAffordance>([
+  ['record-not-writable', 'record'],
+  ['record-locked-by-approval', 'approval'],
+]);
+
+/**
+ * Whether the form's lock is THIS record refusing the update. Such a record
+ * takes no edit at all, so a container does not offer its Save: there is
+ * nothing on the form the server would accept (objectstack#27138).
+ */
+export function closedForRecord(affordance: ClosedFormAffordance | undefined): boolean {
+  return affordance === 'record' || affordance === 'approval';
+}
 
 /**
  * Which affordance the form-wide lock found CLOSED for this form, or
@@ -271,7 +305,9 @@ export type ClosedFormAffordance = 'create' | 'edit';
  *
  * It is {@link managedModeLocked}, the very predicate {@link gateFormFields}
  * disables every drawn field on, read for its reason: `create` for a create
- * form, `edit` for an edit form. The locked form's notice
+ * form, `edit` for an edit form, and `record` / `approval` for an edit form
+ * whose own row refuses the update (the reason the scoped `check` gave). The
+ * locked form's notice
  * (`ClosedAffordanceNotice`) and the wizard's navigation gate read THIS, not a
  * verdict of their own, so a form cannot explain a lock it did not draw, nor
  * draw one it does not explain.
@@ -289,7 +325,9 @@ export function closedFormAffordance({
   | ClosedFormAffordance
   | undefined {
   if (!managedModeLocked(objectSchema, perms, objectName, mode)) return undefined;
-  return mode === 'edit' ? 'edit' : 'create';
+  if (mode !== 'edit') return 'create';
+  const reason = perms?.check?.(objectName, 'update')?.reason;
+  return (reason !== undefined && ROW_REFUSALS.get(reason)) || 'edit';
 }
 
 /**

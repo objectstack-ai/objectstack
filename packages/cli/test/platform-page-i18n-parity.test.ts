@@ -668,7 +668,8 @@ describe('i18n-extract ↔ translatePage walk parity (#13109)', () => {
 //
 // Fed through the real `collectExpectedEntries`, the three pages together
 // offer exactly THREE keys -- one page-level `label` each. Nothing else. All
-// three author `regions: []` and put every component under `slots.*`, and the
+// three authored `regions: []` and put every component under `slots.*` (they
+// are `kind: 'full'` pages since objectstack#27053), and the
 // shared walk (`walkAddressedPageComponents`, `@objectstack/spec/system`) roots
 // at `regions[].components[]` only. So 45 further authored copy sites, every
 // one of them an inline `{ en, 'zh-CN', ... }` locale map, are not reachable
@@ -797,7 +798,7 @@ describe('shipped platform record pages -- i18n ownership (#14817)', () => {
     expect(SHIPPED_LOCALES.length).toBeGreaterThan(1);
   });
 
-  it('records that the walk now reaches under `slots`, that these pages author no component id there, and so the extractor still offers the label alone', () => {
+  it('records that the walk reaches every component of these pages, that none of them carries an id, and so the extractor still offers the label alone', () => {
     // A BOUNDARY PIN, not an endorsement — re-measured, and the reason moved.
     // Until #16772 `offered: ['label']` held because the shared walk rooted at
     // `regions[].components[]` and these pages author `regions: []`: the 45
@@ -809,6 +810,10 @@ describe('shipped platform record pages -- i18n ownership (#14817)', () => {
     // by `pages.<name>.components.<id>` and the extractor still offers the
     // page label alone. These pages gained no bundle surface, need no entries,
     // and their coverage home stays this file (the inline-map case below).
+    // Since objectstack#27053 retired the `tabs` slot these pages author, they
+    // are `kind: 'full'` and their components sit under `regions[]` instead of
+    // `slots.*`: the walk reaches them by the original root, and the answer is
+    // the same, since the rebuild gave no component an id.
     // Both halves are held so the next change is told precisely: `reached`
     // reds if the roots narrow again; `offered` grows the day one of these
     // components takes an id, and that component then needs a bundle entry.
@@ -824,8 +829,8 @@ describe('shipped platform record pages -- i18n ownership (#14817)', () => {
         .filter((e) => e.path[0] === 'pages' && e.path[1] === page.name)
         .map((e) => e.path.slice(2).join('.'))
         .sort();
-      expect({ page: page.name, regions: page.regions, reached: visited > 0, addressed, offered })
-        .toEqual({ page: page.name, regions: [], reached: true, addressed: 0, offered: ['label'] });
+      expect({ page: page.name, kind: page.kind, slots: page.slots, reached: visited > 0, addressed, offered })
+        .toEqual({ page: page.name, kind: 'full', slots: undefined, reached: true, addressed: 0, offered: ['label'] });
     }
   });
 

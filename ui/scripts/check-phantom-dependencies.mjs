@@ -149,9 +149,11 @@
  *   - **Host-provided modules are declared in `HOST_PROVIDED`,** with the
  *     evidence each one requires. `vscode` is the specimen: it is injected by
  *     the extension host, is not on npm as a runtime package, and declaring it
- *     as a dependency would be the mistake. `packages/vscode-extension` earns
- *     the exemption by declaring `@types/vscode` AND `engines.vscode` — checked
- *     on every run, so the exemption cannot outlive its evidence.
+ *     as a dependency would be the mistake. A package earns the exemption by
+ *     declaring `@types/vscode` AND `engines.vscode` — checked on every run, so
+ *     the exemption cannot outlive its evidence. (The VS Code extension was
+ *     the tree's one such package until objectstack#25910 removed it; the row
+ *     stays, fixture-tested, for the next.)
  *   - **A self-reference is allowed when the package declares `exports`.** Node
  *     resolves a package's own name through its own `exports` map, so
  *     `@object-ui/core` importing `@object-ui/core` is legal and installs

@@ -13,10 +13,11 @@
  *
  * Rule 1 is the original one and is version-agnostic. Rules 2 and 3 exist
  * because `@changesets/cli@3` changed what an ABSENT `privatePackages` means,
- * and this repo has a private package inside the `fixed` group — `object-ui`
- * (`packages/vscode-extension`), private because it ships to the VS Code
- * marketplace rather than npm, but versioned in lockstep with the 39
- * publishable packages so its version keeps matching the runtime it embeds.
+ * and this repo then had a private package inside the `fixed` group — the VS
+ * Code extension, versioned in lockstep with the publishable packages. That
+ * package has since left the workspace (objectstack#25910), but `fixed` plus
+ * `privatePackages.version` is still the contradiction rule 3 refuses, for the
+ * next private package anyone puts in the group.
  *
  * What changed, measured against `@changesets/config@4.0.0` rather than
  * recalled: an omitted `privatePackages` used to default to

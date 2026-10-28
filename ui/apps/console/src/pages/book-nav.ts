@@ -182,8 +182,19 @@ function entryFromDoc(doc: ResolverDoc): ResolvedEntry {
 /**
  * Resolve a book spine against the current doc set into a rendered tree.
  * Faithful port of ADR-0046 §6.2.1 — see book-nav.ts header.
+ *
+ * `books` is every authored book: a doc one of them claims is placed, not
+ * "left unplaced" (§6.4), so it never lands in this book's Uncategorized
+ * group (the framework's resolver answers the same since objectstack#27091).
+ * Pass the AUTHORED books, never the portal set: its synthetic implicit
+ * per-package books (§6.4) are a reading fallback, not an authored claim.
  */
-export function resolveBookTree(book: Book, docs: ResolverDoc[], bookPackage?: string): ResolvedBook {
+export function resolveBookTree(
+  book: Book,
+  docs: ResolverDoc[],
+  bookPackage?: string,
+  books?: readonly Book[],
+): ResolvedBook {
   const scopeDefault = bookPackage ?? book.packageId;
   const groupsSorted = [...(book.groups ?? [])]
     .map((g, i) => ({ g, i }))
@@ -265,12 +276,14 @@ export function resolveBookTree(book: Book, docs: ResolverDoc[], bookPackage?: s
   // asked through `include`'s own scope test (ADR-0046 §6.4; the framework's
   // resolver answers the same since objectstack#20980). Another package's
   // unplaced doc is that package's own book's orphan, not this one's. A book
-  // that declares no package keeps every unclaimed doc.
+  // that declares no package keeps every unclaimed doc. A doc another book in
+  // `books` claims is not an orphan either.
   const ownPackages = [scopeDefault, ...groupsSorted.map((g) => g.package)].filter(
     (p): p is string => typeof p === 'string' && p.length > 0,
   );
+  const claimedByAnyBook = books ? claimedByBooks(books, docs) : undefined;
   const orphans = docs
-    .filter((d) => !claimed.has(d.name))
+    .filter((d) => !claimed.has(d.name) && !claimedByAnyBook?.has(d.name))
     .filter((d) => ownPackages.length === 0 || ownPackages.some((p) => matchesInclude(d, '*', p)))
     .sort(byOrderThenLabel);
   if (orphans.length) {
@@ -283,6 +296,22 @@ export function resolveBookTree(book: Book, docs: ResolverDoc[], bookPackage?: s
   }
 
   return { name: book.name, label: book.label, description: book.description, groups: resolvedGroups };
+}
+
+/**
+ * Every doc some book in `books` claims: the docs its authored groups place,
+ * never its synthetic Uncategorized group (the framework's
+ * `resolveBookClaimedDocs`, unioned over the books).
+ */
+function claimedByBooks(books: readonly Book[], docs: ResolverDoc[]): Set<string> {
+  const all = new Set<string>();
+  for (const book of books) {
+    for (const g of resolveBookTree(book, docs).groups) {
+      if (g.synthetic) continue;
+      for (const e of g.entries) if (e.doc) all.add(e.doc);
+    }
+  }
+  return all;
 }
 
 /**

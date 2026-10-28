@@ -135,10 +135,12 @@
  * 41 unused runtime declarations on `fc32921aa`, across 20 of the 40 released
  * packages. 37 were REMOVED in the pull request that landed this gate — every
  * one verified by a whole-package grep first, so that the name appeared nowhere
- * in the package but its own manifest and CHANGELOG. Four are allowed below,
- * because each has a consumer this gate structurally cannot see: a specifier
+ * in the package but its own manifest and CHANGELOG. Four were allowed,
+ * because each had a consumer this gate structurally cannot see: a specifier
  * emitted into GENERATED source (`@object-ui/cli`) and a specifier a bundler
- * inlines by name from its config (`object-ui`). Both are verified on every run.
+ * inlined by name from its config (the VS Code extension). The extension's two
+ * rows left with that package (objectstack#25910); the CLI's two remain below
+ * and are verified on every run.
  *
  * The removals are not cosmetic. `@object-ui/plugin-designer` declared all three
  * `@dnd-kit` packages and imports none of them; `@object-ui/plugin-chatbot`
@@ -301,7 +303,7 @@ export function consumedNames(root, pkgDir) {
  * Declarations with a consumer this gate structurally cannot see.
  *
  * Every row states its evidence and RE-DERIVES it on each run, and a row that
- * has stopped applying fails the build — see the header. Four rows, two shapes.
+ * has stopped applying fails the build — see the header. Two rows, one shape.
  *
  * @type {Record<string, Record<string, Allowance>>}
  */
@@ -309,10 +311,6 @@ export const DECLARED_WITHOUT_IMPORT = {
   '@object-ui/cli': {
     '@object-ui/components': generatedSourceAllowance('@object-ui/components'),
     '@object-ui/react': generatedSourceAllowance('@object-ui/react'),
-  },
-  'object-ui': {
-    '@object-ui/core': bundlerInlinedAllowance('@object-ui/core'),
-    '@object-ui/types': bundlerInlinedAllowance('@object-ui/types'),
   },
 };
 
@@ -347,37 +345,6 @@ function generatedSourceAllowance(name) {
             `no generator under ${pkg.dir} still names '${name}' as a string literal ` +
               `(looked in ${templates.join(', ')}), so the allowance has no evidence left`,
           ];
-    },
-  };
-}
-
-/**
- * The extension shape: the bundler INLINES the package by name from its config.
- *
- * `packages/vscode-extension/tsup.config.ts` lists both names in `noExternal`,
- * so their code is compiled into the extension's `dist` even though no file in
- * the extension imports the bare specifier.
- */
-function bundlerInlinedAllowance(name) {
-  const config = 'tsup.config.ts';
-  return {
-    reason:
-      `bundled into this package's \`dist\` by \`noExternal\` in ${config}, which names it as a string ` +
-      'rather than importing it',
-    verify(root, pkg) {
-      const path = join(root, pkg.dir, config);
-      let text;
-      try {
-        text = readFileSync(path, 'utf8');
-      } catch {
-        return [`${pkg.dir}/${config} cannot be read, so the allowance cannot be verified`];
-      }
-      const noExternal = /noExternal\s*:\s*\[([^\]]*)\]/s.exec(text);
-      if (!noExternal) return [`${pkg.dir}/${config} no longer declares \`noExternal\``];
-      if (!noExternal[1].includes(`'${name}'`) && !noExternal[1].includes(`"${name}"`)) {
-        return [`${pkg.dir}/${config}'s \`noExternal\` no longer names '${name}'`];
-      }
-      return [];
     },
   };
 }

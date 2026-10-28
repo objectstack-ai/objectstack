@@ -1,0 +1,218 @@
+---
+title: "Plugin Dashboard"
+---
+
+Dashboard layouts and metric widgets for creating beautiful dashboards with KPIs, charts, and statistics.
+
+## Installation
+
+```bash
+npm install @object-ui/plugin-dashboard
+```
+
+The props the [`dashboard`](/docs/ui/components/plugins#dashboard), [`object-metric`](/docs/ui/components/plugins#object-metric), [`object-pivot`](/docs/ui/components/plugins#object-pivot) nodes read on a page are generated from the spec into the component reference; this page covers using the plugin from React. Dashboard filters, widget `options` and drill-down are documented with dashboard metadata under [Dashboards](/docs/ui/dashboards).
+
+## Features
+
+- **Dashboard Layouts** - Responsive grid-based layouts
+- **Metric Cards** - Display KPIs with trends and icons
+- **Widget System** - Modular widget architecture
+- **Customizable** - Full Tailwind CSS styling support
+
+## Usage
+
+### Auto-registration (Side-effect Import)
+
+```ts
+import '@object-ui/plugin-dashboard';
+```
+
+### What the side-effect import registers
+
+That single import is the whole of registration — there is no components map to
+iterate over. Importing the entry runs the seven live `ComponentRegistry.register(...)`
+calls in `packages/plugin-dashboard/src/index.tsx`, which claim exactly these
+schema types. The keys below are read off those calls.
+
+| Namespaced key | Bare-name fallback | Renderer behind it |
+| --- | --- | --- |
+| `plugin-dashboard:dashboard` | `dashboard` | `DashboardRenderer` — the widget container |
+| `plugin-dashboard:metric` | none — `skipFallback: true` | `MetricWidget` — one KPI value |
+| `plugin-dashboard:metric-card` | none — `skipFallback: true` | `MetricCard` — KPI with trend and icon |
+| `plugin-dashboard:object-metric` | `object-metric` | internal wrapper around `ObjectMetricWidget` — a metric aggregated over an object |
+| `plugin-dashboard:pivot` | `pivot` | `PivotTable` — pivot over rows you pass in |
+| `plugin-dashboard:object-pivot` | `object-pivot` | `ObjectPivotTable` — a pivot queried from an object; its props go in `properties` |
+| `plugin-dashboard:object-data-table` | `object-data-table` | `ObjectDataTable` — table queried from an object |
+
+`ComponentRegistry.register` publishes `namespace:type`, and — unless the call
+passes `skipFallback: true` — the bare `type` as a back-compat fallback
+(`packages/core/src/registry/Registry.ts:194`, fallback branch at `:226`). Every
+call behind the table above leaves `skipFallback` unset except `metric` and
+`metric-card`, so each other type there resolves under both spellings; the schema
+snippets on this page use the bare one.
+
+`metric` and `metric-card` are two vocabularies that share a spelling: the
+dashboard WIDGET types (`widgets[].type: 'metric'`, and the `metric-card` slot
+entry above) and the internal NODE keys the dashboard renders them through. The
+widget types are unchanged. The node keys register with `skipFallback: true`
+(objectui#10859 batch 8), and both dashboard surfaces emit the namespaced keys, so
+only `plugin-dashboard:metric` / `plugin-dashboard:metric-card` resolve as nodes.
+
+`dashboard-grid` is no longer registered (objectui#10859 batch 8: builder chrome,
+with no producer and no runtime emitter). `DashboardGridLayout` is still exported;
+a host that wants the drag/resize grid mounts the component directly.
+
+⛔ One further registration is deliberately absent from the table above. Until
+objectui#9533 the dashboard renderer was published as `view:dashboard`, while
+`apps/console`'s lazy stubs and the CLI's known-type whitelist already spelled it
+`plugin-dashboard:dashboard`; the bare `dashboard` key therefore declared one
+namespace before the chunk loaded and the other after it, and the
+`plugin-dashboard:dashboard` stub was never cleared, so that spelling could never
+resolve. The renderer now registers under `plugin-dashboard`, and the retired
+`view:dashboard` key is answered by a tombstone widget that refuses BY NAME and
+names `plugin-dashboard:dashboard` as its replacement — so an authored
+`view:dashboard` gets a visible refusal carrying its own migration, never a
+silent fall-through. That tombstone registration passes `skipFallback: true`, so
+it claims no bare key, and `view:dashboard` is deliberately NOT a renderable key:
+`objectui check` reports it as unknown.
+
+The two `object-*` rows name a wrapper rather than an export on purpose.
+`ObjectMetricBlock` and `ObjectPivotBlock` are internal to `src/index.tsx`: each
+first resolves the element's `dataSource` binding through `ElementDataSourceGate`
+(from `@object-ui/react`) and only then renders the exported
+`ObjectMetricWidget` / `ObjectPivotTable`.
+
+### Registering a component under your own key
+
+The import above needs no follow-up call. What a manual registration is for here
+is serving one of this package's exported components under a key of your own —
+you register the component, not a map:
+
+```ts
+import { ComponentRegistry } from '@object-ui/core';
+import { MetricCard } from '@object-ui/plugin-dashboard';
+
+ComponentRegistry.register('my-metric', MetricCard, {
+  namespace: 'my-app',
+  label: 'My Metric',
+  category: 'Dashboard',
+});
+```
+
+The package also exports a `dashboardComponents` object: the manual-integration
+map, keyed by the **same seven schema types** as the table above (objectui#5064
+re-keyed it from component class names; since objectui#10859 batch 8 the `metric`
+and `metric-card` entries are keyed `plugin-dashboard:metric` /
+`plugin-dashboard:metric-card`, the type each serves, so iterating the map cannot
+re-create their retired bare keys). Each key maps to the exact component
+the import registers for that type — for the two `object-*` types that is the
+internal data-source-gate wrapper, not the exported widget. Iterating it with
+`ComponentRegistry.register(type, component)` therefore re-registers the seven
+types the import has already claimed, which is still not the registration above:
+each such call passes no `meta`, so it trips the no-namespace deprecation
+warning in `register` (`packages/core/src/registry/Registry.ts:198`) and
+rewrites each bare-name registry entry without its `label`/`category` metadata
+(the `namespace:type` entries are untouched).
+
+## Translations — a served dashboard is translated once
+
+Widget texts have a client translation channel: bundle keys under
+`dashboards.<name>.widgets.<id>` (`title`, `description`), plus
+`dashboards.<name>.label` and `.description`. There is no `subCaption` key:
+the translation schema in `@objectstack/spec` refuses it by name in a bundle,
+and the renderer reads no such key (objectui#11389). A document read from
+ObjectStack's `/meta` route does not need it. The server has already applied
+those keys for the request's locale, and it keeps a published edit over them:
+an explicit override beats the packaged default.
+
+So the host tells the renderer which kind of document it holds. The `localized`
+prop on `DashboardRenderer` says the document was served, and the console's
+dashboard page sets it. Those texts are then drawn as served. Without the prop,
+the client bundle translates them. That covers an inline `dashboard` block, a
+preview or a design surface (objectui#11295).
+
+## TypeScript Support
+
+```ts
+import type {
+  DashboardComponentSchema,
+  DashboardWidgetSchema,
+  DashboardWidgetSlotComponentSchema,
+} from '@object-ui/types';
+
+const widget: DashboardWidgetSchema = {
+  id: 'revenue',
+  title: 'Revenue',
+  type: 'metric',
+  dataset: 'invoices',
+  values: ['amount'],
+  layout: { x: 0, y: 0, w: 1, h: 1 },
+};
+
+const card: DashboardWidgetSlotComponentSchema = {
+  id: 'users',
+  type: 'metric-card',
+  title: 'Users',
+  value: '1,234',
+  layout: { x: 1, y: 0, w: 1, h: 1 },
+};
+
+const dashboard: DashboardComponentSchema = {
+  type: 'dashboard',
+  columns: 3,
+  widgets: [widget, card],
+};
+```
+
+An entry of `widgets[]` is either a widget (`DashboardWidgetSchema`) or a
+component node placed directly in the slot (`DashboardWidgetSlotComponentSchema`).
+The component arm declares the card's registered inputs — the keys above. The
+widget keys (`colorVariant`, `filter`, `dataset`, …) are declared on the widget
+arm, which takes them from the spec's `DashboardWidget` row, and on no member of
+the component arm. An entry's own type is the slot's element type,
+`DashboardComponentSchema['widgets'][number]`. The component arm is not
+assignable to `DashboardWidgetSchema`, whose `type` names no component type, so
+narrow an entry on `type` before reading a widget key. `metric-card` is the one
+component type the slot holds; any other entry is the widget arm, the compiler
+checks the narrowing, and the key gets its declared type instead of the `any`
+the component arm's passthrough supplies:
+
+```ts
+import type { DashboardComponentSchema } from '@object-ui/types';
+
+declare const dashboard: DashboardComponentSchema;
+
+const accents = dashboard.widgets.map((w) =>
+  w.type === 'metric-card' ? 'default' : (w.colorVariant ?? 'default'),
+);
+```
+
+`title` and `layout` are the exceptions: both arms declare them. `title` is the
+card's heading on the component arm, typed as `MetricCard` reads it. The
+component arm declares `layout` by reference to the spec's widget `layout`,
+because the editable grid's Save Layout writes it onto every entry, a
+`metric-card` node included. `layout` reads with the spec's type off any
+`widgets[]` entry, the strict authoring face accepts it on a component
+node, and a malformed one (not four numbers, or a key besides `x`, `y`, `w` and
+`h`) is refused on either arm.
+
+A widget with no `layout` is auto-placed by the grid. The width and height
+editors (Studio's widget inspector, `DashboardWithConfig` and
+`DashboardEditor`) write the whole box: the coordinates an edit leaves alone
+come from where the grid auto-places that widget, through `completeWidgetLayout`
+and `defaultWidgetPlacement` from `@object-ui/types`. So changing one dimension
+never stores a `{ w }` or `{ h }` box, which the spec refuses.
+
+## Type-aware list/table widget cells
+
+`type: 'table'` widgets bound to an `objectName` infer the renderer for
+each cell from the object's field type — Badges for `select`, expanded
+display name for `lookup`/`user`/`owner`, formatted currency/percent/date
+for numeric fields, and so on. Lookup columns are auto-expanded server-side
+via `$expand`, so you don't see raw FK ids. See
+[`@object-ui/plugin-dashboard` README](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/plugin-dashboard/README.md#type-aware-listtable-widget-cells)
+for the full mapping table and an example.
+
+## License
+
+MIT

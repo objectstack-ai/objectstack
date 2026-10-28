@@ -69,13 +69,12 @@ export const SysMember = ObjectSchema.create({
       // ⚠️ That tab order is DECLARED, and not by anything in this directory:
       // `SysOrganizationDetailPage` (`../pages/sys-organization.page.ts`,
       // handed to the runtime by plugin-auth's `pages: [...]`) is a
-      // `kind: 'slotted'` record page whose `slots.tabs` override REPLACES the
-      // synthesized tab strip outright — objectui's `buildDefaultPageSchema`
-      // pushes the authored node and never calls `buildDefaultTabs` — so the
-      // strip is exactly Members / Invitations / Teams, Members at index 0.
+      // `kind: 'full'` record page that authors its own `page:tabs` strip,
+      // drawn as authored with no synthesized strip, so the strip is exactly
+      // Members / Invitations / Teams, Members at index 0.
       // It is NOT the `Field.relatedList: 'primary'` prominence key: no object
-      // under `identity/` declares that key, and with the `tabs` slot present
-      // one would not move this page if it did. Looking for the tab order in
+      // under `identity/` declares that key, and on a full page one would not
+      // move this page if it did. Looking for the tab order in
       // this directory finds nothing; it lives one directory over (#16270).
       // Declaration order is render order — the related-list toolbar bridge
       // maps the child object's `list_toolbar` actions in array order
