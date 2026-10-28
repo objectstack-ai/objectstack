@@ -2130,6 +2130,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.settings.removeField': 'Remove {field}',
   'engine.studio.settings.addFieldOption': '+ Add field…',
   'engine.studio.settings.undeclared': '(not declared — surfaces pick heuristically)',
+  'engine.studio.settings.highlightMax': 'Up to {max} highlight fields — remove one to add another.',
+  'engine.studio.settings.highlightPreview': 'Highlight strip preview',
   'engine.studio.settings.sharing': 'Record sharing (OWD)',
   'engine.studio.settings.sharingHint': 'Baseline record visibility applied before positions and sharing rules (ADR-0056/0090)',
   'engine.studio.settings.sharingModel': 'Sharing model (sharingModel) — who can see and edit records another user owns',

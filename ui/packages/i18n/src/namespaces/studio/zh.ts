@@ -1944,6 +1944,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.settings.removeField': '移除 {field}',
   'engine.studio.settings.addFieldOption': '+ 添加字段…',
   'engine.studio.settings.undeclared': '(未声明 —— 各处按启发式自动挑选)',
+  'engine.studio.settings.highlightMax': '最多 {max} 个重点字段——移除一个才能再添加。',
+  'engine.studio.settings.highlightPreview': '要点条预览',
   'engine.studio.settings.sharing': '记录共享模型(OWD)',
   'engine.studio.settings.sharingHint': '在岗位与共享规则之前生效的记录可见性基线(ADR-0056/0090)',
   'engine.studio.settings.sharingModel': '共享模型(sharingModel)—— 谁能查看和编辑他人拥有的记录',
