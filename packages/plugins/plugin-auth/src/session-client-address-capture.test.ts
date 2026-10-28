@@ -11,9 +11,8 @@
 //     `0000:0000:0000:0000:0000:0000:0000:0000`.
 //   - The refused sign-in's `login_failed` row and the ADR-0069 D7
 //     `last_login_ip` carry that same text.
-//   - `last_activity_at` is written at creation, equal to `created_at`, so the
-//     #25343 heartbeat has a first value; its first beat still waits out the
-//     one-minute throttle.
+//   - (`last_activity_at` at creation needs ObjectQL's own `created_at` stamp,
+//     which this engine double does not run: `session-first-activity.test.ts`.)
 //
 // The fixture is the client-address suites' (`client-address-vendor-trust-rule
 // .test.ts`): `AuthPlugin.registerAuthRoutes` mounted on a real Hono app in
@@ -126,11 +125,7 @@ async function serve(deployment: { trustProxy?: boolean }) {
     };
   };
 
-  const enforceSessionControls = (sessionId: string) =>
-    (manager as never as { enforceSessionControls(s: string, c: unknown): Promise<void> })
-      .enforceSessionControls(sessionId, undefined);
-
-  return { observe, engine, enforceSessionControls };
+  return { observe };
 }
 
 beforeEach(() => {
@@ -184,38 +179,5 @@ describe('a sign-in stores its client address in RFC 5952 text, the same on ever
     expect(seen.session.ip_address).toBe('203.0.113.7');
     expect(seen.refused).toBe('203.0.113.7');
     expect(seen.lastLoginIp).toBe('203.0.113.7');
-  });
-});
-
-describe('a session is born with last_activity_at = created_at', () => {
-  it('the minted row carries last_activity_at equal to created_at', async () => {
-    const d = await serve({});
-
-    const { session } = await d.observe('203.0.113.7');
-
-    expect(session.created_at).toBeTruthy();
-    expect(session.last_activity_at).toBeTruthy();
-    expect(new Date(session.last_activity_at).getTime()).toBe(new Date(session.created_at).getTime());
-  });
-
-  it('the heartbeat\'s first beat still waits out its one-minute throttle', async () => {
-    const d = await serve({});
-    const { session } = await d.observe('203.0.113.7');
-    const born = new Date(session.last_activity_at).getTime();
-
-    // A request inside the first minute: read, not written.
-    await d.enforceSessionControls(session.id);
-    const row = ((d.engine.tables.get('sys_session') ?? []) as any[]).find((r) => r.id === session.id);
-    expect(new Date(row.last_activity_at).getTime()).toBe(born);
-
-    // Past the minute: advanced.
-    vi.useFakeTimers({ toFake: ['Date'] });
-    try {
-      vi.setSystemTime(born + 61_000);
-      await d.enforceSessionControls(session.id);
-    } finally {
-      vi.useRealTimers();
-    }
-    expect(new Date(row.last_activity_at).getTime()).toBe(born + 61_000);
   });
 });

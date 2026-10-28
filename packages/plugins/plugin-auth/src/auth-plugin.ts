@@ -68,6 +68,7 @@ import { registerLastAdminGuard } from './last-admin-guard.js';
 import { registerApiKeyRestoreGuard } from './api-key-restore-guard.js';
 import { registerMembershipEndedSessionTrigger } from './membership-ended-session.js';
 import { registerMemberRoleCanonicalization } from './member-role-canonical.js';
+import { registerSessionFirstActivity } from './session-first-activity.js';
 import { registerExternalMembershipGuard } from './external-membership.js';
 import { SYS_USER_PROFILE_EDIT_FIELDS } from './sys-user-writable-fields.js';
 import { MANAGED_EXTENSION_EDITABLE_FIELDS } from './managed-extension-fields.js';
@@ -1856,6 +1857,12 @@ export class AuthPlugin implements Plugin {
         registerMembershipEndedSessionTrigger(engine, {
           packageId: 'com.objectstack.plugin-auth.membership-ended-session',
           logger: ctx.logger,
+        });
+        // [#26638] A session is born with `last_activity_at` = the
+        // `created_at` it is stored with, after ObjectQL's own stamp. See
+        // session-first-activity.ts.
+        registerSessionFirstActivity(engine, {
+          packageId: 'com.objectstack.plugin-auth.session-first-activity',
         });
       } catch {
         // Engine not available (mock mode) — permission-set defaults remain
