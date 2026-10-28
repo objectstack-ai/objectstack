@@ -3953,6 +3953,33 @@ const STUDIO_EN: Record<string, string> = {
   'engine.appNav.item': 'Item {n}',
   'engine.appNav.itemOne': 'item',
   'engine.appNav.itemOther': 'items',
+  // The translation preview, the designer table's last family: held out of S6
+  // while a sibling change added its category.hooks row (#25922 slice S6b).
+  'engine.translationPreview.empty':
+    'This bundle is empty — add at least one translated string to see the coverage report.',
+  // One heading per group of the per-app `TranslationDataSchema`, in its order (objectui#11765).
+  'engine.translationPreview.category.objects': 'Objects',
+  'engine.translationPreview.category.picklists': 'Picklists',
+  'engine.translationPreview.category.apps': 'Apps',
+  'engine.translationPreview.category.messages': 'Messages',
+  'engine.translationPreview.category.globalActions': 'Global Actions',
+  'engine.translationPreview.category.dashboards': 'Dashboards',
+  'engine.translationPreview.category.datasets': 'Datasets',
+  'engine.translationPreview.category.reports': 'Reports',
+  'engine.translationPreview.category.pages': 'Pages',
+  'engine.translationPreview.category.flows': 'Flows',
+  'engine.translationPreview.category.hooks': 'Hooks',
+  'engine.translationPreview.category.positions': 'Positions',
+  'engine.translationPreview.category.permissions': 'Permission Sets',
+  'engine.translationPreview.category.books': 'Doc Books',
+  'engine.translationPreview.category.metadataForms': 'Metadata Forms',
+  'engine.translationPreview.category.settingsCommon': 'Settings UI',
+  'engine.translationPreview.coverage': 'Category coverage:',
+  'engine.translationPreview.totalKeys': '{count} total keys',
+  'engine.translationPreview.categoryEmpty': 'empty',
+  'engine.translationPreview.more': '+{count} more…',
+  'engine.translationPreview.keyCountOne': '{{count} key}',
+  'engine.translationPreview.keyCountOther': '{{count} keys}',
 };
 
 export default STUDIO_EN;
