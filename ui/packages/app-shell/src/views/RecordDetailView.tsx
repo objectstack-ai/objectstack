@@ -25,7 +25,7 @@ import { SkeletonDetail } from '../skeletons/index.js';
 import { ManagedByBadge, useManagedByNote } from '../components/ManagedByBadge.js';
 import { isSetupAppSegment } from '../console/setupApp.js';
 import { deriveRelatedLists } from '../utils/deriveRelatedLists.js';
-import { recordPageChildObjects } from './recordPageChildObjects.js';
+import { pruneUnregisteredRecordPageObjects, recordPageChildObjects } from './recordPageChildObjects.js';
 import { stripDiscussionNodes, hasExplicitAttachments, hasExplicitApprovals } from '../utils/pageSchemaIntrospect.js';
 import { ActionConfirmDialog, type ConfirmDialogState } from './ActionConfirmDialog.js';
 import { ActionParamDialog, type ParamDialogState } from './ActionParamDialog.js';
@@ -795,8 +795,29 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     return isRecordPageOf(named, objectName) ? 'accepted' : 'refused';
   }, [requestedPageName, pageAssignmentLoading, metadataPages, objectName]);
   const namedPageBlocked = namedPageState === 'pending' || namedPageState === 'refused';
-  const assignedPage = namedPageBlocked ? null : resolvedPage;
-  const assignedSlots = namedPageBlocked ? null : resolvedSlots;
+  // objectstack#26988 — a related list or rail entry the page lists for an
+  // object this install does not hold is left out, by the rule `DashboardView`
+  // prunes widgets with: the registered object list. That list is this view's
+  // `objects` — the one `deriveRelatedLists` reads below, and on a scoped
+  // record route the objects the page binds, each asked by name
+  // (objectui#13046). ⛔ Never `useMetadata().objects` here: reading it loads
+  // the whole registry the scope exists to spare (objectui#12811). Both the
+  // authored page and a slotted page's slots are pruned, so every reader
+  // downstream — the effective page, the composed page, and the child-write
+  // subscription (objectstack#26890), which has nothing to watch on an object
+  // that cannot be written — sees one page. Deferred while the list is empty.
+  const registeredObjectNames = useMemo(
+    () => new Set<string>(objects.map((o: any) => o?.name).filter(Boolean)),
+    [objects],
+  );
+  const assignedPage = useMemo(
+    () => (namedPageBlocked ? null : pruneUnregisteredRecordPageObjects(resolvedPage, registeredObjectNames)),
+    [namedPageBlocked, resolvedPage, registeredObjectNames],
+  );
+  const assignedSlots = useMemo(
+    () => (namedPageBlocked ? null : pruneUnregisteredRecordPageObjects(resolvedSlots, registeredObjectNames)),
+    [namedPageBlocked, resolvedSlots, registeredObjectNames],
+  );
   const synthesizedPage = useMemo(() => {
     // Synthesizer drives two cases:
     //   1) no assignedPage at all → pure default detail page
