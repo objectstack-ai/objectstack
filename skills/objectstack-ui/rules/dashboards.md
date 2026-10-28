@@ -398,21 +398,17 @@ export const PipelineCoverageReport = defineReport({
   runtimeFilter: { stage: { $ne: 'closed_lost' } },
   // Period: ONE `type: 'date'` dataset dimension, not a dashboard-style raw `field`.
   dateRange: { dimension: 'close_date', defaultRange: 'this_year' },
+  exportOptions: { formats: ['csv', 'xlsx'] }, // the download; optional `includeHeaders`, `fileNamePrefix`
   order: [{ by: 'amount_sum', direction: 'desc' }], // by measure; dates default to chronological
   chart: { type: 'bar', xAxis: 'forecast_category', yAxis: 'amount_sum' },
 });
 ```
 
-> **`dateGranularity`** lives on the dataset's date **dimension**
-> (`day | week | month | quarter | year`); selecting that dimension buckets the
-> field server-side in a single aggregate query — do **not** pre-compute virtual
-> columns for this.
 > **`rows`** are the report's grouping dimensions (selected from the dataset by
 > name). A `summary` groups *down* by `rows`. A `matrix` pivots `rows` (down) ×
 > **`columns`** (across, ADR-0021 D2) with `values` in the cells — do **not**
 > put both axes in `rows`. Multi-level grouping on either axis = multiple
-> dimension names in that array. `drilldown` (default `true`) makes cells
-> click-through to the underlying records.
+> dimension names in that array.
 > **`order`** sorts the result server-side — a list of `{ by, direction }`, most
 > significant key first. `by` must be a `rows`/`columns` dimension or a `values`
 > measure the report actually selects (anything else is an authoring error). A
@@ -420,6 +416,9 @@ export const PipelineCoverageReport = defineReport({
 > matrix reads left-to-right in time with no `order` at all; list the `columns`
 > key first when the across-axis header sequence is what matters. A `joined`
 > report orders per block (`blocks[].order`), never on the container.
+> **`exportOptions`** declares the download, never who may download — that is the
+> base object's permission-set `allowExport`; a `joined` report takes neither
+> `dateRange` nor `exportOptions`.
 
 ---
 
