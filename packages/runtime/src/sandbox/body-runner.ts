@@ -73,12 +73,19 @@ import {
   storedMetadataFamilyTableList,
 } from '../stored-metadata-body-boundary.js';
 import { mapDataError } from '@objectstack/types';
+import { resolveHookRefusal, type HookRefusalI18nSource } from './hook-refusal-catalogue.js';
 import { isRelayedSandboxRefusal } from './quickjs-runner.js';
 
 interface FactoryOptions {
   ql: any;
   appId: string;
   logger?: any;
+  /**
+   * [#26170] Where a hook's declared refusal is translated: the `i18n`
+   * service, read at refusal time (see `resolveHookRefusal`). Absent, a
+   * declared refusal is answered with its declared message.
+   */
+  i18n?: HookRefusalI18nSource;
 }
 
 /**
@@ -486,8 +493,13 @@ export function hookBodyRunnerFactory(
         });
         applyMutationsToInput(engineCtx, result, sandboxCtx.input);
       } catch (err: any) {
-        logBodyThrow(opts, { kind: 'hook', name: hook.name }, err);
-        throw err;
+        // [#26170] A hook that declares `refusals` refuses by code only: the
+        // body's throw is answered with the declared entry in the caller's
+        // locale, or refused loudly when the catalogue cannot answer it.
+        // Everything else leaves exactly as thrown.
+        const answered = resolveHookRefusal(hook, err, engineCtx, { i18n: opts.i18n, logger: opts.logger });
+        logBodyThrow(opts, { kind: 'hook', name: hook.name }, answered);
+        throw answered;
       }
     };
   };

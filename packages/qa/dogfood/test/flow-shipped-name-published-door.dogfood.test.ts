@@ -61,7 +61,7 @@ const CUSTOMER_SOURCE = 'showcase_reassign_wizard';
 /** A flow name no managed package ships, given an environment-wide stored row. */
 const CUSTOMER = 'dogfood_21002_pub_customer_flow';
 /** A writable base and an object published into it at runtime: the `object` control. */
-const OBJECT_BASE = 'app.dogfood_21002_pub';
+const OBJECT_BASE = 'app.dogfood-21002-pub';
 const OBJECT_NAME = 'dogfood_21002_pub_widget';
 
 /** The node id and label a stored body carries, so it can be told from the loader's. */
@@ -95,6 +95,7 @@ interface Ql {
 }
 interface Protocol {
     saveMetaItem(request: Record<string, unknown>): Promise<unknown>;
+    installPackage(request: { manifest: Record<string, unknown> }): Promise<unknown>;
 }
 
 const plugins = () => [
@@ -194,6 +195,11 @@ describe('the published-snapshot door answers the loader\'s body for a shipped f
             sharingModel: 'private',
             fields: { title: { type: 'text', label: 'Title' } },
         };
+        // [#26708] The base is created first, as Studio's "New package" does:
+        // a save naming a package no installed package has is refused.
+        await protocol.installPackage({
+            manifest: { id: OBJECT_BASE, name: 'Dogfood 21002 base', version: '0.1.0', type: 'app', namespace: 'dogfood_21002_pub' },
+        });
         await protocol.saveMetaItem({ type: 'object', name: OBJECT_NAME, item: objectBody, packageId: OBJECT_BASE, mode: 'draft' });
         await protocol.saveMetaItem({ type: 'object', name: OBJECT_NAME, item: objectBody, packageId: OBJECT_BASE, mode: 'publish' });
         await stack.stop();

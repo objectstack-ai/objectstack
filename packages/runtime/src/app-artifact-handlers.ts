@@ -145,6 +145,7 @@ import {
 } from '@objectstack/types';
 import { SEMCONV } from '@objectstack/observability';
 import { QuickJSScriptRunner } from './sandbox/quickjs-runner.js';
+import type { HookRefusalI18nSource } from './sandbox/hook-refusal-catalogue.js';
 import {
     hookBodyRunnerFactory,
     actionBodyRunnerFactory,
@@ -189,6 +190,12 @@ export interface AppArtifactHandlerBindingOptions {
      * module, leaves this unset and binds such hooks as it always did.
      */
     withholdHooksWithoutBody?: boolean;
+    /**
+     * [#26170] The `i18n` service a hook's declared refusal is translated
+     * through, read at refusal time. Absent, a declared refusal is answered
+     * with its declared message.
+     */
+    i18n?: HookRefusalI18nSource;
 }
 
 /** What one {@link bindAppArtifactHandlers} call bound. */
@@ -273,7 +280,7 @@ export function bindAppArtifactHandlers(
                 ql.bindHooks(hooks, {
                     packageId: owner,
                     functions,
-                    bodyRunner: hookBodyRunnerFactory(new QuickJSScriptRunner(), { ql, logger, appId }),
+                    bodyRunner: hookBodyRunnerFactory(new QuickJSScriptRunner(), { ql, logger, appId, i18n: options.i18n }),
                     // [#24289] A handler that runs in-process, an inline function or
                     // the function a string `handler` names, is handed the
                     // `ctx.title(field?)` a `body` gets in the sandbox. The binder

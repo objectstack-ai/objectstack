@@ -148,7 +148,10 @@ function makeEngine() {
             // #6190 actually uses (`allowRuntimeCreate: true`).
             getArtifactItem: () => undefined,
             getObject: () => undefined,
-            getPackage: () => undefined,
+            // [#26708] The one package the specimens below save into is
+            // installed: a save naming a package no installed package has is
+            // refused before it is written.
+            getPackage: (id: string) => (id === 'crm_pkg' ? { manifest: { id }, enabled: true } : undefined),
             // `getMetaItems` filters every listed item through the disabled-
             // package gate and, for apps, merges nav contributions (ADR-0029
             // D7) — the same stubs every metadata-protocol harness carries.

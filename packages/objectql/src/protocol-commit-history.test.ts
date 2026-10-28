@@ -337,6 +337,12 @@ function makeRealRepoHarness(seedCommits: any[] = [], opts: { controlPlane?: boo
   const environmentId: string | undefined = opts.controlPlane === true ? undefined : 'env_test';
   const registry = new SchemaRegistry({ multiTenant: false });
   (registry as any).logLevel = 'silent';
+  // [#26708] The package every save below names is installed, as an authored
+  // base: a save naming a package no installed package has is refused. An
+  // installed package's write is judged against its closure, so the `case`
+  // object its grid binds is one it ships.
+  registry.installPackage({ id: APP_PKG, name: APP_PKG, version: '1.0.0' } as any, 'authored');
+  registry.registerObject({ name: 'case', label: 'Case', fields: { title: { type: 'text', label: 'Title' } } } as never, APP_PKG);
   const rows = new Map<string, any>();
   const historyRows: any[] = [];
   const commits: any[] = [...seedCommits];
