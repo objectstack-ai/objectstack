@@ -395,9 +395,9 @@ name: crm_task_status_flow
 `os build` lints every fence: `type` must be one of the three (typo →
 did-you-mean), `name` is required, `state_machine` also needs `object`, and
 the referenced object-rule / flow / permission set **must exist in this
-package or one it declares in `manifest.dependencies`** (direct dependencies
-only; one-way) — anything else fails the build, naming the scope it judged
-(same posture as a broken link). At render time a missing or forbidden
+package or in a package of the same artifact that it declares in
+`manifest.dependencies`** (direct only; one-way) — anything else fails the
+build (same posture as a broken link). At render time a missing or forbidden
 reference degrades to a placeholder, never a crash.
 
 Embedding an `object` (data model) or an arbitrary SDUI
