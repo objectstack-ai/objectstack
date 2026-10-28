@@ -8,6 +8,10 @@
  * fits the Studio's 240 px rail (objectui#12519). Drag-drop reorders within
  * the root list.
  *
+ * Each level is listed in the order the running menu draws it (objectstack#26979):
+ * by `order`, ties in authored order (`inMenuOrder`). A drop therefore has to
+ * move the entry in that order, which `order` can override: see `moveItem`.
+ *
  * Kind and target are read from the spec's discriminated union — `type`
  * plus that branch's own target key — never inferred from off-spec keys
  * (objectui#3275).
@@ -41,7 +45,7 @@ import type { I18nLabel } from '@objectstack/spec/ui';
 import { Badge, cn } from '@object-ui/components';
 import type { NavTargetLabelResolver } from '@object-ui/layout';
 import { useNavTargetLabel } from '../../../hooks/useNavTargetLabel.js';
-import { appendArray, moveArray, spliceArray } from '../inspectors/_shared.js';
+import { appendArray, spliceArray } from '../inspectors/_shared.js';
 import { t, tFormat, useMetadataLocale } from '../i18n.js';
 import { navEntryLabelText, navItemLabelText, renamedLabel } from './navItemLabel.js';
 
@@ -60,6 +64,8 @@ interface RawNav {
   book?: string;
   doc?: string;
   actionDef?: { actionName?: string };
+  /** The spec's sort weight within a level (lower = first); read through `inMenuOrder` only. */
+  order?: number;
   children?: RawNav[];
   [k: string]: unknown;
 }
@@ -254,6 +260,27 @@ export function navPayloadOf(entries: readonly unknown[]): Array<Record<string, 
   return sent;
 }
 
+/**
+ * A level's entries in the order the running menu draws them, each with its
+ * index in the authored array (objectstack#26979). The Studio's one reader of
+ * that order: this canvas and the Interfaces rail (`NavTree`) both list a
+ * level through it.
+ *
+ * The rule it states is the menu's, `byNavOrder` in `@object-ui/layout`
+ * (`navOrder.ts`), which every sidebar level and the mobile tab bar sort by:
+ * `order` ascending, an absent `order` as `0`, ties in authored order
+ * (`Array.prototype.sort` is stable). Stated here, not imported: that module
+ * is internal to its package, and publishing it would widen
+ * `@object-ui/layout`'s entry point. What holds the two rules together is a
+ * test that renders `NavigationRenderer` beside the rail and this canvas over
+ * the same entries: the `StudioDesignSurface.railNavOrder-26979` block of
+ * `StudioDesignSurface.railLabels.test.tsx`. ⛔ No third copy: sort a Studio
+ * nav level through this.
+ */
+export function inMenuOrder<T extends { order?: number }>(list: readonly T[]): Array<readonly [T, number]> {
+  return list.map((it, i) => [it, i] as const).sort(([a], [b]) => (a.order ?? 0) - (b.order ?? 0));
+}
+
 export interface AppNavCanvasProps {
   draft: Record<string, unknown>;
   rootKey: string;
@@ -276,7 +303,12 @@ export function AppNavCanvas({
     return Array.isArray(v) ? (v as RawNav[]) : [];
   }, [draft, rootKey]);
 
+  // The root level as the menu lists it, each entry with its array index:
+  // selection ids, renames and removals address the authored array.
+  const shown = React.useMemo(() => inMenuOrder(items), [items]);
+
   const selectedId = selection && selection.kind === 'nav' ? selection.id : null;
+  /** The ARRAY index of the entry being dragged. */
   const [dragIndex, setDragIndex] = React.useState<number | null>(null);
 
   const setItems = React.useCallback(
@@ -341,13 +373,36 @@ export function AppNavCanvas({
     [onPatch, items, setItems, rootKey, selectedId, onSelectionChange, locale],
   );
 
+  /**
+   * Drop the entry at array index `from` before the entry SHOWN at position
+   * `before` (`items.length` = at the end), as the menu will then draw it
+   * (objectstack#26979).
+   *
+   * Reordering the array alone does nothing visible once `order` is set,
+   * since the menu sorts by it. So the drop writes the array in the new
+   * shown order, and writes the moved entry's `order` only when its current
+   * weight no longer falls between its new neighbours': then it takes its
+   * neighbour's weight, and the stable sort keeps it on the array side it was
+   * dropped on. At most one `order` write per drop, and none for an app whose
+   * entries carry no `order`.
+   */
   const moveItem = React.useCallback(
     (from: number, before: number) => {
       if (!onPatch) return;
+      const seq = shown.map(([, i]) => i);
+      const at = seq.indexOf(from);
+      if (at < 0) return;
       let to = before;
-      if (from < before) to = before - 1;
-      if (to === from) return;
-      const next = moveArray(items, from, to);
+      if (at < before) to = before - 1;
+      if (to === at) return;
+      seq.splice(at, 1);
+      seq.splice(to, 0, from);
+      const next = seq.map((i) => items[i]);
+      const moved = next[to];
+      const prev = to > 0 ? (next[to - 1].order ?? 0) : -Infinity;
+      const after = to < next.length - 1 ? (next[to + 1].order ?? 0) : Infinity;
+      const own = moved.order ?? 0;
+      if (own < prev || own > after) next[to] = { ...moved, order: to > 0 ? prev : after };
       setItems(next);
       onSelectionChange?.({
         kind: 'nav',
@@ -355,7 +410,7 @@ export function AppNavCanvas({
         label: navLabel(next[to] ?? {}, to, locale, targetLabel),
       });
     },
-    [onPatch, items, setItems, rootKey, onSelectionChange, locale, targetLabel],
+    [onPatch, items, shown, setItems, rootKey, onSelectionChange, locale, targetLabel],
   );
 
   return (
@@ -394,7 +449,7 @@ export function AppNavCanvas({
           if (!e.dataTransfer.types.includes(DND_MIME)) return;
           e.preventDefault();
           if (dragIndex == null) return;
-          moveItem(dragIndex, items.length);
+          moveItem(dragIndex, shown.length);
           setDragIndex(null);
         }}
       >
@@ -405,7 +460,7 @@ export function AppNavCanvas({
               : t('engine.appNav.emptyReadonly', locale)}
           </div>
         ) : (
-          items.map((it, i) => (
+          shown.map(([it, i], at) => (
             <NavCardTree
               key={i}
               item={it}
@@ -423,7 +478,7 @@ export function AppNavCanvas({
               onDragEnd={() => setDragIndex(null)}
               onDropBefore={() => {
                 if (dragIndex == null) return;
-                moveItem(dragIndex, i);
+                moveItem(dragIndex, at);
                 setDragIndex(null);
               }}
             />
@@ -484,7 +539,7 @@ function NavCardTree({
         onDropBefore={onDropBefore}
       />
       {Array.isArray(item.children) &&
-        item.children.map((c, j) => {
+        inMenuOrder(item.children).map(([c, j]) => {
           const childPath = `${path}.children[${j}]`;
           return (
             <NavCardTree

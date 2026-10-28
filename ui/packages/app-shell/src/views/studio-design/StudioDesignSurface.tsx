@@ -278,7 +278,7 @@ import { ObjectPicker } from '../metadata-admin/inspectors/ObjectPicker.js';
 import { IconPickerWidget } from '../metadata-admin/widgets.js';
 import { useDisplayLocale } from '@object-ui/i18n';
 import { SuggestedBindingsPanel } from '../../components/SuggestedBindingsPanel.js';
-import { AppNavCanvas, navPayloadOf } from '../metadata-admin/previews/AppNavCanvas.js';
+import { AppNavCanvas, inMenuOrder, navPayloadOf } from '../metadata-admin/previews/AppNavCanvas.js';
 import {
   FlowRegistrationContext,
   FlowRuntimeContext,
@@ -2741,9 +2741,14 @@ function NavTree({
   // What a label-less row inherits is asked of the console's own resolver, so
   // the rail names it as the console's sidebar does (objectui#11196).
   const targetLabel = useNavTargetLabel();
+  // objectstack#26979 — a level is listed in the order the running menu draws
+  // it, through the canvas's `inMenuOrder` (the menu's `byNavOrder` rule). `i`
+  // stays the entry's position in the authored array, which the canvas numbers
+  // an untitled entry by too.
+  const ordered = inMenuOrder(nodes);
   return (
     <>
-      {nodes.map((node, i) => {
+      {ordered.map(([node, i]) => {
         // objectui#11158 — the spec types a nav item's `label` as `I18nLabel`,
         // so a locale map rendered raw threw ("Objects are not valid as a
         // React child") and took the whole rail down. Every read below goes
