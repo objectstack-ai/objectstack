@@ -223,7 +223,7 @@
  * here is ordered: what was written and why it is not a value of its kind,
  * then what to write instead, then "NOT applied" and what the value would
  * have done past this door. The consequence is the part a cut may take; the
- * prescription is not. `engine-temporal-comparand-prescription-cap.test.ts`
+ * prescription is not. `filter-refusal-prescription-cap.test.ts`
  * pins it per arm, the same rule #27098 set for the retired operators.
  *
  * @see `@objectstack/core`'s `temporal-comparand.ts` — the value-half predicate,
@@ -721,8 +721,8 @@ export function assertTemporalComparandsInterpretable(
   if (yearClass) {
     throw invalidFilterError(
       `${operation}('${object}'): filter on '${hit.field}' compares a declared ${hit.kind} field `
-      + `against ${preview(hit.value)} at ${hit.path}, ${yearClass.year}. ${yearClass.remedy} `
-      + `The filter was NOT applied. ${yearClass.where}`,
+      + `against ${preview(hit.value)} at ${hit.path}, ${yearClass.year}, so it is not a ${hit.kind} `
+      + `value. ${yearClass.remedy} The filter was NOT applied. ${yearClass.where}`,
     );
   }
   // [#20549] A comparand the rule reads as another value than it names.
@@ -730,8 +730,8 @@ export function assertTemporalComparandsInterpretable(
   if (misread) {
     throw invalidFilterError(
       `${operation}('${object}'): filter on '${hit.field}' compares a declared ${hit.kind} field `
-      + `against ${preview(hit.value)} at ${hit.path}, ${misread.why}. ${REMEDY[hit.kind]} The `
-      + `filter was NOT applied. ${misread.where}`,
+      + `against ${preview(hit.value)} at ${hit.path}, ${misread.why}, so it is not a ${hit.kind} `
+      + `value. ${REMEDY[hit.kind]} The filter was NOT applied. ${misread.where}`,
     );
   }
   throw invalidFilterError(
@@ -801,7 +801,8 @@ export function assertHavingTemporalComparandsInterpretable(
   if (yearClass) {
     throw invalidFilterError(
       `aggregate('${object}'): ${column} compares against ${preview(hit.value)} at ${hit.path}, `
-      + `${yearClass.year}. ${yearClass.remedy} The \`having\` was NOT applied. ${yearClass.having}`,
+      + `${yearClass.year}, so it is not a ${hit.kind} value. ${yearClass.remedy} The \`having\` was `
+      + `NOT applied. ${yearClass.having}`,
     );
   }
   // [#20549] The misread classes, in their own words, as on `where`.
@@ -809,7 +810,8 @@ export function assertHavingTemporalComparandsInterpretable(
   if (misread) {
     throw invalidFilterError(
       `aggregate('${object}'): ${column} compares against ${preview(hit.value)} at ${hit.path}, `
-      + `${misread.why}. ${REMEDY[hit.kind]} The \`having\` was NOT applied. ${misread.having}`,
+      + `${misread.why}, so it is not a ${hit.kind} value. ${REMEDY[hit.kind]} The \`having\` was `
+      + `NOT applied. ${misread.having}`,
     );
   }
   throw invalidFilterError(
@@ -857,7 +859,7 @@ function judgeResolvedToken(
 
 /** [#20844] The placeholder, where it sits, and what it resolved to — for the message. */
 function resolvedTokenPhrase(hit: ResolvedTokenOutsideYears): string {
-  return `${preview(hit.token)} at ${hit.path}, a relative-date placeholder that resolved to `
+  return `${preview(hit.token)} at ${hit.path}, a relative-date placeholder resolved to `
     + `${preview(hit.value)} (the year ${resolvedYearOf(hit.value)})`;
 }
 

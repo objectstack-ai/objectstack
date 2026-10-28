@@ -265,7 +265,7 @@ export function assertTextOperatorTargetsAreStringCapable(
   // [#27173] The verdict, the prescription, then the consequence: a client
   // reads 500 characters of this (`CLIENT_MESSAGE_MAX`, `@objectstack/types`),
   // so what to write instead has to land inside them, and only the reasoning
-  // after it may be cut. Pinned in `engine-text-operator-declared-type-door.test.ts`.
+  // after it may be cut. Pinned in `filter-refusal-prescription-cap.test.ts`.
   throw invalidFilterError(
     `${operation}('${object}'): filter on '${hit.field}' aims the text operator `
     + `${hit.operator} at a declared ${declared} at ${hit.path}. A ${hit.declaredType} value is `
