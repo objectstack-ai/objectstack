@@ -1,8 +1,9 @@
 # ADR-0145: A `?: never` tombstone on the ui authoring face retires on the spec's own window — one major after the retirement it names, never longer
 
-**Status**: Proposed (2026-10-28). `docs/adr/**` is Tier H (Prime Directive #14): this record becomes **Accepted** by
-the maintainer's merge. **This record declares; it implements nothing** — no tombstone is removed, no code, no schema,
-no changeset. The first application batch is its own card, cut after the merge (see [Applying the rule](#applying-the-rule)).
+**Status**: Accepted (2026-10-28, #27251) · **Amended** (2026-10-28, #27291 — one clause each; see the amendment notes
+under D2's ui-only bullet and under D1's level-axis bullet). **This record declares; it implements nothing** — no
+tombstone is removed, no code, no schema, no changeset. The first application batch is its own card, cut after the merge
+(see [Applying the rule](#applying-the-rule)).
 **Decided by**: the maintainer's letter **A** of 2026-10-25T01:46Z on
 [#25912](https://github.com/objectstack-ai/objectstack/issues/25912) (filed as objectui#13467), transcribed as ruling
 [`6407810703`](https://github.com/objectstack-ai/objectstack/issues/25912#issuecomment-6407810703) over the seat's
@@ -59,7 +60,10 @@ Spelled on ADR-0087's clock, with **R** the protocol major the retirement belong
 - "major" is the major of the one `fixed` release group: `@objectstack/*` and `@object-ui/*` release together, lockstep
   with `PROTOCOL_VERSION` at every cut, and the spec's deletion gate reads its `CURRENT_MAJOR` off
   `@objectstack/spec`'s package version — so one clock serves both faces. A changeset's *level* is a different axis
-  (ADR-0087's 2026-09-13 amendment, `scripts/check-changeset-no-major.mjs`) and moves nothing here;
+  (ADR-0087's #18003 level-half amendment of 2026-09-13 — the note inside its "Ratified: the pre-launch launch-window
+  exemption" section — and `scripts/check-changeset-no-major.mjs`) and moves nothing here;
+  > **Amended 2026-10-28 (#27291) — the citation names its text.** Was "ADR-0087's 2026-09-13 amendment": ADR-0087
+  > carries two texts of that date, the #12772 artifact-ingestion addendum being the other, and D1 means the level half.
 - the window binds in both directions: a tombstone that names a spec retirement ⛔ never leaves while the spec still
   carries that key's kit (the ui author would lose the remedy the spec still prints), and ⛔ never outlives it — except
   as D3 holds it: a named refusal D3 keeps outlives the kit by design (the `agedOutSpecKeyRefusal` twins are that case).
@@ -81,9 +85,15 @@ Spelled on ADR-0087's clock, with **R** the protocol major the retirement belong
   window by this record: with the protocol at major 18, any whose R is 16 or below is already due, and the first
   application batch takes it.
 - **The tombstone names a ui-only retirement** (an objectui or ui card, no spec key behind it): the same window runs
-  from the ui's own retirement. R is the major of the first `@object-ui/types` release tag (or the first release of the
-  package that publishes the `.d.ts`) whose tree carries the tombstone, on the same convention: first carried by a
-  major's `.0.0` cut counts in the major before it.
+  from the ui's own retirement, on the fixed group's clock (D1): R is read off the first `@objectstack/spec` release tag
+  whose tree carries the tombstone's introducing commit (for a commit the ui merge did not import, the first cut after
+  its date — step 2), on the convention the bullets above use: first carried by a major's `.0.0` cut counts in the major
+  before it. ⛔ Never off `@object-ui/types`' own tags: a major's first tag there need not be a `.0.0` cut.
+  > **Amended 2026-10-28 (#27291) — the ui-only clock reads the group's tags.** Was: "R is the major of the first
+  > `@object-ui/types` release tag (or the first release of the package that publishes the `.d.ts`) whose tree carries
+  > the tombstone, on the same convention: first carried by a major's `.0.0` cut counts in the major before it."
+  > `@object-ui/types` opens 17 at `17.1.0` (no `17.0.0`), so that reading gave a tombstone born before the
+  > `@objectstack/spec@17.0.0` cut R = 17 where the spec's clock reads 16: one major longer, which D1 forbids.
 - **Where R cannot be read** (no tag, no row, a history the reader cannot reach): the tombstone is not due. The batch
   reports it as undated, ⛔ never guesses a date — a wrong date removes a remedy early, which is option B by accident.
 
