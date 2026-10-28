@@ -153,7 +153,7 @@ function renderPage({ object = LEAD, width = 1440, embedded = false }: { object?
 const shown = (container: HTMLElement) =>
   container.querySelector('[data-record-columns]')?.getAttribute('data-record-columns-shown') ?? null;
 const toggle = (name: RegExp) => screen.getByRole('button', { name });
-const press = (key: string, target: EventTarget = document.body) =>
+const press = (key: string, target: Element = document.body) =>
   fireEvent.keyDown(target, { key, metaKey: true, shiftKey: true, bubbles: true });
 
 beforeEach(() => {

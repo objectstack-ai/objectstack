@@ -23,13 +23,14 @@ import {
   useWorkspacePreference,
   workspacePreferenceStorageKey,
   type PreferenceSwitch,
+  type WorkspacePreferenceScope,
 } from './workspacePreference';
 
 const LEAD = objectPreferenceScope('crm_lead');
 const PRODUCT = objectPreferenceScope('crm_product');
 const LEAD_KEY = workspacePreferenceStorageKey(RECORD_TIMELINE_COLUMN_PREFERENCE, LEAD);
 
-function Probe({ id, scope, fallback }: { id: string; scope: `object:${string}`; fallback: PreferenceSwitch }) {
+function Probe({ id, scope, fallback }: { id: string; scope: WorkspacePreferenceScope; fallback: PreferenceSwitch }) {
   const [value, setValue] = useWorkspacePreference(RECORD_TIMELINE_COLUMN_PREFERENCE, scope, fallback);
   return (
     <button type="button" data-testid={id} onClick={() => setValue(value === 'on' ? 'off' : 'on')}>
