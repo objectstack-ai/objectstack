@@ -200,3 +200,49 @@ describe('form renderer — server-rejected fields', () => {
     expect(scrollSpy).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * A unique-index refusal names ONE field on `details.field` (not a list): the
+ * 409 `UNIQUE_VIOLATION` body `@objectstack/rest` sends, as
+ * `@objectstack/client` decorates it.
+ */
+function uniqueViolation(field?: string) {
+  const error = field ? 'A record with this SKU already exists' : 'A record with this value already exists';
+  return Object.assign(new Error(error), {
+    code: 'UNIQUE_VIOLATION',
+    httpStatus: 409,
+    details: { error, code: 'UNIQUE_VIOLATION', ...(field ? { field } : {}), object: 'product' },
+  });
+}
+
+const PRODUCT_FIELDS = [
+  { name: 'name', label: 'Name', type: 'input' },
+  { name: 'sku', label: 'SKU', type: 'input' },
+];
+
+describe('form renderer — unique-index refusal', () => {
+  it('marks the field the refusal names, instead of a banner and a toast', async () => {
+    const onSubmit = vi.fn().mockRejectedValue(uniqueViolation('sku'));
+    const { container } = renderForm(PRODUCT_FIELDS, onSubmit);
+    const skuWrap = container.querySelector('[data-field="sku"]') as HTMLElement;
+    const nameWrap = container.querySelector('[data-field="name"]') as HTMLElement;
+
+    submit();
+
+    await waitFor(() => expect(skuWrap.textContent).toMatch(/A record with this SKU already exists/));
+    expect(skuWrap.querySelector('[aria-invalid="true"]')).toBeTruthy();
+    expect(nameWrap.textContent).not.toMatch(/already exists/);
+    expect(toastErrorSpy).not.toHaveBeenCalled();
+  });
+
+  it('keeps the banner when the refusal cannot name the field', async () => {
+    const onSubmit = vi.fn().mockRejectedValue(uniqueViolation());
+    const { container } = renderForm(PRODUCT_FIELDS, onSubmit);
+
+    submit();
+
+    await waitFor(() => expect(toastErrorSpy).toHaveBeenCalled());
+    expect(String(toastErrorSpy.mock.calls[0][0])).toMatch(/A record with this value already exists/);
+    expect(container.querySelector('[aria-invalid="true"]')).toBeNull();
+  });
+});

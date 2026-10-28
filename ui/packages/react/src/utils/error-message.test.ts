@@ -88,6 +88,55 @@ describe('extractFieldErrors', () => {
     expect(extractFieldErrors('a string')).toBeNull();
     expect(extractFieldErrors(new Error('plain'))).toBeNull();
   });
+
+  // A unique-index refusal names ONE field on a single string `field`, not a
+  // list: `@objectstack/rest` answers 409 `{ error, code: 'UNIQUE_VIOLATION',
+  // developerMessage, field, object }`, and `@objectstack/client` puts that flat
+  // body on `error.details`.
+  function uniqueViolation(field?: string) {
+    const error = field ? 'A record with this SKU already exists' : 'A record with this value already exists';
+    return Object.assign(new Error(error), {
+      code: 'UNIQUE_VIOLATION',
+      httpStatus: 409,
+      details: {
+        error,
+        code: 'UNIQUE_VIOLATION',
+        developerMessage: 'Duplicate value for sku on product',
+        ...(field ? { field } : {}),
+        object: 'product',
+      },
+    });
+  }
+
+  it("marks the field a UNIQUE_VIOLATION names, with the server's sentence", () => {
+    const err = uniqueViolation('sku');
+    expect(err.code).toBe('UNIQUE_VIOLATION');
+    expect(err.httpStatus).toBe(409);
+    expect(extractFieldErrors(err)).toEqual([
+      { field: 'sku', message: 'A record with this SKU already exists' },
+    ]);
+  });
+
+  it('reads a hand-rolled UNIQUE_VIOLATION carrying `field` directly', () => {
+    const err = { code: 'UNIQUE_VIOLATION', field: 'name', error: 'A record with this Name already exists' };
+    expect(extractFieldErrors(err)).toEqual([
+      { field: 'name', message: 'A record with this Name already exists' },
+    ]);
+  });
+
+  it('returns null for a UNIQUE_VIOLATION without `field` — the server could not tell which column', () => {
+    const err = uniqueViolation();
+    expect(err.code).toBe('UNIQUE_VIOLATION');
+    expect(err.httpStatus).toBe(409);
+    expect(extractFieldErrors(err)).toBeNull();
+  });
+
+  it('reads a single `field` only on a UNIQUE_VIOLATION', () => {
+    // `INVALID_FIELD` also carries `field`, but it names a field the request
+    // referenced that does not exist — there is no input to mark.
+    const invalid = { code: 'INVALID_FIELD', httpStatus: 400, details: { code: 'INVALID_FIELD', field: 'skuu' } };
+    expect(extractFieldErrors(invalid)).toBeNull();
+  });
 });
 
 /**
