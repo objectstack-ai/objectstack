@@ -46,7 +46,8 @@ function verdictOf(body: Record<string, unknown>) {
   return errors.length ? { valid: false, errors } : { valid: true };
 }
 
-type FakeClient = Record<string, (...args: never[]) => Promise<unknown>>;
+// `withPreviewDrafts` answers the client itself, not a promise (objectstack#26840).
+type FakeClient = Record<string, (...args: never[]) => unknown>;
 
 function makeClient(server: Server): FakeClient {
   return {
@@ -57,6 +58,8 @@ function makeClient(server: Server): FakeClient {
         ? { type: 'permission', name: 'sales_perms', item: { ...server.draft, _draft: true, _diagnostics: verdictOf(server.draft) } }
         : null;
     },
+    // objectstack#26840 — the package door reads its objects through the draft-overlaid door.
+    withPreviewDrafts() { return this; },
     list: async (type: string) => (type === 'object' ? [{ item: { name: 'a_account' } }] : []),
     get: async () => null,
     save: async (_type: string, _name: string, payload: Record<string, unknown>) => {
