@@ -8,10 +8,22 @@
  * API, or a dev console pointed at a remote backend) where the SameSite
  * cookie never flows — every other console call already sends the Bearer.
  *
+ * Every call goes through the console's authenticated fetch
+ * (`createAuthenticatedFetch`), the transport the request page's data source
+ * (`approvalRequestsDataSource.ts`) already uses. Besides the Bearer it stamps
+ * `X-Tenant-ID` and the active UI language as `Accept-Language`, and the
+ * approvals door serves `process_label`, `step_label` and `object_label` in
+ * that language from the app's pack (`flows.<flow>.label`,
+ * `flows.<flow>.approvals.<node_id>.label`, `objects.<object>.label`), the
+ * stored text when the pack has no entry. A bare `fetch` carried only the
+ * browser's own language, so a reader who switched the console to 中文 still
+ * read the flow, the step and the object in the authoring language on the
+ * inbox while the request page translated them (objectstack#26883).
+ *
  * Mirrors the shape exposed by `@objectstack/plugin-approvals` /
  * `packages/rest/src/rest-server.ts`.
  */
-import { TokenStorage } from '@object-ui/auth';
+import { createAuthenticatedFetch } from '@object-ui/auth';
 import type { ApprovalCancelReason } from '@objectstack/spec/contracts';
 
 const SERVER_URL = (import.meta.env.VITE_SERVER_URL || '').replace(/\/$/, '');
@@ -189,12 +201,10 @@ export interface ApprovalActionRow {
 }
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = TokenStorage.get();
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await createAuthenticatedFetch()(`${API_BASE}${path}`, {
     credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(init?.headers || {}),
     },
     ...init,
