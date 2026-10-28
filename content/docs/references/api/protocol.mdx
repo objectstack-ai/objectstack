@@ -1756,7 +1756,8 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | **object** | `string` | ✅ | Object name |
 | **recordId** | `string` | ✅ | The record the projection was judged on |
 | **readable** | `string[]` | ✅ | Fields the caller may read on this object. Reads are judged row-blind, so this equals the object-wide read projection |
-| **editable** | `string[]` | ✅ | Fields the caller may write on this record, as field-level security judges an update of the stored row: a row-conditioned field permission locks a field only on the rows its condition names. A field absent here is refused by the write gate. The object grant, the record's row-level write scope (sharing, row-level security, ownership) and a field's own rules (readonly, computed types) are not part of it |
+| **editable** | `string[]` | ✅ | Fields the caller may write on this record, as field-level security judges an update of the stored row: a row-conditioned field permission locks a field only on the rows its condition names. A field absent here is refused by the write gate. The object grant, the record's row-level write scope (sharing, row-level security, ownership; see `writable`) and a field's own rules (readonly, computed types) are not part of it |
+| **writable** | `boolean` | ✅ | Whether the caller may update this record at all, judged by the write gate on the stored row: the object's edit permission, record sharing and ownership, row-level security, and a parent record's edit access for a record controlled by its parent. False means an update of this record is refused whole, whatever it changes. True does not promise that a save succeeds: a pending approval that locks the record, conditional read-only and validation rules on the values sent, and a data source that refuses writes are judged when the record is saved |
 
 
 ---

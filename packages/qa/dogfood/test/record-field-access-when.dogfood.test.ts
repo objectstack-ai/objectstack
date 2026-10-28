@@ -159,7 +159,8 @@ describe('a row-conditioned field lock, on the record the form edits', () => {
     // admits a row inside the member's write scope.
     const created = await stack.apiAs(memberTok, 'POST', '/data/rfa_notice', { title: 'mine' });
     expect(created.status, await created.clone().text()).toBeLessThan(300);
-    const ownId = ((await created.json()) as any)?.data?.id;
+    const createdBody: any = await created.json();
+    const ownId = createdBody.id ?? createdBody.record?.id ?? createdBody.data?.id;
     expect(ownId, 'own notice id').toBeTruthy();
     const own = GetRecordFieldAccessResponseSchema.parse((await fieldAccess('rfa_notice', ownId)).body.data);
     expect(own.writable).toBe(true);
