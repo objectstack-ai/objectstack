@@ -17,6 +17,7 @@ import {
 } from './synth/recordPageColumns';
 import { useDetailTranslation } from './useDetailTranslation';
 import { RelatedListCompactContext } from './relatedListCompact';
+import { DefaultRecordPageContext } from './defaultRecordPage';
 
 export interface RecordPageColumnsProps {
   /** The column tier to draw; the tabbed tier is the page itself, drawn by its host. */
@@ -24,10 +25,9 @@ export interface RecordPageColumnsProps {
   /** The synthesized page, partitioned (`buildDefaultPageColumns`). */
   columns: DefaultPageColumns;
   /**
-   * The record's provenance footer, which the host draws once per page: under
-   * the related column in the three-column tier (under the details column
-   * when the page has no related column), under the columns in the
-   * two-column tier (where the related column is a rail that may be closed).
+   * The record's provenance line (created / updated / owner / id), which the
+   * host draws once per page: at the foot of the details column, in every
+   * column tier (objectstack#27055, the v3 meta line).
    */
   footer?: React.ReactNode;
   /**
@@ -43,14 +43,14 @@ const ALL_COLUMNS_ON: RecordPageColumnSwitches = { timeline: true, related: true
 
 /**
  * Grid templates by which columns have content. Literal strings, so
- * Tailwind's scanner emits each one. Details and timeline share the width
- * (the timeline a little wider, it carries the composer); the related column
- * is a fixed rail.
+ * Tailwind's scanner emits each one. The v3 widths (objectstack#27055,
+ * 「栏宽 1.25fr : 1fr : 320px」): details the widest, the timeline after it,
+ * the related column a fixed 320 px rail.
  */
 const THREE_COLUMN_TEMPLATE = {
-  all: 'grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)_20rem]',
+  all: 'grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)_20rem]',
   noTimeline: 'grid-cols-[minmax(0,1fr)_20rem]',
-  noRelated: 'grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]',
+  noRelated: 'grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]',
   detailsOnly: 'grid-cols-1',
 } as const;
 
@@ -125,16 +125,12 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
   const relatedLabel = t('detail.related');
   const foldedTimelineLabel = t('detail.timelineFolded');
 
-  // The provenance footer closes the related column where it is resident; a
-  // three-column page without one closes its details column with it instead,
-  // and a two-column page draws it under the columns.
-  const footerUnderRelated = residentRelated;
-  const footerUnderDetails = !residentRelated && tier === 'three-column';
-  const footerUnderColumns = !footerUnderRelated && !footerUnderDetails;
+  // The provenance line closes the details column in every tier
+  // (objectstack#27055): it describes the record the details show.
   const detailsColumn = (
     <div className={COLUMN_STACK} data-record-column="details">
       {drawNodes(columns.details)}
-      {footerUnderDetails && footer}
+      {footer}
     </div>
   );
   const timelineColumn = residentTimeline ? (
@@ -209,7 +205,6 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
           {residentRelated && (
             <aside className={COLUMN_STACK} data-record-column="related" aria-label={relatedLabel}>
               {relatedContent}
-              {footerUnderRelated && footer}
             </aside>
           )}
         </div>
@@ -233,20 +228,21 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
           </aside>
         )}
       </div>
-      {footerUnderColumns && footer}
     </>
   );
 
   return (
-    <div
-      className={cn('w-full bg-background p-3 md:p-4 lg:p-6', className)}
-      data-page-type="record"
-      data-record-page-tier={tier}
-    >
-      <div className="flex flex-col gap-4">
-        {drawNodes(columns.header)}
-        {body}
+    <DefaultRecordPageContext.Provider value>
+      <div
+        className={cn('w-full bg-background p-3 md:p-4 lg:p-6', className)}
+        data-page-type="record"
+        data-record-page-tier={tier}
+      >
+        <div className="flex flex-col gap-4">
+          {drawNodes(columns.header)}
+          {body}
+        </div>
       </div>
-    </div>
+    </DefaultRecordPageContext.Provider>
   );
 };

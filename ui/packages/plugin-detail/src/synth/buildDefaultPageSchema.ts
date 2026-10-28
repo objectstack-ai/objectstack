@@ -46,7 +46,7 @@ export interface ObjectDefLike {
   stageField?: string | false;
   stages?: Array<{ value: any; label: string }>;
   /** Semantic role (ADR-0085): the object's most important fields —
-   *  drives the highlight strip (first 4). */
+   *  drives the highlight strip (first {@link RECORD_HIGHLIGHTS_MAX}). */
   highlightFields?: string[];
   /**
    * ACCEPTED BUT NEVER READ — do not "tidy" this away (objectui#7287).
@@ -469,6 +469,14 @@ function membersOfGatedFieldGroups(def: ObjectDefLike): Set<string> {
 }
 
 /**
+ * How many highlights the record header shows (objectstack#27055, the v3
+ * header: 「要点 6 项等宽」 — the same six Studio's highlight editor offers).
+ * A declared `highlightFields` list longer than this is cut here, and so is
+ * the derived one.
+ */
+export const RECORD_HIGHLIGHTS_MAX = 6;
+
+/**
  * Pick up to N "highlight" fields by name. Skips the status field
  * (already shown in `record:path`) and obvious junk like id / created_at.
  * Members of a group gated by `visibleWhen` are never picked
@@ -477,7 +485,7 @@ function membersOfGatedFieldGroups(def: ObjectDefLike): Set<string> {
 export function deriveHighlightFields(
   def: ObjectDefLike | undefined,
   statusField: string | null,
-  max = 4,
+  max = RECORD_HIGHLIGHTS_MAX,
 ): string[] {
   if (!def) return [];
   // Semantic role first (ADR-0085): top-level `highlightFields`. (The
@@ -681,8 +689,9 @@ export function buildDefaultHighlights(
 ): any[] {
   const statusField = options.statusField ?? detectStatusField(def);
   const stages = options.stages ?? (statusField ? deriveStages(def, statusField) : null);
-  const highlightFields =
-    options.highlightFields ?? deriveHighlightFields(def, statusField);
+  const highlightFields = (
+    options.highlightFields ?? deriveHighlightFields(def, statusField)
+  ).slice(0, RECORD_HIGHLIGHTS_MAX);
   const out: any[] = [];
   if (highlightFields.length > 0) {
     out.push(componentNode('record:highlights', { fields: highlightFields }));

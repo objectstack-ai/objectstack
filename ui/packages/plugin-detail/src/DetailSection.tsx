@@ -55,6 +55,7 @@ import { useSafeFieldLabel } from '@object-ui/react';
 import { NON_EDITABLE_SYSTEM_FIELDS } from './systemFields';
 import { InlineFieldInput } from './InlineFieldInput';
 import { headerColorClass } from './headerColor';
+import { framelessSectionColumns, useDefaultRecordPage } from './defaultRecordPage';
 import { hasCellValue } from './emptiness';
 import {
   enrichDetailField,
@@ -199,6 +200,10 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
   // the empty-field heuristic below reads the same answer (objectui#12717).
   const isPrintPage = usePrintPage() !== null;
   const isCollapsed = !isPrintPage && collapsedState;
+  // objectstack#27055 — on the synthesized default record page a section is
+  // drawn frameless: a title, a hairline and the field grid, no card. Paper
+  // keeps the card face (objectui#12732), so a print page never takes it.
+  const frameless = useDefaultRecordPage() && !isPrintPage;
   const [copiedField, setCopiedField] = React.useState<string | null>(null);
   const [visibleCount, setVisibleCount] = React.useState<number | undefined>(undefined);
   // objectstack#25883 — "Show N empty fields" is the reader's choice for the
@@ -439,7 +444,12 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
   // Never render more columns than there are visible fields — the object-wide
   // column count (objectui#2578) can exceed a section's visible count when
   // empty fields are hidden; a lone field shouldn't sit at 1/N width.
-  const effectiveColumns = Math.min(rawColumns, Math.max(1, visibleFields.length));
+  // A frameless section (objectstack#27055) takes 1–3 columns by the fields it
+  // shows, never the object-wide count: it shares the page row with the
+  // timeline and related columns.
+  const effectiveColumns = frameless
+    ? framelessSectionColumns(visibleFields.length)
+    : Math.min(rawColumns, Math.max(1, visibleFields.length));
 
   const renderField = (field: DetailViewField) => {
     const value = data?.[field.name] ?? field.value;
@@ -884,7 +894,14 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
         </div>
       ) : (
         <div
-          className={cn(
+          className={frameless ? cn(
+            // Container queries, not viewport breakpoints: the details column
+            // is narrow on a wide screen (objectstack#27055).
+            'grid gap-x-4 gap-y-2.5',
+            effectiveColumns === 1 ? 'grid-cols-1' :
+            effectiveColumns === 2 ? 'grid-cols-1 @sm:grid-cols-2' :
+            'grid-cols-1 @sm:grid-cols-2 @lg:grid-cols-3'
+          ) : cn(
             "grid gap-3 sm:gap-4",
             effectiveColumns === 1 ? "grid-cols-1" :
             effectiveColumns === 2 ? "grid-cols-1 md:grid-cols-2" :
@@ -917,6 +934,42 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
       )}
     </>
   );
+
+  // objectstack#27055 — the frameless face of the default record page: the
+  // section's title row over a hairline, then the field grid. No card border,
+  // no shadow. Every titled section collapses from its title row (a native
+  // button carrying `aria-expanded`, as the card face's disclosure does,
+  // objectui#12625); an untitled section is the grid alone.
+  if (frameless) {
+    return (
+      <section className={cn('@container min-w-0', className)} data-detail-section-face="frameless">
+        {section.title && (
+          <div className={cn('border-b border-border', headerColorClass(section.headerColor))}>
+            <button
+              type="button"
+              aria-expanded={!isCollapsed}
+              onClick={() => setIsCollapsed(!collapsedState)}
+              className="flex min-h-9 w-full items-center justify-between gap-2 py-1.5 text-left text-[13px] font-semibold text-foreground rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <span className="flex min-w-0 items-center gap-2">
+                {section.icon && <SectionIcon name={section.icon} />}
+                <span className="truncate">{section.title}</span>
+              </span>
+              {isCollapsed ? (
+                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+              ) : (
+                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+              )}
+            </button>
+          </div>
+        )}
+        {section.description && !isCollapsed && (
+          <p className="mt-1 text-xs text-muted-foreground">{section.description}</p>
+        )}
+        {!isCollapsed && <div className={cn(section.title ? 'pt-2.5 pb-1' : '')}>{content}</div>}
+      </section>
+    );
+  }
 
   // Flat render: when section has no title, no border, and is not collapsible,
   // skip the Card chrome entirely. This is the universal case for an

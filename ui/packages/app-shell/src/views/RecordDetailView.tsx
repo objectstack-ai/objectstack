@@ -10,7 +10,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom';
-import { activityRowToFeedItem, InlineEditSaveBar, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordPageColumnDefaults, resolveTitleField, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
+import { activityRowToFeedItem, DefaultRecordPageContext, InlineEditSaveBar, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordPageColumnDefaults, resolveTitleField, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
 import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions, PanelToggles, type PanelToggleItem } from '@object-ui/components';
 import { useAuth, createAuthenticatedFetch } from '@object-ui/auth';
 import { usePermissions } from '@object-ui/permissions';
@@ -4203,7 +4203,13 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                     }
                   />
                 ) : recordPageTier === null ? null : (
-                  <SchemaRenderer schema={withPageTabsUrlSync(renderedPage, { defaultTab: activeTabParam, onTabChange: handleTabChange }) as any} />
+                  // objectstack#27055 — the synthesized default page is the
+                  // record page v3 in its tabbed tier too (frameless sections,
+                  // the empty-sections line, the highlight grid); an authored
+                  // page keeps its own face.
+                  <DefaultRecordPageContext.Provider value={!assignedPage && !namedPageBlocked}>
+                    <SchemaRenderer schema={withPageTabsUrlSync(renderedPage, { defaultTab: activeTabParam, onTabChange: handleTabChange }) as any} />
+                  </DefaultRecordPageContext.Provider>
                 )}
               </RelatedRecordActionsBridge>
               {/* Approval visibility fallback (objectui#3461) — synthesized
@@ -4250,11 +4256,13 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   renders nothing when the record carries no audit field. */}
               {/* In a column tier the columns draw it (objectstack#26678). */}
               {!pageColumns && (
-                <RecordMetaFooter
-                  data={readablePageRecord}
-                  objectSchema={objectDef}
-                  objectName={objectName}
-                />
+                <DefaultRecordPageContext.Provider value={!assignedPage && !namedPageBlocked}>
+                  <RecordMetaFooter
+                    data={readablePageRecord}
+                    objectSchema={objectDef}
+                    objectName={objectName}
+                  />
+                </DefaultRecordPageContext.Provider>
               )}
               {/* Record-level inline-edit Save/Cancel bar (objectui#2407 P2) —
                   commits the whole draft (highlights + body) in ONE atomic OCC

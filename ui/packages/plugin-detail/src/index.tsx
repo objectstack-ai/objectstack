@@ -217,6 +217,9 @@ export { useRecordPageTier } from './useRecordPageTier';
 export type { UseRecordPageTierOptions } from './useRecordPageTier';
 export { RecordPageColumns } from './RecordPageColumns';
 export type { RecordPageColumnsProps } from './RecordPageColumns';
+// objectstack#27055 — the record page v3 face: a host drawing the
+// synthesized default page in its tabbed tier marks it, as the column tiers do.
+export { DefaultRecordPageContext, useDefaultRecordPage } from './defaultRecordPage';
 
 /**
  * The registry face of `detail-view` — objectui#5378 item 1.
