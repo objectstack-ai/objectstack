@@ -38,7 +38,7 @@ const OWNED_OBJECTS = new Set([
   // metadata (sys_view_definition retired as inert, ADR-0131 D13)
   'sys_metadata', 'sys_metadata_history', 'sys_metadata_audit',
   // system
-  'sys_setting', 'sys_secret', 'sys_setting_audit', 'sys_migration',
+  'sys_setting', 'sys_secret', 'sys_setting_audit', 'sys_migration', 'sys_exchange_rate',
 ]);
 
 describe('objects translation bundle ownership (ADR-0029 D8)', () => {
