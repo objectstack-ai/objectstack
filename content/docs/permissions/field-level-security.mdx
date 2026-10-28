@@ -52,10 +52,19 @@ fields: {
   address, a stored row the caller cannot read, a condition that does not
   resolve for the request — the entry is applied as its **lock**: no edit
   grant on that write, and a WARN line says why.
-- **Readers that hold no row** (`/auth/me/permissions`, the writable-field
-  projections, `os explain`) report a row-conditioned entry as its lock, so
-  a client never advertises an edit the gate refuses. `os explain` names
-  each such entry as a row-conditioned lock in its `fls` layer.
+- **Readers that hold no row** (`/auth/me/permissions`, the object-wide
+  writable-field projections, `os explain`) report a row-conditioned entry
+  as its lock, so a client never advertises an edit the gate refuses.
+  `os explain` names each such entry as a row-conditioned lock in its `fls`
+  layer.
+- **The record-scoped projection holds the row.**
+  `GET /api/v1/data/{object}/{id}/field-access` (`client.data.fieldAccess`)
+  answers the fields the caller may read and the fields it may write on
+  **that** record, and its `editable` list is the write gate's own verdict on
+  an update of the stored row. So a lock that applies from a stage onward
+  disables the field only on the rows its condition names — this is the
+  answer a record's edit form reads. A row that is absent or that the caller
+  cannot read answers the record read's `404`.
 - **Union without deny is unchanged.** A matched conditioned lock is still
   out-voted by another set's unconditioned `editable: true`; an entry
   without `when` votes on every row, as before (ADR-0066 ⑧, note of

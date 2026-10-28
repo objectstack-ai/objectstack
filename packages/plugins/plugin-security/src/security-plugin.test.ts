@@ -2154,7 +2154,9 @@ describe('SecurityPlugin', () => {
         const { plugin, harness } = await bootWhen(APPROVED_LOCK, { findOneImpl: () => rowOf(status) });
         const access = await plugin.getRecordFieldAccess('task', 'r1', whenCtx);
         for (const field of whenFields) {
-          const admitted = await gateAdmits(harness, { [field]: 'x' });
+          // The stored value written back, so no other gate (an ownership
+          // change, a move across the condition) answers instead of 2.5.
+          const admitted = await gateAdmits(harness, { [field]: (rowOf(status) as any)[field] ?? 'x' });
           expect(access!.editable.includes(field), `${status}.${field}`).toBe(admitted);
         }
       }
