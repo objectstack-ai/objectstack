@@ -3956,13 +3956,95 @@ function translateObjectListViews(
 }
 
 /**
+ * How deep {@link translateObjectValidations} follows `conditional` branches:
+ * the bound the i18n extractor's `pushValidationMessages` walks to, so a
+ * branch the extractor scaffolds a key for is a branch this overlay reaches.
+ */
+const MAX_VALIDATION_DEPTH = 10;
+
+/**
+ * Overlay the catalog onto an object document's `validations[].message`,
+ * returning the SAME array reference when nothing matched, so
+ * {@link translateObject} can leave `validations` off its copy.
+ *
+ * ## One key, the rule evaluator's
+ *
+ * The address is {@link objectValidationMessageKey}, read as is. The ObjectQL
+ * rule evaluator asks the `i18n` service for exactly that dotted key when it
+ * refuses a write, and this walks the same dotted key through each locale's
+ * data. So a client reading the served rule shows the sentence the server's
+ * refusal of the same write carries, in the same language (#27135). ⛔ Never a
+ * second spelling of the address.
+ *
+ * ## The fallbacks are the evaluator's
+ *
+ * A rule with no `name`, or one the bundle carries no non-empty `message`
+ * for, keeps its authored message, which is what the evaluator returns on a
+ * miss. A `conditional` wrapper contributes no key of its own: its branch
+ * supplies the violation and is addressed by the branch's own `name`. So the
+ * branches are translated and the wrapper's `message` is left as authored, the
+ * way the extractor leaves it unscaffolded.
+ *
+ * ## No packaged-base comparison
+ *
+ * Unlike the object's scalars, a rule message is a flat `catalog ?? document`,
+ * as a field `label` is. The evaluator translates a refusal without consulting
+ * any packaged base, and a divergence rule applied here alone would serve one
+ * sentence on `/meta` and another in the refusal of the same write, which is
+ * the split this overlay exists to close.
+ */
+function translateObjectValidations(
+  validations: unknown,
+  bundle: TranslationBundle | undefined,
+  objectName: string,
+  opts: ResolveOptions | undefined,
+): unknown {
+  if (!Array.isArray(validations) || !bundle) return validations;
+  const translateRule = (raw: unknown, depth: number): unknown => {
+    const rule = asRecord(raw);
+    if (rule === undefined || depth >= MAX_VALIDATION_DEPTH) return raw;
+    if (rule.type === 'conditional') {
+      const then = translateRule(rule.then, depth + 1);
+      const otherwise = translateRule(rule.otherwise, depth + 1);
+      if (then === rule.then && otherwise === rule.otherwise) return raw;
+      return {
+        ...rule,
+        ...(then !== rule.then ? { then } : {}),
+        ...(otherwise !== rule.otherwise ? { otherwise } : {}),
+      };
+    }
+    if (typeof rule.name !== 'string' || rule.name.length === 0) return raw;
+    const path = objectValidationMessageKey(objectName, rule.name).split('.');
+    for (const code of localeChain(opts)) {
+      const candidate = path.reduce<unknown>(
+        (cur, part) => asRecord(cur)?.[part],
+        pickData(bundle, code),
+      );
+      if (typeof candidate === 'string' && candidate.length > 0) {
+        return candidate === rule.message ? raw : { ...rule, message: candidate };
+      }
+    }
+    return raw;
+  };
+  let changed = false;
+  const next = validations.map((raw) => {
+    const translated = translateRule(raw, 0);
+    if (translated !== raw) changed = true;
+    return translated;
+  });
+  return changed ? next : validations;
+}
+
+/**
  * Apply the active locale to an object metadata document. Translates the
  * object's `label` / `pluralLabel` / `description`, walks each field to
  * translate its `label`, its `description` (from the bundle's field `help`
  * entry — see below), and per-option `label`s, walks any
  * inline-declared `actions` through {@link translateAction}, and overlays the
  * copy of each EMBEDDED `listViews` entry from the `_views` keys the i18n
- * extractor writes for it ({@link translateObjectListViews}). The input document
+ * extractor writes for it ({@link translateObjectListViews}), and each
+ * `validations[].message` from the key the rule evaluator refuses a write with
+ * ({@link translateObjectValidations}). The input document
  * is not mutated; a structural clone of the touched branches is returned.
  *
  * The embedded views were the second long-standing hole: `os i18n extract`
@@ -4135,6 +4217,8 @@ export function translateObject<T extends ObjectLike>(
     : undefined;
 
   const listViews = translateObjectListViews(doc.listViews, bundle, objectName, opts);
+  const authoredValidations = (doc as { validations?: unknown }).validations;
+  const validations = translateObjectValidations(authoredValidations, bundle, objectName, opts);
 
   return {
     ...doc,
@@ -4144,6 +4228,7 @@ export function translateObject<T extends ObjectLike>(
     ...(fields !== undefined ? { fields } : {}),
     ...(actions !== undefined ? { actions } : {}),
     ...(listViews !== doc.listViews ? { listViews } : {}),
+    ...(validations !== authoredValidations ? { validations } : {}),
   };
 }
 

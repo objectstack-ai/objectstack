@@ -345,6 +345,56 @@ describe('a stored select with no option source — read and named, never droppe
     });
 });
 
+// ── the newTabUrl path door's disposition for a STORED row ─────────────────────
+//
+// `ActionSchema.newTabUrl` refuses a value that does not start with `/`: it is
+// a path on this backend, which the console prefixes with the backend origin.
+// `saveMetaItem` stores the authored body verbatim, so a row saved before the
+// refusal can hold an absolute URL. No conversion can derive a backend path
+// from an external URL, so the row keeps its bytes and is READ AND NAMED:
+// served with `_diagnostics` locating `newTabUrl`, counted `invalid` at boot
+// and still registered (its next save is refused 422 by the same schema).
+const absoluteNewTabUrlRow = {
+    type: 'action',
+    name: 'export_invoice',
+    metadata: {
+        name: 'export_invoice', label: 'Export', type: 'script', objectName: 'crm_invoice',
+        target: 'exportInvoice', opensInNewTab: true,
+        newTabUrl: 'https://example.com/export/{recordId}',
+    },
+};
+
+describe('a stored action whose newTabUrl is an absolute URL — read and named, never rewritten', () => {
+    it('getMetaItem serves the row unchanged with _diagnostics naming newTabUrl', async () => {
+        const { engine } = makeStubEngine([absoluteNewTabUrlRow]);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const res: any = await protocol.getMetaItem({ type: 'action', name: 'export_invoice' });
+        expect(res.item.newTabUrl).toBe('https://example.com/export/{recordId}');
+        expect(res.item._diagnostics?.valid).toBe(false);
+        expect(res.item._diagnostics.errors.map((e: { path?: string }) => e.path)).toContain('newTabUrl');
+    });
+
+    it('boot hydration counts it invalid and STILL registers it with the stored value', async () => {
+        const { engine, registered } = makeStubEngine([absoluteNewTabUrlRow]);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const res = await protocol.loadMetaFromDb();
+        expect(res).toEqual({ loaded: 1, errors: 0, invalid: 1, storeUnavailable: false });
+        const action = registered.find((r) => r.kind === 'item' && r.type === 'action')!;
+        expect(action.body.newTabUrl).toBe('https://example.com/export/{recordId}');
+    });
+
+    it('CONTROL: the same row with a backend path loads valid', async () => {
+        const pathRow = {
+            ...absoluteNewTabUrlRow,
+            metadata: { ...absoluteNewTabUrlRow.metadata, newTabUrl: '/export/{recordId}' },
+        };
+        const { engine } = makeStubEngine([pathRow]);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const res = await protocol.loadMetaFromDb();
+        expect(res).toEqual({ loaded: 1, errors: 0, invalid: 0, storeUnavailable: false });
+    });
+});
+
 // ── [#20101] a declared DEFAULT is part of the canonical served shape ─────────
 //
 // `PageSchema` declares `type: PageTypeSchema.default('record')`: a page

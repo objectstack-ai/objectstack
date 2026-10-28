@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { jobBlock, rootCi, UI_JOBS } from './helpers/root-ci';
+import { jobBlock, rootCi, UI_JOBS, UI_LIVE_E2E_JOB } from './helpers/root-ci';
 
 /**
  * objectui#5304 — `Build & E2E` hung inside `apt-get update` and was cancelled
@@ -241,14 +241,16 @@ describe('ensure-chromium-ready.sh — the bound holds where GNU `timeout` is ab
 
 describe('the workflows actually use it', () => {
   /**
-   * The job that provisions Chromium: `build-e2e-ui` in objectstack's root
-   * ci.yml, objectui's `Build & E2E` (objectstack#25697). The ci.yml under
-   * `ui/.github/` runs nowhere (objectstack#25712). objectui's second caller,
-   * `live-e2e.yml`, left this list with it: it is row 17 of the
-   * objectstack#25697 workflow roster, "kept, follow-up port", and comes back
-   * here with that port.
+   * The jobs that provision Chromium: `build-e2e-ui` in objectstack's root
+   * ci.yml, objectui's `Build & E2E` (objectstack#25697), and `live-e2e-ui`,
+   * objectui's `live-e2e.yml` (row 17 of the objectstack#25697 workflow
+   * roster, "kept, follow-up port"), back with that port (objectstack#27154).
+   * The ci.yml under `ui/.github/` runs nowhere (objectstack#25712).
    */
-  const workflows = [{ file: 'ci.yml `build-e2e-ui`', read: () => jobBlock(rootCi(), UI_JOBS.buildE2e) }];
+  const workflows = [
+    { file: 'ci.yml `build-e2e-ui`', read: () => jobBlock(rootCi(), UI_JOBS.buildE2e) },
+    { file: 'ci.yml `live-e2e-ui`', read: () => jobBlock(rootCi(), UI_LIVE_E2E_JOB) },
+  ];
 
   /**
    * Whole-line comments removed. Required, not cosmetic: objectui's workflows

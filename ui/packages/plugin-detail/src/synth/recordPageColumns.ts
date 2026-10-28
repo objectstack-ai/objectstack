@@ -34,7 +34,7 @@
  * `rightRail` slot) folds into that same related column — one rail, not two.
  *
  * A page this module cannot read — no synthesized tab strip, or a tab whose
- * value it does not know (an authored `slots.tabs` strip) — answers `null`,
+ * value it does not know (an authored strip) — answers `null`,
  * and the host draws the tabs. Tabs are the correct rendering of any strip.
  */
 
@@ -65,6 +65,121 @@ export function recordPageTierFor(width: number, options: { embedded?: boolean }
 
 /** The three resident columns of the wide record page. */
 export type RecordPageColumn = 'details' | 'timeline' | 'related';
+
+/**
+ * Which of the two optional columns a reader keeps shown — the reader's own
+ * switches (objectstack#27052), kept per object in the console's
+ * workspace-preference store; never metadata. Details is always shown.
+ */
+export interface RecordPageColumnSwitches {
+  timeline: boolean;
+  related: boolean;
+}
+
+/**
+ * How a column tier lays the page out for the reader's switches
+ * (objectstack#27052). The tier says how many columns the WIDTH fits; the
+ * switches say which columns take part. A column that is off is not drawn:
+ *
+ *  - timeline off: its blocks fold into a 「动态」 (Activity) card at the foot
+ *    of the related column, and the related column takes the timeline's place;
+ *  - related off: the related column (with any folded timeline) stays behind
+ *    the rail toggle, as it does when the width cannot fit it.
+ *
+ * So timeline off on a three-column page draws details | related, related off
+ * draws details | timeline with the rail, and in the two-column tier timeline
+ * off draws details | related. Below the column tiers the page is tabbed and
+ * the switches are not read; they are kept for when it widens.
+ */
+export interface RecordPageArrangement {
+  /** The resident columns, left to right. Always starts with `details`. */
+  columns: RecordPageColumn[];
+  /** The timeline's blocks are drawn as the related column's foot card. */
+  timelineFolded: boolean;
+  /** The related column is drawn as a rail behind a toggle, not resident. */
+  relatedRail: boolean;
+}
+
+/**
+ * The arrangement of a column tier for the reader's switches. A pure reading
+ * of the two inputs, so the page re-flows by the same rule wherever it is
+ * drawn: a column that is off frees its room for the next.
+ */
+export function recordPageArrangementFor(
+  tier: 'two-column' | 'three-column',
+  switches: RecordPageColumnSwitches,
+): RecordPageArrangement {
+  const room = tier === 'three-column' ? 3 : 2;
+  const wanted: RecordPageColumn[] = ['details'];
+  if (switches.timeline) wanted.push('timeline');
+  if (switches.related) wanted.push('related');
+  const columns = wanted.slice(0, room);
+  return {
+    columns,
+    timelineFolded: !switches.timeline,
+    relatedRail: !columns.includes('related'),
+  };
+}
+
+/** The object-definition shape {@link recordPageColumnDefaults} reads. */
+export interface RecordPageObjectLike {
+  stageField?: unknown;
+  enable?: { files?: unknown } | null;
+  fields?: Record<string, unknown> | unknown[] | null;
+}
+
+function fieldsOf(object: RecordPageObjectLike | null | undefined): Array<Record<string, unknown>> {
+  const fields = object?.fields;
+  const list = Array.isArray(fields) ? fields : fields && typeof fields === 'object' ? Object.values(fields) : [];
+  return list.filter((f): f is Record<string, unknown> => !!f && typeof f === 'object' && !Array.isArray(f));
+}
+
+/** Why {@link recordPageColumnDefaults} turned the timeline on — or `null`, off. */
+export type RecordTimelineDefaultReason = 'stage-field' | 'option-kinds' | 'files' | null;
+
+/**
+ * Why an object is "worked" — the reason its record page shows the timeline
+ * by default — or `null` when it is not (objectstack#27052, the maintainer's
+ * ruling that the timeline suits only some objects and its presence is each
+ * reader's switch with an object-derived default). Read off the object as it
+ * is declared, with no key of its own, in this order:
+ *
+ *  1. `stageField` names a field — the object declares a lifecycle;
+ *  2. otherwise (and unless `stageField: false` turned the stage role off),
+ *     a field whose options declare a lifecycle `kind` (`open` / `won` /
+ *     `lost`) — the same declaration a stage path reads;
+ *  3. `enable.files: true` — records collect attachments, work products.
+ *
+ * Only what the object declares of itself counts. Being the `master_detail`
+ * parent of another object does not: a parent that merely owns child rows (a
+ * price book, a campaign, an event) is a container, not a worked record, and
+ * its middle column would be an empty stream.
+ */
+export function recordTimelineDefaultReason(
+  object: RecordPageObjectLike | null | undefined,
+): RecordTimelineDefaultReason {
+  if (!object) return null;
+  if (typeof object.stageField === 'string' && object.stageField.length > 0) return 'stage-field';
+  if (object.stageField !== false) {
+    const declaresKinds = fieldsOf(object).some(
+      (field) =>
+        Array.isArray(field.options) &&
+        field.options.some((option) => !!option && typeof option === 'object' && (option as { kind?: unknown }).kind !== undefined),
+    );
+    if (declaresKinds) return 'option-kinds';
+  }
+  if (object.enable?.files === true) return 'files';
+  return null;
+}
+
+/**
+ * The column switches a reader who never chose gets for `object`: the
+ * timeline on when the object is worked ({@link recordTimelineDefaultReason}),
+ * the related column on.
+ */
+export function recordPageColumnDefaults(object: RecordPageObjectLike | null | undefined): RecordPageColumnSwitches {
+  return { timeline: recordTimelineDefaultReason(object) !== null, related: true };
+}
 
 /**
  * The column a synthesized tab lands in, by the tab's stable `value`; `null`

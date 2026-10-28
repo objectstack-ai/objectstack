@@ -154,6 +154,22 @@ describe('CRUD / screen / map form ↔ Zod reconciliation (#4045)', () => {
     expect(parse(0), 'the contract refuses 0').toBe(false);
   });
 
+  it('get_record.fields: the form\'s minItems is the contract\'s refusal boundary', () => {
+    // [#27166] The contract refuses an empty projection at every save door; a
+    // form that offers an empty list offers a value the save always refuses.
+    const fields = formSchema('get_record').properties?.fields as
+      | { type?: string; minItems?: number }
+      | undefined;
+    expect(fields?.type).toBe('array');
+    expect(fields?.minItems).toBe(1);
+
+    const parse = (value: string[]) =>
+      (GetRecordConfigSchema as unknown as { safeParse(v: unknown): { success: boolean } })
+        .safeParse({ objectName: 'account', fields: value }).success;
+    expect(parse(['name']), 'the contract accepts one name').toBe(true);
+    expect(parse([]), 'the contract refuses an empty list').toBe(false);
+  });
+
   describe('assignment: pinned as un-reconcilable, with the reason on record', () => {
     // `assignment` deliberately has NO entry in builtin-node-config.zod.ts: with
     // no `assignments` wrapper, the TOP-LEVEL config keys ARE the author's

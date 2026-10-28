@@ -2854,7 +2854,7 @@ const MEMBER_PINS: Record<string, MemberPin> = {
   },
   'action:menu.actions': {
     file: 'packages/components/src/renderers/action/__tests__/action-group-menu-inputs-11168.test.tsx',
-    pins: 'Members are ACTION OBJECTS, one menu item each, read through the real `SchemaRenderer` with the Radix menu opened: `label` is the item text (falling back to `name`), a member\'s own `visible` hides and its own `disabled` greys THAT item (a sibling is the control), `tags: [separator-before]` draws the divider, `variant: destructive` paints the item, and selecting an item hands the runner the member under its OWN `type` with its own keys (`target`, `objectName`). The list kind is pinned against the contract: the spec refuses an `object` at `actions` by kind and accepts a list of objects (objectui#11168 slice 1).',
+    pins: 'Members are ACTION OBJECTS, one menu item each, read through the real `SchemaRenderer` with the Radix menu opened: `label` is the item text (falling back to `name`), a member\'s own `visible` hides and its own `disabled` greys THAT item (a sibling is the control), `tags: [separator-before]` draws the divider, `variant: danger` paints the item, and selecting an item hands the runner the member under its OWN `type` with its own keys (`target`, `objectName`). The list kind is pinned against the contract: the spec refuses an `object` at `actions` by kind and accepts a list of objects (objectui#11168 slice 1).',
   },
   'action:menu.visible': {
     file: 'packages/components/src/renderers/action/__tests__/action-group-menu-inputs-11168.test.tsx',

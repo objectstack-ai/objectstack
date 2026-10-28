@@ -891,16 +891,17 @@ export interface UIActionSchema {
   
   /**
    * Button variant — the vocabulary `@objectstack/spec`'s action block rows
-   * declare, by reference: the Button primitive's `default`, `destructive`,
-   * `outline`, `secondary`, `ghost` and `link`, plus `primary`, which renders
-   * as `default`.
+   * declare, by reference: the Button primitive's `default`, `outline`,
+   * `secondary`, `ghost` and `link`, its destructive arm spelled `danger`,
+   * plus `primary`, which renders as `default`.
    *
-   * objectstack#26665: this is the BLOCK dialect, not the one `ActionSchema`
-   * speaks (`primary | secondary | danger | ghost | link`). The block rows
-   * refuse `danger`, so this type does too; the four block renderers translate
-   * at their forward to the runner, where `destructive` becomes `danger`
-   * (`toRunnerVariant` in `@object-ui/components`). `link` was missing here
-   * while the rows declared it: aligned, not widened.
+   * objectstack#26779: `danger` is the word `ActionSchema` speaks
+   * (`primary | secondary | danger | ghost | link`) and the runner reads, so a
+   * destructive action is spelled one way as a declaration and as a block.
+   * The block rows refuse the retired `destructive`, so this type does too;
+   * the four block renderers forward `danger` as it is and draw it as the
+   * primitive's `destructive` (`toRunnerVariant` / `toButtonVariant` in
+   * `@object-ui/components`).
    */
   variant?: SpecActionButtonProps['variant'];
   

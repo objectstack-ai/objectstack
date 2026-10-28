@@ -345,3 +345,54 @@ describe('FileI18nAdapter supportedLocales narrowing (#7679)', () => {
     expect(file.getLocales()).toEqual(['en', 'zh-CN', 'fr-FR']);
   });
 });
+
+describe('FileI18nAdapter keeps the owner\'s app label across a module bundle (#27086)', () => {
+  // The app package's pack carries the app's label and its own navigation; a
+  // module package's pack carries only the navigation id it contributes into
+  // that app (`manifest.navigationContributions`), with no `apps.APP.label`.
+  // `AppPlugin` loads each package's bundle through `loadTranslations`, in
+  // package order, so the merge must keep the owner's label in either order.
+  const OWNER = { apps: { crm_enterprise: { label: '企业 CRM', navigation: { nav_accounts: { label: '客户' } } } } };
+  const MODULE = { apps: { crm_enterprise: { navigation: { nav_case: { label: '工单' } } } } };
+  const MERGED = {
+    apps: { crm_enterprise: { label: '企业 CRM', navigation: { nav_accounts: { label: '客户' }, nav_case: { label: '工单' } } } },
+  };
+
+  it('owner first, module second', () => {
+    const i18n = new FileI18nAdapter();
+    i18n.loadTranslations('zh-CN', OWNER);
+    i18n.loadTranslations('zh-CN', MODULE);
+    expect(i18n.getTranslations('zh-CN')).toEqual(MERGED);
+    expect(i18n.t('apps.crm_enterprise.label', 'zh-CN')).toBe('企业 CRM');
+  });
+
+  it('module first, owner second', () => {
+    const i18n = new FileI18nAdapter();
+    i18n.loadTranslations('zh-CN', MODULE);
+    i18n.loadTranslations('zh-CN', OWNER);
+    expect(i18n.getTranslations('zh-CN')).toEqual(MERGED);
+    expect(i18n.t('apps.crm_enterprise.navigation.nav_case.label', 'zh-CN')).toBe('工单');
+  });
+
+  // A TS/JS literal can spell the optional label as present-but-`undefined`,
+  // and the schema keeps that key; it must not erase the owner's label.
+  const MODULE_UNDEFINED_LABEL = {
+    apps: { crm_enterprise: { label: undefined, navigation: { nav_case: { label: '工单' } } } },
+  };
+
+  it('owner first, then a module bundle whose label is present but undefined', () => {
+    const i18n = new FileI18nAdapter();
+    i18n.loadTranslations('zh-CN', OWNER);
+    i18n.loadTranslations('zh-CN', MODULE_UNDEFINED_LABEL);
+    expect(i18n.getTranslations('zh-CN')).toEqual(MERGED);
+    expect(i18n.t('apps.crm_enterprise.label', 'zh-CN')).toBe('企业 CRM');
+  });
+
+  it('a module bundle whose label is present but undefined first, then the owner', () => {
+    const i18n = new FileI18nAdapter();
+    i18n.loadTranslations('zh-CN', MODULE_UNDEFINED_LABEL);
+    i18n.loadTranslations('zh-CN', OWNER);
+    expect(i18n.getTranslations('zh-CN')).toEqual(MERGED);
+    expect(i18n.t('apps.crm_enterprise.label', 'zh-CN')).toBe('企业 CRM');
+  });
+});

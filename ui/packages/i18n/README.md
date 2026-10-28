@@ -409,17 +409,17 @@ package's **`studio` namespace**,
   packs and not members of it, so the namespace is outside that test's subject
   rather than an exception to it. Its own parity — every `en` key has a `zh`
   row with the same `{placeholders}` — is held by
-  [`src/__tests__/studio-namespace.test.ts`](./src/__tests__/studio-namespace.test.ts)
-  and, while the move is in progress, by `pnpm check:i18n-designer-parity`
-  over both homes together.
+  [`src/__tests__/studio-namespace.test.ts`](./src/__tests__/studio-namespace.test.ts).
 
-The move runs in slices. Until the last one a key lives in exactly one home —
-the app-shell table or the namespace — and app-shell's lookup asks the table
-first and the namespace second, so no call site changes. The call-site gate
+The move ran in slices, and while it ran a key lived in exactly one home — the
+app-shell table or the namespace — with app-shell's lookup asking the table
+first and the namespace second, so no call site changed. The last slice
+(objectstack#25922 S7) deleted the app-shell table and the table-first lookup,
+and retired `check:i18n-designer-parity`, which paired the two homes. App-shell's
+`t()` / `tOptional()` now resolve from the namespace alone. The call-site gate
 ([`scripts/check-i18n-call-site-keys.mjs`](../../scripts/check-i18n-call-site-keys.mjs))
 still skips app-shell's translator **by declaration** (its `EXCLUDED_TRANSLATORS`
-entry), so a second local table cannot appear silently. The last slice deletes
-the app-shell table and retires `check:i18n-designer-parity` with it.
+entry), so a second local table cannot appear silently.
 
 ## Links
 

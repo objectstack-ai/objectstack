@@ -510,7 +510,6 @@
     "checkPageRecordBindingPlacement": "src/ui/page.zod.ts#checkPageRecordBindingPlacement (function)",
     "checkPageRegionPlacement": "src/ui/page.zod.ts#checkPageRegionPlacement (function)",
     "checkPageRequiresKind": "src/ui/page.zod.ts#checkPageRequiresKind (function)",
-    "checkPageSlotPair": "src/ui/page.zod.ts#checkPageSlotPair (function)",
     "checkPageSourceCompleteness": "src/ui/page.zod.ts#checkPageSourceCompleteness (function)",
     "columnSummaryAlias": "src/ui/view-grouping-query.ts#columnSummaryAlias (function)",
     "compileListViewGroupQuery": "src/ui/view-grouping-query.ts#compileListViewGroupQuery (function)",

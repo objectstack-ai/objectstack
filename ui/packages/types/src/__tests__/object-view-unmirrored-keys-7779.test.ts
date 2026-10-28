@@ -200,7 +200,7 @@ const READ_TEXT: Record<ReadMirrored, ReadonlyArray<readonly [file: string, text
   // objectui#10885: the node's `navigation` is still read, now as the fallback
   // behind the active named view's.
   navigation: [[READER, 'const navigationConfig: ViewNavigationConfig | undefined = currentNamedViewConfig?.navigation ?? schema.navigation;']],
-  searchableFields: [[READER, 'searchableFields: currentNamedViewConfig?.searchableFields ?? activeView?.searchableFields ?? (schema as any).searchableFields,']],
+  searchableFields: [[READER, 'searchableFields: currentNamedViewConfig?.searchableFields ?? activeView?.searchableFields ?? schema.searchableFields,']],
   allowCreateView: [
     [READER, 'allowCreateView: schema.allowCreateView,'],
     [SWITCHER, 'const createViewButton = schema.allowCreateView ? ('],
@@ -1107,7 +1107,7 @@ describe('objectui#7779 — the renderer reads the eight mirrored keys, which is
     expect(namedViewReads()).not.toContain(SPEC_RETIRED_UNREAD);
     expect(src).not.toContain('activeView?.filterableFields');
     // Control on the same file and the same spelling: its sibling's rung stands.
-    expect(src).toContain('searchableFields: currentNamedViewConfig?.searchableFields ?? activeView?.searchableFields ?? (schema as any).searchableFields,');
+    expect(src).toContain('searchableFields: currentNamedViewConfig?.searchableFields ?? activeView?.searchableFields ?? schema.searchableFields,');
     // …and `NamedListView` carries the tombstone, while the node's two faces keep
     // the spec's slot by reference, which carries the spec's own tombstone in at
     // the pin bump that takes the retirement.
@@ -1668,10 +1668,11 @@ describe('objectui#7924 — the per-member liveness census on `NamedListView`, r
     expect(declared.has('data'), '`data` is a declared member since objectui#8980; the census arithmetic subtracts the whole read set').toBe(true);
     expect(reads.reads).toContain('data');
     // …and it is reached through the DECLARED path: the cast on the named-view
-    // config is gone. The two neighbouring casts are untouched and stay — the
-    // host `views` entry is an untyped host shape, and `data` on the node is one
-    // of the 27 objectui#5097 host-composition keys.
-    expect(readRepo(READER)).toContain('data: currentNamedViewConfig?.data ?? (activeView as any)?.data ?? (schema as any).data,');
+    // config is gone, and so is the one on the node (objectstack#25918) — `data`
+    // is declared there too, via `BaseSchema`, and is not one of the 27
+    // objectui#5097 host-composition keys. The `activeView` cast stays: the
+    // host `views` entry is an untyped host shape.
+    expect(readRepo(READER)).toContain('data: currentNamedViewConfig?.data ?? (activeView as any)?.data ?? schema.data,');
     expect(readRepo(READER)).not.toContain('(currentNamedViewConfig as any)?.data');
   });
 

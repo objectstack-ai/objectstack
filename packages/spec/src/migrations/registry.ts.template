@@ -1596,6 +1596,19 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'result cache exists.',
   },
   {
+    id: 'currency-config-fixed-default-currency-required',
+    order: 112,
+    text:
+      'It also removes the `\'CNY\'` default of `currencyConfig.defaultCurrency` (maintainer '
+      + 'ruling X: an amount whose currency is not known takes the tenant default, and nothing '
+      + 'guesses). A `fixed` config without a code is refused with the prescription instead of '
+      + 'becoming a yuan field, and a `dynamic` config parses to output with no code. The D2 '
+      + 'conversion `currency-config-dynamic-default-currency-removed` strips the unread code an '
+      + 'earlier parse baked into `dynamic` stored rows and built artifacts; a `fixed` config is '
+      + 'never converted, so a stored row saved without a code loads with diagnostics and is '
+      + 'refused at its next save. Retired from the load path.',
+  },
+  {
     id: 'currency-config-precision-retired',
     order: 41,
     text:
@@ -2587,19 +2600,19 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'record is the semantic entry `page-requires-non-compiled-kind-refused`.',
   },
   {
-    id: 'page-slots-details-beside-tabs-refused',
-    order: 92,
+    id: 'page-slots-tabs-retired',
+    order: 112,
     text:
-      'It also refuses a page that authors both `slots.details` and `slots.tabs`. The two slots read '
-      + 'as independent and are not: `details` is the body of the Details tab, that tab lives inside '
-      + 'the synthesized `page:tabs` strip, and `tabs` replaces the whole strip, so the console\'s '
-      + 'synthesizer never read a `details` authored beside it and its sections and hidden fields '
-      + 'silently never applied. `PageSchema` now refuses the pair at `slots.details`, naming both '
-      + 'slots and the fix — the `record:details` component as the `children` of a `tabs` item — so '
-      + '`objectstack validate` and the metadata save door agree; the platform\'s own `sys_user_detail` '
-      + 'page moved its details body into its first tab. No key is removed, so there is no tombstone, '
-      + 'and no D2 conversion exists: which tab carries the body is the author\'s decision. Its D3 '
-      + 'record is the semantic entry `page-slots-details-beside-tabs-refused`.',
+      'It also retires the record page\'s `slots.tabs` (ADR-0085; maintainer ruling on the record-page '
+      + 'definition surfaces): the slot replaced the whole synthesized tab strip, dropping the related '
+      + 'lists, approvals, attachments and history the platform composes from the object, and kept the '
+      + 'page tabbed at every width instead of taking the record page\'s columns. The slot map keeps '
+      + 'six slots; `slots.tabs` is a tombstone carrying the prescription, and `related` / '
+      + '`relatedLists`, which were aliases into it, are refused with the same remedy: set '
+      + '`relatedList` on the child\'s reference field, author `slots.details` for the Details body, and '
+      + 'make a page that needs its own strip `kind: \'full\'`. The `details` + `tabs` pair refusal left '
+      + 'with the slot. The D2 conversion `page-slots-tabs-removed` strips the slot from stored pages, '
+      + 'retired from the load path; its D3 record is the semantic entry `page-slots-tabs-retired`.',
   },
   {
     id: 'permission-admin-scope-binding-authoring-retired',
@@ -2972,6 +2985,20 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`form-layout-inline-grid-to-vertical` rewrites them to `vertical` (behaviour-preserving, '
       + '`columns` untouched) on `object-form` page components, on every form payload a view '
       + 'carries, and on the assembled-manifest `viewItems` channel.',
+  },
+  {
+    id: 'ui-form-view-type-layout-only',
+    order: 112,
+    text:
+      'It also narrows the form view `type` to the form\'s layout — `simple`, `tabbed` or `wizard` '
+      + '(ADR-0050, accepted by the maintainer\'s ruling): `drawer` and `modal` named where a form is '
+      + 'opened, which is the caller\'s open mode, and `split` was a list-beside-record view mode, '
+      + 'which the same release had already made a reader\'s preference. Each retired member is '
+      + 'refused at parse with its prescription; the split-only keys `sections[].pane`, `splitSize` '
+      + 'and `splitResizable` are tombstoned with it. The D2 conversion '
+      + '`form-view-presentation-types-removed` deletes the member, which lands the form on the '
+      + '`simple` default, and strips the three keys from existing sources and stored rows. Its D3 '
+      + 'record is the semantic entry `ui-form-view-type-layout-only`.',
   },
   {
     id: 'ui-marketplace-installed-list-retired',

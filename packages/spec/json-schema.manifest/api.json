@@ -254,6 +254,7 @@
     "api/MarkAllNotificationsReadResponse",
     "api/MarkNotificationsReadRequest",
     "api/MarkNotificationsReadResponse",
+    "api/MetadataAuthoringClient",
     "api/MetadataAuthoringSurface",
     "api/MetadataBulkRegisterRequest",
     "api/MetadataBulkResponse",

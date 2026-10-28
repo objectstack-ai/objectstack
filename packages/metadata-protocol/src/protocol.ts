@@ -137,8 +137,8 @@ import { readServiceSelfInfo, readChannelRoute, readAuthFamilies, isSubscribable
 import { isAppPackageIdKey } from '@objectstack/spec/api';
 // [#24395] The save's authoring surface, and the draft row's per-key
 // provenance read back for the strict draft read.
-import { MetadataAuthoringSurfaceSchema, type MetadataAuthoringSurface } from '@objectstack/spec/api';
-import { storedDraftChanges } from './draft-changes.js';
+import { MetadataAuthoringSurfaceSchema, type MetadataAuthoringClient, type MetadataAuthoringSurface } from '@objectstack/spec/api';
+import { authoringClientOf, storedDraftChanges } from './draft-changes.js';
 import {
     parseFilterAST, isFilterAST, VALID_AST_OPERATORS, REFERENCE_VALUE_TYPES,
     resolveSearchFieldResolution,
@@ -425,6 +425,8 @@ import { isDeclaredCodeDatasource, isHostCodeDatasource } from './protocol-code-
 import { legacyOrganizationRowsOf, withoutLegacyOrganizationRows } from './protocol-legacy-organization-rows.js';
 // [#25467 cut 30] The object-extender fold onto a MetadataService object body.
 import { foldObjectExtendersFromRegistry } from './protocol-object-extender-fold.js';
+// [#25467 cut 31] The disabled-package face of the by-name item read.
+import { readMetaItemFace } from './protocol-meta-item-face.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -677,7 +679,7 @@ export function isItemOfDisabledPackage(registry: any, item: unknown): boolean {
  * finds no draft row and the read of a disabled package's draft, so the two
  * answers are byte-identical.
  */
-function noPendingDraftError(type: string, name: string): Error & { code: 'NO_DRAFT'; status: 404 } {
+export function noPendingDraftError(type: string, name: string): Error & { code: 'NO_DRAFT'; status: 404 } {
     const err = new Error(`No pending draft exists for ${type}/${name}.`) as Error & { code: 'NO_DRAFT'; status: 404 };
     err.code = 'NO_DRAFT';
     err.status = 404;
@@ -10703,17 +10705,13 @@ export class ObjectStackProtocolImplementation implements
         type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
         member?: string,
     }, face: 'served' | 'execution') {
-        if (request.type === 'object' && isObjectOfDisabledPackage(this.engine?.registry, request.name)) {
-            throw objectPackageDisabledError(request.name);
-        }
-        const answer = await this.readMetaItem(request, { face });
-        if (request.type === 'object' || request.type === 'package'
-            || !isItemOfDisabledPackage(this.engine?.registry, answer?.item)) {
-            return answer;
-        }
-        if (request.state === 'draft') throw noPendingDraftError(request.type, request.name);
-        const { item: _withheld, registration: _servedOnly, ...envelope } = answer as typeof answer & { registration?: unknown };
-        return { ...envelope, item: undefined };
+        // [#25467 cut 31] The body moved to `protocol-meta-item-face.ts` (see `MetaItemFaceHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof readMetaItemFace> = {
+            get engine() { return readEngine(); },
+            readMetaItem: (...a) => this.readMetaItem(...a),
+        };
+        return readMetaItemFace.call(host, request, face);
     }
 
     /**
@@ -20179,7 +20177,7 @@ export class ObjectStackProtocolImplementation implements
     // STORED content hash itself (`migrateStoredMetadata`): it reaches the
     // repository as given. ⛔ No transport sets it — every door builds its
     // request field by field from named inputs, never by spreading a body.
-    async saveMetaItem(request: { type: string, name: string, item?: any, parentVersion?: string | null, storedParentVersion?: string | null, actor?: string, force?: boolean, mode?: 'draft' | 'publish', packageId?: string | null, source?: string, writeFace?: MetadataWriteFace, surface?: MetadataAuthoringSurface }) {
+    async saveMetaItem(request: { type: string, name: string, item?: any, parentVersion?: string | null, storedParentVersion?: string | null, actor?: string, force?: boolean, mode?: 'draft' | 'publish', packageId?: string | null, source?: string, writeFace?: MetadataWriteFace, surface?: MetadataAuthoringSurface, client?: MetadataAuthoringClient }) {
         // [ADR-0131 D6] FIRST, before every other gate and every read: an
         // organization-scoped write is refused for every type, draft or
         // publish. See {@link organizationScopedWriteRefusal}.
@@ -20233,11 +20231,28 @@ export class ObjectStackProtocolImplementation implements
         // before any read or write, with the request-envelope refusal above —
         // never stamped as `api`, which would record a caller's mistake as
         // a fact about who wrote the draft. The HTTP doors never send
-        // `copilot` (`metaSaveRequestOptions`); an in-process tool may.
+        // `copilot` or `mcp` (`metaSaveRequestOptions`); an in-process tool may.
         if (request.surface !== undefined && !MetadataAuthoringSurfaceSchema.safeParse(request.surface).success) {
             const err: any = new Error(
-                `saveMetaItem 'surface' must be one of copilot, studio or api for '${request.type}/${request.name}'; `
-                + `got ${JSON.stringify(request.surface)}. Omit it for a save that is neither the copilot nor Studio (recorded as api).`,
+                `saveMetaItem 'surface' must be one of copilot, mcp, studio or api for '${request.type}/${request.name}'; `
+                + `got ${JSON.stringify(request.surface)}. Omit it for a save that is none of the copilot, an MCP client or Studio (recorded as api).`,
+            );
+            err.code = 'INVALID_REQUEST';
+            err.status = 400;
+            throw err;
+        }
+        // [#27176] The OAuth client an `mcp` save names, stated only by the
+        // MCP build door: refused beside any other surface (a client is the
+        // MCP door's attribution, never a label another caller borrows) and
+        // refused malformed, both before anything is read or written.
+        if (request.client !== undefined
+            && (request.surface !== 'mcp' || authoringClientOf(request.client) === undefined)) {
+            const err: any = new Error(
+                request.surface !== 'mcp'
+                    ? `saveMetaItem 'client' is stated only with surface 'mcp' for '${request.type}/${request.name}'; `
+                      + `got surface ${JSON.stringify(request.surface ?? null)}. Only the MCP build door names the OAuth client it verified.`
+                    : `saveMetaItem 'client' must be { id, name? } with a non-empty id and, when present, a non-empty name `
+                      + `for '${request.type}/${request.name}'.`,
             );
             err.code = 'INVALID_REQUEST';
             err.status = 400;
@@ -21626,7 +21641,11 @@ export class ObjectStackProtocolImplementation implements
                 // server-stated rewrite — `migrate-stored`, the only caller
                 // that states a `source` — is not authoring and records none.
                 ...(mode === 'draft' && request.source === undefined
-                    ? { draftChangesBy: request.surface ?? 'api' }
+                    ? {
+                        draftChangesBy: request.surface ?? 'api',
+                        // [#27176] The client the MCP door verified, beside `mcp`.
+                        ...(request.client !== undefined ? { draftChangesClient: authoringClientOf(request.client) } : {}),
+                    }
                     : {}),
             });
             // Persistence succeeded — NOW it's safe to mutate the

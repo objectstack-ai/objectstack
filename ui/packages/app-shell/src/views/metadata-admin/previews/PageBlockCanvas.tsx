@@ -223,8 +223,10 @@ export interface PageBlockCanvasProps {
 
 /** Canonical record-page slots, in render order. A `kind:'slotted'` page
  *  overrides individual slots; unoverridden ones are filled by the synthesizer.
- *  We surface all of them so an author can override an inherited slot too. */
-export const SLOT_ORDER = ['header', 'actions', 'alerts', 'highlights', 'details', 'tabs', 'discussion'] as const;
+ *  We surface all of them so an author can override an inherited slot too.
+ *  There is no `tabs` slot (objectstack#27053): the tab strip is composed from
+ *  the object, and a page that needs its own strip is a `kind:'full'` page. */
+export const SLOT_ORDER = ['header', 'actions', 'alerts', 'highlights', 'details', 'discussion'] as const;
 
 /** slots object → one region per slot (single component normalised to array). */
 export function slotsToRegions(slots: Record<string, unknown> | undefined): Region[] {
@@ -251,9 +253,16 @@ function readRegions(
   draft: Record<string, unknown>,
 ): { regions: Region[]; shape: 'regions' | 'children' | 'slots' } {
   // Slotted record page — edit the named slots (must win over an empty
-  // `regions: []`, which slotted pages carry).
+  // `regions: []`, which slotted pages carry). A slotted page with no `slots`
+  // key at all is the page Studio creates for a record page — every slot
+  // inherited, i.e. the synthesized default — so it opens on the same slot
+  // editor with every slot empty, never on a blank regions canvas whose "Add
+  // region" would write regions the slotted page never reads.
   const slots = (draft as any).slots;
-  if ((draft as any).kind === 'slotted' && slots && typeof slots === 'object' && !Array.isArray(slots)) {
+  if (
+    (draft as any).kind === 'slotted'
+    && (slots === undefined || (slots && typeof slots === 'object' && !Array.isArray(slots)))
+  ) {
     return { regions: slotsToRegions(slots), shape: 'slots' };
   }
   const raw = (draft as any).regions;

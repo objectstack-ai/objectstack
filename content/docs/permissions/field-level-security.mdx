@@ -63,12 +63,23 @@ fields: {
   **that** record, and its `editable` list is the write gate's own verdict on
   an update of the stored row. So a lock that applies from a stage onward
   disables the field only on the rows its condition names — this is the
-  answer a record's edit form reads. A row that is absent or that the caller
-  cannot read answers the record read's `404`. The answer is field-level
+  answer a record's edit form and the record page's in-place edit read. A
+  list view's inline edit locks a whole column, which cannot split per row,
+  so it keeps the row-blind answer. A row that is absent or that the caller
+  cannot read answers the record read's `404`. `editable` is field-level
   only: the object grant and the record's row-level write scope (sharing,
-  row-level security, ownership) are not part of it, so on a row the caller
-  may read but not write it still lists fields as editable, and the update
-  is refused as a whole.
+  row-level security, ownership) are not part of it. Those are `writable`,
+  the row's own verdict: `false` on a row the caller may read but not write,
+  where an update is refused as a whole, so a client need not offer the
+  edit at all. It comes from the write gate too, run over an update of the
+  row without performing it. A stored row outside a row-level `check` also
+  answers `false`: an update that leaves it as it is fails the check, while a
+  save that moves the checked value back inside it can pass. `true` does not
+  promise a save succeeds: a pending approval's record lock, rules judged on
+  the values sent (conditional read-only, validation), a data source that
+  refuses writes, the platform's own rules for its own records (comments,
+  attachments, mail messages, approval requests) and an object the API serves
+  read-only still apply when the record is saved.
 - **Union without deny is unchanged.** A matched conditioned lock is still
   out-voted by another set's unconditioned `editable: true`; an entry
   without `when` votes on every row, as before (ADR-0066 ⑧, note of

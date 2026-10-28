@@ -367,6 +367,37 @@ gh label create needs:upgrade-harness -R objectstack-ai/objectstack -c 006b75 -d
 # families.
 gh label create needs:contract-review -R objectstack-ai/objectstack -c bfdadc -d "Marker only — PR awaits its at-tier Contract review PASS; no check reads it, the record decides" 2>/dev/null || true
 
+# pinned and work-in-progress — the two STALE-SWEEP EXEMPTION labels. Their
+# reader is a WORKFLOW rather than a query: `.github/workflows/stale.yml`
+# (actions/stale) skips any issue or PR carrying one of them. Like the needs:*
+# rows above they are not PM states, not lanes and not routing seams: one-of
+# with nothing, they block no dispatch, and no sweep in scripts/pm/ reads them.
+# Measured 2026-10-28 on objectstack-ai/objectstack: both answered 404 — the
+# exemption the workflow declares for them was dead, because a label that does
+# not exist cannot be applied (triage grade 6464839941 on #27151: create both).
+#
+# pinned — named readers: stale.yml `exempt-issue-labels` AND
+# `exempt-pr-labels`, and `scripts/pm/mailbox-open.mjs` (PR #27143), which sends
+# it as STALE_EXEMPT_LABEL in PR_LABELS on every mailbox `pr_create`, so a
+# mailbox PR — never merged, often quiet for weeks — is not marked stale at 30
+# days and closed 7 days later. Applied by that tool, or by hand to any issue or
+# PR that must outlive the sweep.
+#
+# work-in-progress — one named reader only: stale.yml `exempt-pr-labels`. No
+# tool applies it; it is applied by hand to a PR that must survive a quiet
+# stretch. It is declared here so that the exemption the workflow already
+# declares is not dead — the alternative, editing it out of stale.yml, is a
+# Tier H change this file does not make.
+#
+# Main repo only, for the needs:* rows' reason: the workflow that reads them
+# lives here (the other four repos' workflows were not readable from the seat
+# that measured this — widening the rows is a vocabulary decision, not a
+# maintenance edit). Colour cfd3d7 is the sweep-exempt family `tracking` and
+# `status:parked` already share; `tracking` is itself in the same stale.yml
+# exemption list.
+gh label create pinned           -R objectstack-ai/objectstack -c cfd3d7 -d "Exempt from the stale sweep (stale.yml, issues and PRs); every pm:mailbox PR carries it" 2>/dev/null || true
+gh label create work-in-progress -R objectstack-ai/objectstack -c cfd3d7 -d "PR exempt from the stale sweep (stale.yml exempt-pr-labels); applied by hand, no tool sets it" 2>/dev/null || true
+
 # Routing labels exist only on the main backlog repo, and mark SEAM cards only
 # (file-at-destination ruling: pure sibling-repo fixes live in the target repo).
 #

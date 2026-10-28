@@ -7,7 +7,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { useDisplayLocale, useObjectTranslation } from '@object-ui/i18n';
+import { useDisplayLocale, useLocalization, useObjectTranslation } from '@object-ui/i18n';
 
 /** What `ActionRunner.setTranslator` takes. */
 type ActionRunnerTranslate = (key: string, options: { defaultValue: string }) => string;
@@ -65,5 +65,33 @@ export function useActionRunnerDisplayLocale(): ActionRunnerDisplayLocale {
     latest.current = displayLocale;
   });
   const [read] = useState<ActionRunnerDisplayLocale>(() => () => latest.current);
+  return read;
+}
+
+/**
+ * What `ActionRunner.setTenantCurrency` takes: the tenant default currency,
+ * read when a copy template is filled.
+ */
+type ActionRunnerTenantCurrency = () => string | undefined;
+
+/**
+ * The tenant default currency both React owners of an `ActionRunner` install
+ * beside the display locale, so a `{{ amount | currency }}` hole with no
+ * argument in an action's `confirmText` and `successMessage` formats in it. It
+ * is `useLocalization().currency` — the `localization.currency` setting every
+ * currency field and measure renderer reads; ⛔ no second copy here. Undefined
+ * when the tenant has none, and such a hole then does not render.
+ *
+ * Read when CALLED, by the same latest-ref pattern as
+ * {@link useActionRunnerTranslator}, so a settings change reaches a runner
+ * that was built before it.
+ */
+export function useActionRunnerTenantCurrency(): ActionRunnerTenantCurrency {
+  const { currency } = useLocalization();
+  const latest = useRef(currency);
+  useEffect(() => {
+    latest.current = currency;
+  });
+  const [read] = useState<ActionRunnerTenantCurrency>(() => () => latest.current);
   return read;
 }

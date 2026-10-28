@@ -85,10 +85,11 @@ import { issueRefusal, plainRefusal } from './metadataError.js';
 import { isStudioHiddenSystemField } from './studioHiddenSystemField.js';
 import {
   addedArrayElements,
-  copilotDraftMarkOf,
+  agentDraftMarkOf,
   DraftChip,
   DraftSourceLine,
-  type CopilotDraftMark,
+  isAgentDraftSurface,
+  type AgentDraftMark,
 } from './StudioDraftMark.js';
 
 type Row = Record<string, unknown>;
@@ -372,7 +373,7 @@ export function useObjectListViewDraft({
         const draftChanges = draft ? readDraftChanges(draftResp) : null;
         const marksNeedPublished =
           !!draftChanges &&
-          draftChanges.some((c) => c.by === 'copilot') &&
+          draftChanges.some((c) => isAgentDraftSurface(c.by)) &&
           !draftChanges.some((c) => c.path.length === 0);
         // A failure of that added read costs the element marks only, never the
         // editor: the draft is the buffer either way.
@@ -608,12 +609,12 @@ function listViewTitle(target: ListViewTarget, item: Row, objectText: string, lo
 
 /** objectui#12725 — the copilot's marks on the kanban card section's settings. */
 interface KanbanCardMarks {
-  fields: CopilotDraftMark | null;
+  fields: AgentDraftMark | null;
   /** The card fields (`kanban.columns`) the copilot added, by name. */
   addedFields: string[];
-  title: CopilotDraftMark | null;
-  open: CopilotDraftMark | null;
-  groupBy: CopilotDraftMark | null;
+  title: AgentDraftMark | null;
+  open: AgentDraftMark | null;
+  groupBy: AgentDraftMark | null;
 }
 
 const SORT_ID = 'studio-list-view-sort';
@@ -924,10 +925,10 @@ export function ObjectListViewInspector({
   // objectui#12725 — the copilot's draft marks. A key path is the item's own:
   // a record-shaped view keeps its list body under `config`.
   const bodyPath = isPlainObject(working.config) ? ['config'] : [];
-  const markOf = (...path: string[]) => copilotDraftMarkOf(draftChanges, [...bodyPath, ...path]);
+  const markOf = (...path: string[]) => agentDraftMarkOf(draftChanges, [...bodyPath, ...path]);
   // `undefined`: the published body is unknown, so no element is marked.
   const publishedBody = published ? listBodyOf(published) : published;
-  const addedNames = (mark: CopilotDraftMark | null, draftArray: unknown, publishedArray: unknown): string[] =>
+  const addedNames = (mark: AgentDraftMark | null, draftArray: unknown, publishedArray: unknown): string[] =>
     mark && publishedBody !== undefined
       ? addedArrayElements(draftArray, publishedArray)
           .map((c) => colFieldName(c) ?? (typeof c === 'string' ? c : ''))
@@ -952,8 +953,8 @@ export function ObjectListViewInspector({
     columnsMark,
     filterMark,
     sortMark,
-  ].filter((m): m is CopilotDraftMark => m !== null);
-  const latestMark = drawnMarks.reduce<CopilotDraftMark | null>(
+  ].filter((m): m is AgentDraftMark => m !== null);
+  const latestMark = drawnMarks.reduce<AgentDraftMark | null>(
     (latest, m) => (!latest || Date.parse(m.at) > Date.parse(latest.at) ? m : latest),
     null,
   );
@@ -1132,7 +1133,7 @@ export function ObjectListViewInspector({
             </div>
             {latestMark && (
               // objectui#12725 — the 来源 line: who drafted the marked settings, and when.
-              <DraftSourceLine at={latestMark.at} locale={locale} items={addedLabels} className="border-t pt-3" />
+              <DraftSourceLine mark={latestMark} locale={locale} items={addedLabels} className="border-t pt-3" />
             )}
           </>
         )}

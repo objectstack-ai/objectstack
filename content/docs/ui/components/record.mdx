@@ -1,0 +1,181 @@
+---
+title: "Record components — component reference"
+navTitle: "Record"
+description: "The record:* components that draw the record a record page opens: details, highlights, related lists, activity and more."
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Generated from sdui.manifest.json by node scripts/gen-sdui-reference.mjs; change the manifest or the generator, never this page. */}
+
+The `record:*` components render from the record context a record page mounts, so they belong on a `type: 'record'` page.
+
+<Callout type="info">
+This page is generated from the repo-root `sdui.manifest.json`, the component manifest CI
+regenerates from the renderer registry. Regenerate it with
+`node scripts/gen-sdui-reference.mjs`; `node scripts/gen-sdui-reference.mjs --check` fails when it is stale.
+</Callout>
+
+## `record:activity` [#record-activity]
+
+Namespace `record`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `types` | `array` of `string` |  | Allow-list of feed item types to show (comment, field_change, task, event, email, call, note, file, record_create, record_delete, approval, sharing, system). Omit for all; unrecognised entries are ignored. |
+| `filterMode` | `enum`: `all`, `comments_only`, `changes_only`, `tasks_only` |  | Filter the timeline dropdown starts on. The user can still change it; an unrecognised value falls back to "all". |
+| `showFilterToggle` | `boolean` |  | Expose the activity-type filter dropdown in the panel header |
+| `limit` | `number` |  | Items per page. Also caps the scoped sys_activity read; "Load more" grows the window by this much. |
+| `showCompleted` | `boolean` |  | Include completed activities (sys_activity type "completed", which surfaces as a task item). Off by default. A milestone row (metadata.kind "milestone") is not a completed activity and shows either way. A logged interaction, a task item that points at its source record through source_object / source_id (a logged call, meeting or email), also shows either way. |
+| `unifiedTimeline` | `boolean` |  | Mix field changes and comments in one timeline (Airtable style). Off keeps the panel a discussion stream — field changes stay in record:history. |
+| `showCommentInput` | `boolean` |  | Show the composer. Requires a host discussion context to persist the comment (record detail pages provide one); without it the feed is read-only. |
+| `enableMentions` | `boolean` |  | Offer @-mention autocomplete in the composer, from the host discussion context's user list. Off withholds the suggestions. |
+| `enableReactions` | `boolean` |  | Show emoji reactions on feed items. Toggling one requires a host discussion context; without it existing reactions still render, read-only. |
+| `enableThreading` | `boolean` |  | Group replies under their parent comment. Posting a reply requires a host discussion context. |
+| `showSubscriptionToggle` | `boolean` |  | NOT IMPLEMENTED — no record-subscription backend exists yet, so this renders nothing whatever it is set to. Declared for spec parity only (objectui#3165). |
+
+## `record:alert` [#record-alert]
+
+Namespace `record`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `severity` | `enum`: `info`, `warning`, `error`, `success` |  | — |
+| `title` | `string` \| `object` |  | Accepts an inline translation map (\{ en, "zh-CN", … \}) |
+| `body` | `string` \| `object` |  | Accepts an inline translation map (\{ en, "zh-CN", … \}) |
+| `visible` | `boolean` \| `string` \| `object` |  | Gates the banner against the current record: `true`/`false`, a bare CEL expression, or the `{ dialect: 'cel', source }` envelope |
+| `icon` | `string` |  | Lucide icon name; defaults to the severity icon |
+| `action` | `object` |  | \{ actionName, label?, variant? \} — the action the banner offers |
+| `dismissible` | `boolean` |  | — |
+| `dismissKey` | `string` |  | Stable key the dismissal is remembered under |
+
+## `record:details` [#record-details]
+
+Namespace `record`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `columns` | `enum`: `1`, `2`, `3`, `4` |  | Number of columns for field layout (1-4) |
+| `sections` | `array` of `object` |  | Field groups rendered as the detail body, in order. Every entry is an OBJECT — `{ name?, label?, columns?, fields }` — a bare section-id string is NOT accepted (the spec retired that spelling in objectstack#5611, and the renderer reads name/label/fields off each entry, so a string entry renders no fields at all). `fields` are the field names shown in this section, in order — required unless `group` supplies the members instead (the spec refuses a section carrying neither, and refuses one carrying both). `label` is the section heading; omit it for an untitled, borderless section. `name` is a stable snake_case identifier and the i18n anchor — the heading resolves through objects.\<object>._sections.\<name>.label, so a section without a name shows its authored label in every locale. `columns` (1-4) is THIS section's field-grid width; omit it and the renderer derives the width. Authoring `sections` at all makes it the only source of the detail body; omit it and the body falls back to the object's highlightFields. @objectstack/spec 17.3.0 declares eight more member keys on an entry, and this renderer honours all eight: `icon` (a Lucide name on the section header), `description` (sub-heading copy under the heading), `collapsible` and `defaultCollapsed` (a foldable section and its initial state), `showBorder` (force the Card wrapper on or off, overriding the heading-derived default) and `headerColor` (a header tint from the shared palette) through DetailSection, plus `group` — the ADR-0085 §5 REFERENCE form, the alternative to enumerating `fields`. `{ group: 'contact_info' }` inherits the object's `fieldGroups` entry with that key: its members (every visible field pointing at it, in declaration order), its presentation (label, icon, description, collapse) and its `visibleWhen` all come from the group, so the section restates none of it — the predicate is evaluated against the bound record exactly as the entry form evaluates it, and a group it hides renders nothing (a `visibleWhen` written on a section itself is refused by the spec and not read: gate the group and reference it) and the spec refuses those keys beside `group`; `columns`, `showBorder` and `headerColor` stay yours because they are how THIS page lays the section out. A `group` naming no declared group renders nothing and is reported to the console (`@objectstack/lint` flags it as `page-section-group-unknown`). `hideEmpty` is the eighth, and it decides whether an ALL-empty section exists: it defaults to on, so a section whose fields are every one of them empty renders nothing at all — no heading, no skeleton — and `hideEmpty: false` is the spelling that keeps the section on a brand-new record: in read-only mode as its heading plus one fold row that counts the empty fields and reveals them on request (the same fold a partly-filled section uses, objectui#13386), in edit mode as every field an editable row. It decides ONLY the all-empty case; the empty rows of a section that still has a filled one belong to DetailSection's auto-hide heuristic plus the reader's show-empty toggle, which no authored value overrides in either polarity (objectui#7129 Q2-C), and inline-edit mode renders the section either way so its fields stay reachable. Restored under objectui#8603 (maintainer 2026-09-15) after objectui#7129 retired it on the premise, since falsified upstream, that the spec refused the key. None of the eight has a designer control yet; they are authorable in source mode only, tracked as a deferred feature. @objectstack/spec 18 declares a ninth, `count` (`{ field }`): the renderer fills the heading's `{{ count }}` hole with how many values that multi-value field holds on the current record — `{ name: 'tagging', label: '{{ count }} tags', count: { field: 'tags' }, fields: ['tags'] }` reads `3 tags` when three are selected. An absent or empty value counts 0; `count` changes only the heading, never whether the section renders, so with `hideEmpty` on an all-empty section is still absent. The hole is filled after the heading is translated, so each locale of an inline label map and a translated objects.\<object>._sections.\<name>.label write the same `{{ count }}`. The spec refuses `count` beside `group`, on a section with no `label`, and on a label with no hole; a heading on a section without `count` prints as written. Like the eight, `count` has no designer control yet. |
+| `fields` | `array` of `string` |  | Explicit field list (overrides highlightFields) |
+| `hideFields` | `array` of `string` |  | Field names to omit from the body — applied to the top-level `fields` list AND to every section's `fields`. Bare field names only. Authors rarely need it: the synth pipeline fills it with the fields already shown in `record:highlights`, and hand-authored pages get the same dedup live from HighlightFieldsContext, so its purpose is suppressing a field you do not want repeated (the page H1 title field is dropped for you too). Hiding every field of a section leaves that section out entirely. |
+| `inlineEdit` | `boolean` |  | Offer the per-field double-click / pencil inline-edit affordances in the detail body. On by default, and an OPT-OUT only: the value is combined with the object's own editability (system, engine-owned, append-only and better-auth objects are not user-editable unless they opened userActions.edit) and with the server's effective API operation set for the object, so `false` always wins while `true` cannot open editing the platform refuses. The edit session and the atomic Save bar are hosted by the page, so one draft spans the highlights strip and this body. |
+| `showHeader` | `boolean` |  | Render the detail body's own title / follow-star / copy-id chip above the fields. Off by default because this block is normally composed under a `page:header` that already draws that chrome, and turning it on there shows the record title twice. Set it true only when this block is the whole page. |
+| `enforceFieldSecurity` | `boolean` |  | Fold this block's field list through the caller's FIELD-read permissions before rendering, so a field the permission set denies leaves no empty row behind (renderer default: off). Presentation only: it re-applies the same field-read answer the server already enforced (ADR-0066 D3) and never widens access — with it off a denied field still arrives masked or stripped, and with it on the server still decides every value. |
+| `redactFields` | `array` of `string` |  | Field names this block never renders, whatever the permission answer (renderer default: render everything authored). Presentation only, evaluated in the browser after the record is fetched — the values are still in the page, so this is NOT a data-access control and NOT the object's `publicSharing.redactFields`, which removes them server-side. To keep a value from the caller, gate the field itself (`requiredPermissions` / `maskingRule`, ADR-0066 D3) or the permission set. Neighbours `hideFields`, which is the dedupe channel the renderer also writes to. |
+| `requiredPermissions` | `array` of `string` |  | [ADR-0066] Capabilities the user must ALL hold — names that permission sets grant through `systemPermissions`, not object actions: `read` or `update` here is an ordinary capability name, not the object's read or edit permission. When the client has resolved the user's capabilities and any of these is missing, this block does not render its content; wherever it would otherwise render, an insufficient-permissions notice takes its place. Presentation only: it authorises nothing, and the data API still serves the same data to the same user. A client that cannot resolve the user's capabilities (no permission provider, or one that does not report `systemPermissions`) renders this block as if they were held — it fails open. |
+| `emptyState` | `object` |  | What this block draws in its place when its `dataSource` binding answers no row, `{ title, message, icon, link }` — the list view's own empty-state shape: a Lucide `icon` name, a `title` (default: "Record not found"), a `message` (default: none) and one `link: { label, url }` the user follows (default: none), opened as a `url` action opens it. `title`, `message` and the link's `label` each accept a plain string or an inline per-locale map, resolved against the display locale. Drawn then and only then — never on a block with no `dataSource` (it reads the record page's record instead), never while the bound read is loading, and never in place of the error a failed read shows; a read the server refuses as forbidden reads as no row, so it is drawn for that too. Leave it out and a binding with no row keeps the block's own placeholder. |
+| `dataSource` | `object` (`object` data binding) |  | Per-element data binding: \{ object, view, filter, sort, limit \}. Overrides the page-level object context for this block; `view` names a saved view of `object`, and `filter` is ANDed with the view’s own rather than replacing it. |
+
+## `record:discussion` [#record-discussion]
+
+Namespace `record`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `position` | `enum`: `bottom`, `right`, `left` |  | Where the panel docks relative to the record body |
+| `width` | `string` |  | Panel width as a CSS value (side positions only) |
+| `collapsible` | `boolean` |  | — |
+| `defaultCollapsed` | `boolean` |  | — |
+| `feed` | `object` |  | Activity-feed configuration nested inside the panel — the same shape as record:activity. The spec declares this key as RecordActivityProps (RecordChatterProps.feed), so its members are the inputs record:activity declares; see that block for what each one does. |
+
+## `record:highlights` [#record-highlights]
+
+Namespace `record`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `fields` | `array` | yes | Key fields to highlight (1-7), bare names or \{name,label?,type?,readonly?\}. Set readonly: true on an entry to render that chip read-only — it suppresses the inline-edit affordance and the HeaderHighlight editability gate enforces it. Use it for hook/automation-maintained columns that must not be hand-edited from the record header; marking the OBJECT field readonly instead would also strip the hook's own write-back. |
+| `layout` | `enum`: `horizontal`, `vertical` |  | Layout orientation for highlight fields |
+| `enforceFieldSecurity` | `boolean` |  | Fold this block's highlight chips through the caller's FIELD-read permissions before rendering, so a field the permission set denies leaves no empty chip behind (renderer default: off). Presentation only: it re-applies the same field-read answer the server already enforced (ADR-0066 D3) and never widens access — the record is fetched either way and the server still decides every value. |
+| `redactFields` | `array` of `string` |  | Field names this block never renders as a chip, whatever the permission answer (renderer default: render every field authored). Presentation only, evaluated in the browser after the record is fetched — the values are still in the page, so this is NOT a data-access control and NOT the object's `publicSharing.redactFields`, which removes them server-side. To keep a value from the caller, gate the field itself (`requiredPermissions` / `maskingRule`, ADR-0066 D3) or the permission set. |
+| `requiredPermissions` | `array` of `string` |  | [ADR-0066] Capabilities the user must ALL hold — names that permission sets grant through `systemPermissions`, not object actions: `read` or `update` here is an ordinary capability name, not the object's read or edit permission. When the client has resolved the user's capabilities and any of these is missing, this block does not render its content; wherever it would otherwise render, an insufficient-permissions notice takes its place. Presentation only: it authorises nothing, and the data API still serves the same data to the same user. A client that cannot resolve the user's capabilities (no permission provider, or one that does not report `systemPermissions`) renders this block as if they were held — it fails open. |
+| `emptyState` | `object` |  | What this block draws in its place when its `dataSource` binding answers no row, `{ title, message, icon, link }` — the list view's own empty-state shape: a Lucide `icon` name, a `title` (default: "Record not found"), a `message` (default: none) and one `link: { label, url }` the user follows (default: none), opened as a `url` action opens it. `title`, `message` and the link's `label` each accept a plain string or an inline per-locale map, resolved against the display locale. Drawn then and only then — never on a block with no `dataSource` (it reads the record page's record instead), never while the bound read is loading, and never in place of the error a failed read shows; a read the server refuses as forbidden reads as no row, so it is drawn for that too. Leave it out and a binding with no row keeps the block's own placeholder. |
+| `dataSource` | `object` (`object` data binding) |  | Per-element data binding: \{ object, view, filter, sort, limit \}. Overrides the page-level object context for this block; `view` names a saved view of `object`, and `filter` is ANDed with the view’s own rather than replacing it. |
+
+## `record:history` [#record-history]
+
+Namespace `record`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `limit` | `number` |  | Maximum history entries to display |
+| `emptyText` | `string` |  | Copy shown when the record has no history |
+| `unknownUserText` | `string` |  | Copy substituted when an entry has no resolvable actor |
+
+## `record:line_items` [#record-line_items]
+
+Namespace `record`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `childObject` | `string` |  | The child object whose records the panel lists, edits and saves. Not required: the node's `dataSource` binding can name the object instead, and `dataSource.object` lands on this key, outranking an authored value. With neither, the panel shows a configuration hint naming this key and loads nothing. |
+| `relationshipField` | `string` | yes | — |
+| `columns` | `array` | yes | — |
+| `totalField` | `string` |  | — |
+| `amountField` | `string` |  | — |
+| `parentObject` | `string` |  | The PARENT object the line total is written to on Save, together with `totalField`. Defaults to the object of the record the page shows, and outranks it when set. With neither, Save writes the lines alone and no parent field. |
+| `parentId` | `string` |  | The parent record whose lines the panel lists and saves: it loads `childObject` rows whose `relationshipField` equals this id, and a line added in the grid is saved with this id in `relationshipField`. Outranks `recordId` and the record the page shows; leave it unset on a record page, where the record shown is the parent. With no parent id at all the panel asks the user to save the record first and loads nothing. |
+| `recordId` | `string` |  | The parent record id, read only when `parentId` is unset. It outranks the record the page shows. |
+| `title` | `string` |  | Heading of the panel. Defaults to "Line Items" in the active UI language. A plain string, drawn as authored. |
+| `readonly` | `boolean` |  | Shows the lines without editing: no Save button, no Add line / Duplicate row / Remove row actions, and the grid draws a read-only table. |
+| `minRows` | `number` |  | Fewest lines the user can leave: every line's Remove row action is disabled while the grid holds this many lines or fewer. It adds no blank lines to reach the number. |
+| `maxRows` | `number` |  | Most lines the user can hold: at this many lines Add line and Duplicate row are disabled and the trailing blank entry row is not drawn. |
+| `filter` | `array` of `object` |  | Additional criteria for the lines, as spec `ViewFilterRule` entries (`[{ field, operator, value }]`). AND-combined with the parent relationship condition, never a replacement for it: it can only narrow this record's lines. Also the key a per-element `dataSource` binding's composed filter lands on. |
+| `sort` | `array` of `object` |  | Load order for the lines, as `[{ field, order }]` entries applied in list order; `order` is `asc` or `desc`. Without it the lines arrive in storage order. |
+| `limit` | `number` |  | Most lines loaded (default 500). The grid has no pagination: every loaded line is editable and saved as one batch, and lines past the cap are not loaded. Must be a positive integer: any other value is ignored, with a console warning. |
+| `dataSource` | `object` (`object` data binding) |  | Per-element data binding: \{ object, view, filter, sort, limit \}. Overrides the page-level object context for this block; `view` names a saved view of `object`, and `filter` is ANDed with the view’s own rather than replacing it. |
+
+## `record:path` [#record-path]
+
+Namespace `record`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `statusField` | `string` | yes | Field representing the current status/stage |
+| `stages` | `array` of `object` |  | Explicit stage definitions [\{ value, label \}] (else derived from field metadata) |
+
+## `record:quick_actions` [#record-quick_actions]
+
+Namespace `record`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `actionNames` | `array` of `string` |  | Action names to expose, in order — resolved from the actions declared on the object. With no names (and no host-supplied actions) nothing is looked up: the bar renders its empty placeholder on a design / preview surface and nothing at runtime |
+| `requiredPermissions` | `array` of `string` |  | [ADR-0066] Capabilities the user must ALL hold — names that permission sets grant through `systemPermissions`, not object actions: `read` or `update` here is an ordinary capability name, not the object's read or edit permission. When the client has resolved the user's capabilities and any of these is missing, this block does not render its content; wherever it would otherwise render, an insufficient-permissions notice takes its place. Presentation only: it authorises nothing, and the data API still serves the same data to the same user. A client that cannot resolve the user's capabilities (no permission provider, or one that does not report `systemPermissions`) renders this block as if they were held — it fails open. |
+| `location` | `enum`: `list_toolbar`, `list_item`, `record_header`, `record_more`, `record_related`, `record_section` |  | Which declared action location this bar renders |
+| `align` | `enum`: `start`, `center`, `end` |  | — |
+| `inline` | `boolean` |  | Render in the flow instead of folding into the record header |
+| `variant` | `string` |  | Passed to the Button primitive; a per-action variant overrides it |
+| `size` | `string` |  | Passed to the Button primitive; a per-action size overrides it |
+| `emptyState` | `object` |  | What this block draws in its place when its `dataSource` binding answers no row, `{ title, message, icon, link }` — the list view's own empty-state shape: a Lucide `icon` name, a `title` (default: "Record not found"), a `message` (default: none) and one `link: { label, url }` the user follows (default: none), opened as a `url` action opens it. `title`, `message` and the link's `label` each accept a plain string or an inline per-locale map, resolved against the display locale. Drawn then and only then — never on a block with no `dataSource` (it reads the record page's record instead), never while the bound read is loading, and never in place of the error a failed read shows; a read the server refuses as forbidden reads as no row, so it is drawn for that too. Leave it out and a binding with no row keeps the block's own placeholder. |
+| `dataSource` | `object` (`object` data binding) |  | Per-element data binding: \{ object, view, filter, sort, limit \}. Overrides the page-level object context for this block; `view` names a saved view of `object`, and `filter` is ANDed with the view’s own rather than replacing it. |
+
+## `record:reference_rail` [#record-reference_rail]
+
+Namespace `record`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `hideEmpty` | `boolean` |  | Drop the rail entirely when no entries resolve |
+
+## `record:related_list` [#record-related_list]
+
+Namespace `record`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `objectName` | `string` | yes | Related object name (e.g. "task") |
+| `relationshipField` | `string` | yes | Field on the related object pointing back to this record |
+| `relationshipValueField` | `string` |  | Which field OF THIS PARENT record `relationshipField` stores. Defaults to "id"; set it to the field a name-keyed junction points at (e.g. "name" when the junction column holds the machine name of the parent record). The resolved value drives three things at once — the list filter, the Add-picker link value, and the pre-filled create form — so they cannot drift apart. While the parent record is still loading, a non-"id" field resolves to null and the list holds its fetch rather than querying on an empty value. |
+| `parentDataSource` | `object` |  | The PARENT record this related list hangs off, bound by a query of its own: an object binding `{ object, view?, filter?, sort?, limit? }`, the shape `dataSource` takes. The FIRST row of the bound set by its `sort` is the parent (declare `limit: 1`; `objectui validate` warns without it), and `relationshipValueField` is read on that row. When no row answers, the list draws a notice saying so in its place, never an empty list. Without this key, the parent is the record page's record. The node-level `dataSource` on this block is the CHILD rows the list draws, and it is never read as the parent. |
+| `columns` | `array` of `string` |  | Fields to display in the related list. Optional: without it, a `dataSource` binding that names a view supplies that view's columns, and with neither the list derives its columns from the related object (its `highlightFields`, otherwise its listable fields). Authored columns win over both. |
+| `sort` | `array` |  | — |
+| `limit` | `number` |  | Records to display initially |
+| `filter` | `array` of `object` |  | Additional filter criteria, as spec `ViewFilterRule` entries (`[{ field, operator, value }]`). AND-combined with the parent relationship condition, never a replacement for it: it can only narrow this record's children. Also the key a per-element `dataSource` binding's composed filter lands on. |
+| `title` | `string` \| `object` |  | Heading of the list. Defaults to the related object's label (its translation when one is loaded, otherwise the humanized object name). Accepts either a plain string or an inline per-locale map (`{ en: "Open tasks", "zh-CN": "未完成任务" }`) — the `I18nLabel` union the contract admits on this key — and the list resolves the map against the active UI language, falling back through base language, a region-qualified sibling, `default`, then `en`, and finally to any remaining entry. |
+| `showViewAll` | `boolean` |  | — |
+| `actions` | `array` of `string` |  | Action IDs available for related records |
+| `add` | `object` |  | Adds an "Add" button that assigns EXISTING records instead of creating one — the m2m/junction case. Shape: `{ picker: { object, valueField?, labelField?, filter? }, linkField?, label? }`. `picker.object` (required) is the object whose records the dialog offers. `picker.valueField` is the field of the picked record used as the link value (default "id"); `picker.labelField` is the column shown in the picker rows (default "name", and the other columns are derived from that object's schema). With `linkField` set, selecting records CREATES rows in this list's own object as `{ [relationshipField]: parentValue, [linkField]: pickedId }` — the junction case; omit `linkField` and the picked child is RE-PARENTED instead, by setting its own `relationshipField` to this parent. `label` is the button text (default "Add", localizable inline). Setting `add` also enables generic link removal on rows when no host delete handler is wired. `picker.filter` restricts which records the dialog offers — a list of `{ field, operator, value }` rules in the same vocabulary as this list's own `filter`, applied as a hard constraint the user cannot widen (it never appears as an editable filter row). |
+| `enforceFieldSecurity` | `boolean` |  | Fold this list's `columns` through the caller's FIELD-read permissions on the RELATED object before rendering (renderer default: off). Presentation only: it re-applies the same field-read answer the server already enforced (ADR-0066 D3) and never widens access — the rows are fetched either way and the server still decides every value. |
+| `redactFields` | `array` of `string` |  | Field names this list never renders, whatever the permission answer (renderer default: render every column authored or derived). Applies to the authored `columns` AND to the columns the list derives for itself when none are authored. Presentation only, evaluated in the browser after the rows are fetched — the values are still in the page, so this is NOT a data-access control and NOT the object's `publicSharing.redactFields`, which removes them server-side. To keep a value from the caller, gate the field itself (`requiredPermissions` / `maskingRule`, ADR-0066 D3) or the permission set. |
+| `requiredPermissions` | `array` of `string` |  | [ADR-0066] Capabilities the user must ALL hold — names that permission sets grant through `systemPermissions`, not object actions: `read` or `update` here is an ordinary capability name, not the object's read or edit permission. When the client has resolved the user's capabilities and any of these is missing, this block does not render its content; wherever it would otherwise render, an insufficient-permissions notice takes its place. Presentation only: it authorises nothing, and the data API still serves the same data to the same user. A client that cannot resolve the user's capabilities (no permission provider, or one that does not report `systemPermissions`) renders this block as if they were held — it fails open. |
+| `dataSource` | `object` (`object` data binding) |  | Per-element data binding: \{ object, view, filter, sort, limit \}. Overrides the page-level object context for this block; `view` names a saved view of `object`, and `filter` is ANDed with the view’s own rather than replacing it. |

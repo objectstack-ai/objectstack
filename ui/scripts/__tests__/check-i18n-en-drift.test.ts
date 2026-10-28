@@ -24,7 +24,7 @@ import {
   designerPopulation,
   readDesignerTables,
 } from '../check-i18n-en-drift.mjs';
-import { DESIGNER_TABLE } from '../check-i18n-designer-table-parity.mjs';
+import { DESIGNER_TABLE } from '../check-i18n-dead-keys.mjs';
 import { globMatches, jobBlock, repoPath, rootCi, triggerBlock, uiFilterGlobs, uiRun, UI_JOBS, withoutComments } from './helpers/root-ci';
 
 /**
@@ -662,7 +662,39 @@ describe('the designer table as a second population', () => {
     expect(result.counters.absentInPack).toBe(1);
   });
 
-  it('leaves added and removed keys to check:i18n-designer-parity', () => {
+  // objectstack#25922 slice S7: the module declares no ENGINE_STRINGS_* at all,
+  // and the namespace catalogues it imports stand for both tables.
+  const tableless = (en: Record<string, string>, zh: Record<string, string>) => ({
+    ...packFiles(
+      treesFor(() => ({ a: 'x' })),
+      "import { studioString } from '@object-ui/i18n/namespaces/studio';\n" +
+        designerSource({}, {}).replace(/const ENGINE_STRINGS_(EN|ZH)[^;]*;\n\n/g, ''),
+    ),
+    'packages/i18n/src/namespaces/studio/en.ts': `const STUDIO_EN: Record<string, string> = ${JSON.stringify(en)};\n`,
+    'packages/i18n/src/namespaces/studio/zh.ts': `const STUDIO_ZH: Record<string, string> = ${JSON.stringify(zh)};\n`,
+  });
+
+  it('a row that moved into the namespace unchanged, table and all, is not drift', () => {
+    const { root, shas } = repoWithCommits([
+      withDesigner({ 'engine.fx.help': 'Up to 5 items' }, { 'engine.fx.help': '最多 5 项' }),
+      tableless({ 'engine.fx.help': 'Up to 5 items' }, { 'engine.fx.help': '最多 5 项' }),
+    ]);
+    const result = analyzeDesigner(root, { base: shas[0], head: shas[1] });
+    expect(result.findings).toEqual([]);
+    expect(result.counters).toMatchObject({ addedEnKeys: 0, removedEnKeys: 0, changedEnKeys: 0 });
+  });
+
+  it('still names an unfollowed en change once the table is gone', () => {
+    const { root, shas } = repoWithCommits([
+      tableless({ 'engine.fx.help': 'Up to 5 items' }, { 'engine.fx.help': '最多 5 项' }),
+      tableless({ 'engine.fx.help': 'Up to 20 items' }, { 'engine.fx.help': '最多 5 项' }),
+    ]);
+    const result = analyzeDesigner(root, { base: shas[0], head: shas[1] });
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]).toMatchObject({ key: 'ENGINE_STRINGS.engine.fx.help', unfollowed: ['zh'] });
+  });
+
+  it('leaves added and removed keys to the key-set parity pins', () => {
     const { root, shas } = repoWithCommits([
       withDesigner({ 'engine.fx.a': 'A' }, { 'engine.fx.a': '甲' }),
       withDesigner({ 'engine.fx.b': 'B' }, { 'engine.fx.b': '乙' }),

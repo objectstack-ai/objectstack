@@ -1232,55 +1232,6 @@ export function checkPageRequiresKind(
 }
 
 /**
- * The slot-pair check attached to {@link PageSchema}: a page that authors
- * both `slots.details` and `slots.tabs` is refused at `slots.details`, naming
- * the pair and the fix.
- *
- * The two slots are not independent, whatever the slot menu's layout
- * suggests. On a slotted record page the `details` slot is the BODY of the
- * Details tab, and that tab lives inside the synthesized `page:tabs` strip;
- * the `tabs` slot replaces that whole strip. So a `details` authored beside a
- * `tabs` has nowhere to render: the console's default-page synthesizer reads
- * `tabs` and never reads `details` (its own doc states the precedence — "wins
- * over `details` when both are provided"). Before this check the pair parsed,
- * validated and saved, and the authored details body — its `sections`, its
- * `hideFields` — silently never applied. The fix is the shape the platform's
- * own `sys_user_detail` page uses: the `record:details` component as a child
- * of a `tabs` item (the first one, by convention), and no `details` slot.
- *
- * Judged on the slot map whatever the page's `kind`: the pair is never a
- * coherent declaration, and a page that is not slotted reads no slot at all.
- * A slot is present when its value is not `undefined` — the synthesizer's own
- * test — so an empty `details: []` beside `tabs` is refused like a full one.
- *
- * Exported for the reason {@link checkPageSourceCompleteness} is: a downstream
- * mirror that derives its schema from `PageSchema.shape` drops every
- * object-level check, and re-attaches this one with
- * `.superRefine(checkPageSlotPair)`. `PageSchema` attaches this same binding —
- * pinned in `object-refinement-check-exports.test.ts`.
- */
-export function checkPageSlotPair(
-  page: { slots?: unknown },
-  ctx: z.RefinementCtx,
-): void {
-  const slots = page.slots;
-  if (slots === undefined || slots === null || typeof slots !== 'object') return;
-  const { details, tabs } = slots as { details?: unknown; tabs?: unknown };
-  if (details === undefined || tabs === undefined) return;
-  ctx.addIssue({
-    code: 'custom',
-    path: ['slots', 'details'],
-    message:
-      '`slots.details` and `slots.tabs` are refused together: the `details` slot is the body of the '
-      + 'Details tab inside the synthesized `page:tabs` strip, and an authored `tabs` slot replaces that '
-      + 'whole strip, so the `details` beside it is never rendered. Move the `record:details` component '
-      + 'into the `tabs` items — as the `children` of the first item, e.g. '
-      + "`{ label: 'Details', children: [{ type: 'record:details', properties: { … } }] }` — and delete "
-      + '`slots.details`. To keep the synthesized tabs instead, delete `slots.tabs`.',
-  });
-}
-
-/**
  * Page Schema
  * Defines a composition of components for a specific context.
  * Supports both platform pages (Salesforce FlexiPage style: record, home, app, utility)
@@ -1330,6 +1281,44 @@ const PAGE_AUDIENCE_WRONG_LAYER =
   + "audience is the permission set's — gate the DATA the page shows with the object's "
   + 'permission sets, and bind those sets to people through positions '
   + "(named in a position's `permissionSets`), never on the page itself.";
+
+/**
+ * The `page.slots.tabs` tombstone prescription (ADR-0085; maintainer ruling
+ * of 2026-10-28 on the record-page definition surfaces, card #27053).
+ *
+ * The slot replaced the WHOLE synthesized tab strip — the related lists, the
+ * approvals, attachments and history tabs the platform composes from the
+ * object were dropped unless the author re-added each one — and it opted the
+ * page out of the record page's column tiers, so it stayed tabbed at every
+ * width. The record page is composed from the object's roles and relationship
+ * flags (ADR-0085), so a page that needs its own strip is a `kind: 'full'`
+ * page, which is drawn as authored. Carried by a `retiredKey()` tombstone on
+ * the slot map, the `page.assignedProfiles` precedent above.
+ */
+const PAGE_SLOTS_TABS_REMEDY =
+  "The record page composes its tabs and columns from the object's roles and relationship "
+  + "flags: to change which related lists appear or their order, set `relatedList` / "
+  + "`relatedList: 'primary'` on the child's reference field; to replace the Details body, "
+  + "author `slots.details`; a page that needs its own strip is `kind: 'full'`, drawn as "
+  + 'authored. ';
+
+const PAGE_SLOTS_TABS_RETIRED =
+  '`page.slots.tabs` was removed in @objectstack/spec 18.3.0 (ADR-0085) — an authored strip '
+  + 'replaced the whole synthesized one, so the related lists, approvals, attachments and history '
+  + 'the platform composes from the object were dropped unless re-added by hand, and the page stayed '
+  + 'tabbed at every width instead of taking the record page\'s columns. Delete the key. '
+  + PAGE_SLOTS_TABS_REMEDY
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
+
+/**
+ * The answer `related` / `relatedLists` now carry on the slot map. They were
+ * ALIASES into the retired `tabs` slot — an author writing `related:` was
+ * steered INTO the removed key — so they are refusals that point where the
+ * related lists really come from, with the same remedy as the tombstone.
+ */
+const PAGE_SLOTS_RELATED_NOT_A_SLOT =
+  '`related` / `relatedLists` are not slots: the related lists are not a slot of the record page. '
+  + PAGE_SLOTS_TABS_REMEDY.trimEnd();
 
 // ─── The print page (#22158: card ① of the #8346 ruling) ───────────────────
 //
@@ -2101,20 +2090,18 @@ export const PageSchema = lazySchema(() => strictObject({
    * Each slot accepts a single PageComponent or an array. Slots not
    * provided fall through to the synthesized default.
    *
-   * Slot menu (v1): header | actions | alerts | highlights | details |
-   * tabs | discussion. Each slot is a full replacement at the slot
+   * Slot menu: header | actions | alerts | highlights | details |
+   * discussion. Each slot is a full replacement at the slot
    * boundary — no deep merge, no patch operations. To compose default +
    * custom, call the corresponding `buildDefault*` sub-builder from the
    * renderer runtime (e.g. @object-ui/plugin-detail).
    *
-   * Precedence — `details` and `tabs` are NOT independent. `details`
-   * replaces the body of the Details tab, and that tab lives inside the
-   * synthesized `page:tabs` strip; `tabs` replaces the whole strip, so it
-   * wins and a `details` beside it is never rendered. A page authoring both
-   * is therefore refused ({@link checkPageSlotPair}): to replace the tabs
-   * AND the details body, put the `record:details` component in the `tabs`
-   * items (the first item's `children`, by convention) and author no
-   * `details` slot.
+   * There is no `tabs` slot. The tab strip — and, at wider widths, the
+   * record page's columns — is composed from the object's roles and
+   * relationship flags (ADR-0085); `details` replaces the body of the Details
+   * tab inside it. The `tabs` slot that replaced the whole strip is a
+   * `retiredKey()` tombstone ({@link PAGE_SLOTS_TABS_RETIRED}); a page that
+   * needs its own strip is a `kind: 'full'` page, drawn as authored.
    *
    * Only honored when `kind === 'slotted'`.
    */
@@ -2124,14 +2111,22 @@ export const PageSchema = lazySchema(() => strictObject({
     // The slot menu is a CLOSED v1 set (each slot has a `buildDefault*`
     // sub-builder behind it), so an unknown slot name is not a slot that will
     // start working later — it is content that never renders.
-    aliases: { activity: 'discussion', chatter: 'discussion', comments: 'discussion', related: 'tabs', relatedLists: 'tabs', fields: 'details', body: 'details', banner: 'alerts', toolbar: 'actions', buttons: 'actions', summary: 'highlights' },
+    aliases: { activity: 'discussion', chatter: 'discussion', comments: 'discussion', fields: 'details', body: 'details', banner: 'alerts', toolbar: 'actions', buttons: 'actions', summary: 'highlights' },
+    // `related` / `relatedLists` were aliases into the retired `tabs` slot;
+    // they now refuse with the remedy instead of steering into a tombstone.
+    guidance: { related: PAGE_SLOTS_RELATED_NOT_A_SLOT, relatedLists: PAGE_SLOTS_RELATED_NOT_A_SLOT },
   }, {
     header: z.union([PageComponentSchema, z.array(PageComponentSchema)]).optional(),
     actions: z.union([PageComponentSchema, z.array(PageComponentSchema)]).optional(),
     alerts: z.union([PageComponentSchema, z.array(PageComponentSchema)]).optional(),
     highlights: z.union([PageComponentSchema, z.array(PageComponentSchema)]).optional(),
     details: z.union([PageComponentSchema, z.array(PageComponentSchema)]).optional(),
-    tabs: z.union([PageComponentSchema, z.array(PageComponentSchema)]).optional(),
+    // `tabs` REMOVED (ADR-0085, #27053): it replaced the whole synthesized
+    // strip and opted the page out of the column tiers. A `retiredKey()`
+    // tombstone, so authoring it is a `tsc` error and a parse error carrying
+    // the prescription; stored rows are stripped by the protocol-18
+    // `page-slots-tabs-removed` conversion.
+    tabs: retiredKey(PAGE_SLOTS_TABS_RETIRED),
     discussion: z.union([PageComponentSchema, z.array(PageComponentSchema)]).optional(),
   }).optional().describe('Slot override map for slotted pages'),
 
@@ -2187,10 +2182,6 @@ export const PageSchema = lazySchema(() => strictObject({
   // Ruling B′ on #8346 (#22158): a print page prints exactly the blocks it
   // authors. Attached by identifier for the same reason as the checks above.
   .superRefine(checkPagePrintComposition)
-  // #22568: `slots.details` beside `slots.tabs` never renders — the `tabs`
-  // slot replaces the strip the Details tab lives in. Attached by identifier
-  // for the same reason as the checks above.
-  .superRefine(checkPageSlotPair)
   // #23610 (ruling A, record 6190536588): `isDefault: true` on a page that is
   // not a record page bound to an object, and a region the page's template
   // does not place, are refused. Attached by identifier for the same reason
@@ -2205,14 +2196,14 @@ export const PageSchema = lazySchema(() => strictObject({
   // other width there. Attached by identifier for the same reason as the
   // checks above.
   .superRefine(checkPageMainRegionWidth));
-// PageSchema's cross-field rules are the eight checks above: the
+// PageSchema's cross-field rules are the seven checks above: the
 // ADR-0080/0081 source completeness check, the compiled-kind `requires`
-// check, the print-page composition check, the `details` + `tabs` slot
-// pair check, the `isDefault` placement check, the region placement
-// check, the `record` binding placement check and the `main` region width
-// check. A component's `properties` bag is judged by none of them: it is
-// `@objectstack/lint`'s `validateComponentProps`, at the CLI doors and the
-// runtime save door alike. It once also required
+// check, the print-page composition check, the `isDefault` placement check,
+// the region placement check, the `record` binding placement check and the
+// `main` region width check. (The `details` + `tabs` slot pair check left
+// with the `tabs` slot.) A component's `properties` bag is judged by none of
+// them: it is `@objectstack/lint`'s `validateComponentProps`, at the CLI doors
+// and the runtime save door alike. It once also required
 // `recordReview`/`blankLayout` and `slots` (all removed — unrendered roadmap /
 // "required-but-unauthorable" Studio traps).
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { workspaceRoot } from '../workspace-root.mjs';
 
 /**
  * objectui#3449 — `check-links.yml` was pointed at the wrong tree.
@@ -25,13 +26,17 @@ import { fileURLToPath } from 'node:url';
  *     tree again and this test goes red on the same day, instead of the
  *     workflow going quietly blind for another year.
  *
- *  2. **The `root_dir` / `exclude` pair in `lychee.toml`.** Widening the scope
- *     without it does not produce a working sweep, it produces 316 hard errors:
- *     `content/docs` carries ~297 site-absolute links (`/docs/...`), and Lychee
- *     fails those while CONSTRUCTING the URI — before `exclude` is consulted,
- *     so an `^/docs` exclude pattern cannot suppress them. The two settings only
- *     work together; removing either alone re-breaks the sweep, so neither may
- *     leave without the other.
+ *  2. **Site-absolute routes are given a root.** Widening the scope without
+ *     one does not produce a working sweep, it produces hundreds of hard errors:
+ *     `content/docs` carries site-absolute links (`/docs/...`), and Lychee fails
+ *     those while CONSTRUCTING the URI — before `exclude` is consulted, so an
+ *     `^/docs` exclude pattern cannot suppress them. objectui's `lychee.toml`
+ *     answered with a `root_dir` sentinel plus its exclude. The lane that runs
+ *     now, the root `check-links.yml`, answers with `--root-dir` at the content
+ *     root plus `--fallback-extensions`, so the routes RESOLVE; this pin reads
+ *     that argv (objectstack#26080). The two flags only work together: a route
+ *     omits its extension, so a root alone turns every route into "file not
+ *     found".
  *
  *  3. **No document count, here or in the workflow's header.** objectui#7825.
  *     Both prose sentences above once carried a hand-copied size — one per tree
@@ -51,8 +56,36 @@ import { fileURLToPath } from 'node:url';
  * and this header's own count pin stand.
  */
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const lycheeConfigPath = path.join(repoRoot, 'lychee.toml');
+/**
+ * The lychee run that exists: the root `check-links.yml`, which passes
+ * `--config lychee.toml` from the repository root. objectui's own
+ * `lychee.toml` was read by no workflow and is gone (objectstack#26080).
+ */
+const liveRoot = workspaceRoot();
+const liveLycheeConfigPath = path.join(liveRoot, 'lychee.toml');
+const checkLinksWorkflowPath = path.join(liveRoot, '.github/workflows/check-links.yml');
+
+/**
+ * The lychee argv `check-links.yml` declares once in `env.LYCHEE_ARGS`, one
+ * token per entry. A `${{ … }}` expression is collapsed to one token first
+ * (`${{github.workspace}}/content`), so its inner spaces do not split it.
+ */
+function lycheeArgs(): string[] {
+  const lines = fs.readFileSync(checkLinksWorkflowPath, 'utf8').split('\n');
+  const start = lines.findIndex((line) => /^\s*LYCHEE_ARGS:\s*>-\s*$/.test(line));
+  expect(start, 'check-links.yml no longer declares LYCHEE_ARGS as a folded block').toBeGreaterThan(-1);
+  const indent = /^\s*/.exec(lines[start])![0].length;
+  const block: string[] = [];
+  for (const line of lines.slice(start + 1)) {
+    if (line.trim() !== '' && /^\s*/.exec(line)![0].length <= indent) break;
+    block.push(line.trim());
+  }
+  return block
+    .join(' ')
+    .replace(/\$\{\{\s*([^}]*?)\s*\}\}/g, (_, expr: string) => `\${{${expr}}}`)
+    .split(/\s+/)
+    .filter(Boolean);
+}
 
 /**
  * This file's own leading block comment — the second surface the count pin reads.
@@ -209,17 +242,30 @@ describe('check-links — the header count pin', () => {
   });
 });
 
-describe('lychee.toml — site-absolute routes are skipped, not resolved', () => {
-  it('resolves site-absolute routes into a sentinel root and excludes it', () => {
-    // Both halves or neither: `root_dir` alone turns 297 unresolvable links into
-    // 297 "file not found" errors, and the exclude alone cannot fire at all,
-    // because the failure happens before filtering.
-    const config = fs.readFileSync(lycheeConfigPath, 'utf8');
-    const rootDir = /^\s*root_dir\s*=\s*"([^"]+)"/m.exec(config);
-    expect(rootDir, 'lychee.toml must set root_dir, or site-absolute links are hard errors').not.toBeNull();
-    expect(rootDir![1].startsWith('/'), 'root_dir must be an absolute path').toBe(true);
-    expect(fs.existsSync(rootDir![1]), 'root_dir is a sentinel namespace and must not exist on disk').toBe(false);
-    expect(config, `root_dir ${rootDir![1]} is set but never excluded`).toContain(`"^file://${rootDir![1]}/`);
+describe('check-links — site-absolute routes are resolved against the content root', () => {
+  it('hands lychee a root for site-absolute routes, and the extensions a route omits', () => {
+    // Both halves or neither: without `--root-dir` every `/docs/...` link is a
+    // hard error before any filter runs, and a root without
+    // `--fallback-extensions` turns every extension-less route into a
+    // "file not found".
+    const args = lycheeArgs();
+    const value = (flag: string): string | undefined => {
+      const at = args.indexOf(flag);
+      return at === -1 ? undefined : args[at + 1];
+    };
+    expect(value('--config'), 'the lane must read the root lychee.toml').toBe('lychee.toml');
+
+    const rootDir = value('--root-dir');
+    expect(rootDir, 'check-links.yml must pass --root-dir, or site-absolute links are hard errors').toBeDefined();
+    const workspace = '${{github.workspace}}/';
+    expect(rootDir!.startsWith(workspace), '--root-dir must be absolute, i.e. anchored on the workspace').toBe(true);
+    const rel = rootDir!.slice(workspace.length);
+    expect(fs.existsSync(path.join(liveRoot, rel, 'docs')), `--root-dir ${rel} must be the tree \`/docs/...\` routes live under`).toBe(true);
+
+    const fallback = (value('--fallback-extensions') ?? '').split(',');
+    expect(fallback, '--root-dir alone leaves every extension-less route unresolved').toEqual(
+      expect.arrayContaining(['mdx', 'md']),
+    );
   });
 
   it('carries no remap pretending to resolve fumadocs routes', () => {
@@ -227,7 +273,7 @@ describe('lychee.toml — site-absolute routes are skipped, not resolved', () =>
     // a parsed URL; `/docs/x` fails to parse first) and pointed at the internal
     // `docs/` tree besides. Route-to-file resolution has exactly one owner:
     // scripts/check-doc-links.mjs.
-    const config = fs.readFileSync(lycheeConfigPath, 'utf8');
+    const config = fs.readFileSync(liveLycheeConfigPath, 'utf8');
     const active = config
       .split('\n')
       .filter((line) => !/^\s*#/.test(line))

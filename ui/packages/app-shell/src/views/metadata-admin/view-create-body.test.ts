@@ -94,10 +94,21 @@ describe('view createBuildBody — ViewItem family discrimination (objectui#2323
   });
 
   it('accepts every form layout the spec enumerates', () => {
-    for (const formType of ['simple', 'tabbed', 'wizard', 'split', 'drawer', 'modal']) {
+    for (const formType of ['simple', 'tabbed', 'wizard']) {
       const body = build({ label: 'F', name: `f_${formType}`, object: 'crm_lead', viewKind: 'form', formType });
       expect((body.config as Record<string, unknown>).type).toBe(formType);
       expectSpecValid(body);
+    }
+  });
+
+  it('the retired form types are refused by the spec at config.type — why the picker no longer offers them', () => {
+    // `split`, `drawer` and `modal` left `FormViewSchema.type` in
+    // `@objectstack/spec` 18.3.0: where a form opens is the caller's choice.
+    for (const formType of ['split', 'drawer', 'modal']) {
+      const body = build({ label: 'F', name: `f_${formType}`, object: 'crm_lead', viewKind: 'form', formType });
+      const res = ViewItemSchema.safeParse(body);
+      expect(res.success, formType).toBe(false);
+      expect(res.error?.issues.map((i) => i.path.join('.'))).toContain('config.type');
     }
   });
 
@@ -142,7 +153,7 @@ describe('view create form contract exposes both families (objectui#2323)', () =
     const props = (viewConfig().createSchema as Record<string, any>)?.properties ?? {};
     expect(props.viewKind?.enum).toEqual(['list', 'form']);
     expect(props.kind?.enum).toEqual(['grid', 'kanban', 'gallery', 'calendar', 'timeline', 'gantt', 'chart']);
-    expect(props.formType?.enum).toEqual(['simple', 'tabbed', 'wizard', 'split', 'drawer', 'modal']);
+    expect(props.formType?.enum).toEqual(['simple', 'tabbed', 'wizard']);
     // Each layout picker is gated to its family so the form shows only the
     // relevant one, through SchemaForm's per-property `visibleWhen`. The
     // retired `visibleOn` spelling is not written (objectui#12696):

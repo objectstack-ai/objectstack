@@ -703,6 +703,45 @@ function inclusiveCalendarDayWindow(
 }
 
 /**
+ * [#27172] The bound pair a lowered `dateRange` window filters one column by —
+ * the ONE spelling the count (both strategies, the draft preview) and the drill
+ * (`drill-window.ts`) share.
+ *
+ * ADR-0053's one rule: a `datetime` column compares INSTANTS and a `date`
+ * column compares CALENDAR DAYS in the reference zone.
+ *
+ * - A resolved preset (`endExclusive`) on a `date` column is the calendar days
+ *   it covers in `timezone`, through this module's whole-day rule
+ *   {@link inclusiveCalendarDayWindow} — the projection `compareTo` already
+ *   shifts — as the inclusive `{ $gte, $lte }` day pair.
+ * - A resolved preset on any other column stays the instant pair it resolved
+ *   to, stopping before its end: `{ $gte, $lt }`.
+ * - A caller's explicit `[a, b]` is handed back bound for bound, with its
+ *   inclusive upper reading (#16179); the shared lowering gives a bare-day end
+ *   its whole-day reading where the column needs one.
+ *
+ * ⛔ The preset's instants used to reach a `date` column as they are, and the
+ * column reads an instant by its leading UTC day (`temporalStorageForm`). A
+ * zone east of UTC opens at midnight on the PREVIOUS UTC day, so the window
+ * slid one day early: Shanghai's `this_quarter` counted Jun 30 and dropped
+ * Sep 30, on both strategies. West of UTC the leading day happens to be the
+ * zone's own, which is why only eastern tenants saw it.
+ *
+ * @param dateColumn - Is the window's column declared `date`? A column whose
+ *   type the caller cannot name answers `false` and keeps the instants.
+ */
+export function dateRangeWindowBounds(
+  window: LoweredDateRangeWindow,
+  timezone: string | undefined,
+  dateColumn: boolean,
+): Record<string, string> {
+  if (!window.endExclusive) return { $gte: window.start, $lte: window.end };
+  if (!dateColumn) return { $gte: window.start, $lt: window.end };
+  const [first, last] = inclusiveCalendarDayWindow(window, timezone);
+  return { $gte: first, $lte: last };
+}
+
+/**
  * Resolve which time dimension a `compareTo` shifts (#5011).
  *
  * `DatasetCompareTo.dimension` is optional, and this is the rule that makes the
@@ -1550,9 +1589,19 @@ export class DatasetExecutor {
    *     invented bucket would compete for its slots;
    *   - an `order` on anything but a dimension — a measure, a `__compare`
    *     column or a derived measure ranks rows, and a column of invented
-   *     zeros reorders the ranking;
-   *   - a `compareTo` — its answer keeps the shape it has (its own empty
-   *     buckets are a separate question).
+   *     zeros reorders the ranking.
+   *
+   * A `compareTo` answer is filled by this same plan (#27111), and the
+   * PRIMARY window decides the buckets: the plan reads the axis's own
+   * `dateRange`, never the shifted one. It runs after the comparison merge —
+   * when the axis is the anchor, {@link alignedCompareBucketKey} has already
+   * restated the comparison rows in primary bucket keys — so every bucket
+   * either window holds is a row already, left as the merge made it, and what
+   * the fill adds is only a bucket empty in BOTH windows. {@link fillEmptyGroups}
+   * then gives that row's `<measure>__compare` cells the empty values its
+   * primary cells get. An axis with no `dateRange` of its own (the anchor is
+   * another, window-only dimension) gets its interior gaps filled, as a plain
+   * series does. Every other guard holds for `compareTo` as for a plain series.
    *
    * The window is the axis's own `timeDimensions[].dateRange`, read in the
    * zone {@link buildQuery} resolves the query in. A window stated only in
@@ -1567,7 +1616,7 @@ export class DatasetExecutor {
     order: Record<string, 'asc' | 'desc'> | undefined,
     context?: ExecutionContext,
   ): TimeBucketFillPlan | undefined {
-    if (selection.compareTo || selection.limit != null || selection.offset != null) return undefined;
+    if (selection.limit != null || selection.offset != null) return undefined;
     if (Object.keys(order ?? {}).some((key) => !dimensions.includes(key))) return undefined;
     const bucketed = dimensions.flatMap((d) => {
       const granularity = this.granularityOf(compiled, selection, d);

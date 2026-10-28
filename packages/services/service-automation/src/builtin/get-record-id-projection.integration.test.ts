@@ -14,8 +14,10 @@
  * engine on that branch, and only there:
  *  - a projection that already names `id` is handed over as written (no
  *    second `id`);
- *  - no projection, or an empty one, stays a whole-row read (no projection is
- *    invented);
+ *  - no projection stays a whole-row read (no projection is invented);
+ *  - an empty projection is refused by the node's own config contract
+ *    (`GetRecordConfigSchema.fields`, #27166), so the engine is never asked:
+ *    the node fails before any read, never a whole-row read;
  *  - the `find` branch (`limit > 1`) declares no top-level `id` and is not
  *    touched.
  *
@@ -152,15 +154,26 @@ describe('get_record answers the row id as output.id whatever its fields project
     expect(result.output.record).toEqual({ id: rowId, title: 'alpha' });
   });
 
-  for (const [label, config] of [['no fields', {}], ['empty fields', { fields: [] }]] as const) {
-    it(`control, ${label}: the whole row is read and the output is the engine's own answer`, async () => {
-      const whole: any = await ql.findOne(OBJECT.name, { where: { title: 'alpha' }, context: SYS });
-      expect(whole.status, 'control: a whole-row read carries the unnamed columns').toBe('open');
-      const { result, fields } = await readOne(config);
-      expect(fields, 'no projection is invented').toEqual((config as { fields?: unknown }).fields);
-      expect(result.output).toEqual({ record: whole, id: rowId, object: OBJECT.name });
-    });
-  }
+  it("control, no fields: the whole row is read and the output is the engine's own answer", async () => {
+    const whole: any = await ql.findOne(OBJECT.name, { where: { title: 'alpha' }, context: SYS });
+    expect(whole.status, 'control: a whole-row read carries the unnamed columns').toBe('open');
+    const { result, fields } = await readOne({});
+    expect(fields, 'no projection is invented').toBeUndefined();
+    expect(result.output).toEqual({ record: whole, id: rowId, object: OBJECT.name });
+  });
+
+  it("empty fields: refused by the node's config contract before any read (#27166)", async () => {
+    handed.length = 0;
+    const result = await getRecord.execute(
+      { id: 'read', type: 'get_record', config: { objectName: OBJECT.name, filter: { title: 'alpha' }, fields: [] } },
+      new Map(),
+      { runAs: 'system', flowName: 'pin_get_record_id' },
+    );
+    expect(handed, 'the engine is never asked').toEqual([]);
+    expect(result.success, 'an empty projection is refused, never read as the whole row').toBe(false);
+    expect(result.output).toBeUndefined();
+    expect(result.error).toContain("get_record 'read': config does not satisfy the get_record contract — config.fields: Name at least one field.");
+  });
 
   it('a downstream update_record filtering on read.id updates the row the narrowed get_record read', async () => {
     await ql.insert(OBJECT.name, { title: 'beta', status: 'open' }, { context: SYS });

@@ -296,6 +296,14 @@ retired, read them with the operator-only
 them before `os migrate apply --allow-destructive` drops the column. No runtime door serves
 them.
 
+`fields` names at least one column. An empty list, or a list with a blank name, is refused
+rather than read as "every column", the top-level `fields` and an `expand` entry's alike: by the
+query schema itself (`QuerySchema`), so a `POST /data/:object/query` body with `fields: []` answers
+`400 VALIDATION_FAILED` naming `query.fields`; on the querystring (`?fields=`, `$select=`) with
+`400 VALIDATION_ERROR`; and by `engine.find()` / `findOne()` for an in-process caller (a plugin, a
+hook). A flow `get_record` node with `fields: []` is refused when the flow is saved. Leave
+`fields` out to read every column.
+
 ### Nested / Related Fields
 
 {/* os:check */}

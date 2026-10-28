@@ -202,13 +202,12 @@ describe('form.sections — the field-group reference form, members derived from
     expect(FormViewSchema.safeParse(formWith([{ fields: [] }])).success).toBe(true);
   });
 
-  it('accepts `columns` and `pane` beside `group` — the group declares neither', () => {
-    const parsed = formAccept(formWith([{ group: 'contact_info', columns: 2, pane: 'secondary' }], {
-      type: 'split',
+  it('accepts `columns` beside `group` — the group does not declare it', () => {
+    const parsed = formAccept(formWith([{ group: 'contact_info', columns: 2 }], {
+      type: 'tabbed',
     }));
     const section = (parsed.sections as Array<Record<string, unknown>>)[0];
     expect(section.columns).toBe(2);
-    expect(section.pane).toBe('secondary');
   });
 
   it('refuses `group` beside `fields`', () => {

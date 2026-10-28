@@ -247,6 +247,29 @@ function judge(schema: unknown, name: string): Omit<Violation, 'id'> | undefined
 }
 
 /** Every violation on the tree, both directions, both faces, nested included. */
+/**
+ * The element shape a row editor writes into. For a plain array that is its
+ * element. For a union with exactly ONE array arm (`record:related_list.sort`:
+ * a string, or an array of `{ field, order }`) it is that arm's element: the
+ * row editor writes the array arm, and the inspector shows a value in any
+ * other arm as JSON rather than in the rows. Any other union stays unreadable.
+ */
+function rowEditorElement(node: unknown): unknown {
+  const direct = arrayElementSchema(node);
+  if (direct) return direct;
+  let n: any = node;
+  for (let i = 0; i < 8 && n; i++) {
+    const def = n._zod?.def ?? n.def ?? n._def;
+    if (!def) return undefined;
+    if (def.type === 'union' && Array.isArray(def.options)) {
+      const arms = (def.options as unknown[]).map(arrayElementSchema).filter((e) => e !== undefined);
+      return arms.length === 1 ? arms[0] : undefined;
+    }
+    n = def.innerType ?? (typeof def.getter === 'function' ? def.getter() : undefined);
+  }
+  return undefined;
+}
+
 function census(): Violation[] {
   const found: Violation[] = [];
   for (const [blockType, fields] of Object.entries(BLOCK_CONFIG)) {
@@ -264,7 +287,7 @@ function census(): Violation[] {
         // The item editors write into the array's ELEMENT shape, verbatim
         // (`PageBlockInspector.renderField`: `next[i] = { ...itemObj, [n]: v }`).
         const parentShape = resolvePropsShape(schema);
-        const element = arrayElementSchema(parentShape?.[field.name]);
+        const element = rowEditorElement(parentShape?.[field.name]);
         if (!element) {
           // Never a skip: an unreadable element shape would silently exempt
           // every item control under it, which is the vacuity this gate exists

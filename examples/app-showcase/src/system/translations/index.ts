@@ -564,10 +564,10 @@ export const ShowcaseTranslationBundle = {
           step_basics: { label: '基本信息' },
           step_assign: { label: '指派' },
           step_schedule: { label: '排期' },
-          // split panes
+          // the `split` form view (tabbed since ADR-0050 made `type` a layout)
           split_task: { label: '任务' },
           split_schedule: { label: '排期' },
-          // quick (drawer, #8231 remainder)
+          // quick (#8231 remainder)
           quick_edit: { label: '快速编辑' },
         },
         // The filter-preset tab bar of `ui/pages/task-triage.page.ts` — four

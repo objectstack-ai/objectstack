@@ -20,7 +20,7 @@ import { PreviewShell, PreviewErrorBoundary, PreviewMessage } from './PreviewShe
 import { OutlineStrip } from './OutlineStrip.js';
 import { SourcePageEditor } from './SourcePageEditor.js';
 import { pageKindNode } from '../../pageKindNode.js';
-import { deriveStudioDetailSections } from '../../recordDetailSections.js';
+import { deriveStudioDetailSections, toAuthoredDetailSections, MORE_DETAILS_DEFAULT_LABEL } from '../../recordDetailSections.js';
 import { PageBlockCanvas } from './PageBlockCanvas.js';
 import { InterfaceListPage } from '../../InterfaceListPage.js';
 import { t as tr, tFormat } from '../i18n.js';
@@ -290,7 +290,7 @@ export function PagePreview({ draft, editing, selection, onSelectionChange, onPa
   // canonical default page from the bound object's schema and apply the slot
   // overrides via the SAME `buildDefaultPageSchema(objectDef, { slots })` path,
   // so omitted slots fall through to the synthesized header/details/discussion
-  // while authored slots (highlights/tabs/…) override in place. Non-slotted
+  // while authored slots (highlights/details/…) override in place. Non-slotted
   // pages render their authored schema unchanged.
   const isSlotted = (draft as { kind?: string })?.kind === 'slotted';
   // The "More details" heading, resolved exactly as the running app resolves it
@@ -318,6 +318,60 @@ export function PagePreview({ draft, editing, selection, onSelectionChange, onPa
       return schema;
     }
   }, [isSlotted, schema, draft, recordSchema, moreDetailsLabel]);
+  /**
+   * "Convert to full page" — the one explicit way a slotted record page takes
+   * ownership of its whole layout. It writes the page the canvas shows — the
+   * synthesized default with the authored slot overrides applied — switches the
+   * kind to `full`, and drops `slots`, which a full page never reads.
+   *
+   * The regions are synthesized AGAIN for the write, in the PERSISTED shape:
+   * the detail sections name their fields (`toAuthoredDetailSections`) and
+   * carry the English default heading, exactly as the create-time seed writes
+   * them (`anchors.ts`). The canvas's own `renderSchema` holds the RUNTIME
+   * section shape (field objects, a translated heading) and is refused by the
+   * spec as authored metadata. Offered only once the bound object's schema has
+   * loaded: before that the synthesized regions carry no fields, and copying
+   * them would save a page with an empty body.
+   */
+  const slottedRecordPage = isSlotted && isRecordPage;
+  const canConvertToFull = canEdit && slottedRecordPage && !!recordSchema;
+  const convertToFull = () => {
+    if (!canConvertToFull) return;
+    const slots = (draft as { slots?: Record<string, unknown> })?.slots ?? {};
+    const sections = toAuthoredDetailSections(
+      deriveStudioDetailSections(recordSchema, { moreDetails: MORE_DETAILS_DEFAULT_LABEL }),
+    );
+    const synth = buildDefaultPageSchema(
+      recordSchema,
+      sections ? { slots, sections: sections as any } : { slots },
+    ) as { regions?: unknown[]; template?: unknown };
+    if (!Array.isArray(synth?.regions) || synth.regions.length === 0) return;
+    onPatch!({
+      kind: 'full',
+      regions: structuredClone(synth.regions),
+      ...(synth.template !== undefined ? { template: synth.template } : {}),
+      slots: undefined,
+    });
+  };
+  const slottedNote = designMode && slottedRecordPage ? (
+    <div
+      className="flex items-center gap-2 border-b bg-muted/30 px-3 py-1.5 text-xs text-muted-foreground"
+      data-testid="page-slotted-default-note"
+    >
+      <span className="min-w-0 flex-1">{tr('engine.pagePreview.slottedDefault', locale)}</span>
+      {canEdit && (
+        <button
+          type="button"
+          className="shrink-0 rounded border bg-background px-2 py-0.5 text-foreground hover:bg-accent disabled:opacity-50"
+          onClick={convertToFull}
+          disabled={!canConvertToFull}
+          data-testid="page-convert-to-full"
+        >
+          {tr('engine.pagePreview.convertToFull', locale)}
+        </button>
+      )}
+    </div>
+  ) : null;
   // Wrap record-page content in the record context (+ a sample-record picker)
   // so detail/highlights/path/alert blocks render real data. No-op for
   // non-record pages and for record pages with no rows yet (renders the node
@@ -425,6 +479,7 @@ export function PagePreview({ draft, editing, selection, onSelectionChange, onPa
   if (designMode && shape === 'regions') {
     return (
       <PreviewShell hint={`page · design`}>
+        {slottedNote}
         {withRecordBinding(
           <PageBlockCanvas
             draft={draft}
@@ -441,6 +496,7 @@ export function PagePreview({ draft, editing, selection, onSelectionChange, onPa
   return (
     <PreviewShell hint={`page${designMode ? ' · design' : ''}`}>
       <PreviewErrorBoundary fallbackHint={tr('engine.pagePreview.schemaFailed', locale)}>
+        {slottedNote}
         {designMode && (
           <OutlineStrip
             title={tr('engine.inspector.pageBlock.outlineLabel', locale)}

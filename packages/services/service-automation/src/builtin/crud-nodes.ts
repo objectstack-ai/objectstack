@@ -307,9 +307,10 @@ async function serveFamilyRead<A>(
  * node's `outputVariable` agrees with `{<node>.id}`; it is not taken back off,
  * which would be a second projection layer over the engine's answer.
  *
- * Only a non-empty projection is touched: no `fields`, or an empty list, is a
- * whole-row read already, and a projection that names `id` is handed over as
- * written. The `find` branch (`limit > 1`) answers rows only, with no
+ * Only a non-empty projection is touched: no `fields` is a whole-row read
+ * already, an empty list is handed over as written for the engine to refuse
+ * (#27008: an empty projection is never read as the whole row), and a
+ * projection that names `id` is handed over as written. The `find` branch (`limit > 1`) answers rows only, with no
  * top-level `id`, and does not come through here.
  */
 function projectionNamingId(fields: string[] | undefined): string[] | undefined {
@@ -473,9 +474,12 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                         // Declared in #4045: the executor has always passed this
                         // straight into find/findOne as the projection, but no
                         // form offered it — authorable only by hand until now.
+                        // `minItems: 1` mirrors the contract: an empty
+                        // `GetRecordConfigSchema.fields` is refused at every
+                        // flow save door (#27166), as `limit` below is.
                         fields: {
-                            type: 'array', items: { type: 'string' }, title: 'Fields',
-                            description: 'Field projection — only these fields are read (default: all).',
+                            type: 'array', items: { type: 'string' }, minItems: 1, title: 'Fields',
+                            description: 'Field projection — only these fields are read; leave it out to read all. An empty list is refused.',
                         },
                         // `minimum: 1` mirrors the contract: `GetRecordConfigSchema.limit`
                         // is a positive integer, refused below 1 at every flow save

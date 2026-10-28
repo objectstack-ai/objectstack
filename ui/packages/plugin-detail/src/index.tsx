@@ -129,6 +129,11 @@ export type {
 // (objectui#13453); tests import it from `useRecordEditable` directly.
 export { useRecordEditable } from './useRecordEditable';
 export type { RecordOperation } from './useRecordEditable';
+// The Claim affordance on a record sitting in an ownership queue (objectstack
+// ADR-0142 D4): the server's `queue_claim` answer decides the button, the
+// claim is `{ owner_id: <self> }` through the normal update.
+export { recordSitsInQueue, queueClaimAdmitted, useQueueClaimOffered, claimQueuedRecord } from './queueClaim';
+export type { QueueClaimOutcome, ClaimWriter } from './queueClaim';
 export { SectionGroup } from './SectionGroup';
 export { HeaderHighlight } from './HeaderHighlight';
 export { InlineFieldInput, extractLookupId, TEXTUAL_REF_FALLBACK_TYPES } from './InlineFieldInput';
@@ -198,10 +203,21 @@ export {
   RECORD_PAGE_THREE_COLUMN_MIN_WIDTH,
   RECORD_PAGE_TWO_COLUMN_MIN_WIDTH,
   recordPageTierFor,
+  recordPageArrangementFor,
+  recordPageColumnDefaults,
+  recordTimelineDefaultReason,
   recordPageColumnOfTab,
   buildDefaultPageColumns,
 } from './synth/recordPageColumns';
-export type { RecordPageTier, RecordPageColumn, DefaultPageColumns } from './synth/recordPageColumns';
+export type {
+  RecordPageTier,
+  RecordPageColumn,
+  DefaultPageColumns,
+  RecordPageColumnSwitches,
+  RecordPageArrangement,
+  RecordPageObjectLike,
+  RecordTimelineDefaultReason,
+} from './synth/recordPageColumns';
 export { useRecordPageTier } from './useRecordPageTier';
 export type { UseRecordPageTierOptions } from './useRecordPageTier';
 export { RecordPageColumns } from './RecordPageColumns';

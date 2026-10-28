@@ -9,7 +9,7 @@
 import * as React from 'react';
 import { cn, Button, Input, Popover, PopoverContent, PopoverTrigger, FilterBuilder, SortBuilder, NavigationOverlay, GroupingEditor, RefreshIndicator, DataErrorState, resolveIcon, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@object-ui/components';
 import type { SortItem } from '@object-ui/components';
-import { Search, Funnel, ArrowUpDown, X, EyeOff, Pencil, Group, Paintbrush, Download, Rows4, Rows3, Rows2, Share2, Lock, Printer, Plus, Trash2, CheckSquare, AlertTriangle, ShieldAlert, RotateCw, Loader2, Info } from 'lucide-react';
+import { Search, Funnel, ArrowUpDown, X, EyeOff, Pencil, Group, Paintbrush, Download, Rows4, Rows3, Rows2, Share2, Lock, Printer, Plus, Trash2, CheckSquare, AlertTriangle, ShieldAlert, RotateCw, Loader2, Info, Inbox } from 'lucide-react';
 import type { FilterBuilderRowGroup } from '@object-ui/components';
 import { VALUELESS_FILTER_BUILDER_OPERATORS, isFilterValueComplete } from '@object-ui/components';
 import { ViewSwitcherDropdown } from './ViewSwitcher';
@@ -831,6 +831,7 @@ export function buildEffectiveFilter(
   baseFilter: unknown,
   currentFilters: FilterBuilderRowGroup,
   userFilterConditions: any[],
+  queueSittingConditions: ReadonlyArray<QueueSittingCondition> = NO_QUEUE_SITTING_CONDITIONS,
 ): any[] | Record<string, any> | undefined {
   const userFilter = convertFilterGroupToAST(currentFilters);
   return mergeFilterNodes(
@@ -839,7 +840,49 @@ export function buildEffectiveFilter(
     // Normalize the per-field conditions (expands `in` into an `or` of `=`),
     // each of which is already its own node.
     ...normalizeFilters(userFilterConditions),
+    // The "In a queue" toggle (objectstack ADR-0142 D3), AND-ed like the rest.
+    ...queueSittingConditions.map((c) => [...c]),
   );
+}
+
+/** One condition of the "In a queue" filter, in the filter AST's triple form. */
+export type QueueSittingCondition = readonly [field: string, operator: string, value: boolean];
+
+/**
+ * The "In a queue" filter (objectstack ADR-0142 D3): the records that SIT IN
+ * an ownership queue — no owner, and a `queue` named. That is the platform's
+ * own definition of a parked record, so the filter states exactly it and
+ * nothing about who may see or claim the rows: what comes back is whatever the
+ * server's read filter lets this user read (a queue's members read what sits
+ * in their queues). "Empty" is the server's own reading on both columns — null
+ * OR `''` (the explain engine and the assignment seam both read it so) — so the
+ * conditions are `is_empty` / `is_not_empty` (lowered to `$empty`), not the
+ * null-only operators, which would list a row whose `queue` is `''` and miss
+ * one whose `owner_id` is `''`. Module constants, so the fetch effect sees one
+ * identity per state (AGENTS.md #10).
+ */
+export const QUEUE_SITTING_CONDITIONS: ReadonlyArray<QueueSittingCondition> = [
+  ['owner_id', 'is_empty', true],
+  ['queue', 'is_not_empty', true],
+];
+const NO_QUEUE_SITTING_CONDITIONS: ReadonlyArray<QueueSittingCondition> = [];
+
+/**
+ * Does the server say this object has ownership queues? True when the served
+ * object definition carries the platform-injected `queue` column (`system:
+ * true`, ADR-0142 D3), which the server provisions on exactly the objects whose
+ * records can sit in a queue (the `ownership: 'user'` tier) and refuses an
+ * author's own `queue` field on. The filter is offered only there: anywhere
+ * else it would name a column the object does not have.
+ */
+export function objectHasOwnershipQueue(objectDef: unknown): boolean {
+  const raw = (objectDef as { fields?: unknown } | null | undefined)?.fields;
+  const queue = Array.isArray(raw)
+    ? raw.find((f) => (f as { name?: unknown } | null)?.name === 'queue')
+    : raw && typeof raw === 'object'
+      ? (raw as Record<string, unknown>).queue
+      : undefined;
+  return !!queue && typeof queue === 'object' && (queue as { system?: unknown }).system === true;
 }
 
 /**
@@ -1092,6 +1135,8 @@ export const LIST_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'list.addRecord': 'Add record',
   'list.tabs': 'Tabs',
   'list.allRecords': 'All Records',
+  'list.sittingInQueue': 'In a queue',
+  'list.sittingInQueueHint': 'Show only records waiting in a queue for someone to claim them',
   'list.share': 'Share',
   'list.sharingPersonal': 'Personal view',
   'list.sharingCollaborative': 'Shared view',
@@ -2047,6 +2092,17 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       ? WITHHELD_USER_FILTER_CONDITIONS
       : userFilterConditions;
 
+  // The "In a queue" toggle (objectstack ADR-0142 D3). Offered only on an
+  // object the server serves with its injected `queue` column; withheld with
+  // the user filters on a dataset-bound chart. Ephemeral like the toolbar's
+  // other unpersisted toggles: it narrows what is on screen, nothing else.
+  const [sittingInQueueOnly, setSittingInQueueOnly] = React.useState(false);
+  const queueFilterOffered = objectHasOwnershipQueue(objectDef);
+  const appliedQueueSittingConditions =
+    queueFilterOffered && sittingInQueueOnly && !datasetChartOnScreen
+      ? QUEUE_SITTING_CONDITIONS
+      : NO_QUEUE_SITTING_CONDITIONS;
+
   // User filters render ONLY when explicitly configured (ADR-0047 §data
   // mode): saved list views already act as the preset switcher, so an
   // unconfigured view keeps a clean toolbar instead of growing auto-derived
@@ -2938,7 +2994,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       try {
         // Construct filter — shared with the export path so the file a user
         // downloads is built from the same three sources as the rows on screen.
-        const finalFilter = buildEffectiveFilter(authoredFilter, appliedFilters, appliedUserFilterConditions);
+        const finalFilter = buildEffectiveFilter(authoredFilter, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions);
 
         // Convert sort to query format
         // Use array format to ensure order is preserved (Object keys are not guaranteed ordered)
@@ -3585,7 +3641,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     // silently un-suppresses nothing, because the finding it was suppressing
     // simply moves elsewhere. Add prose ABOVE this point, never below it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [schema.objectName, schema.data, dataSource, authoredFilter, effectivePageSize, currentSort, appliedFilters, appliedUserFilterConditions, refreshKey, searchTerm, schema.searchableFields, schema.columns, (schema as any).kanban, (schema as any).calendar, (schema as any).gallery, (schema as any).timeline, (schema as any).gantt, schema.map, objectDef?.fields, objectDefLoaded, schema.refreshTrigger, perms, fetchSkip, groupingConfig, predicateProjectionKey, invalidationNonce, groupingNeedsHeaderQuery, calendarWindowKey, rowsCarryConcurrencyToken]); // Re-fetch on filter/sort/search/refreshTrigger/perms/window change; `rowsCarryConcurrencyToken` (objectui#12292) re-reads the rows with their token when inline edit turns on
+  }, [schema.objectName, schema.data, dataSource, authoredFilter, effectivePageSize, currentSort, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, refreshKey, searchTerm, schema.searchableFields, schema.columns, (schema as any).kanban, (schema as any).calendar, (schema as any).gallery, (schema as any).timeline, (schema as any).gantt, schema.map, objectDef?.fields, objectDefLoaded, schema.refreshTrigger, perms, fetchSkip, groupingConfig, predicateProjectionKey, invalidationNonce, groupingNeedsHeaderQuery, calendarWindowKey, rowsCarryConcurrencyToken]); // Re-fetch on filter/sort/search/refreshTrigger/perms/window change; `rowsCarryConcurrencyToken` (objectui#12292) re-reads the rows with their token when inline edit turns on
 
   // Any change to the result-defining inputs (object, filters, sort, search,
   // grouping, page size) invalidates the current page number — snap back to
@@ -3596,7 +3652,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // the signature, so turning the page never triggers a reset.
   const pageResetSignature = JSON.stringify([
     schema.objectName, authoredFilter, effectivePageSize, currentSort,
-    appliedFilters, appliedUserFilterConditions, searchTerm, currentView, groupingConfig,
+    appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, searchTerm, currentView, groupingConfig,
   ]);
   const prevPageResetSignature = React.useRef(pageResetSignature);
   React.useEffect(() => {
@@ -3989,7 +4045,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   let selfQueryFilter: unknown = authoredFilter;
   if (currentView === 'gantt' || currentView === 'tree' || currentView === 'chart' || gridOwnsGroupedFetch || kanbanLanesPaged) {
     try {
-      const value = buildEffectiveFilter(authoredFilter, appliedFilters, appliedUserFilterConditions);
+      const value = buildEffectiveFilter(authoredFilter, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions);
       const key = JSON.stringify(value ?? null);
       const cached = selfQueryFilterRef.current;
       if (cached && cached.key === key) {
@@ -5093,7 +5149,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           // file, no message. Here it lands in the catch below, which names it
           // in the toolbar the way the data fetch's own `try` names it in the
           // load-error panel — and nothing is exported unfiltered.
-          const finalFilter = buildEffectiveFilter(authoredFilter, appliedFilters, appliedUserFilterConditions);
+          const finalFilter = buildEffectiveFilter(authoredFilter, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions);
           const blob = await dataSource!.exportDownload!(schema.objectName!, {
             format: format as 'csv' | 'xlsx' | 'json',
             fields: fields.length ? fields : undefined,
@@ -5184,7 +5240,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     setShowExport(false);
     // `searchTerm` / `searchableFields` belong here: the export now narrows by
     // the active search, so a stale closure would export the wrong row set.
-  }, [data, effectiveFields, resolvedExportOptions, schema.objectName, authoredFilter, schema.searchableFields, exportPermitted, dataSource, appliedFilters, appliedUserFilterConditions, currentSort, searchTerm, objectDef, resolveObjectLabel]);
+  }, [data, effectiveFields, resolvedExportOptions, schema.objectName, authoredFilter, schema.searchableFields, exportPermitted, dataSource, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, currentSort, searchTerm, objectDef, resolveObjectLabel]);
 
   // All available fields for hide/show (with i18n)
   //
@@ -5543,6 +5599,25 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                   onSelectionsChange={onUserFilterSelectionsChange}
                 />
               </div>
+          )}
+          {/* "In a queue" (objectstack ADR-0142 D3): the records sitting in an
+              ownership queue, waiting to be claimed. Rendered only where the
+              served object carries the injected `queue` column; a pressed
+              toggle, so its state is announced and printed like a chip. */}
+          {queueFilterOffered && !datasetChartOnScreen && (
+            <Button
+              type="button"
+              variant={sittingInQueueOnly ? 'secondary' : 'ghost'}
+              size="sm"
+              className="h-7 shrink-0 gap-1 px-2 text-xs"
+              aria-pressed={sittingInQueueOnly}
+              title={t('list.sittingInQueueHint')}
+              data-testid="queue-sitting-filter"
+              onClick={() => setSittingInQueueOnly((on) => !on)}
+            >
+              <Inbox className="h-3.5 w-3.5" aria-hidden="true" />
+              {t('list.sittingInQueue')}
+            </Button>
           )}
         </div>
 
@@ -6404,6 +6479,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             hasUserQuery={
               !!(searchTerm && searchTerm.trim()) ||
               (Array.isArray(appliedUserFilterConditions) && appliedUserFilterConditions.length > 0) ||
+              appliedQueueSittingConditions.length > 0 ||
               (Array.isArray(appliedFilters?.conditions) && appliedFilters.conditions.length > 0)
             }
             onAddRecord={toolbarFlags.showAddRecord ? () => props.onAddRecord?.() : undefined}

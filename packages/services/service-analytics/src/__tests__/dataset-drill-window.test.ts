@@ -32,6 +32,7 @@ import { installDefaultOrganization } from './default-organization.testkit.js';
 const NOW = new Date('2026-09-09T12:34:56.789Z');
 const CTX = { tenantId: 'org_A' } as ExecutionContext;
 const SHANGHAI = 'Asia/Shanghai';
+const LOS_ANGELES = 'America/Los_Angeles';
 /** Q3 2026 in Shanghai: its July and October midnights, as UTC instants. */
 const Q3_SHANGHAI = { gte: '2026-06-30T16:00:00.000Z', lt: '2026-09-30T16:00:00.000Z' };
 
@@ -233,6 +234,21 @@ describe('#27074 — a windowed dataset answer reports the window in drillRanges
       expect(result.drillRanges).toEqual([{ close_date: { field: 'close_date', gte: '2026-07-01', lt: '2026-10-01' } }]);
     });
 
+    it('[#27172] a date field counts and drills the zone\'s calendar days, east and west of UTC', async () => {
+      for (const timezone of [SHANGHAI, LOS_ANGELES]) {
+        const seen: unknown[] = [];
+        const result = await service([{ stage: 'won', cnt: 3 }], 'date', seen).queryDataset(
+          pipeline,
+          { dimensions: ['stage'], measures: ['cnt'], timeDimensions: [{ dimension: 'close_date', dateRange: 'this_quarter' }], timezone },
+          CTX,
+        );
+        // The days the query counts: Q3 is Jul 1 through Sep 30 in any zone.
+        expect(closeDateBounds(seen[0]), timezone).toEqual({ $gte: '2026-07-01', $lte: '2026-09-30' });
+        // …and the drill lists the same days.
+        expect(result.drillRanges, timezone).toEqual([{ close_date: { field: 'close_date', gte: '2026-07-01', lt: '2026-10-01' } }]);
+      }
+    });
+
     it('UTC resolves a datetime window at UTC midnight', async () => {
       const result = await service([{ stage: 'won', cnt: 3 }], 'datetime').queryDataset(
         pipeline,
@@ -366,8 +382,7 @@ describe('#27074 — on a real engine, each row drill lists exactly the records 
     return rows.map((r) => r.id).sort();
   }
 
-  /** `null`: parity only, the ids the query itself counts being another card's question. */
-  const cases: Array<[string, Record<string, unknown>, Record<string, string[]> | null]> = [
+  const cases: Array<[string, Record<string, unknown>, Record<string, string[]>]> = [
     [
       'stage × this_quarter on the datetime field, Shanghai',
       { dimensions: ['stage'], timeDimensions: [{ dimension: 'closed', dateRange: 'this_quarter' }], timezone: SHANGHAI },
@@ -393,14 +408,28 @@ describe('#27074 — on a real engine, each row drill lists exactly the records 
       { won: ['d2', 'd3', 'd6', 'd8'], lost: ['d10', 'd4'] },
     ],
     [
-      // The query compares a `date` column with the preset's Shanghai-midnight
-      // instants read as their leading UTC day (`temporalStorageForm`), so it
-      // counts June 30 and not September 30 (measured, both strategies). The
-      // drill reports that same storage-form window, so it lists what the row
-      // counted; which days the query should count is not this card's.
+      // [#27172] A `date` column compares the zone's calendar days: Q3 is
+      // Jul 1 through Sep 30 in Shanghai as in UTC. It used to compare the
+      // preset's Shanghai-midnight instants read as their leading UTC day, so
+      // it counted d1 (Jun 30) and dropped d4 (Sep 30), on both strategies.
       'stage × this_quarter on the date field, Shanghai',
       { dimensions: ['stage'], timeDimensions: [{ dimension: 'closed_on', dateRange: 'this_quarter' }], timezone: SHANGHAI },
-      null,
+      { won: ['d2', 'd3', 'd6', 'd8'], lost: ['d10', 'd4'] },
+    ],
+    [
+      // West of UTC the zone's midnight falls on its own UTC day, so the
+      // calendar days were already right there; pinned so the fix keeps them.
+      'stage × this_quarter on the date field, Los Angeles',
+      { dimensions: ['stage'], timeDimensions: [{ dimension: 'closed_on', dateRange: 'this_quarter' }], timezone: LOS_ANGELES },
+      { won: ['d2', 'd3', 'd6', 'd8'], lost: ['d10', 'd4'] },
+    ],
+    [
+      // A `datetime` column keeps comparing instants: Los Angeles' Q3 opens at
+      // 2026-07-01T07:00Z, so d2 (Jun 30 09:00 there) is out and d5 (Sep 30
+      // 09:00 there) is in.
+      'stage × this_quarter on the datetime field, Los Angeles',
+      { dimensions: ['stage'], timeDimensions: [{ dimension: 'closed', dateRange: 'this_quarter' }], timezone: LOS_ANGELES },
+      { won: ['d3', 'd6', 'd8'], lost: ['d10', 'd4', 'd5'] },
     ],
   ];
 
@@ -417,7 +446,7 @@ describe('#27074 — on a real engine, each row drill lists exactly the records 
         }
         expect(Object.keys(counted).length).toBeGreaterThan(0);
         expect(Object.fromEntries(Object.entries(listed).map(([k, ids]) => [k, ids.length]))).toEqual(counted);
-        if (expected) expect(listed).toEqual(expected);
+        expect(listed).toEqual(expected);
       });
     }
   }

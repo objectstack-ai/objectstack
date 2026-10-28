@@ -6,9 +6,13 @@ const data = { provider: 'object' as const, object: 'showcase_task' };
 
 /**
  * Task view gallery — a single object backing **all eight** list-view types
- * plus the simple / tabbed / wizard / split / drawer form variants. This is
- * the heart of the view-layer coverage: the coverage manifest references
- * each `listViews.*.type` here.
+ * plus the simple / tabbed / wizard form layouts. This is the heart of the
+ * view-layer coverage: the coverage manifest references each
+ * `listViews.*.type` here.
+ *
+ * A form view's `type` is its LAYOUT only (ADR-0050). Where a record or its
+ * form opens — the drawer, the full page — is the caller's open mode, declared
+ * on the list's `navigation.mode` below, never on the form.
  */
 export const TaskViews = defineView({
   // Default list shown when the object is opened.
@@ -57,6 +61,14 @@ export const TaskViews = defineView({
     calendar: { startDateField: 'due_date', titleField: 'title', colorField: 'status' },
     timeline: { startDateField: 'created_at', titleField: 'title', colorField: 'priority', scale: 'week' },
     gantt: { startDateField: 'start_date', endDateField: 'end_date', titleField: 'title', progressField: 'progress' },
+
+    // How a click opens a task: `drawer` (the default, written out here to
+    // show where the open mode lives) opens the record in the side drawer,
+    // which expands to the full page; `page` would navigate to the record
+    // route instead. The form views below carry no open mode — their `type`
+    // is a layout, and a record beside its list is each reader's own Display
+    // preference, not metadata.
+    navigation: { mode: 'drawer' },
   },
 
   listViews: {
@@ -416,19 +428,23 @@ export const TaskViews = defineView({
       ],
     },
 
-    // split ── side-by-side resizable panes; `pane` places each section ──
+    // tabbed, two sections ── was the `split` form until `type` became a
+    // layout (ADR-0050): each section now gets its own tab instead of a pane.
+    // The key and the section names stay, so the `_sections.split_*`
+    // translations keep resolving.
     split: {
-      type: 'split',
+      type: 'tabbed',
       data,
       sections: [
-        { name: 'split_task', label: 'Task', pane: 'primary', columns: 1, fields: ['title', 'status', 'assignee'] },
-        { name: 'split_schedule', label: 'Schedule', pane: 'secondary', columns: 1, fields: ['start_date', 'due_date', 'progress'] },
+        { name: 'split_task', label: 'Task', columns: 1, fields: ['title', 'status', 'assignee'] },
+        { name: 'split_schedule', label: 'Schedule', columns: 1, fields: ['start_date', 'due_date', 'progress'] },
       ],
     },
 
-    // drawer ── side panel quick edit ────────────────────────────────────
+    // simple ── quick edit; was a `drawer` form until `type` became a layout
+    // (ADR-0050). Whoever opens it decides the container.
     quick: {
-      type: 'drawer',
+      type: 'simple',
       data,
       // #8231 remainder — `name` is what makes the heading translatable; see
       // `_sections.quick_edit` in `system/translations/index.ts`.
