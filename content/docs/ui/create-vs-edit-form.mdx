@@ -116,6 +116,51 @@ Rule of thumb: **"different field subset" → derive. "different layout or flow"
 - Object: [`examples/app-showcase/src/data/objects/contact.object.ts`](https://github.com/objectstack-ai/objectstack/blob/main/examples/app-showcase/src/data/objects/contact.object.ts) — flat, intent-tagged field set, with the four `fieldGroups` its `group` tags point at.
 - Views: [`examples/app-showcase/src/ui/views/contact.view.ts`](https://github.com/objectstack-ai/objectstack/blob/main/examples/app-showcase/src/ui/views/contact.view.ts) — full edit form + sparse `formViews.create` + the list's Add button (`addRecord: { enabled: true }`), which opens it by convention.
 
+## Modal or page: `editMode`
+
+Where the form opens is a separate choice from what it holds, made on the object:
+
+{/* os:check */}
+```typescript
+import { ObjectSchema } from '@objectstack/spec/data';
+
+export const Account = ObjectSchema.create({
+  name: 'account',
+  label: 'Account',
+  sharingModel: 'private',
+  editMode: 'page', // 'modal' (the Console's default) | 'page'
+  fields: { name: { type: 'text', label: 'Name', required: true } },
+});
+```
+
+- **`modal`** opens Create and Edit in a dialog over the current view: short forms and quick
+  edits.
+- **`page`** gives the form its own route under the active app,
+  `/apps/:appName/:objectName/new` and `/apps/:appName/:objectName/record/:recordId/edit`: a
+  URL that can be bookmarked and shared, survives a refresh (the form re-reads the record from
+  the URL) and closes with Back. It suits long, tabbed or wizard forms.
+
+Both render the same form, so sections, validation and visibility rules behave identically.
+The change is additive: the existing Create and Edit entry points, the list's per-row Edit
+included, follow `editMode` with no other edit. To open the page routes from a page element,
+an `action:button` names the Console's `navigate_create` or `navigate_edit` handler in
+`properties.actionType`, with its arguments in `properties.params` (a node-level `params` is
+the action's input list and is ignored here). Strings in `properties.params` are templates,
+so a button on a record page names its record with `${record.id}`; inside an object view the
+active object is already known and `params` can be omitted.
+
+```json
+{
+  "type": "action:button",
+  "properties": {
+    "label": "Edit",
+    "icon": "pencil",
+    "actionType": "navigate_edit",
+    "params": { "objectName": "account", "recordId": "${record.id}" }
+  }
+}
+```
+
 ## Anti-patterns
 
 - **Two full hand-authored field lists** (`contact_create_form` + `contact_edit_form`). Guaranteed drift; the create form silently misses new required fields.

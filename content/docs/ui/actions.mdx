@@ -371,9 +371,26 @@ strict params gate admits either bag without a word.
   ADR-0059), so any `FieldType` works — a `file` param shows a real upload
   control (`multiple` / `accept` / `maxSize` honored), `lookup` a record
   picker, `date` a date picker, `richtext` the rich-text editor, and so on.
+  A field-backed param resolves the same way when the action is launched from a
+  list's selection bar. Values reach the action as the widget emits them
+  (`number` a number, `date` `YYYY-MM-DD`, a lookup the record id(s), a `file`
+  the uploaded `sys_file` id(s), arrays when `multiple`), and the dialog's
+  **Confirm** stays disabled while an upload is in flight. A param's `visible`
+  is a CEL predicate over `features`, `current_user` and `data` that omits the
+  param when false.
 - **`confirmText`** — confirmation dialog before running.
 - **`successMessage` / `errorMessage` / `refreshAfter`** — post-run feedback
   and an automatic data refresh.
+  `successMessage` is a template whose holes are `{{ }}` over `result` (the
+  handler's answer) and `record` (the record the action ran on):
+  `'Invitation sent to {{ result.email }}'`; a `${…}` token in it is refused. A
+  `type: 'api'` or `'script'` action whose handler can succeed in more than one
+  way adds `outcomeMessages`, one entry per snake_case `outcome` the handler
+  returns, each of which may read `${result.*}`; the toast shows the entry the
+  answer names, else `successMessage`, else a generic "Action completed
+  successfully". A `message` in the server's answer is shown only when the copy
+  asks for it (`{{ result.message }}`). Post-success navigation is
+  `onSuccess: { navigate, openIn }`.
 - **`undoable`** — on a single-record update, the success toast offers an
   **Undo** that restores the record's prior field values (`Ctrl+Z` works too).
   The runtime only captures the prior values when this flag is set, so an
@@ -437,6 +454,24 @@ is a spec proposal for a properly named key, not a values map under this one.
   [formulas guide](/docs/data-modeling/formulas) for CEL syntax.
 - **`requiresFeature`** ties visibility to a feature flag (compiled into a
   `visible` predicate).
+- **Relation fields bind as their id.** A `lookup`, `master_detail`, `user` or
+  `tree` field reads in a predicate as the id the server stores, never as the
+  record it points at, on every surface (a record page that expanded the
+  relation for display collapses it again before evaluating). So "only the
+  record's manager sees this" is `current_user.id == record.manager`;
+  `record.manager.id` faults, because `record.manager` is a string. An empty
+  relation is `null`, a clean `false`.
+- **`current_user.can(object, verb)`** asks whether the signed-in user holds an
+  object permission, from the effective permissions the Console already holds
+  for its built-in Edit and Delete, so a custom action that replaces one of
+  them can be gated the same way: `visible: "current_user.can('account', 'delete')"`.
+  The verb comes from the closed `OBJECT_PERMISSION_VERBS` table in
+  `@objectstack/spec/security`; a verb outside it is a fault, not `false`.
+  `current_user.hasCapability('<name>')` asks the capability question from the
+  same payload. Until that payload has loaded both fault, so a `visible` gate
+  stays closed and a `disabled` gate renders the button disabled until the
+  answer arrives. In a UI gate they decide only what is shown: the server
+  still enforces the request the action sends, as `requiredPermissions` does.
 
 ### Authorization inside an action
 
