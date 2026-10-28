@@ -358,12 +358,14 @@ describe('os migrate meta --from 16 (e2e over the real CLI)', () => {
  * example apps use), and the retired keys authored inside them. A
  * `defineStack`-only tolerance passes the first and fails the last two.
  *
- * The retired keys are ones whose tombstone and conversion still stand
- * (`agent.lifecycle`, `dashboard.refreshInterval`; protocol 18, which
- * `--from 16` replays into). The fixture used to carry `agent.knowledge` and
- * `skill.triggerPhrases`, whose 16.x kits aged out (#25767): their tombstones
- * and conversions left the spec, so neither is a retired key any more, only an
- * unknown one.
+ * The retired spellings are ones whose refusal and conversion still stand
+ * (the `dashboard.refreshInterval` tombstone, and `regex`, a retired member of
+ * `agent.structuredOutput.format` refused at parse with its prescription;
+ * protocol 18, which `--from 16` replays into). The fixture used to carry
+ * `agent.knowledge` and `skill.triggerPhrases`, whose 16.x kits aged out
+ * (#25767): their tombstones and conversions left the spec, so neither is a
+ * retired key any more, only an unknown one. `agent.lifecycle` is not used:
+ * its retirement pins the key absent from the tree outside its own kit.
  *
  * The second test is the other half of the pin, and it is the one that keeps
  * this a restoration rather than a widening: `os validate` on the SAME fixture
@@ -396,7 +398,7 @@ export default defineStack({
     label: 'Agent',
     role: 'Helper',
     instructions: 'help',
-    lifecycle: { id: 'rk', initial: 'open', states: { open: {} } },  // RETIRED in 17.7.0 — the whole point
+    structuredOutput: { format: 'regex' },  // RETIRED member in 17.7.0 — the whole point
   })],
   dashboards: [Dashboard.create({
     name: 'rk_ops',
@@ -437,12 +439,12 @@ export default defineStack({
     expect(parsed.from).toBe(16);
     // …and through helpers imported from a spec subpath, which is where a
     // tolerance scoped to `defineStack` alone would still have refused.
-    expect(appliedAt.get('agent-lifecycle-removed')).toBe('agents[0].lifecycle');
+    expect(appliedAt.get('agent-structured-output-refused-members-removed')).toBe('agents[0].structuredOutput.format');
     expect(appliedAt.get('dashboard-refresh-interval-to-refresh-interval-seconds')).toBe('dashboards[0].refreshIntervalSeconds');
     expect(parsed.schemaValid).toBe(true);
 
     const snap = JSON.parse(readFileSync(join(rkDir, 'migrated.json'), 'utf-8'));
-    expect(snap.agents[0].lifecycle).toBeUndefined();
+    expect(snap.agents[0].structuredOutput).toBeUndefined();
     expect(snap.dashboards[0].refreshInterval).toBeUndefined();
     // The rest of the artifact survives the tolerant load intact — the codemod
     // removes what retired, not what it could not parse.
@@ -461,7 +463,7 @@ export default defineStack({
     } catch (e: any) {
       refused = true;
       const output = `${String(e.stdout ?? '')}${String(e.stderr ?? '')}`;
-      expect(output).toMatch(/`agent\.lifecycle` was removed/);
+      expect(output).toMatch(/`regex` was removed/);
       expect(output).toMatch(/os migrate meta --from 17/);
     }
     expect(refused, '`os validate` must still reject a retired key').toBe(true);
