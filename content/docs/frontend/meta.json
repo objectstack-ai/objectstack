@@ -2,7 +2,7 @@
   "title": "Custom Front-end",
   "pages": [
     "index",
-    "---Object UI SDK---",
+    "---ObjectUI SDK---",
     "quick-start",
     "building-crud-app",
     "architecture-overview",
