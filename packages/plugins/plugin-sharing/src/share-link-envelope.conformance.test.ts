@@ -21,7 +21,7 @@
  * So the target shape was not a design decision. `runtime/src/domains/share-links.ts`
  * serves these same five paths (for cloud's per-environment kernels it is the
  * designed PRIMARY surface), and has always answered `data: link`, `data: links`,
- * `data: { ok: true }`, `data: { record, link, redactFields }`, `data: rows`. This
+ * `data: { ok: true }`, `data: { record, link, redactFields, fields }`, `data: rows`. This
  * module converged onto that. The `sameShapeAsDispatcher` suite at the bottom is
  * what keeps the two from drifting apart again — the failure mode #3833 hit one
  * domain over, where each surface held its own copy of a mapping.
@@ -500,8 +500,9 @@ describe('share-link envelope (#3983) — same shape as the dispatcher twin', ()
     expect(revoke.body.data).toEqual({ ok: true });                        // dispatcher: data: { ok: true }
 
     const resolve = await drive(mount().http, `GET ${B}/:token/resolve`, { params: { token: 'tok_abcdefgh' } });
-    expect(Object.keys(resolve.body.data).sort())                          // dispatcher: data: { record, link, redactFields }
-      .toEqual(['link', 'record', 'redactFields']);
+    // dispatcher: data: { record, link, redactFields, fields } — one builder, #26991
+    expect(Object.keys(resolve.body.data).sort())
+      .toEqual(['fields', 'link', 'record', 'redactFields']);
   });
 
   it('redaction still happens, and `redactFields` names what was stripped', async () => {

@@ -191,7 +191,7 @@ interface ShareLinkFamilyRoute {
  * It has always answered in the declared envelope with `data` as the payload —
  * `data: link`, `data: links`, `data: { ok: true }`, `data: { record, link,
  * redactFields }`, `data: rows`. This module answered `{ link }`, `{ links }`,
- * `{ ok: true }`, `{ record, link, redactFields }`, `{ data: rows }`. Same
+ * `{ ok: true }`, `{ record, link, redactFields, fields }`, `{ data: rows }`. Same
  * routes, two shapes, decided by which surface happened to mount them — the
  * asymmetry #3636 fixed for `/i18n`, one domain over.
  *
