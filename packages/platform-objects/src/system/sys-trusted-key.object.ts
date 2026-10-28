@@ -156,7 +156,8 @@ export const SysTrustedKey = ObjectSchema.create({
   },
 
   indexes: [
-    { fields: ['key_id'], unique: true },
+    // One key id names one key across the environment, revoked rows included.
+    { fields: ['key_id'], unique: 'global' },
     { fields: ['fingerprint'], unique: false },
   ],
 

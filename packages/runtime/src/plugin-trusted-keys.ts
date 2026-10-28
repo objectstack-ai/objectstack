@@ -17,9 +17,11 @@
  *    enters the platform (ADR-0025 §7).
  *  - **Ed25519 only**, the one algorithm plugin artifact signatures use
  *    (`SIGNATURE_ALG` in `@objectstack/core`).
- *  - **A key id is never reused.** Adding a different key under a key id the
- *    store already holds is refused, revoked rows included, so a revoked key
- *    cannot return under its old handle and one handle never names two keys.
+ *  - **A key id is never reused, and a revoked key never returns.** Adding a
+ *    different key under a key id the store already holds is refused, revoked
+ *    rows included, so one handle never names two keys; and a key whose
+ *    fingerprint is on a revoked row is refused under any key id, so a revoked
+ *    key cannot come back under a new handle. One key is trusted under one id.
  *  - **A revoked row stays.** Revoking flips `status`; nothing deletes a row
  *    or re-activates it.
  *  - **The row is re-checked on read.** {@link resolveTrustedKey} recomputes
@@ -74,7 +76,10 @@ export function publicKeyFingerprint(key: KeyObject): string {
 /** The outcome of reading a PEM handed to `os plugin trust add`. */
 export type PublisherKeyRead =
   | { ok: true; publicKeyPem: string; fingerprint: string }
-  | { ok: false; reason: 'private-key' | 'unreadable' | 'wrong-algorithm'; message: string };
+  | { ok: false; reason: PublisherKeyRefusal; message: string };
+
+/** Why {@link readPublisherPublicKey} refused a PEM, each named in its message. */
+export type PublisherKeyRefusal = 'private-key' | 'unreadable' | 'wrong-algorithm';
 
 /**
  * Read a publisher PUBLIC key from PEM text: refuse a private key by name,
@@ -144,9 +149,22 @@ async function findByKeyId(engine: TrustedKeyEngine, keyId: string): Promise<Tru
   return exact[0] ?? null;
 }
 
+async function findByFingerprint(engine: TrustedKeyEngine, fingerprint: string): Promise<TrustedKeyRow[]> {
+  const rows = await engine.find(TRUSTED_KEY_OBJECT, { where: { fingerprint } }, SYSTEM);
+  return rows.map((r) => toRow(r as Record<string, unknown>)).filter((r) => r.fingerprint === fingerprint);
+}
+
 export type AddTrustedKeyResult =
   | { outcome: 'added' | 'already-trusted'; row: TrustedKeyRow }
-  | { outcome: 'refused'; reason: 'key-id-invalid' | 'key-id-taken' | 'key-id-revoked'; message: string; row?: TrustedKeyRow };
+  | { outcome: 'refused'; reason: AddTrustedKeyRefusal; message: string; row?: TrustedKeyRow };
+
+/** Why {@link addTrustedKey} refused, each named in its message. */
+export type AddTrustedKeyRefusal =
+  | 'key-id-invalid'
+  | 'key-id-taken'
+  | 'key-id-revoked'
+  | 'key-revoked'
+  | 'key-trusted-under-another-id';
 
 /**
  * Add `publicKeyPem` (already read by {@link readPublisherPublicKey}) as an
@@ -174,7 +192,7 @@ export async function addTrustedKey(
         row: existing,
         message:
           `Key id '${keyId}' was revoked in this environment, and a revoked key id is never trusted again. `
-          + 'Sign with a new key id (`os plugin sign --key-id NEW_ID`) and trust the key under that id.',
+          + 'Generate a new key pair (`os plugin keygen`), sign with it under a new key id and trust that key.',
       };
     }
     if (existing.fingerprint === input.fingerprint) return { outcome: 'already-trusted', row: existing };
@@ -185,6 +203,29 @@ export async function addTrustedKey(
       message:
         `Key id '${keyId}' already names a different trusted key (${existing.fingerprint}). One key id names one key: `
         + 'choose a new key id for this key, or revoke the old one first (`os plugin trust revoke`).',
+    };
+  }
+  const sameKey = await findByFingerprint(engine, input.fingerprint);
+  const revoked = sameKey.find((r) => r.status === 'revoked');
+  if (revoked) {
+    return {
+      outcome: 'refused',
+      reason: 'key-revoked',
+      row: revoked,
+      message:
+        `This key (${input.fingerprint}) was revoked in this environment under key id '${revoked.key_id}', and a revoked `
+        + 'key is never trusted again, under any key id. Generate a new key pair with `os plugin keygen`.',
+    };
+  }
+  const active = sameKey.find((r) => r.status === 'active');
+  if (active) {
+    return {
+      outcome: 'refused',
+      reason: 'key-trusted-under-another-id',
+      row: active,
+      message:
+        `This key (${input.fingerprint}) is already trusted under key id '${active.key_id}'. One key is trusted under one `
+        + `key id: sign with --key-id ${active.key_id}.`,
     };
   }
   const row: TrustedKeyRow = {

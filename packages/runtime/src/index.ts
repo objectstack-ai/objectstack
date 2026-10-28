@@ -36,7 +36,9 @@ export type {
   TrustedKeySource,
   TrustedKeyEngine,
   PublisherKeyRead,
+  PublisherKeyRefusal,
   AddTrustedKeyResult,
+  AddTrustedKeyRefusal,
   RevokeTrustedKeyResult,
   TrustedKeyResolution,
 } from './plugin-trusted-keys.js';
