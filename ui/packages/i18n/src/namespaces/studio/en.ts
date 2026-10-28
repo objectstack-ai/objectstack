@@ -502,7 +502,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.widget.dataset': 'Dataset',
   'engine.inspector.widget.datasetPlaceholder': 'e.g. sales_pipeline',
   'engine.inspector.widget.datasetHint':
-    'Bind a governed dataset. When set, it takes precedence over the inline object query above and the widget renders via the dataset (consistent, cross-object, RLS-enforced).',
+    'Pick the governed dataset this widget draws from, then choose its dimensions and measures below. Dataset numbers stay consistent across objects, and row-level security applies.',
   'engine.inspector.widget.dimensions': 'Dimensions',
   'engine.inspector.widget.dimensionsPlaceholder': 'e.g. stage, region (comma-separated)',
   'engine.inspector.widget.dimensionsHint':
@@ -531,6 +531,31 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.widget.type.funnel': 'Funnel',
   'engine.inspector.widget.type.table': 'Table',
   'engine.inspector.widget.type.pivot': 'Pivot Table',
+  // objectstack#26745 — the rest of the spec's widget types, now that the Type
+  // select reads the one widget registry (`previews/widget-types`).
+  'engine.inspector.widget.type.column': 'Column Chart',
+  'engine.inspector.widget.type.scatter': 'Scatter Plot',
+  'engine.inspector.widget.type.treemap': 'Treemap',
+  'engine.inspector.widget.type.sankey': 'Sankey Diagram',
+  'engine.inspector.widget.type.combo': 'Combo Chart',
+  'engine.inspector.widget.type.gauge': 'Gauge',
+  'engine.inspector.widget.type.solidGauge': 'Solid Gauge',
+  'engine.inspector.widget.type.kpi': 'KPI',
+  'engine.inspector.widget.type.bullet': 'Bullet Chart',
+  'engine.inspector.widget.type.radar': 'Radar Chart',
+  // objectstack#26745 — the Add-widget menu's names for the spec widget types it
+  // did not offer before. The family's other rows still sit in the app-shell
+  // designer table (objectstack#25922 moves them); each en row is the type's
+  // English `label` in `previews/widget-types`, word for word.
+  'engine.widgetPicker.type.column': 'Column chart',
+  'engine.widgetPicker.type.treemap': 'Treemap',
+  'engine.widgetPicker.type.sankey': 'Sankey diagram',
+  'engine.widgetPicker.type.combo': 'Combo chart',
+  'engine.widgetPicker.type.gauge': 'Gauge',
+  'engine.widgetPicker.type.solidGauge': 'Solid gauge',
+  'engine.widgetPicker.type.kpi': 'KPI',
+  'engine.widgetPicker.type.bullet': 'Bullet chart',
+  'engine.widgetPicker.type.radar': 'Radar chart',
   'engine.inspector.widget.untitledN': 'Widget {n}',
   'engine.inspector.widget.unsupportedSelection': 'Unsupported selection kind: {kind}',
   'engine.inspector.widget.removed': 'The selected widget was removed from the draft.',
@@ -2188,6 +2213,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.if.copyJson': 'Copy JSON',
   'engine.studio.if.copyFailed': 'Could not copy to the clipboard',
   'engine.studio.if.definitionTitle': '{label} · Definition',
+  // The shared rail (objectstack#26733): the action under a search that matched nothing.
+  'engine.studio.rail.clearSearch': 'Clear search',
   // Data pillar
   'engine.studio.data.newFieldLabel': 'New field',
   'engine.studio.data.nameFieldLabel': 'Name',

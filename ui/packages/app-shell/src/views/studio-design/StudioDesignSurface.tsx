@@ -2980,14 +2980,43 @@ const NAV_TARGET_KEY = {
  * Whether a listed row can be a nav target. A record page needs a record id a
  * `page` entry cannot pass (`isStaticPageOption`), and an action bound to an
  * object is not addressable from the nav, which runs GLOBAL actions only
- * (`useNavActionDispatch`). Only a CONFIRMED one is left out: a draft header
- * carries no body, so a draft-only row is kept, as `isStaticPageOption` keeps
- * a row with no `type`.
+ * (`useNavActionDispatch`). Only a CONFIRMED one is left out, as
+ * `isStaticPageOption` keeps a row with no `type`.
+ *
+ * objectstack-ai/objectstack#26743 — a `_drafts` header names the METADATA
+ * type (`page`), never the body's own `type` (`record`), so a draft-only row
+ * is judged on its draft body instead ({@link NAV_TARGET_BODY_KEYED}). A draft
+ * record page is still a record page once it is published with the app.
  */
 function isNavTargetRow(metaType: string, row: Record<string, unknown>): boolean {
   if (metaType === 'page') return isStaticPageOption(row as { type?: string });
   if (metaType === 'action') return !row.objectName;
   return true;
+}
+
+/** The types whose {@link isNavTargetRow} verdict reads a body key, so a draft-only row's body is read for it. */
+const NAV_TARGET_BODY_KEYED: ReadonlySet<string> = new Set(['page', 'action']);
+
+/**
+ * Whether a draft-only row can be a nav target, judged on its draft body. A
+ * body that cannot be read (no draft served, a failed read) leaves the row in,
+ * as a published row with no `type` is left in: only a confirmed non-target
+ * is dropped.
+ */
+async function isDraftNavTarget(
+  client: MetadataClient,
+  metaType: string,
+  name: string,
+  packageId: string,
+): Promise<boolean> {
+  if (!NAV_TARGET_BODY_KEYED.has(metaType)) return true;
+  let body: Record<string, unknown> | null;
+  try {
+    body = extractDraftBody(await client.getDraft(metaType, name, { packageId }));
+  } catch {
+    return true;
+  }
+  return !body || isNavTargetRow(metaType, body);
 }
 
 /**
@@ -3021,10 +3050,19 @@ function usePackageNavTargets(
         // objectui#11862 — a draft-only target carries the label its `_drafts`
         // row serves (objectstack-ai/objectstack#22200), so the picker offers
         // it by that label, as it offers a published one.
+        const draftOnly: NavTargetRow[] = [];
         for (const draft of (drafts ?? []) as Array<{ name?: string | null; label?: I18nLabel | null }>) {
           const name = typeof draft?.name === 'string' ? draft.name : '';
-          if (name && !byName.has(name)) byName.set(name, { name, label: draft.label ?? undefined });
+          if (name && !byName.has(name) && !draftOnly.some((row) => row.name === name)) {
+            draftOnly.push({ name, label: draft.label ?? undefined });
+          }
         }
+        const verdicts = await Promise.all(
+          draftOnly.map((row) => isDraftNavTarget(client, metaType, row.name, packageId)),
+        );
+        draftOnly.forEach((row, i) => {
+          if (verdicts[i]) byName.set(row.name, row);
+        });
       } catch {
         /* non-fatal — the picker just stays empty */
       }
@@ -4468,6 +4506,26 @@ export function InterfacesPillar({
         : navIcon(currentNavEntry?.type ?? current.type);
   const ifKindName = current ? navKindName(currentNavEntry ?? { type: current.type }, locale) || translateMetadataType(current.type, locale) : '';
   const ifInternalId = current ? `${t('engine.studio.if.internalId', locale)}: ${current.type} · ${current.name}` : undefined;
+  // objectstack#26746 — the header names the open leaf as its rail row names
+  // it: the row's entry in `railTree`, through the same `navEntryLabelText`
+  // and resolver, asked on every render. `current.label` is that text frozen
+  // when the Surface was made, so a label the resolver learns later (a
+  // draft-only object's `_drafts` label, the console's object metadata) left
+  // the header on the machine name while the rail already read the label.
+  const ifTitleText = (() => {
+    if (!current) return '';
+    const find = (nodes: NavNode[]): NavNode | null => {
+      for (const node of nodes) {
+        if (node.id === current.navId) return node;
+        const hit = Array.isArray(node.children) ? find(node.children) : null;
+        if (hit) return hit;
+      }
+      return null;
+    };
+    const railEntry = current.navId ? find(railTree) : null;
+    const text = railEntry ? navEntryLabelText(railEntry as NavEntryLike, locale, targetLabel) : current.label;
+    return text || current.name;
+  })();
   // objectui#12455 — an object entry's structure is the Data pillar's: the
   // header offers to open it there, through the host's surface channel (no
   // channel, no chip: the hint under the tab row still names the pillar).
@@ -4591,7 +4649,7 @@ export function InterfacesPillar({
       title={
         current ? (
           <>
-            {current.label || current.name}
+            {ifTitleText}
             <span className="sr-only"> · {ifKindName}</span>
           </>
         ) : (
@@ -4606,7 +4664,7 @@ export function InterfacesPillar({
       chips={
         current ? (
           <span className={STUDIO_KIND_CHIP} data-testid="if-canvas-caption" title={ifInternalId}>
-            <span className="sr-only">{current.label || current.name} · </span>
+            <span className="sr-only">{ifTitleText} · </span>
             {ifKindName}
           </span>
         ) : undefined
@@ -4997,7 +5055,7 @@ export function InterfacesPillar({
       >
         <SheetHeader className="shrink-0 border-b px-4 py-3 pr-10">
           <SheetTitle className="text-[13px] font-medium">
-            {tFormat('engine.studio.if.definitionTitle', locale, { label: current.label || current.name })}
+            {tFormat('engine.studio.if.definitionTitle', locale, { label: ifTitleText })}
           </SheetTitle>
         </SheetHeader>
         {isSourcePage ? (
@@ -6327,6 +6385,11 @@ export function DataPillar({
     </>
   ) : undefined;
 
+  const objectNeedle = query.trim().toLowerCase();
+  const shownObjects = objects.filter(
+    (o) => !objectNeedle || o.label.toLowerCase().includes(objectNeedle) || o.name.toLowerCase().includes(objectNeedle),
+  );
+
   return (
     <div ref={pillarRef} className="flex h-full flex-col">
       {objConflictDialog}
@@ -6345,7 +6408,12 @@ export function DataPillar({
           onAdd={readOnly ? undefined : openCreateObject}
           addLabel={t('engine.studio.data.newObject', locale)}
           addTestId="studio-rail-add"
-          search={{ value: query, onChange: setQuery, placeholder: t('engine.studio.data.searchObjects', locale) }}
+          search={{
+            value: query,
+            onChange: setQuery,
+            placeholder: t('engine.studio.data.searchObjects', locale),
+            matchCount: shownObjects.length,
+          }}
           isMobile={isMobile}
           open={railOpen}
         >
@@ -6354,32 +6422,25 @@ export function DataPillar({
               {error ? t('engine.studio.loadFailed', locale) : objectsLoaded ? t('engine.studio.data.noObjects', locale) : t('engine.studio.loading', locale)}
             </p>
           )}
-          {objects
-            .filter(
-              (o) =>
-                !query.trim() ||
-                o.label.toLowerCase().includes(query.trim().toLowerCase()) ||
-                o.name.toLowerCase().includes(query.trim().toLowerCase()),
-            )
-            .map((o) => {
-              const Icon = getIcon(o.icon);
-              return (
-                <StudioRailRow
-                  key={o.name}
-                  active={current?.name === o.name}
-                  onClick={() => {
-                    // objectstack#26705 — another object's load replaces the
-                    // buffer the held edit lives in; the open one keeps it.
-                    if (current?.name !== o.name && !confirmDropUnsavedWork(objHeld !== null, locale)) return;
-                    setCurrent(o);
-                    if (isMobile) setRailOpen(false);
-                  }}
-                  icon={<Icon className="h-4 w-4 shrink-0" />}
-                >
-                  {o.label}
-                </StudioRailRow>
-              );
-            })}
+          {shownObjects.map((o) => {
+            const Icon = getIcon(o.icon);
+            return (
+              <StudioRailRow
+                key={o.name}
+                active={current?.name === o.name}
+                onClick={() => {
+                  // objectstack#26705 — another object's load replaces the
+                  // buffer the held edit lives in; the open one keeps it.
+                  if (current?.name !== o.name && !confirmDropUnsavedWork(objHeld !== null, locale)) return;
+                  setCurrent(o);
+                  if (isMobile) setRailOpen(false);
+                }}
+                icon={<Icon className="h-4 w-4 shrink-0" />}
+              >
+                {o.label}
+              </StudioRailRow>
+            );
+          })}
         </StudioRail>
 
         <div className={cn('flex min-w-0 flex-1 flex-col overflow-hidden', DATA_CONTENT_CONTAINER)} data-testid="data-content-column">
@@ -7978,6 +8039,7 @@ export function AutomationsPillar({
             onChange: setRailQuery,
             placeholder: t('engine.studio.designer.search', locale),
             testId: 'auto-rail-search',
+            matchCount: shownFlows.length,
           }}
           footer={railLegend}
           isMobile={isMobile}
@@ -8039,11 +8101,6 @@ export function AutomationsPillar({
               </StudioRailGroup>
             );
           })}
-          {flows.length > 0 && shownFlows.length === 0 && (
-            <p className="px-2 py-3 text-[11px] text-muted-foreground">
-              {tFormat('engine.list.emptyQuery', locale, { query: railQuery.trim() })}
-            </p>
-          )}
           {flows.length === 0 && !creating && (error || !listed || openCreateFlow) && (
             <p className="px-2 py-3 text-[11px] text-muted-foreground">
               {error
@@ -8896,7 +8953,12 @@ export function AccessPillar({
           onAdd={openCreateSet}
           addLabel={t('engine.studio.access.new', locale)}
           addTestId="studio-rail-add"
-          search={{ value: query, onChange: setQuery, placeholder: t('engine.studio.access.search', locale) }}
+          search={{
+            value: query,
+            onChange: setQuery,
+            placeholder: t('engine.studio.access.search', locale),
+            matchCount: filtered.length,
+          }}
           pinned={
             // Pinned sibling surface: the package-wide Record Sharing Baseline
             // (OWD) overview (objectui#2505). Same package-author ownership as
