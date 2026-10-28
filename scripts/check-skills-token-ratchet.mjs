@@ -690,7 +690,10 @@ export const CEILINGS = new Map([
   // 2956 at headroom 0, ceiling +737. No repeated passage in the file to
   // cut first (measured: no sentence repeats). Maintainer ruling 2026-10-27 on the decision card 「skills 修复卡的教学和 eval 都撞 token 天
   // 花板,怎么付?」, tap A, verbatim and untranslated: 「A:先削重复,余额按实测提高」.
-  ['skills/objectstack-data/rules/security.md', 3693],
+  // 3693 -> 3687 (#27016): RE-LOCK at the landed count. `queues` joins the
+  // kernel names a membership key may not take (+3 tokens), paid by cutting
+  // "not a stamp on every data row," from the membership-keys intro; net -6.
+  ['skills/objectstack-data/rules/security.md', 3687],
   // 3024 -> 3109 (2026-08-31 app-repo-principles raise, see the block above).
   // Severity Levels listed the three values and left the CHOICE unstated: a
   // block rests on a judgement a person made, so a machine-inferred signal — a
@@ -794,7 +797,17 @@ export const CEILINGS = new Map([
   // prose above it), then the row's 7 tokens of headroom absorb 7; the ceiling moves by the
   // remaining 43 and is pinned AT the measurement — zero headroom. Maintainer ruling 2026-10-27 (Warren, decision card 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」,
   // option A tapped at 01:21Z), verbatim and untranslated: 「A:先削重复,余额按实测提高」.
-  ['skills/objectstack-ui/rules/actions.md', 2151],
+  // 2151 -> 2259: the `disabledReason` teaching beside `disabled` — one bullet (an I18nLabel,
+  // display-only, never a predicate; omitted = the console's default reason, blank refused, the
+  // four near-miss spellings refused naming it, the reason never in `description`) and the key on
+  // the `disabled` line of the ReassignLead example. PAID DOWN FIRST by 122 bytes of true
+  // duplicate in this file: two code comments in that example restating the bullets above it
+  // (`// Greys out (stays visible) …` — the `disabled` bullet; `// success toast offers Undo;
+  // Ctrl+Z works too` — the `undoable` bullet). The file is 8602 -> 9035 bytes -> 2259 tokens,
+  // zero headroom to absorb any of it, ceiling +108, pinned AT the measurement. Same ruling as
+  // the line above (2026-10-27, tap A: 「A:先削重复,余额按实测提高」).
+  //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(9035 / 4)
+  ['skills/objectstack-ui/rules/actions.md', 2259],
   // 6090 -> 6252 (#19715, card item 4): a 5-line table of contents at the top,
   // anchors to the file's existing headings, nothing else changed. +162 tokens,
   // zero headroom to absorb any of it, ceiling +162. Maintainer ruling
@@ -920,7 +933,25 @@ export const CEILINGS = new Map([
   // `applyOn: 'create'`. +309 tokens at headroom 0, ceiling +309; nothing
   // duplicated in the file to cut first. Maintainer ruling 2026-10-27 on the decision card 「skills 修复卡的教学和 eval 都撞 token 天
   // 花板,怎么付?」, tap A, verbatim and untranslated: 「A:先削重复,余额按实测提高」.
-  ['skills/objectstack-data/evals/hooks-security-seeds-datasources.json', 1404],
+  // 1404 -> 1573 (card #26834, the eval owed by the spec PR that added a
+  // hook's `refusals` catalogue): one case for a save refused over the
+  // account's credit limit in an app serving English and Chinese users —
+  // expected `refusals: { CREDIT_LIMIT: { message } }` on the hook, a
+  // `language: 'js'` body throwing `{ code: 'CREDIT_LIMIT' }`, the zh-CN
+  // sentence under the bundle's `hooks: { HOOK: { refusals } }`; NO sentence
+  // on the throw (`new Error('`), NO `handler:`. Triage 6450886908 (room
+  // inside the package first, no raise) read together with the standing
+  // ruling, strictest first — maintainer ruling 2026-10-27 on the decision
+  // card 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」, tap A, verbatim
+  // and untranslated: 「A:先削重复,余额按实测提高」. PAID DOWN FIRST: five
+  // sentences in cases 1–5 that restated their own `must_not_contain`
+  // assertions (case 4 keeps its one non-asserted clause), 453 bytes = 114
+  // units; the case adds 1129 bytes = 283 units. On `origin/main` the file
+  // was 5616 bytes (1404 tokens, headroom 0); the LANDED file is 6292 bytes
+  // -> 1573 tokens, ceiling +169, pinned AT the measurement, zero headroom.
+  // The raising PR's body carries the same arithmetic.
+  //   ceil($(wc -c < skills/objectstack-data/evals/hooks-security-seeds-datasources.json) / 4) == ceil(6292 / 4)
+  ['skills/objectstack-data/evals/hooks-security-seeds-datasources.json', 1573],
   // 946 -> 1050 (#26297): the invoice-line case gains the owner opt-in
   // (`ownerMayEdit` on the controlled_by_parent line) and pins `added_by` as
   // `type: 'user'`, never a lookup to a `user` object. +104 tokens at
@@ -958,7 +989,25 @@ export const CEILINGS = new Map([
   // pin duplicated case 5's (77 bytes cut, 20 tokens); the remainder is the new
   // case; pinned AT the measurement, zero headroom. The raising PR's body carries
   // the same arithmetic.
-  ['skills/objectstack-i18n/evals/bundles-locales-coverage.json', 1642],
+  // 1642 -> 1790 (2026-10-28, the owed Skills-docs follow-up of the spec PR that
+  // added the `books` translation group): one eval prompt for a doc book's
+  // spine copy — `books.<book>.label` / `.description` and
+  // `books.<book>.groups.<key>.label`. Same ruling as the rows above, tap label
+  // verbatim and untranslated: 「A:先削重复,余额按实测提高」. PAID DOWN FIRST: five
+  // sentences restated a rule whose home the reader already reads — case 1's
+  // "no ICU plural/select" (SKILL.md "No ICU MessageFormat" + its own
+  // `{count, plural` pin), case 3's "retired o.* dialect" (SKILL.md "The
+  // Retired o.* Shape" + its own `o: {` pin), case 5's "extract --check is the
+  // freshness gate" (SKILL.md "os i18n extract --check — freshness, not
+  // coverage"), case 6's "inherited by every field referencing the picklist"
+  // (SKILL.md's `picklists` entry in the top-level group list), case 8's
+  // "neither is a pages.*.components key" (its own `components.open_block`
+  // pin): 227 bytes = 57 units (6567 -> 6340 bytes, 1642 -> 1585); the new case
+  // adds 817 bytes = 205 units (6340 -> 7157 bytes, 1585 -> 1790):
+  //   ceil($(wc -c < skills/objectstack-i18n/evals/bundles-locales-coverage.json) / 4) == ceil(7157 / 4)
+  // pinned AT the measurement, zero headroom. The raising PR's body carries the
+  // same arithmetic.
+  ['skills/objectstack-i18n/evals/bundles-locales-coverage.json', 1790],
   // 1211 -> 1458 (card #26302): one eval for a demo whose seed names people —
   // expected: both in `demoStaff` with a declared `position` /
   // `permissionSets`, created by `os dev`; NO `role:` alias and NO platform
@@ -1000,7 +1049,14 @@ export const CEILINGS = new Map([
   // + `onSuccess` pair — +284 tokens in the file's shape; fixtures, nothing to delete, the
   // whole addition raised and pinned AT the measurement. Maintainer ruling 2026-10-27 (Warren, decision card 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」,
   // option A tapped at 01:21Z), verbatim and untranslated: 「A:先削重复,余额按实测提高」.
-  ['skills/objectstack-ui/evals/views-apps-actions-pages.json', 1789],
+  // 1789 -> 2009: case 9, the `disabledReason` beside a `disabled` predicate (the reason never in
+  // `description`, the near-miss spellings refused) — +882 bytes; the file's cases share no
+  // sentence, so there was no duplicate to cut (0 bytes); cases 5 and 8 reworded so neither
+  // spells its own `must_not_contain` string (-2 bytes). 7154 -> 8034 bytes -> 2009 tokens,
+  // ceiling +220, pinned AT the measurement. Same ruling as the line above (2026-10-27, tap A:
+  // 「A:先削重复,余额按实测提高」).
+  //   ceil($(wc -c < skills/objectstack-ui/evals/views-apps-actions-pages.json) / 4) == ceil(8034 / 4)
+  ['skills/objectstack-ui/evals/views-apps-actions-pages.json', 2009],
   ['skills/objectstack-upgrade/evals/protocol-major-upgrade.json', 1033],
 
   // the remaining skills' eval notes

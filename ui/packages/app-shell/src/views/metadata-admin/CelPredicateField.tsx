@@ -54,6 +54,7 @@ import {
   type CelSuggestionKind,
   type CelValueType,
 } from './celAuthoring.js';
+import { useServerErrorsAt } from './draftVerdict.js';
 
 const LINT_DEBOUNCE_MS = 250;
 
@@ -118,6 +119,15 @@ export interface CelPredicateFieldProps {
    * has no such second verdict (the permission matrix included).
    */
   scopeIssue?: boolean;
+  /**
+   * objectstack#26858 — the item-relative path this editor writes in the body
+   * the page holds (`rowLevelSecurity.0.using`). When the page's served verdict
+   * (`DraftVerdictContext`) has an error at exactly that path — what publish
+   * will refuse — the editor shows the server's message and withholds "Valid
+   * CEL". The lint, its findings and `onLintChange` are unaffected, as with
+   * `scopeIssue`. Omitted: no server verdict is read.
+   */
+  verdictPath?: string;
   /** Reports the current lint issues up so the editor can gate Save on errors. */
   onLintChange?: (issues: CelLintIssue[]) => void;
   /**
@@ -158,6 +168,7 @@ export function CelPredicateField({
   slot,
   role,
   scopeIssue,
+  verdictPath,
   onLintChange,
   onInferredTypeChange,
   t,
@@ -354,9 +365,13 @@ export function CelPredicateField({
 
   const errors = issues.filter((i) => i.severity === 'error');
   const warnings = issues.filter((i) => i.severity === 'warning');
-  // "Valid CEL" only when nothing — the lint, or the host's scope verdict —
-  // says otherwise (objectui#11789).
-  const clean = linted && !!value.trim() && issues.length === 0 && !scopeIssue;
+  // objectstack#26858 — the server's errors at this editor's path, each one
+  // the lint does not already say in the same words.
+  const atPath = useServerErrorsAt(verdictPath);
+  const serverErrors = atPath.filter((e) => !issues.some((iss) => issueText(iss, t) === e.message));
+  // "Valid CEL" only when nothing — the lint, the host's scope verdict
+  // (objectui#11789) or the server's verdict at this path — says otherwise.
+  const clean = linted && !!value.trim() && issues.length === 0 && !scopeIssue && atPath.length === 0;
   // Result-type affordance (role="value"): shown once the expression parses,
   // even alongside warnings — the type is what dataset measure eligibility
   // keys off, so the author should see it whenever it is known.
@@ -384,7 +399,7 @@ export function CelPredicateField({
           aria-expanded={open}
           aria-autocomplete="list"
           aria-controls={open ? listId : undefined}
-          aria-invalid={errors.length > 0 || undefined}
+          aria-invalid={errors.length > 0 || atPath.length > 0 || undefined}
           onChange={(e) => {
             onChange(e.target.value);
             refreshAc();
@@ -397,7 +412,7 @@ export function CelPredicateField({
           }}
           className={cn(
             'font-mono text-xs',
-            errors.length > 0 && 'border-destructive focus-visible:ring-destructive/40',
+            (errors.length > 0 || atPath.length > 0) && 'border-destructive focus-visible:ring-destructive/40',
           )}
         />
         {open && suggestions.length > 0 && (
@@ -431,13 +446,19 @@ export function CelPredicateField({
         )}
       </div>
 
-      {/* Inline lint findings. */}
-      {(errors.length > 0 || warnings.length > 0) && (
+      {/* Inline lint findings, then the server's at this path (as written). */}
+      {(errors.length > 0 || warnings.length > 0 || serverErrors.length > 0) && (
         <ul className="mt-1 space-y-1" aria-live="polite">
           {errors.map((iss, i) => (
             <li key={`e${i}`} className="flex items-start gap-1.5 text-[11px] text-destructive">
               <AlertCircle className="mt-[1px] h-3 w-3 shrink-0" />
               <span>{issueText(iss, t)}</span>
+            </li>
+          ))}
+          {serverErrors.map((e, i) => (
+            <li key={`s${i}`} className="flex items-start gap-1.5 text-[11px] text-destructive" data-testid="cel-server-error">
+              <AlertCircle className="mt-[1px] h-3 w-3 shrink-0" />
+              <span>{e.message}</span>
             </li>
           ))}
           {warnings.map((iss, i) => (

@@ -167,6 +167,25 @@ const KEYS_OF_PREDICATE_MAX = 2000;
  * one.
  */
 export function membershipKeyReadsOf(predicate: string): readonly string[] {
+  return currentUserReadsOf(predicate).filter((k) => !RESERVED_RLS_MEMBERSHIP_KEYS.includes(k));
+}
+
+/**
+ * [ADR-0142 D3] Does any of these policies read `current_user.KEY`, in either
+ * clause? Asked for a kernel key the security plugin stages lazily
+ * (`queues`), so a request that reads none pays nothing.
+ */
+export function policiesReadCurrentUserKey(policies: readonly RowLevelSecurityPolicy[], key: string): boolean {
+  for (const policy of policies) {
+    for (const clause of [policy.using, (policy as { check?: unknown }).check]) {
+      if (typeof clause === 'string' && clause !== '' && currentUserReadsOf(clause).includes(key)) return true;
+    }
+  }
+  return false;
+}
+
+/** Every `current_user.KEY` name a predicate reads, reserved kernel names included. */
+function currentUserReadsOf(predicate: string): readonly string[] {
   const cached = KEYS_OF_PREDICATE.get(predicate);
   if (cached) return cached;
   const out = new Set<string>();
@@ -204,7 +223,7 @@ export function membershipKeyReadsOf(predicate: string): readonly string[] {
   } catch {
     // Not parseable: the compiler refuses it on its own path.
   }
-  const keys = [...out].filter((k) => !RESERVED_RLS_MEMBERSHIP_KEYS.includes(k));
+  const keys = [...out];
   if (KEYS_OF_PREDICATE.size >= KEYS_OF_PREDICATE_MAX) KEYS_OF_PREDICATE.clear();
   KEYS_OF_PREDICATE.set(predicate, keys);
   return keys;

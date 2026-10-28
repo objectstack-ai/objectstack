@@ -15,7 +15,7 @@ import type { useObjectListPreferences, ListViewPreference } from '../context/Li
 const ObjectChart = lazy(() =>
   import('@object-ui/plugin-charts').then((m) => ({ default: m.ObjectChart })),
 );
-import { ListView } from '@object-ui/plugin-list';
+import { ListView, type ListViewProps } from '@object-ui/plugin-list';
 import type { ListViewSchema, TreeViewConfig } from '@object-ui/types';
 import type { useAuth } from '@object-ui/auth';
 import type { useActionTextLocalizer } from '@object-ui/react';
@@ -37,6 +37,7 @@ import {
     isSameOptionsValue,
 } from './objectViewOptions.js';
 import { keepInlineEditModeForTheSession } from './objectViewChrome.js';
+import { OpenAsPageLink } from './objectViewOpenAsPage.js';
 import type { useObjectViewIdentity } from './objectViewIdentity.js';
 import type { useObjectViewRecordNavigation } from './objectViewRecordNavigation.js';
 import type { useObjectViewToolbarAffordances } from './objectViewToolbarAffordances.js';
@@ -69,7 +70,10 @@ export function useObjectViewListRenderer({
     filterScope,
     actions,
     handleRowClick,
+    handleListRowsChange,
     navOverlay,
+    recordOpen,
+    openAsPage,
     urlFilters,
     initialUfSelections,
     handleUserFilterSelectionsChange,
@@ -100,7 +104,13 @@ export function useObjectViewListRenderer({
     filterScope: FilterTokenScope;
     actions: ReturnType<typeof useObjectActions>;
     handleRowClick: ReturnType<typeof useObjectViewRecordNavigation>['handleRowClick'];
+    /** objectstack#26679 — the rows the list shows, for the drawer's root `↑` `↓`. */
+    handleListRowsChange: ReturnType<typeof useObjectViewRecordNavigation>['handleListRowsChange'];
     navOverlay: ReturnType<typeof useObjectViewRecordNavigation>['navOverlay'];
+    /** objectstack#26681 — the Display menu's Open records section. */
+    recordOpen: NonNullable<ListViewProps['recordOpen']>;
+    /** objectstack#26681 — the name cell's ↗ (`./objectViewOpenAsPage.tsx`), or `null` for none. */
+    openAsPage: { objectName: string; label: string } | null;
     urlFilters: ReturnType<typeof useObjectViewUrlFilters>['urlFilters'];
     initialUfSelections: ReturnType<typeof useObjectViewUrlFilters>['initialUfSelections'];
     handleUserFilterSelectionsChange: ReturnType<typeof useObjectViewUrlFilters>['handleUserFilterSelectionsChange'];
@@ -863,6 +873,7 @@ export function useObjectViewListRenderer({
                 onRowClick={(record: any, event?: any) => {
                     handleRowClick(record, event);
                 }}
+                onRowsChange={handleListRowsChange}
                 onSortChange={(sort: any) => {
                     // objectui#12418 — this user's sort, not the view's.
                     persistListSort(sort);
@@ -906,10 +917,22 @@ export function useObjectViewListRenderer({
                 // marks a user who holds nothing beyond the baseline. A host
                 // prop the grid draws beside the row's title.
                 rowAdornment={managedUsers ? managedUserMarker : undefined}
+                // objectstack#26681 — for a row that opens the drawer, the ↗
+                // beside its record link that opens the record as the full page.
+                recordLinkAdornment={openAsPage
+                    ? (row: Record<string, unknown>) => {
+                        const id = row?.id ?? row?._id;
+                        return (typeof id === 'string' && id !== '') || typeof id === 'number'
+                            ? <OpenAsPageLink objectName={openAsPage.objectName} recordId={id} label={openAsPage.label} />
+                            : null;
+                    }
+                    : undefined}
+                // objectstack#26681 — the Display menu's Open records section.
+                recordOpen={recordOpen}
                 dataSource={ds}
             />
         );
-    }, [inSetup, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, navOverlay, actions, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, viewTabBar, viewTabRow, managedUsers, managedUserMarker]);
+    }, [inSetup, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, navOverlay, actions, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, viewTabBar, viewTabRow, managedUsers, managedUserMarker, recordOpen, openAsPage, handleListRowsChange]);
 
     return { renderListView };
 }

@@ -55,8 +55,11 @@
  *
  * The stored columns are not touched. `process_label` and `current_step_label`
  * stay the authored text as it stood when the request opened: the audit record,
- * what the generic data door and the list views serve, and the text this read
- * falls back to whenever nothing is picked. Nothing is picked when the read
+ * what a system read is served, and the text this read falls back to whenever
+ * nothing is picked. [#27041] The generic data door (Setup's request list, the
+ * record page, the export) overlays the same two columns by this same pair,
+ * `readerLabelsFor` and `localizeRequestLabels`, at its engine read seam
+ * (`reader-locale-labels-middleware.ts`). Nothing is picked when the read
  * carries no locale (a system context, the token-bearing action page), when no
  * `i18n` service is registered, when the pack holds no entry for the key, or
  * when the service throws. A process name without the `flow:` prefix names no

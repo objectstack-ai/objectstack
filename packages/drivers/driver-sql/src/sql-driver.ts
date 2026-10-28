@@ -55,7 +55,7 @@ import {
 // list of its own — which `defaultValue`s are instructions rather than literals,
 // so the engine and this driver can never disagree about what may become a
 // physical column DEFAULT.
-import { isNowDefaultToken, isRuntimeDefaultToken } from '@objectstack/spec/data';
+import { isNowDefaultToken } from '@objectstack/spec/data';
 // [#5702] The retired filter operators and the prescription each refusal
 // prints. Read from the spec rather than restated here for the reason the
 // #5701 table itself gives: five refusal sites that each write their own
@@ -168,7 +168,9 @@ import {
 // federated registration `registerExternalObject`.
 // [#25521 cut 18] And the deferred-DDL previews (`previewDeferredSchemaWork`, `previewDatetimeConvergence`,
 // `previewTimeConvergence`): the read-only plan of what the deferred schema sync would do.
-import { applyDriftOpInPlace, applyIndexDriftOp, applyMigrationEntries, applyNullSafeUniquePreflight, backfillCanonicalDatetimes, backfillCanonicalJsonEncoding, backfillCanonicalTimes, convergeJsonColumn, countNonTemporalTextRows, createNullSafeUniqueIndex, detectManagedDrift, detectTableDrift, detectTableIndexDrift, ensureRotation, legacyMysqlTimeColumns, legacyMysqlTimestampColumns, planMediaColumnMove, previewDatetimeConvergence, previewDeferredSchemaWork, previewTimeConvergence, rebuildSqliteTablePatched, reconcileAndWarnDrift, registerExternalObject, restoreBareIndexAfterFailedTighten, rotationColumnList, rotationShardKey, runWideningAlters, syncDeclaredIndexes, warnBuiltinColumnCollisions } from './sql-driver-schema-sync.js';
+// [#25521 cut 19] And the declared column DEFAULT emission (`nowColumnDefault`, `applyDeclaredColumnDefault`):
+// what a field's `defaultValue` becomes in the DDL of a fresh or rebuilt column.
+import { applyDeclaredColumnDefault, applyDriftOpInPlace, applyIndexDriftOp, applyMigrationEntries, applyNullSafeUniquePreflight, backfillCanonicalDatetimes, backfillCanonicalJsonEncoding, backfillCanonicalTimes, convergeJsonColumn, countNonTemporalTextRows, createNullSafeUniqueIndex, detectManagedDrift, detectTableDrift, detectTableIndexDrift, ensureRotation, legacyMysqlTimeColumns, legacyMysqlTimestampColumns, nowColumnDefault, planMediaColumnMove, previewDatetimeConvergence, previewDeferredSchemaWork, previewTimeConvergence, rebuildSqliteTablePatched, reconcileAndWarnDrift, registerExternalObject, restoreBareIndexAfterFailedTighten, rotationColumnList, rotationShardKey, runWideningAlters, syncDeclaredIndexes, warnBuiltinColumnCollisions } from './sql-driver-schema-sync.js';
 // [#25521 cut 11] The autonumber sequence path (`getNextSequenceValue`, `fillAutoNumberFields`,
 // `issueAutonumbers`, `maxAutonumberCounter`, and the #5495 collision re-seed `collidingAutoNumberReservations`
 // and `resyncSequenceToDataMax`); the methods of the same names below hand each body the members it reads
@@ -190,6 +192,9 @@ import { aggregateBackendFault, backendStatementFault, distinctBackendFault, unr
 // methods of the same names below hand each body what it reads (`PredicateEmitterHost`). The declarations
 // imported as types are named by docblocks here.
 import { applyEmptyOperator, applyJsonMembership, applyLike, applyLikePattern, applyNormalizedComparison, applyNullSafeNegative, type emptyJsonListPredicate, type emptyListUnsupportedDialectError, type likePatternPredicate, type textMatchPredicate, type undeclaredEmptyOperatorFieldError } from './sql-driver-predicate-emitters.js';
+// [#25521 cut 20] Date bucketing (`buildDateBucketExpr`); the method of the same name below hands the body what
+// it reads (`DateBucketHost`).
+import { buildDateBucketExpr } from './sql-driver-date-bucket.js';
 import { makeDatabaseDirectory, probeAbsentSqliteDatabaseFile, SqliteDatabaseFileError } from './sqlite-database-file.js';
 import { jsonMembershipPredicate } from '@objectstack/core';
 import knex, { Knex } from 'knex';
@@ -482,7 +487,7 @@ export const AUDIT_TIMESTAMP_COLUMNS = ['created_at', 'updated_at'] as const;
  * datetime field (`sys_activity.timestamp`, `sys_presence.last_seen`) was
  * never created, and its data door answered `500`.
  */
-const MYSQL_DATETIME_PRECISION = 3;
+export const MYSQL_DATETIME_PRECISION = 3;
 
 /**
  * Read-side repair for the builtin audit timestamps on SQLite.
@@ -572,7 +577,7 @@ function presentAuditTimestampOutput(value: unknown): unknown {
  * itself lives in `@objectstack/spec/data` so the engine's insert-time
  * resolution and this driver's DDL read one set (#4560).
  */
-const isNowDefaultValue = isNowDefaultToken;
+export const isNowDefaultValue = isNowDefaultToken;
 
 /**
  * Read-side normalization for user-declared `Field.datetime` columns on SQLite.
@@ -5073,62 +5078,20 @@ export class SqlDriver implements IDataDriver {
     granularity: 'day' | 'week' | 'month' | 'quarter' | 'year',
     table?: string | null,
   ): { sql: string; bindings: any[] } | null {
-    if (!this.dateGranularityCapabilities[granularity]) return null;
-
-    const calendarDay = this.temporalFieldKind(table, field) === 'date';
-
-    if (this.isPostgres) {
-      const arg = calendarDay ? `(??)::date::timestamp` : `(??)::timestamptz AT TIME ZONE 'UTC'`;
-      switch (granularity) {
-        case 'year':    return { sql: `to_char(${arg}, 'YYYY')`, bindings: [field] };
-        case 'month':   return { sql: `to_char(${arg}, 'YYYY-MM')`, bindings: [field] };
-        case 'day':     return { sql: `to_char(${arg}, 'YYYY-MM-DD')`, bindings: [field] };
-        case 'quarter': return { sql: `to_char(${arg}, 'YYYY"-Q"Q')`, bindings: [field] };
-        case 'week':    return { sql: `to_char(${arg}, 'IYYY"-W"IW')`, bindings: [field] };
-      }
-    }
-
-    if (this.isMysql) {
-      const arg = calendarDay ? `??` : `convert_tz(??, @@session.time_zone, '+00:00')`;
-      switch (granularity) {
-        case 'year':    return { sql: `date_format(${arg}, '%Y')`, bindings: [field] };
-        case 'month':   return { sql: `date_format(${arg}, '%Y-%m')`, bindings: [field] };
-        case 'day':     return { sql: `date_format(${arg}, '%Y-%m-%d')`, bindings: [field] };
-        case 'quarter': return { sql: `concat(date_format(${arg}, '%Y'), '-Q', quarter(${arg}))`, bindings: [field, field] };
-        case 'week':    return { sql: `date_format(${arg}, '%x-W%v')`, bindings: [field] };
-      }
-    }
-
-    if (this.isSqlite) {
-      // `arg` is a bare `??` for a TEXT-stored column and an epoch→julian-day
-      // normalization for a `Field.datetime` one (#3773).
-      const { sql: arg, bindings: argBindings } = this.sqliteTemporalArg(field, table);
-      const fmt = (f: string) => ({ sql: `strftime('${f}', ${arg})`, bindings: [...argBindings] });
-      switch (granularity) {
-        case 'year':    return fmt('%Y');
-        case 'month':   return fmt('%Y-%m');
-        case 'day':     return fmt('%Y-%m-%d');
-        case 'quarter': return { sql: `(strftime('%Y', ${arg}) || '-Q' || ((cast(strftime('%m', ${arg}) as integer) - 1) / 3 + 1))`, bindings: [...argBindings, ...argBindings] };
-        case 'week': {
-          // [#21595] The ISO 8601 week, `YYYY-Www`: the label the PostgreSQL
-          // arm's `IYYY"-W"IW` and the MySQL arm's `%x-W%v` answer. A week
-          // belongs to the year of its Thursday. `'-3 days', 'weekday 4'` moves
-          // any day to the Thursday of its Monday-start week (a Monday moves
-          // +3, a Sunday -3), so that Thursday's `%Y` is the week-numbering
-          // year and `(%j - 1) / 7 + 1` of it is the week number. Both
-          // modifiers predate every SQLite this platform ships, unlike `%V`
-          // (see `dateGranularityCapabilities`). No zone is read, so a
-          // `Field.date` stays its calendar day.
-          const thursday = (f: string) => `strftime('${f}', ${arg}, '-3 days', 'weekday 4')`;
-          return {
-            sql: `(${thursday('%Y')} || '-W' || printf('%02d', (cast(${thursday('%j')} as integer) - 1) / 7 + 1))`,
-            bindings: [...argBindings, ...argBindings],
-          };
-        }
-      }
-    }
-
-    return null;
+    // [#25521 cut 20] The body moved to `sql-driver-date-bucket.ts` (see `DateBucketHost`).
+    const readDateGranularityCapabilities = () => this.dateGranularityCapabilities;
+    const readIsMysql = () => this.isMysql;
+    const readIsPostgres = () => this.isPostgres;
+    const readIsSqlite = () => this.isSqlite;
+    const host: ThisParameterType<typeof buildDateBucketExpr> = {
+      get dateGranularityCapabilities() { return readDateGranularityCapabilities(); },
+      get isMysql() { return readIsMysql(); },
+      get isPostgres() { return readIsPostgres(); },
+      get isSqlite() { return readIsSqlite(); },
+      sqliteTemporalArg: (...a) => this.sqliteTemporalArg(...a),
+      temporalFieldKind: (...a) => this.temporalFieldKind(...a),
+    };
+    return buildDateBucketExpr.call(host, field, granularity, table);
   }
 
   /**
@@ -15474,57 +15437,18 @@ export class SqlDriver implements IDataDriver {
    * reads are uniform without a schema migration.
    */
   protected nowColumnDefault(type: string): Knex.Raw {
-    if (!this.isSqlite) {
-      // A `time` column deserves the same reasoning on the native dialects
-      // (#3994): `knex.fn.now()` compiles to CURRENT_TIMESTAMP, which a TIME
-      // column resolves in the SERVER's timezone on Postgres and the INSERTING
-      // session's timezone on MySQL — measured as three different wall clocks
-      // for one instant across the three dialects. Pin the default to the UTC
-      // time-of-day, matching what the driver's own writes and the SQLite
-      // branch below produce. (MySQL 8.0 additionally REJECTS a plain
-      // CURRENT_TIMESTAMP default on a TIME column — only the parenthesised
-      // expression form, MySQL 8.0.13+/MariaDB 10.2+, is legal there at all.)
-      if (type === 'time') {
-        if (this.isMysql) return this.knex.raw('(cast(utc_timestamp(3) as time(3)))');
-        if (this.isPostgres) return this.knex.raw("(timezone('utc', now())::time(3))");
-      }
-      // `date` has the same two problems one type over (#4022): a bare
-      // CURRENT_TIMESTAMP default resolves the calendar day in the SERVER's
-      // timezone on Postgres (measured: a UTC-12 server records YESTERDAY),
-      // and MySQL 8.0 rejects it on a DATE column outright (MariaDB is merely
-      // permissive; the driver's UTC-pinned session masked the semantic half
-      // there). Same fix as `time`: an expression default reading the UTC
-      // clock, which is also what `formatInput`'s NOW() safety-net and the
-      // SQLite branch below store.
-      if (type === 'date') {
-        if (this.isMysql) return this.knex.raw('(cast(utc_timestamp() as date))');
-        if (this.isPostgres) return this.knex.raw("(timezone('utc', now())::date)");
-      }
-      // `datetime` on MySQL (#21241): the column is `DATETIME(n)` (see
-      // `createColumn`), and MySQL REFUSES a `CURRENT_TIMESTAMP` default whose
-      // precision differs from its column's — the whole `CREATE TABLE` fails
-      // with "Invalid default value". The bare `knex.fn.now()` below is
-      // precision 0, so the default carries the column's precision from the
-      // one source both read. Postgres keeps the bare form: its `timestamptz`
-      // takes `CURRENT_TIMESTAMP` at microsecond precision, measured accepted.
-      if (type === 'datetime' && this.isMysql) return this.knex.fn.now(MYSQL_DATETIME_PRECISION);
-      return this.knex.fn.now();
-    }
-    switch (type) {
-      case 'date': return this.knex.raw("(strftime('%Y-%m-%d', 'now'))");
-      // The CASE trims a zero-millisecond `.000` so a defaulted row is
-      // byte-canonical ({@link canonicalTimeOfDay}) — `%f` alone would store
-      // `'01:55:08.000'` once in a thousand inserts, and that row would then
-      // miss an equality filter against the canonical `'01:55:08'`. SQLite
-      // fixes `'now'` per statement, so the three calls cannot straddle a
-      // millisecond boundary.
-      case 'time': return this.knex.raw(
-        "(case when strftime('%H:%M:%f', 'now') like '%.000' " +
-        "then strftime('%H:%M:%S', 'now') else strftime('%H:%M:%f', 'now') end)",
-      );
-      // datetime (and any non-temporal field that opts into NOW()): canonical instant.
-      default:     return this.knex.raw("(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))");
-    }
+    // [#25521 cut 19] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const readIsMysql = () => this.isMysql;
+    const readIsPostgres = () => this.isPostgres;
+    const readIsSqlite = () => this.isSqlite;
+    const readKnex = () => this.knex;
+    const host: ThisParameterType<typeof nowColumnDefault> = {
+      get isMysql() { return readIsMysql(); },
+      get isPostgres() { return readIsPostgres(); },
+      get isSqlite() { return readIsSqlite(); },
+      get knex() { return readKnex(); },
+    };
+    return nowColumnDefault.call(host, type);
   }
 
   /**
@@ -17380,15 +17304,11 @@ export class SqlDriver implements IDataDriver {
    * `sql-driver-option-default-ddl.test.ts`.
    */
   protected applyDeclaredColumnDefault(col: Knex.ColumnBuilder, field: any, type: string): void {
-    const dv = field?.defaultValue;
-    if (dv === undefined || dv === null) return;
-    if (isNowDefaultValue(dv)) {
-      col.defaultTo(this.nowColumnDefault(type));
-      return;
-    }
-    if (isRuntimeDefaultToken(dv)) return;
-    if (typeof dv === 'object') return;
-    col.defaultTo(dv as any);
+    // [#25521 cut 19] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const host: ThisParameterType<typeof applyDeclaredColumnDefault> = {
+      nowColumnDefault: (...a) => this.nowColumnDefault(...a),
+    };
+    return applyDeclaredColumnDefault.call(host, col, field, type);
   }
 
   // ── Database helpers ────────────────────────────────────────────────────────

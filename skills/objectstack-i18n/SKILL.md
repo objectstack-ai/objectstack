@@ -161,7 +161,7 @@ All translatable content for a single object is aggregated under
 | `label` / `pluralLabel` / `description` | Object-level text (every key optional) |
 | `fields.{field_name}` | `label`, `help`, `placeholder`, `options` (option value → label), `inlineTitle` (the heading of the inline child grid a `master_detail` field draws on its parent's form — the field lives on the child object, so the key is the child's; untranslated it keeps its authored text, never the child's plural label) per field |
 | `_views.{view_name}` | `label`, `description`, `title` (a form view's own heading — only a form that authors one is translated; a list view has none), `emptyState.title` / `emptyState.message`, `bulkActions.{def_name}` (`label`, `confirmText`, `confirmLabel`, `params`) |
-| `_actions.{action_name}` | `label`, `description`, `confirmText`, `successMessage`, `params.{param_name}` (and `.options.{value}` beneath it — an option's stored `value` in that param's inline `options`), `outcomeMessages.{outcome}` (an outcome the action's own `outcomeMessages` declares), `resultDialog.title` / `.description` / `.acknowledge` (only under an action that declares a `resultDialog`), `resultDialog.fields.{path}` (the literal `path` of a field in `resultDialog.fields[]`, dots included — `client.secret` is one key); the same keys hold under `globalActions.{action_name}` |
+| `_actions.{action_name}` | `label`, `description`, `confirmText`, `successMessage`, `disabledReason` (the sentence a greyed action shows; absent keeps the console's default), `params.{param_name}` (and `.options.{value}` beneath it — an option's stored `value` in that param's inline `options`), `outcomeMessages.{outcome}` (an outcome the action's own `outcomeMessages` declares), `resultDialog.title` / `.description` / `.acknowledge` (only under an action that declares a `resultDialog`), `resultDialog.fields.{path}` (the literal `path` of a field in `resultDialog.fields[]`, dots included — `client.secret` is one key); the same keys hold under `globalActions.{action_name}` |
 | `_sections.{section_name}` | Form section `label`, `description`; `fields.{field_name}` — the `label`, `placeholder`, `helpText` an entry overrides for that form alone (`helpText` here, `help` under `fields.{field_name}` above: each spells what its source does) |
 | `_tabs.{tab_name}` | Filter-preset tab `label` (`ViewTabSchema.name`) |
 | `_validations.{rule_name}` | `message` only — the sentence a rejected write returns (replaces the retired `validationMessages`) |
@@ -171,10 +171,13 @@ Top-level groups alongside `objects`: `apps` (label, description, navigation),
 an **error** whose message names the `objects.{owner}._actions.{action_name}` key to write
 instead), `picklists` (`label`, `options` by stored value — every field referencing the
 picklist inherits them), `dashboards`, `datasets`, `reports`, `pages`, `flows`, `positions`,
-`permissions` (permission sets, spelled as the stack's `permissions[]`), `metadataForms`,
-`settingsCommon`; `reports`, `positions` and `permissions` hold `label` + `description` by name,
-and a joined report's block headings sit at `reports.{report}.blocks.{block_name}.{label,description}`,
-keyed by the block's required `name`.
+`permissions` (permission sets, spelled as the stack's `permissions[]`), `books` (a doc book's
+spine, by `Book.name`: `books.{book}.label` / `.description`, and `groups.{group_key}.label` by
+each group's stable `key`, never its position — `books.crm_manual.groups.getting_started.label`;
+the pages themselves localize through `doc.translations`, and the inline `translations` map a
+book once carried stays retired), `metadataForms`, `settingsCommon`; `reports`, `positions` and
+`permissions` hold `label` + `description` by name, and a joined report's block headings sit at
+`reports.{report}.blocks.{block_name}.{label,description}`, keyed by the block's required `name`.
 Two keys sit deeper than their group's `label`: a `page:tabs` item at
 `pages.{page}.components.{tabs_id}.items.{value}.label` (by the item's `value`; an item without
 one has no key) and an approval step at `flows.{flow}.approvals.{node_id}.label`.

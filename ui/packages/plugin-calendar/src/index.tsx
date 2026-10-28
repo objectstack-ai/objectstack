@@ -291,10 +291,9 @@ export const ObjectCalendarRenderer: React.FC<{ schema: any; [key: string]: any 
       {/*
         The forward set is exactly `ObjectCalendarComponentProps` — nothing else can reach
         the component, because nothing is spread from `rest` (objectui#4492).
-        The registry's own declared inputs (`objectName`, `calendar`, and the
-        flat `startDateField` / `titleField` / … spelling `ObjectView` and
-        `ListView` emit) are consumed through `schema`, never through this
-        channel, so none of them needs a forward.
+        The registry's own declared inputs (`objectName` and the `calendar`
+        block `ObjectView` and `ListView` emit) are consumed through `schema`,
+        never through this channel, so none of them needs a forward.
       */}
       {(bound) => (
         <ObjectCalendar

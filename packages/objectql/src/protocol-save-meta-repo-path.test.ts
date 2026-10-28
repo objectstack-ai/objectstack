@@ -344,6 +344,10 @@ describe('saveMetaItem — repository write path (post PR-10d.6)', () => {
         // so the guard must leave such a binding intact.
         const { engine } = makeStubEngine();
         // No manifests map / empty → isLoadedPackage('com.acme.beta') is false.
+        // [#26708] …but the workspace IS installed, as `POST /packages` installs
+        // an authored base: a save naming a package no installed package has is
+        // refused before it is written.
+        engine.registry.getPackage = (id: string) => (id === 'com.acme.beta' ? { manifest: { id } } : undefined);
         const inserts = spyInserts(engine);
         const protocol = new ObjectStackProtocolImplementation(engine);
         // [#6190] Env-wide — the org was scenery; this case is about the
@@ -367,6 +371,10 @@ describe('saveMetaItem — repository write path (post PR-10d.6)', () => {
         // create. (Objects are not override-allowed, so the control uses a view.)
         const { engine } = makeStubEngine();
         engine.manifests = new Map([['app.objectstack.hotcrm', { id: 'app.objectstack.hotcrm' }]]);
+        // [#26708] A loaded package is installed in the registry too, as
+        // `registerApp` installs it.
+        engine.registry.getPackage = (id: string) =>
+            (id === 'app.objectstack.hotcrm' ? { manifest: { id } } : undefined);
         engine.registry.getArtifactItem = (type: string, name: string) =>
             type === 'view' && name === 'case_grid'
                 ? { _packageId: 'app.objectstack.hotcrm', name, type: 'grid' }

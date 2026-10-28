@@ -170,6 +170,9 @@ async function boot(kind: Kernel) {
     version: '1.0.0',
     permissions: [{ name: CODE_SET, label: 'CRM read-only', isDefault: true, objects: {} }],
   });
+  // [#26708] A save naming a package the registry does not hold is refused,
+  // so the runtime package is installed as a boot or `POST /packages` does.
+  engine.registry.installPackage({ id: RUNTIME_PKG, name: RUNTIME_PKG, version: '1.0.0' } as never, 'authored');
   const metadata = makeMetadataService();
   const protocol = new ObjectStackProtocolImplementation(
     engine as never,

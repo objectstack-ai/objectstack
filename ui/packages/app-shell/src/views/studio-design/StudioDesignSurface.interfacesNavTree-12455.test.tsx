@@ -287,7 +287,9 @@ describe('objectui#12455 — the item header', () => {
 describe('objectui#12455 — the nav-item inspector', () => {
   const entry = { id: 'nav_gated', type: 'page', label: 'Gated', pageName: 'home', visible: 'READS_OPPORTUNITIES' };
 
-  it("shows the entry's `visible` predicate as authored, read-only", () => {
+  // objectstack#26740 — the condition is edited here now, in the CEL editor;
+  // `StudioDesignSurface.navItemInspectorKeys-26740.test.tsx` pins the edit.
+  it("shows the entry's `visible` predicate as authored, in its editor", () => {
     render(
       <StudioNavItemInspector
         navId="navigation[0]"
@@ -298,17 +300,15 @@ describe('objectui#12455 — the nav-item inspector', () => {
         onClear={() => {}}
       />,
     );
-    expect(screen.getByText('Visible when')).toBeInTheDocument();
-    expect(screen.getByTestId('nav-visible-when')).toHaveTextContent('READS_OPPORTUNITIES');
-    expect(screen.queryByDisplayValue('READS_OPPORTUNITIES')).toBeNull();
+    expect(screen.getByLabelText('Visible when')).toHaveValue('READS_OPPORTUNITIES');
+    expect(screen.queryByTestId('nav-visible-when')).toBeNull();
   });
 
-  it('CONTROL: an entry with no `visible` shows no such row', () => {
-    const { visible: _ignored, ...plain } = entry;
+  it('CONTROL: a separator, whose member declares no `visible`, shows no such field', () => {
     render(
       <StudioNavItemInspector
         navId="navigation[0]"
-        appDraft={{ navigation: [plain] }}
+        appDraft={{ navigation: [{ id: 'sep_1', type: 'separator' }] }}
         objects={[]}
         packageId={PKG}
         onNavPatch={() => {}}

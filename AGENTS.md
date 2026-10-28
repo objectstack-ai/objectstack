@@ -4,7 +4,7 @@ Primary AI instruction file for this repo — and the human contributors' source
 Read natively by Claude Code, GitHub Copilot (coding agent + CLI), and other agents — no
 separate `.github/copilot-instructions.md` mirror needed. When any other instruction file
 in this repo (including `.claude/skills/**`) conflicts with this one, **AGENTS.md wins**.
-`docs/NORTH-STAR.md` (先做什么: goals, priority) outranks it; `content/docs/concepts/north-star.mdx` = architecture.
+`docs/NORTH-STAR.md`, the North Star, outranks it; `content/docs/concepts/architecture-overview.mdx` = architecture.
 
 > **v5.0 breaking rename: `project` → `environment`** everywhere (CLI `-e`, `/api/v1/environments/:id`, header `X-Environment-Id`, `OS_ENVIRONMENT_ID`, DB column `environment_id` [control-plane tables; on the metadata tables since deprecated in favour of `organization_id`, ADR-0006 v4]). No aliases. See ADR-0006. "Project" now only means the npm/monorepo sense.
 
@@ -37,7 +37,7 @@ stated once here and the script's own header is the authority on detail.
 
 ```bash
 pnpm install          # deps
-pnpm run setup        # first-time: install + build spec (bare `pnpm setup` is pnpm's own built-in)
+pnpm run setup        # install + build spec only; `pnpm dev` needs `pnpm build` (bare `pnpm setup` is pnpm's own built-in)
 pnpm build            # turbo build (excludes docs)
 pnpm test             # turbo test
 pnpm typecheck        # turbo typecheck — per-package `tsc --noEmit`; tsup/vitest never type-check
@@ -135,7 +135,7 @@ layer at least as close to the code (ruling record 6120820653).
 
 | Scenario | Command | Notes |
 |:---|:---|:---|
-| **Frontend debug** (the Console in `ui/` calls backend) | `PORT=3000 pnpm dev` | `pnpm dev` = the **showcase** kitchen-sink app (default; best for exercising the platform). Port **must** be 3000 (UI hard-wired); persistent state; leave running. For the minimal CRM app instead: `PORT=3000 pnpm dev:crm`. |
+| **Frontend debug** (the Console in `ui/` calls backend) | `OS_PORT=3000 pnpm dev` | `pnpm dev` = the **showcase** kitchen-sink app (default; best for exercising the platform). Port 3000 is the default, not hard-wired: the Console dev proxy targets it unless `DEV_PROXY_TARGET` says otherwise, and a busy port shifts to the next free one, so read the port it prints (`PORT` is the legacy alias of `OS_PORT`); persistent state; leave running. For the minimal CRM app instead: `OS_PORT=3000 pnpm dev:crm`. |
 | **Backend-only debug** | `pnpm dev -- --fresh -p <random>` | Random high port; ephemeral tempdir; **you must kill it** when done |
 
 `--fresh`: ephemeral tempdir (auto-deleted on exit) + `--seed-admin` (POSTs sign-up, prints creds — default
@@ -167,8 +167,8 @@ ships that same tracked file in `packages/console/dist/`. Full procedure: `docs/
 
 **Fast iteration on `ui/` src (no rebuild loop):** run the Console dev server —
 `pnpm --filter @object-ui/console dev` (Vite on **:5180**, HMR). Its `/api` proxy targets
-`DEV_PROXY_TARGET || http://localhost:3000`, so **run the backend you're testing on :3000** (`PORT=3000 pnpm dev` for
-showcase) and browse `:5180`. Note `:3001/_console` (or whatever the backend serves) is the **built** console, not
+`DEV_PROXY_TARGET || http://localhost:3000`, so **run the backend you're testing on :3000** (`OS_PORT=3000 pnpm dev`
+for showcase) and browse `:5180`. Note `:3001/_console` (or whatever the backend serves) is the **built** console, not
 your `ui/` src — only `:5180` reflects local UI edits. See `ui/AGENTS.md` for the app-id /
 localStorage / auth gotchas.
 
@@ -194,8 +194,8 @@ localStorage / auth gotchas.
 7. **One Zod source per metadata type.** Each type (`view`, `flow`, `agent`, …) has exactly one schema in
    `packages/spec/src/{domain}/`. Environment-overlay opt-in lives only in `allowEnvironmentOverlay` on
    `DEFAULT_METADATA_TYPE_REGISTRY` — no parallel whitelists. See ADR-0005, amended by ADR-0131 C5.
-8. **North Star alignment.** Read `content/docs/concepts/north-star.mdx` before structural changes. If a change doesn't
-   advance §7 Built, shrink Drift, or unlock Missing — it probably shouldn't ship.
+8. **North Star alignment.** Read `docs/NORTH-STAR.md` before structural changes. If a change doesn't advance a row of
+   its 路上的功能点 ladder, graded by its 优先级 — it probably shouldn't ship.
 9. **`OS_` env-var prefix + structure.** All ObjectStack-owned env vars MUST start with `OS_`, then follow
    **`OS_{DOMAIN}_{FEATURE}[_QUALIFIER]`** where `DOMAIN` is the subsystem (`AUTH`, `SEARCH`, `CORS`, `CLOUD`,
    `DATABASE`, `CLUSTER`, `MCP`, `SSO`, …) so related vars group together (cf. `OS_AUTH_*`, `OS_CORS_*`). Pick the

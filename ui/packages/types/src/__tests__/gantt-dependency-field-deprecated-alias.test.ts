@@ -56,12 +56,12 @@
  *
  * `ComponentPropsMap['object-gantt']` refuses `dependenciesField` and
  * `dependencyField` written flat on the node, so neither stays a member of the
- * published interface or its mirror. The alias, still `@deprecated`, lives on
- * `plugin-gantt`'s package-local hand-off type `ObjectGanttFlatFields`, where
- * the flat branch still READS it: its tag, its type and its acceptance are
- * pinned there, in `ganttHandoffFlatFields-25923.test.ts`. Failure mode (2) above
- * keeps its guard on that side. What this file pins now is the absence on both
- * published faces, which is the narrowing the card shipped.
+ * published interface or its mirror. The alias then lived on `plugin-gantt`'s
+ * package-local hand-off type until the same card retired the flat fallback
+ * read, and the alias with it: no reader is left, so failure mode (2) above has
+ * nothing left to guard (`plugin-gantt`'s `ganttHandoff-25923.test.ts` pins the
+ * absence there). What this file pins now is the absence on both published
+ * faces, which is the narrowing the card shipped.
  *
  * ## Why the TS face is read as SOURCE TEXT and the zod face at RUNTIME
  *

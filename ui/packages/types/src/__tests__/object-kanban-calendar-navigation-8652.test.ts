@@ -91,7 +91,7 @@ const ARMS: Arm[] = [
   {
     type: 'object-calendar',
     mirror: CalendarMirror as unknown as Parser,
-    base: { type: 'object-calendar', objectName: 'event', startDateField: 'starts_at' },
+    base: { type: 'object-calendar', objectName: 'event', calendar: { startDateField: 'starts_at' } },
   },
 ];
 

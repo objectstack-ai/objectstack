@@ -2119,6 +2119,79 @@ describe('SecurityPlugin', () => {
     await expect(plugin.canWriteObject('task', 'update', whenCtx, { name: 'renamed' })).resolves.toBe(true);
   });
 
+  // [#26594 / ruling of record 6457467702] The record-scoped field projection:
+  // its edit half is the step 2.5 gate's own verdict on the stored row, so it
+  // must agree with a by-id update of that row, both ways, field by field.
+  describe('[#26594] getRecordFieldAccess — the field projection of one record', () => {
+    const rowOf = (status: string) => ({ id: 'r1', owner_id: 'u1', name: 'A', amount: 1, status, assigned_to: null });
+    const gateAdmits = async (harness: any, data: Record<string, unknown>) => {
+      const opCtx: any = { object: 'task', operation: 'update', context: whenCtx, data, options: { where: { id: 'r1' } } };
+      return harness.run(opCtx).then(() => true, (e: any) => {
+        if (e?.details?.forbiddenFields) return false;
+        throw e;
+      });
+    };
+
+    it('a row the condition does not name: the conditioned field is editable, and the gate admits its write', async () => {
+      const { plugin, harness } = await bootWhen(APPROVED_LOCK, { findOneImpl: () => rowOf('draft') });
+      const access = await plugin.getRecordFieldAccess('task', 'r1', whenCtx);
+      expect(access).toEqual({ object: 'task', recordId: 'r1', readable: whenFields, editable: whenFields });
+      await expect(gateAdmits(harness, { amount: 2 })).resolves.toBe(true);
+      // Read as the CALLER, by id — the gate's own pre-image reader.
+      expect(harness.findOne).toHaveBeenCalledWith('task', expect.objectContaining({ where: { id: 'r1' }, context: whenCtx }));
+    });
+
+    it('a row the condition names: the field is locked, and the gate refuses its write', async () => {
+      const { plugin, harness } = await bootWhen(APPROVED_LOCK, { findOneImpl: () => rowOf('approved') });
+      const access = await plugin.getRecordFieldAccess('task', 'r1', whenCtx);
+      expect(access?.editable).toEqual(whenFields.filter((f) => f !== 'amount'));
+      expect(access?.readable).toEqual(whenFields);
+      await expect(gateAdmits(harness, { amount: 2 })).resolves.toBe(false);
+    });
+
+    it('equals the gate verdict for every field, on a row each side of the condition', async () => {
+      for (const status of ['draft', 'approved']) {
+        const { plugin, harness } = await bootWhen(APPROVED_LOCK, { findOneImpl: () => rowOf(status) });
+        const access = await plugin.getRecordFieldAccess('task', 'r1', whenCtx);
+        for (const field of whenFields) {
+          // The stored value written back, so no other gate (an ownership
+          // change, a move across the condition) answers instead of 2.5.
+          const admitted = await gateAdmits(harness, { [field]: (rowOf(status) as any)[field] ?? 'x' });
+          expect(access!.editable.includes(field), `${status}.${field}`).toBe(admitted);
+        }
+      }
+    });
+
+    it('a row that is absent or that the caller cannot read answers null — no projection is served for it', async () => {
+      const { plugin } = await bootWhen(APPROVED_LOCK, { findOneImpl: () => null });
+      await expect(plugin.getRecordFieldAccess('task', 'r1', whenCtx)).resolves.toBeNull();
+    });
+
+    it('the row-less projection is unchanged: it still reports the conditioned entry as its lock', async () => {
+      const { plugin, harness } = await bootWhen(APPROVED_LOCK, { findOneImpl: () => rowOf('draft') });
+      await expect(plugin.getWritableFields('task', whenCtx)).resolves.toEqual(whenFields.filter((f) => f !== 'amount'));
+      // …and it reads no row to say so.
+      expect(harness.findOne).not.toHaveBeenCalled();
+    });
+
+    it('an unresolvable schema is "no answer", and a system context reads every field', async () => {
+      const { plugin } = await bootWhen(APPROVED_LOCK, { findOneImpl: () => rowOf('approved') });
+      await expect(plugin.getRecordFieldAccess('', 'r1', whenCtx)).resolves.toBeUndefined();
+      await expect(plugin.getRecordFieldAccess('task', 'r1', { isSystem: true })).resolves.toEqual({
+        object: 'task', recordId: 'r1', readable: whenFields, editable: whenFields,
+      });
+    });
+
+    it('is the method the registered security service answers from', async () => {
+      const { plugin, harness } = await bootWhen(APPROVED_LOCK, { findOneImpl: () => rowOf('approved') });
+      const svc = harness.ctx.registerService.mock.calls.find((c: any[]) => c[0] === 'security')?.[1];
+      expect(typeof svc?.getRecordFieldAccess).toBe('function');
+      await expect(svc.getRecordFieldAccess('task', 'r1', whenCtx)).resolves.toEqual(
+        await plugin.getRecordFieldAccess('task', 'r1', whenCtx),
+      );
+    });
+  });
+
   it('[#2982 follow-up] bulk-write predicate guard inspects the CALLER predicate, not injected owner/RLS filters', async () => {
     // The anti-oracle guard (2.9) must reject a caller filtering on an
     // FLS-hidden field, but must NOT reject an owner_id predicate a sibling
@@ -3377,13 +3450,17 @@ describe('RLSCompiler — SQL→CEL deprecation bridge (ADR-0058 D1)', () => {
 });
 
 describe('SecurityPlugin – metadata-change cache invalidation', () => {
-  it('clears metadata-derived caches when metadata changes at runtime', async () => {
+  // [#26596, #26698] Driven through the protocol's `onMetadataMutation`, the
+  // signal every metadata authoring door emits. The rest of the subscription
+  // contract (drafts, `metadata:reloaded`, absence, `destroy()`) is pinned in
+  // `metadata-change-invalidation.test.ts`.
+  it('clears metadata-derived caches when a metadata mutation lands at runtime', async () => {
     const plugin = new SecurityPlugin();
-    let watchCb: (() => void) | undefined;
-    const metadata = {
-      watch: (_type: string, cb: () => void) => {
-        watchCb = cb;
-        return { unsubscribe: vi.fn() };
+    const listeners: Array<(evt: { type: string; name: string; state: string }) => void> = [];
+    const protocol = {
+      onMetadataMutation: (listener: (typeof listeners)[number]) => {
+        listeners.push(listener);
+        return () => {};
       },
     };
     const ctx: any = {
@@ -3392,7 +3469,8 @@ describe('SecurityPlugin – metadata-change cache invalidation', () => {
       hook: vi.fn(),
       getService: vi.fn().mockImplementation((name: string) => {
         if (name === 'manifest') return { register: vi.fn() };
-        if (name === 'metadata') return metadata;
+        if (name === 'metadata') return {};
+        if (name === 'protocol') return protocol;
         if (name === 'objectql') return { registerMiddleware: vi.fn() };
         return undefined;
       }),
@@ -3400,17 +3478,19 @@ describe('SecurityPlugin – metadata-change cache invalidation', () => {
     await plugin.init(ctx);
     await plugin.start(ctx);
 
-    expect(typeof watchCb).toBe('function');
+    expect(listeners.length).toBeGreaterThan(0);
 
     (plugin as any).fieldNamesCache.set('crm_account', new Set(['name']));
     (plugin as any).tenancyDisabledCache.set('crm_account', true);
     (plugin as any).cbpRelCache.set('crm_account', null);
+    (plugin as any).objectSecurityMetaCache.set('crm_account', { owdOpensRowWrites: false });
 
-    watchCb!();
+    for (const listener of listeners) listener({ type: 'object', name: 'crm_account', state: 'active' });
 
     expect((plugin as any).fieldNamesCache.size).toBe(0);
     expect((plugin as any).tenancyDisabledCache.size).toBe(0);
     expect((plugin as any).cbpRelCache.size).toBe(0);
+    expect((plugin as any).objectSecurityMetaCache.size).toBe(0);
   });
 });
 

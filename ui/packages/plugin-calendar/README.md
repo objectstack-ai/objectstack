@@ -325,10 +325,9 @@ this. `@objectstack/spec` refuses them at authoring with `unrecognized_keys` and
 names the `calendar` block in the same diagnostic (one key per concept, its
 Prime Directive #12), and since objectstack#25923 `ObjectCalendarSchema` does
 not declare them flat either: `ObjectView` and `ListView` emit the `calendar`
-block on the node they build. `getCalendarConfig` still falls back to the flat
-spelling when a node has no `calendar` block, for a host that mounts the
-renderer directly; that read is typed on this package's own hand-off type,
-`ObjectCalendarHandoff`, not on the published schema.
+block on the node they build. The renderer does not read the flat spelling
+either: a node that carries the five flat keys and no `calendar` block reaches
+the "Calendar configuration required" screen, which names the block.
 
 ```typescript
 import type { ObjectCalendarSchema } from '@object-ui/types';
@@ -507,8 +506,8 @@ const schema: CalendarViewSchema = {
 - 📦 [npm package](https://www.npmjs.com/package/@object-ui/plugin-calendar)
 - 📝 [Changelog](./CHANGELOG.md)
 - 🐛 [Report an issue](https://github.com/objectstack-ai/objectui/issues)
-- 🤝 [Contributing Guide](https://github.com/objectstack-ai/objectui/blob/main/CONTRIBUTING.md)
-- 🗺️ [Roadmap](https://github.com/objectstack-ai/objectui/blob/main/ROADMAP.md)
+- 🤝 [Contributing Guide](https://github.com/objectstack-ai/objectstack/blob/main/CONTRIBUTING.md)
+- 🗺️ [Roadmap](https://github.com/objectstack-ai/objectstack/blob/main/ROADMAP.md)
 
 ## License
 
