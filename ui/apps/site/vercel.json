@@ -1,8 +1,0 @@
-{
-  "$schema": "https://openapi.vercel.sh/vercel.json",
-  "git": {
-    "deploymentEnabled": false
-  },
-  "installCommand": "pnpm i",
-  "buildCommand": "cd ../.. && pnpm turbo run build --filter=@object-ui/site"
-}
