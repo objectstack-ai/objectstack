@@ -27,3 +27,5 @@ Skills-docs: updated here — `content/docs/automation/email-templates.mdx`, `co
 - **Who sees it.** An organization with a default currency other than USD sees its own code where it saw dollars. An organization with no default currency that sends a mail, runs a flow or shows an action sentence with a no-argument `currency` hole now gets the refusal instead of dollars.
 
 **The remedy.** None where the amount is in the organization's default currency: set it in Setup → Localization. Where the amount is in one fixed currency, name it in the hole: `{{ amount | currency:USD }}`. Where a mail template shows each record's amount in that record's own currency, read the code from the send's data: `{{ amount | currency:@currency_code }}`.
+
+**Supersedes, in the same release.** The unreleased notes of the mail `currency:@path` change (`26660-currency-code-path-formula`, `26660-currency-code-path-plugin-email`, `26660-mail-hole-grammar-formula`) say a `currency` hole with no argument still formats in US dollars. That was true when they were written; this entry moves it, and in this release a no-argument hole formats in the organization's default currency as described above.
