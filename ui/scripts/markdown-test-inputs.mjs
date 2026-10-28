@@ -264,7 +264,6 @@ export const ADJUDICATED = new Map([
     'packages/cli/src/__tests__/registered-types-validate-ratchet-10859.test.ts',
     {
       reads: ['content/docs/guide/quick-start.md'],
-      notRead: ['packages/cli/README.md'],
     },
   ],
   [
