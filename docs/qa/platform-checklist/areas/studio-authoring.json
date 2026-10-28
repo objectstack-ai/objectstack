@@ -289,7 +289,7 @@
       "title": "Record-page authoring round-trip: created bound to its object, seeded from the default layout, block-edited, published, rendered",
       "since": "v16",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["admin (authors)", "end user (opens the record). On stock no non-admin persona reads showcase_contact (auditor.demo is refused 'You don't have access to Contact records', QA run #24604), so the viewer is the admin unless a grant is provisioned — e.g. a member bound to the `manager` position, whose showcase_manager set reads showcase_contact (examples/app-showcase/src/security/permission-sets.ts); record which"],
@@ -314,7 +314,7 @@
         {
           "clause": "the created page persists bound to its object with PRE-SEEDED regions — record:highlights present, regions non-empty",
           "oracle": "network",
-          "verify": "the captured PUT body has type:'record', object:'showcase_contact', Array.isArray(regions) with blocks including record:highlights (pinned carrier-neutrally by objectui e2e/live/studio-record-page.spec.ts, which binds showcase_invoice — see automated.ref)",
+          "verify": "the captured PUT body has type:'record', object:'showcase_contact', Array.isArray(regions) with blocks including record:highlights",
           "evidence": "the captured PUT payload"
         },
         {
@@ -342,10 +342,9 @@
       "traps": ["stale-console-bundle", "hydration-race", "automation-input"],
       "automated": {
         "kind": "e2e",
-        "ref": "ui/e2e/live/studio-record-page.spec.ts — acceptance[0], carrier-neutrally: it creates a record page bound to showcase_invoice (not this item's showcase_contact) and asserts the captured PUT body's type 'record', its object, and regions seeded with a record:highlights block. + ui/e2e/live/studio-editor.spec.ts — acceptance[1], carrier-neutrally: 'Add block opens a block-type picker with configurable block kinds' opens the live page editor on an environment-authored copy of the shipped showcase_project_workspace (an app page, not this item's showcase_contact record page) and asserts that the dialog offers Card, Section and Record details. The picker offers one static catalogue whatever the page (AddBlockButton in objectui's PageBlockCanvas.tsx reads TYPES_BY_CATEGORY from block-types.ts), so the carrier does not change the answer. Both were read at the console pin cf153eb2e535 (blobs 3844a60ccd79 and 19f9cc131654) and again at objectui b41ed7f68956, QA run #25815's pin, where both are present and assert as described; they now live under ui/e2e/live in this checkout. Neither covers acceptance[2] or [3]"
+        "ref": "ui/e2e/live/studio-editor.spec.ts — acceptance[1], carrier-neutrally: 'Add block opens a block-type picker with configurable block kinds' opens the live page editor on an environment-authored copy of the shipped showcase_project_workspace (an app page, not this item's showcase_contact record page) and asserts that the dialog offers Card, Section and Record details. The picker offers one static catalogue whatever the page (AddBlockButton in objectui's PageBlockCanvas.tsx reads TYPES_BY_CATEGORY from block-types.ts), so the carrier does not change the answer. It was read at the console pin cf153eb2e535 (blob 19f9cc131654) and again at objectui b41ed7f68956, QA run #25815's pin, where it is present and asserts as described; it now lives under ui/e2e/live in this checkout and runs in Nightly Tiers. It covers none of acceptance[0], [2] or [3]"
       },
       "source": [
-        "objectui: e2e/live/studio-record-page.spec.ts (#1541, ADR-0034 — create bound + seeded regions, asserted off the PUT payload)",
         "objectui: e2e/live/studio-editor.spec.ts (page editor sections + Add-block picker contract)"
       ],
       "history": [
@@ -392,7 +391,8 @@
           "date": "2026-10-26",
           "change": "automated.ref names the run's objectui pin beside the console pin it cited (checklist-accuracy finding of QA run #25815, release-18.2.0-tier1 at 6679644a, objectui pin b41ed7f68956; wave anchor #25807): the ref cited cf153eb2e535 for the reading, the run read both specs at b41ed7f68956, present and asserting as described. automated.ref and fixtures.knownGaps[0] re-pointed to ui/. The retired objectui-pin wording is replaced on the way (#26035 left this file to its card): objectui is imported under ui/, so the pins resolve in this checkout and the console builds from this tree with pnpm console:build. The clauses are unchanged",
           "ref": "#25848"
-        }
+        },
+        { "revision": 10, "date": "2026-10-28", "change": "automated.ref, acceptance[0].verify and source[0] drop ui/e2e/live/studio-record-page.spec.ts, deleted by the triage of the live specs that ran in no CI lane (ruling Q3 B): measured red on the workspace backend at 1e8e5296, alone, twice: a Studio-created record page is saved kind slotted with no copied regions unless the author picks full (fd73f2b3, the page createSeed in ui/packages/app-shell/src/views/metadata-admin/anchors.ts; both outcomes unit-pinned in anchors.page-seed.test.ts beside it), so the spec's seeded-regions assertion reads a superseded design. acceptance[0] is hand-driven again; its clause still asks for seeded regions, which now holds only for a page the author creates full, and is left for the ledger's owner. studio-editor.spec.ts keeps acceptance[1]. No clause changed", "ref": "#25914" }
       ]
     },
     {
@@ -975,7 +975,7 @@
       "title": "Declarative custom pages render their real block COMPOSITION (not just 'no error'): each declared block resolves its renderer and binds its data source, data-bound blocks show seeded rows (API cross-check), and a block that cannot bind degrades with a NAMED error, never a blank region",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["admin (seeded admin@objectos.ai) driving the published showcase app as an end user"],
@@ -986,7 +986,7 @@
           "a scratch page name (e.g. qa_page_probe) authorable via the draft door PUT /api/v1/meta/page/qa_page_probe?mode=draft — used ONLY for the degradation probe, so no shipped showcase page is mutated"
         ],
         "knownGaps": [
-          "objectui e2e/live/showcase-smoke.spec.ts sweeps only a SUBSET of these pages (My Work, Project Workspace, Active Projects, Component Gallery are in its SURFACES list; Command Center 大屏 / showcase_command_center is NOT) and only asserts render-clean (no pageerror / no placeholder leak / non-empty <main>). This item DEEPENS that shallow pin: it asserts the block composition and the data binding, which the smoke does not — so it is NOT marked `automated`.",
+          "examples/app-showcase/e2e/showcase-smoke.spec.ts (the showcase's browser smoke, run by Nightly Tiers) sweeps these pages, Command Center 大屏 / showcase_command_center included, and only asserts render-clean (no pageerror / no placeholder leak / non-empty <main> past the boot splash / a laid-out chart). This item DEEPENS that shallow pin: it asserts the block composition and the data binding, which the smoke does not — so it is NOT marked `automated`.",
           "command-center's KPIs read via the console adapter's aggregate path; where the exact aggregate endpoint differs from a plain GET, cross-check the tile against the same filter applied to the data plane (count of the matching rows), not against a pixel."
         ]
       },
@@ -1063,11 +1063,12 @@
         "examples/app-showcase/src/ui/pages/command-center.page.ts#chart (object-metric bare KPIs + object-chart bar/donut/area on datasets + object-grid work queue), my-work.page.ts ({current_user_id} object-grid + page:card visible-gate), project-workspace.page.ts (object-master-detail-form), active-projects.page.ts (interfaceConfig list: filterBy/sort/appearance/userFilters/addRecord)",
         "objectui: packages/components/src/renderers/layout/page.tsx (PageRenderer — region/template dispatch, full-bleed for width:'full' main)",
         "objectui: packages/react/src/SchemaRenderer.tsx (the OBJUI-001 'Unknown component type' red panel + the SchemaErrorBoundary 'Component failed to render' panel — the NAMED-degradation contract; page.<var>/data/user expression scope)",
-        "objectui: e2e/live/showcase-smoke.spec.ts (the shallow render-clean sweep for my-work/project-workspace/active-projects — this item deepens it with block-composition + data-binding assertions)",
+        "examples/app-showcase/e2e/showcase-smoke.spec.ts (the nightly render-clean sweep for my-work/project-workspace/active-projects/command-center — this item deepens it with block-composition + data-binding assertions)",
         "examples/app-showcase/src/ui/datasets/chart-gallery.dataset.ts#showcase_task_metrics (showcase_task_metrics / showcase_project_metrics — the chart bindings)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-08", "change": "new item: declarative custom pages render their real block composition and bind data (API cross-check, not pixels), with a scratch-page probe proving a bad binding degrades to a NAMED error not a blank — grounded in the four showcase declarative page sources, the PageComponentType enum, objectui PageRenderer + SchemaRenderer, and deepening the shallow showcase-smoke render-clean pin", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-08", "change": "new item: declarative custom pages render their real block composition and bind data (API cross-check, not pixels), with a scratch-page probe proving a bad binding degrades to a NAMED error not a blank — grounded in the four showcase declarative page sources, the PageComponentType enum, objectui PageRenderer + SchemaRenderer, and deepening the shallow showcase-smoke render-clean pin", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-10-28", "change": "knownGaps/source re-pointed from ui/e2e/live/showcase-smoke.spec.ts, deleted by the triage of the live specs that ran in no CI lane (ruling Q3 B) as a duplicate: every surface it swept and each of its four assertions are in examples/app-showcase/e2e/showcase-smoke.spec.ts, which Nightly Tiers runs, with a wider surface list and stricter waits. That sweep includes showcase_command_center, which the old note said it did not. Still not marked automated: the sweep is render-clean only. No clause changed", "ref": "#25914" }
       ]
     },
     {
@@ -1075,7 +1076,7 @@
       "title": "Page variables + page-level actions are runtime-live: variables initialize empty, an interactive writer updates one and dependent visibleWhen predicates re-evaluate WITHOUT reload, and a page action reads the live variable snapshot to POST resolved values that create a real record",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["admin (seeded admin@objectos.ai) driving the published showcase app as an end user"],
@@ -1086,7 +1087,7 @@
           "the public web-to-lead endpoint POST /api/v1/forms/contact-us/submit and its showcase_inquiry sink (ADR-0056) reachable on the stock showcase boot — the contact-form submit action posts here"
         ],
         "knownGaps": [
-          "neither showcase_page_variables nor showcase_contact_form is in objectui e2e/live/showcase-smoke.spec.ts's SURFACES sweep — there is no automated render-clean pin for either, so this item is browser-driven end to end (not marked `automated`)"
+          "showcase_page_variables and showcase_contact_form are in examples/app-showcase/e2e/showcase-smoke.spec.ts's SURFACES sweep (run by Nightly Tiers), which pins render-clean only; nothing automated drives the page-variable loop or the submit, so this item is browser-driven end to end (not marked `automated`)"
         ]
       },
       "steps": [
@@ -1158,7 +1159,8 @@
         "ADR-0056 (public web-to-lead form → showcase_inquiry), ADR-0089 (visibleWhen canonical predicate)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-08", "change": "new item: the end-to-end page-variable loop (initialize empty → interactive writer updates → dependent visibleWhen re-evaluates live, no reload) and the page-level `api` action resolving {{page.<var>}} from the live snapshot to create a real showcase_inquiry — grounded in PageVariableSchema, the page-variables + contact-form sources, and objectui's PageVariablesProvider/PageVariableActionBridge", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-08", "change": "new item: the end-to-end page-variable loop (initialize empty → interactive writer updates → dependent visibleWhen re-evaluates live, no reload) and the page-level `api` action resolving {{page.<var>}} from the live snapshot to create a real showcase_inquiry — grounded in PageVariableSchema, the page-variables + contact-form sources, and objectui's PageVariablesProvider/PageVariableActionBridge", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-10-28", "change": "knownGaps/source re-pointed from ui/e2e/live/showcase-smoke.spec.ts, deleted by the triage of the live specs that ran in no CI lane (ruling Q3 B) as a duplicate: every surface it swept and each of its four assertions are in examples/app-showcase/e2e/showcase-smoke.spec.ts, which Nightly Tiers runs, with a wider surface list and stricter waits. That sweep includes both of this item's pages, which the old note said it did not; it pins render-clean only, so the item stays browser-driven. No clause changed", "ref": "#25914" }
       ]
     },
     {
@@ -1166,7 +1168,7 @@
       "title": "Source-authored page tiers render by the RIGHT path: kind:'html' source is PARSED-never-executed (static, in-browser sdui-parser compile), kind:'react' source is EXECUTED behind its capability gate (live data + interactivity) — command-center-jsx / capability-map (html) vs crm-workbench (react)",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["admin (seeded admin@objectos.ai) driving the published showcase app as an end user"],
@@ -1178,7 +1180,7 @@
         ],
         "knownGaps": [
           "NO manual build step is needed to VIEW either tier in the running showcase (contra the task's guess): a kind:'html' page compiles IN-BROWSER via @object-ui/sdui-parser compile(source, manifest) at render, against a whitelist manifest built from the LIVE ComponentRegistry (packages/components/src/renderers/layout/page.tsx); a kind:'react' page is transpiled IN-BROWSER by a lazily-loaded Sucrase @object-ui/react-runtime chunk. The only build-shaped risk is the vendored /_console bundle being stale (stale-console-bundle) — a stale sdui-parser/react-runtime mis-compiles a page that is fine on a fresh build. ⚠ A FAULTING html source never reaches the RENDERED page on a stock boot: the metadata save door compiles an html page's source against the deployment's manifest with the same compiler `os validate` uses (packages/metadata-protocol/src/runtime-authoring-gate.ts#HTML_PAGE_SOURCE_COMPILE), so an active save or a publish of a faulting html page answers 422 INVALID_METADATA carrying the compile diagnostics, and nothing is served. The 'HTML page failed to compile (N)' panel is therefore reachable only in the page designer's DRAFT preview, where a ?mode=draft save of the faulting source is admitted and rendered (QA run #23166)",
-          "none of showcase_command_center_jsx / showcase_capability_map / showcase_crm_workbench is in objectui e2e/live/showcase-smoke.spec.ts's SURFACES sweep — there is no automated render-clean pin for the html/react tiers, so this item is browser-driven (not marked `automated`)."
+          "showcase_command_center_jsx, showcase_capability_map and showcase_crm_workbench are in examples/app-showcase/e2e/showcase-smoke.spec.ts's SURFACES sweep (run by Nightly Tiers), which pins render-clean only; no pin drives either tier's compile path or the capability gate, so this item is browser-driven (not marked `automated`)."
         ]
       },
       "steps": [
@@ -1252,7 +1254,8 @@
         { "revision": 1, "date": "2026-08-08", "change": "new item: the html (parse-never-execute, in-browser sdui-parser compile, static) vs react (executed at render, capability-gated, live data + interactivity) source-page tiers — the objectui renderer-path split grounded in PageRenderer's kind dispatch + react-page.tsx's gate, distinguishing command-center-jsx/capability-map (html) from crm-workbench (react); records the honest build-step finding (none needed to view — in-browser compile/transpile) as a knownGap", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 2, "date": "2026-10-13", "change": "acceptance[5] (clause and verify), steps[7] and knownGaps[0] name where an html compile error is observable (assertion defect, minor, #23166 A5; parked on #23121, carried by #23169). The save door compiles an html page's source against the deployment's manifest (runtime-authoring-gate.ts HTML_PAGE_SOURCE_COMPILE), so a faulting html page is refused 422 INVALID_METADATA at save / publish and never publishes, and the compile-error panel is reachable only in the designer's draft preview. QA run #23166 met the 422 and the draft-preview panel. The react half is unchanged", "ref": "#23169" },
         { "revision": 3, "date": "2026-10-16", "change": "steps[7](a) names how to reach the draft preview (checklist-accuracy finding 8 of QA run #23942, wave #23878). The compile panel is reachable only for a page staged in a writable package that an app's navigation references, opened at /_console/studio/PKG/interfaces?surface=page:NAME; an env-wide draft has no Studio surface, which is what #23942 met. The clause is unchanged", "ref": "#24036" },
-        { "revision": 4, "date": "2026-10-25", "change": "the react-pages tier defaults OFF (ADR-0081 amendment): fixtures.requires names the showcase's committed .env opt-in OS_PAGE_REACT_ENABLED=true, and the both-sides gate's off-state is a boot with OS_PAGE_REACT_ENABLED=false (steps[6], acceptance[4], negative[1], source rows). The clauses are unchanged", "ref": "claude/project-thread-80dotk" }
+        { "revision": 4, "date": "2026-10-25", "change": "the react-pages tier defaults OFF (ADR-0081 amendment): fixtures.requires names the showcase's committed .env opt-in OS_PAGE_REACT_ENABLED=true, and the both-sides gate's off-state is a boot with OS_PAGE_REACT_ENABLED=false (steps[6], acceptance[4], negative[1], source rows). The clauses are unchanged", "ref": "claude/project-thread-80dotk" },
+        { "revision": 5, "date": "2026-10-28", "change": "knownGaps/source re-pointed from ui/e2e/live/showcase-smoke.spec.ts, deleted by the triage of the live specs that ran in no CI lane (ruling Q3 B) as a duplicate: every surface it swept and each of its four assertions are in examples/app-showcase/e2e/showcase-smoke.spec.ts, which Nightly Tiers runs, with a wider surface list and stricter waits. That sweep includes the three html/react pages, which the old note said it did not; it pins render-clean only, so the item stays browser-driven. No clause changed", "ref": "#25914" }
       ]
     },
     {
