@@ -983,6 +983,7 @@ const ar = {
     noCards: "لا بطاقات",
     columnCards: "بطاقات العمود {{column}}",
     laneCards: "بطاقات {{column}} - {{lane}}",
+    dropBlocked: "لا يمكن نقل بطاقة من {{from}} إلى {{to}}.",
     cardTitlePlaceholder: "أدخل عنوان البطاقة…",
     requiredFieldsTitle: "أكمل الحقول المطلوبة",
     requiredFieldsDescription: "يجعل هذا النقل الحقول أدناه مطلوبة. أكملها للمتابعة.",

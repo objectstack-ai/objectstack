@@ -878,6 +878,7 @@ const de = {
     noCards: "Keine Karten",
     columnCards: "Karten in Spalte {{column}}",
     laneCards: "Karten in {{column}} - {{lane}}",
+    dropBlocked: "Eine Karte aus {{from}} kann nicht nach {{to}} verschoben werden.",
     cardTitlePlaceholder: "Kartentitel eingeben…",
     requiredFieldsTitle: "Erforderliche Felder ausfüllen",
     requiredFieldsDescription: "Durch diese Verschiebung werden die folgenden Felder zu Pflichtfeldern. Füllen Sie sie aus, um fortzufahren.",

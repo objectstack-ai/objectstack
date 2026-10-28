@@ -902,6 +902,7 @@ const pt = {
     noCards: "Sem cartões",
     columnCards: "Cartões da coluna {{column}}",
     laneCards: "Cartões de {{column}} - {{lane}}",
+    dropBlocked: "Um cartão em {{from}} não pode ser movido para {{to}}.",
     cardTitlePlaceholder: "Digite o título do cartão…",
     requiredFieldsTitle: "Preencha os campos obrigatórios",
     requiredFieldsDescription: "Esta movimentação torna os campos abaixo obrigatórios. Preencha-os para continuar.",

@@ -1134,6 +1134,7 @@ const en = {
     noCards: 'No cards',
     columnCards: '{{column}} cards',
     laneCards: '{{column}} - {{lane}} cards',
+    dropBlocked: 'A card in {{from}} cannot be moved to {{to}}.',
     cardTitlePlaceholder: 'Enter card title…',
     uncategorized: 'Uncategorized',
     loadMore: 'Load more',
