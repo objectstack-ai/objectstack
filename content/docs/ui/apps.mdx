@@ -192,6 +192,13 @@ nested `actionDef` block — `actionName` is **not** a top-level key on the item
 design** — the action owns its own parameter contract, so the app schema does
 not validate what goes inside it.
 
+This is how an app-level action ("Quick Create", "Log a Call") is placed: the item
+names a declared action, it does not carry the action's definition. The Console
+renders it in the sidebar, and on click looks the name up among the declared
+actions and runs it through the same runner as a toolbar button, so confirmations,
+parameter dialogs and permission checks apply. An item that names no declared action
+shows an error when clicked rather than doing nothing.
+
 ### Component Navigation
 
 Renders a registered component. `componentRef` is a component-registry key, not
@@ -276,6 +283,54 @@ rejected — a divider has nothing to label, gate, or badge.)
 | `requiredPermissions` | `string[]` | Permissions required to see/access this item |
 | `requiresObject` | `string` | Hide/disable unless the named object is registered |
 | `requiresService` | `string` | Hide/disable unless the named kernel service is registered |
+
+`label` is optional. An entry without one shows its target's **current** label,
+resolved when the navigation renders: the view's label for an entry that names a
+labelled view, else the object's or dashboard's label, else the target's machine
+name. A renamed object, view or dashboard therefore shows its new name on the next
+load with no navigation edit. Other entries fall back to their target's name
+(`pageName`, `reportName`, the `url`) and a group to its `id`, so give those a
+`label`. A `label` you write renders verbatim; never write an empty one, omit the
+key instead.
+
+## Designing the navigation
+
+The same requirement can often be met three ways: a plain object entry, an object
+entry anchored to a named view, or a page that embeds views. They are not
+interchangeable. For an app with a `project` object:
+
+| You write | The user lands on | What comes with it |
+| :--- | :--- | :--- |
+| `{ type: 'object', objectName: 'project' }` | `/apps/my_app/project`, the object's default view | The whole object shell: view switcher, object actions, a create button, record routing, search and recents |
+| `… viewName: 'project.by_status'` | `/apps/my_app/project/view/project.by_status` | The same shell, opened on a named view; the user can still switch |
+| `… filters: { status: 'open' }` | `/apps/my_app/project/data?filter[status]=open`, the bare data surface | The conditions as removable chips over everything permissions allow, bound to no saved view; **Save as view** turns the slice into a named view |
+| `{ type: 'page', pageName: 'project_overview' }` | `/apps/my_app/page/project_overview` | Only the page. View switching, actions and record links are assembled by hand |
+
+A page can imitate the other two, but it loses the object shell, and every later
+improvement to that shell (new actions, view switching, permission trimming) skips
+it. Use the least powerful construct that expresses the requirement:
+
+1. **One plain `object` entry per core business object**, with no `viewName`: the
+   default view is the view metadata's business, so navigation stays decoupled from
+   presentation.
+2. **`viewName` when the entry is a named perspective** ("By Status", "Due This
+   Week"): declare a named view and anchor the entry to it. It sets the entry point;
+   it does not lock the user in.
+3. **`filters` for one-off or parameterized slices** (a drill-through, "assigned to
+   me"): put the condition in the URL instead of authoring a view, and promote it to
+   a named view only once it is curated and reused.
+4. **A page only for composition one view cannot express**: several objects side by
+   side, KPI cards beside lists, onboarding content. A page that wraps one object's
+   one view is an anti-pattern.
+5. **A `dashboard` for metrics and charts, a `report` for tabular analysis**, rather
+   than pages of chart blocks.
+6. **One entry per target.** Don't offer an object through both a plain entry and a
+   page wrapping its default view. If an object needs several entries, make each of
+   them a named-view entry; mixing styles breaks the sidebar's active-state
+   highlighting.
+
+In a typical business app most entries are `object` entries; pages are for the home
+screen, onboarding and cross-object workbenches.
 
 ## Areas
 
@@ -683,8 +738,16 @@ branding: {
 | Property | Type | Description |
 | :--- | :--- | :--- |
 | `primaryColor` | `string` | Primary brand color (hex) |
-| `logo` | `string` | Logo image URL |
+| `accentColor` | `string` | Accent color (hex), for highlights and active states |
+| `logo` | `string` | Logo image URL: one square app icon, SVG preferred, at least 64 px. Each surface scales it; there is no second size or wordmark slot |
 | `favicon` | `string` | Favicon URL |
+
+`branding` is the whole of an app's theming in metadata: the Console maps
+`primaryColor` and `accentColor` onto its `--primary` and `--accent` CSS variables.
+There is no theme document to author (the standalone `themes` collection was retired
+in 17.1). Both the app and `branding` are strict: a top-level `logo` or `theme` is
+refused with a pointer to `branding`, and a misspelled key inside `branding` is
+refused rather than dropped.
 
 ## Complete Example
 

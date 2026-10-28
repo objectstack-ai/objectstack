@@ -61,6 +61,7 @@ import {
   type LoadedRecordSnapshot,
 } from './sanitize';
 import { closedFormAffordance, fieldWriteGate, gateFormFields } from './fieldWriteGate';
+import { RecordFieldAccessForForm } from './recordFieldAccess';
 import { ClosedAffordanceNotice } from './closedAffordanceNotice';
 import { seedCreateValues, omitServerResolvedDefaults } from './schemaDefaults';
 import { resolveInitialRecord } from './initialRecord';
@@ -233,7 +234,18 @@ export interface DrawerFormProps {
   className?: string;
 }
 
-export const DrawerForm: React.FC<DrawerFormProps> = ({
+/**
+ * An `edit` form for a stored record answers its field locks from that record
+ * (objectstack#26594) — see `recordFieldAccess.tsx`.
+ */
+export const DrawerForm: React.FC<DrawerFormProps> = ({ schema, ...rest }) => (
+  <RecordFieldAccessForForm schema={schema} dataSource={rest.dataSource}>
+    {/* `schema=` by name, so the handler-key census follows the document into the body. */}
+    <DrawerFormBody schema={schema} {...rest} />
+  </RecordFieldAccessForForm>
+);
+
+const DrawerFormBody: React.FC<DrawerFormProps> = ({
   schema,
   dataSource,
   className,
