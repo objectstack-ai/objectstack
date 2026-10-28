@@ -3290,9 +3290,9 @@ describe('object-* block props schemas — declared, so the props gate has a sch
   });
 
   it("object-calendar's flat field spellings get the wrong-layer prescription, not a rename", () => {
-    // Read as back-compat by getCalendarConfig, emitted by ObjectView/ListView
-    // handoffs — but the authored spelling is the `calendar` object (one key
-    // per concept; the `body` → `children` precedent).
+    // Not read by getCalendarConfig since objectstack#25923, and not emitted by
+    // ObjectView/ListView — the authored spelling is the `calendar` object (one
+    // key per concept; the `body` → `children` precedent).
     const message = refuse(ComponentPropsMap['object-calendar'], { objectName: 'task', startDateField: 'due_date' });
     expect(message).toContain('`calendar`');
     expect(message).toContain('startDateField');

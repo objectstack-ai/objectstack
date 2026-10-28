@@ -129,10 +129,10 @@ const NOT_A_FUNCTION = 'NOT-A-FUNCTION';
 const BAD_LOCALE = 'en_US';
 
 /**
- * The flat calendar config `ObjectView` / `ListView` emit, which is what makes
+ * The `calendar` block `ObjectView` / `ListView` emit, which is what makes
  * `getCalendarConfig` return non-null and the month grid render at all.
  */
-const CALENDAR_FIELDS = { startDateField: 'start_at', titleField: 'name' };
+const CALENDAR_FIELDS = { calendar: { startDateField: 'start_at', titleField: 'name' } };
 
 /** Two records in the CURRENT month, so the default month view shows them. */
 function currentMonthRecords() {

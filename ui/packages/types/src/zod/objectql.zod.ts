@@ -1877,9 +1877,11 @@ const CALENDAR_DATE_ALIAS_STEM =
  *   - `'binding'` — the value reaches `ObjectCalendar` through a producer's
  *     hand-off (since objectstack#25923 in the node's own `calendar` block,
  *     before that as a FLAT member of the node). Every producer-fed surface is
- *     this: the view-level `calendar` block
- *     and its legacy `options.calendar` twin, a named view's two nestings, and
- *     the flat node face itself.
+ *     this: the view-level `calendar` block and its legacy `options.calendar`
+ *     twin, and a named view's two nestings. The flat node face takes the same
+ *     clause for its own reason: since objectstack#25923 nothing reads a key
+ *     written flat on the node, so the value falls through to the same refusal
+ *     screen.
  *   - `'container'` — the `object-calendar` element's OWN `calendar` container,
  *     which `getCalendarConfig` reads FIRST and returns WHOLE rather than
  *     lifting member by member.
@@ -1954,7 +1956,7 @@ const calendarAliasDetail = (alias: 'dateField' | 'endField', surface: CalendarA
  * The two arms as a VIEW-level calendar block wears them — the list view's
  * `calendar:` block below, its legacy `options.calendar` twin, and a named
  * view's two nestings on `ObjectViewSchema`. Every one of those is producer-fed,
- * so the authored value reaches the renderer as a flat node binding.
+ * so the authored value reaches the renderer in the node's `calendar` block.
  */
 const CalendarBlockDateAliasRefusals = {
   dateField: aliasKeyRefusal('dateField', 'startDateField', 'this calendar configuration', calendarAliasDetail('dateField', 'binding')),
@@ -1977,7 +1979,9 @@ const CalendarContainerDateAliasRefusals = {
 /**
  * The same two arms as the `object-calendar` NODE wears them. This is the FLAT
  * spelling `ListView` used to flatten the block into, and where the retired
- * ladder actually read — a binding surface, so it takes the binding clause.
+ * ladder actually read. Nothing reads the flat node face since objectstack#25923,
+ * so a value there reaches the refusal screen, and the arm takes the binding
+ * clause.
  *
  * ⏱ objectstack#25923: the canonical keys are no flat members of this node any
  * more (the spec and the strict face refuse `startDateField` written flat), so

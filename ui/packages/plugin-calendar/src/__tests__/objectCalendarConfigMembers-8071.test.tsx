@@ -171,8 +171,10 @@ describe('object-calendar.calendar — member shape (objectui#8071 slice 5)', ()
 
   it('CONTROL: with no `calendar` object authored, the flat legacy spelling is read instead', async () => {
     const [event] = await eventsFor({
-      startDateField: 'other_start',
-      titleField: 'other_title',
+      calendar: {
+        startDateField: 'other_start',
+        titleField: 'other_title',
+      },
     });
     expect(event.start).toEqual(new Date(ROW.other_start));
     expect(event.title).toBe(ROW.other_title);
