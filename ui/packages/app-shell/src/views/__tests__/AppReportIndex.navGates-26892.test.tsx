@@ -27,6 +27,16 @@
  *  (e) CONTROLS: an entry `visible: true` lists Gamma; a second entry the
  *      member is shown lists Gamma beside a hidden one; an app whose
  *      navigation names no report lists all four.
+ *
+ * The palette's navigation entries take the same gates (its own `navItems`,
+ * the door a nav-named report is offered through): before, it filtered the
+ * flattened leaves by their own `visible` only, so (b) and (c) were offered
+ * through that door, and so was an object entry the sidebar hides:
+ *
+ *  (f) neither palette door offers Gamma under (b) or (c), nor an object
+ *      entry whose `requiredPermissions` the member lacks;
+ *  (g) an entry's API binding is read once with the sidebar mounted beside
+ *      the palette: one reader per binding, no second request.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -44,6 +54,8 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
 }));
 
 import { MetadataProvider } from '../../providers/MetadataProvider';
+import { navEntriesShownToMember, useNavMemberGates } from '../../hooks/useNavMemberGates';
+import type { NavigationItem } from '@object-ui/types';
 import { ExpressionProvider } from '../../providers/ExpressionProvider';
 import { CommandPalette } from '../../chrome/CommandPalette';
 import { CommandPaletteProvider } from '../../context/CommandPaletteProvider';
@@ -284,5 +296,94 @@ describe('⌘K applies the same gates to the app\'s reports (objectstack#26892)'
     renderPalette(appWith(gammaEntry({ visible: true })));
     await paletteSettled();
     expect(paletteReports()).toEqual(ALL);
+  });
+});
+
+/** The sidebar's walk, as `UnifiedSidebar` takes it: the labels of the entries it shows, depth-first. */
+function SidebarProbe({ items }: { items: NavigationItem[] }) {
+  const gates = useNavMemberGates();
+  const labels: string[] = [];
+  const walk = (list: NavigationItem[]) => {
+    for (const item of list) {
+      if (item.type === 'group' && Array.isArray(item.children)) walk(item.children);
+      else labels.push(String(item.label));
+    }
+  };
+  walk(navEntriesShownToMember(items, gates));
+  return <div data-testid="sidebar-probe">{labels.join('|')}</div>;
+}
+
+function renderPaletteBesideSidebar(app: ReturnType<typeof appWith>, options?: ShellOptions) {
+  shell(
+    app,
+    <CommandPaletteProvider>
+      <Routes>
+        <Route
+          path="/apps/:appName"
+          element={
+            <>
+              <SidebarProbe items={app.navigation as NavigationItem[]} />
+              <CommandPalette apps={[app]} activeApp={app} objects={[]} onAppChange={() => {}} />
+            </>
+          }
+        />
+      </Routes>
+    </CommandPaletteProvider>,
+    '/apps/crm?palette=1',
+    options,
+  );
+}
+
+/** The labels of every object item the palette rendered. */
+function paletteObjects(): string[] {
+  return Array.from(document.querySelectorAll('[cmdk-item][data-value^="object "]')).map((el) =>
+    (el.textContent ?? '').trim(),
+  );
+}
+
+describe('⌘K offers its navigation entries as the sidebar shows them (objectstack#26892)', () => {
+  it('(f) offers neither door to a report whose entry requires a permission the member lacks', async () => {
+    renderPalette(appWith(gammaEntry({ requiredPermissions: ['crm_forecast:read'] })));
+    await paletteSettled();
+    expect(paletteReports()).toEqual(WITHOUT_GAMMA);
+  });
+
+  it('(f) CONTROL: offers it, once, to a member granted that permission', async () => {
+    renderPalette(appWith(gammaEntry({ requiredPermissions: ['crm_forecast:read'] })), { forecastRead: true });
+    await waitFor(() => expect(paletteReports()).toContain('Gamma'));
+    expect(paletteReports()).toEqual(ALL);
+  });
+
+  it('(f) offers neither door to a report whose entry sits in a `visible: false` group', async () => {
+    renderPalette(
+      appWith({ id: 'grp_forecast', type: 'group', label: 'Forecast', visible: false, children: [gammaEntry()] }),
+    );
+    await paletteSettled();
+    expect(paletteReports()).toEqual(WITHOUT_GAMMA);
+  });
+
+  it('(f) does not offer an object entry the sidebar hides by `requiredPermissions`', async () => {
+    const forecasts = {
+      id: 'nav_forecasts',
+      type: 'object',
+      objectName: 'crm_account',
+      label: 'Forecasts',
+      requiredPermissions: ['crm_forecast:read'],
+    };
+    renderPalette(appWith(forecasts));
+    await paletteSettled();
+    expect(paletteObjects()).toEqual(['Accounts']);
+  });
+
+  it('(g) reads an entry\'s API binding once with the sidebar beside the palette, and both show it', async () => {
+    const url = '/api/v1/nav-probe/26892-shared';
+    const apiFetch = vi.fn<ApiFetch>(
+      async () => ({ ok: true, status: 200, json: async () => ({ total: 1 }) }) as unknown as Response,
+    );
+    const dataSource = { provider: 'api', read: { url } };
+    renderPaletteBesideSidebar(appWith(gammaEntry({ visible: 'data.total == 1', dataSource })), { apiFetch });
+    await waitFor(() => expect(paletteReports()).toEqual(ALL));
+    expect(screen.getByTestId('sidebar-probe')).toHaveTextContent('Gamma');
+    expect(apiFetch.mock.calls.filter(([asked]) => asked === url)).toHaveLength(1);
   });
 });

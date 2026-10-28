@@ -58,9 +58,9 @@
  * its `visible` reads the value the binding selects as `data`
  * (`data.total == 1`). Only `visible` reads it: not the label, not the target,
  * and not the entry's `children`. {@link useNavVisibility} is the one evaluator
- * every navigation surface of the shell hands its guard: the sidebar and the
- * landing through {@link useNavMemberGates}, the `nav:menu` block and the
- * command palette directly. It reads each binding an app's navigation declares
+ * every navigation surface of the shell hands its guard: the sidebar, the
+ * landing and the command palette through {@link useNavMemberGates}, the
+ * `nav:menu` block directly. It reads each binding an app's navigation declares
  * through `@object-ui/react`'s element reader (`readElementApi`, the request a
  * page element's binding makes, with the host's `apiFetch`), so there is no
  * second fetch; and in the open the read is asked in (`ElementApiOpenScope`,
@@ -254,8 +254,8 @@ export function navEntryVisible(
 /**
  * The `visible` evaluator for `app`'s navigation: {@link navEntryVisible} over
  * the shell's expression evaluator and the bindings `app` declares. The sidebar
- * (through {@link useNavMemberGates}), the `nav:menu` block and the command
- * palette each build theirs here, so they cannot disagree.
+ * and the command palette (through {@link useNavMemberGates}) and the `nav:menu`
+ * block each build theirs here, so they cannot disagree.
  */
 export function useNavVisibility(
   app: unknown,

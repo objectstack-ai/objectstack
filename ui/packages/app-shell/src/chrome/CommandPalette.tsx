@@ -52,7 +52,7 @@ import {
 import { useRecordSearch } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import { useTheme } from './ThemeProvider.js';
-import { useNavMemberGates, useNavVisibility } from '../hooks/useNavMemberGates.js';
+import { navEntriesShownToMember, useNavMemberGates } from '../hooks/useNavMemberGates.js';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { resolveKeyedI18nLabel, getRecordDisplayName, appRouteSegment } from '../utils/index.js';
 import { getIcon } from '../utils/getIcon.js';
@@ -157,13 +157,11 @@ function CommandPaletteBody(props: CommandPaletteProps) {
   const navigate = useNavigate();
   const { appName } = useParams();
   const { setTheme } = useTheme();
-  // The shell's one navigation `visible` evaluator, the sidebar's and
-  // `nav:menu`'s: an entry that declares an API `dataSource` reads its bound
-  // value as `data`, and is hidden until that read answers (objectui#13029).
-  const evalVis = useNavVisibility(activeApp);
-  // objectstack#26892 — the sidebar's member gates: the app's reports beyond
-  // its navigation are listed only when the navigation shows the member an
-  // entry naming them, or names none.
+  // objectstack#26892 — the sidebar's member gates, the ones `UnifiedSidebar`
+  // draws with: the object-read prune, and per entry its `visible` (through the
+  // shell's one evaluator, so an entry that declares an API `dataSource` reads
+  // its bound value as `data` and is hidden until that read answers,
+  // objectui#13029), `requiredPermissions` and runtime-capability gates.
   const gates = useNavMemberGates();
   const { t, language } = useObjectTranslation();
   // A nav entry's text, the way the sidebar and `nav:menu` name it: an entry
@@ -208,14 +206,13 @@ function CommandPaletteBody(props: CommandPaletteProps) {
   // its edits; OK, or a clean page, goes at once.
   const leaveTo = (to: string) => runCommand(() => confirmUnsavedLeave(() => navigate(to)));
 
-  // Extract navigation items from active app, filtering by the spec's one
-  // navigation gate, `visible`. The `?? item.visibleOn` fallback this read
-  // once carried was a consumer-side alias of a key the spec never declared on
-  // a navigation entry (`NavigationItem.visible` is the gate) — dropped with the
-  // node-level dialects.
-  const navItems = flattenNavigation(activeApp?.navigation || []).filter(
-    (item) => evalVis(item.visible, item)
-  );
+  // The active app's navigation entries as the sidebar shows them to this
+  // member (objectstack#26892): `navEntriesShownToMember` under the sidebar's
+  // gates, then flattened. Filtering the flattened leaves by their own
+  // `visible` alone, as this once did, offered an entry the sidebar hides by
+  // `requiredPermissions`, by a runtime-capability gate, or by its group's
+  // `visible`, and opened it empty.
+  const navItems = flattenNavigation(navEntriesShownToMember(activeApp?.navigation || [], gates));
 
   // The entries the palette shows for the query: a navigation entry or app by
   // its label and its machine name, a built-in command by its value. They are
