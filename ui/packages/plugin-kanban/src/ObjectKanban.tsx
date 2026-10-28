@@ -1835,8 +1835,9 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
   // the gate ignores (warning-only, inactive, insert-only, or silent on this
   // from-state) is never named. Several closing rules join their messages. A
   // rule with no message leaves the board's own sentence (`kanban.dropBlocked`).
-  // The text is the one `/meta` serves: the object's translation bundle does
-  // not reach `validations[].message` there.
+  // The text is the one `/meta` serves, which is the bundle's
+  // `_validations.<rule>.message` for the request locale: the same string the
+  // refusal uses (objectstack#27135).
   const dropBlockedReason = React.useMemo(() => {
     const groupBy = schema.groupBy;
     const rules = (objectDef as { validations?: unknown } | null)?.validations;

@@ -35,15 +35,16 @@ export const PipelineDashboard: Dashboard = {
   columns: 12,
   widgets: [
     // --- Row 1: KPI tiles -------------------------------------------------
-    // No `options` on these tiles: the currency face comes from the dataset
-    // measure (`total_amount` / `avg_amount` declare `format` + `currency` in
-    // `opportunity.dataset.ts`). A dataset-bound widget reads only the `options`
+    // No `options` on these tiles: the number face comes from the dataset
+    // measure (`total_amount` / `avg_amount` declare `format` in
+    // `opportunity.dataset.ts`; their currency is the `amount` field's, the
+    // tenant default). A dataset-bound widget reads only the `options`
     // keys the spec declares (plus the `description` sub-caption), so an
     // `options.format` / `options.currency` here was inert.
     {
       id: 'total_pipeline',
       type: 'metric',
-      title: 'Total Pipeline ($)',
+      title: 'Total Pipeline',
       description: 'Sum of opportunity amounts across open stages.',
       filter: { stage: { $nin: ['closed_won', 'closed_lost'] } },
       dataset: 'opportunity_metrics',
@@ -124,7 +125,7 @@ export const PipelineDashboard: Dashboard = {
     {
       id: 'pipeline_by_industry',
       type: 'pie',
-      title: 'Open Pipeline by Stage ($)',
+      title: 'Open Pipeline by Stage',
       description: 'Open-pipeline revenue split by pipeline stage. Pie/donut/funnel ignore `compareTo`.',
       filter: { stage: { $nin: ['closed_won', 'closed_lost'] } },
       dataset: 'opportunity_metrics',

@@ -175,7 +175,7 @@ Platform translation data — the per-app groups plus the platform-only `setting
 | :--- | :--- | :--- | :--- |
 | **objects** | `Record<string, { label?: string; pluralLabel?: string; description?: string; fields?: Record<string, object>; … }>` | optional | Object translations keyed by object name |
 | **picklists** | `Record<string, { label?: string; options: Record<string, string> }>` | optional | Picklist translations keyed by picklist name |
-| **apps** | `Record<string, { label: string; description?: string; navigation?: Record<string, object> }>` | optional | App translations keyed by app name |
+| **apps** | `Record<string, { label?: string; description?: string; navigation?: Record<string, object> }>` | optional | App translations keyed by app name |
 | **messages** | `Record<string, string>` | optional | UI message translations keyed by message ID |
 | **globalActions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Global action translations keyed by action name |
 | **dashboards** | `Record<string, { label?: string; description?: string; actions?: Record<string, object>; widgets?: Record<string, object>; … }>` | optional | Dashboard translations keyed by dashboard name |
@@ -218,7 +218,7 @@ Translation data for a single object
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **label** | `string` | ✅ | Translated app label |
+| **label** | `string` | optional | Translated app label |
 | **description** | `string` | optional | Translated app description |
 | **navigation** | `Record<string, { label: string }>` | optional | Navigation group translations keyed by group ID |
 
@@ -350,7 +350,7 @@ Served translation data — the platform groups the browser reads, without the s
 | :--- | :--- | :--- | :--- |
 | **objects** | `Record<string, { label?: string; pluralLabel?: string; description?: string; fields?: Record<string, object>; … }>` | optional | Object translations keyed by object name |
 | **picklists** | `Record<string, { label?: string; options: Record<string, string> }>` | optional | Picklist translations keyed by picklist name |
-| **apps** | `Record<string, { label: string; description?: string; navigation?: Record<string, object> }>` | optional | App translations keyed by app name |
+| **apps** | `Record<string, { label?: string; description?: string; navigation?: Record<string, object> }>` | optional | App translations keyed by app name |
 | **messages** | `Record<string, string>` | optional | UI message translations keyed by message ID |
 | **globalActions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Global action translations keyed by action name |
 | **dashboards** | `Record<string, { label?: string; description?: string; actions?: Record<string, object>; widgets?: Record<string, object>; … }>` | optional | Dashboard translations keyed by dashboard name |
@@ -392,7 +392,7 @@ Translation data for a single object
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **label** | `string` | ✅ | Translated app label |
+| **label** | `string` | optional | Translated app label |
 | **description** | `string` | optional | Translated app description |
 | **navigation** | `Record<string, { label: string }>` | optional | Navigation group translations keyed by group ID |
 
@@ -586,7 +586,7 @@ Per-app translation data for objects, apps, and UI messages
 | :--- | :--- | :--- | :--- |
 | **objects** | `Record<string, { label?: string; pluralLabel?: string; description?: string; fields?: Record<string, object>; … }>` | optional | Object translations keyed by object name |
 | **picklists** | `Record<string, { label?: string; options: Record<string, string> }>` | optional | Picklist translations keyed by picklist name |
-| **apps** | `Record<string, { label: string; description?: string; navigation?: Record<string, object> }>` | optional | App translations keyed by app name |
+| **apps** | `Record<string, { label?: string; description?: string; navigation?: Record<string, object> }>` | optional | App translations keyed by app name |
 | **messages** | `Record<string, string>` | optional | UI message translations keyed by message ID |
 | **globalActions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Global action translations keyed by action name |
 | **dashboards** | `Record<string, { label?: string; description?: string; actions?: Record<string, object>; widgets?: Record<string, object>; … }>` | optional | Dashboard translations keyed by dashboard name |
@@ -628,7 +628,7 @@ Translation data for a single object
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **label** | `string` | ✅ | Translated app label |
+| **label** | `string` | optional | Translated app label |
 | **description** | `string` | optional | Translated app description |
 | **navigation** | `Record<string, { label: string }>` | optional | Navigation group translations keyed by group ID |
 
@@ -781,7 +781,7 @@ One locale of translations — the `translation` metadata type
 | :--- | :--- | :--- | :--- |
 | **objects** | `Record<string, { label?: string; pluralLabel?: string; description?: string; fields?: Record<string, object>; … }>` | optional | Object translations keyed by object name |
 | **picklists** | `Record<string, { label?: string; options: Record<string, string> }>` | optional | Picklist translations keyed by picklist name |
-| **apps** | `Record<string, { label: string; description?: string; navigation?: Record<string, object> }>` | optional | App translations keyed by app name |
+| **apps** | `Record<string, { label?: string; description?: string; navigation?: Record<string, object> }>` | optional | App translations keyed by app name |
 | **messages** | `Record<string, string>` | optional | UI message translations keyed by message ID |
 | **globalActions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Global action translations keyed by action name |
 | **dashboards** | `Record<string, { label?: string; description?: string; actions?: Record<string, object>; widgets?: Record<string, object>; … }>` | optional | Dashboard translations keyed by dashboard name |
@@ -833,7 +833,7 @@ Translation data for a single object
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **label** | `string` | ✅ | Translated app label |
+| **label** | `string` | optional | Translated app label |
 | **description** | `string` | optional | Translated app description |
 | **navigation** | `Record<string, { label: string }>` | optional | Navigation group translations keyed by group ID |
 
