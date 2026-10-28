@@ -1051,8 +1051,7 @@ export const ObjectFormSchema = BaseSchema.extend({
   buttons: z.looseObject({
     submit: ObjectFormButtonToggleSchema.optional(),
     cancel: ObjectFormButtonToggleSchema.optional(),
-    reset: ObjectFormButtonToggleSchema.optional(),
-  }).optional().describe('Structured submit/cancel/reset visibility and labels; folded onto the flat keys, which win when set'),
+  }).optional().describe('Structured submit/cancel visibility and labels; folded onto the flat keys, which win when set'),
   defaults: z.record(z.string(), z.any()).optional()
     .describe('Create-mode initial values keyed by field name; folded into initialValues, which wins when set'),
   subforms: z.array(z.looseObject({

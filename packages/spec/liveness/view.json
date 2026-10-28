@@ -370,7 +370,7 @@
         },
         "buttons": {
           "status": "live",
-          "note": "objectui: ObjectForm.tsx foldFormButtons() reads schema.buttons and folds submit/cancel/reset {show,label} onto the flat showSubmit/submitText/showCancel/cancelText/showReset props (framework#1894 / #2998); ObjectView + RecordFormPage forward it. Flat keys kept as deprecated back-compat (explicit flat key wins)."
+          "note": "objectui: ObjectForm.tsx foldFormButtons() reads schema.buttons and folds submit/cancel {show,label} onto the flat showSubmit/submitText/showCancel/cancelText props (framework#1894 / #2998); ObjectView forwards it, and every console form entry point resolves submit/cancel through resolveFormViewChrome / readFormButton (#26843). Flat keys kept as deprecated back-compat (explicit flat key wins). SUB-KEY buttons.reset REMOVED 2026-10-28 (#27153, ADR-0049 enforce-or-remove, ruled retire): measured at origin/main fbe344b3, six button bars (components form.tsx, console FormPage, ModalForm, DrawerForm, WizardForm, MasterDetailForm) drew submit/cancel and none drew reset; reset.label had no reader; the one fold of reset.show landed on ObjectForm showReset, which means clear-after-save (resetOnSubmit), not a button. Tombstoned inside the buttons block (retiredKey carries the prescription) and stripped from stored rows and sources by the protocol-18 form-view-buttons-reset-removed conversion; the fold was removed in the same change. Sub-keys cannot be drilled (one level only), so the removal is recorded here; submit and cancel keep this row live."
         },
         "defaults": {
           "status": "live",

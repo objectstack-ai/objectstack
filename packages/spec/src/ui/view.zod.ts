@@ -4115,7 +4115,7 @@ export const FormSectionSchema = lazySchema(() => strictObject({
 })));
 
 /**
- * A single form action button (submit / cancel / reset): visibility + label.
+ * A single form action button (submit / cancel): visibility + label.
  * Leaf of the {@link FormViewSchema} `buttons` block (#2998).
  * `.strict()` per ADR-0089 D3a so a typo'd key errors instead of vanishing.
  */
@@ -4545,6 +4545,18 @@ const FORM_VIEW_SPLIT_RESIZABLE_RETIRED =
   + 'view draws panes. Delete the key. '
   + FORM_VIEW_TYPE_RETIRED_FIX;
 
+// [#27153] `buttons.reset` (ADR-0049 enforce-or-remove, seat ruling on the
+// card): six form button bars drew submit and cancel and none drew reset, and
+// `reset.label` had no reader. The one fold that read `reset.show` mapped it
+// onto ObjectForm's clear-after-save flag, so `show: true` emptied the form
+// after a save instead of drawing a button. The
+// `form-view-buttons-reset-removed` conversion (ADR-0087 D2) strips the key.
+const FORM_VIEW_BUTTONS_RESET_RETIRED =
+  '`view.form.buttons.reset` was removed in @objectstack/spec 18.3.0 (ADR-0049) — no form ever drew a reset '
+  + 'button, and its label was never read. Delete the key: a form has `submit` and `cancel` buttons only, and '
+  + 'Cancel leaves the form without saving. '
+  + FORM_VIEW_TYPE_RETIRED_FIX;
+
 // Form-view `layout` retired-value prescriptions (#20221, ADR-0049
 // enforce-or-remove). Declared with `//` on purpose — the
 // `LIST_VIEW_EXPORT_PDF_RETIRED` placement note applies here too. An
@@ -4880,17 +4892,21 @@ export const FormViewSchema = lazySchema(() => strictObject({
 
   /**
    * Structured action-button config: per-button visibility + label for
-   * `submit` / `cancel` / `reset`. The spec home for the flat renderer-invented
-   * keys ObjectUI's `ObjectForm` used to read (`showSubmit`/`submitText`/
-   * `showCancel`/`cancelText`/`showReset`) — now consumed: `ObjectForm` folds
-   * `buttons.*` down onto those flat props at render (framework#1894, #2998),
-   * with the flat keys kept only as deprecated back-compat. Authoring `buttons`
-   * takes effect; a stale flat key still wins where explicitly set.
+   * `submit` / `cancel`. The spec home for the flat renderer-invented keys
+   * ObjectUI's `ObjectForm` used to read (`showSubmit`/`submitText`/
+   * `showCancel`/`cancelText`) — now consumed: `ObjectForm` folds `buttons.*`
+   * down onto those flat props at render (framework#1894, #2998), and every
+   * console form entry point draws them (#26843). Authoring `buttons` takes
+   * effect; a stale flat key still wins where explicitly set.
+   *
+   * [#27153] `reset` is a `retiredKey()` tombstone (ADR-0049 enforce-or-remove):
+   * no form drew a reset button and its `label` had no reader.
    */
   buttons: z.object({
     submit: FormButtonConfigSchema.optional().describe('Submit button'),
     cancel: FormButtonConfigSchema.optional().describe('Cancel button'),
-    reset: FormButtonConfigSchema.optional().describe('Reset button'),
+    /** [#27153] RETIRED — {@link FORM_VIEW_BUTTONS_RESET_RETIRED}. */
+    reset: retiredKey(FORM_VIEW_BUTTONS_RESET_RETIRED),
   }).strict().optional()
     .describe('Form action-button visibility & labels; folded onto the flat renderer props by ObjectUI ObjectForm.'),
 
