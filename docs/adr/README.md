@@ -17,8 +17,8 @@
 
 | Status | Records |
 |---|---|
-| Accepted | 112 |
-| Proposed | 18 |
+| Accepted | 116 |
+| Proposed | 14 |
 | Superseded | 4 |
 | Draft | 3 |
 | Deferred | 2 |
@@ -108,7 +108,7 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0035](./0035-config-driven-master-detail.md) | Config-driven master-detail (declare on the relationship, forms derive) | Accepted | — | — | — |
 | [ADR-0036](./0036-app-as-rest-api-and-mcp-server.md) | Every app is a REST API + an MCP server — make it visible and connectable after build | Accepted — framework implemented; cloud surfacing pending (proposed 2026-0… | 2026-06-06 | — | — |
 | [ADR-0037](./0037-live-canvas-draft-preview.md) | Live Canvas — draft-overlay live preview while you build | Accepted — 2026-06-10 — all four phases implemented: `previewDrafts` reads… | 2026-06-10 | — | — |
-| [ADR-0038](./0038-build-verification-loop.md) | Build Verification Loop — the agent builds, verifies, and corrects itself | Proposed — 2026-06-11 — cloud-owned; framework slice partially implemented… | 2026-06-11 | — | cloud ADR-0025 |
+| [ADR-0038](./0038-build-verification-loop.md) | Build Verification Loop — the agent builds, verifies, and corrects itself | Accepted — 2026-10-28 (ruled on objectstack#26553, ADR batch 2; proposed 2… | 2026-10-28 | — | cloud ADR-0025 |
 | [ADR-0039](./0039-token-scope-tree-execution.md) | Concurrent durable pause — multi-instance nodes now, token/scope-tree later | Accepted — Track A implemented; Track B deferred (proposed 2026-06-11, rev… | 2026-06-11 | — | — |
 | [ADR-0040](./0040-unified-assistant-and-agent-binding.md) | Unified Assistant — the end user never picks an agent | Superseded — by ADR-0063 — original: Proposed (2026-06-11) | 2026-06-11 | — | ADR-0063, cloud ADR-0025 |
 | [ADR-0041](./0041-flow-trigger-family.md) | Flow trigger family — taxonomy, naming, and the open-source core set | Accepted — Tier 1 implemented (rename deprecation stubs pending) (proposed… | 2026-06-12 | — | — |
@@ -116,13 +116,13 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0043](./0043-actionable-approval-links.md) | Actionable approval links — single-use tokens with a session-less confirm page | Accepted — implemented (proposed 2026-06-12 · calibrated 2026-06-12) · Ame… | 2026-06-12 | — | — |
 | [ADR-0044](./0044-approval-send-back-for-revision.md) | Flow-level send-back-for-revision — `revise` branch + typed back-edge re-entry | Accepted — engine + model implemented; designer pending (objectui) (propos… | 2026-06-12 | — | — |
 | [ADR-0045](./0045-additive-materialization-and-visibility-gate.md) | Additive materialization with a visibility gate — drafts narrow to mutations | Accepted — 2026-06-12 · Amended 2026-08-09 (#4829, maintainer ruling 2026-… | 2026-06-12 | — | — |
-| [ADR-0046](./0046-package-docs-as-metadata.md) | Package documentation as metadata — flat `src/docs/.md` compiled into the manifest | Proposed — 2026-06-12, revised — simplified from the original directory/do… | 2026-06-12 | — | — |
+| [ADR-0046](./0046-package-docs-as-metadata.md) | Package documentation as metadata — flat `src/docs/.md` compiled into the manifest | Accepted — 2026-10-28 (ruled on objectstack#26553, ADR batch 2; proposed 2… | 2026-10-28 | — | — |
 | [ADR-0047](./0047-object-ui-run-modes.md) | Two run modes for object UI — data views vs interface pages, user filters, and runtime visualization choice | Accepted — 2026-06-12; revised 2026-06-19 — framework scope implemented (`… | 2026-06-12 | — | — |
 | [ADR-0048](./0048-cross-package-metadata-collision.md) | Cross-package metadata collision — package-id identity, namespace install gate, package-scoped resolution | Revised — 2026-06-13 — supersedes the original per-item collision | 2026-06-13 | — | — |
 | [ADR-0049](./0049-no-unenforced-security-properties.md) | Spec must not declare security properties the runtime does not enforce (enforce-or-remove gate) | Accepted — 2026-06-15 — implemented: fail-closed `DESTRUCTIVEOPERATIONS` (… | 2026-06-15 | — | — |
 | [ADR-0050](./0050-form-layout-vs-presentation.md) | Form layout vs presentation — split the overloaded `FormView.type` | Proposed — 2026-06-15 · Amended (2026-10-20, letter B′ on #24692, ruling r… | 2026-06-15 | — | — |
-| [ADR-0051](./0051-inline-metadata-views-in-docs.md) | Inline metadata views in docs — the ` ```metadata ` fenced block | Proposed — 2026-06-16 — P1 authoring surface implemented (2026-07-16 audit… | 2026-06-16 | — | — |
-| [ADR-0052](./0052-audit-is-not-the-activity-feed.md) | Audit is not the activity feed — decompose collaboration, activity, and audit into bounded contexts | Proposed — 2026-06-16 — partially implemented (2026-07-16 audit): §5b decl… | 2026-06-16 | — | — |
+| [ADR-0051](./0051-inline-metadata-views-in-docs.md) | Inline metadata views in docs — the ` ```metadata ` fenced block | Accepted — 2026-10-28 (ruled on objectstack#26553, ADR batch 2; proposed 2… | 2026-10-28 | — | — |
+| [ADR-0052](./0052-audit-is-not-the-activity-feed.md) | Audit is not the activity feed — decompose collaboration, activity, and audit into bounded contexts | Accepted — 2026-10-28 (ruled on objectstack#26553, ADR batch 2; proposed 2… | 2026-10-28 | — | — |
 | [ADR-0053](./0053-date-and-datetime-semantics.md) | `date` is a timezone-naive calendar day; `datetime` is an instant rendered in a reference timezone | Accepted — 2026-06-16 — Phase 1 + addendum D-A1 implemented (`sql-driver.t… | 2026-06-16 | — | — |
 | [ADR-0054](./0054-runtime-proof-for-authorable-surface.md) | A live authorable property must be proven at runtime, not merely have a consumer (prove-it-runs gate) | Accepted — 2026-06-18 | 2026-06-18 | — | — |
 | [ADR-0055](./0055-master-detail-controlled-by-parent.md) | Master-detail "controlled by parent" permissions — derived access via pre-resolved master-id membership | Accepted — 2026-06-19 — implemented in this PR (P0–P2) · Amended (2026-09-… | 2026-06-19 | — | — |
