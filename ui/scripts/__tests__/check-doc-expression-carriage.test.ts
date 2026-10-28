@@ -648,7 +648,9 @@ describe('check-doc-expression-carriage: the census on a fixture tree', () => {
 describe('check-doc-expression-carriage: the real tree, and the posture', () => {
   it('is looking at something — a vacuity guard, not a snapshot', async () => {
     const census = analyze(ROOT, { channels: deriveChannels(ROOT), carriage: await loadCarriage() });
-    expect(census.counters.fences).toBeGreaterThan(100);
+    // 100 fences on the tree objectstack#27145 measured, after the ObjectUI
+    // pages moved to `content/docs/frontend` and `plugin-ai` retired.
+    expect(census.counters.fences).toBeGreaterThan(80);
     expect(census.counters.nodes).toBeGreaterThan(100);
     // ⛔ Deliberately NOT asserted: how many findings there are. That number moves
     // with every card in this class, and pinning it here would make this gate
