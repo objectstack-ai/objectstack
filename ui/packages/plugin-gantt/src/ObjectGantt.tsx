@@ -578,10 +578,9 @@ const warnedFlatGanttKeys = new Set<string>();
 function warnOnFlatGanttKeys(schema: ObjectGanttHandoff): void {
   if (!isDev()) return;
 
-  // The keys are read through a record view: none of them is declared on the
-  // node any more, which is the point of the warning.
-  const node = schema as Record<string, unknown>;
-  const flat = FLAT_GANTT_CONFIG_KEYS.filter((key) => node[key] !== undefined);
+  // The keys are read by name with `Reflect.get`: none of them is declared on
+  // the node any more, which is the point of the warning.
+  const flat = FLAT_GANTT_CONFIG_KEYS.filter((key) => Reflect.get(schema, key) !== undefined);
   if (flat.length === 0) return;
 
   const memo = `${schema.type ?? 'gantt'}::${schema.objectName ?? ''}::${flat.join(',')}`;

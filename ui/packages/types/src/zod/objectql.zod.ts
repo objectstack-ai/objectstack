@@ -2972,8 +2972,10 @@ export const ObjectGanttSchema = BaseSchema.extend({
   // members of this mirror. `ComponentPropsMap['object-gantt']` refuses every
   // one of them on the node; the `gantt` block below is their one spelling, and
   // both producers (`ListView`, `ObjectView`'s `generateViewSchema`) emit it.
-  // What the renderer still reads flat lives on `plugin-gantt`'s package-local
-  // hand-off type (Commandment #0.1), off this published face.
+  // The one pair the renderer reads flat, the toolbar's `search` /
+  // `searchableFields` that `ListView` writes at runtime, lives on
+  // `plugin-gantt`'s package-local hand-off type (Commandment #0.1), off this
+  // published face.
   //
   // objectui#5903 — ten keys `ObjectGantt` reads and this mirror did not
   // declare. They were reachable only through `(schema as any).K`, so nothing

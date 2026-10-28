@@ -104,9 +104,7 @@ const TASK_FIELDS: Record<string, any> = {
 const GANTT_SCHEMA = {
   type: 'gantt',
   objectName: 'task',
-  startDateField: 'start',
-  endDateField: 'end',
-  titleField: 'name',
+  gantt: { startDateField: 'start', endDateField: 'end', titleField: 'name' },
 } as any;
 
 function makeDataSource() {
