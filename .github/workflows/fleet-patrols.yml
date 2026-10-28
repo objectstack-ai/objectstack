@@ -22,9 +22,7 @@ name: Fleet Patrols
 # ⛔ A cron string under `schedule:` and the same string in its job's `if:` are
 # ONE fact spelled twice: change both in the same edit. A cron no `if:` names
 # fires a run that does nothing, and a job whose `if:` names a cron the
-# schedule does not declare never runs — neither shape is red at run time;
-# `scripts/check-platform-checklist-watchdog.mjs` (clause 7) refuses both
-# before the edit merges.
+# schedule does not declare never runs — clause 7 of the watchdog pin refuses both.
 #
 # `workflow_dispatch` takes one input, `patrol`: `all` (the default) runs every
 # job, a job id runs that one alone — the manual fire and the smoke test each

@@ -147,8 +147,7 @@ concurrency:
 #     self-test half of a gate whose scan runs elsewhere). An alias is a copy
 #     only when it is the same command, and a copy is what this rule removes;
 #   * its job sets up no pnpm (an install-free job elsewhere, such as
-#     check-links.yml or fleet-patrols.yml's `board-snapshot` job, keeps the
-#     direct form);
+#     check-links.yml or fleet-patrols.yml's board-snapshot job, keeps it);
 #   * it predates this rule and its script has no alias yet. Those steps are
 #     not swept (#25919 「存量不横扫」); each gains an alias when its step is
 #     next rewired. Their comments say "invoked as `node` rather than through a
@@ -2547,16 +2546,14 @@ jobs:
       # over the watchdog workflow: it asserts the file exists, fires on
       # `schedule:` + `workflow_dispatch:`, carries NO `merge_group:` /
       # `pull_request_target:` trigger, that any `pull_request:` trigger is
-      # `paths`-filtered to a frozen SET — the workflow file plus the sibling
-      # patrol jobs' own inputs, and nothing else — that no board write is
+      # `paths`-filtered to a frozen set of the four patrols' inputs, that no board write is
       # reachable from a pull_request run, and that the gate is invoked through its
       # package script rather than an inlined copy. Two file reads, no socket.
       #
-      # That workflow's `pull_request:` trigger names only the four patrols' own
-      # inputs, so it fires on no unrelated PR, and no job in it publishes a
-      # required context or reds on checklist drift — that filter is what keeps
-      # the decision above intact, and pinning it is most of this step's job. It has to live HERE rather than
-      # inside the watchdog for the other half: a PR DELETING the watchdog would
+      # That trigger names only the patrols' inputs and no job there is required or
+      # reds on drift, so no unrelated PR is blocked — that filter keeps the decision
+      # above intact, and pinning it is most of this step's job. It has to live HERE
+      # rather than inside the watchdog for the other half: a PR DELETING it would
       # silence any check that lived inside it, and this job is the only place where
       # the absence of that file is observable before it merges.
       #

@@ -232,9 +232,8 @@ export const INSTALL_FIX = 'pnpm install';
  *   • The half that HOLDS: nothing mechanical changes. Every consumer of the
  *     gates that import this frame treats any non-zero as failure — measured,
  *     not assumed: the `&&` chains in the root `package.json`, the bare `run:`
- *     steps in `lint.yml`/`ci.yml`, and `fleet-patrols.yml`'s
- *     `required-set-patrol` job, which
- *     branches on `== '0'` / `!= '0'` and nothing finer. ⛔ This change buys
+ *     steps in `lint.yml`/`ci.yml`, and fleet-patrols.yml's `required-set-patrol`
+ *     job, which branches on `== '0'` / `!= '0'` and nothing finer. ⛔ This change buys
  *     zero CI benefit today and must not be sold as if it did.
  *   • The half that does NOT: it is not a new contract. The contract was
  *     already written, by the five sites above. What this frame was doing was

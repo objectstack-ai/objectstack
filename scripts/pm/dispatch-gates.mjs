@@ -1839,8 +1839,7 @@ const WORKFLOW_VALUE_SOURCE = /\$\{\{[\s\S]*?\}\}|\$\{[A-Za-z_]\w*\}|\$[A-Za-z_]
  *   `node scripts/check-required-contexts.mjs`  →  exit 0 — but it runs the
  *       STATIC pin check, while fleet-patrols.yml's `required-set-patrol` job
  *       runs `--verify-required-set`, a live sweep of the repo's required set.
- *       Same script, different question, and the row named that patrol's
- *       workflow.
+ *       Same script, different question, and the row named that patrol.
  *   `node scripts/check-shard-attestation.mjs` and
  *       `node scripts/check-cross-package-test-inputs.mjs`  →  exit 0, and both
  *       duplicate what `lint.yml` already runs under a `pnpm check:` alias

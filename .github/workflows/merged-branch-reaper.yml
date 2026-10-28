@@ -234,8 +234,8 @@ on:
         type: boolean
         required: false
         default: true
-  # Exercise the sweep on changes to itself, the same posture as the
-  # `required-set-patrol` job of fleet-patrols.yml. This is what makes the FIRST delivery of this PR a
+  # Exercise the sweep on changes to itself, the same posture as fleet-patrols.yml's
+  # `required-set-patrol` job. This is what makes the FIRST delivery of this PR a
   # real would-delete list produced by a real runner rather than a claim about
   # one. Publishes no required context, so a red here blocks nothing.
   pull_request:
