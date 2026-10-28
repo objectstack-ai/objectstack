@@ -5,9 +5,9 @@
  *
  * `domains/actions-fault-vs-rejection.test.ts` pins the HTTP half of the
  * crash-vs-rejection contract against a synthesised `SandboxError`. This file
- * is the other half, the split `capability-denial-is-a-fault.test.ts` already
- * draws for #4431: it runs a body that genuinely crashes inside QuickJS and
- * proves the error ARRIVES in the shape the classifier is pinned against —
+ * is the other half, the split `capability-denial-is-a-refusal.test.ts` drew
+ * for #4431 (a capability denial is a coded refusal since #26965): it runs a
+ * body that genuinely crashes inside QuickJS and proves the error ARRIVES in the shape the classifier is pinned against —
  * then hands that same object, untouched, to the real door.
  *
  * The card this closes was filed on a READING of the source, and read-derived
