@@ -6,6 +6,8 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+import { useCallback, useSyncExternalStore } from 'react';
+
 /**
  * How the console's object page opens a record a reader clicks, when the
  * object opens its records in the drawer — a READER's own preference, not
@@ -19,9 +21,11 @@
  * lives here instead: `drawer` draws the record in the drawer over the list,
  * `split` draws the same record page beside the list.
  *
- * This is the READ side. The Display-menu control that writes it is
- * objectstack#26681; until it lands nothing in the console writes the key, so
- * every reader gets the default.
+ * Both sides live here: {@link readRecordOpenPreference} and
+ * {@link writeRecordOpenPreference}, and {@link useRecordOpenPreference}, the
+ * live pair the object page reads — the Display menu's 「打开记录」 control
+ * writes through it and the next row click opens the new way, with no reload
+ * (objectstack#26681).
  *
  * Read per browser: the value lives in `localStorage` under
  * {@link RECORD_OPEN_PREFERENCE_KEY}, across objects. An absent value, an
@@ -42,7 +46,10 @@ export const DEFAULT_RECORD_OPEN_PREFERENCE: RecordOpenPreference = 'drawer';
 /** The storage surface this module reads — `localStorage`, or a test double. */
 export type RecordOpenPreferenceStorage = Pick<Storage, 'getItem'>;
 
-function defaultStorage(): RecordOpenPreferenceStorage | null {
+/** The storage surface this module writes — `localStorage`, or a test double. */
+export type RecordOpenPreferenceWriteStorage = Pick<Storage, 'setItem'>;
+
+function defaultStorage(): Storage | null {
   if (typeof window === 'undefined') return null;
   try {
     return window.localStorage;
@@ -68,4 +75,80 @@ export function readRecordOpenPreference(
   } catch {
     return DEFAULT_RECORD_OPEN_PREFERENCE;
   }
+}
+
+/**
+ * A choice storage would not keep, held for this page: a browser whose
+ * storage refuses the write (private mode, a full quota, a blocked origin)
+ * would otherwise have the reader pick 分屏 and keep reading 抽屉 back.
+ * `undefined` while storage keeps the choice — storage is then the one answer
+ * — and cleared by the next kept write and by another tab's write (see
+ * `subscribe`).
+ */
+let pageChoice: RecordOpenPreference | undefined;
+
+/** The live {@link useRecordOpenPreference} callers on this page. */
+const listeners = new Set<() => void>();
+
+/**
+ * Keep the reader's choice. `storage` defaults to the browser's
+ * `localStorage`; `null` says there is none. With no storage, or one that
+ * refuses the write, nothing is kept and nothing throws: the choice holds on
+ * this page, through {@link useRecordOpenPreference}, and the next page load
+ * reads the default.
+ *
+ * Every live {@link useRecordOpenPreference} on this page hears the write;
+ * another tab of the same origin hears it through the browser's `storage`
+ * event.
+ */
+export function writeRecordOpenPreference(
+  next: RecordOpenPreference,
+  storage: RecordOpenPreferenceWriteStorage | null = defaultStorage(),
+): void {
+  pageChoice = next;
+  if (storage) {
+    try {
+      storage.setItem(RECORD_OPEN_PREFERENCE_KEY, next);
+      pageChoice = undefined;
+    } catch {
+      // Not kept past this page — see above.
+    }
+  }
+  for (const listener of Array.from(listeners)) listener();
+}
+
+function subscribe(onChange: () => void): () => void {
+  listeners.add(onChange);
+  const onStorage = (event: StorageEvent) => {
+    // `key === null` is a `clear()` in another tab.
+    if (event.key === RECORD_OPEN_PREFERENCE_KEY || event.key === null) {
+      pageChoice = undefined;
+      onChange();
+    }
+  };
+  if (typeof window !== 'undefined') window.addEventListener('storage', onStorage);
+  return () => {
+    listeners.delete(onChange);
+    if (typeof window !== 'undefined') window.removeEventListener('storage', onStorage);
+  };
+}
+
+function snapshot(): RecordOpenPreference {
+  return pageChoice ?? readRecordOpenPreference();
+}
+
+function serverSnapshot(): RecordOpenPreference {
+  return DEFAULT_RECORD_OPEN_PREFERENCE;
+}
+
+/**
+ * The reader's record-open preference as live state, and the setter the
+ * Display menu writes it with (objectstack#26681). A write here, in another
+ * component of this page, or in another tab re-renders every caller, so the
+ * object page decides its split face from the value the reader just chose.
+ */
+export function useRecordOpenPreference(): [RecordOpenPreference, (next: RecordOpenPreference) => void] {
+  const preference = useSyncExternalStore(subscribe, snapshot, serverSnapshot);
+  const setPreference = useCallback((next: RecordOpenPreference) => writeRecordOpenPreference(next), []);
+  return [preference, setPreference];
 }

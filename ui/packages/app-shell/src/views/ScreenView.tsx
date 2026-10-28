@@ -155,6 +155,25 @@ export function isRecordLinkScreenField(field: ScreenFieldSpec): boolean {
   return field.type === SCREEN_FIELD_RECORD_LINK_TYPE;
 }
 
+/**
+ * Whether a screen only shows and collects nothing: a flat screen that declares
+ * at least one field, every one of them a record link — the one member of the
+ * spec's open `type` vocabulary that takes no input (objectstack#26902). It is
+ * the result screen a flow ends on, so the runtime answers it with Done rather
+ * than Cancel + Submit (`FlowRunner`).
+ *
+ * Read over the DECLARED fields, like the dialog's width, so the answer never
+ * changes while the screen is open. Two shapes are deliberately not display-only:
+ * - a screen with no fields at all — a message-only step can be the go-ahead for
+ *   what follows it ("Delete these records?"), so its Cancel has to stay a way out;
+ * - an `object-form` step, which writes a record and draws its own buttons.
+ */
+export function isDisplayOnlyScreen(screen: ScreenSpec): boolean {
+  if (isObjectFormScreen(screen)) return false;
+  const fields = screenFields(screen);
+  return fields.length > 0 && fields.every(isRecordLinkScreenField);
+}
+
 /** Whether a screen field is the upload widget — the widget hint, read as the renderer reads it. */
 function isFileScreenField(field: ScreenFieldSpec): boolean {
   return (field.type || '').toLowerCase() === 'file';

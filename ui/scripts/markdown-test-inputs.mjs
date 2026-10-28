@@ -251,7 +251,6 @@ export const ADJUDICATED = new Map([
     'packages/auth/src/__tests__/reserved-auth-features.test.ts',
     {
       reads: ['packages/auth/README.md'],
-      notRead: ['README.md'],
       walker: 'not-markdown: sweeps package `src` directories for `.ts` sources',
     },
   ],
@@ -268,7 +267,7 @@ export const ADJUDICATED = new Map([
     'packages/cli/src/__tests__/registered-types-validate-ratchet-10859.test.ts',
     {
       reads: ['packages/plugin-ai/README.md', 'content/docs/guide/quick-start.md'],
-      notRead: ['README.md', 'packages/cli/README.md'],
+      notRead: ['packages/cli/README.md'],
     },
   ],
   [
@@ -296,7 +295,6 @@ export const ADJUDICATED = new Map([
     'packages/components/src/__tests__/page-node-headings-drawn-11436.test.tsx',
     {
       reads: ['content/docs/**', 'packages/**'],
-      notRead: ['README.md'],
       walker: 'markdown-tree: walks `content/docs` and parses every fence of every `.md`/`.mdx` under it, and walks `packages` for every `README.md` and parses its fences; its walk of `examples` collects JSON and script sources, not markdown',
     },
   ],
@@ -324,8 +322,7 @@ export const ADJUDICATED = new Map([
   [
     'packages/components/src/__tests__/page-body-single-node-8310.test.tsx',
     {
-      reads: ['README.md'],
-      notRead: ['packages/components/README.md', 'packages/components/src/__tests__/README.md'],
+      reads: ['content/docs/guide/quick-start.md'],
     },
   ],
   [
@@ -357,7 +354,7 @@ export const ADJUDICATED = new Map([
     'packages/create-plugin/src/__tests__/cli-cancel-and-nontty-8786.test.ts',
     {
       reads: [],
-      notRead: ['README.md', 'packages/create-plugin/README.md'],
+      notRead: ['packages/create-plugin/README.md'],
       walker: 'not-markdown: walks GENERATED output in a temp directory; its `README.md` literal names a file the generator writes, not one in this tree',
     },
   ],
@@ -365,7 +362,7 @@ export const ADJUDICATED = new Map([
     'packages/create-plugin/src/__tests__/templates.test.ts',
     {
       reads: [],
-      notRead: ['README.md', 'packages/create-plugin/README.md'],
+      notRead: ['packages/create-plugin/README.md'],
       walker: 'not-markdown: reads sibling `package.json` manifests; its `README.md` literal is a generated filename',
     },
   ],
@@ -389,7 +386,6 @@ export const ADJUDICATED = new Map([
         'content/docs/layout/app-shell.mdx',
         'packages/layout/README.md',
       ],
-      notRead: ['README.md'],
     },
   ],
   [
@@ -406,15 +402,15 @@ export const ADJUDICATED = new Map([
   ],
   [
     'packages/layout/src/__tests__/readme-app-shell-example.test.ts',
-    { reads: ['packages/layout/README.md'], notRead: ['README.md'] },
+    { reads: ['packages/layout/README.md'] },
   ],
   [
     'packages/layout/src/__tests__/readme-registration-keys.test.ts',
-    { reads: ['packages/layout/README.md'], notRead: ['README.md'] },
+    { reads: ['packages/layout/README.md'] },
   ],
   [
     'packages/layout/src/__tests__/readme-sidebar-nav-example.test.ts',
-    { reads: ['packages/layout/README.md'], notRead: ['README.md'] },
+    { reads: ['packages/layout/README.md'] },
   ],
   [
     'packages/plugin-calendar/src/readme-calendar-view-schema.test.ts',
@@ -422,7 +418,7 @@ export const ADJUDICATED = new Map([
   ],
   [
     'packages/plugin-dashboard/src/__tests__/readme-dashboard-examples-spec-valid.test.ts',
-    { reads: ['packages/plugin-dashboard/README.md'], notRead: ['README.md'] },
+    { reads: ['packages/plugin-dashboard/README.md'] },
   ],
   [
     'packages/plugin-detail/src/__tests__/guideCrudAppRenders.test.tsx',
@@ -493,7 +489,7 @@ export const ADJUDICATED = new Map([
     'packages/types/src/__tests__/ai-zod-arms-10859.test.ts',
     {
       reads: ['packages/plugin-ai/README.md'],
-      notRead: ['README.md', 'packages/types/README.md'],
+      notRead: ['packages/types/README.md'],
     },
   ],
   [
@@ -575,7 +571,7 @@ export const ADJUDICATED = new Map([
   [
     'packages/types/src/__tests__/object-calendar-container-by-reference-6152.test.ts',
     {
-      reads: ['README.md', 'apps/**', 'content/**', 'docs/**', 'examples/**', 'packages/**', 'skills/**'],
+      reads: ['apps/**', 'content/**', 'docs/**', 'examples/**', 'packages/**', 'skills/**'],
       walker: 'markdown-tree: walks `examples`, `content`, `skills`, `docs` and `apps`, and every package `README.md`, and parses the fences of each `.md`/`.mdx` that names `object-calendar`',
     },
   ],
@@ -629,7 +625,7 @@ export const ADJUDICATED = new Map([
   ],
   [
     'packages/types/src/__tests__/page-body-arity-8310.test.ts',
-    { reads: ['README.md'], notRead: ['packages/types/README.md'] },
+    { reads: ['content/docs/guide/quick-start.md'] },
   ],
   [
     'packages/types/src/__tests__/page-breadcrumbs-refusal-8871.test.ts',
@@ -655,12 +651,12 @@ export const ADJUDICATED = new Map([
       ],
     },
   ],
-  // objectui#8256. Reads the root README's "Kanban Board" `json` fence and runs
-  // it through `safeValidateSchema` -- so an edit to that page IS an edit to
-  // this test's input, and a README-only pull request has to run the shard.
+  // objectui#8256. Reads the "Kanban Board" `json` fence -- the root README's,
+  // in the quick-start guide since objectstack#26080 -- and runs it through
+  // `safeValidateSchema`, so an edit to that page IS an edit to this test's input.
   [
     'packages/types/src/__tests__/readme-kanban-example-8256.test.ts',
-    { reads: ['README.md'], notRead: ['packages/types/README.md'] },
+    { reads: ['content/docs/guide/quick-start.md'] },
   ],
   [
     'packages/types/src/__tests__/schema-reference-named-list-view-keys-7923.test.ts',
@@ -714,14 +710,13 @@ export const ADJUDICATED = new Map([
     'scripts/__tests__/check-changeset-claims.test.ts',
     {
       reads: [],
-      notRead: ['.changeset/README.md', 'README.md'],
+      notRead: ['.changeset/README.md'],
     },
   ],
   [
     'scripts/__tests__/check-changeset-no-major.test.ts',
     {
       reads: ['.changeset/**'],
-      notRead: ['README.md'],
       walker: 'markdown-tree',
     },
   ],
@@ -738,7 +733,7 @@ export const ADJUDICATED = new Map([
     'scripts/__tests__/check-changeset-presence.test.ts',
     {
       reads: [],
-      notRead: ['.changeset/README.md', 'CHANGELOG.md', 'README.md', 'apps/console/README.md'],
+      notRead: ['.changeset/README.md', 'CHANGELOG.md', 'apps/console/README.md'],
     },
   ],
   // Reads no markdown: its three markdown literals are probes of the root `ci.yml`
@@ -748,7 +743,7 @@ export const ADJUDICATED = new Map([
     'scripts/__tests__/check-control-bytes.test.ts',
     {
       reads: [],
-      notRead: ['README.md', 'content/docs/guide/ci-cd-pipeline.md', 'packages/core/README.md'],
+      notRead: ['content/docs/guide/ci-cd-pipeline.md', 'packages/core/README.md'],
     },
   ],
   [
@@ -763,7 +758,7 @@ export const ADJUDICATED = new Map([
       // exists to prevent (objectui#8857) was a pull request changing exactly
       // ONE package README, `packages/plugin-dashboard/README.md`, whose shard
       // reported success in ten seconds having run nothing.
-      reads: ['README.md', 'apps/console/docs/UI_IMPROVEMENT_PROPOSAL.md', 'apps/console/docs/deployment.md', 'apps/console/docs/error-tracking.md', 'content/docs/**', 'packages/**'],
+      reads: ['apps/console/docs/UI_IMPROVEMENT_PROPOSAL.md', 'apps/console/docs/deployment.md', 'apps/console/docs/error-tracking.md', 'content/docs/**', 'packages/**'],
     },
   ],
   [
@@ -791,7 +786,7 @@ export const ADJUDICATED = new Map([
       // `packages/**` for the same reason as the entry above: this census takes
       // `check:doc-types`' surface by IMPORT, so objectui#7896's fourth leg
       // reached it in the same change (objectui#8115).
-      reads: ['README.md', 'apps/console/docs/UI_IMPROVEMENT_PROPOSAL.md', 'apps/console/docs/deployment.md', 'apps/console/docs/error-tracking.md', 'content/docs/**', 'packages/**'],
+      reads: ['apps/console/docs/UI_IMPROVEMENT_PROPOSAL.md', 'apps/console/docs/deployment.md', 'apps/console/docs/error-tracking.md', 'content/docs/**', 'packages/**'],
       walker: 'markdown-tree',
     },
   ],
@@ -802,7 +797,7 @@ export const ADJUDICATED = new Map([
       // globs, not a read (objectstack#25712). The test's only directory walk was
       // of objectui's own `.github/workflows`, which it no longer reads.
       reads: ['apps/console/docs/**', 'content/docs/**', 'docs/**'],
-      notRead: ['README.md', 'packages/core/README.md'],
+      notRead: ['packages/core/README.md'],
     },
   ],
   [
@@ -818,7 +813,7 @@ export const ADJUDICATED = new Map([
       // its anchor `rules/protocol.md` -- so the walk reads that tree too; the
       // two bundle pages the scanner resolves by name (`SKILL.md`, the anchor)
       // are fixture keys of the leg's order and anchor pins, inside the tree.
-      reads: ['README.md', 'content/docs/**', 'packages/**', 'skills/objectui/**'],
+      reads: ['content/docs/**', 'packages/**', 'skills/objectui/**'],
     },
   ],
   // `./*` rather than the eight root documents it used to list, and the
@@ -838,13 +833,13 @@ export const ADJUDICATED = new Map([
   [
     'scripts/__tests__/check-doc-snippet-emitted-census.test.ts',
     {
-      reads: ['README.md', 'apps/console/docs/UI_IMPROVEMENT_PROPOSAL.md', 'apps/console/docs/deployment.md', 'apps/console/docs/error-tracking.md', 'content/docs/**', 'docs/adr/**', 'docs/audits/**', 'packages/**'],
+      reads: ['apps/console/docs/UI_IMPROVEMENT_PROPOSAL.md', 'apps/console/docs/deployment.md', 'apps/console/docs/error-tracking.md', 'content/docs/**', 'docs/adr/**', 'docs/audits/**', 'packages/**'],
     },
   ],
   [
     'scripts/__tests__/check-doc-snippet-types.test.ts',
     {
-      reads: ['README.md', 'apps/console/docs/UI_IMPROVEMENT_PROPOSAL.md', 'apps/console/docs/deployment.md', 'apps/console/docs/error-tracking.md', 'content/docs/**', 'docs/adr/**', 'docs/audits/**', 'packages/**'],
+      reads: ['apps/console/docs/UI_IMPROVEMENT_PROPOSAL.md', 'apps/console/docs/deployment.md', 'apps/console/docs/error-tracking.md', 'content/docs/**', 'docs/adr/**', 'docs/audits/**', 'packages/**'],
       walker: 'markdown-tree',
     },
   ],
@@ -900,14 +895,6 @@ export const ADJUDICATED = new Map([
       walker: 'not-markdown: `.github/workflows/*.yml`',
     },
   ],
-  // Reads no markdown: the `README.md` literals are packed-file names inside a manifest fixture.
-  [
-    'scripts/__tests__/check-published-dist-tooling.test.ts',
-    {
-      reads: [],
-      notRead: ['README.md'],
-    },
-  ],
   [
     'scripts/__tests__/check-readme-exports.test.ts',
     {
@@ -940,7 +927,6 @@ export const ADJUDICATED = new Map([
     'scripts/__tests__/check-skill-examples.test.ts',
     {
       reads: ['.claude/skills/**', 'content/docs/guide/ci-cd-pipeline.md', 'skills/objectui/**'],
-      notRead: ['README.md'],
     },
   ],
   [
@@ -961,7 +947,7 @@ export const ADJUDICATED = new Map([
     'scripts/__tests__/cross-file-line-citation-census.test.ts',
     {
       reads: [],
-      notRead: ['README.md', 'ROADMAP.md', 'packages/core/README.md', 'packages/plugin-form/CHANGELOG.md', 'packages/plugin-form/README.md'],
+      notRead: ['packages/core/README.md', 'packages/plugin-form/CHANGELOG.md', 'packages/plugin-form/README.md'],
     },
   ],
   [
@@ -1013,7 +999,7 @@ export const ADJUDICATED = new Map([
     'scripts/__tests__/markdown-test-inputs.test.ts',
     {
       reads: [],
-      notRead: ['AGENTS.md', 'README.md', 'ROADMAP.md', 'packages/app-shell/README.md', 'packages/plugin-dashboard/README.md'],
+      notRead: ['AGENTS.md', 'packages/app-shell/README.md', 'packages/plugin-dashboard/README.md'],
     },
   ],
   [
@@ -1022,21 +1008,14 @@ export const ADJUDICATED = new Map([
       reads: ['content/docs/guide/ci-cd-pipeline.md'],
     },
   ],
+  // objectstack#26080 folded `QUICK_REFERENCE.md` into the repository root's
+  // `CONTRIBUTING.md`; this test reads that file's UI section, which is outside
+  // this tree, so it reads no markdown document this ledger can name.
   [
     'scripts/__tests__/quick-reference-commands-4149.test.ts',
     {
-      reads: ['QUICK_REFERENCE.md'],
-      walker: 'not-markdown: directory listings that test whether a documented path exists',
-    },
-  ],
-  // objectui#12214. Its fixtures write a `README.md` into a temp directory to
-  // prove a root documentation change is not a full-run trigger; the selector
-  // it tests never opens a markdown file.
-  [
-    'scripts/__tests__/select-affected-tests.test.ts',
-    {
       reads: [],
-      notRead: ['README.md'],
+      walker: 'not-markdown: directory listings that test whether a documented path exists',
     },
   ],
   [

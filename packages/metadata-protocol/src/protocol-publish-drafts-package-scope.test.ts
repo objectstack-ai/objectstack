@@ -10,6 +10,16 @@ import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFin
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 /**
+ * [#26708] The packages this file's saves name, installed: a save naming a
+ * package no installed package has is refused (`WRITABLE_PACKAGE_REQUIRED`)
+ * before any gate this file pins is reached. Each answers a manifest that
+ * declares no dependencies, as an authored base does.
+ */
+const INSTALLED_PACKAGES: ReadonlySet<string> = new Set(['app.demo', 'app.other']);
+const installedPackage = (id: string) => (INSTALLED_PACKAGES.has(id) ? { manifest: { id } } : undefined);
+
+
+/**
  * Regression for #8907 — `publishPackageDrafts` promotes (and drains) ANOTHER
  * package's draft row.
  *
@@ -184,7 +194,7 @@ function makeStubEngine() {
             registerObject: () => {},
             // No declared package namespace → publishPackageDrafts skips the
             // ADR-0028 prefix check (legacy-grandfathered path).
-            getPackage: () => undefined,
+            getPackage: installedPackage,
         },
     };
     return { engine, rows, historyRows };

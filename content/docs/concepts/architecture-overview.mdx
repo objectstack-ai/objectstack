@@ -1,7 +1,7 @@
 ---
-title: North star — why this framework exists
-navTitle: North Star
-description: "Where ObjectStack is headed: a metadata-native backend that humans and AI agents can both operate safely — its principles, runtime shape and non-goals."
+title: Architecture overview — principles and runtime shape
+navTitle: Architecture Overview
+description: "What ObjectStack is built as: a metadata-native backend that humans and AI agents can both operate safely — its principles, runtime shape and non-goals."
 ---
 
 ObjectStack is the metadata-native backend for business software that humans and
@@ -15,6 +15,10 @@ The goal is a small, inspectable, governed application surface:
 ```text
 Zod metadata -> compiled environment artifact -> ObjectStack runtime -> REST / UI / MCP / AI tools
 ```
+
+This page is the architecture. Where the project is headed and what comes first
+— its goals and priority ladder — is the
+[North Star](https://github.com/objectstack-ai/objectstack/blob/main/docs/NORTH-STAR.md).
 
 ---
 
@@ -98,38 +102,6 @@ Environment-aware hosts resolve data-plane requests in this order:
 
 Cloud control-plane endpoints such as `/api/v1/cloud/environments/:id` manage
 environments and are not themselves scoped data-plane requests.
-
----
-
-## Built
-
-- TS-to-JSON compile pipeline (`os compile`)
-- standalone runtime boot from source config or compiled artifact
-- environment-scoped REST routes
-- ObjectQL data engine and memory/SQL/MongoDB drivers
-- Flow engine with durable pause support
-- approval-as-flow-node runtime
-- notification pipeline through single ingress, outbox, preferences, templates,
-  quiet-hours, and digest collapse
-- explicit Action-to-AI tool opt-in
-- formula fields, server-side summary rollups, and autonumber fields
-- config-driven master-detail inline editing via relationship `inlineEdit`
-- bundled console serving from `packages/console`
-
----
-
-## Drift To Keep Shrinking
-
-- Some docs and source comments still use historical `project` wording where
-  current runtime identity is `environment`.
-- The SDK client still exposes `setProjectId` / `getProjectId`, and the REST API
-  config still spells its keys `enableProjectScoping` / `projectResolution`.
-  `getProjectId` is the harder one: it is a cross-package protocol contract that
-  `packages/runtime` and `packages/metadata-protocol` both speak, so it is a
-  coordinated rename rather than a local one.
-- The notification framework pipeline is ahead of the objectui bell cut-over;
-  read-state should move through `sys_notification_receipt`.
-- Some generated references need regeneration after Zod description updates.
 
 ---
 

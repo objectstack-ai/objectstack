@@ -21,6 +21,7 @@ each with its pointer.
 - [Making a Change](#making-a-change)
 - [Human Minimum](#human-minimum)
 - [Where Things Live](#where-things-live)
+- [UI Workspace (`ui/`)](#ui-workspace-ui)
 - [Package Directory](#package-directory)
 - [Pull Request Process](#pull-request-process)
 - [Community](#community)
@@ -111,7 +112,8 @@ Other examples: `pnpm dev:crm`, `pnpm dev:todo`. Docs site: `pnpm docs:dev`.
 1. **Start from an issue.** Pick one from the
    [issue tracker](https://github.com/objectstack-ai/objectstack/issues), or open one
    that describes the bug or the proposal before you write code.
-   [docs/NORTH-STAR.md](./docs/NORTH-STAR.md) shows where the project is going.
+   [docs/NORTH-STAR.md](./docs/NORTH-STAR.md), the project's one North Star, shows where the project is going
+   and what comes first; an English summary closes it.
 2. **Branch off an up-to-date `main`, one branch and one pull request per issue**,
    with the issue number in the branch name:
 
@@ -197,10 +199,116 @@ same list.
 | `content/docs/references/` | Generated from the Zod schemas by `packages/spec/scripts/build-docs.ts`. Never edit it by hand. |
 | `content/docs/releases/` | Written at release time from changesets. Never edit it in a code pull request. |
 | `examples/` | The example apps. The *Examples* table in the [package directory](#package-directory) describes each one. |
+| `ui/` | ObjectUI: the `@object-ui/*` packages, the Console's source and the objectui.org docs site. [UI Workspace](#ui-workspace-ui) below covers working there. |
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | Design details, the plugin lifecycle and the dependency graph. |
 
 AGENTS.md (*Documentation Guardrails*) has the rules for every docs path, including what a
 new page needs before it shows up in the navigation.
+
+## UI Workspace (`ui/`)
+
+`ui/` holds ObjectUI, the view layer: the `@object-ui/*` packages, the Console
+(`ui/apps/console`) and the objectui.org docs site (`ui/apps/site`). It is a member of this
+workspace, so the root `pnpm install` above installs it too, and
+[ui/AGENTS.md](./ui/AGENTS.md) adds that tree's own rules to AGENTS.md: the spec-first and
+contract-first commandments, Shadcn-native styling, actions as data. Its code is MIT-licensed
+([License](#license)). What follows is only what differs from the rest of this guide.
+
+### UI commands
+
+Run these from `ui/`:
+
+```bash
+pnpm exec turbo run build --filter='./*/*' --filter='!@object-ui/site'  # Build every ui package (turbo, parallel & cached)
+pnpm exec turbo run type-check --filter='./*/*'                          # Run tsc --noEmit across the ui packages (turbo)
+pnpm exec turbo run lint --filter='./*/*'                                # Run eslint across the ui packages (turbo)
+pnpm dev                                                                 # The Console's Vite dev server, on :5180
+pnpm site:dev                                                            # The docs site, on http://localhost:3000
+pnpm docs:check-links                                                    # The internal-link check CI runs on ui docs
+pnpm test:e2e                                                            # End-to-end tests (playwright)
+```
+
+turbo resolves a relative filter against the directory it is launched from, so the filter above
+selects every package under `ui/packages/`, `ui/apps/` and `ui/examples/`. The tree has no
+`build`, `type-check` or `lint` script of its own, because a `turbo run` in a member's script
+would nest inside the root's. The ui packages spell the type-check task `type-check`, with a
+hyphen. The Console dev server proxies its API calls to a backend as
+[Getting Started](#getting-started) describes.
+
+### UI tests
+
+Run vitest **from `ui/`**, with paths written relative to it and **no `--`** before them:
+
+```bash
+pnpm test                                              # Run every vitest project (CI runs this)
+pnpm exec vitest run packages/core/                    # Run a single package's tests
+pnpm exec vitest run packages/core/src/<file>.test.ts  # Run a single test file
+pnpm exec vitest run apps/console/                     # Run just the Console's tests
+```
+
+`pnpm --filter <pkg> test` and `turbo run test` are fine too: every package's `test` script
+names the ui root (`vitest run --root ../.. packages/<pkg>/`), so they run the same single
+config CI does. What is still wrong is `cd packages/x && pnpm exec vitest`, and a path behind
+`--`. Each of those moves vitest's root into a package, where the `unit` / `dom` / `dom-heavy`
+projects match nothing and only `ui/apps/console` resolves: foreign files pass, your package
+never runs, and the output is green. A guard **exits non-zero** on them and prints the
+correct invocation. It is wired into every file vitest can pick up as a config:
+`ui/vitest.config.mts`, `ui/apps/console/vitest.config.ts`, and every
+`ui/packages/<pkg>/vite.config.ts`. The rejection looks like this:
+
+```
+vitest 调用被拒绝:从包目录跑 vitest 会静默跑错测试集 (objectui#3378)
+...
+正确跑法 —— 一律在【仓库根目录】执行,路径前【不要】加 `--`:
+  pnpm exec vitest run packages/<pkg>/src/<file>.test.ts   # 只跑一个文件
+  pnpm exec vitest run packages/<pkg>/   # 只跑一个包
+  pnpm test   # 全量(CI 跑的就是它)
+```
+
+Its "repository root" is `ui/`. The guard is `ui/scripts/vitest-invocation-guard.mjs`.
+
+### UI examples
+
+No directory under `ui/examples/` is a dev server: `hello-world` is a snippet to paste into
+your own Vite or Next.js app (copy its app component and its schema), and `schema-catalog` is
+a data package, the canonical JSON schemas the docs render, a smoke test mounts and AI agents
+use as a few-shot corpus. Neither declares a `dev` script.
+[`ui/examples/README.md`](./ui/examples/README.md) is the index. The app to run is the Console
+(`pnpm dev` above).
+
+### UI layout
+
+| Path | Purpose |
+| --- | --- |
+| `ui/packages/*` | The published `@object-ui/*` packages, plus the private `vscode-extension`, `test-support` (test-only, never released), `runner` (workspace demo app, never released) and `app-shell` (the Console's shell and views, no longer published after 18.2.0) |
+| `ui/apps/console` | The Console app (Vite + React), which `pnpm console:build` builds into the `@objectstack/console` package |
+| `ui/apps/site` | The public docs site at <https://www.objectui.org> (fumadocs) |
+| `ui/examples/*` | The snippet and the schema catalog, see [UI examples](#ui-examples) |
+| `ui/content/docs/` | The docs site's pages |
+| `ui/docs/` | Internal engineering material (ADRs, audits); not part of the site |
+| `ui/e2e/` | Playwright end-to-end tests |
+
+The [package directory](#package-directory) lists every `@object-ui/*` package by layer.
+
+### UI documentation
+
+The docs site's pages live in `ui/content/docs/`, and a page's path below it becomes its
+route under the site's /docs base, so an internal link between pages is written
+`[Quick Start](/docs/guide/quick-start)`, with the prefix. `ui/docs/` is not part of the site.
+
+- **A code block in an ADR or a dated audit is a specimen, not an example to copy.** Fence it
+  `plaintext`, never `ts` / `tsx`: a gate compiles the code fences of `ui/content/docs/`, and
+  a record edited until it compiles says something it never said. Code a reader may copy
+  belongs in `ui/content/docs/` or the skills tree.
+- **A `json` fence must pass a strict `JSON.parse`.** A block annotated with comments or
+  trailing commas is fenced `jsonc`, and must still be one JSON document once those are
+  removed; a `${…}` expression stays on one line inside its string.
+- **Internal links are checked offline.** `pnpm docs:check-links` resolves every relative
+  path and site route against the checkout, and CI runs it on every change.
+
+ObjectUI's [Quick Start](./ui/content/docs/guide/quick-start.md) and
+[Component Registry](./ui/content/docs/guide/component-registry.md) guides are the place to
+start when you add a component.
 
 ## Package Directory
 
@@ -331,6 +439,77 @@ new page needs before it shows up in the navigation.
 
 </details>
 
+<details>
+<summary><b>Everything in <code>ui/packages/</code></b> (ObjectUI, <code>@object-ui/*</code>, MIT), grouped by dependency weight — click to expand.</summary>
+
+Atoms and fields stay light; heavy widgets live in lazy-loaded plugins.
+
+#### Core
+
+| Package | Description |
+| :--- | :--- |
+| [`@object-ui/types`](ui/packages/types) | Pure TypeScript definitions — the protocol layer |
+| [`@object-ui/core`](ui/packages/core) | Registry, validation, expression evaluation; zero React |
+| [`@object-ui/react`](ui/packages/react) | React bindings and `SchemaRenderer` |
+| [`@object-ui/components`](ui/packages/components) | Standard UI components (Tailwind + Shadcn) |
+| [`@object-ui/fields`](ui/packages/fields) | Field renderers and registry |
+| [`@object-ui/layout`](ui/packages/layout) | Layout components with React Router integration |
+
+#### Application shell
+
+| Package | Description |
+| :--- | :--- |
+| [`@object-ui/app-shell`](ui/packages/app-shell) | The Console's shell, views and Studio; a private workspace package, last published to npm as 18.2.0 |
+| [`@object-ui/providers`](ui/packages/providers) | The upload adapter context the file and image fields upload through |
+| [`@object-ui/auth`](ui/packages/auth) | `AuthProvider`, `useAuth`, `AuthGuard`, sign-in forms |
+| [`@object-ui/permissions`](ui/packages/permissions) | Object / field / row-level permission guards and hooks |
+| [`@object-ui/i18n`](ui/packages/i18n) | Language packs, RTL layout, date and currency formatting |
+| [`@object-ui/mobile`](ui/packages/mobile) | Responsive components, PWA support, touch gestures |
+| [`@object-ui/collaboration`](ui/packages/collaboration) | Presence, live cursors, conflict resolution, comment threads |
+| [`@object-ui/console`](ui/apps/console) | Fork-ready runtime console with the full plugin set, shipped as a Hono plugin |
+
+#### Data adapters
+
+| Package | Description |
+| :--- | :--- |
+| [`@object-ui/data-objectstack`](ui/packages/data-objectstack) | ObjectStack data adapter |
+
+#### Plugins (lazy-loaded)
+
+| Package | Description |
+| :--- | :--- |
+| [`@object-ui/plugin-view`](ui/packages/plugin-view) | ObjectQL-integrated object views (grid, form, detail) |
+| [`@object-ui/plugin-grid`](ui/packages/plugin-grid) | Advanced data grid |
+| [`@object-ui/plugin-form`](ui/packages/plugin-form) | Advanced form components |
+| [`@object-ui/plugin-detail`](ui/packages/plugin-detail) | Detail pages with sections, tabs, and related lists |
+| [`@object-ui/plugin-list`](ui/packages/plugin-list) | Unified list view with view-type switching |
+| [`@object-ui/plugin-kanban`](ui/packages/plugin-kanban) | Kanban boards with drag-and-drop (dnd-kit) |
+| [`@object-ui/plugin-calendar`](ui/packages/plugin-calendar) | Calendar views |
+| [`@object-ui/plugin-gantt`](ui/packages/plugin-gantt) | Gantt charts |
+| [`@object-ui/plugin-timeline`](ui/packages/plugin-timeline) | Timelines |
+| [`@object-ui/plugin-tree`](ui/packages/plugin-tree) | Tree and tree-grid views |
+| [`@object-ui/plugin-map`](ui/packages/plugin-map) | Map visualization |
+| [`@object-ui/plugin-charts`](ui/packages/plugin-charts) | Charts powered by Recharts |
+| [`@object-ui/plugin-dashboard`](ui/packages/plugin-dashboard) | Dashboard layouts and widgets |
+| [`@object-ui/plugin-report`](ui/packages/plugin-report) | Pivot tables, grouped aggregations, printable reports |
+| [`@object-ui/plugin-designer`](ui/packages/plugin-designer) | Visual page, data-model, process, and report designers |
+| [`@object-ui/plugin-editor`](ui/packages/plugin-editor) | Rich text editor powered by Monaco |
+| [`@object-ui/plugin-markdown`](ui/packages/plugin-markdown) | Markdown rendering |
+| [`@object-ui/plugin-chatbot`](ui/packages/plugin-chatbot) | Chatbot interface |
+| [`@object-ui/plugin-ai`](ui/packages/plugin-ai) | Schema generation and conversational assistants (Vercel AI SDK) |
+
+#### Tooling
+
+| Package | Description |
+| :--- | :--- |
+| [`@object-ui/cli`](ui/packages/cli) | Scaffold, develop, build, and validate schema-driven apps |
+| [`@object-ui/create-plugin`](ui/packages/create-plugin) | Scaffold a new Object UI plugin |
+| [`@object-ui/runner`](ui/packages/runner) | Universal application runner for testing schemas (private workspace app, not published) |
+| [`@object-ui/react-runtime`](ui/packages/react-runtime) | Trusted runtime execution for `kind: 'react'` pages |
+| [`vscode-extension`](ui/packages/vscode-extension) | IntelliSense and live preview for schema files |
+
+</details>
+
 ## Pull Request Process
 
 ### Before Submitting
@@ -376,6 +555,8 @@ that code lives.
 ## License
 
 By contributing, you agree that your contributions will be licensed under the
-Apache License, Version 2.0 (see [LICENSE](./LICENSE) and [LICENSING.md](./LICENSING.md)).
+Apache License, Version 2.0 (see [LICENSE](./LICENSE) and [LICENSING.md](./LICENSING.md)),
+except contributions under `ui/`, which are licensed under the MIT License
+([ui/LICENSE](./ui/LICENSE)).
 
 **Thank you for contributing to ObjectStack! 🚀**

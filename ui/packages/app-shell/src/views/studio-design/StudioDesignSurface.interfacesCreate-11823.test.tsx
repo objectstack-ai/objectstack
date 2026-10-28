@@ -59,6 +59,14 @@ const DATASETS = [
   },
 ];
 
+/** A package other than the pillar's: its items answer the unscoped list only. */
+const OTHER_PKG = 'com.other.app';
+
+/** A package-scoped list keeps the rows of that package, as the server's does (objectstack#26889). */
+function inScope(rows: Array<Record<string, unknown>>, opts: { packageId?: string }) {
+  return opts.packageId ? rows.filter((r) => (r._packageId ?? opts.packageId) === opts.packageId) : rows;
+}
+
 let apps: Array<Record<string, unknown>>;
 let published: Record<string, Array<Record<string, unknown>>>;
 let draftHeaders: Array<{ type: string; name: string; packageId: string }>;
@@ -71,10 +79,10 @@ const mockClient = {
     draftRows[`${type}:${name}`] = body;
     return { success: true, version: 'v1', state: 'draft' };
   }),
-  list: vi.fn(async (type: string) => {
+  list: vi.fn(async (type: string, opts: { packageId?: string } = {}) => {
     if (type === 'app') return apps;
     if (type === 'dataset') return DATASETS;
-    return published[type] ?? [];
+    return inScope(published[type] ?? [], opts);
   }),
   listDrafts: vi.fn(async (opts: { type?: string } = {}) =>
     draftHeaders.filter((h) => !opts.type || h.type === opts.type),
@@ -290,7 +298,7 @@ describe('the Interfaces pillar creates a dashboard and a report (objectui#11823
   });
 
   it('an identifier a dashboard in another package holds is refused in the dialog, and nothing is written', async () => {
-    published.dashboard = [HOME_DASH, { name: 'sales_overview', label: 'Their sales' }];
+    published.dashboard = [HOME_DASH, { name: 'sales_overview', label: 'Their sales', _packageId: OTHER_PKG }];
     mountPillar();
     await ready();
     const dialog = await openCreate('New dashboard');

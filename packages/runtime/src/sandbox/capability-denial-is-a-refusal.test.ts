@@ -1,31 +1,39 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#4431] A capability denial is the sandbox FAULTING, not the body rejecting.
+ * [#26965] An in-VM capability denial is a coded REFUSAL, for every origin.
  *
- * The `action-crash-vs-rejection` contract (#3951) pins the table:
+ * ## History
+ *
+ * [#4431] The `action-crash-vs-rejection` contract (#3951) pins the table:
  *
  *   | `SandboxError` WITH `innerMessage`  — a body's deliberate throw | 400 |
- *   | `SandboxError` with NO `innerMessage` — timeout, capability denial | 500 |
+ *   | `SandboxError` with NO `innerMessage` — timeout, internal fault | 500 |
  *
- * A capability gate throws `SandboxError` synchronously inside a QuickJS host
- * function, which rejects the async IIFE *inside* the VM — so it came back
- * through the `__error` side-channel, and the pump loop presumed everything
- * arriving there was user code throwing on purpose. It therefore set
- * `innerMessage`, the dispatcher's classifier read that as a deliberate
- * rejection and answered **400**, and the client got the `SandboxError: ` debug
- * prefix that only ever belonged in server logs.
+ * A capability gate throws synchronously inside a QuickJS host function, which
+ * rejects the async IIFE *inside* the VM, so it comes back through the
+ * `__error` side-channel. The pump loop once presumed everything arriving there
+ * was user code throwing on purpose and served the denial as a deliberate 400
+ * carrying the `SandboxError: ` debug prefix. #4431 fixed that by marking the
+ * denial as the sandbox's own fault: no `innerMessage`, so a bare
+ * `500 INTERNAL_ERROR`.
  *
- * The contract's own claim — "capability denial has no user-meaningful inner
- * message" — held only for denials detected OUTSIDE evaluation (a timeout,
- * which takes the separate `budgetError` path). These tests pin the in-VM
- * host-call denials that were misclassified: `ctx.api.*`, `ctx.log`,
- * `ctx.crypto`, `ctx.api.transaction`.
+ * [#26903] then ruled that a HOOK body's denial is a refusal: the body's own
+ * metadata did not grant what it called, and the caller is owed a coded answer
+ * naming the hook and the capability. [#26965] ruled one gate, one answer: an
+ * ACTION or JOB body's denial is the same refusal, `403
+ * INSUFFICIENT_PRIVILEGES` (a standard catalog code), with the remedy naming
+ * that body's own `body.capabilities`. The gate is exactly as strict as before.
  *
- * The HTTP half of the contract is asserted by
- * `domains/actions-fault-vs-rejection.test.ts`, which already states that a
- * `SandboxError` with no `innerMessage` is a 500 — this file is what makes a
- * real capability denial actually arrive in that shape.
+ * ## What this file pins
+ *
+ * The error the runner hands the classifier for each in-VM gate (`ctx.api.*`,
+ * `ctx.log`, `ctx.crypto`, `ctx.api.transaction`) under an action origin: its
+ * `innerMessage` is the refusal sentence, without the debug wrapper or the
+ * `SandboxError: ` prefix, and it carries `code` and `status`. The wire half
+ * through the real `/actions` door (and the job arm) is
+ * `action-job-capability-denial-is-a-refusal.integration.test.ts`; the hook
+ * arm is `hook-capability-denial-is-a-refusal.integration.test.ts`.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -39,17 +47,33 @@ function ctx(over: Partial<ScriptContext> = {}): ScriptContext {
   return { input: {}, ...over };
 }
 
-async function faultOf(run: () => Promise<unknown>): Promise<SandboxError> {
+async function refusalOf(run: () => Promise<unknown>): Promise<SandboxError> {
   const e = await run().then(() => null, (err) => err as SandboxError);
   expect(e, 'expected the sandbox to refuse, but the script resolved').toBeInstanceOf(SandboxError);
   return e!;
 }
 
-describe('[#4431] an in-VM capability denial reaches the classifier as a FAULT', () => {
+/** The coded refusal every gate answers with, read off the error the runner hands the classifier. */
+function expectCodedRefusal(err: SandboxError, capability: string): void {
+  // The caller's sentence: which capability, whose, and the remedy on the
+  // ACTION's own `body.capabilities` (never the hook's).
+  expect(err.innerMessage).toContain(`capability '${capability}' not granted to action 'rc1_crash_probe'`);
+  expect(err.innerMessage).toContain(`Grant it by adding '${capability}' to the action's body.capabilities.`);
+  // Neither the debug wrapper nor the VM's name prefix reaches it.
+  expect(err.innerMessage).not.toMatch(/threw:|SandboxError/);
+  // The standard catalog's code at its status: what `mapDataError`'s sandbox
+  // unwrap arm and the `/actions` door's declared-status branch serve.
+  expect(err.code).toBe('INSUFFICIENT_PRIVILEGES');
+  expect(err.status).toBe(403);
+  expect(err.fields).toBeUndefined();
+  expect(err.name).toBe('SandboxError');
+}
+
+describe('[#26965] an in-VM capability denial reaches the classifier as a coded REFUSAL', () => {
   const api = { object: (_n: string) => ({ count: (_f: unknown) => 1 }) };
 
-  it("ctx.api.object(x).count without api.read — the issue's exact repro", async () => {
-    const err = await faultOf(() =>
+  it("ctx.api.object(x).count without api.read — #4431's exact repro", async () => {
+    const err = await refusalOf(() =>
       runner.runScript(
         {
           language: 'js',
@@ -61,71 +85,40 @@ describe('[#4431] an in-VM capability denial reaches the classifier as a FAULT',
       ),
     );
 
-    // THE fix: no `innerMessage`. `domains/actions.ts` reads its absence (plus
-    // the non-`Error` name) as an unexpected fault → `errorFromThrown(err, 500)`.
-    // With it set, the denial was served as a deliberate 400 and stayed
-    // invisible to gateway error rates, APM and alerting.
-    expect(err.innerMessage).toBeUndefined();
-
-    // The debug prefix must not reach the OPERATOR'S LOG line either. Every
-    // assertion in this block is about the THROWN error — what the runner hands
-    // the classifier and what `domains/actions.ts` prints — never about the wire.
-    // [#18540] Since the door's unexpected-fault terminal answers
-    // `INTERNAL_ERROR_MESSAGE`, what the CLIENT sees for this denial is
-    // `Internal server error`, the same sentence `/data` answers; this text is
-    // the diagnostic half of that split, and it has to stay readable.
-    expect(err.message).not.toContain('SandboxError:');
-    // …while the actionable content survives for the log: which capability,
-    // whose, and the call that tripped the gate.
-    expect(err.message).toContain("capability 'api.read' not granted");
-    expect(err.message).toContain("action 'rc1_crash_probe'");
-    expect(err.message).toContain("ctx.api.object('showcase_task').count");
-
-    // Nor does it get the `<kind> '<name>' threw:` wrapper — nothing threw; the
-    // sandbox refused before user code could run the call.
-    expect(err.message).not.toContain('threw:');
-
-    // No `code`/`fields` either: both are "structured domain failure" markers
-    // the classifier reads as a REJECTION, so carrying one would re-break the
-    // 500 the same way `innerMessage` did.
-    expect(err.code).toBeUndefined();
-    expect(err.fields).toBeUndefined();
-
-    // The classifier's own predicate, spelled out.
-    expect(err.name).toBe('SandboxError');
+    // [#26965 — FLIPPED] This used to pin `innerMessage` undefined and no
+    // `code`: the #4431 fault, served as a bare `500 Internal server error`.
+    expectCodedRefusal(err, 'api.read');
+    // The call that tripped the gate is named too.
+    expect(err.innerMessage).toContain("ctx.api.object('showcase_task').count");
   });
 
   it('ctx.log without the log capability', async () => {
     // Four members since #7661 — `debug` is a real level of this seam, not a
     // decoration, so a host double that omits it no longer type-checks.
     const log = { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} };
-    const err = await faultOf(() =>
+    const err = await refusalOf(() =>
       runner.runScript(
         { language: 'js', source: "ctx.log.info('hi'); return 1;", capabilities: [] },
         ctx({ log }),
         actionOpts,
       ),
     );
-    expect(err.innerMessage).toBeUndefined();
-    expect(err.message).not.toContain('SandboxError:');
-    expect(err.message).toContain("capability 'log' not granted");
+    expectCodedRefusal(err, 'log');
   });
 
   it('ctx.crypto.randomUUID without the crypto.uuid capability', async () => {
-    const err = await faultOf(() =>
+    const err = await refusalOf(() =>
       runner.runScript(
         { language: 'js', source: 'return ctx.crypto.randomUUID();', capabilities: [] },
         ctx(),
         actionOpts,
       ),
     );
-    expect(err.innerMessage).toBeUndefined();
-    expect(err.message).not.toContain('SandboxError:');
-    expect(err.message).toContain("capability 'crypto.uuid' not granted");
+    expectCodedRefusal(err, 'crypto.uuid');
   });
 
   it('ctx.api.transaction without the api.transaction capability', async () => {
-    const err = await faultOf(() =>
+    const err = await refusalOf(() =>
       runner.runScript(
         {
           language: 'js',
@@ -136,9 +129,21 @@ describe('[#4431] an in-VM capability denial reaches the classifier as a FAULT',
         actionOpts,
       ),
     );
-    expect(err.innerMessage).toBeUndefined();
-    expect(err.message).not.toContain('SandboxError:');
-    expect(err.message).toContain("capability 'api.transaction' not granted");
+    expectCodedRefusal(err, 'api.transaction');
+  });
+
+  it('a JOB body names the job\'s body.capabilities', async () => {
+    const err = await refusalOf(() =>
+      runner.runScript(
+        { language: 'js', source: 'return ctx.crypto.randomUUID();', capabilities: [] },
+        ctx(),
+        { origin: { kind: 'job', name: 'nightly_rollup' } },
+      ),
+    );
+    expect(err.innerMessage).toContain("capability 'crypto.uuid' not granted to job 'nightly_rollup'");
+    expect(err.innerMessage).toContain("Grant it by adding 'crypto.uuid' to the job's body.capabilities.");
+    expect(err.code).toBe('INSUFFICIENT_PRIVILEGES');
+    expect(err.status).toBe(403);
   });
 
   it('a denial the body CATCHES and rethrows as its own error stays a rejection', async () => {
@@ -146,7 +151,7 @@ describe('[#4431] an in-VM capability denial reaches the classifier as a FAULT',
     // error rather than a match on the flattened `SandboxError: …` text: once
     // user code has caught the denial and thrown its own business error, the
     // outcome IS a deliberate rejection and must keep its 400.
-    const err = await faultOf(() =>
+    const err = await refusalOf(() =>
       runner.runScript(
         {
           language: 'js',
@@ -166,7 +171,7 @@ describe('[#4431] an in-VM capability denial reaches the classifier as a FAULT',
 
 describe('[#4431] the rejection side of the contract is untouched', () => {
   it('a deliberate throw still carries innerMessage and the debug wrapper', async () => {
-    const err = await faultOf(() =>
+    const err = await refusalOf(() =>
       runner.runScript(
         { language: 'js', source: "throw new Error('线索信息不完整');", capabilities: [] },
         ctx(),
@@ -193,7 +198,7 @@ describe('[#4431] the rejection side of the contract is untouched', () => {
         },
       }),
     };
-    const err = await faultOf(() =>
+    const err = await refusalOf(() =>
       runner.runScript(
         {
           language: 'js',

@@ -1,6 +1,6 @@
 # ADR-0046: Package documentation as metadata — flat `src/docs/*.md` compiled into the manifest
 
-**Status**: Proposed (2026-06-12, revised — simplified from the original directory/docSet design)
+**Status**: Accepted — 2026-10-28 (ruled on objectstack#26553, ADR batch 2; proposed 2026-06-12, revised — simplified from the original directory/docSet design). implemented: P1 (`DocSchema`, `os build` collection of flat `src/docs/*.md`, publish lint, kernel `doc`), P2 (console documentation portal and help menu, Studio doc editor), P3a/P3b (`book` spine, `GET /meta/book/:name/tree`, §6.7 audience gating in the REST read gate); pending: P3c (Studio drag-edit of `doc.order` / groups, anonymous library via `apps/docs`) and P3d (portal taxonomy, book-level search, §5 tags).
 · **Superseded in part (2026-06-13, ADR-0048)** — the bare-name overwrite premise; note at §3.2.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0003](./0003-package-as-first-class-citizen.md) (package + versioned releases), [ADR-0016](./0016-studio-package-authoring-and-publish.md) (publish pipeline, `manifest_json` snapshot), [ADR-0025](./0025-plugin-package-distribution.md) (artifact distribution, trust boundary), [ADR-0033](./0033-ai-assisted-metadata-authoring.md) (AI as primary author)

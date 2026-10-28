@@ -50,7 +50,7 @@ Every business app meets this shape: a contract's legal terms after approval, an
 **In the permission-set editor** (Setup → Access Control → Permission Sets, then open the set):
 
 1. Expand the object (`clm_contract`) to show its field rows.
-2. On each field row to lock (`governing_law`, `liability_cap`), keep **Read** on and **Edit** off.
+2. On each field row to lock (`governing_law`, `liability_cap`), set **Read** on and **Edit** off.
 3. In the row's **When (edit)** column, choose **Add condition** and write the stage condition: `status in ["approved", "signing", "active"]`. The editor lints it like a row-level security clause, and a condition the publish gate would refuse holds the save.
 
 **The same entries as metadata:**

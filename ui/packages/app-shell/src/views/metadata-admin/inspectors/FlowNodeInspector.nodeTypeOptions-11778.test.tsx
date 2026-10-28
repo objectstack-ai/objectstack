@@ -24,6 +24,11 @@ import { FlowNodeInspector } from './FlowNodeInspector';
 import { NODE_PALETTE } from '../previews/flow-canvas-parts';
 import { t, type SupportedLocale } from '../i18n';
 import type { MetadataSelection } from '../preview-registry';
+// The designer rows this suite reads in zh live in `@object-ui/i18n`'s `studio`
+// namespace, whose `zh` catalogue is fetched on demand (objectstack#25922).
+// Resident before any case, so the zh rows below read synchronously.
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+await loadStudioCatalogue('zh');
 
 const ACTIONS_ROUTE = '/api/v1/automation/actions';
 let engineActions: unknown[] | null = null;

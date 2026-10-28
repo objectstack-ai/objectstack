@@ -24,7 +24,7 @@ import { bootStack, type VerifyStack } from '@objectstack/verify';
 import { catalogPermissionSet } from './catalog-permission-set.js';
 
 const SYS = { isSystem: true };
-const BASE = 'app.dogfood_uninstall_grants';
+const BASE = 'app.dogfood-uninstall-grants';
 const SET = 'dfu_task_user';
 const USER = 'usr_dfu_grantee';
 
@@ -40,6 +40,9 @@ describe('dogfood: deletePackage revokes the grants naming the package\'s permis
     packageId: BASE,
     mode: 'publish',
   });
+  const installBase = () => protocol.installPackage({
+    manifest: { id: BASE, name: 'DFU grants base', version: '0.1.0', type: 'app', namespace: 'dfu' },
+  });
   const grants = async () =>
     ((await ql.find('sys_user_permission_set', { where: { permission_set: SET }, context: SYS })) ?? []) as any[];
 
@@ -54,13 +57,17 @@ describe('dogfood: deletePackage revokes the grants naming the package\'s permis
     ql = await stack.kernel.getServiceAsync<any>('objectql');
 
     await ql.insert('sys_user', { id: USER, email: 'dfu@example.test', name: 'DFU', email_verified: true }, { context: SYS });
+    // [#26708] The base is created first, as Studio's "New package" does: a
+    // save naming a package no installed package has is refused.
+    await installBase();
     await publishSet();
     granted = await ql.insert('sys_user_permission_set', { user_id: USER, permission_set: SET }, { context: SYS });
 
     uninstall = await protocol.deletePackage({ packageId: BASE });
     afterUninstall = { served: await catalogPermissionSet(ql, SET), grants: await grants() };
 
-    // The same package publishes the same set again.
+    // The same package, installed again, publishes the same set again.
+    await installBase();
     await publishSet();
     afterRepublish = { served: await catalogPermissionSet(ql, SET), grants: await grants() };
   }, 120_000);

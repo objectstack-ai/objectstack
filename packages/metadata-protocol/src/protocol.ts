@@ -421,6 +421,8 @@ import { hierarchyResolverMounted, orgWallEnforced, rlsMembershipResolverKeys, t
 import { flowRegistrationsOf, resolveFlowCanonicalizer, resolveFlowRegistrationReader } from './protocol-automation-flow-reads.js';
 // [#25467 cut 28] The code-datasource predicates: declared by an installed package, or registered by the host.
 import { isDeclaredCodeDatasource, isHostCodeDatasource } from './protocol-code-datasource-predicates.js';
+// [#25467 cut 29] The legacy-organization row filters: which rows a not-yet-migrated database still holds.
+import { legacyOrganizationRowsOf, withoutLegacyOrganizationRows } from './protocol-legacy-organization-rows.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -10210,18 +10212,20 @@ export class ObjectStackProtocolImplementation implements
     }
 
     private async withoutLegacyOrganizationRows<R>(table: string, rows: R[] | null | undefined, context?: unknown): Promise<R[]> {
-        if (!rows || rows.length === 0) return rows ?? [];
-        const legacy = await this.legacyOrganizationRowsOf(table, context);
-        return legacy.size === 0 ? rows : rows.filter((row) => !legacy.has(String((row as { id?: unknown }).id)));
+        // [#25467 cut 29] The body moved to `protocol-legacy-organization-rows.ts` (see `LegacyOrganizationRowsHost`).
+        const host: ThisParameterType<typeof withoutLegacyOrganizationRows> = {
+            legacyOrganizationRowsOf: (...a) => this.legacyOrganizationRowsOf(...a),
+        };
+        return (withoutLegacyOrganizationRows<R>).call(host, table, rows, context);
     }
 
     private legacyOrganizationRowsOf(table: string, context?: unknown): Promise<ReadonlyMap<string, string>> {
-        const transaction = (context as { transaction?: unknown } | undefined)?.transaction;
-        return readLegacyOrganizationRows(
-            (this.engine as { getDriverForObject?: (objectName: string) => unknown }).getDriverForObject?.(table),
-            table,
-            transaction !== undefined ? { transaction } : {},
-        );
+        // [#25467 cut 29] The body moved to `protocol-legacy-organization-rows.ts` (see `LegacyOrganizationRowsHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof legacyOrganizationRowsOf> = {
+            get engine() { return readEngine(); },
+        };
+        return legacyOrganizationRowsOf.call(host, table, context);
     }
 
     /**
@@ -16153,8 +16157,10 @@ export class ObjectStackProtocolImplementation implements
      * members mirror that emitter's.
      *
      * Scoped to `flow` (the 2026-09-30 ruling recorded on the card, point 5):
-     * `/meta`'s handling of every OTHER type is unchanged, so for those this
-     * returns `null` and the caller proceeds exactly as before.
+     * for every OTHER type this returns `null`. [#26708] The named-base rule
+     * alone has since been generalised: `saveMetaItem` asks
+     * {@link uninstalledNamedBaseRefusal} for every type right after this
+     * method, so a view naming an uninstalled base is refused there, not here.
      *
      * @returns the refusal to relay verbatim, or `null` when the write may
      *          proceed on these grounds.
@@ -16174,21 +16180,11 @@ export class ObjectStackProtocolImplementation implements
             if (locked) return locked;
         }
         // [#20863] The named-base rule (see the docblock): a base the write
-        // names must be a package the registry holds as installed.
-        const namedBase = folded.packageId;
-        if (namedBase && namedBase !== 'sys_metadata' && this.resolveWritePackageScope(namedBase) === undefined) {
-            const err = new Error(
-                `Cannot save flow '${folded.name}' into package '${namedBase}': no package with that id is `
-                + `installed in this deployment, so the flow would be stored bound to a package that does not `
-                + `exist. Name an installed writable package as the flow's base (or create one first), or save `
-                + `the flow without naming a package. Nothing was written.`,
-            );
-            (err as any).code = 'WRITABLE_PACKAGE_REQUIRED';
-            (err as any).status = 422;
-            (err as any).packageId = namedBase;
-            (err as any).docs = 'docs/adr/0070-package-first-authoring.md';
-            return err;
-        }
+        // names must be a package the registry holds as installed. [#26708]
+        // The rule is {@link uninstalledNamedBaseRefusal}'s, which
+        // `saveMetaItem` asks for every other type too.
+        const unbound = this.uninstalledNamedBaseRefusal({ type: singular, name: folded.name, packageId: folded.packageId });
+        if (unbound) return unbound;
         if (shipped) return null;
         if (!isCodeArtifactBody(folded.item)) return null;
         const stamped = String((folded.item as { _packageId?: unknown })._packageId);
@@ -16203,6 +16199,45 @@ export class ObjectStackProtocolImplementation implements
         );
         (err as any).code = 'INVALID_METADATA';
         (err as any).status = 422;
+        return err;
+    }
+
+    /**
+     * [#20863, #26708, ADR-0070 D1] THE NAMED-BASE RULE, for every metadata
+     * type: a base an authoring write NAMES must be a package this deployment
+     * has installed. Returns the refusal to throw, or `null` when the write
+     * names no package, names the `sys_metadata` sentinel, or names an
+     * installed one.
+     *
+     * Lifted out of {@link tenantAuthoredWriteRefusal} — where it was the
+     * flow-only rule between the lock and the provenance check (that
+     * docblock's named-base section is this rule's record: what "installed"
+     * reads, why the sentinel is package-less, the fail direction, and why the
+     * code is `WRITABLE_PACKAGE_REQUIRED` / 422). The flow arm still asks it
+     * at that position, and `saveMetaItem` asks it for every type, draft and
+     * active alike: a save naming an id no installed package has stored the
+     * item bound to a package that does not exist — with no manifest there is
+     * no namespace, so the object prefix rule was skipped too, and
+     * `publish-drafts` on that id then served the item live.
+     *
+     * The sentence names the type the write names; for a flow it is the
+     * sentence the flow arm always answered, byte for byte.
+     */
+    private uninstalledNamedBaseRefusal(request: { type: string; name: string; packageId?: string | null }): Error | null {
+        const namedBase = request.packageId;
+        if (!namedBase || namedBase === 'sys_metadata') return null;
+        if (this.resolveWritePackageScope(namedBase) !== undefined) return null;
+        const type = PLURAL_TO_SINGULAR[request.type] ?? request.type;
+        const err = new Error(
+            `Cannot save ${type} '${request.name}' into package '${namedBase}': no package with that id is `
+            + `installed in this deployment, so the ${type} would be stored bound to a package that does not `
+            + `exist. Name an installed writable package as the ${type}'s base (or create one first), or save `
+            + `the ${type} without naming a package. Nothing was written.`,
+        );
+        (err as any).code = 'WRITABLE_PACKAGE_REQUIRED';
+        (err as any).status = 422;
+        (err as any).packageId = namedBase;
+        (err as any).docs = 'docs/adr/0070-package-first-authoring.md';
         return err;
     }
 
@@ -20256,6 +20291,12 @@ export class ObjectStackProtocolImplementation implements
                 ...(request.packageId ? { packageId: request.packageId } : {}),
             });
             if (authored) throw authored;
+            // [#26708] …and the named-base rule for EVERY type, draft or
+            // active: a base the save names must be an installed package. A
+            // flow was asked it just above, at its own position; the second
+            // ask answers the same. See {@link uninstalledNamedBaseRefusal}.
+            const unbound = this.uninstalledNamedBaseRefusal(request);
+            if (unbound) throw unbound;
         }
         request.item = stripDerivedProvenance(request.item);
         // [#6562] …and OUR OWN injected system columns, for the same reason and
