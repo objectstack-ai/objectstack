@@ -267,6 +267,14 @@ vitest 调用被拒绝:从包目录跑 vitest 会静默跑错测试集 (objectui
 
 Its "repository root" is `ui/`. The guard is `ui/scripts/vitest-invocation-guard.mjs`.
 
+### UI CI
+
+GitHub runs only the workflows in the repository root's
+[`.github/workflows/`](./.github/workflows/), so a `ui/` change is checked by the same
+`ci.yml` as the rest of the repository: its `Lint UI`, `Type Check UI`, `Test UI` and
+`Build & E2E UI` jobs run when a pull request changes `ui/`. Read those jobs for what each one
+runs; `ui/` keeps no CI guide of its own.
+
 ### UI examples
 
 No directory under `ui/examples/` is a dev server: `hello-world` is a snippet to paste into

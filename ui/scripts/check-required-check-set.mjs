@@ -40,10 +40,12 @@
  * this file makes available -- each one now separates the read half from the
  * write half and POINTS here rather than answering for itself:
  *
- *   content/docs/guide/ci-cd-pipeline.md        "Merge Queue" step 3, and the
- *                                               Dependabot Auto-Merge section
  *   .github/workflows/dependabot-auto-merge.yml the header's "does NOT do" list
  *   scripts/dependabot-merge-gate.mjs           "declared = enforced"
+ *
+ * A third, objectui's CI guide page (its "Merge Queue" step 3 and its
+ * Dependabot Auto-Merge section), left with objectstack#26944, which deleted
+ * the page: it described workflows that run nowhere under the monorepo.
  *
  * A fourth carrier, AGENTS.md's ruleset bullet, was left standing by
  * objectui#9502 (governed surface) and split by objectui#9520: its

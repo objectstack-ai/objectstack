@@ -390,12 +390,6 @@ describe('wiring — the gate is reachable by name, classified and documented', 
     expect(gate).toContain("'Repo Gates'");
   });
 
-  it('has a section on the CI page, named by heading', () => {
-    // `ci-cd-pipeline-doc.test.ts` enforces this repo-wide; restated here
-    // because objectui#3212's lesson is that the omission happens at the moment
-    // the workflow is added, not later.
-    const doc = fs.readFileSync(path.join(repoRoot, 'content/docs/guide/ci-cd-pipeline.md'), 'utf8');
-    const headings = doc.split('\n').filter((line) => /^#{1,6}\s/.test(line));
-    expect(headings.some((h) => h.includes('repo-gates.yml'))).toBe(true);
-  });
+  // `has a section on the CI page, named by heading` retired with
+  // objectstack#26944, which deleted that page.
 });
