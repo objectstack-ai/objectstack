@@ -342,6 +342,11 @@ import {
   toFieldNameLoose,
 } from '../metadata-admin/previews/object-fields-io.js';
 import type { FieldTypeId } from '../metadata-admin/previews/field-types.js';
+import {
+  ExternalObjectNotice,
+  readExternalBinding,
+  useExternalWriteState,
+} from '../metadata-admin/previews/external-object.js';
 import { CreateItemDialog } from './CreateItemDialog.js';
 import { AddFieldPopover } from './AddFieldPopover.js';
 // objectui#11787 — the shared draft autosave, moved to its own module unchanged.
@@ -6383,6 +6388,13 @@ export function DataPillar({
   const requestedSurface = useRequestedSurface();
   const appliedRequestRef = React.useRef(0);
   const [objDraft, setObjDraft] = React.useState<Record<string, unknown>>({});
+  // ADR-0015 — an external object's table belongs to the remote database: the
+  // pillar offers no Add field on it (grid "+" column, Form toolbar) and says
+  // where its fields come from. Rename / retype / duplicate / remove are gated
+  // in the shared field inspector.
+  const objExternal = readExternalBinding(objDraft);
+  const objExternalWriteState = useExternalWriteState(objExternal);
+  const objIsExternal = objExternal !== null;
   // objectui#11272 — the object `objDraft` was loaded for, `object:NAME`:
   // written where the load below installs it, and nowhere else.
   const [objDraftFor, setObjDraftFor] = React.useState('');
@@ -7008,7 +7020,7 @@ export function DataPillar({
   // the label derived none (or a taken one); otherwise it is derived here.
   const addField = React.useCallback((label: string, type: FieldTypeId, typedName?: string) => {
     // objectui#11272 — never onto another object's buffer (not offered then).
-    if (readOnly || !objLoaded) return;
+    if (readOnly || !objLoaded || objIsExternal) return;
     const view = readFields(objDraft.fields);
     const existing = view.entries.map((e) => e.name);
     const name = typedName && !existing.includes(typedName) ? typedName : addedFieldName(label, existing);
@@ -7016,7 +7028,8 @@ export function DataPillar({
     setObjDraft((d) => ({ ...d, fields: writeFields(view) }));
     setDirty(true);
     setFieldSel({ kind: 'field', id: name });
-  }, [objDraft, readOnly, objLoaded]);
+  }, [objDraft, readOnly, objLoaded, objIsExternal]);
+  const canAddFields = !readOnly && !objIsExternal;
   const addFieldTakenNames = React.useMemo(
     () => readFields(objDraft.fields).entries.map((e) => e.name),
     [objDraft.fields],
@@ -7405,6 +7418,11 @@ export function DataPillar({
                   className={cn('mb-2 px-3 py-1.5 text-[11px]', bodyFlush && 'mx-6 mt-3')}
                 />
               )}
+              {objLoaded && objExternal && (
+                <div className={cn('mb-2', bodyFlush && 'mx-6 mt-3')}>
+                  <ExternalObjectNotice binding={objExternal} state={objExternalWriteState} locale={locale} />
+                </div>
+              )}
               {!objLoaded ? (
                 // objectui#11272 — no view of another object's buffer under
                 // this one; after a failed load, the error above says why.
@@ -7487,7 +7505,7 @@ export function DataPillar({
                   }
                 }}
               >
-                {!readOnly && (
+                {canAddFields && (
                   <AddFieldPopover
                     open={gridAddFieldOpen}
                     onOpenChange={setGridAddFieldOpen}
@@ -7502,13 +7520,15 @@ export function DataPillar({
                   value={{
                     // Read-only package: keep the per-column inspector (view props)
                     // but drop add-column and drag-reorder — both are doomed writes.
-                    ...(readOnly
-                      ? {}
-                      : {
+                    ...(readOnly ? {} : { onReorderFields: doReorderFields }),
+                    // An external object (ADR-0015) keeps reorder but gets no
+                    // add-column: a new field would be a new remote column.
+                    ...(canAddFields
+                      ? {
                           onAddColumn: () => setGridAddFieldOpen(true),
                           addColumnLabel: t('engine.studio.data.addField', locale),
-                          onReorderFields: doReorderFields,
-                        }),
+                        }
+                      : {}),
                     onEditColumn: (fieldName) => {
                       // ignore non-field columns (e.g. the row-actions column)
                       if (readFields(objDraft.fields).entries.some((e) => e.name === fieldName)) {
@@ -7570,7 +7590,7 @@ export function DataPillar({
                   onSelectField={(name) => setFieldSel({ kind: 'field', id: name })}
                   selectedGroup={fieldSel?.kind === 'group' ? fieldSel.id : null}
                   onSelectGroup={(key) => setFieldSel({ kind: 'group', id: key })}
-                  onAddField={addField}
+                  onAddField={canAddFields ? addField : undefined}
                   readOnly={readOnly}
                   modeControl={formModeControl}
                 />
