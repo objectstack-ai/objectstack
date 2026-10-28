@@ -2,6 +2,9 @@
 '@object-ui/plugin-calendar': patch
 '@object-ui/plugin-gantt': patch
 '@objectstack/spec': patch
+'@object-ui/types': patch
+'@object-ui/plugin-list': patch
+'@object-ui/plugin-view': patch
 ---
 
 refactor(plugin-calendar,plugin-gantt)!: the calendar and gantt renderers read their binding from the `calendar` / `gantt` block only; the flat fallback read is retired (#25923)
