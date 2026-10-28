@@ -143,9 +143,9 @@
 - 资源与后端:S 级机械 + M ⇒ `mode:subagent`;S 级但不机械(判断面在设计不在门禁)按 M 待遇。
 - `mode:cloud` 只保留给 L/XL、活过 PM 会话的工作、浏览器/dogfood 验证;build 重的 M 卡逐卡判。
 - 申报文件面写 `packages/spec/src/**` 且至少另一包 ⇒ build 重,派 `mode:cloud`,一卡一容器。
-- 一容器同时至多跑一个 build 重子代理;云会话建闭包拉 turbo 远程缓存。
-- 首张这类派发实测固定开销(安装 + 拉缓存)并记在其卡上。
+- 一容器同时仅一个 build 重子代理;云会话建闭包拉 turbo 远程缓存,首张实测固定开销记卡。
 - 归档义务只落在云卡;OOM 死的单独重派;判定连同档位写进认领评论。
+- 桌面 `start_session` 起的云卡照 runbook〈云卡五课〉五;席位看不见其会话,归档落维护者。
 - 一次性云卡用 `create_session`,⛔ 不用 create_trigger+fire;trigger 流只留给定时/重复型。
 - 接手中断的 dev:先试 SendMessage 复活,不可用才走接手协议,⛔ 不重跑原派发词。
 
