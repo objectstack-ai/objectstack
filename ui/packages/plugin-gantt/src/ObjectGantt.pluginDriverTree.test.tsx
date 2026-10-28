@@ -18,7 +18,7 @@
 import React from 'react';
 import { render, waitFor, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ObjectGantt } from './ObjectGantt';
+import { ObjectGantt, type ObjectGanttHandoff } from './ObjectGantt';
 import type { DataSource } from '@object-ui/types';
 
 // Force the container width to >=1024 so the day column is 110px (deterministic).
@@ -45,8 +45,8 @@ const RECORDS = [
   { id: 'n_weld', name: 'Weld', parent: 'n_root', start_date: '2026-11-09', end_date: '2026-11-13', depends_on: 'n_cut', plan_locked: true, locked: true },
 ];
 
-const SCHEMA: any = {
-  type: 'gantt',
+const SCHEMA: ObjectGanttHandoff = {
+  type: 'object-gantt',
   objectName: 'spike_node',
   gantt: {
     titleField: 'name',
