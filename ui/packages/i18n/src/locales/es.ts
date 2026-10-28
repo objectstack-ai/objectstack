@@ -1698,7 +1698,6 @@ const es = {
       unique: "Único",
       readOnly: "Solo lectura",
       hidden: "Oculto",
-      externalId: "ID externo",
       trackHistory: "Rastrear historial",
       defaultValue: "Valor predeterminado",
       placeholder: "Marcador de posición",

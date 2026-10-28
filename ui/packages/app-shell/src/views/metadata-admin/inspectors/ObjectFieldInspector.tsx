@@ -9,7 +9,7 @@
  *   • Basic     — name (rename), label, type, required, unique, description
  *   • Specific  — picklist options / lookup target / formula / numeric
  *                 precision / max length / value domain, conditional on type
- *   • Advanced  — readonly, hidden, externalId, group
+ *   • Advanced  — readonly, hidden, group
  *
  * All edits are applied as immutable splices of `draft.fields` via
  * the object-fields-io helpers, preserving the original array-vs-record
@@ -26,6 +26,11 @@
  * spec has no field-level index flag, `FieldSchema.safeParse` rejects
  * `indexed` by name, and offering it only ever produced a 422 that blocked
  * the save. Object-level `indexes[]` is the real surface.
+ *
+ * Nor is there an `External ID` switch (objectstack#26674): `field.externalId`
+ * is graded `dead` — no upsert, import or seed matches on it — so offering it
+ * only invited an author to rely on it. `patchDef` spreads the whole stored
+ * definition, so a stored `externalId: true` survives every edit here.
  *
  * Nor is there a `Relationship name` control on a lookup-family field
  * (objectui#12758): it wrote `relationshipName`, a key `FieldSchema` never
@@ -1349,12 +1354,6 @@ export function ObjectFieldInspector({
             label={tr('designer.field.hidden')}
             value={!!def.hidden}
             onCommit={(v) => patchDef({ hidden: v || undefined })}
-            disabled={readOnly}
-          />
-          <InspectorCheckboxField
-            label={tr('designer.field.externalId')}
-            value={!!def.externalId}
-            onCommit={(v) => patchDef({ externalId: v || undefined })}
             disabled={readOnly}
           />
           <InspectorCheckboxField

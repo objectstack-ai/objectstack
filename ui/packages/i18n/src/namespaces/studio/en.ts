@@ -330,7 +330,6 @@ const STUDIO_EN: Record<string, string> = {
   'designer.field.description': 'Description',
   'designer.field.readonly': 'Read-only',
   'designer.field.hidden': 'Hidden',
-  'designer.field.externalId': 'External ID',
   'designer.field.trackHistory': 'Track history',
   'designer.field.placeholder': 'Placeholder',
   'designer.field.group': 'Group',

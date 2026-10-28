@@ -1694,7 +1694,6 @@ const fr = {
       unique: "Unique",
       readOnly: "Lecture seule",
       hidden: "Masqué",
-      externalId: "ID externe",
       trackHistory: "Suivre l'historique",
       defaultValue: "Valeur par défaut",
       placeholder: "Espace réservé",

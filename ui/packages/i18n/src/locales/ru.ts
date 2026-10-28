@@ -1744,7 +1744,6 @@ const ru = {
       unique: "Уникальное",
       readOnly: "Только чтение",
       hidden: "Скрытое",
-      externalId: "Внешний ID",
       trackHistory: "Отслеживать историю",
       defaultValue: "Значение по умолчанию",
       placeholder: "Заполнитель",
