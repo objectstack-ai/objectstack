@@ -9,6 +9,7 @@
 import * as React from 'react';
 import { cn, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@object-ui/components';
 import { getCellRenderer, resolveCellRendererType } from '@object-ui/fields';
+import { SystemFieldName } from '@objectstack/spec/system';
 import { AUDIT_FIELD_BY_ROLE } from '@object-ui/types';
 import type { FieldMetadata } from '@object-ui/types';
 import { useDisplayLocale } from '@object-ui/i18n';
@@ -18,9 +19,9 @@ import { useDefaultRecordPage } from './defaultRecordPage';
 
 /**
  * The record's reassignable owner column — the canonical injected
- * `owner_id` (`@objectstack/spec` `injected-system-column-provenance.ts`).
+ * `owner_id`, read from `@objectstack/spec`'s `SystemFieldName`.
  */
-const OWNER_FIELD = 'owner_id';
+const OWNER_FIELD = SystemFieldName.OWNER_ID;
 
 /**
  * Audit field names auto-injected by the framework's `applySystemFields` —

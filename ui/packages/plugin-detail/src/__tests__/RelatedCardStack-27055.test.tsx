@@ -206,19 +206,20 @@ describe('the tabbed tier 关联 tab reads the same arrangement (objectstack#270
     let stored = editRelatedArrangement(DEFAULT, undefined, { kind: 'move', id: 'call.lead_id', to: 0 }, Date.now());
     stored = editRelatedArrangement(DEFAULT, stored, { kind: 'hide', id: 'note.parent_id' }, Date.now());
     let arranged: any = null;
-    let scope: any = null;
-    const Probe = () => {
-      scope = React.useContext(RelatedArrangementScopeContext);
+    const onScope = vi.fn();
+    const Probe = ({ report }: { report: (value: unknown) => void }) => {
+      report(React.useContext(RelatedArrangementScopeContext));
       return null;
     };
     render(
       <ArrangedRelatedTab page={pageOf()} arrangement={stored} onArrangementChange={vi.fn()}>
         {(page) => {
           arranged = page;
-          return <Probe />;
+          return <Probe report={onScope} />;
         }}
       </ArrangedRelatedTab>,
     );
+    const scope: any = onScope.mock.calls.at(-1)?.[0];
     const children = relatedTabOf(arranged).children;
     expect(children.map((n: any) => n.properties?.objectName ?? n.type)).toEqual(['call', 'task', 'record:attachments']);
     expect(scope.lastId).toBe('task.lead_id');

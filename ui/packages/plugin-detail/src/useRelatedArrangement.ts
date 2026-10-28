@@ -64,7 +64,10 @@ export function useRelatedArrangement({
   const [localArrangement, setLocalArrangement] = React.useState<RelatedArrangement | undefined>(undefined);
   const stored = onArrangementChange ? arrangement : localArrangement;
   const write = onArrangementChange ?? setLocalArrangement;
-  const resolved = resolveRelatedArrangement(defaultOrder, stored, Date.now());
+  // The 48 h 「新」 clock is read once per mount (a render must stay pure);
+  // every edit below stamps its own time in the event handler.
+  const [now] = React.useState(() => Date.now());
+  const resolved = resolveRelatedArrangement(defaultOrder, stored, now);
   const edit = (change: RelatedArrangementEdit) =>
     write(editRelatedArrangement(defaultOrder, stored, change, Date.now()));
 

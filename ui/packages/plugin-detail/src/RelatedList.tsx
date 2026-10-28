@@ -75,6 +75,7 @@ import {
 } from '@object-ui/core';
 import { useSafeFieldLabel } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
+import { useDisplayLocale } from '@object-ui/i18n';
 import { useDetailTranslation } from './useDetailTranslation';
 import { isMaskedDetailFieldType } from './fieldEnrichment';
 import {
@@ -654,6 +655,8 @@ const BodyTableTotals: React.FC<{ rows: readonly any[]; columns: any[] | undefin
   objectSchema,
 }) => {
   const { t } = useDetailTranslation();
+  // The totals format in the reader's display locale, never the machine's.
+  const displayLocale = useDisplayLocale();
   const fields: Record<string, any> = (objectSchema?.fields as any) ?? {};
   const totals: Array<{ key: string; label: string; text: string }> = [];
   for (const col of columns ?? []) {
@@ -673,8 +676,8 @@ const BodyTableTotals: React.FC<{ rows: readonly any[]; columns: any[] | undefin
     let text: string;
     try {
       text = currency
-        ? new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(sum)
-        : new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(sum);
+        ? new Intl.NumberFormat(displayLocale, { style: 'currency', currency }).format(sum)
+        : new Intl.NumberFormat(displayLocale, { maximumFractionDigits: 2 }).format(sum);
     } catch {
       text = String(sum);
     }
@@ -772,6 +775,8 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // The host predicate scope a child row's declared deadline is judged in
   // (objectui#11815) — the scope the grid's cells read.
   const predicateScope = usePredicateScope();
+  // The compact card's date chip formats in the reader's display locale.
+  const displayLocale = useDisplayLocale();
   const [collapsed, setCollapsed] = React.useState(defaultCollapsed);
   // Add-by-picker (generic m2m/junction assignment). `refreshNonce` re-runs the
   // auto-fetch after an add/remove so the list reflects the new link rows.
@@ -2687,7 +2692,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         if (Number.isNaN(date.getTime())) continue;
         return (
           <span className="shrink-0 text-[11px] text-muted-foreground" data-related-card-chip="date">
-            {date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+            {date.toLocaleDateString(displayLocale, { month: 'short', day: 'numeric' })}
           </span>
         );
       }
