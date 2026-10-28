@@ -422,7 +422,7 @@ describe('visibility-bare-identifier (#6128 / #5149 requirement 3)', () => {
             kind: 'slotted',
             slots: {
               highlights: { type: 'element:text', visibleWhen: "stage == 'won'" },
-              tabs: [
+              details: [
                 { type: 'record:related', visibleWhen: 'record.has_children' },
                 { type: 'record:related', visibleWhen: 'has_children' },
               ],
@@ -432,7 +432,7 @@ describe('visibility-bare-identifier (#6128 / #5149 requirement 3)', () => {
       };
       expect(bareFindings(stack).map((f) => f.path).sort()).toEqual([
         'pages[0].slots.highlights',
-        'pages[0].slots.tabs[1]',
+        'pages[0].slots.details[1]',
       ]);
     });
 

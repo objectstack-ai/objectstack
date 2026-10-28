@@ -204,7 +204,7 @@ describe('authored record-page sections', () => {
     kind: 'slotted',
     regions: [],
     slots: {
-      tabs: {
+      details: {
         type: 'page:tabs',
         properties: {
           items: [
@@ -250,7 +250,7 @@ describe('authored record-page sections', () => {
     // Asserting the key survives is what keeps this non-vacuous: the entry is
     // present and its `inline` is empty, not absent because nothing was walked.
     const titled = JSON.parse(JSON.stringify(slottedPage));
-    const sections = titled.slots.tabs.properties.items[0].children[0].properties.sections;
+    const sections = titled.slots.details.properties.items[0].children[0].properties.sections;
     sections[1] = { name: 'timeline', title: 'Timeline', fields: ['close_date'] };
 
     const entries = sectionEntries({ pages: [titled] });
