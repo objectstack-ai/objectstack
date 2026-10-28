@@ -171,7 +171,7 @@ export function writeRowField<T extends { field?: string }>(row: T, field: strin
  * the held draft and the body the save sends say the same thing — a measure on
  * "inherit" carries no `currency` key at all.
  */
-export function writeMeasureFormat<T extends { format?: string; currency?: string }>(row: T, next: { format?: string; currency?: string }): T {
+function writeMeasureFormat<T extends { format?: string; currency?: string }>(row: T, next: { format?: string; currency?: string }): T {
   const { format: _format, currency: _currency, ...rest } = row;
   return {
     ...rest,
