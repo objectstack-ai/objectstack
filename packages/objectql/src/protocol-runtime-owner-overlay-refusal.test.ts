@@ -148,6 +148,10 @@ describe('#23416 — a save into a second package of an object a runtime-authore
         engine.registerDriver(makeMemoryDriver(stores), true);
         await kernel.use(new ObjectQLPlugin({ ql: engine }));
         await kernel.bootstrap();
+        // [#26708] The workspaces the saves below name are installed, as
+        // authored bases: a save naming a package no installed package has
+        // is refused before it is written.
+        for (const id of [P, Q]) engine.registry.installPackage({ id, name: id, version: '1.0.0' } as any, 'authored');
         protocol = kernel.getService('protocol');
     });
     afterEach(async () => {

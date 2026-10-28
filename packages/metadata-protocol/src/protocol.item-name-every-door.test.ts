@@ -67,6 +67,16 @@ import {
 } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
+/**
+ * [#26708] The packages this file's saves name, installed: a save naming a
+ * package no installed package has is refused (`WRITABLE_PACKAGE_REQUIRED`)
+ * before any gate this file pins is reached. Each answers a manifest that
+ * declares no dependencies, as an authored base does.
+ */
+const INSTALLED_PACKAGES: ReadonlySet<string> = new Set(['app.probe_bound', 'app.dash', 'app.dupsrc']);
+const installedPackage = (id: string) => (INSTALLED_PACKAGES.has(id) ? { manifest: { id } } : undefined);
+
+
 interface Row {
     id: string;
     type: string;
@@ -226,7 +236,7 @@ function makeStubEngine() {
             listItems: (type: string) => Array.from(registered.get(type)?.values() ?? []),
             getItem: (type: string, name: string) => registered.get(type)?.get(name),
             getObject: () => undefined,
-            getPackage: () => undefined,
+            getPackage: installedPackage,
             getArtifactItem: () => undefined,
             isPackageDisabled: () => false,
         },

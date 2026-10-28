@@ -72,9 +72,14 @@ const STUDIO_EN: Record<string, string> = {
   'perm.field.empty': 'No fields registered for this object.',
   'perm.field.filter': 'Filter fields…',
   'perm.field.filterEmpty': 'No fields match the filter.',
-  'perm.field.bulk.readable': 'Read all',
+  'perm.field.bulk.readable': 'Read-only all',
   'perm.field.bulk.writable': 'Write all',
   'perm.field.bulk.clear': 'Clear',
+  // objectstack#26597 — a field row with no rule draws the object grant.
+  'perm.field.inherited.legend': 'Grey boxes: no rule for that field, so it follows the object’s Read and Edit. A click there writes a rule.',
+  'perm.field.inherited.tip': 'No rule for this field: it follows the object’s Read and Edit. A click writes a rule.',
+  'perm.field.capped.read': 'This rule grants Read, but the object does not: a holder of this set alone cannot read the field.',
+  'perm.field.capped.edit': 'This rule grants Edit, but the object does not: a holder of this set alone cannot edit the field.',
   'perm.field.col.name': 'Field',
   'perm.field.read': 'Read',
   'perm.field.edit': 'Edit',
@@ -2735,6 +2740,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.permissionPreview.scopeDefault': 'default',
   'engine.permissionPreview.fls.hidden': 'hidden',
   'engine.permissionPreview.fls.editable': 'editable',
+  'engine.permissionPreview.fls.readOnly': 'read-only',
   'engine.permissionPreview.sanityOne': '{count} sanity check failed',
   'engine.permissionPreview.sanityOther': '{count} sanity checks failed',
   'engine.permissionPreview.warn.editWithoutRead': 'Edit granted without Read (record updates will fail).',
@@ -2956,6 +2962,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.landingHome': 'Studio home',
   // objectui#11795 — the one line a phone shows under the Studio header.
   'engine.studio.desktopHint': 'Studio is built for a desktop screen.',
+  // objectstack#26708 — the builder's not-found states: a package id the
+  // package list does not hold, and a pillar segment Studio has no pillar for.
+  'engine.studio.notFound.package': 'Package not found. No package with the id "{id}" is installed here, so there is nothing to build in.',
+  'engine.studio.notFound.pillar': 'This page does not exist. Studio has no "{pillar}" section; pick Data, Automations, Interfaces or Access above.',
   'engine.studio.aiCopilot': 'AI copilot',
   // objectui#12725 — the Studio right slot: properties OR the copilot.
   'engine.studio.slot.label': 'Right panel',

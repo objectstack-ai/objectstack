@@ -206,6 +206,10 @@ export * from './autonumber-format';
 export * from './validation.zod';
 export * from './hook.zod';
 export * from './hook-body.zod';
+// [#26170] A hook's refusal catalogue: the code spelling, the save-time reading
+// of a body's literal throws, and the sentences the schema and the body runner
+// both speak.
+export * from './hook-refusal-codes';
 // [#18163] The TYPED AUTHORING FACE of `HookContext.api` — `HookApi`,
 // `HookObjectApi` and the query / count / update / delete option shapes the
 // engine actually accepts. `contracts/scoped-context.ts` declares the CHECKED

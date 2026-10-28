@@ -836,6 +836,7 @@
     "hasMovedFileColumns (function)",
     "hasObservedDeviation (function)",
     "hasPlatformObjectPrefix (function)",
+    "hookRefusalMessageKey (function)",
     "inProcessServiceMessage (function)",
     "interpolateValidationMessage (function)",
     "isAudiencePosture (function)",

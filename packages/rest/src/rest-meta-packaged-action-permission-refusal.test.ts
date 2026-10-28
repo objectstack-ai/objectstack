@@ -73,6 +73,10 @@ function boot(environmentId: string | undefined = 'env_1') {
         registry.registerItem('action', { name, label: 'Approve', type: 'script', target: 'approve_fn' }, 'name', PACKAGE_ID);
     }
     registry.registerItem('permission', { name: PACKAGED_PERMISSION, label: 'Contributor', objects: {} }, 'name', PACKAGE_ID);
+    // [#26708] The loaded package is installed too, as `registerApp` installs
+    // it: a save naming a package no installed package has is refused before
+    // the lock this file pins.
+    registry.installPackage({ id: PACKAGE_ID, name: PACKAGE_ID, version: '1.0.0', type: 'app' } as never, 'code');
     const protocol = new ObjectStackProtocolImplementation(
         { registry, findOne: async () => null, manifests: new Map([[PACKAGE_ID, {}]]) } as never,
         () => new Map(), environmentId,

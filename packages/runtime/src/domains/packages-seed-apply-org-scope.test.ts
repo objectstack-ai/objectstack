@@ -85,6 +85,16 @@ import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protoco
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { HttpDispatcher } from '../http-dispatcher.js';
 
+/**
+ * [#26708] The packages this file's saves name, installed: a save naming a
+ * package no installed package has is refused (`WRITABLE_PACKAGE_REQUIRED`)
+ * before any gate this file pins is reached. Each answers a manifest that
+ * declares no dependencies, as an authored base does.
+ */
+const INSTALLED_PACKAGES: ReadonlySet<string> = new Set(['com.workspace']);
+const installedPackage = (id: string) => (INSTALLED_PACKAGES.has(id) ? { manifest: { id } } : undefined);
+
+
 const ORG = 'org_acme';
 const PKG = 'com.workspace';
 const SEED = 'project_seed';
@@ -155,7 +165,7 @@ function makeEngine() {
             listItems: () => [],
             getItem: () => undefined,
             getObject: () => undefined,
-            getPackage: () => undefined,
+            getPackage: installedPackage,
             getArtifactItem: () => undefined,
             getAllPackages: () => [],
             isPackageDisabled: () => false,
