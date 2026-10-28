@@ -4485,7 +4485,9 @@ jobs:
     env:
       # The Console's build OOMs at Node's default heap (see Build & E2E UI).
       NODE_OPTIONS: --max-old-space-size=4096
-      LIVE_BACKEND_DIR: ${{ runner.temp }}/live-backend
+      # LIVE_BACKEND_DIR is set on the two steps that run the scripts: the
+      # `runner` context is not available in a job-level `env:`, and a
+      # workflow that names it there does not validate at all.
       LIVE_BACKEND_PORT: '4010'
       LIVE_API_URL: http://localhost:4010
       LIVE_APP_URL: http://localhost:5190
@@ -4582,6 +4584,8 @@ jobs:
         run: bash ensure-chromium-ready.sh
 
       - name: Boot the workspace backend
+        env:
+          LIVE_BACKEND_DIR: ${{ runner.temp }}/live-backend
         run: bash ui/e2e/live/ci/start-backend.sh
 
       # In the background for the rest of the job; the runner reaps it at job
@@ -4608,6 +4612,8 @@ jobs:
 
       - name: Stop the workspace backend
         if: ${{ always() }}
+        env:
+          LIVE_BACKEND_DIR: ${{ runner.temp }}/live-backend
         run: bash ui/e2e/live/ci/stop-backend.sh
 
       - name: Upload failure artefacts
