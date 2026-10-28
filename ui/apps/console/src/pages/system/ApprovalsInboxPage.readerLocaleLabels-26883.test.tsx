@@ -27,8 +27,9 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+import { useEffect, useState, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
 import { I18nProvider } from '@object-ui/i18n';
@@ -72,7 +73,7 @@ function row(id: string, flow: string, node: string, object: string, stored: { p
     step_label: stored.step,
     object_name: object,
     object_label: stored.object,
-    record_id: `${id}_rec`,
+    record_id: id,
     record_title: `Record ${id}`,
     status: 'pending',
     pending_approvers: ['u_1'],
@@ -104,6 +105,7 @@ let seenLanguages: Array<string | null> = [];
 
 beforeEach(() => {
   seenLanguages = [];
+  document.documentElement.lang = '';
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     const lang = new Headers(init?.headers).get('Accept-Language');
@@ -140,7 +142,7 @@ function renderInbox(language: string) {
       <MePermissionsProvider initialPermissions={permissions()}>
         <MemoryRouter initialEntries={['/apps/app/system/approvals']}>
           <Routes>
-            <Route path="/apps/:appName/system/approvals" element={<ApprovalsInboxPage />} />
+            <Route path="/apps/:appName/system/approvals" element={<AfterBoot><ApprovalsInboxPage /></AfterBoot>} />
           </Routes>
         </MemoryRouter>
       </MePermissionsProvider>
@@ -148,12 +150,27 @@ function renderInbox(language: string) {
   );
 }
 
+/**
+ * Mounts its children one commit after the providers. The console mounts a
+ * page behind its boot (auth, routing), long after `I18nProvider` has written
+ * `<html lang>`; a page mounted in the provider's own first commit would run
+ * its fetch effect before the provider's (children's effects run first).
+ */
+function AfterBoot({ children }: { children: ReactNode }) {
+  const [booted, setBooted] = useState(false);
+  useEffect(() => setBooted(true), []);
+  return booted ? <>{children}</> : null;
+}
+
 /** The queue row (table row) that holds `recordTitle`. */
 async function queueRow(recordTitle: string): Promise<HTMLElement> {
-  const cells = await screen.findAllByText(recordTitle);
-  const tr = cells.map((el) => el.closest('tr')).find((el): el is HTMLTableRowElement => !!el);
-  expect(tr, `no table row holds ${recordTitle}`).toBeTruthy();
-  return tr!;
+  return waitFor(() => {
+    const tr = screen.getAllByText(recordTitle)
+      .map((el) => el.closest('tr'))
+      .find((el): el is HTMLTableRowElement => !!el);
+    expect(tr, `no table row holds ${recordTitle}`).toBeTruthy();
+    return tr!;
+  });
 }
 
 describe('ApprovalsInboxPage — flow, step and object labels in the reader language (objectstack#26883)', () => {
@@ -169,7 +186,8 @@ describe('ApprovalsInboxPage — flow, step and object labels in the reader lang
     const tr = await queueRow('Record opp_1');
     expect(within(tr).getByText('大额商机审批')).toBeInTheDocument();
     expect(within(tr).getByText('销售经理审核')).toBeInTheDocument();
-    expect(within(tr).getByText('商机', { exact: false })).toBeInTheDocument();
+    expect(within(tr).getByText('商机')).toBeInTheDocument();
+    expect(within(tr).queryByText('Opportunity')).toBeNull();
     expect(within(tr).queryByText('Large Deal Approval')).toBeNull();
     expect(within(tr).queryByText('Sales Manager Review')).toBeNull();
   });
