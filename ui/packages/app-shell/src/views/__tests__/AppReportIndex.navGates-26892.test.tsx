@@ -122,10 +122,10 @@ function adapterFor(app: unknown) {
   const items: Record<string, unknown[]> = { app: [app], report: REPORTS, dataset: DATASETS };
   return {
     clearCache: vi.fn(),
-    getObjectSchema(this: { getClient(): any }, name: string) {
+    getObjectSchema(this: { getClient(): { meta: { getItem(type: string, name: string): Promise<unknown> } } }, name: string) {
       return this.getClient()
         .meta.getItem('object', name)
-        .then((res: any) => (res && typeof res === 'object' && 'item' in res ? res.item : res));
+        .then((res) => (res && typeof res === 'object' && 'item' in res ? (res as { item: unknown }).item : res));
     },
     getClient: () => ({
       meta: {
