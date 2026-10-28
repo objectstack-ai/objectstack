@@ -5531,14 +5531,13 @@ describe('registry `inputs` vs `@objectstack/spec` ComponentPropsMap (repo-wide)
     // them fails HERE, naming the key, instead of resurfacing as an unexplained
     // red in a derived loop.
     const HARVESTED: Array<[string, string]> = [
-      ['element:record_picker', 'displayField'],
-      ['element:record_picker', 'multiple'],
-      ['element:record_picker', 'searchFields'],
-      ['page:card', 'actions'],
-      ['page:card', 'body'],
-      ['page:header', 'icon'],
-      ['page:tabs', 'type'],
-      ['record:details', 'layout'],
+      // The first eight (`element:record_picker` `displayField` / `multiple` /
+      // `searchFields`, `page:card` `actions` / `body`, `page:header` `icon`,
+      // `page:tabs` `type`, `record:details` `layout`) were 17.0.0 tombstones
+      // and aged out of their rows at spec 18.2 (objectstack#25767, ADR-0087
+      // one major on): no longer LISTED, so the "still listed" leg below has
+      // nothing to read for them, and the reverse direction never demands an
+      // unknown key. They are pinned as absent in the describe after this one.
       // The ninth, harvested at the `@objectstack/spec` 17.5.0 bump
       // (objectui#11073): objectui#8285's ruled retirement, which emptied
       // `LAZY_BLOCK_RULED_CARVE_OUTS` in the same change.
@@ -5611,6 +5610,31 @@ describe('registry `inputs` vs `@objectstack/spec` ComponentPropsMap (repo-wide)
         .map((key) => `${type}.${key}`),
     );
     expect(exemptedTombstones).toEqual([]);
+  });
+
+  it('the eight 17.0.0 tombstones that aged out at spec 18.2 are gone from the rows — not listed, not published, not exempted', () => {
+    // objectstack#25767 (ADR-0087, one major on): the spec no longer declares
+    // these keys at all and refuses each as an unknown key naming the protocol
+    // upgrade guide. The three legs a tombstone row used to get still hold for
+    // an absent key — nothing may publish or exempt it — and the first leg
+    // inverts: the release no longer lists it. Pinned by name so a key that
+    // comes back (re-declared upstream, or re-published here) is a red that
+    // names it rather than an unexplained row in a derived loop.
+    const AGED_OUT: Array<[string, string]> = [
+      ['element:record_picker', 'displayField'],
+      ['element:record_picker', 'multiple'],
+      ['element:record_picker', 'searchFields'],
+      ['page:card', 'actions'],
+      ['page:card', 'body'],
+      ['page:header', 'icon'],
+      ['page:tabs', 'type'],
+      ['record:details', 'layout'],
+    ];
+    for (const [type, key] of AGED_OUT) {
+      expect(specListedKeys(type), `${type} lists ${key} again`).not.toContain(key);
+      expect(Object.keys(UNPUBLISHED_EXEMPTIONS), `${type}.${key} is exempted — an absent key needs no cover`).not.toContain(`${type}.${key}`);
+      expect(declaredInputs(type) ?? [], `${type} publishes ${key}, a key the contract refuses as unknown`).not.toContain(key);
+    }
   });
 
   // ── the ARM direction (objectui#4971) ──────────────────────────────────────

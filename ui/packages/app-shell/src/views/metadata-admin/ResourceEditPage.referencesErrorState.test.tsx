@@ -117,6 +117,11 @@ vi.mock('./useMetadata', async (importOriginal) => {
 });
 
 import { MetadataResourceEditPage } from './ResourceEditPage';
+// The designer rows this suite reads in zh live in `@object-ui/i18n`'s `studio`
+// namespace, whose `zh` catalogue is fetched on demand (objectstack#25922).
+// Resident before any case, so the zh rows below read synchronously.
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+await loadStudioCatalogue('zh');
 
 const START_PATH = '/metadata/object/showcase_account';
 
@@ -260,7 +265,7 @@ describe('References panel — error ≠ empty ≠ loading (#5110)', () => {
   /**
    * The designer table carries `en` and `zh` in one file and is deliberately
    * out of reach of the pack gates (see `metadata-admin/i18n.ts`'s header and
-   * `packages/i18n/README.md`, "Scope — the `engine.*` carve-out"), so a new
+   * `packages/i18n/README.md`, "Scope — the Studio designer strings"), so a new
    * key added to only one of the two tables fails nowhere. This is that file's
    * parity check for the three keys this card adds.
    *

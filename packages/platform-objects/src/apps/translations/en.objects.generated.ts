@@ -3457,11 +3457,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       old_hash: {
         label: "Old Hash",
-        help: "SHA-256 of the previous value (canonicalised). Null when previously unset."
+        help: "Digest of the previous value, never the plaintext: sha256: hex for a plain value, the keyed hmac-sha256: digest for a secret. Null when previously unset, or for a secret with no keyed digest."
       },
       new_hash: {
         label: "New Hash",
-        help: "SHA-256 of the new value (canonicalised). Null on reset."
+        help: "Digest of the new value, never the plaintext: sha256: hex for a plain value, the keyed hmac-sha256: digest for a secret. Null on reset, or for a secret with no keyed digest."
       },
       encrypted: {
         label: "Encrypted",

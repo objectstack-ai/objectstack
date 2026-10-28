@@ -18,7 +18,7 @@ import { retiredKey } from '../shared/retired-key';
 // through it, so `api/UpdateAiConversationRequest.json` states it.
 import { requiredOneOf } from '../shared/refinement-projection';
 import { MetadataItemNameSchema } from '../shared/identifiers.zod';
-import { DroppedFieldsEventSchema, QueryPageWindowParamSchema, QueryWithTransportSchema, ValidationAdvisoryEventSchema } from '../data/data-engine.zod';
+import { DroppedFieldsEventSchema, QueryPageWindowParamSchema, QueryTransportParamsSchema, QueryWithTransportSchema, ValidationAdvisoryEventSchema } from '../data/data-engine.zod';
 import { 
   AnalyticsQueryRequestSchema,  
   AnalyticsResultResponseSchema, 
@@ -28,7 +28,7 @@ import {
 import { RealtimePresenceSchema, TransportProtocol } from './realtime.zod';
 import { ObjectPermissionSchema, EffectiveObjectPermissionSchema, FieldPermissionSchema } from '../security/permission.zod';
 import { ActionDescriptorSchema } from '../automation/node-executor.zod';
-import { PlatformTranslationDataSchema } from '../system/translation.zod';
+import { ServedTranslationDataSchema } from '../system/translation.zod';
 // #5950 / #5882 — the ADR-0010 read-side protection envelope both metadata-item
 // responses publish. Same three vocabularies the resolver filters against, so a
 // value this spec cannot name is a value the resolver would have dropped.
@@ -334,8 +334,9 @@ export const GetMetaItemsResponseSchema = lazySchema(() => z.object({
 
 /**
  * [#22877] The `member` every by-name door that reads or changes ONE stored
- * item declares (get, delete, publish, history; revert has no declared
- * request) — one sentence, so the four requests cannot drift apart. On the
+ * item declares (get, delete, publish, history and [#26699] the layered read;
+ * revert has no declared request) — one sentence, so the five requests cannot
+ * drift apart. On the
  * REST door it is the `?member=` query parameter of each route's closed set.
  */
 const BUNDLE_MEMBER_SELECTOR_DESCRIPTION =
@@ -708,6 +709,12 @@ export const GetMetaItemResponseSchema = lazySchema(() => z.object({
  * parameter type in `@objectstack/metadata-protocol` member for member — a
  * declared-surface catch-up, not a new capability: the verb and every member
  * here already ship and are enforced.
+ *
+ * [#26699] `member` joins the by-name doors' bundle member selector (ruling
+ * 6116165299, extended to the layered read by the option-A ruling on #26649):
+ * the same name and the same one sentence as {@link GetMetaItemRequestSchema}'s,
+ * so the layers of one non-canonical member (an `email_template` locale) can be
+ * read. Absent, the canonical member's layers, as before.
  */
 export const GetMetaItemLayeredRequestSchema = lazySchema(() => z.object({
   type: z.string().describe('Metadata type name'),
@@ -716,6 +723,7 @@ export const GetMetaItemLayeredRequestSchema = lazySchema(() => z.object({
     'Optional package ID — scopes the `code` layer so a same-name collision '
     + 'resolves to the requested package\'s artifact (ADR-0048).',
   ),
+  member: z.string().optional().describe(BUNDLE_MEMBER_SELECTOR_DESCRIPTION),
 }));
 
 /**
@@ -2369,7 +2377,16 @@ export const HttpFindQueryParamsSchema = lazySchema(() => z.object({
   filter: z.string().optional().describe('JSON-encoded filter expression (canonical, singular).'),
   /** @deprecated Use `filter` (singular). Accepted for backward compatibility. */
   filters: z.string().optional().describe('JSON-encoded filter expression (deprecated plural alias).'),
-  select: z.string().optional().describe('Comma-separated list of fields to retrieve.'),
+  // [#26817] The projection the list door reads: it splits on commas, trims
+  // each member and refuses a value naming no field (blank, whitespace-only,
+  // commas only) with a 400. `[^\s,]` is that rule as a pattern — `\s` is the
+  // set `trim()` strips — so the published JSON Schema states it too.
+  // [#26909] Read off the body-side declaration of the same door
+  // (`QueryTransportParamsSchema.select`, its string arm), not restated.
+  select: QueryTransportParamsSchema.shape.select.unwrap().unwrap().options[0].optional().describe(
+    'Comma-separated list of fields to retrieve — at least one field name; a value naming no field '
+    + '(blank, or only commas and spaces) is refused.'
+  ),
   sort: z.string().optional().describe('Sort expression (e.g. "name asc,created_at desc" or "-created_at").'),
   orderBy: z.string().optional().describe('Alias for sort (OData compatibility).'),
   // [#25269] The page window the list door enforces, not `z.coerce.number()`,
@@ -2384,7 +2401,15 @@ export const HttpFindQueryParamsSchema = lazySchema(() => z.object({
   search: z.string().optional().describe('Full-text search query.'),
   /** `?distinct` — REMOVED (#4286): the querystring spelling of `query.distinct`, same tombstone. */
   distinct: retiredKey(QUERY_DISTINCT_REMOVED),
-  count: z.coerce.boolean().optional().describe('Include total count in response.'),
+  // [#26817] The door's accept set, read from the one declaration the door
+  // parses (`QueryTransportParamsSchema.count`, which `findData` checks) and
+  // lowered to the boolean it means — not `z.coerce.boolean()`, which read
+  // `'false'` as `true` and admitted `'maybe'` that the door refuses with a 400.
+  // A querystring carries no `null`, so the nullable arm is unwrapped.
+  count: QueryTransportParamsSchema.shape.count.unwrap().unwrap()
+    .transform((flag) => flag === true || flag === 'true')
+    .optional()
+    .describe('Include the total count in the response — `true` or `false`; any other value is refused.'),
 }));
 
 /**
@@ -2404,7 +2429,13 @@ export const HttpFindQueryParamsSchema = lazySchema(() => z.object({
 export const GetDataRequestSchema = lazySchema(() => z.object({
   object: z.string().describe('The object name.'),
   id: z.string().describe('The unique record identifier (primary key).'),
-  select: z.array(z.string()).optional().describe('Fields to include in the response (allowlisted query param).'),
+  // [#26909] The by-id door reads `select` through the list door's own
+  // projection rule (`projectionFieldsValue`) and refuses `[]`; the array arm
+  // of the list declaration is that rule, so it is read off it here.
+  select: QueryTransportParamsSchema.shape.select.unwrap().unwrap().options[1].optional().describe(
+    'Fields to include in the response (allowlisted query param) — at least one field name; an empty '
+    + 'list, or a list with a blank name, is refused.'
+  ),
   expand: z.array(z.string()).optional().describe(
     'Lookup/master_detail field names to expand. '
     + 'The engine resolves these via batch $in queries, replacing foreign key IDs with full objects.'
@@ -3705,10 +3736,26 @@ export const GetTranslationsRequestSchema = lazySchema(() => z.object({
  * `stack.translations` — so it carries the platform-only `settings` group and
  * is typed against the platform face, not the per-app one
  * (`system/translation.zod.ts`).
+ *
+ * Less the groups the server resolves itself (`SERVER_RESOLVED_TRANSLATION_GROUPS`,
+ * #25785): `metadataForms` stays in the i18n service, where `/meta/types`
+ * translates Studio's authoring forms from it, and is not part of this answer.
+ * `translations` is therefore {@link ServedTranslationDataSchema}, the platform
+ * face without those groups, closed so a body that still carries one fails it.
+ *
+ * `requestedLocale` is the code the caller ASKED for, carried only when the
+ * door fell back to another one: `locale` is always the locale the body
+ * translates, and the pair is how a caller learns that `zh` was served as
+ * `zh-CN`. The runtime door has served it since that fallback existed while
+ * this face did not declare it (#25785) — declared ≠ enforced, Prime
+ * Directive #10: an undeclared field is one no generated client can read and
+ * no conformance suite can hold. Optional, because the exit that serves the
+ * locale asked for omits it.
  */
 export const GetTranslationsResponseSchema = lazySchema(() => z.object({
   locale: z.string().describe('Locale code'),
-  translations: PlatformTranslationDataSchema.describe('Translation data'),
+  requestedLocale: z.string().optional().describe('The locale the caller asked for, when the served locale is a fallback from it'),
+  translations: ServedTranslationDataSchema.describe('Translation data'),
 }));
 
 export const GetFieldLabelsRequestSchema = lazySchema(() => z.object({

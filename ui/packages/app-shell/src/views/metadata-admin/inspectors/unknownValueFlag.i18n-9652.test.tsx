@@ -68,6 +68,11 @@ import { ViewVariantInspector } from './ViewVariantInspector';
 import { FlowNodeConfigField } from './FlowNodeConfigField';
 import { FlowObjectListField } from './FlowObjectListField';
 import type { FlowConfigColumn, FlowConfigField } from './flow-node-config';
+// The designer rows this suite reads in zh live in `@object-ui/i18n`'s `studio`
+// namespace, whose `zh` catalogue is fetched on demand (objectstack#25922).
+// Resident before any case, so the zh rows below read synchronously.
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+await loadStudioCatalogue('zh');
 
 afterEach(cleanup);
 

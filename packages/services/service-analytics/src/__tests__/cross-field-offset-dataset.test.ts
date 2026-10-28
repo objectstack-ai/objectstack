@@ -339,15 +339,20 @@ describe('[#14104] the dataset, valued end to end on the engine path', () => {
     expect(Number(byTitle.get('f')?.late ?? 0)).toBe(0);
   });
 
-  it('the dotted offset spelling of the ruling validates, routes, and is refused by SQL push-down by name', async () => {
-    // Validates at the schema door (the memory evaluator walks the path).
+  it('[#26601] the dotted offset spelling of the ruling is refused at the schema door, and past it by SQL push-down', async () => {
+    // Refused at the schema door: the offset column is a column of the same
+    // record (ruling A on #25808), and the memory evaluator, which walks the
+    // path, reads a lookup's id there on a stored row — zero days, silently.
     const dotted = { completed_on: { $lte: { $field: 'due_on', addDays: { $field: 'duty.grace_days' } } } };
-    expect(DatasetSchema.safeParse({
+    const saved = DatasetSchema.safeParse({
       ...TASK_HEALTH,
       measures: [{ name: 'done_on_time', aggregate: 'count', filter: dotted }],
-    }).success).toBe(true);
-    // …and on a SQL deployment it is a loud INVALID_FILTER, never a wrong count:
-    // the 2026-08-06 same-table ruling on #5222, inherited by the offset.
+    });
+    expect(saved.success).toBe(false);
+    expect(saved.error?.issues[0]?.message).toContain('"duty.grace_days" is a dotted path');
+    // …and a dataset that never met that door is a loud INVALID_FILTER on a SQL
+    // deployment, never a wrong count: the 2026-08-06 same-table ruling on
+    // #5222, inherited by the offset.
     let err: WireBearingError | null = null;
     try {
       await service.queryDataset(

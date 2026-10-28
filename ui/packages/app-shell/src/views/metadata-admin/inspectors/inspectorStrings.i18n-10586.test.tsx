@@ -74,6 +74,11 @@ import { DatasetDefaultInspector } from './DatasetDefaultInspector';
 import { ObjectDefaultInspector } from './ObjectDefaultInspector';
 import { FlowReferenceField } from './FlowReferenceField';
 import { ConditionBuilder } from './ConditionBuilder';
+// The designer's `designer.*` / `perm.*` rows live in `@object-ui/i18n`'s `studio`
+// namespace, whose `zh` catalogue is fetched on demand (objectstack#25922).
+// Resident before any case, so the zh rows below read synchronously.
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+await loadStudioCatalogue('zh');
 
 afterEach(() => {
   cleanup();
@@ -377,7 +382,8 @@ const extra = new Set<string>();
 const REFERENCE_EN = [
   'Resolved automatically',
   "Resolved at runtime from the submitter's manager — no value needed.",
-  'Queue approvers are not supported by the runtime yet — this slot resolves to nobody.',
+  // ADR-0142 D6 replaced the "not supported" warning with what the value names.
+  "The queue's machine name. Its members when the step opens are the approvers; an empty queue adds nobody.",
   'Fields of account.',
   'Set the flow’s trigger object (on the Start node) to list fields.',
   'Actions of slack.',

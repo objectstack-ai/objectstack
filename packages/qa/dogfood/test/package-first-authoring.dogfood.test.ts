@@ -63,12 +63,17 @@ describe('dogfood: package-first authoring rejects runtime creates into read-onl
 
   it('the same create into a fresh writable base id is NOT rejected (control)', async () => {
     const protocol = await stack.kernel.getServiceAsync<any>('protocol');
-    // A bare, unregistered project-base id is writable — the write must succeed.
+    // A fresh authored base is writable — the write must succeed. [#26708] It
+    // is created first, as Studio's "New package" does: a save naming a
+    // package no installed package has is refused.
+    await protocol.installPackage({
+      manifest: { id: 'app.dogfood-probe-base', name: 'Dogfood probe base', version: '0.1.0', type: 'app', namespace: 'dogfood' },
+    });
     const res = await protocol.saveMetaItem({
       type: 'object',
       name: 'dogfood_pkgfirst_ok',
       item: { name: 'dogfood_pkgfirst_ok', label: 'OK', fields: { name: { type: 'text', label: 'Name' } } },
-      packageId: 'app.dogfood_probe_base',
+      packageId: 'app.dogfood-probe-base',
       mode: 'draft',
     });
     expect(res?.success ?? true).toBeTruthy();
@@ -80,13 +85,18 @@ describe('dogfood: the package is the authoring & delete unit (ADR-0070 D3/D4)',
   let protocol: any;
   let ql: any;
   // A fresh, writable, project-scoped base (never a code/installed package).
-  const BASE = 'app.dogfood_lifecycle';
+  const BASE = 'app.dogfood-lifecycle';
   const OBJ = 'dfl_widget';
 
   beforeAll(async () => {
     stack = await bootStack(crmStack);
     protocol = await stack.kernel.getServiceAsync<any>('protocol');
     ql = await stack.kernel.getServiceAsync<any>('objectql');
+    // [#26708] The base is created first, as Studio's "New package" does: a
+    // save naming a package no installed package has is refused.
+    await protocol.installPackage({
+      manifest: { id: BASE, name: 'Dogfood lifecycle', version: '0.1.0', type: 'app', namespace: 'dfl' },
+    });
   });
   afterAll(async () => {
     await stack?.stop?.();
@@ -210,6 +220,11 @@ describe('dogfood: duplicate a writable base (ADR-0070 D4)', () => {
     stack = await bootStack(crmStack);
     protocol = await stack.kernel.getServiceAsync<any>('protocol');
     ql = await stack.kernel.getServiceAsync<any>('objectql');
+    // [#26708] The source base is created first, as Studio's "New package"
+    // does: a save naming a package no installed package has is refused.
+    await protocol.installPackage({
+      manifest: { id: SRC, name: 'Dogfood dup source', version: '0.1.0', type: 'app', namespace: 'dfdup' },
+    });
   });
   afterAll(async () => {
     await stack?.stop?.();

@@ -151,6 +151,13 @@ async function generatedCalendarNode(entry: Record<string, unknown>): Promise<an
  * row passed VACUOUSLY because `viewOptions.calendar` was undefined — a green
  * that asserted nothing about the nesting it names.
  */
+/**
+ * The emitted binding. objectstack#25923: the canonical keys go out as the
+ * node's own `calendar` block, never flat (the spec refuses them flat on
+ * `object-calendar`), so the rows below read them there.
+ */
+const bindingOf = (node: Record<string, any>): Record<string, any> => node.calendar ?? {};
+
 const objectViewDoc = (entry: Record<string, unknown>) => ({
   type: 'object-view',
   objectName: 'task',
@@ -172,6 +179,8 @@ describe('objectui#8355 · second route, half 1 — the emitted node carries can
     const node = await generatedCalendarNode({ calendar: { dateField: 'kickoff', endField: 'wrapup', titleField: 'name' } });
     expect(Object.keys(node)).not.toContain('dateField');
     expect(Object.keys(node)).not.toContain('endField');
+    expect(Object.keys(bindingOf(node))).not.toContain('dateField');
+    expect(Object.keys(bindingOf(node))).not.toContain('endField');
   });
 
   it('…and no canonical binding is invented from them', async () => {
@@ -180,23 +189,23 @@ describe('objectui#8355 · second route, half 1 — the emitted node carries can
     // still pass. The ruling refused that end state on the first route; this
     // route follows it rather than forking.
     const node = await generatedCalendarNode({ calendar: { dateField: 'kickoff', endField: 'wrapup', titleField: 'name' } });
-    expect(node.startDateField).toBeUndefined();
-    expect(node.endDateField).toBeUndefined();
+    expect(bindingOf(node).startDateField).toBeUndefined();
+    expect(bindingOf(node).endDateField).toBeUndefined();
   });
 
   it('CONTROL: the canonical block still reaches the node intact', async () => {
     // Without this row, "the aliases do not reach the node" is satisfied by a
     // branch that forwards nothing at all.
     const node = await generatedCalendarNode({ calendar: { startDateField: 'kickoff', endDateField: 'wrapup', titleField: 'name' } });
-    expect(node.startDateField).toBe('kickoff');
-    expect(node.endDateField).toBe('wrapup');
-    expect(node.titleField).toBe('name');
+    expect(bindingOf(node).startDateField).toBe('kickoff');
+    expect(bindingOf(node).endDateField).toBe('wrapup');
+    expect(bindingOf(node).titleField).toBe('name');
   });
 
   it('CONTROL: an unrelated renderer-ahead knob still rides the block through', async () => {
     // The branch strips exactly TWO keys; it did not become a whitelist.
     const node = await generatedCalendarNode({ calendar: { startDateField: 'kickoff', allDayField: 'is_all_day' } });
-    expect(node.allDayField).toBe('is_all_day');
+    expect(bindingOf(node).allDayField).toBe('is_all_day');
   });
 
   it('CONTROL: the LEGACY `options.calendar` nesting is stripped on the same path — and since objectui#7928 not read at all', async () => {
@@ -208,8 +217,8 @@ describe('objectui#8355 · second route, half 1 — the emitted node carries can
     // strip above), so its `titleField` does not reach the node either.
     const node = await generatedCalendarNode({ options: { calendar: { dateField: 'kickoff', titleField: 'name' } } });
     expect(Object.keys(node)).not.toContain('dateField');
-    expect(node.startDateField).toBeUndefined();
-    expect(node.titleField).toBeUndefined();
+    expect(bindingOf(node).startDateField).toBeUndefined();
+    expect(bindingOf(node).titleField).toBeUndefined();
   });
 });
 

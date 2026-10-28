@@ -11,6 +11,10 @@
  * question. Regex: the whole Latin word `base`, case-insensitive, matched in the
  * row VALUE only — keys, identifiers such as `baseObject` (no word boundary)
  * and comments are out of scope.
+ *
+ * The rows that moved into `@object-ui/i18n`'s `studio` namespace
+ * (objectstack#25922) are walked too, from the namespace's own `zh` catalogue,
+ * so the census still covers the whole designer table wherever a row lives.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -19,6 +23,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 // @ts-expect-error — plain-JS shared helper, intentionally untyped (`allowJs: false`)
 import { maskComments } from '../../../../../scripts/js-comment-mask.mjs';
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
 import { t } from './i18n';
 
 const mask: (source: string) => string = maskComments;
@@ -33,8 +38,11 @@ function zhRows(): Array<[string, string]> {
   const rows: Array<[string, string]> = [];
   const row = /'((?:[^'\\\n]|\\.)*)'\s*:\s*'((?:[^'\\\n]|\\.)*)'/g;
   for (const m of block.matchAll(row)) rows.push([m[1], m[2]]);
-  return rows;
+  return [...rows, ...Object.entries(studioZh)];
 }
+
+/** The namespace's `zh` rows (objectstack#25922), resident before any case runs. */
+const studioZh = await loadStudioCatalogue('zh');
 
 const BARE_BASE = /\bbase\b/i;
 

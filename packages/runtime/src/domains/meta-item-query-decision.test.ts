@@ -4,7 +4,7 @@
  * [#23072] The runtime dispatcher's by-name `/meta` doors ask THE query
  * decision `RestServer`'s doors ask (`metaItemQueryRefusal` in
  * `@objectstack/rest`, ruling 6138588561), and the item read honours the
- * bundle member selector.
+ * bundle member selector — and [#26699] so does `/layers`.
  *
  * The dispatcher is the only `/meta` answer on a host that mounts just the
  * `${prefix}/*` catch-all (`@objectstack/hono`'s `createHonoApp`). Its item
@@ -55,8 +55,10 @@ function protocolDouble() {
     return {
         getMetaTypes: vi.fn(async () => ({ types: ['email_template', 'view', 'object'] })),
         getMetaItem: vi.fn(async ({ member }: any) => envelope(MEMBERS[member ?? 'en-US'])),
-        getMetaItemLayered: vi.fn(async ({ type, name }: any) => ({
-            type, name, code: MEMBERS['en-US'], overlay: null, overlayScope: null, effective: MEMBERS['en-US'],
+        // [#26699] The named member's layers, none for a member the bundle does not hold.
+        getMetaItemLayered: vi.fn(async ({ type, name, member }: any) => ({
+            type, name, code: MEMBERS[member ?? 'en-US'] ?? null, overlay: null, overlayScope: null,
+            effective: MEMBERS[member ?? 'en-US'] ?? null,
             lock: 'none', editable: true, deletable: true, resettable: false,
         })),
         saveMetaItem: vi.fn(async (_request: unknown) => ({ success: true, version: 'v1' })),
@@ -284,12 +286,12 @@ describe('[#23072] the selector\'s VALUE is the protocol\'s refusal, and it come
 
 // ── /layers and /published ────────────────────────────────────────────────────
 
-describe('[#23072] GET /meta/:type/:name/layers on the dispatcher: its closed set is `package`', () => {
-    it('REFUSAL — `?member=` is the located 400 RestServer\'s `/layers` answers, before the layered read', async () => {
+describe('[#23072 · #26699] GET /meta/:type/:name/layers on the dispatcher: its closed set is `package` and `member`', () => {
+    it('REFUSAL — an unrecognised name is the located 400 RestServer\'s `/layers` answers, before the layered read', async () => {
         const protocol = protocolDouble();
-        const answer = await bootDispatcher({ protocol }).call('GET', `${ITEM}/layers`, { member: 'zh-CN' });
-        const reference = await sameRefusal('layers', { member: 'zh-CN' }, answer);
-        expect(reference.message).toContain('Supported parameters: package.');
+        const answer = await bootDispatcher({ protocol }).call('GET', `${ITEM}/layers`, { memeber: 'zh-CN' });
+        const reference = await sameRefusal('layers', { memeber: 'zh-CN' }, answer);
+        expect(reference.message).toContain('Supported parameters: member, package.');
         expect(protocol.getMetaItemLayered).not.toHaveBeenCalled();
     });
 
@@ -302,11 +304,77 @@ describe('[#23072] GET /meta/:type/:name/layers on the dispatcher: its closed se
         expect(protocol.getMetaItemLayered).not.toHaveBeenCalled();
     });
 
-    it('PRESERVATION — `?package=` still scopes the layered read', async () => {
+    it('[#26699] REFUSAL — a repeated `member` is one refusal on both transports, before the layered read', async () => {
+        const protocol = protocolDouble();
+        const answer = await bootDispatcher({ protocol }).call('GET', `${ITEM}/layers`, { member: ['zh-CN', 'ja-JP'] });
+        const reference = await sameRefusal('layers', { member: ['zh-CN', 'ja-JP'] }, answer);
+        expect(reference.message).toContain('"member" query parameter was supplied 2 times');
+        expect(protocol.getMetaItemLayered).not.toHaveBeenCalled();
+    });
+
+    it('PRESERVATION — `?package=` still scopes the layered read, and no selector sends no `member` key', async () => {
         const protocol = protocolDouble();
         const answer = await bootDispatcher({ protocol }).call('GET', `${ITEM}/layers`, { package: 'com.acme.mail' });
         expect(answer.status, JSON.stringify(answer.body)).toBe(200);
         expect(protocol.getMetaItemLayered.mock.calls[0][0]).toEqual({ type: 'email_template', name: NAME, packageId: 'com.acme.mail' });
+    });
+
+    it('[#26699] PRESERVATION — `?member=zh-CN` reaches `getMetaItemLayered` on both transports, with the package beside it', async () => {
+        const protocol = protocolDouble();
+        const answer = await bootDispatcher({ protocol }).call('GET', `${ITEM}/layers`, { member: ['zh-CN'], package: 'com.acme.mail' });
+        expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+        expect(answer.body?.data?.code).toEqual(MEMBERS['zh-CN']);
+        const expected = { type: 'email_template', name: NAME, packageId: 'com.acme.mail', member: 'zh-CN' };
+        expect(protocol.getMetaItemLayered.mock.calls[0][0]).toEqual(expected);
+
+        const restProtocol = protocolDouble();
+        const reference = await bootRest(restProtocol).layers({ member: 'zh-CN', package: 'com.acme.mail' });
+        expect(reference.status).toBe(200);
+        expect(restProtocol.getMetaItemLayered.mock.calls[0][0]).toEqual(expected);
+    });
+
+    it('[#26699] a member no layer holds is the absent item on both transports — never the canonical member\'s layers', async () => {
+        const protocol = protocolDouble();
+        const answer = await bootDispatcher({ protocol }).call('GET', `${ITEM}/layers`, { member: 'fr-FR' });
+        expect(answer.status, JSON.stringify(answer.body)).toBe(404);
+        expect(answer.body?.data).toBeUndefined();
+        const reference = await bootRest(protocolDouble()).layers({ member: 'fr-FR' });
+        expect(reference.status).toBe(404);
+    });
+
+    it('[#26699] a member on a type with no members is the protocol\'s located 400 on both transports, code and status', async () => {
+        const real = () => new ObjectStackProtocolImplementation({} as never);
+        const noMembers = /^The "member" selector names a bundle member, and a 'view' item has none: its identity is its name alone\./;
+        const protocol = real();
+        const spy = vi.spyOn(protocol, 'getMetaItemLayered');
+        const answer = await bootDispatcher({ protocol }).call('GET', '/view/task_grid/layers', { member: 'zh-CN' });
+        expect(answer.status, JSON.stringify(answer.body)).toBe(400);
+        expect(answer.body?.error?.code).toBe('VALIDATION_ERROR');
+        expect(answer.body?.error?.message).toMatch(noMembers);
+        // Reached, and refused there: the engine (`{}`) was never read.
+        expect(spy).toHaveBeenCalledTimes(1);
+
+        const server = {
+            get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn(), patch: vi.fn(), use: vi.fn(),
+            listen: vi.fn().mockResolvedValue(undefined), close: vi.fn().mockResolvedValue(undefined),
+        };
+        const rest: any = new RestServer(server as any, real() as any, { api: { requireAuth: false }, metadata: { enableCache: false } } as any);
+        rest.resolveExecCtx = async () => ({ ...AUTHOR });
+        rest.registerRoutes();
+        const route = rest.getRoutes().find((r: any) => r.method === 'GET' && r.path === '/api/v1/meta/:type/:name/layers');
+        const res: any = { statusCode: 200 };
+        res.status = (c: number) => { res.statusCode = c; return res; };
+        res.json = (b: unknown) => { res.body = b; return res; };
+        res.header = () => res; res.send = () => res; res.setHeader = () => res;
+        await route.handler({
+            method: 'GET', path: '/api/v1/meta/view/task_grid/layers', params: { type: 'view', name: 'task_grid' },
+            query: { member: 'zh-CN' }, headers: {}, body: {},
+        }, res);
+        expect(res.statusCode, JSON.stringify(res.body)).toBe(400);
+        const code = typeof res.body?.error === 'object' ? res.body.error.code : res.body?.code;
+        const message = typeof res.body?.error === 'object' ? res.body.error.message : res.body?.error;
+        expect(code).toBe('VALIDATION_ERROR');
+        expect(message).toMatch(noMembers);
     });
 });
 

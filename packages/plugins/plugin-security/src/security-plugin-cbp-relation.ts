@@ -30,8 +30,8 @@
  *
  * Every field the bodies read goes as a GETTER, by the rule cut 1 set: none of
  * the three is declared `readonly`. `start()` assigns `ql` and `logger` after
- * construction, and `cbpRelCache` is a plain field the metadata watch clears in
- * place.
+ * construction, and `cbpRelCache` is a plain field the metadata-change
+ * invalidation clears in place.
  *
  * `CbpRelation` keeps its one declaration in `security-plugin.ts`, beside the
  * cache that holds it and the consumers that read it; this module names it

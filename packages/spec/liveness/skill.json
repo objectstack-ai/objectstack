@@ -57,11 +57,6 @@
       "evidenceScope": "cross-repo",
       "evidence": "cloud @cb8ee7ff: packages/service-ai/src/skill-registry.ts#listSkills — an inactive record never enters the pool that listActiveSkills filters; packages/mcp/src/skill-prompts.ts#projectSkillPrompt — an inactive row is dropped from the MCP prompt list.",
       "note": "inactive skills dropped — by the cloud registry, and not projected as an MCP prompt either (#3905)."
-    },
-    "triggerPhrases": {
-      "status": "dead",
-      "verifiedAt": "2026-07-30",
-      "note": "REMOVED 2026-07-30 (#3896 close-out sweep) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and stripped from sources by the protocol-17 close-out conversion. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); routing intent belongs in `triggerConditions`; describe intent in `description`/`instructions`."
     }
   }
 }

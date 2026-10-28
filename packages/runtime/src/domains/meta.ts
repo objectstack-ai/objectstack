@@ -67,7 +67,7 @@ import type { ObjectStackProtocolImplementation } from '@objectstack/metadata-pr
 // ruling 6138588561) with the member selector's one reading
 // (`metaMemberSelector`): the item read, `PUT`, `/layers` and `/published`
 // each refuse a name they do not read, as `RestServer`'s doors do, and the
-// item read honours `?member=`.
+// item read and [#26699] `/layers` honour `?member=`.
 // [#23214] …and the arity of the four `/meta` doors whose only query rule it
 // is (`metaQueryArityRefusal` over `META_QUERY_ARITY_DOORS`): the list, the
 // book tree, `_drafts` and the state machine read refuse a repeated
@@ -880,11 +880,15 @@ async function answerMetaLayered(
     deps: DomainHandlerDeps,
     context: HttpProtocolContext,
     protocol: MetaLayeredProtocol,
-    request: { type: string; name: string; packageId: string | undefined; maskPosture: ObjectSchemaMaskPosture },
+    request: {
+        type: string; name: string; packageId: string | undefined; maskPosture: ObjectSchemaMaskPosture;
+        /** [#26699] The bundle member selector, as `metaMemberSelector` read it; `{}` — the canonical member. */
+        memberSelector?: { member?: string };
+    },
     saveVerdict: MetaSaveVerdict,
     headers: Readonly<Record<string, string | undefined>> = {},
 ): Promise<HttpDispatcherResult> {
-    const { type, name, packageId, maskPosture } = request;
+    const { type, name, packageId, maskPosture, memberSelector = {} } = request;
     const mayWriteItem = saveVerdict().allowed;
     let answer: MetaLayeredAnswer;
     try {
@@ -892,6 +896,7 @@ async function answerMetaLayered(
             type,
             name,
             ...(packageId ? { packageId } : {}),
+            ...memberSelector,
         });
         answer = await createMetaLayeredAnswer(
             metaItemReadGateSources(deps, context, protocol, mayWriteItem),
@@ -1141,9 +1146,12 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             const answer = await createMetaBookTreeAnswer(
                 {
                     ...metaItemReadGateSources(deps, _context, protocol),
+                    // [#26690] The translation I/O the item and list reads use: the
+                    // tree translates its book (the bundle's `books` group) the same way.
+                    ...metaTranslationSources(deps, _context, protocol, (i18n) =>
+                        metaRequestLocale({ headers: _context.request?.headers, query }, i18n)),
                     listTreeInput: (type, scopedPackageId) =>
                         Promise.resolve(protocol.getMetaItems!({ type, ...(scopedPackageId ? { packageId: scopedPackageId } : {}) })),
-                    requestLocale: (i18n) => metaRequestLocale({ headers: _context.request?.headers, query }, i18n),
                 },
                 { name: decodeMetaNameSegment(parts[1]), packageId },
             );
@@ -1168,11 +1176,12 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
     // segments, like `/published` beside it. The anonymous gate above keeps its
     // deny here (`metaReadRouteOf` names no route), as `RestServer`'s does.
     if (parts.length === 3 && parts[2] === 'layers' && (!method || method.toUpperCase() === 'GET')) {
-        // [#23072] The route's closed query set — `package`, the one name it
-        // reads — refused before the protocol, the masker and the read gate,
-        // where `RestServer`'s `/layers` refuses it: a `?member=` (the layered
-        // view shows the canonical member's layers) or any other name is a
-        // located 400, never dropped.
+        // [#23072] The route's closed query set refused before the protocol,
+        // the masker and the read gate, where `RestServer`'s `/layers` refuses
+        // it: any name it does not read is a located 400, never dropped.
+        // [#26699] The set is `package` and the bundle member selector, which
+        // reaches the protocol through its one reading (`metaMemberSelector`),
+        // as on the item read; the protocol judges its value.
         const queryRefusal = metaItemQueryRefusal('layers', query);
         if (queryRefusal) return queryRefusalAnswer(deps, queryRefusal);
         const type = parts[0];
@@ -1201,7 +1210,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         const packageId = metaItemPackageBinding(query?.package);
         return answerMetaLayered(
             deps, _context, protocol as MetaLayeredProtocol,
-            { type, name, packageId, maskPosture }, saveVerdict,
+            { type, name, packageId, maskPosture, memberSelector: metaMemberSelector(query) }, saveVerdict,
         );
     }
 

@@ -836,6 +836,11 @@ const ru = {
     addRecord: "Добавить запись",
     // objectui#12703 — the compact list's footer link to the object's list or the block's view.
     viewAll: "Показать все",
+    viewAllCount: "Показать все записи: {{count}}",
+    viewAllCount_one: "Показать {{count}} запись",
+    viewAllCount_few: "Показать все {{count}} записи",
+    viewAllCount_many: "Показать все {{count}} записей",
+    viewAllCount_other: "Показать все {{count}} записи",
     tabs: "Вкладки",
     allRecords: "Все записи",
     userFilters: {
@@ -1887,6 +1892,7 @@ const ru = {
       assistant: "Ассистент",
       liveCanvas: "Живой предпросмотр — {{app}} (черновик)",
       liveCanvasUnlisted: "Работающее приложение — {{app}} (скрыто до публикации)",
+      liveCanvasLive: "Работающее приложение — {{app}}",
       loadingAgents: "Загрузка агентов…",
       askAnything: "Спросите о чём угодно…",
       askOrChangeApp: "Спросите о данных или попросите меня изменить это приложение…",
@@ -2646,6 +2652,9 @@ const ru = {
       invitationDescription: "Используйте адрес электронной почты, на который пришло приглашение.",
       invitationSignUpButton: "Создать учётную запись и присоединиться",
       invitationSignInDivider: "или войдите в существующую учётную запись",
+      invitationPreviewTitle: "{{inviter}} приглашает вас в {{organization}}",
+      invitationPreviewTitleNoInviter: "Вас приглашают в {{organization}}",
+      invitationPreviewDescription: "Используйте адрес электронной почты, на который пришло приглашение ({{email}}).",
       showPasswordText: "Показать пароль",
       hidePasswordText: "Скрыть пароль",
       footer: {
@@ -2658,6 +2667,7 @@ const ru = {
       description: "Введите свои данные, чтобы начать",
       invitationTitle: "Создайте учётную запись, чтобы присоединиться",
       invitationDescription: "Зарегистрируйтесь с адресом, на который пришло приглашение. Принять его можно только с этим адресом.",
+      invitationPreviewDescription: "Зарегистрируйтесь с адресом, на который пришло приглашение ({{email}}). Принять его можно только с этим адресом.",
       nameLabel: "Имя",
       namePlaceholder: "Иван Иванов",
       emailLabel: "Электронная почта",
@@ -2858,6 +2868,8 @@ const ru = {
         dataRead: "Читать записи (в пределах ваших собственных прав)",
         dataWrite: "Создавать, изменять и удалять записи (в пределах ваших собственных прав)",
         actionsExecute: "Выполнять действия от вашего имени (в пределах ваших собственных прав)",
+        metadataWrite: "Создавать и изменять метаданные этого приложения в виде черновиков (в пределах ваших собственных прав) — публикует их человек",
+        unrecognised: "Нераспознанное разрешение: {{scope}}",
       },
       deny: "Отклонить",
       authorize: "Разрешить",
@@ -2994,6 +3006,7 @@ const ru = {
     build: {
       title: "Создать приложение",
       noCapability: "Создание приложений недоступно в этой системе — для этого нужно разрешение «Управление метаданными», которого нет у вашей учётной записи.",
+      inStudio: "Создать в Studio",
     },
     template: {
       title: "Начать с шаблона",
@@ -3220,6 +3233,8 @@ const ru = {
     recordAccessDeniedDescription: "У вас нет прав на просмотр записей этого типа. Обратитесь к администратору, если считаете, что доступ вам нужен.",
     recordLoadFailed: "Не удалось загрузить эту запись",
     recordLoadFailedDescription: "При загрузке произошла ошибка. Проверьте соединение и попробуйте снова.",
+    recordAccessEnded: "Решение записано",
+    recordAccessEndedDescription: "Ваш этап согласования завершён, поэтому доступ к этой записи прекращён.",
   },
   actionDialog: {
     title: "Параметры действия",
@@ -3844,7 +3859,7 @@ const ru = {
       unknownPhase: "Неизвестный этап сборки",
       nextStepsLead: "Дальше можно сказать: {{steps}}",
       nextStepQuote: "«{{step}}»",
-      draftPosture: "Дальнейшие изменения сохраняются как черновики, а публикуете их вы в Studio.",
+      draftPosture: "Дальнейшие изменения сохраняются как черновики; опубликуйте их кнопкой «Опубликовать» здесь, в чате.",
       checksPassed: "Проверки пройдены {{passed}}/{{total}}",
     },
     changes: {

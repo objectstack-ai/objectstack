@@ -10,9 +10,10 @@ import { ComponentRegistry } from '@object-ui/core';
 import type { SwitchSchema } from '@object-ui/types';
 import { Switch, Label } from '../../ui';
 import { toFormControlDomProps } from '../../lib/form-control-dom-props';
+import type { RendererHostProps } from '../../lib/renderer-host-props';
 
 ComponentRegistry.register('switch', 
-  ({ schema, className, ...props }: { schema: SwitchSchema; className?: string; [key: string]: any }) => {
+  ({ schema, className, ...props }: { schema: SwitchSchema; className?: string; [key: string]: unknown } & RendererHostProps) => {
     // Extract designer-related props
     const { 
         'data-obj-id': dataObjId, 

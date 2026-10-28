@@ -995,6 +995,10 @@ const en = {
     addRecord: 'Add record',
     // objectui#12703 — the compact list's footer link to the object's list or the block's view.
     viewAll: 'View all',
+    // objectstack#26613 — the capped list's footer link, with the records the list holds.
+    viewAllCount: 'View all {{count}} records',
+    viewAllCount_one: 'View {{count}} record',
+    viewAllCount_other: 'View all {{count}} records',
     tabs: 'Tabs',
     allRecords: 'All Records',
     // objectui#13405 — the synthetic trailing tab a `showAllRecords` user-filter bar adds.
@@ -2341,6 +2345,7 @@ const en = {
       assistant: 'Assistant',
       liveCanvas: 'Live preview — {{app}} (draft)',
       liveCanvasUnlisted: 'Live app — {{app}} (unlisted until published)',
+      liveCanvasLive: 'Live app — {{app}}',
       loadingAgents: 'Loading agents…',
       askAnything: 'Ask anything…',
       askOrChangeApp: 'Ask about your data, or ask me to change this app…',
@@ -3026,12 +3031,17 @@ const en = {
       welcomeDescription: 'Sign in to continue your work',
       // The same card's header when the visitor arrived signed out from an
       // invitation link (`?redirect=/accept-invitation/ID`), and the
-      // register-first action above the form. The copy names no organization
-      // or inviter: a signed-out page has no read of the invitation (#25886).
+      // register-first action above the form (#25886). The generic copy names
+      // no organization or inviter; the `invitationPreview*` lines below do,
+      // once the signed-out invitation preview answers for the link's id
+      // (#26473). `{{email}}` is the MASKED address the preview returns.
       invitationTitle: 'Accept your invitation',
       invitationDescription: 'Use the email address the invitation was sent to.',
       invitationSignUpButton: 'Create an account and join',
       invitationSignInDivider: 'or sign in to an existing account',
+      invitationPreviewTitle: '{{inviter}} invited you to join {{organization}}',
+      invitationPreviewTitleNoInviter: 'You are invited to join {{organization}}',
+      invitationPreviewDescription: 'Use the email address the invitation was sent to ({{email}}).',
       showPasswordText: 'Show password',
       hidePasswordText: 'Hide password',
       footer: {
@@ -3053,6 +3063,7 @@ const en = {
       description: 'Create your account to start building.',
       invitationTitle: 'Create an account to join',
       invitationDescription: 'Register with the email address the invitation was sent to. The invitation can only be accepted with that address.',
+      invitationPreviewDescription: 'Register with the email address the invitation was sent to ({{email}}). The invitation can only be accepted with that address.',
       nameLabel: 'Name',
       namePlaceholder: 'John Doe',
       emailLabel: 'Email',
@@ -3283,8 +3294,10 @@ const en = {
       unidentified: 'This application could not be identified.',
       clientId: 'Client ID',
       willAllow: 'This app will be able to:',
-      // Only the seven scopes the page maps by name; anything else renders the
-      // raw scope string, which is why there is no generic entry here.
+      // One sentence per scope the page names. The MCP agent scopes take their
+      // English from `@objectstack/spec`'s `MCP_OAUTH_SCOPE_CONSENT_COPY` (the
+      // page passes it as the default) and must read the same here. Any other
+      // scope renders as `unrecognised`, never as its raw spelling.
       scope: {
         openid: 'Confirm your identity',
         profile: 'Read your basic profile (name, picture)',
@@ -3293,6 +3306,8 @@ const en = {
         dataRead: 'Read records, within your own permissions',
         dataWrite: 'Create, change and delete records, within your own permissions',
         actionsExecute: 'Run actions on your behalf, within your own permissions',
+        metadataWrite: "Build and change this app's metadata as drafts, within your own permissions — a person publishes them",
+        unrecognised: 'Unrecognised permission: {{scope}}',
       },
       deny: 'Deny',
       authorize: 'Authorize',
@@ -3478,6 +3493,7 @@ const en = {
     build: {
       title: 'Build an app',
       noCapability: 'Building apps isn\'t available in this system — it requires the “Manage Metadata” permission, which your account doesn\'t have.',
+      inStudio: 'New in Studio',
     },
     template: {
       title: 'Start with a template',
@@ -3637,6 +3653,8 @@ const en = {
     recordAccessDeniedDescription: 'You don’t have permission to view records of this type. Contact your administrator if you think you should have access.',
     recordLoadFailed: 'Couldn’t load this record',
     recordLoadFailedDescription: 'Something went wrong while loading it. Check your connection and try again.',
+    recordAccessEnded: 'Decision recorded',
+    recordAccessEndedDescription: 'Your approval step is complete, so your access to this record has ended.',
     pageNotFound: 'Page Not Found',
     pageNotFoundDescription: 'The page "{{name}}" could not be found. It may have been removed or renamed.',
     dashboardNotFound: 'Dashboard Not Found',
@@ -4440,7 +4458,7 @@ const en = {
       unknownPhase: 'Unknown build phase',
       nextStepsLead: 'Next, you can say: {{steps}}',
       nextStepQuote: '“{{step}}”',
-      draftPosture: 'Later changes are saved as drafts, and you publish them in Studio.',
+      draftPosture: 'Later changes are saved as drafts; click Publish here in the chat to make them live.',
       checksPassed: 'Checks passed {{passed}}/{{total}}',
     },
     changes: {
@@ -5159,8 +5177,8 @@ const en = {
   // places"), so it has no fixed catalogue to key against and is passed through
   // untranslated — the same division `appManagement` states above. The runner
   // borrows `common.{loading,cancel,close,submit}` for its chrome and
-  // `wizard.missingRequired` for the pre-submit check, which is the same
-  // sentence `plugin-form`'s WizardForm raises.
+  // `validation.required` for the pre-submit check, drawn under each missing
+  // field — the same message the record form draws there.
   flowRunner: {
     // Fallback dialog title, used only when the `screen` node declares none.
     title: 'Input',

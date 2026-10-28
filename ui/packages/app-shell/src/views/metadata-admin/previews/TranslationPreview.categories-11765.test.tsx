@@ -63,10 +63,20 @@ const ONE_ENTRY: Record<string, { data: Record<string, unknown>; key: string; ro
   },
   pages: { data: { home: { label: 'Accueil' } }, key: 'home', row: () => keys(1) },
   flows: { data: { onboarding: { label: 'Intégration' } }, key: 'onboarding', row: () => keys(1) },
+  hooks: {
+    data: { credit_guard: { refusals: { CREDIT_LIMIT: { message: 'Limite de crédit dépassée.' } } } },
+    key: 'credit_guard',
+    row: () => keys(1),
+  },
   positions: { data: { legal_counsel: { label: 'Conseiller juridique' } }, key: 'legal_counsel', row: () => keys(1) },
   permissions: {
     data: { contract_reviewer: { label: 'Revue des contrats', description: 'Lire et approuver les contrats' } },
     key: 'contract_reviewer',
+    row: () => keys(2),
+  },
+  books: {
+    data: { crm_manual: { label: 'Manuel', groups: { start: { label: 'Démarrage' } } } },
+    key: 'crm_manual',
     row: () => keys(2),
   },
   metadataForms: { data: { object: { label: 'Objet' } }, key: 'object', row: () => keys(1) },

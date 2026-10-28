@@ -1,0 +1,216 @@
+{
+  "ref": "@objectstack/cli@18.0.0-next.5",
+  "sha": "820fd5aef0d694ffc20c8eccf4a629b6a4d36552",
+  "generatedAt": "2026-10-27T16:42:24.567Z",
+  "generator": "packages/qa/dogfood/test/upgrade-harness/cli-prerelease-fixture.ts generate",
+  "people": {
+    "admin": {
+      "email": "admin@objectos.ai",
+      "password": "admin123"
+    },
+    "memberA": {
+      "email": "n5.member-a@verify.test",
+      "password": "Fixture!Next5-A1"
+    },
+    "memberB": {
+      "email": "n5.member-b@verify.test",
+      "password": "Fixture!Next5-B1"
+    },
+    "invitee": {
+      "email": "n5.invitee@verify.test"
+    }
+  },
+  "tables": {
+    "_objectstack_sequences": 1,
+    "showcase_account": 14,
+    "showcase_announcement": 2,
+    "showcase_business_unit": 9,
+    "showcase_cascade": 0,
+    "showcase_category": 4,
+    "showcase_client_brief": 2,
+    "showcase_contact": 32,
+    "showcase_expense_line": 13,
+    "showcase_expense_report": 4,
+    "showcase_field_zoo": 2,
+    "showcase_inquiry": 3,
+    "showcase_invoice": 12,
+    "showcase_invoice_line": 5,
+    "showcase_preference": 1,
+    "showcase_private_note": 0,
+    "showcase_product": 4,
+    "showcase_project": 5,
+    "showcase_project_membership": 3,
+    "showcase_semantic_zoo": 0,
+    "showcase_semantic_zoo_legacy": 0,
+    "showcase_task": 12,
+    "showcase_team": 2,
+    "sys_account": 5,
+    "sys_api_key": 0,
+    "sys_approval_action": 3,
+    "sys_approval_approver": 4,
+    "sys_approval_delegation": 0,
+    "sys_approval_request": 3,
+    "sys_approval_token": 0,
+    "sys_attachment": 0,
+    "sys_audience_binding_suggestion": 1,
+    "sys_business_unit": 5,
+    "sys_business_unit_member": 0,
+    "sys_comment": 0,
+    "sys_comment_reaction": 0,
+    "sys_device_code": 0,
+    "sys_email": 4,
+    "sys_email_template": 0,
+    "sys_file": 0,
+    "sys_flow_credential": 0,
+    "sys_import_job": 0,
+    "sys_inbox_message": 4,
+    "sys_invitation": 2,
+    "sys_job": 3,
+    "sys_job_queue": 4,
+    "sys_jwks": 0,
+    "sys_mail_association": 0,
+    "sys_mail_message": 0,
+    "sys_mailbox": 0,
+    "sys_member": 5,
+    "sys_metadata": 0,
+    "sys_metadata_activation": 0,
+    "sys_metadata_commit": 0,
+    "sys_metadata_history": 0,
+    "sys_migration": 4,
+    "sys_migration_journal": 0,
+    "sys_notification_preference": 0,
+    "sys_notification_receipt": 4,
+    "sys_notification_subscription": 0,
+    "sys_notification_template": 0,
+    "sys_oauth_access_token": 0,
+    "sys_oauth_application": 0,
+    "sys_oauth_client_assertion": 0,
+    "sys_oauth_client_resource": 0,
+    "sys_oauth_consent": 0,
+    "sys_oauth_refresh_token": 0,
+    "sys_oauth_resource": 1,
+    "sys_organization": 1,
+    "sys_packages": 0,
+    "sys_platform_setting": 8,
+    "sys_presence": 0,
+    "sys_record_share": 1,
+    "sys_scim_connection_binding": 0,
+    "sys_scim_connection_credential": 0,
+    "sys_scim_group": 0,
+    "sys_scim_group_member": 0,
+    "sys_scim_identity_tombstone": 0,
+    "sys_scim_projection_grant": 0,
+    "sys_scim_subject": 0,
+    "sys_scim_user": 0,
+    "sys_secret": 0,
+    "sys_session": 3,
+    "sys_setting": 1,
+    "sys_setting_audit": 9,
+    "sys_share_link": 0,
+    "sys_sharing_rule": 0,
+    "sys_sso_provider": 0,
+    "sys_team": 0,
+    "sys_team_member": 0,
+    "sys_two_factor": 0,
+    "sys_upload_session": 0,
+    "sys_user": 5,
+    "sys_user_permission_set": 2,
+    "sys_user_position": 5,
+    "sys_user_preference": 0,
+    "sys_verification": 1,
+    "sys_webhook": 1
+  },
+  "mail": [
+    {
+      "id": "3a6bc605-5f69-4635-a5d8-528291c993ff",
+      "related_object": "sys_user",
+      "status": "failed",
+      "subject": "Verify your ObjectStack email address"
+    },
+    {
+      "id": "5297ac0f-70a7-4ef3-91dd-43faf20d12b2",
+      "related_object": "sys_user",
+      "status": "failed",
+      "subject": "Reset your ObjectStack password"
+    },
+    {
+      "id": "89172e91-77e9-4169-af86-e918e17bf1c2",
+      "related_object": "sys_invitation",
+      "status": "failed",
+      "subject": "Dev Admin invited you to Default Organization"
+    },
+    {
+      "id": "bad94ef3-ba27-4e38-a762-1b8d309af66a",
+      "related_object": "sys_invitation",
+      "status": "failed",
+      "subject": "Dev Admin invited you to Default Organization"
+    }
+  ],
+  "jobs": [
+    {
+      "id": "msg_415ca291-fa4b-4899-8408-f2e906b9c2d7",
+      "queue": "email.send.async",
+      "status": "pending",
+      "attempts": 2
+    },
+    {
+      "id": "msg_53a7d58b-e49c-440b-a942-60f1e53e71c3",
+      "queue": "email.send.async",
+      "status": "pending",
+      "attempts": 2
+    },
+    {
+      "id": "msg_c7a6912d-c265-4485-9ed5-349beab0dcab",
+      "queue": "email.send.async",
+      "status": "pending",
+      "attempts": 2
+    },
+    {
+      "id": "msg_d9a57d2c-14ca-4fc0-b211-b78bccffaf63",
+      "queue": "email.send.async",
+      "status": "pending",
+      "attempts": 2
+    }
+  ],
+  "globalAudit": [
+    {
+      "id": "-rSr7ub59vFMf8WM",
+      "namespace": "mail"
+    },
+    {
+      "id": "3eYfaHJ_qJtwfK_y",
+      "namespace": "mail"
+    },
+    {
+      "id": "BCnnIVb8WcyT5kea",
+      "namespace": "mail"
+    },
+    {
+      "id": "MDuOoVPnfcyCxSKW",
+      "namespace": "mail"
+    },
+    {
+      "id": "RAUWmJfqb5YtMJ-U",
+      "namespace": "mail"
+    },
+    {
+      "id": "eWSRCtwa5LxircIW",
+      "namespace": "auth"
+    },
+    {
+      "id": "edl5evTfiMTNQAt1",
+      "namespace": "mail"
+    },
+    {
+      "id": "onEB_uhWtxqTTEsh",
+      "namespace": "mail"
+    }
+  ],
+  "webhook": [
+    {
+      "id": "whk_2775de4f-e172-4425-a8a8-6b9b2dc3ef0d",
+      "organization_id": null,
+      "active": 1
+    }
+  ]
+}

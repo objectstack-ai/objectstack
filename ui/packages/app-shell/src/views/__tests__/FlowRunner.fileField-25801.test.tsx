@@ -136,8 +136,10 @@ describe('objectstack#25801 — a `type: \'file\'` screen field is the platform 
 
     fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
 
-    await waitFor(() => expect(toasts.error).toHaveBeenCalledTimes(1));
-    expect(String(toasts.error.mock.calls[0][0])).toContain('Contract');
+    // Refused at the field (objectstack#26882), naming it, with no toast.
+    await waitFor(() => expect(document.querySelector('[data-screen-field-error]')).not.toBeNull());
+    expect(document.querySelector('[data-screen-field-error]')?.textContent).toContain('Contract');
+    expect(toasts.error).not.toHaveBeenCalled();
     expect(authFetch).not.toHaveBeenCalled();
   });
 

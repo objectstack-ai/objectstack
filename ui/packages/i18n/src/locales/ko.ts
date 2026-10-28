@@ -786,6 +786,9 @@ const ko = {
     addRecord: "레코드 추가",
     // objectui#12703 — the compact list's footer link to the object's list or the block's view.
     viewAll: "모두 보기",
+    viewAllCount: "전체 {{count}}개 보기",
+    viewAllCount_one: "전체 {{count}}개 보기",
+    viewAllCount_other: "전체 {{count}}개 보기",
     tabs: "탭",
     allRecords: "전체 레코드",
     userFilters: {
@@ -1787,6 +1790,7 @@ const ko = {
       assistant: "어시스턴트",
       liveCanvas: "실시간 미리보기 — {{app}}(초안)",
       liveCanvasUnlisted: "실시간 앱 — {{app}}(게시 전까지 비공개)",
+      liveCanvasLive: "실시간 앱 — {{app}}",
       loadingAgents: "에이전트를 불러오는 중…",
       askAnything: "무엇이든 물어보세요…",
       askOrChangeApp: "데이터에 대해 묻거나 이 앱을 바꿔 달라고 요청하세요…",
@@ -2533,6 +2537,9 @@ const ko = {
       invitationDescription: "초대를 받은 이메일 주소를 사용하세요.",
       invitationSignUpButton: "계정 만들고 참여하기",
       invitationSignInDivider: "또는 기존 계정으로 로그인",
+      invitationPreviewTitle: "{{inviter}} 님이 {{organization}}에 초대했습니다",
+      invitationPreviewTitleNoInviter: "{{organization}}에 초대되었습니다",
+      invitationPreviewDescription: "초대를 받은 이메일 주소({{email}})를 사용하세요.",
       showPasswordText: "비밀번호 표시",
       hidePasswordText: "비밀번호 숨기기",
       footer: {
@@ -2545,6 +2552,7 @@ const ko = {
       description: "정보를 입력하여 시작하세요",
       invitationTitle: "계정을 만들고 참여하기",
       invitationDescription: "초대를 받은 이메일 주소로 가입하세요. 초대는 해당 주소로만 수락할 수 있습니다.",
+      invitationPreviewDescription: "초대를 받은 이메일 주소({{email}})로 가입하세요. 초대는 해당 주소로만 수락할 수 있습니다.",
       nameLabel: "이름",
       namePlaceholder: "홍길동",
       emailLabel: "이메일",
@@ -2745,6 +2753,8 @@ const ko = {
         dataRead: "레코드 읽기(본인 권한 범위 내)",
         dataWrite: "레코드 생성, 변경 및 삭제(본인 권한 범위 내)",
         actionsExecute: "사용자를 대신하여 작업 실행(본인 권한 범위 내)",
+        metadataWrite: "이 앱의 메타데이터를 초안으로 작성 및 변경(본인 권한 범위 내), 게시는 사람이 합니다",
+        unrecognised: "인식할 수 없는 권한: {{scope}}",
       },
       deny: "거부",
       authorize: "허용",
@@ -2881,6 +2891,7 @@ const ko = {
     build: {
       title: "앱 만들기",
       noCapability: "이 시스템에서는 앱 만들기를 사용할 수 없습니다 — ‘메타데이터 관리’ 권한이 필요하지만 계정에 해당 권한이 없습니다.",
+      inStudio: "Studio에서 새로 만들기",
     },
     template: {
       title: "템플릿으로 시작",
@@ -3094,6 +3105,8 @@ const ko = {
     recordAccessDeniedDescription: "이 유형의 레코드를 볼 권한이 없습니다. 접근이 필요하면 관리자에게 문의하세요.",
     recordLoadFailed: "이 레코드를 불러오지 못했습니다",
     recordLoadFailedDescription: "불러오는 중 문제가 발생했습니다. 연결을 확인하고 다시 시도하세요.",
+    recordAccessEnded: "결정이 기록되었습니다",
+    recordAccessEndedDescription: "승인 단계가 완료되어 이 레코드에 대한 접근 권한이 종료되었습니다.",
   },
   actionDialog: {
     title: "작업 매개변수",
@@ -3692,7 +3705,7 @@ const ko = {
       unknownPhase: "알 수 없는 빌드 단계",
       nextStepsLead: "다음으로 이렇게 말할 수 있습니다: {{steps}}",
       nextStepQuote: "“{{step}}”",
-      draftPosture: "이후 변경 사항은 초안으로 저장되며, Studio에서 직접 게시합니다.",
+      draftPosture: "이후 변경 사항은 초안으로 저장되며, 이 채팅의 「게시」로 게시합니다.",
       checksPassed: "검증 통과 {{passed}}/{{total}}",
     },
     changes: {

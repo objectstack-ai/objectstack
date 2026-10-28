@@ -84,7 +84,12 @@
  *   #7597 pins the hand-authored implicit form's fate). The door steps around
  *   every one of those decisions. [#25808] A `$now` anchor
  *   (`{ $now: true, addDays }`, `NowAnchorSchema`) the same way, and for the
- *   same reason: it is legal exactly where a reference is.
+ *   same reason: it is legal exactly where a reference is. [#26601] One part
+ *   of either IS judged here, at a scalar operator: an `addDays` offset
+ *   `{ $field }` naming a dotted path, refused in `driver-sql`'s same-table
+ *   words — ruling A on #25808
+ *   bounds the offset to a column of the same record, so the authoring doors
+ *   that run this walk refuse it on save instead of on the first read.
  * - **Arrays outside `$in`/`$nin`/`$between`.** An array in an implicit or
  *   scalar-operator position is answered per driver today (`driver-sql` and
  *   `driver-memory` refuse it, each with its own message; `driver-mongodb`
@@ -216,38 +221,95 @@ function isFieldReference(value: unknown): boolean {
  * resolved form the engine hands the executors (`$now` holding the pinned ISO
  * instant). Not a literal either: its legality per position is the anchor's
  * own ruling (the six scalar comparisons, as a `{ $field }` reference), and a
- * malformed one is refused by its own schema sentence at the authoring door
- * and by each executor at query time. Matches `driver-sql`'s `nowAnchorOf` on
- * what an anchor IS: a non-array object whose `$now` is `true` or a string.
+ * malformed one is refused by this walk ({@link isWellFormedNowAnchor}).
+ * Matches `driver-sql`'s `nowAnchorOf` on what an anchor IS: a non-array
+ * object whose `$now` is `true` or a string.
  */
 function isNowAnchor(value: unknown): boolean {
   return isFilterNode(value) && (value.$now === true || typeof value.$now === 'string');
 }
 
 /**
+ * [#26413] The keys a now-anchor carries: `NowAnchorSchema` is closed over
+ * exactly these two, and `filter-comparand-type.test.ts` reconciles this set
+ * against the schema's own shape. Restated rather than imported because
+ * `filter.zod.ts` imports this module.
+ */
+const NOW_ANCHOR_KEYS: ReadonlySet<string> = new Set(['$now', 'addDays']);
+
+function undeclaredNowAnchorKeys(value: Record<string, unknown>): string[] {
+  return Object.keys(value).filter((key) => !NOW_ANCHOR_KEYS.has(key));
+}
+
+/**
  * [#25808] Is this anchor WELL-FORMED — `addDays` present, an integer or a
- * `{ $field: string }`? The door steps around a well-formed anchor as it steps
- * around a reference; a malformed one (`{ $now: true }` with no offset, a
- * fractional or string offset) is refused HERE in the anchor's own words,
- * because the `FilterCondition` door runs this walk and not the operator
- * schemas, and an exemption by `$now` alone would have let the malformed shape
- * through to the executors as a plain object they each refuse differently.
+ * `{ $field: string }`, and no other key? The door steps around a well-formed
+ * anchor as it steps around a reference; a malformed one (`{ $now: true }`
+ * with no offset, a fractional or string offset) is refused HERE in the
+ * anchor's own words, because the `FilterCondition` door runs this walk and
+ * not the operator schemas, and an exemption by `$now` alone would have let
+ * the malformed shape through to the executors as a plain object they each
+ * refuse differently.
+ *
+ * [#26413] An undeclared key (`subDays`, `note`) makes the anchor malformed
+ * too, as `NowAnchorSchema` declares: every executor reads `$now` and
+ * `addDays` only, so a kept extra key would run the query on the `addDays`
+ * reading alone and say nothing.
  */
 function isWellFormedNowAnchor(value: Record<string, unknown>): boolean {
+  if (undeclaredNowAnchorKeys(value).length > 0) return false;
   const offset = value.addDays;
   if (typeof offset === 'number') return Number.isInteger(offset);
   return isFilterNode(offset) && typeof offset.$field === 'string';
 }
 
 function malformedNowAnchorRefusal(context: string | undefined, path: string, value: Record<string, unknown>): Error {
-  const detail = value.addDays === undefined
-    ? 'it carries no addDays — for the unshifted instant write the "{now}" placeholder'
-    : `its addDays (${preview(value.addDays)}) is neither an integer nor a { "$field": "numeric_column" } reference`;
+  const undeclared = undeclaredNowAnchorKeys(value);
+  // The subDays clause answers the one extra key it explains, so a refusal of
+  // any other key stays inside the 500-char client bound with its last
+  // sentence intact.
+  const detail = undeclared.length > 0
+    ? `it carries an undeclared key ${undeclared.map((key) => preview(key)).join(', ')} — the anchor takes `
+      + `$now and addDays only${undeclared.includes('subDays') ? ' (there is no subDays: a negative addDays subtracts)' : ''}`
+    : value.addDays === undefined
+      ? 'it carries no addDays — for the unshifted instant write the "{now}" placeholder'
+      : `its addDays (${preview(value.addDays)}) is neither an integer nor a { "$field": "numeric_column" } reference`;
   return invalidComparandError(
     context,
     `Filter comparand at ${path} is a malformed now-anchored comparand (${preview(value)}): ${detail}. `
       + `A now-anchored comparand is { "$now": true, "addDays": <integer | { "$field" }> }: the current `
       + `instant shifted by whole days. ${NOT_APPLIED}`,
+  );
+}
+
+/**
+ * [#26601] The column an `addDays` offset reads from — the `$field` of a
+ * `{ $field }` offset on a reference or on a now-anchor — when it is a DOTTED
+ * path, else `undefined`. Ruling A on #25808 bounds the offset to a column of
+ * the SAME record, and SQL push-down refuses a dotted one on every read
+ * (`driver-sql`, the 2026-08-06 same-table ruling); the one executor that
+ * walks the path, the formula evaluator, reads a lookup's id there and counts
+ * the offset as zero days. So the walk refuses it, and the authoring doors
+ * that run the walk refuse it on save rather than on the first read.
+ */
+function dottedAddDaysOffset(value: Record<string, unknown>): string | undefined {
+  const offset = value.addDays;
+  if (!isFilterNode(offset)) return undefined;
+  const ref = offset.$field;
+  return typeof ref === 'string' && ref.includes('.') ? ref : undefined;
+}
+
+/**
+ * The refusal of a dotted offset, its reason in `driver-sql`'s own words for
+ * the same refusal, so the save door and the first read say one sentence.
+ */
+function dottedAddDaysOffsetRefusal(context: string | undefined, path: string, ref: string): Error {
+  return invalidComparandError(
+    context,
+    `Filter comparand at ${path} is refused: the addDays offset ${preview(ref)} is a dotted path, and SQL `
+      + 'push-down compiles same-table column references only (no relation traversal, no '
+      + 'alias-qualified columns). Name a numeric column of the same record instead, holding the '
+      + `related value. ${NOT_APPLIED}`,
   );
 }
 
@@ -347,6 +409,17 @@ type ComparandVerdict =
   | { kind: 'refuse'; error: Error };
 
 /**
+ * [#26601] A reference or a well-formed anchor is stepped around — unless its
+ * `addDays` offset names a dotted path ({@link dottedAddDaysOffset}).
+ */
+function judgeAddDaysOffset(context: string | undefined, path: string, value: Record<string, unknown>): ComparandVerdict {
+  const dotted = dottedAddDaysOffset(value);
+  return dotted === undefined
+    ? { kind: 'keep' }
+    : { kind: 'refuse', error: dottedAddDaysOffsetRefusal(context, path, dotted) };
+}
+
+/**
  * Judge one LITERAL comparand. `skip` answers (as `keep`) the shapes the door
  * deliberately does not judge — see the module note's list.
  */
@@ -367,10 +440,11 @@ function judgeLiteralComparand(
   // field references, and plain-object filter STRUCTURE — the caller routes
   // those before asking. What reaches this line is a non-plain object
   // (Map / Set / class instance), a Symbol or a function.
-  if (Array.isArray(value) || isFieldReference(value)) return { kind: 'keep' };
+  if (Array.isArray(value)) return { kind: 'keep' };
+  if (isFieldReference(value)) return judgeAddDaysOffset(context, path, value as Record<string, unknown>);
   if (isNowAnchor(value)) {
     return isWellFormedNowAnchor(value as Record<string, unknown>)
-      ? { kind: 'keep' }
+      ? judgeAddDaysOffset(context, path, value as Record<string, unknown>)
       : { kind: 'refuse', error: malformedNowAnchorRefusal(context, path, value as Record<string, unknown>) };
   }
   return { kind: 'refuse', error: comparandTypeRefusal(context, path, value) };
@@ -425,7 +499,9 @@ export function normalizeFilterComparandTypes<T>(node: T, context?: string, path
 function normalizeFieldSpec(context: string | undefined, path: string, spec: unknown): unknown {
   // A plain object is filter STRUCTURE: an operator spec, a nested-relation /
   // deep-equality condition (not descended into — see the module note), or a
-  // field reference (stepped around — #7597 owns its fate).
+  // field reference (stepped around whole — #7597 owns its fate, a dotted
+  // `addDays` beside it included: that bare form is an operator spec named
+  // `$field`, which no executor implements).
   if (isFilterNode(spec)) {
     if (isFieldReference(spec)) return spec;
     const keys = Object.keys(spec);

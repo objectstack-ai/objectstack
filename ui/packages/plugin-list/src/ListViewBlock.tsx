@@ -9,7 +9,7 @@
 import React, { useContext } from 'react';
 import { elementDataSourceBlock, isElementDataSourceConfig, isListViewVisualization } from '@object-ui/core';
 import { useObjectTranslation } from '@object-ui/i18n';
-import { usePageRegionPosture } from '@object-ui/components';
+import { usePageRegionPosture, usePageTabCountReporter } from '@object-ui/components';
 import { usePermissions } from '@object-ui/permissions';
 import {
   ElementDataSourceGate,
@@ -135,7 +135,8 @@ function namesRecordSource(schema: ListViewSchema): boolean {
 }
 
 /**
- * Where the compact list's "View all" link goes (objectui#12703, part 2): the
+ * Where the compact and capped lists' "View all" link goes (objectui#12703,
+ * part 2; objectstack#26613): the
  * host's list destination for the object this block reads, on the saved view
  * the block binds (`dataSource.view`) when it binds one, else the object's own
  * list. `null` when the host publishes no `listHref`, answers `null`, or the
@@ -322,15 +323,24 @@ const ListViewBlock = elementDataSourceBlock(React.forwardRef<ListViewHandle, Li
   const handOff = React.useMemo(() => toListViewHandOff(props.schema), [props.schema]);
 
   // The page region's posture (objectui#12703), measured by the page renderer:
-  // a region narrower than half the page asks for the compact list. `null`
+  // a region narrower than half the page asks for the compact list, and one
+  // half the page or wider for the capped list (objectstack#26613): its first
+  // rows, at most `dataSource.limit` of them (the binding lands it on
+  // `pagination.pageSize`), 5 when none is stated, then 「View all N →」. `null`
   // (no page region around this block, or a width not known yet) keeps the
   // full list. Read here, on the page block, and not in `ListView`, so the
   // object list page and every other host of `ListView` are untouched.
-  const compact = usePageRegionPosture() === 'compact';
-  // The host's list destination builder, for the compact list's "View all"
-  // link (objectui#12703, part 2), read only when the posture is compact, and
+  const posture = usePageRegionPosture();
+  const compact = posture === 'compact';
+  const capped = posture === 'full';
+  // The host's list destination builder, for the compact and capped lists'
+  // "View all" link (objectui#12703, part 2), read only in those postures, and
   // the `onCreate` it serves for the Add button (objectui#13074).
   const host = useRelatedRecordActions();
+  // The count channel of the `page:tabs` panel this block sits in, `undefined`
+  // outside one (objectstack#26613): the tab's badge says how many records the
+  // list holds, the number its own query answered.
+  const reportTabCount = usePageTabCountReporter();
 
   // A list that names its records in neither place has nothing to fetch, and
   // drew the "Nothing here yet" empty state, which reads as an empty query
@@ -393,13 +403,15 @@ const ListViewBlock = elementDataSourceBlock(React.forwardRef<ListViewHandle, Li
         // hop into `ListView` only through a document-derived name.
         const listSchema = add.schema;
         return (
-          <CompactListDestinationContext.Provider value={compact ? compactListDestination(host, schema) : null}>
+          <CompactListDestinationContext.Provider value={compact || capped ? compactListDestination(host, schema) : null}>
             <ListView
               ref={ref}
               {...props}
               schema={listSchema}
               dataSource={adapter}
               compact={compact}
+              capped={capped}
+              onTotalChange={reportTabCount}
               onAddRecord={add.onAddRecord}
             />
           </CompactListDestinationContext.Provider>

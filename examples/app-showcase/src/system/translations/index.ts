@@ -514,13 +514,20 @@ export const ShowcaseTranslationBundle = {
         _actions: {
           // The two recalc surfaces of the same endpoint: one dispatch per
           // record vs ONE dispatch for the whole selection (objectui#3139).
+          //
+          // Each success message names the task it changed, as its English
+          // source does (`src/ui/actions/index.ts`): this entry REPLACES the
+          // source copy for a zh-CN viewer, and the runner fills its
+          // `{{ record.title }}` hole the same way. An unbound path prints
+          // empty, so `default` restores the object wording for a list row
+          // whose view does not project `title`.
           showcase_recalc_estimate: {
             label: '重算工时',
-            successMessage: '工时已重算。',
+            successMessage: "已重算{{ record.title | default:'该任务' }}的工时。",
           },
           showcase_recalc_selection: {
             label: '重算所选',
-            successMessage: '已为整个选中集重算工时。',
+            successMessage: "已为{{ record.title | default:'整个选中集' }}重算工时。",
           },
           // The hook-refusal specimen: every click is refused by
           // showcase_guard_task_reopen, so it carries no successMessage.
@@ -530,13 +537,13 @@ export const ShowcaseTranslationBundle = {
           // word the recalc entries above use; 重新分配 is the reassign
           // wizard's own flow label (`flows.showcase_reassign_wizard`); 新建…
           // is the shape a create entry takes in this bundle.
-          showcase_mark_done: { label: '标记为完成', successMessage: '任务已标记为完成。' },
+          showcase_mark_done: { label: '标记为完成', successMessage: "{{ record.title | default:'任务' }}已标记为完成。" },
           showcase_open_docs: { label: '打开文档' },
           showcase_bulk_reassign: { label: '重新分配…' },
           showcase_quick_view: { label: '快速查看' },
           showcase_log_time: { label: '记录工时' },
           showcase_new_task: { label: '新建任务' },
-          showcase_archive_task: { label: '归档', successMessage: '任务已归档（演示——未修改任何数据）。' },
+          showcase_archive_task: { label: '归档', successMessage: "{{ record.title | default:'任务' }}已归档（演示——未修改任何数据）。" },
         },
         // Section headings of the six form-view projections in
         // `ui/views/task.view.ts` (edit / tabbed / wizard / split / quick).
@@ -775,6 +782,9 @@ export const ShowcaseTranslationBundle = {
       showcase_expense_line: {
         fields: {
           incurred_at: { label: '发生时间' },
+          // The inline grid heading on the expense report's form — a key born
+          // with its slot, so it is translated at birth like the label above.
+          expense_report: { inlineTitle: '费用明细' },
         },
       },
       // See the `en` side for why this entry translates exactly ONE field and
@@ -782,6 +792,8 @@ export const ShowcaseTranslationBundle = {
       showcase_invoice_line: {
         fields: {
           service_start: { label: '服务开始时间' },
+          // The inline grid heading on the invoice form, translated at birth.
+          invoice: { inlineTitle: '发票明细' },
         },
       },
       showcase_preference: {
@@ -1342,8 +1354,30 @@ export const ShowcaseTranslationBundle = {
     reports: {
       showcase_hours_by_status: { label: '按状态统计工时（汇总）', description: '按任务状态分组的预计工时。' },
       showcase_status_priority_matrix: { label: '状态 × 优先级（矩阵）', description: '按状态和优先级交叉统计的预计工时。' },
-      showcase_task_overview: { label: '任务概览（联合）', description: '将多个任务子报表堆叠在一个联合视图中。' },
+      showcase_task_overview: {
+        label: '任务概览（联合）',
+        description: '将多个任务子报表堆叠在一个联合视图中。',
+        // The joined report's block headings, keyed by block `name`.
+        blocks: {
+          open_block: { label: '未完成任务' },
+          done_block: { label: '已完成任务' },
+        },
+      },
       showcase_hours_by_status_chart: { label: '按状态统计工时（图表）', description: '以柱状图展示按状态统计的预计工时。' },
+    },
+    // The docs book: its title and the docs sidebar's section titles, keyed by
+    // the book's `name` and each group's `key`. The docs themselves localize
+    // through `doc.translations` and `<name>.zh-CN.md` variants.
+    books: {
+      showcase_manual: {
+        label: '示例手册',
+        description: '这个综合示例工作区里的一切。',
+        groups: {
+          start: { label: '入门' },
+          tour: { label: '导览' },
+          guides: { label: '指南' },
+        },
+      },
     },
   },
 };

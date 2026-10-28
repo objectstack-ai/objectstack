@@ -963,6 +963,13 @@ import { dirname, join } from 'node:path';
 import ts from 'typescript';
 import type { z } from 'zod';
 import type { WithoutCatchall } from './zod-catchall-type';
+// The spec-only-key census (objectstack#25923) walks the WHOLE spec/ui surface to
+// pair each mirror with its same-name spec schema — the namespace import is its
+// instrument, read at runtime only, a sanctioned importer (#3090 tripwire).
+// eslint-disable-next-line no-restricted-imports
+import * as SpecUi from '@objectstack/spec/ui';
+import * as SpecData from '@objectstack/spec/data';
+import * as ZodBarrel from '../zod/index.zod.js';
 
 import { AppComponentSchema, AppSchemaRendererNodeSchema, MenuItemSchema as AppMenuItemSchema, NavigationAreaSchema, NavigationItemSchema } from '../zod/app.zod.js';
 import { BaseSchema, ComponentConfigSchema, ComponentInputSchema, ComponentMetaSchema, KeyedI18nLabelSchema, SchemaNodeSchema } from '../zod/base.zod.js';
@@ -971,7 +978,7 @@ import { ChecklistBlockItemSchema, ChecklistBlockSchema, HeroBlockSchema, StatBl
 import { RecordApprovalDecisionBlockSchema } from '../zod/record-approval-decision.zod.js';
 import { RecordApprovalsBlockSchema, RecordAttachmentsBlockSchema } from '../zod/record-panels.zod.js';
 import { CalendarEventSchema, CalendarViewSchema, CarouselItemSchema, CarouselSchema, ChatbotSchema, ChatbotEnhancedSchema, ChatbotFloatingSchema, ChatMessageSchema, ChatMessageSourceSchema, ChatToolInvocationSchema, DashboardComponentSchema, DashboardConfigSchema, DashboardWidgetConfigSchema, DashboardWidgetLayoutSchema, DashboardWidgetSchema, FilterBuilderSchema, FilterFieldSchema, KanbanCardSchema, KanbanColumnSchema, CardTemplateSchema, FilterGroupSchema } from '../zod/complex.zod.js';
-import { ActionSchema, CRUDDialogSchema, DetailSchema } from '../zod/crud.zod.js';
+import { CRUDActionSchema, CRUDDialogSchema, DetailSchema } from '../zod/crud.zod.js';
 import { AlertSchema, AvatarSchema, BadgeSchema, BarChartSchema, ChartDataSeriesSchema, ChartSchema, DataTableSchema, DrillDownConfigSchema, KbdSchema, ListItemSchema, ListSchema, MarkdownSchema, PivotTableSchema, StaticTableColumnSchema, StatisticSchema, TableColumnSchema, TableSchema, TimelineEventSchema, TimelineFeedItemSchema, TimelineGanttItemBarSchema, TimelineGanttItemSchema, TimelineSchema, TreeNodeSchema, TreeViewSchema } from '../zod/data-display.zod.js';
 import { BPMNEdgeSchema, BPMNLaneSchema, BPMNNodeSchema, DataModelDesignerSchema, DataModelEntitySchema, DataModelFieldSchema, DataModelRelationshipSchema, DesignerCanvasConfigSchema, DesignerComponentSchema, DesignerFieldDefinitionSchema, DesignerFieldOptionSchema, DesignerPaletteCategorySchema, DesignerPaletteItemSchema, DesignerPositionSchema, FieldDesignerSchema, ObjectDefinitionSchema, ObjectManagerSchema, PageDesignerSchema, ProcessDesignerSchema, ReportDesignerElementSchema, ReportDesignerSchema, ReportDesignerSectionSchema } from '../zod/designer.zod.js';
 import { AccordionItemSchema, AccordionSchema, CollapsibleSchema, ToggleGroupItemSchema, ToggleGroupSchema } from '../zod/disclosure.zod.js';
@@ -4918,11 +4925,11 @@ const EXCLUSIONS: Readonly<Record<string, string>> = {
   // pinned in `./content-channel-public-blocks-9256.test.ts`; each entry below
   // names them where they apply.
   'public-blocks.zod.ts#PageHeaderBlockSchema':
-    "spec-owned BY REFERENCE — `BaseSchema` + the `page:header` literal + `properties`, which IS `ComponentPropsMap['page:header']`, + the objectui#9256 `body` / `children` refusals (its renderer reads neither channel); no TS declaration in this package restates the node",
+    "spec-owned BY REFERENCE — `BaseSchema` + the `page:header` literal + `properties`, which IS `ComponentPropsMap['page:header']`, + an objectstack#25767 `agedOutSpecKeyRefusal` for the flat `icon` (the row's tombstone aged out at spec 18.2, so `flatPropRefusals` no longer sees the name), + the objectui#9256 `body` / `children` refusals (its renderer reads neither channel); no TS declaration in this package restates the node",
   'public-blocks.zod.ts#PageTabsBlockSchema':
     "spec-owned BY REFERENCE — `BaseSchema` + the `page:tabs` literal + `properties`, which IS `ComponentPropsMap['page:tabs']`, + the `onTabChange` runtime-slot refusal (objectui#6124) its renderer's read requires, + the objectui#9256 `body` / `children` refusals (its renderer reads neither channel); no TS declaration in this package restates the node",
   'public-blocks.zod.ts#PageCardBlockSchema':
-    "spec-owned BY REFERENCE — `BaseSchema` + the `page:card` literal + `properties`, which IS `ComponentPropsMap['page:card']`, + the objectui#10872 batch-6 `body` / `children` refusals (its renderer reads the child list, whose home is the row's `properties.children`); no TS declaration in this package restates the node",
+    "spec-owned BY REFERENCE — `BaseSchema` + the `page:card` literal + `properties`, which IS `ComponentPropsMap['page:card']`, + an objectstack#25767 `agedOutSpecKeyRefusal` for the flat `actions` (the row's tombstone aged out at spec 18.2, so `flatPropRefusals` no longer sees the name), + the objectui#10872 batch-6 `body` / `children` refusals (its renderer reads the child list, whose home is the row's `properties.children`); no TS declaration in this package restates the node",
   'public-blocks.zod.ts#PageAccordionBlockSchema':
     "spec-owned BY REFERENCE — `BaseSchema` + the `page:accordion` literal + `properties`, which IS `ComponentPropsMap['page:accordion']`, + the objectui#9256 `body` / `children` refusals (its renderer reads neither channel); no TS declaration in this package restates the node",
   'public-blocks.zod.ts#PageSectionBlockSchema':
@@ -4932,7 +4939,7 @@ const EXCLUSIONS: Readonly<Record<string, string>> = {
   'public-blocks.zod.ts#PageSidebarBlockSchema':
     "spec-owned BY REFERENCE — `BaseSchema` + the `page:sidebar` literal + `properties`, which IS `ComponentPropsMap['page:sidebar']`, + the objectui#10872 batch-6 `body` / `children` refusals (its renderer reads the child list, whose home is the row's `properties.children`); no TS declaration in this package restates the node",
   'public-blocks.zod.ts#RecordDetailsBlockSchema':
-    "spec-owned BY REFERENCE — `BaseSchema` + the `record:details` literal + `properties`, which IS `ComponentPropsMap['record:details']`, + `dataSource`, which IS the spec's `ElementDataSourceSchema` (objectui#12294), + the objectui#9256 `body` / `children` refusals (its renderer reads neither channel); no TS declaration in this package restates the node",
+    "spec-owned BY REFERENCE — `BaseSchema` + the `record:details` literal + `properties`, which IS `ComponentPropsMap['record:details']`, + an objectstack#25767 `agedOutSpecKeyRefusal` for the flat `layout` (the row's tombstone aged out at spec 18.2, so `flatPropRefusals` no longer sees the name), + `dataSource`, which IS the spec's `ElementDataSourceSchema` (objectui#12294), + the objectui#9256 `body` / `children` refusals (its renderer reads neither channel); no TS declaration in this package restates the node",
   'public-blocks.zod.ts#RecordHighlightsBlockSchema':
     "spec-owned BY REFERENCE — `BaseSchema` + the `record:highlights` literal + `properties`, which IS `ComponentPropsMap['record:highlights']`, + `dataSource`, which IS the spec's `ElementDataSourceSchema` (objectui#12294), + the objectui#9256 `body` / `children` refusals (its renderer reads neither channel); no TS declaration in this package restates the node",
   'public-blocks.zod.ts#RecordRelatedListBlockSchema':
@@ -5035,7 +5042,7 @@ const EXCLUSIONS: Readonly<Record<string, string>> = {
     "a union OVER the mirrors, not an object of its own — its members are checked individually above",
   'crud.zod.ts#ActionExecutionModeSchema':
     "a bare vocabulary with no `.shape`; it is checked where a mirrored KEY declares it",
-  'crud.zod.ts#ActionSchema':
+  'crud.zod.ts#CRUDActionSchema':
     "recursive; a `z.lazy` exposes no `.shape` to read, so there is no key set for the per-key comparison. Since objectui#7760 it carries its TS declaration as BOTH type arguments, so the pair IS compared — as a whole type, by `tsc`, at the annotation itself",
   'crud.zod.ts#CRUDComponentSchema':
     "a union OVER the mirrors, not an object of its own — its members are checked individually above",
@@ -5657,6 +5664,174 @@ the strict face refuses it), or \`.strict()\` where refusing is the contract.`).
       })
       .map(([key]) => key);
     expect(strip, 'a registered mirror parses in strip mode — see objectstack#25923').toEqual([]);
+  });
+});
+
+/* ── The spec-only direction: keys the SPEC declares that no mirror carries ──── */
+
+/**
+ * objectstack#25923, work item 4. Every direction above compares a mirror with the
+ * TypeScript declaration it restates. This one compares it with the `@objectstack/spec`
+ * schema it stands beside, from the other side: a key the spec declares on that schema
+ * and the mirror neither declares nor refuses is, on the tolerant face, a silent pass
+ * (`.passthrough()` keeps it unexamined), and on the strict face an `unrecognized_keys`
+ * report the spec would not give.
+ *
+ * The PAIRS are derived, never listed: (1) a barrel export and a `@objectstack/spec/ui`
+ * or `/data` export under the SAME name, both objects; (2) a barrel export whose `type`
+ * is one literal with a `ComponentPropsMap` row, the row being the spec side (a
+ * `properties` bag's members count as the mirror's own). Each key that pairing finds
+ * on the spec side only must be DERIVED (declared by reference, and then it is not
+ * spec-only any more), REFUSED by name, or carry a row below saying why objectui
+ * leaves it out. ⛔ No row for a key a mirror could declare by reference and a
+ * renderer reads: derive it instead.
+ *
+ * The rows are the `FormField` name collision only. objectui's `FormFieldSchema`
+ * (`form.zod.ts`) is the RUNTIME widget config (`name` = form data path); the spec's
+ * is the authored form-VIEW entry (`field` = object-field reference). The two layers
+ * meet in `@object-ui/plugin-form`'s `normalizeSectionField`, which
+ * `sectionFields.spec-parity.test.ts` covers key by key (ruling objectui#3090; the
+ * `@object-ui/types:FormField` entry in `ui/scripts/check-spec-symbol-derivation.mjs`).
+ * So a row here says what that translation does with the key on the runtime layer.
+ */
+type SpecOnlyDisposition =
+  /** `normalizeSectionField` writes it onto the runtime field under another name, which renders. */
+  | 'translated'
+  /** `normalizeSectionField` copies it onto the runtime field and no renderer reads it there. */
+  | 'carried, not rendered'
+  /** The spec refuses it itself; `normalizeSectionField` has no destination for it. */
+  | 'spec-retired';
+
+const SPEC_ONLY_KEY_ROWS: Record<string, { disposition: SpecOnlyDisposition; why: string }> = {
+  'FormFieldSchema.field': {
+    disposition: 'translated',
+    why: "the spec entry's object-field reference becomes the runtime field's `name`; the runtime `FormField.field` is the resolved field-metadata stash, kept off this mirror on purpose (objectui#6609)",
+  },
+  'FormFieldSchema.helpText': {
+    disposition: 'translated',
+    why: '`normalizeSectionField` writes it as the runtime `description`, which the form renders under the control',
+  },
+  'FormFieldSchema.immutable': {
+    disposition: 'carried, not rendered',
+    why: '`normalizeSectionField` copies it onto the runtime field; no form renderer reads `immutable`, so an edit-mode form leaves the control editable',
+  },
+  'FormFieldSchema.keyField': {
+    disposition: 'carried, not rendered',
+    why: "`normalizeSectionField` copies it through for the record widget (ADR-0007); no widget reads it from the runtime field yet (the mapper's own comment)",
+  },
+  'FormFieldSchema.disclosure': {
+    disposition: 'carried, not rendered',
+    why: "`normalizeSectionField` copies it through for the composite widgets (ADR-0007); no widget reads it from the runtime field yet (the mapper's own comment)",
+  },
+  'FormFieldSchema.precision': {
+    disposition: 'carried, not rendered',
+    why: "`normalizeSectionField` copies it onto the runtime field; the number widgets read `scale` and the object field's own metadata (`FormField.field`), never the runtime field's `precision`",
+  },
+  'FormFieldSchema.publicPicker': {
+    disposition: 'spec-retired',
+    why: 'a `retiredKey()` tombstone in the spec since 17.6.0, which refuses it with its own remedy; it gated a server route that no longer exists, and the runtime layer never had it (exemption ruled on objectui#4648)',
+  },
+};
+
+type ShapeHolder = { _zod?: { def?: { type?: string; shape?: Record<string, unknown>; getter?: () => unknown; innerType?: unknown; in?: unknown; schema?: unknown; values?: unknown[]; value?: unknown } } };
+
+/** The object a schema stands for, through the wrappers a mirror or a spec export carries. */
+function objectOf(schema: unknown): Record<string, unknown> | undefined {
+  let cur = schema as ShapeHolder | undefined;
+  for (let i = 0; i < 30 && cur?._zod?.def; i++) {
+    const def = cur._zod.def;
+    if (def.type === 'object') return def.shape;
+    const next = def.type === 'lazy' && def.getter ? def.getter() : def.innerType ?? def.in ?? def.schema;
+    cur = next as ShapeHolder | undefined;
+  }
+  return undefined;
+}
+
+/** The one `type` literal an object declares, or `undefined`. */
+function typeLiteralOf(shape: Record<string, unknown>): string | undefined {
+  const def = (shape.type as ShapeHolder | undefined)?._zod?.def;
+  if (def?.type !== 'literal') return undefined;
+  const values = def.values ?? (def.value === undefined ? [] : [def.value]);
+  return values.length === 1 && typeof values[0] === 'string' ? values[0] : undefined;
+}
+
+/** Every derived spec pair, with the keys its spec side declares and the mirror side does not. */
+function measureSpecOnlyKeys(): { pairs: string[]; specOnly: string[] } {
+  const spec: Record<string, unknown> = { ...SpecData, ...SpecUi };
+  const rows = (SpecUi as { ComponentPropsMap: Record<string, unknown> }).ComponentPropsMap;
+  const pairs: string[] = [];
+  const specOnly: string[] = [];
+  for (const [name, mirror] of Object.entries(ZodBarrel)) {
+    if (!name.endsWith('Schema')) continue;
+    const mirrorShape = objectOf(mirror);
+    if (!mirrorShape) continue;
+    const literal = typeLiteralOf(mirrorShape);
+    const sides: [string, unknown][] = [];
+    if (name in spec) sides.push([`spec#${name}`, spec[name]]);
+    if (literal !== undefined && literal in rows) sides.push([`ComponentPropsMap['${literal}']`, rows[literal]]);
+    const bag = objectOf(mirrorShape.properties);
+    const mirrored = new Set([...Object.keys(mirrorShape), ...(bag ? Object.keys(bag) : [])]);
+    for (const [side, specSchema] of sides) {
+      const specShape = objectOf(specSchema);
+      if (!specShape) continue;
+      pairs.push(`${name} ↔ ${side}`);
+      for (const key of Object.keys(specShape)) {
+        if (!mirrored.has(key)) specOnly.push(`${name}.${key}`);
+      }
+    }
+  }
+  return { pairs, specOnly: [...new Set(specOnly)].sort() };
+}
+
+describe('every spec-only key over the spec pairs is derived, refused or recorded (objectstack#25923)', () => {
+  it('no key the spec declares on a paired schema is left out without a row', () => {
+    const missing = measureSpecOnlyKeys().specOnly.filter((key) => !(key in SPEC_ONLY_KEY_ROWS));
+    expect(missing, `
+A key \`@objectstack/spec\` declares on a schema a mirror in packages/types/src/zod/ pairs
+with, which the mirror neither declares nor refuses. The tolerant face keeps it
+unexamined and the strict face refuses a key the spec accepts. Derive it by reference
+(\`stripImportedDefaults(SpecX).shape.KEY\`, and the TS twin \`SpecProps['KEY']\`) when a
+renderer reads it; refuse it by name when objectui deliberately does not support it;
+otherwise add a SPEC_ONLY_KEY_ROWS row saying what happens to it.`).toEqual([]);
+  });
+
+  it('every row names a key that is still spec-only — no dead rows', () => {
+    const measured = new Set(measureSpecOnlyKeys().specOnly);
+    const dead = Object.keys(SPEC_ONLY_KEY_ROWS).filter((key) => !measured.has(key));
+    expect(dead, 'a row for a key the mirror now declares, or the spec no longer does — delete it').toEqual([]);
+    const bare = Object.entries(SPEC_ONLY_KEY_ROWS).filter(([, row]) => row.why.trim().length < 40);
+    expect(bare.map(([key]) => key), 'a row without its reason is an oversight').toEqual([]);
+  });
+
+  it('the pairing can see both kinds of pair (non-vacuity)', () => {
+    // A broken reader finds no pair and the first case passes while checking nothing.
+    const { pairs } = measureSpecOnlyKeys();
+    expect(pairs).toContain('FormFieldSchema ↔ spec#FormFieldSchema');
+    expect(pairs).toContain('ListViewSchema ↔ spec#ListViewSchema');
+    expect(pairs).toContain("ObjectFormSchema ↔ ComponentPropsMap['object-form']");
+    expect(pairs).toContain("ObjectCalendarSchema ↔ ComponentPropsMap['object-calendar']");
+  });
+
+  it('the four keys this card derived are the spec row members by reference', () => {
+    const form = (SpecUi.ObjectFormPropsSchema as unknown as { shape: Record<string, unknown> }).shape;
+    const calendar = (SpecUi.ObjectCalendarPropsSchema as unknown as { shape: Record<string, unknown> }).shape;
+    expect(ObjectFormSchema.shape.contentLayout).toBe(form.contentLayout);
+    expect(ObjectFormSchema.shape.confirmOnDiscard).toBe(form.confirmOnDiscard);
+    const calendarShape = objectOf(ObjectCalendarSchema);
+    expect(calendarShape?.locale).toBe(calendar.locale);
+    expect(calendarShape?.loading).toBe(calendar.loading);
+    // The spec's verdict, now the mirror's: a misspelled layout is refused at its own path.
+    const bad = ObjectFormSchema.safeParse({ type: 'object-form', objectName: 'account', mode: 'create', contentLayout: 'tabs' });
+    expect(bad.success).toBe(false);
+    expect(bad.error?.issues.map((issue) => issue.path.join('.'))).toContain('contentLayout');
+  });
+
+  it('`@object-ui/types/zod` publishes no `ActionSchema` — the legacy action node is `CRUDActionSchema`', () => {
+    // The spec's `ActionSchema` is the action metadata type; objectui's legacy
+    // `type: 'action'` node shared none of its vocabulary under the same name.
+    expect('ActionSchema' in ZodBarrel).toBe(false);
+    expect('CRUDActionSchema' in ZodBarrel).toBe(true);
+    expect('ActionSchema' in SpecUi).toBe(true);
   });
 });
 
@@ -6462,7 +6637,7 @@ const RECURSION_BREAKING_MIRRORS: readonly (readonly [string, unknown])[] = [
   ['app.zod.ts#NavigationItemSchema', NavigationItemSchema],
   ['app.zod.ts#MenuItemSchema', AppMenuItemSchema],
   ['complex.zod.ts#FilterGroupSchema', FilterGroupSchema],
-  ['crud.zod.ts#ActionSchema', ActionSchema],
+  ['crud.zod.ts#CRUDActionSchema', CRUDActionSchema],
   ['data-display.zod.ts#TreeNodeSchema', TreeNodeSchema],
   ['designer.zod.ts#DesignerComponentSchema', DesignerComponentSchema],
   ['navigation.zod.ts#NavigationMenuItemSchema', NavigationMenuItemSchema],

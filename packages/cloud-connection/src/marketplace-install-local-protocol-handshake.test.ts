@@ -355,3 +355,39 @@ describe('kernel:ready rehydrate of an already-ledgered incompatible entry', () 
         expect(new LocalManifestSource(dir).read(OLD_ID).entry?.version).toBe('2.0.0');
     });
 });
+
+describe('[#26480] a package AHEAD of this runtime is told to upgrade, never to migrate', () => {
+    /** The card's reproduction: a floor major one above the running protocol. */
+    const NEW_MAJOR = PROTOCOL_MAJOR + 1;
+    const AHEAD_ID = 'com.example.qa-p-future';
+    const AHEAD = { ...INCOMPATIBLE, id: AHEAD_ID, engines: { protocol: `^${NEW_MAJOR}` } };
+
+    it('POST install-local: 422 OS_PROTOCOL_INCOMPATIBLE with no migrateCommand, and nothing is installed', async () => {
+        const h = await mount(dir);
+        const res = await h.install({ manifest: AHEAD });
+        expect(res.status, JSON.stringify(res.payload)).toBe(422);
+        expect(ApiErrorSchema.safeParse(res.payload.error).success).toBe(true);
+        const { error } = res.payload;
+        expect(error.code).toBe('OS_PROTOCOL_INCOMPATIBLE');
+        expect(error.details).toEqual({
+            requiredRange: `^${NEW_MAJOR}`,
+            rangeSource: 'engines.protocol',
+            protocolVersion: PROTOCOL_VERSION,
+            targetMajor: NEW_MAJOR,
+        });
+        expect(error.message).not.toContain('migrate meta');
+        expect(error.message).toMatch(new RegExp(`upgrade the runtime to protocol ${NEW_MAJOR}`, 'i'));
+        expectNothingWritten(h);
+    });
+
+    it('the rehydrate line for an already-ledgered entry names the upgrade, not a migration', async () => {
+        seedEntry(AHEAD);
+        const h = await mount(dir);
+        expect(h.bootRegistrations().map((m) => m.id)).not.toContain(AHEAD_ID);
+        const said = h.logger.error.mock.calls.map(([m]) => String(m));
+        expect(said).toHaveLength(1);
+        expect(said[0]).toContain('OS_PROTOCOL_INCOMPATIBLE');
+        expect(said[0]).not.toContain('migrate meta');
+        expect(said[0]).toMatch(new RegExp(`upgrade the runtime to protocol ${NEW_MAJOR}`, 'i'));
+    });
+});

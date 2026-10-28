@@ -47,7 +47,7 @@ const result = BookSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Book name (namespace prefix recommended, like every metadata name) |
-| **label** | `string` | optional | Display title |
+| **label** | `string` | optional | Display title — translated by `books.<book>.label` in the translation bundle |
 | **description** | `string` | optional |  |
 | **slug** | `string` | optional | Portal URL segment; defaults to name sans prefix |
 | **icon** | `string` | optional |  |
@@ -67,8 +67,8 @@ const result = BookSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **key** | `string` | ✅ | Stable group key (used by overrides, deep links, explicit `doc.group`) |
-| **label** | `string` | ✅ | Section title — first-class, i18n-homed |
-| **translations** | `never` | optional | [REMOVED] Inline `translations` on a book (and on a book group) was removed in @objectstack/spec 17.0.0 (ADR-0049) — no resolver ever read it. The book tree endpoint and the docs portal render `label` / `description` verbatim in every locale, so a localized book shipped its authoring-locale strings to every reader. Delete the key. NOTE the near neighbour that DOES work: `doc.translations` is live and read on every doc render path — localize the docs themselves, and the portal picks the reader's locale up from there. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
+| **label** | `string` | ✅ | Section title — first-class, i18n-homed: translated by `books.<book>.groups.<key>.label` in the translation bundle |
+| **translations** | `never` | optional | [REMOVED] Inline `translations` on a book (and on a book group) was removed in @objectstack/spec 17.0.0 (ADR-0049) — no resolver ever read it, so a localized book shipped its authoring-locale strings to every reader. Delete the key and move each locale's strings into the translation bundle: `books.<book>.label` / `.description` and `books.<book>.groups.<group_key>.label` (`os i18n extract` seeds them). The book list, the book tree and the docs sidebar resolve those per reader locale. A doc's own title and body still localize through `doc.translations`. This edit left `os migrate meta` with the protocol-16.x conversions: apply it by hand, or run the tool on a release that still carries the conversion — https://objectstack.ai/docs/protocol-upgrade. |
 | **order** | `number` | optional | Order of THIS group within the book |
 | **include** | `string \| { tag: string }` | optional | Rule that derives membership (glob or tag) |
 | **package** | `string` | optional | Scope the rule to a package id (default: the book package; cross-package via ADR-0048) |
@@ -115,8 +115,8 @@ Type: `'public'`
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **key** | `string` | ✅ | Stable group key (used by overrides, deep links, explicit `doc.group`) |
-| **label** | `string` | ✅ | Section title — first-class, i18n-homed |
-| **translations** | `never` | optional | [REMOVED] Inline `translations` on a book (and on a book group) was removed in @objectstack/spec 17.0.0 (ADR-0049) — no resolver ever read it. The book tree endpoint and the docs portal render `label` / `description` verbatim in every locale, so a localized book shipped its authoring-locale strings to every reader. Delete the key. NOTE the near neighbour that DOES work: `doc.translations` is live and read on every doc render path — localize the docs themselves, and the portal picks the reader's locale up from there. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
+| **label** | `string` | ✅ | Section title — first-class, i18n-homed: translated by `books.<book>.groups.<key>.label` in the translation bundle |
+| **translations** | `never` | optional | [REMOVED] Inline `translations` on a book (and on a book group) was removed in @objectstack/spec 17.0.0 (ADR-0049) — no resolver ever read it, so a localized book shipped its authoring-locale strings to every reader. Delete the key and move each locale's strings into the translation bundle: `books.<book>.label` / `.description` and `books.<book>.groups.<group_key>.label` (`os i18n extract` seeds them). The book list, the book tree and the docs sidebar resolve those per reader locale. A doc's own title and body still localize through `doc.translations`. This edit left `os migrate meta` with the protocol-16.x conversions: apply it by hand, or run the tool on a release that still carries the conversion — https://objectstack.ai/docs/protocol-upgrade. |
 | **order** | `number` | optional | Order of THIS group within the book |
 | **include** | `string \| { tag: string }` | optional | Rule that derives membership (glob or tag) |
 | **package** | `string` | optional | Scope the rule to a package id (default: the book package; cross-package via ADR-0048) |

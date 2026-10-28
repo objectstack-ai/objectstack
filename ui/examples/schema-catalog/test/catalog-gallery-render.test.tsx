@@ -149,6 +149,7 @@ import { SchemaRenderer, SchemaRendererContext, toRenderableSchema } from '@obje
 import fs from 'node:fs';
 import path from 'node:path';
 import { allExamples } from '../src/index.js';
+import { CATALOG_ENTRY_FLOOR } from './catalog-entry-floor.js';
 
 /**
  * The repo root, derived from THIS FILE's own location — never from
@@ -646,7 +647,7 @@ describe('objectui#4616 — every catalog entry renders in the docs gallery', ()
    * size and the registration set the sweep depends on.
    */
   it('the corpus is populated and every package the census needs is loaded', () => {
-    expect(entries.length).toBeGreaterThanOrEqual(423);
+    expect(entries.length).toBeGreaterThanOrEqual(CATALOG_ENTRY_FLOOR);
     // One type per package below, chosen as the one the census actually needed.
     for (const type of [
       'dashboard',
@@ -1345,7 +1346,9 @@ describe('objectui#6025 — the gallery DECLARES the packages its entries need',
     expect(
       PLUGIN_CATEGORIES.length,
       'no plugin categories were derived, so this case would be vacuous',
-    ).toBeGreaterThanOrEqual(13);
+      // About two thirds of the 13 measured on objectstack 6a7c0fe3: retiring a
+      // plugin package (and its category) must not red an anti-vacuity floor.
+    ).toBeGreaterThanOrEqual(9);
 
     const undeclared = PLUGIN_CATEGORIES.map((category) => `@object-ui/${category}`).filter(
       (pkg) => !HOST_PACKAGES.includes(pkg),

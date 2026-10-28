@@ -12,7 +12,7 @@ import { useDataScope } from '@object-ui/react';
 import { renderChildren, cn } from '../../lib/utils';
 
 ComponentRegistry.register('list', 
-  ({ schema, className, ...props }: { schema: ListSchema; className?: string; [key: string]: any }) => {
+  ({ schema, className, ...props }: { schema: ListSchema; className?: string; [key: string]: unknown }) => {
     // Support data binding
     const boundData = useDataScope(schema.bind);
     const items = Array.isArray(boundData) ? boundData : Array.isArray(schema.items) ? schema.items : [];

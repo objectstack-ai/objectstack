@@ -51,7 +51,7 @@
 import { z } from 'zod';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
-import { closedObject, strictObject, strictObjectError } from '../shared/strict-object';
+import { closedObject, strictObject, strictObjectError, type StrictObjectOptions } from '../shared/strict-object';
 import { SnakeCaseIdentifierSchema, QUALIFIED_ITEM_NAME_PATTERN } from '../shared/identifiers.zod';
 import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
 import { ConditionalFormattingRuleSchema } from '../shared/conditional-formatting.zod';
@@ -64,7 +64,7 @@ import { SectionGroupKeySchema, sectionGroupReferenceRefinement } from '../share
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 import { ChartTypeSchema } from './chart.zod';
 import { SharingConfigSchema } from './sharing.zod';
-import { retiredKey } from '../shared/retired-key';
+import { enumWithRetiredValues, retiredKey } from '../shared/retired-key';
 // [#19088] The decimal-places ceiling every renderer enforces, and the refusal
 // text that explains it. A `src/shared/` leaf that no package entry re-exports,
 // so the bound this row applies costs no published export — see that module's
@@ -2413,19 +2413,58 @@ export const ListMapConfigSchema = lazySchema(() => strictObject({
   style: z.string().optional().describe('Map style URL — the MapLibre style document the renderer loads in place of the public demo tiles. The component-level `mapStyle` is read FIRST and wins when both are present; this is NOT the inline CSS `style` record a component node carries'),
 }).describe('Map view configuration'));
 
+// [#26677] `navigation.mode` retired members — the prescription each one
+// answers with at parse (`enumWithRetiredValues`, `../shared/retired-key.ts`).
+// Declared with `//` on purpose: an enum's error map consumes this, it is no
+// documented surface (the `NAVIGATION_VIEW_RETIRED` placement note below).
+//
+// Maintainer ruling 2026-10-27 (record-page-v2 epic, ruling 1): an object has
+// ONE default way to open a record — the drawer, which expands to the full
+// page; `page` only for an object that declares it; `modal` retired; split and
+// popover become a reader's own preference. The drawer and the full page are
+// the same record page at two widths. The `navigation-mode-overlay-values-removed`
+// conversion (ADR-0087 D2, `conversions/registry.ts`) strips a retired member
+// from existing sources and stored rows, which lands them on the default.
+const NAVIGATION_MODE_RETIRED_FIX =
+  'Delete the value — `drawer` is the default; declare `page` only for an object whose record should '
+  + 'open as a full page; a side-by-side pane is a reader\'s own preference in the list\'s Display menu, '
+  + 'not metadata. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
+
+const NAVIGATION_MODE_RETIRED = {
+  modal:
+    "`navigation.mode: 'modal'` was removed in @objectstack/spec 18.3.0 (ADR-0087 D2) — a record opens "
+    + 'one way per object: in the drawer, which expands to the full page, or as the full page for an '
+    + 'object that declares `page`, so a centred dialog was a third surface for the same record. '
+    + NAVIGATION_MODE_RETIRED_FIX,
+  split:
+    "`navigation.mode: 'split'` was removed in @objectstack/spec 18.3.0 (ADR-0087 D2) — whether the "
+    + 'record opens beside the list is each reader\'s own choice, not a mode an author fixes for every '
+    + 'reader of the list. '
+    + NAVIGATION_MODE_RETIRED_FIX,
+  popover:
+    "`navigation.mode: 'popover'` was removed in @objectstack/spec 18.3.0 (ADR-0087 D2) — a record opens "
+    + 'one way per object: in the drawer, which expands to the full page, or as the full page for an '
+    + 'object that declares `page`, so a popover was a cramped fourth surface for the same record. '
+    + NAVIGATION_MODE_RETIRED_FIX,
+} as const;
+
 /**
  * Navigation Mode Enum
- * Defines how to navigate to the detail view from a list item.
+ * How a list opens the record a reader clicks. `drawer` is the default: the
+ * record opens in the side drawer, which expands to the full page — the same
+ * record page at two widths. `page` is for an object whose record should open
+ * as a full page, and is declared for that object only. `modal`, `split` and
+ * `popover` were retired (#26677): a side-by-side pane is a reader's own
+ * preference, not metadata, and each retired member is refused at parse with
+ * its prescription.
  */
-export const NavigationModeSchema = lazySchema(() => z.enum([
-  'page',       // Navigate to a new route (default)
-  'drawer',     // Open details in a side drawer/panel
-  'modal',      // Open details in a modal dialog
-  'split',      // Show details side-by-side with the list (master-detail)
-  'popover',    // Show details in a popover (lightweight)
+export const NavigationModeSchema = lazySchema(() => enumWithRetiredValues([
+  'drawer',     // Open the record in the side drawer, which expands to the full page (default)
+  'page',       // Navigate to the record route — declared only for an object that opens as a full page
   'new_window', // Open in new browser tab/window
-  'none'        // No navigation (read-only list)
-]));
+  'none',       // No navigation (read-only list)
+], NAVIGATION_MODE_RETIRED));
 
 // [#16885] `navigation.view` retirement prescription — director decision batch
 // #126 item 4 (maintainer ruling 2026-09-13, option B: retire). Declared with
@@ -2464,7 +2503,13 @@ export const NavigationConfigSchema = lazySchema(() => strictObject({
   surface: 'this navigation configuration',
   history: VIEW_HISTORY,
 }, {
-  mode: NavigationModeSchema.default('page'),
+  /**
+   * [#26677] How a click opens the record. Defaults to `drawer` — before
+   * 18.3.0 it defaulted to `page`, which the console never honoured for an
+   * un-authored list (it guessed the surface from the object's field count).
+   * Declare `page` only for an object whose record should open as a full page.
+   */
+  mode: NavigationModeSchema.default('drawer'),
 
   /**
    * [#16885] RETIRED — see {@link NAVIGATION_VIEW_RETIRED} above the schema.
@@ -2479,14 +2524,14 @@ export const NavigationConfigSchema = lazySchema(() => strictObject({
   openNewTab: z.boolean().default(false).describe('Force open in new tab (applies to page mode)'),
   
   /**
-   * [#2578] Overlay size for a drawer/modal detail — coarse T-shirt buckets,
+   * [#2578] Overlay size for a drawer detail — coarse T-shirt buckets,
    * aligned with `FormView.modalSize` (`page` mode ignores it). `'auto'`
    * (default): the renderer derives the size from the object's field count and
    * clamps it to the client viewport, so AI writes nothing — it cannot know the
    * client width. Explicit buckets are a coarse, viewport-independent override.
    */
   size: z.enum(['auto', 'sm', 'md', 'lg', 'xl', 'full']).default('auto')
-    .describe("Overlay size bucket for drawer/modal detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it."),
+    .describe("Overlay size bucket for the drawer detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it."),
 
   /**
    * @deprecated [#2578 → `size`] A pixel/percent width cannot be authored blind:
@@ -2494,7 +2539,7 @@ export const NavigationConfigSchema = lazySchema(() => strictObject({
    * renderer fallback for pre-#2578 metadata; new metadata sets `size` (or omits
    * it for `auto`).
    */
-  width: z.union([z.string(), z.number()]).optional().describe('[DEPRECATED → size] Pixel/percent width of the drawer/modal (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket.'),
+  width: z.union([z.string(), z.number()]).optional().describe('[DEPRECATED → size] Pixel/percent width of the drawer (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket.'),
 }));
 
 /**
@@ -3014,15 +3059,13 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
 
   /** Grid Features */
   resizable: z.boolean().optional().describe('Enable column resizing'),
-  // `striped` / `bordered` — tombstoned at the bottom of this shape with
-  // `virtualScroll` (#7176, pass-through-only; see the retired block below).
   compactToolbar: z.boolean().optional().describe('Collapse Group/Color/Density/Hide-fields into a single View settings popover'),
 
   /** Selection */
   selection: SelectionConfigSchema.optional().describe('Row selection configuration'),
 
   /** Navigation / Interaction */
-  navigation: NavigationConfigSchema.optional().describe('Configuration for item click navigation (page, drawer, modal, etc.)'),
+  navigation: NavigationConfigSchema.optional().describe('Configuration for item click navigation (drawer by default, page, new_window or none)'),
 
   /** Pagination */
   pagination: PaginationConfigSchema.optional().describe('Pagination configuration'),
@@ -3241,46 +3284,6 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
   /** ARIA accessibility attributes */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes for the list view'),
 
-  // `responsive` / `performance` REMOVED (#3896 audit close-out): authorable
-  // and inert — no renderer in either repo read them (re-grepped 2026-07-16,
-  // objectui@fb35e48; ledger: dead).
-  responsive: retiredKey(
-    '`view.responsive` was removed in @objectstack/spec 17.0.0 (audit close-out) — ' +
-    'no renderer ever read it; the grid is responsive by its own layout rules. Delete the key. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
-  performance: retiredKey(
-    '`view.performance` was removed in @objectstack/spec 17.0.0 (audit close-out) — ' +
-    'no renderer or runtime read it; list-view performance tuning was never implemented. ' +
-    'Delete the key. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
-
-  // `striped` / `bordered` / `virtualScroll` REMOVED (#7176, ADR-0049
-  // enforce-or-remove; maintainer ruling 2026-08-10). Every measured reader was
-  // a forwarding copy — react spec-bridge → plugin-list → plugin-view/app-shell
-  // — and the chain ends at ObjectGrid, which never spells any of the three:
-  // copy-without-apply is dead in effect. Per the ruling, if objectui wants one
-  // of these as real behavior, that is an implementation card filed first, and
-  // the key stays retired pending it.
-  striped: retiredKey(
-    '`view.striped` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — ' +
-    'every measured reader only copied it forward and no renderer ever applied it, so authoring ' +
-    'it was a parse-clean no-op. There is no authorable striped-rows switch; delete the key. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
-  bordered: retiredKey(
-    '`view.bordered` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — ' +
-    'every measured reader only copied it forward and no renderer ever applied it (the grid frame ' +
-    "is the renderer's own constant, not authorable). Delete the key. " +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
-  virtualScroll: retiredKey(
-    '`view.virtualScroll` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — ' +
-    'every measured reader only copied it forward and no grid ever virtualized off it; authoring ' +
-    'it was a parse-clean no-op. Delete the key; large datasets page via `pagination`. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
 }));
 
 /**
@@ -4687,15 +4690,6 @@ export const FormViewSchema = lazySchema(() => strictObject({
     maxRows: z.number().optional(),
   })).optional().describe('Inline master-detail child collections'),
 
-  // `defaultSort` REMOVED (#3896 audit close-out): no reader in either repo —
-  // related lists sort by their OWN list view's sort, never by this.
-  defaultSort: retiredKey(
-    '`form.defaultSort` was removed in @objectstack/spec 17.0.0 (audit close-out) — ' +
-    'nothing read it: a related list inside a form sorts by its own list view\'s `sort`. ' +
-    'Delete the key and set the sort on the related list view instead. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
-
   /** Public form sharing configuration */
   sharing: SharingConfigSchema.optional().describe('Public sharing configuration for this form'),
 
@@ -4824,17 +4818,6 @@ export const FormViewSchema = lazySchema(() => strictObject({
   defaults: z.record(z.string(), z.unknown()).optional()
     .describe('Initial field values for create-mode forms (folded into ObjectUI ObjectForm initial values;).'),
 
-  // `aria` REMOVED from the FORM view (#3896 audit close-out): no form
-  // renderer applied it (plugin-form/SchemaForm never read schema.aria) — an
-  // ACCESSIBILITY claim that is merely accepted is false compliance, the
-  // requiresConfirmation shape.
-  aria: retiredKey(
-    '`form.aria` was removed in @objectstack/spec 17.0.0 (audit close-out) — no form ' +
-    'renderer ever applied it, so declared ARIA attributes silently did not reach the DOM. ' +
-    'Delete the key. The form renderer emits its own semantic markup; report gaps as ' +
-    'renderer issues rather than per-view attribute overrides. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
 }).superRefine((view, ctx) => {
   // `section.pane` is split-only vocabulary. On any other form type it would
   // be a silent no-op — the worst failure mode for authored (and especially
@@ -5659,33 +5642,96 @@ function viewItemWireFields() {
 }
 
 /**
+ * [#26711] What the write door's three wire members said about an unknown
+ * top-level key before they were closed: nothing. The save answered success
+ * and stored the parsed body, without the key.
+ */
+const VIEW_WIRE_HISTORY =
+  'Until the `view` write door closed this shape an unknown top-level key was dropped silently — '
+  + 'the save answered success and the key was not stored.';
+
+/**
+ * [#26711] The alias spellings the #20456 census found on stored `view` rows,
+ * each mapped to the declared key it means. Undeclared on purpose (see
+ * {@link VIEW_CONSOLE_ROUND_TRIP_KEYS}); named here so the refusal points at
+ * the declared spelling instead of leaving the author to guess.
+ */
+const VIEW_WIRE_ALIASES = { objectName: 'object', id: 'name' } as const;
+
+/** [#26711] The unknown-key refusal of member 1, the ViewItem record. */
+const VIEW_ITEM_WIRE_SURFACE: StrictObjectOptions = {
+  surface: 'this view item record',
+  history: VIEW_WIRE_HISTORY,
+  aliases: VIEW_WIRE_ALIASES,
+};
+
+/** [#26711] The unknown-key refusal of member 3, the flattened list overlay. */
+const LIST_OVERLAY_WIRE_SURFACE: StrictObjectOptions = {
+  surface: 'this inline list view',
+  history: VIEW_WIRE_HISTORY,
+  aliases: VIEW_WIRE_ALIASES,
+};
+
+/** [#26711] The unknown-key refusal of member 4, the flattened form overlay. */
+const FORM_OVERLAY_WIRE_SURFACE: StrictObjectOptions = {
+  surface: 'this inline form view',
+  history: VIEW_WIRE_HISTORY,
+  aliases: VIEW_WIRE_ALIASES,
+};
+
+/**
+ * [#26711] Close a wire member's TOP level, with its own unknown-key refusal.
+ *
+ * The flattened overlays are built by extending an authoring shape, and an
+ * extension inherits that shape's refusal: the surface named in it, and the
+ * candidate list a typo is pointed at, which would miss every key the overlay
+ * adds (`isPinned`, `columnState`, …). So the member is closed with a refusal
+ * built from its OWN shape — the same `strictObjectError` map
+ * {@link strictObject} attaches — and re-declared as a `closedObject`, so the
+ * refusal is terminal on this surface and the union keeps its envelope.
+ *
+ * Nested blocks keep their own posture, as before: closing the top level does
+ * not recurse any more than `.strip()` did, and the console's row ids are
+ * still removed before the parse by {@link stripViewConsoleDecorations}.
+ */
+function closeWireMember<Shape extends z.core.$ZodShape, Config extends z.core.$ZodObjectConfig>(
+  member: z.ZodObject<Shape, Config>,
+  options: StrictObjectOptions,
+): z.ZodObject<Shape, z.core.$strict> {
+  const strict = member.strict();
+  const def = strict._zod.def;
+  return closedObject(strict.clone({ ...def, error: strictObjectError(options, def.shape) }));
+}
+
+/**
  * [#5074] The WIRE variant of {@link ViewItemSchema} — member 1 of
- * {@link ViewMetadataSchema}, re-opened with `.strip()`.
+ * {@link ViewMetadataSchema}.
  *
- * Exactly the pattern the two flattened members below already use
- * (`ListViewSchema.extend(flattenedViewOverlayFields()).strip()`), reached one
- * member further. `z.discriminatedUnion` cannot be `.extend()`ed, so the two
- * postures share {@link viewItemArmShape} rather than a `.extend()` chain —
- * derive-by-reference either way, one shape, two doors.
+ * `z.discriminatedUnion` cannot be `.extend()`ed, so the two postures share
+ * {@link viewItemArmShape} rather than a `.extend()` chain — derive-by-reference
+ * either way, one shape, two doors. The wire variant adds the console's
+ * round-trip keys ({@link viewItemWireFields}) and nothing else.
  *
- * `.strip()` covers the TOP level only. Nested console decorations
- * (`config.filter[].id`, `config.sort[].id`) are handled by
- * {@link stripViewConsoleDecorations} on the wire door — see that function for
- * why a recursive strip is the piece a posture flip cannot provide.
+ * [#26711] Closed, like the authoring schema: an unknown top-level key is
+ * refused by name. Until then this member `.strip()`ped it, and because the
+ * save stores the parsed body (#20051) a misspelt key answered success and was
+ * not stored. Nested console decorations (`config.filter[].id`,
+ * `config.sort[].id`) are still removed before the parse by
+ * {@link stripViewConsoleDecorations} on the wire door.
  */
 export const ViewItemWireSchema: z.ZodDiscriminatedUnion<[
-  z.ZodObject<ViewItemWireArmShape<'list', typeof ListViewSchema>, z.core.$strip>,
-  z.ZodObject<ViewItemWireArmShape<'form', typeof FormViewSchema>, z.core.$strip>,
+  z.ZodObject<ViewItemWireArmShape<'list', typeof ListViewSchema>, z.core.$strict>,
+  z.ZodObject<ViewItemWireArmShape<'form', typeof FormViewSchema>, z.core.$strict>,
 ], 'viewKind'> = lazySchema(() =>
   z.discriminatedUnion('viewKind', [
-    z.object({
+    strictObject(VIEW_ITEM_WIRE_SURFACE, {
       ...viewItemArmShape('list', ListViewSchema.describe('List-family view configuration.')),
       ...viewItemWireFields(),
-    }).strip(),
-    z.object({
+    }),
+    strictObject(VIEW_ITEM_WIRE_SURFACE, {
       ...viewItemArmShape('form', FormViewSchema.describe('Form view configuration.')),
       ...viewItemWireFields(),
-    }).strip(),
+    }),
   ]),
 );
 
@@ -6085,11 +6131,14 @@ function speaksViewVocabulary(body: unknown): boolean {
  * **Why a precondition and not a required floor on member 4.** Giving the form
  * arm a required key (the other candidate fix) would 422 the flattened overlays
  * Studio writes, whose required-ness nobody has measured; the ruling on #5599
- * took this route and deferred that one explicitly. This route also leaves every
+ * took this route and deferred that one explicitly. This route also left every
  * arm's `.strip()` untouched — the round-trip capability #5074 traced and
- * documented is load-bearing and is not what was broken. What was broken is that
- * an arm which strips AND requires nothing is a wildcard for the whole union, so
- * the fix belongs one level up, at the union's door.
+ * documented was load-bearing then, while the save stored the ORIGINAL body.
+ * What was broken is that an arm which strips AND requires nothing is a
+ * wildcard for the whole union, so the fix belonged one level up, at the
+ * union's door. [#26711] The arms are closed now: #20051 made the save store
+ * the parsed body and #20456 declared every round-trip key, so the strip no
+ * longer carried anything — it only dropped a misspelt key in silence.
  *
  * **Why it lives in the existing `z.preprocess` stage.** `/api/v1/meta/types/view`
  * serves `z.toJSONSchema()` of this schema to Studio's SchemaForm, and both pins
@@ -6501,22 +6550,24 @@ function formOverlayColumnsField(): z.ZodOptional<z.ZodNumber> {
  * identity/round-trip fields a personalization PUT carries. Published as
  * `VIEW_METADATA_MEMBERS.listOverlay`.
  *
- * `.strip()` is load-bearing, not leftover. `.extend()` INHERITS strictness, so
- * closing `ListViewSchema` for authoring (#4001) silently made this overlay
- * strict too — and this member exists precisely to carry Studio's auxiliary
- * round-trip keys (`isPinned`, `sortOrder`, …), which the save keeps because
- * they are declared. Strict here is a 422 on a shape the platform itself writes. The
- * ledger names this as the trap to watch while batching: a response-side
- * extension of an authoring schema must strip back, or an upstream field
- * addition becomes a crash.
+ * [#26711] Closed at the top level, with its own refusal
+ * ({@link closeWireMember}). It used to `.strip()`: `.extend()` inherits
+ * strictness, so closing `ListViewSchema` for authoring (#4001) made this
+ * overlay strict too while Studio's round-trip keys (`isPinned`, `sortOrder`,
+ * …) were still undeclared, and strict would have been a 422 on a shape the
+ * platform itself writes. #20456 declared every one of them
+ * ({@link VIEW_CONSOLE_ROUND_TRIP_KEYS}), and #20051 made the save store the
+ * parsed body, so the strip had become a silent loss: a misspelt key answered
+ * success and was not stored. An undeclared key the console writes is now a
+ * refusal that names it — declare it here, with its meaning, as #20456 did.
  *
  * [#7741] `object` + `viewKind` are required on this arm (and its form
  * sibling) — see {@link flattenedViewOverlayFields} for the ruling and the
  * measured serving filter that decides exactly this pair.
  *
  * [#20051] …and `options` is DECLARED here, judged by
- * {@link ListViewOverlayOptionsSchema}: `.strip()` re-opens the top level for
- * round-trip keys, and a bag the renderer reads is not one of those.
+ * {@link ListViewOverlayOptionsSchema}: a bag the renderer reads is not a
+ * round-trip key.
  *
  * [#20186] This member judges `viewKind: 'list'` only (the form sibling
  * `'form'` only), and it judges a column-less PATCH as well as a full inline
@@ -6532,19 +6583,19 @@ const ListViewOverlayWireSchema = lazySchema(() =>
   // [#13216] Built from {@link ListViewShapeSchema}, not {@link ListViewSchema}:
   // `flattenedViewOverlayFields()` re-declares `name` and `label`, and zod 4
   // refuses to overwrite a key on an object that carries refinements. So the
-  // binding check is re-attached AFTER `.strip()` instead of inherited — this
+  // binding check is re-attached AFTER the close instead of inherited — this
   // is the runtime write door (`PUT /api/v1/meta/view`), the one an MCP/AI
   // author reaches, so it is the last place the refusals may go missing.
   // `viewDoorsCarryingObjectLevelChecks` in `view.test.ts` fails if any of the
   // three attachment points is dropped.
-  ListViewShapeSchema.extend({
+  closeWireMember(ListViewShapeSchema.extend({
     ...flattenedViewOverlayFields('list'),
     options: ListViewOverlayOptionsSchema.optional(),
     ...listOverlayPatchFields(),
     // [#20456] The console's round-trip keys on this row shape, declared so
-    // the parse keeps them instead of `.strip()`ping them unread.
+    // the parse keeps them.
     ...listOverlayRoundTripFields(),
-  }).strip()
+  }), LIST_OVERLAY_WIRE_SURFACE)
     .superRefine(checkListOverlayTypeNeedsColumns)
     .superRefine(checkListViewCalendarVisualization)
     .superRefine(checkListViewChartBinding)
@@ -6554,7 +6605,8 @@ const ListViewOverlayWireSchema = lazySchema(() =>
 /**
  * [#6391] Member 4 of {@link ViewMetadataSchema} — a flattened runtime FORM
  * overlay, published as `VIEW_METADATA_MEMBERS.formOverlay`. Same construction
- * and the same `.strip()` rationale as {@link ListViewOverlayWireSchema}.
+ * as {@link ListViewOverlayWireSchema}, and closed at the top level the same way
+ * (#26711).
  *
  * [#20051] `options` is pinned ABSENT here — see
  * {@link FORM_OVERLAY_OPTIONS_REFUSED} for the fall-through it closes.
@@ -6570,11 +6622,11 @@ const FormViewOverlayWireSchema = lazySchema(() =>
   // (`columns`, see {@link formOverlayColumnsField}), and {@link FormViewSchema}
   // carries refinements, which `.extend()` refuses to combine with an overwrite.
   // The two differ in that throw only — the refinements ride along either way.
-  FormViewSchema.safeExtend({
+  closeWireMember(FormViewSchema.safeExtend({
     ...flattenedViewOverlayFields('form'),
     options: z.undefined({ error: () => FORM_OVERLAY_OPTIONS_REFUSED }).optional(),
     columns: formOverlayColumnsField(),
-  }).strip(),
+  }), FORM_OVERLAY_WIRE_SURFACE),
 );
 
 /**

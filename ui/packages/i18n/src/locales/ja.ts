@@ -786,6 +786,9 @@ const ja = {
     addRecord: "レコードを追加",
     // objectui#12703 — the compact list's footer link to the object's list or the block's view.
     viewAll: "すべて表示",
+    viewAllCount: "すべて表示（{{count}} 件）",
+    viewAllCount_one: "すべて表示（{{count}} 件）",
+    viewAllCount_other: "すべて表示（{{count}} 件）",
     tabs: "タブ",
     allRecords: "すべてのレコード",
     userFilters: {
@@ -1789,6 +1792,7 @@ const ja = {
       assistant: "アシスタント",
       liveCanvas: "ライブプレビュー — {{app}}（ドラフト）",
       liveCanvasUnlisted: "ライブアプリ — {{app}}（公開するまで非掲載）",
+      liveCanvasLive: "ライブアプリ — {{app}}",
       loadingAgents: "エージェントを読み込んでいます…",
       askAnything: "何でも質問してください…",
       askOrChangeApp: "データについて質問するか、このアプリの変更を依頼…",
@@ -2535,6 +2539,9 @@ const ja = {
       invitationDescription: "招待を受け取ったメールアドレスをご利用ください。",
       invitationSignUpButton: "アカウントを作成して参加",
       invitationSignInDivider: "または既存のアカウントでサインイン",
+      invitationPreviewTitle: "{{inviter}} さんから {{organization}} への招待が届いています",
+      invitationPreviewTitleNoInviter: "{{organization}} への招待が届いています",
+      invitationPreviewDescription: "招待を受け取ったメールアドレス（{{email}}）をご利用ください。",
       showPasswordText: "パスワードを表示",
       hidePasswordText: "パスワードを非表示",
       footer: {
@@ -2547,6 +2554,7 @@ const ja = {
       description: "情報を入力して始めましょう",
       invitationTitle: "アカウントを作成して参加する",
       invitationDescription: "招待を受け取ったメールアドレスで登録してください。招待はそのアドレスでのみ承諾できます。",
+      invitationPreviewDescription: "招待を受け取ったメールアドレス（{{email}}）で登録してください。招待はそのアドレスでのみ承諾できます。",
       nameLabel: "名前",
       namePlaceholder: "田中太郎",
       emailLabel: "メールアドレス",
@@ -2747,6 +2755,8 @@ const ja = {
         dataRead: "レコードを読み取る（ご自身の権限の範囲内）",
         dataWrite: "レコードを作成・変更・削除する（ご自身の権限の範囲内）",
         actionsExecute: "あなたに代わってアクションを実行する（ご自身の権限の範囲内）",
+        metadataWrite: "このアプリのメタデータを下書きとして作成・変更する（ご自身の権限の範囲内）。公開は人が行います",
+        unrecognised: "認識できない権限：{{scope}}",
       },
       deny: "拒否",
       authorize: "許可",
@@ -2883,6 +2893,7 @@ const ja = {
     build: {
       title: "アプリを作る",
       noCapability: "このシステムではアプリの作成はできません — 「メタデータ管理」権限が必要ですが、お使いのアカウントにはありません。",
+      inStudio: "Studio で新規作成",
     },
     template: {
       title: "テンプレートから始める",
@@ -3097,6 +3108,8 @@ const ja = {
     recordAccessDeniedDescription: "この種類のレコードを表示する権限がありません。必要な場合は管理者にお問い合わせください。",
     recordLoadFailed: "このレコードを読み込めませんでした",
     recordLoadFailedDescription: "読み込み中に問題が発生しました。接続を確認して再試行してください。",
+    recordAccessEnded: "判断を記録しました",
+    recordAccessEndedDescription: "承認ステップが完了したため、このレコードへのアクセス権は終了しました。",
   },
   actionDialog: {
     title: "アクションパラメーター",
@@ -3695,7 +3708,7 @@ const ja = {
       unknownPhase: "不明なビルドフェーズ",
       nextStepsLead: "次はこう話しかけられます：{{steps}}",
       nextStepQuote: "「{{step}}」",
-      draftPosture: "以降の変更は下書きとして保存され、Studio で公開します。",
+      draftPosture: "以降の変更は下書きとして保存され、このチャットの「公開」で公開します。",
       checksPassed: "照合済み {{passed}}/{{total}}",
     },
     changes: {

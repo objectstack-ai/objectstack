@@ -20,7 +20,6 @@ import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
  */
 import { lazySchema } from '../shared/lazy-schema';
 import { NON_BLANK_STRING } from '../shared/refinement-projection';
-import { retiredKey } from '../shared/retired-key';
 import { retryPolicyShape } from '../shared/retry-policy.zod';
 import { strictObject } from '../shared/strict-object';
 import { collectFlowGraphs, parseFlowNodeRegions } from './control-flow.zod';
@@ -728,16 +727,6 @@ function flowNodeObject() { return strictObject(
     },
   )).optional().describe('Input parameter schema for this node').meta({ title: 'Input Schema' }),
 
-  // `outputSchema` REMOVED (#3896 audit close-out): declared, never validated —
-  // no engine path checked node outputs against it (ledger: dead).
-  outputSchema: retiredKey(
-    '`flow.nodes[].outputSchema` was removed in @objectstack/spec 17.0.0 (audit ' +
-    'close-out) — it was never validated: the engine does not check node outputs against ' +
-    'it, so it documented a contract nothing enforced. Delete the key. Downstream nodes ' +
-    "read prior outputs via expressions ({{nodeId.field}}) regardless of any declaration. " +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
-
   /**
    * Wait Event Configuration (for 'wait' nodes)
    * Defines what external event or condition should resume the paused execution.
@@ -776,49 +765,6 @@ function flowNodeObject() { return strictObject(
     /** Signal name to listen for — for signal/webhook events */
     signalName: z.string().optional().describe('Named signal or webhook event to wait for'),
 
-    /**
-     * `wait` never had a timeout. Both keys below described one and neither
-     * delivered it (#4158) — the pair is retired in 17 rather than left standing
-     * as a promise the runtime does not keep (PD #10). (Both tombstones below say
-     * 17 and the ADR-0087 conversion is `toMajor: 17`; this line said 18, the
-     * #4350 class — a tombstone naming a major that never shipped it.)
-     *
-     * `timeoutMs` said "maximum wait time" and its ONLY reader used it as the
-     * timer *duration* when `timerDuration` was absent — so it did something, just
-     * not what it said. `timerDuration` already expresses that (`parseIsoDuration`
-     * reads a bare numeric *string* as milliseconds — the number must be quoted,
-     * because `timerDuration` is `z.string()` and the schema is what the author
-     * meets), which is why the conversion can move it losslessly, stringifying on
-     * the way, instead of dropping it.
-     *
-     * `onTimeout` had ZERO readers anywhere. Setting it changed nothing, and the
-     * showcase set it — a declared default (`'fail'`) stamped on every wait node
-     * that no code ever consulted.
-     *
-     * Real timeout semantics — resume the run at a deadline and either fail the
-     * node or continue past it — remain unimplemented. If they are wanted, they
-     * should be built to a requirement, not retrofitted to fit two keys that
-     * happened to be declared.
-     */
-    timeoutMs: retiredKey(
-      '`waitEventConfig.timeoutMs` was removed in @objectstack/spec 17. It documented a '
-      + 'timeout guard that never existed: nothing ever failed or resumed a wait on a deadline. Its '
-      + 'only reader treated it as the timer DURATION when `timerDuration` was absent, so use '
-      + '`timerDuration` — but QUOTE the number: the key is a string, and a bare numeric string is '
-      + "read as milliseconds, making `timeoutMs: 60000` and `timerDuration: '60000'` the same wait "
-      + "(`timerDuration: 'PT1M'` is the ISO 8601 spelling of that same 60s). Stored flows are "
-      + 'converted automatically — the conversion does the quoting for you. '
-      + 'Run `os migrate meta --from 16` to list the mechanical edits for existing '
-      + 'sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-    ),
-    onTimeout: retiredKey(
-      '`waitEventConfig.onTimeout` was removed in @objectstack/spec 17. It had no readers at '
-      + 'all — no code path ever inspected it, so neither `fail` nor `continue` ever happened. Delete '
-      + 'the key. There is no replacement: `wait` has no timeout, and a wait node resumes only when '
-      + 'its timer elapses or its signal arrives. '
-      + 'Run `os migrate meta --from 16` to list the mechanical edits for existing '
-      + 'sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-    ),
   }).superRefine((wec, ctx) => {
     // A timer with nothing to count is the forever-hang in its second
     // spelling. `parseIsoDuration` is the executor's only source for the wake
@@ -1089,14 +1035,6 @@ export const FlowSchema = lazySchema(() => strictObject(
   /** Metadata & Versioning */
   version: z.number().int().default(1).describe('Version number'),
   status: z.enum(['draft', 'active', 'obsolete', 'invalid']).default('draft').describe('Deployment status'),
-  // `template` REMOVED (#3896 audit close-out): no reader in designer or engine.
-  template: retiredKey(
-    '`flow.template` was removed in @objectstack/spec 17.0.0 (audit close-out) — ' +
-    'no designer or engine path ever read it, so flagging a flow as a template/subflow did ' +
-    'nothing. Delete the key. Shared logic is invoked via a subflow NODE referencing the ' +
-    'flow by name. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
 
   /** Trigger Type */
   type: z.enum(['autolaunched', 'record_change', 'schedule', 'screen', 'api']).describe('Flow type'),
@@ -1108,19 +1046,6 @@ export const FlowSchema = lazySchema(() => strictObject(
   nodes: z.array(FlowNodeSchema).describe('Flow nodes'),
   edges: z.array(FlowEdgeSchema).describe('Flow connections'),
   
-  // `active` REMOVED (#3896 audit close-out) — the rls.enabled shape, in the
-  // over-permissive direction: the spec default was `false` while the engine
-  // treated an unset flow as ENABLED, and `active: false` never stopped a flow
-  // (`status` is the enforced lifecycle). An author who "disabled" a flow here
-  // left it firing.
-  active: retiredKey(
-    '`flow.active` was removed in @objectstack/spec 17.0.0 (audit close-out) — it ' +
-    'never had an effect: the engine arms flows from `status`, and `active: false` did NOT ' +
-    'stop a flow (worse, the default read as disabled while the engine treated unset as ' +
-    "enabled). Delete the key. Use `status: 'obsolete'` (or 'invalid') to unbind and " +
-    "disable a flow, `status: 'active'` to arm it. " +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
   // ADR-0049 / #1888 — ENFORCED. The service-automation engine establishes the
   // declared identity for the run's data operations and restores the caller's
   // context afterward: `system` runs elevated (a full-access, RLS-bypassing
@@ -1355,17 +1280,6 @@ export const FlowSchema = lazySchema(() => strictObject(
     maxRetries: retryPolicyShape().maxRetries
       .describe("Retry attempts after the initial one. Read only under strategy: 'retry', which requires >= 1; 0 (the default) means no retry."),
 
-    // `fallbackNodeId` REMOVED (#3896 audit close-out): the engine routes
-    // unrecoverable errors via per-node FAULT EDGES, never this — an author
-    // who configured a fallback here had none.
-    fallbackNodeId: retiredKey(
-      '`flow.errorHandling.fallbackNodeId` was removed in @objectstack/spec 17.0.0 (' +
-      'audit close-out) — the engine routes unrecoverable node errors via per-node fault ' +
-      "edges (an edge with type: 'fault'), and never read this key: a fallback " +
-      'configured here silently did not exist. Delete the key and draw a fault edge from ' +
-      'the failing node to the handler node instead. ' +
-      'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-    ),
   }).superRefine((eh, ctx) => {
     // `strategy: 'retry'` with 0 attempts is `strategy: 'fail'` wearing a
     // different label — the flow runs once and stops. That is a declared

@@ -4,7 +4,9 @@
  * release. Three rules, all decided from the config file plus the manifests:
  *
  *   1. every workspace package under `packages/` and `apps/` is either in the
- *      `fixed` group or matched by `ignore`;
+ *      `fixed` group or matched by `ignore` -- or is PRIVATE while
+ *      `privatePackages.version` is true, which versions it on its own and
+ *      publishes it nowhere (`@object-ui/app-shell` since it left npm, #25922);
  *   2. `privatePackages` is declared explicitly;
  *   3. no PRIVATE package sits in the `fixed` group while
  *      `privatePackages.version` is false.
@@ -125,7 +127,16 @@ export function analyze(config, manifests) {
   const isIgnored = globMatcher(config.ignore ?? []);
   const privatePackages = normalizePrivatePackages(config.privatePackages);
 
-  const unclassified = manifests.filter((pkg) => !isFixed(pkg.name) && !isIgnored(pkg.name));
+  // A private package outside both lists is classified only while private
+  // packages are versioned: under `version: false` changesets treats it as
+  // ignored, and a changeset naming it beside a published package is then the
+  // mixed-changeset error rule 3 describes.
+  const unclassified = manifests.filter(
+    (pkg) =>
+      !isFixed(pkg.name) &&
+      !isIgnored(pkg.name) &&
+      !(pkg.private && privatePackages?.version === true)
+  );
   const privateInFixed =
     privatePackages?.version === true
       ? []
@@ -183,7 +194,9 @@ function main() {
       console.error(`    • ${name}  (${path})`);
     }
     console.error(
-      "\nAdd them to the `fixed` array in .changeset/config.json to keep versions in sync."
+      "\nAdd them to the `fixed` array in .changeset/config.json to keep versions in sync, or\n" +
+        "mark a package that publishes nowhere `private: true` (private packages version on\n" +
+        "their own while `privatePackages.version` is true)."
     );
   }
 
@@ -223,7 +236,7 @@ function main() {
 
   if (failed) return 1;
 
-  console.log("✅  All workspace packages are in the changeset fixed group.");
+  console.log("✅  Every workspace package is classified: in the fixed group, ignored, or private.");
   console.log(
     `✅  privatePackages declared: version=${privatePackages.version}, tag=${privatePackages.tag}.`
   );

@@ -235,11 +235,14 @@ describe('[#20290] the draft read serves an app author the stored draft whole', 
         const history = await (engine as any).find('sys_metadata_history', { where: { name: 'atlas' }, context: { isSystem: true } });
         const draftVersion = Math.max(...history.map((h: any) => Number(h.version)));
 
-        const diff = await call('author', 'GET', '/diff', 'atlas', { from: '0', to: String(draftVersion) });
+        // [#26462] From the published version, not `from=0`: a version with no
+        // history row is refused 404 `VERSION_NOT_FOUND`, so the draft's
+        // navigation is read as the `to` side of its change.
+        const diff = await call('author', 'GET', '/diff', 'atlas', { from: String(draftVersion - 1), to: String(draftVersion) });
         const draft = await call('author', 'GET', '', 'atlas', { state: 'draft' });
 
         expect(diff.statusCode).toBe(200);
-        const navigation = diff.body?.added?.find((e: any) => e.path === 'navigation')?.value;
+        const navigation = diff.body?.changed?.find((e: any) => e.path === 'navigation')?.to;
         expect(navIds({ navigation })).toEqual(navIds(draft.body?.item));
     }, 60_000);
 

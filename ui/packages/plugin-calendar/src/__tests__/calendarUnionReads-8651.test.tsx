@@ -130,6 +130,18 @@
  * ratchet plus the compile-time pins in this file, so one row covers both
  * published faces without this file re-implementing a second checker.
  *
+ * ## ⏱ objectstack#25923 — the five flat field-name reads moved to a hand-off type
+ *
+ * The five flat keys (`startDateField` `endDateField` `titleField` `colorField`
+ * `allDayField`) left the published `ObjectCalendarSchema` and its mirror: the
+ * spec refuses them on the node and prescribes the `calendar` block, which both
+ * producers now emit. `getCalendarConfig` still reads them flat, so they are
+ * declared on this package's hand-off type, `ObjectCalendarFlatFields`, and the
+ * props type is `ObjectCalendarHandoff`. The population row below therefore
+ * takes its declared set from BOTH: the mirror's shape, and the hand-off's five,
+ * pinned equal to that type's keys at compile time. The paragraphs above are
+ * this card's reading at the time, kept as written.
+ *
  * ## The ceiling, stated rather than assumed (objectui#5155 / #7927)
  *
  * The mirror is `.passthrough()`, so declaring a key buys VALUE validation and
@@ -151,7 +163,12 @@ import { ComponentPropsMap } from '@objectstack/spec/ui';
 import { ObjectCalendarSchema as ObjectCalendarMirror } from '@object-ui/types/zod';
 import type { ObjectCalendarSchema } from '@object-ui/types';
 
-import { ObjectCalendar, type ObjectCalendarComponentProps } from '../ObjectCalendar';
+import {
+  ObjectCalendar,
+  type ObjectCalendarComponentProps,
+  type ObjectCalendarFlatFields,
+  type ObjectCalendarHandoff,
+} from '../ObjectCalendar';
 
 // @ts-expect-error — plain-JS shared helper, intentionally untyped (`allowJs: false`)
 import { maskComments } from '../../../../scripts/js-comment-mask.mjs';
@@ -210,6 +227,13 @@ const CANONICAL_TWINS = ['startDateField', 'endDateField'] as const;
 
 /** The producer that makes the two aliases reachable, and the branch that does it. */
 const PRODUCER = 'packages/plugin-list/src/ListView.tsx';
+
+/**
+ * The five keys the renderer reads FLAT, declared on the package-local hand-off
+ * type rather than on the published schema (objectstack#25923). Pinned equal to
+ * `keyof ObjectCalendarFlatFields` below, so this list cannot drift from it.
+ */
+const HANDOFF_FLAT_KEYS = ['startDateField', 'endDateField', 'titleField', 'colorField', 'allDayField'] as const;
 
 /** A key nothing reads and nothing declares: the both-ways control. */
 const CONTROL_KEY = 'zzqxNoSuchField';
@@ -270,8 +294,16 @@ type Expect<T extends true> = T;
  * and a one-way check accepts `any` on both sides — which is precisely the
  * before-state this card removed.
  */
-export type assertionSchemaPropIsThePublishedElementSchema =
-  Expect<Equal<ObjectCalendarComponentProps['schema'], ObjectCalendarSchema>>;
+export type assertionSchemaPropIsThePublishedElementSchemaPlusTheHandoff =
+  Expect<Equal<ObjectCalendarComponentProps['schema'], ObjectCalendarHandoff>>;
+export type assertionHandoffIsThePublishedSchemaPlusTheFlatFive =
+  Expect<Equal<ObjectCalendarHandoff, ObjectCalendarSchema & ObjectCalendarFlatFields>>;
+/** The runtime list above is the hand-off type's key set, exactly. */
+export type assertionHandoffKeysAreTheList =
+  Expect<Equal<keyof ObjectCalendarFlatFields, (typeof HANDOFF_FLAT_KEYS)[number]>>;
+/** …and none of the five is a member of the PUBLISHED schema any more (objectstack#25923). */
+export type assertionPublishedSchemaDeclaresNoFlatKey =
+  Expect<Equal<Extract<keyof ObjectCalendarSchema, (typeof HANDOFF_FLAT_KEYS)[number]>, never>>;
 /** The helper can FAIL — synthetic control. */
 export type assertionEqualCanFail = Expect<Equal<Equal<any, ObjectCalendarSchema>, false>>;
 
@@ -308,7 +340,8 @@ describe('objectui#8651 — the props type is the published element schema', () 
 describe('objectui#8651 — every key read off the node is declared on that schema', () => {
   it('no read is undeclared — `navigation` included, since objectui#8652', () => {
     const reads = rendererReads();
-    const declared = new Set(shapeKeys(ObjectCalendarMirror));
+    // The mirror's shape, plus the hand-off's five (objectstack#25923).
+    const declared = new Set([...shapeKeys(ObjectCalendarMirror), ...HANDOFF_FLAT_KEYS]);
     const exempt = new Set<string>([...LEDGERED_OTHER_CARD_READS]);
     const undeclared = [...reads]
       .filter((key) => !declared.has(key))
@@ -341,11 +374,26 @@ describe('objectui#8651 — every key read off the node is declared on that sche
     // …and does not invent one that is not.
     expect(rendererReads().has(CONTROL_KEY)).toBe(false);
     // The declared set is a real set, not everything.
-    expect(shapeKeys(ObjectCalendarMirror)).toContain('startDateField');
+    expect(shapeKeys(ObjectCalendarMirror)).toContain('calendar');
     expect(shapeKeys(ObjectCalendarMirror)).not.toContain(CONTROL_KEY);
     // And the census fires on both spellings, so the cast cleanup cannot mute it.
     const probe = schemaReads('const a = schema.alphaKey; const b = (schema as any).betaKey;');
     expect([...probe].sort()).toEqual(['alphaKey', 'betaKey']);
+  });
+});
+
+describe('objectstack#25923 — the five flat reads are the hand-off\'s, not the published schema\'s', () => {
+  it('every one is still READ, and none is a member of the mirror', () => {
+    const reads = rendererReads();
+    const mirror = shapeKeys(ObjectCalendarMirror);
+    for (const key of HANDOFF_FLAT_KEYS) {
+      expect([...reads], `the renderer no longer reads the flat ${key}; shrink the hand-off type`).toContain(key);
+      expect(mirror, `the published mirror declares the flat ${key} again`).not.toContain(key);
+    }
+    // CONTROL, same two instruments: `calendar` is read AND declared, so the
+    // absences above are readings rather than an empty shape.
+    expect([...reads]).toContain('calendar');
+    expect(mirror).toContain('calendar');
   });
 });
 
@@ -430,8 +478,10 @@ describe('objectui#8355 — the `dateField` / `endField` rungs are RETIRED at bo
   });
 
   it('…and an authored alias is refused BY NAME, at its own path, naming the canonical key', () => {
-    const node = { type: 'object-calendar', objectName: 'duly_task', titleField: 'nickname' };
-    for (const [alias, canonical] of [['dateField', 'startDateField'], ['endField', 'endDateField']] as const) {
+    const node = { type: 'object-calendar', objectName: 'duly_task', calendar: { titleField: 'nickname' } };
+    // The canonical key lives in the `calendar` block since objectstack#25923,
+    // so the refusal names the block path.
+    for (const [alias, canonical] of [['dateField', 'calendar.startDateField'], ['endField', 'calendar.endDateField']] as const) {
       const r = ObjectCalendarMirror.safeParse({ ...node, [alias]: 'kickoff' });
       expect(r.success, `${alias} still parses green on the node face`).toBe(false);
       const issue = r.success ? undefined : r.error.issues.find((i) => i.path.join('.') === alias);
@@ -442,13 +492,12 @@ describe('objectui#8355 — the `dateField` / `endField` rungs are RETIRED at bo
 
   it('CONTROL: the canonical spellings still parse green on the same instrument', () => {
     // So the four rows above are a narrowing of two keys, not "the node face
-    // refuses everything".
+    // refuses everything". In the `calendar` block, their one spelling since
+    // objectstack#25923.
     const ok = ObjectCalendarMirror.safeParse({
       type: 'object-calendar',
       objectName: 'duly_task',
-      startDateField: 'kickoff',
-      endDateField: 'wrapup',
-      titleField: 'nickname',
+      calendar: { startDateField: 'kickoff', endDateField: 'wrapup', titleField: 'nickname' },
     });
     expect(ok.success, JSON.stringify(ok.error?.issues)).toBe(true);
   });

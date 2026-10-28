@@ -9,7 +9,7 @@
       "title": "agent / tool / skill metadata kinds author, persist and list over the meta surface — retired keys reject with prescriptions, the closed agent kind has no runtime write door",
       "since": "v15",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "api",
       "personas": ["admin"],
@@ -90,9 +90,9 @@
       ],
       "traps": ["stale-dist"],
       "source": [
-        "packages/spec/src/ai/agent.zod.ts#tenantId (requireds, aliases, retiredKey tools/knowledge, visibility/tenantId guidance)",
+        "packages/spec/src/ai/agent.zod.ts#tenantId (requireds, aliases, retiredKey lifecycle, visibility/tenantId guidance; `tools`/`knowledge` aged out on #25767 — strict unknown keys naming the upgrade guide)",
         "packages/spec/src/ai/tool.zod.ts#TOOL_RETIRED_KEY_GUIDANCE (.strict() + TOOL_RETIRED_KEY_GUIDANCE; READ-ONLY PROJECTION note)",
-        "packages/spec/src/ai/skill.zod.ts#triggerPhrases (requireds, retiredKey triggerPhrases, permissions/trigger guidance #5013)",
+        "packages/spec/src/ai/skill.zod.ts#SkillSchema (requireds, permissions/trigger guidance #5013; `triggerPhrases` aged out on #25767 — a strict unknown key naming the upgrade guide)",
         "packages/spec/src/kernel/metadata-type-schemas.ts#registered (agent/tool/skill registered with schemas)",
         "packages/spec/src/kernel/metadata-plugin.zod.ts#allowRuntimeCreate (registry rows: agent allowRuntimeCreate:false ADR-0063 §2; tool/skill true; file patterns)",
         "packages/runtime/src/route-ledger.ts (GET /meta, GET /meta/types, GET/PUT /meta/:type/:name)",
@@ -119,6 +119,12 @@
           "date": "2026-10-19",
           "change": "steps[1] and acceptance[3].verify corrected — checklist-accuracy findings of the 18.0 QA sweep (QA run #24540, ai.agent-tool-skill-metadata-roundtrip; wave anchor #24579 §3). Compiling an app-package agent now warns agent-authoring-withdrawn (packages/lint/src/validate-ai-agent-authoring.ts, warning tier) while the meta door still serves it, and the package-shipped agent PUT answers NOT_OVERRIDABLE where revision 5's history cited only the runtime-name NOT_CREATABLE. Re-derived at base 9a7838edf5. No clause changed",
           "ref": "#24649"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-26",
+          "change": "source anchors re-pointed after the ≤16.x retirement kits aged out (#25767): `skill.triggerPhrases` and `agent.tools`/`agent.knowledge` are no longer declared — their probes are strict unknown keys whose refusal names the protocol upgrade guide, not tombstones; the skill anchor now cites SkillSchema and the agent line names the surviving `lifecycle` tombstone. The negative clause holds as written: a probe accepted with a clean parse is still a FAIL.",
+          "ref": "#25767"
         }
       ]
     },
@@ -127,7 +133,7 @@
       "title": "MCP HTTP transport (/mcp) and the public /mcp/skill endpoint gate exactly as documented: 404 when opted out, 501 when unimplemented, 401 anonymous, 403 scopeless-OAuth, full tool list when keyed",
       "since": "v15",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "fixtures": {
@@ -140,7 +146,8 @@
       "variants": [
         "OAuth scope data:read → read-family tools: list_objects, describe_object, validate_expression, query_records, get_record, and aggregate_records where the bridge implements aggregate (packages/mcp/src/mcp-http-tools.ts canRead block; packages/spec/src/ai/mcp.zod.ts MCP_OAUTH_SCOPE_DATA_READ)",
         "OAuth scope data:write → write-family tools: create_record, update_record, delete_record",
-        "OAuth scope actions:execute → list_actions, run_action"
+        "OAuth scope actions:execute → list_actions, run_action",
+        "OAuth scope metadata:write → the authoring tools the host injects (packages/mcp/src/mcp-server-runtime.ts registerAuthoringTools; packages/spec/src/ai/mcp.zod.ts MCP_OAUTH_SCOPE_METADATA_WRITE), served only to an OAuth grant naming metadata:write — a key or a session is served none"
       ],
       "steps": [
         "boot with OS_MCP_SERVER_ENABLED=false; GET /api/v1/mcp/skill and POST /api/v1/mcp; record status + body of both",
@@ -148,7 +155,7 @@
         "POST /api/v1/mcp/skill (wrong method); capture the 405 and its Allow header",
         "POST /api/v1/mcp with NO credentials (an MCP initialize body); capture the 401 body and any WWW-Authenticate header",
         "open an MCP Streamable HTTP session against /api/v1/mcp with the osk_ key: initialize, then tools/list; record the full tool-name set",
-        "if the OAuth track is live in the environment, request /mcp with an OAuth token (to mint one locally, register the client with application_type: 'native' — dynamic client registration refuses a web client whose redirect is http or a loopback host, 'web clients require https redirect URIs on non-loopback hosts', @better-auth/oauth-provider) carrying NONE of the three MCP scopes; capture the 403 + WWW-Authenticate error=\"insufficient_scope\"",
+        "if the OAuth track is live in the environment, request /mcp with an OAuth token (to mint one locally, register the client with application_type: 'native' — dynamic client registration refuses a web client whose redirect is http or a loopback host, 'web clients require https redirect URIs on non-loopback hosts', @better-auth/oauth-provider) carrying NONE of the four MCP scopes; capture the 403 + WWW-Authenticate error=\"insufficient_scope\"",
         "capture the dispatcher-vs-hono distinction: the disabled boot's 404 comes from the gate (surface not advertised), never a hang or 500"
       ],
       "acceptance": [
@@ -183,9 +190,9 @@
           "evidence": "the session trace + tool-name list"
         },
         {
-          "clause": "an OAuth token granting none of the MCP scopes is refused 403 up front with insufficient_scope naming all three scopes (data:read, data:write, actions:execute); a partial grant narrows the tool list per the variants matrix (#2698, ADR-0090 D10)",
+          "clause": "an OAuth token granting none of the MCP scopes is refused 403 up front with insufficient_scope naming all four scopes (data:read, data:write, actions:execute, metadata:write); a partial grant narrows the tool list per the variants matrix (#2698, ADR-0090 D10)",
           "oracle": "api",
-          "verify": "403 body 'Forbidden: the access token grants none of the MCP scopes …' + WWW-Authenticate error=\"insufficient_scope\" scope=\"data:read data:write actions:execute\"; for a data:read-only token, tools/list carries the read family only",
+          "verify": "403 body 'Forbidden: the access token grants none of the MCP scopes …' + WWW-Authenticate error=\"insufficient_scope\" scope=\"data:read data:write actions:execute metadata:write\"; for a data:read-only token, tools/list carries the read family only",
           "evidence": "the 403 + the narrowed tools/list"
         }
       ],
@@ -209,7 +216,8 @@
         { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 3, "date": "2026-10-16", "change": "clause 5's tool list omitted resume_run (#23878 checklist-accuracy finding). Re-measured on main c91af8ed6 with an admin osk_ key: tools/list returns twelve tools, resume_run among them; mcp-http-tools.ts registers it only when the bridge exposes resumeRun, the same optional shape as aggregate_records, so the verify now names that degradation too", "ref": "#24036" },
         { "revision": 4, "date": "2026-10-19", "change": "variants[0] and steps[5] corrected — checklist-accuracy findings of the 18.0 QA sweep (QA run #24540, ai.mcp-http-surface; wave anchor #24579 §3). The data:read family also serves aggregate_records and validate_expression (both read-only), and a local OAuth leg needs a native client. Re-derived at base 9a7838edf5 (mcp-http-tools.ts registers validate_expression and, when the bridge exposes aggregate, aggregate_records inside the canRead gate; the oauth-provider DCR rule in the installed @better-auth/oauth-provider 1.7.3). No clause changed", "ref": "#24649" },
-        { "revision": 5, "date": "2026-10-26", "change": "automated.ref extended and annotated per clause — checklist-accuracy findings of the 18.2.0 sweep, Tier 1 record #25815 at 6679644a (wave anchor #25807): the one-file ref left acceptance[0]–[2] and [5] with no named pin, and the pin asserts acceptance[3]'s status only and acceptance[4] with a session bearer, no initialize and two tool names. Re-read on main at b4199c96: the record's 'no pin at any layer' for acceptance[0]–[2] and [5] no longer holds, since dispatcher-unit and Hono-integration pins in packages/runtime and the scope-narrowing unit in packages/mcp assert parts of them; they join the ref with the layer each reaches and what each leaves unasserted. No clause changed, no status changed", "ref": "#25836" }
+        { "revision": 5, "date": "2026-10-26", "change": "automated.ref extended and annotated per clause — checklist-accuracy findings of the 18.2.0 sweep, Tier 1 record #25815 at 6679644a (wave anchor #25807): the one-file ref left acceptance[0]–[2] and [5] with no named pin, and the pin asserts acceptance[3]'s status only and acceptance[4] with a session bearer, no initialize and two tool names. Re-read on main at b4199c96: the record's 'no pin at any layer' for acceptance[0]–[2] and [5] no longer holds, since dispatcher-unit and Hono-integration pins in packages/runtime and the scope-narrowing unit in packages/mcp assert parts of them; they join the ref with the layer each reaches and what each leaves unasserted. No clause changed, no status changed", "ref": "#25836" },
+        { "revision": 6, "date": "2026-10-27", "change": "acceptance[5] clause and verify, steps[5] and variants follow the fourth MCP scope, metadata:write: the scopeless 403 names all four scopes in its body and in its WWW-Authenticate scope list (packages/runtime/src/domains/mcp.ts joins MCP_OAUTH_SCOPES), and the variants matrix gains the metadata:write row (the host-injected authoring tools, served only to an OAuth grant naming the scope). Re-read on main at c739de75. No status changed", "ref": "#26587" }
       ]
     },
     {
@@ -636,7 +644,7 @@
       "title": "Console AI affordances gate on the access-filtered agent catalog: an agent-less boot hides FAB / chat dock / ⌘⇧I / top-bar link and redirects a stale /ai bookmark without flash — and the ungated bare system/ai-approvals route degrades honestly: one 501 read stops the poll, and the error replaces the empty queue (objectui#11736)",
       "since": "v16",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P2",
       "surface": "browser",
       "personas": ["admin (form sign-in — the pending-actions poll sends the COOKIE half only, credentials:'include' with no bearer header, so an injected-token session reads as anonymous there)"],
@@ -698,7 +706,7 @@
         {
           "clause": "honest degradation on the bare route: no fake empty queue and no unbounded dead poll. The inbox renders the destructive alert INSTEAD of the 'No actions waiting' empty state (the empty state is drawn only when the read answered, AiPendingActionsInbox.tsx), and the poll stops after the one 501 (a refused read ends it, usePendingActions.ts). This was expected-fail K2 until objectui#11736 fixed both halves",
           "oracle": "network",
-          "verify": "the ~15s network capture shows a single 501 read of /api/v1/ai/pending-actions and no further request; the page screenshot shows the error alert with no empty-queue panel beneath it. objectui pins both halves — packages/plugin-chatbot/src/__tests__/usePendingActions.pollFaultPolicy-11736.test.tsx ('a refused read stops the poll') and AiPendingActionsInbox.errorReplacesEmpty-11736.test.tsx ('an errored read shows the error, not an empty queue'); both now live in this tree under ui/packages/plugin-chatbot/src/__tests__/ (@object-ui/plugin-chatbot), so run them at the run subject sha to cite them beside the live read",
+          "verify": "the ~15s network capture shows a single 501 read of /api/v1/ai/pending-actions and no further request; the page screenshot shows the error alert with no empty-queue panel beneath it. Unit pins in this tree cover both halves — ui/packages/plugin-chatbot/src/__tests__/usePendingActions.pollFaultPolicy-11736.test.tsx ('a refused read stops the poll') and ui/packages/plugin-chatbot/src/__tests__/AiPendingActionsInbox.errorReplacesEmpty-11736.test.tsx ('an errored read shows the error, not an empty queue') (@object-ui/plugin-chatbot), so run them at the run subject sha to cite them beside the live read",
           "evidence": "the poll trace + the page screenshot"
         }
       ],
@@ -726,7 +734,8 @@
         { "revision": 4, "date": "2026-10-13", "change": "acceptance[5] (clause and verify) flipped from expected-fail K2 to the positive contract, with steps[6] and [7], negative[2], the title and source[4] and [5] (stale spec, #23163 C5; parked on #23121, carried by #23169). objectui#11736 made the poll follow its last answer (a refused read stops it, a transient one backs off within a ceiling) and made the inbox draw its empty state only when the read answered. QA run #23163 read one 501, no re-arm, and no empty state under the alert, at objectstack 36b2889c with objectui 1fb1ced36243. Re-read from objectui source at that pin, still this repo's .objectui-sha, including the two pins now named in the clause", "ref": "#23169" },
         { "revision": 5, "date": "2026-10-20", "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). source[0] cited lines 71-88 of objectui useAiSurface.ts in the comma-range spelling, the second range of the list 45397edf53 authored (9-40 and 71-88). At the objectui pin that commit shipped, 9602dc820450, and still at the shipped pin 12dc7b47c340, those lines are the useAiSurfaceEnabled hook, so source[0] now names it. objectui is read at the shipped pin 12dc7b47c340 and cited in prose, because no objectui anchor resolves in this gate. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed", "ref": "#24752" },
         { "revision": 6, "date": "2026-10-26", "change": "acceptance[5].verify re-pointed off the retired objectui pin (#26035): the .objectui-sha file is gone (#25745) and the two objectui pins it named now live in this tree under ui/packages/plugin-chatbot. Found while applying the 18.2.0 sweep's ai findings (#25836, wave anchor #25807). No clause changed, no status changed", "ref": "#25836" },
-        { "revision": 7, "date": "2026-10-26", "change": "the landing-page REMEDY clause's verify: the 501 message the alert string-equals now reads 'ObjectOS Cloud/Enterprise' (was the retired product name), following the ObjectOS product-name ruling and moving with REMEDY_DETAIL['ai']", "ref": "#26228" }
+        { "revision": 7, "date": "2026-10-26", "change": "the landing-page REMEDY clause's verify: the 501 message the alert string-equals now reads 'ObjectOS Cloud/Enterprise' (was the retired product name), following the ObjectOS product-name ruling and moving with REMEDY_DETAIL['ai']", "ref": "#26228" },
+        { "revision": 8, "date": "2026-10-27", "change": "acceptance[5].verify: the two unit pins are named by their ui/ paths instead of as objectui pins (#26626, maintainer-directed). No clause changed, no status changed", "ref": "#26626" }
       ]
     },
     {

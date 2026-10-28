@@ -474,6 +474,59 @@ describe('#19542 — the `report` door (three rules, one document)', () => {
   });
 });
 
+describe('#26548 — the `report` door judges a date range against the dataset it binds', () => {
+  // The door's own snapshot shape, with a dataset that declares two date
+  // dimensions (`examples/app-todo`'s task dataset has the same pair) and one
+  // that declares none.
+  const DATED = {
+    objects: OBJECTS,
+    datasets: [
+      ...DATASETS,
+      {
+        name: 'acme_invoice_dated',
+        label: 'Invoice Metrics (dated)',
+        object: 'acme_invoice',
+        dimensions: [
+          { name: 'status', label: 'Status', field: 'status', type: 'string' },
+          { name: 'issued_on', label: 'Issued', field: 'issued_on', type: 'date' },
+          { name: 'paid_on', label: 'Paid', field: 'paid_on', type: 'date' },
+        ],
+        measures: [{ name: 'total_sum', label: 'Total', aggregate: 'sum', field: 'total' }],
+      },
+    ],
+  };
+  const report = (over: Record<string, unknown>) => ({
+    name: 'acme_dated_report',
+    label: 'Invoices by Period',
+    type: 'summary',
+    dataset: 'acme_invoice_dated',
+    rows: ['status'],
+    values: ['total_sum'],
+    ...over,
+  });
+
+  it.each([
+    ['a dimension the dataset does not declare', { dateRange: { dimension: 'due_on' } }, 'report-date-range-dimension-unknown'],
+    ['a dimension that is not a date', { dateRange: { dimension: 'status' } }, 'report-date-range-dimension-not-date'],
+    ['no dimension over two date dimensions', { dateRange: {} }, 'report-date-range-dimension-ambiguous'],
+    ['no dimension over a dataset with none', { dataset: 'acme_invoice_metrics', dateRange: {} }, 'report-date-range-dimension-none'],
+  ] as const)('⭐ LIT — %s is REFUSED', (_label, over, rule) => {
+    const result = runRuntimeAuthoringRules({ type: 'report', item: report(over), context: DATED });
+    expect(result.rulesRun).toContain('validateReferenceIntegrity');
+    expect(ruleIds(result.errors), dump(result)).toEqual([rule]);
+  });
+
+  it('⭐ CONTROL — a date range naming one date dimension publishes clean', () => {
+    const result = runRuntimeAuthoringRules({
+      type: 'report',
+      item: report({ dateRange: { dimension: 'issued_on', defaultRange: 'this_quarter' }, exportOptions: { formats: ['csv'] } }),
+      context: DATED,
+    });
+    expect(result.errors, dump(result)).toEqual([]);
+    expect(result.advisories, dump(result)).toEqual([]);
+  });
+});
+
 // ─── Group A · `skill` — outside the door BY DESIGN, and these pins hold it ──
 
 describe('#19527 — `skill` stays outside the door by design: tool references are a whole-stack verdict', () => {
@@ -875,7 +928,7 @@ describe('#19542 — DARK: what the five crossings did NOT widen', () => {
     }
   });
 
-  it('a `report` write reaches exactly ONE suite member, and a `skill` write none', () => {
+  it('a `report` write reaches exactly TWO suite members, and a `skill` write none', () => {
     // The entry-level `runtimeTypes` says which WRITES dispatch the suite; the
     // per-member `runtimeTypes` says which MEMBERS judge that snapshot. Asked
     // against the real table so a member widened without this file noticing
@@ -883,7 +936,7 @@ describe('#19542 — DARK: what the five crossings did NOT widen', () => {
     const membersFor = (type: string) =>
       REFERENCE_INTEGRITY_RULES.filter((m) => (m.runtimeTypes ?? ['flow']).includes(type)).map((m) => m.name);
 
-    expect(membersFor('report')).toEqual(['validateChartBindings']);
+    expect(membersFor('report')).toEqual(['validateChartBindings', 'validateReportDateRange']);
     // Outside the door by design (ruling `5791822697`) — the entry does not
     // dispatch a skill write and no member claims one, so the two halves
     // agree. See the `skill` block above.

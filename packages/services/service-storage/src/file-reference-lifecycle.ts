@@ -61,6 +61,18 @@ import { callerContext } from './attachment-access-hooks.js';
  * ADR-0104's `verify-references` counts as blocking. Constraint verdicts still
  * never run ahead of the read check.
  *
+ * ### A write references only a file whose upload was completed
+ *
+ * [#26479] A presigned upload is a `pending` row until `/upload/complete`
+ * commits it, and that door is where the platform learns the backend holds
+ * the bytes the row declares (#24548). A write whose caller names a file that
+ * was never committed is refused at the field, after the read check, with the
+ * same envelope: one `invalid_value` entry per field, naming the field and the
+ * file ({@link refuseIncompleteUpload}). Nothing is claimed. A system write and
+ * a context-less programmatic write are not judged: the seed loader writes a
+ * record over the `pending` row `IFieldFileService.storeFile` made, and
+ * commits it with `claimFiles` after.
+ *
  * ### An anonymous write carries no file
  *
  * [#25694] Ruling C (record 6384525042), held at every anonymous write door
@@ -352,6 +364,40 @@ function refuseUnreadableFile(engine: FileReferenceEngine, object: string, field
     code: 'invalid_value',
     message: `${label} cannot reference this file: it is not a file you can open. `
       + 'Choose a file you can open, or upload it again.',
+    label,
+  };
+}
+
+/**
+ * [#26479] Did this file's upload complete? `committed` is what
+ * `/upload/complete` writes; `deleted` is a committed file a record let go,
+ * which a claim within its grace window revives ({@link claimFile}). Anything
+ * else is an upload that never completed (`pending`).
+ */
+function isCompletedUpload(row: Record<string, unknown>): boolean {
+  return row.status === 'committed' || row.status === 'deleted';
+}
+
+/**
+ * [#26479] The refusal of a field naming files whose upload never completed.
+ * The caller may read them, so it names them: the remedy is to complete those
+ * uploads.
+ */
+function refuseIncompleteUpload(
+  engine: FileReferenceEngine,
+  object: string,
+  field: string,
+  fileIds: string[],
+): FileFieldRefusal {
+  const label = fieldLabelOf(engine, object, field);
+  const named = fileIds.length === 1
+    ? `file ${fileIds[0]}: its upload was`
+    : `files ${fileIds.join(', ')}: their uploads were`;
+  return {
+    field,
+    code: 'invalid_value',
+    message: `${label} cannot reference ${named} never completed. `
+      + 'Complete the upload, then save again.',
     label,
   };
 }
@@ -744,7 +790,8 @@ async function copyOwnedFile(
  * so every already-owned id is copied. [#25692] `caller` is the write's caller
  * ({@link referencingCallerOf}). [#26043] Every file the write names is judged
  * for that caller before any is copied or held to its field's declaration,
- * and a field naming one it may not read refuses the whole write.
+ * and a field naming one it may not read refuses the whole write. [#26479] So
+ * does a field naming one whose upload never completed.
  */
 async function applyCopyOnClaim(
   engine: FileReferenceEngine,
@@ -770,6 +817,7 @@ async function applyCopyOnClaim(
     if (tokens.length === 0) continue;
 
     const rows: Array<[string, Record<string, unknown>]> = [];
+    const incomplete: string[] = [];
     let fieldRefused = false;
     for (const token of [...new Set(tokens)]) {
       const found = await findReferenceableFile(engine, token, organizationId, caller, authorizeRead);
@@ -783,9 +831,16 @@ async function applyCopyOnClaim(
       // (external/legacy value), or not one the acting organization can reach
       // (`systemReadContext`). Left verbatim — the read resolver ignores it
       // for the same reason.
-      if (found) rows.push([token, found]);
+      if (!found) continue;
+      // [#26479] A file the caller may read, whose upload never completed —
+      // unless this slot already holds it (an update rewriting the value it
+      // has), which claims nothing.
+      const held = recordId !== null && isSameSlot(found, object, recordId, field);
+      if (caller && !held && !isCompletedUpload(found)) incomplete.push(token);
+      else rows.push([token, found]);
     }
     if (fieldRefused) refused.push(refuseUnreadableFile(engine, object, field));
+    else if (incomplete.length > 0) refused.push(refuseIncompleteUpload(engine, object, field, incomplete));
     else if (rows.length > 0) named.push({ field, value, rows });
   }
   assertNoFileFieldRefused(refused);

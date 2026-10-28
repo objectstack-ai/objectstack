@@ -466,28 +466,20 @@ describe('#6250 — the 409 body echoes nothing the driver said', () => {
     );
 
     /**
-     * [#7821] This assertion used to read `toEqual(new Set(['A record with this
-     * value already exists']))` — ONE sentence for every dialect. It is
-     * deliberately widened, not deleted, because the invariant it defends was
-     * never "one sentence"; it was **"the body is assembled from fixed text and
-     * values this package chose, never from driver prose."**
-     *
-     * There are now exactly two sentences, and the only difference between them
-     * is a bare identifier `uniqueViolationColumn` could determine is a COLUMN.
-     * The set-equality is kept (rather than relaxed to a regex) so that a future
-     * change which lets driver text leak into `body.error` still goes red here:
-     * a third distinct sentence fails this, whatever it says.
+     * [#7821] widened this to two sentences, the second interpolating the bare
+     * column `uniqueViolationColumn` determined. [#26867] narrowed it back to
+     * ONE: that column is the field's API key, and the end user's sentence names
+     * a field only by its label, which a raw driver error never carries — the
+     * column stays on `field` (face 3 below). The invariant it defends is
+     * unchanged: **"the body is assembled from fixed text and values this
+     * package chose, never from driver prose."** The set-equality is kept so a
+     * change that lets driver text — or the key — into `body.error` goes red.
      */
-    it('assembles the body from fixed text — exactly two sentences, one bare identifier apart', () => {
+    it('assembles the body from fixed text — one sentence, whatever the dialect named', () => {
         const bodies = new Set(
             CONFLICTS.map((s) => String(mapDataError(s.build(), 'sys_user').body.error)),
         );
-        expect(bodies).toEqual(
-            new Set([
-                'A record with this value already exists',
-                'A record with this email already exists',
-            ]),
-        );
+        expect(bodies).toEqual(new Set(['A record with this value already exists']));
     });
 });
 
@@ -531,14 +523,16 @@ describe('#7821 face 3 — the conflicting field on the wire', () => {
     });
 
     it.each(NAMED.map((s) => [`${s.dialect}/${s.channel}: ${s.label}`, s] as const))(
-        'names the field for %s',
+        'names the field for %s — on `field`, never by its key in the sentence',
         (_name, sample) => {
             const r = mapDataError(sample.build(), 'sys_user');
             // `code` AND `status` per ADR-0112 — never "it stopped being a 500".
             expect(r.status).toBe(409);
             expect(r.body.code).toBe('UNIQUE_VIOLATION');
             expect(r.body.field).toBe(sample.field);
-            expect(r.body.error).toBe(`A record with this ${sample.field} already exists`);
+            // [#26867] No label is in hand for a raw driver error: the API key
+            // is the programs' half, so the sentence is the unnamed one.
+            expect(r.body.error).toBe('A record with this value already exists');
         },
     );
 
@@ -581,20 +575,22 @@ describe('#7821 face 3 — the conflicting field on the wire', () => {
     });
 
     /**
-     * The reported asymmetry, asserted as the single fact it is: for a conflict
-     * both paths can name, the two paths now say the same field. `sanitizeRowError`
-     * is called with the string it is always given, exactly as `import-runner`
-     * calls it — this compares the two paths, it does not re-test either.
+     * The reported asymmetry, asserted as the single fact it is: for one
+     * conflict the two paths say the same thing. `sanitizeRowError` is called
+     * with the string it is always given, exactly as `import-runner` calls it —
+     * this compares the two paths, it does not re-test either. [#26867] Both now
+     * keep the API key out of the sentence: the single-record body carries it on
+     * `field`, and neither sentence names it.
      */
-    it('parity with the bulk path — both name the same field for one conflict', () => {
+    it('parity with the bulk path — one sentence for one conflict, the key on `field`', () => {
         const message = 'UNIQUE constraint failed: sys_user.email';
         const single = mapDataError(driverError(message, { code: 'SQLITE_CONSTRAINT_UNIQUE' }), 'sys_user');
 
+        expect(single.status).toBe(409);
+        expect(single.body.code).toBe('UNIQUE_VIOLATION');
         expect(single.body.field).toBe('email');
-        // Unchanged by #7821, and restated here so a regression on either side
-        // surfaces as the divergence it would be.
-        expect(sanitizeRowError(message)).toBe('A record with this email already exists.');
-        expect(String(single.body.error)).toContain('email');
+        expect(sanitizeRowError(message)).toBe('A record with this value already exists.');
+        expect(String(single.body.error)).toBe('A record with this value already exists');
     });
 });
 

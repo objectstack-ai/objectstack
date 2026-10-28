@@ -71,6 +71,11 @@ export interface ViewSettingsPopoverProps {
    * choosing a layout completes the choice, so the host's switcher calls
    * `closeMenu` when a layout is picked (objectui#12621). The panel's toggles
    * (row numbers, inline edit, density, hidden fields) never close it.
+   *
+   * The row folds a segmented control that would not fit to icons (see
+   * `LayoutSlot`). It folds what it can read: a `role="tablist"` whose tabs
+   * carry their name in `aria-label` and `title` and their words in a direct
+   * child `<span>`, the shape `ViewSwitcherDropdown` draws.
    */
   layout?: (closeMenu: () => void) => React.ReactNode;
 
@@ -248,6 +253,69 @@ function SwitchRow({
   );
 }
 
+/** Set on the layout slot while its segments show icons only; the class below reads it. */
+const LAYOUT_FOLD_ATTR = 'data-layout-fold';
+
+/**
+ * The Layout row's control, folded to icons when its segments would not fit
+ * (objectstack#26637). The panel is a fixed width and the row shares it with
+ * its title, so four or five icon + label segments ran out of room and broke
+ * each label onto two lines, in zh-CN and longer still in en.
+ *
+ * The fold is MEASURED, never a count or a breakpoint: what decides it is the
+ * width the segments need with every label shown against the width the slot
+ * has, in whatever locale is rendering. Folded, every segment but the selected
+ * one hides its words; its icon stays, and its `aria-label` and `title` stay
+ * its accessible name and tooltip. The selected segment keeps its label.
+ *
+ * Labels never wrap here (`whitespace-nowrap`, `shrink-0`), so the width the
+ * segments need is the slot's children's `scrollWidth`. While folded the
+ * hidden labels add nothing to it, so each measurement lifts the fold for one
+ * synchronous read and puts it back before the browser paints. It runs after
+ * every render (labels, locale and the views offered all arrive as props) and
+ * whenever the slot itself resizes.
+ */
+function LayoutSlot({ children }: { children: React.ReactNode }) {
+  const ref = React.useRef<HTMLDivElement>(null);
+  const [folded, setFolded] = React.useState(false);
+
+  const measure = React.useCallback(() => {
+    const slot = ref.current;
+    if (!slot) return;
+    const fold = slot.getAttribute(LAYOUT_FOLD_ATTR);
+    if (fold !== null) slot.removeAttribute(LAYOUT_FOLD_ATTR);
+    let needed = 0;
+    for (const child of Array.from(slot.children)) needed += (child as HTMLElement).scrollWidth;
+    if (fold !== null) slot.setAttribute(LAYOUT_FOLD_ATTR, fold);
+    setFolded(needed > slot.clientWidth);
+  }, []);
+
+  React.useLayoutEffect(measure);
+
+  React.useEffect(() => {
+    const slot = ref.current;
+    if (!slot || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => measure());
+    observer.observe(slot);
+    return () => observer.disconnect();
+  }, [measure]);
+
+  return (
+    <div
+      ref={ref}
+      data-layout-fold={folded ? 'icons' : undefined}
+      className={cn(
+        'flex min-w-0 flex-1 justify-end',
+        '[&_[role=tab]]:shrink-0 [&_[role=tab]]:whitespace-nowrap',
+        '[&[data-layout-fold]_[role=tab][aria-selected=false]>span]:hidden',
+      )}
+      data-testid="display-layout-slot"
+    >
+      {children}
+    </div>
+  );
+}
+
 export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
   const {
     t,
@@ -321,10 +389,10 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
         <div className="max-h-[min(70vh,560px)] overflow-y-auto">
           {layout && (
             <div className="flex items-center justify-between gap-3 border-b px-3 py-2" data-testid="display-layout-row">
-              <span className="text-xs font-medium text-foreground/80">
+              <span className="shrink-0 whitespace-nowrap text-xs font-medium text-foreground/80">
                 {t('list.layout', { defaultValue: 'Layout' })}
               </span>
-              {layout(closeMenu)}
+              <LayoutSlot>{layout(closeMenu)}</LayoutSlot>
             </div>
           )}
 

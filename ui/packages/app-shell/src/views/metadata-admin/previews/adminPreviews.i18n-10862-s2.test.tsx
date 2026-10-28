@@ -44,6 +44,12 @@ import { PermissionPreview } from './PermissionPreview';
 import { PositionPreview } from './PositionPreview';
 import { TranslationPreview } from './TranslationPreview';
 
+// The designer rows this suite reads in zh live in `@object-ui/i18n`'s `studio`
+// namespace, whose `zh` catalogue is fetched on demand (objectstack#25922).
+// Resident before any case, so the zh rows below read synchronously.
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+await loadStudioCatalogue('zh');
+
 afterEach(cleanup);
 
 type Lang = 'en' | 'zh';
@@ -320,6 +326,7 @@ const PERMISSION_DRAFT = {
   fields: {
     'account.secret': { readable: false },
     'account.notes': { readable: true, editable: true },
+    'contact.email': { readable: true, editable: false },
   },
   systemPermissions: ['manage_users'],
   tabPermissions: { account: 'visible' },
@@ -362,6 +369,7 @@ describe('PermissionPreview reads the designer locale (objectui#10862)', () => {
         { key: 'engine.permissionPreview.scopeDefault' },
         { key: 'engine.permissionPreview.fls.hidden' },
         { key: 'engine.permissionPreview.fls.editable' },
+        { key: 'engine.permissionPreview.fls.readOnly' },
         { key: 'engine.permissionPreview.sanityOther', vars: { count: 4 } },
         warn('engine.permissionPreview.warn.editWithoutRead'),
         warn('engine.permissionPreview.warn.deleteWithoutRead'),
@@ -374,7 +382,7 @@ describe('PermissionPreview reads the designer locale (objectui#10862)', () => {
         { key: 'engine.permissionPreview.legend.bypass' },
         { key: 'engine.permissionPreview.legend.key' },
       ]);
-      expectAsWritten(['Sales', 'sales', 'account', 'contact', 'secret', 'notes', 'manage_users', 'visible', 'C', 'V*', 'own', 'unit']);
+      expectAsWritten(['Sales', 'sales', 'account', 'contact', 'secret', 'notes', 'email', 'manage_users', 'visible', 'C', 'V*', 'own', 'unit']);
     });
 
     it(`${lang}: one failed sanity check`, () => {
@@ -462,8 +470,10 @@ describe('TranslationPreview reads the designer locale (objectui#10862)', () => 
         { key: 'engine.translationPreview.category.reports' },
         { key: 'engine.translationPreview.category.pages' },
         { key: 'engine.translationPreview.category.flows' },
+        { key: 'engine.translationPreview.category.hooks' },
         { key: 'engine.translationPreview.category.positions' },
         { key: 'engine.translationPreview.category.permissions' },
+        { key: 'engine.translationPreview.category.books' },
         { key: 'engine.translationPreview.category.metadataForms' },
         { key: 'engine.translationPreview.category.settingsCommon' },
         { key: 'engine.translationPreview.categoryEmpty' },
@@ -471,7 +481,7 @@ describe('TranslationPreview reads the designer locale (objectui#10862)', () => 
         { key: 'engine.translationPreview.keyCountOne', vars: { count: 1 } },
       ]);
       // The bundle's own locale is author data, not the designer's language.
-      expectAsWritten(['French', 'fr-FR', 'account', '"Un"', '2/14 (14%)']);
+      expectAsWritten(['French', 'fr-FR', 'account', '"Un"', '2/16 (13%)']);
     });
   }
 });

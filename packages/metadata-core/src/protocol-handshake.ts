@@ -80,12 +80,23 @@ export interface ProtocolIncompatibleDiagnostic {
   runtimeMajor: number;
   /**
    * The declared major the package targets, when a single major is
-   * determinable: the range's leading version token, and for a `||` union the
-   * lowest of its alternatives', whatever order they are written in.
+   * determinable: the lowest major the range admits, or for a range open
+   * below (`'<18'`), the highest (#26546). An exclusive bound reads its
+   * direction: on an 18 runtime `'>18'` targets 19 and `'<18'` targets 17. For
+   * a `||` union it is the lowest of its alternatives', whatever order they
+   * are written in.
    */
   targetMajor: number | null;
-  /** The command that resolves the refusal (wired end-to-end by ADR-0087 P2). */
-  migrateCommand: string;
+  /**
+   * The command that resolves the refusal (wired end-to-end by ADR-0087 P2),
+   * present only when there is metadata to move FORWARD: `targetMajor` is at
+   * or below the runtime's, or is not determinable. A package whose
+   * `targetMajor` is ABOVE the runtime's is ahead of it, and
+   * `migrate meta` cannot help (#26480): the member is absent and `message`
+   * names the two remedies that apply, upgrading the runtime or installing a
+   * build of the package for this runtime's protocol.
+   */
+  migrateCommand?: string;
   message: string;
 }
 
@@ -107,7 +118,8 @@ const PROTOCOL_INCOMPATIBLE_BRAND = Symbol.for('objectstack.metadata-core.protoc
  *
  * The manifest is well-formed, but it declares a range this runtime can never
  * satisfy, and the remedy is to change the body
- * (`objectstack migrate meta --from N`). That is 422, the status
+ * (`objectstack migrate meta --from N`, or for a package ahead of the runtime,
+ * a build of it for this protocol). That is 422, the status
  * {@link SchemaValidationError} maps to in this same package. It is NOT 409:
  * the error-code ledger keeps 409 for refusals that come from environment
  * state, where resubmitting the same body could succeed later. With no
@@ -163,7 +175,10 @@ export function isProtocolIncompatibleError(e: unknown): e is ProtocolIncompatib
 export interface ProtocolIncompatibleAnswer {
   status: ProtocolIncompatibleError['status'];
   code: ProtocolIncompatibleError['code'];
-  /** The error's own prose, unchanged. Its `Run:` command is `details.migrateCommand`. */
+  /**
+   * The error's own prose, unchanged. Its `Run:` command is
+   * `details.migrateCommand`, when that member is present.
+   */
   message: string;
   details: Pick<
     ProtocolIncompatibleDiagnostic,
@@ -182,7 +197,8 @@ export interface ProtocolIncompatibleAnswer {
  * shared resolver instead, the five fields survive only inside the prose.
  *
  * `details` is a CLOSED shape: exactly these five members of
- * {@link ProtocolIncompatibleDiagnostic}, named one by one. ⛔ It is not a
+ * {@link ProtocolIncompatibleDiagnostic}, named one by one, with
+ * `migrateCommand` left out, never `undefined`, when the diagnostic has none. ⛔ It is not a
  * spread of the diagnostic. `packageId` and `runtimeMajor` stay out (the first
  * is the id the caller sent, the second is derivable from `protocolVersion`),
  * `code` is the answer's own member (an envelope puts it in `error.code`, never
@@ -202,7 +218,7 @@ export function protocolIncompatibleAnswer(err: ProtocolIncompatibleError): Prot
       rangeSource: d.rangeSource,
       protocolVersion: d.protocolVersion,
       targetMajor: d.targetMajor,
-      migrateCommand: d.migrateCommand,
+      ...(d.migrateCommand !== undefined ? { migrateCommand: d.migrateCommand } : {}),
     },
   };
 }
@@ -309,21 +325,47 @@ export function rangeAdmitsMajor(range: string, runtimeMajor: number): boolean |
   return verdict;
 }
 
-/** One `||` alternative: the single-range grammar {@link rangeAdmitsMajor} combines. */
+/** One `||` alternative: does its {@link alternativeMajorSpan} hold `runtimeMajor`? */
 function alternativeAdmitsMajor(r: string, runtimeMajor: number): boolean | null {
-  if (r === '') return null;
-  if (r === '*' || r === 'x' || r === 'latest') return true;
+  const span = alternativeMajorSpan(r);
+  if (span === null) return null;
+  return (span.lo === null || runtimeMajor >= span.lo) && (span.hi === null || runtimeMajor <= span.hi);
+}
 
-  // Compound comparator range, e.g. ">=11.0.0 <13.0.0" (space- or comma-joined).
+/**
+ * The majors one `||` alternative admits, as an inclusive interval; `null` at
+ * an end leaves that end open (`'<18'` is `{ lo: null, hi: 17 }`, `'*'` is
+ * open at both).
+ */
+interface MajorSpan {
+  lo: number | null;
+  hi: number | null;
+}
+
+/**
+ * The single-range grammar, read once: {@link alternativeAdmitsMajor} asks
+ * whether the span holds a major, and {@link declaredTargetMajor} names the
+ * major a refused range targets from the same span, so the verdict and the
+ * prescription cannot read one comparator two ways (#26546). `null` when the
+ * shape is not recognized.
+ */
+function alternativeMajorSpan(r: string): MajorSpan | null {
+  if (r === '') return null;
+  if (r === '*' || r === 'x' || r === 'latest') return { lo: null, hi: null };
+
+  // Compound comparator range, e.g. ">=11.0.0 <13.0.0" (space- or comma-joined):
+  // the intersection of its comparators' spans.
   const parts = r.split(COMPARATOR_SEPARATOR).filter(Boolean);
   if (parts.length > 1 && parts.every((p) => /^[<>]=?/.test(p))) {
-    let ok = true;
+    let lo: number | null = null;
+    let hi: number | null = null;
     for (const p of parts) {
-      const admits = comparatorAdmitsMajor(p, runtimeMajor);
-      if (admits === null) return null;
-      ok = ok && admits;
+      const span = comparatorMajorSpan(p);
+      if (span === null) return null;
+      if (span.lo !== null) lo = lo === null ? span.lo : Math.max(lo, span.lo);
+      if (span.hi !== null) hi = hi === null ? span.hi : Math.min(hi, span.hi);
     }
-    return ok;
+    return { lo, hi };
   }
 
   // Hyphen range: "11.0.0 - 12.0.0".
@@ -331,55 +373,64 @@ function alternativeAdmitsMajor(r: string, runtimeMajor: number): boolean | null
   if (hyphenParts) {
     const lo = leadingMajor(hyphenParts[0]);
     const hi = leadingMajor(hyphenParts[1]);
-    if (lo === null || hi === null) return null;
-    return runtimeMajor >= lo && runtimeMajor <= hi;
+    return lo === null || hi === null ? null : { lo, hi };
   }
 
   // Single comparator.
-  if (/^[<>]=?/.test(r)) return comparatorAdmitsMajor(r, runtimeMajor);
+  if (/^[<>]=?/.test(r)) return comparatorMajorSpan(r);
 
   // Caret: `^N` / `^N.x.y` pins the major (for N >= 1, which all protocol
   // majors are).
   if (r.startsWith('^')) {
     const maj = leadingMajor(r.slice(1));
-    return maj === null ? null : runtimeMajor === maj;
+    return maj === null ? null : { lo: maj, hi: maj };
   }
 
   // Tilde: `~N.x.y` also pins the major for the handshake's purposes.
   if (r.startsWith('~')) {
     const maj = leadingMajor(r.slice(1));
-    return maj === null ? null : runtimeMajor === maj;
+    return maj === null ? null : { lo: maj, hi: maj };
   }
 
   // `N.x` / `N.*` wildcard.
   const wildcard = r.match(/^(\d+)\.(?:x|\*)/i);
-  if (wildcard) return runtimeMajor === Number.parseInt(wildcard[1]!, 10);
+  if (wildcard) {
+    const maj = Number.parseInt(wildcard[1]!, 10);
+    return { lo: maj, hi: maj };
+  }
 
   // Bare exact version or bare major: `11`, `11.0.0`.
   const exact = leadingMajor(r);
-  if (exact !== null && /^\d+(\.\d+){0,2}$/.test(r)) return runtimeMajor === exact;
+  if (exact !== null && /^\d+(\.\d+){0,2}$/.test(r)) return { lo: exact, hi: exact };
 
   return null;
 }
 
 /**
- * The major a refused range targets: the major of its leading version token,
- * its floor as the upgrade guidance reads it (`'^10'` → 10, `'>=15 <18'` → 15).
- * A `||` union targets its LOWEST alternative's, in whatever order the
- * alternatives are written: `'^16 || ^17'` and `'^17 || ^16'` are one range and
- * get one `migrate meta --from`.
+ * The major a refused range targets, read from the majors it admits
+ * ({@link alternativeMajorSpan}): its floor (`'^10'` → 10, `'>=15 <18'` → 15,
+ * `'>18'` → 19), or, for a range open below, its ceiling (`'<18'` → 17,
+ * `'<=17'` → 17), the newest major it was written for. A `||` union targets its
+ * LOWEST alternative's, in whatever order the alternatives are written:
+ * `'^16 || ^17'` and `'^17 || ^16'` are one range and get one
+ * `migrate meta --from`. A target above the runtime's major means the package
+ * is ahead of the runtime, and gets no `migrate meta` at all.
  */
-function declaredFloorMajor(range: string): number | null {
+function declaredTargetMajor(range: string): number | null {
   let lowest: number | null = null;
   for (const alternative of rangeAlternatives(range)) {
-    const major = leadingMajor(alternative.replace(/^[\^~<>=\s]+/, ''));
-    if (major === null) return null;
+    const span = alternativeMajorSpan(alternative);
+    // A span that holds no major at all (`'<0'`, `'>=19 <15'`) has none to name.
+    const empty = span === null || (span.lo !== null && span.hi !== null && span.lo > span.hi);
+    const major = empty ? null : (span.lo ?? span.hi);
+    if (major === null || major < 0) return null;
     if (lowest === null || major < lowest) lowest = major;
   }
   return lowest;
 }
 
-function comparatorAdmitsMajor(comparator: string, runtimeMajor: number): boolean | null {
+/** The majors one comparator admits: an interval open at one end. */
+function comparatorMajorSpan(comparator: string): MajorSpan | null {
   const peeled = peelComparatorOperator(comparator);
   if (peeled === null) return null;
   const { op, rest } = peeled;
@@ -399,17 +450,17 @@ function comparatorAdmitsMajor(comparator: string, runtimeMajor: number): boolea
   switch (op) {
     case '>=':
       // `>=maj.*` admits major maj and up.
-      return runtimeMajor >= maj;
+      return { lo: maj, hi: null };
     case '>':
       // bare `>maj` → `>=maj+1` (excludes maj); `>maj.x.y` still admits maj.
-      return isBare ? runtimeMajor > maj : runtimeMajor >= maj;
+      return { lo: isBare ? maj + 1 : maj, hi: null };
     case '<=':
       // `<=maj.*` admits major maj and below.
-      return runtimeMajor <= maj;
+      return { lo: null, hi: maj };
     case '<':
       // `<maj.0.0` (bare or explicit floor) excludes all of major maj;
       // `<maj.5.0` still admits maj.
-      return atMajorFloor ? runtimeMajor < maj : runtimeMajor <= maj;
+      return { lo: null, hi: atMajorFloor ? maj - 1 : maj };
     default:
       return null;
   }
@@ -437,15 +488,24 @@ export function checkProtocolCompat(
   }
 
   const packageId = manifest.id ?? '<unknown>';
-  const targetMajor = declaredFloorMajor(declared.range);
-  const migrateCommand =
-    targetMajor !== null
+  const targetMajor = declaredTargetMajor(declared.range);
+  // [#26480] `migrate meta` replays metadata forward from an OLDER major. A
+  // target above this runtime's major is a package built for a newer protocol:
+  // nothing here can migrate it, so the refusal names what can apply instead.
+  const ahead = targetMajor !== null && targetMajor > runtimeMajor;
+  const migrateCommand = ahead
+    ? undefined
+    : targetMajor !== null
       ? `objectstack migrate meta --from ${targetMajor}`
       : `objectstack migrate meta`;
+  const remedy = ahead
+    ? `The package is built for a newer protocol than this runtime implements. ` +
+      `Upgrade the runtime to protocol ${targetMajor}, or install a build of '${packageId}' for protocol ${runtimeMajor}`
+    : `Run: ${migrateCommand}`;
   const message =
     `package '${packageId}' targets protocol ${declared.range} ` +
     `(${declared.source}) but this runtime is protocol ${protocolVersion}. ` +
-    `This is a major-version break. Run: ${migrateCommand}`;
+    `This is a major-version break. ${remedy}`;
 
   return {
     status: 'incompatible',
@@ -461,7 +521,7 @@ export function checkProtocolCompat(
       protocolVersion,
       runtimeMajor,
       targetMajor,
-      migrateCommand,
+      ...(migrateCommand !== undefined ? { migrateCommand } : {}),
       message,
     },
   };

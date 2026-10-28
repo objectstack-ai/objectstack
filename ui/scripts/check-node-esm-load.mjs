@@ -97,7 +97,7 @@
  * about 1065x. Paying that on every run to make "I produced these" true by
  * construction is the wrong trade for a gate people run locally, so the
  * default keeps the cache and leg 3 carries the invariant for a few file
- * reads. `--force-build` buys the expensive form (`TURBO_FORCE`) for the
+ * reads. `--force-build` buys the expensive form (turbo's `--force`) for the
  * caller who wants a reading with no shared-cache question in it at all.
  *
  * Leg 2 also carries this repository's one PRODUCT boundary: three
@@ -111,8 +111,8 @@
  *   - "Scan `dist/` if it exists." With no per-PR full-repo build `dist/` is
  *     usually absent, so such a gate passes because it looked at NOTHING. Leg 1
  *     therefore reads SOURCES, which are always present, and leg 2 BUILDS
- *     rather than hoping someone else did (`--no-build` exists for callers that
- *     just built, and is wired into nothing).
+ *     rather than hoping someone else did (`--no-build` is for callers that
+ *     just ran the release's build, as ci.yml's full battery does).
  *   - "Resolve the entry." Measured and rejected above: resolution succeeded on
  *     the very package the card was filed from.
  *   - "Import it and count the successes." A run where every package failed for
@@ -141,7 +141,7 @@
  *     under objectui#5367: TypeScript's own tsconfig reader.
  */
 
-import { execFileSync, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -149,18 +149,23 @@ import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
 import { SKIP_DIRS, TOOLING_FILE, discoverPackages, moduleSpecifiers } from './check-phantom-dependencies.mjs';
+import { buildWorkspace } from './check-published-dist-tooling.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
+import { workspaceRoot } from './workspace-root.mjs';
+import { UI_PUBLISHED_PACKAGE_FLOOR } from './__tests__/helpers/ui-package-population.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 
 /**
  * Below this many published packages the scan is broken, not empty.
  *
- * The `fixed` group holds 40 entries today. A collapse to a handful means the
- * release config or the manifest walk stopped answering, and every assertion
- * below would pass while reading nothing.
+ * A collapse to a handful means the release config or the manifest walk stopped
+ * answering, and every assertion below would pass while reading nothing. The
+ * number is the shared ui published-package floor, written once with its
+ * measurement in `__tests__/helpers/ui-package-population.mjs`, so deleting a
+ * package never edits this file.
  */
-export const MIN_PACKAGES = 30;
+export const MIN_PACKAGES = UI_PUBLISHED_PACKAGE_FLOOR;
 
 /**
  * Below this many SUCCESSFUL imports the load leg proved nothing.
@@ -819,7 +824,12 @@ export function attributeMissingModule(missingPath, packages, root) {
 
 // ── the run ──────────────────────────────────────────────────────────────────
 
-function main(argv) {
+/**
+ * @param {string[]} argv
+ * @param {{ build?: typeof buildWorkspace }} [seams] `build` is the release's build (see
+ *   `buildWorkspace`); a test swaps it to read which build this gate asks for without paying one.
+ */
+function main(argv, { build = buildWorkspace } = {}) {
   const specifiersOnly = argv.includes('--specifiers-only');
   const noBuild = argv.includes('--no-build');
   // Buys the expensive form of the same invariant: with the cache off, every
@@ -906,19 +916,18 @@ function main(argv) {
   if (!noBuild) {
     console.log(
       forceBuild
-        ? '\nBuilding every published package with the cache OFF (TURBO_FORCE), so every artifact the ' +
+        ? '\nRunning the release\'s build with the cache OFF (--force), so every artifact the ' +
             'load leg grades below is one this run produced…'
-        : '\nBuilding every published package. turbo shares one cache across every worktree of this ' +
+        : '\nRunning the release\'s build. turbo shares one cache across every worktree of this ' +
             'checkout, so this build can be a replay of a sibling worktree\'s — the provenance leg ' +
             'below reads each task log and refuses to grade what this tree did not produce ' +
             '(objectui#7276)…',
     );
     try {
-      execFileSync('pnpm', ['build'], {
-        cwd: root,
-        stdio: 'inherit',
-        env: forceBuild ? { ...process.env, TURBO_FORCE: 'true' } : process.env,
-      });
+      // The release's own build, at the workspace root: `ui/` has no `build`
+      // script, and a build of some other task set would be graded as if it
+      // were the one that publishes (objectstack#26860).
+      build(workspaceRoot(root), { force: forceBuild, log: (line) => console.log(line) });
     } catch (error) {
       console.error(`\n✗ the build failed, so the load leg has nothing to grade: ${error.message}`);
       return 1;

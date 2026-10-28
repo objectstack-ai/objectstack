@@ -50,6 +50,11 @@ import {
   isReportedError,
 } from '../utils/format.js';
 import { checkProtocolVersionGap } from '../utils/protocol-version-gap.js';
+import {
+  checkDependencyRanges,
+  formatDependencyRangeDiagnostic,
+  type DependencyRangeDiagnostic,
+} from '../utils/dependency-range-check.js';
 import { readSpecReleaseChanges } from '../utils/spec-release-changes.js';
 // [#14553] The navigation-contribution group check, shared with `os compile`.
 // Reports; never refuses — the runtime still relocates, deliberately.
@@ -180,6 +185,12 @@ export default class Validate extends Command {
     // right, and `--strict` failing on it would refuse a correct stack. `os
     // compile` computes the identical records, so the residue pin keeps holding.
     let picklistReferenceNotices: ReturnType<typeof judgePicklistReferences>['notices'] = [];
+    // ADR-0141 D2 author side (step 3e): the `dependencies` findings the
+    // install ADMITS — an in-artifact range mismatch, or a co-delivered entry
+    // whose range or sibling version cannot be read. Same class as the nav and
+    // permission-set lists: reports, never refuses, NOT in `--strict`'s list,
+    // and `os compile` computes the identical records.
+    let dependencyRangeWarnings: DependencyRangeDiagnostic[] = [];
     const warningsSoFar = () => [
       ...ruleAdvisories,
       ...docWarnings,
@@ -200,6 +211,8 @@ export default class Validate extends Command {
       ...jsxGateNotices,
       // APPENDED for the same reason, one member later again.
       ...picklistReferenceNotices,
+      // APPENDED for the same reason, one member later again.
+      ...dependencyRangeWarnings,
     ];
     // [commit 79cf692b0] The ADR-0087 D2 conversion notices, hoisted for the SAME reason
     // and under the SAME ruling as the five lists above — one field over. The
@@ -789,6 +802,44 @@ export default class Validate extends Command {
         printError(`Seed file validation failed (${seedFiles.issues.length} issue${seedFiles.issues.length > 1 ? 's' : ''})`);
         for (const issue of seedFiles.issues) console.log(chalk.red(`  ✗ ${issue.location}: ${issue.message}`));
         this.exit(1);
+      }
+
+      // 3e. ADR-0141 D2, author side — every `manifest.dependencies` range of
+      //     the packages one install act would deliver, judged by the install's
+      //     own predicate (`utils/dependency-range-check.ts`). An `error` is
+      //     an entry the install refuses whatever the environment holds (an
+      //     unreadable out-of-artifact range); the in-artifact findings the
+      //     install admits ride `warningsSoFar()`. `os build` refuses the same
+      //     errors at the same step.
+      const dependencyRanges = checkDependencyRanges(result.data);
+      const dependencyRangeErrors = dependencyRanges.filter((d) => d.severity === 'error');
+      dependencyRangeWarnings = dependencyRanges.filter((d) => d.severity !== 'error');
+      if (dependencyRangeErrors.length > 0) {
+        if (flags.json) {
+          await emitJson({
+            valid: false,
+            errors: dependencyRangeErrors,
+            warnings: warningsSoFar(),
+            conversions: conversionNotices,
+            duration: timer.elapsed(),
+          });
+          this.exit(1);
+        }
+        console.log('');
+        printError(
+          `Dependency range check failed (${dependencyRangeErrors.length} issue${dependencyRangeErrors.length > 1 ? 's' : ''})`
+            + ' — the install refuses every one of these',
+        );
+        for (const d of dependencyRangeErrors) console.log(chalk.red(`  ✗ ${formatDependencyRangeDiagnostic(d)}`));
+        this.exit(1);
+      }
+      if (dependencyRangeWarnings.length > 0 && !flags.json) {
+        console.log('');
+        printWarning(
+          `Dependency ranges inside this artifact the install does not judge (${dependencyRangeWarnings.length})`
+            + ' — a package the same artifact delivers is checked for presence only',
+        );
+        printBulletList(dependencyRangeWarnings.map(formatDependencyRangeDiagnostic), { noun: 'dependency-range diagnostic' });
       }
 
       // 4. Collect and display stats

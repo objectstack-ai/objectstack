@@ -23,59 +23,47 @@
  * resolve to `any` and the unused directive failed `tsc -p tsconfig.test.json`
  * (TS2578); since objectui#8347 the indexed access itself errors, the directive
  * swallows that, and the well-typed counter-probe beside it fails instead.
+ *
+ * ## ⏱ objectstack#25923 — the pair moved to the hand-off type
+ *
+ * Only `ListView`'s toolbar writes the pair, at runtime, and
+ * `ComponentPropsMap['object-gantt']` refuses both keys on the node: a key only
+ * the host writes is typed on the package-local hand-off type, never on the
+ * authoring face (ui/AGENTS.md Commandment #0.1). So both left this interface
+ * and its mirror for `plugin-gantt`'s `ObjectGanttFlatFields`, where their types
+ * are pinned now (`ganttHandoffFlatFields-25923.test.ts`). The rows below pin
+ * the absence; the paragraphs above are objectui#10250's reading, kept as written.
  */
 
 import { describe, it, expect } from 'vitest';
 import { ObjectGanttSchema } from '../zod/objectql.zod.js';
 import type { ObjectGanttSchema as ObjectGanttSchemaTS } from '../objectql.js';
 
-const MINIMAL = {
-  type: 'object-gantt',
-  objectName: 'task',
-  startDateField: 'start',
-  endDateField: 'end',
-} as const;
+const MINIMAL = { type: 'object-gantt', objectName: 'task' } as const;
 
-describe('ObjectGanttSchema — the search pair is declared (objectui#10250)', () => {
-  it('the mirror declares both keys, both optional, with no default', () => {
+describe('ObjectGanttSchema — the search pair is NOT published (objectstack#25923)', () => {
+  it('the mirror declares neither key', () => {
     const shape = Object.keys(ObjectGanttSchema.shape);
-    expect(shape).toContain('search');
-    expect(shape).toContain('searchableFields');
-    const result = ObjectGanttSchema.safeParse(MINIMAL);
-    expect(result.success).toBe(true);
-    if (!result.success) return;
-    expect('search' in result.data).toBe(false);
-    expect('searchableFields' in result.data).toBe(false);
+    expect(shape).not.toContain('search');
+    expect(shape).not.toContain('searchableFields');
+    // CONTROL: the shape read is the real one.
+    expect(shape).toContain('objectName');
   });
 
-  it('accepts a well-typed value on each', () => {
-    const result = ObjectGanttSchema.safeParse({ ...MINIMAL, search: 'needle', searchableFields: ['name'] });
+  it('the tolerant mirror no longer examines them: wrong-typed values ride `.passthrough()`', () => {
+    const result = ObjectGanttSchema.safeParse({ ...MINIMAL, search: 5, searchableFields: 'name' });
     expect(result.success ? null : result.error.issues).toBe(null);
-  });
-
-  it('refuses a wrong-typed value on each, on that key\'s path', () => {
-    for (const [key, bad] of [['search', 5], ['searchableFields', 'name']] as const) {
-      const result = ObjectGanttSchema.safeParse({ ...MINIMAL, [key]: bad });
-      expect(result.success, `${key} accepted ${JSON.stringify(bad)}`).toBe(false);
-      if (result.success) continue;
-      expect(result.error.issues.some((i) => i.path[0] === key), `${key} failed off its path`).toBe(true);
-    }
   });
 });
 
-describe('ObjectGanttSchema (TS) — compile-time pin on the same pair', () => {
-  it('refuses a wrong-typed value on both keys', () => {
-    // @ts-expect-error — `search` is declared `string | undefined`.
-    const search: ObjectGanttSchemaTS['search'] = 5;
-    // @ts-expect-error — `searchableFields` is declared `string[] | undefined`.
-    const searchableFields: ObjectGanttSchemaTS['searchableFields'] = 'name';
-    expect([search, searchableFields]).toHaveLength(2);
-  });
-
-  it('accepts the well-typed value on both keys', () => {
-    // Counter-probe: a declaration narrowed to `never` would satisfy both
-    // directives above.
-    const ok: ObjectGanttSchemaTS = { type: 'object-gantt', objectName: 'task', search: 'needle', searchableFields: ['name'] };
-    expect(ok.search).toBe('needle');
+describe('ObjectGanttSchema (TS) — the pair is no member of the published interface', () => {
+  it('refuses both keys on a fresh literal', () => {
+    // @ts-expect-error — `search` lives on plugin-gantt's hand-off type
+    const search: ObjectGanttSchemaTS = { ...MINIMAL, search: 'needle' };
+    // @ts-expect-error — `searchableFields` lives on plugin-gantt's hand-off type
+    const fields: ObjectGanttSchemaTS = { ...MINIMAL, searchableFields: ['name'] };
+    // Counter-probe: the literal without them compiles.
+    const ok: ObjectGanttSchemaTS = { ...MINIMAL };
+    expect([search.type, fields.type, ok.type]).toEqual(['object-gantt', 'object-gantt', 'object-gantt']);
   });
 });

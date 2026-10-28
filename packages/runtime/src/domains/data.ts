@@ -33,7 +33,12 @@ import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.
 // `RestServer`'s list asks, imported rather than restated.
 // [#23265] …and the repo's one sentence for a repeated single-valued
 // parameter, which the delete's `?expectedVersion` answers.
-import { assertFilterParamSuppliedOnce, repeatedQueryParamMessage } from '@objectstack/rest';
+// [#26898] …and the by-id read's closed parameter set (#7606), with the one
+// sentence that refuses a name outside it.
+import {
+    assertFilterParamSuppliedOnce, repeatedQueryParamMessage,
+    DATA_RECORD_READ_PARAMS, unknownQueryParamRefusalMessage,
+} from '@objectstack/rest';
 // [#23492] The dispatcher's one constructor for a `400 VALIDATION_FAILED`
 // answer, which a refused version token returns in this transport's envelope.
 // [#23491] …and the one Zod-issue → `fields[]` mapping, which a write whose
@@ -263,8 +268,20 @@ export async function handleDataRequest(deps: DomainHandlerDeps, path: string, m
         // GET /data/:object/:id
         if (parts.length === 2 && m === 'GET') {
             const id = parts[1];
-            // Spec: Only select/expand are allowlisted query params for GET by ID.
-            // All other query parameters are discarded to prevent parameter pollution.
+            // [#26898] The route's closed parameter set (#7606), the one
+            // `RestServer`'s twin asks, and at the same place in the gate
+            // order: after the object's API exposure (the twin's
+            // `enforceApiAccess`), since which parameters a route understands
+            // is information a caller the object refuses should not learn.
+            // Every name outside `select` / `expand` used to be dropped here,
+            // so `?selct=name` answered `200` with every column where the twin
+            // answered `400`; both now refuse it, before the read, whatever id
+            // the path names.
+            await actionExec.refuseUnexposedDataAction(deps, _context, 'get', objectName, _context.environmentId, _context.executionContext);
+            const unknownParams = unknownQueryParamRefusalMessage(query, DATA_RECORD_READ_PARAMS);
+            if (unknownParams !== undefined) {
+                return { handled: true, response: deps.error(unknownParams, 400, { code: 'VALIDATION_ERROR' }) };
+            }
             const { select, expand } = query || {};
             const allowedParams: Record<string, unknown> = {};
             if (select != null) allowedParams.select = select;

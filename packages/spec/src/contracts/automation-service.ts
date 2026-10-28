@@ -397,6 +397,64 @@ export interface ScreenSpec {
      * prefilling its `account` FK with the id created by the Customer step).
      */
     idVariable?: string;
+    /**
+     * Where this screen sits among the screens of its run, read by the engine
+     * off the flow graph at the moment it pauses (#26657). A runner labels its
+     * primary button from {@link ScreenProgressSpec.nextScreen} ("Next" while
+     * another screen can follow, "Submit" on the last) and draws a step
+     * counter only from {@link ScreenProgressSpec.stepCount}.
+     *
+     * Absent when the engine cannot answer at all — a server that predates
+     * this member; a run with no flow name, a node that is not a `screen` of
+     * the registered flow, or a flow with no start node (no graph to read);
+     * or a screen inside a child run whose own graph shows no further screen
+     * (the parent may still have some) — and a runner then keeps the label
+     * it drew before this member existed.
+     */
+    progress?: ScreenProgressSpec;
+}
+
+/**
+ * The graph's answer about a paused screen's place in its run (#26657),
+ * served on {@link ScreenSpec.progress}. Computed by the engine — the only
+ * party that holds the graph — so a client ⛔ never walks the flow itself.
+ *
+ * "Another screen" means another `screen` node this run can still pause on
+ * and serve before it ends. A screen that never pauses (no fields and no
+ * `waitForInput`) does not count. A pause that serves no screen (an approval,
+ * a wait) may end the stretch of screens a runner draws, so a screen that can
+ * only be reached past one counts as possible, never as certain.
+ */
+export interface ScreenProgressSpec {
+    /**
+     * Whether another screen can follow this one.
+     *
+     * - `'none'` — no path out of this screen reaches another one: it is the
+     *   last step, and a runner says "Submit".
+     * - `'certain'` — every way the run can go from here pauses on another
+     *   screen first: a runner says "Next".
+     * - `'possible'` — some ways do and some do not, because something after
+     *   this screen decides: a branch (a `decision`, a fault path, a loop
+     *   back), a pause that serves no screen, or a `subflow` that may serve
+     *   a screen of its own. The engine does not guess which way the run
+     *   goes; a runner says "Next", since a later screen is still possible.
+     */
+    nextScreen: 'none' | 'possible' | 'certain';
+    /**
+     * This screen's 1-based position among the screens of the run. Present
+     * only when every path from the flow's start to this screen pauses on the
+     * same number of screens before it, so the number is exact; absent when a
+     * branch, a loop through a screen, a parallel fan-out or a `subflow` makes
+     * it vary.
+     */
+    step?: number;
+    /**
+     * How many screens the run pauses on in all, this one included. Present
+     * only alongside {@link step}, and only when every path through this
+     * screen pauses on the same number of screens after it too; a runner
+     * draws a step counter from it and draws none without it.
+     */
+    stepCount?: number;
 }
 
 /**
@@ -991,10 +1049,31 @@ export interface IAutomationService {
      * the automation service refuses it with `RESOURCE_CONFLICT` / 409 and
      * changes nothing. That flow's switch is its own `status` (`'obsolete'` /
      * `'active'`), published through {@link registerFlow}.
+     *
+     * `caller` names who made the request, so the activation-ledger row the
+     * switch writes, and the audit row that write produces, attribute it to
+     * that user. It carries {@link AutomationContext.userId} and nothing else:
+     * the key {@link execute} reads for its acting user, narrowed to what the
+     * write records.
+     *  - No positions, permissions or posture. This method is no authority
+     *    gate: ADR-0126 §5 gates the switch at the door that receives the
+     *    request, and the ledger write itself runs elevated. A channel that
+     *    carried grants would invite a second, divergent gate here.
+     *  - No tenant. The ledger is deployment state with no organization column
+     *    (ADR-0126 as amended by ADR-0131 D6).
+     *
+     * A door that serves a person passes that person's id. An absent `caller`,
+     * or one without a `userId`, means an unattributed write: the ledger row
+     * and its audit row carry no actor. That is the honest answer for an
+     * in-process caller with no person behind it, never the answer for a door
+     * that has one. Attribution only: the channel grants nothing, and an
+     * implementation neither refuses nor widens the switch on it.
+     *
      * @param name - Flow name (snake_case)
      * @param enabled - Whether to enable (true) or disable (false)
+     * @param caller - Who made the request; absent means an unattributed write
      */
-    toggleFlow?(name: string, enabled: boolean): Promise<void>;
+    toggleFlow?(name: string, enabled: boolean, caller?: Pick<AutomationContext, 'userId'>): Promise<void>;
 
     /**
      * List execution runs for a flow

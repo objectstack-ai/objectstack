@@ -68,7 +68,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 批 = 一个上下文里读完的 ≤5 张同族卡,是质量单位,⛔ 不是预算。
 - 班 = 一个会话的任期,只以交接或惰性回收结束。
 - 席位两形:Routine 席与项目席(会话是车队项目的线程);细则见 `references/seat-lifecycle.md`。
-- 项目席唤醒 = PR 订阅 + 每项目一个自建自绑的巡查 routine,默认每小时;⛔ 无 `send_later` 链。
+- 项目席唤醒 = PR 订阅 + 每项目一个自建自绑巡查 routine(总监席除外);⛔ 无 `send_later` 链。
 - 探针先行:fire 的第一动作是一次最便宜的车道盘点查询,⛔ 在它之前不读任何长文本。
 - 队列空 + 无在飞 + 无待复核 + 决策箱无新答复 ⇒ 自退。
 - 分诊席跑直连会话、默认判断档;直连会话按召唤跑,⛔ 无自醒不常驻;裁决归总监席。
@@ -162,7 +162,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 | `domain:skills` | governed 面全量(含本文件;统一定义见「governed 面统一定义」行);非门禁的 `scripts/pm/**`(PM 循环工具);governed 面的治理执行文件:`.github/CODEOWNERS` + SUBJECT 是 governed 面本身的门禁/审计(现为 `scripts/pm/check-governed-merges.mjs`) |
 | `domain:spec` | `packages/spec` 整包:schema 形状、`contracts/**`、退役行为半边、strictness 台账;describe/JSDoc/墓碑散文/错误 guidance 与 alias 表;`packages/spec/scripts/**`、`packages/spec/docs/**` 及按锚定规则的例外归本域的工具链(域边界枚举与席内分派见 `references/lanes/spec.md`) |
 | `domain:ui` | `ui/**` 全部代码:`@object-ui/*` 库与 `ui/apps/*`、`ui/packages/types` 与 schema 语料、`ui/scripts` 与门禁工具、文档随所记录的面走;`packages/console`(dist 由 `pnpm console:build` 生成 ⛔ 不手改);协议恒归 `domain:spec`,受管面归 `domain:skills`;详见 `references/lanes/ui.md` |
-| `domain:cloud` | 云服务旅程,停放(加 `status:parked`,sweep 免扫)待 cloud PM 迁移,本仓不派 |
+| `domain:cloud` | 凡涉 cloud 即归 cloud PM(非按落点):停放(加 `status:parked`,sweep 免扫),本仓不派 |
 | (无固定归属,按落点分诊) | `packages/apps/*`、`examples/*`(归它演练的子系统)、`docs/audits/**` |
 
 - 表未覆盖的包首次分诊时归类并走 PR 更新本表;新增或退役 `domain:*` 必须同批改本表。
@@ -187,7 +187,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 改动 >3000 行(含生成物)同换终局四件套,⛔ 无 Tier S 例外;读数 = PR additions+deletions。
 - ① 席位记录落 PR 先于 `pr_ready`/入队且钉 head:速读六行+席位意见,其下 `## 席位核对`。
 - ② PR 悬着等人批,同笔挂 `needs-user-decision`;人工直合即审核记录,授权批准 ⇒ 席位落地。
-- 指针 `ACCEPT → PR #n comment <id>`;技能面 hunk 复核随面定档:席未达档起隔离达档复核。
+- 指针 `ACCEPT → PR #n comment <id>`;受管/spec 面欠完整复核 ①–④,席未达档起隔离达档复核。
 - 核对六项:形态/前提实测/门禁 check-runs/接受的偏差/范围外去向+`Skills-docs:`/落地条款。
 - 速读六行固定:改了什么/为什么改/风险与回滚/先看/两分钟验证/需要你做的。
 - 草稿归 dev:每个 PR 正文带 `## 维护者速读` 六行,中文、业务角度,不写席位意见。

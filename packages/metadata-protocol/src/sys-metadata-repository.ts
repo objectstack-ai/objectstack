@@ -529,6 +529,30 @@ export function packageScopedRowWhere(
 }
 
 /**
+ * The refusal for a history version the addressed item has no row at: 404
+ * `VERSION_NOT_FOUND`, naming the version and the item. One sentence for every
+ * door that takes a caller-named version — the rollback
+ * ({@link SysMetadataRepository.restoreVersion}) and the protocol's
+ * `diffMetaItem`, where a missing side used to be compared as an empty
+ * document and answered "no change" or "everything removed" (ADR-0110 D3: a
+ * miss never reads as a fact about the document).
+ *
+ * Deliberately NOT exported from the package entry, as
+ * {@link packagelessAddressAmbiguityRefusal} is not.
+ */
+export function versionNotFoundError(
+  ref: { type: string; name: string },
+  version: number,
+): Error & { code: 'VERSION_NOT_FOUND'; status: 404 } {
+  const err = new Error(
+    `No history row at version ${version} for ${ref.type}/${ref.name}.`,
+  ) as Error & { code: 'VERSION_NOT_FOUND'; status: 404 };
+  err.code = 'VERSION_NOT_FOUND';
+  err.status = 404;
+  return err;
+}
+
+/**
  * [#23165, ADR-0048] The refusal of a save, or a delete, that names no
  * package, of an item whose rows at the address are bound to two or more
  * packages: the direct save and the delete, whose address the protocol
@@ -1634,14 +1658,7 @@ export class SysMetadataRepository implements MetadataRepository {
       },
       context: { isSystem: true },
     });
-    if (!row) {
-      const err: any = new Error(
-        `No history row at version ${targetVersion} for ${ref.type}/${ref.name}.`,
-      );
-      err.code = 'VERSION_NOT_FOUND';
-      err.status = 404;
-      throw err;
-    }
+    if (!row) throw versionNotFoundError(ref, targetVersion);
     const raw = (row as any).metadata;
     if (raw === null || raw === undefined) {
       const err: any = new Error(

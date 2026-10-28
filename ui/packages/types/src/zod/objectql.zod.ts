@@ -93,7 +93,7 @@ import {
 // reference.
 import { InlineGridColumnSchema as SpecInlineGridColumnSchema } from '@objectstack/spec/data';
 import { BaseSchema, specFieldsExcept } from './base.zod.js';
-import { aliasKeyRefusal, handlerKeyRefusal, neitherContentChannelGuidance, retirementTombstone } from './tombstone.zod.js';
+import { agedOutSpecKeyRefusal, aliasKeyRefusal, handlerKeyRefusal, neitherContentChannelGuidance, retirementTombstone } from './tombstone.zod.js';
 import { DataTableSchema, DrillDownConfigSchema, PivotTableSchema } from './data-display.zod.js';
 // The kanban CARD vocabulary has one authority (`./complex.zod.ts`); the
 // `object-kanban` lane below reads it rather than restating it (objectui#8913).
@@ -1033,6 +1033,14 @@ export const ObjectFormSchema = BaseSchema.extend({
   drawerWidth: z.string().optional().describe('Drawer width as a CSS value; drawer forms only'),
   modalSize: z.enum(['sm', 'default', 'lg', 'xl', 'full']).optional().describe('Modal dialog size; modal forms only'),
   modalCloseButton: z.boolean().optional().describe('Show the modal header close button; modal forms only'),
+  // objectstack#25923 (work item 4) — two members `ComponentPropsMap['object-form']`
+  // declares and the drawer / modal presentations read (`ModalForm` tests
+  // `schema.contentLayout === 'tabbed'`; `ModalForm` and `DrawerForm` read
+  // `schema.confirmOnDiscard !== false`), which neither face of this package
+  // named. The row's own members BY REFERENCE, so a misspelled `'tabs'` is
+  // refused here as the spec refuses it. The TS twin takes the same members.
+  contentLayout: stripImportedDefaults(SpecObjectFormPropsSchema).shape.contentLayout,
+  confirmOnDiscard: stripImportedDefaults(SpecObjectFormPropsSchema).shape.confirmOnDiscard,
   mobile: z.looseObject({
     stickyActions: z.boolean().optional().describe('Pin Submit/Cancel to the bottom of the viewport on mobile'),
     stepper: z.union([z.boolean(), z.literal('auto')]).optional().describe('One-field-at-a-time stepper on small screens: true, false or auto'),
@@ -1866,8 +1874,10 @@ const CALENDAR_DATE_ALIAS_STEM =
 /**
  * WHERE THE AUTHORED VALUE LANDS, which is what decides the consequence clause.
  *
- *   - `'binding'` — the value reaches `ObjectCalendar` as a FLAT member of the
- *     node. Every producer-fed surface is this: the view-level `calendar` block
+ *   - `'binding'` — the value reaches `ObjectCalendar` through a producer's
+ *     hand-off (since objectstack#25923 in the node's own `calendar` block,
+ *     before that as a FLAT member of the node). Every producer-fed surface is
+ *     this: the view-level `calendar` block
  *     and its legacy `options.calendar` twin, a named view's two nestings, and
  *     the flat node face itself.
  *   - `'container'` — the `object-calendar` element's OWN `calendar` container,
@@ -1967,12 +1977,22 @@ const CalendarContainerDateAliasRefusals = {
 /**
  * The same two arms as the `object-calendar` NODE wears them. This is the FLAT
  * spelling `ListView` used to flatten the block into, and where the retired
- * ladder actually read — a binding surface, so it takes the binding clause; only
- * the surface noun differs from the view-level group.
+ * ladder actually read — a binding surface, so it takes the binding clause.
+ *
+ * ⏱ objectstack#25923: the canonical keys are no flat members of this node any
+ * more (the spec and the strict face refuse `startDateField` written flat), so
+ * the prescription names the `calendar` block — `calendar.startDateField` /
+ * `calendar.endDateField` — in both the pointer and the clause. Pointing at the
+ * bare key would send an author from one refusal straight into the next.
  */
+const calendarNodeAliasDetail = (alias: 'dateField' | 'endField') =>
+  calendarAliasDetail(alias, 'binding').replace(
+    alias === 'dateField' ? 'Write `startDateField`' : 'Write `endDateField`',
+    alias === 'dateField' ? 'Write `calendar.startDateField`' : 'Write `calendar.endDateField`',
+  );
 const CalendarNodeDateAliasRefusals = {
-  dateField: aliasKeyRefusal('dateField', 'startDateField', 'this object-calendar node', calendarAliasDetail('dateField', 'binding')),
-  endField: aliasKeyRefusal('endField', 'endDateField', 'this object-calendar node', calendarAliasDetail('endField', 'binding')),
+  dateField: aliasKeyRefusal('dateField', 'calendar.startDateField', 'this object-calendar node', calendarNodeAliasDetail('dateField')),
+  endField: aliasKeyRefusal('endField', 'calendar.endDateField', 'this object-calendar node', calendarNodeAliasDetail('endField')),
 };
 
 /**
@@ -2276,24 +2296,24 @@ export const ListViewSchema = BaseSchema
   // `scripts/check-spec-symbol-derivation.mjs` instead of hidden one hop away.
   //
   // Imported here: data, filter, sort, searchableFields,
-  // filterableFields, resizable, striped, bordered, compactToolbar, selection, navigation,
+  // filterableFields, resizable, compactToolbar, selection, navigation,
   // pagination, chart, tree, rowHeight, grouping, rowColor, hiddenFields, fieldOrder,
-  // rowActions, bulkActions, bulkActionDefs, virtualScroll, inlineEdit, userActions,
-  // appearance, tabs, addRecord, showRecordCount, allowPrinting, emptyState, responsive,
-  // performance.
+  // rowActions, bulkActions, bulkActionDefs, inlineEdit, userActions,
+  // appearance, tabs, addRecord, showRecordCount, allowPrinting, emptyState.
   //
-  // `striped`, `bordered` and `virtualScroll` are in that list because the spec
-  // pin still carries them, NOT because objectui offers them: objectstack#7176
-  // retired all three (maintainer-ruled 2026-08-10) after measuring every
-  // objectui reader as pass-through — no renderer ever applied one. objectui's
-  // own declarations and the forwarding chain came out with objectui#4649; what
-  // is left here is the by-reference import, which is exactly what must stay.
-  // It carries the spec's `retiredKey()` tombstones in on the GA bump, so an
-  // author writing one gets a rejection from the protocol rather than silence.
-  // Do NOT add them to LIST_VIEW_LOCAL_OVERRIDES to "clean this up" — that
-  // excludes the tombstone and hands the key back to `BaseSchema`'s
-  // passthrough, turning a loud rejection into a silently-accepted dead key.
-  // Re-forwarding needs an implementation card filed first (the ruling's text).
+  // `striped`, `bordered`, `virtualScroll`, `responsive` and `performance` are
+  // NOT in that list any more: the spec carried them as `retiredKey()`
+  // tombstones through 18.1 (objectstack#7176 retired the first three,
+  // maintainer-ruled 2026-08-10, after measuring every objectui reader as
+  // pass-through; the #3896 audit close-out the last two), and this import
+  // brought each tombstone in by reference, so an author got a rejection from
+  // the protocol rather than silence. At spec 18.2 the tombstones aged out of
+  // the shape one major on (objectstack#25767, ADR-0087), so the projection
+  // carries nothing under those names and `BaseSchema`'s passthrough would
+  // turn the loud rejection into a silently-accepted dead key. The five are
+  // the console's OWN refusals now, declared in the `.extend({...})` below
+  // (`agedOutSpecKeyRefusal`). Re-forwarding any of them needs an
+  // implementation card filed first (the ruling's text).
   .extend(specFieldsExcept(stripImportedDefaults(SpecListViewSchema).shape, LIST_VIEW_LOCAL_OVERRIDES).shape)
   .extend({
     // Component discriminator — load-bearing for the ObjectQLComponentSchema union.
@@ -2471,6 +2491,45 @@ export const ListViewSchema = BaseSchema
     // ⚠️ This arm feeds its own TypeScript face (`ListViewInferred` below), so these two members are
     // what put `body?: undefined` / `children?: undefined` on `ListViewSchema`; there is no separate
     // `?: never` pair to keep in step.
+    //
+    // The five list view keys the spec retired at 17.0.0 and carried as
+    // `retiredKey()` tombstones through 18.1 — flowing in by reference through
+    // the projection above, so an authored value was refused at the key's own
+    // path. At spec 18.2 the tombstones aged out of `ListViewSchema` one major
+    // on (objectstack#25767, ADR-0087): the spec refuses each as an unknown key
+    // naming the upgrade guide, and the projection no longer carries the name,
+    // so without these arms `BaseSchema`'s `.passthrough()` would KEEP an
+    // authored `striped: true` in silence. Each is the console's own refusal
+    // now (`agedOutSpecKeyRefusal`, the reasoning on its docblock). As with
+    // `body` / `children` above, the TypeScript face is derived from this arm
+    // (`ListViewInferred`), so each key is `?: undefined` on `ListViewSchema`
+    // with no hand-kept twin; `ListViewPropsBag` reads this shape, so a page
+    // `list-view` node refuses the five in its `properties` bag and, through
+    // the row's own retirement, written flat. Pinned by
+    // `../__tests__/list-view-aged-out-spec-keys-25767.test.ts`.
+    striped: agedOutSpecKeyRefusal(
+      'list view', 'ListView.striped', 'striped', '17.0.0',
+      'Every measured reader only copied it forward and no renderer ever applied it (objectstack#7176), so '
+        + 'there is no authorable striped-rows switch. Delete the key.',
+    ),
+    bordered: agedOutSpecKeyRefusal(
+      'list view', 'ListView.bordered', 'bordered', '17.0.0',
+      'Every measured reader only copied it forward and no renderer ever applied it (objectstack#7176); the '
+        + 'grid frame is the renderer\'s own constant, not authorable. Delete the key.',
+    ),
+    virtualScroll: agedOutSpecKeyRefusal(
+      'list view', 'ListView.virtualScroll', 'virtualScroll', '17.0.0',
+      'Every measured reader only copied it forward and no grid ever virtualized off it (objectstack#7176). '
+        + 'Large datasets page via `pagination`. Delete the key.',
+    ),
+    responsive: agedOutSpecKeyRefusal(
+      'list view', 'ListView.responsive', 'responsive', '17.0.0',
+      'No renderer ever read it; the grid is responsive by its own layout rules. Delete the key.',
+    ),
+    performance: agedOutSpecKeyRefusal(
+      'list view', 'ListView.performance', 'performance', '17.0.0',
+      'No renderer or runtime read it; list view performance tuning was never implemented. Delete the key.',
+    ),
   })
   // ⭐ THE SPEC'S OBJECT-LEVEL CHECKS, re-attached (objectui#7715, ruling B1).
   //
@@ -2888,8 +2947,8 @@ const OBJECT_GANTT_NEITHER_CHANNEL = neitherContentChannelGuidance(
  *
  * This mirror is the node as `ObjectGantt` reads it: after `SchemaRenderer`
  * has hoisted the node's `properties` bag onto it, or as code composes it
- * (`ObjectView` / `ListView` flattening a stored gantt view, which also write
- * the flat `GanttConfig` keys and the `search` pair below). It left
+ * (`ObjectView` / `ListView` lowering a stored gantt view, which hand the
+ * view's block on as the node's `gantt`). It left
  * `ObjectQLComponentSchema`, and so `AnyComponentSchema`: the AUTHORED
  * `object-gantt` node is armed by `ObjectGanttBlockSchema` below, whose
  * `properties` is the spec's `ComponentPropsMap['object-gantt']` row. It stays
@@ -2904,26 +2963,14 @@ export const ObjectGanttSchema = BaseSchema.extend({
     .describe(ELEMENT_DATA_SOURCE_BINDING_DESCRIPTION),
   objectName: z.string().optional().describe('ObjectQL object name — the THIRD record source resolveRecordSourceConfig resolves, after data and staticData; one of the three must be present, unless the node\'s dataSource.object names the object, which ElementDataSourceGate lands here (objectui#11117)'),
   data: ViewDataSchema.optional().describe('Data source configuration — read FIRST by resolveRecordSourceConfig'),
-  startDateField: z.string().optional().describe('Start date field'),
-  endDateField: z.string().optional().describe('End date field'),
-  titleField: z.string().optional().describe('Title field'),
-  // The legacy singular alias. Kept accepted — `getGanttConfig`'s flat branch
-  // reads `dependenciesField || dependencyField` — but no longer declared as an
-  // equal of the canonical key: same treatment `KanbanConfig` above gives
-  // `groupField`/`cardFields`, so this adopts the ruled idiom rather than a
-  // second spelling of "deprecated". The canonical `dependenciesField` is
-  // declared below, BY REFERENCE to the spec (objectui#6470).
-  /** @deprecated legacy alias for the spec's `dependenciesField` */
-  dependencyField: z.string().optional().describe('Deprecated alias for dependenciesField'),
-  progressField: z.string().optional().describe('Progress field'),
-  // DERIVED from the spec's `GanttConfigSchema.shape.viewMode` (an optional
-  // enum, deliberately WITHOUT a default) so the member list cannot drift
-  // (objectui#5074). Absence semantics are load-bearing: an omitted `viewMode`
-  // lets a persisted layout seed the timeline granularity before the
-  // renderer's 'day' fallback — do NOT add `.default('day')` here.
-  viewMode: stripImportedDefaults(SpecGanttConfigSchema).shape.viewMode.describe(
-    'Initial timeline granularity, honoured by both renderer branches; when omitted, a persisted layout may seed it'
-  ),
+  // objectstack#25923 — the flat `GanttConfig` keys (`startDateField`,
+  // `viewMode`, `dependencyField` …) and the toolbar's `search` pair are NOT
+  // members of this mirror. `ComponentPropsMap['object-gantt']` refuses every
+  // one of them on the node; the `gantt` block below is their one spelling, and
+  // both producers (`ListView`, `ObjectView`'s `generateViewSchema`) emit it.
+  // What the renderer still reads flat lives on `plugin-gantt`'s package-local
+  // hand-off type (Commandment #0.1), off this published face.
+  //
   // objectui#5903 — ten keys `ObjectGantt` reads and this mirror did not
   // declare. They were reachable only through `(schema as any).K`, so nothing
   // connected the read to a declaration. Mirrored here at the SAME requiredness
@@ -2953,58 +3000,15 @@ export const ObjectGanttSchema = BaseSchema.extend({
   showBaselines: z.boolean().optional().describe('Render planned-vs-actual baseline bars — defaults ON, only an explicit false disables'),
   readOnly: z.boolean().optional().describe('Disable every write path and lock the record drawer'),
   mobileReadOnly: z.boolean().optional().describe('Auto read-only on narrow viewports — defaults ON, only an explicit false disables'),
-  // objectui#6051 — the FLATTENED `GanttConfig` face. `getGanttConfig` builds its
-  // config from these top-level keys when the node carries no `gantt` block and
-  // `startDateField` / `endDateField` are both present — the block OUTRANKS this
-  // face (objectui#6469); nothing declared them, on either side,
-  // because `BaseSchema`'s index signature admitted them untyped. Mirrored at the
-  // SAME requiredness as `../objectql.ts` (all optional) so the zod-mirror-parity
-  // ratchet stays at zero drift for this pair.
-  //
-  // The spec-modelled members are taken from `SpecGanttConfigSchema.shape` by
-  // reference, exactly as `viewMode` above is, so the vocabulary cannot fork.
-  colorField: stripImportedDefaults(SpecGanttConfigSchema).shape.colorField,
-  dependenciesField: stripImportedDefaults(SpecGanttConfigSchema).shape.dependenciesField,
-  parentField: stripImportedDefaults(SpecGanttConfigSchema).shape.parentField,
-  typeField: stripImportedDefaults(SpecGanttConfigSchema).shape.typeField,
-  tooltipFields: stripImportedDefaults(SpecGanttConfigSchema).shape.tooltipFields,
-  baselineStartField: stripImportedDefaults(SpecGanttConfigSchema).shape.baselineStartField,
-  baselineEndField: stripImportedDefaults(SpecGanttConfigSchema).shape.baselineEndField,
-  groupByField: stripImportedDefaults(SpecGanttConfigSchema).shape.groupByField,
-  resourceView: stripImportedDefaults(SpecGanttConfigSchema).shape.resourceView,
-  assigneeField: stripImportedDefaults(SpecGanttConfigSchema).shape.assigneeField,
-  effortField: stripImportedDefaults(SpecGanttConfigSchema).shape.effortField,
-  capacity: stripImportedDefaults(SpecGanttConfigSchema).shape.capacity,
-  quickFilters: stripImportedDefaults(SpecGanttConfigSchema).shape.quickFilters,
-  autoZoomToFilter: stripImportedDefaults(SpecGanttConfigSchema).shape.autoZoomToFilter,
-  // …and the ten that used to be a SECOND declaration here. objectui read them
-  // through `GanttConfigSchema`'s then-open `.passthrough()` window and had to
-  // model them locally (`GanttConfigExtensionFields`, objectui#6051/#6475);
-  // objectstack#15469 closed the window and declared all ten upstream, so they
-  // arrive by reference like every member above and the local field map is
-  // retired (objectui#7845). Compared member for member before deleting: the
-  // spec's declarations cover the same keys, the same `interactions`
-  // (move/resize/progress/link) and `timeSegments` (dayStart/bands/showMidnight)
-  // sub-shapes and the same band members, with strictly fuller describes — the
-  // local copy carried no describe, alias or member the spec's lacks.
-  borderColorField: stripImportedDefaults(SpecGanttConfigSchema).shape.borderColorField,
-  lockField: stripImportedDefaults(SpecGanttConfigSchema).shape.lockField,
-  objectField: stripImportedDefaults(SpecGanttConfigSchema).shape.objectField,
-  summaryExtent: stripImportedDefaults(SpecGanttConfigSchema).shape.summaryExtent,
-  defaultCollapsedDepth: stripImportedDefaults(SpecGanttConfigSchema).shape.defaultCollapsedDepth,
-  dependencyTypes: stripImportedDefaults(SpecGanttConfigSchema).shape.dependencyTypes,
-  timeZone: stripImportedDefaults(SpecGanttConfigSchema).shape.timeZone,
-  exportFileName: stripImportedDefaults(SpecGanttConfigSchema).shape.exportFileName,
-  interactions: stripImportedDefaults(SpecGanttConfigSchema).shape.interactions,
-  timeSegments: stripImportedDefaults(SpecGanttConfigSchema).shape.timeSegments,
   // `gantt` — the BLOCK face `getGanttConfig`'s FIRST branch reads and prefers
-  // (objectui#6469 ruled block-over-flat) — objectui#6475. It is now
-  // `SpecGanttConfigSchema` itself, the same vocabulary the flat face above
-  // derives from key by key, so the two authoring faces cannot fork. The
+  // (objectui#6469 ruled block-over-flat) — objectui#6475. It is
+  // `SpecGanttConfigSchema` itself, and since objectstack#25923 the ONE
+  // spelling of those keys on this node: the flat face that used to derive
+  // from it key by key is gone. The
   // `.extend(GanttConfigExtensionFields)` this used to carry is gone with the
   // field map (objectui#7845): the spec declares those ten itself.
   //
-  // This is the one entry among the 28 that NARROWS rather than merely names: a
+  // This was the one entry among the 28 that NARROWED rather than merely named: a
   // `gantt` block previously rode through `.passthrough()` entirely unvalidated;
   // now it is PARSED against the spec's `GanttConfigSchema`, which REQUIRES
   // `startDateField`/`endDateField`/`titleField`. This mirror reached the CLI's
@@ -3019,7 +3023,7 @@ export const ObjectGanttSchema = BaseSchema.extend({
   // Option A: enforce as-is, no warning window (excluded by the startup-stage
   // no-gradualism rule, objectstack#12668 — no named external-user evidence).
   gantt: stripImportedDefaults(SpecGanttConfigSchema).optional().describe(
-    'Nested gantt config block — the authoring face, and the winner over the flattened top-level keys whenever present'
+    'Nested gantt config block — the one spelling of the field mapping on this node; the spec refuses the same keys written flat'
   ),
   // The query/data keys the fetch path reads. They were declared on
   // `ObjectGridSchema` — what `ObjectGanttProps.schema` used to be typed as before
@@ -3032,11 +3036,6 @@ export const ObjectGanttSchema = BaseSchema.extend({
   // so no authored door moves; the read stays wider (see the TS twin's member).
   filter: stripImportedDefaults(SpecObjectGanttPropsSchema).shape.filter,
   sort: z.array(SortConfigSchema).optional().describe('Sort configuration, forwarded as $orderby (array only; the legacy string clause is retired — objectui#8221)'),
-  // objectui#10250 — the full-text pair the record query carries, declared in
-  // step with the twin in `../objectql.ts`. ListView's toolbar Search writes
-  // both onto a gantt node, because the chart queries for itself.
-  search: z.string().optional().describe('Full-text search term, forwarded as $search (the server resolves the matched fields, ADR-0061)'),
-  searchableFields: z.array(z.string()).optional().describe('Narrows the fields `search` matches, forwarded as $searchFields alongside a term'),
   // objectui#9256 (E3 residual, ruling Q2 A on objectui#8284): the renderer reads NEITHER content
   // channel, so both are refused by name here as on the TypeScript twin, each kept a MEMBER.
   body: retirementTombstone(OBJECT_GANTT_NEITHER_CHANNEL),
@@ -3049,23 +3048,6 @@ const OBJECT_CALENDAR_NEITHER_CHANNEL = neitherContentChannelGuidance(
   'its `any`-typed registration hands the node to `ObjectCalendar`, which reads it as `ObjectCalendarSchema`',
   'the records of `objectName` as events from `startDateField` to `endDateField`',
 );
-
-/**
- * objectui#8831 — ONE description for the five FLAT field-name members of
- * `ObjectCalendarSchema`, so the five cannot teach five different things.
- *
- * The flat spelling is read, not authored. `@objectstack/spec` refuses all five
- * at this element and its diagnostic names the canonical form,
- * `calendar: { startDateField, endDateField, titleField, colorField, allDayField }`
- * (one key per concept, its Prime Directive #12). The members stay declared
- * because the renderer reads them: `ObjectView` and `ListView` emit this
- * spelling on the node they build, and `getCalendarConfig` falls back to it
- * when the node has no `calendar` block. ⛔ Declared is not a licence to author
- * it; the description says where the key is written instead.
- */
-function objectCalendarFlatField(what: string, key: string): string {
-  return `${what} — FLAT spelling, read but not authored: the runtime handoff ObjectView/ListView emit, read by getCalendarConfig only when the node has no calendar block. Author calendar.${key} instead; the spec refuses the flat key on object-calendar (Prime Directive #12)`;
-}
 
 /**
  * ObjectCalendar Schema
@@ -3127,22 +3109,23 @@ export const ObjectCalendarSchema = BaseSchema.extend({
   // mirror aligns to it rather than forking the contract. Mirrored at the SAME
   // requiredness as `../objectql.ts` (both optional) so the zod-mirror-parity
   // ratchet stays at zero drift for this pair, exactly as the `filter`/`sort`
-  // and `colorField`/`allDayField` pairs below.
+  // pair below.
   //
-  // objectui#8831 — this container is the AUTHORED spelling of the five
-  // field-name keys. `ComponentPropsMap['object-calendar']` refuses them FLAT
-  // and its own diagnostic prescribes
-  // `calendar: { startDateField, endDateField, titleField, colorField, allDayField }`,
-  // so this description names the container as the place to write them, and
-  // the five flat members below describe themselves as the runtime handoff.
+  // objectui#8831, objectstack#25923 — this container is the ONE spelling of
+  // the five field-name keys. `ComponentPropsMap['object-calendar']` refuses
+  // them FLAT and its own diagnostic prescribes
+  // `calendar: { startDateField, endDateField, titleField, colorField, allDayField }`.
+  // Neither face of this package declares the flat five any more, so the strict
+  // authoring face refuses them as the spec does. The flat spelling lives on
+  // only as `plugin-calendar`'s package-local hand-off type, which
+  // `getCalendarConfig` reads when a node carries no block (Commandment #0.1:
+  // a key only code writes at runtime stays off the authoring face).
   //
   // objectui#6152 round 9 — the container's SHAPE is the row's own slot now,
   // by reference: strict, `startDateField` required (see
   // `ObjectCalendarBlockConfigSchema` above). The `calendar` key itself stays
   // optional on both faces, as before.
-  calendar: ObjectCalendarBlockConfigSchema.optional().describe('Calendar configuration container, and the AUTHORED spelling of the five field-name keys: startDateField (required), endDateField, titleField, colorField, allDayField; any other key is refused, as ComponentPropsMap[\'object-calendar\'].calendar refuses it. Read FIRST by getCalendarConfig, ahead of the flat members, which are the runtime handoff and not a second authorable spelling'),
-  startDateField: z.string().optional().describe(objectCalendarFlatField('Start date field', 'startDateField')),
-  endDateField: z.string().optional().describe(objectCalendarFlatField('End date field', 'endDateField')),
+  calendar: ObjectCalendarBlockConfigSchema.optional().describe('Calendar configuration container, and the AUTHORED spelling of the five field-name keys: startDateField (required), endDateField, titleField, colorField, allDayField; any other key is refused, as ComponentPropsMap[\'object-calendar\'].calendar refuses it. The five are never written flat on the node: the spec refuses them there, and so does the strict authoring face'),
   // ⭐ objectui#8355 — the FLAT spelling the retired ladder actually read, and
   // the one position where an unrefused alias is worst: `BaseSchema` ends
   // `.passthrough()`, so the key was KEPT, carried into the renderer, and — with
@@ -3151,33 +3134,6 @@ export const ObjectCalendarSchema = BaseSchema.extend({
   // `?: never` twin and `tsc` refuses the key at the authoring site too.
   dateField: CalendarNodeDateAliasRefusals.dateField,
   endField: CalendarNodeDateAliasRefusals.endField,
-  titleField: z.string().optional().describe(objectCalendarFlatField('Title field', 'titleField')),
-  // objectui#8466 — the last two members of the FLAT field-name face, which
-  // `ObjectCalendar.tsx`'s `getCalendarConfig` reads bare off the node. When
-  // that card landed, `plugin-calendar/README.md` taught them as authorable;
-  // since objectui#8831 it teaches the `calendar` container instead, and the
-  // flat members stay declared because the renderer still reads them. Neither
-  // published face of this package named them: they rode `BaseSchema`'s
-  // `[key: string]: any` on the TS side and its `.passthrough()` here —
-  // admitted, never examined, so a misspelling left the calendar silently
-  // colourless while every published gate passed.
-  //
-  // Mirrored at the SAME requiredness as `../objectql.ts` (both optional) so
-  // the zod-mirror-parity ratchet stays at zero drift for this pair, exactly as
-  // the `filter`/`sort` pair above.
-  //
-  // ⛔ Neither key is added to `plugin-calendar`'s registration `inputs`, and
-  // that asymmetry is deliberate: `ComponentPropsMap['object-calendar']`
-  // refuses all five flat keys with `unrecognized_keys`, so declaring them
-  // THERE would redden the FORWARD direction of
-  // `apps/console/src/__tests__/registry-inputs-spec-parity.test.ts`.
-  // `titleField`/`startDateField`/`endDateField` have shipped declared here, and
-  // absent from `inputs`, for releases. What the five declarations record is a
-  // READ, not an authoring lane (objectui#8831): `ObjectView`/`ListView` emit
-  // this spelling on the node they build, and `getCalendarConfig` falls back to
-  // it only when the node carries no `calendar` block.
-  colorField: z.string().optional().describe(objectCalendarFlatField('Field carrying the per-record event colour — a CSS colour or a semantic palette name', 'colorField')),
-  allDayField: z.string().optional().describe(objectCalendarFlatField('Field carrying the all-day flag, LOAD-BEARING since objectui#8026', 'allDayField')),
   defaultView: z.enum(['month', 'week', 'day']).optional().describe("Default view — 'month' | 'week' | 'day', the renderer's rendered set ('agenda' was retired)"),
   // objectui#8174 — the two query keys `ObjectCalendar.tsx` lowers onto its own
   // `dataSource.find` (`$filter: schema.filter`,
@@ -3211,12 +3167,21 @@ export const ObjectCalendarSchema = BaseSchema.extend({
   // the gantt and map arms above spell it. Until this card it rode
   // `BaseSchema`'s `.passthrough()`: `navigation: { mode: 'not-a-mode' }`
   // parsed green here while the spec's own element schema refused it. The
-  // import-boundary strip keeps the spec's `mode: 'page'` default out of a
-  // parsed document, so the renderer's own `{ mode: 'drawer' }` fallback for
+  // import-boundary strip keeps the spec's `mode` default (`drawer` since
+  // objectstack#26677) out of a parsed document, so the renderer's own
+  // `{ mode: 'drawer' }` fallback for
   // an ABSENT key still applies (objectui#8317). Mirrored at the SAME
   // requiredness as `../objectql.ts` (optional), so the zod-mirror-parity
   // ratchet stays at zero drift for this pair.
-  navigation: stripImportedDefaults(SpecNavigationConfigSchema).optional().describe('Event-click navigation behaviour (drawer/modal/split/popover/page/new_window/none), the same block ListViewSchema.navigation declares; the renderer defaults an absent key to a drawer'),
+  navigation: stripImportedDefaults(SpecNavigationConfigSchema).optional().describe('Event-click navigation behaviour (drawer/page/new_window/none), the same block ListViewSchema.navigation declares; the renderer defaults an absent key to a drawer'),
+  // objectstack#25923 (work item 4) — two NODE members `ComponentPropsMap['object-calendar']`
+  // declares and `plugin-calendar`'s registration boundary reads off the node
+  // (`resolveAuthoredLocale(rest.locale)`, `resolveExternalLoading(rest.loading)`),
+  // which neither face of this package named. The row's own members BY
+  // REFERENCE. Neither is one of the five calendar field-name keys item 1 moved
+  // into the `calendar` block; the spec authors both on the node itself.
+  locale: stripImportedDefaults(SpecObjectCalendarPropsSchema).shape.locale,
+  loading: stripImportedDefaults(SpecObjectCalendarPropsSchema).shape.loading,
   // objectui#9256 (E3 residual, ruling Q2 A on objectui#8284): the renderer reads NEITHER content
   // channel, so both are refused by name here as on the TypeScript twin, each kept a MEMBER.
   body: retirementTombstone(OBJECT_CALENDAR_NEITHER_CHANNEL),
@@ -3575,12 +3540,13 @@ export const ObjectKanbanSchema = BaseSchema.extend({
   // the gantt and map arms above spell it. Until this card it rode
   // `BaseSchema`'s `.passthrough()`: `navigation: { mode: 'not-a-mode' }`
   // parsed green here while the spec's own element schema refused it. The
-  // import-boundary strip keeps the spec's `mode: 'page'` default out of a
-  // parsed document, so the renderer's own `{ mode: 'drawer' }` fallback for
+  // import-boundary strip keeps the spec's `mode` default (`drawer` since
+  // objectstack#26677) out of a parsed document, so the renderer's own
+  // `{ mode: 'drawer' }` fallback for
   // an ABSENT key still applies (objectui#8317). Mirrored at the SAME
   // requiredness as `../objectql.ts` (optional), so the zod-mirror-parity
   // ratchet stays at zero drift for this pair.
-  navigation: stripImportedDefaults(SpecNavigationConfigSchema).optional().describe('Card-click navigation behaviour (drawer/modal/split/popover/page/new_window/none), the same block ListViewSchema.navigation declares; the renderer defaults an absent key to a drawer'),
+  navigation: stripImportedDefaults(SpecNavigationConfigSchema).optional().describe('Card-click navigation behaviour (drawer/page/new_window/none), the same block ListViewSchema.navigation declares; the renderer defaults an absent key to a drawer'),
   // ── `5a41ce733` — the three handler keys `KanbanRenderer` reads off the
   // document this arm judges, MEASURED one at a time (director seat ruling of
   // 2026-09-07, decision batch #69: the arm a `type` selects is the contract
@@ -4936,9 +4902,10 @@ const OBJECT_GANTT_FLAT_PROP_REFUSALS = Object.fromEntries(
 type ObjectGanttConfigKey = keyof NonNullable<z.input<typeof SpecObjectGanttPropsSchema>['gantt']>;
 
 /**
- * The flat mirror's `GanttConfig` members (`startDateField`, `viewMode`,
- * `colorField`, … — the flatten product `getGanttConfig` reads when a node has
- * no `gantt` block) and its legacy alias `dependencyField`, each refused by name
+ * The `GanttConfig` keys written flat (`startDateField`, `viewMode`,
+ * `colorField`, … — the spelling `getGanttConfig` still reads off a node with no
+ * `gantt` block, typed on `plugin-gantt`'s hand-off type since
+ * objectstack#25923) and the legacy alias `dependencyField`, each refused by name
  * when written on the authored node and pointed at its home, the bag's `gantt`
  * block: `properties.gantt.KEY` (`dependencyField` at the canonical
  * `properties.gantt.dependenciesField`). The key set is the row's own `gantt`
@@ -4998,11 +4965,11 @@ const OBJECT_GANTT_FLAT_CONFIG_REFUSALS = {
  * because the gantt's `data` is the row's member. `label` is the one row member
  * that stays: the spec's page component declares a node-level `label` of its
  * own, so a `label` on the node is not mis-layered, and it keeps `BaseSchema`'s
- * member. The flat mirror's `GanttConfig` members and its `dependencyField`
- * alias are refused too, pointed at the bag's `gantt` block
+ * member. The `GanttConfig` keys and the `dependencyField` alias written flat
+ * are refused too, pointed at the bag's `gantt` block
  * (`OBJECT_GANTT_FLAT_CONFIG_REFUSALS` above). A flat key neither the row nor
- * that block declares — the mirror's `search` / `searchableFields`, which a
- * list view writes onto the node it composes, among them — is left as every
+ * that block declares — the `search` / `searchableFields` pair, which a list
+ * view writes onto the node it composes, among them — is left as every
  * arm leaves an undeclared key: unjudged by the tolerant face, refused by the
  * strict one.
  *
@@ -5027,9 +4994,10 @@ const OBJECT_GANTT_FLAT_CONFIG_REFUSALS = {
  *
  * The TypeScript `ObjectGanttSchema` and its zod mirror above stay published:
  * they are the node as `ObjectGantt` reads it after the hoist, and as
- * `ObjectView` / `ListView` compose it when they flatten a stored gantt view. A
- * composed flat node keeps working, because `SchemaRenderer` reads both
- * spellings and no composed node passes through `safeValidateSchema`.
+ * `ObjectView` / `ListView` compose it when they lower a stored gantt view
+ * into the node's `gantt` block. Since objectstack#25923 neither carries a flat
+ * `GanttConfig` key: the flat spelling the renderer still reads is
+ * `plugin-gantt`'s package-local hand-off type, off the published faces.
  */
 export const ObjectGanttBlockSchema = BaseSchema.extend({
   type: z.literal('object-gantt'),

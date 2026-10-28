@@ -118,8 +118,12 @@ describe('2 · the declared keys keep their route; the undeclared ones do not (o
     const node = await generatedNode('calendar', {
       calendar: { startDateField: 'a', endDateField: 'b', titleField: 'c', colorField: 'd', allDayField: 'e', defaultView: 'week' },
     });
-    expect([node.startDateField, node.endDateField, node.titleField, node.colorField, node.allDayField]).toEqual(['a', 'b', 'c', 'd', 'e']);
+    // objectstack#25923 — the five ride the node's own `calendar` block, never flat.
+    const { calendar } = node;
+    expect([calendar.startDateField, calendar.endDateField, calendar.titleField, calendar.colorField, calendar.allDayField]).toEqual(['a', 'b', 'c', 'd', 'e']);
+    expect(node).not.toHaveProperty('startDateField');
     expect(node).not.toHaveProperty('defaultView');
+    expect(calendar).not.toHaveProperty('defaultView');
   });
 
   it('gantt: EVERY key the spec declares on the block reaches the gantt, an undeclared one does not', async () => {
@@ -127,8 +131,11 @@ describe('2 · the declared keys keep their route; the undeclared ones do not (o
     expect(declared.length).toBeGreaterThan(20);
     const block = Object.fromEntries(declared.map((k) => [k, `V_${k}`]));
     const node = await generatedNode('gantt', { gantt: { ...block, zzzUndeclared: 1 } });
-    for (const k of declared) expect(node[k], k).toBe(`V_${k}`);
+    // objectstack#25923 — they reach it as the node's own `gantt` block, never flat.
+    for (const k of declared) expect(node.gantt?.[k], k).toBe(`V_${k}`);
+    for (const k of declared) expect(node, `flat ${k}`).not.toHaveProperty(k);
     expect(node).not.toHaveProperty('zzzUndeclared');
+    expect(node.gantt).not.toHaveProperty('zzzUndeclared');
   });
 
   it('timeline: EVERY key the spec declares on the block reaches the timeline flat; the `dateField` alias does not', async () => {

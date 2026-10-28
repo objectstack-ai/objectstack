@@ -301,8 +301,9 @@ for an either/or.
 > `else`. The runner has always read this key as the predicate above, and an
 > object without a `source` reads as "no gate declared", so an action written
 > that way ran **unconditionally**, with no error at author time and no
-> diagnostic at runtime. The shape is now refused by `ActionSchema`'s zod schema
-> instead of being accepted and ignored.
+> diagnostic at runtime. The shape is now refused by the zod schema
+> (`CRUDActionSchema` in `@object-ui/types/zod`) instead of being accepted and
+> ignored.
 
 ## Post-success behaviour
 
@@ -483,7 +484,7 @@ const complexAction: ActionSchema = {
 ## Runtime Validation
 
 ```ts
-import { ActionSchema } from '@object-ui/types/zod';
+import { CRUDActionSchema } from '@object-ui/types/zod';
 
 const myAction = {
   type: 'action',
@@ -492,7 +493,7 @@ const myAction = {
   confirmText: 'Are you sure?',
 };
 
-const result = ActionSchema.safeParse(myAction);
+const result = CRUDActionSchema.safeParse(myAction);
 
 if (result.success) {
   console.log('Valid action configuration');

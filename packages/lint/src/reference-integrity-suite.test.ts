@@ -45,6 +45,10 @@ describe('reference-integrity suite — membership', () => {
       // Placed beside the member that resolves the same page's field names.
       'validatePageVisualizationBindings',
       'validateChartBindings',
+      // [#26548] The same report's `dateRange.dimension`, resolved against the
+      // same dataset's date dimensions — placed beside the chart member that
+      // resolves the rest of that report's bindings.
+      'validateReportDateRange',
       // [#14105] The dataset's OWN references, one level below the two binding
       // rules above it — the conscious edit this written-out list exists to
       // force, placed so the family reports top-down.

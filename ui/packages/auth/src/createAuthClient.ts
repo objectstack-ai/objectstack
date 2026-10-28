@@ -10,7 +10,8 @@ import { createAuthClient as createBetterAuthClient, parseJSON } from 'better-au
 import { organizationClient, twoFactorClient } from 'better-auth/client/plugins';
 import type {
   AuthClient, AuthClientConfig, AuthUser, AuthClientSession, SignInCredentials, SignUpData,
-  AuthOrganization, AuthOrganizationMember, AuthInvitation, AuthPublicConfig, SignInWithProviderOptions,
+  AuthOrganization, AuthOrganizationMember, AuthInvitation, AuthInvitationPreview, AuthPublicConfig,
+  SignInWithProviderOptions,
 } from './types.js';
 import { AUTH_INVITATION_STATUSES, isAuthInvitationStatus } from './invitation-status.js';
 
@@ -162,6 +163,32 @@ function asAuthInvitation(raw: unknown, method: string): AuthInvitation {
   return raw as AuthInvitation;
 }
 
+/**
+ * The boundary for the signed-out invitation preview's success body,
+ * `{ success: true, data: { organizationName, inviterName, email } }`
+ * (objectstack `plugin-auth` `invitation-preview.ts`). Anything else is a
+ * producer defect and fails loudly, naming the method — the page that asked
+ * treats a rejection as "no preview" and keeps its generic copy, so a wrong
+ * shape never reaches the screen as a half-filled sentence.
+ */
+function asAuthInvitationPreview(raw: unknown): AuthInvitationPreview {
+  const body = raw as { success?: unknown; data?: Record<string, unknown> } | null | undefined;
+  const data = body?.success === true ? body.data : undefined;
+  if (
+    !data ||
+    typeof data.organizationName !== 'string' ||
+    !(data.inviterName === null || typeof data.inviterName === 'string') ||
+    typeof data.email !== 'string'
+  ) {
+    throw new Error('getInvitationPreview: unexpected response body');
+  }
+  return {
+    organizationName: data.organizationName,
+    inviterName: data.inviterName as string | null,
+    email: data.email,
+  };
+}
+
 /** Same boundary, per row, for the list-returning invitation routes. */
 function asAuthInvitations(raw: unknown, method: string): AuthInvitation[] {
   const rows = Array.isArray(raw) ? (raw as unknown[]) : [];
@@ -200,19 +227,23 @@ function getWindowOrigin(): string | undefined {
 }
 
 /**
- * Resolve the redirect URL appended to password-reset emails as
- * `?callbackURL=<value>`. better-auth sends users to `<value>?token=…`
- * after verifying the token, so the value must point at the SPA's
- * `/reset-password` route — including the SPA basename when mounted
- * under a subpath (e.g. `/_console/reset-password`).
+ * Resolve one of the SPA's own routes as a path the server can send the
+ * browser back to — including the SPA basename when mounted under a subpath
+ * (e.g. `/_console/reset-password`, `/_console/login`). Two callers:
+ *
+ *   - password-reset emails carry it as `?callbackURL=<value>`; better-auth
+ *     sends users to `<value>?token=…` after verifying the token.
+ *   - sign-out sends it as `callbackURL`; better-auth turns it into the
+ *     provider's `post_logout_redirect_uri`, where the identity provider
+ *     sends the browser once it has ended its own session.
  *
  * Resolution order:
  *   1. `<base href="…">` in the document head (matches how Console &
  *      Account derive React Router's basename) — preferred since it
  *      tracks whatever path the host SPA is served from.
- *   2. `'/reset-password'` — sensible default for a SPA at the origin root.
+ *   2. `route` as given — sensible default for a SPA at the origin root.
  */
-function resolveResetPasswordRedirect(): string {
+function resolveSpaRoute(route: '/reset-password' | '/login'): string {
   try {
     if (typeof document !== 'undefined') {
       const baseEl = document.querySelector('base');
@@ -220,13 +251,36 @@ function resolveResetPasswordRedirect(): string {
       if (href) {
         const url = new URL(href, getWindowOrigin() ?? 'http://localhost');
         const path = url.pathname.replace(/\/$/, '');
-        return `${path}/reset-password`;
+        return `${path}${route}`;
       }
     }
   } catch {
     // ignore — fall through to default
   }
-  return '/reset-password';
+  return route;
+}
+
+/**
+ * The provider-logout URL a sign-out answer asks the browser to follow, or
+ * `null` when there is none to follow.
+ *
+ * better-auth's `POST /sign-out` answers `{ success: true }` alone when the
+ * user has no account linked through a provider that can end its own session.
+ * For one that can (an OIDC provider with an `end_session_endpoint`, e.g. a
+ * hosted environment signed in through ObjectOS Cloud), it answers
+ * `{ success: true, url, redirect: true }`, where `url` is that endpoint with
+ * the `id_token_hint`. Only an absolute `http:` / `https:` URL is followed:
+ * the answer decides where the whole window goes, so a `javascript:` or
+ * `data:` URL, or anything that does not parse, is dropped.
+ */
+function providerLogoutURL(data: { url?: unknown; redirect?: unknown } | null | undefined): string | null {
+  if (data?.redirect !== true || typeof data.url !== 'string') return null;
+  try {
+    const { protocol } = new URL(data.url);
+    return protocol === 'http:' || protocol === 'https:' ? data.url : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -502,10 +556,30 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
     },
 
     async signOut() {
-      const { error } = await betterAuth.signOut();
+      // `callbackURL` is where the identity provider sends the browser after
+      // ending its own session: this SPA's sign-in page. better-auth uses it
+      // only when it answers with a provider-logout URL (see
+      // `providerLogoutURL`); without a provider the answer is
+      // `{ success: true }` and the caller's in-app route to the sign-in page
+      // stays as it was.
+      const { data, error } = await betterAuth.signOut({ callbackURL: resolveSpaRoute('/login') });
       TokenStorage.clear();
       if (error) {
         throw new Error(error.message ?? `Auth request failed with status ${error.status}`);
+      }
+      // `disableDefaultFetchPlugins: true` drops better-auth's `redirectPlugin`,
+      // so the provider-logout redirect is followed here, the same way
+      // `signInWithProvider` follows its `{ url, redirect }`. Without it the
+      // provider session survives, and the next "continue with" on this
+      // browser signs straight back in as the user who just signed out.
+      //
+      // `AuthProvider.signOut` still resets its state and purges the tab's
+      // caches after this resolves, before the page unloads: `assign` only
+      // starts the navigation, and the document is unloaded in a later task,
+      // after the microtasks that run that purge.
+      const url = providerLogoutURL(data);
+      if (url && typeof window !== 'undefined') {
+        window.location.assign(url);
       }
     },
 
@@ -590,7 +664,7 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
       }
       const { error } = await requestReset({
         email,
-        redirectTo: resolveResetPasswordRedirect(),
+        redirectTo: resolveSpaRoute('/reset-password'),
       });
       if (error) {
         throw new Error(error.message ?? `Auth request failed with status ${error.status}`);
@@ -1008,6 +1082,31 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
       });
       if (error) throw toAuthError(error, 'Failed to load invitation');
       return asAuthInvitation(data, 'getInvitation');
+    },
+
+    async getInvitationPreview(invitationId: string): Promise<AuthInvitationPreview | null> {
+      // objectstack's own signed-out read (#26473): better-auth's
+      // `get-invitation` above answers 401 without a session. The server
+      // gives one uniform 404 for an unknown, expired, accepted, rejected or
+      // cancelled id, which is an answer ("no preview"), not a failure.
+      const url = `${origin}${basePath}/organization/invitation-preview?id=${encodeURIComponent(invitationId)}`;
+      const response = await bearerFetch(url, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (response.status === 404) return null;
+      const body = (await response.json().catch(() => null)) as
+        | { error?: { code?: string; message?: string } }
+        | null;
+      if (!response.ok) {
+        const err = new Error(
+          body?.error?.message ?? `Invitation preview failed with status ${response.status}`,
+        ) as Error & { code?: string; status?: number };
+        if (body?.error?.code) err.code = body.error.code;
+        err.status = response.status;
+        throw err;
+      }
+      return asAuthInvitationPreview(body);
     },
 
     async acceptInvitation(invitationId: string): Promise<void> {

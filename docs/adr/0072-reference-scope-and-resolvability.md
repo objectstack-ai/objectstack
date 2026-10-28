@@ -65,7 +65,7 @@ Two consequences for the picker model:
 - **Token shape is surface-specific** (flow = bare-or-dotted; everything else = dotted). The picker must know the surface.
 - There is **one canonical root allowlist** the validator should reuse, instead of a hand-rolled one.
 
-**`outputSchema` today** (`packages/spec/src/automation/flow.zod.ts#outputSchema`): `Record<string, { type: 'string'|'number'|'boolean'|'object'|'array'; description?: string }>`, **optional**, carries **no `objectName`**, is **not consumed by the engine**, and is read by the designer only for connector/Tool display. So it cannot, today, tell the picker *which object* an `object`-typed output holds. The reliable signal is the **producing node's `config.objectName`** (required on CRUD nodes) found by walking the graph back — exactly the walk the objectui picker already does (`@object-ui/app-shell` · `inspectors/flow-scope.ts` `flowAncestors`).
+**`outputSchema` today** (`packages/spec/src/automation/flow.zod.ts`; removed at 17.0.0 and, since #25767, refused there as an unknown key): `Record<string, { type: 'string'|'number'|'boolean'|'object'|'array'; description?: string }>`, **optional**, carries **no `objectName`**, is **not consumed by the engine**, and is read by the designer only for connector/Tool display. So it cannot, today, tell the picker *which object* an `object`-typed output holds. The reliable signal is the **producing node's `config.objectName`** (required on CRUD nodes) found by walking the graph back — exactly the walk the objectui picker already does (`@object-ui/app-shell` · `inspectors/flow-scope.ts` `flowAncestors`).
 
 ### What already shipped (Slice 0/1, objectui #1934)
 

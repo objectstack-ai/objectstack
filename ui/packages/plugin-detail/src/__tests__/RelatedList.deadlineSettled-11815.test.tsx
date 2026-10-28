@@ -14,6 +14,7 @@
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { cleanup, render, waitFor } from '@testing-library/react';
 import * as React from 'react';
+import { formatDate } from '@object-ui/fields';
 import { RelatedList } from '../RelatedList';
 
 beforeAll(() => {
@@ -79,7 +80,11 @@ const drawCell = (row: Record<string, unknown>) => {
   const col = (h.schema?.columns ?? []).find((c: any) => c.accessorKey === 'due_date');
   const { container } = render(<>{col.cell(row.due_date, row)}</>);
   const span = container.querySelector('span.tabular-nums') as HTMLElement | null;
-  return { text: span?.textContent ?? '', red: !!span?.className.includes('text-red-600') };
+  return {
+    text: span?.textContent ?? '',
+    title: span?.getAttribute('title') ?? '',
+    red: !!span?.className.includes('text-red-600'),
+  };
 };
 
 describe('RelatedList — each child row is judged on its own (objectui#11815)', () => {
@@ -87,8 +92,11 @@ describe('RelatedList — each child row is judged on its own (objectui#11815)',
     const ds = makeDataSource();
     renderList(ds);
     await waitFor(() => expect((h.schema?.columns ?? []).some((c: any) => c.accessorKey === 'due_date')).toBe(true));
-    expect(drawCell(ROWS[0])).toEqual({ text: 'Overdue 5d', red: true });
-    expect(drawCell(ROWS[1])).toEqual({ text: '5 days ago', red: false });
+    // A table cell paints the absolute face and carries the relative phrase as
+    // its tooltip (objectstack#26344), so the verdict reads in both.
+    const absolute = formatDate(ROWS[0].due_date, undefined, { locale: 'en-US' });
+    expect(drawCell(ROWS[0])).toEqual({ text: absolute, title: 'Overdue 5d', red: true });
+    expect(drawCell(ROWS[1])).toEqual({ text: absolute, title: '5 days ago', red: false });
   });
 
   it("asks for the settledWhen's operand when no column shows it", async () => {

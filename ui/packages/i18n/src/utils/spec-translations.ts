@@ -60,18 +60,28 @@ export interface SpecTranslationData {
 }
 
 /**
- * The top-level groups of the translation document the server serves at
- * `/api/v1/i18n/translations/:locale` — the keys of the `translations` shape
- * of `@objectstack/spec`'s `GetTranslationsResponseSchema`: every per-app
+ * The top-level groups this transform recognises in the translation document
+ * the server serves at `/api/v1/i18n/translations/:locale` — every per-app
  * `TranslationData` group plus the platform-only `settings`, because the
  * served document is the merge of the app's bundle and the platform's.
+ *
+ * It is a SUPERSET of the keys of the `translations` shape of
+ * `@objectstack/spec`'s `GetTranslationsResponseSchema`, deliberately: that
+ * shape is the groups the server still SERVES, and a group can leave it while
+ * authored bundles and older servers keep carrying it. `metadataForms` is the
+ * first one to have left (objectstack#25785 — Studio's authoring forms arrive
+ * already translated from `/api/v1/meta/types`, so the console bundle stopped
+ * carrying their translations); it stays listed here, so a payload from a
+ * server that still serves it is namespaced like any other rather than landing
+ * untouched at the root. Nothing reads the group on this side.
  *
  * Written out rather than imported: `@object-ui/i18n` deliberately does not
  * depend on `@objectstack/spec`. The console does, so the pin lives beside
  * its loader — `apps/console/src/loadLanguage.test.tsx` walks the spec's own
  * key list and requires a payload carrying any one group, alone, to take the
- * transform branch. A group the spec adds and this list lacks turns that test
- * red instead of dropping the group's bundles silently (objectui#10235).
+ * transform branch. A group the spec SERVES and this list lacks turns that
+ * test red instead of dropping the group's bundles silently (objectui#10235);
+ * a group listed here and no longer served is not red, by that direction.
  */
 const SPEC_TRANSLATION_GROUPS = [
   'objects',
@@ -97,6 +107,14 @@ const SPEC_TRANSLATION_GROUPS = [
   // objectstack #25788 serves `reports` (a report's label and description are
   // translatable), copied through onto `app` the same way.
   'reports',
+  // objectstack #26170 serves `hooks` (a hook's declared refusal messages,
+  // `hooks.<hook>.refusals.<CODE>.message`); the server answers a refusal
+  // already translated, so nothing here reads it, but a payload carrying it
+  // is namespaced like any other group.
+  'hooks',
+  // objectstack #26690 serves `books` (a doc book's title, description and
+  // section titles are translatable), copied through onto `app` the same way.
+  'books',
 ] as const;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

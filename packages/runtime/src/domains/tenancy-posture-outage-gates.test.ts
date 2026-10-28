@@ -451,7 +451,7 @@ describe('[#15900] the install-wide activation write — a tenancy service that 
         const res = responseOf(await flip(dispatcher, tenantAdmin()));
 
         expect(res.status).toBe(200);
-        expect(setActionActive).toHaveBeenCalledWith({ name: ACTION, packageId: 'crm', active: false });
+        expect(setActionActive).toHaveBeenCalledWith({ name: ACTION, packageId: 'crm', active: false }, expect.anything());
     });
 
     /**
@@ -482,7 +482,7 @@ describe('[#15900] the install-wide activation write — a tenancy service that 
         const res = responseOf(await flip(dispatcher, operator()));
 
         expect(res.status).toBe(200);
-        expect(setActionActive).toHaveBeenCalledWith({ name: ACTION, packageId: 'crm', active: false });
+        expect(setActionActive).toHaveBeenCalledWith({ name: ACTION, packageId: 'crm', active: false }, expect.anything());
     });
 });
 

@@ -12,7 +12,7 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { CreateDataRequest, FindDataRequest, GetMetaItemRequest, UpdateDataRequest, ValidateDataIssue, ValidateDataRequest, ValidateDataResponse } from '@objectstack/spec/api';
 import { isMatchKeySets } from '@objectstack/spec/api';
 import { bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteRowResult } from './bulk-write.js';
-import { isUniqueViolationError, uniqueViolationColumn, isEngineDuplicateRecordEnvelope, mapDataError, sandboxBusinessMessage, isSandboxOrigin, isSandboxOwnFault } from '@objectstack/types';
+import { isUniqueViolationError, isEngineDuplicateRecordEnvelope, mapDataError, sandboxBusinessMessage, isSandboxOrigin, isSandboxOwnFault } from '@objectstack/types';
 
 /**
  * import-runner — the shared row-processing core for bulk import.
@@ -84,6 +84,16 @@ export interface ImportRowResult {
   field?: string;
   error?: string;
   code?: string;
+  /**
+   * [#25582] Every cell error of a failed row, one element per failed cell in
+   * column order, each `{ field, code, message }` (`ImportRowResultSchema.errors`),
+   * so one import names every bad cell instead of one per re-import. Filled
+   * only from `coerceRow`'s cell errors, where `field` / `code` / `error` above
+   * are element 0. ⛔ Never on a validate-verdict row or a refused write: their
+   * `error` is not element 0's message, and the spec names cell errors as the
+   * list's only source.
+   */
+  errors?: ValidateDataIssue[];
   /**
    * Findings this deployment ADMITS rather than rejects — today, ADR-0104
    * value shapes under a warn-first posture (#4633). The row is `ok`: the
@@ -317,8 +327,8 @@ function bareColumn(raw: string): string {
 }
 
 /**
- * The sentence used when the row conflicts but no column is determinable
- * (#6544). Deliberately the same wording `mapDataError` puts in the 409
+ * The sentence used when the row conflicts and no field LABEL is in hand
+ * (#6544, #26867). Deliberately the same wording `mapDataError` puts in the 409
  * `UNIQUE_VIOLATION` body, so the importer and the API say one thing about one
  * condition rather than two.
  */
@@ -347,18 +357,21 @@ const UNNAMED_CONFLICT = 'A record with this value already exists.';
  *    index name, so **MySQL rows no longer name a column** — they used to name
  *    the index (`for key 'idx_email_unique'`) as if it were one, pointing the
  *    user at a field that does not exist. See that function's doc comment.
+ *
+ * [#26867] A unique conflict no longer names the column here at all. What the
+ * driver's text names is the column — the field's API KEY — and this function
+ * holds only that text, never the object's schema, so it has no label to name
+ * the field by; the end user's sentence names a field only by its label (the
+ * create door's, adopted whole by {@link toFailedResult} from the engine's
+ * envelope). The row's `field` keeps the API key for programs.
  */
 export function sanitizeRowError(raw: unknown): string {
   const msg = typeof raw === 'string' ? raw.trim() : '';
   if (!msg) return 'Row failed';
 
-  // UNIQUE — surface the offending column when the dialect determinably named
-  // one (it maps to a user-facing import column, so naming it is helpful, not a
-  // schema leak); otherwise say so generically rather than guess.
-  if (isUniqueViolationError(msg)) {
-    const column = uniqueViolationColumn(msg);
-    return column ? `A record with this ${column} already exists.` : UNNAMED_CONFLICT;
-  }
+  // UNIQUE — the generic sentence: the column the driver names is an API key,
+  // not a label, so it is not the end user's word for the field.
+  if (isUniqueViolationError(msg)) return UNNAMED_CONFLICT;
 
   // NOT NULL — a required value is missing.
   const notNull = /not null constraint failed:\s*([^\s,)]+)/i.exec(msg);
@@ -950,11 +963,11 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
    * with no validation at all, which is the false all-clear this card exists
    * to close.
    */
-  const previewVerdict = async (
-    data: Record<string, any>,
+  const previewVerdicts = async (
+    data: Record<string, any> | Array<Record<string, any>>,
     mode: 'insert' | 'update',
     rowCtx: typeof writeCtx,
-  ): Promise<NonNullable<ValidateDataResponse['results']>[number] | null> => {
+  ): Promise<NonNullable<ValidateDataResponse['results']> | null> => {
     if (typeof p.validateData !== 'function') return null;
     const res = await p.validateData({
       object: objectName, data, mode,
@@ -965,7 +978,96 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
       context: rowCtx,
       ...(environmentId ? { environmentId } : {}),
     });
-    return res?.results?.[0] ?? null;
+    return res?.results ?? [];
+  };
+  const previewVerdict = async (
+    data: Record<string, any>,
+    mode: 'insert' | 'update',
+    rowCtx: typeof writeCtx,
+  ): Promise<PreviewVerdict | null> => {
+    const verdicts = await previewVerdicts(data, mode, rowCtx);
+    return verdicts === null ? null : (verdicts[0] ?? null);
+  };
+
+  /**
+   * [#26684] The dry run's verdicts for a run of CREATE rows, asked of the
+   * engine as ONE multi-row insert preview, in file order — the batch the
+   * commit's flush hands `insertManyData`. The engine's multi-row `validate()`
+   * judges each row with the earlier rows of the same call that its rules
+   * admitted (#25579: a child rule reading a parent roll-up counts them), so
+   * the dry run refuses the rows the commit refuses. ⛔ Nothing here re-reads
+   * or re-judges a rule: the accumulation is the engine's, as on the write.
+   *
+   * One context for the run, the union of its rows' kept option values, as
+   * the commit's batch call carries (`ctxForRows`).
+   *
+   * A call that throws, or answers a verdict count other than one per row, is
+   * degraded as the commit's flush degrades a failed batch: each row is asked
+   * alone, so a row the engine refuses outright (an undeclared field) carries
+   * its own refusal, as `insertManyData` culls it per row; the rows that
+   * survive alone are then asked again together, so they still see each
+   * other.
+   */
+  type PreviewVerdict = NonNullable<ValidateDataResponse['results']>[number];
+  type PreviewOutcome = { verdict: PreviewVerdict | null } | { thrown: unknown };
+  const previewCreateRun = async (run: ReadonlyArray<PendingCreate>): Promise<PreviewOutcome[]> => {
+    const ask = async (part: ReadonlyArray<PendingCreate>): Promise<PreviewOutcome[]> => {
+      const verdicts = await previewVerdicts(part.map((b) => b.data), 'insert', writeCtxFor(part.map((b) => b.kept)));
+      if (verdicts === null) return part.map(() => ({ verdict: null }));
+      if (verdicts.length !== part.length) {
+        throw Object.assign(
+          new Error(`validateData returned ${verdicts.length} verdict(s) for ${part.length} row(s)`),
+          { code: 'ERR_BULK_RESULT_MISMATCH' },
+        );
+      }
+      return verdicts.map((verdict) => ({ verdict }));
+    };
+    try {
+      return await ask(run);
+    } catch (batchError) {
+      if (run.length === 1) return [{ thrown: batchError }];
+      const alone: PreviewOutcome[] = [];
+      for (const b of run) {
+        try { alone.push((await ask([b]))[0]!); } catch (e) { alone.push({ thrown: e }); }
+      }
+      const survivors = run.filter((_, k) => !('thrown' in alone[k]!));
+      if (survivors.length < 2 || survivors.length === run.length) return alone;
+      const together = await ask(survivors).catch(() => null);
+      if (!together) return alone;
+      let s = 0;
+      return alone.map((o) => ('thrown' in o ? o : together[s++]!));
+    }
+  };
+
+  /**
+   * One dry-run row's report from its engine verdict (#4633). `existing` is
+   * the matched record of an update-resolved row; a create-resolved row has
+   * none. `null` (no validate-only operation) reports the row on the coercion
+   * + resolution verdict the caller already has.
+   */
+  const reportPreview = (
+    i: number, rowNo: number, verdict: PreviewVerdict | null, existing?: Record<string, any>,
+  ): void => {
+    if (verdict && !verdict.valid) {
+      errCount++;
+      const first = verdict.errors[0];
+      results[i] = {
+        row: rowNo, ok: false, action: 'failed',
+        ...(first?.field ? { field: first.field } : {}),
+        code: first?.code ?? 'VALIDATION_FAILED',
+        error: composeValidationMessage(verdict.errors),
+      };
+      return;
+    }
+    okCount++;
+    // A warn-first deployment ADMITS some findings; the row is ok
+    // because the write would store it, and the complaint rides
+    // along so "accepted for now" is visible rather than silent.
+    const admitted = verdict?.warnings?.length ? { warnings: verdict.warnings } : {};
+    // [#20701] What the write would strip from this row, from the same verdict.
+    const drops = rowDrops(verdict?.droppedFields);
+    if (existing) { updated++; results[i] = { row: rowNo, ok: true, action: 'updated', id: String(existing.id ?? '') || undefined, ...admitted, ...drops }; }
+    else { created++; results[i] = { row: rowNo, ok: true, action: 'created', ...admitted, ...drops }; }
   };
 
   /**
@@ -1001,7 +1103,11 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
   // batch call, so a bad row never forces the whole-batch degradation that
   // re-runs beforeInsert hooks on its siblings.
   const canPartialCreate = typeof p.insertManyData === 'function';
-  const pendingCreates: Array<{ index: number; rowNo: number; data: Record<string, any>; kept: Record<string, string[]> }> = [];
+  type PendingCreate = { index: number; rowNo: number; data: Record<string, any>; kept: Record<string, string[]> };
+  const pendingCreates: PendingCreate[] = [];
+  // [#26684] A dry run's CREATE rows, buffered as the commit buffers them and
+  // previewed at the same checkpoints in the same runs (`flushPendingPreviews`).
+  const pendingPreviews: PendingCreate[] = [];
   // bulkWrite is at-least-once: a retry (or a mismatch-driven degradation) may
   // re-run a create whose prior attempt already committed. Every buffered
   // CREATE row is therefore pre-assigned a client-generated id at flush time
@@ -1209,6 +1315,33 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
     }
   };
 
+  /**
+   * [#26684] The dry run's counterpart of {@link flushPendingCreates}: the
+   * buffered CREATE rows previewed in the commit's runs — the same checkpoints
+   * (every `progressEvery` rows, and the end) and the same run length
+   * (`Math.min(progressEvery, MAX_CREATE_BATCH_SIZE)`, the commit's
+   * `bulkWrite` batch size) — so each run is the batch the commit writes.
+   * Each row still gets its own verdict, reported as before.
+   */
+  const flushPendingPreviews = async (): Promise<void> => {
+    if (pendingPreviews.length === 0) return;
+    const batch = pendingPreviews.splice(0, pendingPreviews.length);
+    const runLength = Math.min(progressEvery, MAX_CREATE_BATCH_SIZE);
+    for (let start = 0; start < batch.length; start += runLength) {
+      const run = batch.slice(start, start + runLength);
+      const outcomes = await previewCreateRun(run);
+      run.forEach((b, k) => {
+        const outcome = outcomes[k]!;
+        if ('thrown' in outcome) {
+          errCount++;
+          results[b.index] = toFailedResult(b.rowNo, outcome.thrown, objectName);
+        } else {
+          reportPreview(b.index, b.rowNo, outcome.verdict);
+        }
+      });
+    }
+  };
+
   return (async () => {
     const sharingKey = await rowsSharingKey();
     for (let i = 0; i < rows.length; i++) {
@@ -1220,7 +1353,10 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
         if (errors.length > 0) {
           const first = errors[0];
           errCount++;
-          results[i] = { row: rowNo, ok: false, action: 'failed', field: first.field, code: first.code, error: first.message };
+          results[i] = {
+            row: rowNo, ok: false, action: 'failed', field: first.field, code: first.code, error: first.message,
+            errors: errors.map(({ field, code, message }) => ({ field, code, message })),
+          };
         } else if (shared) {
           // [#26133] Another row of this import carries the same key.
           errCount++;
@@ -1280,28 +1416,17 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
               // patch, as the by-id update does. Nothing new crosses the
               // protocol: the id is the address every update door already
               // carries in the payload.
-              const verdict = willUpdate
-                ? await previewVerdict({ ...updatePatch(data, matchedKeySet), id: (existing as Record<string, any>).id }, 'update', rowCtx)
-                : await previewVerdict(data, 'insert', rowCtx);
-              if (verdict && !verdict.valid) {
-                errCount++;
-                const first = verdict.errors[0];
-                results[i] = {
-                  row: rowNo, ok: false, action: 'failed',
-                  ...(first?.field ? { field: first.field } : {}),
-                  code: first?.code ?? 'VALIDATION_FAILED',
-                  error: composeValidationMessage(verdict.errors),
-                };
+              //
+              // [#26684] A create is not asked alone: it is buffered like the
+              // commit's create and previewed with the rows of its batch
+              // (`flushPendingPreviews`), so a rule that counts the earlier
+              // rows of the batch judges it as the commit's write does. An
+              // update is asked alone, as it is written alone.
+              if (willUpdate) {
+                const target = existing as Record<string, any>;
+                reportPreview(i, rowNo, await previewVerdict({ ...updatePatch(data, matchedKeySet), id: target.id }, 'update', rowCtx), target);
               } else {
-                okCount++;
-                // A warn-first deployment ADMITS some findings; the row is ok
-                // because the write would store it, and the complaint rides
-                // along so "accepted for now" is visible rather than silent.
-                const admitted = verdict?.warnings?.length ? { warnings: verdict.warnings } : {};
-                // [#20701] What the write would strip from this row, from the same verdict.
-                const drops = rowDrops(verdict?.droppedFields);
-                if (willUpdate) { updated++; results[i] = { row: rowNo, ok: true, action: 'updated', id: String((existing as any).id ?? '') || undefined, ...admitted, ...drops }; }
-                else { created++; results[i] = { row: rowNo, ok: true, action: 'created', ...admitted, ...drops }; }
+                pendingPreviews.push({ index: i, rowNo, data, kept: keptOptionValues });
               }
             } else if (willUpdate) {
               const target = existing as Record<string, any>;
@@ -1353,6 +1478,7 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
       if (processed % progressEvery === 0 || processed === rows.length) {
         // Flush before reporting/cancelling so counts and `processed` reflect
         // every row up to this checkpoint, not just decided-but-unwritten ones.
+        await flushPendingPreviews();
         await flushPendingCreates();
         if (onProgress) await onProgress(snapshot(processed));
       }
@@ -1364,6 +1490,7 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
       }
     }
 
+    await flushPendingPreviews();
     await flushPendingCreates();
     const compacted = results.filter((r): r is ImportRowResult => r !== undefined);
 

@@ -45,6 +45,11 @@
  * CJK labels, verbatim) is exercised directly, and the invariance test rules
  * out a count threshold that could put some other length back on the old path.
  *
+ * The steps reach the line as the approvals get serves them since
+ * objectstack#26668: the pending request's own route, `flow_route`. So each
+ * fixture below is a served route, passed steps, the pending one and the
+ * steps ahead.
+ *
  * No build artifact sits between the edit and this test — the root Vitest
  * config aliases every `@object-ui` specifier at that package's source.
  */
@@ -67,7 +72,8 @@ import { RecordApprovalsPanel } from './RecordApprovalsPanel';
 /** The strip's accessible name, as the panel spells it through `tr`. */
 const STEPPER_LABEL = 'Approval steps';
 
-type Step = NonNullable<ApprovalRequestLite['flow_steps']>[number];
+/** One step of a served route. */
+type Step = NonNullable<ApprovalRequestLite['flow_route']>['steps'][number];
 
 /**
  * The reporter's actual 6-step flow, labels verbatim (objectui#5554). They are
@@ -86,7 +92,7 @@ const REPORTED_STEPS: Step[] = [
   { id: 's6', label: '工厂厂长审批', state: 'upcoming' },
 ];
 
-/** A synthetic flow of `n` steps, for the step-count invariance sweep. */
+/** A synthetic route of `n` steps, for the step-count invariance sweep. */
 function stepsOfLength(n: number): Step[] {
   return Array.from({ length: n }, (_, i) => ({
     id: `syn_${i}`,
@@ -95,7 +101,8 @@ function stepsOfLength(n: number): Step[] {
   })) as Step[];
 }
 
-function pendingWith(flow_steps: Step[]): ApprovalRequestLite {
+/** The pending request, as the get serves it with its route. */
+function pendingWith(steps: Step[]): ApprovalRequestLite {
   return {
     id: 'req_pending',
     process_name: 'flow:purchase',
@@ -107,12 +114,12 @@ function pendingWith(flow_steps: Step[]): ApprovalRequestLite {
     submitter_name: 'Zhou Ming',
     submitted_at: '2026-08-20T08:00:00Z',
     viewer: { can_act: false, is_submitter: false },
-    flow_steps,
+    flow_route: { steps, ahead: 'end' },
   };
 }
 
-function renderWithSteps(flow_steps: Step[]) {
-  const pending = pendingWith(flow_steps);
+function renderWithSteps(steps: Step[]) {
+  const pending = pendingWith(steps);
   return render(
     <RecordApprovalsPanel
       approvals={{ available: true, requests: [pending], pendingRequest: pending }}

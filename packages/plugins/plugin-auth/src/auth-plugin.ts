@@ -68,6 +68,7 @@ import { registerLastAdminGuard } from './last-admin-guard.js';
 import { registerApiKeyRestoreGuard } from './api-key-restore-guard.js';
 import { registerMembershipEndedSessionTrigger } from './membership-ended-session.js';
 import { registerMemberRoleCanonicalization } from './member-role-canonical.js';
+import { registerSessionFirstActivity } from './session-first-activity.js';
 import { registerExternalMembershipGuard } from './external-membership.js';
 import { SYS_USER_PROFILE_EDIT_FIELDS } from './sys-user-writable-fields.js';
 import { MANAGED_EXTENSION_EDITABLE_FIELDS } from './managed-extension-fields.js';
@@ -997,6 +998,20 @@ export class AuthPlugin implements Plugin {
           );
         }
       }
+    }
+
+    // [#26638] A session is born with `last_activity_at` = the `created_at`
+    // it is stored with, after ObjectQL's own stamp (session-first-activity.ts).
+    // Registered here rather than on `kernel:ready`: the development admin
+    // seed's sign-up, itself a `kernel:ready` hook, mints a session as well.
+    // An engine that cannot take hooks (mock mode) stores no session row.
+    try {
+      const ql = ctx.getService<IObjectQLEngine>('objectql');
+      if (ql && typeof ql.registerHook === 'function') {
+        registerSessionFirstActivity(ql, { packageId: 'com.objectstack.plugin-auth.session-first-activity' });
+      }
+    } catch {
+      // No `objectql` service (mock mode): nothing to register on.
     }
 
     // [#8009] Move any provider row still holding a CLEARTEXT OIDC client
@@ -2517,16 +2532,23 @@ export class AuthPlugin implements Plugin {
         }
       },
       defaultOrganizationId: async () => (tenancy ? await tenancy.defaultOrgId() : null),
+      logger: ctx.logger,
     });
 
     for (const failure of outcome.failed) {
       ctx.logger.warn(`[auth] demoStaff: ${failure.email} was not provisioned — ${failure.message}`);
     }
-    if (outcome.created.length > 0 || outcome.assignmentsAdded > 0) {
+    if (outcome.managersKept.length > 0) {
+      ctx.logger.info(
+        `[auth] demoStaff: ${outcome.managersKept.join(', ')} already had a manager other than the declared one, ` +
+          'set by hand; it was left as it is.',
+      );
+    }
+    if (outcome.created.length > 0 || outcome.assignmentsAdded > 0 || outcome.managersLinked > 0) {
       ctx.logger.info(
         `[auth] demoStaff: ${outcome.created.length} demo account(s) created, ${outcome.present.length} already ` +
-          `present, ${outcome.assignmentsAdded} assignment(s) added — they sign in with the development seed ` +
-          `password (${password}).`,
+          `present, ${outcome.assignmentsAdded} assignment(s) added, ${outcome.managersLinked} manager(s) linked — ` +
+          `they sign in with the development seed password (${password}).`,
       );
     } else {
       ctx.logger.debug(`[auth] demoStaff: all ${outcome.present.length} demo account(s) already present`);

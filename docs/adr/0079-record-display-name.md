@@ -1,6 +1,6 @@
 # ADR-0079: The record display-name contract — `nameField` is the one canonical primary-title pointer
 
-- **Status**: Accepted — implemented. **This file is a RETROACTIVE RECONSTRUCTION written 2026-08-08**, not a contemporaneous record; see [Provenance](#provenance-read-this-before-citing-this-file) before you cite it.
+**Status**: Accepted — implemented. **This file is a RETROACTIVE RECONSTRUCTION written 2026-08-08**, not a contemporaneous record; see [Provenance](#provenance-read-this-before-citing-this-file) before you cite it.
 - **Decided**: 2026-06-28 (the decision), reconstructed 2026-08-08 (this file)
 - **Reconstructed by**: #6634
 - **Implemented by**: [#2434](https://github.com/objectstack-ai/objectstack/pull/2434) (foundation — `nameField` + resolver), [#2458](https://github.com/objectstack-ai/objectstack/pull/2458) (designate-only provisioning at the registry seam), [#2463](https://github.com/objectstack-ai/objectstack/pull/2463) (the author-time gate)

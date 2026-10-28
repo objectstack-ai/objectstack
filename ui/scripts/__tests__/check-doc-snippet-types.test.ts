@@ -30,6 +30,7 @@ import {
   nestedPackageReadmePages,
   resolvesOnlyThroughRootManifest,
   ROOT_DOCS,
+  ROOT_PAGES,
   adrDocsPages,
   auditDocsPages,
   rootDeclaredSpecifiers,
@@ -612,29 +613,40 @@ describe('this repository', () => {
  * at all, which is coverage of nothing, and only the second half tells the two
  * apart.
  */
-describe('objectui#7115 — the root README is in the scan set', () => {
-  it('listDocuments reaches it', () => {
-    expect(listDocuments(repoRoot)).toContain('README.md');
+/*
+ * objectstack#26080 folded the root README into the repository's root README,
+ * outside this tree, and moved its examples — every ts/tsx block this pin was
+ * about — to `content/docs/guide/quick-start.md`, so `ROOT_PAGES` is empty and
+ * the far end of the walk above is pinned on that page: in the scan set, off the
+ * ledger, and contributing blocks to the compiled tier.
+ */
+const QUICK_START = 'content/docs/guide/quick-start.md';
+
+describe('objectui#7115 — the root README examples are in the scan set, on the quick-start page', () => {
+  it('listDocuments reaches the page they moved to', () => {
+    expect(listDocuments(repoRoot)).toContain(QUICK_START);
   });
 
   it('is COVERED and actually judged — off the ledger, with blocks in the compiled tier', () => {
-    expect(Object.keys(UNGATED_DOCS as Record<string, string>)).not.toContain('README.md');
+    expect(Object.keys(UNGATED_DOCS as Record<string, string>)).not.toContain(QUICK_START);
     const state = analyze({});
-    expect(state.covered as string[]).toContain('README.md');
+    expect(state.covered as string[]).toContain(QUICK_START);
     expect(
-      (state.compiled as Array<{ doc: string }>).filter((b) => b.doc === 'README.md').length,
+      (state.compiled as Array<{ doc: string }>).filter((b) => b.doc === QUICK_START).length,
       'off the ledger with no block left would be coverage of nothing',
     ).toBeGreaterThan(0);
   });
 
-  it('root pages are collected BY NAME, not by the packages walk', () => {
+  it('root pages are collected BY NAME, not by any walk — and none is named now', () => {
     // The mechanism, isolated: a tree with no `content/docs` and no `packages`
-    // still lists its root page, which is what makes the entry independent of
-    // the two walks it sits between.
+    // lists exactly the root pages `ROOT_PAGES` names. It names none since
+    // objectstack#26080, so a stray root README is not collected — the entry is
+    // what decides, never the file's presence.
+    expect([...ROOT_PAGES]).toEqual([]);
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'check-doc-snippet-types-rootpages-'));
     try {
       fs.writeFileSync(path.join(dir, 'README.md'), '# root\n');
-      expect(listDocuments(dir)).toEqual(['README.md']);
+      expect(listDocuments(dir)).toEqual([]);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -670,20 +682,37 @@ describe('objectui#7856 — the root docs/*.md pages are in the scan set, and on
   it('listDocuments reaches them', () => {
     const documents = listDocuments(repoRoot);
     for (const doc of rootDocsPages(repoRoot)) expect(documents).toContain(doc);
-    // Non-vacuous: the leg reaches a real page, not an empty directory.
-    expect(rootDocsPages(repoRoot)).toContain('docs/app-shell-extraction-guide.md');
+    // Non-vacuous on a fixture: the tree's one root page, the app-shell
+    // extraction guide, was retired with the package's publishing (#25922),
+    // so the real `docs/` holds no top-level page today and the loop above
+    // has nothing to iterate. The leg still has to reach one when it exists.
+    const root = tempTree({ 'docs/PAGE.md': '# top level\n' });
+    try {
+      expect(rootDocsPages(root)).toEqual(['docs/PAGE.md']);
+      expect(listDocuments(root)).toContain('docs/PAGE.md');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('the widening judges something — the leg contributes blocks to the compiled tier', () => {
-    // Being IN the walk is one fact; being compiled is the other, and this card
-    // delivered both (no `UNGATED_DOCS` entry was needed — the blocks were
-    // repaired). A leg whose pages all sat on the ledger would be visible to the
-    // accounting and judged by nothing, which is a weaker claim than this test
-    // makes.
-    const state = analyze({});
-    const leg = new Set(rootDocsPages(repoRoot));
-    expect((state.covered as string[]).filter((d) => leg.has(d)).sort()).toEqual([...leg].sort());
-    expect((state.compiled as { doc: string }[]).some((b) => leg.has(b.doc))).toBe(true);
+    // Being IN the walk is one fact; being compiled is the other. A leg whose
+    // pages all sat on the ledger would be visible to the accounting and judged
+    // by nothing, which is a weaker claim than this test makes. Measured on a
+    // fixture page because the real `docs/` has no top-level page since #25922;
+    // every real page the leg reaches must still be covered.
+    const real = new Set(rootDocsPages(repoRoot));
+    expect((analyze({}).covered as string[]).filter((d) => real.has(d)).sort()).toEqual([...real].sort());
+    const root = tempTree({
+      'docs/PAGE.md': ['# T', '', `${FENCE}ts`, 'export const a = 1;', FENCE].join('\n'),
+    });
+    try {
+      const state = analyze({ root, ungated: {} });
+      expect(state.covered as string[]).toContain('docs/PAGE.md');
+      expect((state.compiled as { doc: string }[]).some((b) => b.doc === 'docs/PAGE.md')).toBe(true);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('stops at the top level: a page in a subdirectory is NOT collected BY THIS LEG', () => {

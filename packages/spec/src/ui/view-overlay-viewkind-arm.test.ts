@@ -146,7 +146,9 @@ describe('a column-less list overlay that NAMES a `type` stays refused — at `c
   // refused now, and still wrapped as `invalid_union` (the refusal is an
   // ABORTING issue, so the list member is not the union's lone survivor).
   it.each([
-    ['a kanban config with no columns', { name: 'x', object: 'crm_lead', viewKind: 'list', type: 'kanban', groupByField: 'stage' }],
+    // [#26711] `groupByField` is spelled under `kanban`: at the top level it is
+    // an unknown key, refused by name ahead of the `columns` check.
+    ['a kanban config with no columns', { name: 'x', object: 'crm_lead', viewKind: 'list', type: 'kanban', kanban: { groupByField: 'stage', columns: ['name'] } }],
     ['a grid config with no columns', { ...LIST, type: 'grid', sort: [{ field: 'name', order: 'asc' }] }],
   ])('%s', (_label, body) => {
     const r = refusal(body);

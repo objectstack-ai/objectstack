@@ -34,6 +34,11 @@ import {
 } from '../block-config';
 import { BLOCK_TYPE_META, PALETTE_EXCLUSIONS, TYPES_BY_CATEGORY } from '../block-types';
 import { t } from '../../i18n';
+// `engine.inspector.pageBlock.*` lives in `@object-ui/i18n`'s `studio`
+// namespace, whose `zh` catalogue is fetched on demand (objectstack#25922).
+// Resident before any case, so the zh rows below read synchronously.
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+await loadStudioCatalogue('zh');
 
 describe('block-config', () => {
   it('exposes a configurable panel for every content block with authorable props', () => {
@@ -339,6 +344,9 @@ describe('page palette ↔ spec PageComponentType coverage', () => {
     // curated panel and no way to author it (objectui#8280). Palette membership
     // is the question this case asks, so the palette is the only thing it
     // reads — `TYPES_BY_CATEGORY`, the list the page canvas's picker renders.
+    //
+    // No exemption: `list-view` had a panel and no palette row from
+    // objectstack#26703 until objectstack#26794 offered it.
     const offered = new Set<string>(TYPES_BY_CATEGORY.flatMap((g) => g.types));
     const orphanPanels = Object.keys(BLOCK_CONFIG).filter((t) => !offered.has(t));
     expect(orphanPanels, 'these expose a config panel but cannot be authored').toEqual([]);
@@ -431,12 +439,23 @@ describe('page:header `icon` — the designer field retired with the spec key (#
   // criterion is `@object-ui/test-support`'s shared judge (objectui#3809,
   // converged here by objectui#4947), which OR-s the structural channel this
   // block used to spell out by hand with the `[REMOVED]` description channel.
-  it('the spec tombstones `icon` rather than deleting it', () => {
-    expect(listedShapeKeys(PageHeaderProps)).toContain('icon');
-    expect(isShapeKeyTombstoned(PageHeaderProps, 'icon')).toBe(true);
-    // Non-vacuity for the probe itself: a Zod-internals change that made every
-    // member read `'never'` would make the line above meaningless, and a live
-    // key is the only thing that can tell the difference.
+  it('the spec aged the `icon` tombstone out — the key is no longer listed, and the strict row refuses it as unknown', () => {
+    // Through spec 18.1 the ADR-0087 D2 tombstone kept `icon` IN the shape as
+    // `z.never()`; at 18.2 the ≤16.x tombstones aged out one major on
+    // (objectstack#25767), so `icon` is not a key of the shape at all and the
+    // strict row refuses it as an unknown key naming the protocol upgrade guide.
+    expect(listedShapeKeys(PageHeaderProps)).not.toContain('icon');
+    const refused = PageHeaderProps.safeParse({ title: 'T', icon: 'users' });
+    expect(refused.success).toBe(false);
+    const root = refused.success ? '' : refused.error.issues.filter((i) => i.path.length === 0).map((i) => i.message).join('\n');
+    expect(root).toMatch(/Unrecognized key\(s\)[^\n]*`icon`/);
+    expect(root).toContain('https://objectstack.ai/docs/protocol-upgrade');
+    // The tombstone probe's own non-vacuity moves to a tombstone the pin still
+    // carries: `breadcrumb` (spec 17.x, objectstack#20758) is listed AND reads
+    // as tombstoned, and a live key is the only thing that can tell the
+    // difference from a Zod-internals change that made every member `'never'`.
+    expect(listedShapeKeys(PageHeaderProps)).toContain('breadcrumb');
+    expect(isShapeKeyTombstoned(PageHeaderProps, 'breadcrumb')).toBe(true);
     expect(isShapeKeyTombstoned(PageHeaderProps, 'title')).toBe(false);
     expect(shapeMemberTypeName(PageHeaderProps, 'title')).toBeTruthy();
   });
@@ -789,8 +808,9 @@ describe('object-kanban — the `groupBy` control, and the retired `groupField` 
 
   // The two repo-wide i18n gates do NOT reach this table — `check:i18n-keys`
   // and `check:i18n-dead-keys` both read `packages/i18n/src/locales/en.ts`, and
-  // `engine.inspector.pageBlock.*` lives only in `metadata-admin/i18n.ts`
-  // (which says so in its own header). So the renamed key's two halves are
+  // `engine.inspector.pageBlock.*` lives only in the designer strings (the
+  // `studio` namespace since objectstack#25922; `metadata-admin/i18n.ts` says so
+  // in its own header). So the renamed key's two halves are
   // pinned here, in the same file as the field it labels: the sibling
   // `block-config-i18n.test.ts` derives the NEW key from this table's position
   // and demands both locales define it, and this pin is the other direction —

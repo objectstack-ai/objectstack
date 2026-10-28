@@ -49,7 +49,7 @@
  * their own, and a door that reads a draft is no less a door there. A site's
  * key names its route or function, never its file, so the ledger is the same
  * ledger. The node helpers below read each node's OWN source file for that
- * reason. The census's last case pins the list's length and its sum over it.
+ * reason. The census's first case holds its sum: the sites found are the ledgered ones.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -236,7 +236,7 @@ describe('[#20338] census: every draft switch in rest-server.ts is ledgered', ()
             .toBe(`return isObjectSchemaMaskExempt(${param.name.getText(sf)});`);
     });
 
-    it('[#23050 slice 3] walks every file on the registrar list — its length and this sum are pinned', () => {
+    it('[#23050 slice 3] walks every file on the registrar list', () => {
         // A module added to the list makes this re-read its number rather than
         // widening unnoticed. 8 switches, all in `rest-server.ts` (the `/meta`
         // and analytics doors); the data-action, batch and approval bodies read
@@ -285,8 +285,10 @@ describe('[#20338] census: every draft switch in rest-server.ts is ledgered', ()
         // `meta-item-history-routes.ts`, carrying no draft switch: neither door reads
         // one, so no ledger row changed:
         // 8 = 0 + 0 + 0 + 0 + 0 + 2 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 3 + 2 + 1 + 0 + 0, length 17 → 18.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(18);
+        // [#26433] Neither the list's length nor the sum is pinned here any more: the
+        // list is the authority on the files, and the first case's ledger equality
+        // holds the sum.
+        expect(REST_SERVER_REGISTRAR_FILES.length).toBeGreaterThan(0);
         expect(SOURCE_FILES.map((file) => file.fileName)).toEqual([...REST_SERVER_REGISTRAR_FILES]);
-        expect(SITES).toHaveLength(8);
     });
 });

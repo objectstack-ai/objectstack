@@ -10,7 +10,8 @@
  * keys with `mode` REQUIRED — under a doc comment that itself claimed
  * `@default 'page'`. The spec never asked for that: `NavigationConfigSchema`
  * in `@objectstack/spec`'s `ui/view.zod.ts` declares
- * `mode: NavigationModeSchema.default('page')`, and a `.default()` lands on the
+ * `mode: NavigationModeSchema.default('drawer')` (`'page'` until
+ * objectstack#26677), and a `.default()` lands on the
  * AUTHORING side as `| undefined`, which is why the spec publishes its own type
  * as `z.input< typeof NavigationConfigSchema >`. So a config that omits `mode`
  * is legal authored metadata that lets the mode default — and it did not
@@ -120,31 +121,42 @@ type _ViewIsStillDeclared = Expect< Equal< 'view' extends keyof ViewNavigationCo
 
 /**
  * The defect this card names. `undefined` is assignable to `mode` because
- * `.default('page')` makes it optional on the authoring side.
+ * `.default('drawer')` makes it optional on the authoring side.
  */
 type _ModeIsOptional = Expect<
   Equal< undefined extends ViewNavigationConfig['mode'] ? true : false, true >
 >;
 
 /**
- * Membership of the seven modes, pinned through `NonNullable`.
+ * Membership of the four modes, pinned through `NonNullable`.
  *
- * A BARE `Equal< ViewNavigationConfig['mode'], …the seven… >` would now be
+ * objectstack#26677 retired `modal`, `split` and `popover` from the spec, so
+ * the required members are `drawer | page | new_window | none`, and the three
+ * retired ones are pinned OUT below (`_RetiredModesAreGone`): a spec that
+ * re-admitted one reds here.
+ *
+ * A BARE `Equal< ViewNavigationConfig['mode'], …the four… >` would now be
  * `false` — but for the wrong reason: the `| undefined` that the `.default()`
  * puts there on purpose, not a drift in which modes exist. `NonNullable` keeps
  * this assertion pointed at the thing it guards. (Same care PR objectui#4586
  * took with `_ModeIsConfigMode` one package over.)
  *
- * The seven are required members, not a closed list: no ui consumer is total
+ * The four are required members, not a closed list: no ui consumer is total
  * over the modes, so a mode the spec adds is not a red here. A widening to
  * `string` still is.
  */
-type _ModeMembershipIsTheSevenSpecModes = Expect<
+type _ModeMembershipIsTheFourSpecModes = Expect<
   Equal<
     Exclude<
-      'page' | 'drawer' | 'modal' | 'split' | 'popover' | 'new_window' | 'none',
+      'drawer' | 'page' | 'new_window' | 'none',
       NonNullable< ViewNavigationConfig['mode'] >
     >,
+    never
+  >
+>;
+type _RetiredModesAreGone = Expect<
+  Equal<
+    Extract< 'modal' | 'split' | 'popover', NonNullable< ViewNavigationConfig['mode'] > >,
     never
   >
 >;
@@ -227,7 +239,7 @@ describe('ViewNavigationConfig is the spec navigation config (objectui#4588)', (
 
   it('refuses a mode outside the spec enum', () => {
     const bad: ViewNavigationConfig = {
-      // @ts-expect-error 'sidebar' is not one of the seven spec navigation modes
+      // @ts-expect-error 'sidebar' is not one of the four spec navigation modes
       mode: 'sidebar',
     };
     expect(bad).toBeDefined();

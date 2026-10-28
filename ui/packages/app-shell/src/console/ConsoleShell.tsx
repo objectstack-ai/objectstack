@@ -6,12 +6,12 @@
  * routing tree behind a config object. In practice every real project wants to
  * edit the routes directly (add /billing, tweak AuthGuard behaviour, reorder
  * providers), so we now export the pieces and let consumers write ~40 lines of
- * JSX in App.tsx. See examples/console-starter/src/App.tsx for a minimal example,
- * apps/console/src/App.tsx for one with custom system routes + CreateApp.
+ * JSX in App.tsx. See apps/console/src/App.tsx, with custom system routes +
+ * CreateApp.
  */
 
 import { Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Navigate, useLocation } from 'react-router-dom';
+import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { AuthGuard, useAuth, createAuthenticatedFetch } from '@object-ui/auth';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { SchemaRendererProvider, ActionProvider, NotificationProvider, HostMapStyleProvider } from '@object-ui/react';
@@ -31,6 +31,7 @@ import { appRouteSegment } from '../utils/appRoute.js';
 import { SETUP_APP_PACKAGE_ID, SETUP_APP_NAME } from './setupApp.js';
 import { useAiSurfaceEnabled } from '../hooks/useAiSurface.js';
 import { useHomePath } from '../hooks/useHomePath.js';
+import { AiUnavailable } from './ai/AiUnavailable.js';
 import { PreviewModeProvider } from '../preview/PreviewModeContext.js';
 import { NavigationProvider } from '../context/NavigationContext.js';
 import { FavoritesProvider } from '../context/FavoritesProvider.js';
@@ -39,12 +40,17 @@ import { FlowPaletteRecentsProvider } from '../context/FlowPaletteRecentsProvide
 import {
   UserStateAdaptersProvider,
   useAttachListStateFamily,
+  useAttachRecordStateFamily,
   useAttachUserStateAdapters,
 } from '../context/UserStateAdapters.js';
 import {
   LIST_PREFERENCE_PREFIX,
   ListPreferencesProvider,
 } from '../context/ListPreferencesProvider.js';
+import {
+  RECORD_PREFERENCE_PREFIX,
+  RecordPreferencesProvider,
+} from '../context/RecordPreferencesProvider.js';
 import { ThemeProvider } from '../chrome/ThemeProvider.js';
 import { LoadingScreen } from '../chrome/LoadingScreen.js';
 import { RedirectWithSplash } from '../chrome/RedirectWithSplash.js';
@@ -194,36 +200,38 @@ function ConsoleShellProviders({ children }: { children: ReactNode }) {
               <RecentItemsProvider>
                 <FlowPaletteRecentsProvider>
                   <ListPreferencesProvider>
-                    {/* objectui#4467 — the impersonation indicator. Above the
-                        routes, so it is chrome for EVERY console page (home has
-                        its own layout and would otherwise carry no indicator),
-                        and in flow rather than overlaid, so it never covers the
-                        header it warns about. Renders null on every ordinary
-                        session. */}
-                    <ImpersonationBanner />
-                    {/* objectui#9954 — the environment admin's read-rate report.
-                        Beside the impersonation indicator for the same reason it
-                        is here: chrome for EVERY console page, including `/home`,
-                        which has its own layout and would otherwise carry no
-                        report. Renders null unless the control plane's verdict is
-                        `anomalous`, so an ordinary session and an unmeasured
-                        environment both see nothing — and a non-admin session
-                        never even issues the request, nor does any session on a
-                        runtime whose config does not serve `storageUsage`
-                        (objectui#11002). */}
-                    <ReadRateBanner />
-                    {/* objectui#10439 — the environment admin's storage-capacity
-                        banner, beside the read-rate report and behind the same
-                        two gates (the admin, and the runtime serving
-                        `storageUsage`); the two read one `/usage/storage` response.
-                        Renders null unless the runtime's own verdict says `warn`
-                        (80% and up) or `blocked` (uploads and imports refused). */}
-                    <StorageUsageBanner />
-                    <Suspense fallback={<LoadingFallback />}>{children}</Suspense>
-                    {/* ADR-0069 — full-screen gate (expired password / required MFA) above all routes */}
-                    <RemediationOverlay />
-                    <NotificationSnackbar />
-                    <NotificationAlerts />
+                    <RecordPreferencesProvider>
+                      {/* objectui#4467 — the impersonation indicator. Above the
+                          routes, so it is chrome for EVERY console page (home has
+                          its own layout and would otherwise carry no indicator),
+                          and in flow rather than overlaid, so it never covers the
+                          header it warns about. Renders null on every ordinary
+                          session. */}
+                      <ImpersonationBanner />
+                      {/* objectui#9954 — the environment admin's read-rate report.
+                          Beside the impersonation indicator for the same reason it
+                          is here: chrome for EVERY console page, including `/home`,
+                          which has its own layout and would otherwise carry no
+                          report. Renders null unless the control plane's verdict is
+                          `anomalous`, so an ordinary session and an unmeasured
+                          environment both see nothing — and a non-admin session
+                          never even issues the request, nor does any session on a
+                          runtime whose config does not serve `storageUsage`
+                          (objectui#11002). */}
+                      <ReadRateBanner />
+                      {/* objectui#10439 — the environment admin's storage-capacity
+                          banner, beside the read-rate report and behind the same
+                          two gates (the admin, and the runtime serving
+                          `storageUsage`); the two read one `/usage/storage` response.
+                          Renders null unless the runtime's own verdict says `warn`
+                          (80% and up) or `blocked` (uploads and imports refused). */}
+                      <StorageUsageBanner />
+                      <Suspense fallback={<LoadingFallback />}>{children}</Suspense>
+                      {/* ADR-0069 — full-screen gate (expired password / required MFA) above all routes */}
+                      <RemediationOverlay />
+                      <NotificationSnackbar />
+                      <NotificationAlerts />
+                    </RecordPreferencesProvider>
                   </ListPreferencesProvider>
                 </FlowPaletteRecentsProvider>
               </RecentItemsProvider>
@@ -350,6 +358,7 @@ function UserStateBridge() {
   const dataSource = useAdapter();
   const attach = useAttachUserStateAdapters();
   const attachListState = useAttachListStateFamily();
+  const attachRecordState = useAttachRecordStateFamily();
 
   useEffect(() => {
     if (!user?.id || !dataSource) {
@@ -357,6 +366,7 @@ function UserStateBridge() {
       attach('recent', null);
       attach('flowPaletteRecents', null);
       attachListState(null);
+      attachRecordState(null);
       return;
     }
     const favorites = createObjectStackUserStateAdapter({
@@ -384,14 +394,23 @@ function UserStateBridge() {
     attach('favorites', favorites);
     attach('recent', recent);
     attach('flowPaletteRecents', flowPaletteRecents);
+    // objectstack#25883 — every object's record-page state, `ui.record.<object>`
+    // ("show empty fields"): a second key family in the same one read.
+    const recordState = createObjectStackUserPreferenceFamily({
+      dataSource,
+      userId: user.id,
+      prefix: RECORD_PREFERENCE_PREFIX,
+    });
     attachListState(listState);
+    attachRecordState(recordState);
     return () => {
       attach('favorites', null);
       attach('recent', null);
       attach('flowPaletteRecents', null);
       attachListState(null);
+      attachRecordState(null);
     };
-  }, [user?.id, dataSource, attach, attachListState]);
+  }, [user?.id, dataSource, attach, attachListState, attachRecordState]);
 
   return null;
 }
@@ -439,38 +458,50 @@ export function RequireOrganization({ children }: { children: ReactNode }) {
  * RequireAiSurface — gate for the `/ai*` routes. The console is edition-agnostic
  * (MIT, runtime-gated): a Community Edition runtime serves no AI agent, so a
  * stale `/ai` bookmark or external link must not land on a broken/empty chat.
- * When the server serves no agent it redirects to `redirectTo` (home) instead.
+ * When the server serves no agent it shows `AiUnavailable` in place of the
+ * chat: one line saying this deployment has no AI assistant enabled, the way
+ * home, and Studio's new-package flow for a session that may author.
+ *
+ * It used to redirect home there (objectstack#26614), which read exactly like
+ * a broken link: the visitor arrived on Home with no word of why. Saying so in
+ * place is the posture `RequireStudioAccess` took for the same reason
+ * (objectui#12035), and the URL stays.
  *
  * Availability is the live agent catalog (see {@link useAiSurfaceEnabled}) — the
  * same signal every other AI entry point now gates on, so the route is reachable
- * from exactly the entry points that are visible (no shown CTA that bounces back
- * to home, no hidden FAB to a working route). Waits for the catalog to resolve
- * before deciding so the redirect never flashes on first paint.
+ * from exactly the entry points that are visible (no hidden FAB to a working
+ * route). Waits for the catalog to resolve before deciding, so the screen never
+ * flashes on first paint.
  *
- * WHICH home it bounces to is the DECLARED landing (objectui#7373), resolved by
- * `useHomePath()` — the default is no longer the launcher literal. A caller that
- * passes `redirectTo` still wins, and on a deployment that declares no landing
- * the hook answers the launcher, so every ordinary environment is unchanged.
+ * WHERE the screen's way home leads is the DECLARED landing (objectui#7373),
+ * resolved by `useHomePath()`; a caller that passes `redirectTo` still wins.
+ * The prop keeps the name it had while this gate redirected there, because
+ * renaming a published prop breaks every host that passes it.
  */
 export function RequireAiSurface({
   children,
   redirectTo,
 }: {
   children: ReactNode;
-  /** Overrides the declared-home default. */
+  /** Where the no-assistant screen's way home leads; overrides the declared home. */
   redirectTo?: string;
 }) {
   const homePath = useHomePath();
+  const navigate = useNavigate();
+  const { t } = useObjectTranslation();
   const { enabled, isLoading } = useAiSurfaceEnabled();
   if (isLoading) return <LoadingFallback />;
-  // Splash-preserving handoff (objectui#6507). This is a BOOT-path redirect
-  // even though `/ai` is reachable from inside the console: every in-app entry
-  // point gates on this same `useAiSurfaceEnabled` signal (`AppHeader`'s
-  // assistant button, `ConsoleLayout`'s dock, `HomeLayout`/`HomePage`), so on a
-  // runtime where this branch fires none of them is rendered. What reaches it
-  // is a stale bookmark or an external link — a first navigation, with the
-  // splash still up and no layout underneath.
-  if (!enabled) return <RedirectWithSplash to={redirectTo ?? homePath} replace />;
+  // The full-viewport frame the boot splash hands off to: what reaches this
+  // branch is a first navigation (every in-app entry point gates on this same
+  // signal, so none is rendered on such a runtime), with no layout underneath
+  // (objectui#6507).
+  if (!enabled) {
+    return (
+      <div className="flex h-screen flex-col bg-background" data-testid="ai-surface-unavailable">
+        <AiUnavailable hasError={false} onHome={() => navigate(redirectTo ?? homePath)} t={t} />
+      </div>
+    );
+  }
   return <>{children}</>;
 }
 

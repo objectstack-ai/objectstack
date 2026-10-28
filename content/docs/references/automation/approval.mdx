@@ -53,8 +53,8 @@ const result = ApprovalDecision.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'manager' \| 'position' \| 'department' \| 'team' \| 'field' \| 'expression' \| 'org_membership_level' \| 'role' \| 'user' \| 'queue'>` | ✅ | Approval step approver type. `manager` is resolved from the directory rather than configured here: it reads the submitter's `sys_user.manager_id` at runtime, and that column is not a profile field an author edits, so until an operator populates it, a manager step resolves to nobody and the request falls to the node's `onEmptyApprovers` policy. `os lint` reports that at authoring time as `approval-approvers-may-resolve-empty`, and `os explain approval-approvers-may-resolve-empty` carries the graded population routes and the full remedy, the node-level `onEmptyApprovers` fallback included; the Approvals guide states the same remedy in prose. |
-| **value** | `string` | optional | User id / membership tier / position / team / department / field — per `type`; for `expression`, a CEL expression over `current.*` / `trigger.*` / `vars.*` |
+| **type** | `Enum<'manager' \| 'position' \| 'department' \| 'team' \| 'queue' \| 'field' \| 'expression' \| 'org_membership_level' \| 'role' \| 'user'>` | ✅ | Approval step approver type. `manager` is resolved from the directory rather than configured here: it reads the submitter's `sys_user.manager_id` at runtime, and that column is not a profile field an author edits, so until an operator populates it, a manager step resolves to nobody and the request falls to the node's `onEmptyApprovers` policy. `os lint` reports that at authoring time as `approval-approvers-may-resolve-empty`, and `os explain approval-approvers-may-resolve-empty` carries the graded population routes and the full remedy, the node-level `onEmptyApprovers` fallback included; the Approvals guide states the same remedy in prose. |
+| **value** | `string` | optional | User id / membership tier / position / team / department / field / queue name — per `type`; for `expression`, a CEL expression over `current.*` / `trigger.*` / `vars.*` |
 | **resolveAs** | `Enum<'user' \| 'department' \| 'position' \| 'team'>` | optional | How an `expression` result is expanded into approvers (default 'user') |
 | **group** | `string` | optional | Group label for per_group sign-off (e.g. "legal", "finance") |
 | **organization** | `string` | optional | ADR-0105 D9 — organization whose directory resolves this approver: `$root` (group org), `$parent` (one level up), or an organization slug. Omitted = the request's own organization. |
@@ -68,14 +68,14 @@ const result = ApprovalDecision.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **approvers** | `{ type: Enum<'manager' \| 'position' \| 'department' \| 'team' \| 'field' \| 'expression' \| …>; value?: string; resolveAs?: Enum<'user' \| 'department' \| 'position' \| 'team'>; group?: string; … }[]` | ✅ | Allowed approvers for this node |
+| **approvers** | `{ type: Enum<'manager' \| 'position' \| 'department' \| 'team' \| 'queue' \| 'field' \| …>; value?: string; resolveAs?: Enum<'user' \| 'department' \| 'position' \| 'team'>; group?: string; … }[]` | ✅ | Allowed approvers for this node |
 | **excludeSubmitter** | `boolean` | optional | Segregation of duties for this step: when true, the request's submitter (the user whose action started the flow run, recorded on the approval request as `submitter_id`) is removed from the slate `approvers` resolves to, whatever approver type produced them. If that leaves nobody, the request takes the node's `onEmptyApprovers` route (`admin_rescue` by default, or `fallbackApprovers` under `'fallback'`) and never passes silently, and the approval record shows that the exclusion changed the route. `onEmptyApprovers: 'auto_approve'` is refused beside `excludeSubmitter: true`, because it would approve exactly the request this option exists to stop; choose `'admin_rescue'`, `'fail'` or `'fallback'`. Omitted or false (the default), the slate stays as resolved. |
 | **behavior** | `Enum<'first_response' \| 'unanimous' \| 'quorum' \| 'per_group'>` | optional (default: `"first_response"`) | How to combine multiple approvers |
 | **minApprovals** | `integer` | optional | Approvals required — total (quorum) or per group (per_group). Omitted ⇒ all resolvable approvers for quorum, 1 per group for per_group |
 | **lockRecord** | `boolean` | optional (default: `true`) | Lock the record from editing while pending |
 | **approvalStatusField** | `string` | optional | Business-object field to mirror request status onto |
 | **onEmptyApprovers** | `Enum<'admin_rescue' \| 'fail' \| 'auto_approve' \| 'fallback'>` | optional (default: `"admin_rescue"`) | Behavior when no concrete approver resolves at node entry — 'admin_rescue' (default) opens the request on the organization's administrators; 'fallback' opens it on fallbackApprovers instead, naming who decides |
-| **fallbackApprovers** | `{ type: Enum<'manager' \| 'position' \| 'department' \| 'team' \| 'field' \| 'expression' \| …>; value?: string; resolveAs?: Enum<'user' \| 'department' \| 'position' \| 'team'>; group?: string; … }[]` | optional | Approvers the request opens on when onEmptyApprovers is 'fallback' |
+| **fallbackApprovers** | `{ type: Enum<'manager' \| 'position' \| 'department' \| 'team' \| 'queue' \| 'field' \| …>; value?: string; resolveAs?: Enum<'user' \| 'department' \| 'position' \| 'team'>; group?: string; … }[]` | optional | Approvers the request opens on when onEmptyApprovers is 'fallback' |
 | **decisionOutputs** | `(string \| { key: string; label?: string; type?: Enum<'text' \| 'user' \| 'department' \| 'position' \| 'team'>; multiple?: boolean; … })[]` | optional | Author-declared decision outputs — bare keys or typed `{ key, type, multiple }` declarations |
 | **escalation** | `{ enabled?: boolean; timeoutHours: number; action?: Enum<'reassign' \| 'auto_approve' \| 'auto_reject' \| 'notify'>; escalateTo?: string; … }` | optional | Per-node SLA escalation |
 | **maxRevisions** | `integer` | optional (default: `3`) | Max send-backs for revision before auto-reject (0 = send-back disabled) |
@@ -84,8 +84,8 @@ const result = ApprovalDecision.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'manager' \| 'position' \| 'department' \| 'team' \| 'field' \| 'expression' \| …>` | ✅ | Approval step approver type. `manager` is resolved from the directory rather than configured here: it reads the submitter's `sys_user.manager_id` at runtime, and that column is not a profile field an author edits, so until an operator populates it, a manager step resolves to nobody and the request falls to the node's `onEmptyApprovers` policy. `os lint` reports that at authoring time as `approval-approvers-may-resolve-empty`, and `os explain approval-approvers-may-resolve-empty` carries the graded population routes and the full remedy, the node-level `onEmptyApprovers` fallback included; the Approvals guide states the same remedy in prose. |
-| **value** | `string` | optional | User id / membership tier / position / team / department / field — per `type`; for `expression`, a CEL expression over `current.*` / `trigger.*` / `vars.*` |
+| **type** | `Enum<'manager' \| 'position' \| 'department' \| 'team' \| 'queue' \| 'field' \| …>` | ✅ | Approval step approver type. `manager` is resolved from the directory rather than configured here: it reads the submitter's `sys_user.manager_id` at runtime, and that column is not a profile field an author edits, so until an operator populates it, a manager step resolves to nobody and the request falls to the node's `onEmptyApprovers` policy. `os lint` reports that at authoring time as `approval-approvers-may-resolve-empty`, and `os explain approval-approvers-may-resolve-empty` carries the graded population routes and the full remedy, the node-level `onEmptyApprovers` fallback included; the Approvals guide states the same remedy in prose. |
+| **value** | `string` | optional | User id / membership tier / position / team / department / field / queue name — per `type`; for `expression`, a CEL expression over `current.*` / `trigger.*` / `vars.*` |
 | **resolveAs** | `Enum<'user' \| 'department' \| 'position' \| 'team'>` | optional | How an `expression` result is expanded into approvers (default 'user') |
 | **group** | `string` | optional | Group label for per_group sign-off (e.g. "legal", "finance") |
 | **organization** | `string` | optional | ADR-0105 D9 — organization whose directory resolves this approver: `$root` (group org), `$parent` (one level up), or an organization slug. Omitted = the request's own organization. |
@@ -94,8 +94,8 @@ const result = ApprovalDecision.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'manager' \| 'position' \| 'department' \| 'team' \| 'field' \| 'expression' \| …>` | ✅ | Approval step approver type. `manager` is resolved from the directory rather than configured here: it reads the submitter's `sys_user.manager_id` at runtime, and that column is not a profile field an author edits, so until an operator populates it, a manager step resolves to nobody and the request falls to the node's `onEmptyApprovers` policy. `os lint` reports that at authoring time as `approval-approvers-may-resolve-empty`, and `os explain approval-approvers-may-resolve-empty` carries the graded population routes and the full remedy, the node-level `onEmptyApprovers` fallback included; the Approvals guide states the same remedy in prose. |
-| **value** | `string` | optional | User id / membership tier / position / team / department / field — per `type`; for `expression`, a CEL expression over `current.*` / `trigger.*` / `vars.*` |
+| **type** | `Enum<'manager' \| 'position' \| 'department' \| 'team' \| 'queue' \| 'field' \| …>` | ✅ | Approval step approver type. `manager` is resolved from the directory rather than configured here: it reads the submitter's `sys_user.manager_id` at runtime, and that column is not a profile field an author edits, so until an operator populates it, a manager step resolves to nobody and the request falls to the node's `onEmptyApprovers` policy. `os lint` reports that at authoring time as `approval-approvers-may-resolve-empty`, and `os explain approval-approvers-may-resolve-empty` carries the graded population routes and the full remedy, the node-level `onEmptyApprovers` fallback included; the Approvals guide states the same remedy in prose. |
+| **value** | `string` | optional | User id / membership tier / position / team / department / field / queue name — per `type`; for `expression`, a CEL expression over `current.*` / `trigger.*` / `vars.*` |
 | **resolveAs** | `Enum<'user' \| 'department' \| 'position' \| 'team'>` | optional | How an `expression` result is expanded into approvers (default 'user') |
 | **group** | `string` | optional | Group label for per_group sign-off (e.g. "legal", "finance") |
 | **organization** | `string` | optional | ADR-0105 D9 — organization whose directory resolves this approver: `$root` (group org), `$parent` (one level up), or an organization slug. Omitted = the request's own organization. |
@@ -133,12 +133,12 @@ Approval step approver type. `manager` is resolved from the directory rather tha
 * `position`
 * `department`
 * `team`
+* `queue`
 * `field`
 * `expression`
 * `org_membership_level`
 * `role`
 * `user`
-* `queue`
 
 
 ---

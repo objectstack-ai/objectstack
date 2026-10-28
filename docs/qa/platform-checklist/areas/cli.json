@@ -3,6 +3,45 @@
   "area": "cli",
   "axis": "devpath",
   "title": "CLI — os dev/build/migrate/verify/test boot, load, execution & exit-code contracts, scaffold first-run, flag/command error UX",
+  "fixtures": {
+    "$comment": "AREA-LEVEL standing fixtures (README \"Area-level `fixtures`\"; shape copied from qa-scratch-authz in areas/attachments-storage.json). An item opts in with fixtures.provisioning = { use: KEY, why: … }. This area's one recipe is not runtime-provisioned like the others: it RESTORES a committed database into two new files, so nothing in the repo or on a live boot is touched and the teardown line is the whole cleanup. Every call cites the file and symbol that grounds it; replay the calls literally, and if one answers differently re-read the citation before assuming the recipe rotted.",
+    "cli-18-prerelease-db": {
+      "title": "A showcase database the 18.0.0-next.5 release's own `os dev` created and served, restored from a committed text dump (primary + telemetry sibling)",
+      "why": "cli.organization-ownership-ceremony acceptance[5] upgrades a database an 18.0 pre-release created and served. Making one took a build of the release's tag commit in its own worktree on every run, so the clause scored blocked(fixture) in both 18.2.0 waves (QA runs #25812 and #26481), and a published pre-release CLI is no substitute (an npm install of @objectstack/cli@18.0.0-next.5 resolves 18.1 dependencies and births an 18.1 database, QA run #25812). The choice made here is a COMMITTED fixture, not a rebuild script per run: the database travels as SQLite text in packages/qa/dogfood/test/upgrade-harness/fixture-18.0.0-next.5/ — database.sql 198,531 bytes, telemetry.sql 202,762 bytes, manifest.json 5,573 bytes, 406,866 bytes in all, under the ~1 MB line a binary would have to clear — and the generator that made it stays beside it to remake it from the tag. Retire the recipe when an 18.0 pre-release database stops being a supported upgrade source",
+      "provenance": "#26624. Generated on 2026-10-27 by `cli-prerelease-fixture.ts generate --checkout` over a worktree of the @objectstack/cli@18.0.0-next.5 tag commit 820fd5aef0 (pnpm install --frozen-lockfile, turbo build of the showcase closure): that commit's `os dev --seed-admin` over a fresh file database, used through its own HTTP doors, stopped by SIGTERM; manifest.json records ref, sha and the census. Re-driven once on the restore at main 8b276385 (cli.organization-ownership-ceremony history revision 6)",
+      "app": "showcase",
+      "requires": [
+        "this repository installed (`pnpm install`): the restore runs under the workspace's tsx and node:sqlite, and needs no build of the tag. The run subject's CLI is built as the item's own steps need it",
+        "the restored pair is a COPY by construction (the restore refuses to write over an existing file), so the clause's never-the-original rule holds; restore again for a second leg",
+        "every boot and ceremony command of the leg run WITH --dev (`os serve --dev`, `os migrate organization-ownership --dev …`): the database was born under `os dev`, whose composition keeps a telemetry sibling beside a file primary (packages/cli/src/utils/telemetry-datasource.ts#resolveTelemetryDbPath), and that sibling holds sys_activity and sys_http_delivery. A production `os serve` boot over the restored pair is NOT MEASURED"
+      ],
+      "sequence": [
+        {
+          "step": 1,
+          "call": "pnpm --filter @objectstack/dogfood exec tsx test/upgrade-harness/cli-prerelease-fixture.ts restore --to /tmp/RUN/n5.db",
+          "expect": "exit 0, printing 'restored /tmp/RUN/n5.db and /tmp/RUN/n5.telemetry.db — born under @objectstack/cli@18.0.0-next.5 (820fd5aef0d6)'. The telemetry file's name is the one `os dev` derives from the primary's, so OS_DATABASE_URL=file:/tmp/RUN/n5.db under --dev composes both. A second restore to the same path refuses (the files exist): pick a new path",
+          "source": "packages/qa/dogfood/test/upgrade-harness/cli-prerelease-fixture.ts#restore, loading through packages/qa/dogfood/test/upgrade-harness/sqlite-text-dump.ts#loadSqlIntoSqlite"
+        },
+        {
+          "step": 2,
+          "call": "read the restored primary with node:sqlite: sys_email, sys_job_queue (queue LIKE 'email.%'), sys_setting_audit WHERE scope = 'global', sys_webhook, and sys_migration for 'adr-0131-organization-ownership'",
+          "expect": "what manifest.json's census recorded: four sys_email rows, two identity mails (related_object sys_user: a password reset for n5.member-b@verify.test and a verification resend for n5.member-a@verify.test) and two organization-invitation mails (sys_invitation); four email.send.async jobs, all `pending`, one per mail; eight global sys_setting_audit rows (seven `mail`, one `auth`); the showcase_task_changed mirror row in sys_webhook with organization_id NULL and active 1; no organization-ownership marker. The people and their 18.0 passwords are manifest.json's `people` (the seeded admin, member A invited and signed up, member B made by admin create-user)",
+          "source": "packages/qa/dogfood/test/upgrade-harness/cli-prerelease-fixture.ts#census (the same census refuses to write a dump missing any of it) and packages/qa/dogfood/test/upgrade-harness/cli-prerelease-fixture.ts#PRERELEASE_PEOPLE"
+        }
+      ],
+      "regenerate": {
+        "call": "git fetch --depth=1 origin 'refs/tags/@objectstack/cli@18.0.0-next.5:refs/tags/@objectstack/cli@18.0.0-next.5', then `pnpm --filter @objectstack/dogfood exec tsx test/upgrade-harness/cli-prerelease-fixture.ts generate` (it adds, installs, builds and removes its own worktree of the tag), or `generate --checkout DIR` over a built worktree already at the tag commit",
+        "expect": "rewrites the three fixture files and prints the census. Not byte-reproducible (ids, timestamps, tokens and hashes are minted per run), so a regenerated dump is a reviewed diff; the census is what holds. What it drives, in order, on the tag's own `os dev --seed-admin`: admin sign-in and set-active; the global `mail` settings written twice (SMTP at a local port nothing listens on, queue_delivery on; then from_name), with OS_EMAIL_RETRIES=10 on the boot so each queued mail fails fast and waits; member A invited, signed up and accepted; member B by admin create-user; a password reset for B and a verification resend for A; a second, pending organization invitation; the declared webhook's mirror row PATCHed active; an admin task and a member task",
+        "source": "packages/qa/dogfood/test/upgrade-harness/cli-prerelease-fixture.ts#generate and packages/qa/dogfood/test/upgrade-harness/cli-prerelease-fixture.ts#useTheRelease; the retry budget is packages/plugins/plugin-email/src/capability-arg.ts#resolveEmailCapabilityArg (OS_EMAIL_RETRIES) over packages/plugins/plugin-email/src/email-plugin.ts#QUEUE_DELIVERY_BACKOFF"
+      },
+      "teardown": "delete /tmp/RUN/n5.db and /tmp/RUN/n5.telemetry.db with their -wal and -shm files; the restore writes nothing else",
+      "knownGaps": [
+        "no magic-link mail and no email.attachment.reclaim job: 18.0.0-next.5's served composition mounts no magic-link door, and identity mail carries no attachment, so acceptance[5]'s magic-link and reclaim arms read nothing here (QA run #24838 planted both by hand). All four mail jobs are `pending`; none is `running` or `completed`, so the 'completed jobs unchanged' arm reads the two organization-invitation jobs only",
+        "the second boot keeps delivering: the mail settings still name the closed port, so it retries the re-pointed sends, and each moved sys_identity_email row's attempt_count and updated_at advance (2 → 3 in the #26624 re-drive). Read 'equal over the columns both tables hold' at the apply, before the second boot, and after it on every column but those two; that the retry reads the row from sys_identity_email is itself evidence the job was re-pointed",
+        "the database carries no sys_http_delivery row: on 18.0.0-next.5 the organization-less declared webhook refuses to fan out an organization's event ('belongs to NO organization … refusing to fan out', QA run #24838), so the ceremony's deliveriesResourced is 0 here and the delivery leg is the post-upgrade PATCH alone"
+      ]
+    }
+  },
   "items": [
     {
       "id": "cli.dev-boot-contract",
@@ -238,7 +277,7 @@
       "title": "os migrate: bare command is a read-only plan, apply is safe-by-default, re-runs are idempotent, and --json exits 0 on success (#4873)",
       "since": "v15",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "cli",
       "personas": ["operator (local shell)"],
@@ -259,7 +298,8 @@
         "remove a field from the config + `os build`; run `os migrate apply --yes` WITHOUT --allow-destructive (the drop must be SKIPPED with a warning), then with `--allow-destructive --yes` (applied)",
         "with the dev server booted and holding the DB, run `os migrate apply --yes; echo $?` (expect the busy refusal, exit 1, without --force) and `os migrate plan` (proceeds with a warning — a plan writes nothing either way)",
         "run `os migrate apply --json` WITHOUT --yes on a pending change: the payload must say confirmation_required with the pass--yes hint and mutate nothing",
-        "the #4873 pair: on the scratch DB run `os migrate recorded-by --json; echo $?` and `os migrate resume --json; echo $?`"
+        "the #4873 pair: on the scratch DB run `os migrate recorded-by --json; echo $?` and `os migrate resume --json; echo $?`",
+        "the #4873 --json sweep over every subcommand: read the set from the CLI itself, never from a list typed into this item. `os migrate --help` prints it under COMMANDS (oclif pattern strategy: one default-exported Command per non-test file in packages/cli/src/commands/migrate/, index.ts being the bare command); capture that list. For each listed subcommand the steps above did not already run, run its dry-run form `os migrate <name> --json; echo $?` on the scratch DB, adding only what that subcommand's own `os migrate <name> --help` USAGE line marks required (unmapped-columns takes --object <name>). audit-key-material (#26772) is in the set and takes the same flags as audit-mail-bodies (--apply, --yes, --force, --json), so its dry run is the probe. ⛔ The one exception: duplicates (#8928) is ALWAYS JSON on stdout and has NO --json flag, so run it bare (`os migrate duplicates; echo $?`) and never feed it --json, whose oclif Nonexistent-flag exit 2 is not a #4873 violation (deep coverage at cli.migrate-duplicates-inventory). A subcommand added later joins the sweep through the --help list, with no edit here, unless it too lacks --json"
       ],
       "acceptance": [
         {
@@ -277,8 +317,8 @@
         {
           "clause": "#4873 exit-code honesty: EVERY migrate subcommand with --json exits 0 on success — never the elapsed-ms leak (recorded-by/resume once passed timer.elapsed() into the exit-code slot, so the shell saw duration & 0xFF: a different bogus nonzero on every successful run)",
           "oracle": "log",
-          "verify": "echo $? after plan/apply/recorded-by/resume --json successes is exactly 0; the CliExitCode 0|1 type now makes the mistake a compile error",
-          "evidence": "the collected exit codes per subcommand"
+          "verify": "echo $? after plan/apply/recorded-by/resume --json successes, and after every other subcommand the sweep step read from `os migrate --help` (duplicates run bare), is exactly 0; the CliExitCode 0|1 type now makes the mistake a compile error",
+          "evidence": "the captured `os migrate --help` COMMANDS list + the collected exit code per listed subcommand"
         },
         {
           "clause": "apply is safe-by-default: a destructive change is SKIPPED with an explicit warning until --allow-destructive, then applied with it — both sides captured",
@@ -309,32 +349,11 @@
         "an apply that performs a drop WITHOUT --allow-destructive is the FAIL the safe-by-default split exists for",
         "exit 0 from a refused (busy) apply, or ANY nonzero exit from a successful --json run, is a FAIL — exit codes are the load-bearing CI contract here"
       ],
-      "variants": [
-        "plan (default of the bare command)",
-        "apply",
-        "resume",
-        "recorded-by",
-        "duplicates (#8928 read-only cross-partition duplicate-identifier inventory — ALWAYS JSON on stdout with NO --json flag, so the #4873 --json sweep must not probe it with one; deep coverage at cli.migrate-duplicates-inventory)",
-        "meta",
-        "files-to-references",
-        "summary-nulls",
-        "value-shapes",
-        "account-issuer",
-        "audit-metadata-bodies",
-        "multi-value-columns",
-        "unmapped-columns",
-        "organization-ownership",
-        "security-catalog-overlays",
-        "comment-reactions",
-        "activity-changed-fields",
-        "comment-parent-pair",
-        "audit-mail-bodies"
-      ],
       "traps": ["stale-dist"],
       "source": [
         "packages/cli/src/commands/migrate/index.ts + plan.ts (#2186 bare-command-is-plan; #3917 enforced never-mutates; occupancy warning) + apply.ts (--allow-destructive / --force / --yes / in_sync)",
         "packages/cli/src/utils/format.ts#CliExitCode (CliExitCode narrows the emitJson exit slot — the #4873 fix, commit 83df2fd)",
-        "packages/cli/src/commands/migrate/ (the 19 registered subcommands under `os migrate`, besides the bare command, enumerated as variants — oclif pattern strategy, one default-exported Command per non-test file)",
+        "packages/cli/src/commands/migrate/ (the registered subcommands under `os migrate`, besides the bare command — oclif pattern strategy, one default-exported Command per non-test file, listed by `os migrate --help`; the sweep step reads the set from there at run time, so this item carries no count and no list)",
         "sibling item cli.migrate-duplicates-inventory (the duplicates subcommand's own contract — cross-referenced, not duplicated)"
       ],
       "history": [
@@ -369,6 +388,12 @@
           "date": "2026-10-20",
           "change": "automated removed, fixtures.knownGaps[0] added — checklist-accuracy finding of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4, 'Refs that claim more than their pins assert'), round 15 of wave anchor #24579. The ref said format.exit-code.test.ts covers acceptance[2]. That pin calls emitJson / emitText in-process, while acceptance[2] asks for `echo $?` after each subcommand's --json success, which only a spawned CLI answers. By RUNNER rule 6 (a pin scores only the layer it drives) it scores no clause, so automated is dropped (theme-B rule) and the knownGap says what the pin does assert. Read at base b1676441ba. No clause changed",
           "ref": "#24891"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-27",
+          "change": "variants list removed; the #4873 sweep now reads the subcommand set from the CLI. #26772 added audit-key-material, the 20th registered subcommand, and the typed list (19 names, the source note saying 19) missed it, as revisions 2, 3, 4 and 6 each had to re-count it before. Under the #26431 rule a retyped list of a set that already has an authority goes, so a new steps entry derives the set from `os migrate --help` (oclif pattern strategy over packages/cli/src/commands/migrate/), keeps the duplicates exception explicit (always JSON, no --json flag, run bare), takes each subcommand's required inputs from its own --help USAGE line, and names audit-key-material, which takes the audit-mail-bodies flags. acceptance[2] verify and evidence name the derived list; the source note drops the count. No gate added: the list it would hold equal to the tree is the one removed. Clause text unchanged. Read at base 4c29f384, where `os migrate --help` lists 20 subcommands",
+          "ref": "#26795"
         }
       ]
     },
@@ -1964,7 +1989,7 @@
       "title": "`os migrate organization-ownership` upgrades a database 17.x or an 18.0 pre-release (18.0.0-next.*) created (18.x): a bare run writes the reviewed plan and changes nothing; `--apply --plan-file PLAN --backup-taken` runs every step — attribution through the moves, the declared webhook and sharing-rule settlements, the column drops and NOT NULL — and certifies the marker at this release's ownership shape generation; the served boot refuses an uncertified database, naming the command, and boots a certified one; `os migrate apply --allow-destructive` still withholds every organization_id drop the ceremony owns, and `os migrate comment-reactions --apply` stays pinned",
       "since": "v18",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P0",
       "surface": "cli",
       "personas": [
@@ -1975,12 +2000,16 @@
         "requires": [
           "a SCRATCH copy of examples/app-showcase (or a scaffolded blank app) for every planted-metadata step — never edit the shared fixtures; a file DB under /tmp/RUN/ for every boot",
           "a COPY of a v17-shaped SQLite DB (platform-core.v18-boot-refusals names how to get one) — never the original",
-          "for acceptance[5] (the 18.0 pre-release upgrade), a COPY of a database an 18.0 pre-release created and served, never the original. Build it with that release's own CLI, never the run subject's: `os dev --seed-admin` over a fresh file DB in a scratch showcase copy, run from a linked worktree at the release's tag commit, each built in its own worktree and never by switching the checkout under test (npm's `next` dist-tag is `@objectstack/cli@18.0.0-next.5`; QA run #24838 used its tag commit 820fd5aef0, and 18.0.0-next.3's 2c9bf9430a). Then drive that release's HTTP doors so the rows the ceremony moves exist: a member invited and signed up and a second made by admin create-user, a password-reset request, an email-verification resend, an organization invitation, the global `mail` settings written twice, the declared webhook activated, and admin and member tasks. ⚠️ scripts/gen-upgrade-harness-fixture.mjs does not run against a published 18.0 pre-release, and the committed harness fixture was generated from main, not from a published build (QA run #24838), so neither stands in for this database. `rsync` is not installed here; copy with `tar` or `cp -a`. Where no such database can be built, record acceptance[5] blocked(fixture), never pass"
+          "for acceptance[5] (the 18.0 pre-release upgrade), a COPY of a database an 18.0 pre-release created and served, never the original: the cli-18-prerelease-db recipe restores one (fixtures.provisioning). Without it, build it with that release's own CLI, never the run subject's: the recipe's `regenerate` call drives the release tag commit's `os dev --seed-admin` in its own worktree through the HTTP doors the ceremony moves rows from, and is the sequence QA run #24838 drove by hand (npm's `next` dist-tag is `@objectstack/cli@18.0.0-next.5`, tag commit 820fd5aef0; 18.0.0-next.3's is 2c9bf9430a). ⚠️ scripts/gen-upgrade-harness-fixture.mjs does not run against a published 18.0 pre-release, and the committed harness fixture-18.0/ was generated from main, not from a published build (QA run #24838), so neither stands in for this database. `rsync` is not installed here; copy with `tar` or `cp -a`. Where neither the restore nor a build can be had, record acceptance[5] blocked(fixture), never pass"
         ],
+        "provisioning": {
+          "use": "cli-18-prerelease-db",
+          "why": "acceptance[5] needs a database an 18.0 pre-release created and served. The recipe restores one from a committed dump in seconds, where building the release's tag commit for every run is what left the clause blocked(fixture) in QA runs #25812 and #26481 (knownGaps[2])"
+        },
         "knownGaps": [
           "a walled database (group or isolated posture) holding a CUSTOMIZED copy of a declared webhook or sharing rule blocks at its settlement step, by design: the declaration's switch is deployment-wide, so the ceremony does not switch it off for every organization on the operator's behalf — that arm is scored by the unit pins (organization-ownership-apply.generation-1.test.ts), not by a step here",
           "the pins in automated.ref score acceptance[0] and no other clause in full (RUNNER rule 6, a pin scores only the layer it drives; QA run #25815). organization-ownership.occupancy.integration.test.ts mocks the boot of its plan run and compares no DB checksum, so acceptance[1]'s unchanged checksum after a bare plan run is unpinned. organization-ownership-apply.generation-1.test.ts › 'runs every step in order, certifies, and records this release's shape generation in the checkpoint' calls apply() over a fake ledger, so the CLI's `--apply --plan-file PLAN --backup-taken` exit 0 (acceptance[2]) is unpinned. organization-ownership-boot-guard.test.ts asserts assertOrganizationOwnershipMigrated's error code and message directly, never a served boot's error line or the migrated boot's ready line (acceptance[3]). apply-organization-ownership-gate.integration.test.ts holds acceptance[4]'s refusal, its JSON message and `applied: []`, with the organization_id column still present (its columnsOf read) standing in for the checksum pair. negative[0]'s no-alteration on a plan run is unpinned. A pin run scores acceptance[1] to [4] and negative[0] partial at most; steps[0] to [4] are their live legs",
-          "acceptance[5]'s 18.0 pre-release database cannot come from a published pre-release CLI installed from npm: an npm install of @objectstack/cli@18.0.0-next.5 resolved 18.1.0 dependencies, and the database it created carried an 18.1.0 birth marker (QA run #25812, measured), so it is a database this release line created, not one an 18.0 pre-release did. Build it as fixtures.requires[2] says, from the release's tag commit in its own worktree, or record acceptance[5] blocked(fixture)"
+          "CLOSED by the cli-18-prerelease-db recipe (#26624): acceptance[5]'s 18.0 pre-release database is restored from the committed dump the 18.0.0-next.5 tag commit's own `os dev` created and served, so a run needs no tag build. It still cannot come from a published pre-release CLI installed from npm: an npm install of @objectstack/cli@18.0.0-next.5 resolved 18.1.0 dependencies, and the database it created carried an 18.1.0 birth marker (QA run #25812, measured), so it is a database this release line created, not one an 18.0 pre-release did. The run records which source its verdict rests on: the restored dump, or a database built by the recipe's `regenerate` call; with neither, acceptance[5] is blocked(fixture)"
         ]
       },
       "steps": [
@@ -1989,7 +2018,7 @@
         "boot the showcase (`os serve`) over the migrated copy, and over a second, unmigrated copy",
         "on a fresh unmigrated v17-shaped copy, first run steps[4]: on a real 17.x database the drop gate's first refusal is the reactions one, `refused_comment_reactions_unconverted` (packages/cli/src/commands/migrate/apply.ts, the comment-reactions gate sits above the organization-ownership one), until `os migrate comment-reactions --apply` is recorded verified. Then `os migrate apply --allow-destructive --yes --json`; checksum the DB before and after this apply",
         "`os migrate comment-reactions --apply --yes` twice, on the steps[3] copy before its apply. Without --yes a non-interactive --apply is refused before it converts anything (packages/cli/src/commands/migrate/comment-reactions.ts)",
-        "18.0 pre-release leg, for acceptance[5]: on a COPY of the fixtures.requires[2] database, read every table's rows through SQLite (node:sqlite, the `-wal` included: no sqlite3 CLI here) and keep per-table counts; boot the run subject's `os serve` over it (OS_DATABASE_URL=file:COPY) and keep the output and exit code; run steps[0] and steps[1] on it (the bare plan, then the reviewed `--apply --plan-file PLAN --backup-taken`); boot `os serve` over it again; read the rows again. Then, on that boot: sign in as each user the pre-release made, with its 18.0 password and once with a wrong one; read the token out of a reset mail the pre-release sent (now a sys_identity_email row) and complete that reset; and PATCH one showcase_task"
+        "18.0 pre-release leg, for acceptance[5]: on a COPY of the fixtures.requires[2] database (the cli-18-prerelease-db recipe's restore, the primary and its telemetry sibling), read every table's rows through SQLite (node:sqlite, the `-wal` included: no sqlite3 CLI here) and keep per-table counts; boot the run subject's `os serve` over it (OS_DATABASE_URL=file:COPY) and keep the output and exit code; run steps[0] and steps[1] on it (the bare plan, then the reviewed `--apply --plan-file PLAN --backup-taken`); boot `os serve` over it again; read the rows again. Then, on that boot: sign in as each user the pre-release made, with its 18.0 password and once with a wrong one; read the token out of a reset mail the pre-release sent (now a sys_identity_email row) and complete that reset; and PATCH one showcase_task (under --dev its sys_http_delivery row lands in the telemetry sibling, n5.telemetry.db, not in the primary)"
       ],
       "acceptance": [
         {
@@ -2078,6 +2107,12 @@
           "date": "2026-10-26",
           "change": "steps[0], [1], [3] and [4], acceptance[0].verify and acceptance[4].verify corrected, and fixtures.knownGaps[1] and [2] added — checklist-accuracy findings of the 18.2.0 sweep, parked on wave anchor #25807 and filed as #25841: QA run #25812 (P0 at 6679644a) and QA run #25815 (Tier 1 at 6679644a). #25812: a plan drawn on a raw v17 database before any v18 boot blocks the apply at `rewrite` (resumable after one boot), so steps[0] boots the copy once before the plan, the order the 18.0 upgrade notes give; the apply needs OS_AUTH_SECRET or `--dev`, or it blocks at `authored-conversion`, so steps[1] says so; on a real 17.x database the drop gate refuses first over the unconverted reactions, so steps[3] runs steps[4]'s conversion first and steps[4] gains `--yes`; acceptance[0] prescribed --maxWorkers=2 where RUNNER's environment facts prescribe 1; knownGaps[2] records that a published pre-release CLI is no stand-in for acceptance[5]'s database. #25815: knownGaps[1] names what each pin reaches, so a pin run scores acceptance[1] to [4] and negative[0] partial and never pass. Re-read at base 9753d163 (apply.ts drop-gate order, comment-reactions.ts --yes refusal, organization-ownership.ts --dev, the four pins). No clause changed",
           "ref": "#25841"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-27",
+          "change": "acceptance[5] made scorable without a tag build (#26624, the maintainer's 「补测试数据配方。立卡」): fixtures.provisioning opts into the new area recipe cli-18-prerelease-db, which restores a committed text dump of a database the 18.0.0-next.5 tag commit's own `os dev` created and served (packages/qa/dogfood/test/upgrade-harness/fixture-18.0.0-next.5/, 406,866 bytes, with its generator); fixtures.requires[2] names the recipe first and keeps the by-hand build as its fallback; knownGaps[2] is rewritten as CLOSED-by-recipe; steps[5] names the restored pair and where the delivery row lands. No clause changed. Re-driven once on the recipe at main 8b276385, with `os serve --dev` and the ceremony's --dev: the first boot exited 1 before listening, 'This database carries no organization-ownership marker: 17.x or an 18.0 pre-release (18.0.0-next.*) created it …', naming sys_flow_credential and sys_secret, and wrote no row; the plan exited 0 with the file checksum unchanged; `--apply` without --plan-file was refused, exit 1; the reviewed apply exited 0, complete true, blocking 0 (sibling-moves moved 10, two identity mails and eight global setting-audit rows, jobsRewritten 2, activityRepointed 14; declared-webhooks mirrorsDeleted 1, activationRows 1; column-drops 2; not-null 64 of 65, the one rotation shard unsupported), the marker verified at shape generation 1; the second boot reached 'Server is ready'. Rows: both identity mails are in sys_identity_email under their own ids, 0 differences over the 24 columns both tables hold at the apply, and gone from sys_email, while both invitation mails stay in sys_email; all eight global audit rows are in sys_platform_setting_audit with 0 differences and gone from sys_setting_audit; the two pending email.send.async jobs naming moved mails carry object sys_identity_email in payload and metadata, and the two invitation jobs are unchanged; every per-table count change across the apply is a step the report names, and the second boot and the doors below only added rows, except sys_verification 1 → 0, the token the reset consumed. Doors: admin, member A and member B sign in 200 with their 18.0 passwords and 401 with a wrong one; the token read from the moved reset mail resets, 200, and the new password signs in; one showcase_task PATCH wrote exactly one sys_http_delivery row, ref_id declared:showcase_task_changed. Verdict: pass",
+          "ref": "#26624"
         }
       ]
     },

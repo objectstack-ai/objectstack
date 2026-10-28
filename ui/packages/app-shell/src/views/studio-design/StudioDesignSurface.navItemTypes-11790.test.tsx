@@ -381,7 +381,7 @@ describe('StudioNavItemInspector — each target-bearing type picks a target and
 
   it('separator: no target and no label — the Label field goes, and the entry parses and is sent', () => {
     render(<InspectorHost entry={{ ...BORN, label: 'Was labelled' }} />);
-    expect(screen.getByRole('textbox')).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Label' })).toBeInTheDocument();
     fireEvent.click(typeChoice('separator'));
     const entry = entryNow();
     expect(entry).toEqual({ id: 'nav_item_3', type: 'separator' });

@@ -100,8 +100,6 @@ const result = AnalyticsEndpoint.parse(data);
 | **limit** | `integer` | optional | Maximum number of rows to return, applied after `order` — a non-negative integer (`0` returns no rows) |
 | **offset** | `integer` | optional | Number of rows to skip before the first row returned, applied after `order` — a non-negative integer; an `offset` with no `limit` returns every row after it |
 | **timezone** | `string` | optional |  |
-| **query** | `never` | optional | [REMOVED] `query` was removed from AnalyticsQueryRequest in @objectstack/spec 17.0.0. The `{ cube, query: {...} }` envelope was the dialect of the retired degraded analytics shim — the real engine never understood it. Move the query.* fields to the body top level: `{ cube, measures, dimensions?, where?, timeDimensions?, order?, limit?, offset?, timezone? }`. |
-| **format** | `never` | optional | [REMOVED] `format` was removed from AnalyticsQueryRequest in @objectstack/spec 17.0.0. It was never implemented — every response is the JSON envelope. Delete the key; for CSV/XLSX use the export surface instead. |
 
 ### Nested Shape: `AnalyticsQueryRequest.timeDimensions[number]`
 

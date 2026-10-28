@@ -24,11 +24,15 @@
  *     object's `hidden: true` fields and the reader's unreadable fields left
  *     out. `RecordSnapshotSummary` draws it from the bound row's `payload`
  *     and `payload_display`; see its header for what it reads.
- *  2. **Where the flow stands** (objectui#12491) — the vertical step line of
- *     the owning flow, from the bound row's `flow_steps`, when the flow has
- *     more than one approval step, at ANY status: a decided request and a
- *     `first_response` node draw it too, as the sheet draws it. The markup is
- *     `ApprovalStepLine`, the one the business record's approvals panel draws.
+ *  2. **Where the flow stands** (objectui#12491, objectstack#26668) — the
+ *     vertical step line of this request's own route, the bound row's
+ *     `flow_route` as the approvals get serves it: the steps its run passed,
+ *     its own step, and, while it is pending, the steps ahead the flow's graph
+ *     decides. At ANY status: a decided request and a `first_response` node
+ *     draw it too. The markup is `ApprovalStepLine`, the one the business
+ *     record's approvals panel draws. Never the row's `flow_steps`, the flow
+ *     graph's trunk, which showed a request a decision sent down another
+ *     branch on rungs it never visits (objectstack#26563).
  *  3. **Progress** — `DecisionProgressIndicator` (A3), drawn from the request's
  *     server-computed `decision_progress` tally. It is present only on a
  *     pending node that aggregates more than one decision, and the panel draws
@@ -252,7 +256,7 @@ export function ApprovalDecisionPanel({ request, className }: ApprovalDecisionPa
         snapshot={request.payload}
         display={request.payload_display}
       />
-      <ApprovalStepLine steps={request.flow_steps} />
+      <ApprovalStepLine steps={request.flow_route?.steps} />
       {progress && <DecisionProgressIndicator progress={progress} eligibleApprovers={eligible} />}
       <PendingApprovers request={request} />
       <DeclaredActionsBar

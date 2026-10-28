@@ -761,6 +761,9 @@ const zh = {
     addRecord: '添加记录',
     // objectui#12703 — the compact list's footer link to the object's list or the block's view.
     viewAll: '查看全部',
+    viewAllCount: '查看全部 {{count}} 条',
+    viewAllCount_one: '查看全部 {{count}} 条',
+    viewAllCount_other: '查看全部 {{count}} 条',
     tabs: '标签页',
     allRecords: '全部记录',
     userFilters: {
@@ -1949,6 +1952,7 @@ const zh = {
       assistant: '助手',
       liveCanvas: '草稿预览 · {{app}}',
       liveCanvasUnlisted: '运行预览 · {{app}}(未发布 · 仅自己可见)',
+      liveCanvasLive: '运行预览 · {{app}}',
       loadingAgents: '正在加载助手…',
       askAnything: '输入你的问题…',
       askOrChangeApp: '问问数据，或让我改改这个应用…',
@@ -2588,6 +2592,9 @@ const zh = {
       invitationDescription: '请使用收到邀请的邮箱。',
       invitationSignUpButton: '注册并加入',
       invitationSignInDivider: '或登录已有账号',
+      invitationPreviewTitle: '{{inviter}} 邀请你加入 {{organization}}',
+      invitationPreviewTitleNoInviter: '你受邀加入 {{organization}}',
+      invitationPreviewDescription: '请使用收到邀请的邮箱（{{email}}）。',
       showPasswordText: '显示密码',
       hidePasswordText: '隐藏密码',
       footer: {
@@ -2600,6 +2607,7 @@ const zh = {
       description: '创建账号，开始搭建。',
       invitationTitle: '注册账号并加入',
       invitationDescription: '请使用收到邀请的邮箱注册，邀请只能由该邮箱接受。',
+      invitationPreviewDescription: '请使用收到邀请的邮箱（{{email}}）注册，邀请只能由该邮箱接受。',
       nameLabel: '姓名',
       namePlaceholder: '张三',
       emailLabel: '邮箱',
@@ -2814,6 +2822,8 @@ const zh = {
         dataRead: '读取记录（不超出您自己的权限）',
         dataWrite: '创建、修改和删除记录（不超出您自己的权限）',
         actionsExecute: '代表您运行操作（不超出您自己的权限）',
+        metadataWrite: '以草稿形式构建和修改此应用的元数据（不超出您自己的权限），由人来发布',
+        unrecognised: '无法识别的权限：{{scope}}',
       },
       deny: '拒绝',
       authorize: '授权',
@@ -2981,6 +2991,7 @@ const zh = {
     build: {
       title: '构建应用',
       noCapability: '本系统不提供构建应用功能 — 它需要「管理元数据」权限,而你的账号没有该权限。',
+      inStudio: '在 Studio 中新建',
     },
     template: {
       title: '从模板开始',
@@ -3137,6 +3148,8 @@ const zh = {
     recordAccessDeniedDescription: '你没有查看此类记录的权限。如需访问，请联系管理员。',
     recordLoadFailed: '无法加载此记录',
     recordLoadFailedDescription: '加载时出错。请检查网络连接后重试。',
+    recordAccessEnded: '你的审批决定已记录',
+    recordAccessEndedDescription: '你的审批环节已结束，对此记录的访问权限也随之结束。',
     pageNotFound: '未找到页面',
     pageNotFoundDescription: '未找到页面 “{{name}}”，可能已被删除或重命名。',
     dashboardNotFound: '未找到仪表板',
@@ -3856,8 +3869,8 @@ const zh = {
       nameField: '名称：{{field}}',
     },
     build: {
-      building: '正在构建{{app}}…',
-      built: '已构建{{app}}',
+      building: '正在构建 · {{app}}…',
+      built: '已构建 · {{app}}',
       builtAndLive: '已搭建并上线 · {{app}}',
       appFallback: '你的应用',
       addingSampleData: '正在添加示例数据',
@@ -3875,7 +3888,7 @@ const zh = {
       unknownPhase: '未知的构建阶段',
       nextStepsLead: '接下来可以说：{{steps}}',
       nextStepQuote: '「{{step}}」',
-      draftPosture: '之后的修改先存草稿，由你在 Studio 发布。',
+      draftPosture: '之后的修改先存草稿，在对话里点「发布」即可上线。',
       checksPassed: '核对通过 {{passed}}/{{total}}',
     },
     changes: {

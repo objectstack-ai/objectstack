@@ -391,9 +391,6 @@ const result = ActionButtonPropsSchema.parse(data);
 | **targetVariable** | `never` | optional | [REMOVED] `element:record_picker` property `targetVariable` was removed in @objectstack/spec 17 (ADR-0049) — it was a declarative hint no renderer ever read: the live binding runs the other direction, resolved from the page variable whose `source` names this component's `id`, so authoring only `targetVariable` bound nothing while reporting success. Delete the key; to bind the picked record id, declare it on the variable — `variables: [{ name: '<var>', type: 'record_id', source: '<this component id>' }]`. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **placeholder** | `string \| Record<string, string>` | optional | Placeholder text |
 | **emptyText** | `string \| Record<string, string>` | optional | Text shown when the query returns no records (default "No records") |
-| **displayField** | `never` | optional | [REMOVED] `element:record_picker` property `displayField` was removed in @objectstack/spec 17.0.0 (ADR-0087 D2) — it was a required declaration no renderer ever read, while the renderer honoured `labelField` for the same thing and defaulted to `name`. Rename the key to `labelField`; the value (a field name) is unchanged. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
-| **searchFields** | `never` | optional | [REMOVED] `element:record_picker` property `searchFields` was removed in @objectstack/spec 17.0.0 (ADR-0049) — the picker renders a plain single-select with no search input, so no renderer ever read it and it narrowed nothing. Delete the key. To restrict which records the picker offers, use the component-level `dataSource.filter`, which the query path does apply. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
-| **multiple** | `never` | optional | [REMOVED] `element:record_picker` property `multiple` was removed in @objectstack/spec 17.0.0 (ADR-0049) — the picker is a single-select `Select` and the bound page variable holds one record id, so `multiple: true` selected nothing extra and reported success. Delete the key; multi-record selection is not implemented on this element. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 ### Nested Shape: `ElementRecordPickerProps.aria`
@@ -495,7 +492,7 @@ const result = ActionButtonPropsSchema.parse(data);
 | **staticData** | `any[]` | optional | Static inline records |
 | **locale** | `string` | optional | Locale override for the calendar chrome |
 | **loading** | `boolean` | optional | External loading state (honoured only alongside `data`) |
-| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Event-click navigation config — the same block `ListViewSchema.navigation` declares (`{ mode, size, openNewTab, preventNavigation }`). The renderer's own default is `{ mode: 'drawer' }` when the key is absent; it is documented rather than declared, so a parsed calendar carries the key only when the author wrote it |
+| **navigation** | `{ mode?: Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Event-click navigation config — the same block `ListViewSchema.navigation` declares (`{ mode, size, openNewTab, preventNavigation }`). The renderer's own default is `{ mode: 'drawer' }` when the key is absent; it is documented rather than declared, so a parsed calendar carries the key only when the author wrote it |
 
 ### Nested Shape: `ObjectCalendarProps.calendar`
 
@@ -530,12 +527,12 @@ Sort field and direction pair
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **mode** | `Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>` | optional (default: `"page"`) |  |
+| **mode** | `Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>` | optional (default: `"drawer"`) |  |
 | **view** | `never` | optional | [REMOVED] `view.list.navigation.view` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the form view to open for a record detail, and no layer resolved a view by that name: the value was passed straight into the navigation-MODE argument of the console's `onNavigate`, where anything other than `edit` or `view` matched no branch, so the key selected nothing and could silently deaden the row click. Delete the key; to choose what opens for a record, assign a `record` page to the object and let `isDefault` pick the one that opens — page assignment is the machinery that resolves a detail layout, and a list view's navigation block only decides HOW the detail is surfaced (`mode`, `size`). |
 | **preventNavigation** | `boolean` | optional (default: `false`) | Disable standard navigation entirely |
 | **openNewTab** | `boolean` | optional (default: `false`) | Force open in new tab (applies to page mode) |
-| **size** | `Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>` | optional (default: `"auto"`) | Overlay size bucket for drawer/modal detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it. |
-| **width** | `string \| number` | optional | [DEPRECATED → size] Pixel/percent width of the drawer/modal (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket. |
+| **size** | `Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>` | optional (default: `"auto"`) | Overlay size bucket for the drawer detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it. |
+| **width** | `string \| number` | optional | [DEPRECATED → size] Pixel/percent width of the drawer (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket. |
 
 
 ---
@@ -680,7 +677,7 @@ Sort field and direction pair
 | **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares; lowered to the wire `$filter`. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Task order for the fetched bars — the SortItem array form `[{ field, order }, ...]`, the one sort orthography every declared `sort` door on this platform shares; lowered to the wire `$orderby`. The legacy string clause (`name desc`) is refused — see migration `object-block-sort-item-array` |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration, the author face — the same block `ListViewSchema.gantt` declares, and the one the renderer validates this node against. Taken WHOLE when present: the flat top-level spelling beside it is ignored |
-| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Task-click navigation config — the same block `ListViewSchema.navigation` declares (`{ mode, size, openNewTab, preventNavigation }`), `mode` one of the seven `NavigationModeSchema` values. The renderer's own default is `{ mode: 'drawer' }` when the key is absent |
+| **navigation** | `{ mode?: Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Task-click navigation config — the same block `ListViewSchema.navigation` declares (`{ mode, size, openNewTab, preventNavigation }`), `mode` one of the four `NavigationModeSchema` values (`drawer` by default). The renderer's own default is `{ mode: 'drawer' }` when the key is absent |
 | **label** | `string \| Record<string, string>` | optional | Gantt label — the second link of the exported PNG/PDF file-name chain, after `gantt.exportFileName` and before the bound object's own label |
 | **skipWeekends** | `boolean` | optional | Measure duration and auto-schedule math in WORKING days, skipping Saturdays and Sundays |
 | **holidays** | `string[]` | optional | Additional non-working dates for the working calendar, ISO `yyyy-mm-dd` strings; folded into a Set for the duration math |
@@ -771,12 +768,12 @@ Sort field and direction pair
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **mode** | `Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>` | optional (default: `"page"`) |  |
+| **mode** | `Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>` | optional (default: `"drawer"`) |  |
 | **view** | `never` | optional | [REMOVED] `view.list.navigation.view` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the form view to open for a record detail, and no layer resolved a view by that name: the value was passed straight into the navigation-MODE argument of the console's `onNavigate`, where anything other than `edit` or `view` matched no branch, so the key selected nothing and could silently deaden the row click. Delete the key; to choose what opens for a record, assign a `record` page to the object and let `isDefault` pick the one that opens — page assignment is the machinery that resolves a detail layout, and a list view's navigation block only decides HOW the detail is surfaced (`mode`, `size`). |
 | **preventNavigation** | `boolean` | optional (default: `false`) | Disable standard navigation entirely |
 | **openNewTab** | `boolean` | optional (default: `false`) | Force open in new tab (applies to page mode) |
-| **size** | `Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>` | optional (default: `"auto"`) | Overlay size bucket for drawer/modal detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it. |
-| **width** | `string \| number` | optional | [DEPRECATED → size] Pixel/percent width of the drawer/modal (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket. |
+| **size** | `Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>` | optional (default: `"auto"`) | Overlay size bucket for the drawer detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it. |
+| **width** | `string \| number` | optional | [DEPRECATED → size] Pixel/percent width of the drawer (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket. |
 
 ### Nested Shape: `ObjectGanttProps.markers[number]`
 
@@ -822,7 +819,7 @@ Sort field and direction pair
 | **bulkActions** | `string[]` | optional | Bulk action names shown on selection — the same list a list view's `bulkActions` declares; a full def goes on `bulkActionDefs` |
 | **batchActions** | `string[]` | optional | Alternate spelling of `bulkActions` that the renderer reads FIRST (`batchActions ?? bulkActions`) — the same action-name list. Prefer `bulkActions` |
 | **bulkActionDefs** | `{ name: string; label?: string; icon?: string; variant?: Enum<'primary' \| 'secondary' \| 'danger' \| 'ghost' \| 'outline'>; … }[]` | optional | Inline bulk-action definitions (full defs, not names) — the same `BulkActionDef` entries a list view's `bulkActionDefs` declares |
-| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Row-click navigation config — the same block `ListViewSchema.navigation` declares (`{ mode, size, openNewTab, preventNavigation }`) |
+| **navigation** | `{ mode?: Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Row-click navigation config — the same block `ListViewSchema.navigation` declares (`{ mode, size, openNewTab, preventNavigation }`) |
 | **editable** | `boolean` | optional | Enable inline cell editing |
 | **singleClickEdit** | `boolean` | optional | Enter cell edit on single click (default true when editable) |
 | **keyboardNavigation** | `boolean` | optional | Arrow-key cell navigation on the WAI-ARIA grid pattern: the grid's data cells become one Tab stop that the arrow keys, Home / End and Ctrl+Home / Ctrl+End move between. Defaults to on when the grid renders editable — `editable` set and the viewer allowed to edit; a grid that renders read-only keeps every cell its own Tab stop unless this is `true`, and `false` turns it off on an editable grid |
@@ -939,12 +936,12 @@ Sort field and direction pair
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **mode** | `Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>` | optional (default: `"page"`) |  |
+| **mode** | `Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>` | optional (default: `"drawer"`) |  |
 | **view** | `never` | optional | [REMOVED] `view.list.navigation.view` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the form view to open for a record detail, and no layer resolved a view by that name: the value was passed straight into the navigation-MODE argument of the console's `onNavigate`, where anything other than `edit` or `view` matched no branch, so the key selected nothing and could silently deaden the row click. Delete the key; to choose what opens for a record, assign a `record` page to the object and let `isDefault` pick the one that opens — page assignment is the machinery that resolves a detail layout, and a list view's navigation block only decides HOW the detail is surfaced (`mode`, `size`). |
 | **preventNavigation** | `boolean` | optional (default: `false`) | Disable standard navigation entirely |
 | **openNewTab** | `boolean` | optional (default: `false`) | Force open in new tab (applies to page mode) |
-| **size** | `Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>` | optional (default: `"auto"`) | Overlay size bucket for drawer/modal detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it. |
-| **width** | `string \| number` | optional | [DEPRECATED → size] Pixel/percent width of the drawer/modal (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket. |
+| **size** | `Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>` | optional (default: `"auto"`) | Overlay size bucket for the drawer detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it. |
+| **width** | `string \| number` | optional | [DEPRECATED → size] Pixel/percent width of the drawer (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket. |
 
 ### Nested Shape: `ObjectGridProps.exportOptions`
 
@@ -1010,7 +1007,7 @@ Sort field and direction pair
 | **quickAdd** | `never` | optional | [REMOVED] `object-kanban` property `quickAdd` was removed in @objectstack/spec 17 (ADR-0049) — the board forwarded it, but the per-column affordance is gated on both `quickAdd` and `onQuickAdd`, and `onQuickAdd` is a host-supplied function JSON cannot carry and no producer ever put on an `object-kanban` node, so authoring it was a parse-clean no-op. Delete the key; `object-kanban` offers no quick-add control. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **coverImageField** | `string` | optional | Image field rendered as the card cover |
 | **conditionalFormatting** | `{ condition: string \| object; style: Record<string, string> }[]` | optional | Card conditional formatting rules — `[{ condition, style }]`, the same rules a list view declares: the first rule whose CEL `condition` holds applies its CSS `style` map to that card |
-| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Card-click navigation config — the same block `ListViewSchema.navigation` declares (`{ mode, size, openNewTab, preventNavigation }`). The renderer's own default is `{ mode: 'drawer' }` when the key is absent; it is documented rather than declared, so a parsed board carries the key only when the author wrote it |
+| **navigation** | `{ mode?: Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Card-click navigation config — the same block `ListViewSchema.navigation` declares (`{ mode, size, openNewTab, preventNavigation }`). The renderer's own default is `{ mode: 'drawer' }` when the key is absent; it is documented rather than declared, so a parsed board carries the key only when the author wrote it |
 
 ### Nested Shape: `ObjectKanbanProps.columns[number]`
 
@@ -1050,12 +1047,12 @@ View filter rule
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **mode** | `Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>` | optional (default: `"page"`) |  |
+| **mode** | `Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>` | optional (default: `"drawer"`) |  |
 | **view** | `never` | optional | [REMOVED] `view.list.navigation.view` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the form view to open for a record detail, and no layer resolved a view by that name: the value was passed straight into the navigation-MODE argument of the console's `onNavigate`, where anything other than `edit` or `view` matched no branch, so the key selected nothing and could silently deaden the row click. Delete the key; to choose what opens for a record, assign a `record` page to the object and let `isDefault` pick the one that opens — page assignment is the machinery that resolves a detail layout, and a list view's navigation block only decides HOW the detail is surfaced (`mode`, `size`). |
 | **preventNavigation** | `boolean` | optional (default: `false`) | Disable standard navigation entirely |
 | **openNewTab** | `boolean` | optional (default: `false`) | Force open in new tab (applies to page mode) |
-| **size** | `Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>` | optional (default: `"auto"`) | Overlay size bucket for drawer/modal detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it. |
-| **width** | `string \| number` | optional | [DEPRECATED → size] Pixel/percent width of the drawer/modal (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket. |
+| **size** | `Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>` | optional (default: `"auto"`) | Overlay size bucket for the drawer detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it. |
+| **width** | `string \| number` | optional | [DEPRECATED → size] Pixel/percent width of the drawer (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket. |
 
 
 ---
@@ -1073,7 +1070,7 @@ View filter rule
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Marker order for the fetched records — the SortItem array form `[{ field, order }, ...]`, the one sort orthography every declared `sort` door on this platform shares; lowered to the wire `$orderby`. The legacy string clause (`name desc`) is refused — see migration `object-block-sort-item-array` |
 | **map** | `{ latitudeField?: string; longitudeField?: string; locationField?: string; titleField?: string; … }` | optional | Map field config, the author face — the same block `ListViewSchema.map` declares, and the one the renderer validates this node against. Taken WHOLE when present: the flat top-level spelling beside it is ignored |
 | **mapStyle** | `string` | optional | MapLibre style URL or spec, overriding the public demo tiles. Read before `map.style`; NOT the base node `style`, which is an inline CSS record |
-| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Marker-click navigation config — the same block `ListViewSchema.navigation` declares (`{ mode, size, openNewTab, preventNavigation }`), `mode` one of the seven `NavigationModeSchema` values |
+| **navigation** | `{ mode?: Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Marker-click navigation config — the same block `ListViewSchema.navigation` declares (`{ mode, size, openNewTab, preventNavigation }`), `mode` one of the four `NavigationModeSchema` values (`drawer` by default) |
 | **enableClustering** | `boolean` | optional | Group nearby markers into clusters. Absent, the renderer clusters only above 100 markers |
 
 ### Nested Shape: `ObjectMapProps.data[provider='object']`
@@ -1134,12 +1131,12 @@ Sort field and direction pair
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **mode** | `Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>` | optional (default: `"page"`) |  |
+| **mode** | `Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>` | optional (default: `"drawer"`) |  |
 | **view** | `never` | optional | [REMOVED] `view.list.navigation.view` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the form view to open for a record detail, and no layer resolved a view by that name: the value was passed straight into the navigation-MODE argument of the console's `onNavigate`, where anything other than `edit` or `view` matched no branch, so the key selected nothing and could silently deaden the row click. Delete the key; to choose what opens for a record, assign a `record` page to the object and let `isDefault` pick the one that opens — page assignment is the machinery that resolves a detail layout, and a list view's navigation block only decides HOW the detail is surfaced (`mode`, `size`). |
 | **preventNavigation** | `boolean` | optional (default: `false`) | Disable standard navigation entirely |
 | **openNewTab** | `boolean` | optional (default: `false`) | Force open in new tab (applies to page mode) |
-| **size** | `Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>` | optional (default: `"auto"`) | Overlay size bucket for drawer/modal detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it. |
-| **width** | `string \| number` | optional | [DEPRECATED → size] Pixel/percent width of the drawer/modal (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket. |
+| **size** | `Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>` | optional (default: `"auto"`) | Overlay size bucket for the drawer detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it. |
+| **width** | `string \| number` | optional | [DEPRECATED → size] Pixel/percent width of the drawer (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket. |
 
 
 ---
@@ -1291,7 +1288,7 @@ View filter rule
 | **maxDate** | `string` | optional | Pin the gantt axis end (ISO `yyyy-mm-dd`) instead of deriving it from the rows; only a non-empty value is honoured |
 | **descriptionField** | `string` | optional | Field rendered as each entry's description (renderer default `description`). Declared FLAT because the `timeline` block has no member for it — it is the only spelling this binding has |
 | **mapping** | `{ title?: string; date?: string; description?: string; variant?: string }` | optional | Record-to-entry field mapping `{ title?, date?, description?, variant? }`, each a field name — the binding record read BETWEEN the `timeline` block and the flat fallbacks. Its `variant` member (the field whose value picks each marker colour, renderer default `variant`) is the only spelling that binding has |
-| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Entry-click navigation config — the same block `ListViewSchema.navigation` declares (`{ mode, size, openNewTab, preventNavigation }`) |
+| **navigation** | `{ mode?: Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Entry-click navigation config — the same block `ListViewSchema.navigation` declares (`{ mode, size, openNewTab, preventNavigation }`) |
 
 ### Nested Shape: `ObjectTimelineProps.timeline`
 
@@ -1350,12 +1347,12 @@ Sort field and direction pair
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **mode** | `Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>` | optional (default: `"page"`) |  |
+| **mode** | `Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>` | optional (default: `"drawer"`) |  |
 | **view** | `never` | optional | [REMOVED] `view.list.navigation.view` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the form view to open for a record detail, and no layer resolved a view by that name: the value was passed straight into the navigation-MODE argument of the console's `onNavigate`, where anything other than `edit` or `view` matched no branch, so the key selected nothing and could silently deaden the row click. Delete the key; to choose what opens for a record, assign a `record` page to the object and let `isDefault` pick the one that opens — page assignment is the machinery that resolves a detail layout, and a list view's navigation block only decides HOW the detail is surfaced (`mode`, `size`). |
 | **preventNavigation** | `boolean` | optional (default: `false`) | Disable standard navigation entirely |
 | **openNewTab** | `boolean` | optional (default: `false`) | Force open in new tab (applies to page mode) |
-| **size** | `Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>` | optional (default: `"auto"`) | Overlay size bucket for drawer/modal detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it. |
-| **width** | `string \| number` | optional | [DEPRECATED → size] Pixel/percent width of the drawer/modal (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket. |
+| **size** | `Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>` | optional (default: `"auto"`) | Overlay size bucket for the drawer detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it. |
+| **width** | `string \| number` | optional | [DEPRECATED → size] Pixel/percent width of the drawer (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket. |
 
 
 ---
@@ -1371,7 +1368,7 @@ Sort field and direction pair
 | **staticData** | `any[]` | optional | Inline records — read SECOND by `resolveRecordSourceConfig`, wrapped into a `{ provider: 'value' }` config |
 | **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares; lowered to the wire `$filter`. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
 | **tree** | `{ parentField?: string; labelField?: string; fields?: string[]; defaultExpandedDepth?: integer }` | optional | Tree/hierarchy configuration, the author face — the same block `ListViewSchema.tree` declares: `{ parentField?, labelField?, fields?, defaultExpandedDepth? }`. `parentField` auto-detects from the object schema when omitted |
-| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Row-click navigation config — the same block `ListViewSchema.navigation` declares (`{ mode, size, openNewTab, preventNavigation }`), `mode` one of the seven `NavigationModeSchema` values |
+| **navigation** | `{ mode?: Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Row-click navigation config — the same block `ListViewSchema.navigation` declares (`{ mode, size, openNewTab, preventNavigation }`), `mode` one of the four `NavigationModeSchema` values (`drawer` by default) |
 
 ### Nested Shape: `ObjectTreeProps.data[provider='object']`
 
@@ -1418,12 +1415,12 @@ View filter rule
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **mode** | `Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>` | optional (default: `"page"`) |  |
+| **mode** | `Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>` | optional (default: `"drawer"`) |  |
 | **view** | `never` | optional | [REMOVED] `view.list.navigation.view` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the form view to open for a record detail, and no layer resolved a view by that name: the value was passed straight into the navigation-MODE argument of the console's `onNavigate`, where anything other than `edit` or `view` matched no branch, so the key selected nothing and could silently deaden the row click. Delete the key; to choose what opens for a record, assign a `record` page to the object and let `isDefault` pick the one that opens — page assignment is the machinery that resolves a detail layout, and a list view's navigation block only decides HOW the detail is surfaced (`mode`, `size`). |
 | **preventNavigation** | `boolean` | optional (default: `false`) | Disable standard navigation entirely |
 | **openNewTab** | `boolean` | optional (default: `false`) | Force open in new tab (applies to page mode) |
-| **size** | `Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>` | optional (default: `"auto"`) | Overlay size bucket for drawer/modal detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it. |
-| **width** | `string \| number` | optional | [DEPRECATED → size] Pixel/percent width of the drawer/modal (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket. |
+| **size** | `Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>` | optional (default: `"auto"`) | Overlay size bucket for the drawer detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it. |
+| **width** | `string \| number` | optional | [DEPRECATED → size] Pixel/percent width of the drawer (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket. |
 
 
 ---
@@ -1467,9 +1464,7 @@ View filter rule
 | :--- | :--- | :--- | :--- |
 | **title** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **bordered** | `boolean` | optional (default: `true`) |  |
-| **actions** | `never` | optional | [REMOVED] `page:card` property `actions` was removed in @objectstack/spec 17.0.0 (ADR-0087 D2) — no renderer ever read it: objectui's card renderer builds its `<Card>` from `title`, `bordered`, `children` and `footer` only, has no actions area, and the component registry never published it as an input, so an authored value was accepted and dropped. Delete the key and author the buttons as components in the card's `children` or `footer` (`element:button`, `record:quick_actions`), which is what actually renders. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **children** | `any[]` | optional | Card content components, in order (the card body slot) |
-| **body** | `never` | optional | [REMOVED] `page:card` property `body` was removed in @objectstack/spec 17.0.0 (ADR-0087 D2) — it was a second spelling of the composition slot every other container calls `children`, and the renderer reads both. Rename the key to `children`; the value (an array of child components) is unchanged. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **footer** | `any[]` | optional | Card footer components (slot) |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
@@ -1503,7 +1498,6 @@ View filter rule
 | :--- | :--- | :--- | :--- |
 | **title** | `string \| Record<string, string>` | optional | Page title. Omit to let the renderer derive the heading from the record (the default for record pages) — set explicitly on non-record pages (dashboard, landing) with no record to derive from. |
 | **subtitle** | `string \| Record<string, string>` | optional | Page subtitle |
-| **icon** | `never` | optional | [REMOVED] `page:header` property `icon` was removed in @objectstack/spec 17.0.0 (ADR-0087 D2) — no renderer ever read it: objectui resolves `icon` only per header action (`action.icon`), never off the header's own props bag, and the component registry never published it as an input, so an authored value was accepted and dropped. Delete the key. The header's own identity is drawn by the record chrome (`recordChrome`, on by default) and each action carries its own `icon`. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **breadcrumb** | `never` | optional | [REMOVED] `page:header` property `breadcrumb` was removed in @objectstack/spec 17 (ADR-0087 D2) — no renderer ever drew a trail for it: objectui drew an empty slot and nothing filled it, and the navigation trail is drawn once, by the app shell's header. Delete the key, whether it was `true` or `false`; the shell's trail is unchanged. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **actions** | `string[]` | optional | Action IDs the header draws, resolved against the actions declared on the page's object. An authored list is the whole set: an action that declares `record_header` (or `record_more`) in its `locations` but is not named here is not drawn, and omitting the key draws none of the object's actions. A named action that declares neither location renders nowhere. The host's own Edit / Share / Delete chrome is separate from this list. |
 | **recordChrome** | `boolean` | optional (default: `true`) | Render the record chrome — the title as a record chip with its copy-id button. Set false on a non-record page (dashboard, landing) to fall back to the bare heading layout. |
@@ -1531,7 +1525,6 @@ View filter rule
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **tabStyle** | `Enum<'line' \| 'card' \| 'pill'>` | optional (default: `"line"`) | Tab-strip visual style: 'line' underlines the active tab, 'card' frames each tab, 'pill' renders rounded pills |
-| **type** | `never` | optional | [REMOVED] `page:tabs` property `type` was removed in @objectstack/spec 17.0.0 (ADR-0087 D2) — a props key named `type` collides with the page component's own dispatch key, so it is unauthorable in the flat and JSX carriers and was never validated in them. Rename the key to `tabStyle`; the value (`line` \| `card` \| `pill`) is unchanged. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **position** | `Enum<'top' \| 'left'>` | optional (default: `"top"`) |  |
 | **alwaysShowStrip** | `boolean` | optional | Render the tab strip even when only one tab is visible (renderer default: a one-tab strip is hidden). |
 | **items** | `{ label: string \| Record<string, string>; icon?: string; visibleWhen?: string \| object; value?: string; … }[]` | ✅ |  |
@@ -1676,7 +1669,6 @@ View filter rule
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **columns** | `Enum<'1' \| '2' \| '3' \| '4'>` | optional (default: `"2"`) | Number of columns for field layout (1-4) |
-| **layout** | `never` | optional | [REMOVED] `record:details` property `layout` was removed in @objectstack/spec 17.0.0 (ADR-0087 D2) — its declared `auto` \| `custom` semantics were never implemented: the renderer tests `layout` only against `inline` \| `compact`, two values the schema never permitted, so both legal values took the same branch and the key selected nothing. Delete the key — the body is already chosen by what you author: `sections` renders the explicit groups (the old `custom`), and omitting it falls back to the object's `highlightFields` (the old `auto`). Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **sections** | `{ name?: string; label?: string \| Record<string, string>; columns?: integer; group?: string; … }[]` | optional | Field groups rendered as the detail body, in order. Object form: `{ name?, label?, columns?, fields, hideEmpty?, collapsible?, showBorder?, defaultCollapsed?, icon?, description?, headerColor?, count? }` — or the group-reference form `{ group, columns?, hideEmpty?, showBorder?, headerColor? }`, which inherits members and presentation from the object's `fieldGroups` entry (ADR-0085 §5). `count: { field }` shows how many values a multi-value field holds in the heading, through its `{{ count }}` hole. |
 | **fields** | `string[]` | optional | Explicit field list to display (optional, overrides highlightFields) |
 | **hideFields** | `string[]` | optional | Field names to omit from the body — applied to `fields` and to every section's `fields` (used to dedupe fields already shown in `record:highlights` or as the page title) |

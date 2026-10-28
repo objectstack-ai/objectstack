@@ -808,6 +808,10 @@ const pt = {
     addRecord: "Adicionar registro",
     // objectui#12703 — the compact list's footer link to the object's list or the block's view.
     viewAll: "Ver tudo",
+    viewAllCount: "Ver os {{count}} registros",
+    viewAllCount_one: "Ver {{count}} registro",
+    viewAllCount_many: "Ver os {{count}} de registros",
+    viewAllCount_other: "Ver os {{count}} registros",
     tabs: "Abas",
     allRecords: "Todos os registros",
     userFilters: {
@@ -1831,6 +1835,7 @@ const pt = {
       assistant: "Assistente",
       liveCanvas: "Pré-visualização ao vivo — {{app}} (rascunho)",
       liveCanvasUnlisted: "Aplicativo ao vivo — {{app}} (não listado até ser publicado)",
+      liveCanvasLive: "Aplicativo ao vivo — {{app}}",
       loadingAgents: "Carregando agentes…",
       askAnything: "Pergunte qualquer coisa…",
       askOrChangeApp: "Pergunte sobre seus dados ou peça para eu alterar este app…",
@@ -2582,6 +2587,9 @@ const pt = {
       invitationDescription: "Use o e-mail para o qual o convite foi enviado.",
       invitationSignUpButton: "Criar conta e participar",
       invitationSignInDivider: "ou entre com uma conta existente",
+      invitationPreviewTitle: "{{inviter}} convidou você para participar de {{organization}}",
+      invitationPreviewTitleNoInviter: "Você foi convidado para participar de {{organization}}",
+      invitationPreviewDescription: "Use o e-mail para o qual o convite foi enviado ({{email}}).",
       showPasswordText: "Mostrar senha",
       hidePasswordText: "Ocultar senha",
       footer: {
@@ -2594,6 +2602,7 @@ const pt = {
       description: "Digite suas informações para começar",
       invitationTitle: "Crie uma conta para participar",
       invitationDescription: "Cadastre-se com o e-mail para o qual o convite foi enviado. Ele só pode ser aceito com esse endereço.",
+      invitationPreviewDescription: "Cadastre-se com o e-mail para o qual o convite foi enviado ({{email}}). Ele só pode ser aceito com esse endereço.",
       nameLabel: "Nome",
       namePlaceholder: "João Silva",
       emailLabel: "E-mail",
@@ -2794,6 +2803,8 @@ const pt = {
         dataRead: "Ler registros (dentro das suas próprias permissões)",
         dataWrite: "Criar, alterar e excluir registros (dentro das suas próprias permissões)",
         actionsExecute: "Executar ações em seu nome (dentro das suas próprias permissões)",
+        metadataWrite: "Criar e alterar os metadados deste aplicativo como rascunhos (dentro das suas próprias permissões) — uma pessoa os publica",
+        unrecognised: "Permissão não reconhecida: {{scope}}",
       },
       deny: "Negar",
       authorize: "Autorizar",
@@ -2930,6 +2941,7 @@ const pt = {
     build: {
       title: "Criar um aplicativo",
       noCapability: "A criação de aplicativos não está disponível neste sistema — ela exige a permissão “Gerenciar metadados”, que sua conta não possui.",
+      inStudio: "Novo no Studio",
     },
     template: {
       title: "Comece com um modelo",
@@ -3148,6 +3160,8 @@ const pt = {
     recordAccessDeniedDescription: "Você não tem permissão para ver registros deste tipo. Contate seu administrador se acha que deveria ter acesso.",
     recordLoadFailed: "Não foi possível carregar este registro",
     recordLoadFailedDescription: "Algo deu errado ao carregá-lo. Verifique sua conexão e tente novamente.",
+    recordAccessEnded: "Decisão registrada",
+    recordAccessEndedDescription: "Sua etapa de aprovação foi concluída e seu acesso a este registro terminou.",
   },
   actionDialog: {
     title: "Parâmetros de ação",
@@ -3759,7 +3773,7 @@ const pt = {
       unknownPhase: "Fase de criação desconhecida",
       nextStepsLead: "Em seguida, você pode dizer: {{steps}}",
       nextStepQuote: "“{{step}}”",
-      draftPosture: "As alterações seguintes ficam salvas como rascunho, e você as publica no Studio.",
+      draftPosture: "As alterações seguintes ficam salvas como rascunho; publique-as com «Publicar» aqui no chat.",
       checksPassed: "Verificações aprovadas {{passed}}/{{total}}",
     },
     changes: {

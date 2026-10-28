@@ -7,7 +7,7 @@ import { describe, it, expect } from 'vitest';
 // the root the rule never saw.
 import { SCOPE_ROOTS, buildScope, ExpressionEngine } from '@objectstack/formula';
 import { EVALUATED_EXPRESSION_SOURCE_REQUIRED, ExpressionInputSchema, ObjectStackSchema } from '@objectstack/spec';
-import { FieldSchema, ObjectSchema, SelectOptionSchema } from '@objectstack/spec/data';
+import { FieldSchema, ObjectFieldGroupSchema, ObjectSchema, SelectOptionSchema } from '@objectstack/spec/data';
 import { EvalUserSchema } from '@objectstack/spec/identity';
 import { SharingRuleSchema } from '@objectstack/spec/security';
 import { BulkActionDefSchema } from '@objectstack/spec/ui';
@@ -151,6 +151,17 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
   // #4343 — the retired dispatch keys. Naming them beats the generic "no
   // callable": they are what the author actually wrote, and each branch has a
   // different replacement.
+  //
+  // [#25767] Their tombstones were ≤16.x retirement kits and aged out of the
+  // script config contract, so the contract now refuses each key as unknown —
+  // one issue per key, naming the protocol upgrade guide — and the dispatch
+  // prescription below rides beside those refusals, not instead of them.
+  const REFUSED_RE = /Unrecognized key\(s\) on this script node config/;
+  const split = (issues: ReturnType<typeof validateStackExpressions>) => ({
+    refused: issues.filter((i) => REFUSED_RE.test(i.message)),
+    rest: issues.filter((i) => !REFUSED_RE.test(i.message)),
+  });
+
   it('flags a retired dispatch key and prescribes the replacement mechanism', () => {
     const issues = validateStackExpressions({
       flows: [{
@@ -162,12 +173,15 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
         edges: [],
       }],
     });
-    expect(issues).toHaveLength(1);
-    expect(issues[0].message).toMatch(/made `script` a call to a registered function and nothing else/);
-    expect(issues[0].message).toMatch(/config\.actionType/);
-    expect(issues[0].message).toMatch(/config\.template/);
-    expect(issues[0].message).toMatch(/`notify` node/);
-    expect(issues[0].message).toMatch(/os migrate meta --from 16/);
+    const { refused, rest } = split(issues);
+    expect(refused).toHaveLength(3);
+    for (const r of refused) expect(r.message).toContain('https://objectstack.ai/docs/protocol-upgrade');
+    expect(rest).toHaveLength(1);
+    expect(rest[0].message).toMatch(/made `script` a call to a registered function and nothing else/);
+    expect(rest[0].message).toMatch(/config\.actionType/);
+    expect(rest[0].message).toMatch(/config\.template/);
+    expect(rest[0].message).toMatch(/`notify` node/);
+    expect(rest[0].message).not.toMatch(/os migrate meta --from 16/);
     // #7030 — house sentence (#6856 route D): names the TOOL's behaviour, never
     // the retired key's fate. This branch can DELETE the key outright
     // (`template`/`recipients`/`variables`/`script`), so "rewrite it" read two
@@ -175,11 +189,11 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
     // automatic-rewrite claim outright, and #9591 names `--write`, which writes
     // only the edits it can prove — never the unqualified claim. Pinned here AND class-wide in
     // `retired-key-migrate-sentence.test.ts` (widened to `packages/lint/src`).
-    expect(issues[0].message).toMatch(
-      /Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand\.$/,
+    expect(rest[0].message).toMatch(
+      /This edit left `os migrate meta` with the protocol-16\.x conversions: apply it by hand, or run the tool on a release that still carries the conversion — https:\/\/objectstack\.ai\/docs\/protocol-upgrade\.$/,
     );
-    expect(issues[0].message).not.toMatch(/rewrite it automatically/);
-    expect(issues[0].message).not.toMatch(/rewrite existing sources automatically/);
+    expect(rest[0].message).not.toMatch(/rewrite it automatically/);
+    expect(rest[0].message).not.toMatch(/rewrite existing sources automatically/);
   });
 
   it('tells a shorthand actionType exactly where its name belongs', () => {
@@ -193,8 +207,10 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
         edges: [],
       }],
     });
-    expect(issues).toHaveLength(1);
-    expect(issues[0].message).toMatch(/function: 'helpdesk\.aiTriageStub'/);
+    const { refused, rest } = split(issues);
+    expect(refused).toHaveLength(1);
+    expect(rest).toHaveLength(1);
+    expect(rest[0].message).toMatch(/function: 'helpdesk\.aiTriageStub'/);
   });
 
   it('flags an inline script body — the runtime never executed it', () => {
@@ -208,8 +224,10 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
         edges: [],
       }],
     });
-    expect(issues).toHaveLength(1);
-    expect(issues[0].message).toMatch(/config\.script/);
+    const { refused, rest } = split(issues);
+    expect(refused).toHaveLength(1);
+    expect(rest).toHaveLength(1);
+    expect(rest[0].message).toMatch(/config\.script/);
   });
 
   // #1928 — bare field references are silently null in `record`-scoped sites
@@ -906,6 +924,21 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
         actions: [{ name: 'park', objectName: 'crm_lead', disabled: true }],
       });
       expect(ok).toHaveLength(0);
+    });
+
+    it('never reads `disabledReason` as a predicate — it is display copy (#26619)', () => {
+      // The same bare-field source that is an error on `disabled` above is a
+      // plain sentence on `disabledReason`: nothing is checked, nothing flagged.
+      const issues = validateStackExpressions({
+        objects: [{ name: 'crm_lead', fields: { status: { type: 'select' } } }],
+        actions: [{
+          name: 'park',
+          objectName: 'crm_lead',
+          disabled: 'record.status == "converted"',
+          disabledReason: 'status == "converted"',
+        }],
+      });
+      expect(issues).toHaveLength(0);
     });
 
     it('validates an action attached to an object (record scope = parent object)', () => {
@@ -3316,7 +3349,8 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
     // attachments, whose block names join the field index.
     // `listViews` joined with #24798: an object's own list views carry bulk
     // defs whose `confirmText` is judged.
-    expected: ['actions', 'attachedOnRead', 'fields', 'listViews', 'name', 'validations'],
+    // `fieldGroups` joined with #26646: each group's section predicate.
+    expected: ['actions', 'attachedOnRead', 'fieldGroups', 'fields', 'listViews', 'name', 'validations'],
     declaredBy: 'ObjectSchema',
     keys: () => Object.keys(ObjectSchema.shape),
   },
@@ -3354,6 +3388,8 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
   {
     receiver: 'action',
     // `object` is absent — the action schema's canonical key is `objectName`.
+    // `disabledReason` is absent by contract (#26619): display copy beside
+    // `disabled`, never read as a condition.
     expected: ['disabled', 'name', 'objectName', 'visible'],
     declaredBy: 'ObjectStackSchema.actions[]',
     keys: () => shapeKeysOf(ObjectStackSchema.shape.actions),
@@ -3399,6 +3435,14 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
     expected: ['value', 'visibleWhen'],
     declaredBy: 'SelectOptionSchema',
     keys: () => Object.keys(SelectOptionSchema.shape),
+  },
+  {
+    // [#26646] One `fieldGroups[]` entry: its section predicate, and its
+    // `key` for the location.
+    receiver: 'fieldGroup',
+    expected: ['key', 'visibleWhen'],
+    declaredBy: 'ObjectFieldGroupSchema',
+    keys: () => shapeKeysOf(ObjectFieldGroupSchema),
   },
   {
     // [#22228] A field's cell formatting rule — the list view's own rule
@@ -3476,7 +3520,9 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
     const fieldKeys = /for \(const key of \[([^\]]*)\] as const\)/.exec(RULE_CODE);
     expect(fieldKeys, 'the field-predicate loop moved — update this guard').not.toBeNull();
     const slots = [...fieldKeys![1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
-    expect(slots).toEqual(['requiredWhen', 'readonlyWhen', 'conditionalRequired', 'visibleWhen', 'settledWhen']);
+    // [#25767] `conditionalRequired` left the list with its tombstone: the
+    // schema no longer declares it, so the walk no longer reads it.
+    expect(slots).toEqual(['requiredWhen', 'readonlyWhen', 'visibleWhen', 'settledWhen']);
     expect(slots.filter((k) => !Object.keys(FieldSchema.shape).includes(k))).toEqual([]);
   });
 

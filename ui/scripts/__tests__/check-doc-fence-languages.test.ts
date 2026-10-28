@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
@@ -215,9 +216,18 @@ describe('check-doc-fence-languages: the scan surface is check-doc-snippet-types
 
   it('…and that subtraction is non-empty, so it is not silently subtracting nothing', () => {
     // Each leg separately: a union that is non-empty overall would stay green
-    // with one of its four members returning nothing at all.
+    // with one of its four members returning nothing at all. The root `docs/*.md`
+    // leg is read on a fixture page: the tree's one root page, the app-shell
+    // extraction guide, was retired with the package's publishing (#25922).
+    const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'check-doc-fence-languages-rootdocs-'));
+    try {
+      fs.mkdirSync(path.join(fixture, 'docs'));
+      fs.writeFileSync(path.join(fixture, 'docs', 'PAGE.md'), '# top level\n');
+      expect(snippetRootDocsPages(fixture)).toEqual(['docs/PAGE.md']);
+    } finally {
+      fs.rmSync(fixture, { recursive: true, force: true });
+    }
     for (const leg of [
-      snippetRootDocsPages(ROOT),
       snippetAdrDocsPages(ROOT),
       snippetAuditDocsPages(ROOT),
       snippetNestedPackageReadmes(ROOT),
@@ -345,14 +355,19 @@ describe('check-doc-fence-languages: the scan surface is check-doc-snippet-types
    * install-free reason; comparing the copies is what keeps "copy freely" honest.
    */
   it('all three doc gates carry the same ROOT_PAGES — the surface objectui#7115 widened', () => {
-    expect([...FENCE_ROOT_PAGES]).toEqual(['README.md']);
+    // Empty since objectstack#26080 folded the root README into the repository's
+    // root README and moved its examples to the quick-start page; the three
+    // copies are emptied together, and stay compared.
+    expect([...FENCE_ROOT_PAGES]).toEqual([]);
     expect([...SNIPPET_ROOT_PAGES]).toEqual([...FENCE_ROOT_PAGES]);
     expect([...COMPONENT_ROOT_PAGES]).toEqual([...FENCE_ROOT_PAGES]);
   });
 
-  it('the root README is really in this gate’s walk — the widening, pinned', () => {
-    // Not implied by the equality above: both lists could lose it together.
-    expect(fenceDocuments(ROOT)).toContain('README.md');
+  it('the root README examples are really in this gate’s walk, on the quick-start page', () => {
+    // Not implied by the equality above: the README's examples left the root
+    // pages for `content/docs/guide/quick-start.md`, and only the guide-tree walk
+    // can still reach them.
+    expect(fenceDocuments(ROOT)).toContain('content/docs/guide/quick-start.md');
   });
 
   /**

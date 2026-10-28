@@ -66,7 +66,12 @@ export const MarkDoneAction = defineAction({
   // that wiring a build-time refusal (`action-dispatch-contract-mismatch`)
   // instead of a failure on every click.
   execution: 'perRecord',
-  successMessage: 'Task marked done.',
+  // Names the task it wrote (ux-conventions.write-feedback: a record-level write
+  // names the record). The runner fills a `{{ }}` hole over `record`, the
+  // record the dispatch ran against; an unbound path prints empty, so a list
+  // row whose view does not project `title` falls back to the object wording
+  // through `default`.
+  successMessage: "{{ record.title | default:'Task' }} marked done.",
   // Hide once the task is complete. Gate on `record.done` (the boolean this
   // action sets) so the button vanishes after a successful click and stays
   // hidden on finished records (the "why is it still here?" report). NOTE the
@@ -183,7 +188,8 @@ export const RecalcEstimateAction = defineAction({
   // endpoint, which is what the platform used to require: one body, one
   // contract, and until this key no way to say which.
   execution: 'perRecord',
-  successMessage: 'Estimate recalculated.',
+  // Names the task (see MarkDoneAction's note on the hole and its fallback).
+  successMessage: "Estimate recalculated for {{ record.title | default:'the task' }}.",
   locations: ['record_more', 'record_section'],
   // The endpoint is record-scoped and rejects a body without an id. On a
   // record surface the page supplies it; invoked from a LIST ROW (see the
@@ -239,7 +245,12 @@ export const RecalcSelectionAction = defineAction({
   // bare-string `bulkActions` wiring of it is refused rather than silently
   // recalculating one row out of ten.
   execution: 'aggregate',
-  successMessage: 'Estimates recalculated for the whole selection.',
+  // This toast shows only at the single-record placement below: the selection
+  // bar's aggregate dispatch runs with the success toast off and reports its
+  // own count (`Succeeded N / M`), and the copy's holes bind `record` and
+  // `result`, never the selection. So it names the record it ran against, and
+  // says "the whole selection" only when no record is bound.
+  successMessage: "Estimates recalculated for {{ record.title | default:'the whole selection' }}.",
   locations: ['record_more'],
   recordIdParam: 'recordId',
   refreshAfter: true,
@@ -329,7 +340,8 @@ export const SubmitForSignoffAction = defineAction({
   objectName: invoice,
   operation: 'update',
   patch: { status: 'sent' },
-  successMessage: 'Invoice submitted for finance + legal sign-off.',
+  // Names the invoice by its number (see MarkDoneAction's note on the hole).
+  successMessage: "{{ record.name | default:'Invoice' }} submitted for finance + legal sign-off.",
   // Only on invoices not yet sent. `record.`-prefixed comparison, per the
   // ActionEngine's fail-closed CEL evaluation (see MarkDoneAction's note).
   // #8990 — `has()` guards the sparse face this reaches via `list_item`; the
@@ -479,7 +491,8 @@ export const ArchiveTaskAction = defineAction({
       "return { ok: true, archived: id };",
     capabilities: [],
   },
-  successMessage: 'Task archived (demo — no data changed).',
+  // Names the task (see MarkDoneAction's note on the hole and its fallback).
+  successMessage: "{{ record.title | default:'Task' }} archived (demo — no data changed).",
   // Disabled while the task is not done — visible either way. #8990: `has()`
   // for the sparse face; `!=` against a literal cannot fault, so no `!= null`.
   disabled: 'has(record.done) && record.done != true',

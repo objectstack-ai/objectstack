@@ -1090,9 +1090,11 @@ const step17: MigrationStep = {
       '`formats` array rather than deleting the declaration.',
     ].join(''),
   conversionIds: [
-    'action-execute-to-target',
-    'field-conditionalRequired-to-requiredWhen',
-    'agent-tools-to-skills',
+    // #25767 (ADR-0087 2026-10-26 amendment, scoped by ruling 6434038284): the 45
+    // conversions this step graduated with `retiredAfter: 16.1.0` aged out with
+    // their kits and left the registry, so their ids left this list. The step
+    // stays (the floor is 16); its semantic entries are unchanged, and the
+    // edits those conversions applied are prescribed by hand from the guide.
     'sharing-rule-access-level-full-to-edit',
     'flow-node-crud-object-alias',
     'flow-node-notify-config-aliases',
@@ -1101,52 +1103,10 @@ const step17: MigrationStep = {
     'flow-node-map-flow-alias',
     'flow-node-subflow-flow-alias',
     'flow-node-script-config-aliases',
-    'permission-rls-priority-removed',
-    'tool-inert-authoring-keys-removed',
-    'app-dead-authoring-keys-removed',
-    'app-area-fail-open-gates-removed',
-    'action-inert-keys-removed',
-    'flow-inert-keys-removed',
-    'view-inert-keys-removed',
-    'view-list-passthrough-keys-removed',
-    'view-export-options-pdf-removed',
-    'dashboard-inert-keys-removed',
-    'agent-knowledge-removed',
-    'skill-trigger-phrases-removed',
-    'stack-api-require-auth-removed',
-    'datasource-capabilities-removed',
-    'datasource-inert-blocks-removed',
-    'mapping-inert-keys-removed',
-    'book-translations-removed',
-    'job-id-removed',
-    'translation-validation-messages-removed',
-    'flow-node-wait-timeout-keys-removed',
-    'datasource-read-replicas-removed',
-    'datasource-config-driver-key-aliases',
     'datasource-driver-mongo-to-mongodb',
-    'flow-node-script-branch-keys-removed',
-    'object-managed-by-system-to-system-data',
     'retry-policy-converged',
-    'object-enable-trash-mru-removed',
-    'hook-body-crypto-hash-removed',
-    'connector-rate-limit-config-removed',
-    'dashboard-widget-responsive-removed',
-    'dashboard-widget-action-aria-removed',
-    'dashboard-widget-compareto-converged',
-    'theme-inert-token-scales-removed',
     'page-header-subtitle-alias',
-    'object-index-type-partial-removed',
-    'field-mapping-transform-removed',
-    'record-picker-display-field-to-label-field',
-    'record-picker-inert-keys-removed',
-    'page-card-body-to-children',
-    'dataset-measure-array-string-agg-removed',
     'inline-action-api-params-to-body-extra',
-    'page-tabs-type-to-tab-style',
-    'page-structure-inert-keys-removed',
-    'record-details-layout-removed',
-    'app-hidden-to-unpublished',
-    'action-global-nav-location-removed',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
@@ -3364,6 +3324,21 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'carries it: in a page region\'s components, in a container\'s component children, in a '
       + '`page:tabs` or `page:accordion` item\'s `children` and in a slot. Its D3 record is the '
       + 'semantic entry `ui-record-line-items-props-closed`.',
+  },
+  {
+    id: 'ui-record-open-overlay-modes-retired',
+    order: 111,
+    text:
+      'It gives an object one default way to open a record (the maintainer\'s record-page model): '
+      + '`navigation.mode` keeps `drawer`, `page`, `new_window` and `none`, and defaults to `drawer` '
+      + 'instead of `page` — the drawer expands to the full page, the same record page at two widths, '
+      + 'and `page` is declared only for an object whose record should open as a full page. `modal`, '
+      + '`split` and `popover` leave the mode, and `modal` leaves a list page\'s `recordAction`; a '
+      + 'side-by-side pane becomes a reader\'s own preference rather than metadata. Each retired '
+      + 'member is refused at parse with its prescription, and the D2 conversion '
+      + '`navigation-mode-overlay-values-removed` deletes it from existing sources and stored rows, '
+      + 'which lands the block on the drawer. Its D3 record is the semantic entry '
+      + '`ui-record-open-overlay-modes-retired`.',
   },
   {
     id: 'ui-report-joined-block-dataset-required',

@@ -130,6 +130,7 @@ import { validateSemanticRoles } from './validate-semantic-roles.js';
 import { validateFormLayout } from './validate-form-layout.js';
 import { validatePublicFormFileFields } from './validate-public-form-file-fields.js';
 import { validateSeedReplaySafety } from './validate-seed-replay-safety.js';
+import { validateAssignmentRules } from './validate-assignment-rules.js';
 import { validateSeedStateMachine } from './validate-seed-state-machine.js';
 import { validateVisibilityPredicates } from './validate-visibility-predicates.js';
 import { validatePredicatePathRefs } from './validate-predicate-path-refs.js';
@@ -151,6 +152,7 @@ import { lintAutonumberFormats } from './lint-autonumber-formats.js';
 import { lintViewRefs } from './lint-view-refs.js';
 import { validateRetiredPermissionResidue } from './validate-retired-permission-residue.js';
 import { validateEmailTemplateHolePlacements } from './validate-email-template-hole-placements.js';
+import { validateEmailTemplateHoleGrammar } from './validate-email-template-hole-grammar.js';
 import {
   lintUniqueDeclarations,
   lintUnscopedDeclaredIndexes,
@@ -684,8 +686,9 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // harness.
     //
     // [#22032, pass 2] The field-rule-slot pass joins the object door: every
-    // field's `requiredWhen` / `readonlyWhen` / `conditionalRequired` /
-    // `visibleWhen`, with the `parent` gate, the `requiredWhen` null guard and
+    // field's `requiredWhen` / `readonlyWhen` / `visibleWhen` (and, until its
+    // tombstone aged out at #25767, `conditionalRequired`), with the `parent`
+    // gate, the `requiredWhen` null guard and
     // the reference-traversal refusal — the same sentence of `formulas.mdx`,
     // and the gap the card measured (a bare `requiredWhen: 'amount > 1'` saved
     // with a 200). The per-option `visibleWhen` stays fenced. No entry-level
@@ -729,6 +732,20 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // `validate-expressions.ts`), where a declared block resolves and its
     // leaves are judged: the build and the door accept all 8, and refuse a
     // misspelt leaf.
+    //
+    // [#26646] The field-group pass joins the build and the object door: every
+    // `fieldGroups[].visibleWhen`, the section predicate the form renderer
+    // gates the whole group on, fail-closed. It takes the field `visibleWhen`
+    // slot's verdict (the `record`-scoped check and the root verdict), located
+    // at the group's key. Before it no pass read the slot, so
+    // `record.no_such_field == 'x'` saved with a 200 while the same text on a
+    // field's `visibleWhen` or an action's `visible` was refused 422, and the
+    // group then vanished from every form. No entry-level change. MEASURED
+    // first: the repository ships 8 field groups on 4 objects (examples:
+    // app-showcase `contact` 4 and `semantic_zoo` 2; the `create-objectstack`
+    // blank template and the `os init` scaffold 1 each; platform objects
+    // none) and none carries a `visibleWhen` → 0 findings at either door,
+    // against a refusal at each for the card's body.
     //
     // [#24677] The object pass also refuses a `lookup` / `master_detail`
     // whose `reference` is a stored-metadata-body table — the declaration the
@@ -1607,6 +1624,21 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateActionLocations(stack),
   },
+  // [ADR-0142 D5] An assignment rule naming a user id carries one
+  // organization's data in package metadata, and one targeting a declared queue
+  // with no member parks every row it matches. Advisory: the engine never
+  // refuses an insert on a rule's account. CLI-only — the queue check reads the
+  // stack's `queues` beside its `assignmentRules`.
+  {
+    name: 'validateAssignmentRules',
+    tier: 'advisory',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-assignment-rules.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
+    run: (stack) => validateAssignmentRules(stack),
+  },
   // framework#3434 — seeds replay on every boot, so a `mode: 'insert'` dataset
   // duplicates its table on every restart.
   {
@@ -2435,6 +2467,31 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['email_template'],
     run: (stack) => validateEmailTemplateHolePlacements(stack),
+  },
+  // Every hole of an email template's three faces is within the mail hole
+  // grammar — `@objectstack/formula`'s `judgeMailHoleGrammar`, the grammar the
+  // mail renderer parses with. A hole that chains a second formatter is
+  // refused, naming the one-formatter rule and the "branch in the caller"
+  // remedy (the renderer printed `0 | number:2`); a `currency` argument that
+  // is not a literal ISO 4217 code is refused, naming the literal-only rule
+  // (the renderer printed the amount in USD). Gating: no reading of such a
+  // hole renders as its author wrote it.
+  //
+  // Runtime publish gate: the same door and shape as the placement rule above
+  // — each written template is judged on its own, so the door's verdict and
+  // the whole-stack verdict are one value. A stored template is judged at its
+  // next publish, and until then the renderer refuses the hole at send
+  // (`TEMPLATE_INVALID`). MEASURED first: no shipped template, example or
+  // fixture in this repository writes a hole it refuses.
+  {
+    name: 'validateEmailTemplateHoleGrammar',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-email-template-hole-grammar.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['email_template'],
+    run: (stack) => validateEmailTemplateHoleGrammar(stack),
   },
 ];
 

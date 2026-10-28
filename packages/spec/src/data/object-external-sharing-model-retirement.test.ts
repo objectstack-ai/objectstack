@@ -357,6 +357,12 @@ describe('tree-scoped absence: nothing inside the declared radius still authors 
     'packages/lint/src/runtime-gate.datasource-writes.test.ts',
     'packages/lint/src/runtime-gate.inert-type-writes.test.ts',
     'packages/cli/test/i18n-flow-liveness-gate.test.ts',
+    // The CLI write door's pin and the chain's own replay pin (#25767): each
+    // authors the pre-retirement object on purpose, to assert the D2
+    // conversion strips the key at `--from 17` — this kit's fixtures at the
+    // two doors that replay it.
+    'packages/cli/test/migrate-meta-write.test.ts',
+    'packages/spec/src/migrations/migrations.test.ts',
   ]);
   const EXCLUDED_PREFIXES = [
     // The D2 conversion's fixture authors the pre-retirement object on purpose.

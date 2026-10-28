@@ -309,6 +309,28 @@ row is unaffected — a user still needs edit access to change any other field o
 it — and the summary column stays subject to the parent's field-level security
 on read.
 
+A child validation rule can read a parent summary one hop through its
+reference, for example "each supplier has at most one primary contact" as a
+`count` summary filtered on `{ is_primary: true }` plus the child rule
+`record.is_primary == true && record.supplier.primary_contact_count > 0`.
+**A bulk create equals one-by-one creates (批量等于逐条):** inside one bulk
+insert (an import batch, `createManyData`, `insertManyData`) each row's rules
+read the summary as it stands after the earlier rows of the same batch that the
+rules admitted, accumulated in memory, so two primary contacts in one import
+create one row and refuse the other with the rule's error. A row the rules
+refuse is not counted. This holds for `count`, and for `sum`, `min` and `max`
+over number values. An `avg` summary, a `sum`/`min`/`max` meeting a value that
+is not a number, and a summary whose `filter` reads a dotted path through
+another reference keep reading the stored value, as they did before.
+An import's **dry run** previews its create rows in the batches the import
+writes them in (200 rows each) and refuses the rows the import refuses, with
+the same message. It writes nothing, so a row in a later batch reads the
+summary as stored before the import: two such rows that fall in different
+batches of a dry run both preview valid, while the import refuses the second.
+**Concurrent writes are not guaranteed (并发不保证):** two writes in flight at
+the same time each read the summary they started from, so a guard like the one
+above can still admit one row from each.
+
 ### Specialized Types
 
 | Type | Factory | Description |
@@ -369,7 +391,7 @@ These properties are available on all field types:
 | Property | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `searchable` | `boolean` | `false` | Include in full-text search |
-| `externalId` | `boolean` | `false` | Mark as external system identifier |
+| `externalId` | `boolean` | `false` | Not read: nothing matches on it. A seed dataset names its match field in its own `externalId`, an import in its mapping's `upsertKey` |
 
 Database indexes are declared at the object level in the object's `indexes[]` array — there is no per-field `index` flag. See [Indexing](/docs/data-modeling/indexing).
 

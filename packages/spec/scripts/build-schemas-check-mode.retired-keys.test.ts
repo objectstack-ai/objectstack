@@ -57,16 +57,27 @@ const ROOT_SCRIPTS = fileURLToPath(new URL('../../../scripts', import.meta.url))
 useSharedSandbox(ROOT_SCRIPTS);
 
 /** Retired keys whose ONLY registered clause names a DIFFERENT def — the defect. */
-const LEAF_COLLIDER_A = 'api/HttpFindQueryParams:distinct';
+const LEAF_COLLIDER_A = 'api/PackageInstallManifest:capabilities';
 
-/** …matched by this clause, which registers `data/Query`'s key, not this one. */
-const LEAF_COLLIDER_A_CLAUSE = 'data.query.distinct';
+/**
+ * …matched by this clause, which registers `kernel/Manifest`'s key, not this
+ * one: `PackageInstallManifestSchema` extends `ManifestSchema`, so the same
+ * tombstone sits on a second def with no row of its own. Re-picked at spec 18.2
+ * (#25767): the fixture was `api/HttpFindQueryParams:distinct` against
+ * `data.query.distinct` until that clause left with the 16.x conversions.
+ */
+const LEAF_COLLIDER_A_CLAUSE = 'manifest.capabilities';
 
-/** The issue's own `.type` shape: an index type dated by a flow node rename. */
-const LEAF_COLLIDER_B = 'data/Index:type';
+/**
+ * A book group's i18n block: a surviving tombstone (`book.zod.ts`, no row of
+ * its own) whose leaf a manifest retirement also spells. Re-picked at spec
+ * 18.2 (#25767) with A: the issue's own fixture, `data/Index:type` against
+ * `flow.node.type`, aged out with the 16.x tombstones.
+ */
+const LEAF_COLLIDER_B = 'system/BookGroup:translations';
 
-/** …registered at protocol 11 by `flow-node-http-callout-rename`. Unrelated. */
-const LEAF_COLLIDER_B_CLAUSE = 'flow.node.type';
+/** …registered by `plugin-manifest-contributes-dead-members-retired` for the manifest's `contributes` block. Unrelated. */
+const LEAF_COLLIDER_B_CLAUSE = 'manifest.contributes.translations';
 
 /** A key no build emits: the aged-out steady state a stale entry decays into. */
 const AGED_OUT_KEY = 'data/Object:zzAgedOutTombstone4659';
@@ -242,7 +253,7 @@ describe('build-schemas.ts — check (b) matches the exact retired key, not its 
     'registering one key registers exactly that key — its neighbour with the same leaf still fails',
     { timeout: SPAWN_TIMEOUT_MS },
     () => {
-      // `data.query.distinct` covered A only by leaf; now even a REAL entry for
+      // `manifest.capabilities` covered A only by leaf; now even a REAL entry for
       // B cannot cover A. This is the whole change in one run: membership is per
       // key, and nothing radiates from one registration to another.
       seedRetiredKeys({ [CURRENT_MAJOR]: [LEAF_COLLIDER_B] });

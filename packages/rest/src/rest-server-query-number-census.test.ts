@@ -71,8 +71,8 @@ const SOURCE = readFileSync(resolve(HERE, SOURCE_FILE), 'utf8');
 // function, never its file, so the ledger below did not change a row.
 // [#23050 slice 3] …and now every file on THE list of the files `RestServer`'s
 // registrars live in, imported rather than spelt here, so a registrar body the
-// split moves next stays inside this census. §2's last case pins the list's
-// length and the census's sum over it.
+// split moves next stays inside this census. §2's last case pins the census's
+// sum over it.
 const SOURCES: ReadonlyArray<readonly [string, string]> = REST_SERVER_REGISTRAR_FILES.map((file) =>
     [file, file === SOURCE_FILE ? SOURCE : readFileSync(resolve(HERE, file), 'utf8')] as const);
 
@@ -303,7 +303,7 @@ describe('#20139 census — every numeric coercion in rest-server.ts is classifi
         }
     });
 
-    it('[#23050 slice 3] reads every file on the registrar list — its length and this sum are pinned', () => {
+    it('[#23050 slice 3] reads every file on the registrar list — this sum is pinned', () => {
         // A module added to the list makes this re-read its number rather than
         // widening unnoticed. 9 sites = 8 in `rest-server.ts` + 1 in
         // `data-action-routes.ts` (the export door's `page`); the batch and
@@ -355,7 +355,7 @@ describe('#20139 census — every numeric coercion in rest-server.ts is classifi
         // judged as it came and its query value goes through the reader, so its
         // exemption row left the ledger with it:
         // 8 = 7 + 1 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0, length 18.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(18);
+        // [#26433] The list's length is no longer pinned: the list is the authority.
         expect(SOURCES.map(([file]) => file)).toEqual([...REST_SERVER_REGISTRAR_FILES]);
         expect(sites).toHaveLength(8);
     });

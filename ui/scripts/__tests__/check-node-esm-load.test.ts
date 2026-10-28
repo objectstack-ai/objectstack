@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { UI_PUBLISHED_PACKAGE_FLOOR } from './helpers/ui-package-population.mjs';
 
 import {
   ESM_MODULE_EDGE,
@@ -21,12 +22,14 @@ import {
   emittedSources,
   esmEntryOf,
   importEntry,
+  main,
   readTsconfig,
   relativeSpecifiers,
   resolvesToModule,
   scanSpecifiers,
 } from '../check-node-esm-load.mjs';
 import { SKIP_DIRS, discoverPackages } from '../check-phantom-dependencies.mjs';
+import { workspaceRoot } from '../workspace-root.mjs';
 
 /**
  * objectui#4538 — a published entry plain Node ESM cannot load.
@@ -448,7 +451,10 @@ describe('the load leg evaluates rather than resolves', () => {
 
 describe('the gate cannot be green about nothing', () => {
   it('keeps a floor under both legs', () => {
-    expect(MIN_PACKAGES).toBeGreaterThanOrEqual(30);
+    // The package floor is the shared ui published-package floor, not a number of
+    // its own: re-measuring the population moves it in one place for every reader.
+    expect(MIN_PACKAGES).toBe(UI_PUBLISHED_PACKAGE_FLOOR);
+    expect(MIN_PACKAGES).toBeGreaterThan(0);
     expect(MIN_LOADED).toBeGreaterThan(0);
   });
 
@@ -826,5 +832,36 @@ describe('objectui#7276 — the load leg grades only what this tree produced', (
       fs.writeFileSync(path.join(dir, TURBO_TASK_LOG), ['', `> ${buildScript}`, ''].join('\n'));
       expect(buildProvenance(dir).code, `build script line for ${name}`).toBe('unreadable-build-log');
     }
+  });
+});
+
+/**
+ * objectstack#26860 — the build mode runs the release's build, where the release runs it.
+ *
+ * The gate's full mode ran `pnpm build` from `ui/`, whose manifest has no
+ * `build` script, so a maintainer running the alias by hand got pnpm's exit 254
+ * and no reading. It now asks for the published-dist gate's `buildWorkspace`
+ * (the workspace root's `build` script, from the workspace root — pinned over
+ * there against what `pnpm run release` runs), so both gates read one build.
+ */
+describe('objectstack#26860 — the load leg is graded over the release build', () => {
+  it('asks for the release build at the workspace root, with --force-build as turbo --force', () => {
+    const calls: Array<{ workspace: string; force: unknown }> = [];
+    const quiet = [
+      vi.spyOn(console, 'log').mockImplementation(() => {}),
+      vi.spyOn(console, 'error').mockImplementation(() => {}),
+    ];
+    try {
+      const exit = main(['--force-build'], {
+        build: (workspace: string, options?: { force?: boolean }) => {
+          calls.push({ workspace, force: options?.force });
+          throw new Error('stop before grading: this case reads only which build was asked for');
+        },
+      });
+      expect(exit).toBe(1);
+    } finally {
+      for (const spy of quiet) spy.mockRestore();
+    }
+    expect(calls).toEqual([{ workspace: workspaceRoot(REPO_ROOT), force: true }]);
   });
 });

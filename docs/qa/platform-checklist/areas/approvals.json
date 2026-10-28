@@ -3,6 +3,75 @@
   "area": "approvals",
   "axis": "workflow",
   "title": "Approvals — quorum, per-group sign-off (会签), inbox",
+  "fixtures": {
+    "$comment": "AREA-LEVEL standing fixtures (README \"Area-level `fixtures`\"; shape copied from qa-scratch-authz in areas/attachments-storage.json). An item opts in with fixtures.provisioning = { use: KEY, why: … }. Recipes are runtime-provisioned: no repo file is touched and nothing is seeded, so the teardown line is the whole cleanup. Every call cites the framework file and symbol that grounds it; replay the calls literally, and if one answers differently re-read the citation before assuming the recipe rotted.",
+    "qa-cross-org-request": {
+      "title": "A pending approval request in a SECOND organization, decided by a caller narrowed to the first",
+      "why": "approvals.decision-action-matrix acceptance[9] needs a request whose row is invisible inside the deciding caller's organization narrowing. The stock showcase boots under the single posture with one organization, where every request carries that organization and every caller is narrowed to it, so the clause scored blocked(fixture) in both 18.2.0 waves (QA runs #25817 and #26456). The ORG-LESS row the clause first named cannot exist any more: organization_id is NOT NULL on sys_approval_request, sys_approval_approver and sys_approval_action (ADR-0131), and an organization-less system insert is stamped with the install's one organization or refused (ADR-0131 D9). The reachable shape is a request in another organization: under the group posture the platform admin can hold two organizations, and the read-back narrows to the caller's active one.",
+      "provenance": "#26621, measured on main 74db43ef. The card's first candidate was driven and refuted on a single-posture boot with OS_AUTOMATION_SCHEDULED_WORK_ENABLED=1: a scratch-package time-relative sweep (type schedule, runAs system, a 60 s interval) over a tenancy-disabled scratch object opened its approval request stamped with the Default Organization, and a node:sqlite UPDATE of that column to NULL answers 'NOT NULL constraint failed'. This recipe was then driven twice on group-posture boots, the second time literally as written below, REST only, on a fresh DB.",
+      "app": "showcase",
+      "requires": [
+        "its OWN boot, separate from the item's stock single-posture boot: `OS_TENANCY_POSTURE=group OS_PLATFORM_OWNER_EMAIL=admin@objectos.ai OS_AUTH_MEMBERSHIP_POLICY=invite-only pnpm dev -- --fresh -p PORT`. Each variable answers a measured boot refusal of the group posture: without OS_PLATFORM_OWNER_EMAIL the auth plugin refuses to boot ('tenancy posture group requires OS_PLATFORM_OWNER_EMAIL'), and without a declared membership policy the boot is FATAL ('walled, but this deployment never declared a membership policy'). The owner email is the seeded dev admin's, so that account boots as platform admin",
+        "the seeded dev admin's session (admin@objectos.ai / admin123): organization create and set-active act on that session's own memberships"
+      ],
+      "sequence": [
+        {
+          "step": 1,
+          "call": "POST /api/v1/auth/sign-in/email",
+          "body": { "email": "admin@objectos.ai", "password": "admin123" },
+          "expect": "200; keep the bearer token and session.activeOrganizationId — organization A, the Default Organization",
+          "source": "the better-auth email sign-in that packages/plugins/plugin-auth mounts — the same sign-in every recipe in this ledger starts from"
+        },
+        {
+          "step": 2,
+          "call": "POST /api/v1/auth/organization/create",
+          "body": { "name": "QA Other Org", "slug": "qa-other-org" },
+          "expect": "200 with the new organization's id — organization B — and the admin as its one member, role owner. Under the stock single posture the same call answers 403 ORGANIZATION_CREATION_DISABLED, which is why this recipe needs its own boot. A re-run on a live DB collides on the slug: pick another",
+          "source": "packages/plugins/plugin-auth/src/auth-manager-organization-plugin.ts#beforeCreateOrganization (refuses unless the effective posture is multi-organization)"
+        },
+        {
+          "step": 3,
+          "call": "POST /api/v1/auth/organization/set-active",
+          "body": { "organizationId": "B" },
+          "expect": "200 naming organization B; every write below now carries B",
+          "source": "the better-auth organization plugin that packages/plugins/plugin-auth/src/auth-manager-organization-plugin.ts configures"
+        },
+        {
+          "step": 4,
+          "call": "POST /api/v1/data/showcase_account",
+          "body": { "name": "QA cross-org account" },
+          "expect": "201 with organization_id = B. showcase_project requires an account, and the seeded accounts live in A",
+          "source": "examples/app-showcase (showcase_project declares `account` required — a project POST without one answers 400 VALIDATION_FAILED 'Account is required')"
+        },
+        {
+          "step": 5,
+          "call": "POST /api/v1/data/showcase_project",
+          "body": { "name": "QA cross-org probe", "account": "ACCOUNT_ID", "budget": 50000 },
+          "expect": "201 with organization_id = B; the budget sits under the approval threshold, so nothing opens yet",
+          "source": "examples/app-showcase/src/automation/flows/index.ts#BudgetApprovalFlow (start condition budget > 100000 && budget != previous.budget)"
+        },
+        {
+          "step": 6,
+          "call": "PATCH /api/v1/data/showcase_project/PROJECT_ID",
+          "body": { "budget": 200000 },
+          "expect": "200; showcase_budget_approval opens its manager_review request inside B. Position 'manager' has no holder in B, so the slate falls to B's administrators (the timeline's comment row reads 'Routed to this organization's administrators because the approver slate named no one'), which is the dev admin. Then GET /api/v1/approvals/requests?status=pending and take the row whose record_id is PROJECT_ID: request R, organization_id = B, current_step manager_review",
+          "source": "examples/app-showcase/src/automation/flows/index.ts#BudgetApprovalFlow (manager_review routes to position manager; the empty slate takes the default admin_rescue route)"
+        },
+        {
+          "step": 7,
+          "call": "POST /api/v1/auth/organization/set-active",
+          "body": { "organizationId": "A" },
+          "expect": "200 naming A. Then GET /api/v1/approvals/requests/R answers 404 REQUEST_NOT_FOUND: the row is invisible inside the caller's narrowing, which is the precondition acceptance[9] decides against",
+          "source": "packages/plugins/plugin-approvals/src/approval-service.ts#findRequestRow (the by-id read adds where.organization_id = the caller's organization)"
+        }
+      ],
+      "teardown": "stop the boot: --fresh discards its tempdir DB, and organization B with it. No repo file is touched.",
+      "knownGaps": [
+        "the caller is ON R's slate (B's administrator, by admin_rescue), so the decide is admitted as a pending approver and the approve action row reads via_override false. If B ever gains a manager holder, the platform-admin arm of ApprovalService.isOverrideActor still admits the decide, because that arm crosses the organization wall; the run records which of the two admitted it",
+        "the posture boot cannot share the item's stock single-posture boot: drive acceptance[9] on this boot alone and the rest of the item on the stock one"
+      ]
+    }
+  },
   "items": [
     {
       "id": "approvals.per-group-signoff",
@@ -444,7 +513,7 @@
       "title": "Every approval action executes its REST route and produces the expected state transition plus a timeline entry",
       "since": "v16",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["dev admin (pending approver on the seeded requests; submitter of the invoice request)"],
@@ -454,8 +523,12 @@
           "the three seeded demo requests (invoice unanimous / EXP-DEMO quorum / EXP-2001 per-group) plus fresh showcase_budget_approval requests raised on demand by PATCHing a showcase_project budget above 100000 (budget != previous.budget)",
           "showcase_budget_approval's manager step declares the ADR-0044 revise loop (maxRevisions: 2) and lockRecord: false; its exec step (budget > 500000) declares NO revise edge and lockRecord: true — both sides of two gates in one flow"
         ],
+        "provisioning": {
+          "use": "qa-cross-org-request",
+          "why": "acceptance[9] needs a request whose row is invisible inside the deciding caller's organization. The stock single-posture boot holds one organization, so without the recipe that clause scores blocked(fixture) (knownGaps[0])"
+        },
         "knownGaps": [
-          "the ORG-LESS request the READ_BACK_FAILED clause needs arises only from schedule / time-relative / api-trigger runs, which open their requests with organization_id null by construction (#10131; #9132 pinned that behaviour rather than repairing it) — no seeded showcase flow opens one on demand, so that clause cannot be provisioned on stock seeds. QA run #21784 tried the api-trigger route and found even an api-hook approval org-stamped, so that candidate is refuted (parked on #22017 row 19). QA run #25817 refuted the two remaining candidates on a scheduled-work boot (OS_AUTOMATION_SCHEDULED_WORK_ENABLED=1): a schedule-triggered approval binds but fails 'no target object in context', and an api-hook approval on an object declaring tenancy:{enabled:false} still stamps the default organization. No stock door mints an org-less request, so on stock acceptance[9] is recorded blocked(fixture), citing this gap. Two pins sit beside that verdict as lower-layer evidence, never its pass (RUNNER rule 6, a pin scores only the layer it drives). packages/plugins/plugin-approvals/src/approval-service.test.ts's 'ApprovalService — org-filtered read-back refuses loudly (#12769)' describe drives the service over a fake engine: the mutation lands, and the read-back throws READ_BACK_FAILED naming the request instead of a success with request:null, on recall, decide and comment alike, with org-less and org-matched controls. packages/rest/src/rest-approvals-wire-codes.test.ts's 'an org-filtered read-back on approve answers 500 READ_BACK_FAILED — named, not the template fallback' drives the approve route handler over a mocked service",
+          "CLOSED by the qa-cross-org-request recipe (#26621): acceptance[9] is driven on a group-posture boot, where the dev admin, narrowed to the Default Organization, decides a request opened in a second organization. The ORG-LESS request this clause first named exists nowhere any more: organization_id is NOT NULL on the three approval tables (ADR-0131), and an organization-less system insert is stamped with the install's one organization or refused (ADR-0131 D9). Measured on main 74db43ef: a time-relative sweep (scratch package, OS_AUTOMATION_SCHEDULED_WORK_ENABLED=1) over a tenancy-disabled object opened its request stamped with the Default Organization, and a node:sqlite UPDATE of the column to NULL is refused 'NOT NULL constraint failed' — so the api-trigger candidate of QA run #21784 and the schedule and api-hook candidates of QA run #25817 are closed as unreachable, not as untried. Fall back to blocked(fixture) only when the posture boot cannot be had, and the run records which of the two its verdict rests on. Two pins sit beside the verdict as lower-layer evidence, never its pass (RUNNER rule 6, a pin scores only the layer it drives). packages/plugins/plugin-approvals/src/approval-service.test.ts's 'ApprovalService — org-filtered read-back refuses loudly (#12769)' describe drives the service over a fake engine: the mutation lands, and the read-back throws READ_BACK_FAILED naming the request instead of a success with request:null, on recall, decide and comment alike, with org-less and org-matched controls. packages/rest/src/rest-approvals-wire-codes.test.ts's 'an org-filtered read-back on approve answers 500 READ_BACK_FAILED — named, not the template fallback' drives the approve route handler over a mocked service",
           "no pin scores a full clause of this item at its layer (RUNNER rule 6, a pin scores only the layer it drives), so the item carries no automated ref (acceptance[9]: knownGaps[0]). negative[1]'s throttle is pinned below the remind door only. approval-service.test.ts's 'remind: notifies pending approvers, audits, and throttles repeats' and 'remind: cool-down measures from the NEWEST reminder, not the first' assert that ApprovalService.remind throws THROTTLED on the second call, over a fake engine. packages/rest/src/rest-approvals-wire-codes.test.ts's 'remind inside the cool-down answers 429 THROTTLED — the contract-documented rejection' maps a mocked rejection to 429 THROTTLED at the route handler. 'A silent second success' is the remind POST's answer on a booted server, which neither drives, so the negative is driven by hand. automated may return when a pin drives a decision route, or the remind door, on a booted stack"
         ]
       },
@@ -472,7 +545,8 @@
         "request-info + comment: POST /:id/request-info {comment} AS A PENDING APPROVER of the request (request-info is approver-only: once the admin has reassigned their own slot away in the reassign step, the admin's request-info answers 403 FORBIDDEN \"actor '…' is not a pending approver\" — drive it as the pending approver, e.g. the reassign target with their own token), and POST /:id/comment {comment}, which a non-approver admin may still post",
         "after EVERY action above: GET /:id and GET /:id/actions; record the status transition and the appended timeline row",
         "lock contrast: while a request from exec_review (lockRecord: true) is pending, PATCH the project record — refused; while parked at manager_review (lockRecord: false) the same PATCH succeeds",
-        "exec no-revise gate: drive a >500000 budget to exec_review and POST /:id/revise — expect a clear refusal"
+        "exec no-revise gate: drive a >500000 budget to exec_review and POST /:id/revise — expect a clear refusal",
+        "read-back gate (acceptance[9]), on its OWN boot: replay the qa-cross-org-request recipe, then, still narrowed to organization A, POST /api/v1/approvals/requests/R/approve {comment}; set-active organization B and re-read GET /:id and GET /:id/actions"
       ],
       "acceptance": [
         {
@@ -532,8 +606,8 @@
         {
           "clause": "the org-scope read-back gate (#12769, landed #13181): deciding a request whose row is invisible inside the caller's organization narrowing answers a LOUD named refusal — the decision IS recorded, only the echo is refused — never a well-formed 200 whose declared-non-null `request` is null on the wire",
           "oracle": "api",
-          "verify": "decide an ORG-LESS request (organization_id null — the shape every schedule / time-relative / api-trigger run mints, #10131) as an org-scoped caller the override gate admits (isOverrideActor: 'a null-org request is global and any admin may release it'): the wire answer is 500 with code READ_BACK_FAILED and an error text, its prefix stripped, saying the write was recorded and naming the remedy ('read the request back with a system or matching-organization context'); a follow-up re-read under a system/matching-org context shows the decision landed — status moved, the action row present, nothing rolled back. READ_BACK_FAILED is a named 500 row of handleApprovalError's prefix map since 5b3ff63cc (packages/rest/src/approvals-routes.ts), beside RESUME_FAILED: the 500 is the designed status, not a bug to file",
-          "evidence": "the refused decision response + the system-context re-read showing the recorded write"
+          "verify": "on the qa-cross-org-request recipe's boot, as the dev admin narrowed to organization A, decide request R, which lives in organization B (POST /api/v1/approvals/requests/R/approve {comment}): the wire answer is 500 with code READ_BACK_FAILED and an error text, its prefix stripped, saying the write was recorded and naming the remedy ('read the request back with a system or matching-organization context'); a follow-up re-read under the matching organization (set-active B, then GET /:id and GET /:id/actions) shows the decision landed — status moved, the action row present, nothing rolled back. The org-less request this verify first named cannot be minted (organization_id is NOT NULL, ADR-0131), so ApprovalService.isOverrideActor's null-org arm is reached by no row; a request in another organization is the one shape left that the caller's narrowing hides. READ_BACK_FAILED is a named 500 row of handleApprovalError's prefix map since 5b3ff63cc (packages/rest/src/approvals-routes.ts), beside RESUME_FAILED: the 500 is the designed status, not a bug to file",
+          "evidence": "the refused decision response + the matching-organization re-read showing the recorded write"
         }
       ],
       "negative": [
@@ -550,6 +624,7 @@
         "packages/spec/src/contracts/approval-service.ts#APPROVAL_STATUSES (APPROVAL_STATUSES: pending|approved|rejected|recalled|returned)",
         "examples/app-showcase/src/automation/flows/index.ts#BudgetApprovalFlow (BudgetApprovalFlow — ADR-0044 revise loop, maxRevisions 2, exec step without a revise edge, lockRecord pair)",
         "packages/plugins/plugin-approvals/src/approval-service.ts#readBackRequest (readBackRequest — the write path's post-mutation echo; #12769 docblock: org-less rows are a live state, the null echo used to escape behind the callers' fresh! non-null assertions, now it refuses loudly; landed as PR #13181)",
+        "packages/plugins/plugin-approvals/src/approval-service.ts#findRequestRow (findRequestRow — the by-id read narrows to the caller's organization; it is why a request in another organization is invisible to the read-back, the shape acceptance[9] drives since #26621)",
         "packages/rest/src/approvals-routes.ts#handleApprovalError (handleApprovalError prefix map — READ_BACK_FAILED deliberately unmapped, so it reaches the wire as the generic 500 APPROVAL_<action>_FAILED envelope carrying the named text)"
       ],
       "history": [
@@ -581,6 +656,12 @@
           "date": "2026-10-26",
           "change": "three checklist-accuracy findings of the 18.2.0 sweep's QA run #25817, manual set, at framework 6679644a (findings card #25838, wave anchor #25807): knownGaps[0] records the schedule-triggered approval and an api-hook on an object with no organization column as both refuted, so no stock door mints an org-less request; acceptance[0] carves out the maxRevisions auto-reject, which appends revise then reject (approval-service.ts sendBack, audit-first); negative[1] quotes the live refusal, 'a reminder was already sent recently'. Re-read at base 9753d163",
           "ref": "#26116"
+        },
+        {
+          "revision": 10,
+          "date": "2026-10-27",
+          "change": "acceptance[9] made scorable (#26621, the maintainer's 「补测试数据配方。立卡」): fixtures.provisioning opts into the new area recipe qa-cross-org-request, knownGaps[0] is rewritten as CLOSED-by-recipe, acceptance[9].verify and evidence name the cross-organization request in place of the org-less one, steps gains the read-back step, and source cites findRequestRow. The clause sentence is unchanged; its verify named a state that no longer exists, since organization_id is NOT NULL on the approval tables (ADR-0131). Re-driven once on the recipe at main 74db43ef, on a fresh group-posture boot: deciding the second organization's request while narrowed to the Default Organization answered 500 READ_BACK_FAILED with the recorded-write text and the remedy, and the matching-organization re-read showed status approved and the approve action row. Verdict: pass",
+          "ref": "#26621"
         }
       ]
     },
@@ -1595,7 +1676,7 @@
       "title": "Approval requests on v18: the request record page serves record:approval_decision and a Reply action that lands in its timeline, `enable.approvalsVisibleToReaders` lets a plain record reader see the record's requests read-only (and only then), the generic /data door serves request rows by approvals visibility, and titles shown to a reader use only what that reader may read",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -1610,7 +1691,7 @@
           "for the reader leg: a scratch object (or showcase object via the scratch app) with enable.approvalsVisibleToReaders:true"
         ],
         "knownGaps": [
-          "the console clause (acceptance[4]) needs a bundled console: build it with `pnpm console:build`, which builds ui/apps/console from this checkout, so the console and the spec it renders are one tree by construction (packages/console/build-dist.sh). The blocked(environment) this gap used to record — the retired .objectui-sha pin not building against current spec — no longer arises"
+          "the console clause (acceptance[4]) needs a bundled console: build it with `pnpm console:build`, which builds ui/apps/console from this checkout, so the console and the spec it renders are one tree by construction (packages/console/build-dist.sh). The blocked(environment) this gap used to record — a console built from a pinned objectui revision instead of this tree, not building against current spec — no longer arises"
         ]
       },
       "steps": [
@@ -1683,6 +1764,12 @@
           "date": "2026-10-26",
           "change": "two checklist-accuracy findings of the 18.2.0 sweep's QA run #25815, Tier 1 set, at framework 6679644a (findings card #25838, wave anchor #25807): acceptance[1].verify names the reply's HTTP legs — the comment landing in the timeline, and the pending-approver-or-submitter-only refusal — because no pin in automated.ref asserts either, and cites the two service-layer pins that do as evidence of their layer only; automated.ref's acceptance[2] annotation says request-read-gate.integration.test.ts drives ObjectQL and the data protocol in-process, never /data/sys_approval_request over HTTP. Also respelled while there, the retired pin flow (#26052, #26035): knownGaps[0] builds the console with `pnpm console:build` from this tree, and the pin-skew block it recorded no longer arises. Pins re-read at base 9753d163. No clause changed",
           "ref": "#26116"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-27",
+          "change": "fixtures.knownGaps[0]: the retired pin-file name dropped from the description of the gap that no longer arises (#26626, maintainer-directed). No clause changed, no status changed",
+          "ref": "#26626"
         }
       ]
     },

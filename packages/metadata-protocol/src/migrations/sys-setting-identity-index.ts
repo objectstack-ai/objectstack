@@ -144,6 +144,8 @@
  */
 
 import {
+    countDuplicateKeys,
+    describeDuplicateKeys,
     logProblem,
     probeThenReplaceIndex,
     resolveIndexExecForTable,
@@ -152,7 +154,7 @@ import {
     type IndexMigrationLogger,
     type PartialIndexStatus,
 } from './partial-index-probe.js';
-import { readTablePresence } from './read-probe.js';
+import { catalogFamilyOf, readTablePresence } from './read-probe.js';
 
 /** The one table this migration touches. */
 export const SYS_SETTING_TABLE = 'sys_setting';
@@ -526,6 +528,11 @@ export async function ensureSysSettingIdentityIndex(
         indexName: SYS_SETTING_IDENTITY_INDEX_NAME,
         probeIndexName: SYS_SETTING_IDENTITY_PROBE_INDEX_NAME,
         buildSql: buildSysSettingIdentityIndexSql,
+        // [#26630] The table and the dialect select PostgreSQL's drop and
+        // read-back; without them that dialect left the NULL-distinct constraint
+        // in place and reported 'created'.
+        table: SYS_SETTING_TABLE,
+        client: opts.client,
     });
 
     if (outcome.status === 'created') return { status: 'created' };
@@ -545,7 +552,20 @@ export async function ensureSysSettingIdentityIndex(
         return { status: 'failed', detail };
     }
 
-    reportDegradation(outcome.status, detail, logger);
+    // [#26630] A conflict is reported WITH its size. Counted through the same
+    // duplicate probe the line prints, spelled for the dialect it runs on.
+    const duplicates =
+        outcome.status === 'conflict'
+            ? describeDuplicateKeys(
+                  await countDuplicateKeys(
+                      exec,
+                      catalogFamilyOf(opts.client) === 'mysql'
+                          ? buildSysSettingDuplicateProbeSqlMysql()
+                          : buildSysSettingDuplicateProbeSql(),
+                  ),
+              )
+            : '';
+    reportDegradation(outcome.status, detail, logger, duplicates);
     return { status: outcome.status, detail };
 }
 
@@ -567,6 +587,7 @@ function reportDegradation(
     status: PartialIndexStatus,
     detail: string,
     logger?: EnsureSysSettingIndexLogger,
+    duplicates = '',
 ): void {
     const columns = SYS_SETTING_IDENTITY_INDEX_COLUMNS.join(', ');
     const keyParts = sysSettingIdentityKeyParts().join(', ');
@@ -615,7 +636,7 @@ function reportDegradation(
         logProblem(
             logger,
             `[metadata-protocol] cannot tighten '${SYS_SETTING_IDENTITY_INDEX_NAME}' on ` +
-            `"${SYS_SETTING_TABLE}" — existing rows violate (${keyParts}). The previous index is left in ` +
+            `"${SYS_SETTING_TABLE}" — existing rows violate (${keyParts})${duplicates}. The previous index is left in ` +
             `place, so (${columns}) is enforced only as far as it was before, and the NULL-safe key is NOT ` +
             `enforced until the duplicates are resolved: settings rows are admin-authored configuration, so ` +
             `no row is discarded automatically and this migration will keep refusing until an operator ` +

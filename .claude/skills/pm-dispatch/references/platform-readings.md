@@ -236,7 +236,6 @@
 - ⇒ ⛔ 读成功而标签空或缺席不读作没有标签:按 `data-name=` 确认,否则整集作 UNKNOWN。
 - 可达时优先加法端点;⛔ 单读与单次即时读回都不决断。
 - ⇒ union-write 欠一次延迟确认;必需标签(如 `skip-changeset`)其后每次触碰重核。
-- objectui labeler 带 `sync-labels: true`:PR 标签按路径整集重算,手打的下次 push 即失,⛔ 不重挂。
 - `list_issues` 永不返回 assignees:`fields` 枚举无此成员,不传也没有。
 - 已认领卡与空闲卡响应逐字节相同,清单只是候选名单 ⇒ 认领前必须过完整 `issue_read`。
 - `comments` 计数会多读:实测 1 而列表与 timeline 双 0 ⇒ 线程空否读那两条,⛔ 不读计数。
@@ -293,7 +292,7 @@
 - 同一 head 上轻量兄弟 workflow `success` 加重量级载体 `cancelled` 是普通取代的预期签名。
 - 同名 `failure` 也会被带另一诊断的后一次 `failure` 取代 ⇒ 任何判定前先按名取最新一次。
 - cancel-in-progress 窗口只罩得住慢载体 ⇒ 先比对 run `head_sha` 与 PR 当前 head,不开调查。
-- 两仓 CI 并发组都按 PR 号不按 head:重跑过期 head 取消当前 head 的 run ⇒ 重跑是写不是读。
+- 本仓 CI 并发组按 PR 号不按 head:重跑过期 head 取消当前 head 的 run ⇒ 重跑是写不是读。
 - CI 红了先取完整日志归档再下结论:断言文本只在归档里,直读工具拿不到。
 - `get_check_run` 回空 `output.text`;`get_job_logs` 带 `tail_lines` 只回尾部的 service-container teardown。
 - ⇒ 改带 `return_content: true` 整份日志回包(2026-09-20 一 job)⇒ REST 腿被拒只是该腿的读数。
@@ -386,10 +385,9 @@
 - 强制档不因临缺授权降档:临缺非退役,退役唯维护者裁;不达档起隔离达档子代理或等档。
 - 本车道强制多是过宽的回忆:`dispatch-gates.mjs --tier PATH` 逐路径现推,路径线是下限非放行。
 - 该脚本只答自己那棵树:姊妹仓路径回 absent from this tree,姊妹仓的档位与条款②只能手推。
-- `os-verify-lock.sh` 只住 objectstack:objectui 无它,跑本仓副本读的是容器级锁,非该仓深度。
-- required checks 的名单是每仓事实,objectstack 八个:
+- required checks 的名单是每仓事实,objectstack 九个:
   `TypeScript Type Check` · `Lint & Repo Gates` · `Test Core` · `Build Core` · `Lint UI` ·
-  `Governed Surface Queue Guard` · `Type Check UI` · `Build & E2E UI`。
+  `Governed Surface Queue Guard` · `Type Check UI` · `Test UI` · `Build & E2E UI`。
 - ⭐ 本表的 `mustName` 声明 `statesTheSet` ⇒ 必须逐字等于注册表,加注册行不跟改本表即红。
 - ⇒ 门绿即名单逐字齐全的读数;⛔ 但数量词未钉:实测 七→六 照绿,只能手跟改。
 - ⛔ 聚合命令同样不作判定:`check:type-check-debt` 可在包级 typecheck 绿时红。

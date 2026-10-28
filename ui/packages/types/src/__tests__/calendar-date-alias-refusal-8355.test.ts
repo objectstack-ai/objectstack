@@ -136,19 +136,22 @@ const canonicalBlockCompiles: ListViewInferred = {
 const nodeRefusesBothByTsc: TsObjectCalendarSchema = {
   type: 'object-calendar',
   objectName: 'duly_task',
-  startDateField: 'kickoff',
+  calendar: { startDateField: 'kickoff' },
   // @ts-expect-error objectui#8355 — `dateField?: never` on the node face.
   dateField: 'kickoff',
   // @ts-expect-error objectui#8355 — `endField?: never` on the node face.
   endField: 'wrapup',
 };
 
-/** POSITIVE CONTROL: the canonical flat node compiles. */
+/**
+ * POSITIVE CONTROL: the canonical node compiles. Since objectstack#25923 the
+ * canonical spelling is the `calendar` block: the five flat members left the
+ * published node face (the spec refuses them flat).
+ */
 const canonicalNodeCompiles: TsObjectCalendarSchema = {
   type: 'object-calendar',
   objectName: 'duly_task',
-  startDateField: 'kickoff',
-  endDateField: 'wrapup',
+  calendar: { startDateField: 'kickoff', endDateField: 'wrapup' },
 };
 
 /* ── The RUNTIME face — this is what vitest actually gates ────────────────── */
@@ -165,7 +168,7 @@ const issueAt = (result: ReturnType<typeof listView>, path: string) =>
 describe('objectui#8355 · the compile-time fixtures above are real program inputs', () => {
   it('exists so the fixtures cannot be dropped as unused — `tsc` is their only gate', () => {
     expect(canonicalBlockCompiles.calendar?.startDateField).toBe('kickoff');
-    expect(canonicalNodeCompiles.endDateField).toBe('wrapup');
+    expect(canonicalNodeCompiles.calendar?.endDateField).toBe('wrapup');
     expect((viewBlockRefusesBothByTsc.calendar as Record<string, unknown>).dateField).toBe('kickoff');
     expect((nodeRefusesBothByTsc as unknown as Record<string, unknown>).endField).toBe('wrapup');
   });
@@ -242,15 +245,21 @@ describe('objectui#8355 · surface 2 — the legacy `options.calendar` nesting',
 });
 
 describe('objectui#8355 · surfaces 3 and 4 — the `object-calendar` node', () => {
-  it.each(RETIRED)('refuses a FLAT `%s` on the node, naming `%s`', (alias, canonical) => {
-    const result = calendarNode({ startDateField: 'kickoff', [alias]: 'kickoff' });
+  it.each(RETIRED)('refuses a FLAT `%s` on the node, naming `calendar.%s` (objectstack#25923)', (alias, canonical) => {
+    const result = calendarNode({ calendar: { startDateField: 'kickoff' }, [alias]: 'kickoff' });
     expect(result.success, `a flat ${alias} still parses green on the node`).toBe(false);
     const issue = result.success
       ? undefined
       : result.error.issues.find((i) => i.path.join('.') === alias);
     expect(issue?.code).toBe('invalid_type');
     expect(issue?.message).toContain(`Unrecognized key(s) on this object-calendar node: \`${alias}\``);
-    expect(issue?.message).toContain(`Did you mean \`${alias}\` → \`${canonical}\`?`);
+    // The canonical key is no flat member of the node since objectstack#25923,
+    // so the pointer and the clause both name the `calendar` block.
+    expect(issue?.message).toContain(`Did you mean \`${alias}\` → \`calendar.${canonical}\`?`);
+    expect(issue?.message).toContain(`Write \`calendar.${canonical}\``);
+    // CONTROL: the bare canonical key is prescribed nowhere in the node's message.
+    expect(issue?.message).not.toContain(`→ \`${canonical}\``);
+    expect(issue?.message).not.toContain(`Write \`${canonical}\``);
   });
 
   it.each(RETIRED)('refuses `%s` inside the element\'s own `calendar` container, naming `%s`', (alias, canonical) => {
@@ -264,6 +273,8 @@ describe('objectui#8355 · surfaces 3 and 4 — the `object-calendar` node', () 
   });
 
   it('DARK CONTROL: the canonical node parses GREEN on both nestings', () => {
+    // The flat node still parses on the TOLERANT mirror (`.passthrough()`), though
+    // since objectstack#25923 it declares none of the three: the strict face refuses them.
     const flat = calendarNode({ startDateField: 'kickoff', endDateField: 'wrapup', titleField: 'nickname' });
     expect(flat.success, JSON.stringify(flat.error?.issues)).toBe(true);
     const nested = calendarNode({ calendar: { startDateField: 'kickoff', endDateField: 'wrapup' } });

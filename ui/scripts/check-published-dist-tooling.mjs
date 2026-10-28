@@ -54,7 +54,7 @@
  * packages) are never built there. Paying a full build on every pull request to
  * catch a defect that can only reach a user at publish time is the wrong trade;
  * this gate therefore runs where the harm materialises — the publish path
- * (`pnpm changeset:publish`) — plus nightly, at zero per-PR cost.
+ * (`scripts/release-publish.sh`) — plus `main`'s full battery, at zero per-PR cost.
  *
  * ## The vacuous form this gate must never take
  *
@@ -64,8 +64,8 @@
  * guarded. Three separate rules make that impossible here:
  *
  *   1. The gate BUILDS. It runs the repository's own build itself and fails
- *      loudly if the build fails. `--no-build` exists for callers that just
- *      built (and for the tests), and it is wired into nothing.
+ *      loudly if the build fails. `--no-build` is for callers that just ran
+ *      the release's build: the publish path and ci.yml's full battery both do.
  *   2. A published package that contributes NO file under a build output
  *      directory is a FINDING (`no-build-output`), not a skip. That is what
  *      keeps `--no-build` safe: a missing `dist/` is red, never green.
@@ -135,6 +135,8 @@ import { fileURLToPath } from 'node:url';
 
 import { PACKAGE_ROOTS, TOOLING_FILE, readReleaseGroup } from './check-phantom-dependencies.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
+import { workspaceRoot } from './workspace-root.mjs';
+import { UI_PUBLISHED_PACKAGE_FLOOR } from './__tests__/helpers/ui-package-population.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 
@@ -151,11 +153,13 @@ export const BUILD_OUTPUT_DIRS = ['dist', 'build', '.next'];
 /**
  * Below this many published packages the scan is broken, not empty.
  *
- * The `fixed` group holds 40 entries today, one of them private. A collapse to
- * a handful means the release config, the manifest walk or `npm pack` stopped
- * answering, and every assertion below would pass while reading nothing.
+ * A collapse to a handful means the release config, the manifest walk or
+ * `npm pack` stopped answering, and every assertion below would pass while
+ * reading nothing. The number is the shared ui published-package floor, written
+ * once with its measurement in `__tests__/helpers/ui-package-population.mjs`, so
+ * deleting a package never edits this file.
  */
-export const MIN_PACKAGES = 30;
+export const MIN_PACKAGES = UI_PUBLISHED_PACKAGE_FLOOR;
 
 // ── the tooling convention, derived rather than re-spelled ───────────────────
 
@@ -288,27 +292,35 @@ export function discoverPublishedPackages(root, released = readReleaseGroup(root
 // ── the build ────────────────────────────────────────────────────────────────
 
 /**
- * The repository's own build, run by the gate.
+ * The release's own build, run by the gate.
  *
- * Deliberately the same command the release workflow runs (`pnpm build`,
- * i.e. turbo's `build` task minus the docs site), so the artifacts inspected
- * below are the artifacts a release produces, rather than a second build shape
- * invented here that could differ from it.
+ * The workspace root's `build` script, run FROM the workspace root: the
+ * command `pnpm run release` opens with, the `Build` step of release.yml's
+ * `publish` job, and the build ci.yml's `UI Published Artifacts` job runs
+ * before it reads with `--no-build`. So the artifacts inspected below are the
+ * artifacts a release produces, rather than a second build shape invented here
+ * that could differ from it. Under the monorepo that root is the PARENT of the
+ * objectui tree (`workspaceRoot`), whose own manifest has no `build` script, so
+ * the objectui root is the one directory this must never run in (objectstack#26860).
  *
- * @param {string} root
+ * `--concurrency` and `--force` are appended to that script's command line,
+ * which pnpm hands through to turbo.
+ *
+ * @param {string} workspace the pnpm workspace root, `workspaceRoot(uiRoot)`
  * @param {{ concurrency?: number|null, force?: boolean, log?: (line: string) => void, exec?: Function }} options
  */
 export function buildWorkspace(
-  root,
+  workspace,
   { concurrency = null, force = false, log = () => {}, exec = execFileSync } = {},
 ) {
-  const args = ['exec', 'turbo', 'run', 'build', '--filter=!@object-ui/site'];
+  const script = readBuildScript(workspace);
+  const args = ['build'];
   if (concurrency !== null) args.push(`--concurrency=${concurrency}`);
   if (force) args.push('--force');
-  log(`Building: pnpm ${args.join(' ')}`);
+  log(`Building: pnpm ${args.join(' ')}  (in ${workspace}: ${script})`);
   const started = Date.now();
   try {
-    exec('pnpm', args, { cwd: root, stdio: 'inherit' });
+    exec('pnpm', args, { cwd: workspace, stdio: 'inherit' });
   } catch (error) {
     throw new Error(
       `the workspace build failed (${error.message}), so there is nothing trustworthy to inspect. ` +
@@ -319,6 +331,24 @@ export function buildWorkspace(
   const seconds = Math.round((Date.now() - started) / 1000);
   log(`Build finished in ${seconds}s.`);
   return seconds;
+}
+
+/** The workspace root's `build` script, or a loud refusal naming where it looked. */
+function readBuildScript(workspace) {
+  const manifestPath = join(workspace, 'package.json');
+  let script;
+  try {
+    script = JSON.parse(readFileSync(manifestPath, 'utf8')).scripts?.build;
+  } catch (error) {
+    throw new Error(`cannot read ${manifestPath} (${error.message}), so the release's build is unknown.`);
+  }
+  if (typeof script !== 'string' || script.trim() === '') {
+    throw new Error(
+      `${manifestPath} declares no \`build\` script, so there is no release build to run. Run the ` +
+        "release's build yourself and pass `--no-build`.",
+    );
+  }
+  return script;
 }
 
 /** Remove each package's build output, so a stale artifact cannot be read as a fresh one. */
@@ -497,7 +527,7 @@ if (invokedDirectly) {
           'published package with no build output is reported as `no-build-output`.',
       );
     } else {
-      buildSeconds = buildWorkspace(root, { concurrency, force, log: (line) => console.log(line) });
+      buildSeconds = buildWorkspace(workspaceRoot(root), { concurrency, force, log: (line) => console.log(line) });
     }
     result = analyze(root, { packages });
   } catch (error) {

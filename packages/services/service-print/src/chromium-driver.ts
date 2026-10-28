@@ -98,7 +98,7 @@ interface ContextHandle {
 }
 interface PageHandle {
   goto(url: string, options: { waitUntil: 'load'; timeout: number }): Promise<unknown>;
-  waitForFunction(fn: string, arg: undefined, options: { timeout: number; polling: number }): Promise<unknown>;
+  waitForFunction(fn: (stablePolls: number) => boolean, arg: number, options: { timeout: number; polling: number }): Promise<unknown>;
   evaluate(fn: string): Promise<unknown>;
   pdf(options: { preferCSSPageSize: boolean; printBackground: boolean }): Promise<Buffer>;
 }
@@ -141,15 +141,29 @@ interface OpenBrowser {
 }
 
 /**
- * The ready predicate, evaluated in the page. A string, not a function, so the
- * page sees exactly this text and nothing from this module's scope.
+ * The ready predicate, run in the page on every poll. A function, never a
+ * string, because of how playwright-core polls: it evaluates the predicate's
+ * text with `eval` in the page. A string is evaluated again on every poll, from
+ * a page timer, where the page's own CSP applies, so under the console's
+ * default `script-src` (no `'unsafe-eval'`) the second poll throws EvalError
+ * and every print fails. A function's text is evaluated once, inside the
+ * DevTools call that starts the wait, which a page's CSP does not govern; each
+ * poll then calls the function that evaluation produced.
+ *
+ * The page receives the function's text only, so it reads nothing from this
+ * module's scope: the poll count arrives as its argument.
  */
-const PRINT_READY_PREDICATE = `(() => {
-  const ready = document.querySelector('[data-print-page]') !== null
-    && window.__objectui !== undefined && window.__objectui.idle === true;
-  window.__objectstackPrintStable = ready ? (window.__objectstackPrintStable || 0) + 1 : 0;
-  return window.__objectstackPrintStable >= ${STABLE_POLLS};
-})()`;
+function printReady(stablePolls: number): boolean {
+  const page = globalThis as unknown as {
+    document: { querySelector(selector: string): unknown };
+    __objectui?: { idle?: unknown };
+    __objectstackPrintStable?: number;
+  };
+  const ready = page.document.querySelector('[data-print-page]') !== null
+    && page.__objectui !== undefined && page.__objectui.idle === true;
+  page.__objectstackPrintStable = ready ? (page.__objectstackPrintStable || 0) + 1 : 0;
+  return page.__objectstackPrintStable >= stablePolls;
+}
 
 const FONTS_READY = `document.fonts.ready.then(() => true)`;
 
@@ -300,7 +314,7 @@ class PlaywrightChromiumDriver implements ChromiumDriver {
       await held.context.addCookies([cookieFor(input.url, input.cookie)]);
       const page = await held.context.newPage();
       await page.goto(input.url, { waitUntil: 'load', timeout: remaining() });
-      await page.waitForFunction(PRINT_READY_PREDICATE, undefined, { timeout: remaining(), polling: POLL_INTERVAL_MS });
+      await page.waitForFunction(printReady, STABLE_POLLS, { timeout: remaining(), polling: POLL_INTERVAL_MS });
       await page.evaluate(FONTS_READY);
       return page.pdf({ preferCSSPageSize: true, printBackground: true });
     })();

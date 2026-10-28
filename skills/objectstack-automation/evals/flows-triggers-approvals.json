@@ -44,7 +44,7 @@
     {
       "id": 5,
       "prompt": "Add a step that calls our `pricing.recalc` function to compute the discount and saves it on the quote, then posts the quote to our tax service over HTTP; if the tax call fails, route to a handler node instead of failing the run.",
-      "expected_output": "Emits a `script` node with `config.function: 'pricing.recalc'` (registered via `defineStack({ functions })`), `inputs`, and `outputVariable: 'recalc'`; the function is a pure compute step, so a following `update_record` persists it with `fields: { discount: { dialect: 'cel', source: 'recalc.discount' } }`. The `http` node sets `timeoutMs`. Failure routing is a `type: 'fault'` edge — a `label: 'error'` alone routes nothing.",
+      "expected_output": "Emits a `script` node with `config.function: 'pricing.recalc'` (registered via `defineStack({ functions })`), `inputs`, and `outputVariable: 'recalc'`; a pure compute step, so a following `update_record` persists it with `fields: { discount: { dialect: 'cel', source: 'recalc.discount' } }`. The `http` node sets `timeoutMs`. Failure routing is a `type: 'fault'` edge; a bare error label routes nothing.",
       "files": [],
       "assertions": {
         "must_contain": ["function:", "outputVariable", "type: 'fault'", "timeoutMs", "update_record", "dialect: 'cel'"],
@@ -64,7 +64,7 @@
     {
       "id": 7,
       "prompt": "An expense approval only holders of the `expense.approve_request` capability may start; route to the `finance_manager` position, and the submitter must never approve their own expense.",
-      "expected_output": "Flow-level `requiredPermissions: ['expense.approve_request']` (checked at every door that starts the flow, not a `current_user.positions` check inside it); the `approval` node sets `excludeSubmitter: true`, and its `onEmptyApprovers` is anything but `auto_approve`, which is refused beside it.",
+      "expected_output": "Flow-level `requiredPermissions: ['expense.approve_request']`, checked at every door that starts the flow (never a run-user positions check inside it); the `approval` node names `approvers: [{ type: 'position', value: 'finance_manager' }]`, sets `excludeSubmitter: true`, and its `onEmptyApprovers` is anything but `auto_approve`, refused beside it.",
       "files": [],
       "assertions": {
         "must_contain": ["requiredPermissions", "excludeSubmitter: true", "type: 'position'"],
@@ -74,7 +74,7 @@
     {
       "id": 8,
       "prompt": "A screen flow: the user uploads the signed contract PDF on the last step, then the flow creates the `contract` record with the file in its `signed_copy` field.",
-      "expected_output": "A `screen` field `{ name: 'signed_copy', type: 'file', required: true }`; the screen resumes with the uploaded `sys_file` id bound to `signed_copy`, and a `create_record` after the last screen writes `fields: { signed_copy: { dialect: 'cel', source: 'signed_copy' } }`, which claims the file for the record.",
+      "expected_output": "A `type: 'screen'` flow whose last `screen` carries `{ name: 'signed_copy', type: 'file', required: true }` and resumes with the uploaded `sys_file` id bound to `signed_copy`; a `create_record` after it writes `fields: { signed_copy: { dialect: 'cel', source: 'signed_copy' } }`, which claims the file for the record.",
       "files": [],
       "assertions": {
         "must_contain": ["type: 'screen'", "type: 'file'", "create_record", "signed_copy"],
@@ -99,6 +99,25 @@
       "assertions": {
         "must_contain": ["getRecordLock", "locked"],
         "must_not_contain": ["lock_record", "approvalsVisibleToReaders: true"]
+      }
+    },
+    {
+      "id": 11,
+      "prompt": "When a `contractor` record is marked `onboarded`, grant its linked user (`contractor.user_id`) the `contractor_portal` permission set. Make the flow run as system so the grant always lands.",
+      "expected_output": "Not as system: a system-context insert into `sys_user_permission_set` (as into `sys_user_position`, `sys_invitation` or `sys_member`) is refused with `PERMISSION_DENIED` — elevation does not lift a governed identity write, a dedicated system subflow included. Emits the `record_change` flow with `runAs: 'user'`: its `create_record` on `sys_user_permission_set` is judged by the delegated-administration gate as the user whose write fired the flow, recorded as the grant's `granted_by`; a user the gate would not let grant the set is refused, which is the rule, not a defect to route around.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "runAs: 'user'",
+          "sys_user_permission_set",
+          "PERMISSION_DENIED",
+          "delegated-administration",
+          "granted_by"
+        ],
+        "must_not_contain": [
+          "runAs: 'system'",
+          "sudo"
+        ]
       }
     }
   ]

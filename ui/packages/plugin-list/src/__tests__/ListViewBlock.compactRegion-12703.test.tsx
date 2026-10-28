@@ -10,7 +10,10 @@
  * objectui#12703 — a `list-view` block in a page region narrower than half the
  * page takes the compact posture: a header with the list's title and record
  * count over two-line rows, without the toolbar, the view tabs and the
- * row-number column. A region half the page or wider keeps the full list.
+ * row-number column. A region half the page or wider takes the capped
+ * posture instead (objectstack#26613, pinned in
+ * `ListViewBlock.cappedPageBlock-26613.test.tsx`), and no page region keeps the
+ * full list.
  *
  * Everything renders through the REAL page renderer (`@object-ui/components`)
  * and the REAL `list-view` registration, because the posture is decided
@@ -26,8 +29,9 @@
  *      no grid (so no `#` column), and one two-line row per record: the
  *      view's first column over its second;
  *  (b) its header carries the block's title and the record count;
- *  (c) CONTROL — the block in `main` (856 of 1200) on the same page draws the
- *      full list: the toolbar and the grid, with row numbers;
+ *  (c) CONTROL — the block in `main` (856 of 1200) on the same page is not
+ *      compact: it draws the capped table (objectstack#26613), still without
+ *      the toolbar or the grid;
  *  (d) CONTROL — a list outside any page region (the object list page's
  *      `ListView`, and the block with no page around it) is the full list.
  */
@@ -185,18 +189,18 @@ describe('a list block in a region narrower than half the page is compact (objec
     expect(within(aside).getByTestId('list-compact-count').textContent).toBe('2');
   });
 
-  it('(c) CONTROL: the main block on the same page draws the full list, with row numbers', async () => {
+  it('(c) CONTROL: the main block on the same page is not compact, it draws the capped table', async () => {
     stubWidths({ page: 1200, regions: { main: 856, aside: 320 } });
     const { container } = renderWithData(<SchemaRenderer schema={salesHomeShape as never} />);
     const main = regionOf(container, 'main');
 
-    await waitFor(() => expect(within(main).getByTestId('grid-spy')).toBeTruthy());
-    expect(within(main).getByTestId('toolbar-filter-trigger')).toBeTruthy();
+    await waitFor(() => expect(within(main).getAllByTestId('list-capped-row')).toHaveLength(2));
     expect(within(main).queryByTestId('list-compact-header')).toBeNull();
     expect(within(main).queryByTestId('list-compact-rows')).toBeNull();
-    // Exactly one grid mounted on the page — main's — and it numbers its rows.
-    expect(container.querySelectorAll('[data-testid="grid-spy"]')).toHaveLength(1);
-    expect(gridProps[gridProps.length - 1]?.showRowNumbers).toBe(true);
+    // The capped posture (objectstack#26613) is not the full list either: no
+    // toolbar, and no grid anywhere on the page.
+    expect(within(main).queryByTestId('toolbar-filter-trigger')).toBeNull();
+    expect(container.querySelectorAll('[data-testid="grid-spy"]')).toHaveLength(0);
   });
 
   it('a region whose width is not known keeps the full list', async () => {

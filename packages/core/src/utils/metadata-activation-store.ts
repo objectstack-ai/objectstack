@@ -82,8 +82,45 @@
  */
 export const METADATA_ACTIVATION_TABLE = 'sys_metadata_activation';
 
-/** Infrastructure rows, not tenant data — the `sys_metadata_activation` posture. */
+/**
+ * Infrastructure rows, not tenant data — the `sys_metadata_activation` posture.
+ * The context of every read, and of a write no caller is named for (a boot-time
+ * or in-process flip): such a row names nobody, which is true of it.
+ */
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
+
+/**
+ * The context one ledger WRITE runs under when a caller asked for it: that
+ * caller's own execution context, ELEVATED — `{ ...callerContext, isSystem: true }`,
+ * the `sudo()`-shaped elevation the engine's own trusted paths use.
+ *
+ * Both halves are load-bearing:
+ *
+ *   - **the elevation** — the ledger object is `managedBy: 'engine-owned'` and
+ *     declares `apiMethods: ['get', 'list']`, so nothing but an elevated write
+ *     reaches it. The door has already judged the caller's authority (ADR-0126
+ *     §5); the write itself is the platform's;
+ *   - **the caller** — the engine stamps `created_by` / `updated_by` from its
+ *     `userId`, and the audit plugin records `user_id` / `actor` from the same
+ *     session, so the record of an install-wide switch names the administrator
+ *     who threw it. A bare system context names nobody.
+ *
+ * `isSystem: true` is in the type, so a door cannot hand the caller's bare
+ * context down by accident. Runtime doors build it with one shared helper
+ * (`activationWriteContext` in `@objectstack/runtime`), so they cannot disagree
+ * about who a row names.
+ */
+export type MetadataActivationWriteContext = { readonly isSystem: true; readonly userId?: string } & Record<string, unknown>;
+
+/** Options for one {@link MetadataActivationStore.setActive} call. */
+export interface MetadataActivationWriteOptions {
+    /**
+     * The caller this write is made on behalf of, already elevated
+     * ({@link MetadataActivationWriteContext}). Absent ⇒ the store's own system
+     * context, and the row names nobody.
+     */
+    context?: MetadataActivationWriteContext;
+}
 
 /**
  * [ADR-0126 §4] One artifact's install-level activation row.
@@ -120,8 +157,11 @@ export interface MetadataActivationRow {
 export interface MetadataActivationStore {
     /** Every activation row for this type — the ledger is deployment-wide. */
     list(): Promise<MetadataActivationRow[]>;
-    /** Insert or update the row for one packaged artifact. */
-    setActive(row: MetadataActivationRow): Promise<void>;
+    /**
+     * Insert or update the row for one packaged artifact — written on behalf of
+     * `options.context` when a caller asked for it.
+     */
+    setActive(row: MetadataActivationRow, options?: MetadataActivationWriteOptions): Promise<void>;
 }
 
 /**
@@ -176,7 +216,8 @@ export class InMemoryMetadataActivationStore implements MetadataActivationStore 
         return [...this.rows.values()];
     }
 
-    async setActive(row: MetadataActivationRow): Promise<void> {
+    /** The caller is not recorded: a map has no `created_by` to stamp. */
+    async setActive(row: MetadataActivationRow, _options?: MetadataActivationWriteOptions): Promise<void> {
         refuseEmptyPackageId(row, `'${row.name}'`);
         this.rows.set(row.name, { ...row });
     }
@@ -187,10 +228,13 @@ export class InMemoryMetadataActivationStore implements MetadataActivationStore 
  * `sys_metadata_activation` object (ADR-0126 §4), scoped to one
  * `metadata_type`.
  *
- * All access uses a system context: the object is `managedBy: 'engine-owned'`
- * and declares `apiMethods: ['get', 'list']`, i.e. the generic data API cannot
+ * All access is elevated: the object is `managedBy: 'engine-owned'` and
+ * declares `apiMethods: ['get', 'list']`, i.e. the generic data API cannot
  * write it at all — these rows are written by the ADR-0126 enable/disable
- * doors and by nothing else.
+ * doors and by nothing else. Reads use the store's own system context; a write
+ * a door makes for a caller runs under that caller's context, elevated, so the
+ * row and its audit row name who switched the item
+ * ({@link MetadataActivationWriteContext}).
  */
 export class ObjectStoreMetadataActivationStore implements MetadataActivationStore {
     constructor(
@@ -256,13 +300,19 @@ export class ObjectStoreMetadataActivationStore implements MetadataActivationSto
      * `packageId` absent writes NO package (`null`), the ledger's spelling for
      * an item no package ships. An empty string is refused before anything is
      * read or written ({@link refuseEmptyPackageId}).
+     *
+     * `options.context` is the caller the write is made for, elevated
+     * ({@link MetadataActivationWriteContext}). The keyed lookup runs under it
+     * too, so the read-then-write is one principal's act; absent, both run
+     * under the store's system context and the row names nobody.
      */
-    async setActive(row: MetadataActivationRow): Promise<void> {
+    async setActive(row: MetadataActivationRow, options?: MetadataActivationWriteOptions): Promise<void> {
         refuseEmptyPackageId(row, `${this.metadataType} '${row.name}'`);
+        const context = options?.context ?? SYSTEM_CTX;
         const packageId = row.packageId ?? null;
         const existing = await this.engine.find(METADATA_ACTIVATION_TABLE, {
             where: { metadata_type: this.metadataType, name: row.name },
-            context: SYSTEM_CTX,
+            context,
         });
         const current = Array.isArray(existing) ? existing[0] : undefined;
 
@@ -270,7 +320,7 @@ export class ObjectStoreMetadataActivationStore implements MetadataActivationSto
             await this.engine.update(
                 METADATA_ACTIVATION_TABLE,
                 { id: (current as { id: unknown }).id, active: row.active, package_id: packageId },
-                { context: SYSTEM_CTX },
+                { context },
             );
             return;
         }
@@ -283,7 +333,7 @@ export class ObjectStoreMetadataActivationStore implements MetadataActivationSto
                 package_id: packageId,
                 active: row.active,
             },
-            { context: SYSTEM_CTX },
+            { context },
         );
     }
 

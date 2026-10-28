@@ -321,12 +321,14 @@ of its own — the only lever there is `sourceView`, pointed at a view that
 declares the block (objectui#8170).
 
 The same five keys written flat on the node are **not** a second way to author
-this. That flat spelling is the runtime handoff — `ObjectView` and `ListView`
-emit it on the node they build, and `getCalendarConfig` falls back to it only
-when the node has no `calendar` block — so `ObjectCalendarSchema` declares it
-because the renderer reads it. `@objectstack/spec` refuses it at authoring with
-`unrecognized_keys` and names the `calendar` block in the same diagnostic (one
-key per concept, its Prime Directive #12).
+this. `@objectstack/spec` refuses them at authoring with `unrecognized_keys` and
+names the `calendar` block in the same diagnostic (one key per concept, its
+Prime Directive #12), and since objectstack#25923 `ObjectCalendarSchema` does
+not declare them flat either: `ObjectView` and `ListView` emit the `calendar`
+block on the node they build. `getCalendarConfig` still falls back to the flat
+spelling when a node has no `calendar` block, for a host that mounts the
+renderer directly; that read is typed on this package's own hand-off type,
+`ObjectCalendarHandoff`, not on the published schema.
 
 ```typescript
 import type { ObjectCalendarSchema } from '@object-ui/types';
@@ -350,18 +352,17 @@ const schema: ObjectCalendarSchema = {
     colorField: 'statusColor'
   },
   defaultView: 'month',
-  navigation: { mode: 'modal' }   // what an event click opens - see below
+    navigation: { mode: 'drawer' }  // what an event click opens - see below
 };
 ```
 
 `navigation` is what an event click opens — the spec's `NavigationConfig` by
 reference, `ViewNavigationConfig` in `@object-ui/types`, the type
-`ObjectGridSchema.navigation` uses: `mode` (`page`, `drawer`, `modal`, `split`,
-`popover`, `new_window` or `none`) with `size`, `openNewTab` and
-`preventNavigation`. With the key absent a click opens the record in a drawer.
-An overlay mode keeps the click from a parent view's `onRowClick` /
-`onEventClick`; any other mode hands it to them. `page` — and a block written
-without `mode`, which takes the spec's `page` default — opens the record page
+`ObjectGridSchema.navigation` uses: `mode` (`drawer`, `page`, `new_window`
+or `none`) with `size`, `openNewTab` and `preventNavigation`. With the key absent a click opens the record in a drawer.
+The drawer keeps the click from a parent view's `onRowClick` /
+`onEventClick`; any other mode hands it to them. A block written without `mode`
+takes the spec's `drawer` default. `page` opens the record page
 through the record navigator the host publishes on `RelatedRecordActionsContext`
 (objectui#11293); the console publishes one on its custom pages, record pages and
 list views. Under a host that publishes none, such as an embedded renderer,
@@ -506,8 +507,8 @@ const schema: CalendarViewSchema = {
 - 📦 [npm package](https://www.npmjs.com/package/@object-ui/plugin-calendar)
 - 📝 [Changelog](./CHANGELOG.md)
 - 🐛 [Report an issue](https://github.com/objectstack-ai/objectui/issues)
-- 🤝 [Contributing Guide](https://github.com/objectstack-ai/objectui/blob/main/CONTRIBUTING.md)
-- 🗺️ [Roadmap](https://github.com/objectstack-ai/objectui/blob/main/ROADMAP.md)
+- 🤝 [Contributing Guide](https://github.com/objectstack-ai/objectstack/blob/main/CONTRIBUTING.md)
+- 🗺️ [Roadmap](https://github.com/objectstack-ai/objectstack/blob/main/ROADMAP.md)
 
 ## License
 

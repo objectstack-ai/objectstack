@@ -813,6 +813,10 @@ const es = {
     addRecord: "Agregar registro",
     // objectui#12703 — the compact list's footer link to the object's list or the block's view.
     viewAll: "Ver todo",
+    viewAllCount: "Ver los {{count}} registros",
+    viewAllCount_one: "Ver {{count}} registro",
+    viewAllCount_many: "Ver los {{count}} de registros",
+    viewAllCount_other: "Ver los {{count}} registros",
     tabs: "Pestañas",
     allRecords: "Todos los registros",
     userFilters: {
@@ -1836,6 +1840,7 @@ const es = {
       assistant: "Asistente",
       liveCanvas: "Vista previa en vivo — {{app}} (borrador)",
       liveCanvasUnlisted: "Aplicación en vivo — {{app}} (no listada hasta su publicación)",
+      liveCanvasLive: "Aplicación en vivo — {{app}}",
       loadingAgents: "Cargando agentes…",
       askAnything: "Pregunte lo que quiera…",
       askOrChangeApp: "Pregunte por sus datos o pídame que cambie esta app…",
@@ -2587,6 +2592,9 @@ const es = {
       invitationDescription: "Usa el correo al que se envió la invitación.",
       invitationSignUpButton: "Crear una cuenta y unirme",
       invitationSignInDivider: "o inicia sesión con una cuenta existente",
+      invitationPreviewTitle: "{{inviter}} te invitó a unirte a {{organization}}",
+      invitationPreviewTitleNoInviter: "Te invitaron a unirte a {{organization}}",
+      invitationPreviewDescription: "Usa el correo al que se envió la invitación ({{email}}).",
       showPasswordText: "Mostrar contraseña",
       hidePasswordText: "Ocultar contraseña",
       footer: {
@@ -2599,6 +2607,7 @@ const es = {
       description: "Ingresa tu información para comenzar",
       invitationTitle: "Crea una cuenta para unirte",
       invitationDescription: "Regístrate con el correo al que se envió la invitación. Solo se puede aceptar con esa dirección.",
+      invitationPreviewDescription: "Regístrate con el correo al que se envió la invitación ({{email}}). Solo se puede aceptar con esa dirección.",
       nameLabel: "Nombre",
       namePlaceholder: "Juan Pérez",
       emailLabel: "Correo electrónico",
@@ -2799,6 +2808,8 @@ const es = {
         dataRead: "Leer registros (dentro de sus propios permisos)",
         dataWrite: "Crear, modificar y eliminar registros (dentro de sus propios permisos)",
         actionsExecute: "Ejecutar acciones en su nombre (dentro de sus propios permisos)",
+        metadataWrite: "Crear y modificar los metadatos de esta aplicación como borradores (dentro de sus propios permisos); una persona los publica",
+        unrecognised: "Permiso no reconocido: {{scope}}",
       },
       deny: "Denegar",
       authorize: "Autorizar",
@@ -2935,6 +2946,7 @@ const es = {
     build: {
       title: "Crear una aplicación",
       noCapability: "La creación de aplicaciones no está disponible en este sistema: requiere el permiso «Gestionar metadatos», que su cuenta no tiene.",
+      inStudio: "Nuevo en Studio",
     },
     template: {
       title: "Empezar con una plantilla",
@@ -3153,6 +3165,8 @@ const es = {
     recordAccessDeniedDescription: "No tiene permiso para ver registros de este tipo. Contacte a su administrador si cree que debería tener acceso.",
     recordLoadFailed: "No se pudo cargar este registro",
     recordLoadFailedDescription: "Algo salió mal al cargarlo. Compruebe su conexión y vuelva a intentarlo.",
+    recordAccessEnded: "Decisión registrada",
+    recordAccessEndedDescription: "Su paso de aprobación ha finalizado y su acceso a este registro ha terminado.",
   },
   actionDialog: {
     title: "Parámetros de acción",
@@ -3764,7 +3778,7 @@ const es = {
       unknownPhase: "Fase de creación desconocida",
       nextStepsLead: "A continuación puede decir: {{steps}}",
       nextStepQuote: "«{{step}}»",
-      draftPosture: "Los cambios posteriores se guardan como borrador y usted los publica en Studio.",
+      draftPosture: "Los cambios posteriores se guardan como borrador; publíquelos con «Publicar» aquí en el chat.",
       checksPassed: "Comprobaciones superadas {{passed}}/{{total}}",
     },
     changes: {

@@ -167,6 +167,89 @@ describe('security-controlled-by-parent-owner-policy-without-opt-in (#25760)', (
     });
   });
 
+  // [#26591] The opt-in admits ONE column — the stored row's `owner_id`, on a
+  // detail that carries it — so the arm prescribes it only there. hotclm's
+  // shape: the accountable person is the detail's own user field `owner`, and
+  // the requester's update policy keys on it.
+  describe('the opt-in is prescribed only where it admits (#26591)', () => {
+    const OWNER_FIELD = { owner: { name: 'owner', type: 'user', reference: 'sys_user', label: 'Owner' } };
+    /** hotclm's `clm_obligation`: a `controlled_by_parent` detail with its own `owner` user field. */
+    const hotclmDetail = (extra: Record<string, unknown> = {}) =>
+      detail({ fields: { ...DETAIL_FIELDS, ...OWNER_FIELD }, ...extra });
+    const ownerPolicy = policy({ name: 'obligation_requester_own', using: 'owner == current_user.id' });
+
+    it('an owner_id-keyed policy without the opt-in: flagged, and the opt-in is the remedy', () => {
+      const findings = ownerArm(stack([MASTER, hotclmDetail()], policy()));
+      expect(findings).toHaveLength(1);
+      expect(findings[0].hint).toContain('Declare sharing: { controlledByParent: { ownerMayEdit: true } }');
+    });
+
+    it('an owner_id-keyed policy with the opt-in: silent', () => {
+      expect(ownerArm(stack([MASTER, hotclmDetail(OPT_IN)], policy()))).toEqual([]);
+    });
+
+    it('an other-field policy without the opt-in: flagged with the owner_id remedy, never the opt-in', () => {
+      const findings = ownerArm(stack([MASTER, hotclmDetail()], ownerPolicy));
+      expect(findings).toHaveLength(1);
+      expect(findings[0]).toMatchObject({
+        severity: 'warning',
+        rule: SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN,
+        path: 'permissions[0].rowLevelSecurity[0].using',
+      });
+      expect(findings[0].message).toContain('(owner == current_user.id)');
+      expect(findings[0].message).toContain("ownerMayEdit admits only the row's stored owner_id");
+      expect(findings[0].hint).toContain('Key the accountable person on owner_id');
+      expect(findings[0].hint).not.toContain('ownerMayEdit');
+    });
+
+    it('an other-field policy with the opt-in: still flagged, the opt-in does not admit that field', () => {
+      const findings = ownerArm(stack([MASTER, hotclmDetail(OPT_IN)], ownerPolicy));
+      expect(findings).toHaveLength(1);
+      expect(findings[0].message).toContain('(owner == current_user.id)');
+      expect(findings[0].message).toContain("the opt-in it declares (sharing.controlledByParent.ownerMayEdit) admits only the row's stored owner_id");
+      expect(findings[0].hint).toContain('Key the accountable person on owner_id');
+      expect(findings[0].hint).not.toContain('ownerMayEdit');
+    });
+
+    it('a predicate keying owner_id beside another field is one the opt-in serves: prescribed without it, silent with it', () => {
+      const mixed = policy({ using: 'owner == current_user.id || owner_id == current_user.id' });
+      const findings = ownerArm(stack([MASTER, hotclmDetail()], mixed));
+      expect(findings).toHaveLength(1);
+      expect(findings[0].hint).toContain('ownerMayEdit: true');
+      expect(ownerArm(stack([MASTER, hotclmDetail(OPT_IN)], mixed))).toEqual([]);
+    });
+
+    describe('a detail that carries no owner_id: the opt-in names nobody there', () => {
+      it.each([
+        ['ownership: org', { ownership: 'org' }],
+        ['ownership: none', { ownership: 'none' }],
+        ['ownership: business_unit', { ownership: 'business_unit' }],
+      ])('%s — an owner_id-keyed policy is flagged with the owner-column remedy, with or without the opt-in', (_label, ownership) => {
+        for (const extra of [ownership, { ...ownership, ...OPT_IN }]) {
+          const findings = ownerArm(stack([MASTER, detail(extra)], policy()));
+          expect(findings, JSON.stringify(extra)).toHaveLength(1);
+          expect(findings[0].message).toContain('a column "omd_obligation" does not carry');
+          expect(findings[0].hint).toContain('Give "omd_obligation" an owner_id column');
+          expect(findings[0].hint).not.toContain('ownerMayEdit');
+        }
+      });
+
+      it("an author's own owner_id field is the column the runtime reads: the opt-in is prescribed, then silent", () => {
+        const ownOwner = { ownership: 'none', fields: { ...DETAIL_FIELDS, owner_id: { name: 'owner_id', type: 'user', reference: 'sys_user', label: 'Owner' } } };
+        expect(ownerArm(stack([MASTER, detail(ownOwner)], policy()))[0]?.hint).toContain('ownerMayEdit: true');
+        expect(ownerArm(stack([MASTER, detail({ ...ownOwner, ...OPT_IN })], policy()))).toEqual([]);
+      });
+    });
+
+    it('the hotclm fixture is key-legal: the stack schema refuses no key it carries', () => {
+      const result = ObjectStackSchema.safeParse({
+        manifest: { id: 'com.example.omd', name: 'omd', version: '1.0.0', type: 'app' },
+        ...stack([MASTER, hotclmDetail(OPT_IN)], ownerPolicy),
+      });
+      expect(result.success ? [] : result.error.issues.filter((i) => i.code === 'unrecognized_keys')).toEqual([]);
+    });
+  });
+
   describe('the parsed path reads what the raw path reads', () => {
     it('the PARSED detail and set: flagged without the opt-in, silent with it', () => {
       const parsedSet = PermissionSetSchema.parse({ name: 'omd_requester', objects: {}, rowLevelSecurity: [policy()] });

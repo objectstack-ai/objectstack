@@ -18,6 +18,12 @@
  *   face 1 — `uniqueViolationColumn` (`@objectstack/types`), the column answer;
  *   face 2 — `sanitizeRowError` (this package), the sentence the importer shows.
  *
+ * [#26867] Face 2 no longer names the column for ANY conflict: the column is
+ * the field's API key, and the end user's sentence names a field only by its
+ * label, which a driver's text never carries. So a sample whose face 1 answers
+ * a column still expects the unnamed sentence on face 2 — the two faces now
+ * disagree on purpose, and the table keeps both so neither drifts.
+ *
  * A dialect that regresses on either goes red here, and teaching one face a
  * dialect without the other cannot go green. The table lives in this package
  * for the same reason #6250's does: `@objectstack/types` cannot import
@@ -51,7 +57,7 @@ interface DialectSample {
   readonly conflict: boolean;
   /** Face 1: the column `uniqueViolationColumn` must name, or `undefined`. */
   readonly column: string | undefined;
-  /** Face 2: the exact sentence the importer must show. */
+  /** Face 2: the exact sentence the importer must show — never the column (#26867). */
   readonly sanitized: string;
 }
 
@@ -75,7 +81,7 @@ const DIALECT_SAMPLES: readonly DialectSample[] = [
       "('a@b.com', 'zhoujunyi', '13800000000') - UNIQUE constraint failed: sys_user.phone_number",
     conflict: true,
     column: 'phone_number',
-    sanitized: 'A record with this phone_number already exists.',
+    sanitized: UNNAMED_CONFLICT,
   },
   {
     dialect: 'sqlite',
@@ -83,7 +89,7 @@ const DIALECT_SAMPLES: readonly DialectSample[] = [
     message: 'UNIQUE constraint failed: sys_user.email',
     conflict: true,
     column: 'email',
-    sanitized: 'A record with this email already exists.',
+    sanitized: UNNAMED_CONFLICT,
   },
   // Composite: no single offending column, so naming the first would point the
   // form at `tenant_id` when what was typed twice is `email`.
@@ -182,7 +188,7 @@ const DIALECT_SAMPLES: readonly DialectSample[] = [
       `Detail: Key (email)=(${OFFENDING_VALUE}) already exists.`,
     conflict: true,
     column: 'email',
-    sanitized: 'A record with this email already exists.',
+    sanitized: UNNAMED_CONFLICT,
   },
   {
     dialect: 'postgres',
@@ -192,7 +198,7 @@ const DIALECT_SAMPLES: readonly DialectSample[] = [
       `Detail: Key ("emailAddress")=(${OFFENDING_VALUE}) already exists.`,
     conflict: true,
     column: 'emailAddress',
-    sanitized: 'A record with this emailAddress already exists.',
+    sanitized: UNNAMED_CONFLICT,
   },
   // No DETAIL line: the only identifier present is the constraint (index) name.
   // Before #6544 this fell through to the SQL backstop and echoed the driver's

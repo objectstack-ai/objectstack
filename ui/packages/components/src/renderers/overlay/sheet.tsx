@@ -24,7 +24,7 @@ import { renderChildren, renderNodeSlot, renderTriggerSlot } from '../../lib/uti
 // example, doc page or README authors one, so `modal={schema.modal}` rode
 // `BaseSchema`'s index signature alone and was retired.
 ComponentRegistry.register('sheet', 
-  ({ schema, className, ...props }: { schema: SheetSchema; className?: string; [key: string]: any }) => (
+  ({ schema, className, ...props }: { schema: SheetSchema; className?: string; [key: string]: unknown }) => (
     <Sheet defaultOpen={schema.defaultOpen} {...props}>
       {renderTriggerSlot(SheetTrigger, schema.trigger)}
       <SheetContent side={schema.side || 'right'} className={className}>

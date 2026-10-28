@@ -29,7 +29,7 @@ import {
   resolveIcon,
   useIsMobile,
 } from '@object-ui/components';
-import { SchemaRenderer, useCapabilityGate, useCondition, toPredicateInput, useSettledSchema, useFilterScope, useResolvedFilter, usePredicateScope, type RelatedRowActionDef } from '@object-ui/react';
+import { SchemaRenderer, useCapabilityGate, useCondition, toPredicateInput, useSettledSchema, useFilterScope, useResolvedFilter, usePredicateScope, classifyLoadError, declaredUserMessage, extractWriteErrorMessage, type LoadErrorKind, type RelatedRowActionDef } from '@object-ui/react';
 import {
   Plus,
   ExternalLink,
@@ -38,6 +38,9 @@ import {
   ArrowUpDown,
   ChevronDown,
   Inbox,
+  AlertTriangle,
+  ShieldAlert,
+  RotateCw,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { DataSource, FieldMetadata } from '@object-ui/types';
@@ -73,6 +76,7 @@ import { useSafeFieldLabel } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import { useDetailTranslation } from './useDetailTranslation';
 import { isMaskedDetailFieldType } from './fieldEnrichment';
+import { RelatedListCompactContext } from './relatedListCompact';
 
 export interface RelatedListProps {
   title: string;
@@ -482,6 +486,116 @@ export const RelatedToolbarButton: React.FC<{
   );
 };
 
+/**
+ * The error a raw-URL read throws for a non-2xx answer (objectstack#26415).
+ *
+ * `fetch` RESOLVES on every HTTP status, so the legacy path used to parse the
+ * error body as a result, find no rows in it and draw "no related records".
+ * The thrown error carries what `@objectstack/client` decorates its own errors
+ * with — the numeric `httpStatus`, the semantic `code`, the server's sentence
+ * as `message`, the producer-marked `userMessage` — read from the same two
+ * envelope spots (top level, and wrapped under `error`), so `classifyLoadError`
+ * and `declaredUserMessage` judge it exactly as they judge an adapter failure.
+ * No sentence in the body leaves `message` empty: the status alone is no
+ * sentence, and the line then says the generic one.
+ */
+type ErrorEnvelope = { error?: unknown; code?: unknown; message?: unknown; userMessage?: unknown };
+async function rawUrlReadFailure(res: Response): Promise<Error> {
+  let body: ErrorEnvelope | null = null;
+  try {
+    body = (await res.json()) as ErrorEnvelope | null;
+  } catch {
+    // Not JSON: the status is all the server said.
+  }
+  const text = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v : undefined);
+  const wrapped = body && typeof body.error === 'object' && body.error !== null ? (body.error as ErrorEnvelope) : null;
+  return Object.assign(new Error(text(wrapped?.message) ?? text(body?.error) ?? text(body?.message) ?? ''), {
+    httpStatus: res.status,
+    code: text(body?.code) ?? text(wrapped?.code),
+    userMessage: text(body?.userMessage) ?? text(wrapped?.userMessage),
+  });
+}
+
+/**
+ * What a failed related-list read says, per `classifyLoadError` kind. A list of
+ * records says it in the list view's words: the `list.*` keys ListView's
+ * load-failed panel renders, already in all ten packs. `message: null` means
+ * the server's own sentence goes there when it answered with one.
+ */
+const LOAD_FAILED_COPY: Record<LoadErrorKind, { title: [string, string]; message: [string, string] | null }> = {
+  forbidden: {
+    title: ['list.loadErrorForbiddenTitle', 'You don’t have access'],
+    message: ['list.loadErrorForbiddenMessage', 'You don’t have permission to view these records. Contact your administrator if you think you should have access.'],
+  },
+  unauthorized: {
+    title: ['list.loadErrorUnauthorizedTitle', 'Sign in required'],
+    message: ['list.loadErrorUnauthorizedMessage', 'Your session has expired or you are signed out. Sign in again to view these records.'],
+  },
+  'api-disabled': {
+    title: ['list.loadErrorApiDisabledTitle', 'This object isn’t available through the API'],
+    message: ['list.loadErrorApiDisabledMessage', 'This page can’t load its records because the object is not exposed through the API. That is a setting on the object itself, not a permission — an administrator has to enable API access for it before this page can work.'],
+  },
+  rejected: { title: ['list.loadErrorTitle', 'Couldn’t load records'], message: null },
+  network: { title: ['list.loadErrorTitle', 'Couldn’t load records'], message: null },
+};
+
+/**
+ * The server's sentence for a failed read, or `null` when the server did not
+ * answer (a network failure carries no status, and its text is the browser's,
+ * not the server's).
+ */
+function serverSentence(err: unknown): string | null {
+  const e = err as { httpStatus?: unknown; status?: unknown; statusCode?: unknown } | null;
+  const answered = [e?.httpStatus, e?.status, e?.statusCode].some((s) => typeof s === 'number');
+  return answered ? extractWriteErrorMessage(err) : null;
+}
+
+/**
+ * The one line a related list draws when its read FAILED (objectstack#26415),
+ * in place of the "no related records" it used to draw. The refusal kinds say
+ * the shared fixed sentence and never the server's text (a refused read does
+ * not name what it cannot see), unless the producer marked a `userMessage` for
+ * the reader; every other failure says the server's sentence when it gave one.
+ * Retry for every kind but `api-disabled`, whose verdict a retry cannot change
+ * — the ListView precedent.
+ */
+const RelatedListLoadFailed: React.FC<{ error: unknown; onRetry: () => void }> = ({ error, onRetry }) => {
+  const { t } = useDetailTranslation();
+  const kind = classifyLoadError(error);
+  const copy = LOAD_FAILED_COPY[kind];
+  const message =
+    declaredUserMessage(error)
+    ?? (copy.message
+      ? t(copy.message[0], { defaultValue: copy.message[1] })
+      : serverSentence(error)
+        ?? t('list.loadErrorMessage', { defaultValue: 'Something went wrong while loading this data. Check your connection and try again.' }));
+  const Icon = kind === 'network' || kind === 'rejected' ? AlertTriangle : ShieldAlert;
+  return (
+    <div
+      role="alert"
+      data-testid="related-list-load-failed"
+      data-error-kind={kind}
+      className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm"
+    >
+      <Icon className="h-4 w-4 shrink-0 text-destructive/70" aria-hidden />
+      <span className="font-medium">{t(copy.title[0], { defaultValue: copy.title[1] })}</span>
+      <span className="min-w-0 text-muted-foreground">{message}</span>
+      {kind !== 'api-disabled' && (
+        <Button
+          variant="outline"
+          size="sm"
+          className="ml-auto h-7 gap-1 text-xs shadow-none"
+          data-testid="related-list-load-failed-retry"
+          onClick={(e) => { e.stopPropagation(); onRetry(); }}
+        >
+          <RotateCw className="h-3 w-3" aria-hidden />
+          {t('list.retry', { defaultValue: 'Retry' })}
+        </Button>
+      )}
+    </div>
+  );
+};
+
 /*
  * The two-shape field lookup and the ARITY VERDICT that used to live here are
  * now `@object-ui/core`'s `parent-scope` seam (`composeParentScopeFilter` /
@@ -595,6 +709,11 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   const [addBusy, setAddBusy] = React.useState(false);
   const [addError, setAddError] = React.useState<string | null>(null);
   const [refreshNonce, setRefreshNonce] = React.useState(0);
+  // The read that FAILED (objectstack#26415), kept as a value so the card can
+  // say so instead of drawing "no related records". Boxed, because a rejection
+  // value may itself be falsy. Cleared by every re-read (the fetch effect's
+  // first statement) and by Retry.
+  const [loadFailure, setLoadFailure] = React.useState<{ error: unknown } | null>(null);
   // Per-lookup-field cache of resolved labels: fieldName -> Map<id, label>
   const [lookupLabels, setLookupLabels] = React.useState<Record<string, Record<string, string>>>({});
   const { t } = useDetailTranslation();
@@ -1014,6 +1133,8 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     // window may still be in flight — a slow page-2 response must not
     // overwrite page 3 after the fact.
     let cancelled = false;
+    // Every run is a new read, so an earlier failure no longer describes it.
+    setLoadFailure(null);
     // A refused filter never reaches the wire (objectui#9050). The render
     // below shows the malformed-filter state instead, and this early return is
     // what keeps "no filter node" from being read as "no filter" by the query
@@ -1124,7 +1245,14 @@ export const RelatedList: React.FC<RelatedListProps> = ({
           setLoading(false);
         }).catch((err) => {
           console.error('Failed to fetch related data:', err);
-          if (!cancelled) setLoading(false);
+          if (cancelled) return;
+          // A failed read is not an empty one (objectstack#26415): keep the
+          // error, so the card draws the load-failed line, not "no records".
+          setRelatedData([]);
+          setTotal(null);
+          setHasMore(false);
+          setLoadFailure({ error: err });
+          setLoading(false);
         });
       } else if (listFilterNode !== undefined) {
         // No adapter — the legacy raw-URL path, whose query language is
@@ -1172,7 +1300,13 @@ export const RelatedList: React.FC<RelatedListProps> = ({
           [`filter[${referenceField}]`]: String(parentId),
         }).toString();
         fetch(`${api}?${qs}`)
-          .then(res => res.json())
+          // A non-2xx answer is a failed read, not a body to look for rows in
+          // (objectstack#26415). Asked as `ok === false` — the Response's own
+          // verdict — so a bare `{ json }` double reads as the success it means.
+          .then(async (res) => {
+            if (res.ok === false) throw await rawUrlReadFailure(res);
+            return res.json();
+          })
           .then(result => {
             if (cancelled) return;
             const items = Array.isArray(result) ? result : (result?.data || []);
@@ -1182,6 +1316,11 @@ export const RelatedList: React.FC<RelatedListProps> = ({
           })
           .catch(err => {
             console.error('Failed to fetch related data:', err);
+            if (cancelled) return;
+            setRelatedData([]);
+            setTotal(null);
+            setHasMore(false);
+            setLoadFailure({ error: err });
           })
           .finally(() => { if (!cancelled) setLoading(false); });
       }
@@ -1222,12 +1361,23 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // Windowed mode: a page beyond the (shrunken) collection — e.g. the last
   // row of the last page was just deleted — comes back empty. Step back one
   // page instead of stranding the user on an empty window.
+  // A FAILED window is not an overflow: it keeps its page and its load-failed
+  // line, so Retry reads the same window again (objectstack#26415).
   React.useEffect(() => {
-    if (!windowed || loading) return;
+    if (!windowed || loading || loadFailure) return;
     if (currentPage > 0 && relatedData.length === 0) {
       setCurrentPage((p) => Math.max(0, p - 1));
     }
-  }, [windowed, loading, relatedData, currentPage]);
+  }, [windowed, loading, loadFailure, relatedData, currentPage]);
+
+  // Retry: clear the failure and read again. `loading` goes up in the same
+  // batch, so the render between the two never reads as an empty list (which
+  // would answer `true` to the stack fold for one frame).
+  const handleRetryRead = React.useCallback(() => {
+    setLoadFailure(null);
+    setLoading(true);
+    setRefreshNonce((n) => n + 1);
+  }, []);
 
   // A different parent (or relationship, or list scope) is a different
   // collection — restart from the first page. `filterKey` belongs here for the
@@ -1666,6 +1816,11 @@ export const RelatedList: React.FC<RelatedListProps> = ({
           // The CHILD row's own `settledWhen` verdict (objectui#11815), judged
           // against the row the table hands this cell — never the parent record.
           deadlineSettled: isDeadlineSettled(def, row, { scope: predicateScope, fields: objectSchema?.fields }),
+          // Every cell this builder makes is one of a table COLUMN's cells
+          // (objectstack#26344, the grid's objectstack#25884): an undeclared
+          // `date` reads in one absolute face down the column, its relative
+          // phrase the tooltip. A declared `format` still wins.
+          inGridColumn: true,
         });
       };
     };
@@ -2186,6 +2341,11 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   const hasCustomRowActions = Array.isArray(rowActions) && rowActions.length > 0;
   const hasRowActions = !!onRowEdit || !!onRowDelete || hasCustomRowActions;
   const isMobile = useIsMobile();
+  // In the record page's related column (objectstack#26678) the list is a
+  // ~20rem card that names its first rows: the identity column alone, since a
+  // second column does not fit beside it and the table would be cut off at the
+  // column's edge. Display only — the read, filter and sort are unchanged.
+  const compact = React.useContext(RelatedListCompactContext);
 
   const viewSchema = React.useMemo(() => {
     if (schema) return schema;
@@ -2233,7 +2393,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         return {
           type: 'data-table',
           data: paginatedData,
-          columns: tableColumns,
+          columns: compact ? tableColumns.slice(0, 1) : tableColumns,
           pagination: false, // We handle pagination ourselves
           pageSize: effectivePageSize || 10,
           searchable: false,
@@ -2271,7 +2431,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       default:
         return { type: 'div', children: 'No view configured' };
     }
-  }, [type, paginatedData, tableColumns, effectiveColumns, schema, effectivePageSize, hasRowActions, hasCustomRowActions, rowActions, onRowAction, onRowEdit, onRowDelete, handleDeleteRow, onRowClick, isMobile, api, objectSchema, activeSort, handleTableSort]);
+  }, [type, paginatedData, tableColumns, effectiveColumns, schema, effectivePageSize, hasRowActions, hasCustomRowActions, rowActions, onRowAction, onRowEdit, onRowDelete, handleDeleteRow, onRowClick, isMobile, compact, api, objectSchema, activeSort, handleTableSort]);
 
   const headerClassName = collapsible ? 'cursor-pointer select-none' : undefined;
   const handleHeaderClick = collapsible ? () => setCollapsed((c) => !c) : undefined;
@@ -2282,10 +2442,13 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   const recordCount = windowed && total != null ? total : relatedData.length;
   // In windowed mode an empty page beyond page 0 is a transient overflow (the
   // step-back effect above corrects it), not an empty collection.
-  const isEmpty = !loading && relatedData.length === 0 && (!windowed || currentPage === 0);
+  // A failed read is never empty: it draws its own line (objectstack#26415).
+  const isEmpty = !loading && !loadFailure && relatedData.length === 0 && (!windowed || currentPage === 0);
   // The same answer, for a caller that arranges several lists (#25895). Before
-  // the early return below, so the hook order never changes.
-  const emptyAnswer: boolean | null = filterRefusal ? false : loading ? null : isEmpty;
+  // the early return below, so the hook order never changes. A failed read
+  // answers `false`, as a refused filter does, so the stack's empty fold
+  // leaves it in its own row instead of hiding the failure in the fold line.
+  const emptyAnswer: boolean | null = filterRefusal || loadFailure ? false : loading ? null : isEmpty;
   React.useEffect(() => {
     onEmptyChange?.(emptyAnswer);
   }, [emptyAnswer, onEmptyChange]);
@@ -2331,7 +2494,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         className={cn('py-3 px-4 sm:py-3 min-h-12 sm:min-h-0', headerClassName)}
         onClick={handleHeaderClick}
       >
-        <CardTitle className="flex items-center justify-between gap-2 text-sm font-semibold">
+        <CardTitle className={cn('flex items-center justify-between gap-2 text-sm font-semibold', compact && 'flex-wrap')}>
           <div className="flex items-center gap-2 min-w-0">
             {collapsible && (
               collapsed
@@ -2343,16 +2506,20 @@ export const RelatedList: React.FC<RelatedListProps> = ({
             <span className={cn('truncate', isEmpty && 'text-muted-foreground font-medium')}>
               {title}
             </span>
-            <Badge
-              variant="secondary"
-              className={cn(
-                'text-xs font-normal h-5 px-1.5',
-                recordCount === 0 && 'bg-muted text-muted-foreground'
-              )}
-              aria-label={`${recordCount} records`}
-            >
-              {recordCount}
-            </Badge>
+            {/* No count over a failed read: "0" would be the claim the
+                load-failed line exists to withdraw (objectstack#26415). */}
+            {!loadFailure && (
+              <Badge
+                variant="secondary"
+                className={cn(
+                  'text-xs font-normal h-5 px-1.5',
+                  recordCount === 0 && 'bg-muted text-muted-foreground'
+                )}
+                aria-label={`${recordCount} records`}
+              >
+                {recordCount}
+              </Badge>
+            )}
             {isEmpty && (
               <span className="text-xs text-muted-foreground/70 italic ml-1 truncate">
                 {t('detail.noRelatedRecords')}
@@ -2422,7 +2589,12 @@ export const RelatedList: React.FC<RelatedListProps> = ({
           </div>
         </CardTitle>
       </CardHeader>
-      {!collapsed && !isEmpty && <CardContent className={cn('pt-0 pb-4 px-4')}>
+      {!collapsed && loadFailure && (
+        <CardContent className="pt-0 pb-4 px-4">
+          <RelatedListLoadFailed error={loadFailure.error} onRetry={handleRetryRead} />
+        </CardContent>
+      )}
+      {!collapsed && !isEmpty && !loadFailure && <CardContent className={cn('pt-0 pb-4 px-4')}>
         {/* Filter bar — only when records justify it */}
         {showFilterInput && (
           <div className="mb-3">

@@ -5,7 +5,6 @@ import { describe, expect, it } from 'vitest';
 import { CreateRecordConfigSchema } from '../automation/builtin-node-config.zod.js';
 import { FlowSchema } from '../automation/flow.zod.js';
 import { FLOW_RESERVED_NODE_TYPES } from '../automation/flow-reserved-node-types.js';
-import { ScriptConfigSchema } from '../automation/schemaless-node-config.zod.js';
 import { DatasourceSchema } from '../data/datasource.zod.js';
 import {
   getDriverConfigSchema,
@@ -13,7 +12,7 @@ import {
   validateDriverConfig,
 } from '../data/driver/config-registry.zod.js';
 import { normalizeStackInput } from '../shared/metadata-collection.zod.js';
-import { ElementButtonPropsSchema, PageHeaderProps, PageTabsProps } from '../ui/component.zod.js';
+import { ElementButtonPropsSchema, PageHeaderProps } from '../ui/component.zod.js';
 import { PageSchema } from '../ui/page.zod.js';
 import { JobSchema, RetryPolicySchema } from '../system/job.zod.js';
 import { defineStack } from '../stack.zod.js';
@@ -45,10 +44,10 @@ import { CONVERSION_NOTICE_CODE, type ConversionNotice } from './types.js';
  * same-major pair is absorbed instead (`spec-property-retirement` §0).
  */
 const SUPERSEDED_FIXTURES: Readonly<Record<string, { by: string; stripped: readonly string[] }>> = {
-  // `connector.fieldMappings[].transform` (17) lives only inside
-  // `connector.fieldMappings`, which protocol 18 retired whole with the rest of
-  // connector-attached sync (ADR-0049).
-  'field-mapping-transform-removed': { by: 'connector-sync-keys-removed', stripped: ['fieldMappings'] },
+  // Empty since #25767: the one entry here (`field-mapping-transform-removed`,
+  // 17, whose only surface protocol 18 retired whole with
+  // `connector-sync-keys-removed`) aged out with the 16.x kits. The mechanism
+  // stays for the next such pair.
 };
 
 describe('conversion layer (ADR-0087 D2)', () => {
@@ -683,202 +682,28 @@ describe('conversion layer (ADR-0087 D2)', () => {
      * the test that fails first when either half moves.
      */
     it('⛔ does NOT replay a RETIRED entry, while the stored-row door does', () => {
-      const entry = ALL_CONVERSIONS.find((c) => c.id === 'app-hidden-to-unpublished');
+      const entry = ALL_CONVERSIONS.find((c) => c.id === 'object-external-sharing-model-removed');
       // Premise: without this the assertions below would pass vacuously.
       expect(entry?.retiredFromLoadPath, 'premise: the entry under test is retired').toBe(true);
 
-      const authored = { name: 'account', label: 'Account', hidden: true, navigation: [] };
+      const authored = { name: 'portal_case', label: 'Case', sharingModel: 'public_read', externalSharingModel: 'private' };
 
       // Authoring funnel: the old shape survives verbatim, nothing is reported.
       const notices: ConversionNotice[] = [];
       const out = normalizeStackInput(
-        { apps: [structuredClone(authored)] },
+        { objects: [structuredClone(authored)] },
         { onConversionNotice: (n) => notices.push(n) },
       );
-      expect((out.apps as any[])[0]).toEqual(authored);
+      expect((out.objects as any[])[0]).toEqual(authored);
       expect(notices).toEqual([]);
 
       // Data at rest: the SAME bytes through the stored-row door DO convert.
-      const stored = applyConversionsToStoredItem('app', structuredClone(authored)) as Record<
+      const stored = applyConversionsToStoredItem('object', structuredClone(authored)) as Record<
         string,
         unknown
       >;
-      expect(stored.hidden).toBeUndefined();
-      expect(stored._unpublished).toBe(true);
-    });
-  });
-
-  describe('flow-node-wait-timeout-keys-removed', () => {
-    const wecFlow = (waitEventConfig: Record<string, unknown>) => ({
-      flows: [
-        {
-          name: 'settle',
-          label: 'Settle',
-          type: 'autolaunched',
-          edges: [],
-          nodes: [
-            { id: 'n1', type: 'start', label: 'Start' },
-            { id: 'w', type: 'wait', label: 'Wait', waitEventConfig },
-          ],
-        },
-      ],
-    });
-    const wecOf = (stack: Record<string, unknown>) => (stack.flows as any[])[0].nodes[1].waitEventConfig;
-    // Retired from the load path, so the default `applyConversions` skips it —
-    // exactly like `stack-api-require-auth-removed`.
-    const convert = (stack: Record<string, unknown>) => collectConversionNotices(stack, { includeRetired: true });
-
-    it('moves `timeoutMs` to `timerDuration` as a STRING the schema accepts', () => {
-      const { stack, notices } = convert(wecFlow({ eventType: 'timer', timeoutMs: 60_000 }));
-      expect(wecOf(stack)).toEqual({ eventType: 'timer', timerDuration: '60000' });
-      expect(notices).toHaveLength(1);
-      // The move is only lossless if the result still parses — `timerDuration` is
-      // `z.string()`, so carrying the number across would have broken the block.
-      expect(() => FlowSchema.parse((stack.flows as any[])[0])).not.toThrow();
-    });
-
-    it('drops `timeoutMs` instead of moving it when `timerDuration` already won', () => {
-      const { stack, notices } = convert(
-        wecFlow({ eventType: 'timer', timerDuration: 'PT5M', timeoutMs: 999 }),
-      );
-      expect(wecOf(stack)).toEqual({ eventType: 'timer', timerDuration: 'PT5M' });
-      expect(notices).toHaveLength(1);
-    });
-
-    it('drops `onTimeout` — it never had a reader, so there is nothing to preserve', () => {
-      const { stack, notices } = convert(wecFlow({ eventType: 'timer', timerDuration: 'PT1M', onTimeout: 'continue' }));
-      expect(wecOf(stack)).toEqual({ eventType: 'timer', timerDuration: 'PT1M' });
-      expect(notices).toHaveLength(1);
-    });
-
-    it('leaves a block carrying neither key untouched', () => {
-      const { stack, notices } = convert(wecFlow({ eventType: 'signal', signalName: 'paid' }));
-      expect(wecOf(stack)).toEqual({ eventType: 'signal', signalName: 'paid' });
-      expect(notices).toHaveLength(0);
-    });
-
-    it('tombstones both keys so a source that skipped conversion is rejected, not stripped', () => {
-      for (const bad of [{ timeoutMs: 60_000 }, { onTimeout: 'continue' }]) {
-        const flow = (wecFlow({ eventType: 'timer', timerDuration: 'PT1M', ...bad }).flows as any[])[0];
-        expect(() => FlowSchema.parse(flow), `${Object.keys(bad)[0]} must be rejected`)
-          .toThrow(/was removed in @objectstack\/spec 17/);
-      }
-    });
-  });
-
-  describe('flow-node-script-branch-keys-removed', () => {
-    /** One `script` node in a flow shaped the way the conversion walks it. */
-    const scriptFlow = (config: Record<string, unknown>) => ({
-      flows: [
-        {
-          name: 'task_lifecycle',
-          label: 'Task lifecycle',
-          type: 'autolaunched',
-          edges: [],
-          nodes: [
-            { id: 'n1', type: 'start', label: 'Start' },
-            { id: 's', type: 'script', label: 'Script', config },
-          ],
-        },
-      ],
-    });
-    const cfgOf = (stack: Record<string, unknown>) => (stack.flows as any[])[0].nodes[1].config;
-    // Retired from the load path (the keys misdescribed themselves), so the
-    // default `applyConversions` skips it — only `os migrate meta` replays it.
-    const convert = (stack: Record<string, unknown>) => collectConversionNotices(stack, { includeRetired: true });
-
-    it('moves a shorthand `actionType` into `function` — that is what it named', () => {
-      const { stack, notices } = convert(scriptFlow({ actionType: 'score_lead', outputVariable: 'score' }));
-      expect(cfgOf(stack)).toEqual({ function: 'score_lead', outputVariable: 'score' });
-      expect(notices).toHaveLength(1);
-      expect(notices[0]!.to).toBe('config.function');
-    });
-
-    it('drops a shorthand `actionType` instead of moving it when `function` already won', () => {
-      const { stack, notices } = convert(scriptFlow({ actionType: 'stale_name', function: 'score_lead' }));
-      expect(cfgOf(stack)).toEqual({ function: 'score_lead' });
-      expect(notices).toHaveLength(1);
-    });
-
-    it('drops the built-in ids and the bare marker — neither was ever a function name', () => {
-      for (const actionType of ['email', 'slack', 'invoke_function']) {
-        const { stack, notices } = convert(scriptFlow({ actionType, function: 'score_lead' }));
-        expect(cfgOf(stack), actionType).toEqual({ function: 'score_lead' });
-        expect(notices, actionType).toHaveLength(1);
-        expect(notices[0]!.to, actionType).toMatch(/removed/);
-      }
-    });
-
-    it('drops the stub payload keys — nothing ever read them, so there is nothing to preserve', () => {
-      const { stack, notices } = convert(scriptFlow({
-        actionType: 'email',
-        template: 'task_done',
-        recipients: ['{record.owner}'],
-        variables: { taskName: '{record.name}' },
-      }));
-      expect(cfgOf(stack)).toEqual({});
-      expect(notices).toHaveLength(4);
-    });
-
-    it('drops an inline `script` body the runtime never executed', () => {
-      const { stack, notices } = convert(scriptFlow({ script: 'return { ok: true };' }));
-      expect(cfgOf(stack)).toEqual({});
-      expect(notices).toHaveLength(1);
-    });
-
-    it('leaves an already-converged node untouched', () => {
-      const { stack, notices } = convert(scriptFlow({ function: 'score_lead', inputs: { id: '{record.id}' } }));
-      expect(cfgOf(stack)).toEqual({ function: 'score_lead', inputs: { id: '{record.id}' } });
-      expect(notices).toHaveLength(0);
-    });
-
-    it('leaves a non-script node carrying the same key names alone', () => {
-      // Unlike the wait retirement, these tombstones live on the script config
-      // contract — no other node type is parsed against it, so a `template` key
-      // elsewhere is that node's own business.
-      const stack0 = {
-        flows: [{
-          name: 'f',
-          nodes: [{ id: 'n', type: 'notify', config: { template: 'x', recipients: ['a'] } }],
-        }],
-      };
-      const { stack, notices } = convert(stack0);
-      expect(stack).toEqual(stack0);
-      expect(notices).toHaveLength(0);
-    });
-
-    it('tombstones every retired key so a source that skipped conversion is rejected, not stripped', () => {
-      // NOTE the channel: unlike `waitEventConfig`, a node's `config` is
-      // `z.record(z.unknown())` on `FlowNodeSchema`, so `FlowSchema.parse` does
-      // NOT reach these tombstones — they answer whoever AUTHORS the key (`tsc`
-      // types it `never`; this parse raises the prescription). A stored flow is
-      // reached by the other half: `registerFlow` replays this conversion even
-      // though it is retired (#3903), and the execute-time parse then refuses
-      // what is left over for naming no callable.
-      for (const bad of [
-        { actionType: 'email' },
-        { template: 't' },
-        { recipients: ['a'] },
-        { variables: { x: 1 } },
-        { script: 'return 1;' },
-      ]) {
-        const key = Object.keys(bad)[0]!;
-        expect(
-          () => ScriptConfigSchema.parse({ function: 'score_lead', ...bad }),
-          `${key} must be rejected`,
-        ).toThrow(/was removed in @objectstack\/spec 17/);
-      }
-      // The flow-level parse is deliberately blind to the TOMBSTONES — pinned so
-      // the note above stays true if `FlowNodeSchema.config` is ever tightened.
-      // What it does see since #20316 is the one key the script contract
-      // requires, left out: a stripped node naming no callable is refused at
-      // the build doors now, not only at execute — and by that, never by a
-      // tombstone.
-      expect(() => FlowSchema.parse((scriptFlow({ function: 'score_lead', actionType: 'email' }).flows as any[])[0])).not.toThrow();
-      const stripped = FlowSchema.safeParse((scriptFlow({ actionType: 'email' }).flows as any[])[0]);
-      expect(stripped.success).toBe(false);
-      expect(stripped.error!.issues.map((i) => i.path.join('.'))).toEqual(['nodes.1.config.function']);
-      expect(stripped.error!.issues[0].message).not.toMatch(/was removed in @objectstack\/spec 17/);
+      expect(stored.externalSharingModel).toBeUndefined();
+      expect(stored.sharingModel).toBe('public_read');
     });
   });
 
@@ -1204,7 +1029,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
       expect(JobSchema.safeParse(converted).success).toBe(true);
     });
 
-    it('the flow half needed nothing more: an authored `retryDelayMs` meets its tombstone naming `backoffMs`', () => {
+    it('the flow half needed nothing more: an authored `retryDelayMs` meets the strict refusal (its tombstone aged out, #25767)', () => {
       const issues = refusalOf({
         flows: [{
           name: 'sync_orders',
@@ -1215,8 +1040,9 @@ describe('conversion layer (ADR-0087 D2)', () => {
           edges: [{ id: 'e1', source: 'start', target: 'end' }],
         }],
       });
-      expect(issues.map((i) => i.path.join('.'))).toEqual(['flows.0.errorHandling.retryDelayMs']);
-      expect(issues[0]!.message).toContain('Rename the key to `backoffMs`');
+      expect(issues.map((i) => i.path.join('.'))).toEqual(['flows.0.errorHandling']);
+      expect(issues[0]!.message).toContain('`retryDelayMs`');
+      expect(issues[0]!.message).toContain('https://objectstack.ai/docs/protocol-upgrade');
     });
 
     it('CONTROL — a job with no block, and a block stating `maxRetries: 1`, both parse; an omitted multiplier keeps its default', () => {
@@ -1353,159 +1179,6 @@ describe('conversion layer (ADR-0087 D2)', () => {
       const typo = PageSchema.safeParse(page('htm'));
       expect(typo.success).toBe(false);
       expect(typo.error!.issues[0]!.message).not.toContain('was removed');
-    });
-  });
-
-  // #4456 — the driver-factory `??` fallback graduation. The mappings are
-  // driver-scoped by construction; these pin the two edges the flat fixture
-  // pair cannot express as sharply: the same key converting under one driver
-  // and not another, and the load-path posture.
-  describe('datasource-config-driver-key-aliases', () => {
-    const convert = (datasources: unknown[]) =>
-      collectConversionNotices({ datasources }, { includeRetired: true });
-
-    it('renames `database` → `filename` ONLY under sqlite — it is canonical for the SQL/mongo drivers', () => {
-      const { stack, notices } = convert([
-        { name: 'a', driver: 'sqlite', config: { database: './a.db' } },
-        { name: 'b', driver: 'postgres', config: { host: 'db', database: 'analytics' } },
-        { name: 'c', driver: 'mysql', config: { host: 'db', database: 'orders' } },
-        { name: 'd', driver: 'mongo', config: { host: 'db', database: 'events' } },
-      ]);
-      const [a, b, c, d] = stack.datasources as Array<{ config: Record<string, unknown> }>;
-      expect(a!.config).toEqual({ filename: './a.db' });
-      expect(b!.config).toEqual({ host: 'db', database: 'analytics' });
-      expect(c!.config).toEqual({ host: 'db', database: 'orders' });
-      expect(d!.config).toEqual({ host: 'db', database: 'events' });
-      expect(notices.filter((n) => n.conversionId === 'datasource-config-driver-key-aliases')).toHaveLength(1);
-    });
-
-    it('still lands for a row whose driver id is ITSELF being renamed', () => {
-      // The pairs are keyed by CANONICAL driver id, and commit e2798fab7 renamed mongo's.
-      // A stored `driver: 'mongo'` must therefore still find the mongo pairs
-      // (through the alias) even as the sibling conversion rewrites its id —
-      // otherwise the rename would quietly un-convert every legacy mongo config.
-      const { stack, notices } = convert([
-        { name: 'events', driver: 'mongo', config: { uri: 'mongodb://db/x', user: 'svc' } },
-      ]);
-      const [events] = stack.datasources as Array<{ driver: string; config: Record<string, unknown> }>;
-      expect(events!.config).toEqual({ url: 'mongodb://db/x', username: 'svc' });
-      expect(events!.driver).toBe('mongodb');
-      // Two key renames (`uri` → `url`, `user` → `username`) plus the id rename.
-      expect(notices.filter((n) => n.conversionId === 'datasource-config-driver-key-aliases')).toHaveLength(2);
-      expect(notices.filter((n) => n.conversionId === 'datasource-driver-mongo-to-mongodb')).toHaveLength(1);
-    });
-
-    it('does not touch a plugin-contributed driver id — no contract, no rewrite', () => {
-      const before = { datasources: [{ name: 'x', driver: 'com.vendor.snowflake', config: { user: 'svc' } }] };
-      const { stack, notices } = collectConversionNotices(structuredClone(before), { includeRetired: true });
-      expect(stack).toEqual(before);
-      expect(notices).toHaveLength(0);
-    });
-
-    it('is retired from the load path — an AUTHORED legacy spelling is not silently absorbed', () => {
-      // Without includeRetired (the normalizeStackInput posture) the stack is
-      // untouched: the authoring gate rejects `file:` with a rename hint, and
-      // this conversion must not run ahead of it and defeat #4410.
-      const before = { datasources: [{ name: 'a', driver: 'sqlite', config: { file: './a.db' } }] };
-      const { stack, notices } = collectConversionNotices(structuredClone(before));
-      expect(stack).toEqual(before);
-      expect(notices).toHaveLength(0);
-    });
-  });
-  /**
-   * #5011 — `dashboard.widgets[].compareTo` converged on the executor contract.
-   *
-   * The fixture pair above already proves the three mechanical rewrites. What it
-   * cannot express is the entry's real judgement: the durations it deliberately
-   * does NOT touch, and the fact that it takes no acceptance window. Both are
-   * asserted here, because a conversion that quietly rewrote `{ offset: '7d' }`
-   * into a kind would turn a loud rejection into a wrong comparison — the exact
-   * failure class #5011 exists to end.
-   */
-  describe('dashboard-widget-compareto-converged', () => {
-    const dash = (compareTo: unknown) => ({
-      dashboards: [{
-        name: 'revenue_review',
-        widgets: [{ id: 'w1', type: 'kpi', dataset: 'orders', values: ['total'], compareTo }],
-      }],
-    });
-    const convert = (compareTo: unknown) =>
-      collectConversionNotices(structuredClone(dash(compareTo)), { includeRetired: true });
-    const widgetOf = (stack: Record<string, unknown>) =>
-      (stack.dashboards as Array<{ widgets: Array<Record<string, unknown>> }>)[0]!.widgets[0]!;
-
-    it('rewrites both bare strings, value verbatim, container changed', () => {
-      for (const kind of ['previousPeriod', 'previousYear'] as const) {
-        const { stack, notices } = convert(kind);
-        expect(widgetOf(stack).compareTo).toEqual({ kind });
-        expect(notices).toHaveLength(1);
-        expect(notices[0]!.from).toBe(`'${kind}'`);
-      }
-    });
-
-    it("rewrites `{ offset: '1y' }` — the one duration with an exact equivalent", () => {
-      const { stack, notices } = convert({ offset: '1y' });
-      expect(widgetOf(stack).compareTo).toEqual({ kind: 'previousYear' });
-      expect(notices).toHaveLength(1);
-    });
-
-    /**
-     * The deliberate non-rewrite, and the assertion this whole describe exists
-     * for. `previousPeriod` shifts by the resolved window's own length, which
-     * equals `7d` only when the window happens to be seven days — so a
-     * mechanical rewrite would silently change which rows the comparison column
-     * counts. Left untouched, the strict schema meets the author with the
-     * prescription instead.
-     */
-    it('leaves every other duration UNTOUCHED and silent, rather than guessing', () => {
-      for (const offset of ['7d', '1M', '2w', '30d', '3y']) {
-        const before = dash({ offset });
-        const { stack, notices } = convert({ offset });
-        expect(stack, `${offset} must not be rewritten`).toEqual(before);
-        expect(notices, `${offset} must emit no notice`).toHaveLength(0);
-      }
-    });
-
-    it('never synthesises a `dimension` — the executor resolves it, the chain cannot', () => {
-      // The conversion sees a stack, not a dataset: it cannot know which time
-      // dimension carries the window. Writing a guess here would convert a loud
-      // runtime error into a wrong comparison.
-      for (const input of ['previousPeriod', 'previousYear', { offset: '1y' }]) {
-        expect(widgetOf(convert(input).stack)).not.toHaveProperty('compareTo.dimension');
-      }
-    });
-
-    it('is retired from the load path — the old spellings get NO acceptance window', () => {
-      // Without `includeRetired` (the normalizeStackInput posture) nothing is
-      // rewritten: the strict schema must be what an AUTHORED legacy spelling
-      // meets, so the prescription is delivered instead of the shape being
-      // silently absorbed (PD #12).
-      for (const input of ['previousPeriod', 'previousYear', { offset: '1y' }]) {
-        const before = dash(input);
-        const { stack, notices } = collectConversionNotices(structuredClone(before));
-        expect(stack).toEqual(before);
-        expect(notices).toHaveLength(0);
-      }
-    });
-
-    it('touches only `compareTo` — a widget without one passes through by reference', () => {
-      const before = {
-        dashboards: [{
-          name: 'other', widgets: [{ id: 'w1', type: 'kpi', dataset: 'orders', values: ['total'] }],
-        }],
-      };
-      const { stack, notices } = collectConversionNotices(structuredClone(before), { includeRetired: true });
-      expect(stack).toEqual(before);
-      expect(notices).toHaveLength(0);
-    });
-
-    it('is idempotent by construction — the converged shape is not a match', () => {
-      // No test replays a conversion twice for us (the skill's note), so this
-      // asserts it directly: `{ kind }` is neither a string arm nor an `offset`.
-      const before = dash({ kind: 'previousYear' });
-      const { stack, notices } = collectConversionNotices(structuredClone(before), { includeRetired: true });
-      expect(stack).toEqual(before);
-      expect(notices).toHaveLength(0);
     });
   });
 
@@ -1820,294 +1493,6 @@ describe('conversion layer (ADR-0087 D2)', () => {
       });
       expect(PageSchema.safeParse(page(before)).success).toBe(true);
       expect(PageSchema.safeParse(page(after)).success).toBe(true);
-    });
-  });
-
-  /**
-   * `page-tabs-type-to-tab-style` (#6776).
-   *
-   * The fixture pair above pins before → after and the notice count. What needs
-   * its own cover here is everything the fixture cannot show:
-   *
-   *   - the **discriminator** — this entry keys on the component's `type`, and
-   *     the key it rewrites is also called `type`, so "which `type`" is the
-   *     whole correctness question;
-   *   - the **reach** — `page:tabs` is one of the seven named slots, and all
-   *     four in-repo authoring sites are `slots.tabs`, so a region-only walk
-   *     would rewrite nothing that actually exists;
-   *   - **idempotence** and the #4923 both-keys rule;
-   *   - the **acceptance face in both directions**, since a rename moves what
-   *     the schema accepts as well as what it refuses.
-   */
-  describe('page-tabs-type-to-tab-style', () => {
-    const regionPage = (properties: Record<string, unknown>) => ({
-      pages: [{ name: 'sys_position_detail', regions: [{ name: 'main', components: [{ type: 'page:tabs', properties }] }] }],
-    });
-    const slottedPage = (properties: Record<string, unknown>) => ({
-      pages: [{ name: 'sys_user_detail', regions: [], slots: { tabs: { type: 'page:tabs', properties } } }],
-    });
-    const convert = (stack: Record<string, unknown>) => {
-      const notices: ConversionNotice[] = [];
-      const out = applyConversions(stack, { includeRetired: true, onNotice: (n) => notices.push(n) });
-      return { out, notices };
-    };
-    type Comp = { type: string; properties: Record<string, unknown> };
-    type Pg = { regions: { components: Comp[] }[]; slots?: { tabs: Comp | Comp[] } };
-    const pageOf = (stack: Record<string, unknown>) => (stack.pages as Pg[])[0]!;
-    const propsOf = (stack: Record<string, unknown>, where: 'region' | 'slot') => {
-      const page = pageOf(stack);
-      return where === 'region'
-        ? page.regions[0]!.components[0]!.properties
-        : (page.slots!.tabs as Comp).properties;
-    };
-
-    it('rewrites `properties.type` → `tabStyle` on a region-level page:tabs', () => {
-      const { out, notices } = convert(regionPage({ type: 'card', items: [] }));
-      expect(propsOf(out, 'region')).toEqual({ tabStyle: 'card', items: [] });
-      expect(notices.map((n) => n.conversionId)).toEqual(['page-tabs-type-to-tab-style']);
-      expect(notices[0]!.path).toBe('pages[0].regions[0].components[0].properties.tabStyle');
-    });
-
-    it('reaches `slots.tabs` — the shape every in-repo site actually uses', () => {
-      // Region-only reach was the pre-#6776 behaviour of `mapPageComponents`,
-      // and for THIS key it would have converted nothing: `page:tabs` is a
-      // named slot, and all four sites in this repo are slotted record pages.
-      // A conversion that cannot reach the corpus makes the tombstone's
-      // "run `os migrate meta`" prescription a false promise.
-      const { out, notices } = convert(slottedPage({ type: 'pill', position: 'top', items: [] }));
-      expect(propsOf(out, 'slot')).toEqual({ tabStyle: 'pill', position: 'top', items: [] });
-      expect(notices[0]!.path).toBe('pages[0].slots.tabs.properties.tabStyle');
-    });
-
-    it('reaches an ARRAY-valued slot too, indexing the path', () => {
-      const stack = {
-        pages: [{
-          name: 'sys_user_detail',
-          regions: [],
-          slots: { tabs: [{ type: 'page:tabs', properties: { type: 'card', items: [] } }] },
-        }],
-      };
-      const { out, notices } = convert(stack);
-      const slot = pageOf(out).slots!.tabs as Comp[];
-      expect(slot[0]!.properties).toEqual({ tabStyle: 'card', items: [] });
-      expect(notices[0]!.path).toBe('pages[0].slots.tabs[0].properties.tabStyle');
-    });
-
-    it('never touches the node\'s OWN `type` — the dispatch key is not the prop', () => {
-      // The one confusion this entry has to be immune to: `component.type` is
-      // `'page:tabs'` and stays that way; only `properties.type` moves.
-      const { out } = convert(regionPage({ type: 'card', items: [] }));
-      expect(pageOf(out).regions[0]!.components[0]!.type).toBe('page:tabs');
-    });
-
-    it('leaves a non-tabs component alone, including a nested `type` in its props', () => {
-      const stack = {
-        pages: [{
-          name: 'p',
-          regions: [{
-            name: 'main',
-            components: [{ type: 'element:button', properties: { label: 'Open', action: { type: 'url', target: '/x' } } }],
-          }],
-        }],
-      };
-      // Identity, not just equality: nothing converted, so copy-on-write shares.
-      expect(applyConversions(stack, { includeRetired: true })).toBe(stack);
-    });
-
-    it('keeps BOTH when `tabStyle` already says something different', () => {
-      const stack = regionPage({ tabStyle: 'pill', type: 'card', items: [] });
-      const { out, notices } = convert(stack);
-      expect(out).toBe(stack);
-      expect(notices).toEqual([]);
-    });
-
-    it('drops the redundant twin when both spellings agree', () => {
-      const { out, notices } = convert(regionPage({ tabStyle: 'pill', type: 'pill', items: [] }));
-      expect(propsOf(out, 'region')).toEqual({ tabStyle: 'pill', items: [] });
-      expect(notices).toHaveLength(1);
-    });
-
-    it('is idempotent — the converted result replays to itself with no second notice', () => {
-      const once = applyConversions(regionPage({ type: 'card', items: [] }), { includeRetired: true });
-      const notices: ConversionNotice[] = [];
-      const twice = applyConversions(once, { includeRetired: true, onNotice: (n) => notices.push(n) });
-      expect(twice).toBe(once);
-      expect(notices).toEqual([]);
-    });
-
-    /**
-     * The acceptance face, both directions — a KEY verdict, so the criterion is
-     * the props schema's own judgement of the key (#5046's distinction), not a
-     * full-parse-green demand on a value.
-     *
-     * `PageSchema` stays green on both spellings because
-     * `PageComponent.properties` is an open bag that never judged the key at
-     * all; that gap is the defect's mechanism, and the #5068 props gate is the
-     * only place either verdict is visible.
-     */
-    it('the props schema refuses `type` BY NAME and accepts `tabStyle`; PageSchema accepts both', () => {
-      expect(PageTabsProps.safeParse({ type: 'card', items: [] }).success).toBe(false);
-      // The refusal carries the prescription, not a bare "unrecognized key" —
-      // a `retiredKey` tombstone rather than an undeclared key, which is what
-      // makes the removal audible to an upgrading (often AI) author.
-      expect(() => PageTabsProps.parse({ type: 'card', items: [] }))
-        .toThrow(/`type`.*removed.*`tabStyle`/s);
-      expect(PageTabsProps.safeParse({ tabStyle: 'card', items: [] }).success).toBe(true);
-
-      const page = (properties: Record<string, unknown>) => ({
-        name: 'sys_position_detail',
-        label: 'Position',
-        type: 'record' as const,
-        object: 'sys_position',
-        regions: [{ name: 'main', components: [{ type: 'page:tabs', properties }] }],
-      });
-      expect(PageSchema.safeParse(page({ type: 'card', items: [] })).success).toBe(true);
-      expect(PageSchema.safeParse(page({ tabStyle: 'card', items: [] })).success).toBe(true);
-    });
-  });
-
-  /**
-   * `app-hidden-to-unpublished` (#4829, ADR-0045 amended 2026-08-09).
-   *
-   * The fixture pair pins before → after and the notice count. What needs its
-   * own cover here is the property the fixture cannot express, and the one this
-   * entry would be dangerous without: **its reach is the stored population and
-   * nothing else.**
-   *
-   * `hidden` is not a retired key. It keeps its birth contract — navigation
-   * presentation — so an author writing `hidden: true` (the Account /
-   * personal-settings case, which the platform itself does) must come out of the
-   * load path with `hidden: true` still on the app. A conversion firing there
-   * would rewrite that into an unpublished app and reproduce #4829 one layer
-   * down, through the very machinery meant to repair it. `retiredFromLoadPath`
-   * is what buys that, so it is asserted directly rather than inferred.
-   */
-  describe('app-hidden-to-unpublished', () => {
-    const storedApp = (app: Record<string, unknown>) => ({ apps: [{ name: 'production_management', ...app }] });
-    const convertStored = (stack: Record<string, unknown>) => {
-      const notices: ConversionNotice[] = [];
-      const out = applyConversions(stack, { includeRetired: true, onNotice: (n) => notices.push(n) });
-      return { out, notices };
-    };
-    const appOf = (stack: Record<string, unknown>) => (stack.apps as Record<string, unknown>[])[0]!;
-
-    it('rewrites a stored `hidden: true` app to `_unpublished: true`, dropping `hidden`', () => {
-      const { out, notices } = convertStored(storedApp({ hidden: true, label: 'PM', navigation: [] }));
-      expect(appOf(out)).toEqual({ name: 'production_management', _unpublished: true, label: 'PM', navigation: [] });
-      expect(notices.map((n) => n.conversionId)).toEqual(['app-hidden-to-unpublished']);
-      expect(notices[0]!.path).toBe('apps[0]._unpublished');
-      expect(notices[0]!.from).toBe('hidden');
-      expect(notices[0]!.to).toBe('_unpublished');
-    });
-
-    it('leaves `hidden: false` alone — it meant "listed" under both regimes', () => {
-      const before = storedApp({ hidden: false, navigation: [] });
-      const { out, notices } = convertStored(before);
-      expect(out).toBe(before);
-      expect(notices).toEqual([]);
-    });
-
-    it('a row that already carries `_unpublished` keeps BOTH keys, untouched', () => {
-      // The machine has already spoken about this row. Reconciling a
-      // disagreeing pair is a human's call, not the loader's — and it is what
-      // makes the pass idempotent on a row that has already converted.
-      const before = storedApp({ hidden: true, _unpublished: false, navigation: [] });
-      const { out, notices } = convertStored(before);
-      expect(out).toBe(before);
-      expect(notices).toEqual([]);
-    });
-
-    it('is idempotent — the converted result replays to itself with no second notice', () => {
-      const once = applyConversions(storedApp({ hidden: true, navigation: [] }), { includeRetired: true });
-      const notices: ConversionNotice[] = [];
-      const twice = applyConversions(once, { includeRetired: true, onNotice: (n) => notices.push(n) });
-      expect(twice).toBe(once);
-      expect(notices).toEqual([]);
-    });
-
-    it('replays on the STORED seam, which is the population it exists for', () => {
-      const converted = applyConversionsToStoredItem('app', { name: 'edu_admin', hidden: true, navigation: [] });
-      expect(converted).toEqual({ name: 'edu_admin', _unpublished: true, navigation: [] });
-    });
-
-    // ---- the reach, asserted in the negative ----
-
-    it('⛔ does NOT fire on the LOAD path — an authored `hidden: true` survives verbatim', () => {
-      // `includeRetired` defaults to false, which IS the load seam
-      // (`normalizeStackInput` for defineStack / validate / lint). This is the
-      // assertion that keeps the built-in Account app — authored `hidden: true`
-      // for the avatar-menu reason — from being converted into an app no normal
-      // user may reach, which is the #4829 defect itself.
-      const account = { apps: [{ name: 'account', label: 'Account', hidden: true, navigation: [] }] };
-      const notices: ConversionNotice[] = [];
-      const out = applyConversions(account, { onNotice: (n) => notices.push(n) });
-      expect(out).toBe(account);
-      expect(appOf(out)).toEqual({ name: 'account', label: 'Account', hidden: true, navigation: [] });
-      expect(notices).toEqual([]);
-    });
-
-    it('is declared `retiredFromLoadPath` — the flag IS the load-path exclusion', () => {
-      const entry = ALL_CONVERSIONS.find((c) => c.id === 'app-hidden-to-unpublished');
-      expect(entry).toBeDefined();
-      expect(entry!.retiredFromLoadPath).toBe(true);
-      expect(entry!.toMajor).toBe(17);
-    });
-
-    // ---- the seam's own refusal (`excludeConversionIds`, #17885) ----
-
-    /**
-     * A seam that has opened the retired window may still refuse a named
-     * entry. The artifact-ingestion door does exactly this for the DEFAULT-FLIP
-     * class: its evidence is the artifact's DECLARED `engines.protocol` floor,
-     * which is a dependency range and not an age, so "this input predates the
-     * flip" is a guess there — while at the stored-row seam above it is a fact.
-     * Pinned on the primitive so the option cannot quietly stop working while
-     * the door's own suite still reads green for another reason.
-     */
-    it('a seam can refuse a named entry by id even with `includeRetired: true`', () => {
-      const before = storedApp({ hidden: true, label: 'PM', navigation: [] });
-      const notices: ConversionNotice[] = [];
-      const out = applyConversions(before, {
-        includeRetired: true,
-        excludeConversionIds: ['app-hidden-to-unpublished'],
-        onNotice: (n) => notices.push(n),
-      });
-      expect(out).toBe(before);
-      expect(appOf(out)).toEqual({ name: 'production_management', hidden: true, label: 'PM', navigation: [] });
-      expect(notices).toEqual([]);
-    });
-
-    /**
-     * ⭐ FIRING CONTROL for the refusal above — it excludes ONE id, not the
-     * window. `page-kind-jsx-to-html` (retired too, at 18) and the retired app
-     * entry are driven through the SAME call: the named one is refused, the other
-     * still fires.
-     */
-    it('refuses only the named id — the rest of the chain still runs', () => {
-      const notices: ConversionNotice[] = [];
-      const out = applyConversions(
-        {
-          apps: [{ name: 'production_management', hidden: true, navigation: [] }],
-          pages: [{ name: 'landing', kind: 'jsx', source: '<div>hi</div>' }],
-        },
-        {
-          includeRetired: true,
-          excludeConversionIds: ['app-hidden-to-unpublished'],
-          onNotice: (n) => notices.push(n),
-        },
-      );
-      expect(appOf(out).hidden, 'the refused entry did not fire').toBe(true);
-      expect(appOf(out)._unpublished).toBeUndefined();
-      expect((out.pages as Record<string, unknown>[])[0]!.kind, 'the rest of the chain did').toBe('html');
-      expect(notices.map((n) => n.conversionId)).toEqual(['page-kind-jsx-to-html']);
-    });
-
-    it('an absent or empty exclusion list changes nothing', () => {
-      const shape = () => storedApp({ hidden: true, navigation: [] });
-      const withEmpty = applyConversions(shape(), { includeRetired: true, excludeConversionIds: [] });
-      const without = applyConversions(shape(), { includeRetired: true });
-      expect(appOf(withEmpty)._unpublished).toBe(true);
-      expect(appOf(without)._unpublished).toBe(true);
     });
   });
 

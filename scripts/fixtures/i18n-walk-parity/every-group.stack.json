@@ -173,10 +173,27 @@
       ]
     }
   ],
+  "hooks": [
+    {
+      "name": "parity_guard",
+      "object": "parity_object",
+      "events": ["beforeInsert"],
+      "body": { "language": "js", "source": "throw Object.assign(new Error('refused'), { code: 'PARITY_REFUSED' });" },
+      "refusals": { "PARITY_REFUSED": { "message": "Parity records are refused." } }
+    }
+  ],
   "positions": [
     { "name": "parity_reviewer", "label": "Parity Reviewer", "description": "Reviews parity findings" }
   ],
   "permissions": [
     { "name": "parity_auditor", "label": "Parity Auditor", "description": "Reads parity findings" }
+  ],
+  "books": [
+    {
+      "name": "parity_handbook",
+      "label": "Parity Handbook",
+      "description": "How parity is measured",
+      "groups": [{ "key": "basics", "label": "Basics", "include": "parity_*" }]
+    }
   ]
 }
