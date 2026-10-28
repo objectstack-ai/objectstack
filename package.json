@@ -160,7 +160,7 @@
     "check:release-index-currency-sync": "node scripts/sync-release-index-currency.mjs --self-test",
     "check:node-version": "node scripts/check-node-version.mjs --self-test && node scripts/check-node-version.mjs",
     "check:pnpm-acquisition": "node scripts/check-pnpm-acquisition.mjs --self-test && node scripts/check-pnpm-acquisition.mjs",
-    "check:workflow-status-functions": "node scripts/check-workflow-status-functions.mjs --self-test && node scripts/check-workflow-status-functions.mjs",
+    "check:workflow-status-functions": "node scripts/check-workflow-status-functions.mjs --self-test && node scripts/check-workflow-status-functions.mjs && node scripts/check-workflow-context-availability.mjs --self-test && node scripts/check-workflow-context-availability.mjs",
     "check:workflow-step-name-quoting": "node scripts/check-workflow-step-name-quoting.mjs --self-test && node scripts/check-workflow-step-name-quoting.mjs",
     "check:select-shard-packages": "bash scripts/ci/select-shard-packages.selftest.sh",
     "check:select-gate-families": "bash scripts/ci/select-gate-families.selftest.sh",
