@@ -153,6 +153,25 @@ describe('RETIRED_FILTER_OPERATORS', () => {
     }
   });
 
+  it('names every operator it prescribes before the history, inside what a client reads', () => {
+    // [#27098] A refusal prints `why` after a lead-in of its own (operator,
+    // field, path, `Write "<to>" instead.`), and a client reads 500 characters
+    // of it. This budget is what is left after the longest lead-in with room
+    // for a long field name and path; an alternative named only past it is
+    // history-first again — the order that cut `$contains` off the wire.
+    const PRESCRIPTION_BUDGET = 300;
+    const declared = new Set<string>(declaredKeys());
+    for (const [op, guidance] of entries) {
+      const prescribed = [...guidance.why.matchAll(/`(\$[A-Za-z]+)`/g)]
+        .map((m) => m[1])
+        .filter((name) => declared.has(name));
+      expect(prescribed.length, `${op}'s prescription names no declared operator`).toBeGreaterThan(0);
+      for (const name of new Set(prescribed)) {
+        expect(guidance.why.indexOf(`\`${name}\``), `${op} prescribes ${name} past the budget`).toBeLessThan(PRESCRIPTION_BUDGET);
+      }
+    }
+  });
+
   it('is not simultaneously declared anywhere — retired means gone', () => {
     const declared = new Set([...declaredKeys(), ...FILTER_OPERATORS, ...LOGICAL_OPERATORS]);
     for (const op of Object.keys(RETIRED_FILTER_OPERATORS)) {
