@@ -105,7 +105,7 @@ describe('PermissionMatrixEditPage — header shows the served label (objectstac
 
     // Any matrix edit → the autosave sends the draft (objectui#11787).
     const row = screen.getByText('a_account').closest('tr')!;
-    fireEvent.click(within(row).getByRole('button', { name: /None|无/ }));
+    fireEvent.click(within(row).getByRole('button', { name: /None|清空/ }));
     await waitFor(() => expect(server.saved).toHaveLength(1), { timeout: 4000 });
     expect(server.saved[0].label).toBe('Sales Representative');
     // The header still names the set by the served label after the save.
