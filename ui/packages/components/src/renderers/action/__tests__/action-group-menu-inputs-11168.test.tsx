@@ -250,7 +250,7 @@ describe('action:group — the member shape of `actions` (the MEMBER-PIN directi
         member('shown'),
         member('hidden', { visible: false }),
         member('greyed', { disabled: true }),
-        member('loud', { variant: 'destructive', size: 'lg', className: 'member-class' }),
+        member('loud', { variant: 'danger', size: 'lg', className: 'member-class' }),
       ],
     });
     expect(screen.getByRole('button', { name: 'SHOWN' })).toBeEnabled();
@@ -369,7 +369,7 @@ describe('action:menu — the member shape of `actions` (the MEMBER-PIN directio
         member('shown'),
         member('hidden', { visible: false }),
         member('greyed', { disabled: true }),
-        { name: 'nameonly', type: 'run', tags: ['separator-before'], variant: 'destructive' },
+        { name: 'nameonly', type: 'run', tags: ['separator-before'], variant: 'danger' },
       ],
     });
     const menu = await openMenu(screen.getByRole('button', { name: MORE }));

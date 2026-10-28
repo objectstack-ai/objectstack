@@ -27,7 +27,7 @@ import { resolveIcon } from './resolve-icon';
 import { hasDeclaredVisibilityGate } from './visibility-gate';
 import { useAutoTriggerOnce } from './auto-trigger';
 import { readStaticParamValues } from './static-params';
-import { toRunnerVariant } from './runner-variant';
+import { toButtonVariant, toRunnerVariant } from './runner-variant';
 import { DisabledReasonTrigger, describedByWithReason, useDisabledReason } from './disabled-reason';
 import type { RendererHostProps } from '../../lib/renderer-host-props';
 
@@ -126,7 +126,7 @@ const ActionIconRenderer = forwardRef<
     );
 
     const Icon = resolveIcon(schema.icon);
-    const variant = schema.variant === 'primary' ? 'default' : (schema.variant || 'ghost');
+    const variant = toButtonVariant(schema.variant, 'ghost');
     const size = 'icon';
 
     const handleClick = useCallback(async () => {
@@ -366,7 +366,7 @@ ComponentRegistry.register('icon', ActionIconRenderer, {
     {
       name: 'variant',
       type: 'enum',
-      enum: ['default', 'secondary', 'destructive', 'outline', 'ghost'],
+      enum: ['default', 'secondary', 'danger', 'outline', 'ghost'],
     },
     { name: 'className', type: 'string' },
     {
