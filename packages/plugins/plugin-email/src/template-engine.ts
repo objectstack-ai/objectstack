@@ -34,9 +34,16 @@
  * literal ISO 4217 code — is refused at authoring and publish; one that still
  * reaches the renderer (a template stored before the rule existed, or a body
  * handed to these functions directly) makes the render throw
- * `TEMPLATE_INVALID`, naming the hole and the rule. That is the one way a
- * render throws: it prints neither a substituted currency nor formatter
- * syntax to a recipient.
+ * `TEMPLATE_INVALID`, naming the hole and the rule.
+ *
+ * `{{ amount | currency:@currency_code }}` formats the amount in the currency
+ * whose ISO 4217 code the send's `data` holds at that path, so one template
+ * serves records in many currencies. The path is resolved here, like a hole's
+ * own path; a value that is not a code in three capital letters — missing,
+ * `null`, lowercase (`eur`), anything else — makes the render throw
+ * `TEMPLATE_INVALID` too, naming the hole, the path and the value
+ * (`currencyCodeValueRefusal`). Those are the ways a render throws: it prints
+ * neither a substituted currency nor formatter syntax to a recipient.
  *
  * Deliberately tiny (no loops / conditionals / partials) — the design
  * stance is that email templates SHOULD be data-only renderings; any
@@ -45,7 +52,7 @@
  * runtime; we resist that until a real use case demands it.
  */
 
-import { formatValue, mailHolePattern, parseMailHole } from '@objectstack/formula';
+import { currencyCodeValueRefusal, formatValue, mailHolePattern, parseMailHole } from '@objectstack/formula';
 
 /** Locale + reference timezone for hole formatters (ADR-0053 Phase 2). */
 export interface RenderOptions {
@@ -124,9 +131,18 @@ function render(
       const raw = lookup(data, parsed.path);
       let str: string;
       if (parsed.formatter) {
+        // `currency:@path`: the code is the send's data at that path, judged
+        // before the amount is read, as a literal argument is.
+        let arg = parsed.arg;
+        if (parsed.codePath !== undefined) {
+          const code = lookup(data, parsed.codePath);
+          const refusal = currencyCodeValueRefusal(match, parsed.codePath, code);
+          if (refusal) throw new Error(`TEMPLATE_INVALID: ${refusal}`);
+          arg = code as string;
+        }
         // Formatted holes render '' for a missing value (the formula formatters
         // treat null as empty), so they never emit "undefined".
-        const formatted = formatValue(parsed.formatter, raw, parsed.arg, {
+        const formatted = formatValue(parsed.formatter, raw, arg, {
           locale: opts.locale,
           timeZone: opts.timeZone,
         });

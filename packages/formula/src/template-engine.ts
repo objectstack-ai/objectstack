@@ -72,7 +72,9 @@ const FORMATTERS: Record<string, Formatter> = {
   // literal ISO 4217 code. An argument that is not one (a path such as
   // `currency_code`, a lowercase or empty code) is refused when the template
   // is compiled or published (`judgeHoleFormatter`), and refused here too: it
-  // throws rather than format the amount in a currency nobody wrote.
+  // throws rather than format the amount in a currency nobody wrote. The mail
+  // dialect's `currency:@path` form is resolved by the mail renderer, which
+  // hands this formatter the code it read; this formatter never reads a path.
   currency: (v, arg, locale) => {
     if (arg !== undefined && !isCurrencyCode(arg)) {
       throw new RangeError(currencyArgumentRefusal(`currency:${arg}`, arg));
@@ -149,14 +151,35 @@ export const TEMPLATE_FORMATTERS: string[] = Object.keys(FORMATTERS);
 //   formatter's argument, so `{{ x | default:0 | number:2 }}` rendered the
 //   text `0 | number:2` — formatter syntax printed to the reader — and
 //   `{{ x | upper | lower }}` was left on the page as written.
-// - The `currency` argument is a literal ISO 4217 code in capitals. A path
-//   (`currency:currency_code`) is not read: `Intl` refused it and the
+// - The `currency` argument is a literal ISO 4217 code in capitals. A bare
+//   path (`currency:currency_code`) is not read: `Intl` refused it and the
 //   formatter used to substitute USD, so the amount printed in a currency
-//   nobody wrote. Reading a code from the data is a grammar widening this
-//   function does not make.
+//   nobody wrote.
+// - A mail template may instead read the code from the send's data, marked
+//   with `@` (`currency:@currency_code`, `CURRENCY_ARGUMENT_RULE`). The mark
+//   keeps the two forms apart for every input: a literal code never starts
+//   with `@`, and no path does. The in-app dialect refuses the marked form by
+//   name: its doors judge the roots of a hole's path against the slot's
+//   closed scope and do not read an argument, so a path there would reach
+//   the page unjudged.
 
 /** The rule a refused hole breaks. */
-export type TemplateHoleGrammarRule = 'one-formatter' | 'known-formatter' | 'currency-code-literal';
+export type TemplateHoleGrammarRule =
+  | 'one-formatter'
+  | 'known-formatter'
+  | 'currency-code-literal'
+  | 'currency-code-path-mail-only'
+  | 'currency-code-path-undeclared';
+
+/**
+ * The `currency` argument rule, in the one sentence the mail renderer, the
+ * `email-template-hole-grammar` authoring rule and the spec's
+ * `email_template` face descriptions all quote.
+ */
+export const CURRENCY_ARGUMENT_RULE =
+  'A `currency` argument is either a literal ISO 4217 code in three capital letters (`currency:EUR`) or, '
+  + 'in a mail template only, `@` followed by a path into the send\'s data whose value is such a code '
+  + '(`currency:@currency_code`).';
 
 /** A hole the shared grammar refuses, with the sentence an author is shown. */
 export interface TemplateHoleGrammarRefusal {
@@ -175,12 +198,72 @@ function isCurrencyCode(arg: string): boolean {
   return CURRENCY_CODE_RE.test(arg.trim());
 }
 
-function currencyArgumentRefusal(hole: string, arg: string): string {
+/** The dialect a hole is judged in: the in-app template engine's (the default) or a mail template's. */
+export type TemplateHoleDialect = 'in-app' | 'mail';
+
+function currencyArgumentRefusal(hole: string, arg: string, dialect: TemplateHoleDialect = 'in-app'): string {
+  if (dialect === 'mail') {
+    return (
+      `the hole ${hole} gives the currency formatter the argument '${arg.trim()}', which is neither an ISO 4217 `
+      + 'currency code nor a marked path: a bare argument is never read as a path to a value. '
+      + `${CURRENCY_ARGUMENT_RULE} Write the code itself, or mark the path that holds it with \`@\`.`
+    );
+  }
   return (
     `the hole ${hole} gives the currency formatter the argument '${arg.trim()}', which is not an ISO 4217 `
     + 'currency code: the argument is a literal code in three capital letters (`currency:EUR`), and it is '
     + 'never read as a path to a value. Write the code itself, or format the amount in the caller that '
     + 'supplies the data and pass the formatted text as its own variable.'
+  );
+}
+
+/** The `@` mark, then a dotted path of word characters with no empty segment. */
+const CURRENCY_CODE_PATH_RE = /^@(\w+(?:\.\w+)*)$/;
+
+/**
+ * The path a `currency` hole reads its code from (`currency:@currency_code` →
+ * `currency_code`), or `undefined` when the formatter part is not that form.
+ * The form is read from the text as written: an argument in quotes
+ * (`currency:'@x'`) is not a path, and neither is a mark with no path after
+ * it, a space after the mark, or an empty segment (`@a..b`).
+ *
+ * @param formatterPart the text after the hole's first `|`, trimmed
+ */
+export function currencyCodePath(formatterPart: string): string | undefined {
+  const colon = formatterPart.indexOf(':');
+  if (colon === -1 || formatterPart.slice(0, colon).trim() !== 'currency') return undefined;
+  return CURRENCY_CODE_PATH_RE.exec(formatterPart.slice(colon + 1).trim())?.[1];
+}
+
+function describeCodeValue(value: unknown): string {
+  if (value === undefined) return 'missing';
+  if (value === null) return 'null';
+  if (typeof value === 'string') return `'${value}'`;
+  try {
+    return `${typeof value} ${JSON.stringify(value)}`;
+  } catch {
+    return typeof value;
+  }
+}
+
+/**
+ * Why the value a `currency:@path` hole read from the send's data cannot be
+ * the currency it formats in, or `null` when it is an ISO 4217 code in three
+ * capital letters, exactly as stored. A missing or null value, a lowercase
+ * code (`eur`), a padded one or any other value is refused: the amount is then
+ * formatted in no currency at all, never in a default one.
+ *
+ * @param hole  the hole as written, braces included
+ * @param path  the path after the `@` mark
+ * @param value what the path resolved to in the send's data
+ */
+export function currencyCodeValueRefusal(hole: string, path: string, value: unknown): string | null {
+  if (typeof value === 'string' && CURRENCY_CODE_RE.test(value)) return null;
+  return (
+    `the hole ${hole} reads the currency code from \`${path}\`, whose value in this send's data is `
+    + `${describeCodeValue(value)}, not an ISO 4217 code in three capital letters, so the amount is not `
+    + `formatted in any currency. ${CURRENCY_ARGUMENT_RULE} Supply the code in capitals (\`EUR\`) under `
+    + `\`${path}\`.`
   );
 }
 
@@ -215,6 +298,8 @@ function chainsASecondFormatter(formatterPart: string): boolean {
  * @param formatterPart the text after the hole's first `|`, trimmed
  * @param formatter     the formatter name the dialect parsed
  * @param arg           the argument the dialect parsed, quotes removed; `undefined` when none was written
+ * @param dialect       `'mail'` admits the `currency:@path` form ({@link CURRENCY_ARGUMENT_RULE}); the
+ *                      in-app dialect (the default) refuses it by name
  * @returns the refusal, or `null` when the hole is within the grammar
  */
 export function judgeHoleFormatter(
@@ -222,6 +307,7 @@ export function judgeHoleFormatter(
   formatterPart: string,
   formatter: string,
   arg: string | undefined,
+  dialect: TemplateHoleDialect = 'in-app',
 ): TemplateHoleGrammarRefusal | null {
   if (chainsASecondFormatter(formatterPart)) {
     return {
@@ -243,7 +329,20 @@ export function judgeHoleFormatter(
     };
   }
   if (formatter === 'currency' && arg !== undefined && !isCurrencyCode(arg)) {
-    return { rule: 'currency-code-literal', message: currencyArgumentRefusal(hole, arg) };
+    if (currencyCodePath(formatterPart) === undefined) {
+      return { rule: 'currency-code-literal', message: currencyArgumentRefusal(hole, arg, dialect) };
+    }
+    if (dialect !== 'mail') {
+      return {
+        rule: 'currency-code-path-mail-only',
+        message:
+          `the hole ${hole} reads its currency code from the data (\`currency:@path\`), a form only a mail `
+          + 'template reads: here the `currency` argument is a literal ISO 4217 code in three capital letters '
+          + '(`currency:EUR`), because the doors that judge this text check a hole\'s path against the roots '
+          + 'it binds and never read an argument. Write the code itself, or format the amount in the caller '
+          + 'that supplies the data and pass the formatted text as its own variable.',
+      };
+    }
   }
   return null;
 }

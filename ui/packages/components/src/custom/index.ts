@@ -14,6 +14,7 @@ export * from './item';
 export * from './kbd';
 export * from './native-select';
 export * from './navigation-overlay';
+export * from './panel-toggles';
 export * from './resizable';
 export * from './section-header';
 export * from './spinner';

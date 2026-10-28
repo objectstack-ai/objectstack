@@ -2747,7 +2747,7 @@ function groupOfStoredRules(rules: FilterRuleLite[]) {
   };
 }
 
-function FilterBuilderField({ value, onChange, fields, readOnly, id, ariaLabelledBy, loadError }: {
+export function FilterBuilderField({ value, onChange, fields, readOnly, id, ariaLabelledBy, loadError }: {
   value?: FilterRuleLite[];
   onChange: (rules: FilterRuleLite[]) => void;
   fields: Array<{ name: string; label?: string; type?: string }>;

@@ -937,6 +937,18 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "メモリ（MB）",
         helpText: "呼び出しごとのメモリ上限（MB、最大 256）"
       },
+      refusals: {
+        label: "拒否カタログ",
+        helpText: "本体がスローする SCREAMING_SNAKE のコード（例: CLEAN_VERSION_REQUIRED）をキーとする拒否カタログ。呼び出し元には宣言したメッセージ（その言語に翻訳）と宣言したステータスが返ります。JavaScript（L2）本体のみ"
+      },
+      "refusals.message": {
+        label: "メッセージ",
+        helpText: "本体がこのコードをスローしたときにユーザーが読む文 — プレーンテキスト、プレースホルダーなし"
+      },
+      "refusals.status": {
+        label: "ステータス",
+        helpText: "拒否の HTTP ステータス（400–499）。未指定: 400"
+      },
       handler: {
         label: "ハンドラー",
         helpText: "ハンドラー関数名（非推奨 — `body` を推奨）"
@@ -2094,6 +2106,9 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "measures.currency": {
         label: "通貨"
+      },
+      "measures.polarity": {
+        label: "極性"
       },
       "measures.derived": {
         label: "派生元"

@@ -782,9 +782,10 @@ describe('#19403 round 6 — the composite blind spot, hook side, CLOSED', () =>
   it('the derivation reproduces round 5\'s measurement of what the repeater pin cannot see', () => {
     // `hookForm` enumerates no repeater at all, so `repeater-row-properties.test.ts`
     // is blind here through a DARK control that is TRUE and CORRECT — the shape
-    // round 5 wrote down. Seven children sit enumerated and outside it.
+    // round 5 wrote down. Seven children sit enumerated and outside it — 9
+    // since #26835, when the `refusals` record's `message` / `status` joined.
     expect(HOOK_ENUMERATED.covered.length, 'hookForm enumerates no repeater row properties').toBe(0);
-    expect(HOOK_ENUMERATED.skipped.length).toBe(7);
+    expect(HOOK_ENUMERATED.skipped.length).toBe(9);
     for (const child of SHARED_BODY_CHILDREN) expect(HOOK_ENUMERATED.skipped).toContain(`body.${child}`);
     expect(HOOK_ENUMERATED.skipped).toContain('retryPolicy.maxRetries');
     expect(HOOK_ENUMERATED.skipped).toContain('retryPolicy.backoffMs');

@@ -307,9 +307,10 @@ async function serveFamilyRead<A>(
  * node's `outputVariable` agrees with `{<node>.id}`; it is not taken back off,
  * which would be a second projection layer over the engine's answer.
  *
- * Only a non-empty projection is touched: no `fields`, or an empty list, is a
- * whole-row read already, and a projection that names `id` is handed over as
- * written. The `find` branch (`limit > 1`) answers rows only, with no
+ * Only a non-empty projection is touched: no `fields` is a whole-row read
+ * already, an empty list is handed over as written for the engine to refuse
+ * (#27008: an empty projection is never read as the whole row), and a
+ * projection that names `id` is handed over as written. The `find` branch (`limit > 1`) answers rows only, with no
  * top-level `id`, and does not come through here.
  */
 function projectionNamingId(fields: string[] | undefined): string[] | undefined {

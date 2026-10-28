@@ -16,9 +16,13 @@
  * - a second formatter (`{{ x | default:0 | number:2 }}`) — the renderer used
  *   to read it as part of the first formatter's argument and print the text
  *   `0 | number:2`, or leave the whole hole on the page;
- * - a `currency` argument that is not a literal ISO 4217 code
- *   (`currency:currency_code`, a path) — it is not read as a path, and the
- *   renderer used to print the amount in USD instead.
+ * - a `currency` argument that is neither a literal ISO 4217 code nor a
+ *   marked path (`currency:currency_code`, a bare path) — it is not read as a
+ *   path, and the renderer used to print the amount in USD instead;
+ * - a marked path (`currency:@currency_code`, which reads the code from the
+ *   send's data) that the template's declared `variables` do not declare,
+ *   when it declares any. A template that declares none has its path judged
+ *   at render, where a value that is not a code is refused.
  *
  * WHICH holes are refused is not decided here: it is `@objectstack/formula`'s
  * `judgeMailHoleGrammar`, the grammar the mail renderer itself parses with,
@@ -39,7 +43,7 @@
  * placement rule's question (`validate-email-template-hole-placements.ts`).
  */
 
-import { judgeMailHoleGrammar } from '@objectstack/formula';
+import { CURRENCY_ARGUMENT_RULE, judgeMailHoleGrammar } from '@objectstack/formula';
 
 import { collectionEntries } from './collection-entries.js';
 
@@ -60,15 +64,25 @@ export interface EmailTemplateHoleGrammarFinding {
 /** The faces a mail template renders, in the order a finding reports them. */
 const FACES = ['subject', 'bodyText', 'bodyHtml'] as const;
 
+/** The names a template's `variables` declare; a malformed entry declares nothing. */
+function declaredVariableNames(variables: unknown): string[] {
+  if (!Array.isArray(variables)) return [];
+  return variables.flatMap((v) =>
+    v && typeof v === 'object' && typeof (v as AnyRec).name === 'string' && (v as AnyRec).name !== ''
+      ? [(v as AnyRec).name as string]
+      : []);
+}
+
 export function validateEmailTemplateHoleGrammar(stack: AnyRec): EmailTemplateHoleGrammarFinding[] {
   const findings: EmailTemplateHoleGrammarFinding[] = [];
   for (const { rec: template, path } of collectionEntries(stack.emailTemplates, 'emailTemplates')) {
     const name = typeof template.name === 'string' ? template.name : '(unnamed)';
     const locale = typeof template.locale === 'string' ? ` [${template.locale}]` : '';
+    const variables = declaredVariableNames(template.variables);
     for (const face of FACES) {
       const text = template[face];
       if (typeof text !== 'string') continue;
-      for (const hole of judgeMailHoleGrammar(text)) {
+      for (const hole of judgeMailHoleGrammar(text, { variables })) {
         findings.push({
           severity: 'error',
           rule: EMAIL_TEMPLATE_HOLE_GRAMMAR,
@@ -76,9 +90,8 @@ export function validateEmailTemplateHoleGrammar(stack: AnyRec): EmailTemplateHo
           path: `${path}.${face}`,
           message: `${face}: ${hole.refusal.message} (offset ${hole.start})`,
           hint:
-            'A mail template hole is `{{ path }}` or `{{ path | formatter[:arg] }}`: one formatter, and a '
-            + '`currency` argument that is a literal ISO 4217 code such as EUR. Anything more belongs in the '
-            + 'caller that supplies the data.',
+            'A mail template hole is `{{ path }}` or `{{ path | formatter[:arg] }}`, with one formatter. '
+            + `${CURRENCY_ARGUMENT_RULE} Anything more belongs in the caller that supplies the data.`,
         });
       }
     }

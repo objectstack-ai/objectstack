@@ -2475,9 +2475,11 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // mail renderer parses with. A hole that chains a second formatter is
   // refused, naming the one-formatter rule and the "branch in the caller"
   // remedy (the renderer printed `0 | number:2`); a `currency` argument that
-  // is not a literal ISO 4217 code is refused, naming the literal-only rule
-  // (the renderer printed the amount in USD). Gating: no reading of such a
-  // hole renders as its author wrote it.
+  // is neither a literal ISO 4217 code nor a marked `@path` into the send's
+  // data is refused, naming `CURRENCY_ARGUMENT_RULE` (the renderer printed the
+  // amount in USD); and a marked path the template's declared `variables` do
+  // not cover is refused (`currency-code-path-undeclared`). Gating: no reading
+  // of such a hole renders as its author wrote it.
   //
   // Runtime publish gate: the same door and shape as the placement rule above
   // — each written template is judged on its own, so the door's verdict and
