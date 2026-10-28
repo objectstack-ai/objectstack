@@ -407,7 +407,7 @@ describe('wiring -- the gate is actually reachable and actually runs', () => {
     const missed = [
       'packages/core/src/index.ts',
       'apps/site/source.config.ts',
-      'content/docs/guide/ci-cd-pipeline.md',
+      'content/docs/guide/deployment.md',
       'scripts/check-docs-route-eager-closure.mjs',
     ]
       .map(repoPath)
