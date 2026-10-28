@@ -1706,14 +1706,34 @@ const actionObject = () => strictObject({
   opensInNewTab: z.boolean().optional().describe('Open the action result in a new tab. The renderer pre-opens the tab synchronously on click (popup-blocker-safe) and navigates it to the handler\'s redirectUrl.'),
 
   /**
-   * Zero-roundtrip new-tab target. A path template the renderer navigates
-   * the pre-opened tab to IMMEDIATELY on click, skipping the action POST
-   * entirely. Only valid together with `opensInNewTab`. The target endpoint
-   * MUST perform all auth/authz itself (e.g. the cloud `/sso-open` endpoint,
-   * which re-runs every check the POST half would have done). Supports the
-   * `{recordId}` placeholder, URL-encoded on substitution.
+   * Zero-roundtrip new-tab target. A path template on the SAME backend the
+   * renderer navigates the pre-opened tab to IMMEDIATELY on click, skipping
+   * the action POST entirely. Only valid together with `opensInNewTab`. The
+   * target endpoint MUST perform all auth/authz itself (e.g. the cloud
+   * `/sso-open` endpoint, which re-runs every check the POST half would have
+   * done). Supports the `{recordId}` placeholder, URL-encoded on substitution.
+   *
+   * **A path, never a URL.** The value must start with `/`: the console
+   * prefixes the backend origin to it (`consoleServerAction.ts`), so an
+   * absolute `https://…` value opened a tab at origin + the whole URL. Any
+   * other value is refused at parse. An external page is a `type: 'url'`
+   * action — `target: 'https://…'` (with `${ctx.recordId}` where the record
+   * id goes) and `openIn: 'new-tab'`.
+   *
+   * A stored row written before the refusal is converted by nothing (no
+   * backend path can be derived from an external URL): it loads unchanged,
+   * is counted `invalid` with a `[metadata_spec_invalid]` boot line and still
+   * registered, is served with `_diagnostics` locating `newTabUrl`, and its
+   * next save is refused until the value is a path or the action is rewritten
+   * as a `type: 'url'` action.
    */
-  newTabUrl: z.string().optional().describe('Direct new-tab URL template ({recordId} placeholder). When set with opensInNewTab, the renderer navigates the pre-opened tab here immediately — no action POST. The endpoint must enforce auth itself.'),
+  newTabUrl: z.string().regex(/^\//, {
+    message:
+      '`newTabUrl` is a path on this backend and must start with `/` (e.g. `/sso-open/{recordId}`): '
+      + 'the console prefixes the backend origin to it, so an absolute or relative URL opens a broken tab. '
+      + "To open an external page, use a `type: 'url'` action with `target: 'https://…'` "
+      + "(`${ctx.recordId}` where the record id goes) and `openIn: 'new-tab'`.",
+  }).optional().describe("New-tab path template on this backend, starting with / ({recordId} placeholder). When set with opensInNewTab, the renderer navigates the pre-opened tab to the backend origin + this path immediately — no action POST. The endpoint must enforce auth itself. An absolute URL is refused; an external page is a type:'url' action with openIn: 'new-tab'."),
 
   /**
    * Post-success navigation (#9566 / #9474, maintainer ruling 2026-08-18) —

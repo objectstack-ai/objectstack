@@ -6,43 +6,24 @@
  * renders that sense as 基座 (`engine.package.writableRequired`,
  * `engine.packages.detail.duplicated` / `adopted`), so the fixed rows reuse it.
  *
- * The census walks every row of `ENGINE_STRINGS_ZH` as read from source (with
- * comments masked by the shared helper), so a row added later is asked the same
- * question. Regex: the whole Latin word `base`, case-insensitive, matched in the
- * row VALUE only — keys, identifiers such as `baseObject` (no word boundary)
- * and comments are out of scope.
- *
- * The rows that moved into `@object-ui/i18n`'s `studio` namespace
- * (objectstack#25922) are walked too, from the namespace's own `zh` catalogue,
- * so the census still covers the whole designer table wherever a row lives.
+ * The census walks every row of the designer strings' `zh` catalogue, so a row
+ * added later is asked the same question. Those rows live in `@object-ui/i18n`'s
+ * `studio` namespace since objectstack#25922 retired the app-shell table
+ * (slice S7), and the census reads the loaded catalogue itself. Regex: the
+ * whole Latin word `base`, case-insensitive, matched in the row VALUE only —
+ * keys and identifiers such as `baseObject` (no word boundary) are out of scope.
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-// @ts-expect-error — plain-JS shared helper, intentionally untyped (`allowJs: false`)
-import { maskComments } from '../../../../../scripts/js-comment-mask.mjs';
 import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
 import { t } from './i18n';
 
-const mask: (source: string) => string = maskComments;
-const here = path.dirname(fileURLToPath(import.meta.url));
-
-function zhRows(): Array<[string, string]> {
-  const source = mask(readFileSync(path.join(here, 'i18n.ts'), 'utf8'));
-  const start = source.indexOf('const ENGINE_STRINGS_ZH');
-  expect(start).toBeGreaterThan(-1);
-  const end = source.indexOf('\n};', start);
-  const block = source.slice(start, end);
-  const rows: Array<[string, string]> = [];
-  const row = /'((?:[^'\\\n]|\\.)*)'\s*:\s*'((?:[^'\\\n]|\\.)*)'/g;
-  for (const m of block.matchAll(row)) rows.push([m[1], m[2]]);
-  return [...rows, ...Object.entries(studioZh)];
-}
-
 /** The namespace's `zh` rows (objectstack#25922), resident before any case runs. */
 const studioZh = await loadStudioCatalogue('zh');
+
+function zhRows(): Array<[string, string]> {
+  return Object.entries(studioZh);
+}
 
 const BARE_BASE = /\bbase\b/i;
 
@@ -53,9 +34,9 @@ describe('zh "base" (writable package) is translated — objectui#13131', () => 
     expect(msg).toContain('基座');
   });
 
-  it('census: no ENGINE_STRINGS_ZH value carries the bare word "base"', () => {
+  it('census: no studio zh value carries the bare word "base"', () => {
     const rows = zhRows();
-    // Positive control: the walk reaches the whole table, including the fixed row.
+    // Positive control: the walk reaches the whole catalogue, including the fixed row.
     expect(rows.length).toBeGreaterThan(3000);
     expect(rows.map(([k]) => k)).toContain('engine.studio.pkg.new');
     const offenders = rows.filter(([, v]) => BARE_BASE.test(v)).map(([k]) => k);

@@ -1596,6 +1596,19 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'result cache exists.',
   },
   {
+    id: 'currency-config-fixed-default-currency-required',
+    order: 112,
+    text:
+      'It also removes the `\'CNY\'` default of `currencyConfig.defaultCurrency` (maintainer '
+      + 'ruling X: an amount whose currency is not known takes the tenant default, and nothing '
+      + 'guesses). A `fixed` config without a code is refused with the prescription instead of '
+      + 'becoming a yuan field, and a `dynamic` config parses to output with no code. The D2 '
+      + 'conversion `currency-config-dynamic-default-currency-removed` strips the unread code an '
+      + 'earlier parse baked into `dynamic` stored rows and built artifacts; a `fixed` config is '
+      + 'never converted, so a stored row saved without a code loads with diagnostics and is '
+      + 'refused at its next save. Retired from the load path.',
+  },
+  {
     id: 'currency-config-precision-retired',
     order: 41,
     text:

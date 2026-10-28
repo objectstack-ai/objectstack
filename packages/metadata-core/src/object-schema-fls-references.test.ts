@@ -279,6 +279,19 @@ describe('[ADR-0106 D1] references to a denied field — object level', () => {
         expect(served.fields.title.group).toBe('secret_score');
     });
 
+    it('[#27069] serves relatedLists and a group relatedList naming a child that shares the denied field\'s name', () => {
+        // The entries name CHILD objects (or `object.field`), never a field of
+        // this object, so a child called like the denied field is still served.
+        const served = mask({
+            name: 'thing',
+            fields: fieldsWith({}),
+            relatedLists: ['secret_score', 'task.thing_id'],
+            fieldGroups: [{ key: 'lines', label: 'Lines', relatedList: 'secret_score.thing_id' }],
+        });
+        expect(served.relatedLists).toEqual(['secret_score', 'task.thing_id']);
+        expect(served.fieldGroups).toEqual([{ key: 'lines', label: 'Lines', relatedList: 'secret_score.thing_id' }]);
+    });
+
     it('deletes an UNCLASSIFIED key that mentions the denied field — fail-safe, never a leak', () => {
         const served = mask({ name: 'thing', fields: fieldsWith(), futureKey: { pick: 'record.secret_score' }, otherKey: 'title' });
         expect(served).not.toHaveProperty('futureKey');

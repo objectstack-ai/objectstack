@@ -31,6 +31,10 @@ describe('reference-integrity suite — membership', () => {
       // Studio's app builder mints no `view` items, which is what left those
       // members with nothing to inspect on the click path.
       'validateObjectFieldRefs',
+      // [#27069] The same object's related-list names, resolved against the
+      // inbound relationships of its children: the door's copy of the verdict
+      // `defineStack` gives on the CLI.
+      'validateRelatedListRefs',
       'validateActionNameRefs',
       // [#17319] The same action name, one question on: the name-ref member
       // above asks whether the selection bar's name resolves to an action; this

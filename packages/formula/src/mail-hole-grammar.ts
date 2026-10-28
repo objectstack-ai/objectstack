@@ -20,8 +20,9 @@
  * What follows the first `|` is judged by `judgeHoleFormatter`
  * (`template-engine.ts`), the function the in-app template dialect judges its
  * holes with too, so the two dialects refuse the same formatter parts with the
- * same sentence: one formatter per hole, and a `currency` argument that is a
- * literal ISO 4217 code. A refused hole is a hole — it is found, located and
+ * same sentence: one formatter per hole, a formatter the whitelist names
+ * (`TEMPLATE_FORMATTERS`), and a `currency` argument that is a literal ISO
+ * 4217 code. A refused hole is a hole — it is found, located and
  * named — and the renderer refuses to render it rather than print a wrong
  * value or formatter syntax.
  *

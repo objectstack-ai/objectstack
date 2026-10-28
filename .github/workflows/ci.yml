@@ -3540,9 +3540,6 @@ jobs:
       - name: Verify changed en strings were followed by the nine translations
         run: pnpm --dir ui run check:i18n-drift
 
-      - name: Verify the metadata-admin designer string tables stay paired
-        run: pnpm --dir ui run check:i18n-designer-parity
-
       - name: Type-check the ui scripts
         run: pnpm --dir ui run type-check:scripts
 

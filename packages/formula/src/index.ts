@@ -5,7 +5,7 @@
  * Language) is the default dialect; `js` and `cron` are dispatched to
  * dedicated plugin engines.
  *
- * @see content/docs/concepts/north-star.mdx §8 "No private expression DSL"
+ * @see docs/adr/0032-unified-expression-layer.md — "one CEL language"
  * @see ROADMAP.md M9 "Expression Unification"
  */
 

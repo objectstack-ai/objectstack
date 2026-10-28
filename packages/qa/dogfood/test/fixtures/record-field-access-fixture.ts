@@ -16,8 +16,8 @@
 //    row the caller cannot read, for the existence-leak leg.
 //  - `rfa_notice` is `public_read`: everyone reads, only the owner writes. A
 //    row someone else owns is one the member may READ but not WRITE — the
-//    row-level write scope the record-scoped projection declares it leaves
-//    out, measured against the PATCH.
+//    row-level write scope `editable` leaves out and `writable` answers,
+//    measured against the PATCH.
 
 import { defineStack } from '@objectstack/spec';
 import { ObjectSchema, Field } from '@objectstack/spec/data';

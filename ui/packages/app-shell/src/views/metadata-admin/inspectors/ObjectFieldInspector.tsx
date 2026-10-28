@@ -108,6 +108,7 @@ import { t, tFormat, type SupportedLocale } from '../i18n.js';
 import { FilterConditionField } from './FilterConditionField.js';
 import type { FilterCondition } from './datasetFilterCondition.js';
 import { usePickerLoad, type LoadState } from '../loadState.js';
+import { isMainContentList } from '../../../utils/deriveRelatedLists.js';
 
 
 /**
@@ -2116,13 +2117,20 @@ function LookupConfigFields({
 type RelatedListMode = 'shown' | 'hidden' | 'primary';
 
 /**
- * The stored `relatedList` as one of the control's three states. `true` and
- * absent are the same declaration (the spec: "true/absent = shown"), so both
- * read as `shown`.
+ * The stored `relatedList` as one of the control's three states. `true` reads
+ * as `shown`. ABSENT reads as the relationship's default, which the record
+ * page's own predicate decides (`isMainContentList`, objectstack#27069): a
+ * `master_detail` FK that sets `inlineEdit` is primary by default, every other
+ * FK is shown. Without `field` an absent value reads as `shown`.
  */
-export function readRelatedListMode(value: unknown): RelatedListMode {
+export function readRelatedListMode(
+  value: unknown,
+  field?: { type?: unknown; inlineEdit?: unknown },
+): RelatedListMode {
   if (value === false) return 'hidden';
   if (value === 'primary') return 'primary';
+  if (value === undefined && field && typeof field.type === 'string'
+    && isMainContentList(field.type, { inlineEdit: field.inlineEdit })) return 'primary';
   return 'shown';
 }
 
@@ -2136,9 +2144,10 @@ const RELATED_LIST_MODES: ReadonlyArray<{ mode: RelatedListMode; labelKey: strin
  * How this relationship's child records appear on the PARENT's record page —
  * the read-side mirror of `inlineEdit`, declared on the child's FK field.
  *
- *  - The three-state `relatedList` control: shown (the default — the key is
- *    left ABSENT, the spec's own "true/absent = shown"), hidden (`false`), and
- *    primary (`'primary'`), a core relationship. The primary state's wording,
+ *  - The three-state `relatedList` control: shown, hidden (`false`), and
+ *    primary (`'primary'`), a core relationship. The relationship's default
+ *    state leaves the key ABSENT: shown, or primary on a `master_detail` FK
+ *    that sets `inlineEdit` (objectstack#27069); the other states write it. The primary state's wording,
  *    "Primary (in body)", follows the record-page v3 ruling that a primary
  *    related list is drawn in the record body as a full-width table (the
  *    rendering half is the record-page card objectstack#27069).
@@ -2163,12 +2172,16 @@ function RelatedListFields({
   locale?: string;
 }) {
   const tr = (key: string) => t(key, locale);
-  const mode = readRelatedListMode(def.relatedList);
+  const mode = readRelatedListMode(def.relatedList, def);
+  // The state an absent key already means here. Picking it clears the key;
+  // picking another writes it, so "Show" on an inline-edited `master_detail`
+  // (primary by default) is an explicit `true`.
+  const defaultMode = readRelatedListMode(undefined, def);
   const reference = typeof def.reference === 'string' && def.reference ? (def.reference as string) : '';
   const setMode = (next: RelatedListMode) => {
     if (next === mode) return;
-    if (next === 'shown') unsetDefKey('relatedList');
-    else patchDef({ relatedList: next === 'hidden' ? false : 'primary' });
+    if (next === defaultMode) unsetDefKey('relatedList');
+    else patchDef({ relatedList: next === 'hidden' ? false : next === 'primary' ? 'primary' : true });
   };
   const filterFields = React.useMemo(
     () => ownFields
