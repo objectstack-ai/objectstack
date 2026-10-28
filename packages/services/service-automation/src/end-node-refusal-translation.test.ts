@@ -163,6 +163,40 @@ describe('#22450 — the authored message renders whenever no translation is pic
     });
 });
 
+describe('a refusal both texts share is the authored text\'s, and no line blames the translation', () => {
+    it('a no-argument `currency` hole with no tenant default fails the run naming the hole, with no translation warning', async () => {
+        const lines: LogLine[] = [];
+        const zh = { flows: { dedupe: { refusals: { finish: { message: '已拒绝:{{ record.amount | currency }}' } } } } };
+        const { engine } = engineWith(i18nWith({ 'zh-CN': zh }), lines);
+        const flow = refusingFlow();
+        (flow.nodes[1] as { config: { message: string } }).config.message = 'Refused: {{ record.amount | currency }}';
+        engine.registerFlow('dedupe', flow as never);
+
+        const result = await engine.execute('dedupe', {
+            ...doorContext('zh-CN'), record: { ...ACME, amount: 1234.5 },
+        } as unknown as AutomationContext);
+
+        expect(result.success).toBe(false);
+        expect(String(result.error)).toContain('{{ record.amount | currency }}');
+        expect(String(result.error)).toContain('localization.currency');
+        expect(lines.filter((l) => l.level === 'warn' && l.message.includes('translation'))).toEqual([]);
+    });
+
+    it('CONTROL — with the tenant default on the run, the zh-CN translation renders in it', async () => {
+        const zh = { flows: { dedupe: { refusals: { finish: { message: '已拒绝:{{ record.amount | currency }}' } } } } };
+        const { engine } = engineWith(i18nWith({ 'zh-CN': zh }));
+        const flow = refusingFlow();
+        (flow.nodes[1] as { config: { message: string } }).config.message = 'Refused: {{ record.amount | currency }}';
+        engine.registerFlow('dedupe', flow as never);
+
+        const result = await engine.execute('dedupe', {
+            ...doorContext('zh-CN'), record: { ...ACME, amount: 1234.5 }, currency: 'CNY',
+        } as unknown as AutomationContext);
+
+        expect(result.refusalMessage).toBe(`已拒绝:${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'CNY' }).format(1234.5)}`);
+    });
+});
+
 describe('#22450 — a door-started run carries its locale into a resumed leg', () => {
     /** `start → ask (screen) → finish (refused)`: the refusal renders on the RESUMED leg. */
     function reviewFlow() {

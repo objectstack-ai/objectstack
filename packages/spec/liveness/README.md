@@ -4,7 +4,8 @@ For a metadata-driven platform, **the spec is the product surface**: authors wri
 metadata against these schemas. A property that is parsed but has no runtime consumer
 is a silent no-op — and for a *security* property, a silent no-op is **false
 compliance** (e.g. `forceMfa: true` accepted and ignored). The metadata-liveness audits
-(`docs/audits/2026-06-*-property-liveness.md`) found that large swaths of the declared
+(`docs/audits/archive/2026-06/2026-06-*-property-liveness.md`, with the three still cited
+from an ADR or a changelog left in `docs/audits/`) found that large swaths of the declared
 surface are DEAD.
 
 This ledger makes that classification **explicit and regression-proof**: every property

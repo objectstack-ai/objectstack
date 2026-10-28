@@ -2,6 +2,7 @@
 
 import { randomUUID } from 'node:crypto';
 import type { Plugin, PluginContext } from '@objectstack/core';
+import { resolveLocalizationContext } from '@objectstack/core';
 import type { IDataEngine } from '@objectstack/spec/contracts';
 import { MessagingService } from './messaging-service.js';
 import type { MessagingChannel } from './channel.js';
@@ -262,6 +263,24 @@ export class MessagingServicePlugin implements Plugin {
             }
         };
 
+        // The organization's default currency (`localization.currency`), the
+        // code a template's `{{ amount | currency }}` hole with no argument
+        // formats in. Read through `resolveLocalizationContext`, the reader a
+        // request resolves `ExecutionContext.currency` with, so a mail and the
+        // record's currency field show the same currency. Probed at delivery
+        // time like the locale above; a failed read leaves it unset, and the
+        // render then refuses such a hole by name rather than guess one.
+        const getTenantCurrency = async (organizationId: string | undefined): Promise<string | undefined> => {
+            let settings: unknown;
+            try { settings = ctx.getService('settings'); } catch { settings = undefined; }
+            try {
+                const localization = await resolveLocalizationContext({ ql: getData(), settings, organizationId });
+                return localization.currency;
+            } catch {
+                return undefined;
+            }
+        };
+
         // [#24978] The `i18n` service whose catalog a keyed notification text
         // is rendered from — probed at delivery time, never captured at boot,
         // for the reasons `getDefaultTemplateLocale` above is.
@@ -290,7 +309,7 @@ export class MessagingServicePlugin implements Plugin {
         });
 
         if (this.options.registerInbox) {
-            service.registerChannel(createInboxChannel({ getData, getEmail, getDefaultTemplateLocale }));
+            service.registerChannel(createInboxChannel({ getData, getEmail, getDefaultTemplateLocale, getTenantCurrency }));
         }
 
         ctx.registerService('messaging', service);
@@ -438,7 +457,7 @@ export class MessagingServicePlugin implements Plugin {
             ctx.hook('kernel:ready', async () => {
                 service.registerChannelProvider('email', lazyChannelMount({
                     resolveTransport: getEmail,
-                    create: () => createEmailChannel({ getEmail, getData, store: templateStore, getDefaultTemplateLocale }),
+                    create: () => createEmailChannel({ getEmail, getData, store: templateStore, getDefaultTemplateLocale, getTenantCurrency }),
                     announce: '[messaging] email channel registered (renders sys_notification_template; notify `template` refs resolve sys_email_template by (name, locale) — resolved per recipient: sys_user.locale, else the deployment default)',
                     logger: ctx.logger,
                 }));
