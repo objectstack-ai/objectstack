@@ -11,7 +11,7 @@
  * preference × scope keyed `localStorage` entry holding a small versioned
  * record, read as "no choice" whenever it cannot be read. This file runs in
  * the node project (no `window`); the live hook and its cross-tab path are
- * driven in `workspacePreference.live.test.tsx`.
+ * driven in `workspacePreference.hook.test.tsx`.
  */
 
 import { describe, it, expect } from 'vitest';
