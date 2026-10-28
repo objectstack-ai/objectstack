@@ -158,6 +158,8 @@
     "DatasetMeasure (type)",
     "DatasetMeasureDuration (type)",
     "DatasetMeasureDurationSchema (const)",
+    "DatasetMeasurePolarity (const)",
+    "DatasetMeasurePolarity (type)",
     "DatasetMeasureSchema (const)",
     "DatasetSchema (const)",
     "DateRangeDefaultRange (type)",

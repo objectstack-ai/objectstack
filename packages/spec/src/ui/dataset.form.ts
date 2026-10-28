@@ -90,6 +90,7 @@ export const datasetForm = defineForm({
             { field: 'filter', label: 'Filter' },
             { field: 'format', label: 'Format' },
             { field: 'currency', label: 'Currency' },
+            { field: 'polarity', label: 'Polarity' },
             { field: 'derived', label: 'Derived From' },
             { field: 'duration', label: 'Duration' },
           ],

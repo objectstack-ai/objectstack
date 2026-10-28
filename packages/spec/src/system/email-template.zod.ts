@@ -95,8 +95,27 @@ const EMAIL_TEMPLATE_IS_SYSTEM_REMOVED =
   + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` '
   + 'applies the ones it can prove, and you apply the rest by hand.';
 
+/**
+ * The hole grammar of the three faces (`subject`, `bodyHtml`, `bodyText`), as
+ * their descriptions state it. The `currency` sentence is
+ * `CURRENCY_ARGUMENT_RULE` from `@objectstack/formula` word for word — the
+ * mail renderer and the `email-template-hole-grammar` authoring rule quote the
+ * same constant, and the formula package pins this text against it. The spec
+ * only states the grammar: the formula package judges it and plugin-email
+ * renders it. It promises no refusal of an unknown formatter name: none
+ * exists today (the mail renderer prints such a hole raw; #26948).
+ */
+const MAIL_TEMPLATE_HOLES =
+  "Holes are `{{ path }}` or `{{ path | formatter[:arg] }}` over the send's `data`, with at most one formatter "
+  + 'per hole (a second, chained formatter is refused). A `currency` argument is either a literal ISO 4217 '
+  + "code in three capital letters (`currency:EUR`) or, in a mail template only, `@` followed by a path into the "
+  + "send's data whose value is such a code (`currency:@currency_code`).";
+
 export const EmailTemplateDefinitionVariableSchema = lazySchema(() => z.object({
-  name: z.string().describe('Variable name as referenced in placeholders (snake_case or dotted path)'),
+  name: z.string().describe(
+    'Variable name as referenced in placeholders (snake_case or dotted path). When the template declares any '
+    + 'variable, the path of a `currency:@path` argument must be one of them or lie under one.',
+  ),
   type: z.enum(['string', 'number', 'boolean', 'date', 'url', 'user', 'record']).default('string'),
   required: z.boolean().default(false),
   description: z.string().optional().describe('Author hint shown in Studio'),
@@ -189,17 +208,19 @@ export const EmailTemplateDefinitionSchema = lazySchema(() => strictObject({
   ),
 
   /** Subject line; supports `{{var.path}}` placeholders. */
-  subject: z.string().describe('Subject template'),
+  subject: z.string().describe(`Subject template. ${MAIL_TEMPLATE_HOLES}`),
 
   /** HTML body; supports `{{var.path}}` placeholders. */
-  bodyHtml: z.string().describe('HTML body template'),
+  bodyHtml: z.string().describe(`HTML body template. ${MAIL_TEMPLATE_HOLES}`),
 
   /**
    * Plain-text body. When omitted the service strips tags from
    * `bodyHtml` to derive a text alternative — recommended for spam
    * scoring but optional.
    */
-  bodyText: z.string().optional().describe('Plain-text body template (auto-derived from HTML when omitted)'),
+  bodyText: z.string().optional().describe(
+    `Plain-text body template (auto-derived from HTML when omitted). ${MAIL_TEMPLATE_HOLES}`,
+  ),
 
   /**
    * Declared variables; rendered as form hints in the Studio
