@@ -289,7 +289,7 @@ For platforms that expect an HTTP 200 on `/`, the SPA `index.html` fallback alre
 
 ## Next Steps
 
-- [CI/CD Pipeline](/docs/guide/ci-cd-pipeline) — Understand the automated build and release workflows
+- [CI workflows](https://github.com/objectstack-ai/objectstack/tree/main/.github/workflows) — The repository-root workflows that build, test and release ObjectUI
 - [Architecture Overview](/docs/guide/architecture) — How ObjectUI packages fit together
 - [Quick Start](/docs/guide/quick-start) — Set up a new ObjectUI project from scratch
 - [Theming](/docs/guide/theming) — Customize the look-and-feel before deploying
