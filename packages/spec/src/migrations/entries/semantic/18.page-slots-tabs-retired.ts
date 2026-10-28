@@ -48,4 +48,5 @@ export const entry: SemanticMigration = {
     + 'nothing at `pages.N.slots.tabs`, saving each formerly affected page through the metadata API '
     + 'succeeds, and each record page shows either the synthesized strip (and the columns at wider '
     + 'widths) or, for a `kind: \'full\'` page, the same tabs it showed before.',
+  conversionIds: ['page-slots-tabs-removed'],
 };

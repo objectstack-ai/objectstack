@@ -37,6 +37,8 @@ five) or `dashboard` (`header`, `footer`; other regions are grid cells);
 `full-width` is retired (a second name for `default`). On a `kind: 'full'` page a region
 the template does not place, or a second one for a filled slot, is refused at
 its `name` — the left column is `sidebar`, the right `aside`.
+A `slotted` record page has no `tabs` slot: shape the strip with `relatedList` /
+`relatedList: 'primary'` on the child's reference field, or author `kind: 'full'`.
 
 ### Component Catalogue (selection)
 
@@ -134,9 +136,6 @@ by what the page needs:
 `source` is the source-of-truth in both source tiers; `regions` is ignored. A
 `kind:'html'`/`'react'` page with no `source` fails the build (ADR-0078).
 `kind:'jsx'` is retired: the parse refuses it and names `kind:'html'`.
-
-- A `slotted` record page has no `tabs` slot: shape the strip with `relatedList` /
-  `relatedList: 'primary'` on the child's reference field, or author `kind: 'full'`.
 
 #### `kind:'html'` — constrained JSX, parsed (safe by construction)
 
