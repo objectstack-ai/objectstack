@@ -44,7 +44,7 @@
     {
       "id": 5,
       "prompt": "Sales reps need a locked-down task workbench: only open tasks, sorted by due date, grid only, no switching to other views; plus a report of opportunity amounts by stage.",
-      "expected_output": "Capability narrowing is the signal for an interface page: `definePage({ type: 'list', object: 'task', interfaceConfig: { source: 'task', columns: [...], sort: [...], filterBy: [...], userFilters: { element: 'dropdown', ... }, appearance: { allowedVisualizations: ['grid'] }, userActions: {...} } })` — the page IS the view definition (no deprecated `sourceView`). The report is `type: 'summary'` selecting `rows` / `values` from a declared `dataset`; there is no `chart` report type.",
+      "expected_output": "Capability narrowing is the signal for an interface page: `definePage({ type: 'list', object: 'task', interfaceConfig: { source: 'task', columns: [...], sort: [...], filterBy: [...], userFilters: { element: 'dropdown', ... }, appearance: { allowedVisualizations: ['grid'] }, userActions: {...} } })` — the page IS the view definition (no deprecated source view). The report is `type: 'summary'` selecting `rows` / `values` from a declared `dataset`; there is no `chart` report type.",
       "files": [],
       "assertions": {
         "must_contain": ["definePage", "interfaceConfig", "columns", "allowedVisualizations", "summary", "dataset"],
@@ -74,7 +74,7 @@
     {
       "id": 8,
       "prompt": "Make the Reassign Lead toast read 'Lead NAME reassigned'; after Convert's lead_conversion flow completes, open the opportunity it created.",
-      "expected_output": "`successMessage: 'Lead {{ record.name }} reassigned'` (`${record.name}` fails `os validate`); Convert gets `onSuccess: { navigate }` ending `${result.output.opportunity_id}`, an `isOutput` flow variable.",
+      "expected_output": "`successMessage: 'Lead {{ record.name }} reassigned'` (a `${…}` hole fails `os validate`); Convert gets `onSuccess: { navigate }` ending `${result.output.opportunity_id}`, an `isOutput` flow variable.",
       "files": [],
       "assertions": {
         "must_contain": ["{{", "onSuccess", "result.output"],

@@ -973,10 +973,11 @@ export const CEILINGS = new Map([
   // option A tapped at 01:21Z), verbatim and untranslated: 「A:先削重复,余额按实测提高」.
   // 1789 -> 2009: case 9, the `disabledReason` beside a `disabled` predicate (the reason never in
   // `description`, the near-miss spellings refused) — +882 bytes; the file's cases share no
-  // sentence, so there was no duplicate to cut (0 bytes). 7154 -> 8036 bytes -> 2009 tokens,
+  // sentence, so there was no duplicate to cut (0 bytes); cases 5 and 8 reworded so neither
+  // spells its own `must_not_contain` string (-2 bytes). 7154 -> 8034 bytes -> 2009 tokens,
   // ceiling +220, pinned AT the measurement. Same ruling as the line above (2026-10-27, tap A:
   // 「A:先削重复,余额按实测提高」).
-  //   ceil($(wc -c < skills/objectstack-ui/evals/views-apps-actions-pages.json) / 4) == ceil(8036 / 4)
+  //   ceil($(wc -c < skills/objectstack-ui/evals/views-apps-actions-pages.json) / 4) == ceil(8034 / 4)
   ['skills/objectstack-ui/evals/views-apps-actions-pages.json', 2009],
   ['skills/objectstack-upgrade/evals/protocol-major-upgrade.json', 1033],
 
