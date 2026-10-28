@@ -104,12 +104,20 @@ export function formContainerContractPins(): void {
   const wasUndeclarableHere: ConsoleSectionSpec = {
     name: 'advanced_options',
     description: 'Rarely-used options',
-    pane: 'secondary',
     visibleWhen: '${record.kind == "deal"}',
     columns: '3',
     fields: ['name'],
   };
   void wasUndeclarableHere;
+  // `pane` was on this list until `@objectstack/spec` 18.3.0 retired it with the
+  // `split` form type it served: the shared type now follows the spec and
+  // refuses it, so the console cannot type an authored `pane` either.
+  const paneIsRetired: ConsoleSectionSpec = {
+    fields: ['name'],
+    // @ts-expect-error — `pane` is a retired key on the spec's `FormSection`
+    pane: 'secondary',
+  };
+  void paneIsRetired;
 
   // Same for the view: `title`, `description`, `data`, `subforms` and the
   // per-variant presentation keys were all undeclarable here.
@@ -168,7 +176,6 @@ describe('objectui#5596 — the console renders the shared container specs', () 
             name: 'details',
             label: 'Details',
             description: 'The bits that matter',
-            pane: 'primary',
             columns: 2,
             visibleWhen: '${record.kind == "deal"}',
             fields: [{ field: 'stage', label: 'Stage', colSpan: 2 }],

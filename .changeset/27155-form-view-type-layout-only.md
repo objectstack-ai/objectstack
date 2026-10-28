@@ -1,5 +1,6 @@
 ---
 '@objectstack/spec': minor
+'@object-ui/app-shell': minor
 ---
 
 feat(spec)!: a form view's `type` is its layout only — `simple` (the default), `tabbed` or `wizard`; `split`, `drawer` and `modal` are retired, and the split-only `sections[].pane`, `splitSize` and `splitResizable` keys go with them
@@ -18,3 +19,5 @@ The model: `type` says how the form lays out its sections. Where a form opens is
 - **The one-line fix.** Delete the retired value and the three split-only keys. `os migrate meta --from 17` lists the edits for existing sources, and `--write` applies them. A stored `sys_metadata` row is converted when it is read (the `form-view-presentation-types-removed` conversion), so a form view saved with one of the three values keeps loading as a `simple` form.
 - **What the parse says.** Each retired value is refused by name with its prescription, for example "'modal' was removed from the form view `type` enum in @objectstack/spec 18.3.0 (ADR-0050) — …", at every form view door (a view's `form` and `formViews.*`, a form view item record, a flattened form overlay) and at `defineStack` as `STACK_SCHEMA_INVALID` / 422. `pane`, `splitSize` and `splitResizable` are refused on every layout. TypeScript rejects each at the authoring site. A misspelt value keeps zod's own message.
 - **Unchanged.** `splitDirection`, `drawerSide`, `drawerWidth` and `modalSize` stay declared: the console reads `modalSize` for its record dialog, and the React `ObjectForm` block contract still takes the other three from this schema until its renderer follows.
+
+The console (`@object-ui/app-shell`): Studio's New View form offers the three form layouts only. It offered all six, and a form view created with `split`, `drawer` or `modal` would now be refused when saved.

@@ -469,20 +469,30 @@ describe('objectui#7051 — @objectstack/spec is the enforcing door for the two 
     expect(refusal({ label: 'x' })).toContain('custom:fields');
   });
 
-  it('refuses every group-owned presentation key beside `group`, and PERMITS the layout pair', () => {
+  it('refuses every group-owned presentation key beside `group`, and PERMITS `columns`', () => {
     for (const key of ['name', 'label', 'description', 'collapsible', 'collapsed', 'visibleWhen']) {
       const value = key === 'collapsible' || key === 'collapsed' ? true : 'v';
       expect(refusal({ group: 'contact_info', [key]: value })).toContain(`custom:${key}`);
     }
     expect(FormSectionSchema.safeParse({ group: 'contact_info', columns: 2 }).success).toBe(true);
-    expect(FormSectionSchema.safeParse({ group: 'contact_info', pane: 'primary' }).success).toBe(true);
+    // `pane` left the form-view section in `@objectstack/spec` 18.3.0 with the
+    // `split` form type it served: refused by name, beside `group` or not.
+    const pane = FormSectionSchema.safeParse({ group: 'contact_info', pane: 'primary' });
+    expect(pane.success).toBe(false);
+    expect((pane as any).error.issues.map((i: any) => i.path.join('.'))).toEqual(['pane']);
+    expect((pane as any).error.issues[0].message).toContain('was removed in @objectstack/spec 18.3.0');
   });
 
   it('refuses `group` on a wizard step, and accepts it on every other form type', () => {
     const view = (type: string) => ({ type, sections: [{ group: 'contact_info' }, { fields: ['channel'] }] });
     expect(refusal(view('wizard'), FormViewSchema)).toContain('custom:sections.0.group');
-    for (const type of ['simple', 'tabbed', 'split', 'drawer', 'modal']) {
+    for (const type of ['simple', 'tabbed']) {
       expect(FormViewSchema.safeParse(view(type)).success).toBe(true);
+    }
+    // The form view `type` is the form's layout only since `@objectstack/spec`
+    // 18.3.0: `split`, `drawer` and `modal` are refused by name at `type`.
+    for (const type of ['split', 'drawer', 'modal']) {
+      expect(refusal(view(type), FormViewSchema)).toEqual(['invalid_value:type']);
     }
   });
 
