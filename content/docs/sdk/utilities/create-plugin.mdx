@@ -67,7 +67,7 @@ not interactive. The package README states the rule in full.
 This page deliberately does **not** reproduce the generated tree or the generated files.
 Run the generator and read what it wrote — and when you need the answer without running
 it, read the one function that decides it:
-[`buildPluginFiles()` in `packages/create-plugin/src/templates.ts`](https://github.com/objectstack-ai/objectui/blob/main/packages/create-plugin/src/templates.ts).
+[`buildPluginFiles()` in `packages/create-plugin/src/templates.ts`](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/create-plugin/src/templates.ts).
 That map of *path to file contents* is the single source of truth for what a scaffolded
 plugin contains; the CLI in `src/index.ts` is the loop that writes it to disk.
 
@@ -147,9 +147,9 @@ Advice for the plugin you are about to write, beyond whatever the scaffold hands
 
 See these official plugins for reference:
 
-- **[@object-ui/plugin-charts](https://github.com/objectstack-ai/objectui/tree/main/packages/plugin-charts)** - Data visualization
-- **[@object-ui/plugin-kanban](https://github.com/objectstack-ai/objectui/tree/main/packages/plugin-kanban)** - Kanban boards
-- **[@object-ui/plugin-editor](https://github.com/objectstack-ai/objectui/tree/main/packages/plugin-editor)** - Code editor
+- **[@object-ui/plugin-charts](https://github.com/objectstack-ai/objectstack/tree/main/ui/packages/plugin-charts)** - Data visualization
+- **[@object-ui/plugin-kanban](https://github.com/objectstack-ai/objectstack/tree/main/ui/packages/plugin-kanban)** - Kanban boards
+- **[@object-ui/plugin-editor](https://github.com/objectstack-ai/objectstack/tree/main/ui/packages/plugin-editor)** - Code editor
 
 ## Package Information
 
@@ -165,7 +165,7 @@ existing directory. Pick another name, or remove the old package first.
 
 **The name was rejected.** Only lowercase letters, digits and hyphens are accepted; a
 scope, a slash or a `..` is refused. The validation is at the top of
-[`src/index.ts`](https://github.com/objectstack-ai/objectui/blob/main/packages/create-plugin/src/index.ts).
+[`src/index.ts`](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/create-plugin/src/index.ts).
 
 **The new package's imports and `tsconfig.json` resolve to nothing.** The generator was
 almost certainly run outside a workspace root — see [Quick Start](#quick-start). Move the
@@ -184,6 +184,6 @@ no write access outside the npm cache.
 
 ## Need Help?
 
-- [GitHub Issues](https://github.com/objectstack-ai/objectui/issues)
+- [GitHub Issues](https://github.com/objectstack-ai/objectstack/issues)
 - [Plugin Development Guide](/docs/sdk/guide/plugin-development)
-- [Examples](https://github.com/objectstack-ai/objectui/tree/main/packages)
+- [Examples](https://github.com/objectstack-ai/objectstack/tree/main/ui/packages)

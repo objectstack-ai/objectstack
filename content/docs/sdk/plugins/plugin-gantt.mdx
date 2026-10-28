@@ -35,7 +35,7 @@ The `@object-ui/plugin-gantt` plugin provides Gantt chart visualization for Obje
   day-view drag goes by bands instead, and a move keeps the bar's elapsed
   length), and persists the change through
   `dataSource.update()` automatically (optimistic local update + revert on
-  failure). See the [package README](https://github.com/objectstack-ai/objectui/blob/main/packages/plugin-gantt/README.md#drag-and-drop-rescheduling) for details on the
+  failure). See the [package README](https://github.com/objectstack-ai/objectstack/blob/main/ui/packages/plugin-gantt/README.md#drag-and-drop-rescheduling) for details on the
   lower-level `onTaskUpdate` hook when embedding `<GanttView>` directly.
 - **Writes follow the caller's grant**: a bar's drag, resize and progress, its
   title edited in place and its dependency links are offered only when the
@@ -735,4 +735,4 @@ hoists the bag, or as you hand it to `<ObjectGantt schema={…}>` yourself.
 
 - [Timeline Plugin](/docs/sdk/plugins/plugin-timeline) - Simpler timeline visualization
 - [Plugin System Overview](/docs/sdk/guide/plugins)
-- [Package README](https://github.com/objectstack-ai/objectui/tree/main/packages/plugin-gantt)
+- [Package README](https://github.com/objectstack-ai/objectstack/tree/main/ui/packages/plugin-gantt)
