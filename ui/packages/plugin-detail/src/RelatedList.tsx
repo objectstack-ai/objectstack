@@ -2426,7 +2426,12 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   const enlargeRelated = React.useContext(RelatedEnlargeContext);
   const ownRelationshipId = objectName && referenceField ? relatedCardId(objectName, referenceField) : null;
   const bodyTable = !compact && !!ownRelationshipId && bodyTableIds.has(ownRelationshipId);
-  const isCollapsible = collapsible || bodyTable;
+  // In the tabbed tier's 关联 tab the reader's arrangement hands the full
+  // list its chrome (objectstack#27055): the title collapses it — a write to
+  // the reader's arrangement, after which the tab draws it collapsed — and
+  // its ⋯ menu moves and hides it.
+  const arrangedFull = !compact && !!cardChrome;
+  const isCollapsible = collapsible || bodyTable || arrangedFull;
 
   // The row click hands the host the rows on show beside the clicked one
   // (objectstack#26679), so its drawer can step through them.
@@ -2522,7 +2527,9 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   }, [type, paginatedData, tableColumns, effectiveColumns, schema, effectivePageSize, hasRowActions, hasCustomRowActions, rowActions, onRowAction, onRowEdit, onRowDelete, handleDeleteRow, handleRowClick, isMobile, compact, api, objectSchema, activeSort, handleTableSort]);
 
   const headerClassName = isCollapsible ? 'cursor-pointer select-none' : undefined;
-  const handleHeaderClick = isCollapsible ? () => setCollapsed((c) => !c) : undefined;
+  const handleHeaderClick = arrangedFull
+    ? () => cardChrome!.onCollapse()
+    : isCollapsible ? () => setCollapsed((c) => !c) : undefined;
 
   const SectionIcon = resolveIconComponent(icon);
   // Badge shows the COLLECTION size: the server total in windowed mode (only
@@ -2884,6 +2891,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
                 {add.label || t('detail.add', { defaultValue: 'Add' })}
               </Button>
             )}
+            {arrangedFull && <RelatedCardMenu chrome={cardChrome!} title={title} collapsed={false} />}
             {bodyTable && enlargeRelated && ownRelationshipId && (
               <Button
                 variant="ghost"

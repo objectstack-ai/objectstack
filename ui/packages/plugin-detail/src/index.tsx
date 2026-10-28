@@ -223,6 +223,8 @@ export type { RecordPageColumnsProps } from './RecordPageColumns';
 // synthesized default page in its tabbed tier marks it, as the column tiers do.
 export { DefaultRecordPageContext, useDefaultRecordPage } from './defaultRecordPage';
 export { RecordBodyTablesContext } from './relatedListCompact';
+// The tabbed tier's 关联 tab in the reader's arrangement (objectstack#27055).
+export { ArrangedRelatedTab } from './ArrangedRelatedTab';
 // objectstack#27055, Target 3 — the timeline as ONE stream: the host hands
 // the record's field changes over through this context.
 export {

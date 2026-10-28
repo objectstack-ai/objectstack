@@ -7,19 +7,13 @@
  */
 
 import * as React from 'react';
-import { Badge, RelatedCountStore, cn, useIsMobile, useRelatedCount } from '@object-ui/components';
+import { Badge, RelatedCountStore, cn, useRelatedCount } from '@object-ui/components';
 import { SchemaRenderer, toRenderableSchema, useRecordContext } from '@object-ui/react';
 import { ChevronRight } from 'lucide-react';
 import { RELATED_CARD_DROP_LINE, RelatedCardChromeContext, type RelatedCardChrome } from './relatedListCompact';
 import { RelatedCardMenu } from './RelatedCardMenu';
-import {
-  editRelatedArrangement,
-  relatedCardId,
-  resolveRelatedArrangement,
-  type RelatedArrangement,
-  type RelatedArrangementEdit,
-  type RelatedCardId,
-} from './synth/relatedArrangement';
+import { relatedCardId, type RelatedArrangement, type RelatedCardId } from './synth/relatedArrangement';
+import { useRelatedArrangement } from './useRelatedArrangement';
 import { useDetailTranslation } from './useDetailTranslation';
 
 export interface RelatedCardStackProps {
@@ -60,7 +54,7 @@ function cardIdOf(node: unknown): RelatedCardId | null {
  * shared count store, the same one-row `$count` probe the tab strip's badges
  * ask, so the card reads no rows.
  */
-const CollapsedRelatedCard: React.FC<{ node: PageNode; chrome: RelatedCardChrome; onExpand: () => void }> = ({
+export const CollapsedRelatedCard: React.FC<{ node: PageNode; chrome: RelatedCardChrome; onExpand: () => void }> = ({
   node,
   chrome,
   onExpand,
@@ -153,11 +147,6 @@ export const RelatedCardStack: React.FC<RelatedCardStackProps> = ({
   onEnlarge,
 }) => {
   const { t } = useDetailTranslation();
-  const isMobile = useIsMobile();
-  const [localArrangement, setLocalArrangement] = React.useState<RelatedArrangement | undefined>(undefined);
-  const stored = onArrangementChange ? arrangement : localArrangement;
-  const write = onArrangementChange ?? setLocalArrangement;
-
   const cards = new Map<RelatedCardId, PageNode>();
   const rest: unknown[] = [];
   for (const node of nodes) {
@@ -165,26 +154,24 @@ export const RelatedCardStack: React.FC<RelatedCardStackProps> = ({
     if (id && !cards.has(id)) cards.set(id, node as PageNode);
     else rest.push(node);
   }
-  const defaultOrder = Array.from(cards.keys());
-  const now = Date.now();
-  const resolved = resolveRelatedArrangement(defaultOrder, stored, now);
-  const edit = (change: RelatedArrangementEdit) =>
-    write(editRelatedArrangement(defaultOrder, stored, change, Date.now()));
-
-  // Rule 3: a relationship new since the reader's last drag is stamped the
-  // first time this reader sees it, so its 「新」 badge runs 48 h from here.
-  const unseenKey = resolved.unseen.join('|');
-  React.useEffect(() => {
-    if (!unseenKey || !stored) return;
-    write(editRelatedArrangement(defaultOrder, stored, { kind: 'mark-seen', ids: unseenKey.split('|'), at: Date.now() }, Date.now()));
-    // Stamp once per set of unseen ids.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [unseenKey]);
+  const [dragId, setDragId] = React.useState<RelatedCardId | null>(null);
+  const [drop, setDrop] = React.useState<{ index: number } | null>(null);
+  const endDrag = () => {
+    setDragId(null);
+    setDrop(null);
+  };
+  const { resolved, edit, chromeOf } = useRelatedArrangement({
+    defaultOrder: Array.from(cards.keys()),
+    arrangement,
+    onArrangementChange,
+    onEnlarge,
+    draggable: true,
+    onDragStart: setDragId,
+    onDragEnd: endDrag,
+  });
 
   // ── Drag (desktop) ────────────────────────────────────────────────────
   const anchorRef = React.useRef<HTMLSpanElement>(null);
-  const [dragId, setDragId] = React.useState<RelatedCardId | null>(null);
-  const [drop, setDrop] = React.useState<{ index: number } | null>(null);
   const cardElements = (): HTMLElement[] => {
     const parent = anchorRef.current?.parentElement;
     if (!parent) return [];
@@ -216,10 +203,6 @@ export const RelatedCardStack: React.FC<RelatedCardStackProps> = ({
     if (drop.index < els.length) els[drop.index].dataset.relatedDrop = 'before';
     else els[els.length - 1].dataset.relatedDrop = 'after';
   });
-  const endDrag = () => {
-    setDragId(null);
-    setDrop(null);
-  };
   const onDrop = (event: React.DragEvent) => {
     if (!dragId || !drop) return endDrag();
     event.preventDefault();
@@ -229,27 +212,6 @@ export const RelatedCardStack: React.FC<RelatedCardStackProps> = ({
     endDrag();
   };
 
-  const chromeOf = (id: RelatedCardId, index: number): RelatedCardChrome => ({
-    id,
-    fresh: resolved.fresh.has(id),
-    onCollapse: () => edit({ kind: 'collapse', id, collapsed: true }),
-    onMoveUp: index > 0 ? () => edit({ kind: 'move-up', id }) : undefined,
-    onMoveDown: index < resolved.order.length - 1 ? () => edit({ kind: 'move-down', id }) : undefined,
-    onHide: () => edit({ kind: 'hide', id }),
-    onEnlarge: onEnlarge ? () => onEnlarge(id) : undefined,
-    dragHandleProps: isMobile
-      ? undefined
-      : {
-          draggable: true,
-          onDragStart: (event: React.DragEvent) => {
-            event.dataTransfer.effectAllowed = 'move';
-            event.dataTransfer.setData('text/plain', id);
-            setDragId(id);
-          },
-          onDragEnd: endDrag,
-        },
-  });
-
   return (
     <>
       {/* The stack's anchor: no box of its own; it names the column the drag
@@ -257,19 +219,7 @@ export const RelatedCardStack: React.FC<RelatedCardStackProps> = ({
           column's code). */}
       <span ref={anchorRef} hidden data-related-card-stack="" />
       <DragListener parentOf={anchorRef} onDragOver={onDragOver} onDrop={onDrop} onLeave={() => setDrop(null)} />
-      {resolved.defaultChanged && (
-        <p className="text-xs text-muted-foreground" data-related-default-changed="">
-          {t('detail.relatedDefaultChanged', { defaultValue: 'Default order updated' })}
-          {' · '}
-          <button
-            type="button"
-            className="rounded-sm font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            onClick={() => edit({ kind: 'restore-default-order' })}
-          >
-            {t('detail.relatedRestoreDefault', { defaultValue: 'Restore default' })}
-          </button>
-        </p>
-      )}
+      {resolved.defaultChanged && <RelatedDefaultChangedHint onRestore={() => edit({ kind: 'restore-default-order' })} />}
       {resolved.order.map((id, index) => {
         const node = cards.get(id)!;
         const chrome = chromeOf(id, index);
@@ -290,19 +240,40 @@ export const RelatedCardStack: React.FC<RelatedCardStackProps> = ({
         <SchemaRenderer key={`rest-${index}`} schema={toRenderableSchema(node)} />
       ))}
       {resolved.hidden.length > 0 && (
-        <p className="text-xs text-muted-foreground" data-related-hidden-line="">
-          {t('detail.relatedHiddenCount', { count: resolved.hidden.length, defaultValue: '{{count}} hidden' })}
-          {' · '}
-          <button
-            type="button"
-            className="rounded-sm font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            onClick={() => edit({ kind: 'show-hidden' })}
-          >
-            {t('detail.relatedShowHidden', { defaultValue: 'Show' })}
-          </button>
-        </p>
+        <RelatedHiddenLine count={resolved.hidden.length} onShow={() => edit({ kind: 'show-hidden' })} />
       )}
     </>
+  );
+};
+
+const LINE_BUTTON =
+  'rounded-sm font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+
+/** 「默认顺序已更新 · 恢复默认」 — the reader's order was laid over an older default (rule 5). */
+export const RelatedDefaultChangedHint: React.FC<{ onRestore: () => void }> = ({ onRestore }) => {
+  const { t } = useDetailTranslation();
+  return (
+    <p className="text-xs text-muted-foreground" data-related-default-changed="">
+      {t('detail.relatedDefaultChanged', { defaultValue: 'Default order updated' })}
+      {' · '}
+      <button type="button" className={LINE_BUTTON} onClick={onRestore}>
+        {t('detail.relatedRestoreDefault', { defaultValue: 'Restore default' })}
+      </button>
+    </p>
+  );
+};
+
+/** 「已隐藏 N 张 · 显示」 — the cards the reader hid, brought back together (rule 6). */
+export const RelatedHiddenLine: React.FC<{ count: number; onShow: () => void }> = ({ count, onShow }) => {
+  const { t } = useDetailTranslation();
+  return (
+    <p className="text-xs text-muted-foreground" data-related-hidden-line="">
+      {t('detail.relatedHiddenCount', { count, defaultValue: '{{count}} hidden' })}
+      {' · '}
+      <button type="button" className={LINE_BUTTON} onClick={onShow}>
+        {t('detail.relatedShowHidden', { defaultValue: 'Show' })}
+      </button>
+    </p>
   );
 };
 

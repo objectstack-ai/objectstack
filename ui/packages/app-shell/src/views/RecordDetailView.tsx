@@ -10,7 +10,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom';
-import { activityRowToFeedItem, auditEntriesToFeedItems, bodyTableIdsOf, RecordFieldChangesContext, DefaultRecordPageContext, EMPTY_RELATED_ARRANGEMENT, InlineEditSaveBar, RecordBodyTablesContext, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordPageColumnDefaults, resolveTitleField, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
+import { activityRowToFeedItem, ArrangedRelatedTab, auditEntriesToFeedItems, bodyTableIdsOf, RecordFieldChangesContext, DefaultRecordPageContext, EMPTY_RELATED_ARRANGEMENT, InlineEditSaveBar, RecordBodyTablesContext, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordPageColumnDefaults, resolveTitleField, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
 import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions, PanelToggles, type PanelToggleItem } from '@object-ui/components';
 import { useAuth, createAuthenticatedFetch } from '@object-ui/auth';
 import { usePermissions } from '@object-ui/permissions';
@@ -4275,7 +4275,21 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   // page keeps its own face.
                   <DefaultRecordPageContext.Provider value={!assignedPage && !namedPageBlocked}>
                     <RecordBodyTablesContext.Provider value={bodyTableIds}>
-                      <SchemaRenderer schema={withPageTabsUrlSync(renderedPage, { defaultTab: activeTabParam, onTabChange: handleTabChange }) as any} />
+                      {assignedPage || namedPageBlocked ? (
+                        <SchemaRenderer schema={withPageTabsUrlSync(renderedPage, { defaultTab: activeTabParam, onTabChange: handleTabChange }) as any} />
+                      ) : (
+                        // objectstack#27055 — the 关联 tab in the reader's
+                        // arrangement, the same one the related column reads.
+                        <ArrangedRelatedTab
+                          page={renderedPage}
+                          arrangement={relatedArrangement}
+                          onArrangementChange={setRelatedArrangement}
+                        >
+                          {(arranged) => (
+                            <SchemaRenderer schema={withPageTabsUrlSync(arranged as any, { defaultTab: activeTabParam, onTabChange: handleTabChange }) as any} />
+                          )}
+                        </ArrangedRelatedTab>
+                      )}
                     </RecordBodyTablesContext.Provider>
                   </DefaultRecordPageContext.Provider>
                 )}
