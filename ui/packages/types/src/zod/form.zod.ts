@@ -987,9 +987,9 @@ export const CommandSchema = BaseSchema.extend({
  * the author shipped the bad metadata anyway.
  *
  * This is deliberately NOT an answer to "which validator is canonical"
- * (objectui#5449, objectui#4631): a third hand-rolled implementation lives in
- * `packages/vscode-extension/src/providers/SchemaValidator.ts`, and whether
- * the end state is one canonical validator or a contract the others defer to
+ * (objectui#5449, objectui#4631): a third hand-rolled implementation lived in
+ * the VS Code extension's `SchemaValidator.ts` until objectstack#25910 removed
+ * that package, and whether the end state is one canonical validator or a contract the others defer to
  * is a maintainer architecture call. Closing the authoring-time gap is not,
  * and is all that happens here.
  */

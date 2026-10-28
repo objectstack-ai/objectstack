@@ -572,6 +572,38 @@ describe('[#26871] a predicate delete runs the referential walk for every matche
     expect(driver.writes).toEqual([]);
     expect(driver.rowsOf('detail')).toHaveLength(1);
   });
+
+  it('counts a matched row another matched row cascades into, and fires its delete hooks once (#27004)', async () => {
+    // One walk over the matched set: the child is a member like its parent,
+    // so the cascade leaves it to the predicate's own id-set delete instead of
+    // deleting it through a nested delete of its own.
+    const crew = {
+      name: 'crew',
+      label: 'Crew',
+      fields: {
+        id: { name: 'id', type: 'text' as const, primaryKey: true },
+        name: { name: 'name', type: 'text' as const },
+        lead: { name: 'lead', type: 'lookup' as const, reference: 'crew', deleteBehavior: 'cascade' },
+      },
+    };
+    const { engine, driver } = await makeEngine([crew]);
+    const lead = await engine.insert('crew', { name: 'doomed', lead: null });
+    const member = await engine.insert('crew', { name: 'doomed', lead: lead.id });
+    const kept = await engine.insert('crew', { name: 'kept', lead: null });
+    const events: string[] = [];
+    for (const event of ['beforeDelete', 'afterDelete'] as const) {
+      engine.registerHook(event, async (ctx: any) => void events.push(`${event}:${ctx.input?.id}`), { object: 'crew' });
+    }
+
+    const removed = await engine.delete('crew', { where: { name: 'doomed' }, multi: true });
+
+    expect(removed).toBe(2);
+    expect(driver.rowsOf('crew').map((r: any) => r.id)).toEqual([kept.id]);
+    expect([...events].sort()).toEqual([
+      `afterDelete:${lead.id}`, `afterDelete:${member.id}`,
+      `beforeDelete:${lead.id}`, `beforeDelete:${member.id}`,
+    ].sort());
+  });
 });
 
 // ---------------------------------------------------------------------------

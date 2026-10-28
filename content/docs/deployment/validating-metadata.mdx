@@ -777,6 +777,73 @@ schema, so a schema error is `os validate`'s verdict to give — but a rule that
 can fail the build fails `os lint` too.
 </Callout>
 
+## Metadata diagnostics on load
+
+Every metadata item is also validated against its schema when a server loads it, and
+the result travels with the item as a `_diagnostics` envelope:
+
+```ts
+interface MetadataDiagnostics {
+  valid: boolean;
+  errors?: Array<{ path: string; message: string; code?: string }>;
+  warnings?: Array<{ path: string; message: string; code?: string }>;
+}
+```
+
+`valid: false` means at least one error, and whatever depends on the item (rendering,
+queries, automation) is unsafe to use. Warnings are advisory. `path` is dot-delimited
+(`fields.email.type`, `columns.0.bind`). An environment overlay merges first and is
+validated after, so the envelope describes the effective item.
+
+`GET /api/v1/meta/diagnostics` sweeps every type and item in one request:
+
+| Query | Default | Effect |
+| :--- | :--- | :--- |
+| `severity` | `error` | `error` returns invalid items only; `warning` also returns warning-only items |
+| `type` | — | One metadata type |
+| `package` | — | One package |
+
+The response carries `entries` (each `{ type, name, diagnostics }`), `total`,
+`scannedTypes`, `scannedItems` and per-type `stats`. `total === 0` is a usable CI gate
+against a running server; add `severity=warning` to hold warnings to the same bar.
+Studio shows the same envelope on the metadata directory, each type's list, each
+item's edit page and the governance page (`…/metadata/_diagnostics`).
+
+## When a predicate cannot be evaluated at runtime
+
+A predicate that gets past authoring and fails to evaluate (a misspelled root, a type
+error, a missing function) never fails silently. The Console warns once per distinct
+predicate source, in production builds too, naming the node, the key, the predicate and
+the engine's reason:
+
+```text
+[ObjectUI] A visibility predicate could not be evaluated - node "record:alert" (id: "a1")
+  visibleWhen: "nosuchroot.status == 'draft'"
+  Reason: ... nosuchroot is not defined
+```
+
+What the failure does depends on what the predicate guards:
+
+| Predicate | On failure |
+| :--- | :--- |
+| A field's `visibleWhen`, `readonlyWhen`, `requiredWhen`; a view's `visibleOn`; an option's `visibleWhen`; list conditional formatting | **Fail open**: the rule's safe default applies, so a broken rule never hides a field. A rule that never fires while its field stays visible is the symptom, usually a bare field name where `record.<field>` was meant |
+| An object field group's `visibleWhen` | **Fail closed**: the whole group is hidden on the form and the record page |
+| A page node's `visibleWhen` / `visible` / `hidden`, and a `page:tabs` item's `visibleWhen` | **Fail closed**: the node or tab is withheld; a withheld related list is not counted in its tab badge |
+| A navigation item's or area's `visible` | **Fail open**: the item renders for everyone, reported under `app-shell:visible` |
+
+At **submit** a broken field rule is refused, not passed. A field `visibleWhen` that
+cannot be evaluated refuses the submit on the client, with a message naming the field
+and the rule, because no server evaluates `visibleWhen`. A broken `requiredWhen` or
+`readonlyWhen` is refused by the server, and the form shows that refusal beside the
+input. A `visibleWhen` that reads `previous` cannot be evaluated on a create form, so
+such a form is always refused.
+
+A **blank** rule (`''`, whitespace, or an envelope whose `source` is blank) is not "no
+rule". A blank field rule is refused when it is authored, and one already stored is
+refused at submit. A blank gate (`visible`, `hidden`, `disabled`, a page node's
+`visibleWhen`) reads as "no gate" at runtime and is reported once with the `[blank]`
+reason.
+
 ## The workflow
 
 ```bash

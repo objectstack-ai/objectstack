@@ -2135,7 +2135,7 @@ describe('SecurityPlugin', () => {
     it('a row the condition does not name: the conditioned field is editable, and the gate admits its write', async () => {
       const { plugin, harness } = await bootWhen(APPROVED_LOCK, { findOneImpl: () => rowOf('draft') });
       const access = await plugin.getRecordFieldAccess('task', 'r1', whenCtx);
-      expect(access).toEqual({ object: 'task', recordId: 'r1', readable: whenFields, editable: whenFields });
+      expect(access).toEqual({ object: 'task', recordId: 'r1', readable: whenFields, editable: whenFields, writable: true });
       await expect(gateAdmits(harness, { amount: 2 })).resolves.toBe(true);
       // Read as the CALLER, by id — the gate's own pre-image reader.
       expect(harness.findOne).toHaveBeenCalledWith('task', expect.objectContaining({ where: { id: 'r1' }, context: whenCtx }));
@@ -2178,7 +2178,135 @@ describe('SecurityPlugin', () => {
       const { plugin } = await bootWhen(APPROVED_LOCK, { findOneImpl: () => rowOf('approved') });
       await expect(plugin.getRecordFieldAccess('', 'r1', whenCtx)).resolves.toBeUndefined();
       await expect(plugin.getRecordFieldAccess('task', 'r1', { isSystem: true })).resolves.toEqual({
-        object: 'task', recordId: 'r1', readable: whenFields, editable: whenFields,
+        object: 'task', recordId: 'r1', readable: whenFields, editable: whenFields, writable: true,
+      });
+    });
+
+    // [#27175] `writable`: the row's own verdict, from the registered
+    // middleware run over a by-id update of the row — so it must agree with
+    // that update, both ways, and must leave nothing behind.
+    describe('[#27175] writable — the row write verdict', () => {
+      const ownRowsSet = (allowEdit: boolean): PermissionSet => ({
+        name: 'member_default',
+        label: 'Member',
+        objects: { '*': { allowRead: true, allowCreate: true, allowEdit, allowDelete: true } },
+        rowLevelSecurity: [
+          { name: 'own_rows_update', object: 'task', operation: 'update', using: 'owner_id = current_user.id' },
+        ],
+      } as any);
+      const bootRows = async (opts: { allowEdit?: boolean; inWriteScope: boolean; sharing?: any }) => {
+        const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+        const harness = makeMiddlewareCtx({
+          permissionSets: [ownRowsSet(opts.allowEdit ?? true)],
+          objectFields: whenFields,
+          // The by-id read answers the row; the step 2.7 re-read
+          // (`{ id } AND <write filter>`) answers it only inside the write scope.
+          findOneImpl: (q) => (q?.where?.$and && !opts.inWriteScope ? null : rowOf('draft')),
+          ...(opts.sharing ? { sharing: opts.sharing } : {}),
+        });
+        await plugin.init(harness.ctx);
+        await plugin.start(harness.ctx);
+        return { plugin, harness };
+      };
+      const updateAdmitted = (harness: any) =>
+        harness
+          .run({ object: 'task', operation: 'update', context: { ...whenCtx }, data: { name: 'renamed' }, options: { where: { id: 'r1' } } })
+          .then(() => true, () => false);
+
+      it('equals a by-id update of the row: inside the row-level write scope true, outside it false', async () => {
+        for (const inWriteScope of [true, false]) {
+          const { plugin, harness } = await bootRows({ inWriteScope });
+          const access = await plugin.getRecordFieldAccess('task', 'r1', whenCtx);
+          expect(access?.writable, `inWriteScope=${inWriteScope}`).toBe(inWriteScope);
+          await expect(updateAdmitted(harness)).resolves.toBe(inWriteScope);
+          // `editable` stays field-level: the row verdict does not empty it.
+          expect(access?.editable).toEqual(whenFields);
+        }
+      });
+
+      it('an object grant without edit answers false, as the update is refused', async () => {
+        const { plugin, harness } = await bootRows({ allowEdit: false, inWriteScope: true });
+        await expect(plugin.getRecordFieldAccess('task', 'r1', whenCtx)).resolves.toMatchObject({ writable: false });
+        await expect(updateAdmitted(harness)).resolves.toBe(false);
+      });
+
+      it('a stored row outside a row-level check answers false, while a save moving it back inside passes', async () => {
+        // The check judges the post-image; the probe's post-image is the stored
+        // row as it is. So `false` is "an update that leaves the row as stored",
+        // not "every update" — the describe says exactly that.
+        const checkSet = {
+          ...ownRowsSet(true),
+          rowLevelSecurity: [
+            { name: 'own_rows_update', object: 'task', operation: 'update', using: 'owner_id = current_user.id', check: "status != 'archived'" },
+          ],
+        } as any;
+        for (const status of ['draft', 'archived']) {
+          const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+          const harness = makeMiddlewareCtx({ permissionSets: [checkSet], objectFields: whenFields, findOneImpl: () => rowOf(status) });
+          await plugin.init(harness.ctx);
+          await plugin.start(harness.ctx);
+          const writable = status !== 'archived';
+          await expect(plugin.getRecordFieldAccess('task', 'r1', whenCtx), status).resolves.toMatchObject({ writable });
+          const save = (data: Record<string, unknown>) =>
+            harness
+              .run({ object: 'task', operation: 'update', context: { ...whenCtx }, data, options: { where: { id: 'r1' } } })
+              .then(() => true, () => false);
+          await expect(save({ name: 'renamed' }), status).resolves.toBe(writable);
+          await expect(save({ status: 'draft' }), status).resolves.toBe(true);
+        }
+      });
+
+      it('a refused probe logs at debug, tagged probe: true; a refused update still warns', async () => {
+        const { plugin, harness } = await bootRows({ inWriteScope: false });
+        harness.ctx.logger.debug = vi.fn();
+        const denials = () =>
+          harness.ctx.logger.warn.mock.calls.filter((c: any[]) => String(c[0]).includes('Access denied'));
+        await expect(plugin.getRecordFieldAccess('task', 'r1', whenCtx)).resolves.toMatchObject({ writable: false });
+        expect(denials()).toEqual([]);
+        expect(harness.ctx.logger.debug).toHaveBeenCalledWith(
+          expect.stringContaining('row-level security'),
+          expect.objectContaining({ operation: 'update', recordId: 'r1', probe: true }),
+        );
+        // Positive control: the same refusal on a real update is a warning.
+        await expect(updateAdmitted(harness)).resolves.toBe(false);
+        expect(denials()).toEqual([
+          [expect.stringContaining('row-level security'), expect.not.objectContaining({ probe: true })],
+        ]);
+      });
+
+      it('leaves nothing behind: no write epoch advanced, the caller\'s context unstamped', async () => {
+        const { plugin, harness } = await bootRows({ inWriteScope: true });
+        const epoch = (plugin as any).epoch;
+        const bump = vi.spyOn(epoch, 'bump');
+        const callerContext = { ...whenCtx };
+        await expect(plugin.getRecordFieldAccess('task', 'r1', callerContext)).resolves.toMatchObject({ writable: true });
+        expect(bump).not.toHaveBeenCalled();
+        expect(callerContext).toEqual(whenCtx);
+        // Positive control: a real by-id update through the same handler does advance it.
+        await expect(updateAdmitted(harness)).resolves.toBe(true);
+        expect(bump).toHaveBeenCalledWith('write');
+      });
+
+      it('asks plugin-sharing\'s by-id gate at the chain\'s end, with the context as the middleware stamped it', async () => {
+        const admitsByIdWrite = vi.fn(async () => false);
+        const sharing = { byIdWriteGateInstalled: true, admitsByIdWrite };
+        const { plugin } = await bootRows({ inWriteScope: true, sharing });
+        await expect(plugin.getRecordFieldAccess('task', 'r1', whenCtx)).resolves.toMatchObject({ writable: false });
+        expect(admitsByIdWrite).toHaveBeenCalledWith('task', 'r1', 'update', expect.objectContaining({ userId: 'u1', __writeScope: expect.any(String) }));
+        admitsByIdWrite.mockResolvedValue(true);
+        await expect(plugin.getRecordFieldAccess('task', 'r1', whenCtx)).resolves.toMatchObject({ writable: true });
+        // A sharing service whose middleware is not installed imposes nothing, as on the write.
+        sharing.byIdWriteGateInstalled = false;
+        admitsByIdWrite.mockClear();
+        admitsByIdWrite.mockResolvedValue(false);
+        await expect(plugin.getRecordFieldAccess('task', 'r1', whenCtx)).resolves.toMatchObject({ writable: true });
+        expect(admitsByIdWrite).not.toHaveBeenCalled();
+      });
+
+      it('fails closed when no middleware was registered', async () => {
+        const { plugin } = await bootRows({ inWriteScope: true });
+        (plugin as any).authzMiddleware = null;
+        await expect(plugin.getRecordFieldAccess('task', 'r1', whenCtx)).resolves.toMatchObject({ writable: false });
       });
     });
 

@@ -703,6 +703,45 @@ function inclusiveCalendarDayWindow(
 }
 
 /**
+ * [#27172] The bound pair a lowered `dateRange` window filters one column by —
+ * the ONE spelling the count (both strategies, the draft preview) and the drill
+ * (`drill-window.ts`) share.
+ *
+ * ADR-0053's one rule: a `datetime` column compares INSTANTS and a `date`
+ * column compares CALENDAR DAYS in the reference zone.
+ *
+ * - A resolved preset (`endExclusive`) on a `date` column is the calendar days
+ *   it covers in `timezone`, through this module's whole-day rule
+ *   {@link inclusiveCalendarDayWindow} — the projection `compareTo` already
+ *   shifts — as the inclusive `{ $gte, $lte }` day pair.
+ * - A resolved preset on any other column stays the instant pair it resolved
+ *   to, stopping before its end: `{ $gte, $lt }`.
+ * - A caller's explicit `[a, b]` is handed back bound for bound, with its
+ *   inclusive upper reading (#16179); the shared lowering gives a bare-day end
+ *   its whole-day reading where the column needs one.
+ *
+ * ⛔ The preset's instants used to reach a `date` column as they are, and the
+ * column reads an instant by its leading UTC day (`temporalStorageForm`). A
+ * zone east of UTC opens at midnight on the PREVIOUS UTC day, so the window
+ * slid one day early: Shanghai's `this_quarter` counted Jun 30 and dropped
+ * Sep 30, on both strategies. West of UTC the leading day happens to be the
+ * zone's own, which is why only eastern tenants saw it.
+ *
+ * @param dateColumn - Is the window's column declared `date`? A column whose
+ *   type the caller cannot name answers `false` and keeps the instants.
+ */
+export function dateRangeWindowBounds(
+  window: LoweredDateRangeWindow,
+  timezone: string | undefined,
+  dateColumn: boolean,
+): Record<string, string> {
+  if (!window.endExclusive) return { $gte: window.start, $lte: window.end };
+  if (!dateColumn) return { $gte: window.start, $lt: window.end };
+  const [first, last] = inclusiveCalendarDayWindow(window, timezone);
+  return { $gte: first, $lte: last };
+}
+
+/**
  * Resolve which time dimension a `compareTo` shifts (#5011).
  *
  * `DatasetCompareTo.dimension` is optional, and this is the rule that makes the

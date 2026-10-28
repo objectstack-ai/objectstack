@@ -166,10 +166,10 @@ export const PrintA3Action = defineAction({
 For actions whose redirect URL is **computed after a fetch** (SSO and SSO-like
 handlers), set `opensInNewTab: true`. The renderer pre-opens the tab
 **synchronously** on click so popup blockers don't fire, then navigates it to
-the handler's returned `redirectUrl`. For external deep-links with no server
-round-trip, add `newTabUrl` — a direct URL template (supports the `{recordId}`
-placeholder). It is valid **only** alongside `opensInNewTab: true`, and the
-target endpoint must enforce its own auth (the new tab carries no in-app session
+the handler's returned `redirectUrl`. To skip the round-trip, add `newTabUrl`
+— a backend path starting with `/` (`{recordId}` placeholder; an external URL
+is refused, use `openIn` above). Valid **only** with `opensInNewTab: true`; the
+endpoint must enforce its own auth (the new tab carries no in-app session
 context).
 
 ```typescript

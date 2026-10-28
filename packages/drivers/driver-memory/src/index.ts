@@ -61,20 +61,10 @@ export type {
   UniqueAwareSchema,
 } from './memory-unique-constraint.js';
 
-export default {
-  id: 'com.objectstack.driver.memory',
-  version: '1.0.0',
-
-  onEnable: async (context: any) => {
-    const { logger, config, drivers } = context;
-    logger.info('[Memory Driver] Initializing...');
-
-    if (drivers) {
-       const driver = new InMemoryDriver(config);
-       drivers.register(driver);
-       logger.info(`[Memory Driver] Registered driver: ${driver.name}`);
-    } else {
-       logger.warn('[Memory Driver] No driver registry found in context.');
-    }
-  }
-};
+// [ADR-0087 runtime-export-retired] This entry has NO default export, on
+// purpose. The legacy `{ id, version, onEnable }` object it once carried was not
+// a kernel `Plugin` (the contract is init/start/destroy), and the package's CJS
+// build could only place it on `require(...).default`, which the published
+// `.d.ts` misdescribed (attw `FalseExportDefault`). Register this driver through
+// a named export: `new DriverPlugin(new InMemoryDriver(), 'memory')`
+// (`@objectstack/runtime`), or construct `InMemoryDriver` directly.

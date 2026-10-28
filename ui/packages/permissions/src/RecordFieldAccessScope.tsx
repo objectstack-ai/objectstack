@@ -14,11 +14,30 @@ import { PermCtx, type PermissionContextValue } from './PermissionContext.js';
  * The part of the server's record-scoped field projection this scope reads
  * (`GET /data/{object}/{id}/field-access`, `GetRecordFieldAccessResponse` in
  * `@objectstack/spec`): the fields the caller may write on THIS record, as
- * field-level security judges an update of the stored row.
+ * field-level security judges an update of the stored row, and whether the
+ * row may be updated at all.
  */
 export interface RecordFieldAccessAnswer {
   readonly editable: readonly string[];
+  /**
+   * The write gate's verdict on the row itself (the object grant, sharing,
+   * ownership, row-level security). Only `false` changes anything below the
+   * scope; `true` and an absent key (a server that predates the verdict)
+   * leave the row's write question to the enclosing provider.
+   */
+  readonly writable?: boolean;
 }
+
+/**
+ * The `reason` a scoped `check(object, 'update')` answers with when THIS row
+ * refuses the update while the object grant allows it. A form reads it to say
+ * why every field is locked (`closedFormAffordance` in `@object-ui/plugin-form`).
+ *
+ *  - `record-not-writable` — the projection answered `writable: false`;
+ *  - `record-locked-by-approval` — the host reported a pending approval that
+ *    locks the record (`lockedBy: 'approval'`).
+ */
+type RecordWriteRefusal = 'record-not-writable' | 'record-locked-by-approval';
 
 export interface RecordFieldAccessScopeProps {
   /** The object the record belongs to. Matched case-insensitively, as `MePermissionsProvider` matches object names. */
@@ -39,6 +58,15 @@ export interface RecordFieldAccessScopeProps {
    * from the earlier answer.
    */
   revision?: number;
+  /**
+   * A lock on the record that the projection does not judge and the host
+   * reads from its own door: `'approval'` while a pending approval locks the
+   * record (the approvals service's record lock, answered to every reader).
+   * The row then answers as not writable, exactly as `writable: false` does,
+   * without waiting for the projection. The host passes the verdict it already
+   * draws its own lock from; the scope never re-derives it.
+   */
+  lockedBy?: 'approval';
   children: ReactNode;
 }
 
@@ -86,12 +114,15 @@ const scopeKey = (object: string, recordId: string) => JSON.stringify([(object ?
  *
  * The projection never widens past the enclosing provider on anything but
  * that lock, and on the lock it is the write gate's own verdict for the row.
+ * A row that refuses the update as a whole (`writable: false`, or a lock the
+ * host reports) is layered on top by {@link refusedRow}, which only narrows.
  */
 function scoped(
   parent: PermissionContextValue,
   object: string,
   recordId: string,
   answer: RecordFieldAccessAnswer | null,
+  lockedBy: RecordFieldAccessScopeProps['lockedBy'],
 ): PermissionContextValue {
   const key = scopeKey(object, recordId);
   let byRecord = SCOPED.get(parent);
@@ -99,10 +130,11 @@ function scoped(
     byRecord = new Map();
     SCOPED.set(parent, byRecord);
   }
-  let byAnswer = byRecord.get(key);
+  const cacheKey = lockedBy ? `${key}|${lockedBy}` : key;
+  let byAnswer = byRecord.get(cacheKey);
   if (!byAnswer) {
     byAnswer = new WeakMap();
-    byRecord.set(key, byAnswer);
+    byRecord.set(cacheKey, byAnswer);
   }
   const answerKey = answer ?? NO_ANSWER;
   const hit = byAnswer.get(answerKey);
@@ -133,9 +165,49 @@ function scoped(
         },
       }
     : { ...parent };
-  SCOPE_OF.set(value, key);
-  byAnswer.set(answerKey, value);
-  return value;
+  const refusal: RecordWriteRefusal | undefined =
+    answer?.writable === false ? 'record-not-writable'
+      : lockedBy === 'approval' ? 'record-locked-by-approval'
+        : undefined;
+  const result = refusal ? refusedRow(value, objKey, recordId, refusal) : value;
+  SCOPE_OF.set(result, key);
+  byAnswer.set(answerKey, result);
+  return result;
+}
+
+/**
+ * The row's own write verdict over `base`: THIS record refuses every update,
+ * so no field of it is writable and the object's `update` is refused for it.
+ *
+ * Only the update of this row is answered. `read` and `create` keep the
+ * enclosing answer, a `check` that names another record of the object keeps
+ * it too, and a `check` the enclosing provider already refuses keeps its own
+ * reason (the object grant is the wider refusal, and its sentence is the one
+ * a form should show).
+ */
+function refusedRow(
+  base: PermissionContextValue,
+  objKey: string,
+  recordId: string,
+  refusal: RecordWriteRefusal,
+): PermissionContextValue {
+  const ownRecord = (record: Record<string, unknown> | undefined): boolean => {
+    if (!record) return true;
+    const id = record.id ?? record._id;
+    return id === undefined || id === null || String(id) === recordId;
+  };
+  return {
+    ...base,
+    check: (o, action, record) => {
+      const verdict = base.check(o, action, record);
+      if (action !== 'update' || (o ?? '').toLowerCase() !== objKey || !verdict.allowed || !ownRecord(record)) {
+        return verdict;
+      }
+      return { allowed: false, reason: refusal };
+    },
+    checkField: (o, field, action) =>
+      action === 'write' && (o ?? '').toLowerCase() === objKey ? false : base.checkField(o, field, action),
+  };
 }
 
 /**
@@ -155,17 +227,25 @@ function scoped(
  * `revision` moves (the row was saved or re-read), the scope asks again and
  * the lock stands until the new answer lands.
  *
- * ⛔ The projection is field-level only. The record's row-level write scope
- * (sharing, row-level security, ownership) and the object grant are not part
- * of it: a row the caller may read but not write still answers its fields
- * editable here, and the server refuses the save as a whole, as it did before
- * this scope existed. The form-wide lock (`gateFormFields` in
- * `@object-ui/plugin-form`) keeps reading the object grant.
+ * The row's own write verdict rides on the same answer (objectstack#27138).
+ * `editable` is field-level only; the projection's `writable` is the write
+ * gate's verdict on the row itself — sharing, row-level security, ownership
+ * and the object grant. On `writable: false` every field of the record
+ * answers `write` refused and `check(object, 'update')` answers refused with
+ * the reason `record-not-writable`, so the field gates and the form-wide lock
+ * (`gateFormFields` in `@object-ui/plugin-form`) and the detail page's inline
+ * edit all draw the record read-only from the one source, and a form can say
+ * why. `lockedBy: 'approval'` answers the same way with the reason
+ * `record-locked-by-approval`: the approvals record lock is judged on the
+ * values a save sends, so the projection leaves it out, and the host passes
+ * the lock it already reads. `writable: true` or an absent `writable` changes
+ * nothing. Until the answer arrives the row-blind answer stands for the row,
+ * as it does for the fields.
  *
  * With no enclosing provider there is no field answer to refine, so the scope
  * renders its children as they are and asks nothing.
  */
-export function RecordFieldAccessScope({ object, recordId, load, revision = 0, children }: RecordFieldAccessScopeProps) {
+export function RecordFieldAccessScope({ object, recordId, load, revision = 0, lockedBy, children }: RecordFieldAccessScopeProps) {
   const parent = useContext(PermCtx);
   const key = scopeKey(object, recordId);
   const nested = !!parent && SCOPE_OF.get(parent) === key;
@@ -186,7 +266,14 @@ export function RecordFieldAccessScope({ object, recordId, load, revision = 0, c
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [!!parent, nested, key, revision]);
 
-  if (!parent || nested) return <>{children}</>;
+  if (!parent) return <>{children}</>;
+  // A scope nested under one for the same record reuses its answer, and adds
+  // only a lock the outer scope was not told of.
+  if (nested) {
+    return lockedBy
+      ? <PermCtx.Provider value={scoped(parent, object, recordId, null, lockedBy)}>{children}</PermCtx.Provider>
+      : <>{children}</>;
+  }
   const current = answer?.key === key && answer.revision === revision ? answer.value : null;
-  return <PermCtx.Provider value={scoped(parent, object, recordId, current)}>{children}</PermCtx.Provider>;
+  return <PermCtx.Provider value={scoped(parent, object, recordId, current, lockedBy)}>{children}</PermCtx.Provider>;
 }

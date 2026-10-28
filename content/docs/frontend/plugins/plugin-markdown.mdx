@@ -1,0 +1,181 @@
+---
+title: "Plugin Markdown"
+---
+
+Markdown renderer with GitHub Flavored Markdown support.
+
+## Installation
+
+```bash
+npm install @object-ui/plugin-markdown
+```
+
+The props a [`markdown`](/docs/ui/components/plugins#markdown) node reads on a page are generated from the spec into the component reference; this page covers using the plugin from React.
+
+## Usage
+
+### Basic Usage
+
+```tsx
+// Import once in your app entry point
+import '@object-ui/plugin-markdown'
+import type { MarkdownSchema } from '@object-ui/plugin-markdown'
+
+// Use in schemas
+const schema: MarkdownSchema = {
+  type: 'markdown',
+  content: '# Hello World\n\nThis is **markdown** text with [links](https://example.com).'
+}
+```
+
+## Features
+
+- **GitHub Flavored Markdown** (tables, task lists, strikethrough)
+- **XSS protection** (sanitized output)
+- **Code syntax highlighting**
+- **Lazy-loaded** (~100-200 KB loads only when rendered)
+
+## Supported Markdown Features
+
+### Headers
+
+```markdown
+# H1 Header
+## H2 Header
+### H3 Header
+#### H4 Header
+##### H5 Header
+###### H6 Header
+```
+
+### Text Formatting
+
+```markdown
+**Bold text**
+*Italic text*
+~~Strikethrough~~
+`Inline code`
+```
+
+### Links and Images
+
+```markdown
+[Link text](https://example.com)
+![Alt text](https://example.com/image.jpg)
+```
+
+### Lists
+
+```markdown
+- Unordered item 1
+- Unordered item 2
+  - Nested item
+
+1. Ordered item 1
+2. Ordered item 2
+   1. Nested ordered item
+```
+
+### Task Lists
+
+```markdown
+- [x] Completed task
+- [ ] Incomplete task
+- [ ] Another task
+```
+
+### Tables
+
+```markdown
+| Column 1 | Column 2 | Column 3 |
+|----------|----------|----------|
+| Cell 1   | Cell 2   | Cell 3   |
+| Cell 4   | Cell 5   | Cell 6   |
+```
+
+### Code Blocks
+
+````markdown
+```javascript
+function hello() {
+  console.log("Hello, World!");
+}
+```
+````
+
+### Blockquotes
+
+```markdown
+> This is a blockquote
+> It can span multiple lines
+```
+
+### Horizontal Rules
+
+```markdown
+---
+***
+___
+```
+
+## Styling with Tailwind
+
+Use Tailwind Typography plugin for better markdown styling:
+
+```tsx
+import type { MarkdownSchema } from '@object-ui/plugin-markdown'
+
+const schema: MarkdownSchema = {
+  type: 'markdown',
+  content: '# My Document\n\nContent here...',
+  className: 'prose prose-lg prose-slate dark:prose-invert max-w-none'
+}
+```
+
+Common prose classes:
+
+- `prose` - Base typography styles
+- `prose-sm` / `prose-lg` / `prose-xl` - Size variants
+- `prose-slate` / `prose-gray` - Color schemes
+- `dark:prose-invert` - Dark mode support
+- `max-w-none` - Remove max-width constraint
+
+## Security (XSS Protection)
+
+All markdown content is automatically sanitized using `rehype-sanitize` to prevent XSS attacks:
+
+```tsx
+// Safe - HTML tags are sanitized
+import type { MarkdownSchema } from '@object-ui/plugin-markdown'
+
+const schema: MarkdownSchema = {
+  type: 'markdown',
+  content: '**Safe** markdown with <script>alert("XSS")</script>'
+}
+// The script tag will be removed in the output
+```
+
+## Bundle Size
+
+The plugin uses lazy loading to optimize bundle size:
+
+- **Initial load**: ~0.2 KB (entry point)
+- **Lazy chunk**: ~100-200 KB (loaded when markdown is rendered)
+- **Includes react-markdown and plugins**
+
+## TypeScript Support
+
+```ts
+import type { MarkdownSchema } from '@object-ui/plugin-markdown'
+
+const markdownSchema: MarkdownSchema = {
+  type: 'markdown',
+  content: '# Hello TypeScript!'
+}
+```
+
+## Related Documentation
+
+- [Plugin System Overview](/docs/frontend/plugins)
+- [Lazy-Loaded Plugins Architecture](/docs/frontend/plugins#lazy-loading-architecture)
+- [Package README](https://github.com/objectstack-ai/objectstack/tree/main/ui/packages/plugin-markdown)

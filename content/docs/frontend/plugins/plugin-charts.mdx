@@ -1,0 +1,339 @@
+---
+title: "Plugin Charts"
+---
+
+Data visualization components powered by Recharts.
+
+## Installation
+
+```bash
+npm install @object-ui/plugin-charts
+```
+
+The props an [`object-chart`](/docs/ui/components/plugins#object-chart) node reads on a page are generated from the spec into the component reference; this page covers using the plugin from React.
+
+## Usage
+
+The plugin provides two chart APIs:
+
+1. **Simple Bar Chart** (`bar-chart`) - Simplified API for basic bar charts
+2. **Advanced Charts** (`chart`) - Full-featured API supporting multiple chart types (bar, line, area) and multiple data series
+
+### Basic Usage
+
+```tsx
+// Import once in your app entry point
+import '@object-ui/plugin-charts'
+import type { BarChartSchema } from '@object-ui/plugin-charts'
+
+// Use in schemas
+const schema: BarChartSchema = {
+  type: 'bar-chart',
+  data: [
+    { name: 'Jan', value: 400 },
+    { name: 'Feb', value: 300 },
+    { name: 'Mar', value: 600 }
+  ],
+  dataKey: 'value',
+  xAxisKey: 'name',
+  height: 400
+}
+```
+
+## Features
+
+- **Bar, line, and area charts**
+- **Responsive design**
+- **Customizable colors and styles**
+- **Lazy-loaded** (~540 KB loads only when rendered)
+
+## Chart Types
+
+The plugin provides three chart components: `bar-chart` and `chart` draw the rows they are given, and `object-chart` fetches its own:
+
+### Simple Bar Chart (bar-chart)
+
+For basic single-series bar charts, use the simplified `bar-chart` type:
+
+```tsx
+import type { BarChartSchema } from '@object-ui/plugin-charts'
+
+const schema: BarChartSchema = {
+  type: 'bar-chart',
+  data: [
+    { month: 'Jan', sales: 400 },
+    { month: 'Feb', sales: 300 },
+    { month: 'Mar', sales: 600 }
+  ],
+  dataKey: 'sales',
+  xAxisKey: 'month',
+  color: '#3b82f6',
+  height: 300
+}
+```
+
+### Advanced Charts (chart)
+
+For multi-series charts or line/area charts, use the advanced `chart` type with the `chartType` property:
+
+##### Bar Chart
+
+```tsx
+import type { ChartSchema } from '@object-ui/types'
+
+const schema: ChartSchema = {
+  type: 'chart',
+  chartType: 'bar',
+  data: [
+    { month: 'Jan', sales: 400, target: 350 },
+    { month: 'Feb', sales: 300, target: 400 },
+    { month: 'Mar', sales: 600, target: 550 }
+  ],
+  xAxisKey: 'month',
+  series: [
+    { dataKey: 'sales' },
+    { dataKey: 'target' }
+  ],
+  config: {
+    sales: { label: 'Sales', color: '#3b82f6' },
+    target: { label: 'Target', color: '#10b981' }
+  }
+}
+```
+
+##### Line Chart
+
+```tsx
+import type { ChartSchema } from '@object-ui/types'
+
+const schema: ChartSchema = {
+  type: 'chart',
+  chartType: 'line',
+  data: [
+    { date: '2024-01', users: 120 },
+    { date: '2024-02', users: 180 },
+    { date: '2024-03', users: 250 }
+  ],
+  xAxisKey: 'date',
+  series: [
+    { dataKey: 'users' }
+  ],
+  config: {
+    users: { label: 'Users', color: '#8884d8' }
+  }
+}
+```
+
+###### Area Chart
+
+```tsx
+import type { ChartSchema } from '@object-ui/types'
+
+const schema: ChartSchema = {
+  type: 'chart',
+  chartType: 'area',
+  data: [
+    { time: '9:00', value: 20 },
+    { time: '10:00', value: 35 },
+    { time: '11:00', value: 45 }
+  ],
+  xAxisKey: 'time',
+  series: [
+    { dataKey: 'value' }
+  ],
+  config: {
+    value: { label: 'Value', color: '#10b981' }
+  }
+}
+```
+
+##### Per-series options
+
+Each `series` entry names the column it plots (`dataKey`, or the spec spelling `name`) and may carry the presentation keys the renderer reads — the same keys as `@objectstack/spec`'s `ChartSeries`:
+
+| Key | Type | Effect |
+|---|---|---|
+| `label` | `string` or inline locale map | Legend / tooltip name; defaults to the column key. |
+| `type` | `'bar' \| 'line' \| 'area'` | Per-series family override — a combo chart is a series disagreeing with the chart's `chartType`. |
+| `color` | `string` | Series colour; wins over the positional palette. |
+| `stack` | `string` | Stack group id — series sharing one id stack together. |
+| `yAxis` | `'left' \| 'right'` | Which y-axis the series binds to, on a chart that declares a second y-axis. |
+| `variant` | `'primary' \| 'comparison'` | `comparison` draws the muted period-over-period overlay; `primary` (the default) is the normal treatment. The muted defaults are per mark family; a `radar` overlay takes the `area` ones, radar being the other mark this renderer both strokes and fills. |
+| `dashArray` | `string` | SVG `stroke-dasharray`, e.g. `"4 4"` for a dashed line. Applies on **any** series, whatever its `variant`, and overrides the comparison overlay's default `"4 4"`. Only a mark with a stroke can show a dash, and this renderer strokes `line`, `area` and `radar` marks (the chart's `chartType`, or a per-series `type` override) — on a `bar` or `scatter` mark the value reaches the mark and paints nothing, which is the mark's geometry rather than a condition on the key. |
+| `opacity` | `number` | Stroke and fill opacity override — any finite number (the spec bounds it to 0–1). Applies on **any** series, whatever its `variant`, on every mark family — the fill of a `bar` or `scatter` mark, the stroke of a `line` mark, both on an `area` or `radar` mark — and overrides the comparison overlay's per-family default. |
+
+`chartType` is **not** a series key. It is the renderer's internal spelling of `type` — `@objectstack/spec`'s `ChartSeries` lists it as an alias — and the validator refuses it by name (`Unrecognized key(s) on this chart series: chartType. Did you mean chartType → type?`) instead of dropping it silently, which is what it used to do. Write `type`.
+
+An `area` chart keeps every key in this example live: `stack` stacks the two primary areas, and the comparison overlay takes both the dash and the opacity (on a `bar` chart the dash would still reach the mark, but a bar has no stroke to dash). Neither key needs `variant: 'comparison'` — a primary series may carry them too, and then it is the overlay's defaults, not the keys, that stay comparison-only.
+
+```tsx
+import type { ChartSchema } from '@object-ui/types'
+
+const schema: ChartSchema = {
+  type: 'chart',
+  chartType: 'area',
+  data: [
+    { month: 'Jan', revenue: 400, cost: 250, revenue_prev: 360 },
+    { month: 'Feb', revenue: 300, cost: 210, revenue_prev: 330 }
+  ],
+  xAxisKey: 'month',
+  series: [
+    { name: 'revenue', label: 'Revenue', stack: 'money' },
+    { name: 'cost', label: 'Cost', stack: 'money' },
+    // '8 4' overrides the overlay's default '4 4' dash; 0.6 lifts its 0.2 fill default (its stroke default is already 0.6)
+    { name: 'revenue_prev', label: 'Revenue (previous period)', variant: 'comparison', dashArray: '8 4', opacity: 0.6 }
+  ]
+}
+```
+
+##### Axis options
+
+`xAxis` and `yAxis` take `@objectstack/spec`'s axis object, `ChartAxis` — the same object the react `ObjectChart` tier (an `object-chart` node) takes for its own `xAxis` / `yAxis`, with the same keys and the same checks. `xAxis` is one object; `yAxis` is a **list**, one entry per value axis, and a second entry declares the right-hand axis. A bar (`column`), line, area, combo or `horizontal-bar` chart draws at most two value axes: an entry after the second is accepted but drawn on no axis, and the chart shows a note under the plot naming it (`yAxis[2]`, …) and, when the chart declares neither `series` nor `categories`, the axis its `field` is plotted against — the right-hand one, the top one on `horizontal-bar` (objectui#10691). A `scatter` chart draws one value axis, the first entry's: an entry after the first is accepted but drawn on no axis, and the chart shows a note under the plot naming it (`yAxis[1]`, …) and the axis it draws, `yAxis[0]` (objectui#10721). The object is strict: an undeclared key is refused at parse, with the spec's own hint (`Did you mean grid → showGridLines?`).
+
+| Key | Type | Effect |
+|---|---|---|
+| `field` | `string` | **Required.** The column the axis reads. On `xAxis` it names the category column (`xAxisKey` wins when both are written); on `yAxis`, when the chart has neither `series` nor `categories`, the entries' `field`s are the plotted columns. |
+| `title` | `string` or inline locale map | Axis title, resolved to the viewer's language. |
+| `format` | `string` | Tick number format, e.g. `"$0,0.00"` or `"0.0%"`. A string the renderer does not recognise keeps the default ticks. |
+| `min` / `max` | `number` | Pin the ends of a numeric axis: the value axes, and the x axis of a `scatter` chart. |
+| `stepSize` | `number` | Distance between ticks on a numeric axis. |
+| `showGridLines` | `boolean` | `false` on the first `yAxis` entry hides the horizontal grid lines; `true` on `xAxis` draws vertical ones. |
+| `position` | `'left' \| 'right' \| 'top' \| 'bottom'` | The side of the chart the axis belongs to. On `xAxis` it is one of the two sides that axis can run along: `top` or `bottom` on bar (`column`), line, area and `scatter` charts, whose x axis runs across the plot; `left` or `right` on a `horizontal-bar` chart, where `xAxis` configures the category axis running down the plot. Any other side draws the axis at its default side (the bottom; the left on `horizontal-bar`), and the chart shows a note under the plot naming `xAxis.position`. On `yAxis` it is the side of that entry's value axis. The open sides are `left` and `right` on bar (`column`), line, area, combo and `scatter` charts (a `scatter` chart draws one y axis, the first entry's), and `bottom` and `top` on a `horizontal-bar` chart, whose value axes run across the plot; there a series' `yAxis: 'left'` binds the bottom axis and `'right'` the top one. A lone entry's axis is drawn on the side it names. With two entries each is drawn on the side it names, and an entry that names no side takes the side the other left free; when both name the same side, the first keeps it and the second is drawn on the other side, with a note under the plot naming `yAxis[1].position`. Any other side places the entry as if it named none, and the chart shows a note under the plot naming `yAxis[N].position` (objectui#10654). |
+| `logarithmic` | `boolean` | Logarithmic scale on a numeric axis. |
+
+A bare string is not an axis object. `xAxis: 'month'` is the sibling spelling of `xAxisKey` and folds onto it at parse; a single object or a bare string on `yAxis` is refused — write a one-entry list.
+
+```tsx
+import type { ChartSchema } from '@object-ui/types'
+
+const schema: ChartSchema = {
+  type: 'chart',
+  chartType: 'line',
+  data: [
+    { month: 'Jan', revenue: 4000, margin: 0.21 },
+    { month: 'Feb', revenue: 3000, margin: 0.18 }
+  ],
+  xAxis: { field: 'month', title: 'Month' },
+  yAxis: [
+    { field: 'revenue', title: 'Revenue', format: '$0,0', min: 0 },
+    // the second entry is the right-hand axis the `margin` series binds to
+    { field: 'margin', title: { en: 'Margin', fr: 'Marge' }, format: '0.0%' }
+  ],
+  series: [
+    { name: 'revenue' },
+    { name: 'margin', yAxis: 'right' }
+  ]
+}
+```
+
+### Object Charts (object-chart)
+
+An `object-chart` node charts an object's records (`objectName` with an `aggregate`) or a dataset (`dataset` with `dimensions` and `values`), and fetches the rows itself. An authored node takes its props in the `properties` bag. Its family is `chartType`, one of the `@objectstack/spec` chart families this package draws as a chart: `bar`, `horizontal-bar`, `column`, `line`, `area`, `pie`, `donut`, `funnel`, `scatter`, `treemap`, `sankey`, `combo` and `radar` (objectui#11513).
+
+```json
+{
+  "type": "object-chart",
+  "properties": {
+    "chartType": "funnel",
+    "objectName": "opportunity",
+    "aggregate": { "field": "amount", "function": "sum", "groupBy": "stage" },
+    "xAxis": { "field": "stage" },
+    "series": [{ "name": "amount" }]
+  }
+}
+```
+
+The spec's single-value families (`gauge`, `solid-gauge`, `metric`, `kpi`, `bullet`) and tabular ones (`table`, `pivot`) are refused on `chartType`, and the refusal names the set above: this node draws no chart of them. Write a single number as an `object-metric`, rows as an `object-data-table`, and a cross-tab as an `object-pivot`. The TypeScript `ObjectChartSchema` in `@object-ui/types` declares the same set, taken from the spec's `ChartType`:
+
+```ts
+import type { ObjectChartSchema } from '@object-ui/types'
+
+const pipeline: ObjectChartSchema = {
+  type: 'object-chart',
+  chartType: 'funnel',
+  objectName: 'opportunity',
+  aggregate: { field: 'amount', function: 'sum', groupBy: 'stage' },
+  series: [{ name: 'amount' }]
+}
+```
+
+## Bundle Size
+
+The plugin uses lazy loading to optimize bundle size:
+
+- **Initial load**: ~0.2 KB (entry point)
+- **Lazy chunk**: ~541 KB minified (~136 KB gzipped)
+- **Loads only when rendered**
+
+Without lazy loading, this would add 541 KB to your main bundle. With lazy loading, it's loaded only when charts are displayed.
+
+## Customization
+
+### Custom Colors
+
+```tsx
+const schema = {
+  type: 'bar-chart',
+  data: salesData,
+  color: '#f59e0b', // Amber color
+  className: 'bg-white p-4 rounded-lg'
+}
+```
+
+### Responsive Height
+
+```tsx
+const schema = {
+  type: 'chart',
+  chartType: 'line',
+  data: metricsData,
+  xAxisKey: 'date',
+  series: [{ dataKey: 'value' }],
+  config: {
+    value: { label: 'Metrics', color: '#8884d8' }
+  },
+  className: 'h-64 sm:h-96 lg:h-[500px]'
+}
+```
+
+## Rendering Without the Entrance Animation (host-composed)
+
+A host that builds an `object-chart` or `chart` node in code can set `isAnimationActive: false` on it for a deterministic render: the chart draws at its final geometry on the first frame, with no entrance animation. Omitted, the chart animates. `ChartRenderer` honours the flag, and the flag reaches it by one of two routes:
+
+- **An `object-chart` node.** `ObjectChart` spreads the node into the schema it hands `ChartRenderer`. `DashboardRenderer` and `DashboardGridLayout` set the flag this way on the `object-chart` nodes they build for an object-bound widget. For this node it is declared on the TypeScript `ObjectChartSchema` in `@object-ui/types`, as a host-composed member.
+- **A bare `chart` node.** `ChartRenderer` renders it directly: it owns the bare `chart` key, and `ObjectChart`'s block is registered as `view:chart` only. `ChartRenderer`'s own `schema` prop declares the flag. `DatasetWidget` and `DatasetReportRenderer` set it this way, and so do the two dashboard renderers for a widget on inline data. These nodes do not go through `ObjectChartSchema`.
+
+It is not an authoring key: the zod mirror of `ObjectChartSchema` declares no member for it, so it is not part of the `object-chart` node's `properties` vocabulary.
+
+## Axis Tick Labels and the Host Page Font
+
+**Precondition:** the host page's `body` font family must match the font family the chart's axis tick labels render with. When the two differ, Recharts computes its tick-density and collision decisions against the wrong glyph metrics: tick labels overlap when the page font is narrower than the tick font, and labels that would have fitted are dropped from the axis when it is wider. Nothing reports the mismatch — there is no error and no warning, only a different set of visible labels.
+
+To meet it, render charts in the page's body font: set your font stack on `body`, and do not give a chart, or any element between `body` and the chart, a different `font-family`.
+
+Why it happens: on any axis whose `interval` is not a number — Recharts' default `preserveEnd`, and `preserveStart`, `preserveStartEnd`, `equidistantPreserveStart` and `equidistantPreserveEnd` — Recharts chooses which tick labels to keep by measuring every label: its width on a horizontal axis, its height on a vertical one. It takes that measurement in a hidden `span` that it appends to `document.body`, so the span inherits the page's body font family rather than the chart's. After the first render Recharts reads the computed `fontSize` and `letterSpacing` back from a rendered tick and measures again with them, but it never reads `fontFamily`, and a `fontFamily` in an axis's `tick` props does not reach the measurement either. A numeric `interval` (such as `0`) skips the measurement altogether. The fix belongs in Recharts itself; it is tracked in [objectui#9430](https://github.com/objectstack-ai/objectui/issues/9430).
+
+This package has one instance of it. `ChartImpl`, the component the `bar-chart` type lazy-loads, sets `fontFamily: 'monospace'` in its y-axis `tick` props and gives that axis no `interval`, so the axis runs Recharts' default `preserveEnd` thinning and its labels are measured in the page's body font instead of in monospace. Its x-axis carries the same font but sets `interval={0}`, which skips the measurement. Because a vertical axis measures label heights, and the measuring `span` is one line tall — its height comes from the `line-height` it inherits from `body`, and depends on the font family only when that `line-height` is `normal` — this y-axis can keep a different set of labels only on a page that leaves `line-height` at `normal`.
+
+## TypeScript Support
+
+```ts
+import type { BarChartSchema } from '@object-ui/plugin-charts'
+
+const chartSchema: BarChartSchema = {
+  type: 'bar-chart',
+  data: [
+    { name: 'Product A', value: 400 },
+    { name: 'Product B', value: 300 }
+  ],
+  dataKey: 'value',
+  xAxisKey: 'name',
+  height: 400
+}
+```
+
+## Related Documentation
+
+- [Plugin System Overview](/docs/frontend/plugins)
+- [Lazy-Loaded Plugins Architecture](/docs/frontend/plugins#lazy-loading-architecture)
+- [Package README](https://github.com/objectstack-ai/objectstack/tree/main/ui/packages/plugin-charts)

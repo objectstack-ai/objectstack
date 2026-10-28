@@ -119,6 +119,20 @@ export interface EvalContext {
    */
   locale?: string;
   /**
+   * The tenant default currency (an ISO 4217 code in three capitals, e.g.
+   * `CNY`): the `localization.currency` setting, read the way a currency field
+   * and a dashboard measure read it (`ExecutionContext.currency` on a request).
+   * A `template` hole `{{ amount | currency }}` with no argument formats in it.
+   *
+   * A reserved channel, like {@link locale}: never bound as a variable, and no
+   * root sets it. Unset (the tenant has no default, or the caller supplied
+   * none) or not a three-capital code, a no-argument `currency` hole makes the
+   * evaluation fail (`kind: 'runtime'`), naming the hole and the remedy: the
+   * amount is never formatted in a currency nobody chose. A hole that names
+   * its code (`currency:EUR`) does not read this.
+   */
+  currency?: string;
+  /**
    * Current authenticated subject (hook / action / view contexts).
    *
    * ADR-0068: the canonical user contract is {@link EvalUser} from

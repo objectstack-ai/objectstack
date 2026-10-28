@@ -215,7 +215,7 @@ import { isEntrypoint } from '../invoked-as.mjs';
 // `check-half-states.mjs`, so this reader and the patrol cannot come to
 // disagree about which board is being read or whether this container's fetch
 // reaches it.
-import { DEFAULT_SWEEP_REPO, resolveSweepRepo, proxyRearmPlan, PROXY_FLAG, PROXY_REARM_GUARD } from './check-half-states.mjs';
+import { DEFAULT_SWEEP_REPO, resolveSweepRepo, proxyRearmPlan, PROXY_FLAG, PROXY_REARM_GUARD, stripSignatureLine } from './check-half-states.mjs';
 
 export const EXIT_OK = 0;
 export const EXIT_SELF_TEST_FAILED = 1;
@@ -333,7 +333,8 @@ export const RULING_COMMENT_SHAPES = Object.freeze([
  * ruling mid-body is about a ruling, not one.
  */
 export function firstContentLine(body) {
-  const line = String(body ?? '').split('\n').find((l) => l.trim() !== '');
+  // One leading signature line is not the ruling's line (`stripSignatureLine`, #27113).
+  const line = stripSignatureLine(body).split('\n').find((l) => l.trim() !== '');
   if (line === undefined) return '';
   return line.replace(/^[\s>]+/, '').replace(/^#{1,6}\s+/, '').replace(/^[*_`\s]+/, '').trim();
 }

@@ -469,6 +469,41 @@ app page or action, where `features.*` stays bound and stays legal. A record *fi
 `features` is unaffected — `record.features.x` is member access, not the scope root.
 </Callout>
 
+## How a list opens a record
+
+Clicking a row, card, node, bar or event opens the record in an overlay whose mode is
+the view's `navigation.mode`: `drawer`, `modal`, `split` or `popover`. Every list-type
+view (grid, tree, kanban, calendar, gantt, list, gallery, map and timeline) opens the
+same record panel, so a record reads with its declared labels and typed values, without
+its `hidden` fields, whichever view it came from. In `split` the view moves into the
+left panel; in `popover` the panel is anchored to what was clicked.
+
+The record opened from a list is addressable: `?recordId=` on the list's URL, so a
+reload, a shared link or Back reopens it. A record opened inside the drawer (a related
+row, a lookup value) opens one level down in the same drawer; those levels are
+in-memory, so a reload shows the root record. `⤢` opens a level's full page, and
+**Collapse to drawer** returns to the stack it left. A record page's own layout is
+described in [Pages](/docs/ui/pages).
+
+### A user's list state never writes the view
+
+A header sort, a column drag or resize, a filter change, a density change, Hide Fields
+and a Manage Views drag are saved for that user (`sys_user_preference`, key
+`ui.list.<object>`), never to the view metadata, so they work even where the tenant's
+metadata is read-only. What you author (`sort`, filters, columns, `rowHeight`,
+`hiddenFields`, tab order) is the default for every user with no state of their own.
+
+- A link carrying list state (`uf_*` parameters) wins over the stored state.
+- A user's hidden fields only subtract from the columns the view shows, never add one.
+- **Reset view** in the page header's ⋯ menu drops the active view's stored state.
+
+### A view the user may not open
+
+The server lists only the views and dashboards a user may open, so one gated by
+`requiredPermissions` is absent from their lists. Opened by URL, it answers
+`403 PERMISSION_DENIED`, and the Console shows "You don't have access" with the
+server's sentence, not "not found". A name that does not exist still reads "not found".
+
 ## Complete Example
 
 One container covering a default grid, a kanban saved view, and a tabbed default form — mirroring `examples/app-showcase/src/ui/views/task.view.ts`:

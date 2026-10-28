@@ -77,6 +77,7 @@ import { describe, expect, it } from 'vitest';
 
 import { ALL_CONVERSIONS } from '../conversions/registry';
 import { TimeUpdateInterval } from '../data/analytics.zod';
+import { CurrencyConfigSchema } from '../data/field.zod';
 import { IndexSchema, ObjectSchema } from '../data/object.zod';
 import { ManifestPermissionsSchema } from '../kernel/manifest.zod';
 import {
@@ -251,6 +252,15 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
     tombstone(AdminScopeSchema, 'permission.adminScope', 'authorEnvironmentSets'),
   ],
   'permission-set-managed-by-removed': [tombstone(PermissionSetSchema, 'permission', 'managedBy')],
+  // #27157: the D2 strip is the data-at-rest half; what an author meets is the
+  // refusal of a `fixed` config with no code, which names the release.
+  'currency-config-dynamic-default-currency-removed': [
+    refusal(
+      "currencyConfig.currencyMode 'fixed' without defaultCurrency",
+      () => CurrencyConfigSchema.safeParse({ currencyMode: 'fixed' }),
+      'defaultCurrency',
+    ),
+  ],
   'permission-modify-all-allow-delete-false-to-true': [
     refusal(
       'allowDelete: false beside modifyAllRecords: true',
@@ -394,6 +404,10 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
       'recordAction',
     ),
   ],
+  // #27153: `buttons.reset`, tombstoned inside the live `buttons` block.
+  'form-view-buttons-reset-removed': [
+    tombstone((FormViewSchema.shape.buttons as unknown as { unwrap: () => unknown }).unwrap(), 'view.form.buttons', 'reset'),
+  ],
   // #27155: the form view `type` narrowed to the form's layout — each retired
   // member refused by the enum's own error map, plus the three split-only keys
   // tombstoned beside it.
@@ -450,6 +464,15 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
       "page template 'full-width'",
       () => PageSchema.safeParse({ name: 'lead_detail_page', label: 'Lead', type: 'record', object: 'crm_lead', template: 'full-width', regions: [{ name: 'main', components: [] }] }),
       'template',
+    ),
+  ],
+  // The slotted page's `tabs` slot, tombstoned in the slot map; the page is
+  // otherwise complete, so `slots` is the only issue path.
+  'page-slots-tabs-removed': [
+    refusal(
+      'a slotted page authoring slots.tabs',
+      () => PageSchema.safeParse({ name: 'lead_detail_page', label: 'Lead', type: 'record', object: 'crm_lead', kind: 'slotted', regions: [], slots: { tabs: { type: 'page:tabs' } } }),
+      'slots',
     ),
   ],
   // #23543 F3: a loose `config` key under a sibling-block node type, refused by
