@@ -33,6 +33,26 @@ import { DatasetReportRenderer } from '../DatasetReportRenderer';
 
 const OBJECT = 'crm_opportunity';
 
+// A result that names its `object` makes the dimension-label hook read
+// `/api/v1/meta/object/NAME` through the global `fetch` (no host `apiFetch`
+// here). Answered by ONE module-scope double that stays up for the whole file
+// (the network-escape guard's prescription), declaring no option fields, so
+// the rows are drawn exactly as the server sent them. Any other URL is refused.
+const META_OBJECT_ROUTE = /^\/api\/v1\/meta\/object\/(.+)$/;
+const strayUrls: string[] = [];
+vi.stubGlobal(
+  'fetch',
+  vi.fn(async (input: unknown) => {
+    const url = String(input && typeof input === 'object' && 'url' in input ? (input as { url: unknown }).url : input);
+    const m = META_OBJECT_ROUTE.exec(url);
+    if (!m) {
+      strayUrls.push(url);
+      return { ok: false, status: 404, json: async () => ({}) };
+    }
+    return { ok: true, status: 200, json: async () => ({ item: { name: decodeURIComponent(m[1]), fields: {} } }) };
+  }),
+);
+
 function makeSource(result: Record<string, unknown>) {
   return { queryDataset: vi.fn(async () => result) };
 }
@@ -80,6 +100,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  expect(strayUrls).toEqual([]);
 });
 
 function permissions(apiOperations?: string[]): MePermissionsResponse {
