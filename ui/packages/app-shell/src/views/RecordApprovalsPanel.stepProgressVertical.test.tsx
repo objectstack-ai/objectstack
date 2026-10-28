@@ -45,11 +45,10 @@
  * CJK labels, verbatim) is exercised directly, and the invariance test rules
  * out a count threshold that could put some other length back on the old path.
  *
- * The steps reach the line as the panel builds them since objectstack#26563:
- * off the pending request's run, one approved request per passed step and the
- * pending request last (`visitedApprovalSteps`). So each fixture below is a
- * run's request rows, every step but the last passed, and no step is ahead of
- * the pending one.
+ * The steps reach the line as the approvals get serves them since
+ * objectstack#26668: the pending request's own route, `flow_route`. So each
+ * fixture below is a served route, passed steps, the pending one and the
+ * steps ahead.
  *
  * No build artifact sits between the edit and this test — the root Vitest
  * config aliases every `@object-ui` specifier at that package's source.
@@ -73,8 +72,8 @@ import { RecordApprovalsPanel } from './RecordApprovalsPanel';
 /** The strip's accessible name, as the panel spells it through `tr`. */
 const STEPPER_LABEL = 'Approval steps';
 
-/** One step of a run: the approval node a request was opened for, and its label. */
-type Step = { id: string; label: string };
+/** One step of a served route. */
+type Step = NonNullable<ApprovalRequestLite['flow_route']>['steps'][number];
 
 /**
  * The reporter's actual 6-step flow, labels verbatim (objectui#5554). They are
@@ -85,49 +84,45 @@ type Step = { id: string; label: string };
  * would quietly move the fixture out of the failing regime.
  */
 const REPORTED_STEPS: Step[] = [
-  { id: 's1', label: '需求部门负责人初审' },
-  { id: 's2', label: '工厂生产工艺负责人审核' },
-  { id: 's3', label: '工厂业财审核（确认单价/派工工时）' },
-  { id: 's4', label: '事业部成本改善经理加审' },
-  { id: 's5', label: '区域总经理+事业部业财运营总监会审' },
-  { id: 's6', label: '工厂厂长审批' },
+  { id: 's1', label: '需求部门负责人初审', state: 'done' },
+  { id: 's2', label: '工厂生产工艺负责人审核', state: 'done' },
+  { id: 's3', label: '工厂业财审核（确认单价/派工工时）', state: 'current' },
+  { id: 's4', label: '事业部成本改善经理加审', state: 'upcoming' },
+  { id: 's5', label: '区域总经理+事业部业财运营总监会审', state: 'upcoming' },
+  { id: 's6', label: '工厂厂长审批', state: 'upcoming' },
 ];
 
-/** A synthetic flow of `n` steps, for the step-count invariance sweep. */
+/** A synthetic route of `n` steps, for the step-count invariance sweep. */
 function stepsOfLength(n: number): Step[] {
   return Array.from({ length: n }, (_, i) => ({
     id: `syn_${i}`,
     label: `区域总经理+事业部业财运营总监会审 ${i + 1}`,
-  }));
+    state: i === 0 ? 'current' : 'upcoming',
+  })) as Step[];
 }
 
-/** The request the run opened at `step`, the `i`-th step it reached. */
-function requestAt(step: Step, i: number, status: string): ApprovalRequestLite {
+/** The pending request, as the get serves it with its route. */
+function pendingWith(steps: Step[]): ApprovalRequestLite {
   return {
-    id: `req_${step.id}`,
+    id: 'req_pending',
     process_name: 'flow:purchase',
     process_label: 'Purchase Approval',
     object_name: 'purchase_order',
     record_id: 'rec_1',
-    status,
+    status: 'pending',
     submitter_id: 'u_submitter',
     submitter_name: 'Zhou Ming',
-    submitted_at: `2026-08-20T08:${String(i).padStart(2, '0')}:00Z`,
-    flow_run_id: 'run_1',
-    flow_node_id: step.id,
-    current_step: step.id,
-    step_label: step.label,
+    submitted_at: '2026-08-20T08:00:00Z',
     viewer: { can_act: false, is_submitter: false },
+    flow_route: { steps, ahead: 'end' },
   };
 }
 
-/** A run that passed every step but the last, and waits on the last. */
 function renderWithSteps(steps: Step[]) {
-  const rows = steps.map((s, i) => requestAt(s, i, i === steps.length - 1 ? 'pending' : 'approved'));
-  const pending = rows[rows.length - 1];
+  const pending = pendingWith(steps);
   return render(
     <RecordApprovalsPanel
-      approvals={{ available: true, requests: [...rows].reverse(), pendingRequest: pending }}
+      approvals={{ available: true, requests: [pending], pendingRequest: pending }}
       currentUserId="u_viewer"
     />,
   );
@@ -266,10 +261,10 @@ describe('RecordApprovalsPanel — vertical step stepper (objectui#5554)', () =>
     expect(rows.slice(0, -1).every((r) => rail(r) !== undefined)).toBe(true);
     expect(rail(rows[rows.length - 1])).toBeUndefined();
 
-    // Every step a segment leads into is passed or pending, so every segment
-    // is green: the line draws nothing ahead of the pending step.
-    for (const row of rows.slice(0, -1)) {
-      expect(tokens(rail(row)!)).toContain('bg-emerald-300');
-    }
+    // s2 (done) and s3 (current) are the steps rows 1 and 2 lead into, so
+    // those segments are green; s4 is upcoming, so row 2's successor is not.
+    expect(tokens(rail(rows[0])!)).toContain('bg-emerald-300');
+    expect(tokens(rail(rows[1])!)).toContain('bg-emerald-300');
+    expect(tokens(rail(rows[2])!)).toContain('bg-border');
   });
 });
