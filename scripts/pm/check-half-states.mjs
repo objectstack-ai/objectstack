@@ -1256,6 +1256,135 @@ export const CLAIM_COMMENT_MARKER = /^\s*>?\s*Claim(?:ed)?\s*:/mi;
 export const RELEASE_COMMENT_MARKER = /^\s*>?\s*Release\s*:/mi;
 
 // ---------------------------------------------------------------------------
+// The seat SIGNATURE line — who wrote a seat-authored body, on its first line (#27113).
+//
+// Every seat writes through the fleet relay, so every post lands under one bot
+// login and the platform's author field cannot say which lane, seat or account
+// wrote it. The maintainer's ruling (「让发帖脚本 post-stamped 强制每条帖子第一行带署名:
+// 车道#席位号 · 账户 · 会话,缺署名就拒发」) puts all of it on the FIRST non-empty line:
+//
+//   LANE#N · ACCOUNT · SESSION      e.g. `domain:skills#2 · os-justin · session_01…`
+//
+//   LANE     a seat as the role table spells it: `domain:` or `repo:` plus a lowercase
+//            name (`domain:engine-core` carries a hyphen, measured on the label set),
+//            `epic:#` plus the parent card, `triage`, `director` or `coordinator`
+//   N        the seat number, from 1
+//   ACCOUNT  the login a claim's `Account:` line carries — GitHub's own login rule
+//   SESSION  the full id, in the relay envelope's shape (`SESSION_SHAPE`, fleet-write/ops.mjs,
+//            mirrored here because this module may not import that one; the record-recognisers
+//            self-test holds the two sources equal) — a container session is `session_` plus
+//            the `cse_` tail, so the 26-character desktop form is not the only real one
+//
+// The separator is exactly ` · ` — one space, U+00B7, one space — the doorbell keys' dot.
+//
+// TWO halves read this ONE spelling, and neither restates it:
+//   WRITE  the seat-authored writers REFUSE a body whose first non-empty line is not one:
+//          `post-stamped.mjs` (both modes), `issue-create.mjs`, and the `comment_edit` /
+//          `issue_patch` bodies a seat hands `fleet-write/dispatch.mjs`. ⛔ No writer inserts
+//          one for the seat: a body without a signature is never posted.
+//   READ   every recogniser that keys on a body's FIRST line reads it through
+//          `stripSignatureLine`, so one leading signature line changes no reading. A marker
+//          that already matches at any line start (the `m` flag) needs nothing.
+//
+// ⛔ Exactly ONE line is skipped, and only an exact match. A near miss stays the first line:
+// the write half refuses it by name, and the read half does not quietly read past it.
+// ---------------------------------------------------------------------------
+
+/** The four parts' patterns, unanchored, in order — the ONE spelling every reader and writer composes from. */
+const SIGNATURE_LANE_SOURCE = '(?:domain:[a-z][a-z0-9-]*|repo:[a-z][a-z0-9-]*|epic:#[1-9][0-9]*|triage|director|coordinator)';
+const SIGNATURE_ACCOUNT_SOURCE = '[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}';
+/** The relay envelope's session shape without its anchors — `SESSION_SHAPE` in `fleet-write/ops.mjs`. */
+export const SEAT_SIGNATURE_SESSION_SOURCE = 'session_[A-Za-z0-9]{6,}';
+/** The separator, exactly. */
+export const SEAT_SIGNATURE_SEPARATOR = ' · ';
+
+/** The signature line's pattern, unanchored and capture-free — what a marker composes when it admits one leading signature. */
+export const SEAT_SIGNATURE_SOURCE =
+  `${SIGNATURE_LANE_SOURCE}#[1-9][0-9]*${SEAT_SIGNATURE_SEPARATOR}${SIGNATURE_ACCOUNT_SOURCE}${SEAT_SIGNATURE_SEPARATOR}${SEAT_SIGNATURE_SESSION_SOURCE}`;
+
+/** ONE line, whitespace around it trimmed, is a signature — with the four parts captured. ⛔ No `g` or `m` flag. */
+export const SEAT_SIGNATURE_LINE = new RegExp(
+  `^(${SIGNATURE_LANE_SOURCE})#([1-9][0-9]*)${SEAT_SIGNATURE_SEPARATOR}(${SIGNATURE_ACCOUNT_SOURCE})${SEAT_SIGNATURE_SEPARATOR}(${SEAT_SIGNATURE_SESSION_SOURCE})$`,
+  'u',
+);
+
+/** The shape, as a refusal prints it — placeholders only, so it survives a GitHub body unchanged. */
+export const SEAT_SIGNATURE_SHAPE = 'LANE#N · ACCOUNT · SESSION — e.g. `domain:skills#2 · os-justin · session_01…`';
+
+/** The index of a line list's first non-blank line, or -1. */
+function firstNonBlankIndex(lines) {
+  return lines.findIndex((line) => line.trim() !== '');
+}
+
+/**
+ * The signature a body opens with, read off its FIRST non-empty line, or null when that line is
+ * not one (an empty body included). Pure.
+ *
+ * @param {string} body
+ * @returns {{ lane: string, seat: number, account: string, session: string, line: string } | null}
+ */
+export function readSignatureLine(body) {
+  const lines = String(body ?? '').split(/\r?\n/);
+  const at = firstNonBlankIndex(lines);
+  if (at < 0) return null;
+  const line = lines[at].trim();
+  const m = SEAT_SIGNATURE_LINE.exec(line);
+  return m ? { lane: m[1], seat: Number(m[2]), account: m[3], session: m[4], line } : null;
+}
+
+/**
+ * The body a first-line recogniser reads: unchanged when its first non-empty line is not a
+ * signature, else everything from the next non-empty line on — ONE signature line and the blank
+ * lines around it removed, so "the first line" is the same line it was before the rule. Pure.
+ */
+export function stripSignatureLine(body) {
+  const text = String(body ?? '');
+  if (readSignatureLine(text) === null) return text;
+  const lines = text.split(/\r?\n/);
+  const rest = lines.slice(firstNonBlankIndex(lines) + 1);
+  const from = firstNonBlankIndex(rest);
+  return from < 0 ? '' : rest.slice(from).join('\n');
+}
+
+/**
+ * Why a body about to be written by a seat-authored writer carries no signature, or null when its
+ * first non-empty line is one. The row every writer prints, so the refusal reads the same from
+ * each door. Pure.
+ *
+ * @returns {{ line: string, why: string } | null}
+ */
+export function signatureRefusal(body) {
+  if (readSignatureLine(body) !== null) return null;
+  const lines = String(body ?? '').split(/\r?\n/);
+  const at = firstNonBlankIndex(lines);
+  const line = at < 0 ? '(the body is empty)' : lines[at].trim();
+  // A line naming a seat number AND a session id is a signature typed wrong — named as such, so the fix is the spelling.
+  const near = at >= 0 && /#[1-9]/u.test(line) && /\bsession_/u.test(line);
+  return {
+    line: line.length > 160 ? `${line.slice(0, 160)}…` : line,
+    why: near
+      ? 'the first non-empty line reads like a signature and is not one — check the lane, the `#N` seat number, the login, the full session id, and that each separator is exactly ` · `'
+      : 'the first non-empty line is not a signature — the reader cannot tell which lane, seat, account or session wrote this',
+  };
+}
+
+/**
+ * The refusal a seat-authored writer prints, from `signatureRefusal`'s row — ONE text, so the
+ * signature reads the same from every door. `tool` names the door; `where` names the body when
+ * the door carries more than one (an action of a stroke).
+ */
+export function signatureRefusalText(row, { tool, where = 'the body' } = {}) {
+  return (
+    `${tool}: REFUSED — ${where} opens with no signature line. Nothing was written.\n` +
+    `  1. [signature] ${row.why}\n` +
+    `      line:  ${row.line}\n` +
+    `      write: ${SEAT_SIGNATURE_SHAPE} — as the FIRST non-empty line, alone\n\n` +
+    '  Every reply lands under one bot login, so this line is the only place a reader learns which lane, seat,\n' +
+    '  account and session wrote it. ⛔ No flag turns it off, and no writer inserts it for you.'
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Reading the two ownership markers — ONE place, decoration included (#18680).
 //
 // The two constants above describe the BARE directive and still do: they are
@@ -5584,7 +5713,8 @@ export function yieldedClaimIndexes(commentRows) {
     a.stamp !== null && b.stamp !== null && a.stamp !== b.stamp ? a.stamp < b.stamp : a.index < b.index;
   const yields = [];
   for (const row of rows) {
-    const first = row.body.split(/\r?\n/).find((line) => line.trim() !== '') ?? '';
+    // One leading signature line is not the yield's line (`stripSignatureLine`, #27113).
+    const first = stripSignatureLine(row.body).split(/\r?\n/).find((line) => line.trim() !== '') ?? '';
     if (!markerMatches(CLAIM_YIELD_MARKER, first)) continue;
     const sessions = new Set(first.match(new RegExp(SEAT_SESSION_ID.source, 'g')) ?? []);
     if (sessions.size !== 1) continue;
@@ -7979,7 +8109,8 @@ export const TRIAGE_RULING_ANCHORS = [
  * H4 paid for (#10102) applies verbatim.
  */
 export function isTriageRulingComment(body) {
-  const first = String(body ?? '')
+  // One leading signature line is not the ruling's opening (`stripSignatureLine`, #27113).
+  const first = stripSignatureLine(body)
     .split('\n')
     .map((l) => l.trim())
     .find((l) => l.length > 0);
@@ -12014,7 +12145,14 @@ export function h50ThreadReadMismatch(issue, commentRows, sinceMs = Date.parse(T
  * ⛔ No `g` flag — a shared regex carrying `lastIndex` between callers is a
  * state bug waiting for its second reader.
  */
-export const OS_DEV_REPORT_MARKER = /^[\s>]*(?:<!--[ \t]*)?os-dev-report[ \t]*(?:-->)?[ \t]*(?:\r?\n|$)/i;
+// ⭐ One leading signature line (`SEAT_SIGNATURE_SOURCE`, #27113) may stand above the marker: composed from the one
+// spelling, never restated, and still anchored at the body's start — a marker on any OTHER later line stays refused.
+// The `i` the dialect needs folds case on that signature too: a read-side allowance only, since every writer refuses
+// a signature spelt in any other case before it is posted.
+export const OS_DEV_REPORT_MARKER = new RegExp(
+  `^(?:\\s*${SEAT_SIGNATURE_SOURCE}[ \\t]*\\r?\\n)?[\\s>]*(?:<!--[ \\t]*)?os-dev-report[ \\t]*(?:-->)?[ \\t]*(?:\\r?\\n|$)`,
+  'i',
+);
 
 /** How many question texts the finding sentence echoes before it degrades to a count. */
 export const H52_QUESTION_ECHO_CAP = 2;
@@ -12886,7 +13024,8 @@ export function stampDriftMinutes(stamp, createdAt, updatedAt = createdAt) {
  * than one stamp contributes nothing — see `h56AmbiguousLines`.
  */
 export function h56StampedReadings(text) {
-  const lines = String(text ?? '').split('\n');
+  // The OPENING line is the act's own line, so one leading signature line above it is skipped (#27113).
+  const lines = stripSignatureLine(text).split('\n');
   const opening = lines.findIndex((line) => line.trim().length > 0);
   const out = [];
   for (let i = 0; i < lines.length; i++) {
@@ -12902,7 +13041,7 @@ export function h56StampedReadings(text) {
 
 /** How many of those positions were HELD OUT for carrying more than one stamp. */
 export function h56AmbiguousLines(text) {
-  const lines = String(text ?? '').split('\n');
+  const lines = stripSignatureLine(text).split('\n');
   const opening = lines.findIndex((line) => line.trim().length > 0);
   let held = 0;
   for (let i = 0; i < lines.length; i++) {
@@ -15788,7 +15927,8 @@ export const H65_ROUND_ARTEFACT_SHAPES = Object.freeze([
  * down (a report ABOUT a round, this card's own body) is not a round artefact.
  */
 export function h65Headline(body) {
-  for (const line of h44StripFences(body).split('\n')) {
+  // One leading signature line is not the headline (`stripSignatureLine`, #27113).
+  for (const line of h44StripFences(stripSignatureLine(body)).split('\n')) {
     if (line.trim()) return line;
   }
   return '';
