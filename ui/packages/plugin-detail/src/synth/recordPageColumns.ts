@@ -123,6 +123,7 @@ export function recordPageArrangementFor(
 
 /** The object-definition shape {@link recordPageColumnDefaults} reads. */
 export interface RecordPageObjectLike {
+  name?: string;
   stageField?: unknown;
   enable?: { files?: unknown } | null;
   fields?: Record<string, unknown> | unknown[] | null;
