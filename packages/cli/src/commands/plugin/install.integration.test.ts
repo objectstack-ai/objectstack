@@ -40,7 +40,9 @@ const ENV = ['OS_HOME', 'OS_DATABASE_URL', 'DATABASE_URL', 'TURSO_DATABASE_URL',
 
 interface Run {
   payload: any;
+  /** What reached `process.stdout.write`. */
   stdout: string;
+  /** Everything else: `process.stderr.write` and the console. */
   stderr: string;
   exitCode: number;
 }
@@ -58,7 +60,9 @@ async function run(command: { run: (argv: string[], opts: { root: string }) => P
   }) as typeof process.stdout.write;
   vi.spyOn(process.stdout, 'write').mockImplementation(capture(out));
   vi.spyOn(process.stderr, 'write').mockImplementation(capture(err));
-  vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => void out.push(`${a.join(' ')}\n`));
+  // Boot chatter goes through console; the `--json` document is the one
+  // thing written to stdout itself, as `emitJson` writes it.
+  vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => void err.push(`${a.join(' ')}\n`));
   vi.spyOn(console, 'warn').mockImplementation((...a: unknown[]) => void err.push(`${a.join(' ')}\n`));
   vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => void err.push(`${a.join(' ')}\n`));
   let thrownExit: number | undefined;
