@@ -49,6 +49,7 @@
     "content/docs/automation/hooks.mdx",
     "content/docs/automation/index.mdx",
     "content/docs/automation/jobs.mdx",
+    "content/docs/automation/queues-and-assignment-rules.mdx",
     "content/docs/automation/webhooks.mdx",
     "content/docs/automation/workflows.mdx",
     "content/docs/build-without-code.mdx",

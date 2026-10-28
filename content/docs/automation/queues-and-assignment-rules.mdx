@@ -1,0 +1,165 @@
+---
+title: Queues and assignment rules — route new work to a team
+navTitle: Queues & assignment
+description: Declare an ownership queue and an assignment rule, park new records for a team to claim or hand them to the least-loaded member, and know who sees a parked record.
+---
+
+## Scenario
+
+> New cases (leads, tickets, requests) arrive with no owner — from a public form, an import, an integration. They should land with **a team**, and either go straight to one of its members or wait until someone takes them. How do I say that without writing a `beforeInsert` hook that picks an owner?
+
+## Recommended solution
+
+Two declarations, both in your stack, and no hook:
+
+1. A **queue** — a named set of people that records can wait in (ADR-0142 D1).
+2. An **assignment rule** — per object, which inserted rows go to which queue (or user), and how one member is chosen (ADR-0142 D5).
+
+The platform does the rest: it stamps the record's owner or parks it in the queue, lets the queue's members see what is parked, and turns "I'll take this one" into one ordinary update that only one person can win.
+
+Queues and assignment rules apply to objects with `ownership: 'user'` — the tier that has an `owner_id`. Both keys need the ownership-queue service, which `@objectstack/plugin-sharing` registers; a stack that declares either without it is **refused at boot**, naming the key and the missing service, rather than served with queues nothing resolves.
+
+### 1. Declare a queue
+
+```ts
+import { defineStack } from '@objectstack/spec';
+import { defineQueue } from '@objectstack/spec/security';
+
+export default defineStack({
+  // …objects, positions, …
+  queues: [
+    defineQueue({
+      name: 'support_intake',              // the one name everything references
+      label: 'Support Intake',
+      members: [{ type: 'position', value: 'service_agent' }],
+    }),
+    defineQueue({
+      name: 'escalations',
+      label: 'Escalations',
+      members: [{ type: 'position', value: 'support_lead' }],
+    }),
+  ],
+});
+```
+
+A queue's **members** are written with the recipient kinds a sharing rule already uses, and resolve in the organization a record belongs to. A **declared** queue names **positions only**: a position is a catalog item your package can know by name, while a user, a team or a business unit is an organization's own row.
+
+An organization staffs its own queues too. A `sys_queue` record (with `sys_queue_member` records naming any of `user`, `team`, `position`, `business_unit` or `unit_and_subordinates`) is a queue exactly like a declared one. Both live in **one namespace, by name**: a `sys_queue` record may not take a declared queue's name, and every reference — the record's `queue` column, an assignment rule, an approver, a sharing recipient — resolves the name registry-first, then the organization's records. A declared queue is switched off through the activation ledger like any other declared metadata.
+
+An empty member list is allowed: it is a queue nobody staffs yet, and records still sit in it.
+
+### 2. Declare an assignment rule
+
+```ts
+import { defineAssignmentRule } from '@objectstack/spec/automation';
+
+export default defineStack({
+  // …
+  assignmentRules: [
+    defineAssignmentRule({
+      name: 'case_intake',
+      object: 'crm_case',
+      entries: [
+        {
+          name: 'vip_to_escalations',
+          criteria: 'record.priority == "urgent"',
+          assignTo: { type: 'queue', value: 'escalations' },   // no strategy: park it
+        },
+        {
+          name: 'everyone_else',                               // no criteria: every row
+          assignTo: { type: 'queue', value: 'support_intake' },
+          strategy: 'least_loaded',
+          load: 'record.status != "resolved" && record.status != "closed"',
+        },
+      ],
+    }),
+  ],
+});
+```
+
+**Entries are ordered; the first whose `criteria` match wins.** `criteria` is CEL over `record.*`, read against the row being inserted. `assignTo` is a queue (by machine name) or one user (by id).
+
+**`strategy`** decides what happens inside a queue:
+
+| `strategy` | The row ends up |
+|:--|:--|
+| *(absent)* | **Parked**: `queue` set, `owner_id` empty, until a member claims it |
+| `least_loaded` | Owned by the member with the fewest rows matching `load`; a tie goes to the earlier member (members are ordered by user id) |
+| `round_robin` | Owned by the member after the one this entry chose last |
+
+`strategy` applies only to a queue target; on a `user` target it is refused.
+
+**When it runs.** Once per inserted row, after every `beforeInsert` hook and before the write, and only for a row whose `owner_id` and `queue` are both still empty. A row whose writer named an owner, or whose hook set or cleared one, is left alone. **An update never runs a rule.** Assignment never refuses an insert: an empty queue parks the row, and a queue that does not resolve in the row's organization, or a read that fails, leaves the row ownerless — each logged once at `warn`, naming the queue.
+
+The rule writes `owner_id` (when it chose a member) and `queue` (for a queue target), nothing else. The row's audit columns still record who inserted it; the owner the rule chose is ownership, not attribution.
+
+### 3. `load` is required with `least_loaded`
+
+`least_loaded` counts each member's **open** rows of the object, and only you know what "open" means for it — `status != "closed"` for cases, `is_converted == false` for leads. So `load` is **required** with `least_loaded` and has no default: a default such as "every row" would count closed work and quietly make the busiest historical owner look the most loaded. `load` on any other strategy is refused, because nothing reads it.
+
+`load` is a **pushdown** predicate: it is lowered to a query filter, so it may use only what the CEL → filter compiler can lower (comparisons, `&&`, `||`, `in` over the object's own columns). A `load` the compiler cannot lower is an authoring-time error, never a rule that silently counts everything. `criteria`, by contrast, is read against the in-memory row and may use any CEL.
+
+## What a parked record is, and who sees it
+
+A record **sits in** queue Q when its `owner_id` is empty and its `queue` column names Q. Every `ownership: 'user'` object carries that `queue` column — a system-managed text column the platform injects beside `owner_id` (an object that declares its own field named `queue` is refused at registration). Once a record has an owner, `queue` only names its **home queue**: where a release returns it, and a reporting dimension. It grants nothing.
+
+**Who sees a parked record:**
+
+- **The members of Q** read and edit what sits in Q, through the reserved membership set `current_user.queues` (the queues the caller belongs to in the active organization). This widens **rows, never verbs**: a member still needs the object's read and edit grants, and **delete is never conferred** by queue membership.
+- **Everyone who could see it anyway** — scope depth, `viewAllRecords` / `modifyAllRecords`, an applicable sharing rule or record share — still does.
+- **Nobody through ownership.** A parked record is "owned by nobody": it is in no one's "my records" view, and an `owner_of:` notification audience reaches no one.
+
+The moment someone claims it, the queue path stops applying: the other members lose access unless another basis grants it. Ask the explain endpoint (`POST /api/v1/security/explain`) why a user sees a record and it reports the queue basis as its own reason (`queue_membership`) — see [Explaining a decision](/docs/permissions/explain).
+
+In the Console, a list of an object that carries the `queue` column has an **In a queue** toggle in its toolbar. It narrows the list to parked records (`owner_id` empty and `queue` set); which of them you see is still the server's read filter, so a member sees what sits in their own queues.
+
+## How a claim is spelled
+
+A **claim** is an ordinary update of `owner_id` to your own user id, by record id:
+
+```http
+PATCH /api/v1/data/crm_case/cas_01J8…
+Content-Type: application/json
+
+{ "owner_id": "<your user id>" }
+```
+
+There is no claim endpoint and no claim hook. The ownership gate admits this one update when the record is **unowned**, the payload names **you** as a single value, the request addresses **one record by id**, and the sharing model positively admits you to the record — a member of its queue, a holder of an `edit` share, or `modifyAllRecords`. A bulk update carrying `owner_id` stays refused.
+
+**Only one person wins.** The write is conditional on the owner still being empty, so two people claiming at once produce exactly one owner. The loser gets **`409 CONCURRENT_UPDATE`** — "The record was taken: another user changed it first. Reload it to see who has it now." Treat it as an answer, not an error: reload and move on. Any other refusal is `403 PERMISSION_DENIED`, and its message names the condition that failed.
+
+The Console's **Claim** button on a record sends exactly this update. It appears only on a record that sits in a queue, and only after the server's explain answer says your claim would be admitted; when someone beats you to it, it says so.
+
+Two related writes go through the same gate:
+
+- **Release** — the current owner sets `owner_id` back to `null` and leaves `queue` unchanged; the record sits in its home queue again. A record with no home queue has nowhere to return to, so releasing it is an ordinary disown that needs the transfer grant.
+- **Move** — writing a different `queue` (to re-route a parked record, or to park an owned one with `owner_id: null` in the same write) is a transfer: it needs `allowTransfer` or `modifyAllRecords`, and a queue that does not resolve in the record's organization is refused with `QUEUE_NOT_FOUND`.
+
+## A queue elsewhere: approvers and sharing recipients
+
+The same queue name works in two more places, each resolving to the queue's members:
+
+- **An approval node's approver** — `{ type: 'queue', value: 'support_intake' }` puts the queue's members on the slate at node entry; see [Approval chains](/docs/automation/approvals).
+- **A sharing rule's recipient** — `sharedWith: { type: 'queue', value: 'support_intake' }` shares the rule's matching records with the queue's members, re-materialised as membership moves; see [Sharing rules](/docs/permissions/sharing-rules#recipient-types).
+
+In the Console both pickers list the declared queues and the organization's own `sys_queue` records together. Note what a sharing rule does **not** do: naming a queue as a recipient shares *the rule's records* with *the queue's people*. It does not make records sit in the queue; only the `queue` column does that.
+
+## A queue is not a messaging audience
+
+A queue routes **records** to people. It is not an address for **messages**: a flow's `notify` audience grammar (`user:`, `role:`, `team:`, `owner_of:`) has no `queue:` selector, so "tell the queue that something new arrived" cannot be written as a queue. Address the people who staff it instead — the team, or the users holding the position the queue's members name — and remember that `owner_of:` on a parked record reaches nobody, because nobody owns it yet.
+
+## Checklist
+
+- The object is `ownership: 'user'`, and declares no field of its own named `queue`.
+- The stack loads `@objectstack/plugin-sharing`; otherwise `queues` / `assignmentRules` refuse the boot.
+- A declared queue's members are positions; organizations add users, teams and units through `sys_queue_member`.
+- Every `least_loaded` entry has a `load` your filter compiler can lower; no other entry has one.
+- Code that claims a record sends `{ owner_id: <self> }` by id and handles `409` as "someone else took it".
+- Alerts about new work address a team or a position, not the queue.
+
+## See also
+
+- [Assignment rule reference](/docs/references/automation/assignment-rule) — the generated schema.
+- [Approval chains](/docs/automation/approvals) — the `queue` approver.
+- [Sharing rules](/docs/permissions/sharing-rules) — recipient kinds, including `queue`.
+- [Row-level security](/docs/permissions/rls) — reserved membership keys such as `current_user.queues`.
