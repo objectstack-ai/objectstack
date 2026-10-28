@@ -25,6 +25,7 @@ import { SkeletonDetail } from '../skeletons/index.js';
 import { ManagedByBadge, useManagedByNote } from '../components/ManagedByBadge.js';
 import { isSetupAppSegment } from '../console/setupApp.js';
 import { deriveRelatedLists } from '../utils/deriveRelatedLists.js';
+import { recordPageChildObjects } from './recordPageChildObjects.js';
 import { stripDiscussionNodes, hasExplicitAttachments, hasExplicitApprovals } from '../utils/pageSchemaIntrospect.js';
 import { ActionConfirmDialog, type ConfirmDialogState } from './ActionConfirmDialog.js';
 import { ActionParamDialog, type ParamDialogState } from './ActionParamDialog.js';
@@ -1851,13 +1852,19 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // knows what it depends on. That covers every child-write path at one seam,
   // and costs one parent read per change, however many lists are mounted.
   //
-  // The children are the page's derived related lists, keyed by CONTENT
-  // (AGENTS.md #10 — `childRelations` is a memo). A change both subscriptions
+  // The children are the page's derived related lists, plus the ones its
+  // author lists on it (objectstack#26890): an authored page's
+  // `record:related_list` blocks and `record:reference_rail` entries may name a
+  // child the graph does not derive — its FK opted out with `relatedList:
+  // false`, the page being the only place it is shown — and a create through
+  // that list left the header's total stale. Keyed by CONTENT (AGENTS.md #10 —
+  // `childRelations` and the page are memos). A change both subscriptions
   // match — a `'*'`, or this record when the object references itself — bumps
   // both nonces from one dispatch; React batches the two updates into one
   // render, so the row is still read once.
+  const authoredChildObjects = useMemo(() => recordPageChildObjects(effectivePage), [effectivePage]);
   const relatedChildObjectsKey = JSON.stringify(
-    Array.from(new Set(childRelations.map((r) => r.childObject))).sort(),
+    Array.from(new Set([...childRelations.map((r) => r.childObject), ...authoredChildObjects])).sort(),
   );
   useEffect(() => {
     const childObjects = JSON.parse(relatedChildObjectsKey) as string[];

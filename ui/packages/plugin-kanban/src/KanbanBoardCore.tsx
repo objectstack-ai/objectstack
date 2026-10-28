@@ -51,6 +51,12 @@ export interface KanbanBoardCoreProps {
    * derives it from the object's `state_machine` rule on the grouped field.
    */
   canDropCard?: KanbanBoardProps['canDropCard'];
+  /**
+   * Why `canDropCard` refuses a lane — see `KanbanBoardProps.dropBlockedReason`
+   * (#27099). A PROP for the same reason: `ObjectKanban` reads it off the rule
+   * that closes the lane.
+   */
+  dropBlockedReason?: KanbanBoardProps['dropBlockedReason'];
   /** Half of the Quick Add pair. Only `KanbanRenderer` supplies it. */
   quickAdd?: boolean;
   /** The other half of the Quick Add pair. Only `KanbanRenderer` supplies it. */
@@ -100,6 +106,7 @@ export const KanbanBoardCore: React.FC<KanbanBoardCoreProps> = ({
   onCardMove,
   cardsMovable,
   canDropCard,
+  dropBlockedReason,
   quickAdd,
   onQuickAdd,
 }) => {
@@ -124,6 +131,7 @@ export const KanbanBoardCore: React.FC<KanbanBoardCoreProps> = ({
         onCardMove={onCardMove}
         cardsMovable={cardsMovable}
         canDropCard={canDropCard}
+        dropBlockedReason={dropBlockedReason}
         onCardClick={schema.onCardClick}
         className={schema.className}
         quickAdd={quickAdd}

@@ -2287,6 +2287,7 @@ const STUDIO_ZH: Record<string, string> = {
   // Access pillar: a create over a taken identifier, and the draft discard (objectstack#26836).
   'engine.studio.access.createTaken': '此软件包已有标识为「{name}」的权限集：{label}。请打开它，或换一个标识。',
   'engine.studio.access.createTakenElsewhere': '此软件包之外已有标识为「{name}」的权限集：{label}。请换一个标识。',
+  'engine.studio.access.createDraftTaken': '已有标识为「{name}」的权限集草稿。请换一个标识。',
   'engine.studio.access.discardConfirm': '放弃「{item}」的待发布草稿吗？已发布的权限集保持不变，只移除未发布的修改。',
   'engine.studio.access.discardConfirmUnpublished': '放弃「{item}」吗？它从未发布过，放弃草稿会移除这个权限集。',
   'engine.studio.access.discardFailed': '无法放弃草稿',
@@ -3009,6 +3010,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.list.col.accessLevel': '访问级别',
   'engine.list.col._packageId': '软件包',
   'engine.list.col.criteria': '条件',
+  'engine.list.col.locale': '语言',
   'engine.list.col.actions': '操作',
   'engine.list.col._holderCount': '持有人数',
   'engine.list.col._grantedPermissionSets': '权限集',

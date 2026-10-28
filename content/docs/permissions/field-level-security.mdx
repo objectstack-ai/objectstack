@@ -64,7 +64,11 @@ fields: {
   an update of the stored row. So a lock that applies from a stage onward
   disables the field only on the rows its condition names — this is the
   answer a record's edit form reads. A row that is absent or that the caller
-  cannot read answers the record read's `404`.
+  cannot read answers the record read's `404`. The answer is field-level
+  only: the object grant and the record's row-level write scope (sharing,
+  row-level security, ownership) are not part of it, so on a row the caller
+  may read but not write it still lists fields as editable, and the update
+  is refused as a whole.
 - **Union without deny is unchanged.** A matched conditioned lock is still
   out-voted by another set's unconditioned `editable: true`; an entry
   without `when` votes on every row, as before (ADR-0066 ⑧, note of

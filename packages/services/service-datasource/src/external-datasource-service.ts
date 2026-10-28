@@ -26,7 +26,7 @@ import type {
   IDataDriver,
 } from '@objectstack/spec/contracts';
 import type { SchemaDiffEntry } from '@objectstack/spec/shared';
-import { DEFAULT_DATASOURCE_NAME } from './datasource-connection-service.js';
+import { DEFAULT_DATASOURCE_NAME, type DatasourceConnectionState } from './datasource-connection-service.js';
 import {
   suggestFieldTypeForSqlType,
   isCompatible,
@@ -91,6 +91,18 @@ export interface ExternalDatasourceServiceConfig {
    * introspection round trip it always was.
    */
   liveDriver?: (datasource: string) => Pick<IDataDriver, 'checkHealth' | 'introspectSchema'> | undefined;
+  /**
+   * [#27100] The retained verdict of `datasource`'s last connect attempt
+   * (`DatasourceConnectionService.getConnectionState`), or `undefined` when
+   * none was made. {@link ExternalDatasourceService.testConnection} answers a
+   * failed verdict's `reason` for a datasource with no live driver: the
+   * text the admin list and the create answer serve as `statusReason`.
+   *
+   * Optional. A host that does not wire it keeps the engine's answer.
+   */
+  connectionState?: (
+    datasource: string,
+  ) => Pick<DatasourceConnectionState, 'availability' | 'reason'> | undefined;
   /** Resolve a datasource definition by name. */
   getDatasource: (name: string) => Promise<DatasourceLike | undefined>;
   /** Resolve one object definition by name. */
@@ -673,6 +685,17 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
    * Test reads `ok`, `error` and `latencyMs`). Every other datasource is tested
    * exactly as before. So is one with no live driver: `introspect` names the
    * absence itself.
+   *
+   * [#27100] …unless the absence has a cause on record. A failed connect
+   * registers no driver, so `introspect` answered "has no registered driver"
+   * for a Postgres datasource that was refused at its host, pointing the
+   * admin at installing a driver that is installed. With `connectionState`
+   * wired, a datasource with no live driver and a FAILED verdict answers that
+   * verdict's `reason`, the one `statusReason` carries: one message, never a
+   * second one built here. Test does not re-attempt the connect; the edit's
+   * rebuild does, and replaces the verdict either way. A datasource whose
+   * failed rebuild kept its old pool serving has a live driver, so it is
+   * probed as before.
    */
   async testConnection(
     datasource: string,
@@ -680,6 +703,10 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
     const started = Date.now();
     try {
       const driver = this.config.liveDriver?.(datasource);
+      if (!driver) {
+        const verdict = this.config.connectionState?.(datasource);
+        if (verdict?.availability === 'failed' && verdict.reason) return { ok: false, error: verdict.reason };
+      }
       const canIntrospect = typeof driver?.introspectSchema === 'function';
       if (driver && (datasource === DEFAULT_DATASOURCE_NAME || !canIntrospect)) {
         if (!(await driver.checkHealth())) {

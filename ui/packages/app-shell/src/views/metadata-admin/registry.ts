@@ -30,6 +30,30 @@
 import type { ComponentType, ReactNode } from 'react';
 
 /**
+ * objectstack#26649 — the edit route's bundle member query parameter
+ * (`metadata/:type/:name?member=zh-CN`), written by the list's row link for a
+ * type that declares {@link MetadataResourceConfig.bundleMemberField} and read
+ * by the edit page. The same name as the by-name doors' own `?member=`
+ * selector, which the page forwards verbatim. Page-scoped, like `package`.
+ */
+export const BUNDLE_MEMBER_PARAM = 'member';
+
+/**
+ * objectstack#26649 — the bundle member a body IS, read off its own
+ * {@link MetadataResourceConfig.bundleMemberField}, trimmed as the doors read
+ * the selector; `undefined` when the type declares no field or the body none
+ * (the canonical member, which the bare name already addresses).
+ */
+export function bundleMemberOf(
+  item: Record<string, unknown> | null | undefined,
+  field: string | undefined,
+): string | undefined {
+  if (!field) return undefined;
+  const value = item?.[field];
+  return typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined;
+}
+
+/**
  * Live field-to-field derivation rule used by the generic create form.
  * See {@link MetadataResourceConfig.createDerive}.
  */
@@ -110,6 +134,16 @@ export interface MetadataResourceConfig {
    * are this type's own `listColumns`. Omit for the plain list.
    */
   listInclude?: 'grants';
+  /**
+   * objectstack#26649 — the body field that tells two members of one name
+   * apart, for a type whose identity is a pair (`email_template`:
+   * `(name, locale)`). The list then shows it as a column and links each row
+   * to its own member (`?member=`), which the edit page passes to every
+   * by-name read and write. Declared HERE because the server serves no such
+   * key: its table (`ITEM_KEY_DISCRIMINATORS`, `@objectstack/metadata-core`)
+   * stays server-side, and a list row carries only the body's own field.
+   */
+  bundleMemberField?: string;
 
   /** Columns rendered in the list page. */
   listColumns?: Array<{

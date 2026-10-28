@@ -381,6 +381,20 @@ const DashboardRendererInner = forwardRef<HTMLDivElement, DashboardRendererProps
     const hasExplicitColumns = schema.columns != null || inferredColumns !== 4;
     const [isMobile, setIsMobile] = useState(false);
 
+    // objectstack#26971 — the dataset-bound tiles whose query the server
+    // refused as a READ refusal, keyed by the tile and the dataset it names.
+    // Outside design mode such a tile is left out of the layout, so a viewer
+    // who may not read the data behind it does not see a permission-error
+    // tile and the other tiles reflow (span-flow: array order is visual
+    // order). In design mode the tile stays and draws `DatasetWidget`'s
+    // no-access state (objectui#10899): the author must still see and select
+    // it. Nothing here guesses a permission: the server's 403 is the only
+    // verdict, reported by `DatasetWidget`'s `onForbidden`.
+    const [refusedTiles, setRefusedTiles] = useState<ReadonlySet<string>>(() => new Set());
+    const markTileRefused = useCallback((tileKey: string) => {
+      setRefusedTiles((prev) => (prev.has(tileKey) ? prev : new Set(prev).add(tileKey)));
+    }, []);
+
     // Dashboard-level filters (framework#2501). Filter values live as
     // dashboard variables — the outer DashboardRenderer mounts a
     // PageVariablesProvider when the schema declares filters, so
@@ -1087,6 +1101,8 @@ const DashboardRendererInner = forwardRef<HTMLDivElement, DashboardRendererProps
         const resolvedTitle = tWidgetTitle(widget);
         const resolvedDescription = tWidgetDescription(widget);
         const widgetKey = widget.id || resolvedTitle || `widget-${index}`;
+        const refusedTileKey = datasetWidget ? `${widgetKey}::${String(datasetWidget.dataset)}` : undefined;
+        if (!designMode && refusedTileKey && refusedTiles.has(refusedTileKey)) return null;
         const isSelected = designMode && selectedWidgetId === widget.id;
 
         const designModeProps = designMode ? {
@@ -1156,6 +1172,7 @@ const DashboardRendererInner = forwardRef<HTMLDivElement, DashboardRendererProps
                           ? <DatasetWidget
                               widget={datasetWidget}
                               dataSource={dataSource}
+                              onForbidden={refusedTileKey ? () => markTileRefused(refusedTileKey) : undefined}
                               heading={datasetMetric
                                 ? { title: resolvedTitle || '', description: resolvedDescription || undefined }
                                 : undefined}
