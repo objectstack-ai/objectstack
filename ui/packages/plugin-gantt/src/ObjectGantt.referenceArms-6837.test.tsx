@@ -199,10 +199,12 @@ function makeDataSource(projectDef: Record<string, unknown>) {
 const GANTT_SCHEMA = {
   type: 'gantt',
   objectName: 'task',
-  startDateField: 'start',
-  endDateField: 'end',
-  titleField: 'name',
-  quickFilters: [{ field: 'project', label: 'Project' }],
+  gantt: {
+    startDateField: 'start',
+    endDateField: 'end',
+    titleField: 'name',
+    quickFilters: [{ field: 'project', label: 'Project' }],
+  },
 } as any;
 
 /**

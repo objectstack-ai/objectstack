@@ -37,7 +37,7 @@ stated once here and the script's own header is the authority on detail.
 
 ```bash
 pnpm install          # deps
-pnpm run setup        # first-time: install + build spec (bare `pnpm setup` is pnpm's own built-in)
+pnpm run setup        # install + build spec only; `pnpm dev` needs `pnpm build` (bare `pnpm setup` is pnpm's own built-in)
 pnpm build            # turbo build (excludes docs)
 pnpm test             # turbo test
 pnpm typecheck        # turbo typecheck — per-package `tsc --noEmit`; tsup/vitest never type-check
@@ -135,7 +135,7 @@ layer at least as close to the code (ruling record 6120820653).
 
 | Scenario | Command | Notes |
 |:---|:---|:---|
-| **Frontend debug** (the Console in `ui/` calls backend) | `PORT=3000 pnpm dev` | `pnpm dev` = the **showcase** kitchen-sink app (default; best for exercising the platform). Port **must** be 3000 (UI hard-wired); persistent state; leave running. For the minimal CRM app instead: `PORT=3000 pnpm dev:crm`. |
+| **Frontend debug** (the Console in `ui/` calls backend) | `OS_PORT=3000 pnpm dev` | `pnpm dev` = the **showcase** kitchen-sink app (default; best for exercising the platform). Port 3000 is the default, not hard-wired: the Console dev proxy targets it unless `DEV_PROXY_TARGET` says otherwise, and a busy port shifts to the next free one, so read the port it prints (`PORT` is the legacy alias of `OS_PORT`); persistent state; leave running. For the minimal CRM app instead: `OS_PORT=3000 pnpm dev:crm`. |
 | **Backend-only debug** | `pnpm dev -- --fresh -p <random>` | Random high port; ephemeral tempdir; **you must kill it** when done |
 
 `--fresh`: ephemeral tempdir (auto-deleted on exit) + `--seed-admin` (POSTs sign-up, prints creds — default
@@ -167,8 +167,8 @@ ships that same tracked file in `packages/console/dist/`. Full procedure: `docs/
 
 **Fast iteration on `ui/` src (no rebuild loop):** run the Console dev server —
 `pnpm --filter @object-ui/console dev` (Vite on **:5180**, HMR). Its `/api` proxy targets
-`DEV_PROXY_TARGET || http://localhost:3000`, so **run the backend you're testing on :3000** (`PORT=3000 pnpm dev` for
-showcase) and browse `:5180`. Note `:3001/_console` (or whatever the backend serves) is the **built** console, not
+`DEV_PROXY_TARGET || http://localhost:3000`, so **run the backend you're testing on :3000** (`OS_PORT=3000 pnpm dev`
+for showcase) and browse `:5180`. Note `:3001/_console` (or whatever the backend serves) is the **built** console, not
 your `ui/` src — only `:5180` reflects local UI edits. See `ui/AGENTS.md` for the app-id /
 localStorage / auth gotchas.
 

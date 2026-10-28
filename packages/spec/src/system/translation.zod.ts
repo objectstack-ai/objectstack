@@ -2079,7 +2079,7 @@ const platformSettingsShape = () => ({
  * One locale of a PER-APP translation bundle — `stack.translations`, and
  * everything {@link defineTranslationBundle} builds.
  *
- * Fifteen groups: every group the platform bundle declares EXCEPT `settings`,
+ * Sixteen groups: every group the platform bundle declares EXCEPT `settings`,
  * which is platform-only and is refused here by name with
  * {@link PER_APP_SETTINGS_PLATFORM_ONLY} as the remedy. See
  * {@link PlatformTranslationDataSchema} for the seventeen-group face and for why

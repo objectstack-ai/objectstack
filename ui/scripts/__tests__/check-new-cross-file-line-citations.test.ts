@@ -38,7 +38,6 @@ import { judge } from '../cross-file-line-citation-census.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const gatePath = path.join(repoRoot, 'scripts/check-new-cross-file-line-citations.mjs');
-const docPath = path.join(repoRoot, 'content/docs/guide/ci-cd-pipeline.md');
 
 /** Judges a hit against the real tree, the way the gate's own run does. */
 function judgeAgainstTree(hit: { citedWritten: string; citedLine: number; file: string; anchors: string[] }) {
@@ -427,34 +426,12 @@ describe('the instrument does not count itself', () => {
  * which runs nowhere under the monorepo: GitHub runs the root
  * `.github/workflows/` alone, and no root workflow runs this gate. It is row 15
  * of the objectstack#25697 workflow roster (→ sub-issue 4); a port brings these
- * pins back against its root workflow, by path. The page and the classifier
- * pins below read no workflow and stand.
+ * pins back against its root workflow, by path. The two page pins (`is written
+ * up on the page objectui#3653 pins, and declared report-only there` and `has a
+ * heading naming the workflow file`) retired with objectstack#26944, which
+ * deleted that page. The classifier pin below reads neither and stands.
  */
 describe('wiring — a gate nothing runs is not a gate', () => {
-  it('is written up on the page objectui#3653 pins, and declared report-only there', () => {
-    const doc = fs.readFileSync(docPath, 'utf8');
-    expect(doc).toContain('node scripts/check-new-cross-file-line-citations.mjs');
-
-    const at = doc.indexOf('node scripts/check-new-cross-file-line-citations.mjs');
-    const start = doc.lastIndexOf('\n\n', at);
-    const end = doc.indexOf('\n\n', at);
-    // Whitespace-normalised: the page hard-wraps, so a sentence that must be
-    // present is split across lines in the source and matches nothing verbatim.
-    const around = doc
-      .slice(start, end === -1 ? doc.length : end + 400)
-      .toLowerCase()
-      .replace(/\s+/g, ' ');
-    expect(around, 'a step the page does not declare report-only is a guardrail readers believe in')
-      .toContain('report-only');
-    expect(around).toContain('exits 0 regardless of what it finds');
-  });
-
-  it('has a heading naming the workflow file, which the inventory pin also requires', () => {
-    const doc = fs.readFileSync(docPath, 'utf8');
-    const headings = doc.split('\n').filter((line) => /^#{1,6}\s/.test(line));
-    expect(headings.some((h) => h.includes('line-citation-gate.yml'))).toBe(true);
-  });
-
   it('is classified by the Dependabot merge gate, with its reason', () => {
     // An unclassified blocking check is one a Dependabot merge would be let
     // past (objectui#6135); an unclassified NON-blocking one fails that gate's

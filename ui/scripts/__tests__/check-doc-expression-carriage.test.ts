@@ -856,28 +856,15 @@ describe('check-doc-expression-carriage: the real tree, and the posture', () => 
   });
 });
 
-describe('check-doc-expression-carriage: the wiring', () => {
-  // `is actually run by ci.yml` retired with objectstack#25712. The census ran,
-  // report-only, in objectui ci.yml's `docs` job (`Build Docs`), and that file
-  // runs nowhere under the monorepo. The job is row 7 `Build Docs
-  // (@object-ui/site)` of the objectstack#25697 workflow roster, "kept,
-  // follow-up port": no root job runs the census until that port lands, and
-  // the port brings this pin back against its job (`helpers/root-ci.ts`).
-
-  it('is named on the page that documents what CI runs', () => {
-    const page = fs.readFileSync(path.join(ROOT, 'content/docs/guide/ci-cd-pipeline.md'), 'utf8');
-    expect(page).toContain(GATE);
-    // objectui#3653 pins the pairing by command; this asserts the page also says
-    // the posture, because a row that reads like a guardrail when the step blocks
-    // nothing is the objectui#3451 mistake.
-    const row = page.split('\n').find((line) => line.startsWith('|') && line.includes(GATE));
-    expect(row, 'the docs job row must name the gate').toBeDefined();
-    expect(row!.toLowerCase()).toContain('report-only');
-    // objectui#7878: the row named `content/docs/**` while the walk had widened.
-    // A row that understates a gate's reach is the same defect one level up from
-    // objectui#3451 — a page describing a guardrail that is not the one that runs.
-    expect(row!).toContain(DOCS_ROOT);
-    expect(row!).toContain(`${APP_DOCS.dir}/`);
-    for (const name of ROOT_PAGES) expect(row!).toContain(name);
-  });
-});
+// The wiring.
+//
+// `is actually run by ci.yml` retired with objectstack#25712. The census ran,
+// report-only, in objectui ci.yml's `docs` job (`Build Docs`), and that file
+// runs nowhere under the monorepo. The job is row 7 `Build Docs
+// (@object-ui/site)` of the objectstack#25697 workflow roster, "kept,
+// follow-up port": no root job runs the census until that port lands, and
+// the port brings this pin back against its job (`helpers/root-ci.ts`).
+//
+// `is named on the page that documents what CI runs` retired with
+// objectstack#26944, which deleted that page: it described objectui's
+// workflows, and the census runs in none of the root ones yet.

@@ -585,10 +585,11 @@ const OBJECT_CHART_EXTRAS = {
   data: CHART_DATA,
   series: CHART_SERIES,
 };
+// The binding lives in the `calendar` block, the one spelling `ObjectCalendar`
+// reads since objectstack#25923 retired its flat fallback.
 const CALENDAR_OBJECT_EXTRAS = {
   objectName: 'accounts',
-  startDateField: 'start_at',
-  titleField: 'name',
+  calendar: { startDateField: 'start_at', titleField: 'name' },
 };
 
 /* ── `packages/components`: the renderer family objectui#5574 widened this to ──

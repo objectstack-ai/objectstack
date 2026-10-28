@@ -536,11 +536,10 @@ describe('wiring — the gate is reachable by name, and documented', () => {
   // into the root `Lint UI` job and brings these pins back against that job, by
   // path.
 
-  it('has a root script and is documented on the page that inventories the gates', () => {
+  // Its page half (`pnpm check:doc-json` named on the page that inventoried the
+  // gates) retired with objectstack#26944, which deleted that page.
+  it('has a root script', () => {
     const manifest = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
     expect(manifest.scripts['check:doc-json']).toBe(`node ${GATE}`);
-    const page = fs.readFileSync(path.join(repoRoot, 'content/docs/guide/ci-cd-pipeline.md'), 'utf8');
-    expect(page).toContain('pnpm check:doc-json');
-    expect(page).toContain(GATE);
   });
 });

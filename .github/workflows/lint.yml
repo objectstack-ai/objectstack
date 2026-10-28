@@ -3422,6 +3422,7 @@ jobs:
           }
           run_self_test node scripts/ci/scheduled-full-run-card.mjs --self-test
           run_self_test node scripts/ci/nightly-tiers-card.mjs --self-test
+          run_self_test node scripts/ci/docker-rolling-tags.mjs --self-test
           run_self_test bash scripts/ci/board-snapshot-r2-upload.selftest.sh
           if [ -n "$failed" ]; then
             echo ""
@@ -3429,7 +3430,7 @@ jobs:
             printf "%s" "$failed"
             exit 1
           fi
-          echo "Moved workflow step bodies self-tests — all three ran and passed"
+          echo "Moved workflow step bodies self-tests — all four ran and passed"
 
       # Gate-family selection self-test (#16496). The "Select the gate families
       # this run pays for" step at the top of this job is a thin call into
@@ -5683,7 +5684,7 @@ jobs:
           fi
           if [ -n "$WHOLE" ]; then
             echo "Type-checking the whole workspace -- $WHOLE."
-            pnpm exec turbo run typecheck "${UNIVERSE[@]}"
+            pnpm exec turbo run typecheck "${UNIVERSE[@]}" --summarize
             exit 0
           fi
           pnpm exec turbo ls "${UNIVERSE[@]}" --output=json > "$RUNNER_TEMP/typecheck-universe.json"
@@ -5699,7 +5700,7 @@ jobs:
           printf '  %s\n' "${SELECTED[@]}"
           FILTERS=()
           for P in "${SELECTED[@]}"; do FILTERS+=("--filter=$P"); done
-          pnpm exec turbo run typecheck "${FILTERS[@]}"
+          pnpm exec turbo run typecheck "${FILTERS[@]}" --summarize
 
       # Seed the shared Turbo cache from main only (see the restore step above).
       #
@@ -5720,8 +5721,21 @@ jobs:
       # merge_group is deliberately NOT added to this condition — see the
       # "why queue-branch saves are not the win they look like" note on the
       # `typecheck` aggregator at the bottom of this file.
-      - name: Save Turbo cache (main only)
+      #
+      # The seed keeps only the entries this lane's two turbo runs used, as
+      # ci.yml Test Core's prune step does (#25452): the build's and the
+      # typecheck's `--summarize` summaries, both left in `.turbo/runs/`. A
+      # bookkeeping step, not a gate: no `continue-on-error`, and it exits 0 on
+      # every run-time path.
+      - name: Prune the Turbo cache to this run's tasks (main only)
+        id: prune-turbo-cache
         if: always() && github.event_name == 'push'
+        run: |
+          node scripts/ci/prune-turbo-cache.mjs --site 'Type Check · workspace' \
+            --cache .turbo/cache --run-summaries .turbo/runs
+
+      - name: Save Turbo cache (main only)
+        if: always() && github.event_name == 'push' && steps.prune-turbo-cache.outputs.save == 'true'
         uses: actions/cache/save@v6
         with:
           path: .turbo/cache
