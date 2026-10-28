@@ -302,18 +302,33 @@ function entryFromDoc(doc: ResolverDoc): ResolvedEntry {
  *  - Otherwise membership is derived: a doc joins the first group (in group
  *    order) whose `include` matches it OR whose `key` equals the doc's explicit
  *    `group`. Within a group, docs sort by `doc.order` then label.
- *  - Any doc OF THE BOOK'S PACKAGES claimed by no group falls into a
- *    synthetic *Uncategorized* group appended last — no doc of the book is
- *    ever dropped (ADR-0046 §6.4: "any doc left unplaced rolls up under a
- *    synthetic *Uncategorized* group", the unplaced docs being the
+ *  - Any doc OF THE BOOK'S PACKAGES that NO registered book claims falls
+ *    into a synthetic *Uncategorized* group appended last — no doc of the
+ *    book is ever dropped (ADR-0046 §6.4: "any doc left unplaced rolls up
+ *    under a synthetic *Uncategorized* group", the unplaced docs being the
  *    package's). The book's packages are `bookPackage` plus every group's
  *    `package`; a doc of any OTHER package is not this book's to catch — it
  *    stays reachable through its own package's book. When the book declares
  *    no package at all, every unclaimed doc is an orphan, as before.
  *    Explicit placement is NOT scoped: a doc of another package whose
  *    `group` names one of this book's groups still joins that group.
+ *  - "Claimed" is judged against `books`, every registered book (#27091):
+ *    a doc a SIBLING book places is placed, not "left unplaced" (§6.4), so
+ *    it is not this book's orphan — two books splitting one package's docs
+ *    (by audience, §6.7) no longer list each other's pages under
+ *    *Uncategorized*. The judge is `resolveBookClaimedDocs` over each book,
+ *    the very claim set `resolveDocAudiences` unions audiences over, so the
+ *    catch-all only ever SHRINKS: a sibling's docs leave it and appear
+ *    nowhere new. That claim set excludes the *Uncategorized* group, so the
+ *    §6.7 audience union cannot move. Without `books` only this book's own
+ *    groups judge, as before.
  */
-export function resolveBookTree(book: Book, docs: ResolverDoc[], bookPackage?: string): ResolvedBook {
+export function resolveBookTree(
+  book: Book,
+  docs: ResolverDoc[],
+  bookPackage?: string,
+  books?: readonly AudienceBook[],
+): ResolvedBook {
   const groupsSorted = [...book.groups]
     .map((g, i) => ({ g, i }))
     .sort((a, b) => (a.g.order ?? 0) - (b.g.order ?? 0) || a.i - b.i)
@@ -398,8 +413,9 @@ export function resolveBookTree(book: Book, docs: ResolverDoc[], bookPackage?: s
   const ownPackages = [bookPackage, ...book.groups.map((g) => g.package)].filter(
     (p): p is string => typeof p === 'string' && p.length > 0,
   );
+  const claimedByAnyBook = books ? claimedByBooks(books, docs) : undefined;
   const orphans = docs
-    .filter((d) => !claimed.has(d.name))
+    .filter((d) => !claimed.has(d.name) && !claimedByAnyBook?.has(d.name))
     .filter((d) => ownPackages.length === 0 || ownPackages.some((p) => matchesInclude(d, '*', p)))
     .sort(byOrderThenLabel);
   if (orphans.length) {
@@ -494,6 +510,26 @@ export interface AudienceBook extends Book {
 }
 
 /**
+ * THE cross-book claim pass: each book with the docs it claims
+ * (`resolveBookClaimedDocs` over its own `packageId`). `resolveDocAudiences`
+ * unions audiences over it and `resolveBookTree`'s orphan pass reads its
+ * union ({@link claimedByBooks}), so the two never judge "claimed" apart.
+ */
+function* claimsPerBook(
+  books: readonly AudienceBook[],
+  docs: ResolverDoc[],
+): Generator<[AudienceBook, Set<string>]> {
+  for (const book of books) yield [book, resolveBookClaimedDocs(book, docs, book.packageId)];
+}
+
+/** Every doc some book in `books` claims: the union of {@link claimsPerBook}. */
+function claimedByBooks(books: readonly AudienceBook[], docs: ResolverDoc[]): Set<string> {
+  const all = new Set<string>();
+  for (const [, claimed] of claimsPerBook(books, docs)) for (const name of claimed) all.add(name);
+  return all;
+}
+
+/**
  * Effective audience of every doc = the union over the books that claim it
  * (ADR-0046 §6.7). A doc claimed by no authored book falls back to `'org'` —
  * the §3.6 package-grant default (equivalently: the implicit per-package
@@ -507,9 +543,9 @@ export function resolveDocAudiences(
 ): Map<string, BookAudience[]> {
   const audiences = new Map<string, BookAudience[]>();
   for (const doc of docs) audiences.set(doc.name, []);
-  for (const book of books) {
+  for (const [book, claimed] of claimsPerBook(books, docs)) {
     const audience: BookAudience = book.audience ?? 'org';
-    for (const name of resolveBookClaimedDocs(book, docs, book.packageId)) {
+    for (const name of claimed) {
       audiences.get(name)?.push(audience);
     }
   }
