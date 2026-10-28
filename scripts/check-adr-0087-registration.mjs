@@ -463,7 +463,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'REX-L: the compiler is loaded only when a marker names the category': 6,
   'WS (#26220): ui workspace packages, `.tsx` modules, aliases and shims': 11,
   'IX (#26220): predicate 4 reads an `any` index signature; the entry may be `src/index.tsx`': 52,
-  'WP (#26220): a deleted published package is retired whole, `<package>#*`': 55,
+  'WP (#26220): a deleted published package is retired whole, `<package>#*`': 59,
+  'DX (#26324): an export named `default` is reached through an import, never through the word': 11,
   'G6: a changeset that was ALREADY breaking at base is inherited': 1,
   'R15: a changeset RENAMED AND turned breaking in the same commit': 5,
   'G10: a PURE rename of an ALREADY-breaking stock changeset': 3,
@@ -3161,9 +3162,13 @@ export function verifyRuntimeInterfaceOnly(refs, { rev, cwd, packages }) {
  * @param {Map<string, string>} surfaceTexts path -> text of every metadata surface
  * @param {() => Map<string, {private: boolean, file: string}>} packages workspace
  *   manifests, read only when an import has to be attributed to a package
+ * An export named `default` is read through the import arm only: see
+ * `defaultImportReference`.
+ *
  * @returns {{ kind: 'import', hitPath: string } | { kind: 'mention', hitPath: string, line: string } | null}
  */
 export function metadataSurfaceReference(symbol, declPath, surfaceTexts, packages) {
+  if (symbol === 'default') return defaultImportReference(declPath, surfaceTexts, packages);
   const word = new RegExp(`\\b${symbol}\\b`);
   for (const [hitPath, rawText] of surfaceTexts) {
     if (hitPath === declPath || !word.test(rawText)) continue;
@@ -3195,6 +3200,48 @@ export function metadataSurfaceReference(symbol, declPath, surfaceTexts, package
       return { kind: 'import', hitPath };
     }
     return { kind: 'mention', hitPath, line: (codeText.split(/\r?\n/).find((l) => word.test(l)) ?? '').trim() };
+  }
+  return null;
+}
+
+/**
+ * The two import shapes that bind a module's DEFAULT export, each anchored at a
+ * statement start and each linear in the text. ⛔ Not `importSpecifiersFor`'s
+ * `[\s\S]*?` clause scan: that one runs only on files that already name the symbol,
+ * and over every metadata surface it is super-linear in the whitespace runs
+ * `maskComments` leaves (measured: 41 s on one `*.zod.ts`).
+ *
+ *   import x from 'm'          a default binding, named bindings or a namespace
+ *   import x, { y } from 'm'   beside it or not, `type` or not
+ *   import { default as x } from 'm'   `default` named inside the braces, an
+ *   export { default } from 'm'        `export ... from` re-export included
+ */
+const DEFAULT_BINDING_IMPORT_RE =
+  /(?:^|;)[ \t]*import\s+(?:type\s+)?[A-Za-z_$][\w$]*\s*(?:,\s*(?:\{[^}]*\}|\*\s*as\s+[A-Za-z_$][\w$]*)\s*)?from\s*(['"])([^'"\n]+)\1/gm;
+const BRACED_IMPORT_RE = /(?:^|;)[ \t]*(?:import|export)\s+(?:type\s+)?\{([^}]*)\}\s*from\s*(['"])([^'"\n]+)\2/gm;
+
+/**
+ * `metadataSurfaceReference` for an export named `default` (#26324): the IMPORT arm
+ * only. `default` is an ordinary object key and member name in exactly the files
+ * this step reads -- a field option `{ value: 'technology', default: true }`, a Zod
+ * `.default(...)` -- so the bare-word arm hit on every tree, and no retirement of a
+ * default export could ever certify. A metadata surface reaches a default export
+ * through an import that binds it (the two shapes above). The specifier is
+ * attributed as for any other name (`specifierNamesModule`), and comment spans are
+ * blanked first, so a docblock quoting the import is not one.
+ * ⛔ A namespace import's `ns.default` and a dynamic `import()` are not read here:
+ * both reach the export through a member named `default`, the very spelling that
+ * cannot be told from the object keys above.
+ */
+function defaultImportReference(declPath, surfaceTexts, packages) {
+  for (const [hitPath, rawText] of surfaceTexts) {
+    if (hitPath === declPath || !(rawText.includes('import') || rawText.includes('export'))) continue;
+    const code = maskComments(rawText);
+    const specifiers = [...code.matchAll(DEFAULT_BINDING_IMPORT_RE)].map((m) => m[2]);
+    for (const m of code.matchAll(BRACED_IMPORT_RE)) if (/\bdefault\b/.test(m[1])) specifiers.push(m[3]);
+    if (specifiers.length === 0) continue;
+    const pkgs = packages();
+    if (specifiers.some((s) => specifierNamesModule(s, hitPath, declPath, pkgs))) return { kind: 'import', hitPath };
   }
   return null;
 }
@@ -4802,8 +4849,12 @@ function verifyWholePackageRetired(pkg, { base, head, cwd, packagesAt, kit }) {
  * any occurrence counts -- a plugin id or package reference held as a VALUE as much
  * as an import. An import specifier (`from '…'`, a bare `import '…'`, `import('…')`,
  * `require('…')`, by the root or a subpath) is the case reported as `import`; every
- * other occurrence is a `mention`. A name that merely starts with `pkg`
- * (`plugin-xy` for `plugin-x`) is not it.
+ * other occurrence is a `mention`, one inside a path or URL included
+ * (`…/node_modules/@scope/pkg/dist/index.js`, `https://npm.im/@scope/pkg`, #27022).
+ * A name that merely starts or ends with `pkg` (`plugin-xy` for `plugin-x`) is not
+ * it, and neither is a scoped package whose last segment is an unscoped `pkg`
+ * (`@scope/plugin-x` for `plugin-x`): a `/` may precede the name, but not one that
+ * closes an `@scope` segment.
  *
  * @param {string} pkg
  * @param {string} pkgDir the package's directory, no trailing slash
@@ -4813,7 +4864,7 @@ function verifyWholePackageRetired(pkg, { base, head, cwd, packagesAt, kit }) {
 export function packageReference(pkg, pkgDir, surfaceTexts) {
   const name = pkg.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
   const spec = new RegExp(`(?:\\bfrom\\s*|\\bimport\\s*\\(\\s*|\\brequire\\s*\\(\\s*|^\\s*import\\s+)(['"])${name}(?:/[^'"\\n]*)?\\1`, 'm');
-  const mention = new RegExp(`(?<![\\w@./-])${name}(?![\\w.-])`);
+  const mention = new RegExp(`(?<![\\w@.-])(?<!@[\\w.~-]+/)${name}(?![\\w.-])`);
   // `maskComments` blanks in place, so an offset in `code` is the same offset in the file.
   const lineAt = (raw, code, at) => {
     const end = code.indexOf('\n', at);
@@ -8262,6 +8313,77 @@ function selfTest() {
     ]));
     assert(u5?.kind === 'mention' && u5.hitPath === 'packages/spec/src/d.zod.ts' && u5.line === `export const D = { plugin: '${WP_PKG}' };`,
       `WP-U5: a string VALUE naming the package is a reference in code, reported with its line; a comment is not (${JSON.stringify(u5)})`);
+    // #27022: an occurrence inside a path or URL is "any other occurrence" (D9); a
+    // `/` may precede the name, but not one closing an `@scope` segment.
+    const mentionIn = (pkg, line) => packageReference(pkg, 'ui/packages/plugin-x', new Map([['packages/spec/src/e.zod.ts', `${line}\n`]]));
+    const u6Line = `export const E = { entry: '/repo/node_modules/${WP_PKG}/dist/index.js' };`;
+    const u6 = mentionIn(WP_PKG, u6Line);
+    assert(u6?.kind === 'mention' && u6.line === u6Line,
+      `WP-U6: the package name inside a PATH string is a mention, reported with its line (${JSON.stringify(u6)})`);
+    const u7Line = `export const E = { docs: 'https://npm.im/${WP_PKG}' };`;
+    const u7 = mentionIn(WP_PKG, u7Line);
+    assert(u7?.kind === 'mention' && u7.line === u7Line,
+      `WP-U7: the package name inside a URL string is a mention, reported with its line (${JSON.stringify(u7)})`);
+    assert(['@scope/plugin-x', '/repo/node_modules/@scope/plugin-x/dist/index.js', 'https://npm.im/@scope/plugin-x']
+      .every((v) => mentionIn('plugin-x', `export const E = { v: '${v}' };`) === null),
+      'WP-U8: `@scope/plugin-x` is another package than an unscoped `plugin-x`, bare, in a path or in a URL');
+    assert(['/repo/node_modules/plugin-x/dist/index.js', 'https://npm.im/plugin-x']
+      .every((v) => mentionIn('plugin-x', `export const E = { v: '${v}' };`)?.kind === 'mention'),
+      'WP-U9: an unscoped `plugin-x` in a path or a URL is still a mention (the `/` refused is only a scope\'s)');
+  }
+
+  // ---- DX (#26324): an export named `default` ------------------------------
+  //
+  // `default` is an ordinary key in exactly the files predicate 2 reads -- a field
+  // option `{ value: 'technology', default: true }`, a Zod `.default(...)` -- so the
+  // bare-word arm refused every `default` retirement on every tree (measured on
+  // #26206's `@objectstack/driver-memory#default`). The import arm is the reading:
+  // a metadata surface reaches a default export only through an import binding it.
+  battery('DX (#26324): an export named `default` is reached through an import, never through the word');
+  {
+    const DX_KEYS = {
+      'packages/platform-objects/src/crm/account.object.ts':
+        "export const Account = { fields: { industry: { options: [{ label: 'Technology', value: 'technology', default: true }] } } };\n",
+      'packages/spec/src/data/field.zod.ts': "import { z } from 'zod';\nexport const FieldSchema = z.object({ label: z.string().default('') });\n",
+    };
+    const DX_HOST = 'packages/platform-objects/src/ui/host.object.ts';
+    const dx = (surfaces = {}) => run(mk(REX_FIXTURE(['default'],
+      '- FROM `default` TO `EmailServicePlugin`: register `new EmailServicePlugin()` with the kernel.', {
+        baseFiles: { [rexPath('src/index.ts')]: `${REX_INDEX_BASE}export default { id: 'com.objectstack.plugin.email' };\n`, ...DX_KEYS, ...surfaces },
+      })));
+    const DX_P2 = /`runtime-export-retired @objectstack\/plugin-email#default` \[predicate 2: no-metadata-surface\] is false: packages\/platform-objects\/src\/ui\/host\.object\.ts \(an object definition\) IMPORTS `default`/;
+
+    const dxG1 = dx();
+    green('DX-G1 THE #26206 SHAPE: a retired default export, beside unrelated `default:` keys and `.default(...)` calls in metadata surfaces', dxG1);
+    assert(/default \(export, packages\/plugins\/plugin-email\/src\/index\.ts\)/.test(dxG1.judged[0]?.detail ?? ''),
+      `DX-G1b: the verdict names the \`default\` operand and the entry that declared it. Got: ${dxG1.judged[0]?.detail}`);
+    green('DX-G2 a metadata surface that quotes the default import only in a COMMENT', dx({
+      [DX_HOST]: `// import emailPlugin from '${REX_PKG}';\nexport const Host = { name: 'host', default: true };\n`,
+    }));
+    green('DX-G3 a metadata surface that imports ANOTHER module\'s default', dx({
+      [DX_HOST]: "import other from '@objectstack/spec';\nexport const Host = { name: 'host', plugin: other };\n",
+    }));
+    red('DX-R1 a metadata surface that IMPORTS the package\'s default', dx({
+      [DX_HOST]: `import emailPlugin from '${REX_PKG}';\nexport const Host = { name: 'host', plugin: emailPlugin };\n`,
+    }), [DX_P2]);
+    red('DX-R2 ...and the same default named inside the braces, `{ default as x }`', dx({
+      [DX_HOST]: `import { default as emailPlugin } from '${REX_PKG}';\nexport const Host = { name: 'host', plugin: emailPlugin };\n`,
+    }), [DX_P2]);
+
+    const DX_DECL = rexPath('src/index.ts');
+    const dxPkgs = () => new Map([[REX_PKG, { private: false, file: rexPath('package.json') }]]);
+    const dxRef = (text) => metadataSurfaceReference('default', DX_DECL, new Map([['packages/spec/src/a.zod.ts', text]]), dxPkgs);
+    assert(dxRef(`import email, { LogTransport } from '${REX_PKG}';\n`)?.kind === 'import' &&
+      dxRef(`import type email from '${REX_PKG}/sub';\n`)?.kind === 'import' &&
+      dxRef(`import { z } from 'zod'; export {\n  default,\n} from '${REX_PKG}';\n`)?.kind === 'import',
+      'DX-U1: a default binding beside named bindings, a type-only default import of a subpath, and a ' +
+      'multi-line `export { default } from` after a `;` on the same line, are imports');
+    assert(dxRef(`import { LogTransport } from '${REX_PKG}';\nexport const A = { default: LogTransport };\n`) === null &&
+      dxRef(`import type { T } from '${REX_PKG}';\nexport const A = z.string().default('');\n`) === null,
+      'DX-U2: named bindings alone, a `default:` key and a `.default(...)` call never reach the default export');
+    assert(metadataSurfaceReference('LogTransport', rexPath('src/log-transport.ts'),
+      new Map([['packages/spec/src/a.zod.ts', 'export const A = { LogTransport: true };\n']]), dxPkgs)?.kind === 'mention',
+      'DX-U3: every other export name keeps the bare-word arm (a key named after it is still a mention)');
   }
 
   // ---- G6: a changeset that was ALREADY breaking at base is inherited -------
