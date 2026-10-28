@@ -57,8 +57,6 @@ const RELATED = [
 const maximal = {
   related: RELATED,
   approvals: { count: 2, node: { requests: [] } },
-  showActivity: true,
-  history: { entries: [], loading: false },
 };
 
 describe('recordPageTierFor (objectstack#26678)', () => {
@@ -91,7 +89,8 @@ describe('recordPageColumnOfTab — every synthesized tab has a column', () => {
     const tabs = buildDefaultTabs(leadDef, maximal);
     const values = tabs.properties.items.map((item: any) => item.value);
     // The maximal synthesis really emitted the whole strip.
-    expect(values).toEqual(expect.arrayContaining(['details', 'approvals', 'attachments', 'activity', 'history']));
+    // `attachments` rides the Related tab now (objectstack#27055).
+    expect(values).toEqual(expect.arrayContaining(['details', 'related', 'approvals', 'timeline']));
     for (const value of values) expect(recordPageColumnOfTab(value)).not.toBeNull();
   });
 
@@ -115,14 +114,14 @@ describe('buildDefaultPageColumns (objectstack#26678)', () => {
     // The primary list is the record's body: a table in the details column
     // (objectstack#27055, Target 8).
     expect(types(columns!.details)).toEqual(['record:details', 'record:related_list']);
-    // The discussion footer first (its composer on top), then Activity, History.
-    expect(types(columns!.timeline)).toEqual(['record:discussion', 'record:activity', 'record:history']);
-    // The side lists, then Approvals and Attachments.
+    // The one stream (objectstack#27055): a record:activity.
+    expect(types(columns!.timeline)).toEqual(['record:activity']);
+    // The Related tab (side lists, attachments at its foot), then Approvals.
     expect(types(columns!.related)).toEqual([
       'record:related_list',
       'record:related_list',
-      'record:approvals',
       'record:attachments',
+      'record:approvals',
     ]);
     expect(columns!.related.slice(0, 2).map((n: any) => n.properties.objectName)).toEqual(['note', 'call']);
     expect(columns!.relatedCount).toBe(2);

@@ -36,7 +36,6 @@ const page = buildDefaultPageSchema(
       { objectName: 'task', relationshipField: 'lead_id', title: 'Tasks' },
       { objectName: 'note', relationshipField: 'parent_id', title: 'Notes' },
     ],
-    history: { entries: [] },
   },
 );
 const columns = buildDefaultPageColumns(page)!;
@@ -57,7 +56,7 @@ describe('RecordPageColumns — three columns (objectstack#26678)', () => {
     expect(screen.queryByRole('tablist')).toBeNull();
     expect(container.querySelectorAll('[data-node="page:header"]')).toHaveLength(1);
     expect(nodesIn(column(container, 'details'))).toEqual(['record:details']);
-    expect(nodesIn(column(container, 'timeline'))).toEqual(['record:discussion', 'record:history']);
+    expect(nodesIn(column(container, 'timeline'))).toEqual(['record:activity']);
     expect(nodesIn(column(container, 'related'))).toEqual(['record:related_list', 'record:related_list']);
     // The meta line closes the details column (objectstack#27055).
     const related = column(container, 'related')!;
@@ -88,7 +87,7 @@ describe('RecordPageColumns — two columns and the related rail (objectstack#26
     expect(container.querySelector('[data-record-page-tier="two-column"]')).not.toBeNull();
     expect(screen.queryByRole('tablist')).toBeNull();
     expect(nodesIn(column(container, 'details'))).toEqual(['record:details']);
-    expect(nodesIn(column(container, 'timeline'))).toEqual(['record:discussion', 'record:history']);
+    expect(nodesIn(column(container, 'timeline'))).toEqual(['record:activity']);
     expect(column(container, 'related')).toBeNull();
     expect(container.querySelectorAll('[data-node="record:related_list"]')).toHaveLength(0);
     // The footer closes the details column while the rail is closed.

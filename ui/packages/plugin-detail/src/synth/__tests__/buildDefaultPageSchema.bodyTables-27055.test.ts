@@ -50,7 +50,7 @@ const shape = (nodes: any[]) =>
 describe('body tables sit in the Details tab after the first section (objectstack#27055)', () => {
   it('splits the details around the body tables; side lists stay in Related', () => {
     const tabs = buildDefaultTabs(quoteDef, { sections: SECTIONS, related: [LINES, TASKS, SCHEDULE] });
-    expect(items(tabs).map((i: any) => i.value)).toEqual(['details', 'related']);
+    expect(items(tabs).map((i: any) => i.value)).toEqual(['details', 'related', 'timeline']);
     expect(shape(items(tabs)[0].children)).toEqual([
       'details(Basic)',
       'table(quote_line_item)',
@@ -81,7 +81,7 @@ describe('body tables sit in the Details tab after the first section (objectstac
     expect(shape(items(tabs)[0].children)).toEqual(['details(Basic)', 'table(quote_line_item)']);
   });
 
-  it('emits no per-list tab any more — the strip is Details / Related', () => {
+  it('emits no per-list tab any more — the strip is Details / Related / Timeline', () => {
     const tabs = buildDefaultTabs(quoteDef, { sections: SECTIONS, related: [{ ...TASKS, isPrimary: true }, LINES] });
     expect(items(tabs).some((i: any) => String(i.value).startsWith('related:'))).toBe(false);
   });

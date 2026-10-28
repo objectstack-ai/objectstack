@@ -34,7 +34,6 @@ const page = buildDefaultPageSchema(
       { objectName: 'task', relationshipField: 'lead_id', title: 'Tasks' },
       { objectName: 'note', relationshipField: 'parent_id', title: 'Notes' },
     ],
-    history: { entries: [] },
   },
 );
 const columns = buildDefaultPageColumns(page)!;
@@ -72,10 +71,10 @@ describe('RecordPageColumns — the column switches (objectstack#27052)', () => 
     const folded = related.querySelector('[data-record-folded-timeline]')!;
     expect(folded).not.toBeNull();
     expect(folded.getAttribute('aria-label')).toBe('Activity');
-    expect(nodesIn(folded)).toEqual(['record:discussion', 'record:history']);
+    expect(nodesIn(folded)).toEqual(['record:activity']);
     // Lists first, the folded card after them; the meta line closes the
     // details column (objectstack#27055).
-    expect(nodesIn(related)).toEqual(['record:related_list', 'record:related_list', 'record:discussion', 'record:history']);
+    expect(nodesIn(related)).toEqual(['record:related_list', 'record:related_list', 'record:activity']);
     expect(column(container, 'details')!.lastElementChild?.getAttribute('data-testid')).toBe('meta-footer');
     // The related lists stay siblings of one parent (one empty-fold stack).
     const lists = related.querySelectorAll('[data-node="record:related_list"]');

@@ -145,6 +145,14 @@ export interface RecordActivityTimelineProps {
   className?: string;
 }
 
+/** The stream chips' copy (objectstack#27055): 全部 / 活动 / 讨论 / 变更. */
+const STREAM_FILTER_KEYS: Record<TimelineStreamFilter, { key: string; fallback: string }> = {
+  all: { key: 'detail.streamAll', fallback: 'All' },
+  activity: { key: 'detail.streamActivity', fallback: 'Activity' },
+  discussion: { key: 'detail.streamDiscussion', fallback: 'Discussion' },
+  changes: { key: 'detail.streamChanges', fallback: 'Changes' },
+};
+
 // Total over `FeedItemType`, so a feed kind the spec adds cannot reach the
 // timeline without an icon and a colour (objectstack#4115): the six entries
 // below `call` were missing for as long as the local union was a 7-member
@@ -789,7 +797,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
                       streamFilter === chip ? 'bg-primary/10 text-primary' : 'bg-muted text-foreground hover:bg-muted/70',
                     )}
                   >
-                    {t(`detail.streamFilter.${chip}`)}
+                    {t(STREAM_FILTER_KEYS[chip].key, { defaultValue: STREAM_FILTER_KEYS[chip].fallback })}
                   </button>
                 ))}
               </div>
@@ -933,7 +941,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
                 <ChevronDown className="h-4 w-4 mr-1" />
               )}
               {isStream
-                ? t('detail.viewAllEntries', { count: totalCount ?? filtered.length })
+                ? t('detail.viewAllEntries', { count: totalCount ?? filtered.length, defaultValue: 'View all {{count}} →' })
                 : t('detail.loadMore')}
             </Button>
           </div>

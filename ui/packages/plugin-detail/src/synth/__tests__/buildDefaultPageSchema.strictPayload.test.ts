@@ -33,6 +33,7 @@ import {
   PageSchema,
   PageComponentSchema,
   PageTabsProps,
+  RecordActivityProps,
 } from '@objectstack/spec/ui';
 import {
   buildDefaultPageSchema,
@@ -42,6 +43,7 @@ import {
   buildDefaultDetails,
   buildDefaultTabs,
   buildDefaultDiscussion,
+  buildDefaultTimeline,
   buildDefaultAttachments,
   type ObjectDefLike,
 } from '../buildDefaultPageSchema';
@@ -108,8 +110,6 @@ describe('ADR-0089 D3a — the Studio create payload parses server-side (objectu
         { objectName: 'task', relationshipField: 'lead_id', title: 'Tasks', limit: 10, icon: 'check' },
         { objectName: 'note', relationshipField: 'parent_id', isPrimary: true },
       ],
-      showActivity: true,
-      history: { entries: [{ id: 'h1' }], loading: false },
       approvals: { count: 2, node: { currentUserId: 'u_1' } },
     });
     expect(issuesOf(PageSchema.safeParse(body))).toEqual([]);
@@ -134,10 +134,8 @@ describe('ADR-0089 D3a — the Studio create payload parses server-side (objectu
       headerActions: [{ name: 'convert', label: 'Convert', locations: ['record_header'] }],
       related: [
         { objectName: 'task', relationshipField: 'lead_id', title: 'Tasks' },
-        { objectName: 'note', relationshipField: 'parent_id' },
+        { objectName: 'note', relationshipField: 'parent_id', isBody: true },
       ],
-      showActivity: true,
-      history: { entries: [], loading: false },
       approvals: { node: { currentUserId: 'u_1' } },
     };
     const filesDef = { ...leadDef, enable: { files: true } };
@@ -161,9 +159,7 @@ describe('ADR-0089 D3a — the Studio create payload parses server-side (objectu
       'record:approvals',
       'record:attachments',
       'record:details',
-      'record:discussion',
       'record:highlights',
-      'record:history',
       'record:path',
       'record:related_list',
     ]);
@@ -180,11 +176,17 @@ describe('ADR-0089 D3a — the Studio create payload parses server-side (objectu
       buildDefaultDetails(leadDef),
       buildDefaultTabs(leadDef),
       buildDefaultDiscussion(),
+      buildDefaultTimeline(),
       buildDefaultAttachments(),
     ];
     for (const node of nodes) {
       expect([node.type, issuesOf(PageComponentSchema.safeParse(node))]).toEqual([node.type, []]);
     }
+  });
+
+  it('the timeline stream writes only `record:activity` inputs the spec declares (objectstack#27055)', () => {
+    const node = buildDefaultTimeline();
+    expect(issuesOf(RecordActivityProps.safeParse(node.properties))).toEqual([]);
   });
 });
 
@@ -225,11 +227,10 @@ describe('the accepted shape still carries the semantics (objectui#4232)', () =>
   it('the tab items are the spec-declared `page:tabs` props, labels/values/children intact', () => {
     const tabs = buildDefaultTabs(leadDef, {
       related: [{ objectName: 'task', relationshipField: 'lead_id', title: 'Tasks' }],
-      showActivity: true,
     });
     const parsed = PageTabsProps.parse(tabs.properties) as any;
-    expect(parsed.items.map((i: any) => i.label)).toEqual(['Details', 'Related', 'Activity']);
-    expect(parsed.items.map((i: any) => i.value)).toEqual(['details', 'related', 'activity']);
+    expect(parsed.items.map((i: any) => i.label)).toEqual(['Details', 'Related', 'Timeline']);
+    expect(parsed.items.map((i: any) => i.value)).toEqual(['details', 'related', 'timeline']);
     expect(parsed.items[0].children[0].type).toBe('record:details');
     expect(parsed.items[1].children[0].properties.objectName).toBe('task');
   });
@@ -240,7 +241,7 @@ describe('the accepted shape still carries the semantics (objectui#4232)', () =>
     });
     const page = PageSchema.parse(body) as any;
     const tabs = page.regions[0].components.find((c: any) => c.type === 'page:tabs');
-    expect(tabs.properties.items.map((i: any) => i.value)).toEqual(['details', 'related']);
+    expect(tabs.properties.items.map((i: any) => i.value)).toEqual(['details', 'related', 'timeline']);
     expect(tabs.properties.items[1].children[0].properties.relationshipField).toBe('lead_id');
   });
 });
