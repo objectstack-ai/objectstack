@@ -105,26 +105,26 @@
 - 无权执行 ⇒ 点名有权者,并当轮换标把状态搬进对方的收件箱视图或决策箱。
 - ⛔ 不许只留一条评论等人路过:评论不是任何人的收件箱,标签才是。
 
-## 云卡(`mode:cloud`)四课
+## 云卡(`mode:cloud`)五课
 
-- 一、授权面随 source 不随环境:trigger 拉起的会话无仓库授权,只读勘察。
-- `create_session` 带 `source_url` 出生即持推送授权。
-- 同时带 `outcome_branch`(= 认领分支)、显式 `model`(trigger 流不可指模型)、`title`。
-- `title` 以车道名开头,⛔ 不叫 os-dev,形如 `⚡ <车道> #<单号> <短语>`。
-- 二、派发词必带自驱条款:云会话回合一结束即停摆等 poke。
-- ⛔ 不为提问或中报结束回合;实现取舍自定记入 `open_questions`;碰产品行为/契约报 fork。
-- 合法回合终点只有两个:推送完成加终报,或硬阻塞详报。
+- 一、授权随 source 不随环境:trigger 会话无仓库授权只读,`create_session` 带 `source_url` 可推送。
+- 带 `outcome_branch`(认领分支)、显式 `model`、`title`(`⚡ <车道> #<单号> <短语>`,⛔ 不叫 os-dev)。
+- 二、派发词必带自驱条款:云会话回合一完即停摆,合法终点仅推送加终报、硬阻塞详报。
+- 取舍自记 `open_questions`,产品行为/契约报 fork;姊妹仓未 attach 够不着,跨仓跟进卡 PM 代立。
 - 三、交付通道:dev 自开 draft PR(`Fixes #<n>` 只写正文,`partof-closing-keyword` RULE 2,含验证记录)。
-- 未 attach 的姊妹仓够不着,跨仓跟进卡由 PM 代立。
 - trigger 定时会话维持降级通道:推送 outcome branch,终报走最后一条会话消息,PM 代开 draft PR。
-- 四、云卡 draft PR 一存在立即 `subscribe_pr_activity`,这是硬步骤。
-- 监控与转向:`get_session` 读实时状态,IDLE 加分支未推送 = 停摆待 poke。
-- 投递消息用绑会话 poke 触发器:`create_trigger` 带 `persistent_session_id` 加 `fire_trigger`,用后删。
+- 四、draft PR 一存在即 `subscribe_pr_activity`(硬步骤);`get_session` 读状态,IDLE 且未推送即停摆。
+- poke 用绑会话触发器:`create_trigger` 带 `persistent_session_id` 加 `fire_trigger`,用后删。
 - 巡检退为兜底心跳,只补订阅盲区:会话停摆、未开 PR 的分支、姊妹仓动静。
 - roster 不可达与 `SendMessage` 同裁,`ListAgents` 同列不到,⛔ 不复测。
-- 会话句柄是账号作用域的:三个会话工具对另一账号建的会话一律答 `not found`。
-- 该答案与从不存在不可区分,⛔ 永不读作死亡信号。
-- 跨账号接班活性只认 GitHub 产出读数,draft-PR 时点交报正为此存在。
+- 会话句柄按账号作用域:三个会话工具对另一账号建的会话一律答 `not found`。
+- 该答案与不存在不可区分,⛔ 不读作死亡信号;活性只认 GitHub 产出,draft-PR 即交报为此。
+- 五、桌面 `start_session`(`target: cloud`)实测六异。① 克隆发起会话所记分支,已删即开局死:
+- 先推同名指针分支(= `origin/main`),⛔ 不提交其上;复核 `get_session`→`branch`、`ls-remote --heads`。
+- ② `model`/`effort` 同 trigger 流不可指:继承发起席位档,认领写明,或从卡档位的会话发起。
+- ③ 中继凭会话 id 自选 `dispatch`,⛔ 不传 `--session`;④ 席位 `list_sessions` 只列本地,不见它。
+- ⑤ Claude GitHub App 的 PR 后推送不触发工作流(复核 check-suites):末推后开 PR 或用户令牌重推。
+- ⑥ 收不到 poke 也发不了消息,只经 PR 与报告评论交回;REWORK 由本地 os-dev 同分支同认领接。
 
 ## 卡线程(`mode:thread`)
 
