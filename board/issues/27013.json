@@ -1,0 +1,32 @@
+{
+  "number": 27013,
+  "kind": "pull_request",
+  "title": "fix(plugin-list): show list view sharing type and lock owner as read-only text, drop the dead Share button",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T01:23:19Z",
+  "updated_at": "2026-10-28T01:25:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27013",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8G41SwYqhjjNvKBvSwT3KBm)_\nFixes #26844\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:列表视图工具栏上那个点了没反应的「Share」按钮,换成只读的共享状态文字(个人视图 / 共享视图),并在设置了 `sharing.lockedBy` 时显示锁图标和「Locked by 某人」。\n- 为什么改:原按钮没有任何点击处理,`lockedBy` 也从未显示;仓内不存在可以打开的视图共享控件或接口,按分诊裁决「不接就不渲染按钮」。\n- 风险与回滚:只动 plugin-list 工具栏这一处渲染和 10 个语言包各 3 个新键;不改 spec、不改接口;回滚即 revert 本 PR。\n- 先看:`ui/packages/plugin-list/src/ListView.tsx` 的 Sharing 指示块;`ListView.test.tsx` 的 `sharing spec format — additional`;`ui/packages/i18n/src/locales/en.ts` 的 `sharingLockedBy`。\n- 两分钟验证:`pnpm --dir ui exec vitest run packages/plugin-list/src/__tests__/ListView.test.tsx -t sharing`,预期 7 条全绿。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- `ListView` no longer renders a ghost `Button` for `sharing`. It renders a non-interactive `span` (no role, no tabindex, not inside a button) keeping the `share-button` test id, showing the localized sharing type (`list.sharingPersonal` \"Personal view\" / `list.sharingCollaborative` \"Shared view\") and, when `sharing.lockedBy` is set, a lock icon plus `list.sharingLockedBy` \"Locked by USER\". The tooltip carries both, so the narrow toolbar that hides the text still says them.\n- `lockedBy`: `ViewSharingSchema` declares it as a free `z.string()` described \"User who locked the view configuration\"; spec fixtures use ids (`user_123`, `admin`) and the plugin-list test an email. No user-lookup seam exists on this path, so it is rendered as written.\n- Three new `list.*` keys in all ten `@object-ui/i18n` locale packs and in `LIST_DEFAULT_TRANSLATIONS` (byte-identical to `en`).\n- Tests: the misnamed \"should display lockedBy in sharing tooltip when set\" (which asserted only `Sharing: collaborative`) is replaced by real coverage: collaborative + `lockedBy` shows the owner; personal shows no owner; collaborative without `lockedBy` shows no owner; the indicator is never a button. Two existing title assertions move to the new label.\n- Changeset: `@object-ui/plugin-list` patch, `@object-ui/i18n` patch.\n\n## Why\n\nTriage ruling on the card: \"Show the lock owner, and either wire Share to the sharing control or do not render it.\" / \"⛔ No dead button.\" No view-sharing control or endpoint was found on `main` (`ShareDialog` in components is the record share-link dialog, a different feature; the list-view registration publishes no `sharing` input), so the second branch applies.\n\n## Acceptance notes\n\n- `ListViewBlock.inertKeys-13074.test.tsx` CONTROL \"the Share button still carries no click handler\" stays green unchanged (a click on the span changes nothing); its name now says \"button\" for a non-button. Outside the claimed file surface, so left untouched.\n- `packages/spec/liveness/view.json` row `sharing` cites \"ListView.test.tsx:2572 pins the lockedBy tooltip\" and the test name \"should display lockedBy in sharing tooltip when set\". That test is renamed here, and the old one never pinned `lockedBy`. Not edited (`packages/spec/**` out of scope); reported to the seat for routing.\n- The `list.share` default key is no longer read by `ListView`; left in place (still in every locale pack).\n\n## Verification\n\n<details><summary>Tests and ablations</summary>\n\n- Closure: `pnpm --workspace-concurrency=2 --filter '@object-ui/plugin-list^...' build` under the lock, VERDICT command-exit 0 (5m44s).\n- `vitest run packages/plugin-list/src/__tests__/ListView.test.tsx packages/plugin-list/src/__tests__/ListViewBlock.inertKeys-13074.test.tsx`: Test Files 2 passed, Tests 167 passed.\n- After merging `origin/main`: `vitest run packages/i18n/ packages/plugin-list/ packages/app-shell/src/__tests__/defaults-maps-mirror-en-pack.test.tsx`: Test Files 255 passed, Tests 3045 passed, 13 skipped.\n- `pnpm --filter @object-ui/plugin-list --filter @object-ui/i18n run type-check`: exit 0.\n- Ablation 1 (`ablation-replace.mjs`, anchor `const lockedBy = schema.sharing.lockedBy;` replaced by an `undefined`): \"shows the lock owner from `sharing.lockedBy` beside a collaborative type\" red, 1 failed / 6 passed; restored, blob == HEAD.\n- Ablation 2 (the indicator's opening and closing `span` replaced by the old ghost `Button`): \"renders the sharing indicator as read-only text, never a button\" red, 1 failed / 6 passed; restored, blob == HEAD and `git diff HEAD` empty.\n- Tests import `ListView` by relative path, so no dist leg.\n\n</details>\n\n<details><summary>Gates</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` at 2ccb9656 (after merging `origin/main`): 34 families, each run, all exit 0, including `node scripts/check-sdui-manifest.mjs` and `pnpm check:nul-bytes`. `--ran` reconciliation: 34 derived, 34 run, 0 NOT-MEASURED.\n- `pnpm check:new-line-citations` (ui): 0 new citations, exit 0.\n- CI families: see this PR's check-runs.\n\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbWRtAdijdY6zPkJ9Pq)_\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 26962,
+  "kind": "pull_request",
+  "title": "docs(qa): retire the objectui-pin wording left in the checklist ledger",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T23:22:23Z",
+  "updated_at": "2026-10-28T00:17:34Z",
+  "closed_at": "2026-10-28T00:17:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-28T00:17:32Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26962",
+  "body": "Part of #26626\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：测试清单账本里 14 个条目、18 处还在写 objectui 旧钉（`.objectui-sha`、\"objectui-repo-only\"、\"objectui pin\"）的文字，改成仓内 `ui/...` 路径或删去过时旁注；每条 revision +1、追加一行 history。\n- 为什么改：维护者原话「还在写 objectui 旧路径的文字。立卡」；跑测的人照旧文字会跳过其实能跑的 pin（例如 share-link 条目说\"本仓跑不了\"，实际在 `ui/apps/console/src/pages/` 下）。\n- 风险与回滚：纯文档账本，不发布、不改任何条款与状态；回滚即 revert 本 PR。与 #26848 在 `studio-authoring.doc-on-app-menu` 上会撞 revision/history（两边都升到 r7），后落地者需重排。\n- 先看：`docs/qa/platform-checklist/areas/access-security.json`（share-link 的 knownGaps[0] 改写最大）、`platform-core.json`、`records-forms.json`。\n- 两分钟验证：`node scripts/check-platform-checklist.mjs` 应打印 `OK — 16 areas`；用卡上的模式对 areas/*.json 非 history 字段搜索，应为 0 处。\n- 需要你做的：无，席位落地。\n\n## What changes\n\nThe card's pattern (`objectui:build|objectui:refresh|\\.objectui-sha|objectui-repo-only|objectui-only|objectui checkout|sibling objectui|objectui pin`, case-insensitive), measured over `docs/qa/platform-checklist/areas/*.json` with `history` rows excluded:\n\n- before, at `e4ba846f`: 20 matches in 18 strings across 14 items\n- after, at `beab18b242`: 0 matches\n- positive control (`acceptance|verify`, same files, same exclusion): 1029 matches both times\n\nItems touched (revision from main at edit time, then +1, and ONE new `history` row citing #26626 on each):\n\n- `access-security.share-link-landing-page` r5 to r6: fixtures.knownGaps[0], knownGaps[2], automated.ref. knownGaps[0] no longer says the pins are unrunnable from this checkout.\n- `ai.console-ai-surface-gating` r7 to r8: acceptance[5].verify\n- `approvals.request-page-reply-and-reader-visibility` r3 to r4: fixtures.knownGaps[0]\n- `attachments-storage.download-authz-both-sides` r7 to r8: automated.ref\n- `i18n.surface-matrix` r10 to r11: fixtures.knownGaps[3]\n- `platform-core.keyboard-shortcut-surface` r5 to r6: fixtures.knownGaps[1], acceptance[2].verify, acceptance[3].verify\n- `records-forms.conditional-rules-grid` r9 to r10, `import-wizard-encoding-and-hints` r8 to r9, `gantt-interactions` r6 to r7, `form-dirty-guard` r5 to r6, `record-discussion-mentions` r11 to r12, `field-group-visible-when` r8 to r9, `v18-semantic-defaults` r4 to r5\n- `studio-authoring.doc-on-app-menu` r6 to r7: fixtures.knownGaps[1]\n\nKept on purpose: historical objectui issue and PR numbers (objectui#11649, objectui#11674, objectui#3378, objectui PR 11241 / 11258) and measured objectui revisions (`1fb1ced36243`, `daeb77fc84dd`, `f8267df93aba`, `4016370af3c9`). The wording around them reads \"objectui revision\" rather than \"objectui pin\". No `history` row was rewritten: a script check confirms that, per item, main's history is an exact prefix of the new one with one row appended. No clause, status or step semantics change.\n\nOut of scope and left on the card: the two governed `.claude/skills/**` files (`checklist-test`, `dogfood-verification`). They are the `domain:skills` half.\n\n## Tests\n\nEvery `ui/...` path the new text names was checked with `git ls-files` at `e4ba846f`: `ui/apps/console/src/pages/{shared-record-shape.test.ts,SharedRecordPage-11649.test.tsx,SharedRecordPage.tsx,shared-record-shape.ts}`, `ui/packages/plugin-chatbot/src/__tests__/{usePendingActions.pollFaultPolicy-11736,AiPendingActionsInbox.errorReplacesEmpty-11736}.test.tsx`, `ui/packages/app-shell/src/chrome/KeyboardShortcutsDialog.wiredOnly-11674.test.tsx`, `ui/packages/app-shell/src/console/ai/__tests__/matchAiChatShortcut.test.ts`, `ui/e2e/live/grid-conditional-rules.spec.ts`, `ui/packages/plugin-detail/src/renderers/__tests__/{recordActivityFeed.test.ts,record-details.groupVisibleWhen-11630.test.tsx}`, `ui/packages/plugin-gantt/src/GanttView.tree.test.tsx`. `pnpm console:build` exists in the root `package.json`.\n\nRunnability, where the new text claims a pin runs from this tree:\n\n- `ui/apps/console/src/pages/shared-record-shape.test.ts`: run from `ui/` (`pnpm exec vitest run --maxWorkers=2 FILE`, once `@objectstack/spec`, `formula` and `sdui-parser` were built) gave 10/10 passed.\n- `SharedRecordPage-11649.test.tsx`: NOT MEASURED. Its import chain needs the `@objectstack/client` dependency closure built, and that build was cut off by a container restart. Existence is verified; runnability is not.\n- The other items already said their pins run under `ui/`, or now only name the path. No new runnability claim is made for them.\n\n## Acceptance notes\n\n- Open draft #26848 also edits `studio-authoring.doc-on-app-menu`: steps[1] and fixtures.knownGaps[2], bumping r6 to r7. This PR edits knownGaps[1] and also bumps to r7. The text does not overlap, but `revision` and `history` collide. Whichever lands second renumbers its row to r8.\n- #26941 (open) edits `access-security.json`. It does not touch `share-link-landing-page` as of this head. Merged `origin/main` (`b1b153a325`) cleanly before opening.\n- RUNNER.md gives `pnpm --filter @object-ui/PKG exec vitest run` as the jsdom invocation. The `form-dirty-guard` and `import-wizard` items forbid that form, citing the ui vitest invocation guard. I noted this and changed nothing: RUNNER.md is outside this PR's file surface.\n\n## Verification\n\nAt `beab18b242` (the final head, after the merge), each command exited 0, with the exit captured before any pipe:\n\n- `node scripts/check-platform-checklist.mjs`: `check-platform-checklist: OK — 16 areas, 329 items (324 active, 1 planned)`\n- derived (`dispatch-gates --commands --repo objectstack-ai/objectstack`, 16 commands): check-adr-links (and --self-test), check-closing-keyword-parity (and --self-test), check-comment-mask-corpus, plan-test-core-shards --self-test, lint check:doc-formula-expressions, check:ci-filter-parity, check:cross-package-test-inputs, check:doc-authoring, check:driver-memory-census, check:gitlink-declared, check:nul-bytes, check:platform-checklist, check:refd-timer-probe, check:watch-hint-literal. All 0.\n- `dispatch-gates --ran`: 16 derived, 16 run, 0 NOT-MEASURED, 0 UNRUN.\n- CI-only families (type-check lanes, Test Core shard planning) are left to this PR's check-runs.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QSeKYmTYfaPbLQD4BJfomW)_\n"
+}

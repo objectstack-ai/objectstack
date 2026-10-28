@@ -1,0 +1,37 @@
+{
+  "number": 26964,
+  "kind": "pull_request",
+  "title": "fix(core): the console runs a stored action that leaves `type` to its default as a script action",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T23:23:26Z",
+  "updated_at": "2026-10-28T00:22:08Z",
+  "closed_at": "2026-10-28T00:22:06Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-28T00:22:06Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26964",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9Ubb6NNyYYEoRck5PnHDXNdfpc)_\n\nFixes #26879\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**:控制台动作运行器(`@object-ui/core` 的 `ActionRunner`)在选派发路由的唯一一处,把「没写 `type`」的已存动作读成 spec 的默认值 `script`,于是它走已注册的 `script` 派发,打平台动作路由 `POST /api/v1/actions/{object}/{action}`。\n- **为什么改**:spec 的 `ActionSchema.type` 默认是 `script`,但控制台跑的是存储里的原样行、不是解析后的行。Studio「新建」骨架和旧版 Studio 存下的无 `type` 动作,路由被解析成动作自己的名字,匹配不到执行器,被报「not executable」,点了没反应。\n- **风险与回滚**:低。只影响「无 `type`、无 `actionType`、有名字、名下没注册处理器、也没写运行器自有键(navigate/api/endpoint/onClick/redirect/显式 reload、close)」的动作:原来必然被拒,现在走 script。未知 `type`、空动作仍拒绝;按名注册的处理器仍优先。回滚即还原 `resolveDispatchType` 一个函数。\n- **先看**:`ui/packages/core/src/actions/ActionRunner.ts` 的 `resolveDispatchType` 与 `declaresRunnerBehavior`(新增)以及 `execute` 里改用它的那一行;`ActionRunner.specDefaultType-26879.test.ts`(8 个用例)。\n- **两分钟验证**:`pnpm --dir ui exec vitest run packages/core/src/actions/__tests__/ActionRunner.specDefaultType-26879.test.ts`,预期 8 个测试全绿。\n- **需要你做的**:无,席位落地。\n\n## What changes\n\n- **One place picks the route.** `execute` used to resolve the dispatch key as `type || actionType || name`. It now calls `resolveDispatchType`, which keeps the first three legs (an authored `type`, the `action:*` block's `actionType`, the `name` when a handler is registered under it or the action carries a runner-own key) and, for a named action that has none of those, answers `ActionSchema.type`'s default, `script`. Nothing unnamed takes the default, so `{}` still lands in `executeActionSchema` and is refused.\n- **The same key is asked twice, as before:** by `refusalBeforeInput` (the dispatch's early refusal, so a typeless script action meets the script dispatch's row guard) and by `dispatchCollected`.\n- `declaresRunnerBehavior` names the runner-own keys once; `executeActionSchema`'s guard now reads it instead of its own copy (same keys: `navigate` never reaches that guard because `dispatchCollected` runs it first).\n- **Fork taken: the runner, not the serve path.** The card offered either the console reading a typeless action as `script` at route selection, or the serve path returning the parsed row. The runner is in this lane's file surface and covers every unparsed source at once (stored rows from any Studio build or by hand), with no server change. No writer adds `type`, and no stored row is rewritten.\n- `@object-ui/core`'s exports are unchanged: both helpers and the constant are module-private.\n- One root changeset, `@object-ui/core` patch.\n\n## Tests\n\nNew `ui/packages/core/src/actions/__tests__/ActionRunner.specDefaultType-26879.test.ts`, 8 cases:\n\n- A typeless `{ name, body }` and a typeless `{ name, operation: 'update', patch }` both POST `/api/v1/actions/tasks/NAME` through the real `createServerActionHandler`.\n- A typeless action is asked the `script` dispatch's `refuseBeforeInput`.\n- **The default is the spec's:** the stored row is parsed with `@objectstack/spec`'s `ActionSchema`, and with a spy handler under every runnable type the typeless action reaches exactly the handler named by the parsed `type`. If the spec's default ever moves, this case goes red.\n- Not swallowed by the default: an unknown `type` is refused, `{}` is refused as \"not executable\", a handler registered under the action's name runs ahead of `script`, and a typeless named `redirect` action still redirects.\n\nThe typeless update shape already reached the route through the `operation` check that runs ahead of `type` (pinned in `ActionRunner.updateOperation.test.ts`); it is pinned again here at the new resolution.\n\n## Acceptance notes\n\n- The card's two shapes run on the script route; an unknown `type` and an empty schema are still refused (cases above).\n- The New skeleton in `ObjectActionsPanel.tsx` still leaves `type` off, as its comment intends; with this change that row runs. Its pinned Type control reading \"—\" until the first write is untouched (outside this claim's file surface).\n\n## Verification\n\nAll at head `e7e7e357`, a worktree off `origin/main` `8074feb6` (main has moved 27 commits since, none in `ui/packages/core/`; `git merge-tree` against it is clean).\n\n<details><summary>Tests, ablation and type-check</summary>\n\n- `pnpm --dir ui exec vitest run packages/core/src/actions/` under `scripts/pm/os-verify-lock.sh`: `Test Files 45 passed (45)`, `Tests 660 passed (660)`; the new file alone, verbose: 8/8.\n- Every ui test file that names `ActionRunner`, `ActionProvider`, `useActionRunner` or `useConsoleActionRuntime` outside `packages/core/src/actions/` (383 files: app-shell, plugin-grid, components, react, plugin-detail, plugin-view, console and others), `--maxWorkers=2` in four locked batches: 47 + 45 + 145 + 146 files passed, 630 + 452 + 1656 + 1310 tests passed, 0 failed.\n- **Ablation** through `scripts/ablation-replace.mjs` on the committed head: `return SPEC_DEFAULT_ACTION_TYPE;` replaced by `return name;` (anchor 1 -> 0, blob `ecfc5fa6` -> `9f29d4cd`). The new file went `3 failed | 5 passed (8)`: the typeless body action, the early-refusal case and the spec-default case. The typeless update case stays green, as expected: `operation` is read ahead of `type`. Restored: blob back to `ecfc5fa6` = HEAD, `git diff HEAD` empty.\n- `pnpm exec turbo run type-check --filter=@object-ui/core --concurrency=2` under the lock: `VERDICT command-exit 0`, 4/4 tasks, core's `type-check` a cache miss (it runs `tsconfig.test.json` too, so the new test file is compiled).\n\n</details>\n\n<details><summary>Derived dispatch gates (34/34)</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 34 commands; every one exited 0, the PR-body gates (`check-closing-keyword-parity`, `check-adr-0087-registration`, `check-changeset-no-major`) against this body.\n- `pnpm --dir ui exec vitest run scripts/` under the lock: `Test Files 178 passed | 2 skipped (180)`, `Tests 5065 passed | 2 skipped (5067)`.\n- `pnpm check:type-check-debt` under the lock: `0 raw tsc error(s) total, none above its recorded number`.\n- `dispatch-gates --ran`: `34 derived famil(ies) accounted for — 34 run, 0 NOT-MEASURED`.\n- `pnpm check:new-line-citations` (from `ui/`): `0 new citation(s)`. Control-byte self-scan of the three files: no hit.\n\n</details>\n\nNo dogfood battery: no `!` in the title and no `(narrowing)` arm.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jUfE6TDKDHQvod289V)_\n"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 26946,
+  "kind": "pull_request",
+  "title": "fix(client): data.find refuses a select that names no field before the request",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T22:34:58Z",
+  "updated_at": "2026-10-27T23:51:32Z",
+  "closed_at": "2026-10-27T23:51:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-27T23:51:30Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26946",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1XBJqmquET4esJZNQWTR5J1e)_\nFixes #26910\n\nClause-②: no\nMetadata-protocol: none\n\nThe `Clause-②` measure: the calls refused are exactly the calls the list door already refuses with `400 VALIDATION_ERROR` (the parity test below sends the same request to the real door), and the caller gets the same `code`, `httpStatus` and message, only without the round trip. No call that was served is refused, nothing is widened, and no type changes (`select` / `fields` stay `string[]`; no non-empty tuple narrowing was added).\n\n## 维护者速读\n\n- 改了什么:SDK 的 `data.find` 遇到 `select: []`(或 `fields: []`、成员全为空白)时,在发请求之前就拒绝,报错与服务端列表门完全相同(`VALIDATION_ERROR` / 400 / 同一句话)。\n- 为什么改:之前空数组为真值,SDK 会发出 `?select=`,白跑一趟网络再拿到 400;改成调用点直接报错。参数绝不丢弃,丢弃会变成读全部列。\n- 风险与回滚:只影响本来就会被服务端 400 拒绝的调用;回滚即还原 `packages/client/src/index.ts` 中的一个 helper 及两处调用。\n- 先看:`packages/client/src/index.ts` 的 `projectionSelectParam`;`packages/client/src/client.hono.test.ts` 新增的对等测试。\n- 两分钟验证:`pnpm --filter @objectstack/client exec vitest run src/client.test.ts src/client.hono.test.ts`,预期全部通过,其中含 4 条空 projection 拒绝用例与 1 条真实门对等用例。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- **One shared helper, both copies.** `projectionSelectParam` (`packages/client/src/index.ts`) builds the `select` value both `ObjectStackClient.data.find` and `ScopedEnvironmentClient.data.find` put on the wire. It applies the door's own rule to the exact value the client would have sent (split on commas, trim, at least one name) and, when that names no field, throws before any request with `code: 'VALIDATION_ERROR'`, `httpStatus: 400` and the door's sentence (`Query parameter 'select' names no field; got \"\". The query was not run: ...`).\n- **Never dropped.** An empty projection is refused, not omitted: an absent `select` reads every column, the widening the door refuses.\n- **Where the sentence comes from.** The door's copy lives in `projectionFieldsValue`, a module-private function in `packages/metadata-protocol/src/protocol.ts`. No shared copy exists in a package the client may import (`@objectstack/client` depends on `@objectstack/core` and `@objectstack/spec` only; spec is outside this card's file surface, and the spec's `HttpFindQueryParamsSchema.select` message is a different sentence). So the client restates it, and `client.hono.test.ts` holds the restated copy equal to the real door's answer.\n- **Sweep.** Every `select` emitter in `packages/client/src`: exactly the two `data.find` copies (`queryParams.set('select', ...)` at the two sites, both reached by the canonical `fields` mapping too). No other method builds `select` or another projection parameter from a truthy test: `data.query` sends a QueryAST body verbatim, and `QueryBuilder.select()` writes `fields` into that body (the POST door applies the same refusal server-side).\n- Changeset: `patch` on `@objectstack/client`.\n\n## Tests\n\n- **Red first, on `main` `8074feb6`.** A probe drove both copies with a stubbed `fetch`: `{ select: [] }` and `{ fields: [] }` requested `.../data/task?select=` (scoped: `.../environments/env-1/data/task?select=`), `{ select: ['', ' '] }` requested `?select=%2C+`. The new `client.test.ts` cases went red there: `4 failed | 1 passed` with `promise resolved ... instead of rejecting`.\n- **Green, on `8efd86c3`.** `client.test.ts`: four rows (`select: []`, `fields: []`, `select: ['', ' ']`, `fields: [' ']`), each on both copies, assert the rejection's `code`, `httpStatus` and message and that `fetch` was never called. Controls: `select: ['a','b']` and `fields: ['a','b']` send `select=a%2Cb`; `select: ['a', '']` still sends `select=a%2C` (the door serves it); the existing `no options at all` row still sends no parameter.\n- **Parity with the real door.** `client.hono.test.ts` sends `?select=` and `?select=%2C+` raw through the client's transport against the real REST stack, then asserts `data.find` refuses `[]` and `['', ' ']` with the identical `message`, `code` and `httpStatus`.\n- **Ablation (one-shot, not kept).** `scripts/ablation-replace.mjs` drifted the restated sentence's last clause in `index.ts`; the parity test went red (`1 failed`); restore proved by blob `e553346c4fe0` equal to `HEAD` and an empty `git diff HEAD`.\n- `@objectstack/client`: `pnpm test` 52 files, 678 tests passed; `typecheck` exit 0 (including `check:test-typecheck`); `eslint packages/client --no-inline-config` exit 0.\n\n## Acceptance notes\n\n- `groupBy` is emitted on the same truthy test (`groupBy: []` sends `?groupBy=`). It is not a projection and the card names only projections, so it is untouched here.\n- A JS caller passing a string instead of the declared `string[]` hits `select.join is not a function`, as before; nothing about that path changes.\n- No open pull request titled for the client was found (`is:open client in:title`, 0 hits), so no overlap on `packages/client/src/index.ts` was seen.\n\n## Verification\n\n<details><summary>Derived gate families on 8efd86c3 (59 derived, 58 run, 1 NOT MEASURED)</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 59 families on this diff; `--ran` reconciled 59 accounted, 58 run with exit 0, 1 NOT MEASURED.\n\n- NOT MEASURED: `pnpm check:dual-build-cjs-loads` exited 3 (PREREQUISITE NOT MET: it needs every package's `dist/`, i.e. a full workspace build). CI's `Lint & Repo Gates` runs it on this PR.\n- `node scripts/check-plugin-teardown-shape.mjs --self-test` first exited 3 on the shallow clone; after fetching its pinned fixture commit it exited 0 (48 cases).\n- `pnpm --filter @objectstack/spec run check:skill-examples` first exited 3 (client-react not built); after building it, exit 0 (267 prose examples type-check, 23 blocks on the client SDK surface).\n- Every other family: exit 0.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01FEkQ5mTFyYsPjawe7Bv7x5)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01FEkQ5mTFyYsPjawe7Bv7x5\n"
+}

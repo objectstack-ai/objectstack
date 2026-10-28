@@ -2,8 +2,8 @@
   "number": 26836,
   "kind": "issue",
   "title": "Studio Access: creating a permission set whose derived id equals an already-published set puts a blank draft over the live set (publishing it would wipe its grants), and Studio offers no way to discard it",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,24 @@
     "area:access",
     "bug",
     "domain:ui",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T18:16:50Z",
-  "updated_at": "2026-10-27T19:07:51Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-27T22:01:57Z",
+  "closed_at": "2026-10-27T22:01:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26836",
   "body": "Filing gate: ① product defect, reproduced, landing site named.\nBatch-of: studio-qa-2026-10-27 — 39 cards from one Studio QA run (coordinator session `session_01J8VVAkZns5rNnK2rtszzbQ`; tested at `3fcafcd3`; `origin/main` was `43731031` at filing, so the implementer re-checks the landing site on current main). The run record is the `qa-run` issue filed with this batch.\n\n## Symptom\n\nThe create dialog's first-write guard only checks for an existing DRAFT row, so a name that derives to a published id silently starts a blank replacement of a live set.\n\n## Reproduction\n\n1. Publish `project_editor_qa`.\n2. Access › \"+\" › Name \"Project Editor (QA)\" → Save as draft → toast \"created\"; `GET /api/v1/meta/permission/project_editor_qa?state=draft` → `{objects:{},fields:{}}`.\n3. There is no discard control in Studio; publishing would replace the live set with an empty one. Coordinator API-confirmed.\n\n## Expected\n\nCreation refuses an id that already exists in any state (offering \"open existing\"), and Studio can discard a draft.\n\n## Suspected landing site (the implementer verifies)\n\nAccessPillar `doCreate` (`ifNoneMatch: \"*\"` guards only the draft row).\n\n## Filing facts\n\n- reach: Studio UI + metadata API, measured by the Access QA card and the coordinator.\n- Business reason: A routine \"new set\" can stage the removal of every grant of an existing set.\n- Reader who acts: the triage seat (first touch: domain, area, level), then that lane's `os-dev` implementer. QA suggestion only: `domain:ui`, `area:access`, p2.\n- Dedupe: semantic search `new permission set with an already published id overwrites it with a blank draft` on objectstack-ai/objectstack → 8 hits, none about the create dialog (nearest closed #23537 duplicatePackage merge).\n- QA id: A3"

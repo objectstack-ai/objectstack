@@ -1,0 +1,35 @@
+{
+  "number": 26914,
+  "kind": "pull_request",
+  "title": "test(app-shell): three zh tests await the lazy studio catalogue before reading moved strings",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T20:56:41Z",
+  "updated_at": "2026-10-27T21:13:04Z",
+  "closed_at": "2026-10-27T21:13:04Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26914",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbLAfFbSSvEBDJ5gTja19CVc)_\n\nFixes #26863\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**:三个 app-shell 测试文件在模块作用域先 `await loadStudioCatalogue('zh')`,再跑用例:`PackageFormDialog.validationTiming`、`ResourceEditPage.discardDraftLabel-12690`、`ResourceEditPage.environmentOverlay-12141`。只改测试,不动源码,不动 i18n 包。\n- **为什么改**:#26815 把软件包、表单、编辑器文案移进按需加载的 studio 中文包。这三个测试按中文文案找元素(「软件包 ID」「丢弃草稿」「出于安全考虑」),包没到时页面还是英文,Test UI 随机变红,连 main 红修复 PR #26866 也被拖红。\n- **风险与回滚**:极低。三个测试文件各加 6 行,不发布任何包;回滚即还原这三个文件。\n- **先看**:`ui/packages/app-shell/src/views/metadata-admin/PackageFormDialog.validationTiming.test.tsx`(新增的 import 与 await 两行及注释)。\n- **两分钟验证**:在仓根跑 `pnpm --dir ui exec vitest run packages/app-shell/src/views/metadata-admin/PackageFormDialog.validationTiming.test.tsx`,应见 5 passed。\n- **需要你做的**:无,席位落地。\n\n## What changes\n\nEach of the three test files below now loads the lazy `studio` zh catalogue at module scope (`await loadStudioCatalogue('zh')` from `@object-ui/i18n/namespaces/studio`), the shape #26800 used and the twenty siblings #26815 already carry. The cost moves into the import phase, outside any test or hook timeout, per `ui/AGENTS.md` test discipline.\n\n| Test file | zh string it reads | Studio key (moved by #26815) |\n|---|---|---|\n| `PackageFormDialog.validationTiming.test.tsx` | `软件包 ID`, `显示名称` (`getByLabelText`) | `engine.packages.create.id`, `engine.packages.create.name` |\n| `ResourceEditPage.discardDraftLabel-12690.test.tsx` | the `丢弃草稿` button (`getByRole`), then the confirm and toast | `engine.edit.discardDraft`, `engine.edit.discardDraftConfirm`, `engine.edit.draftDiscarded` |\n| `ResourceEditPage.environmentOverlay-12141.test.tsx` | the read-only banner (`出于安全考虑`, `永远不会开放由包提供的条目`) | `engine.edit.readOnlyTypeBanner` |\n\nNo shipped code, no `ui/packages/i18n` change, no skip, no quarantine, no timeout change. Test-only and publishes nothing, so no changeset (as #26800 had none).\n\n## Tests\n\n**The sweep.** The population is every app-shell test file without the preload that names a zh locale in code or holds a literal found in a studio zh value: 238 files (the card's own file excluded, it was already fixed). They ran with the studio zh loader held never-resolving (`scripts/ablation-replace.mjs` on `ui/packages/i18n/src/namespaces/studio/index.ts`, restored, blob equals HEAD): `Test Files 2 failed | 236 passed (238)`, `Tests 2 failed | 2368 passed (2370)`. The two failures are the two `ResourceEditPage` files above, the same red CI showed for `discardDraftLabel-12690` on PR #26877 (Test UI 9/16). Every other file in the population is judged safe on that run: it reads no lazy studio zh row, or it already reads a zh row only after the catalogue has landed.\n\n**Red before, green after.** The studio zh loader delayed 4000 ms, under the shared verify lock, at head `a51a0622`:\n\n| Leg | Preloads | Result |\n|---|---|---|\n| A | kept | `Test Files 3 passed (3)`, `Tests 20 passed (20)` |\n| B | all three removed | `Test Files 3 failed (3)`, `Tests 5 failed / 15 passed (20)`: `Unable to find a label with the text of: /软件包 ID/` (the card's CI signature), `/显示名称/` twice, the `丢弃草稿` button, and `expected 'This metadata type is read-only…' to contain '出于安全考虑'` |\n\nEvery mutation was restored and proven (`blob == HEAD`, `git diff HEAD` empty).\n\n**Cold module graph, alone and in company.** Each touched file alone: 5/5, 3/3 and 12/12 tests passed. Each in its full-run Test UI shard's app-shell company, computed with `ui/scripts/test-shard-partition.mjs` (`planShards`, the same plan the sequencer uses; it puts `validationTiming` on shard 10/16, the shard CI showed red): shard 10, 102 files, 755 tests passed; shard 2, 104 files, 1010 tests passed; shard 13, 107 files, 1139 tests passed.\n\n## Acceptance notes\n\n- The company runs are narrowed to the shard's `packages/app-shell` files. A whole-shard run (369 files across the `unit`, `dom`, `dom-heavy` and console projects) was stopped by hand at 18 min: the non-TTY reporter prints nothing until the end, which read as a stall. CI's Test UI runs the full shards.\n\n## Verification\n\n<details><summary>Type-check and derived gates</summary>\n\nAll at head `a51a0622`, in a worktree off `origin/main` `a20824f3`.\n\n- `pnpm exec turbo run type-check --filter=@object-ui/app-shell --concurrency=2` under `scripts/pm/os-verify-lock.sh`: `VERDICT command-exit 0`, 64/64 tasks (app-shell `type-check` covers its test files).\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 24 commands; every one exited 0. The PR-body gates (`check-closing-keyword-parity`, plus `check-changeset-no-major --base origin/main` and `check-adr-0087-registration`) ran against this body through `GITHUB_EVENT_PATH`.\n- `pnpm check:type-check-debt` under the lock: `0 raw tsc error(s) total, none above its recorded number`.\n- `pnpm --dir ui exec vitest run scripts/` under the lock, after a spec rebuild: `Test Files 178 passed | 2 skipped (180)`, `Tests 5065 passed | 2 skipped (5067)`.\n- `dispatch-gates --ran`: `24 derived famil(ies) accounted for — 24 run, 0 NOT-MEASURED`.\n- `pnpm check:new-line-citations` (from `ui/`): `0 new citation(s)`.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jVTqmjzhQU2Rqq79mu)_\n"
+}

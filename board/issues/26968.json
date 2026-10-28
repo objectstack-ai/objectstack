@@ -1,0 +1,35 @@
+{
+  "number": 26968,
+  "kind": "pull_request",
+  "title": "fix(app-shell): nav page picker offers a draft page only when its draft body can be a nav target",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T23:34:34Z",
+  "updated_at": "2026-10-28T00:41:04Z",
+  "closed_at": "2026-10-28T00:41:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-28T00:41:02Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26968",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8PBqR3JqcpQdxvP362pdfwm)_\nFixes #26743\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:Studio Interfaces 导航项的「页面」选择器不再列出草稿态的记录页;草稿页按其草稿正文的 `type` 判定,与已发布页同一规则(绑定对象的草稿动作同理)。\n- 为什么改:`_drafts` 行只带元数据类型 `page`,不带页面自身的 `type`,原代码对草稿行一律放行,选中草稿记录页、随应用发布后导航项打不开。\n- 风险与回滚:只改 Studio 选择器的候选列表;每个仅草稿的页面/动作多一次草稿读取;读不到正文时仍列出(与无 `type` 的已发布行一致)。回滚即 revert 本 PR。\n- 先看:`StudioDesignSurface.tsx` 的 `isDraftNavTarget` 与 `usePackageNavTargets` 中草稿循环;再看新测试 `StudioDesignSurface.navPageDrafts-26743.test.tsx`。\n- 两分钟验证:`pnpm --dir ui exec vitest run packages/app-shell/src/views/studio-design/StudioDesignSurface.navPageDrafts-26743.test.tsx`,预期 6 个测试全过。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- `usePackageNavTargets` (Interfaces nav item inspector's target picker): a draft-only row of a type whose `isNavTargetRow` verdict reads a body key (`page`: the body's `type`; `action`: `objectName`) is now judged on its draft body, read with `client.getDraft` and unwrapped by `extractDraftBody`, the one draft-envelope reader. A draft record page is no longer offered; a draft static page still is.\n- A body that cannot be read (no draft served, a failed read) keeps the row, as a published row with no `type` is kept: only a confirmed non-target is dropped. Other target types (`dashboard`, `report`, `doc`) read no body.\n- In-place fix named here: the same draft loop also offered a draft action bound to an object, which the nav cannot run (it runs global actions only). Same defect class, same line, same gate families; covered by one test.\n\n## Why\n\nThe `_drafts` header (`ListDraftsResponseSchema`) carries the metadata type name and the draft's `label`, never the body's own `type`, so the old loop could not filter and added every draft-only row. Fixed client-side with the existing draft read; no spec or server change.\n\n## Tests\n\nNew `StudioDesignSurface.navPageDrafts-26743.test.tsx` (6 tests): a draft record page is not offered; a draft static page is offered; a published record page is still not offered; CONTROL an unreadable draft body is still offered; a draft object-bound action is not offered, a draft global action is; only body-keyed types read drafts, published rows are never re-read.\n\n<details><summary>Ablation (commit ca23ec41)</summary>\n\n`node scripts/ablation-replace.mjs` replaced the anchor `if (verdicts[i]) byName.set(row.name, row);` with an always-true condition: anchor 1 -> 0, blob 8a30d22bfe30 -> e63569e6a119. Result: `a draft record page is not offered` and `a draft action bound to an object is not offered, a draft global action is` failed (2 failed, 4 passed). Restored: blob == HEAD (8a30d22bfe30), `git diff HEAD` empty. No dist leg: the test imports the component by relative path.\n</details>\n\n## Verification\n\nAll local readings at head `ca23ec41` (base `aa00362f`).\n\n<details><summary>Local gates</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`: 24 derived families, all run, every one exit 0; `--ran` reconciliation: 24 derived, 24 run, 0 NOT-MEASURED, 0 UNRUN.\n- `node scripts/check-sdui-manifest.mjs` exit 0 (and `--self-test` exit 0).\n- `pnpm --filter @object-ui/app-shell run type-check` exit 0.\n- `pnpm --dir ui exec vitest run packages/app-shell/src/views/studio-design/ packages/app-shell/src/views/metadata-admin/inspectors/`: Test Files 429 passed, Tests 4289 passed, 1 skipped.\n- `pnpm --dir ui run check:new-line-citations`: 0 new citations, exit 0.\n- `node scripts/check-nul-bytes.mjs` exit 0.\n</details>\n\nChangeset: none. `@object-ui/app-shell` is `private: true`, so nothing publishes; `skip-changeset` is declared with this PR.\n\n## Acceptance notes\n\n- Each draft-only page or action costs one `?state=draft` read when the picker opens; `getDraft` asks the shared `_drafts` ledger read first, so no extra ledger request is sent.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes (CI).\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset (nothing publishes here), and both declaration lines are filled in.\n- [x] 6. `packages/spec` not touched.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbYChiSg5184uQo2r5x)_\n"
+}

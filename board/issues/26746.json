@@ -2,8 +2,8 @@
   "number": 26746,
   "kind": "issue",
   "title": "Studio Interfaces: an object nav entry without its own label is titled by the object's machine name in the item header (\"repairs_repair_ticket · Object\") while the rail shows the object label",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:studio",
     "bug",
     "domain:ui",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-warren"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T14:11:47Z",
-  "updated_at": "2026-10-27T17:16:03Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-28T00:56:27Z",
+  "closed_at": "2026-10-28T00:45:43Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26746",
   "body": "Filing gate: ① product defect, reproduced, landing site named.\nBatch-of: studio-qa-2026-10-27 — 39 cards from one Studio QA run (coordinator session `session_01J8VVAkZns5rNnK2rtszzbQ`; tested at `3fcafcd3`; `origin/main` was `43731031` at filing, so the implementer re-checks the landing site on current main). The run record is the `qa-run` issue filed with this batch.\n\n## Symptom\n\nThe scaffolded nav entry (`{type:\"object\", objectName}`) has no label; the header falls back to the name instead of resolving the object label as the rail does. Label-less groups show ids like \"NAV_ITEM_2\".\n\n## Reproduction\n\n1. Create an app from Studio scaffolding over an object → open its nav entry → header reads \"repairs_repair_ticket · Object\", rail reads \"Repair Ticket\".\n\n## Expected\n\nThe header resolves the same label the rail shows (object label, then name).\n\n## Suspected landing site (the implementer verifies)\n\n`StudioDesignSurface.tsx` ~4548 renders `current.label || current.name`.\n\n## Filing facts\n\n- reach: Studio UI, measured by the coordinator and the Interfaces QA card.\n- Business reason: Machine names leak into the builder for every scaffolded app.\n- Reader who acts: the triage seat (first touch: domain, area, level), then that lane's `os-dev` implementer. QA suggestion only: `domain:ui`, `area:studio`, p3.\n- Dedupe: semantic search `Interfaces header shows object machine name instead of label for nav entry without label` on objectstack-ai/objectstack → 8 hits, none about the Studio item header (nearest closed #25901 console labels).\n- QA id: U15"

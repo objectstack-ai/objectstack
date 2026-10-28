@@ -1,0 +1,36 @@
+{
+  "number": 26911,
+  "kind": "pull_request",
+  "title": "docs(spec): IEmailService Errors lists name TEMPLATE_INVALID",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T20:49:24Z",
+  "updated_at": "2026-10-27T22:08:48Z",
+  "closed_at": "2026-10-27T22:08:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-27T22:08:46Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26911",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-support-ai\"} -->\n_Requested by **Yibo Wang** · [project thread](https://claude.ai/code/project/chan_01BVUyyPie8gHwoPM18iABwB?thread=cmsg_01BVUyyPie8gHwoPM18iABwBDcxHMZCUNuUDSn6AKJTHtZ)_\n\nFixes #26803\n\n## 维护者速读\n\n- **改了什么**:`IEmailService` 契约里 `sendTemplate` 和 `renderTemplate` 的错误清单补上 `TEMPLATE_INVALID`,只改注释,不改类型或 schema。\n- **为什么改**:插件已经会对含非法占位符的已存模板抛 `TEMPLATE_INVALID`,但契约没写,渠道或应用作者读契约时不知道这是一个永久失败。\n- **风险与回滚**:纯文档改动,无运行时影响;回滚即还原这一个提交。\n- **先看**:`packages/spec/src/contracts/email-service.ts`(两段新增的 Errors 条目)。\n- **两分钟验证**:`git grep -c TEMPLATE_INVALID -- packages/spec/src/contracts/email-service.ts`,预期 4(每个清单两处)。\n- **需要你做的**:无,席位落地。\n\nClause-②: no\nMetadata-protocol: none\nSkills-docs: no skill lists these codes; `content/docs/kernel/runtime-services/email-service.mdx` (Typed Error Codes) updated in this PR; `content/docs/automation/email-templates.mdx` already names it.\n\n## What changes\n\n- `packages/spec/src/contracts/email-service.ts`: the `sendTemplate` and `renderTemplate` Errors lists name `TEMPLATE_INVALID`, worded from what `@objectstack/plugin-email` does: a stored template with a hole the authoring rules refuse (rule `email-template-hole-grammar`: a second formatter, or a `currency` argument that is not a literal ISO 4217 code) is refused at render with `TEMPLATE_INVALID: email template NAME (locale=LOCALE): HOLE_AND_RULE`, and is permanent until the template is re-published.\n- `content/docs/kernel/runtime-services/email-service.mdx`: Typed Error Codes lists `TEMPLATE_INVALID`.\n- `.changeset/26803-email-service-template-invalid.md`: patch on `@objectstack/spec`.\n\n## Why\n\nThe runtime throws this code from both methods since #26799, and `service-messaging` grades it permanent, but the contract a channel or app author reads did not list it.\n\n## Measured\n\n- `TEMPLATE_INVALID` on `origin/main` 6090bb73a: thrown by `template-engine.ts` render (`TEMPLATE_INVALID: ` + the grammar's refusal) and re-thrown by `EmailService.resolveAndRenderTemplate` with the template name and locale in front; both `sendTemplate` and `renderTemplate` go through that resolver.\n- `TEMPLATE_UNSUPPORTED`: `EmailService` never throws it. Only the `service-messaging` email and inbox channels raise it, when the registered email service lacks `sendTemplate` / `renderTemplate`. So it is not added to `IEmailService`'s lists.\n- Error-code ledger: does not apply. `error-code-ledger.zod.ts` registers route `error.code` values; `TEMPLATE_NOT_FOUND`, `TEMPLATE_INACTIVE` and `MISSING_VARIABLES` are absent from it (0 hits) because they are `Error` message prefixes, not envelope codes. Mirroring that, `TEMPLATE_INVALID` is not added, and the ledger and its test are untouched.\n\n## Acceptance notes\n\n- `content/docs/kernel/runtime-services/email-service.mdx` Typed Error Codes now lists `TEMPLATE_INVALID` beside the three older codes (claim surface amended by the seat, 2026-10-27T20:51Z).\n\n## Verification\n\nAll on head 6978e5812 (spec tests on 0ca6a3723; the later commit is .mdx only).\n\n<details><summary>Spec tests and typecheck (under os-verify-lock)</summary>\n\n`pnpm --filter @objectstack/spec test && pnpm --filter @objectstack/spec typecheck`: VERDICT command-exit 0. Test Files 736 passed (736); Tests 22050 passed, 1 todo.\n\n</details>\n\n<details><summary>Derived gates</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`: On 6978e5812: 97 derived, 94 exit 0, 3 NOT MEASURED with exit 3 (full-build prerequisite: spec `check:skill-examples`, `check:dual-build-cjs-loads`, `check:lean-entry-closure`); `--ran`: 94 run, 3 NOT-MEASURED, 0 UNRUN. Earlier, on 0ca6a3723: 73 commands. 71 exit 0. `check:doc-formula-expressions` first exited 3 (formula not built), then exit 0 after building formula and lint. `check:dual-build-cjs-loads` and `check:lean-entry-closure` exit 3 (PREREQUISITE NOT MET, need a full build): NOT MEASURED locally, CI runs them. `--ran` reconciliation: 73 derived, 71 run, 2 NOT-MEASURED, 0 UNRUN.\n\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01WGufziYqBAqnKprHc4h25c"
+}

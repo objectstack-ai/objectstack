@@ -1,0 +1,36 @@
+{
+  "number": 26956,
+  "kind": "pull_request",
+  "title": "fix(app-shell): refuse an empty required screen-flow field at the field, as the record form does",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T23:01:28Z",
+  "updated_at": "2026-10-28T00:07:04Z",
+  "closed_at": "2026-10-28T00:07:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-28T00:07:02Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26956",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbRfsb7WKBerWxaiMLy1ThAf)_\n\nFixes #26882\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**:流程弹窗(screen flow)里必填字段留空点「提交」,以前只弹一个转瞬即逝的提示,弹窗里什么都没有,看起来像按钮坏了。现在每个漏填的字段下方直接显示「某某 is required」,输入框标红(`aria-invalid`),光标跳到第一个漏填的字段,「提交」按钮保留,不发请求、不弹 toast,与记录表单一致。\n- **为什么改**:HotCRM 全量浏览器走查(hotcrm#2320,D1)报告「Schedule Follow-up 的 Due Date 留空提交毫无反应」。实测:请求没有发出,唯一的反馈是 toast,字段上没有任何标记。\n- **风险与回滚**:只改控制台流程弹窗的前端呈现,不动服务端、spec 与流程定义。回滚即 revert 本 PR。卡里的第二半(引擎拒绝后「提交」消失)经实测是运行已结束的正确处置,前端无法重提,修法在流程作者侧,见 Acceptance notes。\n- **先看**:`ui/packages/app-shell/src/views/FlowRunner.tsx` 的 `submit`(必填检查改为字段级);`ScreenView.tsx` 的 `errors` 属性与字段下方的消息;新测试 `FlowRunner.requiredAtField-26882.test.tsx`。\n- **两分钟验证**:`pnpm --dir ui exec vitest run packages/app-shell/src/views/__tests__/FlowRunner.requiredAtField-26882.test.tsx`,预期 5 个用例全绿。\n- **需要你做的**:无,席位落地。\n\n## What changes\n\n- **An empty required field is refused at the field.** `FlowRunner`'s `submit` used to answer a missing required field with one `toast.error` (`wizard.missingRequired`) and nothing in the dialog. It now records a per-field message (`validation.required`, \"Due Date is required\", in the display locale and naming the localized label), moves focus to the first missing field in screen order, and returns without a request. No toast: the record form raises none for a client-side refusal either, because each refused field carries its own message. Submit stays. Editing a field retires its own message.\n- **`ScreenView` draws the message.** A new optional `errors` prop (field name to message) draws the message under the control the way the record form's `FormMessage` does, and marks the control: `aria-invalid` on the plain input, textarea and select trigger, and the published `error` slot on the platform widgets (date and date-time pickers, lookup, upload, checkbox), which set `aria-invalid` on their own control. The control's `aria-describedby` names the message after any help text. The Studio preview passes no `errors` and renders as before.\n- **A retryable engine refusal is unchanged and now pinned for values.** `INVALID_SCREEN_INPUT` keeps the screen, the typed values and Submit, with the sentence in the banner; the resubmit goes to the same run.\n- Two existing suites that pinned the old toast (`FlowRunner.fileField-25801`, `FlowRunner.flowsTranslation-5920`) now read the message drawn at the field and assert no toast. The `en` locale comment that named `wizard.missingRequired` as the runner's borrowed key now names `validation.required`; no catalogue row changes.\n\n## Tests\n\n- New `FlowRunner.requiredAtField-26882.test.tsx` (5 cases): an empty required date (message under it, `aria-invalid`, described by it, focused, Submit enabled, no request, no toast); several missing fields each with a message and focus on the first; answering a field retires its message and the next Submit resumes; the message in `zh` names the label; a retryable `INVALID_SCREEN_INPUT` keeps both typed values and Submit, and the resubmit reaches the same run.\n- Reverse verification: with `FlowRunner.tsx` and `ScreenView.tsx` checked out from `7a2818c5`, 4 of the 5 fail, each naming the missing sentence (`Unable to find an element with the text: Due Date is required`); the retryable case passes there too, as expected, since that behaviour already existed. Restored from `HEAD`, proved by an empty `git diff HEAD` and equal blob hashes.\n\n## Acceptance notes\n\n- **Why QA saw \"nothing happens\" (measured on `7a2818c5`, jsdom, the card's screen shape):** Submit with Due Date empty made 0 resume requests, raised the toast \"Please complete the required fields: Due Date\", and left 0 elements with `aria-invalid`. So the untouched date was empty to the check (the PM's alternative, a non-empty untouched date, does not hold); the refusal's only carrier was a transient toast outside the dialog.\n- **The vanished Submit is the terminal disposition, and the ui cannot change it.** Submit is withdrawn only when the run is over: a `refused` end, or a resume answered `400 FLOW_FAILED` / `404` / a failed run under `200`. On those, the engine has already consumed the suspension: `resumeInternal` calls `forgetSuspendedRun` before it traverses the downstream nodes (an order ruled for exactly-once, per the comment above `stepCountAtPause` in `service-automation`'s `run-resume.ts`), and the only door that re-arms it, `POST /automation/FLOW/runs/RUN/restore-suspension`, is an operator verb. Which of the two terminal paths HotCRM's Generate Quote takes for \"Discount cannot exceed 60%\" is NOT MEASURED: the HotCRM flow is outside this repository. Either way the fix is on the flow's side: declaring the bound on the screen field (`max: 60` on the discount field) makes the engine refuse it as `INVALID_SCREEN_INPUT` before it consumes the suspension (retryable: values and Submit kept, this PR's last test), and the dialog refuses it before any request.\n- Out of scope, noted: the `min` / `max` bound refusal is still a toast only (`screenFieldBoundViolations`). Moving it to the field is the same mechanism (an entry in `errors`); it is left as an open question to the seat rather than changed here.\n\n## Verification\n\nHead of the measured tree: see the final report on the card.\n"
+}

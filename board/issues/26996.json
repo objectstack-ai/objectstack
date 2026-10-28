@@ -1,0 +1,35 @@
+{
+  "number": 26996,
+  "kind": "issue",
+  "title": "[Decision] Delegated-admin scopes saved before the #26706 fix: leave as is, ask admins to re-check, or migrate (detail withheld pending maintainer)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "domain:server",
+    "priority:p2",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T00:37:49Z",
+  "updated_at": "2026-10-28T02:12:24Z",
+  "closed_at": "2026-10-28T02:12:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26996",
+  "body": "Filing gate: ② maintainer decision, filed on the maintainer's instruction in session `session_01J8VVAkZns5rNnK2rtszzbQ`, 2026-10-28, verbatim: 「委派范围立决策卡」\n\n## 维护者速读\n- **一句话问题**：#26706 的修复（PR #26990）只改界面显示，不改已存数据。修复之前按旧界面保存的委派管理范围，是否需要处理？怎么处理？\n- 具体细节按维护者的不公开指令不写在本卡；派发与复核席位手里有。\n\n## Background\n- The PR #26990 fix is display-only. Stored scopes stay valid under the spec, and the runtime keeps enforcing what the spec declares.\n- What may differ is what an admin *intended* when they read the old screen. The number of affected scopes is **not measured**.\n\n## Governing text\n- `AdminScopeSchema` in `packages/spec/src/security/permission.zod.ts` defines what a stored scope means.\n- AGENTS.md: protocol first. No option below changes the spec.\n\n## Options\n\n| | 做什么 | 客户可感知后果 | 工作量 |\n|---|---|---|---|\n| A | 不动数据；发布说明（changeset 已有中性提醒）请管理员复查委派范围 | 无行为变化 | 无 |\n| B | 一次性只读提示：在 Setup 列出需要管理员复查的委派范围，确认后消失 | 管理员看到一次确认提示；不改授权 | ui 车道 · 1 PR · 无先例 |\n| C | 数据迁移：把存量范围写成与当前执行一致的显式值 | 无行为变化，只是数据变显式 | server 车道 · 1 PR + 迁移 · 无先例 |\n| D | 数据迁移：按旧界面显示的值改写存量范围 | **有行为变化**，部分被委派管理员的权限会改变 | 同 C，另需通知 |\n\n## Four-axis facets\n<!-- os-decision-facets -->\nos-decision-facets\n- ① 项目长远合理性：A、C 不增特例。B 新增一次性提示面，需要设退役时点。D 以旧界面为准改数据，违背\"spec 决定含义\"。\n- ② 实际业务拉动：受影响数量未测。委派管理较新，零拉动时默认不扩散。\n- ③ 防 AI 犯错：A、C 的数据都是 spec 合法的同一含义。D 制造静默的行为变化，最差。\n- ④ 创业阶段不扩散：A 不新增任何东西。B、C 各新增一次性工作。\n\nPrior rulings read: `delegated admin scope stored audit migration adminScope decision` → 16 hits, none ruling on this; no ADR; thread: none\n\n## Recommendation\n**A**，置信缺口：受影响数量未测。\n\n- 只看①选 A；②③④ 是否翻转：否。\n- 不取 B：先测影响面，零拉动不新增提示面。\n- 不取 C：没有行为收益。\n- 不取 D：静默改变授权。\n\n## After the ruling\n- A：#26990 照常落地，本卡关闭。\n- B / C / D：立对应车道的执行卡，`Blocked-by:` 本卡，派发前先测影响面。\n\n## Related\n#26706, PR #26990"
+}

@@ -2,7 +2,7 @@
   "number": 26881,
   "kind": "pull_request",
   "title": "refactor(objectql): move the package registration bodies out of engine.ts into engine-package-registration.ts (#25522 cut 17)",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -20,10 +20,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T19:45:41Z",
-  "updated_at": "2026-10-27T20:14:44Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-27T20:52:59Z",
+  "closed_at": "2026-10-27T20:52:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-27T20:52:57Z",
   "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/26881",

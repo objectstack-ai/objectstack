@@ -2,8 +2,8 @@
   "number": 26744,
   "kind": "issue",
   "title": "cloud: state the persisted visualize_data result shape after cloud#3292 (chart descriptor key, row cap), so ui can redraw charts after a reload",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -20,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T14:09:53Z",
-  "updated_at": "2026-10-27T14:09:53Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-28T00:31:57Z",
+  "closed_at": "2026-10-28T00:31:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26744",
   "body": "Source: split by the ui seat (`domain:ui#4`) from #25908, at the maintainer's rule 「cloud 相关的任务,转 cloud 车道处理」 (2026-10-27T14:08Z). The ui card thread stopped before editing (report 6442837522) because the cloud side could not be read: `objectstack-ai/cloud` is not reachable from the ui lane, and npm `@objectstack/service-ai` latest is 10.3.0, which predates objectstack-ai/cloud#3292.\n\n## What the cloud lane answers\n\nOn `objectstack-ai/cloud` at or after #3292, read the `visualize_data` tool's result as it is **persisted** with the conversation (the shape a reload hydrates, not only the streamed one), and state on this card:\n\n1. the key path that holds the full chart descriptor in the persisted result;\n2. whether the persisted rows are capped (the ui thread was told 20), and where the cap is set;\n3. the cloud `file:line` for each, and the `@objectstack/service-ai` version that ships it (or \"unreleased\").\n\nDone when: a comment on this card answers 1 to 3 with cloud `file:line` citations. That comment unblocks #25908.\n\n## Why ui needs it\n\n#25908: an assistant answer's chart disappears after a reload. The ui read points are already measured, and nothing is written until the shape is known:\n\n- hydration: app-shell `src/console/ai/AiChatPage.tsx:206` (second caller console `SharedRecordPage.tsx:181`);\n- cache: app-shell `src/hooks/useChatConversation.ts:441`;\n- plugin-chatbot `useObjectChat.ts:743` → `mapMessages.ts` `extractCharts:1440`.\n\nReading an assumed key was ruled out. Declaring the shape in `packages/spec` would owe a contract review the ui lane does not take, so it is not done from ui.\n\nNo ui code is part of this card."

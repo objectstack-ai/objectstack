@@ -1,0 +1,32 @@
+{
+  "number": 26986,
+  "kind": "issue",
+  "title": "[decision] ADR-0141 carve-out: five measured gaps keep an app artifact from compiling or running with a dependent module artifact absent (lookups, actions, widgets, guard hooks, record-change flows)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:spec",
+    "enhancement",
+    "pm:on-hold",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T00:12:04Z",
+  "updated_at": "2026-10-28T01:06:01Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26986",
+  "body": "## Source\n\nThe ADR-0141 pre-install check (#25792), co-ownership (#26054) and the console refusal (#26123) shipped in 18.2.0. HotCRM's first consumer is hotcrm#2271: revenue becomes its own artifact that **declares** HotCRM, so HotCRM must compile, boot and run with revenue absent.\n\nHotCRM measured exactly that before moving anything: the hard-edge ledger, `docs/architecture/module-split-hard-edges.md` (hotcrm#2311, landed as `3f5622d`, 18.2.0). It covers every app → module reference with the module absent, on a fresh database. **None of the three modules can be left out today.** `objectstack dev` stops at G1 (`defineStack` cross-reference) and G2 (`os validate`) before a server starts. Once the referrers were peeled away in a scratch tree, the runtime rows showed below.\n\nThree of the ledger's findings are **not** platform asks and are not filed here:\n- F1, grants on module objects: ADR-0141 D7 says the permission sets move with the objects, and objectstack#14488's ruling says the same. HotCRM does this under #2271.\n- The translation rows: HotCRM moves them in hotcrm#2352.\n- F8, the cosmetic related-list labels: filed separately, for objectui.\n\nWhat follows has no in-repo answer that AGENTS.md permits. ⛔ No existence guard, no try/catch and no copied dataset.\n\n## The five gaps\n\n| Ledger | What the app package carries | Measured with the module absent | What would answer it (options for the decision) |\n|---|---|---|---|\n| **F2** · rows M5, S5 | A lookup from an app object to a module object: `crm_opportunity.crm_campaign`, `crm_task`/`crm_event.related_to_case` | G2 `object-reference-unknown` refuses it at author time, **although `defineStack` admits a lookup to an object the stack does not carry** (ADR-0130 §1.5, ADR-0141 Context, `packages/spec/src/stack.zod.ts`). The two layers disagree. | (a) G2 follows `defineStack` and admits it, with the lookup rendering as dangling when the object is absent; or (b) the module contributes the field onto the app object it depends on, in the same direction as `navigationContributions`. |\n| **F3** · rows R11, M6, M7 | An app action that launches a module flow (`type: 'flow'`) or creates a module record (`objectOverride`) | G1: \"Action 'generate_quote' references flow 'quote_generation' which is not defined in flows.\" G2 `object-reference-unknown` on `objectOverride`. #25514 fixed this only for the **same** artifact. | (a) A module contributes actions onto app objects; or (b) an action binds only when its target is installed. |\n| **F4** · row R9 | An app dashboard widget bound to a module dataset (`top_products` → `product_metrics`) | G2 `widget-dataset-unknown` | (a) A module contributes widgets onto an app dashboard; or (b) optional widgets, hidden when the dataset's package is absent (`requiresObject` already hides on absence at run time, but G2 refuses first). |\n| **F5** · rows R15, M10, M11 | Guards and rollups that belong to a module but fire on an app object. ADR-0130 R4 and ADR-0141 D7 (\"hooks follow ownership\") forbid the module's own hook there, so they live in app hooks that query module objects. | `DELETE crm_contact` → **404** `OBJECT_NOT_FOUND` \"Object 'crm_quote' not found\" on **every** contact. Every opportunity write and every lead conversion logs `ERROR [hook] … Object 'crm_campaign_member' not found`. | (a) A module may attach hooks to objects of a package it **declares** (the edge points downward, the direction ADR-0141 already trusts); or (b) a declarative conditional delete restriction the module states on its own lookup, plus a module-side rollup on the app trigger. |\n| **F6** · rows R16, R17 | App record-change flows that read a module object (the billing hand-off loads `crm_opportunity_line_item`) | The write answers 200, and the run **fails**: \"get_record(crm_opportunity_line_item) failed: Object … not found\". There is no retry and the user gets no signal. | The F5 answer for flows: (a) a module flow on an app trigger object; or (b) a node that skips when its object's package is absent. |\n\n## Ask\n\nDecide one answer per row. The rows may share one mechanism, for example \"a declared dependency may contribute to the package it declares\". Each answer becomes its own implementation card. hotcrm#2271 is blocked on F2–F6, and that block is recorded there.\n\n**Grade: `priority:p3`**, matching hotcrm#2271. No shipped install breaks today, because HotCRM still ships as one artifact.\n\n<sub>Filed by the `repo:hotcrm` lane seat (session `session_01J8VVAnPkgK6CWrJa6t7Fk5`) from the ledger's *Upstream findings*, as hotcrm#2311's landing said the seat would. Dedupe: searches for module-absent lookups, module hooks on a depended-on package's objects, and optional widgets or actions found only #14488 (closed, not planned; it covers F1 and is honoured above), #25514 (closed; same-artifact only) and #24471 (closed; object-extension wording).</sub>"
+}

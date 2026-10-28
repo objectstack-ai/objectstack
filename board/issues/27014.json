@@ -1,0 +1,36 @@
+{
+  "number": 27014,
+  "kind": "pull_request",
+  "title": "fix(ui/scripts): check:node-esm-load and check:published-dist build modes run the release's build",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T01:28:52Z",
+  "updated_at": "2026-10-28T02:23:03Z",
+  "closed_at": "2026-10-28T02:23:01Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-28T02:23:01Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27014",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8W3o2SDQXgpRSRQTXHo1oX3)_\nFixes #26860\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:`check:node-esm-load` 与 `check:published-dist` 不带 `--no-build` 手跑时,改为在仓根跑发布用的那条 `pnpm build`;两脚本共用同一个构建函数。\n- 为什么改:之前一个在 `ui/` 里跑不存在的 `build` 脚本直接崩,另一个构建了含文档站的 128 个任务,读到的不是发布的产物,本地复现 CI 红灯无从对照。\n- 风险与回滚:只动 `ui/scripts` 两个工具脚本与其测试,不发布任何包;CI 与发布路径本来就带 `--no-build`,行为不变;回滚即 revert 本 PR。\n- 先看:`ui/scripts/check-published-dist-tooling.mjs` 的 `buildWorkspace`;`ui/scripts/check-node-esm-load.mjs` 的构建步骤;`ui/scripts/__tests__/check-published-dist-tooling.test.ts` 钉发布构建的那条用例。\n- 两分钟验证:`pnpm --dir ui exec vitest run scripts/__tests__/check-node-esm-load.test.ts scripts/__tests__/check-published-dist-tooling.test.ts`,预期 89 个测试全绿。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- `buildWorkspace` (published-dist gate) now runs the **release's own build**: the workspace root's `build` script, run from the workspace root (`workspaceRoot()` from `ui/scripts/workspace-root.mjs`). `--concurrency` / `--force` are appended and pnpm hands them to turbo. A workspace root with no `build` script is refused by name instead of surfacing as pnpm's exit 254.\n- `check-node-esm-load.mjs` full mode now calls that same `buildWorkspace` at the workspace root (`--force-build` maps to turbo `--force`), so both gates read one build. `main` takes an injectable `build` seam so a test can read which build it asks for without paying one.\n- Stale docblock text refreshed: both gates said `--no-build` \"is wired into nothing\" (it is wired into `scripts/release-publish.sh` and ci.yml's `UI Published Artifacts` job), and the published-dist header named `pnpm changeset:publish` as the publish path.\n\n## Why\n\nShape chosen by measurement, per the card's two options: \"what the release builds\" is **one stable command**. `pnpm run release` opens with `pnpm run build`; release.yml's `publish` job runs `pnpm run build`; ci.yml's `UI Published Artifacts` job runs `pnpm build` before both gates read with `--no-build`. So the build mode runs that command rather than being removed. Measured on `5e99bd93`: the old published-dist build (`turbo run build --filter=!@object-ui/site` from `ui/`) planned 128 tasks including `@objectstack/docs`; root `pnpm build` plans 127 tasks, neither docs nor site, 41 of them `@object-ui/*`.\n\nThe publish path is unchanged: `scripts/release-publish.sh` and ci.yml both pass `--no-build`, so neither builds through this code.\n\n## Tests\n\n- `check-published-dist-tooling.test.ts`: `buildWorkspace` runs `pnpm build` with `cwd` at the given workspace root; forwards `--concurrency=2 --force`; refuses a manifest with no `build` script (naming the manifest, without exec); still throws when the build fails; and a pin that the workspace root's `build` script is what `pnpm run release` opens with and what release.yml's `publish` job runs.\n- `check-node-esm-load.test.ts`: `main(['--force-build'])` asks the injected build for `workspaceRoot(ui root)` with `force: true`.\n- Both files: 89/89 pass. No ablation: the diff is tooling scripts only (os-dev: scripts are not ablated).\n\n## Acceptance notes\n\n- `ui/package.json` `changeset:publish` still runs the published-dist gate without `--no-build`; after this PR it would build the release's build too. Nothing in the repository invokes it (the release publishes through `scripts/release-publish.sh`), and the `wiring` test's comment still calls it \"the command changesets/action runs\". Left as is: out of this card's scope.\n- Follow-up owed: `.github/workflows/release.yml`'s comment over the publish step is stale in the way the card names (governed, Tier H; not edited here).\n\n## Verification\n\nAll on head `cf75e342`, in a fresh worktree, under the shared verify lock (shared-box seconds).\n\n<details><summary>Acceptance: both aliases by hand, exit 0</summary>\n\n- `pnpm --dir ui run check:node-esm-load --force-build` → exit 0. turbo: 116 successful, 0 cached. Provenance leg: 35 of 35 gradable entries built by this tree. Load leg: 33 of 36 published ESM entries imported and evaluated (plugin-dashboard and plugin-map by ruling; one bin-only CLI).\n- `pnpm --dir ui run check:published-dist` → exit 0. turbo: 116 cached of 116 (this tree's own forced build). \"Inspected 36 published package(s): 5813 tarball file(s), 5668 of them build output, 0 tooling artifact(s) in build output.\"\n- `pnpm --dir ui run check:node-esm-load` → exit 0. Provenance 35 of 35 own; load 33 of 36.\n- Before the fix (`5e99bd93`): `check:node-esm-load` exit 1, `ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL Command \"build\" not found`.\n</details>\n\n<details><summary>Counter-probes, one per script (restored and re-run green)</summary>\n\n- published-dist: a test file copied into `ui/packages/core/dist/probe-copied.test.js`, then `check:published-dist --no-build` → exit 1, `@object-ui/core [tooling-in-published-output] packages/core/dist/probe-copied.test.js`. Removed → exit 0.\n- node-esm-load: an extensionless relative re-export (`export * from './probe-extensionless'`) appended to `ui/packages/core/dist/index.js`, then `check:node-esm-load --no-build` → exit 1, `@object-ui/core: ERR_MODULE_NOT_FOUND` (and its dependants, attributed via `@object-ui/core`). Restored by hash → exit 0.\n</details>\n\n<details><summary>Gates</summary>\n\n`dispatch-gates --commands` derived 18 families; all 18 exit 0, reconciled with `--ran` (0 NOT-MEASURED). Includes `pnpm --dir ui exec vitest run scripts/` (178 files passed, 2 skipped; 5069 tests passed). Also run: `node scripts/check-sdui-manifest.mjs`, ui eslint on the four changed files, `check:new-line-citations`, `check:spec-symbols`, all exit 0.\n</details>\n\nNo changeset: `ui/scripts` ships in no package (`skip-changeset`).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbXWtZtWh3syXudgoFj)_\n"
+}

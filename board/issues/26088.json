@@ -13,7 +13,7 @@
   "labels": [
     "area:devpath",
     "documentation",
-    "domain:devx",
+    "domain:skills",
     "pm:queue",
     "priority:p2"
   ],
@@ -21,11 +21,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T11:30:21Z",
-  "updated_at": "2026-10-27T01:21:52Z",
+  "updated_at": "2026-10-28T01:05:43Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 6,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26088",
   "body": "Filing gate ③: a maintainer-directed task. Maintainer, 2026-10-26, verbatim: 「完整的评估本项目， 还有哪些可以优化的地方。包括 ci 和文档」 then 「使用 pm-dispatch 技能创建 issue，需要决策的立为决策卡。」 and 「低优先级的先不考虑」. Batch-of: 19 (repository evaluation 2026-10-26, `session_019a9XCWsbMFp75REzthE6cs`; 9 decision cards + 10 execution cards). ⛔ Filed bare: grading, `domain:*` and `area:*` are triage's. ⛔ Not a claim. Reader: the `domain:devx` execution seat — one os-dev, one PR; the AGENTS.md line is Tier H and #26035 is rewriting that same section now, so the AGENTS.md half rides #26035's PR or serializes behind it. Dedupe: REST list (439 issues), grep `OS_PORT|PORT=3000|npx create-objectstack|pnpm run setup` → 1 unrelated hit (#25581, dist-tags). #26035 (open, dispatched) covers the objectui pin text in AGENTS.md, not these three contradictions. **New.**\n\n**谁付代价（业务筛）:** a new developer follows one page, a seat follows another, and they disagree about the port the UI reaches, the command that creates a project, and the command that sets up the repo. Documentation that says two things is a product defect under North Star item 4.\n\n## Measured (HEAD 0d83ee8f77)\n\n1. **Port and env var.** `AGENTS.md:138`: the dev-server port \"must be 3000 (UI hard-wired)\" and the spelling is `PORT=3000 pnpm dev`. `content/docs/getting-started/index.mdx:207-212`: the dev server auto-shifts to a free port and `PORT` is the legacy alias of `OS_PORT`. AGENTS.md Prime Directive 9 (`:202`) requires the `OS_` prefix on ObjectStack-owned env vars. Which is true is a code reading: `grep -rn \"OS_PORT\\|process.env.PORT\" packages/cli/src packages/runtime/src examples/*/package.json`.\n2. **Scaffold command.** `README.md:50` and `content/docs/getting-started/your-first-project.mdx:43`: `npm create objectstack@latest`; `content/docs/getting-started/index.mdx:169`: `npx create-objectstack my-app`. Both work; one spelling should be canonical (the README's is the one the North Star names: 「npm create objectstack」).\n3. **Setup command.** `AGENTS.md:40`: `pnpm run setup` (\"first-time: install + build spec\"); `CONTRIBUTING.md:52-57` and `README.md:249-252`: `pnpm install` then `pnpm build`. Read `package.json` `setup` to see what it actually runs and whether the two sequences are equivalent.\n\n## Wanted\n\n- For each of the three: read the code, pick the true statement, and make every page say it. ⛔ Not a third wording: the fix is one sentence in one place quoted by the others, or the same sentence in each.\n- Port: if `PORT` is a deprecated alias, AGENTS.md says `OS_PORT=3000` and the `readEnvWithDeprecation` note; if the UI really hard-wires 3000, getting-started says so.\n- Scaffold: the North Star's spelling wins unless the code says otherwise.\n- The AGENTS.md edits are Tier H; coordinate with #26035's branch to avoid two PRs on the same lines.\n\n## Acceptance\n\n- `grep -rn 'PORT=3000\\|OS_PORT\\|npx create-objectstack\\|npm create objectstack\\|pnpm run setup' AGENTS.md README.md CONTRIBUTING.md content/docs/getting-started/` shows one spelling per fact; the PR body quotes the code line that decided each.\n\n**Size:** S. **Clause-②:** no. **Metadata-protocol:** none.\n\n## Related\n\n#26035 (open, dispatched)."

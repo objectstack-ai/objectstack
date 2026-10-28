@@ -2,8 +2,8 @@
   "number": 26597,
   "kind": "issue",
   "title": "Studio Access pillar: the field-permission editor shows a different edit right for a field with no explicit rule than the runtime enforces, and its bulk controls change edit rights silently (detail withheld pending maintainer)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:access",
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p1",
     "security"
   ],
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T09:33:34Z",
-  "updated_at": "2026-10-27T09:36:14Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-28T02:13:22Z",
+  "closed_at": "2026-10-28T02:12:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26597",
   "body": "Filing gate: ① product defect, reproduced and confirmed in code, landing site named (maintainer direct dispatch, authorizing words quoted in the audit comment).\n\n## Symptom (customer-visible)\n\nIn Studio › Access › a permission set › an object's field sub-table, the readable/editable state shown for a field that has **no explicit field rule** disagrees with what the server enforces for that same field. An admin who trusts the screen gets the opposite of what they see.\n\nThe bulk/clear controls in that sub-table look like no-ops on screen, but they write explicit field rules that change who can edit.\n\n- This is an authorization-display defect, so the step-by-step reproduction and the exact direction of the mismatch are withheld from this card, per the maintainer's instruction. They go to the implementer privately.\n\n## Measured\n\n- Repo `3fcafcd3`, 2026-10-27, by the Studio QA Access card. The member's write was refused or accepted against what the editor displayed.\n- The coordinator confirmed the mismatch by reading the editor's render default against the server's field-masking rule for unruled fields.\n\n## Landing site (suspected — the implementer verifies)\n\n- Editor side: `ui/packages/app-shell/src/views/metadata-admin/PermissionMatrixEditor.tsx` (field sub-table render default and the field-permission seed on update).\n- Runtime side: `packages/plugins/plugin-security/src/field-masker.ts`.\n- Which side is wrong is decided by the spec's declared meaning of an absent field rule (`packages/spec/src/security/permission.zod.ts`). Per the protocol-first rule, code aligns to the spec; changing the spec is a separate card.\n\n## Acceptance\n\n- For every combination of object grant × field rule (absent / readable-only / editable), the editor shows exactly what the runtime enforces.\n- No bulk or clear control writes an edit right the admin did not see change on screen.\n- A pin covers the absent-rule case on both sides (editor render and runtime enforcement), so they cannot drift again.\n\n## Filing facts\n\n- Business reason: admins decide who may change sensitive fields from this screen. A display that disagrees with enforcement either leaves a field editable that the admin believes is locked, or locks one they meant to keep open, with no signal either way.\n- Reader who acts: an `os-dev` implementer, dispatched directly by this PM session on the maintainer's instruction (`domain:ui`).\n- Dedupe: semantic search `permission set field permission editor default editable display runtime field-masker unruled field` on objectstack-ai/objectstack → 3 hits (#22379, #21063, #9127), all closed and none about this editor/runtime mismatch.\n- Source: Studio QA run, 2026-10-27, coordinator session `session_01J8VVAkZns5rNnK2rtszzbQ`."

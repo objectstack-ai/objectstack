@@ -1,0 +1,35 @@
+{
+  "number": 26974,
+  "kind": "pull_request",
+  "title": "fix(app-shell): Studio Interfaces item header names a label-less object entry by its label, as the rail does",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T23:47:12Z",
+  "updated_at": "2026-10-28T00:45:44Z",
+  "closed_at": "2026-10-28T00:45:41Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-28T00:45:41Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26974",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8LSNZTBKB5UepDXQ6qob588)_\nFixes #26746\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:Studio「界面」条目标题(标题、读屏说明、定义抽屉标题)改为与左侧导航行同一套标签解析,每次渲染现解析。\n- 为什么改:无标签的对象导航项(脚手架生成的就是这种)标题显示机器名 `repairs_ticket`,而侧栏已显示「Repair Ticket」。\n- 风险与回滚:仅 app-shell 一个私有包、一个文件的显示文本;回滚即 revert 本 PR,无数据或契约变化。\n- 先看:`StudioDesignSurface.tsx` 中新增的 `ifTitleText` 一段;其次新测试文件 `StudioDesignSurface.itemHeaderLabel-26746.test.tsx`。\n- 两分钟验证:`pnpm --dir ui exec vitest run packages/app-shell/src/views/studio-design/StudioDesignSurface.itemHeaderLabel-26746.test.tsx`,预期 3 个测试全绿。\n- 需要你做的:无,席位落地。\n\n## What changes\n\nThe Interfaces item header read `current.label || current.name` in three places: the header title, its screen-reader caption beside the kind chip, and the definition sheet's title (`engine.studio.if.definitionTitle`). `current.label` is the open leaf's display text frozen when its Surface was made. On the first load that happens before the resolver knows every label. For example, a draft-only object's `_drafts` row lands after the app load picks its first leaf. The rail asks the resolver again on every render, so it read \"Repair Ticket\" while the header kept \"repairs_ticket · Object\".\n\nThe three sites now read one value, `ifTitleText`. It finds the open leaf's entry in `railTree` (the tree the rail draws, served text included) by `navId` and names it through the rail's own `navEntryLabelText` with the same `useNavTargetLabel` resolver. No second resolver is added. A Surface without a `navId` keeps `current.label`, and an empty text keeps the existing `current.name` fallback.\n\n## Why\n\nThe rail and the header name the same leaf, and the label wins over the machine name everywhere (ruling B of objectui#11201, the `navEntryLabelText` contract). Triage 6448317687: \"Resolve the object label the way the rail does.\"\n\n## Tests\n\nNew `StudioDesignSurface.itemHeaderLabel-26746.test.tsx` mounts the whole surface and holds the `_drafts` answer until the header has opened on its first leaf:\n\n- a label-less object entry: the header, its caption and its tooltip read \"Repair Ticket\" once the label arrives, with the machine name only on the tooltip;\n- a labelled entry: the header reads its authored label, unchanged;\n- a label-less group: the rail's group header reads what the runtime sidebar's `resolveNavItemLabel` gives it, and a leaf inside it is named alike in the rail and the header.\n\nAblation, after the fix was committed: `scripts/ablation-replace.mjs` replaced the resolver line with `const text = current.label;` (the old `current.label || current.name`). Tests 1 and 3 went red with `Received: repairs_ticket · Object`, the QA symptom; test 2 stayed green. The restore leg was verified by blob: HEAD and disk both `d05fa2404f2a`, `git diff HEAD` empty. The test imports the surface by relative path, so there is no dist leg.\n\n## Acceptance notes\n\n- Label-less groups: the rail shows a label-less group's `id` (for example `nav_item_2`, drawn uppercase by the rail group style). This is the runtime's own rule: `resolveNavItemLabel` in `@object-ui/layout` falls to the entry `id` for a group, and the running app's sidebar shows the same text. The header never names a group, because a group is not a Surface. So the rail and the header already agree, and `NavTreeGroup` is unchanged. Test 3 pins that the rail matches the runtime. Giving label-less groups a different text would be a change to the runtime rule, not to this header.\n- Outside this card's surface, the same frozen-label read remains in two places, reported only: the Automation pillar header's `current.label || current.name`, and the `onSurfaceLabelChange` report to the dock, which reads `current.label`.\n\n## Verification\n\nAll readings are on head `052aae45`, the last commit before this PR.\n\n<details><summary>Derived gates: 24 of 24 exit 0, `--ran` reconciled</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 24 families. Each one ran, its exit code was captured before any pipe, and `--ran` printed \"24 derived famil(ies) accounted for — 24 run, 0 NOT-MEASURED\". The set includes `node scripts/check-sdui-manifest.mjs` (and `--self-test`), `pnpm --dir ui exec vitest run scripts/` under the lock, `check:cross-package-test-inputs`, `check:test-source-alias`, `check:nul-bytes`, `check:type-check-coverage` and `check:type-check-debt`. All exit 0.\n</details>\n\n<details><summary>Package checks</summary>\n\n- `pnpm --filter @object-ui/app-shell type-check`: exit 0 (lock VERDICT command-exit 0).\n- `pnpm --dir ui exec vitest run packages/app-shell/src/views/studio-design/`: Test Files 234 passed (234), Tests 1693 passed (1693) (lock VERDICT command-exit 0).\n- eslint on the two changed files: 0 errors, 14 warnings, all on pre-existing lines outside this hunk.\n- `pnpm --dir ui run check:new-line-citations`: 0 new citations, exit 0.\n</details>\n\nNo changeset: `@object-ui/app-shell` is `private: true`, and the diff touches only it, so the PR carries `skip-changeset`.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes. (eslint on the changed files: 0 errors)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset. (nothing publishes; both declaration lines filled in)\n- [x] 6. `packages/spec` touched: n/a.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01JQwxbY5nVXXfxvWqYPEQAe\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbY5nVXXfxvWqYPEQAe)_\n"
+}

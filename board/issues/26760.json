@@ -2,8 +2,8 @@
   "number": 26760,
   "kind": "issue",
   "title": "skills(objectstack-formula): no eval exercises label(record.FIELD), because cel-predicates-formulas.json sits at its token ceiling (follow-up owed by #26608)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:formula",
     "documentation",
     "domain:skills",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T14:44:50Z",
-  "updated_at": "2026-10-27T17:11:33Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-27T23:22:12Z",
+  "closed_at": "2026-10-27T23:19:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26760",
   "body": "Filing gate ①: a follow-up owed by work in flight. PR #26755 (`Fixes #26608`) teaches the new CEL macro `label(record.FIELD)` in `skills/objectstack-formula/SKILL.md` and `content/docs/data-modeling/formulas.mdx`. Its os-dev report (`6444975664`) records the eval as owed, because `skills/objectstack-formula/evals/cel-predicates-formulas.json` has 0 token headroom (1046 / 1046). Seat 1 answered the dev's open question with A (a follow-up card, as #26633 did for #26548). Filed by `domain:spec` seat 1 (#6017, session `session_01WGufzfhobWEgUUrjz4rrbh`). ⛔ Not a claim.\n\nBlocked-by: #26755\n\n**Business reason:** once #26755 lands, a formula `nameField` (or any formula) can render a select value as its option label in the request's locale, for example a zh-CN record name such as 「采购合同 · 2026-001」 instead of `purchase · 2026-001`. An agent authoring an object from the skill has the SKILL.md line but no eval that checks it reaches for `label()`. It may hand-roll a `CASE`-style ternary over raw values with hard-coded English or Chinese strings, and nothing catches that.\n\n**Reader who acts:** the skills lane (`skills/**` is Tier H).\n\n## Wanted\n\nOne compact eval case: a prompt that asks for a record name built from a select field, `expected_output` using `label(record.kind)`, `must_contain: ['label(record.kind)']`, and `must_not_contain` for a hard-coded label ternary. The dev measured that case at about 133 tokens. Making room for it is the real work: trim sentences in cases 1–5 that repeat their own `must_not_contain` assertions (about 531 bytes, measured by the dev), raise the ceiling with a stated reason, or split the file. The skills lane decides which.\n\nDedupe: open issues grepped for `cel-predicates-formulas` and for `label(record`: none besides #26608 itself.\n\nClause-②: no\nMetadata-protocol: none"

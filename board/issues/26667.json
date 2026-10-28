@@ -2,8 +2,8 @@
   "number": 26667,
   "kind": "issue",
   "title": "pm-dispatch(contract-review): when the implementing seat's Fable is exhausted, it hands the review to triage with a machine-findable marker; triage runs it and the record says so",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:devpath",
     "domain:skills",
-    "pm:dispatched",
     "priority:p1",
     "tooling"
   ],
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T12:08:53Z",
-  "updated_at": "2026-10-27T15:42:04Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-27T23:21:47Z",
+  "closed_at": "2026-10-27T23:19:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26667",
   "body": "Filing gate ③: a maintainer-directed rule. Maintainer, 2026-10-27, in the triage seat thread, verbatim: 「关于契约复审，开发自己有fable时都可以自己审核，只有开发的fable用完了，才需要分诊，但是此时分诊要能看出来，区别出来。」 This follows the triage seat's options on who owns contract review (lean C, a triage backstop). The maintainer narrowed the backstop to one trigger. Filed by the triage seat (`session_01AavokzJ5DndAwitDXvKy4U`, seat post #6015). ⛔ Not a claim.\n\n## The ruling, as rule text to write\n\n1. **Default unchanged:** the seat that dispatched the work runs the contract review at `CONTRACT_REVIEW_TIER` (`references/contract-review.md`: 「谁跑 = 派发席」).\n2. **Hand-off only on an exhausted Fable:** when that seat's `CONTRACT_REVIEW_TIER` call fails for quota (HTTP 429 / quota exhausted), the seat does not review at a lower tier. It hands the review to triage.\n3. **Triage must be able to tell the case apart.** The hand-off is one PR comment in a fixed, machine-findable shape, plus the existing `needs:contract-review` label:\n   ```\n   Contract-review-handoff: triage — CONTRACT_REVIEW_TIER unavailable (<HTTP status / error>, <UTC time>) · head <sha>\n   ```\n   A PR that carries `needs:contract-review` **without** this line is still its own seat's to review, and triage does not touch it.\n4. **Triage's act:** each round, triage lists open PRs whose latest hand-off line names the **current head**. For each one, it runs the review in an isolated `CONTRACT_REVIEW_TIER` subagent, with the same-shape record (`## Contract review`, `Served-tier:`, the head sha, ①②③ (and ④ where it applies), PASS/FAIL), and `Reviewed-by:` naming the triage seat. A PASS removes the label, per the existing rule. If triage's own call is also quota-refused, triage writes that once on the PR and leaves the label, ⛔ it never reviews at a lower tier.\n6. **Stale-review tracking.** Maintainer, 2026-10-27, after triage missed a moved head on PR #26598: 「改进 skills」. Each round, triage compares every open PR that carries a triage-rendered `## Contract review` record against its current head. If the head has moved past the record's `Head-sha`, that record is stale. The one exception is a move covered by the existing regen-only / prose-only rule, judged on the committed tree.\n   - **Triage's own FAIL, head moved:** in the same round, triage re-reviews the new head at `CONTRACT_REVIEW_TIER`. It checks every earlier must-fix item, and it reviews the delta commits as changes in their own right.\n   - **Triage's own PASS, head moved:** triage posts one note on the PR saying the PASS no longer governs and a delta review is owed. That review falls to the PR's own seat, or to triage again if a fresh `Contract-review-handoff:` line appears.\n   - **The round record** lists each triage-reviewed PR as `record head → current head → state` (current / stale-FAIL re-reviewed / stale-PASS noted), so a moved head cannot drop out of sight.\n   - **The recogniser** in `scripts/pm/record-recognisers.mjs` exposes the record's `Head-sha` and its `Reviewed-by` session, so the comparison is one read, not prose parsing. ⛔ No gate reads it.\n7. **What does not change:** the review grants no landing, enqueue or approval. Tier H still waits on the governed approver. A head that moves after the hand-off needs a new hand-off line (or the seat's own review).\n\n## Where it lands\n\n- `.claude/skills/pm-dispatch/references/contract-review.md` (〈复核归属与资格〉: the hand-off arm and the line's shape).\n- `references/triage-duties.md` (the round step).\n- `node scripts/pm/record-recognisers.mjs`: recognise the hand-off line, so a seat or patrol reads it the same way. ⛔ No gate reads it.\n\nTier S (`.claude/**`) plus one `scripts/pm/**` recogniser. `domain:skills`. Within the ratchet headroom: widen existing lines where possible.\n\n## Until it lands\n\nThe triage seat already applies points 3–4 by hand to any PR that carries such a line, or an equivalent explicit statement that the dev's Fable was quota-refused (for example #26619's \"Fable quota was exhausted (HTTP 429)\"). It does not touch reviews a seat is running itself.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

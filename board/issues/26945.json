@@ -1,0 +1,30 @@
+{
+  "number": 26945,
+  "kind": "issue",
+  "title": "[PM seat] domain:ui · seat 5 — 🟢 os-warren · 由 os-warren 账户的项目负责",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "pm:seat"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T22:34:24Z",
+  "updated_at": "2026-10-27T22:44:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26945",
+  "body": "⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md`. This is **`domain:ui` seat 5**, opened on the maintainer's word in the Claude Code project \"objectstack devx ui\" (「UI 车道可以再开一个座位」, 2026-10-27T22:30Z). The `pm:seat` index (open and closed, read 2026-10-27T22:33Z) holds `domain:ui` seat 1 (#25966), seat 2 (#25995) and seat 4 (#26620); no seat 3 post exists and the maintainer named no number, so this seat takes the lane's highest number plus one (`seat-post-protocol.md`).\n\n- **Current PM:** 🟢 `os-warren` · 由 os-warren 账户的项目负责 (project \"objectstack devx ui\", seat thread \"Take another ui lane seat\") · `session_01JQwxbXGpVJHZTXXerMoY4C` · seated 2026-10-27T22:35Z. The same project also sits `domain:ui` seat 1 (#25966) in a separate seat thread; the two seats split seat 1's former area below and never claim the same card.\n- **File area:** carved from seat 1's area. Seat 5 = the Studio Interfaces pillar (navigation entries, page picker, dashboard widget types, the Interfaces list), the approvals-inbox i18n card (#26883) and `ui/scripts` tooling (#26860, after PR #26854). The Setup permission-set header card (#26884) is in seat 2's Setup area and stays with seat 2. Seat 1 keeps every other path it held, its in-flight cards and loans, and the rest of Studio. Seat 2's area is unchanged; Studio Access stays out of this seat while seat 2 has cards in flight on that pillar. Seat 4 keeps its lane-wide rule. Claims carry `Seat: domain:ui#5`.\n- **Model:** default judgment tier (Opus) under the quota exemption; no card whose order binds `CONTRACT_REVIEW_TIER`. A Tier H PR waits for the director seat's contract review and this seat's ACCEPT before any approver is asked (#26617).\n- **Hot-file serial queue:** none held yet. Read #25966's, #25995's and #26620's queues before any claim; ⛔ `ui/.github/**` and the root `ci.yml` stay out of bounds, as they record.\n- **Standing constraints (maintainer):** changesets for ui cards go to the root `.changeset/`; no PR on the objectui repository; `node scripts/check-sdui-manifest.mjs` is a gate on every ui card.\n- **Pointer:** posture and ledger live in the project; canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:ui#5` + `head:claude/` PRs.\n- **Patrol:** hourly, :55, bound to the seat thread.\n- **Wall:** none.\n"
+}

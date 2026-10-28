@@ -1,0 +1,36 @@
+{
+  "number": 26978,
+  "kind": "pull_request",
+  "title": "docs(skills): objectstack-formula eval case 4 names the refused date forms without spelling its own must_not_contain strings",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T23:56:22Z",
+  "updated_at": "2026-10-28T00:46:19Z",
+  "closed_at": "2026-10-28T00:46:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-28T00:46:17Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26978",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9JDFo2s6eXsNxvQivW2pGpK)_\nFixes #26814\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:`skills/objectstack-formula/evals/cel-predicates-formulas.json` 第 4 例的参考答案改写——不再把自己 `must_not_contain` 要拒的两个字符串(JS 的 Date 构造、`today()` 加数字)原样拼出来,改为点名其形态;七个断言、全部事实一字不少,文件字节数不变(5407 B),token 棘轮行不动;附 `@objectstack/skills` patch changeset。\n- 为什么改:参考答案自己含被拒字符串,按该例标准作答反而判错(总监复审 PR #26810 发现)。\n- 风险与回滚:只改一条 JSON 字符串与一个 changeset,无 schema/行为变化;回滚即 revert 本 PR。\n- 先看:`skills/objectstack-formula/evals/cel-predicates-formulas.json`(第 4 例 `expected_output` 一行)。\n- 两分钟验证:`node scripts/check-skills-token-ratchet.mjs`,预期看到该文件 `1352 tokens (ceiling 1352; headroom 0)` 且总判定 ✓。\n- 需要你做的:批准本 PR(`skills/**` 受管面,Tier H,保持 draft 等 GOVERNED_APPROVERS 批准;席位不 ready/不入队)。\n\n## What changes\n\n- **Case 4 `expected_output`** of `skills/objectstack-formula/evals/cel-predicates-formulas.json` no longer spells its own `must_not_contain` strings. The two phrases that carried them are reworded; everything else in the case is byte-identical:\n  - \"never `new Date()` / `Date.now()`\" → \"never a JS `Date` / `Date.now()`\"\n  - \"never `today() + 45` (date arithmetic faults)\" → \"never date arithmetic on `today()` (it faults)\"\n- **Every assertion and fact kept**: the CEL-envelope seed `close_date: cel`daysFromNow(45)``, the determinism gate (two `os build` runs byte-identical), `daysBetween(today(), record.close_date)`, the `record.close_date - today()` duration-stored-as-`{}` trap, and the date-arithmetic fault. `must_contain` / `must_not_contain` are untouched.\n- **Changeset** `.changeset/26814-formula-eval-case4-self-consistent.md`, `@objectstack/skills` patch (the evals ship in the published catalog).\n- No forced test edits. No ratchet row moves.\n\n## Why\n\nCase 4 refused `new Date(` and `today() + ` in an answer while its own reference answer contained both, so an answer that matched the reference was graded wrong. Found by the contract review of PR #26810 (card #26814).\n\n## Tests\n\nPer-case cross-check over the file (each case: no `must_not_contain` string inside its own `expected_output`, every `must_contain` string present), at `origin/main` 912076f8 and at this head:\n\n```text\norigin/main 912076f8:  case 4: must_not_contain \"new Date(\" PRESENT\n                       case 4: must_not_contain \"today() + \" PRESENT\n                       cases=7 failures=2\nhead f8531858:         cases=7 failures=0\n```\n\n`JSON.parse` of the file succeeds at this head.\n\n### Skills readings (`skills/**` diff — whole-file and whole-package, before → after)\n\n| Reading | before (912076f8) | after (f8531858) |\n|:---|---:|---:|\n| `evals/cel-predicates-formulas.json` lines / bytes / tokens | 75 / 5407 / 1352 | 75 / 5407 / 1352 |\n| whole package, all `skills/*/SKILL.md` lines / bytes | 4605 / 224961 | 4605 / 224961 |\n| whole package, all `skills/*/evals/*.json` lines / bytes | 1479 / 94793 | 1479 / 94793 |\n\nToken = `ceil(bytes / 4)`, the convention `scripts/check-skills-token-ratchet.mjs` declares. Ceiling row for the file stays at 1352 (headroom 0, unchanged).\n\n## Acceptance notes\n\n- Same-byte rewrite achieved, so the standing ruling 「A:先削重复,余额按实测提高」 was not needed and the ratchet row did not move.\n- The cross-check script is a local probe (not committed); its two rules are the ones the card's acceptance line states.\n\n## Verification\n\nLocal gate subset at head f8531858 (`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`, no paths; 42 derived commands run serially, each exit code captured before any pipe):\n\n<details><summary>42 / 42 exit 0 · `--ran` reconciliation: 42 derived, 42 run, 0 NOT-MEASURED, 0 UNRUN</summary>\n\n```text\n✓ check-skills-token-ratchet: skills/objectstack-formula/evals/cel-predicates-formulas.json is 1352 tokens (ceiling 1352; headroom 0).\n✓ check-skills-token-ratchet: 82 authored bundle file(s) within their ceilings; 10 generator-owned file(s) measured, not ratcheted.\nRun reconciliation — 42 derived, 42 run, 0 NOT-MEASURED, 0 UNRUN.\n✓ dispatch-gates --ran: 42 derived famil(ies) accounted for — 42 run, 0 NOT-MEASURED (a DERIVED zero — all 42 recorded an exit code and none of them is 3).\n```\n\nBuild closure first: `bash scripts/pm/os-verify-lock.sh -c 'pnpm build --concurrency=2'` → `VERDICT command-exit 0 · held the lock 841s (14m01s)`.\n\n</details>\n\nEvery family CI runs on the PR (`Lint & Repo Gates`, `TypeScript Type Check`, `Check Changeset`, `Governed Surface Queue Guard`, …) is read from this PR's check-runs, not re-run locally. `test:repo` is not in the local subset (it is CI's; this diff edits no test). Dogfood battery: n/a (no `!` in the title, no `(narrowing)` arm).\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmPQ8p3cVKear7Mchi2)_\n"
+}

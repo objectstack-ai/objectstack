@@ -1,0 +1,37 @@
+{
+  "number": 26915,
+  "kind": "pull_request",
+  "title": "feat(app-shell): the page designer's add-block picker offers the list view block",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T21:04:56Z",
+  "updated_at": "2026-10-27T21:42:15Z",
+  "closed_at": "2026-10-27T21:42:13Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-27T21:42:13Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26915",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9Ubb3jLLKvBmct3LQ4bsBRmBx5)_\n\nFixes #26794\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**:页面设计器的「添加区块」选择器里新增「列表视图」(`list-view`),放在「数据」分类下,和表格、表单、指标、看板并列;中英文名称齐全。\n- **为什么改**:上一张卡(PR #26793)给列表区块加了属性面板(对象、视图、条数上限),但选择器里没有这一项,设计器只能编辑页面里已有的列表区块,不能新加。\n- **风险与回滚**:低。只加了选择器里的一行和两种语言的名称,删掉测试里为它留的豁免表;不新增元数据键,渲染端不动。回滚即 revert 本 PR。\n- **先看**:`ui/packages/app-shell/src/views/metadata-admin/previews/block-types.ts` 新增的 `'list-view'` 一行;`previews/PageBlockCanvas.addListView-26794.test.tsx`;`previews/__tests__/block-config.test.ts` 删掉的 `PANEL_WITHOUT_PALETTE`。\n- **两分钟验证**:`cd ui && pnpm exec vitest run packages/app-shell/src/views/metadata-admin/previews/PageBlockCanvas.addListView-26794.test.tsx`,预期 3 个用例全绿;或在 Studio 打开一个页面,点「添加区块」,在「数据」下选「列表视图」,右侧出现对象、视图、条数上限三个空框,画布上的列表提示先选对象。\n- **需要你做的**:无,席位落地。\n\n## What changes\n\n- **The picker offers `list-view`.** `BLOCK_TYPE_META` gains a `list-view` row: category `data`, the `LayoutList` icon (the one its registration in plugin-list names), and the type label `engine.pageBlockCanvas.type.listView`, \"List view\" / \"列表视图\". `BlockTypeId` gains the id. `TYPES_BY_CATEGORY`, which the picker renders, is derived from that table, so nothing else changes in the picker.\n- **The label lives in the `studio` namespace** of `@object-ui/i18n` (en + zh), beside the block's three inspector rows, as the claim's file surface names. Its sibling `engine.pageBlockCanvas.type.*` rows are still in app-shell's designer table (`views/metadata-admin/i18n.ts`); the designer's `t()` asks that table first and the namespace second, so the picker reads either home the same way.\n- **The exemption goes.** `previews/__tests__/block-config.test.ts` loses `PANEL_WITHOUT_PALETTE` and its self-deleting case; \"a block with a config panel is a block the palette offers\" now reads the palette with no exemption.\n- **A fresh block carries no binding.** Measured on main: `addBlock` writes `{ type }` and selects it, and `ListViewBlock` with neither `data` nor `dataSource` draws its existing hint (\"No object named: set data.object or dataSource.object.\") rather than an empty list. So the chosen behaviour is \"asks for its object\": the block is written bare, and the panel's Object control writes `dataSource.object`. No canvas default was added.\n\n## Tests\n\n`previews/PageBlockCanvas.addListView-26794.test.tsx` drives the real picker in `PageBlockCanvas` and the real `PageBlockInspector`:\n\n- the `list-view` row sits under the Data heading, named in en and zh (zh read from the catalogue and checked to differ from en);\n- picking it writes `[{ type: 'list-view' }]` into the region, the draft passes `PageSchema.safeParse`, and the canvas selects `regions[0].components[0]`;\n- that selection and draft, handed to the inspector, open Object, View and Row limit, all empty (Row limit hints 5), and typing an object writes `dataSource.object`.\n\n## Acceptance notes\n\n- The page-block type labels now live in two homes for one family (one row in the namespace, the rest in the designer table) until the #25922 slice that moves `engine.pageBlockCanvas.*` takes them; the open slice S4 (PR #26900) does not move that family.\n\n## Verification\n\nAll readings at head `1959511d`, on merge base `6090bb73` (main has since moved to `1708115e` without touching any file of this diff).\n\n<details><summary>New test, and the ablation that proves it can fail</summary>\n\n- `cd ui && pnpm exec vitest run packages/app-shell/src/views/metadata-admin/previews/PageBlockCanvas.addListView-26794.test.tsx`: Test Files 1 passed, Tests 3 passed.\n- Ablation (one-time, under the verify lock, restored by trap): the `'list-view'` row deleted from `BLOCK_TYPE_META` (anchor count after mutation 0), then the new file plus `__tests__/block-config.test.ts`: Tests 4 failed, 44 passed, the three new cases and \"a block with a config panel is a block the palette offers\". Restored: `git diff HEAD` empty, `git hash-object` equals the HEAD blob `f6153ab1`.\n\n</details>\n\n<details><summary>Touched suites and type-checks</summary>\n\n- Narrowed suite, declared: every app-shell test naming `block-types`, `PageBlockCanvas`, `BLOCK_CONFIG` or `PageBlockInspector`, every app-shell or i18n test naming the studio namespace, plus all of `packages/i18n`: Test Files 181 passed, Tests 2387 passed, 13 skipped. The rest of app-shell is left to CI's Test UI shards.\n- `pnpm --filter @object-ui/i18n run type-check` and `pnpm --filter @object-ui/app-shell run type-check`: exit 0 (both cover test files).\n- `cd ui && pnpm run check:i18n-designer-parity`: exit 0, every en row has a zh row. `check:i18n-dead-keys`: exit 0, the new key is not reported. `check:new-line-citations`: 0 new citations.\n\n</details>\n\n<details><summary>Derived gates</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands` derived 34 commands; all 34 ran locally with exit 0 (PR-body gates against this body through `GITHUB_EVENT_PATH`), and `--ran` reconciles 34 derived, 34 run, 0 NOT-MEASURED. `check-partof-closing-keyword` with `PR_BODY`: exit 0. CI's lint and type-check farms are left to CI.\n\n</details>\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [ ] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (n/a: no `packages/spec` change)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QsR2jVDGfqqDsAhmZbg6aF\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jVDGfqqDsAhmZbg6aF)_\n"
+}

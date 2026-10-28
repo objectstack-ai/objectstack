@@ -1,0 +1,35 @@
+{
+  "number": 26943,
+  "kind": "pull_request",
+  "title": "chore(ui): delete the inert objectui labeler config (F12, #25753)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T22:32:04Z",
+  "updated_at": "2026-10-27T23:08:39Z",
+  "closed_at": "2026-10-27T23:08:37Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-27T23:08:37Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26943",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6Jao2fSEGAKhWxTZd1rVNTsfqL)_\n\nPart of #25753 (F12 from #25712's closing record 6432294556). Part of #25677.\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么:** 删除 `ui/.github/labeler.yml`。这是 `ui/.github/` 下仅剩的一个文件。\n- **为什么改:** GitHub 只读根目录的 `.github/labeler.yml`,所以这份文件自 `ui/` 并入以来从未生效。按 4b 的测量,它的 32 个标签里有 28 个在本仓不存在。你在项目线程的 F12 决策卡上选了「删除」(2026-10-27 22:23Z)。\n- **风险与回滚:** 没有运行时改动,也没有 CI 读这个文件。回滚 = revert 本 PR。\n- **你要做的:** 无。改动不在受管路径上,席位走队列落地。\n\n## What changes\n\n`ui/.github/labeler.yml` is deleted (−167 lines), so `ui/.github/` no longer exists.\n\nThe file was inert. Root Auto Label (`pr-automation.yml`, `scripts/pr-labels.mjs`) reads only `.github/labeler.yml` at the repository root. The F12 = B ruling (2026-10-26) kept the file only until the label taxonomy was decided, and the maintainer has now chosen deletion.\n\nNo file reads it: `git grep` for `labeler` under `ui/` finds only path-string fixtures in `check-governed-queue-guard` (synthetic `.github/labeler.yml` paths, never read from disk), one description string in `dependabot-merge-gate.mjs`, and the F14 CI docs page, which gets its own card.\n\n## Not in this PR\n\n- The governed register row `ui-workflows` (`ui/.github/workflows/**`), its CODEOWNERS line and the AGENTS.md / pm-dispatch mentions stay. They guard the path against re-creation and do not depend on this file; changing them is Tier H.\n- F14 (`ui/content/docs/guide/ci-cd-pipeline.md`) gets its own card, per the maintainer's choice on that decision card.\n\n## Verification\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derives 11 commands for this diff, and all 11 exit 0 on the head. Also run: `check-governed-merges --self-test` (0) and `dispatch-gates --tier` (no path-derived mandate, 167 changed lines). `check-governed-queue-guard` reads only a workflow event payload, so it runs in CI.\n\n`skip-changeset`: nothing published changes.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L9qibvE77Ed7MKdzPxJTQQ\n"
+}

@@ -17,17 +17,15 @@
     "pm:blocked",
     "priority:p3"
   ],
-  "assignees": [
-    "os-steve"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T15:25:20Z",
-  "updated_at": "2026-10-26T23:21:23Z",
+  "updated_at": "2026-10-28T00:25:54Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 8,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26206",
   "body": "Filing gate: ① a defect with a named location, measured once. Filed by `domain:devx` seat 2 (#20163) · `os-steve` · session `session_01Q4MDXRbEJCNdPAP4SiXwp9`. ⛔ Not a claim.\n\n**Business reason.** A CommonJS consumer that `require()`s these entry points gets an ESM module or a missing default, and fails at load time. These are the export-surface leftovers #26095 deliberately excluded, because the fix changes an export map's shape.\n\n**Reader who acts.** The `domain:devx` seat; each package's owner reviews its own export surface.\n\n## Measured (attw 0.18.5 on `npm pack` staging of a fresh `main` build, PR #26198 at `23f2dea480`; os-dev report 6419735271, out_of_scope_findings[1] and [2])\n\n- `CJSResolvesToESM` (node16-cjs) on ESM-only subpaths: `@objectstack/cli` `.`, `./console` and `./hook-body`; `create-objectstack` `./created-summary`; `@objectstack/metadata-core` `./testing`; `@objectstack/service-cluster` `./testing`.\n- `FalseExportDefault`: `@objectstack/driver-memory` publishes `export default` from `src/index.ts`. Its CJS build puts it on a `default` property, so `require('@objectstack/driver-memory')` does not return it.\n\n## Wanted\n\nPer entry point, either declare it ESM-only in writing (a `require` condition that throws a clear error, or no `require` condition at all) or give it a CJS build. For driver-memory, make the CJS default reachable, or drop the default export in favour of the named one the package already has, if a reader confirms nothing imports the default. Each choice goes in the PR body.\n\n## Acceptance\n\n- attw on the affected tarballs: 0 `CJSResolvesToESM` and 0 `FalseExportDefault`, or each remaining one is an intended ESM-only entry, documented in the package README.\n\nRelated: #26095, PR #26198."

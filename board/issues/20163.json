@@ -1,7 +1,7 @@
 {
   "number": 20163,
   "kind": "issue",
-  "title": "[PM seat] domain:devx · seat 2 — ⏳ vacant",
+  "title": "[PM seat] domain:devx · seat 2 — 🟢 os-justin",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,16 +13,18 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-justin"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-27T04:07:54Z",
-  "updated_at": "2026-10-27T09:36:44Z",
+  "updated_at": "2026-10-28T00:27:44Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 82,
+  "comments": 83,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20163",
-  "body": "⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/devx.md`. This is **`domain:devx` seat 2**. Seat 1 is #6023 (⛔ this post is not #6023).\n\n- **Current PM:** ⏳ vacant since 2026-10-27T09:34Z. Previous holder: `os-steve` · 由 os-steve 账户的项目负责 (Claude Code project \"objectstack ui\", seat thread \"接管 devx 车道派发(席位 2)\") · `session_01Q4MDXRbEJCNdPAP4SiXwp9` · seated 2026-10-26T12:11Z. It stood down on the maintainer's word, verbatim: 「devx 车道当前任务处理完就下班」 (2026-10-27 08:42Z). `check-handover` exited 0 for that session before this body was written.\n- **Seat 1:** seated again 2026-10-27 08:49Z (`os-warren`, `session_01JQwxbaFpnMwgpCgneKe2qS`, #6023). Seat 2's answer to its knock (6438116163) hands it the whole devx queue and seat 2's tails.\n- **Tails (no claim held; every card released):**\n  - #26569 → #26460, Test UI aggregate, Tier H. Contract review PASS 6437562805 and ACCEPT 6437580781. Awaits a GOVERNED_APPROVERS approval. ⛔ Merge first; then the maintainer adds `Test UI` to the ruleset in the same sitting.\n  - #26536 → #26035 slice 1, `.claude/**`. Contract review PASS and ACCEPT. Awaits a maintainer. Next slice candidate: 6436082138.\n  - #25870: `needs-user-decision` on 6436991767 (A / C / D; recommended A).\n  - #26444: `pm:blocked`, Blocked-by #26523 (CLI floors, `domain:server`).\n  - #26428: the next scheduled Validate Dependencies run (2026-10-28 03:00Z) is the acceptance reading; seat 2 will not be there to post it.\n- **Hot-file serial queue:** seat 2 holds none.\n- **Standing constraints (maintainer, project chat):** changesets go to the root `.changeset/`; no PR is opened on the objectui repository; a `ci.yml` change needs the maintainer's ruling.\n- **Pointer:** posture and ledger live in the project; canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:devx#2` + `head:claude/` PRs. Next holder: `/pm-dispatch 接手`, then read this post and its newest comments first.\n- **Wall:** none.\n"
+  "body": "⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/devx.md`. This is **`domain:devx` seat 2**. Seat 1 is #6023 (⛔ this post is not #6023).\n\n- **Current PM:** 🟢 `os-justin` · `session_01QSeKYmTYfaPbLQD4BJfomW` (cloud session, direct summons) · seated 2026-10-27T22:46Z (body refreshed 2026-10-28T00:27Z).\n- **Mandate (maintainer, this session, verbatim):** 「seat 1 只负责手上的卡，你接管车道后续的卡，并发5，可以派云卡」. Seat 1 keeps only the cards it holds now; every other `domain:devx` card is this seat's. `batch:5`; `mode:cloud` allowed.\n- **Sole devx seat (maintainer, verbatim):** 「devx 现在只有你一个座位」. Seat 1 (#6023) and seat 3 (#26373) are `⏳ vacant`; seat 1's queue and tails were handed over in 6455547882.\n- **Hot-file serial queue:** `AGENTS.md` → #26073 (PR #26970, approved, held for #26975), then #26088 remainder (L40/L138/L173), then #26081 PR 1 (TOC + `docs/agents/`).\n- **Standing constraints (carried from the previous holder's body, maintainer, project chat):** changesets go to the root `.changeset/`; no PR on the objectui repository; a `ci.yml` change needs the maintainer's ruling.\n- **Pointer:** ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:devx#2` + `head:claude/` PRs. Round reports go to the maintainer in this session's chat.\n- **In flight / landing:** #25807 slice A (cloud `session_01QSeKYkXktsD6m4eAJ18rUE`), #26080 slice 1, #25870, #26975; PR #26984 (#25452 step 1) queued. Decision box: #26957.\n- **Wall:** none.\n"
 }

@@ -1,7 +1,7 @@
 {
   "number": 25995,
   "kind": "issue",
-  "title": "[PM seat] domain:ui · seat 2 — 🟢 huangyiirene · 由 huangyiirene 账户的项目负责",
+  "title": "[PM seat] domain:ui · seat 2 — 🟢 os-warren · 由 os-warren 账户的项目负责",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -14,17 +14,17 @@
     "pm:seat"
   ],
   "assignees": [
-    "huangyiirene"
+    "os-warren"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T08:21:41Z",
-  "updated_at": "2026-10-27T12:55:06Z",
+  "updated_at": "2026-10-28T00:32:07Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25995",
-  "body": "⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md`. This is **`domain:ui` seat 2**, opened on the maintainer's word to add a seat to the lane (「你现在就可以增加席位啊」, project chat, 2026-10-26). Seat 1 is #25966; seat 4 is #26620.\n\n- **Current PM:** 🟢 `huangyiirene` · 由 huangyiirene 账户的项目负责 (Claude Code project \"objectstack ui\", seat thread \"Run the ui lane PM seat\") · `session_01J8VVAkHqAv2eFKVSt9LqkC` · seated 2026-10-27T12:53Z. Summons: the account holder's project instruction 「objectstack 仓库 pm-dispatch」 for the ui lane, and her pick on the seating card (2026-10-27T12:51Z) to take a seat beside os-steve and claim only unclaimed cards. This vacant post was taken instead of raising a new one (`project-forms.md`: own seat, else an empty seat). Previous PM: `os-steve`, `session_01SMps7wq7rBTk53e8KTSEup`, stood down 2026-10-27T11:04Z (brief 6440315533, `check-handover` clear).\n- **File area:** seat 2 = `ui/packages/` plugin-list, plugin-grid, plugin-detail, plugin-form, plugin-view, fields, plugin-kanban, plugin-calendar, plugin-gantt, plugin-map, plugin-timeline, plugin-tree, plugin-charts, plugin-dashboard, plugin-report; plus auth (`ui/packages/auth`, console / app-shell auth pages), the Setup / admin pages, marketplace and the console sidebar. Seat 1 (#25966) = every other `domain:ui` path. This seat claims only unclaimed `pm:queue` cards; it takes over none of seat 1's or seat 4's claims, loans or PRs. Priority comes first across the whole lane (p0 > p1 > p2 > p3). Claims carry `Seat: domain:ui#2`.\n- **Hot-file serial queue:** seat 2 holds no file. Read #25966's and #26620's queues before any claim. ⛔ `ui/.github/**` and the root `ci.yml` stay out of ui cards unless the maintainer approves.\n- **Ledger handed on:** #25873 (p2, report page date range + export, ruling 6408567749 letter B) is `pm:blocked`, `Blocked-by: #26548`; when #26548 lands it is this seat's `ui/` renderer work.\n- **Standing constraints (maintainer):** changesets for ui cards go to the root `.changeset/`; no PR on the objectui repository; `node scripts/check-sdui-manifest.mjs` is a gate on every ui card.\n- **Pointer:** posture and ledger live in the project; canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:ui#2` + `head:claude/` PRs, read by `assignee:huangyiirene`.\n- **Wall:** none.\n"
+  "body": "⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md`. This is **`domain:ui` seat 2**, opened on the maintainer's word to add a seat to the lane (「你现在就可以增加席位啊」, project chat, 2026-10-26). Seat 1 is #25966; seat 4 is #26620; seat 5 is #26945.\n\n- **Current PM:** 🟢 `os-warren` · 由 os-warren 账户的项目负责 (Claude Code project \"objectstack ui\", seat thread \"Take a third ui lane seat\") · `session_01JQwxbXpF772qWJjojJvRXw` · seated 2026-10-28T00:30Z. The same project also sits seats 1 (#25966) and 5 (#26945) in separate seat threads; the three never claim the same card. Previous PM: `huangyiirene` · `session_01J8VVAkHqAv2eFKVSt9LqkC`, stood down 2026-10-28T00:08Z (brief 6456927674); before that `os-steve` (brief 6440315533).\n- **File area (unchanged):** seat 2 = `ui/packages/` plugin-list, plugin-grid, plugin-detail, plugin-form, plugin-view, fields, plugin-kanban, plugin-calendar, plugin-gantt, plugin-map, plugin-timeline, plugin-tree, plugin-charts, plugin-dashboard, plugin-report; plus auth (`ui/packages/auth`, console / app-shell auth pages), the Setup / admin pages, marketplace and the console sidebar. Seat 1 (#25966) = every other `domain:ui` path except seat 5's Interfaces carve (#26945). Epic #26676's territory stays out of this seat while its children are open. Claims carry `Seat: domain:ui#2`.\n- **Model:** default judgment tier (Opus) under the quota exemption; no card whose order binds `CONTRACT_REVIEW_TIER`. A Tier H PR waits for the director seat's contract review and this seat's ACCEPT before any approver is asked (#26617).\n- **Hot-file serial queue:** seat 2 holds no file. `AppNavInspector.tsx` (Setup) waits for seat 5's PR #26977 to land before this seat edits it. Read #25966's, #26620's and #26945's queues before any claim; ⛔ `ui/.github/**` and the root `ci.yml` stay out of ui cards unless the maintainer approves.\n- **Ledger carried:** #26649 (`Blocked-by: #26699`, closed) and #25873 (`Blocked-by: #26548`, closed) are `pm:blocked`; this seat re-derives each and releases it.\n- **Standing constraints (maintainer):** changesets for ui cards go to the root `.changeset/`; no PR on the objectui repository; `node scripts/check-sdui-manifest.mjs` is a gate on every ui card.\n- **Pointer:** posture and ledger live in the project; canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:ui#2` + `head:claude/` PRs. Successor: `/pm-dispatch 接手`, read this post first.\n- **Wall:** none.\n"
 }

@@ -2,8 +2,8 @@
   "number": 26596,
   "kind": "issue",
   "title": "access: changing an object's sharing model to public_read_write after it was first published leaves members unable to edit records they can read — the #8023 write-floor exemption does not follow the change (detail withheld pending maintainer)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:access",
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p2",
     "security"
   ],
@@ -24,9 +23,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T09:32:38Z",
-  "updated_at": "2026-10-27T19:46:12Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-28T01:04:52Z",
+  "closed_at": "2026-10-28T01:04:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 3,
   "locked": false,

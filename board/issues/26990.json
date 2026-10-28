@@ -1,0 +1,36 @@
+{
+  "number": 26990,
+  "kind": "pull_request",
+  "title": "fix(app-shell): the delegated-admin scope facet shows the spec default for an unset key",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T00:22:42Z",
+  "updated_at": "2026-10-28T01:56:27Z",
+  "closed_at": "2026-10-28T01:56:25Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-28T01:56:25Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26990",
+  "body": "Fixes #26706\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:Studio › Access › 权限集 › 委派管理(Delegated admin)里的开关,对范围里没有设置的键显示协议(`AdminScopeSchema`)的默认值;管理员切换开关时才写入显式的布尔值。\n- 为什么改:委派管理是大客户安全下放管理权的方式,屏幕上显示的委派范围必须和服务端实际执行的一致,管理员才能正确判断自己授出了什么。\n- 风险与回滚:只改前端显示,不改存储数据、保存载荷和服务端校验;回滚即 revert 本 PR。\n- 先看:`PermissionAdvancedFacets.tsx` 的 `ADMIN_SCOPE_SWITCH_DEFAULTS` 与 `scopeSwitchOn`(风险 hunk:两个 Switch 的 `checked`);新测试 `PermissionAdvancedFacets.adminScopeDefault-26706.test.tsx`;`PermissionAdvancedFacets.adminScopeAnchor.test.tsx` 里两处期望值的更新。\n- 两分钟验证:`pnpm --dir ui exec vitest run packages/app-shell/src/views/metadata-admin/PermissionAdvancedFacets.adminScopeDefault-26706.test.tsx`(先 build `@objectstack/spec`),预期 `Tests 6 passed (6)`。\n- 需要你做的:无,席位落地。\n\n## What changes\n\nThe delegated-admin scope facet shows the spec default for an unset key.\n\n- Each switch in the Delegated admin facet now draws `scopeSwitchOn(scope, key)`: the scope's own boolean when it sets one, and otherwise the spec default for that key from `ADMIN_SCOPE_SWITCH_DEFAULTS`. That is the value `AdminScopeSchema` parses the key to and the value the server enforces.\n- Drawing a default writes nothing. The draft keeps an untouched key unset, so a save keeps it unset. A flip writes an explicit boolean, as before. The write paths (`setScope` / `setScopeDetail`) and the business-unit gate are unchanged.\n- The two defaults are restated, not imported, for the reason `useTenancyPosture` gives (the `@objectstack/spec/security` value entry adds its schema modules to the console bundle). They are typed against the spec's `AdminScope`, and the new test reads every expected value from the installed spec, so a default the spec moves fails CI here.\n- Landing site: `ui/packages/app-shell/src/views/metadata-admin/PermissionAdvancedFacets.tsx`, the site the card expected. A grep of `ui/` for the two keys finds no other surface that draws them.\n\n## Tests\n\n- New `PermissionAdvancedFacets.adminScopeDefault-26706.test.tsx`, 6 cases: a CONTROL that the installed spec parses each unset switch key to a boolean default; an unset key draws the spec default (with a business unit, and while the switches wait for one); naming the business unit writes that key alone; a flip writes an explicit boolean and draws it, and flipping back keeps the key written; an explicit boolean draws as itself.\n- `PermissionAdvancedFacets.adminScopeAnchor.test.tsx`: two expectations updated. Each asserted the boolean a single flip writes from the drawn state, and that value follows what the switch draws.\n- Ablation, one time, through `scripts/ablation-replace.mjs`: one switch's `checked` reading was put back to its pre-change expression (anchor 1 to 0, replacement 0 to 1, blob `cabc1416e0fd` to `c5282ce2ba31`). Result: `Tests 6 failed | 12 passed (18)` across the two facet files, in the direction declared in advance (red). Restored: the blob equals HEAD and `git diff HEAD` is empty. The test imports the component by relative path, so the run read `src/` and no `dist/` leg applies. Run on `3592965f`; the merge of `main` since then does not touch the facet or its tests.\n\n## Acceptance notes\n\n- None. No out-of-scope finding.\n\n## Verification\n\nAll readings below were taken on head `394213f2` (a merge of `origin/main` at `f1cd529d`).\n\n<details><summary>Facet suites: 8 files, 113 tests, exit 0</summary>\n\n```\npnpm --dir ui exec vitest run --maxWorkers=2 (the 7 PermissionAdvancedFacets.*.test.tsx files + src/__tests__/spec-symbol-parity.test.ts)\n Test Files  8 passed (8)\n      Tests  113 passed (113)\n```\n\n</details>\n\n<details><summary>Type check: @object-ui/app-shell type-check, exit 0</summary>\n\n`tsc --noEmit && tsc -p tsconfig.test.json`. `tsc -p tsconfig.test.json --listFilesOnly` lists both changed test files, so the test-layer program compiles them.\n\n</details>\n\n<details><summary>Derived gate families: 34 of 34 run; 33 exit 0, one test run timed out under load and passed on re-run</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` (no paths; change set from the merge base) derived 34 commands. Each ran with its exit code captured before any pipe.\n\n- 33 commands: exit 0.\n- `pnpm --dir ui exec vitest run scripts/`: exit 1, `Tests 9 failed | 5056 passed | 2 skipped (5067)`. All 9 failures are `Test timed out in 15000ms` in whole-tree scans, on a shared box with the other gates running. The 6 files that timed out, re-run alone under the verify lock: `Test Files 6 passed (6)`, `Tests 522 passed (522)`, exit 0. The same command on `3592965f`, before the merge of `main`, exited 0. This diff does not touch `ui/scripts/`.\n- `--ran` reconciliation: `34 derived famil(ies) accounted for — 34 run, 0 NOT-MEASURED (a DERIVED zero — all 34 recorded an exit code and none of them is 3)`.\n\nDeclared narrowing: `origin/main` moved again after the merge. The derivation names 6 gate-input files that changed upstream since `394213f2`. CI runs those families on the merge ref of this PR.\n\n</details>\n\nNot run locally, and owned by CI: `pnpm lint`, the `test:repo` project, and the workspace type-check lanes.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01J8VVAkZns5rNnK2rtszzbQ)_\n"
+}

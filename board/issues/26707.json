@@ -2,8 +2,8 @@
   "number": 26707,
   "kind": "issue",
   "title": "Studio/metadata: a draft the editors, the draft `_diagnostics` and the Problems tab all call valid is refused only at publish — and one such draft rolls back the whole package release",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T13:30:19Z",
-  "updated_at": "2026-10-27T18:46:15Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-27T21:14:53Z",
+  "closed_at": "2026-10-27T21:13:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26707",
   "body": "Filing gate: ① product defect, reproduced, landing site named.\nBatch-of: studio-qa-2026-10-27 — 39 cards from one Studio QA run (coordinator session `session_01J8VVAkZns5rNnK2rtszzbQ`; tested at `3fcafcd3`; `origin/main` was `43731031` at filing, so the implementer re-checks the landing site on current main). The run record is the `qa-run` issue filed with this batch.\n\n## Symptom\n\nSeveral author-time rules run only at publish. The draft save answers 200 with `_diagnostics.valid: true`, the Studio editor shows no error (some even say \"Valid CEL\" or \"No problems\"), and then Publish all refuses. Because package publish is atomic, one such draft aborts every other pending draft in the package (\"Nothing was published — the batch rolled back…\").\n\n## Reproduction\n\n1. Invalid CEL on a flow edge: Automations › Start→Decision→End › edge › Type Conditional, uncheck Default, Condition `record.name ==` → autosave 200, draft `_diagnostics {valid:true}`, Problems shows only \"no default branch\" → publish refuses `expression-invalid` (\"Unexpected token: EOF\"). Coordinator re-verified over the API (draft 200 valid:true; publish 422).\n2. API-trigger flow without a secret: Automations › + › Advanced › Trigger \"Webhook / API\" › Save → Problems \"No problems — this flow is structurally valid\" → Publish all with ≥1 other draft → refused `flow-api-trigger-secret-missing`, \"(1 other draft aborted with it)\".\n3. RLS predicate on a virtual formula field: Access › RLS editor `f_formula > 5` → \"Valid CEL\", autosaves → publish refuses `rls-predicate-unenforceable`.\n4. Unconfigured summary field: saved as a draft, refused only at publish; Sum/Avg also offers non-numeric child fields.\n5. Dashboard global filter \"Add item\" autosaves an incomplete item → publish refuses the whole draft.\n6. Dataset with a bad `include` saves as a draft and is refused only at publish.\n\n## Expected\n\nThe draft verdict equals the publish verdict: whatever publish will refuse is reported at save time (draft `_diagnostics`, the editor and the Problems tab), so the author fixes it where they made it and one bad item never silently blocks a whole release.\n\n## Suspected landing site (the implementer verifies)\n\nServer: the draft diagnostics pass does not run the publish-time author rules (`expression-invalid`, `flow-api-trigger-secret-missing`, `rls-predicate-unenforceable`, summary configuration, global-filter shape, dataset include). UI: the matching editors (edge condition, RLS CEL lint without the virtual-field branch of `lint/validate-rls-predicate-enforceability.ts`, summary inspector, global-filter add) should surface the same verdict.\n\n## Filing facts\n\n- reach: Studio UI + `PUT /api/v1/meta/<type>/<name>?mode=draft` + `POST /api/v1/packages/<id>/publish-drafts`, measured on each instance.\n- Business reason: Authors (and AI authors especially) trust \"valid\"; today the refusal arrives later, far from the edit, and takes unrelated work down with it.\n- Reader who acts: the triage seat (first touch: domain, area, level), then that lane's `os-dev` implementer. QA suggestion only: `domain:server`, `area:studio`, p2.\n- Dedupe: semantic search `Studio draft diagnostics valid but publish refuses and rolls back whole package` on objectstack-ai/objectstack → 23 hits, none about save-vs-publish verdict parity (nearest closed: #25484, #25544, #21655).\n- QA id: F2"

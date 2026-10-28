@@ -2,7 +2,7 @@
   "number": 26824,
   "kind": "pull_request",
   "title": "fix(app-shell): a Studio selection unfolds a hidden right panel at every width",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -21,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T17:41:34Z",
-  "updated_at": "2026-10-27T19:58:24Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-27T20:25:37Z",
+  "closed_at": "2026-10-27T20:25:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-27T20:25:34Z",
   "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/26824",

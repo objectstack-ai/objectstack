@@ -1,0 +1,31 @@
+{
+  "number": 27025,
+  "kind": "pull_request",
+  "title": "fix(app-shell): keep the Tab visibility name input across keystrokes",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T02:05:39Z",
+  "updated_at": "2026-10-28T02:18:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27025",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8HLVrp8SYSogdEQyNHRBNsf)_\n\nFixes #26748\n\n## 维护者速读\n\n- 改了什么:Studio Access › 标签页可见性的每一行改按位置作 React key,名称输入框改为行内缓冲,只在新名称不与其它行重名时写回草稿。\n- 为什么改:行 key 原是输入框正在编辑的标签名,每按一键整行重挂载,焦点丢失,只留下首字符。\n- 风险与回滚:只动 Tab Visibility 区块与一个新测试文件;回滚即 revert 本 PR。\n- 先看:`PermissionAdvancedFacets.tsx` 的 `tabEntries.map` 与文件末尾的 `TabNameInput`。\n- 两分钟验证:`pnpm --dir ui exec vitest run packages/app-shell/src/views/metadata-admin/PermissionAdvancedFacets.tabName-26748.test.tsx`。\n- 需要你做的:无,等待 seat 复核。\n\n## What changes\n\n- Each Tab Visibility row is keyed by its position in `tabEntries`, not by the tab name its input edits. A rename keeps insertion order, so the row and the input's focus survive each keystroke.\n- The name input (`TabNameInput`) buffers what is typed and writes the rename only while the name is no other row's. Before, a name that passed through or ended at another row's name merged the two rows in `tabPermissions` and dropped one. While the typed name collides, the input carries `aria-invalid`.\n- `FacetPicker` `testId` is unchanged (`tab-visibility-${tab}`).\n\n## Why\n\nTyping `showcase_app` into a new row stored `{\"s\":\"hidden\"}`: the row remounted after the first key.\n\n## Verification\n\n- New `PermissionAdvancedFacets.tabName-26748.test.tsx`: `userEvent.type` of `showcase_app` key by key keeps focus and stores `{ showcase_app: 'hidden' }`; renaming an existing row keeps the other row and order; typing through another row's name merges nothing; remove drops only its own row.\n- Ablation: restoring `key={tab}` turns the typed-name test red.\n- `PermissionAdvancedFacets*` + `PermissionMatrixEditor*`: 35 files, 256 tests pass. The 24 derived gates, app-shell type-check, ui `check:spec-symbols` and eslint on both files exit 0.\n- Known limit, unchanged: a tab name JS orders as an integer (e.g. `1`) moves to the front of `tabPermissions`, so its row moves too.\n\nClause-②: no\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (`@object-ui/app-shell` is private: `skip-changeset`.)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [ ] 8. Title, body and comments are in English. (The dispatch order asks for the Chinese 维护者速读 block.)\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01JQwxbXbEWQehrHjkZUViYN\n"
+}

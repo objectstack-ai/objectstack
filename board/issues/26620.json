@@ -1,7 +1,7 @@
 {
   "number": 26620,
   "kind": "issue",
-  "title": "[PM seat] domain:ui · seat 4 — 🟢 zhuangjianguo · 由 zhuangjianguo 账户的项目负责",
+  "title": "[PM seat] domain:ui · seat 4 — ⏳ vacant",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,18 +13,16 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [
-    "zhuangjianguo"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T10:42:48Z",
-  "updated_at": "2026-10-27T10:43:50Z",
+  "updated_at": "2026-10-28T01:17:33Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26620",
-  "body": "⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md`. This is **`domain:ui` seat 4**, opened on the maintainer's word in the Claude Code project \"objectstack spec\" (「再开 ui seat 4」, 2026-10-27T10:39Z). The `pm:seat` index (open and closed, read 2026-10-27T10:42Z) holds `domain:ui` seat 1 (#25966) and seat 2 (#25995) only. No seat 3 post exists; this seat takes the number the maintainer named.\n\n- **Current PM:** 🟢 `zhuangjianguo` · 由 zhuangjianguo 账户的项目负责 (project \"objectstack spec\", seat thread \"Run ui lane seat 4\") · `session_01QsR2jTfvjNTaR29ehLk26T` · seated 2026-10-27T10:42Z.\n- **What this seat takes:** unclaimed `domain:ui` `pm:queue` cards, priority first across the lane (the lane order rule recorded on #25995). Seats 1 and 2 keep their file areas, their claims and their loans. A card whose landing file sits in either seat's hot-file queue stays with that seat. Claims carry `Seat: domain:ui#4`.\n- **Model rule (maintainer, 2026-10-27T10:39Z):** 「只认领不需要 fable 的卡」. This seat claims no card whose order would bind `CONTRACT_REVIEW_TIER`, or whose PR would owe a `CONTRACT_REVIEW_TIER` contract review; those stay in the queue for the other seats.\n- **Hot-file serial queue:** none held. Read #25966's and #25995's queues before any claim; ⛔ `ui/.github/**` and the root `ci.yml` stay out of bounds, as they record.\n- Posture, ledger and round reports live in the project."
+  "body": "os-pm-seat-post — `domain:ui` seat 4.\n\n**This post is the seat.** Only the sitting PM edits the body, and the body is authoritative; the title and the assignee are views derived from it. This is a project seat's stub (`seat-lifecycle.md`): posture, ledger and round reports live in the project. The archive of record for the shift before this one is the body revision before this edit (`zhuangjianguo` · `session_01QsR2jTfvjNTaR29ehLk26T`, seated 2026-10-27T10:42Z, off duty 2026-10-28T01:14Z; the clock-out brief is the newest comment below).\n\n## Current PM\n\n- ⏳ **vacant** since 2026-10-28T01:14Z. The maintainer closed this seat once its in-hand cards were finished (「算了，你还是 ui 车道当前任务处理完下班」, 2026-10-27T22:33Z).\n- Successor: `/pm-dispatch 接手`, then read this post and the clock-out brief below. ⛔ No tail stays with the previous PM: no open PR, no `pm:dispatched` card and no queued write is held by `session_01QsR2jTfvjNTaR29ehLk26T`.\n- **Seat Routine:** none. The hourly patrol trigger is deleted at clock-out.\n- **Charter:** `.claude/skills/pm-dispatch/references/lanes/ui.md`.\n\n## Handover ledger\n\n`node scripts/pm/check-handover.mjs --session=session_01QsR2jTfvjNTaR29ehLk26T --account=zhuangjianguo` exited 0: no unreleased claim and no decision outside the inbox. Every card this shift claimed either landed or was released (index in the brief). State per card lives on the card and its PR.\n\nQueue snapshot at 2026-10-28T01:14Z, open `domain:ui` issues (re-derive at dispatch, ⛔ never carry as rulings):\n\n| label | count | cards |\n|:--|:--|:--|\n| `pm:queue` | 23 | #26998 #26988 #26979 #26971 #26951 #26902 #26897 #26896 #26892 #26891 #26890 #26888 #26846 #26840 #26837 #26835 #26781 #26748 #25912 #25915 #25918 #25921 #25943 |\n| `pm:dispatched` | 16 | 12 `os-warren`, 2 `huangyiirene`; #26681 #26679 are assigned `zhuangjianguo` but claimed by the epic #26676 PM session (`session_cdb7a717-…`), not this seat |\n| `pm:blocked` | 3 | #27010 #25873 #25908 (`Blocked-by: #26744`, cloud) |\n| `needs-user-decision` | 0 | — |\n\n## Hot-file serial queue\n\nRe-derived at each dispatch from open-PR file lists and live claim comments. ⛔ It is never carried forward.\n\n| file / region | holder | next |\n|:--|:--|:--|\n| — | none | — |\n\n## 说明\n\n- **Other live `domain:ui` seats:** #25966 (seat 1), #25995 (seat 2). ⛔ No liveness judgement on them.\n- **Left in the queue by this seat:** #25912 (owes a Fable-tier review, outside this seat's no-Fable rule) and #25943 (cloud-routed).\n- 留守登记: none.\n"
 }

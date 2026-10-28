@@ -2,8 +2,8 @@
   "number": 26632,
   "kind": "issue",
   "title": "console: every record page on a deployment without the approvals service logs two console errors for the designed 501 of GET /approvals/records/OBJECT/ID/lock (18.2.0 scaffold)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:workflow",
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,9 +22,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T11:02:39Z",
-  "updated_at": "2026-10-27T18:21:02Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-28T00:03:59Z",
+  "closed_at": "2026-10-28T00:03:03Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 3,
   "locked": false,

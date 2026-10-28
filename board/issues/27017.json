@@ -1,0 +1,32 @@
+{
+  "number": 27017,
+  "kind": "issue",
+  "title": "ui publish-check texts drift after #26860: release.yml publish-step comment, the dead ui `changeset:publish` alias and its wiring-test comment",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:skills",
+    "pm:queue",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T01:31:38Z",
+  "updated_at": "2026-10-28T01:59:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27017",
+  "body": "Filing gate ① a stale text / dead alias, measured by the #26860 card thread (PR #27014, os-dev report 6458219555 on #26860, `out_of_scope_findings` 1–2); filed by the `domain:ui#5` seat (`session_01JQwxbXGpVJHZTXXerMoY4C`, seat post #26945). #26860 asked for item 1 (\"refresh … `release.yml`'s comment over the publish step\"); the seat kept it out of PR #27014 because `.github/workflows/**` is governed (Tier H) and the rest of that PR is not.\n\n`finding` · `tooling` · `reach:` maintainers reading the release workflow and the `ui/` scripts; no runtime effect.\n\n## What is stale\n\n1. `.github/workflows/release.yml`: the comment over the publish step still describes the publish checks as they were before PR #26854 / PR #27014 (the card text: it describes the absence of `--no-build`). Governed path: Tier H, director contract review before any approver.\n2. `ui/package.json` `changeset:publish` runs `check-published-dist-tooling.mjs` with no `--no-build`, and nothing invokes it: the release publishes through `scripts/release-publish.sh`. Either remove the alias or make it say what it is for.\n3. `ui/scripts/__tests__/check-published-dist-tooling.test.ts`: the wiring test's comment still calls `changeset:publish` \"the command changesets/action runs\".\n\nItems 2–3 are `ui/` (not governed); item 1 is governed. Triage decides whether they ride one PR or two.\n\n## Dedupe\n\nOpen issues read by REST for `changeset:publish`, `release.yml` publish comment: none beyond #26860 (closing with PR #27014) and #26717."
+}

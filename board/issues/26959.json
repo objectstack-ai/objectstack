@@ -1,0 +1,36 @@
+{
+  "number": 26959,
+  "kind": "pull_request",
+  "title": "feat(app-shell): a Studio rail search that matches nothing names the query and offers to clear it",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T23:17:33Z",
+  "updated_at": "2026-10-28T00:17:34Z",
+  "closed_at": "2026-10-28T00:17:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-28T00:17:32Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/26959",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8CbVK4eWbzTwqdFcwRSZgVo)_\nFixes #26733\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:Studio 的数据、自动化、权限三个侧栏共用一个「搜索无结果」状态:写出搜不到的关键词,并给一个「清除搜索」按钮,点了清空搜索框、列表恢复。\n- 为什么改:之前数据和权限侧栏搜不到时整列空白,看起来像加载失败;自动化侧栏有一句提示但没有退路。\n- 风险与回滚:只动侧栏的显示,不改任何过滤或排序;回滚即 revert 本 PR,i18n 包只多一个文案键。\n- 先看:`StudioRail.tsx`(新状态与 `matchCount` 判定),`StudioDesignSurface.tsx`(三处侧栏只传匹配数;数据侧栏的过滤原样上提成常量),新测试文件。\n- 两分钟验证:`pnpm --dir ui exec vitest run packages/app-shell/src/views/studio-design/StudioRail.noMatches-26733.test.tsx`,预期 13 条全绿。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- `StudioRail` (shared by every Studio pillar) gains `search.matchCount`: how many rows the pillar's own filter left. When the query is non-blank, `matchCount` is 0 and the list was not empty before searching (`count !== 0`), the rail shows one state under the list: the existing `engine.list.emptyQuery` sentence naming the trimmed query, and a **Clear search** button that calls `search.onChange('')` and focuses the box again.\n- Data rail: the object filter is hoisted, unchanged, into `shownObjects` so its length can be handed to the rail; Automations passes `shownFlows.length`; Access passes `filtered.length`. No rail filters or sorts differently.\n- The Automations rail's own copy of the no-matches sentence is removed: the rail now says it, once, for all three.\n- `@object-ui/i18n` `studio` namespace: new row `engine.studio.rail.clearSearch` (en \"Clear search\", zh \"清除搜索\"); patch changeset.\n- A blank query, or an empty package, never shows the line: each pillar's existing empty sentence keeps speaking there.\n\n## Why\n\nA builder who mistyped a rail search saw an empty column on Data and Access and could not tell a failed load from no matches (card #26733, from the studio-qa-2026-10-27 batch).\n\n## Tests\n\nNew `StudioRail.noMatches-26733.test.tsx` renders the real Data, Automations and Access pillars. Per rail: a query that matches nothing shows the state naming the query and no row; Clear search empties and focuses the box and restores every row; a matching query shows no state; an empty package keeps its own sentence with no no-matches line, with or without a query. Plus a zh case (the state's sentence and the button read in Chinese).\n\n<details><summary>Readings at head 66aa3c5d</summary>\n\n- New file: Test Files 1 passed, Tests 13 passed.\n- `pnpm --dir ui exec vitest run packages/app-shell/src/views/studio-design/` (includes the existing Automations rail search pin): Test Files 234 passed, Tests 1703 passed.\n- `pnpm --dir ui exec vitest run packages/i18n/`: 89 files passed, 1373 passed, 13 skipped.\n- `pnpm --filter @object-ui/app-shell run type-check` and `pnpm --filter @object-ui/i18n run type-check`: exit 0.\n- Ablation: the rail's `noMatches` branch replaced with `false` through `scripts/ablation-replace.mjs` (anchor 1 to 0, blob 805aceee to a4f216f0): 7 failed, 6 passed. The 7 are every positive case (three rails times two, plus zh); the 6 green are the matching-query controls and the empty-package cases, as expected. Restored: blob equals HEAD, `git diff HEAD` empty.\n\n</details>\n\n## Acceptance notes\n\n- Measured before the fix on `origin/main` 5ec398dc: Data and Access rendered nothing under a non-matching query; Automations already printed `engine.list.emptyQuery` but had no clear action. The card's premise holds for Data and Access and half-holds for Automations.\n- The sentence reuses the existing `engine.list.emptyQuery` row (straight quotes around the query), so no new sentence row was added and the existing Automations pin still reads the same text.\n\n## Verification\n\n<details><summary>Derived gates (34) at head 66aa3c5d</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 34 families; all 34 ran with exit 0, and `--ran` reconciled 34 derived, 34 run, 0 NOT-MEASURED, 0 UNRUN. Also run: `check:i18n-designer-parity` exit 0, `check:new-line-citations` exit 0 (0 new citations), eslint on the five touched source files exit 0 (0 errors; 16 warnings, all on untouched lines of `StudioDesignSurface.tsx`).\n\n</details>\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [ ] 3. No formatter ran; `pnpm lint` passes. (No formatter ran; eslint is clean on the touched files, and the repo-wide `pnpm lint` is CI's run.)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01JQwxbZPJiXo3QSt3ShH9c1\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbZPJiXo3QSt3ShH9c1)_\n"
+}

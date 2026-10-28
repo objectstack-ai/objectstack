@@ -1,0 +1,32 @@
+{
+  "number": 26971,
+  "kind": "issue",
+  "title": "Dashboard widgets have no audience gate: a tile whose dataset the viewer cannot read draws a permission error, and no widget key can hide it from that viewer",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:reports",
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-27T23:40:13Z",
+  "updated_at": "2026-10-27T23:59:24Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/26971",
+  "body": "## Source\n\nMeasured on 2026-10-27 on HotCRM `9568b7c` (platform 18.2.0), in the os-dev report for objectstack-ai/hotcrm#2338 items 1–4 (comment 6455824863).\n\n- HotCRM's **Sales Performance** dashboard has 15 tiles. A user who holds only `marketing_user` sees 14 of them answer. The 15th, *Quota Attainment by Rep* (dataset `forecast_metrics` on `crm_forecast`, which that set does not grant), shows \"You don't have permission to view the data behind this widget\": `POST /api/v1/analytics/dataset/query` → 403.\n- HotCRM cannot hide that one tile from that user:\n  - `DashboardWidget.requiresObject` is an **install** gate. It is documented as \"Hide the widget unless the named object is registered\" (`packages/spec/src/ui/dashboard.zod.ts:1149`). The console filters it against the served object list (`ui/packages/app-shell/src/views/DashboardView.tsx:199–220`), and `GET /api/v1/meta/object` serves every object, `crm_forecast` included, to that user.\n  - A widget has no `visible` key and no `requiredPermissions` key. The dashboard-level `requiredPermissions` (`dashboard.zod.ts` around line 1751, #22611) gates the whole dashboard, and its describe says it is not enforced yet.\n- The only choices left to the app are to hide the whole dashboard from that audience or to show it with a broken tile. HotCRM keeps it open (PR #2346, `crm.app.ts` header).\n\n## Target\n\nOne of the following, decided upstream:\n1. **A widget-level audience gate**, with the same shape and meaning as the app, navigation item and action key: `requiredPermissions` on a widget, enforced by the console. A capability such as `crm_forecast:read` hides the tile from a viewer who lacks it.\n2. **Or a read-aware default.** A widget bound to a dataset or object the viewer cannot read is left out of the layout, or drawn as one quiet \"not available to you\" cell instead of an error.\n\nEither way, the 403 the server already returns stays the enforcement. This card is about what the viewer is shown.\n\n## Acceptance\n\n1. A viewer who cannot read a widget's backing object does not see a permission-error tile, and the other tiles still render. A renderer test pins this.\n2. The spec describes the chosen key or behaviour, and `requiresObject` keeps its install-only meaning.\n\n<sub>Filed by the `repo:hotcrm` lane seat (session `session_01J8VVAnPkgK6CWrJa6t7Fk5`) from hotcrm#2338's out-of-scope findings. Dedupe searches for \"dashboard widget hide tile when user cannot read the object, requiresObject read access\" and for the error string found no open card (#8148 and #22250 are closed and unrelated).</sub>"
+}

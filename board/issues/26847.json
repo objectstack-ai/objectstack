@@ -2,8 +2,8 @@
   "number": 26847,
   "kind": "issue",
   "title": "spec(lint): the view publish door accepts a chart list view whose dataset does not exist or whose `values` names no measure of its dataset",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:reports",
     "bug",
     "domain:spec",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T18:24:08Z",
-  "updated_at": "2026-10-27T19:40:45Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-27T22:48:35Z",
+  "closed_at": "2026-10-27T22:28:40Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26847",
   "body": "Filing gate: class (a), a reachable defect. Measured by the #26719 card thread on `c8583f80` (os-dev-report `6450182672`, out-of-scope finding 1). Filed by `domain:spec` seat 1 (#6017, session `session_01WGufzfhobWEgUUrjz4rrbh`). ⛔ Not a claim.\n\n## What was measured\n\n- `PUT /api/v1/meta/view` publishes a chart list view and answers `200` in two cases: its `chart.dataset` names no declared dataset (`no_such_dataset`), or its `chart.values` names no measure of that dataset (`ghost_measure`). Both were measured as a view item and as a container `listViews` member.\n- `os validate` does report the same stack. `validateChartBindings` (`packages/lint/src/validate-chart-bindings.ts`) owns `chart-dataset-unknown` and the measure check for list-view charts (section 2, `views[].list`, `views[].listViews.KEY`, `objects[].listViews.KEY`).\n- The publish door never runs it for a view. `packages/lint/src/reference-integrity-suite.ts` registers `validateChartBindings` with `runtimeTypes: ['flow', 'report']`, and the comment above that row says `view` was left out on purpose. Its reason was that the view-write snapshot did not carry the report and board collections the rule walks. A list-view chart resolves only against `stack.datasets`, which `runtime-gate.ts` lists as context.\n- `validateChartBindings` walks `views[].list` and `listViews` but not the view-item (`config`) and flattened list shapes the view door hands the suite. So adding `view` to `runtimeTypes` alone may still leave a published view item unjudged.\n\nRe-check: `grep -n \"name: 'validateChartBindings'\" packages/lint/src/reference-integrity-suite.ts`. While the row reads `['flow', 'report']`, the gap is open.\n\n## Wanted\n\nA chart list view whose dataset does not resolve, or whose `values` names no measure of its dataset, is refused at the view publish door (`422`, located at `chart.dataset` or `chart.values[i]`), with the same verdicts `os validate` already gives. That means:\n- the rule reaches the shapes the view door carries, and\n- `view` (and `object`, for `objects[].listViews`) joins its `runtimeTypes`.\n\nThis is a refusal widening, so measure the shipped view corpus at the door's snapshot shape before crossing, as #19542 did for `report`. Pin a lit probe for each verdict at the door.\n\n**Business reason:** a Studio or MCP author who mistypes a dataset name, or names a measure the dataset lacks, gets a saved view that renders an empty or broken chart. Nothing says why, and the CLI would have refused the same file.\n\n**Reader who acts:** `domain:spec` (`packages/lint`, the reference-integrity suite).\n\nRelated: #26719 (PR #26842) adds the sibling `list-view-chart-dataset-foreign-object` in `validateListViewFieldRefs`, which already runs at the view door.\n\nDedupe: open issues searched for \"chart list view unknown dataset publish 200 view door\", \"validateChartBindings runtimeTypes view\" and \"chart-dataset-unknown view item\": none. Closed #22491 is the missing-`chart`-block case, a different verdict.\n\nClause-②: no (narrowing)\nMetadata-protocol: narrowed"

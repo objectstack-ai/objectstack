@@ -1,0 +1,31 @@
+{
+  "number": 27032,
+  "kind": "issue",
+  "title": "[Decision] ADR-0050 form layout vs presentation — the maintainer's own call: schedule the spec-major narrowing of `FormView.type` to layout only, defer it, or withdraw the record (set aside from ADR batch 2 on #26553)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "needs-user-decision",
+    "pm:awaiting-maintainer",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T02:24:01Z",
+  "updated_at": "2026-10-28T02:24:01Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27032",
+  "body": "Filing gate: ③ maintainer-directed. The maintainer, answering ADR batch 2 on objectstack#26553 (batch #417, brief 6458849517), 2026-10-28, verbatim: 「ADR-0050 表单布局 vs 呈现，单独立卡交维护者处理，其他同意」. Filed by the director seat (`session_01KrKXQVvgYk2AJ4VkqMobyb`, ledger objectstack#12708). ⛔ Not a claim; ⛔ not presented again by the director seat — the maintainer rules on this card directly (as objectstack#26582). Reader who acts: the maintainer; after the ruling, the seat that opens the `docs/adr/0050-*.md` status-line PR (Tier H) and, under letter A, the `domain:ui` + `domain:spec` seats for the cutover card. Dedupe: #24692 (closed; ruling B′ amended this record on 2026-10-20), #1890 (the modal-hosts-tabbed unlock), objectui#1763 (viewschema key drift, out of scope) — no open card asks this question.\n\n## 维护者速读\n\nADR-0050 的决策是把 `FormView.type` 收窄成纯布局（`simple | tabbed | wizard`），删掉混在同一字段里的呈现值 `drawer | modal` 和视图模式值 `split`。它解锁的能力——模态框里放 tabbed 表单——已经上线（#1890，`ModalForm.tsx:950`、`AppContent.tsx:1513`）；收窄本身没做：`packages/spec/src/ui/view.zod.ts:4546` 仍列六个值，`ObjectForm` 仍分支到 `SplitForm` / `DrawerForm`。收窄是 spec-major 破坏性改动。2026-10-20 你在 #24692 裁 B′ 退役了 `addRecord.mode`，记录「呈现维度已在三处」的前提少了一处（剩 `NavigationMode` 与动作 `type:'modal'`）。\n\n请裁：\n- **A** Accepted（收窄）：状态行写「布局转发已实现；枚举收窄 + `ObjectForm` 三分支删除随下一次 spec-major」，并立一张 `domain:ui` + `domain:spec` 的 cutover 卡挂在 spec-major 窗口。\n- **B** Deferred：状态行写 Deferred，重启条件「下一次 spec-major 窗口」；不立 cutover 卡。\n- **C** Withdrawn：接受 `type` 继续混两维（「模态+tabbed」已可表达）；状态行写 Withdrawn，说明 #1890 取走了它的价值。\n\n选 A / B / C？\n\n## Governing text\n\n- `docs/adr/0050-form-layout-vs-presentation.md` Decision 1–4 and Migration (\"breaking spec, tiny blast radius\"; \"should land after architect sign-off, ideally bundled with the modal/drawer layout-forwarding follow-up\").\n- Its 2026-10-20 amendment (ruling 6281834942 on #24692): `addRecord.mode` / `addRecord.formView` retired under ADR-0049 enforce-or-remove.\n- #26076 ruling A (6417460375): the stale Proposed records are ruled by the maintainer, one of Accepted / Deferred / Withdrawn / Superseded each.\n- AGENTS.md Prime Directive 14: `docs/adr/**` is Tier H.\n\n## Premises (each with its re-check)\n\n- P1: the enum is not narrowed. `sed -n 4544,4552p packages/spec/src/ui/view.zod.ts` on `origin/main` `a90163d477` lists `simple`, `tabbed`, `wizard`, `split`, `drawer`, `modal`.\n- P2: the renderer still executes the three values. `grep -n \"SplitForm\\|DrawerForm\" ui/packages/plugin-form/src/ObjectForm.tsx` → imports at :41–42, branches at :516 and :553; `ModalForm.tsx` is the modal container. So the values are enforced, not dead keys under ADR-0049.\n- P3: the unlock shipped. `ModalForm.tsx:167` and `:950` (\"a modal can host a tabbed layout\", ADR-0050, #1890); `AppContent.tsx:1513`.\n- P4: PR #26503 row 8 counted 0 citations under `packages/`; the two citations are under `ui/`.\n- P5: real usage of the removed values was audited by the record as five demo views (showcase `task`, hotcrm `lead`); not re-measured by this seat.\n\n## One-sentence problem\n\nThe record's unlock is live but its decision — a breaking narrowing of `FormView.type` — is neither scheduled nor withdrawn, so the record cannot honestly say Accepted or Proposed.\n\n## Options\n\n| Option | What | Consequence | Workload |\n|---|---|---|---|\n| A | Accepted; cutover card for the next spec-major (`FormViewSchema.type` → three values; `ObjectForm` drops `split`/`drawer`/`modal` branches; five demo views re-spelled; migration note) | `type` becomes one dimension; a breaking spec change, blast radius five demo views | ui + spec · 1 cutover PR at the spec-major · M; status line now · XS |\n| B | Deferred with restart condition \"next spec-major\" | the field stays two-dimensional until then; no card | status line · XS |\n| C | Withdrawn | the field stays two-dimensional for good; `split` keeps three spellings | status line · XS |\n\n## Business meaning\n\n- A: the design is kept and the breaking change goes on the next major's list.\n- B: shelved until a major is being cut anyway.\n- C: the form field keeps its overloaded meaning; the practical gain already landed.\n\n## 四维分析\n\n- **实际业务需求**：删除值零真实业务使用（记录自审），解锁价值已由 #1890 兑现；收窄的剩余收益是字段语义单一、lint 更简单。\n- **项目长远合理性**：一个字段混两维与 ADR-0049「键的含义唯一」方向相悖；但破坏性改动只在 spec-major 窗口合理。\n- **防 AI 犯错**：收窄后 agent 不会再写 `type:'modal'` 来表达呈现；今天靠 lint 提示引导。\n- **创业阶段不扩散**：A 加一张卡、一次 spec-major 改动；B、C 零工作。\n\nos-decision-facets\n① 项目长远合理性：A 使 `FormView.type` 单维，与 ADR-0049 方向一致；只在 spec-major 窗口落。\n② 实际业务拉动：删除值零业务使用；解锁价值已落地。\n③ 防 AI 犯错：收窄后一字段一维；今天靠 lint。\n④ 创业阶段不扩散：A 一卡一改，B/C 零工作。\nPrior rulings read: #24692 B′ (6281834942), #26076 A (6417460375), batch 2 brief 6458849517; ADR-0049; thread: #26553.\n\n## Recommendation\n\nThe seat's reading on #26553 was **A (narrowed)**, with the stated gap: whether the maintainer wants the spec-major cutover scheduled at all; if not, **B**. The maintainer set the record aside for their own ruling; the seat adds nothing here.\n\n## After the ruling\n\n- A: status line Accepted + pending clause in the batch 3 docs PR (or its own XS PR); one cutover card `domain:ui` + `domain:spec`, `Blocked-by:` the next spec-major decision.\n- B: status line Deferred + restart condition, same PR; no card.\n- C: status line Withdrawn, same PR; the index moves the record to Withdrawn.\n\n## Related\n\n#26553 (carrier), #24692 (amendment), #1890 (unlock), #26076 (ruling A), ADR-0049."
+}
