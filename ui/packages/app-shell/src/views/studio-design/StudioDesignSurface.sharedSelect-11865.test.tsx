@@ -344,8 +344,9 @@ describe('the nav-item inspector picks with the shared Select (objectui#11865)',
     for (const key of ['objBorn', 'pageBorn', 'dashBound', 'reportBorn', 'actionBorn', 'compBorn', 'docBorn', 'urlDefault']) {
       renderEntry(key);
       names[key] = screen.getAllByRole('combobox').map((c) => {
-        // objectui#12455 — the inspector's Icon picker is a combobox named by its label too.
-        const named = ['Link to object', 'Page', 'Dashboard', 'Report', 'Action', 'Component', 'Doc page', 'Book', 'Open in', 'Icon'].find(
+        // objectui#12455 — the inspector's Icon picker is a combobox named by its label too;
+        // objectstack#26740 — so are its badge style picker and its condition field.
+        const named = ['Link to object', 'Page', 'Dashboard', 'Report', 'Action', 'Component', 'Doc page', 'Book', 'Open in', 'Icon', 'Badge style', 'Visible when'].find(
           (n) => screen.queryByRole('combobox', { name: n }) === c,
         );
         return named ?? '';
@@ -353,14 +354,14 @@ describe('the nav-item inspector picks with the shared Select (objectui#11865)',
       cleanup();
     }
     expect(names).toEqual({
-      objBorn: ['Link to object', 'Icon'],
-      pageBorn: ['Page', 'Icon'],
-      dashBound: ['Dashboard', 'Icon'],
-      reportBorn: ['Report', 'Icon'],
-      actionBorn: ['Action', 'Icon'],
-      compBorn: ['Component', 'Icon'],
-      docBorn: ['Doc page', 'Book', 'Icon'],
-      urlDefault: ['Open in', 'Icon'],
+      objBorn: ['Link to object', 'Icon', 'Badge style', 'Visible when'],
+      pageBorn: ['Page', 'Icon', 'Badge style', 'Visible when'],
+      dashBound: ['Dashboard', 'Icon', 'Badge style', 'Visible when'],
+      reportBorn: ['Report', 'Icon', 'Badge style', 'Visible when'],
+      actionBorn: ['Action', 'Icon', 'Badge style', 'Visible when'],
+      compBorn: ['Component', 'Icon', 'Badge style', 'Visible when'],
+      docBorn: ['Doc page', 'Book', 'Icon', 'Badge style', 'Visible when'],
+      urlDefault: ['Open in', 'Icon', 'Badge style', 'Visible when'],
     });
     renderEntry('objBorn');
     expect(screen.getByTestId(OBJECT_PICKER)).toHaveAccessibleName('Link to object');
