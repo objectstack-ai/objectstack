@@ -107,7 +107,7 @@ params:
     required: true
 ```
 
-For a **static** url, `openIn: 'new-tab'` opens `target` in a new tab and `openIn: 'self'` navigates in place; omitted, absolute URLs open in a new tab and relative ones navigate in place. For an **async handler that redirects**, set `opensInNewTab: true` instead (the renderer pre-opens the tab synchronously so popup blockers don't fire); `newTabUrl` provides a zero-roundtrip new-tab target template supporting the `{recordId}` placeholder.
+For a **static** url, `openIn: 'new-tab'` opens `target` in a new tab and `openIn: 'self'` navigates in place; omitted, absolute URLs open in a new tab and relative ones navigate in place. For an **async handler that redirects**, set `opensInNewTab: true` instead (the renderer pre-opens the tab synchronously so popup blockers don't fire); `newTabUrl` skips the round-trip with a path on this backend, starting with `/` (`{recordId}` placeholder); an absolute URL is refused, so an external page is a `type: 'url'` action with `openIn: 'new-tab'`.
 
 <Callout type="warn">
 **The interpolation scope is not authorable, and `params` is not it.** `params`

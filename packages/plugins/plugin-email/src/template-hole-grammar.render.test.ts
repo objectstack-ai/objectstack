@@ -107,13 +107,13 @@ describe('a currency argument that is not a literal ISO 4217 code', () => {
     expect(sent).toEqual([]);
   });
 
-  it('a literal code renders in that currency in every face, and no argument still renders USD', async () => {
+  it('a literal code renders in that currency in every face, and no argument renders the tenant default', async () => {
     const { svc } = makeService([row('contract.overdue', {
       subject: 'Due {{ planned_amount | currency:EUR }}',
       body_html: '<p>{{ planned_amount | currency:EUR }} / {{ planned_amount | currency }}</p>',
       body_text: 'Due {{ planned_amount | currency:EUR }}',
     })]);
-    const out = await svc.renderTemplate({ template: 'contract.overdue', data });
-    expect(out).toEqual({ subject: 'Due €1,234.50', html: '<p>€1,234.50 / $1,234.50</p>', text: 'Due €1,234.50' });
+    const out = await svc.renderTemplate({ template: 'contract.overdue', data, currency: 'CNY' });
+    expect(out).toEqual({ subject: 'Due €1,234.50', html: '<p>€1,234.50 / CN¥1,234.50</p>', text: 'Due €1,234.50' });
   });
 });

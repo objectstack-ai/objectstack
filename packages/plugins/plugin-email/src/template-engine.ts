@@ -43,7 +43,10 @@
  * own path; a value that is not a code in three capital letters — missing,
  * `null`, lowercase (`eur`), anything else — makes the render throw
  * `TEMPLATE_INVALID` too, naming the hole, the path and the value
- * (`currencyCodeValueRefusal`). Those are the ways a render throws: it prints
+ * (`currencyCodeValueRefusal`). A `currency` hole with no argument formats in
+ * the tenant default currency, {@link RenderOptions.currency}; with none it
+ * throws `TEMPLATE_INVALID` as well (`currencyDefaultRefusal`), since it then
+ * names no currency at all. Those are the ways a render throws: it prints
  * neither a substituted currency nor formatter syntax to a recipient.
  *
  * Deliberately tiny (no loops / conditionals / partials) — the design
@@ -53,12 +56,18 @@
  * runtime; we resist that until a real use case demands it.
  */
 
-import { currencyCodeValueRefusal, formatValue, mailHolePattern, parseMailHole } from '@objectstack/formula';
+import { currencyCodeValueRefusal, currencyDefaultRefusal, formatValue, mailHolePattern, parseMailHole } from '@objectstack/formula';
 
 /** Locale + reference timezone for hole formatters (ADR-0053 Phase 2). */
 export interface RenderOptions {
   locale?: string;
   timeZone?: string;
+  /**
+   * The tenant default currency (ISO 4217, the `localization.currency`
+   * setting) a `{{ amount | currency }}` hole with no argument formats in.
+   * Unset, such a hole makes the render throw `TEMPLATE_INVALID`.
+   */
+  currency?: string;
 }
 
 function lookup(data: Record<string, any>, path: string): unknown {
@@ -132,6 +141,12 @@ function render(
       const raw = lookup(data, parsed.path);
       let str: string;
       if (parsed.formatter) {
+        // A `currency` hole with no argument formats in the tenant default,
+        // judged before the amount is read: with none, nothing is formatted.
+        if (parsed.formatter === 'currency' && parsed.arg === undefined) {
+          const refusal = currencyDefaultRefusal(match, opts.currency, 'mail');
+          if (refusal) throw new Error(`TEMPLATE_INVALID: ${refusal}`);
+        }
         // `currency:@path`: the code is the send's data at that path, judged
         // before the amount is read, as a literal argument is.
         let arg = parsed.arg;
@@ -146,6 +161,7 @@ function render(
         const formatted = formatValue(parsed.formatter, raw, arg, {
           locale: opts.locale,
           timeZone: opts.timeZone,
+          currency: opts.currency,
         });
         // The grammar refuses a formatter the whitelist does not name, so
         // `formatValue` knows this one; if the two ever disagree the render

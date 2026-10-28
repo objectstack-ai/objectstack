@@ -1844,7 +1844,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "Abre el RESULTADO de la acción en una pestaña nueva: el renderizador la abre de forma síncrona al hacer clic (a prueba de bloqueadores de ventanas emergentes) y luego la lleva a la redirectUrl del manejador. Distinto de `openIn`, que enruta un destino de URL estática."
       },
       newTabUrl: {
-        label: "URL de pestaña nueva",
+        label: "Ruta de pestaña nueva",
         helpText: "Ruta en este backend, que empieza por / (p. ej. /sso-open/{recordId}), con un marcador {recordId}. Junto con `opensInNewTab`, el renderizador lleva la pestaña preabierta de inmediato al origen del backend + esta ruta y no envía nada, así que el endpoint debe aplicar la autenticación por su cuenta. Una URL absoluta se rechaza; para abrir una página externa usa una acción de tipo url con «Abrir en» en new-tab."
       },
       locations: {

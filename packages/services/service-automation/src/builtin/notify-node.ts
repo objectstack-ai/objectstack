@@ -950,8 +950,8 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
             // `end` text share — the formula template engine's `{{ }}` holes
             // (ADR-0032 D3). An object a hole reaches (`{{ $error }}`) renders as
             // JSON, never `[object Object]` (#3450).
-            const title = renderTextSlot(cfg.title?.source, variables) ?? '';
-            const body = renderTextSlot(cfg.message?.source, variables) ?? '';
+            const title = renderTextSlot(cfg.title?.source, variables, context.currency) ?? '';
+            const body = renderTextSlot(cfg.message?.source, variables, context.currency) ?? '';
             // #9205 — the localizable content path. `template` is read RAW (a
             // static metadata cross-reference, like `topic`/`channels`);
             // `templateData` is a VALUE slot per key (#19939), so flow state
@@ -969,7 +969,7 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
             // renderer, like `title`, with `{{ }}` holes. A link that renders no
             // text is no link (`undefined`), so the synthesized one below still
             // applies — as an empty one did.
-            const actionUrl = renderTextSlot(cfg.actionUrl, variables);
+            const actionUrl = renderTextSlot(cfg.actionUrl, variables, context.currency);
             // [#19939] `payload` is a literal, read as written: no flow
             // computed one, and the contract refused a `{…}` token or an
             // envelope in it.

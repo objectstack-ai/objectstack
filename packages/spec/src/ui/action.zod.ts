@@ -1720,8 +1720,9 @@ const actionObject = () => strictObject({
    * action — `target: 'https://…'` (with `${ctx.recordId}` where the record
    * id goes) and `openIn: 'new-tab'`.
    *
-   * A stored row written before the refusal is converted by nothing (no
-   * backend path can be derived from an external URL): it loads unchanged,
+   * A stored row written before the refusal is converted by nothing (the
+   * rewrite is the author's choice; ADR-0087 D3 entry
+   * `ui-action-new-tab-url-path-refused` is its structured TODO): it loads unchanged,
    * is counted `invalid` with a `[metadata_spec_invalid]` boot line and still
    * registered, is served with `_diagnostics` locating `newTabUrl`, and its
    * next save is refused until the value is a path or the action is rewritten
