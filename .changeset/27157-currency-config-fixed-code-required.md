@@ -21,4 +21,4 @@ Metadata-protocol: narrowed
 - **Readers.** None changes what it displays. The console's `resolveFieldCurrency` and the analytics field-currency relay already read the code only under `fixed`. `@objectstack/formula`'s return-type inference reads a field's currency through `CurrencyConfigSchema`; a `fixed` config without a code no longer parses there, so it reads as an unproven currency instead of CNY.
 - **`@objectstack/platform-objects`.** The field form's `defaultCurrency` help text says the code is required in fixed mode instead of "Defaults to CNY", in en, zh-CN, ja-JP and es-ES.
 
-Survey at the change: 17 `fixed` currency configs across `examples/**`, `packages/platform-objects/**`, `packages/qa/**`, seeds and fixtures, none without a code.
+Survey at the change: 11 `fixed` currency configs across `examples/**`, `packages/platform-objects/**`, `packages/qa/**`, seeds and fixtures, none without a code.
