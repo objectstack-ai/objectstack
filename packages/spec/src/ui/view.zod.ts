@@ -4550,11 +4550,15 @@ const FORM_VIEW_SPLIT_RESIZABLE_RETIRED =
 // `reset.label` had no reader. The one fold that read `reset.show` mapped it
 // onto ObjectForm's clear-after-save flag, so `show: true` emptied the form
 // after a save instead of drawing a button. The
-// `form-view-buttons-reset-removed` conversion (ADR-0087 D2) strips the key.
+// `form-view-buttons-reset-removed` conversion (ADR-0087 D2) strips the key, so
+// a converted form stops clearing after a save; the prescription names
+// `submitBehavior: { kind: 'continue' }`, the declared spelling of that effect.
 const FORM_VIEW_BUTTONS_RESET_RETIRED =
   '`view.form.buttons.reset` was removed in @objectstack/spec 18.3.0 (ADR-0049) — no form ever drew a reset '
   + 'button, and its label was never read. Delete the key: a form has `submit` and `cancel` buttons only, and '
-  + 'Cancel leaves the form without saving. '
+  + 'Cancel leaves the form without saving. `reset.show: true` used to clear the form after each save (the '
+  + 'ObjectForm fold that ObjectView and the record form page render); a form converted by this release no '
+  + 'longer clears after a save, and a form that should declares `submitBehavior: { kind: \'continue\' }`. '
   + FORM_VIEW_TYPE_RETIRED_FIX;
 
 // Form-view `layout` retired-value prescriptions (#20221, ADR-0049

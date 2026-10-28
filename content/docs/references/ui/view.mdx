@@ -504,7 +504,7 @@ Form-view select option — the object-field option shape minus the per-option `
 | :--- | :--- | :--- | :--- |
 | **submit** | `{ show?: boolean; label?: string \| Record<string, string> }` | optional | Submit button |
 | **cancel** | `{ show?: boolean; label?: string \| Record<string, string> }` | optional | Cancel button |
-| **reset** | `never` | optional | [REMOVED] `view.form.buttons.reset` was removed in @objectstack/spec 18.3.0 (ADR-0049) — no form ever drew a reset button, and its label was never read. Delete the key: a form has `submit` and `cancel` buttons only, and Cancel leaves the form without saving. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
+| **reset** | `never` | optional | [REMOVED] `view.form.buttons.reset` was removed in @objectstack/spec 18.3.0 (ADR-0049) — no form ever drew a reset button, and its label was never read. Delete the key: a form has `submit` and `cancel` buttons only, and Cancel leaves the form without saving. `reset.show: true` used to clear the form after each save (the ObjectForm fold that ObjectView and the record form page render); a form converted by this release no longer clears after a save, and a form that should declares `submitBehavior: { kind: 'continue' }`. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 
 
 ---

@@ -276,8 +276,8 @@ const ObjectFormBody: React.FC<ObjectFormComponentProps> = ({
   // Fail-open when no provider mounted (perms.isLoaded false).
   const schema = useMemo<LocalizedObjectFormSchema>(() => {
     // framework#1894 / objectstack-ai/objectstack#2998 (ADR-0078): the authored @objectstack/spec
-    // FormViewSchema carries the structured `buttons.{submit,cancel,reset}.
-    // {show,label}` + `defaults` surface, but this renderer historically read
+    // FormViewSchema carries the structured `buttons.{submit,cancel}.
+    // {show,label}` + `defaults` surface (`buttons.reset` retired, #27153), but this renderer historically read
     // only the flat `showSubmit`/`submitText`/…/`initialValues`. Fold the
     // structured shape down onto those flat props FIRST so every downstream
     // read (and every variant we dispatch `schema` into) sees it. An

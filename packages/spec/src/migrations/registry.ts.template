@@ -2993,8 +2993,9 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       'It also retires the form view\'s `buttons.reset` (ADR-0049): no form drew a reset button and '
       + 'its label was never read, so a form has `submit` and `cancel` only. The key is refused at '
       + 'parse with its prescription; the D2 conversion `form-view-buttons-reset-removed` strips it '
-      + 'from existing sources and stored rows. Its D3 record is the semantic entry '
-      + '`ui-form-view-buttons-reset-retired`.',
+      + 'from existing sources and stored rows, so a form that `reset.show: true` cleared after a save '
+      + 'stops clearing; an author who wants that declares `submitBehavior: { kind: \'continue\' }`. '
+      + 'Its D3 record is the semantic entry `ui-form-view-buttons-reset-retired`.',
   },
   {
     id: 'ui-form-view-type-layout-only',
