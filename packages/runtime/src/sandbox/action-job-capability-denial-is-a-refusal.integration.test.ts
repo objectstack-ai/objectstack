@@ -171,7 +171,7 @@ describe('[#26965] an action or job body\'s capability denial is a coded refusal
       const e = await boot();
       const { handler, bodyLog } = bindJob(e, gate.source, []);
 
-      const err: any = await handler().then(() => null, (x) => x);
+      const err: any = await handler({ jobId: 'run_1' }).then(() => null, (x) => x);
       expect(err, 'the denied call must fail the run').not.toBeNull();
       expect(err.code).toBe('INSUFFICIENT_PRIVILEGES');
       expect(err.status).toBe(403);
@@ -192,7 +192,7 @@ describe('[#26965] an action or job body\'s capability denial is a coded refusal
   it('job control — the same body WITH the capability runs', async () => {
     const e = await boot();
     const { handler, bodyLog } = bindJob(e, GATES[0].source, ['api.read']);
-    await expect(handler()).resolves.toBeUndefined();
+    await expect(handler({ jobId: 'run_1' })).resolves.toBeUndefined();
     expect(bodyLog.lines.filter((l) => l.level === 'error')).toEqual([]);
   }, 30_000);
 });
