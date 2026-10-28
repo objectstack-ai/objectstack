@@ -195,7 +195,8 @@ describe('block-config labels are translation keys (#3913)', () => {
     // are counted per USE, so shared option lists (`format`, `ALIGN_OPTS`) are
     // visited once per referencing field.
     expect(families.field).toBeGreaterThan(80);
-    expect(families.add).toBe(5);
+    // 6 since `record:related_list.sort` became a row editor (its add button).
+    expect(families.add).toBe(6);
     expect(families.option).toBeGreaterThan(50);
     // Exact, like `add`: the keyed half of the placeholder column is 6
     // (#3979; 8 until objectui#3829 retired the canonical `page:header.icon`
@@ -391,7 +392,13 @@ describe('placeholders that must NOT be translated (#3979)', () => {
       literal: '{ "type": "url", "target": "/environments" }',
       because: 'a JSON sample the author copies — translated keys would fail InlineActionSchema',
     },
-    'record:related_list.limit': { literal: '10', because: 'a row limit' },
+    // `5`, not the `10` it read before: the renderer's own default when the
+    // box is empty (`SPEC_DEFAULT_LIMIT`, the spec's `.default(5)`).
+    'record:related_list.add': {
+      literal: '{ "picker": { "object": "sys_user" }, "linkField": "user_id" }',
+      because: 'a JSON sample the author copies — translated keys would fail the add config schema',
+    },
+    'record:related_list.limit': { literal: '5', because: "a row limit — the list's row count when the box is empty" },
     'object-kanban.limit': {
       literal: '100',
       because: "a row limit — DEFAULT_KANBAN_FETCH_BATCH_SIZE, the board's fetch batch when the box is empty",
@@ -400,7 +407,7 @@ describe('placeholders that must NOT be translated (#3979)', () => {
     'list-view.limit': { literal: '5', because: "a row limit — the capped list's row count when the box is empty" },
   };
 
-  it('collects all 18 placeholders — 6 keyed, 12 literal', () => {
+  it('collects all 19 placeholders — 6 keyed, 13 literal', () => {
     // Guards the walk: if placeholder collection silently found nothing, every
     // assertion here would pass over an empty list.
     //
@@ -414,10 +421,12 @@ describe('placeholders that must NOT be translated (#3979)', () => {
     // objectui#8280 removed the `ai:input` panel, whose `agentName` box was a
     // KEYED placeholder — the palette never offered that block. Then 17 / 6 / 11
     // until objectstack#26703 gave `list-view` its row-cap box, a VALUE
-    // placeholder (`5`, the capped list's own count).
-    expect(PLACEHOLDERS.length).toBe(18);
+    // placeholder (`5`, the capped list's own count). Then 19 / 6 / 13 since
+    // `record:related_list.add` got its JSON box, a VALUE placeholder (a JSON
+    // sample of the add config).
+    expect(PLACEHOLDERS.length).toBe(19);
     expect(PLACEHOLDERS.filter((p) => p.spec.key !== undefined).length).toBe(6);
-    expect(PLACEHOLDERS.filter((p) => p.spec.literal !== undefined).length).toBe(12);
+    expect(PLACEHOLDERS.filter((p) => p.spec.literal !== undefined).length).toBe(13);
   });
 
   it('every placeholder declares exactly one of key / literal', () => {
