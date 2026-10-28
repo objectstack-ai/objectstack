@@ -87,7 +87,9 @@ function makeDriver() {
     async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
     async find(object: string, ast: any) {
       reads.push({ object, fields: ast?.fields });
-      return (rows[object] ?? []).filter((r) => matches(r, ast?.where)).map((r) => project(r, ast?.fields));
+      const matched = (rows[object] ?? []).filter((r) => matches(r, ast?.where));
+      const page = typeof ast?.limit === 'number' ? matched.slice(0, ast.limit) : matched;
+      return page.map((r) => project(r, ast?.fields));
     },
     async findOne(object: string, ast: any) {
       reads.push({ object, fields: ast?.fields });
