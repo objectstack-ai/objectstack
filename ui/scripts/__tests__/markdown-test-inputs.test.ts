@@ -163,8 +163,10 @@ describe('objectui#9096 — `scripts` is a scan root, and the class is now total
     // candidates at all, so a root that silently stopped resolving is caught.
     // 45 files the day the root landed; 38 once objectstack#26080 deleted the
     // tree's root README, ROADMAP.md and QUICK_REFERENCE.md, the literals
-    // several of these tests only matched against those files.
-    expect(fromScripts.length).toBeGreaterThanOrEqual(35);
+    // several of these tests only matched against those files; 27 once
+    // objectstack#26944 deleted objectui's CI guide page, the one document eight
+    // more of them named.
+    expect(fromScripts.length).toBeGreaterThanOrEqual(27);
   });
 
   it('names the card\'s instance: three gate tests read `AGENTS.md`, so it is an input', () => {
@@ -292,7 +294,10 @@ describe('objectui#9142 — a root-level markdown file a pull request ADDS', () 
     const hits = markdownTestInputsAmong(['AGENTS.md']);
     expect(hits).toHaveLength(1);
     expect(hits[0].entries).toEqual(expect.arrayContaining(['./*', 'AGENTS.md']));
-    expect(hits[0].readers.length).toBeGreaterThanOrEqual(4);
+    // 3 since objectstack#26944: `check-required-check-set.test.ts` named
+    // `AGENTS.md` only beside objectui's CI guide page, and left the ledger with
+    // the page. Three readers still prove every one is reported, not the first.
+    expect(hits[0].readers.length).toBeGreaterThanOrEqual(3);
     // The same overlap outside the root, which predates this card: a package
     // README declared exactly AND inside `packages/**`.
     const nested = markdownTestInputsAmong(['packages/app-shell/README.md']);

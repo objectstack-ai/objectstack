@@ -37,6 +37,7 @@ import {
 import { CelPredicateField } from './CelPredicateField.js';
 import { CelTestRunDialog } from './CelTestRunDialog.js';
 import type { CelLintIssue } from './celAuthoring.js';
+import { objectRuleCell, objectRuleSeed, type ObjectAccessDefault, type ObjectPerm } from './permission-slice.js';
 import type {
   AdminScope as SpecAdminScope,
   RowLevelSecurityPolicy as SpecRlsPolicy,
@@ -260,10 +261,27 @@ const ADMIN_COMPANION_GRANTS: readonly CompanionGrant[] = [
 
 type ObjectRows = Record<string, Record<string, unknown>>;
 
+/** An object's `access.default` posture, from the host's object catalog; `undefined` when not listed. */
+export type ObjectAccessDefaultOf = (objectName: string) => ObjectAccessDefault | undefined;
+
+/**
+ * objectstack#27010 — the entry the runtime applies for a companion object:
+ * the set's own entry, or its `'*'` entry where that applies to the object
+ * (`objectRuleCell`, the matrix's own reading).
+ */
+function companionRow(objects: ObjectRows, objectName: string, accessDefaultOf: ObjectAccessDefaultOf): Record<string, unknown> {
+  return asObject(objectRuleCell(objects as Record<string, ObjectPerm>, objectName, accessDefaultOf(objectName)).perm);
+}
+
 /** Whether the set as the draft holds it already carries `grant` — exactly, no inference. */
-function companionGranted(grant: CompanionGrant, systemPermissions: string[], objects: ObjectRows): boolean {
+function companionGranted(
+  grant: CompanionGrant,
+  systemPermissions: string[],
+  objects: ObjectRows,
+  accessDefaultOf: ObjectAccessDefaultOf,
+): boolean {
   if (grant.kind === 'capability') return systemPermissions.includes(grant.id);
-  const row = asObject(objects[grant.id]);
+  const row = companionRow(objects, grant.id, accessDefaultOf);
   return grant.flags.every((flag) => row[flag] === true);
 }
 
@@ -277,18 +295,25 @@ function companionGranted(grant: CompanionGrant, systemPermissions: string[], ob
  */
 function companionGrantsAdded(
   draft: Record<string, unknown>,
+  accessDefaultOf: ObjectAccessDefaultOf,
 ): { systemPermissions: string[]; objects: ObjectRows } | null {
   let systemPermissions = asArray<string>(draft.systemPermissions);
   let objects = asObject<ObjectRows>(draft.objects);
   let changed = false;
   for (const grant of ADMIN_COMPANION_GRANTS) {
-    if (companionGranted(grant, systemPermissions, objects)) continue;
+    if (companionGranted(grant, systemPermissions, objects, accessDefaultOf)) continue;
     changed = true;
     if (grant.kind === 'capability') {
       systemPermissions = [...systemPermissions, grant.id];
       continue;
     }
-    const row = asObject(objects[grant.id]);
+    // objectstack#27010 — the row starts from the entry the runtime applies,
+    // so an object the `'*'` entry covers keeps every bit it had.
+    const row = objectRuleSeed(
+      objects as Record<string, ObjectPerm>,
+      grant.id,
+      accessDefaultOf(grant.id),
+    ) as Record<string, unknown>;
     const added: Record<string, true> = {};
     for (const flag of grant.flags) if (row[flag] !== true) added[flag] = true;
     objects = { ...objects, [grant.id]: { ...row, ...added } };
@@ -444,7 +469,17 @@ export interface PermissionAdvancedFacetsProps {
    * environment set, with marks and the one-click grant.
    */
   packageBound?: boolean;
+  /**
+   * objectstack#27010 — an object's `access.default`, from the host's object
+   * catalog. The companion grants read a set's `'*'` entry the way the runtime
+   * does, and that depends on the posture. Omitted, or `undefined` for an
+   * object: not private, as the runtime reads an object without
+   * `access.default`.
+   */
+  objectAccessDefault?: ObjectAccessDefaultOf;
 }
+
+const NO_POSTURE: ObjectAccessDefaultOf = () => undefined;
 
 export function PermissionAdvancedFacets({
   draft,
@@ -456,6 +491,7 @@ export function PermissionAdvancedFacets({
   t,
   only,
   packageBound = false,
+  objectAccessDefault = NO_POSTURE,
 }: PermissionAdvancedFacetsProps) {
   const flatFor = (section: 'rls' | 'tabs' | 'admin') =>
     only === undefined ? undefined : { shown: only === section, testId: `perm-facet-${section}` };
@@ -586,9 +622,9 @@ export function PermissionAdvancedFacets({
     const objects = asObject<ObjectRows>(draft.objects);
     return ADMIN_COMPANION_GRANTS.map((grant) => ({
       grant,
-      granted: companionGranted(grant, systemPermissions, objects),
+      granted: companionGranted(grant, systemPermissions, objects, objectAccessDefault),
     }));
-  }, [draft.systemPermissions, draft.objects]);
+  }, [draft.systemPermissions, draft.objects, objectAccessDefault]);
   const companionsMissing = companions.some((c) => !c.granted);
   /**
    * Adds only the missing grants, as ONE draft edit the set's normal Save
@@ -596,7 +632,7 @@ export function PermissionAdvancedFacets({
    */
   const grantCompanions = () =>
     setDraft((p) => {
-      const added = companionGrantsAdded(p);
+      const added = companionGrantsAdded(p, objectAccessDefault);
       if (!added) return p;
       return { ...p, systemPermissions: added.systemPermissions, objects: added.objects };
     });
@@ -709,6 +745,7 @@ export function PermissionAdvancedFacets({
                   objectName={pol.object}
                   fieldNames={fieldsFor(pol.object)}
                   clause="using"
+                  verdictPath={`rowLevelSecurity.${i}.using`}
                   onLintChange={(issues) => reportClause(`${i}:using`, issues)}
                   onChange={(v) => {
                     const next = [...policies];
@@ -725,6 +762,7 @@ export function PermissionAdvancedFacets({
                   objectName={pol.object}
                   fieldNames={fieldsFor(pol.object)}
                   clause="check"
+                  verdictPath={`rowLevelSecurity.${i}.check`}
                   onLintChange={(issues) => reportClause(`${i}:check`, issues)}
                   onChange={(v) => {
                     const next = [...policies];

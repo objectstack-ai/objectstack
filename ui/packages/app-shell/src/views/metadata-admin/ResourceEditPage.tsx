@@ -147,6 +147,7 @@ import { useMetadataLocale, t, tFormat, translateMetadataType, translateValidati
 import { JsonSourceEditor } from './JsonSourceEditor.js';
 import { validateMetadataDraft, hasClientValidator, type DraftMode } from './clientValidation.js';
 import {
+  DraftVerdictContext,
   draftEnvelopeDiagnostics,
   editedItemDiagnostics,
   withServerOnlyErrors,
@@ -2643,7 +2644,7 @@ function MetadataResourceEditPageImpl({
     </>
   );
 
-  return (
+  const page = (
     <PageShell
       entry={entry ?? { type, label: type }}
       itemName={createMode ? '(new)' : name}
@@ -3080,8 +3081,17 @@ function MetadataResourceEditPageImpl({
                           onSelectionChange={setSelection}
                           locale={locale}
                           diagnostics={previewDiagnostics}
-                          onPatch={(patch) =>
-                            handleDraftChange((d) => ({ ...(d as Record<string, unknown>), ...patch }))
+                          // objectstack#26888 — an item this page cannot write (a
+                          // locked package item, a caller without the capability)
+                          // gets no `onPatch`: per the preview contract the canvas
+                          // is then read-only, as Studio does for a read-only
+                          // package (objectui#11136). A live canvas here took
+                          // edits the page offers no Save for, and dropped them.
+                          onPatch={
+                            readOnly
+                              ? undefined
+                              : (patch) =>
+                                  handleDraftChange((d) => ({ ...(d as Record<string, unknown>), ...patch }))
                           }
                         />
                       </div>
@@ -3536,6 +3546,9 @@ function MetadataResourceEditPageImpl({
       </AlertDialog>
     </PageShell>
   );
+  // objectstack#26858 — the verdict on the body on screen, for an expression
+  // field to read at its own path (`useServerErrorsAt`).
+  return <DraftVerdictContext.Provider value={serverDiagnostics}>{page}</DraftVerdictContext.Provider>;
 }
 
 /**

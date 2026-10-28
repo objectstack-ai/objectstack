@@ -305,7 +305,7 @@ test.beforeAll(async () => {
   // this callback runs long after module evaluation, so its utilities are
   // resolvable here — and they MUST be compiled, or the console pane below
   // would be an unstyled block and its reading meaningless.
-  css = await tailwindFor([...ALL_CANDIDATES, ...CONSOLE_MAIN.split(' ')]);
+  css = await tailwindFor([...ALL_CANDIDATES, ...CONSOLE_MAIN.split(' '), ...PAGE_HEADER_CANDIDATES]);
 });
 
 /* ════════════════════════════════════════════════════════════════════════════
@@ -544,5 +544,95 @@ test.describe('record header title width arbitration (objectui#7281)', () => {
     // Kept as a class-shape check on purpose: it states WHY the title needed a
     // floor, and it is not what the geometry assertions above rest on.
     expect(DETAIL.tail.split(/\s+/)).toContain('shrink-0');
+  });
+});
+
+/* ════════════════════════════════════════════════════════════════════════════
+ * objectstack#26897 — `page:header`'s record header BELOW the `sm` breakpoint.
+ *
+ * The same cross-axis defect objectui#9119 fixed on DetailView, on the third
+ * record header: `page:header` (`packages/components/src/renderers/layout/
+ * containers.tsx`) draws its record title through `RecordTitleChip`, inside a
+ * row that is `flex-col items-start` below `sm`, so its title column took the
+ * h1's max-content width and the console's content pane clipped the title
+ * mid-word with no ellipsis ("CASE-00001 · Login issues after platfo" at
+ * 390×844 on the HotCRM seed). Every class string below is read out of the
+ * two real sources; only the action tail's content is a fixture.
+ * ════════════════════════════════════════════════════════════════════════════ */
+
+const CONTAINERS_FILE = 'packages/components/src/renderers/layout/containers.tsx';
+const CHIP_FILE = 'packages/components/src/custom/RecordTitleChip.tsx';
+const containersSrc = read(CONTAINERS_FILE);
+const chipSrc = read(CHIP_FILE);
+
+const PAGE_HEADER = {
+  // The record branch's `<header>` comes first in the file; the non-record
+  // fallback's carries no `sm:flex-row`, so a drift onto it throws.
+  row: classByPattern(containersSrc, CONTAINERS_FILE, /<header\s+className=\{cn\(\s*'([^']+)'/, [
+    'flex-col',
+    'items-start',
+    'sm:flex-row',
+  ]),
+  titleColumn: classBefore(containersSrc, CONTAINERS_FILE, '<RecordTitleChip', ['flex-col', 'min-w-0']),
+  // The tail as it renders when the host wires `refresh` (the console does).
+  tail: classAt(containersSrc, CONTAINERS_FILE, 'if (!refreshButton) return actions;', 1, ['shrink-0']),
+  chip: classByPattern(chipSrc, CHIP_FILE, /<div className=\{cn\('([^']+)', className\)\}>/, ['min-w-0']),
+  chipRow: classBefore(chipSrc, CHIP_FILE, '{icon && (', ['flex-wrap']),
+  // #1 after the anchor is the icon's own span; #2 is the h1, #3 the object label.
+  h1: classAt(chipSrc, CHIP_FILE, '{icon && (', 2, ['truncate']),
+  objectLabel: classAt(chipSrc, CHIP_FILE, '{icon && (', 3, ['shrink-0']),
+};
+
+/** The mobile tail: one inline action, the `⋯` trigger and the `⟳` chrome. */
+const PAGE_HEADER_TAIL_BOX = 'h-9 w-12 shrink-0';
+
+const pageHeaderFixture = (title: string) =>
+  box(
+    PAGE_HEADER.row,
+    box(
+      PAGE_HEADER.titleColumn,
+      box(
+        PAGE_HEADER.chip,
+        box(
+          PAGE_HEADER.chipRow,
+          `<h1 class="${PAGE_HEADER.h1}">${title}</h1><span class="${PAGE_HEADER.objectLabel}">Case</span>`,
+        ),
+      ),
+    ) + box(PAGE_HEADER.tail, Array.from({ length: 3 }, () => box(PAGE_HEADER_TAIL_BOX)).join('')),
+  );
+
+const PAGE_HEADER_CANDIDATES = [...Object.values(PAGE_HEADER), PAGE_HEADER_TAIL_BOX]
+  .join(' ')
+  .split(/\s+/)
+  .filter(Boolean);
+
+test.describe('page:header record title below the sm breakpoint (objectstack#26897)', () => {
+  // 390 is the card's phone; the other three are objectui#9119's.
+  for (const width of [320, 375, 390, 639]) {
+    test(`the title column cannot outgrow its row at ${width}px`, async ({ page }) => {
+      const r = await readGeometry(page, pageHeaderFixture(LONG_TITLE), css, width);
+      expect(
+        r.titleColumnWidth,
+        `title column ${r.titleColumnWidth}px inside a ${r.rowWidth}px row — it was sized to the ` +
+          'title, not to the row, so the h1 `truncate` cannot bind',
+      ).toBeLessThanOrEqual(r.rowWidth + 0.5);
+      expect(r.documentOverflowX, 'the record header pushed the page sideways').toBe(0);
+      // A title cut off with no ellipsis is the defect, not the fix: the
+      // ellipsis has to fire.
+      expect(
+        r.h1Clipped,
+        `h1 is ${r.h1Width}px wide for a ${r.h1ScrollWidth}px title but reports no clipping`,
+      ).toBe(true);
+    });
+  }
+
+  test('CONTROL: at 1440px the title column is content-sized and the tail shares its line', async ({ page }) => {
+    // `sm:w-auto` has to hand the row back to the `sm:flex-row` arbitration
+    // objectui#7244 settled: a short title, unclipped, with the tail beside it.
+    const r = await readGeometry(page, pageHeaderFixture(TITLE), css, ROOMY);
+    expect(r.h1Clipped, `h1 ${r.h1Width}px vs scrollWidth ${r.h1ScrollWidth}px`).toBe(false);
+    expect(r.tailOnOwnLine, 'the tail wrapped at a viewport where it fits').toBe(false);
+    expect(r.titleColumnWidth).toBeLessThan(r.rowWidth);
+    expect(r.documentOverflowX).toBe(0);
   });
 });

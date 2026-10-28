@@ -126,6 +126,15 @@ import {
   exportMeasureCell,
   type ReportTableSnapshot,
 } from './ReportExport';
+import {
+  ReportDateRangeControl,
+  initialReportPeriod,
+  readDateRangeDeclaration,
+  reportTimeWindow,
+  useReportDateDimension,
+  type ReportPeriod,
+  type ReportTimeWindow,
+} from './ReportDateRange';
 
 type Row = Record<string, unknown>;
 
@@ -210,6 +219,13 @@ interface DatasetReportLike {
   drilldown?: boolean;
   /** Embedded chart visualization (ADR-0021): type + xAxis/yAxis over the dataset. */
   chart?: Record<string, unknown>;
+  /**
+   * The report's period (`ReportSchema.dateRange`): a date window over one
+   * dataset date dimension, drawn as a chip and lowered onto every query as a
+   * `timeDimensions` entry — see `ReportDateRange.tsx`. Refused on a `joined`
+   * container by the spec, and not read there.
+   */
+  dateRange?: unknown;
   label?: unknown;
   description?: unknown;
   blocks?: DatasetReportLike[];
@@ -509,6 +525,7 @@ function useDatasetRows(
   dataSource: unknown,
   totalsGroupings?: string[][],
   order?: SelectionOrder,
+  timeWindow?: ReportTimeWindow,
 ) {
   const [state, setState] = React.useState<{
     status: 'idle' | 'loading' | 'ok' | 'error';
@@ -536,7 +553,10 @@ function useDatasetRows(
   // re-render the previous grid. `JSON.stringify` preserves key order, which is
   // exactly the sort significance that must invalidate the cache.
   const orderKey = JSON.stringify(scopedOrder ?? null);
-  const signature = `${dataset}|${dimensions.join(',')}|${measures.join(',')}|${rfKey}|${totalsKey}|${orderKey}`;
+  // The report's period (`dateRange`) is part of the signature too: picking
+  // another window on the chip is another selection, so it re-queries.
+  const windowKey = JSON.stringify(timeWindow ?? null);
+  const signature = `${dataset}|${dimensions.join(',')}|${measures.join(',')}|${rfKey}|${totalsKey}|${orderKey}|${windowKey}`;
 
   // objectui#10814 — the data-invalidation bus (`notifyDataChanged` from
   // `@object-ui/react`), read the objectui#10623 way: the nonce moves when a
@@ -596,6 +616,11 @@ function useDatasetRows(
         ...(runtimeFilter && Object.keys(runtimeFilter).length > 0 ? { runtimeFilter } : {}),
         ...(totalsGroupings ? { totals: { groupings: totalsGroupings } } : {}),
         ...(scopedOrder ? { order: scopedOrder } : {}),
+        // `ReportSchema.dateRange`'s lowering: ONE `timeDimensions` entry with
+        // no `granularity` — a filter window the server ANDs with
+        // `runtimeFilter`, never a bucket. Absent, the selection is exactly
+        // what a report without a period has always posted.
+        ...(timeWindow ? { timeDimensions: [timeWindow] } : {}),
       })
       .then((res) => {
         if (!cancelled) {
@@ -755,6 +780,7 @@ function DatasetReportTable({
   onDrill,
   order,
   withTotals,
+  timeWindow,
 }: {
   dataset: string;
   rows: string[];
@@ -764,6 +790,7 @@ function DatasetReportTable({
   onDrill?: (args: DatasetDrillArgs) => void;
   order?: SelectionOrder;
   withTotals?: boolean;
+  timeWindow?: ReportTimeWindow;
 }) {
   // With no grouping dimensions the single result row already IS the grand
   // total — requesting totals would only duplicate it.
@@ -775,6 +802,7 @@ function DatasetReportTable({
     dataSource,
     withTotals && rows.length > 0 ? [[]] : undefined,
     order,
+    timeWindow,
   );
   const { fieldLabel, fieldOptionLabel } = useSafeFieldLabel();
   const tt = useSafeTranslate();
@@ -1149,12 +1177,14 @@ function DatasetReportChart({
   runtimeFilter,
   dataSource,
   order,
+  timeWindow,
 }: {
   dataset: string;
   chart: Record<string, unknown>;
   runtimeFilter?: Record<string, unknown>;
   dataSource?: unknown;
   order?: SelectionOrder;
+  timeWindow?: ReportTimeWindow;
 }) {
   const xAxis = typeof chart.xAxis === 'string' ? chart.xAxis : '';
   const yAxis = typeof chart.yAxis === 'string' ? chart.yAxis : '';
@@ -1181,6 +1211,7 @@ function DatasetReportChart({
     dataSource,
     undefined,
     order,
+    timeWindow,
   );
   const ChartComponent = useRegistryComponent('chart');
   const { fieldLabel, fieldOptionLabel } = useSafeFieldLabel();
@@ -1526,6 +1557,7 @@ function DatasetMatrixTable({
   dataSource,
   onDrill,
   order,
+  timeWindow,
 }: {
   dataset: string;
   rows: string[];
@@ -1535,6 +1567,7 @@ function DatasetMatrixTable({
   dataSource?: unknown;
   onDrill?: (args: DatasetDrillArgs) => void;
   order?: SelectionOrder;
+  timeWindow?: ReportTimeWindow;
 }) {
   // Row subtotals, column subtotals, and the grand total ([]), in that order.
   //
@@ -1552,6 +1585,7 @@ function DatasetMatrixTable({
     dataSource,
     [rows, columnsAcross, []],
     order,
+    timeWindow,
   );
   const tt = useSafeTranslate();
   const { fieldLabel, fieldOptionLabel } = useSafeFieldLabel();
@@ -1855,6 +1889,23 @@ export const DatasetReportRenderer: React.FC<DatasetReportRendererProps> = ({
   // The drawn table's cells, for the export control (not read on `joined`).
   const [tableSnapshot, setTableSnapshot] = React.useState<ReportTableSnapshot | null>(null);
 
+  // The report's period (`dateRange`, objectstack-ai/objectstack#25873). A
+  // `joined` container has none — the spec refuses it there — so it is not
+  // read on that branch. The pick is keyed on the declaration it was made
+  // against: a report edited to another declaration reopens on its own
+  // `defaultRange` instead of keeping a window the author no longer offers.
+  const dateRangeDecl = presentation === 'joined' ? undefined : readDateRangeDeclaration(report.dateRange);
+  const dateRangeKey = JSON.stringify(dateRangeDecl ?? null);
+  const [picked, setPicked] = React.useState<{ key: string; period: ReportPeriod } | null>(null);
+  const period = dateRangeDecl
+    ? picked && picked.key === dateRangeKey
+      ? picked.period
+      : initialReportPeriod(dateRangeDecl)
+    : undefined;
+  const dateDimension = useReportDateDimension(String(report.dataset ?? ''), dateRangeDecl);
+  const timeWindow =
+    period && dateDimension.status === 'ready' ? reportTimeWindow(dateDimension.dimension, period) : undefined;
+
   // Joined → a vertical stack of dataset-bound blocks.
   if (presentation === 'joined' && Array.isArray(report.blocks)) {
     return (
@@ -1951,6 +2002,7 @@ export const DatasetReportRenderer: React.FC<DatasetReportRendererProps> = ({
       runtimeFilter={outerFilter}
       dataSource={dataSource}
       order={reportOrder}
+      timeWindow={timeWindow}
     />
   ) : null;
 
@@ -1968,6 +2020,7 @@ export const DatasetReportRenderer: React.FC<DatasetReportRendererProps> = ({
       dataSource={dataSource}
       onDrill={drillSink}
       order={reportOrder}
+      timeWindow={timeWindow}
     />
   ) : (
     <DatasetReportTable
@@ -1979,8 +2032,15 @@ export const DatasetReportRenderer: React.FC<DatasetReportRendererProps> = ({
       onDrill={drillSink}
       order={reportOrder}
       withTotals={presentation === 'summary' || presentation === 'matrix'}
+      timeWindow={timeWindow}
     />
   );
+
+  // A declared period whose dimension is still being resolved, or cannot be,
+  // draws that state INSTEAD of the body: a table queried before the window
+  // is known would show every period under a chip naming one.
+  const periodPending = !!dateRangeDecl && dateDimension.status === 'loading';
+  const periodError = dateDimension.status === 'error' ? dateDimension.message : undefined;
 
   // The chart precedes the grouped / flat table, and follows the cross-tab:
   // the ruling on objectstack-ai/objectstack#20293 draws a matrix's chart
@@ -1998,9 +2058,28 @@ export const DatasetReportRenderer: React.FC<DatasetReportRendererProps> = ({
       data-report-name={report.name}
       data-report-presentation={presentation}
     >
-      <ReportExportControl exportOptions={report.exportOptions} label={report.label} name={report.name} snapshot={tableSnapshot} />
-      {crossTab ? table : chart}
-      {crossTab ? chart : table}
+      {/* One header row: the period chip on the left, Export on the right;
+          hidden when neither draws. */}
+      <div className="flex flex-wrap items-center justify-between gap-2 empty:hidden" data-testid="dataset-report-header">
+        {dateRangeDecl && period ? (
+          <ReportDateRangeControl
+            decl={dateRangeDecl}
+            value={period}
+            onChange={(next) => setPicked({ key: dateRangeKey, period: next })}
+          />
+        ) : null}
+        <ReportExportControl exportOptions={report.exportOptions} label={report.label} name={report.name} snapshot={tableSnapshot} />
+      </div>
+      {periodError ? (
+        <FetchStates status="error" error={periodError} />
+      ) : periodPending ? (
+        <FetchStates status="loading" />
+      ) : (
+        <>
+          {crossTab ? table : chart}
+          {crossTab ? chart : table}
+        </>
+      )}
     </div>
     </ReportTableSnapshotContext.Provider>
   );

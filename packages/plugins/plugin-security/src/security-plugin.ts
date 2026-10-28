@@ -2095,7 +2095,7 @@ export class SecurityPlugin implements Plugin {
       const readPermissionEvaluator = () => this.permissionEvaluator;
       const readQl = () => this.ql;
       const readTenancyPosture = () => this.tenancyPosture;
-      const host: Pick<SecurityServiceHost, 'acceptedDefaultPermissionSets' | 'canExport' | 'canReadObject' | 'checkAuthoredRowWrite' | 'checkControlledByParentWrite' | 'declareEveryone' | 'delegatedAdminGate' | 'describePositionGrants' | 'explainAccessForCaller' | 'getEffectiveObjectPermissions' | 'getMetadataReadableFields' | 'getObjectSecurityMeta' | 'getQueryableFields' | 'getReadFilter' | 'getReadableFields' | 'getWritableFields' | 'logger' | 'ownershipFloorAlternates' | 'permissionEvaluator' | 'ql' | 'resolvePermissionSetsForContext' | 'tenancyPosture'> = {
+      const host: Pick<SecurityServiceHost, 'acceptedDefaultPermissionSets' | 'canExport' | 'canReadObject' | 'checkAuthoredRowWrite' | 'checkControlledByParentWrite' | 'declareEveryone' | 'delegatedAdminGate' | 'describePositionGrants' | 'explainAccessForCaller' | 'getEffectiveObjectPermissions' | 'getMetadataReadableFields' | 'getObjectSecurityMeta' | 'getQueryableFields' | 'getReadFilter' | 'getReadableFields' | 'getRecordFieldAccess' | 'getWritableFields' | 'logger' | 'ownershipFloorAlternates' | 'permissionEvaluator' | 'ql' | 'resolvePermissionSetsForContext' | 'tenancyPosture'> = {
         acceptedDefaultPermissionSets: this.acceptedDefaultPermissionSets,
         canExport: (...a) => this.canExport(...a),
         canReadObject: (...a) => this.canReadObject(...a),
@@ -2111,6 +2111,7 @@ export class SecurityPlugin implements Plugin {
         getQueryableFields: (...a) => this.getQueryableFields(...a),
         getReadFilter: (...a) => this.getReadFilter(...a),
         getReadableFields: (...a) => this.getReadableFields(...a),
+        getRecordFieldAccess: (...a) => this.getRecordFieldAccess(...a),
         getWritableFields: (...a) => this.getWritableFields(...a),
         get logger() { return readLogger(); },
         ownershipFloorAlternates: this.ownershipFloorAlternates,
@@ -2615,6 +2616,19 @@ export class SecurityPlugin implements Plugin {
   }
 
   /**
+   * [ADR-0142 D3] The same ownership-queue service, for the caller's queue set
+   * (`queuesOf`) — the one producer of `current_user.queues`
+   * (`kernel-queue-membership.ts`). `null` with no service, and the key then
+   * stays unresolved: every policy reading it fails closed.
+   */
+  private ownershipQueueMembership(): Pick<IOwnershipQueueService, 'queuesOf'> | null {
+    const svc = this.resolveKernelService?.(OWNERSHIP_QUEUE_SERVICE) as
+      | Pick<IOwnershipQueueService, 'queuesOf'>
+      | undefined;
+    return svc && typeof svc.queuesOf === 'function' ? svc : null;
+  }
+
+  /**
    * [ADR-0090 D10] The composition knobs the DELEGATOR's own direct by-id
    * write of `recordId` would get: its floor decision
    * ({@link resolvePreImageFloorDrop}, asked as the delegator — its own sets,
@@ -2970,6 +2984,62 @@ export class SecurityPlugin implements Plugin {
   }
 
   /**
+   * [#26594 / ruling of record 6457467702] Query surface: the field projection
+   * of ONE record — which fields the caller may read on `object`, and which it
+   * may write on the stored row `recordId`. The record-scoped twin of
+   * {@link getReadableFields} and {@link getWritableFields}, for the one reader
+   * that holds a row: a record's edit form.
+   *
+   * One judge. `editable` is the step 2.5 write gate's own verdict
+   * ({@link computeForbiddenFieldWrites}) on an update by id of that row
+   * naming every field, over the same sets, posture and delegator
+   * intersection the gate takes ({@link resolveProjectionFieldMask}), with the
+   * row read as the CALLER reads it — the reader the gate's own pre-image is
+   * read by ({@link getCallerPreImage} → {@link readRowById}). So a
+   * row-conditioned entry (`FieldPermissionSchema.when`) locks a field only on
+   * the rows its condition names, and a field is in `editable` iff a by-id
+   * update of that row naming it passes step 2.5. No second evaluator of
+   * `when` exists for this answer to drift from.
+   *
+   * `readable` is {@link getReadableFields}' answer from the same mask: reads
+   * are judged row-blind.
+   *
+   * Never wider than the read path: `null` for a row that is absent or that the
+   * caller cannot read — the same no-row read, deliberately indistinguishable
+   * — and a read the middleware refuses outright (no read grant) rejects as it
+   * does there. `undefined` when the schema cannot be resolved, as on the
+   * object-wide projections. A system context reads every field.
+   */
+  async getRecordFieldAccess(
+    object: string,
+    recordId: string,
+    context?: any,
+  ): Promise<{ object: string; recordId: string; readable: string[]; editable: string[] } | null | undefined> {
+    const objectName = String(object ?? '');
+    const id = String(recordId ?? '');
+    const mask = await this.resolveProjectionFieldMask(objectName, context, { fallbackOnEmptySets: false });
+    if (mask.kind === 'answer' && mask.fields === undefined) return undefined;
+    if (!id) return null;
+    const row = await this.readRowById(objectName, id, context);
+    if (!row) return null;
+    // The read half from the SAME mask, through the read projection's own body.
+    const readable = await computeReadableFields.call(
+      { resolveProjectionFieldMask: async () => mask },
+      objectName, context, { fallbackOnEmptySets: false },
+    );
+    if (mask.kind === 'answer') {
+      return { object: objectName, recordId: id, readable: readable ?? [], editable: mask.fields ?? [] };
+    }
+    const forbidden = new Set(await mask.readRowForbiddenWrites(row));
+    return {
+      object: objectName,
+      recordId: id,
+      readable: readable ?? [],
+      editable: mask.allFields.filter((f) => !forbidden.has(f)),
+    };
+  }
+
+  /**
    * [#20935] Query surface: the field names the caller may QUERY ON in
    * `object` — filter, sort, group or aggregate by — the query-side twin of
    * {@link getReadableFields}, for the doors that compile their own statement
@@ -3023,6 +3093,8 @@ export class SecurityPlugin implements Plugin {
       readPartialMaskRules: () => Record<string, FieldMaskingRule>;
       /** [#20935] The middleware's query-guard map for these sets (computeQueryGuardFieldPerms). */
       readQueryGuardPerms: () => Record<string, { readable: boolean; editable: boolean }>;
+      /** [#26594] The write gate's verdict on an update of `row` naming every field (computeForbiddenFieldWrites). */
+      readRowForbiddenWrites: (row: Record<string, unknown>) => Promise<string[]>;
     }
   > {
     // [#25223 cut 9] The body moved to `security-plugin-field-readers.ts` (see `FieldReadersHost`).
@@ -3030,7 +3102,8 @@ export class SecurityPlugin implements Plugin {
     const readPermissionEvaluator = () => this.permissionEvaluator;
     const readQl = () => this.ql;
     const readTenancyPosture = () => this.tenancyPosture;
-    const host: Pick<FieldReadersHost, 'computeQueryGuardFieldPerms' | 'computeReadPartialMaskRules' | 'foldFieldRequiredPermissions' | 'getObjectFieldNames' | 'metadata' | 'permissionEvaluator' | 'ql' | 'resolveCallerPosture' | 'resolveFallbackPermissionSets' | 'resolvePermissionSetsForContext' | 'tenancyPosture'> = {
+    const host: Pick<FieldReadersHost, 'computeForbiddenFieldWrites' | 'computeQueryGuardFieldPerms' | 'computeReadPartialMaskRules' | 'foldFieldRequiredPermissions' | 'getObjectFieldNames' | 'metadata' | 'permissionEvaluator' | 'ql' | 'resolveCallerPosture' | 'resolveFallbackPermissionSets' | 'resolvePermissionSetsForContext' | 'tenancyPosture'> = {
+      computeForbiddenFieldWrites: (...a) => this.computeForbiddenFieldWrites(...a),
       computeQueryGuardFieldPerms: (...a) => this.computeQueryGuardFieldPerms(...a),
       computeReadPartialMaskRules: (...a) => this.computeReadPartialMaskRules(...a),
       foldFieldRequiredPermissions: (...a) => this.foldFieldRequiredPermissions(...a),
@@ -4202,6 +4275,10 @@ export class SecurityPlugin implements Plugin {
    * with every miss failing closed. A key both the resolver and a declaration
    * claim resolves from neither. Called with the context alone, it stages the
    * resolver's keys only, as before.
+   *
+   * [ADR-0142 D3] When those policies read `current_user.queues`, it first
+   * resolves that reserved key from the ownership-queue service
+   * (`kernel-queue-membership.ts`), once per request.
    */
   private stageRlsMembership(
     context: any,
@@ -4215,13 +4292,14 @@ export class SecurityPlugin implements Plugin {
     const readRlsCompiler = () => this.rlsCompiler;
     const readRlsMembershipResolver = () => this.rlsMembershipResolver;
     const readTenancyPosture = () => this.tenancyPosture;
-    const host: Pick<RlsFilterHost, 'datetimeFieldNamesCache' | 'getObjectFieldNames' | 'getObjectSecurityMeta' | 'logger' | 'metadata' | 'numberComparandFieldsCache' | 'ql' | 'rlsCompiler' | 'rlsMembershipResolver' | 'tenancyDisabledCache' | 'tenancyPosture'> = {
+    const host: Pick<RlsFilterHost, 'datetimeFieldNamesCache' | 'getObjectFieldNames' | 'getObjectSecurityMeta' | 'logger' | 'metadata' | 'numberComparandFieldsCache' | 'ownershipQueueMembership' | 'ql' | 'rlsCompiler' | 'rlsMembershipResolver' | 'tenancyDisabledCache' | 'tenancyPosture'> = {
       datetimeFieldNamesCache: this.datetimeFieldNamesCache,
       getObjectFieldNames: (...a) => this.getObjectFieldNames(...a),
       getObjectSecurityMeta: (...a) => this.getObjectSecurityMeta(...a),
       get logger() { return readLogger(); },
       get metadata() { return readMetadata(); },
       numberComparandFieldsCache: this.numberComparandFieldsCache,
+      ownershipQueueMembership: () => this.ownershipQueueMembership(),
       get ql() { return readQl(); },
       get rlsCompiler() { return readRlsCompiler(); },
       get rlsMembershipResolver() { return readRlsMembershipResolver(); },

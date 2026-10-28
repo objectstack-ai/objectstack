@@ -143,10 +143,16 @@ export function unresolvedFieldOf(param: BulkActionParam): string | undefined {
  * `accept` / `maxSize` ride along because the file widgets read them and a
  * promoted param always delivered them (the hand-mapper spread the raw param).
  *
- * The rest of the resolved picker config (`descriptionField`, `lookupColumns`,
- * `lookupFilters`, …) is NOT forwarded: the bulk adapter (`bulkParamToField`)
- * has no rename for those widget keys, and growing one is a convergence of the
- * two param adapters, not this card. Named in objectui#12105's PR.
+ * The picker settings a reference-bearing field declares — `lookupFilters`,
+ * `lookupColumns`, `lookupPageSize` and `descriptionField` — are carried under
+ * their own names, the spellings `LookupField` reads and the ones app-shell's
+ * `paramToField` hands the single-record dialog's picker
+ * (objectstack-ai/objectstack#26951). No rename is needed: `BulkActionParam`'s
+ * catch-all holds them and `bulkParamToField` spreads the rest onto the
+ * widget's field. Dropping them let the selection bar's picker offer a record
+ * the field's `lookupFilters` hides from the row menu's picker.
+ * `idField` / `titleFormat` are still not carried: the resolver reads them off
+ * undeclared snake keys only, and no bulk reader has asked for them.
  *
  * Collecting the values ONCE in the bulk dialog is the whole point, so the
  * runner must not be handed the param defs again (it would re-prompt per
@@ -169,6 +175,10 @@ function toBulkParam(resolved: ActionParamDef): BulkActionParam | null {
     ...(resolved.referenceTo !== undefined && { object: resolved.referenceTo }),
     ...(resolved.displayField !== undefined && { labelField: resolved.displayField }),
     ...(resolved.dependsOn !== undefined && { dependsOn: resolved.dependsOn }),
+    ...(resolved.descriptionField !== undefined && { descriptionField: resolved.descriptionField }),
+    ...(resolved.lookupColumns !== undefined && { lookupColumns: resolved.lookupColumns }),
+    ...(resolved.lookupFilters !== undefined && { lookupFilters: resolved.lookupFilters }),
+    ...(resolved.lookupPageSize !== undefined && { lookupPageSize: resolved.lookupPageSize }),
     ...(resolved.accept !== undefined && { accept: resolved.accept }),
     ...(resolved.maxSize !== undefined && { maxSize: resolved.maxSize }),
     ...(resolved.unresolvedField !== undefined && { [UNRESOLVED_FIELD_KEY]: resolved.unresolvedField }),

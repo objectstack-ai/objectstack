@@ -56,8 +56,7 @@ import type { ObjectGanttSchema as ObjectGanttSchemaTS } from '../objectql.js';
 const MINIMAL = {
   type: 'object-gantt',
   objectName: 'task',
-  startDateField: 'start',
-  endDateField: 'end',
+  gantt: { startDateField: 'start', endDateField: 'end', titleField: 'name' },
 } as const;
 
 /** The ten keys this card declared, each with a value its declared type refuses. */

@@ -237,8 +237,11 @@ export {
   useResponsiveSidebar,
   useActionModal,
   useHomePath,
+  LauncherAppsProvider,
+  useLauncherApps,
+  useServedApps,
 } from './hooks/index.js';
-export type { FavoriteItem } from './hooks/index.js';
+export type { FavoriteItem, LauncherApps, LauncherAppsProviderProps } from './hooks/index.js';
 
 // Context providers
 export {

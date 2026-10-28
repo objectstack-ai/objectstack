@@ -119,6 +119,19 @@
  * reference counts from `sql-driver.ts`, as before. `sql-driver.ts` no longer
  * reads `fieldHasColumn` as a value.
  *
+ * [#25521 cut 19] The declared column DEFAULT emission joined them the same
+ * way: `nowColumnDefault`, the driver-native DEFAULT for a `defaultValue:
+ * 'NOW()'` field on each dialect, and `applyDeclaredColumnDefault`, which
+ * decides what a field's `defaultValue` becomes in DDL and calls it. The SQLite
+ * rebuild above already reached both through the host; `createColumn` and
+ * `createAuditTimestampColumn`, which call them too, stay in the class, and so
+ * do both methods. `SchemaSyncHost` already listed every member these bodies
+ * read. The module-level declarations they read are imported from where they
+ * are declared: `MYSQL_DATETIME_PRECISION` and `isNowDefaultValue` (which now
+ * carry `export`) from `sql-driver.ts`, which still reads both, and
+ * `isRuntimeDefaultToken` from `@objectstack/spec/data`, which `sql-driver.ts`
+ * no longer reads.
+ *
  * A MOVE, not a redesign. Each function below is the body of the `SqlDriver`
  * method of the same name as it stood, re-indented one level and otherwise
  * unedited: the same dialect statements, the same rebuild procedure, the same
@@ -149,15 +162,16 @@
  */
 
 import { isUniqueViolationError } from '@objectstack/types';
+import type { Knex } from 'knex';
 import { StorageNameMapping } from '@objectstack/spec/system';
 import { carriesNullSafeTenantKeyPart, ceremonyOwnedDropFinding, describeMissingIndexColumns, diffManagedIndexes, diffManagedTable, diffUnbuildableIndexes, driftKey, expectedIndexes, fieldHasColumn, GLOBAL_TENANT, indexedKeyColumns, isCeremonyOwnedColumnDrop, isIndexDriftOp, legacyUniqueReplacements, normalizeDeclaredIndex, type DeclaredIndexInput, type DriftOp, type ManagedDriftEntry, type PendingSchemaWork, type PhysicalColumn } from './schema-drift.js';
 import { isJsonColumnType, mediaColumnMoveDialect, mediaColumnMovePlan, type MediaColumnMovePlan, type MediaColumnMoveRefusal, type MediaColumnMoveScan } from './media-column-move.js';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import { recoverUnencodedJsonText } from './unencoded-json-text.js';
 import { aggregandColumnClass } from '@objectstack/core';
-import { FILE_REFERENCE_TYPES, NUMERIC_VALUE_TYPES, parseAutonumberFormat, resolveAutonumberFormat, type AutonumberToken } from '@objectstack/spec/data';
+import { FILE_REFERENCE_TYPES, isRuntimeDefaultToken, NUMERIC_VALUE_TYPES, parseAutonumberFormat, resolveAutonumberFormat, type AutonumberToken } from '@objectstack/spec/data';
 import { formatAttribute, undeliveredStorageAttributes, type UndeliveredAttribute } from './builtin-column-collision.js';
-import { AUDIT_TIMESTAMP_COLUMNS, declaredValueShapes, type IntrospectedColumn, isMultiValuedColumn, LOCK_WAIT_REFUSAL, NUMERIC_SCALAR_TYPES, type SqlDriver, SQLITE_NON_TEMPORAL_TEXT_REFS, SQLITE_TIME_EXPR_REFS } from './sql-driver.js';
+import { AUDIT_TIMESTAMP_COLUMNS, declaredValueShapes, type IntrospectedColumn, isMultiValuedColumn, isNowDefaultValue, LOCK_WAIT_REFUSAL, MYSQL_DATETIME_PRECISION, NUMERIC_SCALAR_TYPES, type SqlDriver, SQLITE_NON_TEMPORAL_TEXT_REFS, SQLITE_TIME_EXPR_REFS } from './sql-driver.js';
 
 /**
  * The `SqlDriver` members the functions below read — every one of them, and
@@ -2063,4 +2077,72 @@ export async function previewTimeConvergence(this: Pick<SchemaSyncHost, 'isMysql
   } catch {
     return [];
   }
+}
+
+/** The body of `SqlDriver#nowColumnDefault`; the method's docblock there is its contract. */
+export function nowColumnDefault(this: Pick<SchemaSyncHost, 'isMysql' | 'isPostgres' | 'isSqlite' | 'knex'>, type: string): Knex.Raw {
+  if (!this.isSqlite) {
+    // A `time` column deserves the same reasoning on the native dialects
+    // (#3994): `knex.fn.now()` compiles to CURRENT_TIMESTAMP, which a TIME
+    // column resolves in the SERVER's timezone on Postgres and the INSERTING
+    // session's timezone on MySQL — measured as three different wall clocks
+    // for one instant across the three dialects. Pin the default to the UTC
+    // time-of-day, matching what the driver's own writes and the SQLite
+    // branch below produce. (MySQL 8.0 additionally REJECTS a plain
+    // CURRENT_TIMESTAMP default on a TIME column — only the parenthesised
+    // expression form, MySQL 8.0.13+/MariaDB 10.2+, is legal there at all.)
+    if (type === 'time') {
+      if (this.isMysql) return this.knex.raw('(cast(utc_timestamp(3) as time(3)))');
+      if (this.isPostgres) return this.knex.raw("(timezone('utc', now())::time(3))");
+    }
+    // `date` has the same two problems one type over (#4022): a bare
+    // CURRENT_TIMESTAMP default resolves the calendar day in the SERVER's
+    // timezone on Postgres (measured: a UTC-12 server records YESTERDAY),
+    // and MySQL 8.0 rejects it on a DATE column outright (MariaDB is merely
+    // permissive; the driver's UTC-pinned session masked the semantic half
+    // there). Same fix as `time`: an expression default reading the UTC
+    // clock, which is also what `formatInput`'s NOW() safety-net and the
+    // SQLite branch below store.
+    if (type === 'date') {
+      if (this.isMysql) return this.knex.raw('(cast(utc_timestamp() as date))');
+      if (this.isPostgres) return this.knex.raw("(timezone('utc', now())::date)");
+    }
+    // `datetime` on MySQL (#21241): the column is `DATETIME(n)` (see
+    // `createColumn`), and MySQL REFUSES a `CURRENT_TIMESTAMP` default whose
+    // precision differs from its column's — the whole `CREATE TABLE` fails
+    // with "Invalid default value". The bare `knex.fn.now()` below is
+    // precision 0, so the default carries the column's precision from the
+    // one source both read. Postgres keeps the bare form: its `timestamptz`
+    // takes `CURRENT_TIMESTAMP` at microsecond precision, measured accepted.
+    if (type === 'datetime' && this.isMysql) return this.knex.fn.now(MYSQL_DATETIME_PRECISION);
+    return this.knex.fn.now();
+  }
+  switch (type) {
+    case 'date': return this.knex.raw("(strftime('%Y-%m-%d', 'now'))");
+    // The CASE trims a zero-millisecond `.000` so a defaulted row is
+    // byte-canonical ({@link canonicalTimeOfDay}) — `%f` alone would store
+    // `'01:55:08.000'` once in a thousand inserts, and that row would then
+    // miss an equality filter against the canonical `'01:55:08'`. SQLite
+    // fixes `'now'` per statement, so the three calls cannot straddle a
+    // millisecond boundary.
+    case 'time': return this.knex.raw(
+      "(case when strftime('%H:%M:%f', 'now') like '%.000' " +
+      "then strftime('%H:%M:%S', 'now') else strftime('%H:%M:%f', 'now') end)",
+    );
+    // datetime (and any non-temporal field that opts into NOW()): canonical instant.
+    default:     return this.knex.raw("(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))");
+  }
+}
+
+/** The body of `SqlDriver#applyDeclaredColumnDefault`; the method's docblock there is its contract. */
+export function applyDeclaredColumnDefault(this: Pick<SchemaSyncHost, 'nowColumnDefault'>, col: Knex.ColumnBuilder, field: any, type: string): void {
+  const dv = field?.defaultValue;
+  if (dv === undefined || dv === null) return;
+  if (isNowDefaultValue(dv)) {
+    col.defaultTo(this.nowColumnDefault(type));
+    return;
+  }
+  if (isRuntimeDefaultToken(dv)) return;
+  if (typeof dv === 'object') return;
+  col.defaultTo(dv as any);
 }

@@ -215,7 +215,7 @@ export function ReportExportControl({ exportOptions, label, name, snapshot }: Re
 
   const exportText = t('list.export', { defaultValue: 'Export' });
   return (
-    <div className="flex justify-end" data-testid="report-export">
+    <div className="ml-auto flex" data-testid="report-export">
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-muted-foreground" aria-label={exportText}>

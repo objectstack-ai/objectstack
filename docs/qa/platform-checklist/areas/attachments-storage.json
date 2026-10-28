@@ -170,7 +170,7 @@
       "title": "Authenticated presigned upload → committed sys_file → signed-URL download round-trip; anonymous upload is 401",
       "since": "v15.1",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai)", "anonymous (no bearer token)"],
@@ -227,7 +227,7 @@
         "a downloadUrl that 404s when followed is the #3641 regression (a minted-but-unmounted URL) — FAIL, not environment"
       ],
       "traps": ["dispatcher-vs-hono-route"],
-      "automated": { "kind": "api", "ref": "packages/qa/dogfood/test/attachments-permission-matrix.dogfood.test.ts — a permission-matrix file over the HTTP doors of a booted stack, and it pins halves of three clauses only: acceptance[0]'s owner half after completion ('(e) authenticated upload succeeds and sys_file.owner_id is server-stamped' reads the COMMITTED row's owner_id; never the pending row, the presign response fields or a client-supplied owner); acceptance[2]'s envelope half ('(e-read) attachments download requires auth AND read access to a parent record' asserts { success: true, data: { url } } on the owner's /url and never follows the url); acceptance[4]'s 401 AUTH_REQUIRED half ('(e) anonymous presigned upload → 401 AUTH_REQUIRED'). Its uploadFile helper drives presign, PUT and complete but asserts only their statuses. Unpinned, so driven by hand: acceptance[0]'s response fields and pending read, acceptance[1]'s pending → committed pair, acceptance[2]'s byte comparison, acceptance[3]'s 302, and acceptance[4]'s sys_file count before and after the anonymous attempt" },
+      "automated": { "kind": "api", "ref": "packages/qa/dogfood/test/attachments-permission-matrix.dogfood.test.ts — a permission-matrix file over the HTTP doors of a booted stack, and it pins halves of three clauses only: acceptance[0]'s owner half after completion ('(e) authenticated upload succeeds and sys_file.owner_id is server-stamped' reads the COMMITTED row's owner_id; never the pending row, the presign response fields or a client-supplied owner); acceptance[2]'s envelope half ('(e-read) attachments download requires auth AND read access to a parent record' asserts { success: true, data: { url } } on the owner's /url and never follows the url); acceptance[4]'s 401 AUTH_REQUIRED half ('(e) anonymous presigned upload → 401 AUTH_REQUIRED'). Its uploadFile helper drives presign, PUT and complete but asserts only their statuses. Unpinned, so driven by hand: acceptance[0]'s response fields and pending read, acceptance[1]'s pending → committed pair, acceptance[2]'s byte comparison, acceptance[3]'s 302, and acceptance[4]'s sys_file count before and after the anonymous attempt. Corroborating, not in the scoring list: packages/qa/dogfood/test/storage-unclaimed-download.dogfood.test.ts follows /url to the bytes and the 302 → Location → bytes for a bearer and a cookie caller over a booted stack, but on a scope-less file, so acceptance[2] and [3] stay hand-driven for the attachments-scope file" },
       "source": [
         "docs/plans/release-15.1-test-plan.md §A12 / §C1",
         "packages/services/service-storage/src/storage-routes.ts#session (upload session gate #2755, envelope #3689, 302 door)",
@@ -240,6 +240,12 @@
           "date": "2026-10-26",
           "change": "Two checklist-accuracy findings of Tier 1 record #25815 (release-18.2.0-tier1, at 6679644a), re-read on main f6c61932. (1) The bare automated.ref named the permission-matrix file for the whole item, but that file's uploadFile helper drives presign, PUT and complete asserting only their statuses: acceptance[0]–[3]'s response-field, pending → committed, byte-equality and 302 halves are unpinned. The ref now scopes the file to the halves it asserts (acceptance[0]'s committed owner_id, acceptance[2]'s envelope, acceptance[4]'s 401) and names the rest as hand-driven. (2) acceptance[4]: the anonymous case asserts 401 + AUTH_REQUIRED but never counts sys_file rows around the attempt, so the no-row half is named as hand-driven. No clause, step or oracle changed.",
           "ref": "#25839"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-28",
+          "change": "automated.ref names a corroborating pin. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26468, Tier 1 half A, at 756220c4; wave anchor #25807, slice B): storage-unclaimed-download.dogfood.test.ts follows /url and the 302 to the bytes over HTTP for bearer and cookie callers, on a scope-less file, so it corroborates acceptance[2] and [3] without scoring them for the attachments-scope fixture. Re-read at base fd246c22 (the file exists in packages/qa/dogfood/test). No clause changed",
+          "ref": "#25807"
         }
       ]
     },
@@ -248,7 +254,7 @@
       "title": "Gated downloads: 401 anonymous, 403 parent-invisible, signed URL for the entitled — per gating class (attachments-scope / field-owned / public_read opt-out / ungated)",
       "since": "v15.1",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["admin (uploader/owner)", "signed-up member who cannot read the parent record (qa-scratch-authz persona B: the API deny clauses)",
@@ -314,7 +320,7 @@
         "a deny that surfaces in the panel as 'Download failed (403)' instead of the mapped copy means the error-envelope dialect broke (#3689 note in the panel) — file it against objectui, not storage"
       ],
       "traps": ["wrong-persona", "dispatcher-vs-hono-route", "stale-console-bundle"],
-      "automated": { "kind": "api", "ref": "packages/qa/dogfood/test/attachments-permission-matrix.dogfood.test.ts (the CLOSED side — clauses 0, 1 and 2: anonymous 401 AUTH_REQUIRED on both download routes, 403 ATTACHMENT_DOWNLOAD_DENIED for an authenticated member who cannot read the parent, and, for clause 2, the 200 {success, data:{url}} envelope only — answered to the admin owner, who also owns and reads the parent, and to a non-uploader member who reads it; the url is never followed. Clause 2's uploader-bypass leg (the file's owner_id user against a parent it cannot otherwise read) and its 'the url serves the bytes' leg are not asserted here and are hand-driven) + packages/qa/dogfood/test/attachments-public-read-acl.dogfood.test.ts (clause 3, the OPEN side, asserted on ONE attachments-scope file attached to a private parent: the anonymous capability URL is 401 BEFORE the flip, 302 AFTER acl='public_read' — and the redirect is FOLLOWED anonymously and the served bytes compared, because a 302 into a wall would satisfy a status-only assertion — the /url sibling likewise reopens in its declared envelope, and flipping the acl back to 'private' re-closes both routes, which is what shows the acl VALUE is the cause rather than state accrued by the earlier requests. A sibling file on the SAME parent with the same uploader and scope keeps its 401/403, so the opt-out is per FILE and not a global fail-open. The TTL is read back out of the minted capability URL to prove WHICH branch ran: public_read returns presignedTtl (measured >3000s) while an authorized gated grant returns downloadTtl (measured <=300s) — a distinction no status code exposes, so a widened gate admitting the anonymous caller through the AUTHORIZED path would still be caught. The field-owned gating class (ref_object/ref_id, ADR-0104 D3 wave 2) is covered on both sides too, including its distinct FILE_DOWNLOAD_DENIED deny code, which is the evidence that the field-owned arm — not the attachments arm — is the one that ran). STILL MANUAL: clause 4, the browser's friendly denial copy in RecordAttachmentsPanel (ui/packages/app-shell/src/views/RecordAttachmentsPanel.tsx since the objectui import), is a screenshot oracle over the console bundle, which this repo builds from its ui/ tree with `pnpm console:build` into the gitignored packages/console/dist (`pnpm build` does not refresh it). It has NO pin, must be hand-driven, and the clause-3 pin must NOT be read as covering it." },
+      "automated": { "kind": "api", "ref": "packages/qa/dogfood/test/attachments-permission-matrix.dogfood.test.ts (the CLOSED side — clauses 0, 1 and 2: anonymous 401 AUTH_REQUIRED on both download routes, 403 ATTACHMENT_DOWNLOAD_DENIED for an authenticated member who cannot read the parent, and, for clause 2, the 200 {success, data:{url}} envelope only — answered to the admin owner, who also owns and reads the parent, and to a non-uploader member who reads it; the url is never followed. Clause 2's uploader-bypass leg (the file's owner_id user against a parent it cannot otherwise read) and its 'the url serves the bytes' leg are not asserted here and are hand-driven) + packages/qa/dogfood/test/attachments-public-read-acl.dogfood.test.ts (clause 3, the OPEN side, asserted on ONE attachments-scope file attached to a private parent: the anonymous capability URL is 401 BEFORE the flip, 302 AFTER acl='public_read' — and the redirect is FOLLOWED anonymously and the served bytes compared, because a 302 into a wall would satisfy a status-only assertion — the /url sibling likewise reopens in its declared envelope, and flipping the acl back to 'private' re-closes both routes, which is what shows the acl VALUE is the cause rather than state accrued by the earlier requests. A sibling file on the SAME parent with the same uploader and scope keeps its 401/403, so the opt-out is per FILE and not a global fail-open. The TTL is read back out of the minted capability URL to prove WHICH branch ran: public_read returns presignedTtl (measured >3000s) while an authorized gated grant returns downloadTtl (measured <=300s) — a distinction no status code exposes, so a widened gate admitting the anonymous caller through the AUTHORIZED path would still be caught. The field-owned gating class (ref_object/ref_id, ADR-0104 D3 wave 2) is covered on both sides too, including its distinct FILE_DOWNLOAD_DENIED deny code, which is the evidence that the field-owned arm — not the attachments arm — is the one that ran). STILL MANUAL: clause 4, the browser's friendly denial copy in RecordAttachmentsPanel (ui/packages/app-shell/src/views/RecordAttachmentsPanel.tsx since the objectui import), is a screenshot oracle over the console bundle, which this repo builds from its ui/ tree with `pnpm console:build` into the gitignored packages/console/dist (`pnpm build` does not refresh it). Its one pin is a component test, ui/packages/app-shell/src/views/__tests__/RecordAttachmentsPanel.test.tsx, which asserts the friendly-copy mapping for both envelope dialects in jsdom: that lifts clause 4 and negative[1] to partial (component), never pass, so the browser leg is still hand-driven, and the clause-3 pin must NOT be read as covering it." },
       "source": [
         "docs/plans/release-15.1-test-plan.md §A12 / §C1 (#2755/#2970)",
         "packages/services/service-storage/src/storage-routes.ts#authorizeDownload (authorizeDownload: gating classes, verdict→status mapping, downloadTtl vs presignedTtl)",
@@ -359,6 +365,12 @@
           "date": "2026-10-27",
           "change": "automated.ref: the 'objectui pin is retired' aside dropped; the sentence already names the in-repo console build line (`pnpm console:build` from ui/) (#26626, maintainer-directed). No clause changed, no status changed",
           "ref": "#26626"
+        },
+        {
+          "revision": 9,
+          "date": "2026-10-28",
+          "change": "automated.ref names the component pin of clause 4. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26468, Tier 1 half A, at 756220c4; wave anchor #25807, slice B): RecordAttachmentsPanel.test.tsx asserts the friendly denial copy for both envelope dialects at component layer, so the ref's 'It has NO pin' was stale; it now says the pin lifts clause 4 and negative[1] to partial and the browser leg stays manual. The run's other note (clause 2's admin owner is also the parent owner, so the uploader bypass is never isolated) is already in the ref. Re-read at base fd246c22 (the test file exists). No clause changed",
+          "ref": "#25807"
         }
       ]
     },
@@ -618,7 +630,7 @@
       "title": "sys_file status pipeline: pending → committed → deleted (tombstone) with un-tombstone on re-attach; shared files never tombstone early",
       "since": "v15.1",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai)"],
@@ -684,7 +696,7 @@
       ],
       "variants": ["pending", "committed", "deleted"],
       "traps": ["wrong-panel"],
-      "automated": { "kind": "api", "ref": "packages/qa/dogfood/test/attachments-permission-matrix.dogfood.test.ts + packages/services/service-storage/src/tombstone-download-live-reference.test.ts (#10246 — acceptance[2]'s tombstone-with-a-live-holder half, which no live door can stage; a route-handler unit test over a mock HTTP server and a fake engine)" },
+      "automated": { "kind": "api", "ref": "packages/qa/dogfood/test/attachments-permission-matrix.dogfood.test.ts + packages/services/service-storage/src/tombstone-download-live-reference.test.ts (#10246 — acceptance[2]'s tombstone-with-a-live-holder half, which no live door can stage; a route-handler unit test over a mock HTTP server and a fake engine) + packages/services/service-storage/src/attachment-lifecycle.test.ts (unit over stub adapters: 'never tombstones non-attachments scopes (Field.file/avatar protection)' for acceptance[5], and 'a failing lookup never blocks the delete (best-effort)' for negative[1] — evidence of that layer only)" },
       "source": [
         "packages/services/service-storage/src/objects/system-file.object.ts (status enum + lifecycle declaration; the variants list is that enum)",
         "packages/services/service-storage/src/attachment-lifecycle.ts (tombstone/un-tombstone hooks, last-reference rule, attachments-scope discriminator)",
@@ -700,6 +712,12 @@
           "date": "2026-10-26",
           "change": "Two checklist-accuracy findings of Tier 1 record #25815 (release-18.2.0-tier1, at 6679644a), re-read on main f6c61932. (1) acceptance[2]: the live-holder half is scored, as the item directs, from tombstone-download-live-reference.test.ts, which is a route-handler unit test (mock HTTP server, fake engine), and the live holder-less 404 FILE_NOT_FOUND and post-re-attach /url 200 legs have no pin. (2) acceptance[1]: that file's 'leaves `pending` refused' case is the same unit layer, and the api clause's 404 FILE_NOT_FOUND has no HTTP pin. Both verifies now name the layer, score the unit half partial under RUNNER rule 6 and send the live legs to steps[1], steps[6] and steps[7]; automated.ref names the file's layer and says acceptance[2] where it said 'clause 3'. No clause or oracle changed.",
           "ref": "#25839"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-28",
+          "change": "automated.ref gains attachment-lifecycle.test.ts. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26468, Tier 1 half A, at 756220c4; wave anchor #25807, slice B): that file (named in orphan-tombstone-reap's ref, not this one) carries unit pins for acceptance[5] (non-attachments scopes never tombstone) and negative[1] (a failing lookup never blocks the delete). Re-read at base fd246c22 (attachment-lifecycle.test.ts, the installAttachmentLifecycleHooks block). No clause changed",
+          "ref": "#25807"
         }
       ]
     },
@@ -790,7 +808,7 @@
       "title": "Chunked uploads are resumable; abandoned sessions are reaped and their backend multipart uploads ABORTED before the row (the only pointer) is deleted",
       "since": "v15.1",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai)"],
@@ -859,7 +877,7 @@
       ],
       "variants": ["in_progress", "completing", "completed", "failed", "expired"],
       "traps": ["stale-dist"],
-      "automated": { "kind": "api", "ref": "packages/qa/dogfood/test/attachments-permission-matrix.dogfood.test.ts (acceptance[1] ONLY: '(item 4 + multipart-abort guard) an abandoned chunked upload is reaped AND its uploaded parts are aborted' — the chunked doors over HTTP, then lifecycle.sweep() in-process and the parts directory read on disk) + packages/services/service-storage/src/attachment-lifecycle.test.ts (its createUploadSessionReapGuard block, unit over stub adapters: acceptance[2] and negative[1] by 'does NOT abort a completed session (its multipart is already an object) — just reaps the row', 'reaps a session with no backend_upload_id without calling abort' and 'reaps the row when the adapter cannot abort at all'; acceptance[3] and negative[0] by 'VETOES on abort failure so backend_upload_id survives for the retry', which asserts that a warn was logged on a mock logger but not the warning's text, so acceptance[3]'s log oracle scores partial from it) + packages/services/service-storage/src/storage-routes.test.ts (acceptance[5] at the route-handler unit layer only, its 'terminal upload-session statuses (#7667)' block: the two \"stamps 'expired' and 410s …\" cases, for a chunk PUT and a completion past the session deadline, and 'does not expire a session that is still inside its deadline' — evidence of that layer, never a pass of the api clause; drive steps[8] live)" },
+      "automated": { "kind": "api", "ref": "packages/qa/dogfood/test/attachments-permission-matrix.dogfood.test.ts (acceptance[1] ONLY: '(item 4 + multipart-abort guard) an abandoned chunked upload is reaped AND its uploaded parts are aborted' — the chunked doors over HTTP, then lifecycle.sweep() in-process and the parts directory read on disk) + packages/services/service-storage/src/attachment-lifecycle.test.ts (its createUploadSessionReapGuard block, unit over stub adapters: acceptance[2] and negative[1] by 'does NOT abort a completed session (its multipart is already an object) — just reaps the row', 'reaps a session with no backend_upload_id without calling abort' and 'reaps the row when the adapter cannot abort at all'; acceptance[3] and negative[0] by 'VETOES on abort failure so backend_upload_id survives for the retry', which asserts that a warn was logged on a mock logger but not the warning's text, so acceptance[3]'s log oracle scores partial from it) + packages/services/service-storage/src/storage-routes.test.ts (acceptance[5] at the route-handler unit layer only, its 'terminal upload-session statuses (#7667)' block: the two \"stamps 'expired' and 410s …\" cases, for a chunk PUT and a completion past the session deadline, and 'does not expire a session that is still inside its deadline' — evidence of that layer, never a pass of the api clause; drive steps[8] live; the same block also holds \"reports 'expired' on progress rather than refusing the poll\" and 'leaves a completed session alone once its deadline passes', unit as well). packages/qa/dogfood/test/storage-chunked-resume-integrity.dogfood.test.ts drives the chunked round-trip over HTTP but never reads sys_upload_session status, so acceptance[0] stays unpinned" },
       "source": [
         "packages/services/service-storage/src/attachment-lifecycle.ts#createUploadSessionReapGuard (createUploadSessionReapGuard — abort-before-reap contract, completed/no-backend confirm branches, veto-on-failure)",
         "packages/services/service-storage/src/objects/system-upload-session.object.ts#expires_at (status enum = the variants list; ttl expires_at+1d, retention 7d terminal statuses)",
@@ -879,6 +897,12 @@
           "date": "2026-10-26",
           "change": "Three checklist-accuracy findings of Tier 1 record #25815 (release-18.2.0-tier1, at 6679644a), re-read on main f6c61932. (1) The bare automated.ref named only the permission-matrix file, which scores acceptance[1] alone. (2) acceptance[2], acceptance[3], negative[0] and negative[1] are asserted at unit by attachment-lifecycle.test.ts's createUploadSessionReapGuard block ('does NOT abort a completed session', 'reaps a session with no backend_upload_id without calling abort', 'VETOES on abort failure…', 'reaps the row when the adapter cannot abort at all'), which was not in the ref. (3) acceptance[5]'s 410 is asserted by storage-routes.test.ts at the route-handler unit layer, which was not in the ref and does not score the api oracle. The ref now names all three files, scoped per clause with their layers. No clause, step or oracle changed.",
           "ref": "#25839"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-28",
+          "change": "automated.ref names two more storage-routes cases and the chunked dogfood file. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26468, Tier 1 half A, at 756220c4; wave anchor #25807, slice B): storage-routes.test.ts carries two more terminal-status cases (expired on progress, a completed session left alone), and storage-chunked-resume-integrity.dogfood.test.ts drives the chunked doors over HTTP without reading the session row, so acceptance[0] is still unpinned. Re-read at base fd246c22 (storage-routes.test.ts, the two cases named in the ref). No clause changed",
+          "ref": "#25807"
         }
       ]
     },
@@ -887,7 +911,7 @@
       "title": "Per-line Receipt upload cells in the invoice inline grid: auto-derived file column, real upload control, opaque sys_file reference in the atomic batch",
       "since": "v15.1",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "browser",
       "personas": ["seeded admin (admin@objectos.ai)"],
@@ -902,7 +926,7 @@
         ]
       },
       "steps": [
-        "open /apps/showcase_app/showcase_invoice, click New, and wait for the Line Items grid's real headers (screenshot first)",
+        "open /apps/showcase_app/showcase_invoice (on the console dev server, port 5180 by default, which is where the spec's LIVE_APP_URL points; on a showcase boot's built console the same path sits under /_console, e.g. /_console/apps/showcase_app/showcase_invoice), click New, and wait for the Line Items grid's real headers (screenshot first)",
         "verify the Receipt column auto-derived into the grid (no columns config authors it — file fields must not be dropped from auto-columns)",
         "verify the Receipt cell is a genuine input[type=file] upload control and NOT a text input",
         "materialize a row: pick 'Widget A' in the product lookup, set Qty 1",
@@ -968,6 +992,12 @@
           "date": "2026-10-26",
           "change": "Three checklist-accuracy findings of Tier 1 record #25815 (release-18.2.0-tier1, at 6679644a), re-read on main f6c61932 (the spec read in this tree's ui/e2e/live/). (1) acceptance[2]: the spec does not capture the /api/v1/storage/* upload requests; storage routing is inferred from the file door returning the uploaded bytes. (2) acceptance[3]: the spec never reads the sys_file row (status 'committed', ref_object/ref_id/ref_field, acl 'private') and never asserts the batch answered success — only the request payload and GET /storage/files/:id. (3) negative[1]: a data: URL would satisfy typeof === 'string' and not-contains('receipt.png'); the guard rests on the follow-up storage GET answering 200 with the PNG bytes. Each verify or negative now says what the pin asserts and which leg is hand-driven. Separately, the item's objectui-only framing predates the objectui import, the retired-pin wording #26035 left to this card: knownGaps[0] said the spec exists only in the objectui repo, so the item could not run here and was to be run 'in an objectui checkout'. The spec is now ui/e2e/live/grid-file-upload.spec.ts in this tree, so automated.ref and source[1] name that path, and knownGaps[0] says how to run it from ui/ (`pnpm test:e2e:live`, with a backend on port 3000 and the console dev server on port 5180) and keeps the rule that an unrun pin is a claim, not evidence. No clause, step or oracle changed.",
           "ref": "#25839"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-28",
+          "change": "steps[0] names the base URL. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26468, Tier 1 half A, at 756220c4; wave anchor #25807, slice B): the spec navigates /apps/showcase_app/… on the console dev server (LIVE_APP_URL, default port 5180), while a showcase boot serves the built console under /_console; the step named the path only. Re-read at base fd246c22: ui/playwright.live.config.ts (LIVE_APP_URL || http://localhost:5180), ui/e2e/live/grid-file-upload.spec.ts (its page.goto). No clause changed",
+          "ref": "#25807"
         }
       ]
     },
@@ -976,7 +1006,7 @@
       "title": "A field's declared accept/maxSize is re-enforced SERVER-SIDE on record write — the control the client widget check explicitly is not — with the declared missing-metadata and dotless-extension holes scored as documented boundaries",
       "since": "v17",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai) — the check is a declaration constraint, not an authz gate: it binds every caller identically, so no restricted persona is needed"],
@@ -1000,11 +1030,11 @@
       },
       "steps": [
         "replay the qa-media-constraints recipe (or verify qamedia_media already exists from this boot)",
-        "as admin, mint probe files via presign → PUT bytes → complete: (A) a small PDF declared mimeType 'application/pdf', size ~10KB; (B) a file declared mimeType 'image/png' with size 2097152 (> poster's 1048576 maxSize — size is the DECLARED value; the actual bytes need not be that large); (C) a compliant control declared 'image/png', size ~10KB; (D) filename 'README' (no dot), any mimeType; (E) filename 'report.txt', mimeType 'text/plain'",
+        "as admin, mint probe files via presign → PUT bytes → complete: (A) a small PDF declared mimeType 'application/pdf', size ~10KB; (B) a file declared mimeType 'image/png' with size 2097152 (> poster's 1048576 maxSize — size is the DECLARED value, and since #24548 upload/complete compares it with the bytes the backend holds and answers 409 on a mismatch, so PUT the full 2097152 bytes or B never commits); (C) a compliant control declared 'image/png', size ~10KB; (D) filename 'README' (no dot), any mimeType; (E) filename 'report.txt', mimeType 'text/plain'",
         "POST /api/v1/data/qamedia_media { name: 'accept-probe', poster: <A> } and capture the refusal; list qamedia_media where name='accept-probe' → must be empty; read sys_file A in stored form → ref_id must still be null (the throw lands before the claim)",
         "POST /api/v1/data/qamedia_media { name: 'size-probe', poster: <B> } and capture the refusal + the empty re-list",
         "POST /api/v1/data/qamedia_media { name: 'control', poster: <C> } → 2xx; read sys_file C: ref_object='qamedia_media', ref_field='poster', ref_id=<the record>",
-        "update path: PUT/PATCH the 'control' record swapping poster to <A> → capture the refusal; re-read the record → poster unchanged (the check also rides beforeUpdate, file-reference-lifecycle.ts)",
+        "update path: PATCH the 'control' record swapping poster to <A> (PUT on a record answers 405; PATCH is the record door's update verb) → capture the refusal; re-read the record → poster unchanged (the check also rides beforeUpdate, file-reference-lifecycle.ts)",
         "capture the server log around each refusal: the FileConstraintError text names the field and the accept list ('not permitted by the accept list declared for...') or the byte counts ('exceeds the maximum size declared for...'); record the WIRE status + code each refusal actually surfaced with",
         "documented hole 1 (missing metadata): system-write one committed sys_file clearing mime_type AND size to null, then POST it into poster → the write SUCCEEDS (file-reference-lifecycle.ts — 'missing metadata is not evidence of a violation'; the maxSize guard and the mime read both require the value to be present)",
         "documented hole 2 (extension-only accept vs dotless name): POST { doc: <D> } → SUCCEEDS — accept ['.pdf'] against a name with no dot leaves testable empty and the check exits before judging; contrast POST { doc: <E> } → REFUSED ('report.txt' HAS an extension, so the.pdf entry is testable and mismatches) — the contrast proves the hole is the dotless case, not a dead extension arm",
@@ -1058,7 +1088,7 @@
         "a qamedia_media row created holding the violating reference is THE fail this item exists for — it means the only guard is the client widget, the exact 'declared but not enforced' state ADR-0104 removes (file-reference-lifecycle.ts)",
         "a refusal that still claimed the file (sys_file ref_id stamped despite the non-2xx) is a FAIL — the rejection must be authoritative, not cosmetic (same rule as attach-requires-parent-edit)",
         "⛔ NOT failures: the missing-metadata pass (clause 5) and the dotless-extension pass (clause 6) — both are the source's own documented boundaries; and arbitrary BYTES passing under a compliant declared mimeType is the declaration-based content boundary in knownGaps, not a bypass",
-        "⛔ NOT a violation probe: a random/unknown id token in the field passes untouched BY DESIGN — an id matching no sys_file row is treated as an external/legacy value and skipped before any constraint is read (file-reference-lifecycle.ts); probe with a REAL committed sys_file or the run measures nothing"
+        "⛔ NOT a violation probe: a random/unknown id token in the field is refused before any constraint is read — since #26043 a write WITH a caller answers 400 VALIDATION_FAILED with an invalid_value entry naming the field, the same answer as a file the caller may not read (file-reference-lifecycle.ts findReferenceableFile); only a system or context-less write keeps an unknown id as written. Either way the accept list and maxSize are never judged, so probe with a REAL committed sys_file or the run measures nothing"
       ],
       "traps": ["absence-inference", "wrong-panel"],
       "source": [
@@ -1075,7 +1105,13 @@
         { "revision": 3, "date": "2026-10-20", "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). fixtures.requires[1] cited line 255 of storage-routes.ts, and fixtures.knownGaps[0] and source[5] line 337 of the showcase actions index.ts, in the comma-range spelling (authored in 8d74a57487 as the lists 241-243 and 255, and 334 and 337). At that commit line 255 was the mime_type of the pending sys_file row the presigned-upload route writes, and line 337 the accept/maxSize of the action gallery's p_attachments param; at this base both have moved. requires[1] now anchors storage-routes.ts#registerStorageFamily, whose POST /storage/upload/presigned handler writes that row, and knownGaps[0] and source[5] anchor index.ts#ActionParamGalleryAction. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed", "ref": "#24752" },
         { "revision": 4, "date": "2026-10-20", "change": "automated.ref adds clause 3, the update path — checklist-accuracy finding of QA run #24779 (wave anchor #24579 round 12). Read at base 307ce4c4b4: file-reference-lifecycle.test.ts's 'accept / maxSize enforcement' case 'refuses an UPDATE onto an oversize file with the same envelope, leaving the record and both files as they were' asserts the refused swap and the unchanged stored value at the same handler-direct level as the clauses the ref already names. No clause changed", "ref": "#24824" },
         { "revision": 5, "date": "2026-10-20", "change": "automated removed, fixtures.knownGaps[3] added — checklist-accuracy finding of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4: the ref disclaims the wired lane), round 15 of wave anchor #24579. Re-read at base b1676441ba, after round 12 added the acceptance[3] update-path case: the one pin is handler-direct over a fake engine, and every clause scores the REST answer. By RUNNER rule 6 (a pin scores only the layer it drives) it scores none of them, round 12's update-path case included. automated is dropped (theme-B rule), and the knownGap carries what the pin asserts. No clause changed", "ref": "#24891" },
-        { "revision": 6, "date": "2026-10-27", "change": "the scratch object is renamed qa_media → qamedia_media in fixtures.requires[0], provisioning.why, steps, acceptance and negative, because the qa-media-constraints recipe now declares manifest.namespace 'qamedia' (#26876). Replayed on a fresh stock showcase boot at main a51ba639: as written, the install derived namespace 'media' and the object save answered 422 NAMESPACE_PREFIX, so a literal replay provisioned nothing and every clause of this item would have scored blocked(fixture). The recipe cannot declare 'qa': qa-scratch-authz owns it, and a second 'qa' package answers 422 NAMESPACE_CONFLICT. With 'qamedia', steps 1-2 answered 201/200 beside the qa and qafeeds packages on one boot. Only the object name changed; no clause's assertion, step order or oracle changed", "ref": "#26876" }
+        { "revision": 6, "date": "2026-10-27", "change": "the scratch object is renamed qa_media → qamedia_media in fixtures.requires[0], provisioning.why, steps, acceptance and negative, because the qa-media-constraints recipe now declares manifest.namespace 'qamedia' (#26876). Replayed on a fresh stock showcase boot at main a51ba639: as written, the install derived namespace 'media' and the object save answered 422 NAMESPACE_PREFIX, so a literal replay provisioned nothing and every clause of this item would have scored blocked(fixture). The recipe cannot declare 'qa': qa-scratch-authz owns it, and a second 'qa' package answers 422 NAMESPACE_CONFLICT. With 'qamedia', steps 1-2 answered 201/200 beside the qa and qafeeds packages on one boot. Only the object name changed; no clause's assertion, step order or oracle changed", "ref": "#26876" },
+        {
+          "revision": 7,
+          "date": "2026-10-28",
+          "change": "steps[1](B), steps[5] and negative[3] corrected. Checklist-accuracy findings of the 18.2.0 wave 2 (QA run #26476, manual api set, at 756220c4; wave anchor #25807, slice B). (1) steps[1](B) said the bytes need not match the declared size; since #24548 upload/complete answers 409 when the backend's bytes differ from the declared size, so B must carry its 2097152 bytes. (2) steps[5] offered PUT, which a record answers 405. (3) negative[3] said an unknown id passes untouched; since #26043 a write with a caller refuses it 400 VALIDATION_FAILED, the same answer as an unreadable file. Re-read at base fd246c22: packages/services/service-storage/src/storage-routes.ts heldBytesRefusal (getInfo size against the declared size), file-reference-lifecycle.ts findReferenceableFile ('refused' for an id the lookup cannot see when a caller is asked). The run's recipe line (media_qa_media, 422 NAMESPACE_PREFIX) is already closed by revision 6 (#26876, qamedia_media). The negative still says the probe measures nothing; only the reason changed",
+          "ref": "#25807"
+        }
       ]
     },
     {
@@ -1083,7 +1119,7 @@
       "title": "Upload contract on v18: a declared size over the limit (100 MiB default, moved live by the max_upload_mb setting) is 413 with nothing written, an unknown scope is 400 naming the allowed values (public is retired), only the uploader may complete or poll an upload, an unclaimed private file is 401 to anonymous, and a file id copied from another record hydrates as {id, metadataRefused:true}",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1151,7 +1187,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/services/service-storage/src/storage-limits.test.ts + packages/services/service-storage/src/upload-scope-vocabulary.test.ts + packages/qa/dogfood/test/storage-unclaimed-download.dogfood.test.ts + packages/services/service-storage/src/upload-door-ownership.test.ts + packages/services/service-storage/src/storage-routes.raw-token-refusal.test.ts + packages/objectql/src/engine-file-hydrate-refused.test.ts + packages/objectql/src/engine-file-hydrate-parent-derived.test.ts — layers (RUNNER rule 6): storage-limits.test.ts, upload-scope-vocabulary.test.ts, upload-door-ownership.test.ts and storage-routes.raw-token-refusal.test.ts call the registered RouteHandlers with hand-built IHttpRequest/IHttpResponse (no HTTP adapter), and storage-limits.test.ts's 'a save after boot reaches the next request' is a settings save read inside one ObjectKernel, not a served request; storage-unclaimed-download.dogfood.test.ts drives the download doors of a booted stack (acceptance[4]); both engine-file-hydrate pins run ObjectQL directly (engine). So the pins score acceptance[0]; acceptance[1]–[3] score partial from them and are hand-driven (steps[0]–[2]), and acceptance[5] is hand-driven too, because no pin reads a copied file id over /data (steps[4])"
+        "ref": "packages/services/service-storage/src/storage-limits.test.ts + packages/services/service-storage/src/upload-scope-vocabulary.test.ts + packages/qa/dogfood/test/storage-unclaimed-download.dogfood.test.ts + packages/services/service-storage/src/upload-door-ownership.test.ts + packages/services/service-storage/src/storage-routes.raw-token-refusal.test.ts + packages/objectql/src/engine-file-hydrate-refused.test.ts + packages/objectql/src/engine-file-hydrate-parent-derived.test.ts — layers (RUNNER rule 6): storage-limits.test.ts, upload-scope-vocabulary.test.ts, upload-door-ownership.test.ts and storage-routes.raw-token-refusal.test.ts call the registered RouteHandlers with hand-built IHttpRequest/IHttpResponse (no HTTP adapter), and storage-limits.test.ts's 'a save after boot reaches the next request' is a settings save read inside one ObjectKernel, not a served request; storage-unclaimed-download.dogfood.test.ts drives the download doors of a booted stack (acceptance[4]); both engine-file-hydrate pins run ObjectQL directly (engine). Two more files sit outside this list: packages/qa/dogfood/test/storage-upload-limits.dogfood.test.ts (the presigned and raw doors answer 413 over HTTP, the default and after a settings save without a restart: acceptance[1] at HTTP, short of its no-sys_file-row read) and packages/plugins/organizations/src/storage-upload-door-ownership.wall.test.ts (a booted organization wall, over HTTP: a colleague's commit, chunked-completion and progress on another's upload answer 403 PERMISSION_DENIED and the row is unchanged, which scores acceptance[3] pass). So the pins score acceptance[0] and acceptance[3]; acceptance[1] and [2] score partial from them and are hand-driven (steps[0]–[1]), and acceptance[5] is hand-driven too, because no pin reads a copied file id over /data (steps[4])"
       },
       "source": [
         "packages/services/service-storage/src/storage-limits.ts#resolveStorageLimits",
@@ -1172,6 +1208,12 @@
           "date": "2026-10-26",
           "change": "Two checklist-accuracy findings of Tier 1 record #25815 (release-18.2.0-tier1, at 6679644a), re-read on main f6c61932. (1) acceptance[1]–[3]: storage-limits, upload-scope-vocabulary and upload-door-ownership call registered RouteHandlers with hand-built IHttpRequest/IHttpResponse, with no HTTP adapter, and acceptance[1]'s 'takes effect without restart' is pinned at the plugin and kernel, not on a served request. (2) acceptance[5]: both hydrate pins are engine-level, and no pin reads a copied file id over /data. automated.ref now names each pin's layer and which clauses are hand-driven. No clause, step or oracle changed.",
           "ref": "#25839"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-28",
+          "change": "automated.ref names two HTTP pins and rescores acceptance[3]. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26468, Tier 1 half A, at 756220c4; wave anchor #25807, slice B): storage-upload-limits.dogfood.test.ts (413 and the restartless save, over HTTP) and storage-upload-door-ownership.wall.test.ts (403 PERMISSION_DENIED on commit, chunked completion and progress, booted wall, over HTTP) were missing from the ref; the second makes acceptance[3] pass at the HTTP layer. Re-read at base fd246c22 (both files exist; the wall file drives stack.api and asserts error.code PERMISSION_DENIED). No clause changed",
+          "ref": "#25807"
         }
       ]
     },
@@ -1180,7 +1222,7 @@
       "title": "Chunked upload integrity on v18: complete with a missing chunk is 409 with details.missingChunks and the session stays in_progress, a re-sent chunk counts once, parallel chunks all record, and an org switch mid-upload answers 409 on chunk and complete, and on progress only once the session's expiry stamp is due",
       "since": "v18",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -1192,7 +1234,7 @@
           "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)"
         ],
         "knownGaps": [
-          "acceptance[0] names the org-switch guard among what the pins prove, but none of the three automated.ref files drives a CHUNKED door after an organization switch, so the door-level 409 of acceptance[3] (chunk PUT, chunked complete, a progress read whose expiry stamp is due) is unpinned. The guard is the doors' shared requireStartingOrganization (packages/services/service-storage/src/storage-routes.ts, asking packages/services/service-storage/src/metadata-store.ts#organizationOutOfWriteReach); the one door-level pin of it is the presigned COMMIT door's 409 RESOURCE_CONFLICT in packages/services/service-storage/src/error-envelope.conformance.test.ts, a sibling door, and chunk-part-record-concurrency.test.ts pins only the store-level miss. Score acceptance[0] on chunk accounting and the missing-chunk refusal alone, and do not cite the pins for the org-switch guard. acceptance[3]'s live leg, steps[3], needs a second organization the admin can make active. A stock boot holds one: POST /api/v1/auth/organization/create answers 403 ORGANIZATION_CREATION_DISABLED on every boot whose posture enforces no wall (packages/plugins/plugin-auth/src/auth-manager.ts#ORGANIZATION_CREATION_DISABLED_CODE; QA runs #24560 / #24558). On 18.0.0, where 18.x step 4 (#24580) has deleted the walled boot refusal that of the published prereleases only 18.0.0-next.5 carries, a walled boot provisioned per RUNNER.md's environment-facts entry 'A walled boot is a fixture of its own' creates it through that same door (RUNNER.md 'A stock `single` boot holds exactly one organization, and no door mints a second; a walled boot mints them through the auth API'). A run that provisions neither records acceptance[3] blocked(fixture) naming those entries, never fail. With no chunked-door pin of the guard either, such a run carries no verdict on it; a run that stages the second organization with a system write, as QA run #24560 did, scores a fixture of its own making and records that its verdict rests on it"
+          "CLOSED for the pin half: packages/plugins/organizations/src/storage-upload-organization-change.wall.test.ts now drives the CHUNKED doors after an organization switch over a booted wall (chunk PUT 409, chunked complete 409, progress 200 on a live session and 409 when its expiry stamp is due), so the door-level 409 of acceptance[3] is pinned at http-in-process and the automated.ref names it. The guard is the doors' shared requireStartingOrganization (packages/services/service-storage/src/storage-routes.ts, asking packages/services/service-storage/src/metadata-store.ts#organizationOutOfWriteReach). acceptance[3]'s live leg, steps[3], needs a second organization the admin can make active. A stock boot holds one: POST /api/v1/auth/organization/create answers 403 ORGANIZATION_CREATION_DISABLED on every boot whose posture enforces no wall (packages/plugins/plugin-auth/src/auth-manager.ts#ORGANIZATION_CREATION_DISABLED_CODE; QA runs #24560 / #24558). On 18.0.0, where 18.x step 4 (#24580) has deleted the walled boot refusal that of the published prereleases only 18.0.0-next.5 carries, a walled boot provisioned per RUNNER.md's environment-facts entry 'A walled boot is a fixture of its own' creates it through that same door (RUNNER.md 'A stock `single` boot holds exactly one organization, and no door mints a second; a walled boot mints them through the auth API'). A run that provisions neither records acceptance[3] blocked(fixture) naming those entries, never fail. Such a run scores the guard from the wall pin alone; a run that stages the second organization with a system write, as QA run #24560 did, scores a fixture of its own making and records that its verdict rests on it"
         ]
       },
       "steps": [
@@ -1203,7 +1245,7 @@
       ],
       "acceptance": [
         {
-          "clause": "chunk accounting and the missing-chunk refusal — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand). The org-switch guard of acceptance[3] has no chunked-door pin (knownGaps[0])",
+          "clause": "chunk accounting and the missing-chunk refusal — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand). The org-switch guard of acceptance[3] is pinned at the chunked doors by storage-upload-organization-change.wall.test.ts (knownGaps[0])",
           "oracle": "test",
           "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
@@ -1229,7 +1271,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/services/service-storage/src/chunked-upload-integrity.test.ts + packages/qa/dogfood/test/storage-chunked-resume-integrity.dogfood.test.ts + packages/services/service-storage/src/chunk-part-record-concurrency.test.ts"
+        "ref": "packages/services/service-storage/src/chunked-upload-integrity.test.ts + packages/qa/dogfood/test/storage-chunked-resume-integrity.dogfood.test.ts + packages/services/service-storage/src/chunk-part-record-concurrency.test.ts + packages/plugins/organizations/src/storage-upload-organization-change.wall.test.ts (run it with the @objectstack/organizations vitest: a booted organization wall, http-in-process, pinning acceptance[3]'s doors after an organization switch — chunk PUT 409, chunked complete 409, progress 200 on a live session and 409 once its expiry stamp is due, each with RESOURCE_CONFLICT naming the change and the row unchanged, and switching back finishing the upload)"
       },
       "source": [
         "packages/services/service-storage/src/storage-routes.ts#registerStorageRoutes",
@@ -1277,6 +1319,12 @@
           "date": "2026-10-26",
           "change": "One checklist-accuracy finding of Tier 1 record #25815 (release-18.2.0-tier1, at 6679644a) (acceptance[1]), re-read on main f6c61932: the clause names details.missingChunks [1] (chunk 1 not sent), while the dogfood pin withholds chunk 0 of two and asserts [0] — the same behaviour, on a different fixture. acceptance[1].verify now says the literal belongs to steps[0]'s fixture and that a pin-scored verdict records the pin's [0]. No clause, step or oracle changed.",
           "ref": "#25839"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-28",
+          "change": "knownGaps[0], acceptance[0] and automated.ref follow the chunked-door wall pin. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26468, Tier 1 half A, at 756220c4; wave anchor #25807, slice B): knownGaps[0] said no file drives a chunked door after an organization switch, but packages/plugins/organizations/src/storage-upload-organization-change.wall.test.ts pins the chunk PUT 409, the chunked-complete 409, progress 200 and the progress-with-due-expiry 409 over a booted wall. The file joins the ref, knownGaps[0] is closed for the pin half (its live-leg fixture text is kept), and acceptance[0]'s 'no chunked-door pin' sentence is replaced. Re-read at base fd246c22 (the wall file's chunk-PUT, chunked-complete and progress cases). No clause's assertion changed",
+          "ref": "#25807"
         }
       ]
     }

@@ -219,7 +219,7 @@ function readSource(rel: string): string {
  * the criterion.
  */
 const HOOK_CALL = /useNavigationOverlay\s*\(/;
-const IN_SITES: Array<{ rel: string; member: string; why: string; hop: RegExp; after?: string }> = [
+const IN_SITES: Array<{ rel: string; member: string; why: string; hop: RegExp; after?: string; arity?: number }> = [
   { rel: 'packages/plugin-grid/src/ObjectGrid.tsx', member: 'onRowClick',
     why: 'fed to useNavigationOverlay as its onRowClick', hop: HOOK_CALL },
   { rel: 'packages/plugin-kanban/src/ObjectKanban.tsx', member: 'onRowClick',
@@ -242,9 +242,13 @@ const IN_SITES: Array<{ rel: string; member: string; why: string; hop: RegExp; a
     why: 'the onRowClick arm of `props.onRowClick ?? props.onCardClick`', hop: HOOK_CALL },
   { rel: 'packages/plugin-list/src/ObjectGallery.tsx', member: 'onCardClick',
     why: 'the onCardClick arm of the same `??`', hop: HOOK_CALL },
+  // Three since objectstack#26679: after the modifier payload, the rows the
+  // list shows (the drawer's sibling set). Optional like the second, so the
+  // payload this card pins is still declared and no caller is forced to pass
+  // either.
   { rel: 'packages/plugin-detail/src/RelatedList.tsx', member: 'onRowClick',
     why: 'placed on the object-gallery schema it renders, reaching ObjectGallery props',
-    hop: /type: 'object-gallery'/ },
+    hop: /type: 'object-gallery'/, arity: 3 },
   // ⭐ objectui#7804's `objectql.ts` slice closed the remaining hole on this
   // exact path. `RelatedList` above is IN *because* it writes `onRowClick` onto
   // the `object-gallery` NODE — and until that slice the node type declared
@@ -367,12 +371,15 @@ describe('objectui#9357 — the arity counter, before it is pointed at the tree'
 });
 
 describe('objectui#9357 — consumers on the modifier-forwarding path declare the payload', () => {
-  it.each(IN_SITES)('$rel declares two parameters for $member ($why)', ({ rel, member, after }) => {
+  it.each(IN_SITES)('$rel declares two parameters for $member ($why)', ({ rel, member, after, arity = 2 }) => {
     const params = declParams(readSource(rel), member, after);
     expect(params, `${rel} :: ${member} — no inline function-type declaration found`).not.toBeNull();
-    expect(params, `${rel} :: ${member}`).toHaveLength(2);
-    // The second parameter is optional, so no existing caller is forced to pass it.
-    expect(params![1], `${rel} :: ${member} second parameter must stay optional`).toMatch(/^\w+\?:/);
+    expect(params, `${rel} :: ${member}`).toHaveLength(arity);
+    // The second parameter is optional, so no existing caller is forced to pass
+    // it — and so is any after it.
+    for (const param of params!.slice(1)) {
+      expect(param, `${rel} :: ${member} parameters after the first must stay optional`).toMatch(/^\w+\?:/);
+    }
   });
 
   it('every IN site carries its own forwarding hop — the criterion, not the name', () => {

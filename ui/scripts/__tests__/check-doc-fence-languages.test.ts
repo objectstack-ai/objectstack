@@ -519,7 +519,7 @@ describe('check-doc-fence-languages is wired, not merely present', () => {
     // The root job runs on the `filter` job's `ui` globs, so those globs are the
     // path filter that matters, and a docs-only change under `ui/` must match.
     const globs = uiFilterGlobs(rootCi());
-    const missed = ['content/docs/guide/ci-cd-pipeline.md', 'packages/core/README.md']
+    const missed = ['content/docs/guide/deployment.md', 'packages/core/README.md']
       .map(repoPath)
       .filter((file) => !globs.some((glob) => globMatches(glob, file)));
     expect(missed, 'a docs-only change under ui/ would skip Lint UI').toEqual([]);

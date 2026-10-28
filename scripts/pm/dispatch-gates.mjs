@@ -326,8 +326,8 @@
  * `pull_request:` trigger with a `paths:` filter naming its own script, so
  * "changes to the patrol itself get exercised before they merge"
  * (`half-state-patrol.yml`'s own comment, and the same words in
- * `required-set-patrol.yml`, `release-coverage-patrol.yml` and
- * `merged-branch-reaper.yml`). The card's own specimen is one of those ten:
+ * `fleet-patrols.yml`'s `required-set-patrol` and `release-coverage-patrol`
+ * jobs, and `merged-branch-reaper.yml`). The card's own specimen is one of those ten:
  * `half-state-patrol.yml` already carried that trigger on the day the card was
  * filed. Three of the ten are `validate-deps.yml`'s, including
  * `check:override-consistency` — a gate every dependency card must run. So
@@ -1837,9 +1837,9 @@ const WORKFLOW_VALUE_SOURCE = /\$\{\{[\s\S]*?\}\}|\$\{[A-Za-z_]\w*\}|\$[A-Za-z_]
  *       MET — this gate grades a saved `turbo run test` log, and no log was
  *       named.` A dev following the list runs it and gets a non-verdict.
  *   `node scripts/check-required-contexts.mjs`  →  exit 0 — but it runs the
- *       STATIC pin check, while `required-set-patrol.yml` runs
- *       `--verify-required-set`, a live sweep of the repo's required set. Same
- *       script, different question, and the row said `[required-set-patrol.yml]`.
+ *       STATIC pin check, while fleet-patrols.yml's `required-set-patrol` job
+ *       runs `--verify-required-set`, a live sweep of the repo's required set.
+ *       Same script, different question, and the row named that patrol.
  *   `node scripts/check-shard-attestation.mjs` and
  *       `node scripts/check-cross-package-test-inputs.mjs`  →  exit 0, and both
  *       duplicate what `lint.yml` already runs under a `pnpm check:` alias
