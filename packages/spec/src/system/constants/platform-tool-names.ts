@@ -28,7 +28,9 @@
  * Maintenance contract: registering a new tool in a cloud AI package means
  * adding its name here. The owning package's conformance test fails
  * otherwise — an out-of-date registry is worse than no registry, because
- * consumers now trust it.
+ * consumers now trust it. A new name also needs its `chatbot.tool.<name>`
+ * label in every pack under `ui/packages/i18n/src/locales/` — the ui
+ * plugin-chatbot label-parity tests read this registry.
  */
 
 /**
