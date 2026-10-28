@@ -89,12 +89,16 @@ describe('the drill-through sidecars are emitted on the declared AnalyticsResult
       drillRawTotals: answer.drillRawTotals,
       drillRanges: answer.drillRanges,
     };
+    // Each stage holds one of the two months, so the other is filled as an
+    // empty bucket (#26893) and drills like any row: four grid rows, by month.
     expect(JSON.stringify(sidecars)).toBe(
       '{"dimensionFields":{"stage":"stage"},' +
-        '"drillRawRows":[{"stage":"qualification"},{"stage":"won"}],' +
+        '"drillRawRows":[{"stage":"qualification"},{"stage":"won"},{"stage":"won"},{"stage":"qualification"}],' +
         '"drillRawTotals":[[{"stage":"qualification"},{"stage":"won"}],[{}]],' +
         '"drillRanges":[' +
         '{"close_date":{"field":"close_date","gte":"2026-06-01","lt":"2026-07-01"}},' +
+        '{"close_date":{"field":"close_date","gte":"2026-06-01","lt":"2026-07-01"}},' +
+        '{"close_date":{"field":"close_date","gte":"2026-07-01","lt":"2026-08-01"}},' +
         '{"close_date":{"field":"close_date","gte":"2026-07-01","lt":"2026-08-01"}}]}',
     );
   });

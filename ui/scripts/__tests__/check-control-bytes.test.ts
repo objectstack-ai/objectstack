@@ -505,7 +505,7 @@ describe('wiring — the gate is actually reachable and actually runs', () => {
     // a markdown-only change anywhere under `ui/`.
     expect(withoutComments(triggerBlock(ci))).not.toMatch(/^\s+paths(-ignore)?:/m);
     const globs = uiFilterGlobs(ci);
-    const missed = ['README.md', 'content/docs/guide/ci-cd-pipeline.md', 'packages/core/README.md']
+    const missed = ['README.md', 'content/docs/guide/deployment.md', 'packages/core/README.md']
       .map(repoPath)
       .filter((file) => !globs.some((glob) => globMatches(glob, file)));
     expect(missed, 'a markdown-only change under ui/ would skip Lint UI').toEqual([]);

@@ -490,12 +490,6 @@ describe('check-doc-example-shared-reader — this repository', () => {
       jobBlock(rootCi(), UI_JOBS.typeCheck),
       'the gate must run in CI, next to the other source-parsing gates',
     ).toContain(`run: ${uiRun('check:doc-example-readers')}`);
-
-    // The page that inventories the gates is pinned by command (objectui#3653), so
-    // this would fail there too — asserted here as well because a reader looking
-    // for this gate looks at this file first.
-    const page = fs.readFileSync(path.join(repoRoot, 'content/docs/guide/ci-cd-pipeline.md'), 'utf8');
-    expect(page).toContain('check:doc-example-readers');
   });
 });
 

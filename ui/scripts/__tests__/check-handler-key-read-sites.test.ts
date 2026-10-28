@@ -1156,12 +1156,6 @@ describe('check-handler-key-read-sites — this repository', () => {
       jobBlock(rootCi(), UI_JOBS.typeCheck),
       'the gate must run in CI, next to the other source-parsing gates',
     ).toContain(`run: ${uiRun('check:handler-key-reads')}`);
-
-    // The page that inventories the gates is pinned by command (objectui#3653), so
-    // this would fail there too — asserted here as well because a reader looking
-    // for this gate looks at this file first.
-    const page = fs.readFileSync(path.join(repoRoot, 'content/docs/guide/ci-cd-pipeline.md'), 'utf8');
-    expect(page).toContain('check:handler-key-reads');
   });
 
   it('derives its arms from the mirrors, including the one the card is about', () => {

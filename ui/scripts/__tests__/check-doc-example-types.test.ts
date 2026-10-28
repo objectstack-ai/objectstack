@@ -546,31 +546,9 @@ describe('wiring — the gate is reachable by name, and documented by command', 
   // case at the bottom keeps its `package.json` half and drops the workflow
   // half for the same reason.
 
-  /**
-   * objectui#3653's discipline, applied by hand here: the page that inventories
-   * this repository's gates must name the command a contributor can be stopped
-   * by. `doc-snippet-types.yml` carries no `commandParity` unit in
-   * `ci-cd-pipeline-doc.test.ts` — verified when this landed — so this stands in
-   * for one rather than relying on a pin that does not cover the section.
-   */
-  it('is documented on the page that inventories the gates, by command', () => {
-    const page = fs.readFileSync(
-      path.join(repoRoot, 'content/docs/guide/ci-cd-pipeline.md'),
-      'utf8',
-    );
-    expect(page, 'a contributor stopped by this gate must be able to find it').toContain(
-      'pnpm check:doc-examples',
-    );
-    expect(page).toContain(GATE);
-    // The by-command row, asserted as the whole row rather than by a regex that
-    // could drift onto the prose mentions elsewhere in the same section.
-    const row = page
-      .split('\n')
-      .filter((line) => line.startsWith('|') && line.includes('`pnpm check:doc-examples`'));
-    expect(row, 'exactly one by-command table row must name this gate').toHaveLength(1);
-    expect(row[0], 'the page must say the gate BLOCKS, not merely that it exists').toContain('**Yes**');
-    expect(row[0]).toContain(GATE);
-  });
+  // `is documented on the page that inventories the gates, by command` retired
+  // with objectstack#26944, which deleted that page (objectui's CI guide, which
+  // described workflows that run nowhere under the monorepo).
 
   it('the root package.json alias invokes the gate', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as {

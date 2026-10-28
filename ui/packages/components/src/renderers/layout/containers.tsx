@@ -2942,6 +2942,18 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
     // Headers whose tail already fits are unaffected — an Account record
     // (edit + `⋯` + `⟳`) needs 192 + 16 + ~180px of a 687px header, so it stays
     // on one line exactly as before.
+    //
+    // Below `sm` the header is a COLUMN, and there the title column carries
+    // `w-full sm:w-auto` (objectstack#26897, the defect objectui#9119 fixed
+    // on DetailView's header). In a column a child's WIDTH is its cross size,
+    // and `items-start` sizes it to fit-content, so the column took the h1's
+    // max-content width: 1015px inside a 390px row in Chromium, and the
+    // console's content pane, which clips sideways overflow, cut the title
+    // mid-word with no ellipsis. `min-w-0` is a floor and `flex-1` acts on the
+    // main axis (height here), so neither can bound it; only a definite cross
+    // size lets the h1's `truncate` fire. `sm:w-auto` hands the row back to
+    // the arbitration above unchanged. Geometry pinned in Chromium by
+    // `e2e/record-header-title-width.spec.ts`.
     return (
       <header
         className={cn(
@@ -2951,7 +2963,7 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
         {...designer}
         {...headerAria}
       >
-        <div className="flex flex-col min-w-0 sm:min-w-48 flex-1">
+        <div className="flex flex-col min-w-0 sm:min-w-48 flex-1 w-full sm:w-auto">
           <RecordTitleChip
             title={resolvedTitle}
             titleNode={declaredFace}

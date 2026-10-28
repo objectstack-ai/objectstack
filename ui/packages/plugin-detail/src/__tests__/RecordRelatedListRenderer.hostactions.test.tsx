@@ -76,6 +76,11 @@ describe('RecordRelatedListRenderer — host CRUD + action wiring', () => {
     p.onRowClick({ id: 'c1', name: 'Alice' });
     expect(onView).toHaveBeenCalledWith('c1', { id: 'c1', name: 'Alice' });
 
+    // objectstack#26679 — the rows on show reach the host as the clicked
+    // row's sibling ids, in the list's order, for a drawer's ↑ ↓.
+    p.onRowClick({ id: 'c2', name: 'Bob' }, undefined, [{ id: 'c1' }, { _id: 'c2' }, { name: 'no id' }]);
+    expect(onView).toHaveBeenLastCalledWith('c2', { id: 'c2', name: 'Bob' }, ['c1', 'c2']);
+
     p.onNew();
     expect(onCreate).toHaveBeenCalledTimes(1);
 

@@ -4278,9 +4278,11 @@ jobs:
       # showed recent changes, and a search that truncated away fresh records.
       # #4720 restored those two sites and #4721 closed the external callers;
       # this stops the shape regrowing internally. Same ratchet mechanism as
-      # slot-lookup for the non-test residual, plus one aggregate decrease-only
-      # number for test code (a test whose subject IS off-contract engine input
-      # must be able to build it). Runs its own --self-test first.
+      # slot-lookup for the non-test residual, plus one aggregate number for
+      # test code (a test whose subject IS off-contract engine input must be
+      # able to build it). That number is one-sided (#26549): growth past its
+      # ceiling reds, a fall passes and is reported, and a fall to zero is
+      # refused as a dead scan. Runs its own --self-test first.
       #
       # Scoped (#16496): the same population and inputs as the slot-lookup
       # ratchet, with `scripts/query-options-erasure-baseline.json`.
@@ -5684,7 +5686,7 @@ jobs:
           fi
           if [ -n "$WHOLE" ]; then
             echo "Type-checking the whole workspace -- $WHOLE."
-            pnpm exec turbo run typecheck "${UNIVERSE[@]}"
+            pnpm exec turbo run typecheck "${UNIVERSE[@]}" --summarize
             exit 0
           fi
           pnpm exec turbo ls "${UNIVERSE[@]}" --output=json > "$RUNNER_TEMP/typecheck-universe.json"
@@ -5700,7 +5702,7 @@ jobs:
           printf '  %s\n' "${SELECTED[@]}"
           FILTERS=()
           for P in "${SELECTED[@]}"; do FILTERS+=("--filter=$P"); done
-          pnpm exec turbo run typecheck "${FILTERS[@]}"
+          pnpm exec turbo run typecheck "${FILTERS[@]}" --summarize
 
       # Seed the shared Turbo cache from main only (see the restore step above).
       #
@@ -5721,8 +5723,21 @@ jobs:
       # merge_group is deliberately NOT added to this condition — see the
       # "why queue-branch saves are not the win they look like" note on the
       # `typecheck` aggregator at the bottom of this file.
-      - name: Save Turbo cache (main only)
+      #
+      # The seed keeps only the entries this lane's two turbo runs used, as
+      # ci.yml Test Core's prune step does (#25452): the build's and the
+      # typecheck's `--summarize` summaries, both left in `.turbo/runs/`. A
+      # bookkeeping step, not a gate: no `continue-on-error`, and it exits 0 on
+      # every run-time path.
+      - name: Prune the Turbo cache to this run's tasks (main only)
+        id: prune-turbo-cache
         if: always() && github.event_name == 'push'
+        run: |
+          node scripts/ci/prune-turbo-cache.mjs --site 'Type Check · workspace' \
+            --cache .turbo/cache --run-summaries .turbo/runs
+
+      - name: Save Turbo cache (main only)
+        if: always() && github.event_name == 'push' && steps.prune-turbo-cache.outputs.save == 'true'
         uses: actions/cache/save@v6
         with:
           path: .turbo/cache
