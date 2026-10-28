@@ -285,20 +285,25 @@ describe('[#20263] having — a comparand its column cannot read is refused befo
         "`having` on 'first_opened' (min(opened_at), a datetime column) compares against \"last_30_days\" at "
         + 'having.first_opened.$lt, which is not a datetime value this platform can interpret.'],
     ];
-    const after = (message: string, marker: string): string => {
-      expect(message).toContain(marker);
-      return message.slice(message.indexOf(marker) + marker.length);
+    // [#27173] The remedy sits between the verdict and "NOT applied", so it
+    // lands inside the 500 characters a client reads.
+    const between = (message: string, start: string, end: string): string => {
+      expect(message).toContain(start);
+      const from = message.indexOf(start) + start.length;
+      expect(message.indexOf(end, from)).toBeGreaterThan(from);
+      return message.slice(from, message.indexOf(end, from));
     };
+    const VERDICT_END = 'this platform can interpret. ';
     for (const [having, where, firstSentence] of CASES) {
       // INVALID_FILTER / 400 on both paths, empty or populated, no read.
       const message = await expectHavingRefusal(() => having);
       expect(message.startsWith(`aggregate('${OBJECT}'): ${firstSentence} `)).toBe(true);
-      const remedy = after(message, 'The `having` was NOT applied. ');
+      const remedy = between(message, VERDICT_END, ' The `having` was NOT applied.');
       expect(remedy).toContain('"{30_days_ago}"');
       const twin = await whereTwinOf(where);
       expect(twin.err?.code).toBe('INVALID_FILTER');
       expect(twin.err?.status).toBe(400);
-      expect(remedy).toBe(after(twin.err!.message, 'The filter was NOT applied. '));
+      expect(remedy).toBe(between(twin.err!.message, VERDICT_END, ' The filter was NOT applied.'));
     }
   });
 });
