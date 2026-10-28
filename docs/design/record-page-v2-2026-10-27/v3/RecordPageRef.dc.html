@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>记录页 v3 · 主数据对象两栏档（产品）</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#ffffff}
+:root{--bg:#ffffff;--fg:#0f172a;--muted:#f1f5f9;--muted-fg:#64748b;--border:#e2e8f0;--sidebar:#fafafa;--primary-soft:#eef2ff;--primary-fg:#ffffff;--amber:#b45309;--amber-soft:#fef3c7;--green:#15803d;--green-soft:#dcfce7;--red:#b91c1c;--red-soft:#fee2e2;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+*{box-sizing:border-box}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+a{color:var(--primary);text-decoration:none}
+.btn-primary{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 12px;border-radius:8px;background:var(--primary);color:var(--primary-fg);font-size:12.5px;font-weight:500}
+.btn-outline{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);font-size:12.5px;font-weight:500;color:var(--fg)}
+.iconbtn{display:inline-flex;width:28px;height:28px;align-items:center;justify-content:center;border-radius:6px;color:var(--muted-fg)}
+.chip{display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 7px;border-radius:5px;background:var(--muted);color:var(--fg);font-size:11.5px;white-space:nowrap}
+.chip.soft{background:var(--primary-soft);color:var(--primary)}
+.chip.ok{background:var(--green-soft);color:var(--green)}
+.chip.warn{background:var(--amber-soft);color:var(--amber)}
+.chip.bad{background:var(--red-soft);color:var(--red)}
+.k{font-family:var(--mono);font-size:11px;color:var(--muted-fg)}
+.nav{display:flex;align-items:center;gap:10px;height:34px;padding:0 10px;border-radius:6px;font-size:13px;color:var(--fg)}
+.nav.on{background:var(--primary-soft);color:var(--primary);font-weight:500}
+.hl{display:flex;flex-direction:column;gap:3px;min-width:0}
+.hl .l{font-size:11px;color:var(--muted-fg)}
+.hl .v{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sect{display:flex;align-items:center;justify-content:space-between;height:34px;margin-top:6px;font-size:12.5px;font-weight:600;border-bottom:1px solid var(--border)}
+.sect .k{font-weight:400}
+.sect .cv{color:var(--muted-fg);font-size:11px;margin-right:8px}
+.grid{display:grid;gap:10px 16px;padding:10px 0 4px}
+.g2{grid-template-columns:1fr 1fr}.g3{grid-template-columns:1fr 1fr 1fr}
+.fld{display:flex;flex-direction:column;gap:2px;min-width:0}
+.fld .l{font-size:10.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted-fg)}
+.fld .v{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stage{display:flex;gap:4px;align-items:center}
+.stage span{flex:1;height:6px;border-radius:3px;background:var(--muted)}
+.stage span.done{background:var(--green)}
+.stage span.cur{background:var(--primary)}
+.col{display:flex;flex-direction:column;min-width:0}
+.coltitle{display:flex;align-items:center;justify-content:space-between;height:40px;font-size:13px;font-weight:600}
+.tl{display:flex;gap:10px;padding:10px 0;border-top:1px solid var(--border);font-size:12.5px}
+.tl .ic{display:inline-flex;width:24px;height:24px;align-items:center;justify-content:center;border-radius:12px;background:var(--muted);color:var(--muted-fg);flex:none;font-size:11px}
+.tl .m{font-size:11.5px;color:var(--muted-fg);margin-top:2px}
+.tl.sys{padding:6px 0;color:var(--muted-fg)}
+.tl.sys .ic{width:20px;height:20px;margin-left:2px;margin-right:2px;background:transparent}
+.rel{border:1px solid var(--border);border-radius:10px;margin-bottom:10px}
+.rel .h{display:flex;align-items:center;gap:6px;height:36px;padding:0 12px;font-size:12.5px;font-weight:600}
+.rel .h .iconbtn{margin-left:auto;width:24px;height:24px}
+.rel .r{display:flex;align-items:center;justify-content:space-between;gap:8px;height:32px;padding:0 12px;border-top:1px solid var(--border);font-size:12.5px}
+.rel .r a{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rel .more{display:flex;align-items:center;height:30px;padding:0 12px;border-top:1px solid var(--border);font-size:12px}
+.rel.dash{border-style:dashed}
+.rel.dash .h{color:var(--muted-fg);font-weight:500}
+.tag{position:absolute;top:-9px;left:10px;font:10px/16px var(--mono);padding:0 5px;border-radius:4px;background:var(--fg);color:var(--bg)}
+</style>
+</helmet>
+<div style="width:100%;min-height:900px;display:grid;grid-template-rows:48px 1fr;background:var(--bg);color:var(--fg);font-family:Inter,ui-sans-serif,system-ui,sans-serif;font-size:13px;line-height:1.45;--primary:{{accent}}">
+  <header style="display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:12px;padding:0 16px;border-bottom:1px solid var(--border)">
+    <div style="display:flex;align-items:center;gap:8px"><button type="button" class="iconbtn" aria-label="切换侧边栏">☰</button><span style="display:inline-flex;width:26px;height:26px;align-items:center;justify-content:center;border-radius:7px;background:var(--primary);color:#fff">◆</span><span style="color:var(--muted-fg)">/</span><button type="button" style="display:inline-flex;align-items:center;gap:8px;height:30px;padding:0 10px 0 6px;border-radius:8px;border:1px solid var(--border)"><span style="display:inline-flex;width:20px;height:20px;align-items:center;justify-content:center;border-radius:5px;background:#f97316;color:#fff;font-size:11px;font-weight:700">H</span><span style="font-weight:600">HotCRM</span></button><span class="chip" style="font-size:10px">预览版</span></div>
+    <button type="button" style="display:inline-flex;align-items:center;gap:8px;width:300px;height:32px;padding:0 10px;border:1px solid var(--border);border-radius:8px;background:var(--sidebar);color:var(--muted-fg);font-size:13px">🔍<span style="flex:1;text-align:left">搜索…</span><kbd class="k" style="padding:1px 5px;border:1px solid var(--border);border-radius:4px">⌘K</kbd></button>
+    <div style="display:flex;align-items:center;justify-content:flex-end;gap:4px"><button type="button" class="iconbtn" aria-label="通知">🔔</button><button type="button" class="iconbtn" aria-label="帮助">?</button><button type="button" aria-label="账户" style="display:inline-flex;width:28px;height:28px;margin-left:6px;align-items:center;justify-content:center;border-radius:14px;background:var(--primary);color:#fff;font-size:11px;font-weight:600">DA</button></div>
+  </header>
+  <div style="display:grid;grid-template-columns:200px 1fr;min-height:0">
+    <aside style="border-right:1px solid var(--border);background:var(--sidebar);padding:12px 8px;display:flex;flex-direction:column;gap:2px">
+      <div class="nav">首页</div><div class="nav">销售主页</div>
+      <div style="padding:10px 10px 4px;font-size:11px;color:var(--muted-fg)">销售</div>
+      <div class="nav">线索</div><div class="nav">客户</div><div class="nav">商机</div><div class="nav">报价</div>
+      <div style="padding:10px 10px 4px;font-size:11px;color:var(--muted-fg)">目录</div>
+      <div class="nav on">产品</div><div class="nav">价目表</div>
+    </aside>
+    <main style="min-width:0;display:flex;flex-direction:column">
+      <div style="display:flex;align-items:center;gap:6px;height:36px;padding:0 24px;font-size:12px;color:var(--muted-fg);border-bottom:1px solid var(--border)"><a href="#">‹ 全部产品</a><span style="margin-left:auto;display:inline-flex;align-items:center;gap:2px"><button type="button" class="iconbtn" aria-label="上一条" style="width:24px;height:24px">↑</button><button type="button" class="iconbtn" aria-label="下一条" style="width:24px;height:24px">↓</button><span style="width:1px;height:16px;background:var(--border);margin:0 6px"></span><button type="button" class="iconbtn" aria-pressed="false" title="时间线栏 · ⌘⇧T" aria-label="显示 / 隐藏时间线栏（⌘⇧T）" style="width:26px;height:24px;border-radius:6px;">☴</button><button type="button" class="iconbtn" aria-pressed="true" title="关联栏 · ⌘⇧R" aria-label="显示 / 隐藏关联栏（⌘⇧R）" style="width:26px;height:24px;border-radius:6px;background:var(--primary-soft);color:var(--primary)">⊞</button></span></div>
+      <div style="padding:16px 24px 12px;border-bottom:1px solid var(--border)">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px">
+          <div style="min-width:0"><div style="display:flex;align-items:center;gap:10px"><span style="display:inline-flex;width:36px;height:36px;align-items:center;justify-content:center;border-radius:8px;background:var(--muted);color:var(--muted-fg)">▦</span><span style="font-size:22px;font-weight:600">CRM 企业版</span><span class="chip">产品</span><span class="chip ok">在售</span><button type="button" class="iconbtn" aria-label="复制记录 ID" style="width:22px;height:22px">⧉</button></div><div style="color:var(--muted-fg);margin-left:46px">PRD-0007 · 软件订阅 · 按席位年付</div></div>
+          <div style="display:flex;gap:6px;flex:none"><button type="button" class="btn-primary">加入价目表</button><button type="button" class="btn-outline">克隆</button><button type="button" class="btn-outline">编辑</button><button type="button" class="iconbtn" aria-label="更多：停售、删除">⋯</button></div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:16px;margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+          <div class="hl"><span class="l">产品代码</span><span class="v">CRM-ENT</span></div>
+          <div class="hl"><span class="l">产品族</span><span class="v">CRM</span></div>
+          <div class="hl"><span class="l">标准价</span><span class="v">¥ 8,000 / 席位 / 年</span></div>
+          <div class="hl"><span class="l">计费单位</span><span class="v">席位</span></div>
+          <div class="hl"><span class="l">负责人</span><span class="v" style="color:var(--primary)">Sara Cole</span></div>
+        </div>
+      </div>
+      <!-- reference object: two columns, details takes the width, timeline folds into a compact card -->
+      <div style="display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:28px;padding:4px 24px 24px;min-height:0">
+        <div class="col">
+          <div class="coltitle">详情 <span class="k">全部展开</span></div>
+          <div class="sect"><span>基本信息</span><span class="k">收起 ˄</span></div>
+          <div class="grid g3"><div class="fld"><span class="l">产品名称</span><span class="v">CRM 企业版</span></div><div class="fld"><span class="l">产品代码</span><span class="v">CRM-ENT</span></div><div class="fld"><span class="l">产品族</span><span class="v">CRM</span></div><div class="fld"><span class="l">类型</span><span class="v">软件订阅</span></div><div class="fld"><span class="l">状态</span><span class="v"><span class="chip ok">在售</span></span></div><div class="fld"><span class="l">上架日期</span><span class="v">2026/01/15</span></div></div>
+          <div class="sect"><span>定价</span><span class="k">收起 ˄</span></div>
+          <div class="grid g3"><div class="fld"><span class="l">标准价</span><span class="v">¥ 8,000</span></div><div class="fld"><span class="l">计费单位</span><span class="v">席位 / 年</span></div><div class="fld"><span class="l">最低席位</span><span class="v">10</span></div><div class="fld"><span class="l">折扣上限</span><span class="v">25%</span></div><div class="fld"><span class="l">税率</span><span class="v">6%</span></div><div class="fld"><span class="l">币种</span><span class="v">CNY</span></div></div>
+          <div class="sect"><span>描述</span><span class="k">收起 ˄</span></div>
+          <div style="padding:10px 0 4px;font-size:13px;line-height:1.6;max-width:72ch">面向 50 人以上销售团队的 CRM 套件：线索评分、商机阶段、报价审批、营销活动与仪表盘；含 API 与 SSO，支持按部门的行级权限。年付，按席位计费，续费前 60 天自动提醒。</div>
+          <div class="sect"><span>库存与交付</span><span class="k">显示 3 个空字段</span></div>
+          <div class="grid g3"><div class="fld"><span class="l">交付方式</span><span class="v">云端</span></div><div class="fld"><span class="l">SLA</span><span class="v">99.9%</span></div></div>
+          <div class="sect" style="color:var(--muted-fg);border-bottom:0"><span>合规 · 附加信息</span><span class="k">2 个空分区 · 展开</span></div>
+          <div style="margin-top:auto;padding-top:14px;font-size:11.5px;color:var(--muted-fg)">创建于 1月15日 · 更新于 10月12日 · Sara Cole · <span class="k">PRD-0007</span></div>
+        </div>
+        <div class="col">
+          <div class="coltitle">关联</div>
+          <div class="rel"><div class="h">价目表条目 <span class="chip">3</span><button type="button" class="iconbtn" aria-label="新建价目表条目">＋</button></div><div class="r"><a href="#">标准价目表</a><span class="k">¥ 8,000</span></div><div class="r"><a href="#">教育优惠</a><span class="k">¥ 6,400</span></div><div class="r"><a href="#">渠道价目表</a><span class="k">¥ 7,200</span></div><div class="more"><a href="#">查看全部 3 条 →</a></div></div>
+          <div class="rel"><div class="h">商机明细 <span class="chip">12</span></div><div class="r"><a href="#">Lattice Education Renewal</a><span class="chip warn">谈判</span></div><div class="r"><a href="#">Acme Platform Upgrade</a><span class="chip ok">赢单</span></div><div class="r"><a href="#">Nimbus 扩容</a><span class="chip">方案报价</span></div><div class="more"><a href="#">查看全部 12 条 →</a></div></div>
+          <div class="rel"><div class="h">报价明细 <span class="chip">7</span></div><div class="r"><a href="#">Q-0192 v2</a><span class="k">40 席</span></div><div class="r"><a href="#">Q-0188</a><span class="k">25 席</span></div><div class="more"><a href="#">查看全部 7 条 →</a></div></div>
+          <!-- the folded timeline card: discussion + changes, expands on click -->
+          <div class="rel" style="border-style:dashed"><div class="h" style="color:var(--muted-fg);font-weight:500">动态 <span class="chip">评论 1 · 变更 4</span><button type="button" class="iconbtn" aria-label="展开动态">˅</button></div></div>
+          <div style="margin-top:4px;border-top:1px solid var(--border);padding-top:10px;font-size:11.5px;color:var(--muted-fg);display:flex;flex-direction:column;gap:4px"><span>附件 · 2 <a href="#" style="margin-left:6px">上传</a></span></div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#4f46e5","options":["#4f46e5","#2563eb","#0f766e","#0f172a"]},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { accent: this.props.accent ?? '#4f46e5' };
+  }
+}
+</script>
+</body>
+</html>

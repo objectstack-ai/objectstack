@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>记录页 v3 · 手机端（列表 → 记录页 → 一层下）</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#ffffff}
+:root{--bg:#ffffff;--fg:#0f172a;--muted:#f1f5f9;--muted-fg:#64748b;--border:#e2e8f0;--sidebar:#fafafa;--primary-soft:#eef2ff;--primary-fg:#ffffff;--amber:#b45309;--amber-soft:#fef3c7;--green:#15803d;--green-soft:#dcfce7;--red:#b91c1c;--red-soft:#fee2e2;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+*{box-sizing:border-box}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+a{color:var(--primary);text-decoration:none}
+.btn-primary{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 12px;border-radius:8px;background:var(--primary);color:var(--primary-fg);font-size:12.5px;font-weight:500}
+.btn-outline{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);font-size:12.5px;font-weight:500;color:var(--fg)}
+.iconbtn{display:inline-flex;width:28px;height:28px;align-items:center;justify-content:center;border-radius:6px;color:var(--muted-fg)}
+.chip{display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 7px;border-radius:5px;background:var(--muted);color:var(--fg);font-size:11.5px;white-space:nowrap}
+.chip.soft{background:var(--primary-soft);color:var(--primary)}
+.chip.ok{background:var(--green-soft);color:var(--green)}
+.chip.warn{background:var(--amber-soft);color:var(--amber)}
+.chip.bad{background:var(--red-soft);color:var(--red)}
+.k{font-family:var(--mono);font-size:11px;color:var(--muted-fg)}
+.nav{display:flex;align-items:center;gap:10px;height:34px;padding:0 10px;border-radius:6px;font-size:13px;color:var(--fg)}
+.nav.on{background:var(--primary-soft);color:var(--primary);font-weight:500}
+.hl{display:flex;flex-direction:column;gap:3px;min-width:0}
+.hl .l{font-size:11px;color:var(--muted-fg)}
+.hl .v{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sect{display:flex;align-items:center;justify-content:space-between;height:34px;margin-top:6px;font-size:12.5px;font-weight:600;border-bottom:1px solid var(--border)}
+.sect .k{font-weight:400}
+.sect .cv{color:var(--muted-fg);font-size:11px;margin-right:8px}
+.grid{display:grid;gap:10px 16px;padding:10px 0 4px}
+.g2{grid-template-columns:1fr 1fr}.g3{grid-template-columns:1fr 1fr 1fr}
+.fld{display:flex;flex-direction:column;gap:2px;min-width:0}
+.fld .l{font-size:10.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted-fg)}
+.fld .v{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stage{display:flex;gap:4px;align-items:center}
+.stage span{flex:1;height:6px;border-radius:3px;background:var(--muted)}
+.stage span.done{background:var(--green)}
+.stage span.cur{background:var(--primary)}
+.col{display:flex;flex-direction:column;min-width:0}
+.coltitle{display:flex;align-items:center;justify-content:space-between;height:40px;font-size:13px;font-weight:600}
+.tl{display:flex;gap:10px;padding:10px 0;border-top:1px solid var(--border);font-size:12.5px}
+.tl .ic{display:inline-flex;width:24px;height:24px;align-items:center;justify-content:center;border-radius:12px;background:var(--muted);color:var(--muted-fg);flex:none;font-size:11px}
+.tl .m{font-size:11.5px;color:var(--muted-fg);margin-top:2px}
+.tl.sys{padding:6px 0;color:var(--muted-fg)}
+.tl.sys .ic{width:20px;height:20px;margin-left:2px;margin-right:2px;background:transparent}
+.rel{border:1px solid var(--border);border-radius:10px;margin-bottom:10px}
+.rel .h{display:flex;align-items:center;gap:6px;height:36px;padding:0 12px;font-size:12.5px;font-weight:600}
+.rel .h .iconbtn{margin-left:auto;width:24px;height:24px}
+.rel .r{display:flex;align-items:center;justify-content:space-between;gap:8px;height:32px;padding:0 12px;border-top:1px solid var(--border);font-size:12.5px}
+.rel .r a{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rel .more{display:flex;align-items:center;height:30px;padding:0 12px;border-top:1px solid var(--border);font-size:12px}
+.rel.dash{border-style:dashed}
+.rel.dash .h{color:var(--muted-fg);font-weight:500}
+.tag{position:absolute;top:-9px;left:10px;font:10px/16px var(--mono);padding:0 5px;border-radius:4px;background:var(--fg);color:var(--bg)}
+</style>
+<style>
+.phone{width:390px;height:844px;border:1px solid var(--border);border-radius:28px;background:var(--bg);overflow:hidden;display:flex;flex-direction:column;box-shadow:0 12px 32px rgba(15,23,42,.10);position:relative}
+.status{height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 24px;font-size:12px;font-weight:600}
+.mbar{height:48px;display:flex;align-items:center;gap:8px;padding:0 8px;border-bottom:1px solid var(--border)}
+.mbar .ttl{flex:1;text-align:center;font-weight:600;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mbody{flex:1;overflow:auto}
+.mtabs{display:flex;padding:0 16px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg)}
+.mtabs .tab{height:40px;margin-right:18px}
+.mrow{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--border)}
+.mrow .av{width:36px;height:36px;border-radius:18px;background:var(--primary-soft);color:var(--primary);display:inline-flex;align-items:center;justify-content:center;font-weight:600;font-size:12px;flex:none}
+.mrow .t{flex:1;min-width:0}
+.mrow .t .n{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mrow .t .s{font-size:12px;color:var(--muted-fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fab{position:absolute;right:16px;bottom:34px;width:48px;height:48px;border-radius:24px;background:var(--primary);color:#fff;display:flex;align-items:center;justify-content:center;font-size:22px;box-shadow:0 8px 20px rgba(79,70,229,.35)}
+.home{position:absolute;left:50%;bottom:8px;width:134px;height:5px;border-radius:3px;background:var(--fg);opacity:.25;transform:translateX(-50%)}
+.g2m{display:grid;grid-template-columns:1fr 1fr;gap:10px 12px;padding:10px 0 4px}
+.mact{display:flex;gap:8px;padding:12px 16px;border-top:1px solid var(--border);background:var(--bg)}
+.mact .btn-primary,.mact .btn-outline{flex:1;height:40px}
+</style>
+</helmet>
+<div style="width:100%;min-height:900px;display:flex;gap:40px;align-items:flex-start;justify-content:center;padding:28px 24px;background:var(--muted);color:var(--fg);font-family:Inter,ui-sans-serif,system-ui,sans-serif;font-size:13px;line-height:1.45;--primary:{{accent}}">
+
+  <!-- 1 · list: card rows, view tabs, filter/sort/display icons -->
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>●●● ᯤ ▮</span></div>
+    <div class="mbar"><button type="button" class="iconbtn" aria-label="菜单">☰</button><span class="ttl">线索</span><button type="button" class="iconbtn" aria-label="搜索">🔍</button><button type="button" class="iconbtn" aria-label="显示">⚙</button></div>
+    <div style="display:flex;gap:6px;padding:10px 16px;overflow:auto;border-bottom:1px solid var(--border)"><span class="chip soft" style="height:26px;padding:0 10px">全部线索</span><span class="chip" style="height:26px;padding:0 10px">我的线索</span><span class="chip" style="height:26px;padding:0 10px">🔥 高热度</span><span class="chip" style="height:26px;padding:0 10px">还有 5 个 ▾</span></div>
+    <div style="display:flex;gap:6px;padding:8px 16px;border-bottom:1px solid var(--border);font-size:12px;color:var(--muted-fg)"><span class="chip soft">状态 = 已联系 ×</span><span class="chip soft">评分 ↓ ×</span><span style="margin-left:auto">21 条</span></div>
+    <div class="mbody">
+      <div class="mrow"><span class="av">MC</span><div class="t"><div class="n">Mira Costa</div><div class="s">Atlas Construction · Director of Sales</div></div><span class="chip warn">已联系</span></div>
+      <div class="mrow"><span class="av">KW</span><div class="t"><div class="n">Kai Watanabe</div><div class="s">Coral Reef Hotels · VP Operations</div></div><span class="chip">新建</span></div>
+      <div class="mrow"><span class="av">LF</span><div class="t"><div class="n">Lena Fischer</div><div class="s">Granite Insurance · Head of Procurement</div></div><span class="chip bad">未通过</span></div>
+      <div class="mrow"><span class="av">HD</span><div class="t"><div class="n">Hugo Dubois</div><div class="s">Nimbus Aerospace · CTO</div></div><span class="chip ok">已确认</span></div>
+      <div class="mrow"><span class="av">WG</span><div class="t"><div class="n">Wren Garcia</div><div class="s">Maple Bakery Group · Marketing Lead</div></div><span class="chip warn">已联系</span></div>
+      <div class="mrow"><span class="av">TP</span><div class="t"><div class="n">Theo Park</div><div class="s">Skyline Media · COO</div></div><span class="chip">新建</span></div>
+      <div class="mrow"><span class="av">OB</span><div class="t"><div class="n">Owen Becker</div><div class="s">Northwind Energy · IT Manager</div></div><span class="chip ok">已确认</span></div>
+      <div class="mrow"><span class="av">AL</span><div class="t"><div class="n">Ava Lind</div><div class="s">Harbor Logistics · VP Operations</div></div><span class="chip warn">已联系</span></div>
+      <div class="mrow"><span class="av">NH</span><div class="t"><div class="n">Noah Haas</div><div class="s">Pinecrest Clinics · Head of Procurement</div></div><span class="chip">新建</span></div>
+    </div>
+    <div class="fab">＋</div>
+    <div class="home"></div>
+  </div>
+
+  <!-- 2 · record page: compact header, 2-col highlights, stage path, tabs -->
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>●●● ᯤ ▮</span></div>
+    <div class="mbar"><button type="button" class="iconbtn" aria-label="返回">‹</button><span class="ttl">Mira Costa</span><button type="button" class="iconbtn" aria-label="上一条">↑</button><button type="button" class="iconbtn" aria-label="下一条">↓</button><button type="button" class="iconbtn" aria-label="更多">⋯</button></div>
+    <div class="mbody">
+      <div style="padding:14px 16px 10px;border-bottom:1px solid var(--border)">
+        <div style="display:flex;align-items:center;gap:10px"><span class="av" style="width:40px;height:40px;border-radius:20px;background:var(--primary-soft);color:var(--primary);display:inline-flex;align-items:center;justify-content:center;font-weight:600">MC</span><div style="min-width:0"><div style="font-size:18px;font-weight:600;display:flex;align-items:center;gap:6px">Mira Costa <span class="chip">线索</span></div><div style="font-size:12px;color:var(--muted-fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Atlas Construction · Director of Sales</div></div></div>
+        <div class="g2m"><div class="hl"><span class="l">状态</span><span class="v"><span class="chip warn">已联系</span></span></div><div class="hl"><span class="l">线索评分</span><span class="v">★★★★★</span></div><div class="hl"><span class="l">负责人</span><span class="v" style="color:var(--primary)">Dev Admin</span></div><div class="hl"><span class="l">最近联系</span><span class="v">2026/10/27</span></div></div>
+        <div style="margin-top:6px"><div class="stage"><span class="done"></span><span class="cur"></span><span></span><span></span></div><div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--muted-fg);margin-top:4px"><span style="color:var(--green)">✓ 新建</span><span style="color:var(--fg);font-weight:500">已联系</span><span>已确认</span><span>已转化</span></div></div>
+      </div>
+      <div class="mtabs"><span class="tab on">详情</span><span class="tab">时间线 <span class="chip" style="height:16px;padding:0 5px">6</span></span><span class="tab">关联 <span class="chip" style="height:16px;padding:0 5px">4</span></span></div>
+      <div style="padding:0 16px 16px">
+        <div class="sect"><span>身份信息</span><span class="k">收起 ˄</span></div>
+        <div class="g2m"><div class="fld"><span class="l">名</span><span class="v">Mira</span></div><div class="fld"><span class="l">姓</span><span class="v">Costa</span></div><div class="fld" style="grid-column:1/-1"><span class="l">邮箱</span><span class="v" style="color:var(--primary)">mira.costa@atlasconstruction.example.com</span></div><div class="fld"><span class="l">电话</span><span class="v" style="color:var(--primary)">+1-555-0117-1119</span></div><div class="fld"><span class="l">来源</span><span class="v">陌生拜访</span></div></div>
+        <div class="sect"><span>公司信息</span><span class="k">收起 ˄</span></div>
+        <div class="g2m"><div class="fld"><span class="l">公司</span><span class="v">Atlas Construction</span></div><div class="fld"><span class="l">职位</span><span class="v">Director of Sales</span></div><div class="fld"><span class="l">行业</span><span class="v">建筑</span></div><div class="fld"><span class="l">员工数</span><span class="v">2,354</span></div></div>
+        <div class="sect"><span>资格评估</span><span class="k">显示 4 个空字段</span></div>
+        <div class="g2m"><div class="fld"><span class="l">转化审批</span><span class="v">无需审批</span></div><div class="fld"><span class="l">最近联系</span><span class="v">2026/10/27</span></div></div>
+        <div class="sect" style="color:var(--muted-fg);border-bottom:0"><span>地址 · 转化 · 附加信息</span><span class="k">3 个空分区</span></div>
+      </div>
+    </div>
+    <div class="mact"><button type="button" class="btn-primary">转化线索</button><button type="button" class="btn-outline">记录通话</button><button type="button" class="btn-outline" style="flex:0 0 44px" aria-label="更多动作">⋯</button></div>
+    <div class="home"></div>
+  </div>
+
+  <!-- 3 · one level down: task page pushed over the lead, back returns to the lead's 关联 tab -->
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>●●● ᯤ ▮</span></div>
+    <div class="mbar"><button type="button" class="iconbtn" aria-label="返回线索">‹</button><span class="ttl">跟进报价</span><button type="button" class="iconbtn" aria-label="上一条">↑</button><button type="button" class="iconbtn" aria-label="下一条">↓</button><button type="button" class="iconbtn" aria-label="更多">⋯</button></div>
+    <div style="display:flex;align-items:center;gap:4px;padding:6px 16px;font-size:12px;color:var(--muted-fg);border-bottom:1px solid var(--border)"><a href="#">线索 Mira Costa</a><span>›</span><span>任务</span></div>
+    <div class="mbody">
+      <div style="padding:14px 16px 10px;border-bottom:1px solid var(--border)">
+        <div style="font-size:18px;font-weight:600;display:flex;align-items:center;gap:6px">跟进报价 <span class="chip">任务</span></div>
+        <div class="g2m"><div class="hl"><span class="l">状态</span><span class="v"><span class="chip">待办</span></span></div><div class="hl"><span class="l">截止</span><span class="v">明天</span></div><div class="hl"><span class="l">优先级</span><span class="v">高</span></div><div class="hl"><span class="l">负责人</span><span class="v" style="color:var(--primary)">Dev Admin</span></div></div>
+        <div style="margin-top:6px"><div class="stage"><span class="cur"></span><span></span><span></span></div><div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--muted-fg);margin-top:4px"><span style="color:var(--fg);font-weight:500">待办</span><span>进行中</span><span>已完成</span></div></div>
+      </div>
+      <div class="mtabs"><span class="tab on">详情</span><span class="tab">时间线 <span class="chip" style="height:16px;padding:0 5px">3</span></span><span class="tab">关联 <span class="chip" style="height:16px;padding:0 5px">0</span></span></div>
+      <div style="padding:0 16px 16px">
+        <div class="sect"><span>任务</span></div>
+        <div class="g2m"><div class="fld" style="grid-column:1/-1"><span class="l">主题</span><span class="v">跟进报价</span></div><div class="fld"><span class="l">关联记录</span><span class="v" style="color:var(--primary)">Mira Costa</span></div><div class="fld"><span class="l">截止</span><span class="v">明天</span></div></div>
+        <div class="sect"><span>进度</span><span class="k">显示 1 个空字段</span></div>
+        <div class="g2m"><div class="fld" style="grid-column:1/-1"><span class="l">备注</span><span class="v" style="white-space:normal">对方要求先看同行业案例，报价随案例一起发。</span></div></div>
+        <div style="margin-top:14px;padding:10px 12px;border:1px dashed var(--border);border-radius:8px;font-size:11.5px;color:var(--muted-fg)">手机上没有抽屉：关联记录整页推入，‹ 返回到线索并停在「关联」页签；↑↓ 在同一层的兄弟（Mira 的 2 条任务）里翻；路径行就是桌面抽屉里的 ← 路径。</div>
+      </div>
+    </div>
+    <div class="mact"><button type="button" class="btn-primary">标记完成</button><button type="button" class="btn-outline">改期</button><button type="button" class="btn-outline" style="flex:0 0 44px" aria-label="更多动作">⋯</button></div>
+    <div class="home"></div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#4f46e5","options":["#4f46e5","#2563eb","#0f766e","#0f172a"]},"$preview":{"width":1340,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { accent: this.props.accent ?? '#4f46e5' };
+  }
+}
+</script>
+</body>
+</html>
