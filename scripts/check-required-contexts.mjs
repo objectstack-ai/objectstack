@@ -235,7 +235,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the recognizer itself, in BOTH directions': 10,
   '…and the NARROW recognizer beside it, in both directions': 6,
   'is the pin WIRED into the required job?': 3,
-  'the wiring recognizer, in BOTH directions': 19,
+  'the wiring recognizer, in BOTH directions': 23,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
