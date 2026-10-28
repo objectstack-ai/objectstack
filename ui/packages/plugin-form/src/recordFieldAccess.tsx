@@ -29,10 +29,18 @@
  * Only an `edit` form with a record id asks. A create form holds no stored row,
  * a `view` form writes nothing, and a data source without the method (a
  * non-ObjectStack backend, a designer preview) keeps the row-blind answer.
+ *
+ * The answer belongs to the stored row, so it is asked again whenever that row
+ * may have moved: a write the data source reports for this record (the form's
+ * own save included) and a change on the data-invalidation bus for it (the
+ * signal the form re-reads its record on). A save that moves the row into the
+ * state a `when` names therefore locks the field again, rather than leaving
+ * the earlier answer standing.
  */
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { RecordFieldAccessScope } from '@object-ui/permissions';
+import { useDataInvalidation } from '@object-ui/react';
 import type { DataSource } from '@object-ui/types';
 
 export interface RecordFieldAccessForFormProps {
@@ -45,19 +53,31 @@ export function RecordFieldAccessForForm({ schema, dataSource, children }: Recor
   const objectName = schema?.objectName;
   const recordId = schema?.recordId;
   const load = dataSource?.getRecordFieldAccess;
-  if (
-    schema?.mode !== 'edit'
-    || !objectName
-    || recordId === undefined || recordId === null || recordId === ''
-    || typeof load !== 'function'
-  ) {
+  const asks = schema?.mode === 'edit'
+    && !!objectName
+    && recordId !== undefined && recordId !== null && recordId !== ''
+    && typeof load === 'function';
+  const id = asks ? String(recordId) : undefined;
+  const busRevision = useDataInvalidation(asks ? objectName : undefined, id);
+  const [writeRevision, setWriteRevision] = useState(0);
+  useEffect(() => {
+    if (!asks || typeof dataSource?.onMutation !== 'function') return;
+    const object = (objectName as string).toLowerCase();
+    return dataSource.onMutation((event) => {
+      if ((event?.resource ?? '').toLowerCase() !== object) return;
+      if (event.id != null && String(event.id) !== id) return;
+      setWriteRevision((n) => n + 1);
+    });
+  }, [asks, dataSource, objectName, id]);
+  if (!asks) {
     return <>{children}</>;
   }
   return (
     <RecordFieldAccessScope
-      object={objectName}
-      recordId={String(recordId)}
-      load={(object, id) => load.call(dataSource, object, id)}
+      object={objectName as string}
+      recordId={id as string}
+      load={(object, recordKey) => (load as NonNullable<typeof load>).call(dataSource, object, recordKey)}
+      revision={busRevision + writeRevision}
     >
       {children}
     </RecordFieldAccessScope>

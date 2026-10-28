@@ -17,11 +17,12 @@
  *   - `owner_id` → the enclosing answer (a transfer needs a grant the projection does not carry);
  *   - `read` / `create` and every other object → the enclosing answer;
  *   - before the answer arrives, and on no answer → the enclosing answer (locked);
+ *   - a new `revision` (the row was saved or re-read) → asked again, locked until it lands;
  *   - a nested scope for the same record asks once; no provider → asks nothing.
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { render, waitFor } from '@testing-library/react';
+import { render, waitFor, act } from '@testing-library/react';
 import React from 'react';
 import { MePermissionsProvider, type MePermissionsResponse } from '../MePermissionsProvider';
 import { RecordFieldAccessScope } from '../RecordFieldAccessScope';
@@ -119,6 +120,31 @@ describe('[#26594] RecordFieldAccessScope', () => {
     const refused = mount(async () => { throw Object.assign(new Error('gone'), { httpStatus: 404 }); });
     await new Promise((r) => setTimeout(r, 0));
     expect(refused.last().checkField('rfa_contract', 'summary', 'write')).toBe(false);
+  });
+
+  it('a new revision asks again and holds the lock until the new answer lands', async () => {
+    const seen: Perms[] = [];
+    const answers: Array<(v: any) => void> = [];
+    const load = vi.fn(() => new Promise<any>((r) => { answers.push(r); }));
+    const tree = (revision: number) => (
+      <MePermissionsProvider initialPermissions={ANSWER}>
+        <RecordFieldAccessScope object="rfa_contract" recordId="c1" load={load} revision={revision}>
+          <Probe seen={seen} />
+        </RecordFieldAccessScope>
+      </MePermissionsProvider>
+    );
+    const { rerender } = render(tree(0));
+    await waitFor(() => expect(answers).toHaveLength(1));
+    await act(async () => { answers[0](DRAFT); });
+    await waitFor(() => expect(seen[seen.length - 1].checkField('rfa_contract', 'summary', 'write')).toBe(true));
+
+    rerender(tree(1));
+    await waitFor(() => expect(answers).toHaveLength(2));
+    expect(seen[seen.length - 1].checkField('rfa_contract', 'summary', 'write')).toBe(false);
+    await act(async () => { answers[1](APPROVED); });
+    expect(seen[seen.length - 1].checkField('rfa_contract', 'summary', 'write')).toBe(false);
+    expect(seen[seen.length - 1].checkField('rfa_contract', 'title', 'write')).toBe(true);
+    expect(load).toHaveBeenCalledTimes(2);
   });
 
   it('a scope nested under one for the same record asks once and answers the same', async () => {

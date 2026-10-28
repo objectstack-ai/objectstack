@@ -32,6 +32,13 @@ export interface RecordFieldAccessScopeProps {
    * enclosing provider's row-blind answer then stands, unchanged.
    */
   load: (object: string, recordId: string) => Promise<RecordFieldAccessAnswer | null | undefined>;
+  /**
+   * Moves whenever the stored row may have changed (a save, a re-read). The
+   * scope then asks again, and holds the row-blind lock until the new answer
+   * lands, so a row that moved into the state a `when` names is never drawn
+   * from the earlier answer.
+   */
+  revision?: number;
   children: ReactNode;
 }
 
@@ -144,7 +151,9 @@ function scoped(
  * client never evaluates `when` itself.
  *
  * Until the answer arrives, and when there is none, the enclosing answer
- * stands, so a conditioned field shows locked rather than briefly open.
+ * stands, so a conditioned field shows locked rather than briefly open. When
+ * `revision` moves (the row was saved or re-read), the scope asks again and
+ * the lock stands until the new answer lands.
  *
  * ⛔ The projection is field-level only. The record's row-level write scope
  * (sharing, row-level security, ownership) and the object grant are not part
@@ -156,11 +165,11 @@ function scoped(
  * With no enclosing provider there is no field answer to refine, so the scope
  * renders its children as they are and asks nothing.
  */
-export function RecordFieldAccessScope({ object, recordId, load, children }: RecordFieldAccessScopeProps) {
+export function RecordFieldAccessScope({ object, recordId, load, revision = 0, children }: RecordFieldAccessScopeProps) {
   const parent = useContext(PermCtx);
   const key = scopeKey(object, recordId);
   const nested = !!parent && SCOPE_OF.get(parent) === key;
-  const [answer, setAnswer] = useState<{ key: string; value: RecordFieldAccessAnswer | null } | null>(null);
+  const [answer, setAnswer] = useState<{ key: string; revision: number; value: RecordFieldAccessAnswer | null } | null>(null);
 
   useEffect(() => {
     if (!parent || nested) return;
@@ -168,16 +177,16 @@ export function RecordFieldAccessScope({ object, recordId, load, children }: Rec
     Promise.resolve()
       .then(() => load(object, recordId))
       .then(
-        (value) => { if (alive) setAnswer({ key, value: value && Array.isArray(value.editable) ? value : null }); },
-        () => { if (alive) setAnswer({ key, value: null }); },
+        (value) => { if (alive) setAnswer({ key, revision, value: value && Array.isArray(value.editable) ? value : null }); },
+        () => { if (alive) setAnswer({ key, revision, value: null }); },
       );
     return () => { alive = false; };
     // `load` is deliberately not a trigger: callers pass an inline closure, and
     // the answer belongs to the record, not to the function that fetched it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [!!parent, nested, key]);
+  }, [!!parent, nested, key, revision]);
 
   if (!parent || nested) return <>{children}</>;
-  const current = answer?.key === key ? answer.value : null;
+  const current = answer?.key === key && answer.revision === revision ? answer.value : null;
   return <PermCtx.Provider value={scoped(parent, object, recordId, current)}>{children}</PermCtx.Provider>;
 }

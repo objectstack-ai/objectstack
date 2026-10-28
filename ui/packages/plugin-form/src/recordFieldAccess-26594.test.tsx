@@ -22,6 +22,8 @@
  *   - a draft the server unlocks → `summary` drawn live, `ref_no` locked, and
  *     the save sends `summary` (the outbound gate reads the same answer);
  *   - an approved row → both locked, the save withholds both;
+ *   - a save after which the server judges the row approved → asked again,
+ *     and `summary` locks (the answer follows the stored row, not the mount);
  * and the controls:
  *   - a create form holds no stored row and asks nothing;
  *   - a data source without the method keeps the row-blind lock.
@@ -70,12 +72,22 @@ const ROWS = {
 };
 
 function makeDS(row: (typeof ROWS)[keyof typeof ROWS], withMethod = true) {
+  const listeners = new Set<(e: any) => void>();
   return {
     getObjectSchema: vi.fn().mockResolvedValue({ name: 'rfa_contract', fields: FIELDS }),
     findOne: vi.fn().mockResolvedValue({ ...row.record }),
     find: vi.fn().mockResolvedValue({ data: [] }),
     create: vi.fn().mockResolvedValue({ ...row.record }),
-    update: vi.fn().mockImplementation(async (_o: string, _id: string, data: any) => ({ ...row.record, ...data })),
+    update: vi.fn().mockImplementation(async (resource: string, id: string, data: any) => {
+      const record = { ...row.record, ...data };
+      // As the adapter does: every successful write is reported to `onMutation` subscribers.
+      for (const listener of listeners) listener({ type: 'update', resource, id, record });
+      return record;
+    }),
+    onMutation: (listener: (e: any) => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
     ...(withMethod ? { getRecordFieldAccess: vi.fn().mockResolvedValue(row.access) } : {}),
   };
 }
@@ -156,6 +168,22 @@ describe.each(CONTAINERS)('[#26594] $container', ({ mount }) => {
     const sent = ds.update.mock.calls[0][2];
     expect(sent.summary).toBe('Revised terms');
     expect(sent).not.toHaveProperty('ref_no');
+  });
+
+  it('a save that moves the row into the state the condition names locks the field again', async () => {
+    const ds = makeDS(ROWS.draft);
+    render(<MePermissionsProvider initialPermissions={PRINCIPAL}>{mount(ds, 'edit')}</MePermissionsProvider>);
+    await drawn('edit');
+    await waitFor(() => expect(locked().summary).toBe(false));
+    // The server now judges the stored row approved: the next answer locks `summary`.
+    ds.getRecordFieldAccess!.mockResolvedValue(ROWS.approved.access);
+    fireEvent.change(document.querySelector('input[name="title"]') as HTMLInputElement, { target: { value: 'MSA v2' } });
+    const form = document.body.querySelector('form') as HTMLFormElement;
+    await act(async () => { fireEvent.submit(form); });
+    await waitFor(() => expect(ds.update).toHaveBeenCalled());
+    await waitFor(() => expect(ds.getRecordFieldAccess).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(locked().summary).toBe(true));
+    expect(locked().ref_no).toBe(true);
   });
 
   it('on a row the condition names, the field stays locked', async () => {
