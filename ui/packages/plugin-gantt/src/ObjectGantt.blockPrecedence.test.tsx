@@ -7,37 +7,31 @@
  */
 
 /**
- * objectui#6469 — the `gantt` BLOCK outranks the flat top-level spelling, and
- * the losing face's keys are NAMED in a dev-mode warning.
+ * The `gantt` BLOCK is the one spelling `getGanttConfig` reads, and flat
+ * top-level config keys are NAMED in a dev-mode warning as not read.
  *
- * ## What changed and why the pin is written this way
+ * ## History
  *
  * `getGanttConfig` used to check the flat spelling FIRST and `return` early, so
  * a node carrying both spellings rendered the flat one and every key inside the
- * authored `gantt` block was discarded with NO diagnostic — not even the
- * `GanttConfigSchema.safeParse` warning, which lived behind that early return.
- * `plugin-map` had the identical two-faces shape ruled the other way (maintainer
- * on objectui#5018, 2026-08-17, landed PR #5156); this card inherits that
- * ruling, so the block wins and the shadowed flat keys are named.
+ * authored `gantt` block was discarded with NO diagnostic. objectui#6469
+ * inherited the `plugin-map` ruling (maintainer on objectui#5018, 2026-08-17,
+ * landed PR #5156): the block won, and the shadowed flat keys were named. The
+ * flat spelling stayed as a second branch for a node with no block, because
+ * `ObjectView` and `ListView` flattened `options.gantt` onto top-level keys.
  *
- * The precedence pin below is written as a RENDERED-VALUES assertion rather than
- * a call-level one: the two faces name DIFFERENT record fields, so the direction
- * of the flip is visible in the bars themselves. Before the flip the same
- * fixture rendered `FLAT …` titles spanning March; after it, `BLOCK …` titles
- * spanning January.
+ * objectstack#25923 moved both producers to the block and then retired that
+ * second branch, once the stored-row census found no stored flat row. So a
+ * node that writes its binding flat now reaches the "Gantt configuration
+ * required" refusal screen, and the warning names the flat keys on every node
+ * that carries them, with a block or without.
  *
- * ## Why the warning cannot spray
- *
- * The flat branch is the HOT path for gantt in practice: `ObjectView`
- * (`case 'gantt'`) and `ListView` (`case 'gantt'`) both FLATTEN `options.gantt`
- * onto top-level keys and emit NO `gantt` key at all, so a hand-authored block
- * reaching this component through either view layer has already been flattened
- * before `getGanttConfig` sees it. The warning is raised only from the block
- * branch, which their output never enters — pinned directly below by the
- * "flatten product" case.
+ * The pins are RENDERED-VALUES assertions: the two spellings name DIFFERENT
+ * record fields, so which one was read is visible in the bars themselves —
+ * `BLOCK …` titles spanning January, never `FLAT …` titles spanning March.
  */
 import React from 'react';
-import { render, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ObjectGantt, FLAT_GANTT_CONFIG_KEYS, type KnownGanttConfigKey } from './ObjectGantt';
 
@@ -110,87 +104,90 @@ afterEach(() => {
 const calls = (): unknown[][] => warn.mock.calls as unknown as unknown[][];
 /** …flattened to one searchable string. */
 const warnText = () => calls().map((c) => c.map(String).join(' ')).join('\n');
-const shadowWarnings = () =>
-  calls().filter((c) => String(c[0]).includes('so these top-level keys are'));
+const flatKeyWarnings = () =>
+  calls().filter((c) => String(c[0]).includes('top-level keys are NOT READ'));
 
-describe('precedence: the `gantt` block outranks the flat spelling (objectui#6469)', () => {
+const REFUSAL = /Gantt configuration required/;
+
+describe('one spelling: the `gantt` block (objectstack#25923)', () => {
   it('renders the BLOCK values when a node carries both spellings', async () => {
-    // ⛔ The direction pin. Before the flip this same fixture rendered
-    // `FLAT Alpha` / 2024-03-01 — the flat branch returned before the block was
-    // ever read. Reverting `getGanttConfig`'s branch order turns this red.
     const { titles, starts } = await rendered(bothSpellings({ objectName: 'precedence_a' }));
     expect(titles).toBe('BLOCK Alpha');
     expect(starts).toBe('2024-01-01');
   });
 
-  it('still reads the flat spelling when there is no `gantt` block — the flatten product is unaffected', async () => {
+  it('REFUSES a node whose binding is written flat with no `gantt` block', async () => {
+    // The retired fallback. This fixture used to render `FLAT Alpha`; with the
+    // flat branch gone it carries no binding the chart reads.
+    render(
+      <ObjectGantt
+        schema={
+          {
+            type: 'object-gantt',
+            ...FLAT,
+            data: { provider: 'value', items: INLINE },
+            objectName: 'flat_only',
+          } as any
+        }
+      />,
+    );
+    await waitFor(() => expect(screen.getByText(REFUSAL)).toBeTruthy());
+    expect(screen.getByText(REFUSAL).textContent).toContain('gantt block');
+    expect(screen.queryByTestId('gantt-view')).toBeNull();
+    // …and the dev warning names the keys that were not read.
+    const hits = flatKeyWarnings();
+    expect(hits).toHaveLength(1);
+    for (const key of ['startDateField', 'endDateField', 'titleField']) {
+      expect(String(hits[0][0])).toContain(`\`${key}\``);
+    }
+  });
+
+  it('CONTROL: the same binding moved into the block draws', async () => {
     const { titles, starts } = await rendered({
       type: 'object-gantt',
-      ...FLAT,
+      gantt: { ...FLAT },
       data: { provider: 'value', items: INLINE },
-      objectName: 'precedence_b',
+      objectName: 'flat_moved_into_block',
     } as any);
     expect(titles).toBe('FLAT Alpha');
     expect(starts).toBe('2024-03-01');
+    expect(flatKeyWarnings()).toHaveLength(0);
   });
 });
 
-describe('the losing face is NAMED, not dropped silently (objectui#6469)', () => {
-  it('names every shadowed top-level key in the dev-mode warning', async () => {
+describe('flat keys are NAMED, not dropped silently (objectui#6469, objectstack#25923)', () => {
+  it('names every flat top-level key in the dev-mode warning', async () => {
     await rendered(
       bothSpellings({ objectName: 'named_keys', colorField: 'flat_color', capacity: 3 }),
     );
 
-    const hits = shadowWarnings();
+    const hits = flatKeyWarnings();
     expect(hits).toHaveLength(1);
     const text = String(hits[0][0]);
 
-    // The keys this node actually shadows — the three flat `FLAT` keys plus the
-    // two extras. Each is asserted BY NAME: a warning that merely says "some
-    // keys were ignored" is the silence this card exists to end.
+    // Each key the node carries flat is asserted BY NAME: a warning that merely
+    // says "some keys were ignored" is the silence objectui#6469 ended.
     for (const key of ['startDateField', 'endDateField', 'titleField', 'colorField', 'capacity']) {
       expect(text).toContain(`\`${key}\``);
     }
     // …and it does not invent keys the node never carried.
     expect(text).not.toContain('`progressField`');
     expect(text).not.toContain('`assigneeField`');
-    // The node-level keys that are NOT part of the flat gantt-config face must
-    // never be named: `objectName` / `data` / `type` are read straight off the
-    // schema and are unaffected by which config face wins.
+    // Node-level keys that are not gantt config are never named.
     expect(text).not.toContain('`objectName`');
     expect(text).not.toContain('`data`');
   });
 
-  it('says which face won and how to fix it', async () => {
+  it('says where the keys belong', async () => {
     await rendered(bothSpellings({ objectName: 'message_shape' }));
-    const text = String(shadowWarnings()[0][0]);
+    const text = String(flatKeyWarnings()[0][0]);
     expect(text).toContain('[ObjectGantt]');
     expect(text).toContain('`gantt` block');
-    expect(text).toContain('IGNORED');
-    expect(text).toContain('objectui#6469');
-  });
-
-  it('does NOT fire on the ObjectView / ListView flatten product', async () => {
-    // The hot path: flat keys, no `gantt` key. Both flatteners emit exactly
-    // this shape, so a warning here would fire on every flattened gantt node in
-    // the product.
-    await rendered({
-      type: 'object-gantt',
-      ...FLAT,
-      progressField: 'progress',
-      dependenciesField: 'deps',
-      data: { provider: 'value', items: INLINE },
-      objectName: 'flatten_product',
-    } as any);
-    expect(shadowWarnings()).toHaveLength(0);
+    expect(text).toContain('NOT READ');
+    expect(text).toContain('objectstack#25923');
   });
 
   it('names GanttConfig keys hoisted beside a block, with no top-level date pair', async () => {
-    // The shape published authoring guidance actually produces: a `gantt` block
-    // plus GanttConfig keys hoisted to the top level as if they were node-level
-    // options. There is no top-level date pair, so this node took the BLOCK
-    // branch before the flip too — the hoisted keys were already inert, just
-    // silently. The warning is what changes for it.
     await rendered({
       type: 'object-gantt',
       gantt: { ...BLOCK },
@@ -200,39 +197,37 @@ describe('the losing face is NAMED, not dropped silently (objectui#6469)', () =>
       objectName: 'hoisted_beside_block',
     } as any);
 
-    const hits = shadowWarnings();
+    const hits = flatKeyWarnings();
     expect(hits).toHaveLength(1);
     const text = String(hits[0][0]);
     expect(text).toContain('`quickFilters`');
     expect(text).toContain('`autoZoomToFilter`');
   });
 
-  it('does NOT fire for a block with no flat keys beside it', async () => {
+  it('does NOT fire for a block with no flat keys beside it — the ObjectView / ListView product', async () => {
     await rendered({
       type: 'object-gantt',
       gantt: { ...BLOCK },
       data: { provider: 'value', items: INLINE },
       objectName: 'block_only',
     } as any);
-    expect(shadowWarnings()).toHaveLength(0);
+    expect(flatKeyWarnings()).toHaveLength(0);
   });
 
-  it('warns ONCE per distinct shadowing, not once per render', async () => {
+  it('warns ONCE per distinct key set, not once per render', async () => {
     const schema = bothSpellings({ objectName: 'warn_once' });
     await rendered(schema);
     await rendered(schema);
     await rendered(schema);
-    expect(shadowWarnings()).toHaveLength(1);
+    expect(flatKeyWarnings()).toHaveLength(1);
   });
 
-  it('still reports an incomplete winning block through the existing safeParse warning', async () => {
-    // The gantt-specific consequence of block-wins, stated out loud: the spec's
-    // `GanttConfigSchema` REQUIRES startDateField/endDateField/titleField
-    // (`ObjectMapConfigSchema`, the map case this ruling is inherited from,
-    // requires nothing), so an INCOMPLETE block outranks a complete flat
-    // spelling. The block is taken whole — merging the flat keys in would be
-    // the lenient consumer fallback AGENTS.md #0.1 forbids — so the author is
-    // told twice instead: the config is invalid, AND these flat keys lost.
+  it('still reports an incomplete block through the existing safeParse warning', async () => {
+    // The spec's `GanttConfigSchema` REQUIRES startDateField/endDateField/
+    // titleField, so an INCOMPLETE block is refused even when flat keys beside
+    // it would complete it — merging them in would be the lenient consumer
+    // fallback AGENTS.md #0.1 forbids. The author is told twice instead: the
+    // config is invalid, AND these flat keys are not read.
     render(
       <ObjectGantt
         schema={
@@ -247,8 +242,8 @@ describe('the losing face is NAMED, not dropped silently (objectui#6469)', () =>
       />,
     );
     await waitFor(() => expect(warnText()).toContain('Invalid gantt configuration'));
-    expect(shadowWarnings()).toHaveLength(1);
-    expect(String(shadowWarnings()[0][0])).toContain('`startDateField`');
+    expect(flatKeyWarnings()).toHaveLength(1);
+    expect(String(flatKeyWarnings()[0][0])).toContain('`startDateField`');
   });
 });
 
@@ -264,7 +259,7 @@ describe('the named key set cannot drift from `GanttConfig` (objectui#6469)', ()
     // keep arriving — now by the same derivation as the line above, not by list.
     expect(FLAT_GANTT_CONFIG_KEYS).toContain('lockField');
     expect(FLAT_GANTT_CONFIG_KEYS).toContain('timeSegments');
-    // The legacy singular alias the flat branch still reads.
+    // The legacy singular alias, named so a node that writes it is told too.
     expect(FLAT_GANTT_CONFIG_KEYS).toContain('dependencyField');
     // No duplicates — the two halves must not overlap.
     expect(new Set(FLAT_GANTT_CONFIG_KEYS).size).toBe(FLAT_GANTT_CONFIG_KEYS.length);
@@ -273,8 +268,8 @@ describe('the named key set cannot drift from `GanttConfig` (objectui#6469)', ()
 
 /**
  * Compile-time coverage pin (`tsc -p tsconfig.test.json` type-checks this file).
- * `never` exactly while every `GanttConfig` key — the one declaration both faces
- * derive from — appears in `FLAT_GANTT_CONFIG_KEYS`. A `GanttConfig` key that
+ * `never` exactly while every `GanttConfig` key appears in
+ * `FLAT_GANTT_CONFIG_KEYS`, so the warning can name any of them. A `GanttConfig` key that
  * `GanttConfigSchema.shape` does not model makes this line fail to compile,
  * NAMING the missing key. Before objectui#7845 a second literal
  * (`GANTT_CONFIG_EXTENSION_KEYS`) could also satisfy it; the spec now declares

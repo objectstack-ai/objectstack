@@ -28,7 +28,9 @@
  * Maintenance contract: registering a new tool in a cloud AI package means
  * adding its name here. The owning package's conformance test fails
  * otherwise — an out-of-date registry is worse than no registry, because
- * consumers now trust it.
+ * consumers now trust it. A new name also needs its `chatbot.tool.<name>`
+ * label in every pack under `ui/packages/i18n/src/locales/` — the ui
+ * plugin-chatbot label-parity tests read this registry.
  */
 
 /**
@@ -38,14 +40,18 @@
 export const PLATFORM_TOOLS_BY_PACKAGE: Readonly<Record<string, readonly string[]>> = {
   /**
    * `@objectstack/service-ai` (cloud) — the `ask` data product's shared
-   * data/knowledge/visualization tools.
+   * data/knowledge/visualization tools, and the package-doc pair that reads the
+   * installed packages' `doc` items behind the `/meta/doc` audience gate
+   * (cloud#3335).
    */
   'service-ai': [
     'aggregate_data',
     'get_record',
     'query_data',
     'query_records',
+    'read_package_doc',
     'search_knowledge',
+    'search_package_docs',
     'visualize_data',
   ],
   /**

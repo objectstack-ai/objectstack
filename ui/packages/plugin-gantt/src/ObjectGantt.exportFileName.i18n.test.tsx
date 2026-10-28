@@ -76,13 +76,17 @@ const ITEMS = [
   { id: '2', name: 'Beta', start: '2024-02-01', end: '2024-02-10' },
 ];
 
-function ganttSchema(extra: Record<string, any> = {}) {
+/** `extra` lands on the node; `gantt` adds members to its `gantt` block. */
+function ganttSchema(extra: Record<string, any> = {}, gantt: Record<string, any> = {}) {
   return {
     type: 'object-gantt',
     objectName: 'task',
-    startDateField: 'start',
-    endDateField: 'end',
-    titleField: 'name',
+    gantt: {
+      startDateField: 'start',
+      endDateField: 'end',
+      titleField: 'name',
+      ...gantt,
+    },
     data: { provider: 'value', items: ITEMS },
     ...extra,
   } as any;
@@ -196,7 +200,7 @@ describe('ObjectGantt export filename resolves the inline locale map (objectui#6
 
   it('CONTROL — an explicit exportFileName still wins the chain over the map', async () => {
     const name = await exportPngName(
-      ganttSchema({ label: INLINE_MAP, exportFileName: 'Shift Plan Gantt' }),
+      ganttSchema({ label: INLINE_MAP }, { exportFileName: 'Shift Plan Gantt' }),
       'zh-CN',
     );
     expect(name).toMatch(named('Shift Plan Gantt'));

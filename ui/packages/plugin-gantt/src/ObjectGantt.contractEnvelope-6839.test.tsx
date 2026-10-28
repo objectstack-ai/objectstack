@@ -126,15 +126,17 @@ const asRecords: Envelope = (rows) => ({ records: rows, total: rows.length });
 const GANTT_SCHEMA = {
   type: 'gantt',
   objectName: 'task',
-  startDateField: 'start',
-  endDateField: 'end',
-  titleField: 'name',
-  quickFilters: [
-    { field: 'project', label: 'Project' },
-    // The control dimension — resolved by the SAME `setLookupOptions` commit
-    // as `project`, and answered OUTSIDE the envelope under test.
-    { field: 'owner', label: 'Owner' },
-  ],
+  gantt: {
+    startDateField: 'start',
+    endDateField: 'end',
+    titleField: 'name',
+    quickFilters: [
+      { field: 'project', label: 'Project' },
+      // The control dimension — resolved by the SAME `setLookupOptions` commit
+      // as `project`, and answered OUTSIDE the envelope under test.
+      { field: 'owner', label: 'Owner' },
+    ],
+  },
 } as any;
 
 /**

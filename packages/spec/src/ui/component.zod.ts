@@ -6082,15 +6082,13 @@ export type ObjectKanbanProps = z.input<typeof ObjectKanbanPropsSchema>;
 export type ObjectKanbanPropsParsed = z.infer<typeof ObjectKanbanPropsSchema>;
 
 /**
- * The flat per-field spellings `ObjectCalendar` keeps reading as a
- * stored-document fallback (`getCalendarConfig`; read points recorded in
- * `liveness/page.json`, row `regions`). `ObjectView`/`ListView` hand the
- * binding off in the `calendar` block, not flat (objectstack#25923), and the
- * flat keys live on `plugin-calendar`'s own hand-off type, not on
- * `@object-ui/types`' `ObjectCalendarSchema`. Read, but
- * NOT authorable — one composition key per concept (Prime Directive #12, the
- * `body` → `children` precedent on {@link PageContainerProps}): the authored
- * spelling is the `calendar` object.
+ * The flat per-field spellings of the `calendar` block, refused on the node.
+ * `ObjectView`/`ListView` hand the binding off in the `calendar` block, not
+ * flat, `@object-ui/types`' `ObjectCalendarSchema` declares none of them, and
+ * `ObjectCalendar`'s `getCalendarConfig` no longer reads them either: its flat
+ * fallback retired with objectstack#25923. NOT authorable — one composition
+ * key per concept (Prime Directive #12, the `body` → `children` precedent on
+ * {@link PageContainerProps}): the authored spelling is the `calendar` object.
  */
 const OBJECT_CALENDAR_FLAT_FIELD_GUIDANCE: readonly KeySetGuidance[] = [
   ...COMPONENT_LEVEL_GUIDANCE,
@@ -6101,8 +6099,8 @@ const OBJECT_CALENDAR_FLAT_FIELD_GUIDANCE: readonly KeySetGuidance[] = [
     prescription:
       'Write this as a key of the `calendar` config object instead — `calendar: { startDateField, '
       + 'endDateField, titleField, colorField, allDayField }`. `ObjectView`/`ListView` hand the binding '
-      + 'off in that block too; the flat spelling is only a stored-document fallback the renderer still '
-      + 'reads, not a second authorable spelling (one key per concept, Prime Directive #12).',
+      + 'off in that block too, and the renderer reads the binding there only: the flat spelling is not '
+      + 'read and not a second authorable spelling (one key per concept, Prime Directive #12).',
   },
 ];
 
@@ -7413,26 +7411,21 @@ export type ObjectMapProps = z.input<typeof ObjectMapPropsSchema>;
 export type ObjectMapPropsParsed = z.infer<typeof ObjectMapPropsSchema>;
 
 /**
- * The flat `GanttConfig` spellings `getGanttConfig`'s branch 2 reads as a
- * stored-document fallback — objectui's own `FLAT_GANTT_CONFIG_KEYS` (read
- * points recorded in `liveness/page.json`, row `regions`). `ObjectView` /
- * `ListView` hand the binding off in the `gantt` block, not flat
- * (objectstack#25923). Read, but
- * NOT authorable, for the reason the map's twin set above records: objectui#6469
- * inherited the objectui#5018 ruling for this block, so the `gantt` block is the
- * authoring shape, it is taken WHOLE when present, and every flat key beside it
- * is named as ignored in a dev warning.
+ * The flat `GanttConfig` spellings, refused on the node — objectui's own
+ * `FLAT_GANTT_CONFIG_KEYS`. `ObjectView` / `ListView` hand the binding off in
+ * the `gantt` block, not flat, and `getGanttConfig` reads that block only: its
+ * flat fallback branch retired with objectstack#25923. NOT authorable, for the
+ * reason the map's twin set above records: objectui#6469 inherited the
+ * objectui#5018 ruling for this block, so the `gantt` block is the authoring
+ * shape, it is taken WHOLE, and a dev warning names every flat key as not read.
  *
- * The block branch is the path both view layers take — they hand the `gantt`
- * block on whole — and the flat branch is only the stored-document fallback.
  * The prescription still matters: an author who met the flat spelling in an
- * older stored document writes it on an SDUI node next. The flat keys live on
- * `plugin-gantt`'s package-local hand-off type (`ObjectGanttFlatFields`), not
- * on `@object-ui/types`' `ObjectGanttSchema`, which declares only the block.
+ * older document writes it on an SDUI node next. `@object-ui/types`'
+ * `ObjectGanttSchema` declares only the block.
  *
  * Membership is `GanttConfigSchema`'s own shape plus the legacy singular
- * `dependencyField` alias the flat branch still reads beside `dependenciesField`
- * — the same two halves objectui derives its list from. Spelled out rather than
+ * `dependencyField` alias of `dependenciesField` — the same two halves objectui
+ * derives its list from. Spelled out rather than
  * read off `GanttConfigSchema.shape` here because that schema is a
  * {@link lazySchema} proxy and forcing it at module load would build `view.zod`
  * mid-initialisation (the import-cycle footgun `ruleArrayFilterError` defers
@@ -7453,10 +7446,9 @@ const OBJECT_GANTT_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
     examples: ['startDateField', 'endDateField', 'viewMode'],
     prescription:
       'Write this as a key of the `gantt` config object instead — `gantt: { startDateField, endDateField, '
-      + 'titleField, ... }`. `ObjectView`/`ListView` hand the binding off in that block too; the flat '
-      + 'top-level spelling is only a stored-document fallback the renderer still reads, not a second '
-      + 'authoring spelling: whenever a `gantt` block is present the renderer takes it WHOLE and names '
-      + 'every flat key beside it as ignored. The '
+      + 'titleField, ... }`. `ObjectView`/`ListView` hand the binding off in that block too, and the '
+      + 'renderer reads the binding there only: the flat top-level spelling is not read and not a second '
+      + 'authoring spelling. The '
       + 'legacy singular `dependencyField` is `dependenciesField` inside that block.',
   },
 ];
@@ -7523,8 +7515,8 @@ function objectGanttMarker() {
  * `showBaselines`, `readOnly` (the chart and the record overlay's lock) and
  * `mobileReadOnly`.
  *
- * Measured and deliberately NOT declared: the flat `GanttConfig` spellings (the
- * stored-document fallback — {@link OBJECT_GANTT_FLAT_CONFIG_GUIDANCE}); `title`, which
+ * Measured and deliberately NOT declared: the flat `GanttConfig` spellings (not
+ * read since objectstack#25923 — {@link OBJECT_GANTT_FLAT_CONFIG_GUIDANCE}); `title`, which
  * this renderer never reads (the export-name chain is `gantt.exportFileName` →
  * `label` → the OBJECT's label → `objectName`); a row cap — the reload's `$top`
  * is the platform ceiling, spread in as core's `nonGridRowCeilingQuery()` (one
@@ -7534,8 +7526,8 @@ function objectGanttMarker() {
  * props. ⚠️ Recorded, not ruled: objectui#10250 gave the renderer two more
  * reads, `search` and `searchableFields` (sent as `$search` / `$searchFields`),
  * which `ListView` writes onto the node it generates from its toolbar Search
- * box (its `case 'gantt'` arm) — a host-generated key pair in the same position
- * as the flat fallback spellings, and not declared here.
+ * box (its `case 'gantt'` arm) — a host-generated key pair, and not declared
+ * here.
  *
  * VALUE posture: `gantt` is the one config block in this family whose value
  * contract is already the SPEC's — the renderer validates it against
