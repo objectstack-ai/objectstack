@@ -47,8 +47,8 @@
 // stays on 17.2.0 until someone notices. Worse here than for the sibling surfaces:
 // `.github/workflows/lint.yml` runs check-release-section-coverage WITHOUT `--strict`,
 // where a finding is advisory and the job is GREEN by design, so the staleness reaches
-// `main` green on every ordinary PR as well. Only `release-coverage-patrol.yml` passes
-// `--strict`, and a standing patrol is by construction an AFTER-THE-FACT reader.
+// `main` green on every ordinary PR as well. Only fleet-patrols.yml's `release-coverage-patrol`
+// job passes `--strict`, and a standing patrol is by construction an AFTER-THE-FACT reader.
 //
 // This repo has already chosen this exact shape for this exact drift class, three
 // times: sync-protocol-version.mjs (#2769), sync-template-versions.mjs (#2907),
