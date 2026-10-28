@@ -4,7 +4,7 @@ import { definePage } from '@objectstack/spec/ui';
 
 /**
  * New Project Wizard — a multi-step (wizard) form surface. The showcase
- * defines wizard/tabbed/split form view *types* but had no page that actually
+ * defines wizard/tabbed form view *layouts* but had no page that actually
  * walks a user through a stepped create flow. This renders `object-form` with
  * `formType: 'wizard'` directly: Basics → Health → Budget, with a step
  * indicator, over showcase_project.

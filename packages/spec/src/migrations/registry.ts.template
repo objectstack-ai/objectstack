@@ -1596,6 +1596,19 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'result cache exists.',
   },
   {
+    id: 'currency-config-fixed-default-currency-required',
+    order: 112,
+    text:
+      'It also removes the `\'CNY\'` default of `currencyConfig.defaultCurrency` (maintainer '
+      + 'ruling X: an amount whose currency is not known takes the tenant default, and nothing '
+      + 'guesses). A `fixed` config without a code is refused with the prescription instead of '
+      + 'becoming a yuan field, and a `dynamic` config parses to output with no code. The D2 '
+      + 'conversion `currency-config-dynamic-default-currency-removed` strips the unread code an '
+      + 'earlier parse baked into `dynamic` stored rows and built artifacts; a `fixed` config is '
+      + 'never converted, so a stored row saved without a code loads with diagnostics and is '
+      + 'refused at its next save. Retired from the load path.',
+  },
+  {
     id: 'currency-config-precision-retired',
     order: 41,
     text:
@@ -2972,6 +2985,20 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`form-layout-inline-grid-to-vertical` rewrites them to `vertical` (behaviour-preserving, '
       + '`columns` untouched) on `object-form` page components, on every form payload a view '
       + 'carries, and on the assembled-manifest `viewItems` channel.',
+  },
+  {
+    id: 'ui-form-view-type-layout-only',
+    order: 112,
+    text:
+      'It also narrows the form view `type` to the form\'s layout — `simple`, `tabbed` or `wizard` '
+      + '(ADR-0050, accepted by the maintainer\'s ruling): `drawer` and `modal` named where a form is '
+      + 'opened, which is the caller\'s open mode, and `split` was a list-beside-record view mode, '
+      + 'which the same release had already made a reader\'s preference. Each retired member is '
+      + 'refused at parse with its prescription; the split-only keys `sections[].pane`, `splitSize` '
+      + 'and `splitResizable` are tombstoned with it. The D2 conversion '
+      + '`form-view-presentation-types-removed` deletes the member, which lands the form on the '
+      + '`simple` default, and strips the three keys from existing sources and stored rows. Its D3 '
+      + 'record is the semantic entry `ui-form-view-type-layout-only`.',
   },
   {
     id: 'ui-marketplace-installed-list-retired',

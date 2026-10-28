@@ -45,7 +45,7 @@ import { ActivityTimeline } from './ActivityTimeline';
 import { HistoryTimeline } from './HistoryTimeline';
 import { RecordMetaFooter } from './RecordMetaFooter';
 import { RecordPageProvenanceContext } from './recordPageProvenance';
-import { SchemaRenderer, SchemaErrorBoundary, toRenderableSchema, useSafeFieldLabel, useDataInvalidation, useInlineEdit, useRowPredicate, resolveApprovalLock, usePrintPage } from '@object-ui/react';
+import { SchemaRenderer, SchemaErrorBoundary, toRenderableSchema, useSafeFieldLabel, useDataInvalidation, useInlineEdit, useRowPredicate, resolveApprovalLock, usePrintPage, useRecordContext } from '@object-ui/react';
 import { buildExpandFields, declaredNameField, getRecordDisplayName, formatTitleTemplate, recordDisplayValueAt, resolveAffordance, toDisplayDate, userActionPredicates, withoutDeniedFields } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
 import { useLocalization, useDisplayLocale, resolveFieldCurrency } from '@object-ui/i18n';
@@ -330,7 +330,19 @@ export const DetailView: React.FC<DetailViewProps> = ({
   // Retained local error state for the approval-cancel flow ONLY — the
   // inline-edit draft now surfaces its own errors through the save bar.
   const [saveError, setSaveError] = React.useState<string | null>(null);
-  const [objectSchema, setObjectSchema] = React.useState<any>(null);
+  const [dataSourceObjectSchema, setObjectSchema] = React.useState<any>(null);
+  // The host's object definition, for a host that supplies the record
+  // (`recordFromHost`). Field types come from the object schema: without it a
+  // bare-name section entry has no type, so `DetailSection` draws the raw
+  // stored value (a `select` code, a `location` object as `[Object]`). The
+  // dataSource answer below is what supplies it on the record page; a host
+  // that renders with no dataSource bound (the Studio page designer) never
+  // gets that answer, though its record context already holds the schema it
+  // read. So the host's schema stands in until a dataSource answers, and
+  // nothing is fetched for it. A host with no record context, or one that
+  // does not supply the record, is unchanged.
+  const hostObjectSchema = useRecordContext()?.objectSchema;
+  const objectSchema = dataSourceObjectSchema ?? (recordFromHost ? hostObjectSchema ?? null : null);
   const [idCopied, setIdCopied] = React.useState(false);
   const [reloadTick, setReloadTick] = React.useState(0);
   // #2269 — refetch in place when this record (or its object) is invalidated
@@ -982,7 +994,7 @@ export const DetailView: React.FC<DetailViewProps> = ({
    */
   const systemActions = React.useMemo<ActionSchema[]>(() => {
     // System action items use a UI-local shape (`type: 'script'`,
-    // `variant: 'destructive'`, `onClick`) that doesn't perfectly conform
+    // `variant: 'danger'`, `onClick`) that doesn't perfectly conform
     // to the canonical ActionSchema discriminated union. Cast at the
     // boundary so call sites can keep treating them as ActionSchema[].
     const items: any[] = [];
@@ -1037,7 +1049,7 @@ export const DetailView: React.FC<DetailViewProps> = ({
         label: t('detail.delete'),
         icon: 'trash',
         type: 'script',
-        variant: 'destructive',
+        variant: 'danger',
         tags: ['separator-before'],
         // `delete.disabledWhen` — kebab symmetry, same rule as Edit above.
         ...(deleteDisabled ? { disabled: true } : null),

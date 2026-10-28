@@ -1151,6 +1151,28 @@ function withReadonlyHostGroup(labelId: string | undefined, node: React.ReactNod
 }
 
 /**
+ * One field item under `layout: 'horizontal'` (objectstack-ai/objectstack#26843):
+ * the label in a fixed column BESIDE its control, from `sm` up. Below `sm` none
+ * of these classes engage, so a phone draws the item exactly as `vertical` does —
+ * label above, control under it.
+ *
+ * - `sm:space-y-0` takes back `<FormItem>`'s own `space-y-2` margins, which in a
+ *   grid would push the control down out of line with its label; `sm:gap-y-2`
+ *   puts the same distance back between the control, its description and its
+ *   message.
+ * - Every child that is not the `<label>` goes to the second column, so a field
+ *   drawn with no label keeps its control there too, and the description and
+ *   message stack under the control instead of under the label.
+ * - `items-baseline`: the label's text sits on the first text line of whatever
+ *   the control is — an input, a textarea, a widget's composite.
+ *
+ * Only the item's arrangement changes: the label element, its `for` / `id`,
+ * and the control's `aria-*` are the ones the vertical item carries.
+ */
+const HORIZONTAL_FIELD_ITEM_CLASS =
+  'sm:grid sm:grid-cols-[minmax(0,10rem)_minmax(0,1fr)] sm:items-baseline sm:gap-x-4 sm:gap-y-2 sm:space-y-0 sm:[&>:not(label)]:col-start-2';
+
+/**
  * The help line under one field: its authored `description`, and the
  * "set automatically when saved" hint when the caller passes one
  * (objectui#12108).
@@ -3639,7 +3661,14 @@ ComponentRegistry.register('form',
           rules={rules}
           render={({ field: formField, fieldState }) => (
             <FormItem
-              className={colSpanClass || undefined}
+              // The form's `layout` decides the item's arrangement — see
+              // HORIZONTAL_FIELD_ITEM_CLASS. `vertical` (and an absent layout)
+              // adds nothing, so its DOM is the one it always drew.
+              className={
+                layout === 'horizontal'
+                  ? cn(colSpanClass, HORIZONTAL_FIELD_ITEM_CLASS)
+                  : colSpanClass || undefined
+              }
               data-testid={fieldTestId}
               data-field={name}
             >

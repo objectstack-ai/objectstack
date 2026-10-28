@@ -10,8 +10,8 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom';
-import { activityRowToFeedItem, InlineEditSaveBar, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, resolveTitleField, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
-import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions } from '@object-ui/components';
+import { activityRowToFeedItem, InlineEditSaveBar, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordPageColumnDefaults, resolveTitleField, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
+import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions, PanelToggles, type PanelToggleItem } from '@object-ui/components';
 import { useAuth, createAuthenticatedFetch } from '@object-ui/auth';
 import { usePermissions } from '@object-ui/permissions';
 import { useDisplayLocale } from '@object-ui/i18n';
@@ -19,7 +19,7 @@ import { ActionProvider, useObjectTranslation, useObjectLabel, useActionTextLoca
 import { buildExpandFields, captureUpdateUndoData, recordDelete, resolveAffordance, resolveRecordIdParamSeed, userActionPredicates, withoutDeniedFields, type AffordanceGrantPrincipal, type SchemaLike } from '@object-ui/core';
 import { toast } from 'sonner';
 import { useRecordPresence, PresenceAvatars, isCommentAuthor } from '@object-ui/collaboration';
-import { Database, ChevronLeft, Lock, AlertTriangle, RotateCw, Printer, FileText, CheckCircle2, Inbox } from 'lucide-react';
+import { Database, ChevronLeft, Lock, AlertTriangle, RotateCw, Printer, FileText, CheckCircle2, Inbox, Rows3, LayoutGrid } from 'lucide-react';
 import { MetadataPanel, useMetadataInspector } from './MetadataInspector.js';
 import { SkeletonDetail } from '../skeletons/index.js';
 import { ManagedByBadge, useManagedByNote } from '../components/ManagedByBadge.js';
@@ -69,6 +69,13 @@ import './record-approvals-renderer.js';
 import { getRecordDisplayName } from '../utils/index.js';
 import { parseAuditValue, collectAuditChanges, collectLookupIds, formatAuditValue } from '../utils/auditHistoryDisplay.js';
 import { useFavorites } from '../hooks/useFavorites.js';
+import {
+  RECORD_RELATED_COLUMN_PREFERENCE,
+  RECORD_TIMELINE_COLUMN_PREFERENCE,
+  objectPreferenceScope,
+  useWorkspacePreference,
+} from '../utils/workspacePreference.js';
+import { shortcutKeycaps, useAdvertiseShortcut, type AdvertisedShortcut, type ShortcutChord, type ShortcutLabelTranslate } from '../chrome/advertisedShortcuts.js';
 import { useActionModal } from '../hooks/useActionModal.js';
 import { useRecentItems } from '../hooks/useRecentItems.js';
 import { useObjectPresence } from '../hooks/useObjectPresence.js';
@@ -99,6 +106,67 @@ interface RecordDetailViewProps {
 }
 
 const FALLBACK_USER = { id: 'current-user', name: 'Demo User' };
+
+/**
+ * `⌘⇧.` / `Ctrl+Shift+.` — show or hide the record page's timeline column
+ * (objectstack#27052). The record page owns the listener and advertises this
+ * beside it, under the same gate: a full record page in a column tier.
+ *
+ * Not `⌘⇧T` / `⌘⇧R`: Chromium and Firefox keep Ctrl/⌘+Shift+T (reopen the
+ * closed tab) and Ctrl/⌘+Shift+R (hard reload) for themselves, and the page
+ * never receives them.
+ */
+const TOGGLE_TIMELINE_SHORTCUT: AdvertisedShortcut = {
+  id: 'record-toggle-timeline',
+  group: 'general',
+  chord: { key: '.', mod: true, shift: true },
+  label: (t: ShortcutLabelTranslate) => t('console.shortcuts.toggleTimeline'),
+};
+
+/** `⌘⇧,` / `Ctrl+Shift+,` — show or hide the record page's related column (objectstack#27052). */
+const TOGGLE_RELATED_SHORTCUT: AdvertisedShortcut = {
+  id: 'record-toggle-related',
+  group: 'general',
+  chord: { key: ',', mod: true, shift: true },
+  label: (t: ShortcutLabelTranslate) => t('console.shortcuts.toggleRelated'),
+};
+
+/**
+ * The physical key of each punctuation chord key. Shift changes the character
+ * those keys type (`.` becomes `>` on a US layout), so a chord that holds
+ * Shift is matched by `KeyboardEvent.code`, the key itself, not by `key`.
+ */
+const PANEL_CHORD_CODES: Readonly<Record<string, string>> = { '.': 'Period', ',': 'Comma' };
+
+function matchesPanelChord(
+  e: Pick<KeyboardEvent, 'key' | 'code' | 'metaKey' | 'ctrlKey' | 'shiftKey' | 'altKey'>,
+  chord: ShortcutChord,
+): boolean {
+  if (e.altKey) return false;
+  if (Boolean(chord.mod) !== (e.metaKey || e.ctrlKey)) return false;
+  if (Boolean(chord.shift) !== e.shiftKey) return false;
+  const code = PANEL_CHORD_CODES[chord.key];
+  return code !== undefined ? e.code === code : e.key.toLowerCase() === chord.key;
+}
+
+/**
+ * A keydown aimed at something the reader types into — a text field, a
+ * select, a content-editable region, an ARIA textbox: the panel shortcuts
+ * leave those alone, so a reader typing in the composer keeps their keys.
+ */
+function isTypingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  if (target instanceof HTMLElement && target.isContentEditable) return true;
+  return target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]') !== null;
+}
+
+/** `aria-keyshortcuts` spelling of a chord, for the platform the page runs on. */
+function ariaKeyShortcutsOf(chord: ShortcutChord): string {
+  const mac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || '');
+  return [chord.mod ? (mac ? 'Meta' : 'Control') : null, chord.shift ? 'Shift' : null, chord.key.toUpperCase()]
+    .filter(Boolean)
+    .join('+');
+}
 
 /**
  * The `user` seeded into this view's own `<ActionProvider>` — identity plus, once
@@ -848,6 +916,49 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     !assignedPage && !namedPageBlocked && !(assignedSlots && (assignedSlots as { tabs?: unknown }).tabs !== undefined);
   const recordPageTier = useRecordPageTier(pageRootEl, { embedded: !!embedded, enabled: pageColumnsEligible });
   const pageInColumnTier = recordPageTier === 'two-column' || recordPageTier === 'three-column';
+  // ─── The reader's column switches (objectstack#27052) ────────────────
+  // Whether the timeline and the related column take part in a column tier
+  // is each reader's choice, per object, kept in the console's
+  // workspace-preference store — never metadata. A reader who never chose
+  // gets the object's derived default: the timeline for a worked object
+  // (`recordPageColumnDefaults`), the related column always. The tabbed tier
+  // does not read them; the choice is kept for when the page widens.
+  const columnDefaults = recordPageColumnDefaults(objectDef as never);
+  const columnScope = objectPreferenceScope(objectName ?? '');
+  const [timelineSwitch, setTimelineSwitch] = useWorkspacePreference(
+    RECORD_TIMELINE_COLUMN_PREFERENCE,
+    columnScope,
+    columnDefaults.timeline ? 'on' : 'off',
+  );
+  const [relatedSwitch, setRelatedSwitch] = useWorkspacePreference(
+    RECORD_RELATED_COLUMN_PREFERENCE,
+    columnScope,
+    columnDefaults.related ? 'on' : 'off',
+  );
+  const columnSwitches = { timeline: timelineSwitch === 'on', related: relatedSwitch === 'on' };
+  // Which switches the toolbar draws — the columns the page has content for —
+  // set at render below and read by the shortcuts, so a shortcut never flips
+  // a switch the reader cannot see.
+  const drawnPanelSwitches = useRef<{ timeline: boolean; related: boolean }>({ timeline: false, related: false });
+  useEffect(() => {
+    if (!pageInColumnTier) return undefined;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.isComposing) return;
+      const timeline = matchesPanelChord(e, TOGGLE_TIMELINE_SHORTCUT.chord);
+      const related = !timeline && matchesPanelChord(e, TOGGLE_RELATED_SHORTCUT.chord);
+      if (!timeline && !related) return;
+      if (isTypingTarget(e.target)) return;
+      if (timeline && !drawnPanelSwitches.current.timeline) return;
+      if (related && !drawnPanelSwitches.current.related) return;
+      e.preventDefault();
+      if (timeline) setTimelineSwitch(timelineSwitch === 'on' ? 'off' : 'on');
+      else setRelatedSwitch(relatedSwitch === 'on' ? 'off' : 'on');
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [pageInColumnTier, timelineSwitch, relatedSwitch, setTimelineSwitch, setRelatedSwitch]);
+  useAdvertiseShortcut(TOGGLE_TIMELINE_SHORTCUT, pageInColumnTier);
+  useAdvertiseShortcut(TOGGLE_RELATED_SHORTCUT, pageInColumnTier);
   const [pageRecord, setPageRecord] = useState<any>(null);
   // 'idle' | 'loading' | 'loaded' | 'missing' | 'forbidden' | 'failed' —
   // distinguishes "haven't tried yet" from each way the read can end. The
@@ -3644,7 +3755,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         icon: 'trash',
         type: 'script',
         locations: ['record_header'],
-        variant: 'destructive',
+        variant: 'danger',
         order: 120,
         component: 'action:menu',
         // objectui#4213 — `delete.disabledWhen` greys the overflow entry, the
@@ -3758,6 +3869,39 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // included). `null` in the tabbed tier, and for a page whose strip the
   // partition cannot read, which then keeps its tabs.
   const pageColumns = pageInColumnTier ? buildDefaultPageColumns(renderedPage) : null;
+
+  // objectstack#27052 — the panel toggles on the crumb row: one per column the
+  // page has content for, drawn only where the columns are (never in the
+  // drawer / split pane, never in the tabbed tier).
+  const panelToggleItems: PanelToggleItem[] = [];
+  if (pageColumns && pageColumns.timeline.length > 0) {
+    panelToggleItems.push({
+      id: 'timeline',
+      label: t('detail.timeline', { defaultValue: 'Timeline' }),
+      icon: Rows3,
+      pressed: columnSwitches.timeline,
+      onPressedChange: (pressed) => setTimelineSwitch(pressed ? 'on' : 'off'),
+      shortcut: shortcutKeycaps(TOGGLE_TIMELINE_SHORTCUT.chord),
+      ariaKeyShortcuts: ariaKeyShortcutsOf(TOGGLE_TIMELINE_SHORTCUT.chord),
+    });
+  }
+  if (pageColumns && pageColumns.related.length > 0) {
+    panelToggleItems.push({
+      id: 'related',
+      // Not `detail.related`: the rail toggle and the Related tab carry that
+      // name, and a second control with the same name would announce as them.
+      label: t('detail.relatedColumn', { defaultValue: 'Related column' }),
+      icon: LayoutGrid,
+      pressed: columnSwitches.related,
+      onPressedChange: (pressed) => setRelatedSwitch(pressed ? 'on' : 'off'),
+      shortcut: shortcutKeycaps(TOGGLE_RELATED_SHORTCUT.chord),
+      ariaKeyShortcuts: ariaKeyShortcutsOf(TOGGLE_RELATED_SHORTCUT.chord),
+    });
+  }
+  drawnPanelSwitches.current = {
+    timeline: panelToggleItems.some((item) => item.id === 'timeline'),
+    related: panelToggleItems.some((item) => item.id === 'related'),
+  };
 
   // objectui#11958 (card ② of the objectstack#8346 ruling, M1, zero server) —
   // the record page's "print" action. The page this view renders for the
@@ -3917,12 +4061,15 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         >
           <div className="flex-1 overflow-hidden flex flex-row">
             <div className="flex-1 overflow-auto p-3 sm:p-4 lg:p-6 scroll-pb-48">
-              {/* The way back: the origin link, and on a page a drawer's ⤢
-                  opened, the way back into that drawer (objectstack#26679).
-                  Neither is drawn inside a drawer — the drawer's own bar is
-                  its way back, and the page's history state is not its. */}
+              {/* The crumb row: the way back on the left — the origin link,
+                  and on a page a drawer's ⤢ opened, the way back into that
+                  drawer (objectstack#26679) — and, on a page in a column
+                  tier, the reader's panel toggles on the right
+                  (objectstack#27052). None of it is drawn inside a drawer:
+                  the drawer's own bar is its way back, and the page's
+                  history state is not its. */}
               {!embedded && (
-                <div className="flex items-center justify-between gap-3 empty:hidden">
+                <div className="flex items-center justify-between gap-3 empty:hidden" data-record-crumb-row="">
                   {originFrom?.pathname && originFrom?.label && (
                     <Link
                       to={originFrom.pathname}
@@ -3932,8 +4079,14 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                       <span>{originFrom.label}</span>
                     </Link>
                   )}
-                  <div className="mb-3 ml-auto empty:hidden">
+                  <div className="mb-3 ml-auto flex items-center gap-2 empty:hidden">
                     <RecordDrawerReturnLink />
+                    {panelToggleItems.length > 0 && (
+                      <PanelToggles
+                        label={t('detail.panelToggles', { defaultValue: 'Panels' })}
+                        items={panelToggleItems}
+                      />
+                    )}
                   </div>
                 </div>
               )}
@@ -4041,6 +4194,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   <RecordPageColumns
                     tier={recordPageTier}
                     columns={pageColumns}
+                    switches={columnSwitches}
                     footer={
                       <RecordMetaFooter
                         data={readablePageRecord}

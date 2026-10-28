@@ -43,7 +43,7 @@ import { SidebarProvider, badgeVariants } from '@object-ui/components';
 import { NavigationRenderer } from '@object-ui/layout';
 import type { NavigationItem } from '@object-ui/types';
 // @ts-expect-error — plain-JS gate script, intentionally untyped (`allowJs: false`)
-import { readDesignerPairs } from '../../../../../scripts/check-i18n-designer-table-parity.mjs';
+import { readDesignerPairs } from '../../../../../scripts/check-i18n-dead-keys.mjs';
 
 /** The metadata client the open block installed; the mocks below read it. */
 const studio = vi.hoisted(() => ({ client: undefined as unknown }));
@@ -1304,8 +1304,8 @@ describe('StudioDesignSurface.railServedLabels-12688', () => {
  * ## The three pins
  *
  * 1. No zh value in the designer string tables contains 支柱. Read through
- *    the extractor `check:i18n-designer-parity` reads with
- *    (`readDesignerPairs`), so the population is the whole table rather than
+ *    the designer tables' shared extractor (`readDesignerPairs` in
+ *    `ui/scripts/check-i18n-dead-keys.mjs`), so the population is the whole table rather than
  *    a list of keys this block would have to keep. Its lit control: the
  *    extractor's zh value for `engine.studio.pillar.data` must be the one
  *    `t()` serves, so an extractor that read nothing cannot pass for "no 支柱".

@@ -1393,7 +1393,7 @@ describe('[#24395] the draft save records per-key provenance, the strict draft r
 
     it('each surface is stamped as `by`; an absent surface stamps `api`; the actor is the save\'s', async () => {
         const { protocol } = makeProtocol();
-        for (const surface of ['copilot', 'studio', 'api', undefined] as const) {
+        for (const surface of ['copilot', 'mcp', 'studio', 'api', undefined] as const) {
             const name = `v_${surface ?? 'none'}`;
             await protocol.saveMetaItem({
                 type: 'view', name, item: view(name), mode: 'draft', actor: 'u_1', ...(surface ? { surface } : {}),
@@ -1493,6 +1493,57 @@ describe('[#24395] the draft save records per-key provenance, the strict draft r
             type: 'view', name: 'v_bad', item: view('v_bad'), mode: 'draft', surface: 'robot',
         })));
         expect(envelope).toMatchObject({ status: 400, code: 'INVALID_REQUEST' });
+        expect(metadataWrites()).toEqual([]);
+    });
+
+    it('[#27176] an `mcp` save stamps its OAuth client beside `by` on every path it changes; a later save keeps it on the paths it leaves', async () => {
+        const { protocol } = makeProtocol();
+        const client = { id: 'cli_claude', name: 'Claude' };
+        await protocol.saveMetaItem({ type: 'view', name: 'v_mcp', item: view('v_mcp', { description: 'pub' }) });
+        await protocol.saveMetaItem({
+            type: 'view', name: 'v_mcp', mode: 'draft', surface: 'mcp', client, actor: 'u_1',
+            item: view('v_mcp', { description: 'pub', label: 'Agent', columns: TWO_COLUMNS }),
+        });
+        const first = (await readDraft(protocol, 'v_mcp'));
+        expect(first.draftChanges).toEqual([
+            { path: ['label'], by: 'mcp', actor: 'u_1', at: expect.stringMatching(ISO_Z), client },
+            { path: ['columns'], by: 'mcp', actor: 'u_1', at: expect.stringMatching(ISO_Z), client },
+        ]);
+        expect(GetMetaItemResponseSchema.safeParse(first).success).toBe(true);
+        await protocol.saveMetaItem({
+            type: 'view', name: 'v_mcp', mode: 'draft', surface: 'studio', actor: 'u_1',
+            item: view('v_mcp', { description: 'pub', label: 'Hand', columns: TWO_COLUMNS }),
+        });
+        const second = (await readDraft(protocol, 'v_mcp')).draftChanges;
+        expect(second[0]).toEqual(first.draftChanges[1]);
+        expect(second[1]).toEqual({ path: ['label'], by: 'studio', actor: 'u_1', at: expect.stringMatching(ISO_Z) });
+        // A client with no registered name is recorded by its id alone.
+        await protocol.saveMetaItem({
+            type: 'view', name: 'v_mcp_id', item: view('v_mcp_id'), mode: 'draft', surface: 'mcp', client: { id: 'cli_x' },
+        });
+        expect((await readDraft(protocol, 'v_mcp_id')).draftChanges[0].client).toEqual({ id: 'cli_x' });
+        // An `mcp` save that states no client records none — absent, never a placeholder.
+        await protocol.saveMetaItem({ type: 'view', name: 'v_mcp_none', item: view('v_mcp_none'), mode: 'draft', surface: 'mcp' });
+        expect('client' in (await readDraft(protocol, 'v_mcp_none')).draftChanges[0]).toBe(false);
+    });
+
+    it('[#27176] a `client` beside any surface but `mcp`, or of the wrong shape, is refused 400 INVALID_REQUEST before anything is written', async () => {
+        const { protocol, metadataWrites } = makeProtocol();
+        const cases: Array<Record<string, unknown>> = [
+            { surface: 'copilot', client: { id: 'cli_1' } },
+            { surface: 'studio', client: { id: 'cli_1' } },
+            { client: { id: 'cli_1' } },
+            { surface: 'mcp', client: { id: '' } },
+            { surface: 'mcp', client: { id: 'cli_1', name: '' } },
+            { surface: 'mcp', client: { id: 'cli_1', secret: 's' } },
+            { surface: 'mcp', client: 'cli_1' },
+        ];
+        for (const extra of cases) {
+            const envelope = resolveThrownHttpError(await refusalOf(() => protocol.saveMetaItem({
+                type: 'view', name: 'v_cli', item: view('v_cli'), mode: 'draft', ...extra,
+            } as any)));
+            expect(envelope, JSON.stringify(extra)).toMatchObject({ status: 400, code: 'INVALID_REQUEST' });
+        }
         expect(metadataWrites()).toEqual([]);
     });
 });

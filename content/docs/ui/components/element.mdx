@@ -1,0 +1,80 @@
+---
+title: "Element components — component reference"
+navTitle: "Elements"
+description: "The element:* components: text, numbers, buttons, dividers, definition lists and repeaters."
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Generated from sdui.manifest.json by node scripts/gen-sdui-reference.mjs; change the manifest or the generator, never this page. */}
+
+The `element:*` components are small, self-contained page elements.
+
+<Callout type="info">
+This page is generated from the repo-root `sdui.manifest.json`, the component manifest CI
+regenerates from the renderer registry. Regenerate it with
+`node scripts/gen-sdui-reference.mjs`; `node scripts/gen-sdui-reference.mjs --check` fails when it is stale.
+</Callout>
+
+## `element:button` [#element-button]
+
+Namespace `element`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `label` | `string` \| `object` | yes | Accepts an inline translation map (\{ en, "zh-CN", … \}) |
+| `action` | `object` |  | Inline ActionDef executed on click (url / navigation / api / script / modal / flow); omitted → renders inert |
+| `variant` | `enum`: `primary`, `secondary`, `danger`, `ghost`, `link` |  | — |
+| `size` | `enum`: `small`, `medium`, `large` |  | — |
+| `icon` | `string` |  | Lucide icon name |
+| `iconPosition` | `enum`: `left`, `right` |  | — |
+| `disabled` | `boolean` |  | — |
+
+## `element:definition-list` [#element-definition-list]
+
+Namespace `element`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `items` | `array` of `object` |  | Term/description pairs [\{ term, description \}], in order: `term` is the row label, `description` is shown as-is (an object as JSON, an omitted one as an em dash). Omitted or empty renders the empty state: the active language’s "No data" (`common.noData`) |
+| `columns` | `enum`: `[object Object]`, `[object Object]` |  | Grid columns from the small breakpoint up: the NUMBER 1 or 2 (default 1) |
+| `inline` | `boolean` |  | Term and description on one baseline-aligned row |
+
+## `element:divider` [#element-divider]
+
+Namespace `element`.
+
+It takes no inputs.
+
+## `element:number` [#element-number]
+
+Namespace `element`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `aggregate` | `enum`: `count`, `sum`, `avg`, `min`, `max` | yes | — |
+| `field` | `string` |  | Measure field (required for every aggregate except count) |
+| `format` | `enum`: `number`, `currency`, `percent` |  | — |
+| `prefix` | `string` |  | — |
+| `suffix` | `string` |  | — |
+| `dataSource` | `object` (`object` data binding) |  | Per-element data binding: \{ object, view, filter, sort, limit \}. Overrides the page-level object context for this block; `view` names a saved view of `object`, and `filter` is ANDed with the view’s own rather than replacing it. |
+
+## `element:repeater` [#element-repeater]
+
+Namespace `element`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `titleField` | `string` |  | — |
+| `fields` | `array` |  | Fields shown after the title on each line, in order: a bare field name, or `{ field }` |
+| `emptyText` | `string` |  | — |
+| `divided` | `boolean` |  | Separator between rows |
+| `dataSource` | `object` (`object` data binding) |  | Per-element data binding: \{ object, view, filter, sort, limit \}. Overrides the page-level object context for this block; `view` names a saved view of `object`, and `filter` is ANDed with the view’s own rather than replacing it. |
+
+## `element:text` [#element-text]
+
+Namespace `element`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `content` | `string` \| `object` | yes | Accepts an inline translation map (\{ en, "zh-CN", … \}) |
+| `variant` | `enum`: `h1`, `h2`, `h3`, `h4`, `h5`, `h6`, `body`, `caption`, `overline` |  | One of the nine text styles ui:text uses: h1-h6 (rendered as that heading level), body, caption or overline. The earlier spellings heading and subheading are refused; write h2 or h3 instead. |
+| `align` | `enum`: `left`, `center`, `right` |  | — |

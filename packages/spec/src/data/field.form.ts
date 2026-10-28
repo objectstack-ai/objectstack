@@ -97,8 +97,9 @@ export const fieldForm = defineForm({
         // values, so it takes the `object.form.ts` `access` / `lifecycle` face: a
         // composite whose sub-rows are DECLARED, so their labels and help text
         // reach the translation catalogs (a schema-derived sub-field never does).
-        // Schema defaults (`dynamic`, `CNY`) are placeholders the renderer never
-        // writes on mount, so an untouched composite stays absent.
+        // The schema default (`dynamic`) is a placeholder the renderer never
+        // writes on mount, so an untouched composite stays absent. A code has no
+        // default (#27157): `fixed` without one is refused, not filled in.
         // #22727 — a formula returning `currency` carries its currency in this
         // same key, so the row shows for it too; the gate is the returnType
         // row's own value, not a second control.
@@ -112,7 +113,7 @@ export const fieldForm = defineForm({
               { label: 'Dynamic — the tenant default currency', value: 'dynamic' },
               { label: 'Fixed — one currency for this field', value: 'fixed' },
             ] },
-            { field: 'defaultCurrency', type: 'text', helpText: 'The one currency of a fixed-mode field, as a three-character ISO 4217 code (e.g. USD, EUR). Defaults to CNY. Not read in dynamic mode.' },
+            { field: 'defaultCurrency', type: 'text', helpText: 'The one currency of a fixed-mode field, as a three-character ISO 4217 code (e.g. USD, EUR). Required in fixed mode; nothing fills one in. Not read in dynamic mode.' },
           ],
         },
         // Every `visibleWhen` below is a MEANINGFULNESS gate, not a parse gate:

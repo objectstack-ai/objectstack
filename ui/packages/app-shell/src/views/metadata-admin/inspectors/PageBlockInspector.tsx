@@ -38,6 +38,7 @@ import { ConditionBuilder } from './ConditionBuilder.js';
 import { expressionSource, writeExpressionSource } from './expression-envelope.js';
 import { useObjectOptions } from '../previews/useObjectOptions.js';
 import { useObjectFields } from '../previews/useObjectFields.js';
+import { FilterBuilderField } from '../widgets.js';
 import {
   Button, Input, Label,
   Select, SelectTrigger, SelectContent, SelectItem, SelectValue,
@@ -55,6 +56,38 @@ function useFieldOptions(objectName: string | undefined): Array<{ value: string;
         .filter((f) => !f.hidden)
         .map((f) => ({ value: f.name, label: f.label && f.label !== f.name ? `${f.label} (${f.name})` : f.name })),
     [fields],
+  );
+}
+
+/**
+ * A block prop that is a spec `ViewFilterRule[]` (`record:related_list.filter`),
+ * edited with the list toolbar's own filter builder — the one the
+ * `filter-builder` form widget renders for a view's and a page's filters — over
+ * the fields of `objectName`. Clearing the last rule removes the key.
+ */
+function FilterRulesField({ label, objectName, value, onChange, disabled }: {
+  label: string; objectName: string | undefined; value: unknown;
+  onChange: (v: Array<{ field: string; operator: string; value?: unknown }> | undefined) => void;
+  disabled?: boolean;
+}) {
+  const { fields, error } = useObjectFields(objectName);
+  const id = React.useId();
+  const builderFields = React.useMemo(
+    () => fields.filter((f) => !f.hidden).map((f) => ({ name: f.name, label: f.label, type: f.type })),
+    [fields],
+  );
+  return (
+    <div className="space-y-1.5" data-testid="block-filter-rules">
+      <Label htmlFor={id} className="text-xs text-muted-foreground">{label}</Label>
+      <FilterBuilderField
+        id={id}
+        value={Array.isArray(value) ? (value as Array<{ field: string; operator: string; value?: unknown }>) : undefined}
+        onChange={(rules) => onChange(rules.length > 0 ? rules : undefined)}
+        fields={builderFields}
+        readOnly={disabled}
+        loadError={error ?? undefined}
+      />
+    </div>
   );
 }
 
@@ -147,6 +180,10 @@ function InspectorJsonField({ label, value, onCommit, disabled, placeholder, loc
   // message is resolved at render and follows a locale switch instead of
   // freezing whatever language was active when the parse failed.
   const [invalid, setInvalid] = React.useState(false);
+  // Minted here, not derived from the label or the prop name: `renderField`
+  // draws this editor inside array rows too, where a caller-derived id would
+  // repeat and `for` would resolve to the first row's textarea.
+  const id = React.useId();
   React.useEffect(() => { setText(initial); setInvalid(false); }, [initial]);
   const commit = () => {
     if (disabled) return;
@@ -162,8 +199,9 @@ function InspectorJsonField({ label, value, onCommit, disabled, placeholder, loc
   };
   return (
     <div className="space-y-1">
-      <Label className="text-xs text-muted-foreground">{label}</Label>
+      <Label htmlFor={id} className="text-xs text-muted-foreground">{label}</Label>
       <textarea
+        id={id}
         value={text}
         onChange={(e) => setText(e.target.value)}
         onBlur={commit}
@@ -541,6 +579,11 @@ export function PageBlockInspector({ selection, draft, onPatch, onClearSelection
     keyPrefix = '',
   ): React.ReactNode => {
     const k = `${keyPrefix}${f.name}`;
+    /** This prop's stored value is one its own editor cannot hold: show it as JSON. */
+    const jsonFallback = (): React.ReactNode => (
+      <InspectorJsonField key={k} label={fieldLabel(f.label)} value={read(f.name)}
+        locale={locale} onCommit={(v) => write(f.name, v)} disabled={readOnly} />
+    );
     switch (f.kind) {
       case 'number':
         return (
@@ -550,7 +593,8 @@ export function PageBlockInspector({ selection, draft, onPatch, onClearSelection
         );
       case 'boolean':
         return (
-          <InspectorCheckboxField key={k} label={fieldLabel(f.label)} value={!!read(f.name)}
+          <InspectorCheckboxField key={k} label={fieldLabel(f.label)}
+            value={read(f.name) === undefined ? (f.defaultValue ?? false) : !!read(f.name)}
             onCommit={(v) => write(f.name, v)} disabled={readOnly} />
         );
       case 'color':
@@ -604,6 +648,10 @@ export function PageBlockInspector({ selection, draft, onPatch, onClearSelection
         );
       }
       case 'array': {
+        // A stored value in another arm of the prop's union (`sort: 'name'`)
+        // is shown and edited as JSON: the row editor would draw it as an
+        // empty list and its first "Add" would overwrite it.
+        if (read(f.name) !== undefined && !Array.isArray(read(f.name))) return jsonFallback();
         const arr = Array.isArray(read(f.name)) ? (read(f.name) as unknown[]) : [];
         return (
           <div key={k} className="space-y-2">
@@ -651,9 +699,23 @@ export function PageBlockInspector({ selection, draft, onPatch, onClearSelection
             value={read(f.name) != null ? String(read(f.name)) : undefined}
             onCommit={(v) => write(f.name, v)} disabled={readOnly} />
         );
-      case 'field-list':
+      case 'field-list': {
+        // The editor holds field NAMES. A list in another arm of the prop's
+        // union — `record:related_list.columns` as a saved view's `ListColumn`
+        // objects — is shown and edited as JSON rather than drawn as
+        // `[object Object]` rows and flattened on the next edit.
+        const listValue = read(f.name);
+        if (listValue !== undefined && (!Array.isArray(listValue) || listValue.some((x) => typeof x !== 'string'))) {
+          return jsonFallback();
+        }
         return (
           <FieldListField key={k} label={fieldLabel(f.label)} objectName={resolveObject(f)} locale={locale}
+            value={listValue} onChange={(v) => write(f.name, v)} disabled={readOnly} />
+        );
+      }
+      case 'filter-rules':
+        return (
+          <FilterRulesField key={k} label={fieldLabel(f.label)} objectName={resolveObject(f)}
             value={read(f.name)} onChange={(v) => write(f.name, v)} disabled={readOnly} />
         );
       default:

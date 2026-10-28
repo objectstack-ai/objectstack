@@ -625,6 +625,8 @@
     "MarkNotificationsReadRequestSchema (const)",
     "MarkNotificationsReadResponse (type)",
     "MarkNotificationsReadResponseSchema (const)",
+    "MetadataAuthoringClient (type)",
+    "MetadataAuthoringClientSchema (const)",
     "MetadataAuthoringSurface (type)",
     "MetadataAuthoringSurfaceSchema (const)",
     "MetadataBulkRegisterRequest (type)",

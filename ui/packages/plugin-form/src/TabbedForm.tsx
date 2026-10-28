@@ -165,6 +165,15 @@ export interface TabbedFormSchema {
   columns?: number;
 
   /**
+   * Label placement for every field on every tab — `vertical` (the default) or
+   * `horizontal` (label beside its field). Declared as `ObjectFormSchema['layout']`
+   * rather than restated: `ObjectForm` hands the authored key over in its
+   * `{...schema}` spread, and this layout used to drop it on the form node it
+   * builds (objectstack-ai/objectstack#26843).
+   */
+  layout?: ObjectFormSchema['layout'];
+
+  /**
    * Default active tab (section name)
    */
   defaultTab?: string;
@@ -674,7 +683,9 @@ export const TabbedForm: React.FC<TabbedFormProps> = ({
     fields: allFields,
     columns: formColumns,
     ...(containerFieldClass ? { fieldContainerClass: containerFieldClass } : {}),
-    layout: 'vertical',
+    // The authored label placement, not a hard-coded `vertical`
+    // (objectstack-ai/objectstack#26843): the form renderer draws it on every tab.
+    layout: schema.layout ?? 'vertical',
     defaultValues: formData,
     // Persisted record → `previous` binding + read-only submit strip (#3484).
     previousValues: schema.mode === 'edit' && schema.recordId ? formData : undefined,

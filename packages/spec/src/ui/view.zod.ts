@@ -3509,6 +3509,20 @@ const FORM_SECTION_VISIBLE_ON_RETIRED =
   + 'which hides the whole section when false) is unchanged. Where a section writes both, `visibleWhen` is '
   + 'the one that was in effect: delete `visibleOn`.';
 
+// [#27155] `section.pane` retired with the form view `type` `'split'` it
+// served (ADR-0050, ruling 6464210455 on #27032, letter A′). `pane` placed a
+// section in the primary or secondary pane of a split form; once `type` is
+// layout only, no form view draws panes, so the key would be accepted and do
+// nothing. The `form-view-presentation-types-removed` conversion (ADR-0087 D2)
+// strips it from existing sources and stored rows together with the retired
+// `type`. Declared with `//` on purpose, as `NAVIGATION_MODE_RETIRED` is.
+const FORM_SECTION_PANE_RETIRED =
+  '`view.form.sections[].pane` was removed in @objectstack/spec 18.3.0 (ADR-0050) — it placed a section '
+  + 'in one pane of a `type: \'split\'` form, and `split` left the form view `type` in the same release, so '
+  + 'no form view draws panes. Delete the key: a `tabbed` form gives each section its own tab, and a '
+  + '`simple` form stacks them. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
+
 const FormFieldBaseSchema = lazySchema(() => {
   const shape = {
   /** Field name (snake_case) */
@@ -4031,18 +4045,12 @@ export const FormSectionSchema = lazySchema(() => strictObject({
     .transform(val => (typeof val === 'string' ? parseInt(val, 10) : val) as 1 | 2 | 3 | 4 | undefined)
     .describe("Fields per row, 1–4 ('1'–'4' parse to the number). Declared: the author's ceiling — at most that many per row where the container is wide enough; a renderer collapses it on narrow containers. Undeclared: the renderer's choice by available width — the parse adds no default, so declare `columns: 1` to keep a section single-column."),
   /**
-   * Which pane of a split form this section renders in (`type: 'split'` only —
-   * any other form type rejects the key at parse, see the FormViewSchema
-   * refinement). Placement is explicit and PER SECTION so it survives
-   * reordering: with the old first-vs-rest positional rule the assignment was
-   * invisible in the metadata, and an edit that reordered sections silently
-   * moved them across the divider. Defaults by position when omitted: the
-   * first section renders in `primary`, every other section in `secondary`
-   * (exactly the legacy rule, so keyless metadata keeps its layout).
+   * [#27155] RETIRED with the form view `type` `'split'` — see
+   * {@link FORM_SECTION_PANE_RETIRED} above the schema. The tombstone stays in
+   * the shape on purpose: `tsc` types the key `never` and a value reaching a
+   * parse raises the prescription instead of a bare unrecognized-key report.
    */
-  pane: z.enum(['primary', 'secondary']).optional().describe(
-    "Split pane this section renders in (split forms only; a parse error elsewhere). Omitted → first section 'primary', others 'secondary'.",
-  ),
+  pane: retiredKey(FORM_SECTION_PANE_RETIRED),
   /**
    * [#13855] Reference a declared field GROUP instead of enumerating members —
    * the delta form ruled 2026-08-31 (maintainer: 「直接处理b」).
@@ -4093,9 +4101,10 @@ export const FormSectionSchema = lazySchema(() => strictObject({
   // tombstone refuses it at the key, and this refinement never runs on a
   // section that wrote it (#23543 F4, measured: one issue, at `visibleOn`).
   //
-  // NOT in the list, deliberately: `columns` and `pane`. Those are how THIS
-  // form lays the section out and the group declares nothing about them, so
-  // there is no second source to create.
+  // NOT in the list, deliberately: `columns`. That is how THIS form lays the
+  // section out and the group declares nothing about it, so there is no
+  // second source to create. (`pane` sat beside it until #27155 retired it
+  // with `type: 'split'`; its tombstone refuses it at the key.)
   derivedKeys: ['name', 'label', 'description', 'visibleWhen'],
   // `collapsible` / `collapsed` carry `.default(false)`, so an authored `false`
   // is already indistinguishable from the default by the time this runs — the
@@ -4188,12 +4197,13 @@ type WithFormSectionAlias = { sections?: unknown; groups?: unknown };
  * else. Export it if and when a pre-parse door is ruled to need the same fold
  * (see "What this does NOT reach").
  *
- * ## Ordering: the `pane` refinement above still sees `groups`
+ * ## Ordering: the section refinements above still see `groups`
  *
  * Checks run in attachment order, so the `.superRefine` is evaluated BEFORE
- * this fold and keeps reporting a misplaced `pane` at the path the author
- * actually wrote (`groups.0.pane`, not `sections.0.pane`). Attaching the fold
- * first would have re-pathed that message onto a key the author never typed.
+ * this fold and keeps reporting a refused section key at the path the author
+ * actually wrote (`groups.0.visibleWhen` on a wizard step, not
+ * `sections.0.visibleWhen`). Attaching the fold first would have re-pathed that
+ * message onto a key the author never typed.
  *
  * ## What this does NOT reach
  *
@@ -4479,6 +4489,62 @@ function refineFormFieldFeaturesRoot(
   });
 }
 
+// [#27155] Form-view `type` retired-value prescriptions — ADR-0050 Accepted by
+// ruling 6464210455 on #27032 (letter A′, maintainer 「其他同意」 2026-10-28):
+// `type` is the form's LAYOUT only. `drawer` and `modal` named where a form is
+// OPENED, which is the caller's concern and modelled there; `split` was a
+// list-beside-record view mode, neither a layout nor a container. The ruling's
+// own mapping sent `split` to the list's `navigation.mode: 'split'`, which
+// #26804 had already retired the day before (a side-by-side pane is a reader's
+// preference), so these prescriptions name the live replacements only. The
+// `form-view-presentation-types-removed` conversion (ADR-0087 D2) deletes a
+// retired member — the form lands on the `simple` default — and strips the
+// split-only keys beside it. Declared with `//` on purpose, as below.
+const FORM_VIEW_TYPE_RETIRED_FIX =
+  'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
+
+const FORM_VIEW_TYPE_RETIRED = {
+  split:
+    "'split' was removed from the form view `type` enum in @objectstack/spec 18.3.0 (ADR-0050) — `type` is "
+    + 'the form\'s layout, and a side-by-side split is not one: whether a record opens beside its list is '
+    + 'each reader\'s own preference in the list\'s Display menu, not metadata. Write `type: \'tabbed\'` (one '
+    + 'tab per section) or delete the value for the `simple` default, and delete each section\'s `pane` and '
+    + 'the form\'s `splitSize` / `splitResizable`; to edit child records beside the parent, declare '
+    + '`subforms`. '
+    + FORM_VIEW_TYPE_RETIRED_FIX,
+  drawer:
+    "'drawer' was removed from the form view `type` enum in @objectstack/spec 18.3.0 (ADR-0050) — `type` is "
+    + 'the form\'s layout, and where a form opens is decided by whoever opens it: a list opens a clicked '
+    + 'record in the drawer (`navigation.mode`, the default), and the console\'s New and Edit entries open '
+    + 'the record form themselves. Delete the value for the `simple` default, or write the layout you want: '
+    + '`simple`, `tabbed` or `wizard`. '
+    + FORM_VIEW_TYPE_RETIRED_FIX,
+  modal:
+    "'modal' was removed from the form view `type` enum in @objectstack/spec 18.3.0 (ADR-0050) — `type` is "
+    + 'the form\'s layout, and where a form opens is decided by whoever opens it: the console\'s New and Edit '
+    + 'dialogs open the record form themselves (sized by the form\'s `modalSize`), and an action '
+    + '`type: \'modal\'` opens the page it targets. Delete the value for the `simple` default, or write the '
+    + 'layout you want: `simple`, `tabbed` or `wizard`. '
+    + FORM_VIEW_TYPE_RETIRED_FIX,
+} as const;
+
+// [#27155] The split-only parameter keys, retired with `type: 'split'`. Each
+// was read only by the split form's renderer, behind that type; `splitDirection`
+// stays for now because the React `ObjectForm` block (`react-blocks.ts`) takes
+// its contract from this schema and that tier still renders a split form —
+// the renderer card that retires `SplitForm` (#27159) takes it.
+const FORM_VIEW_SPLIT_SIZE_RETIRED =
+  '`view.form.splitSize` was removed in @objectstack/spec 18.3.0 (ADR-0050) — it sized the primary pane of '
+  + 'a `type: \'split\'` form, and `split` left the form view `type` in the same release, so no form view '
+  + 'draws panes. Delete the key. '
+  + FORM_VIEW_TYPE_RETIRED_FIX;
+
+const FORM_VIEW_SPLIT_RESIZABLE_RETIRED =
+  '`view.form.splitResizable` was removed in @objectstack/spec 18.3.0 (ADR-0050) — it made the panes of a '
+  + '`type: \'split\'` form resizable, and `split` left the form view `type` in the same release, so no form '
+  + 'view draws panes. Delete the key. '
+  + FORM_VIEW_TYPE_RETIRED_FIX;
+
 // Form-view `layout` retired-value prescriptions (#20221, ADR-0049
 // enforce-or-remove). Declared with `//` on purpose — the
 // `LIST_VIEW_EXPORT_PDF_RETIRED` placement note applies here too. An
@@ -4540,14 +4606,18 @@ export const FormViewSchema = lazySchema(() => strictObject({
       + 'each section renders as one gated step, and array order is step order.',
   },
 }, {
-  type: z.enum([
+  /**
+   * [#27155] The form's LAYOUT, and nothing else (ADR-0050). Where a form opens
+   * — drawer, dialog, full page — is the caller's open mode, and a record beside
+   * its list is a reader's preference; `split`, `drawer` and `modal` are refused
+   * by name with their prescriptions ({@link FORM_VIEW_TYPE_RETIRED}).
+   */
+  type: enumWithRetiredValues([
     'simple',  // Single column or sections
     'tabbed',  // Tabs
     'wizard',  // Step by step
-    'split',   // Side-by-side resizable panes; sections placed via `section.pane`
-    'drawer',  // Side panel
-    'modal'    // Dialog
-  ]).default('simple'),
+  ], FORM_VIEW_TYPE_RETIRED).default('simple')
+    .describe("Form layout: 'simple' (stacked sections, the default), 'tabbed' (one tab per section) or 'wizard' (one gated step per section). Where the form opens is the caller's choice, not the form's"),
 
   // --- Presentation options (per `type` variant). These mirror what the
   // ObjectForm component accepts so the protocol declares them; all optional. ---
@@ -4616,15 +4686,31 @@ export const FormViewSchema = lazySchema(() => strictObject({
     + '(completed/current/upcoming/invalid) is derived from the step gate — this boolean is the '
     + 'only authorable progress surface.',
   ),
-  /** Split (`type: 'split'`). */
+  /**
+   * Split orientation. [#27155] Inert on a form view since `type: 'split'` was
+   * retired; it stays declared only because the React `ObjectForm` block takes
+   * its contract from this schema (`react-blocks.ts`) and that tier still draws
+   * a split form. It leaves with `SplitForm`, on the renderer card #27159.
+   */
   splitDirection: z.enum(['horizontal', 'vertical']).optional().describe('Split orientation (split forms)'),
-  splitSize: z.number().optional().describe('Primary split panel size, % (split forms)'),
-  splitResizable: z.boolean().optional().describe('Whether the split is resizable (split forms)'),
-  /** Drawer (`type: 'drawer'`). */
+  /** [#27155] RETIRED with `type: 'split'` — {@link FORM_VIEW_SPLIT_SIZE_RETIRED}. */
+  splitSize: retiredKey(FORM_VIEW_SPLIT_SIZE_RETIRED),
+  /** [#27155] RETIRED with `type: 'split'` — {@link FORM_VIEW_SPLIT_RESIZABLE_RETIRED}. */
+  splitResizable: retiredKey(FORM_VIEW_SPLIT_RESIZABLE_RETIRED),
+  /**
+   * Drawer side and width. [#27155] Inert on a form view since `type: 'drawer'`
+   * was retired; both stay declared for the same React `ObjectForm` reason as
+   * `splitDirection` (a React page's `formType='drawer'` reads them), and the
+   * drawer half of their enforce-or-remove question stays open on #27153.
+   */
   drawerSide: z.enum(['top', 'bottom', 'left', 'right']).optional().describe('Drawer side (drawer forms)'),
   /** @deprecated [#2578 → `modalSize` / size buckets] A pixel width can't be authored blind (unknown client viewport); the renderer derives width from content + viewport. */
   drawerWidth: z.string().optional().describe('[DEPRECATED → size buckets] Drawer width, e.g. "480px". A pixel width cannot be chosen without knowing the client viewport — the renderer derives it.'),
-  /** Modal (`type: 'modal'`). */
+  /**
+   * Size bucket of the dialog a caller opens this form in. Live on every
+   * layout: the console's New / Edit dialog reads it off the form view it
+   * selects, whatever the form's `type` ([#27155] it outlived `type: 'modal'`).
+   */
   modalSize: z.enum(['sm', 'default', 'lg', 'xl', 'full']).optional().describe('Modal size (modal forms)'),
 
   /**
@@ -4819,32 +4905,22 @@ export const FormViewSchema = lazySchema(() => strictObject({
     .describe('Initial field values for create-mode forms (folded into ObjectUI ObjectForm initial values;).'),
 
 }).superRefine((view, ctx) => {
-  // `section.pane` is split-only vocabulary. On any other form type it would
-  // be a silent no-op — the worst failure mode for authored (and especially
-  // AI-authored) metadata, where "accepted but ignored" reads as working.
-  // Reject it loudly at parse instead. `.extend()` keeps this check (zod 4
-  // attaches refinements to the schema), so the flattened runtime-overlay
-  // variant in ViewMetadataSchema enforces it too.
+  // Section-level checks. `.extend()` keeps this refinement (zod 4 attaches
+  // refinements to the schema), so the flattened runtime-overlay variant in
+  // ViewMetadataSchema enforces it too. [#27155] The split-only `pane` check
+  // that used to open this loop is gone: `pane` is a `retiredKey()` tombstone
+  // now, refused on every form type at the section itself.
   //
   // ⚠️ This refinement runs BEFORE the `.overwrite()` fold — see
   // {@link foldFormGroupsIntoSections} — so every check here must keep
   // reading BOTH buckets (`sections` AND the legacy `groups` alias).
   for (const [key, sections] of [['sections', view.sections], ['groups', view.groups]] as const) {
     sections?.forEach((section, index) => {
-      if (view.type !== 'split' && section?.pane != null) {
-        ctx.addIssue({
-          code: 'custom',
-          path: [key, index, 'pane'],
-          message:
-            `\`pane\` places a section in a split pane and is only valid on \`type: 'split'\` ` +
-            `form views (this form is '${view.type}'). Remove the key or change the form type.`,
-        });
-      }
       // The `features.*` scope-root exclusion (ruled 2026-08-27, objectui#6262
       // — see {@link checkFormViewPredicateFeaturesRoot}): every predicate
       // this form view carries — section-level, field-level at any depth,
       // per-option — is refused when it names the root that is unbound on the
-      // standalone form routes. Runs on every form `type`, split included.
+      // standalone form routes. Runs on every form `type`.
       const sectionRefusal = checkFormViewPredicateFeaturesRoot(section?.visibleWhen);
       if (sectionRefusal) {
         ctx.addIssue({ code: 'custom', path: [key, index, 'visibleWhen'], message: sectionRefusal });
