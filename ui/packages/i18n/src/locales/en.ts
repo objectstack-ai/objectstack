@@ -357,6 +357,14 @@ const en = {
     },
   },
   fields: {
+    // ADR-0144 D2 — the record-currency code select (`CurrencyCodeField`).
+    currencyCode: {
+      placeholder: 'Select currency',
+      search: 'Search currency…',
+      noResults: 'No currency found',
+      available: 'Available',
+      all: 'All currencies (ISO 4217)',
+    },
     // objectui#13461 — names for icon-only buttons in the field widgets.
     masterDetail: {
       view: 'Open {{name}}',

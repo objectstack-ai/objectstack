@@ -1208,6 +1208,15 @@ function renderFieldDescription(
   );
 }
 
+/**
+ * Widget keys whose DISPLAY reads a sibling field's value: a `record`-mode
+ * amount (ADR-0144 D2) shows the currency its record's code field holds, and a
+ * `formula` declaring `returnType: 'currency'` is drawn by the same widget.
+ * They get the live record (`dependentValues`) and nothing else from the
+ * data-source family — they query nothing.
+ */
+const RECORD_CURRENCY_WIDGET_TYPES = new Set(['currency', 'formula']);
+
 function stripRegisteredFieldProps(type: string, props: RenderFieldProps): RenderFieldProps {
   const {
     dataSource,
@@ -1253,6 +1262,9 @@ function stripRegisteredFieldProps(type: string, props: RenderFieldProps): Rende
     // leftover props onto a DOM node, where an unknown `emptyHint` attribute is
     // a React warning — hence an allow-list, not an unconditional pass-through.
     ...(CASCADE_OPTION_WIDGET_TYPES.has(normalizedType) ? { dependentValues, emptyHint } : {}),
+    // A record-mode amount's symbol and decimals follow the code the user picks
+    // in its sibling select, so the amount box needs the live record too.
+    ...(RECORD_CURRENCY_WIDGET_TYPES.has(normalizedType) ? { dependentValues } : {}),
   };
 }
 

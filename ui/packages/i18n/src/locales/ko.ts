@@ -377,6 +377,14 @@ const ko = {
       postalCode: "우편번호",
       country: "국가",
     },
+    // ADR-0144 D2 — the record-currency code select (`CurrencyCodeField`).
+    currencyCode: {
+      placeholder: '통화 선택',
+      search: '통화 검색…',
+      noResults: '통화를 찾을 수 없음',
+      available: '사용 가능',
+      all: '모든 통화 (ISO 4217)',
+    },
     boolean: {
       offBadge: "{{label}} — 꺼짐",
       completed: "완료됨",

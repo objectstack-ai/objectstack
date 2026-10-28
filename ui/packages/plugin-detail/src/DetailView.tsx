@@ -1272,7 +1272,8 @@ export const DetailView: React.FC<DetailViewProps> = ({
                     if (ftype === 'currency') {
                       const num = Number(val);
                       if (!Number.isNaN(num)) {
-                        const cur = resolveFieldCurrency({ ...(objField as any), ...(sectionField as any) }, tenantCurrency);
+                        // A `record`-mode amount (ADR-0144 D2) reads this record's code field.
+                        const cur = resolveFieldCurrency({ ...(objField as any), ...(sectionField as any) }, tenantCurrency, data);
                         display = cur
                           ? new Intl.NumberFormat(displayLocale, {
                               style: 'currency',

@@ -386,6 +386,14 @@ const zh = {
       postalCode: '邮政编码',
       country: '国家 / 地区',
     },
+    // ADR-0144 D2 — the record-currency code select (`CurrencyCodeField`).
+    currencyCode: {
+      placeholder: '选择币种',
+      search: '搜索币种…',
+      noResults: '未找到币种',
+      available: '可用',
+      all: '全部币种（ISO 4217）',
+    },
     boolean: {
       offBadge: '{{label}} — 已关闭',
       completed: '已完成',

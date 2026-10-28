@@ -386,6 +386,14 @@ const ru = {
       postalCode: "Почтовый индекс",
       country: "Страна",
     },
+    // ADR-0144 D2 — the record-currency code select (`CurrencyCodeField`).
+    currencyCode: {
+      placeholder: 'Выберите валюту',
+      search: 'Поиск валюты…',
+      noResults: 'Валюта не найдена',
+      available: 'Доступные',
+      all: 'Все валюты (ISO 4217)',
+    },
     boolean: {
       offBadge: "{{label}} — Выкл.",
       completed: "Выполнено",
