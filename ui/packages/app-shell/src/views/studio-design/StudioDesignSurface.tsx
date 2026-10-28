@@ -2561,6 +2561,9 @@ function NavTree({
 const OFF_NAV_TYPES = ['page', 'dashboard', 'report', 'view'] as const;
 type OffNavType = (typeof OFF_NAV_TYPES)[number];
 
+/** An item's identity in {@link navOpenedItems}' set. Not a cache key. */
+const itemKeyOf = (type: string, name: string): string => `${type}:${name}`;
+
 /**
  * The `type:name` of every item a nav entry in `nodes` opens, at any depth —
  * what the sections under the tree leave out, so no item is listed twice. The
@@ -2580,9 +2583,9 @@ function navOpenedItems(nodes: readonly NavNode[], locale: string): Set<string> 
       }
       const surface = resolveSurface(node, locale);
       if (!surface) continue;
-      opened.add(`${surface.type}:${surface.name}`);
+      opened.add(itemKeyOf(surface.type, surface.name));
       if (surface.type === 'object' && typeof node.viewName === 'string' && node.viewName) {
-        opened.add(`view:${listViewTargetOf(surface.name, node.viewName, {}).viewId}`);
+        opened.add(itemKeyOf('view', listViewTargetOf(surface.name, node.viewName, {}).viewId));
       }
     }
   };
@@ -5188,7 +5191,7 @@ export function InterfacesPillar({
     type,
     items:
       appStatus !== 'loading' && packageItems?.packageId === packageId
-        ? (packageItems.byType[type] ?? []).filter((item) => !navOpened.has(`${type}:${item.name}`))
+        ? (packageItems.byType[type] ?? []).filter((item) => !navOpened.has(itemKeyOf(type, item.name)))
         : [],
   }));
 
