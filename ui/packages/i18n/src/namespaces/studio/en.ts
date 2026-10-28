@@ -544,9 +544,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.widget.type.bullet': 'Bullet Chart',
   'engine.inspector.widget.type.radar': 'Radar Chart',
   // objectstack#26745 — the Add-widget menu's names for the spec widget types it
-  // did not offer before. The family's other rows still sit in the app-shell
-  // designer table (objectstack#25922 moves them); each en row is the type's
-  // English `label` in `previews/widget-types`, word for word.
+  // did not offer before. The family's other rows sit in the S6 section below
+  // (objectstack#25922); each en row is the type's English `label` in
+  // `previews/widget-types`, word for word.
   'engine.widgetPicker.type.column': 'Column chart',
   'engine.widgetPicker.type.treemap': 'Treemap',
   'engine.widgetPicker.type.sankey': 'Sankey diagram',
