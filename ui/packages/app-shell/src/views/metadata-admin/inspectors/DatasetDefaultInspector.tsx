@@ -165,6 +165,21 @@ export function writeRowField<T extends { field?: string }>(row: T, field: strin
   return (isBlankField(field) ? rest : { ...rest, field }) as T;
 }
 
+/**
+ * Write a measure's display format: a key the picker leaves unset is removed
+ * rather than stored as `undefined`, the same rule as {@link writeRowField}, so
+ * the held draft and the body the save sends say the same thing — a measure on
+ * "inherit" carries no `currency` key at all.
+ */
+export function writeMeasureFormat<T extends { format?: string; currency?: string }>(row: T, next: { format?: string; currency?: string }): T {
+  const { format: _format, currency: _currency, ...rest } = row;
+  return {
+    ...rest,
+    ...(next.format ? { format: next.format } : {}),
+    ...(next.currency ? { currency: next.currency } : {}),
+  } as T;
+}
+
 function SectionHeader({ title, count, onAdd, addLabel }: { title: string; count: number; onAdd?: () => void; addLabel: string }) {
   return (
     <div className="flex items-center justify-between">
@@ -196,23 +211,39 @@ function Advanced({ children, locale }: { children: React.ReactNode; locale: Sup
   );
 }
 
-/** Best-effort parse of a stored measure format into the picker's {kind, decimals}. */
-function parseMeasureFormat(format?: string, currency?: string): { kind: string; decimals: number } {
+/**
+ * Best-effort parse of a stored measure format into the picker's {kind, decimals}.
+ *
+ * `monetaryField` — the measure aggregates a `currency`-type field. Such a
+ * measure is monetary at runtime whether or not it names a `currency` (the
+ * analytics service resolves one from the field's fixed currency, then the
+ * tenant default), so a numeral format with no code reads back as "Currency ·
+ * inherit" — the state the picker wrote — rather than as a plain number.
+ */
+function parseMeasureFormat(format?: string, currency?: string, monetaryField = false): { kind: string; decimals: number } {
   const f = (format ?? '').trim();
   const m = f.match(/\.(0+)/);
   const decimals = m ? Math.min(m[1].length, 2) : 0;
   if (currency || /[$£€¥₹]/.test(f)) return { kind: 'currency', decimals };
+  if (monetaryField && f && !f.includes('%')) return { kind: 'currency', decimals };
   if (f.includes('%')) return { kind: 'percent', decimals };
   if (f) return { kind: 'number', decimals };
   return { kind: 'raw', decimals: 0 };
 }
 
-/** Generate {format, currency} from the picker selection. */
+/**
+ * Generate {format, currency} from the picker selection.
+ *
+ * An empty currency stays empty: no surface guesses a code. A measure with no
+ * `currency` inherits through the existing chain — the source field's fixed
+ * currency, then the tenant default — where a guessed `'USD'` would outrank
+ * both and show `$` on a CNY tenant's dashboard.
+ */
 function buildMeasureFormat(kind: string, decimals: number, currency: string): { format?: string; currency?: string } {
   const dp = decimals > 0 ? '.' + '0'.repeat(decimals) : '';
   switch (kind) {
     case 'number': return { format: `0,0${dp}`, currency: undefined };
-    case 'currency': return { format: `0,0${dp}`, currency: currency || 'USD' };
+    case 'currency': return { format: `0,0${dp}`, currency: currency || undefined };
     case 'percent': return { format: `0${dp}%`, currency: undefined };
     default: return { format: undefined, currency: undefined };
   }
@@ -223,10 +254,27 @@ function buildMeasureFormat(kind: string, decimals: number, currency: string): {
  * ⇄ the spec's `format`/`currency` strings and shows a live sample so a business
  * user never has to hand-write a numeral pattern.
  */
-function MeasureFormatField({ measure, onPatch, disabled, locale }: { measure: Measure; onPatch: (p: Partial<Measure>) => void; disabled?: boolean; locale: SupportedLocale }) {
-  const { kind, decimals } = parseMeasureFormat(measure.format, measure.currency);
-  const currency = measure.currency || 'USD';
-  const apply = (k: string, d: number, c: string) => onPatch(buildMeasureFormat(k, d, c));
+function MeasureFormatField({ measure, monetaryField, onPatch, disabled, locale }: { measure: Measure; monetaryField: boolean; onPatch: (p: { format?: string; currency?: string }) => void; disabled?: boolean; locale: SupportedLocale }) {
+  const parsed = parseMeasureFormat(measure.format, measure.currency, monetaryField);
+  // "Currency" with no code is not distinguishable on the wire from "Number"
+  // for a measure over a plain number field, so the kind the author just picked
+  // is held for as long as the stored format is still the one that pick wrote —
+  // otherwise the select would snap back to "Number" before a code is chosen.
+  const [held, setHeld] = React.useState<{ kind: string; format?: string; currency?: string } | null>(null);
+  const kind = held && held.format === measure.format && held.currency === measure.currency ? held.kind : parsed.kind;
+  const { decimals } = parsed;
+  const currency = measure.currency ?? '';
+  const apply = (k: string, d: number, c: string) => {
+    const next = buildMeasureFormat(k, d, c);
+    setHeld({ kind: k, ...next });
+    onPatch(next);
+  };
+  // Only a measure over a `currency` field has a chain to inherit from; any
+  // other measure without a code renders as a plain number, so it is offered
+  // no "inherit" row and asks for a code instead.
+  const currencyOptions = monetaryField
+    ? [{ value: '', label: t('engine.inspector.dataset.currencyInherit', locale) }, ...CURRENCY_OPTIONS]
+    : CURRENCY_OPTIONS;
   // The sample is a PREVIEW of authored formatting, so it has to be rendered
   // through the same channel as the surfaces it previews (objectui#4575): a
   // German session picking "Number · 1 decimal" is shown `1.234,5`, because
@@ -246,7 +294,7 @@ function MeasureFormatField({ measure, onPatch, disabled, locale }: { measure: M
         )}
       </div>
       {kind === 'currency' && (
-        <InspectorSelectField label={t('engine.inspector.dataset.currency', locale)} value={currency} options={CURRENCY_OPTIONS} onCommit={(v) => apply(kind, decimals, v)} disabled={disabled} />
+        <InspectorSelectField label={t('engine.inspector.dataset.currency', locale)} value={currency} options={currencyOptions} placeholder={t('engine.inspector.dataset.currencyChoose', locale)} onCommit={(v) => apply(kind, decimals, v)} disabled={disabled} />
       )}
       {kind !== 'raw' && (
         <p className="text-[10px] text-muted-foreground">
@@ -754,7 +802,13 @@ export function DatasetDefaultInspector({ draft, onPatch, readOnly, name, locale
               {(() => { const rel = missingRelationship(m.field, include); return rel ? <RelWarning rel={rel} disabled={readOnly} locale={locale} onAdd={() => onPatch({ include: appendArray(include, rel) })} /> : null; })()}
               <Advanced locale={locale}>
                 <InspectorTextField label={tr('engine.inspector.dataset.labelOptional')} value={m.label ?? ''} onCommit={(v) => patchMeasure(i, { label: v || undefined })} placeholder={m.name || tr('engine.inspector.dataset.displayLabel')} disabled={readOnly} />
-                <MeasureFormatField measure={m} onPatch={(pp) => patchMeasure(i, pp)} disabled={readOnly} locale={locale} />
+                <MeasureFormatField
+                  measure={m}
+                  monetaryField={fieldOptions.find((o) => o.value === m.field)?.type === 'currency'}
+                  onPatch={(fmt) => onPatch({ measures: measures.map((mm, idx) => (idx === i ? writeMeasureFormat(mm, fmt) : mm)) })}
+                  disabled={readOnly}
+                  locale={locale}
+                />
                 <DatasetFilterField
                   label={tr('engine.inspector.dataset.measureFilter')}
                   help={tr('engine.inspector.dataset.measureFilterHelp')}

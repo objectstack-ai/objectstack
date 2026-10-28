@@ -1151,6 +1151,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.dataset.displayFormat': 'Display format',
   'engine.inspector.dataset.decimals': 'Decimals',
   'engine.inspector.dataset.currency': 'Currency',
+  'engine.inspector.dataset.currencyInherit': 'Inherit — field or organization default',
+  'engine.inspector.dataset.currencyChoose': 'Choose a currency',
   'engine.inspector.dataset.sample': 'Sample: {sample}',
   'engine.inspector.dataset.relWarning': "Relationship {rel} isn't in Included relationships.",
   'engine.inspector.dataset.relWarningAdd': 'Add it',
