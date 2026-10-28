@@ -336,6 +336,7 @@ const ar = {
       selectTeam: "اختر فريقاً",
       selectBusinessUnit: "اختر وحدة عمل",
       selectPosition: "اختر منصباً",
+      selectQueue: "اختر قائمة انتظار",
       selectUnitAndSubordinates: "اختر وحدة عمل",
       selectField: "اختر حقل مستخدم",
       noUserFields: "لا توجد حقول مستخدم في هذا الكائن",

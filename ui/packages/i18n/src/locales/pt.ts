@@ -321,6 +321,7 @@ const pt = {
       selectTeam: "Selecionar uma equipe",
       selectBusinessUnit: "Selecionar uma unidade de negócio",
       selectPosition: "Selecionar um cargo",
+      selectQueue: "Selecionar uma fila",
       selectUnitAndSubordinates: "Selecionar uma unidade de negócio",
       selectField: "Selecionar um campo de usuário",
       noUserFields: "Este objeto não tem campos de usuário",

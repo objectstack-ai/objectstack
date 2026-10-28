@@ -318,6 +318,7 @@ const de = {
       selectTeam: "Team auswählen",
       selectBusinessUnit: "Geschäftseinheit auswählen",
       selectPosition: "Position auswählen",
+      selectQueue: "Warteschlange auswählen",
       selectUnitAndSubordinates: "Geschäftseinheit auswählen",
       selectField: "Benutzerfeld auswählen",
       noUserFields: "Dieses Objekt hat keine Benutzerfelder",

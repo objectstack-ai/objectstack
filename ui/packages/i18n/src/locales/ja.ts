@@ -318,6 +318,7 @@ const ja = {
       selectTeam: "チームを選択",
       selectBusinessUnit: "事業単位を選択",
       selectPosition: "役職を選択",
+      selectQueue: "キューを選択",
       selectUnitAndSubordinates: "事業単位を選択",
       selectField: "ユーザーフィールドを選択",
       noUserFields: "このオブジェクトにユーザーフィールドはありません",

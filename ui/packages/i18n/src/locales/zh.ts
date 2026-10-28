@@ -324,6 +324,7 @@ const zh = {
       selectTeam: '请选择团队',
       selectBusinessUnit: '请选择业务单元',
       selectPosition: '请选择岗位',
+      selectQueue: '请选择队列',
       selectUnitAndSubordinates: '请选择业务单元',
       selectField: '请选择用户字段',
       noUserFields: '此对象没有用户字段',

@@ -445,6 +445,7 @@ const en = {
       selectTeam: 'Select a team',
       selectBusinessUnit: 'Select a business unit',
       selectPosition: 'Select a position',
+      selectQueue: 'Select a queue',
       selectUnitAndSubordinates: 'Select a business unit',
       selectField: 'Select a user field',
       noUserFields: 'No user fields on this object',

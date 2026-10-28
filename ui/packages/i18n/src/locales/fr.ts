@@ -321,6 +321,7 @@ const fr = {
       selectTeam: "Sélectionner une équipe",
       selectBusinessUnit: "Sélectionner une unité opérationnelle",
       selectPosition: "Sélectionner un poste",
+      selectQueue: "Sélectionner une file",
       selectUnitAndSubordinates: "Sélectionner une unité opérationnelle",
       selectField: "Sélectionner un champ utilisateur",
       noUserFields: "Cet objet n'a aucun champ utilisateur",

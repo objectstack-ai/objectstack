@@ -1310,6 +1310,7 @@ const STUDIO_ZH: Record<string, string> = {
   // Flow reference picker — ReferenceCombobox / FlowReferenceField (objectui#10586)
   'engine.inspector.reference.pickFromRecords': '从记录中选择',
   'engine.inspector.reference.pickFromRegistry': '从已声明的项中选择',
+  'engine.inspector.reference.pickFromQueues': '从队列中选择',
   'engine.inspector.reference.enterManually': '手动输入值',
   'engine.inspector.reference.managerPlaceholder': '自动解析',
   'engine.inspector.reference.managerHint': '运行时根据提交人的上级自动解析 —— 无需填写。',

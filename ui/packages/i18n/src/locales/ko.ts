@@ -318,6 +318,7 @@ const ko = {
       selectTeam: "팀 선택",
       selectBusinessUnit: "사업 단위 선택",
       selectPosition: "직위 선택",
+      selectQueue: "대기열 선택",
       selectUnitAndSubordinates: "사업 단위 선택",
       selectField: "사용자 필드 선택",
       noUserFields: "이 객체에는 사용자 필드가 없습니다",

@@ -327,6 +327,7 @@ const ru = {
       selectTeam: "Выберите команду",
       selectBusinessUnit: "Выберите бизнес-подразделение",
       selectPosition: "Выберите должность",
+      selectQueue: "Выберите очередь",
       selectUnitAndSubordinates: "Выберите бизнес-подразделение",
       selectField: "Выберите поле пользователя",
       noUserFields: "В этом объекте нет полей пользователя",
