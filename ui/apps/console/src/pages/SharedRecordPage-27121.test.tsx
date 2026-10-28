@@ -21,6 +21,7 @@ import { cleanup, render, screen, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { formatCurrency } from '@object-ui/fields';
 import { resolveFieldCurrency } from '@object-ui/i18n';
+import { SchemaRendererProvider } from '@object-ui/react';
 import SharedRecordPage from './SharedRecordPage';
 
 const TOKEN = 'tok_27121';
@@ -103,13 +104,16 @@ function shareServer(record: Record<string, unknown>, fields?: Record<string, un
   return requested;
 }
 
-function renderLink() {
-  return render(
+function renderLink(dataSource?: Record<string, unknown>) {
+  const routed = (
     <MemoryRouter initialEntries={[`/s/${TOKEN}`]}>
       <Routes>
         <Route path="/s/:token" element={<SharedRecordPage />} />
       </Routes>
-    </MemoryRouter>,
+    </MemoryRouter>
+  );
+  return render(
+    dataSource ? <SchemaRendererProvider dataSource={dataSource as never}>{routed}</SchemaRendererProvider> : routed,
   );
 }
 
@@ -183,6 +187,28 @@ describe('SharedRecordPage — rows read the resolve answer’s fields projectio
     await screen.findByText('Shared account');
     expect(cellOf('Parent Account').textContent).toBe('acc_parent_9');
     // One request, to resolve: no lookup-name read, no /meta, no /data.
+    expect(requested).toEqual([RESOLVE_PATH]);
+  });
+
+  it('a lookup never reads its target, even under a host that holds a data source', async () => {
+    // The `/s/:token` route mounts no data source today; this pins the page's
+    // own guard, so hoisting one above the route cannot turn an anonymous
+    // visit into a read of the referenced record.
+    const dataSource = {
+      find: vi.fn(async () => ({ data: [{ id: 'acc_parent_9', name: 'Globex' }] })),
+      findOne: vi.fn(async () => ({ id: 'acc_parent_9', name: 'Globex' })),
+      getObjectSchema: vi.fn(async () => ({ name: 'account', fields: {} })),
+    };
+    const requested = shareServer(ACCOUNT, FIELDS);
+    renderLink(dataSource);
+
+    await screen.findByText('Shared account');
+    // Let any effect a renderer scheduled settle before reading the spies.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(cellOf('Parent Account').textContent).toBe('acc_parent_9');
+    expect(dataSource.find).not.toHaveBeenCalled();
+    expect(dataSource.findOne).not.toHaveBeenCalled();
+    expect(dataSource.getObjectSchema).not.toHaveBeenCalled();
     expect(requested).toEqual([RESOLVE_PATH]);
   });
 
