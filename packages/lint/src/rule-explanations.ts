@@ -3776,6 +3776,30 @@ const OBJECT_FIELD_REF_UNKNOWN_EXPLANATION: RuleExplanation = {
   ],
 };
 
+// ── Related-list names (`validate-related-list-refs.ts`) ───────────────────
+
+const RELATED_LIST_REF_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'related-list-ref-unknown',
+  covers: 'what a related-list entry may name',
+  paragraphs: [
+    'An object names its related lists in two places: `relatedLists`, the business order of its ' +
+      'record page\'s related lists, and a field group\'s `relatedList`, which places one list\'s table ' +
+      'in the record body. Each name must match an INBOUND relationship: a `lookup` or ' +
+      '`master_detail` field of a child object whose `reference` is this object. A bare child name ' +
+      'matches every such field of that child; `object.field` matches that one FK, which is how to ' +
+      'pick one when a child points at this object more than once.',
+    'A name that matches nothing places nothing, silently: the record page keeps its derived order ' +
+      'and the group draws no table. So it is an error, the verdict `defineStack` gives on ' +
+      '`os validate` and `os build`, and at the runtime publish gate, which runs no `defineStack`. ' +
+      'The audit and ownership FKs (`created_by`, `updated_by`, `owner_id`) never become a related ' +
+      'list, so they are not names an entry may use.',
+    'A child the stack does not declare is judged only where the stack is everything the host ' +
+      'serves: at the publish gate with no package closure in force. Under a closure, and on the ' +
+      'CLI, such a child may belong to another package, so this rule does not judge it; on the ' +
+      'CLI `defineStack` does, against the artifact\'s packages.',
+  ],
+};
+
 // ── Object-name references (`validate-object-references.ts`) ────────────────
 
 /** The sites judged — both object-reference ids. */
@@ -5234,6 +5258,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [NAV_OBJECT_UNSERVABLE_EXPLANATION.rule]: NAV_OBJECT_UNSERVABLE_EXPLANATION,
   [NAV_TARGET_UNRESOLVED_EXPLANATION.rule]: NAV_TARGET_UNRESOLVED_EXPLANATION,
   [OBJECT_FIELD_REF_UNKNOWN_EXPLANATION.rule]: OBJECT_FIELD_REF_UNKNOWN_EXPLANATION,
+  [RELATED_LIST_REF_UNKNOWN_EXPLANATION.rule]: RELATED_LIST_REF_UNKNOWN_EXPLANATION,
   [OBJECT_REFERENCE_UNKNOWN_EXPLANATION.rule]: OBJECT_REFERENCE_UNKNOWN_EXPLANATION,
   [OBJECT_REFERENCE_UNREGISTERED_PLATFORM_EXPLANATION.rule]: OBJECT_REFERENCE_UNREGISTERED_PLATFORM_EXPLANATION,
   [CAPABILITY_REFERENCE_UNKNOWN_EXPLANATION.rule]: CAPABILITY_REFERENCE_UNKNOWN_EXPLANATION,

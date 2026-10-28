@@ -72,6 +72,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Campos destacados",
         helpText: "Nombres de campo de este objeto, del más importante al menos; donde solo cabe uno, gana la primera entrada (ADR-0085). Determinan las columnas de lista predeterminadas, las tarjetas, las vistas previas de registros hijos y la franja destacada del detalle. Un nombre que no sea un campo de este objeto se rechaza al publicar."
       },
+      relatedLists: {
+        label: "Orden de listas relacionadas",
+        helpText: "Orden de negocio de las listas relacionadas de este objeto en su página de registro, de la más importante a la menos. Cada entrada es el nombre de un objeto hijo (p. ej., task), u objeto.campo cuando ese hijo tiene más de una relación con este objeto. Las listas indicadas van primero; el resto sigue en el orden derivado. Un nombre que no coincide con ninguna relación que apunte a este objeto no coloca nada, y se rechaza al guardar o validar el objeto."
+      },
       searchableFields: {
         label: "Campos buscables",
         helpText: "Nombres de campo con los que coincide la consulta $search (ADR-0061): el valor predeterminado del selector de registros, la búsqueda rápida de listas y la búsqueda global; una vista puede acotarlo. Sin definir, la búsqueda usa el campo de nombre/título más los campos de texto corto. Cada entrada debe nombrar un campo almacenado de este objeto: un nombre desconocido o un campo formula virtual se rechaza al publicar."
@@ -95,6 +99,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "fieldGroups.description": {
         label: "Descripción",
         helpText: "Texto que se muestra bajo el encabezado, en el formulario de entrada y en la página de detalle del registro."
+      },
+      "fieldGroups.relatedList": {
+        label: "Lista relacionada",
+        helpText: "Convierte esta entrada en la tabla de una lista relacionada en lugar de una sección de campos: indica el objeto hijo (u objeto.campo) cuya lista se dibuja en esta posición de la columna de detalles del registro. Un grupo así no contiene campos; se rechaza un campo que lo indique como su grupo, y también un nombre que no coincide con ninguna relación que apunte a este objeto. La página de registro aún no dibuja esta ubicación."
       },
       "fieldGroups.collapse": {
         label: "Contraer",
@@ -618,7 +626,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "currencyConfig.defaultCurrency": {
         label: "Moneda predeterminada",
-        helpText: "La única moneda de un campo en modo fixed, como código ISO 4217 de tres caracteres (p. ej., USD, EUR). Por defecto, CNY. No se lee en modo dynamic."
+        helpText: "La única moneda de un campo en modo fixed, como código ISO 4217 de tres caracteres (p. ej., USD, EUR). Obligatorio en modo fixed; no se rellena automáticamente. No se lee en modo dynamic."
       },
       step: {
         label: "Incremento",

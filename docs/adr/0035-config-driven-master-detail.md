@@ -1,6 +1,6 @@
 # ADR-0035: Config-driven master-detail (declare on the relationship, forms derive)
 
-**Status**: Accepted
+**Status**: Accepted · **Amended** (2026-10-28, [#27069](https://github.com/objectstack-ai/objectstack/issues/27069), maintainer rulings on that card: 「A」, an ordered list on the parent, and 「明细行的子表放在右侧合适嘛？」 / 「他如果做到放在基本信息下面，而条款和备注在后面」, line items in the record body) — `relatedList: 'primary'` is a **placement** (the record body, as a full-width table), no longer a prominence hint that orders lists; the order is the parent object's `relatedLists`; and an omitted `relatedList` on a `master_detail` FK that sets `inlineEdit` is now `'primary'` by default. See the note under the read-side table.
 **Author**: surfaced while making master-detail (parent + child line-item) entry a first-class, low-config capability
 **Affects**: `@objectstack/spec` (field schema), `@object-ui/plugin-form`, `@object-ui/plugin-view`, `@object-ui/app-shell`; builds on ADR-0034 (atomic multi-write) and the cross-object batch endpoint (#1604)
 
@@ -96,6 +96,23 @@ columns auto-deriving from the child object's `highlightFields` when omitted.
 Audit FKs (`created_by` / `updated_by` / `owner_id`) are skipped; a child that
 references the parent through several FKs yields **one related list per FK**, and
 a self-referential FK surfaces a "children" list.
+
+> **Amended (2026-10-28, #27069).** Two sentences of the paragraph above no
+> longer hold. (1) "`true` / omitted shows the child under a single shared
+> **Related** tab": an omitted `relatedList` on a `master_detail` FK that sets
+> `inlineEdit` (any arm, `true` / `'grid'` / `'form'`) is `'primary'` by
+> default, because line items the parent's form edits inline belong in the
+> record body (the maintainer's ruling on the card); `relatedList: true` on
+> that FK keeps the shared Related tab. On every other FK, omitted still means
+> the shared Related tab. (2) "a *prominence* hint, not a layout switch":
+> `'primary'` now says WHERE a list is drawn, in the record's body as a
+> full-width table rather than as a side card, which on today's tabbed record
+> page is still its own tab. It no longer orders lists. The order of a record
+> page's related lists is the parent object's `relatedLists` (an ordered list
+> of child object names, or `object.field` for one FK); unlisted lists follow
+> in the derived order described above (owned first). `false` still
+> suppresses a list whatever `relatedLists` says. The read-side table's
+> "`'primary'` promotes it to its own tab" stays true on the tabbed page.
 
 The derivation is a pure function — `deriveRelatedLists(objectDef, objects)` in
 `@object-ui/app-shell` (`utils/deriveRelatedLists.ts`) — the read-side analogue
