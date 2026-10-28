@@ -99,6 +99,8 @@ function makeClient(server: Server, opts: { draft: Record<string, unknown> | nul
       if (opts.rejectSaveTimeDraft && server.getDraftCalls > 1) throw new Error('draft read failed');
       return opts.draft ? { type: 'permission', name: 'sales_perms', item: opts.draft, version: 'v1' } : null;
     },
+    // objectstack#26840 — the package door reads its objects through the draft-overlaid door.
+    withPreviewDrafts() { return this; },
     // The package declares `a_account` only.
     list: async (type: string) => (type === 'object' ? [{ item: { name: 'a_account' } }] : []),
     get: async () => null,
