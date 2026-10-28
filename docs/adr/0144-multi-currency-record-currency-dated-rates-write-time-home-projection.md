@@ -7,7 +7,8 @@
   [`6464438764`](https://github.com/objectstack-ai/objectstack/issues/27119#issuecomment-6464438764), the workload list
   [`6464936321`](https://github.com/objectstack-ai/objectstack/issues/27119#issuecomment-6464936321) and the seat's answers
   in the summon chat. The ruling's own text is the authority this record executes; where the two differ, the ruling
-  wins and this record is corrected.
+  wins and this record is corrected. The unit of parameter 4 was ruled afterwards, on 2026-10-28, in ruling
+  [`6469382727`](https://github.com/objectstack-ai/objectstack/issues/27185#issuecomment-6469382727) on #27185. The maintainer chose the option 「小数点后 12 位(推荐)」.
 - **Builds on**: [ADR-0104](./0104-field-runtime-value-shape-contract.md) D1 (a `currency` value is a bare number,
   kept here). [ADR-0112](./0112-error-code-vocabulary-and-ledger.md) governs the runtime refusals only: a blank record
   currency code and a missing rate ([Open item](#open-items) 9). It sets their codes and envelope on the wire, and any
@@ -53,8 +54,8 @@
 Three kinds of text feed this record. Each section says which kind it carries.
 
 1. **Ruled.** Ruling `6465431966` fixes shape C′, sub-questions Q0–Q4, parameters 1–4, the five design rules, the
-   release pairing and the commitment. [Decision](#decision) carries only this. It quotes the ruling wherever the
-   wording matters.
+   release pairing and the commitment. Ruling `6469382727` on #27185 fixes parameter 4's unit. [Decision](#decision)
+   carries only these two. It quotes them wherever the wording matters.
 2. **Analysis the ruling read.** This is the design record `6464438764`, the workload rows `6464936321`, the
    measurement round `6041378776` and the shape verdict `6041482631`. They supply the context, the shapes considered
    and the per-card plan. A detail that appears only there is not ruled. This record lists such details under
@@ -214,7 +215,7 @@ pairing.
 | 1 | Backfill when a historical rate is missing | Report and skip the row, and apply the rest |
 | 2 | Who edits `sys_exchange_rate` | Organization admins only |
 | 3 | Rate direction | "1 home unit = `rate` units of the foreign currency" |
-| 4 | Precision of `rate` | "12 significant decimals" |
+| 4 | Precision of `rate` | "12 significant decimals", ruled as **scale 12** (ruling `6469382727`) |
 
 - **Parameter 3 as arithmetic.** An amount `A` in currency `X`, whose rate row says `r`, is `A ÷ r` home units. The
   home amount is the record amount **divided by** `rate`. Workload row M2-2 writes the projection as
@@ -222,7 +223,9 @@ pairing.
   two-minute check is the division: USD 10,000 at 0.1389 gives ¥71,994.24. #27192 follows parameter 3.
 - **Parameter 1 governs the recompute and backfill** (M2-3, #27193). It does not govern the write path, where D5's
   refusal holds.
-- The wording of parameter 4 leaves its unit open ([Open item](#open-items) 5).
+- **Parameter 4's unit** comes from ruling [`6469382727`](https://github.com/objectstack-ai/objectstack/issues/27185#issuecomment-6469382727) on #27185: "scale 12 — twelve digits after the
+  decimal point, total precision 24, decimal arithmetic, never float". The `rate` column is a decimal with precision 24
+  and scale 12.
 
 ### D8 — Design rules recorded from the summon
 
@@ -326,8 +329,8 @@ Where a source leans one way, the lean is quoted here, not adopted. This record 
    `localization.currency` may be unset (its manifest entry says `required: false`, and there is no platform
    default). The ruling locks the setting once used. It does not say what happens while the setting is unset. The sources rule out a
    silent default (design record §9: no CNY default).
-5. **The unit of parameter 4** (#27185). "12 significant decimals" can mean 12 significant digits or 12 digits after
-   the decimal point. The precision and scale of the `rate` column follow from the choice.
+5. **The unit of parameter 4.** Settled, and moved to D7: scale 12, ruling `6469382727` on #27185. The entry stays so
+   that the numbers of the items below do not change.
 6. **A record currency equal to the home currency** (#27192). Workload row M2-2 reads "same-currency-as-home ⇒ rate
    1, no lookup". The ruling does not say whether such a write needs a rate row.
 7. **Uniqueness and audit of rate rows** (#27185). The design record §5 and the measurement round make rows unique per
