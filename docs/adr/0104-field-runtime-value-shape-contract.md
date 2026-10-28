@@ -170,7 +170,7 @@ either adopted by the contract and enforced, or deleted — it does not remain
 exported-but-dead. An exported-but-unconsumed value schema is exactly the
 inert metadata ADR-0078 forbids.
 
-> **Note (2026-10-28, #27182, PR #__PR__) — `CurrencyValueSchema` is deleted.**
+> **Note (2026-10-28, #27182, PR #27233) — `CurrencyValueSchema` is deleted.**
 > The deletion this paragraph decided had not happened: through 18.2.0 the
 > schema and its `CurrencyValue` type stayed exported from
 > `@objectstack/spec/data`, `@deprecated`, with zero readers. They are now
