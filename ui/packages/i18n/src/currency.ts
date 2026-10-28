@@ -42,6 +42,12 @@
  * its own selected code, that code is the one to win, ahead of the tenant
  * default.
  *
+ * `currencyMode: 'record'` (ADR-0144 D2) also skips step 2: the field has no
+ * currency of its own — each record's code lives in the sibling field
+ * `currencyConfig.currencyField` names, which only a renderer holding the row
+ * can read. This field-level answer therefore never claims a code from the
+ * config; reading the row's code is the per-row display's job.
+ *
  * This is the single resolution every field / measure / cell renderer shares -
  * ending the per-renderer drift where some read only `currency`, others only
  * `defaultCurrency`, and others `currencyConfig`. It lives in `@object-ui/i18n`
@@ -53,7 +59,7 @@ export function resolveFieldCurrency(
     | {
         currency?: string;
         defaultCurrency?: string;
-        currencyConfig?: { currencyMode?: 'dynamic' | 'fixed'; defaultCurrency?: string };
+        currencyConfig?: { currencyMode?: 'dynamic' | 'fixed' | 'record'; defaultCurrency?: string; currencyField?: string };
       }
     | null
     | undefined,
