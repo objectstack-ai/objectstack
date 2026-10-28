@@ -326,6 +326,7 @@ import { FiltersEditor } from '../metadata-admin/inspectors/NavFiltersEditor.js'
 import { CelPredicateField } from '../metadata-admin/CelPredicateField.js';
 import type { CelLintIssue } from '../metadata-admin/celAuthoring.js';
 import type { NavigationEntryItem, NavigationItemType } from '@object-ui/types';
+import { errorCodeIs } from '@object-ui/types';
 import type { NavTargetLabelResolver } from '@object-ui/layout';
 import {
   readFields,
@@ -9618,7 +9619,15 @@ export function AccessPillar({
         setOwdOpen(false);
         setCurrent(name);
       } catch (e) {
-        setCreateErr(formatMetadataError(e));
+        // objectstack#26846 — the first-write pin's refusal, for a draft that
+        // landed after the check above, read by its code: this create sent
+        // the pin, so a conflict means the identifier holds a draft. The
+        // door's sentence speaks of the pin itself and is not shown.
+        setCreateErr(
+          errorCodeIs(e, 'METADATA_CONFLICT')
+            ? tFormat('engine.studio.access.createDraftTaken', locale, { name })
+            : formatMetadataError(e),
+        );
       } finally {
         setBusy(false);
       }
@@ -9946,6 +9955,10 @@ export function AccessPillar({
                 // The set now holds a pending draft, so its discard shows.
                 setDraftNames((names) => (names.has(current) ? names : new Set(names).add(current)));
                 onDraftSaved?.();
+                // objectstack#26846 — and the rail reads the sets again, so a
+                // label this save changed shows there without a publish or a
+                // reload.
+                void load();
               }}
               readOnly={readOnly}
               onDirtyChange={setMatrixDirty}

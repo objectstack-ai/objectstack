@@ -2975,6 +2975,13 @@ function StudioObjectRow({
 }
 
 /**
+ * objectstack#26846 — the field sub-table's name cell, header and rows alike:
+ * pinned to the left edge of the matrix's scroll container, over an opaque
+ * background so the boxes scrolling under it do not show through.
+ */
+const FIELD_NAME_CELL = 'sticky left-0 z-[1] bg-background pr-2';
+
+/**
  * The inherited look, shared by object and field boxes: grey with a dashed
  * edge, so a box that draws a grant the set inherits never reads as one the
  * set declares for that row.
@@ -3131,6 +3138,10 @@ function FieldsSubTable({
     <div className="space-y-2">
       {/* Field toolbar (B4): filter + bulk over the visible field set. The
           filter only appears once one-by-one would actually hurt. */}
+      {/* objectstack#26846 — the count sits beside the filter it counts. At
+          the far end of the row it sat past the visible edge whenever the
+          matrix scrolled sideways (its floor is wider than the Studio
+          content column at 1440 px). */}
       <div className="flex flex-wrap items-center gap-2">
         {fields.length > 6 && (
           <Input
@@ -3141,6 +3152,12 @@ function FieldsSubTable({
             className="h-7 w-44 text-xs"
           />
         )}
+        <span
+          data-testid={`perm-field-count-${objectName}`}
+          className="shrink-0 whitespace-nowrap text-[11px] tabular-nums text-muted-foreground"
+        >
+          {visible.length} / {fields.length}
+        </span>
         {writable && (
           <div className="flex items-center gap-1">
             <Button
@@ -3172,9 +3189,6 @@ function FieldsSubTable({
             </Button>
           </div>
         )}
-        <span className="ml-auto text-[11px] text-muted-foreground">
-          {visible.length} / {fields.length}
-        </span>
       </div>
       {/* objectstack#26597 — what a grey box means, said once per sub-table. */}
       {visible.some((f) => fieldsState[`${objectName}.${f.name}`] === undefined) && (
@@ -3188,7 +3202,9 @@ function FieldsSubTable({
         <table className="w-full text-xs">
           <thead>
             <tr className="text-muted-foreground">
-              <th className="text-left py-1 font-medium">{t('perm.field.col.name')}</th>
+              {/* objectstack#26846 — the name column stays in view while the
+                  matrix scrolls sideways (FIELD_NAME_CELL). */}
+              <th className={cn('text-left py-1 font-medium', FIELD_NAME_CELL)}>{t('perm.field.col.name')}</th>
               <th className="px-2 py-1 font-medium w-16 text-center" title={t('perm.field.read')}>{t('perm.field.read')}</th>
               <th className="px-2 py-1 font-medium w-16 text-center" title={t('perm.field.edit')}>{t('perm.field.edit')}</th>
               <th className="px-2 py-1 font-medium text-left" title={t('perm.field.when.tip')}>{t('perm.field.when')}</th>
@@ -3204,7 +3220,7 @@ function FieldsSubTable({
               return (
                 <React.Fragment key={f.name}>
                   <tr className="border-t border-muted">
-                    <td className="py-1">
+                    <td className={cn('py-1', FIELD_NAME_CELL)} data-testid={`perm-field-name-${objectName}-${f.name}`}>
                       {f.label ?? f.name}
                       {f.label && (
                         <span className="ml-1 text-muted-foreground">({f.name})</span>
