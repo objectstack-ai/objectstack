@@ -4188,9 +4188,11 @@ jobs:
       # showed recent changes, and a search that truncated away fresh records.
       # #4720 restored those two sites and #4721 closed the external callers;
       # this stops the shape regrowing internally. Same ratchet mechanism as
-      # slot-lookup for the non-test residual, plus one aggregate decrease-only
-      # number for test code (a test whose subject IS off-contract engine input
-      # must be able to build it). Runs its own --self-test first.
+      # slot-lookup for the non-test residual, plus one aggregate number for
+      # test code (a test whose subject IS off-contract engine input must be
+      # able to build it). That number is one-sided (#26549): growth past its
+      # ceiling reds, a fall passes and is reported, and a fall to zero is
+      # refused as a dead scan. Runs its own --self-test first.
       #
       # Scoped (#16496): the same population and inputs as the slot-lookup
       # ratchet, with `scripts/query-options-erasure-baseline.json`.
