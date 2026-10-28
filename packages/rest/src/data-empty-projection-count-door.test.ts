@@ -13,7 +13,7 @@
  * |:--|:--|:--|
  * | `GET ?$select=`, `?$select=%20`, `?$select=,`, `?select=`, `?fields=` | 200, every column | 400 naming the spelling |
  * | `GET ?$count=maybe`, `?$count=1`, `?count=` (with `$top`) | 200, `total` reported | 400 naming the spelling |
- * | `POST {"select":""}`, `{"fields":[]}` | 200, every column | 400 naming the key (`select` at the body schema, `VALIDATION_FAILED`, since #26909) |
+ * | `POST {"select":""}`, `{"fields":[]}` | 200, every column | 400 naming the key at the body schema, `VALIDATION_FAILED` (`select` since #26909, `fields` since #27166) |
  * | `POST {"count":"maybe"}` | 400 `VALIDATION_FAILED` (the body schema) | unchanged |
  * | `GET /:id?select=`, `?select=,` | 200, every column | `VALIDATION_ERROR` naming `select`, at this route's 404 (it rewrote every 400, as for `?select=nope`); 400 since #26816 |
  * | `GET ?$select=label`, `?$count=true` / `false`, absent; `GET /:id?select=label` | 200 | unchanged |
@@ -57,11 +57,6 @@ const REFUSED_GET: ReadonlyArray<readonly [string, Record<string, string>, strin
   ['count= blank', { $top: '2', count: '' }, 'count', 'must be true or false'],
 ];
 
-/** name · the JSON body `POST /data/:object/query` receives · the key the refusal names. */
-const REFUSED_POST: ReadonlyArray<readonly [string, Record<string, unknown>, string]> = [
-  ['fields: []', { fields: [] }, 'fields'],
-];
-
 /**
  * [#26909] The body's published schema (`FindDataRequestSchema`) now declares
  * the projection the normalizer enforces, so these are refused where every
@@ -74,6 +69,10 @@ const REFUSED_POST_AT_SCHEMA: ReadonlyArray<readonly [string, Record<string, unk
   ['$select: ","', { $select: ',' }, 'query.$select'],
   ['select: []', { select: [] }, 'query.select'],
   ['select: ["label", ""] (the blank member)', { select: ['label', ''] }, 'query.select.1'],
+  // [#27166] The canonical `fields` takes the same arm on `QuerySchema` itself,
+  // so it answers what its `$select` alias answers.
+  ['fields: []', { fields: [] }, 'query.fields'],
+  ['fields: ["label", " "] (the blank member)', { fields: ['label', ' '] }, 'query.fields.1'],
 ];
 
 function createMockServer() {
@@ -162,18 +161,7 @@ describe('[#26644] an empty projection and an unrecognised count flag on the Dat
     expect(reads.n - before, 'no read of the object — every refusal precedes the driver').toBe(0);
   });
 
-  it('POST query: 400 VALIDATION_ERROR naming the body key — no read', async () => {
-    const before = reads.n;
-    for (const [name, body, param] of REFUSED_POST) {
-      const res = await query(body);
-      expect(res.status, `${name}: ${JSON.stringify(res.body)}`).toBe(400);
-      expect(res.body.code, name).toBe('VALIDATION_ERROR');
-      expect(res.body.error, name).toContain(`Query parameter '${param}' names no field`);
-    }
-    expect(reads.n - before, 'no read of the object — every refusal precedes the driver').toBe(0);
-  });
-
-  it('POST query: `select` / `$select` naming no field is the schema door\'s 400 VALIDATION_FAILED — no read', async () => {
+  it('POST query: `fields` / `select` / `$select` naming no field is the schema door\'s 400 VALIDATION_FAILED — no read', async () => {
     const before = reads.n;
     for (const [name, body, field] of REFUSED_POST_AT_SCHEMA) {
       const res = await query(body);
