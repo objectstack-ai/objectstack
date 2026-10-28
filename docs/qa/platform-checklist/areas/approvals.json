@@ -1628,7 +1628,7 @@
         {
           "revision": 5,
           "date": "2026-10-28",
-          "change": "automated.ref names three corroborating pins. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26468, Tier 1 half A, at 756220c4; wave anchor #25807, slice B): the ref read as if no pin touched the record lock or the mirror values, while record-lock-multi-update.integration.test.ts pins the mirror-only exemption at the engine, status-mirror-declared-values.integration.test.ts pins the values, and approval-service.test.ts carries the mirror cases including 'returned'. Re-read at base fd246c22 (record-lock-multi-update.integration.test.ts:191, approval-service.test.ts:305/1071/1249). No clause changed, and no clause scores higher: the oracles are api and log",
+          "change": "automated.ref names three corroborating pins. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26468, Tier 1 half A, at 756220c4; wave anchor #25807, slice B): the ref read as if no pin touched the record lock or the mirror values, while record-lock-multi-update.integration.test.ts pins the mirror-only exemption at the engine, status-mirror-declared-values.integration.test.ts pins the values, and approval-service.test.ts carries the mirror cases including 'returned'. Re-read at base fd246c22 (record-lock-multi-update.integration.test.ts's mirror-exemption case; approval-service.test.ts's open, decide and recall mirror cases). No clause changed, and no clause scores higher: the oracles are api and log",
           "ref": "#25807"
         }
       ]
