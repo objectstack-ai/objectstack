@@ -752,6 +752,14 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
       `${D7}: a flow's encrypted credential is read by its flow, never by organization; systemFields.tenant: false ` +
       'with the open ceremony (18.x step 6, line fact F2)',
   },
+  {
+    object: 'sys_connector_credential',
+    census: PMAIN,
+    fate: 'column-drop',
+    citation:
+      `${CENSUS_MAIN}: systemFields.tenant: false; ${D7}: a declarative connector's stored credential is environment-level, ` +
+      'read by the reference its instances name, never by organization',
+  },
   // Inbound mail (`@objectstack/service-mailbox`): every row is written by the
   // system with the mailbox's organization stamped (ADR-0131 D9), so a NULL
   // row has no producer today; the parents below are where one would take it.
