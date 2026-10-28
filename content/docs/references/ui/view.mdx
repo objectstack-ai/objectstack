@@ -406,12 +406,10 @@ Form-view select option — the object-field option shape minus the per-option `
 | **sections** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional |  |
 | **groups** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional | [LEGACY ALIAS → `sections`] Accepted for back-compat and folded onto `sections` at parse; `sections` wins when both are present. Prefer `sections`. |
 | **subforms** | `{ childObject: string; relationshipField?: string; columns?: object[]; amountField?: string; … }[]` | optional | Inline master-detail child collections |
-| **defaultSort** | `never` | optional | [REMOVED] `form.defaultSort` was removed in @objectstack/spec 17.0.0 (audit close-out) — nothing read it: a related list inside a form sorts by its own list view's `sort`. Delete the key and set the sort on the related list view instead. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **sharing** | `{ enabled?: boolean; publicLink?: string; password?: string; allowedDomains?: string[]; … }` | optional | Public sharing configuration for this form |
 | **submitBehavior** | `{ kind: 'thank-you'; title?: string; message?: string } \| { kind: 'redirect'; url: string; delayMs?: integer } \| { kind: 'continue' } \| { kind: 'next-record' }` | optional | Post-submit behavior. On the `redirect` arm, `url` is relative-only and interpolates only declared record fields as `{{record.field_name}}`, URL-escaped. |
 | **buttons** | `{ submit?: object; cancel?: object; reset?: object }` | optional | Form action-button visibility & labels; folded onto the flat renderer props by ObjectUI ObjectForm. |
 | **defaults** | `Record<string, any>` | optional | Initial field values for create-mode forms (folded into ObjectUI ObjectForm initial values;). |
-| **aria** | `never` | optional | [REMOVED] `form.aria` was removed in @objectstack/spec 17.0.0 (audit close-out) — no form renderer ever applied it, so declared ARIA attributes silently did not reach the DOM. Delete the key. The form renderer emits its own semantic markup; report gaps as renderer issues rather than per-view attribute overrides. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 
 ### Nested Shape: `FormView.data[provider='object']`
 
@@ -780,7 +778,7 @@ Map view configuration
 | **resizable** | `boolean` | optional | Enable column resizing |
 | **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover |
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
-| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
+| **navigation** | `{ mode?: Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation (drawer by default, page, new_window or none) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
 | **kanban** | `{ groupByField: string; summarizeField?: string; titleField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
@@ -813,11 +811,6 @@ Map view configuration
 | **allowPrinting** | `boolean` | optional | Allow users to print the view |
 | **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string; link?: object }` | optional | Empty state configuration when no records found |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes for the list view |
-| **responsive** | `never` | optional | [REMOVED] `view.responsive` was removed in @objectstack/spec 17.0.0 (audit close-out) — no renderer ever read it; the grid is responsive by its own layout rules. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
-| **performance** | `never` | optional | [REMOVED] `view.performance` was removed in @objectstack/spec 17.0.0 (audit close-out) — no renderer or runtime read it; list-view performance tuning was never implemented. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
-| **striped** | `never` | optional | [REMOVED] `view.striped` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no renderer ever applied it, so authoring it was a parse-clean no-op. There is no authorable striped-rows switch; delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
-| **bordered** | `never` | optional | [REMOVED] `view.bordered` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no renderer ever applied it (the grid frame is the renderer's own constant, not authorable). Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
-| **virtualScroll** | `never` | optional | [REMOVED] `view.virtualScroll` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no grid ever virtualized off it; authoring it was a parse-clean no-op. Delete the key; large datasets page via `pagination`. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 
 ### Nested Shape: `ListView.data[provider='object']`
 
@@ -890,12 +883,12 @@ View filter rule
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **mode** | `Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>` | optional (default: `"page"`) |  |
+| **mode** | `Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>` | optional (default: `"drawer"`) |  |
 | **view** | `never` | optional | [REMOVED] `view.list.navigation.view` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the form view to open for a record detail, and no layer resolved a view by that name: the value was passed straight into the navigation-MODE argument of the console's `onNavigate`, where anything other than `edit` or `view` matched no branch, so the key selected nothing and could silently deaden the row click. Delete the key; to choose what opens for a record, assign a `record` page to the object and let `isDefault` pick the one that opens — page assignment is the machinery that resolves a detail layout, and a list view's navigation block only decides HOW the detail is surfaced (`mode`, `size`). |
 | **preventNavigation** | `boolean` | optional (default: `false`) | Disable standard navigation entirely |
 | **openNewTab** | `boolean` | optional (default: `false`) | Force open in new tab (applies to page mode) |
-| **size** | `Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>` | optional (default: `"auto"`) | Overlay size bucket for drawer/modal detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it. |
-| **width** | `string \| number` | optional | [DEPRECATED → size] Pixel/percent width of the drawer/modal (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket. |
+| **size** | `Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>` | optional (default: `"auto"`) | Overlay size bucket for the drawer detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it. |
+| **width** | `string \| number` | optional | [DEPRECATED → size] Pixel/percent width of the drawer (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket. |
 
 ### Nested Shape: `ListView.pagination`
 
@@ -1123,12 +1116,12 @@ View filter rule
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **mode** | `Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>` | optional (default: `"page"`) |  |
+| **mode** | `Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>` | optional (default: `"drawer"`) |  |
 | **view** | `never` | optional | [REMOVED] `view.list.navigation.view` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the form view to open for a record detail, and no layer resolved a view by that name: the value was passed straight into the navigation-MODE argument of the console's `onNavigate`, where anything other than `edit` or `view` matched no branch, so the key selected nothing and could silently deaden the row click. Delete the key; to choose what opens for a record, assign a `record` page to the object and let `isDefault` pick the one that opens — page assignment is the machinery that resolves a detail layout, and a list view's navigation block only decides HOW the detail is surfaced (`mode`, `size`). |
 | **preventNavigation** | `boolean` | optional (default: `false`) | Disable standard navigation entirely |
 | **openNewTab** | `boolean` | optional (default: `false`) | Force open in new tab (applies to page mode) |
-| **size** | `Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>` | optional (default: `"auto"`) | Overlay size bucket for drawer/modal detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it. |
-| **width** | `string \| number` | optional | [DEPRECATED → size] Pixel/percent width of the drawer/modal (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket. |
+| **size** | `Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>` | optional (default: `"auto"`) | Overlay size bucket for the drawer detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it. |
+| **width** | `string \| number` | optional | [DEPRECATED → size] Pixel/percent width of the drawer (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket. |
 
 
 ---
@@ -1137,11 +1130,8 @@ View filter rule
 
 ### Allowed Values
 
-* `page`
 * `drawer`
-* `modal`
-* `split`
-* `popover`
+* `page`
 * `new_window`
 * `none`
 
@@ -1166,7 +1156,7 @@ View filter rule
 | **resizable** | `boolean` | optional | Enable column resizing |
 | **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover |
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
-| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
+| **navigation** | `{ mode?: Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation (drawer by default, page, new_window or none) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
 | **kanban** | `{ groupByField: string; summarizeField?: string; titleField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
@@ -1199,11 +1189,6 @@ View filter rule
 | **allowPrinting** | `boolean` | optional | Allow users to print the view |
 | **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string; link?: object }` | optional | Empty state configuration when no records found |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes for the list view |
-| **responsive** | `never` | optional | [REMOVED] `view.responsive` was removed in @objectstack/spec 17.0.0 (audit close-out) — no renderer ever read it; the grid is responsive by its own layout rules. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
-| **performance** | `never` | optional | [REMOVED] `view.performance` was removed in @objectstack/spec 17.0.0 (audit close-out) — no renderer or runtime read it; list-view performance tuning was never implemented. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
-| **striped** | `never` | optional | [REMOVED] `view.striped` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no renderer ever applied it, so authoring it was a parse-clean no-op. There is no authorable striped-rows switch; delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
-| **bordered** | `never` | optional | [REMOVED] `view.bordered` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no renderer ever applied it (the grid frame is the renderer's own constant, not authorable). Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
-| **virtualScroll** | `never` | optional | [REMOVED] `view.virtualScroll` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no grid ever virtualized off it; authoring it was a parse-clean no-op. Delete the key; large datasets page via `pagination`. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **userFilters** | `{ element?: Enum<'dropdown' \| 'toggle'>; fields?: object[] }` | optional |  |
 
 ### Nested Shape: `ObjectListView.data[provider='object']`
@@ -1267,12 +1252,12 @@ View filter rule
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **mode** | `Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>` | optional (default: `"page"`) |  |
+| **mode** | `Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>` | optional (default: `"drawer"`) |  |
 | **view** | `never` | optional | [REMOVED] `view.list.navigation.view` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the form view to open for a record detail, and no layer resolved a view by that name: the value was passed straight into the navigation-MODE argument of the console's `onNavigate`, where anything other than `edit` or `view` matched no branch, so the key selected nothing and could silently deaden the row click. Delete the key; to choose what opens for a record, assign a `record` page to the object and let `isDefault` pick the one that opens — page assignment is the machinery that resolves a detail layout, and a list view's navigation block only decides HOW the detail is surfaced (`mode`, `size`). |
 | **preventNavigation** | `boolean` | optional (default: `false`) | Disable standard navigation entirely |
 | **openNewTab** | `boolean` | optional (default: `false`) | Force open in new tab (applies to page mode) |
-| **size** | `Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>` | optional (default: `"auto"`) | Overlay size bucket for drawer/modal detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it. |
-| **width** | `string \| number` | optional | [DEPRECATED → size] Pixel/percent width of the drawer/modal (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket. |
+| **size** | `Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>` | optional (default: `"auto"`) | Overlay size bucket for the drawer detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it. |
+| **width** | `string \| number` | optional | [DEPRECATED → size] Pixel/percent width of the drawer (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket. |
 
 ### Nested Shape: `ObjectListView.pagination`
 
@@ -1743,7 +1728,7 @@ Tab configuration for multi-tab view interface
 | **resizable** | `boolean` | optional | Enable column resizing |
 | **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover |
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
-| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
+| **navigation** | `{ mode?: Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation (drawer by default, page, new_window or none) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
 | **kanban** | `{ groupByField: string; summarizeField?: string; titleField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
@@ -1776,11 +1761,6 @@ Tab configuration for multi-tab view interface
 | **allowPrinting** | `boolean` | optional | Allow users to print the view |
 | **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string; link?: object }` | optional | Empty state configuration when no records found |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes for the list view |
-| **responsive** | `never` | optional | [REMOVED] `view.responsive` was removed in @objectstack/spec 17.0.0 (audit close-out) — no renderer ever read it; the grid is responsive by its own layout rules. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
-| **performance** | `never` | optional | [REMOVED] `view.performance` was removed in @objectstack/spec 17.0.0 (audit close-out) — no renderer or runtime read it; list-view performance tuning was never implemented. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
-| **striped** | `never` | optional | [REMOVED] `view.striped` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no renderer ever applied it, so authoring it was a parse-clean no-op. There is no authorable striped-rows switch; delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
-| **bordered** | `never` | optional | [REMOVED] `view.bordered` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no renderer ever applied it (the grid frame is the renderer's own constant, not authorable). Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
-| **virtualScroll** | `never` | optional | [REMOVED] `view.virtualScroll` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no grid ever virtualized off it; authoring it was a parse-clean no-op. Delete the key; large datasets page via `pagination`. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **userFilters** | `{ element?: Enum<'dropdown' \| 'toggle'>; fields?: object[] }` | optional |  |
 
 ### Nested Shape: `View.form`
@@ -1806,12 +1786,10 @@ Tab configuration for multi-tab view interface
 | **sections** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional |  |
 | **groups** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional | [LEGACY ALIAS → `sections`] Accepted for back-compat and folded onto `sections` at parse; `sections` wins when both are present. Prefer `sections`. |
 | **subforms** | `{ childObject: string; relationshipField?: string; columns?: object[]; amountField?: string; … }[]` | optional | Inline master-detail child collections |
-| **defaultSort** | `never` | optional | [REMOVED] `form.defaultSort` was removed in @objectstack/spec 17.0.0 (audit close-out) — nothing read it: a related list inside a form sorts by its own list view's `sort`. Delete the key and set the sort on the related list view instead. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **sharing** | `{ enabled?: boolean; publicLink?: string; password?: string; allowedDomains?: string[]; … }` | optional | Public sharing configuration for this form |
 | **submitBehavior** | `{ kind: 'thank-you'; title?: string; message?: string } \| { kind: 'redirect'; url: string; delayMs?: integer } \| { kind: 'continue' } \| { kind: 'next-record' }` | optional | Post-submit behavior. On the `redirect` arm, `url` is relative-only and interpolates only declared record fields as `{{record.field_name}}`, URL-escaped. |
 | **buttons** | `{ submit?: object; cancel?: object; reset?: object }` | optional | Form action-button visibility & labels; folded onto the flat renderer props by ObjectUI ObjectForm. |
 | **defaults** | `Record<string, any>` | optional | Initial field values for create-mode forms (folded into ObjectUI ObjectForm initial values;). |
-| **aria** | `never` | optional | [REMOVED] `form.aria` was removed in @objectstack/spec 17.0.0 (audit close-out) — no form renderer ever applied it, so declared ARIA attributes silently did not reach the DOM. Delete the key. The form renderer emits its own semantic markup; report gaps as renderer issues rather than per-view attribute overrides. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 
 ### Nested Shape: `View.listViews[string]`
 
@@ -1829,7 +1807,7 @@ Tab configuration for multi-tab view interface
 | **resizable** | `boolean` | optional | Enable column resizing |
 | **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover |
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
-| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
+| **navigation** | `{ mode?: Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation (drawer by default, page, new_window or none) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
 | **kanban** | `{ groupByField: string; summarizeField?: string; titleField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
@@ -1862,11 +1840,6 @@ Tab configuration for multi-tab view interface
 | **allowPrinting** | `boolean` | optional | Allow users to print the view |
 | **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string; link?: object }` | optional | Empty state configuration when no records found |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes for the list view |
-| **responsive** | `never` | optional | [REMOVED] `view.responsive` was removed in @objectstack/spec 17.0.0 (audit close-out) — no renderer ever read it; the grid is responsive by its own layout rules. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
-| **performance** | `never` | optional | [REMOVED] `view.performance` was removed in @objectstack/spec 17.0.0 (audit close-out) — no renderer or runtime read it; list-view performance tuning was never implemented. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
-| **striped** | `never` | optional | [REMOVED] `view.striped` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no renderer ever applied it, so authoring it was a parse-clean no-op. There is no authorable striped-rows switch; delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
-| **bordered** | `never` | optional | [REMOVED] `view.bordered` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no renderer ever applied it (the grid frame is the renderer's own constant, not authorable). Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
-| **virtualScroll** | `never` | optional | [REMOVED] `view.virtualScroll` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no grid ever virtualized off it; authoring it was a parse-clean no-op. Delete the key; large datasets page via `pagination`. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **userFilters** | `{ element?: Enum<'dropdown' \| 'toggle'>; fields?: object[] }` | optional |  |
 
 ### Nested Shape: `View.formViews[string]`
@@ -1892,12 +1865,10 @@ Tab configuration for multi-tab view interface
 | **sections** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional |  |
 | **groups** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional | [LEGACY ALIAS → `sections`] Accepted for back-compat and folded onto `sections` at parse; `sections` wins when both are present. Prefer `sections`. |
 | **subforms** | `{ childObject: string; relationshipField?: string; columns?: object[]; amountField?: string; … }[]` | optional | Inline master-detail child collections |
-| **defaultSort** | `never` | optional | [REMOVED] `form.defaultSort` was removed in @objectstack/spec 17.0.0 (audit close-out) — nothing read it: a related list inside a form sorts by its own list view's `sort`. Delete the key and set the sort on the related list view instead. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **sharing** | `{ enabled?: boolean; publicLink?: string; password?: string; allowedDomains?: string[]; … }` | optional | Public sharing configuration for this form |
 | **submitBehavior** | `{ kind: 'thank-you'; title?: string; message?: string } \| { kind: 'redirect'; url: string; delayMs?: integer } \| { kind: 'continue' } \| { kind: 'next-record' }` | optional | Post-submit behavior. On the `redirect` arm, `url` is relative-only and interpolates only declared record fields as `{{record.field_name}}`, URL-escaped. |
 | **buttons** | `{ submit?: object; cancel?: object; reset?: object }` | optional | Form action-button visibility & labels; folded onto the flat renderer props by ObjectUI ObjectForm. |
 | **defaults** | `Record<string, any>` | optional | Initial field values for create-mode forms (folded into ObjectUI ObjectForm initial values;). |
-| **aria** | `never` | optional | [REMOVED] `form.aria` was removed in @objectstack/spec 17.0.0 (audit close-out) — no form renderer ever applied it, so declared ARIA attributes silently did not reach the DOM. Delete the key. The form renderer emits its own semantic markup; report gaps as renderer issues rather than per-view attribute overrides. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 
 ### Nested Shape: `View.protection`
 
@@ -2039,7 +2010,7 @@ This schema accepts one of the following structures:
 | **resizable** | `boolean` | optional | Enable column resizing |
 | **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover |
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
-| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
+| **navigation** | `{ mode?: Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation (drawer by default, page, new_window or none) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
 | **kanban** | `{ groupByField: string; summarizeField?: string; titleField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
@@ -2072,11 +2043,6 @@ This schema accepts one of the following structures:
 | **allowPrinting** | `boolean` | optional | Allow users to print the view |
 | **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string; link?: object }` | optional | Empty state configuration when no records found |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes for the list view |
-| **responsive** | `never` | optional | [REMOVED] `view.responsive` was removed in @objectstack/spec 17.0.0 (audit close-out) — no renderer ever read it; the grid is responsive by its own layout rules. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
-| **performance** | `never` | optional | [REMOVED] `view.performance` was removed in @objectstack/spec 17.0.0 (audit close-out) — no renderer or runtime read it; list-view performance tuning was never implemented. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
-| **striped** | `never` | optional | [REMOVED] `view.striped` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no renderer ever applied it, so authoring it was a parse-clean no-op. There is no authorable striped-rows switch; delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
-| **bordered** | `never` | optional | [REMOVED] `view.bordered` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no renderer ever applied it (the grid frame is the renderer's own constant, not authorable). Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
-| **virtualScroll** | `never` | optional | [REMOVED] `view.virtualScroll` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no grid ever virtualized off it; authoring it was a parse-clean no-op. Delete the key; large datasets page via `pagination`. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 
 ### Nested Shape: `ViewItem[viewKind='list'].protection`
 
@@ -2136,12 +2102,10 @@ This schema accepts one of the following structures:
 | **sections** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional |  |
 | **groups** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional | [LEGACY ALIAS → `sections`] Accepted for back-compat and folded onto `sections` at parse; `sections` wins when both are present. Prefer `sections`. |
 | **subforms** | `{ childObject: string; relationshipField?: string; columns?: object[]; amountField?: string; … }[]` | optional | Inline master-detail child collections |
-| **defaultSort** | `never` | optional | [REMOVED] `form.defaultSort` was removed in @objectstack/spec 17.0.0 (audit close-out) — nothing read it: a related list inside a form sorts by its own list view's `sort`. Delete the key and set the sort on the related list view instead. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **sharing** | `{ enabled?: boolean; publicLink?: string; password?: string; allowedDomains?: string[]; … }` | optional | Public sharing configuration for this form |
 | **submitBehavior** | `{ kind: 'thank-you'; title?: string; message?: string } \| { kind: 'redirect'; url: string; delayMs?: integer } \| { kind: 'continue' } \| { kind: 'next-record' }` | optional | Post-submit behavior. On the `redirect` arm, `url` is relative-only and interpolates only declared record fields as `{{record.field_name}}`, URL-escaped. |
 | **buttons** | `{ submit?: object; cancel?: object; reset?: object }` | optional | Form action-button visibility & labels; folded onto the flat renderer props by ObjectUI ObjectForm. |
 | **defaults** | `Record<string, any>` | optional | Initial field values for create-mode forms (folded into ObjectUI ObjectForm initial values;). |
-| **aria** | `never` | optional | [REMOVED] `form.aria` was removed in @objectstack/spec 17.0.0 (audit close-out) — no form renderer ever applied it, so declared ARIA attributes silently did not reach the DOM. Delete the key. The form renderer emits its own semantic markup; report gaps as renderer issues rather than per-view attribute overrides. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 
 ### Nested Shape: `ViewItem[viewKind='form'].protection`
 
@@ -2218,7 +2182,7 @@ This schema accepts one of the following structures:
 | **resizable** | `boolean` | optional | Enable column resizing |
 | **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover |
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
-| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
+| **navigation** | `{ mode?: Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation (drawer by default, page, new_window or none) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
 | **kanban** | `{ groupByField: string; summarizeField?: string; titleField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
@@ -2251,11 +2215,6 @@ This schema accepts one of the following structures:
 | **allowPrinting** | `boolean` | optional | Allow users to print the view |
 | **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string; link?: object }` | optional | Empty state configuration when no records found |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes for the list view |
-| **responsive** | `never` | optional | [REMOVED] `view.responsive` was removed in @objectstack/spec 17.0.0 (audit close-out) — no renderer ever read it; the grid is responsive by its own layout rules. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
-| **performance** | `never` | optional | [REMOVED] `view.performance` was removed in @objectstack/spec 17.0.0 (audit close-out) — no renderer or runtime read it; list-view performance tuning was never implemented. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
-| **striped** | `never` | optional | [REMOVED] `view.striped` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no renderer ever applied it, so authoring it was a parse-clean no-op. There is no authorable striped-rows switch; delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
-| **bordered** | `never` | optional | [REMOVED] `view.bordered` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no renderer ever applied it (the grid frame is the renderer's own constant, not authorable). Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
-| **virtualScroll** | `never` | optional | [REMOVED] `view.virtualScroll` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no grid ever virtualized off it; authoring it was a parse-clean no-op. Delete the key; large datasets page via `pagination`. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 
 ### Nested Shape: `ViewItemWire[viewKind='list'].protection`
 
@@ -2327,12 +2286,10 @@ This schema accepts one of the following structures:
 | **sections** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional |  |
 | **groups** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional | [LEGACY ALIAS → `sections`] Accepted for back-compat and folded onto `sections` at parse; `sections` wins when both are present. Prefer `sections`. |
 | **subforms** | `{ childObject: string; relationshipField?: string; columns?: object[]; amountField?: string; … }[]` | optional | Inline master-detail child collections |
-| **defaultSort** | `never` | optional | [REMOVED] `form.defaultSort` was removed in @objectstack/spec 17.0.0 (audit close-out) — nothing read it: a related list inside a form sorts by its own list view's `sort`. Delete the key and set the sort on the related list view instead. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **sharing** | `{ enabled?: boolean; publicLink?: string; password?: string; allowedDomains?: string[]; … }` | optional | Public sharing configuration for this form |
 | **submitBehavior** | `{ kind: 'thank-you'; title?: string; message?: string } \| { kind: 'redirect'; url: string; delayMs?: integer } \| { kind: 'continue' } \| { kind: 'next-record' }` | optional | Post-submit behavior. On the `redirect` arm, `url` is relative-only and interpolates only declared record fields as `{{record.field_name}}`, URL-escaped. |
 | **buttons** | `{ submit?: object; cancel?: object; reset?: object }` | optional | Form action-button visibility & labels; folded onto the flat renderer props by ObjectUI ObjectForm. |
 | **defaults** | `Record<string, any>` | optional | Initial field values for create-mode forms (folded into ObjectUI ObjectForm initial values;). |
-| **aria** | `never` | optional | [REMOVED] `form.aria` was removed in @objectstack/spec 17.0.0 (audit close-out) — no form renderer ever applied it, so declared ARIA attributes silently did not reach the DOM. Delete the key. The form renderer emits its own semantic markup; report gaps as renderer issues rather than per-view attribute overrides. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 
 ### Nested Shape: `ViewItemWire[viewKind='form'].protection`
 

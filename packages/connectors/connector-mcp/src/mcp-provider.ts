@@ -152,6 +152,28 @@ function assertDeclarativeStdioAllowed(
 }
 
 /**
+ * The HTTP status of a credential rejection carried by `err` (or by an error in
+ * its `cause` chain), else `undefined`. Only the MCP SDK's own HTTP-transport
+ * errors count — a `StreamableHTTPError` with status 401 / 403, or the SDK's
+ * `UnauthorizedError` — so a JSON-RPC error that merely carries a numeric code
+ * is never mistaken for one. The SDK is imported lazily, as the default client
+ * does, and only on this failure path.
+ */
+async function credentialRejectionStatus(err: unknown): Promise<number | undefined> {
+  const [{ StreamableHTTPError }, { UnauthorizedError }] = await Promise.all([
+    import('@modelcontextprotocol/sdk/client/streamableHttp.js'),
+    import('@modelcontextprotocol/sdk/client/auth.js'),
+  ]);
+  let cur: unknown = err;
+  for (let depth = 0; depth < 8 && cur instanceof Error; depth++) {
+    if (cur instanceof StreamableHTTPError && (cur.code === 401 || cur.code === 403)) return cur.code;
+    if (cur instanceof UnauthorizedError) return 401;
+    cur = (cur as { cause?: unknown }).cause;
+  }
+  return undefined;
+}
+
+/**
  * Build the `mcp` {@link ConnectorProviderFactory} (ADR-0097 / ADR-0024). At boot
  * the automation service invokes it for each `provider: 'mcp'` declarative
  * instance: it connects to the MCP server named by `providerConfig.transport`,
@@ -180,7 +202,10 @@ function assertDeclarativeStdioAllowed(
  * `tools/list` failure (server down, refused, timed out) is an *operational*
  * fault and throws {@link ConnectorUpstreamUnavailableError}, which the
  * materializer turns into a degraded instance that is retried with backoff
- * instead of aborting the whole app boot.
+ * instead of aborting the whole app boot. The one exception past transport
+ * validation is a **rejected credential**: an HTTP 401 / 403 during connect,
+ * handshake or `tools/list` throws plain — a configuration fault, fatal at boot
+ * and never retried (see {@link credentialRejectionStatus}).
  */
 export function createMcpProviderFactory(deps: McpProviderDeps = {}): ConnectorProviderFactory {
   return async (ctx) => {
@@ -211,10 +236,26 @@ export function createMcpProviderFactory(deps: McpProviderDeps = {}): ConnectorP
         clientFactory: deps.clientFactory,
       });
     } catch (err) {
-      // Everything past transport validation is talking to the server (connect,
-      // handshake, tools/list) — operational, hence retryable. A credential the
-      // server rejects also lands here: indistinguishable from the outside, and
-      // retrying it is loud (logged per attempt), never silent.
+      // A credential the server rejects (HTTP 401 / 403 on connect, handshake
+      // or tools/list) is a configuration fault on ADR-0097's configuration /
+      // operational split, like an unresolvable credentialRef and like the
+      // openapi provider's 401 on its spec fetch: retrying cannot make a wrong,
+      // missing or under-scoped credential valid, and a degraded instance
+      // retried with backoff reads as "server down", hiding the misconfiguration
+      // the author has to fix. Credential-protected remote servers are the
+      // common case, so it is told apart by the SDK's HTTP status and thrown
+      // plain — fatal at boot, a skipped entry on reload.
+      const status = await credentialRejectionStatus(err);
+      if (status !== undefined) {
+        throw new Error(
+          `connector-mcp provider: connector '${ctx.name}' was refused by its MCP server (HTTP ${status}): the ` +
+            `credential it sent (the instance auth, or providerConfig.transport.headers) is missing, wrong or not ` +
+            `authorized. This is a configuration fault and is not retried — fix the credential and reload. ` +
+            `${(err as Error).message}`,
+        );
+      }
+      // Everything else past transport validation is talking to the server
+      // (connect, handshake, tools/list) — operational, hence retryable.
       throw new ConnectorUpstreamUnavailableError(
         `connector-mcp provider: connector '${ctx.name}' could not reach its MCP server: ${(err as Error).message}`,
         { cause: err },

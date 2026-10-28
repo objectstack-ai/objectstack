@@ -161,8 +161,10 @@ describe('objectui#9096 — `scripts` is a scan root, and the class is now total
     const fromScripts = [...candidates.keys()].filter((file) => file.startsWith('scripts/'));
     // A floor, not an exact count: the point is that the root is producing
     // candidates at all, so a root that silently stopped resolving is caught.
-    // 45 files the day the root landed.
-    expect(fromScripts.length).toBeGreaterThanOrEqual(40);
+    // 45 files the day the root landed; 38 once objectstack#26080 deleted the
+    // tree's root README, ROADMAP.md and QUICK_REFERENCE.md, the literals
+    // several of these tests only matched against those files.
+    expect(fromScripts.length).toBeGreaterThanOrEqual(35);
   });
 
   it('names the card\'s instance: three gate tests read `AGENTS.md`, so it is an input', () => {
@@ -265,8 +267,10 @@ describe('objectui#9142 — a root-level markdown file a pull request ADDS', () 
       .sort();
 
     // Floor under the floor: an empty enumeration would satisfy the next
-    // assertion while proving nothing (objectui#8468).
-    expect(rootDocuments.length).toBeGreaterThanOrEqual(8);
+    // assertion while proving nothing (objectui#8468). Four since
+    // objectstack#26080 folded README.md, CONTRIBUTING.md, ROADMAP.md and
+    // QUICK_REFERENCE.md into the repository root's documents.
+    expect(rootDocuments.length).toBeGreaterThanOrEqual(4);
     expect(rootDocuments.filter((file) => markdownTestInputsAmong([file]).length === 0)).toEqual([]);
   });
 

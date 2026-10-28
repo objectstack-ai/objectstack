@@ -137,22 +137,33 @@ export const SysSettingAudit = ObjectSchema.create({
     /**
      * Content digest of the previous value. Never the plaintext —
      * lets operators detect duplicate writes without leaking secrets.
-     * Format: hex SHA-256 of the canonicalised JSON, or null when
-     * the previous value was unset.
+     * The format depends on the value:
+     *  - a non-secret value: `sha256:` + hex SHA-256 of its canonical JSON;
+     *  - a secret value (`encrypted: true`): the crypto provider's keyed
+     *    digest, `hmac-sha256:…`. Never an unkeyed hash: one of a short
+     *    secret lets anyone holding the trail confirm a guess.
+     * Null when the previous value was unset, and null for a secret when
+     * no keyed digest is available. Rows written before the SHA-256 digest
+     * (#26465) may carry `fnv32:`; compare only values with the same prefix.
      */
     old_hash: Field.text({
       label: 'Old Hash',
       readonly: true,
       maxLength: 128,
-      description: 'SHA-256 of the previous value (canonicalised). Null when previously unset.',
+      description: 'Digest of the previous value, never the plaintext: sha256: hex for a plain value, the keyed hmac-sha256: digest for a secret. Null when previously unset, or for a secret with no keyed digest.',
     }),
 
-    /** Content digest of the new value. Null on `reset`. */
+    /**
+     * Content digest of the new value, in the same formats as `old_hash`
+     * (`sha256:` for a non-secret value, the keyed `hmac-sha256:` digest
+     * for a secret). Null on `reset`, and null for a secret when no keyed
+     * digest is available.
+     */
     new_hash: Field.text({
       label: 'New Hash',
       readonly: true,
       maxLength: 128,
-      description: 'SHA-256 of the new value (canonicalised). Null on reset.',
+      description: 'Digest of the new value, never the plaintext: sha256: hex for a plain value, the keyed hmac-sha256: digest for a secret. Null on reset, or for a secret with no keyed digest.',
     }),
 
     /** True when the field is encrypted — flags secret rotation events. */

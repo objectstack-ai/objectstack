@@ -50,7 +50,7 @@ void _mirrorPin;
 // named, as the blocks below already name them.
 
 /** The door's DEFAULT-FLIP refusals, named in their own blocks below (#17885, #15429). */
-const DOOR_DEFAULT_FLIPS: readonly string[] = ['app-hidden-to-unpublished', 'flow-decision-mode-inclusive-explicit'];
+const DOOR_DEFAULT_FLIPS: readonly string[] = ['flow-decision-mode-inclusive-explicit'];
 
 const versionTriple = (v: string): [number, number, number] =>
   v.split(/[.-]/).slice(0, 3).map((n) => Number.parseInt(n, 10)) as [number, number, number];
@@ -379,8 +379,13 @@ describe('the artifact door never stamps a column constraint (ADR-0113, #16693)'
 /**
  * #17885 — the artifact door must not replay the DEFAULT-FLIP class.
  *
- * `app-hidden-to-unpublished` (#4829, ADR-0045 amended 2026-08-09) rewrites
- * `app.hidden: true` into `app._unpublished: true`. Both keys are live and
+ * `app-hidden-to-unpublished` (#4829, ADR-0045 amended 2026-08-09) rewrote
+ * `app.hidden: true` into `app._unpublished: true`. #25767 retired the entry
+ * with the ≤16.x kits, so the door no longer has it to refuse — the pins below
+ * stay because the outcome they guard (an authored `hidden: true` reaches
+ * registration untouched) is the outcome, whatever the registry carries; the
+ * step-18 reading further down is where the door's refusal-by-id is still
+ * exercised on a live entry. Both keys are live and
  * they mean opposite kinds of thing: `hidden` is navigation presentation and
  * *"never an access gate"* (`ui/app.zod.ts`), while `_unpublished` is the
  * machine-managed publish gate `filterAppForUser` drops the app on for every
@@ -552,18 +557,22 @@ describe('the artifact door never turns an authored `hidden: true` into an unpub
   });
 
   /**
-   * ⭐ SEAM SCOPE — the entry is refused by THIS DOOR, not removed from the
-   * chain. The stored-row seam, where a `hidden: true` row can only have come
-   * from the pre-split materialization path, still carries the population
-   * across. A fix that had neutered the entry would go green on every leg
-   * above and silently strand those rows.
+   * SEAM SCOPE, after #25767. Until then this case pinned the OTHER half of the
+   * #17885 ruling: the entry was refused by this door and still fired at the
+   * stored-row seam, where a `hidden: true` row could only have come from the
+   * pre-split materialization path. #25767 retired the entry itself (a ≤16.x
+   * kit, ADR-0087 D2 = A), so no seam rewrites that row any more: a pre-split
+   * row is canonicalized once, `os migrate meta --stored --apply` on a release
+   * that still carries the step, and from here the stored-row seam reads
+   * `hidden: true` as what it says. Pinned so a re-registration of the entry
+   * is a deliberate act, not a merge accident.
    */
-  it('leaves the entry firing at the stored-row seam it is sound at', () => {
+  it('the stored-row seam no longer rewrites `hidden: true` either — the entry is retired, not merely refused here', () => {
     const row = applyConversionsToStoredItem('app', {
       name: 'production_management', label: 'Production', hidden: true, navigation: [],
     }) as Record<string, unknown>;
-    expect(row._unpublished, 'the stored-row seam still converts').toBe(true);
-    expect(row.hidden).toBeUndefined();
+    expect(row._unpublished, 'no seam invents the publish gate now').toBeUndefined();
+    expect(row.hidden).toBe(true);
   });
 });
 

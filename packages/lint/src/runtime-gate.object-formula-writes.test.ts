@@ -22,9 +22,11 @@
  * (its pins: `runtime-gate.object-validation-writes.test.ts`), since its
  * pass 2 the field-rule slots (`runtime-gate.object-field-rule-writes.test.ts`),
  * since its pass 3 the per-option `visibleWhen`
- * (`runtime-gate.object-option-visibility-writes.test.ts`), and since its
+ * (`runtime-gate.object-option-visibility-writes.test.ts`), since its
  * pass 4 the object's own action predicates
- * (`runtime-gate.object-action-predicate-writes.test.ts`). Every pass over the
+ * (`runtime-gate.object-action-predicate-writes.test.ts`), and since #26646 a
+ * field group's `visibleWhen`
+ * (`runtime-gate.object-field-group-visibility-writes.test.ts`). Every pass over the
  * object's own body now judges here; the passes over the stack's OTHER
  * collections (flows, top-level actions, sharing rules, hooks) do not. Both
  * halves are pinned below with the build still flagging the same body, so a
@@ -161,8 +163,9 @@ describe('#22019 / #22032 — every pass over the object\'s body judges on this 
   /**
    * One body carrying a fault in EVERY pass over the object's own body — the
    * validation-rule pass (#22032 pass 1), a field-rule slot (`requiredWhen`,
-   * pass 2), an option's `visibleWhen` (pass 3) and an object action's
-   * `visible` and `disabled` (pass 4) — beside a CLEAN formula. Since pass 4 no
+   * pass 2), an option's `visibleWhen` (pass 3), an object action's
+   * `visible` and `disabled` (pass 4) and a field group's `visibleWhen`
+   * (#26646) — beside a CLEAN formula. Since pass 4 no
    * object-borne site is fenced: the build and the object door flag the same
    * sites in the same order. Each fault is one the build refuses at `error`,
    * so a fence put back on any of these passes drops its site from the door's
@@ -182,15 +185,17 @@ describe('#22019 / #22032 — every pass over the object\'s body judges on this 
         options: [{ label: 'Gold', value: 'gold', visibleWhen: 'amount > 1' }],
       },
     },
+    fieldGroups: [{ key: 'g1', label: 'G1', visibleWhen: 'amount > 1' }],
     actions: [
       { name: 'fx_close', label: 'Close', type: 'script', target: 'close', visible: 'record.status ==', disabled: 'amount > 1' },
     ],
   });
-  /** Every object-borne site of the body (passes 1–4), by the build's `where`, in the build's order. */
+  /** Every object-borne site of the body (passes 1–4 and #26646), by the build's `where`, in the build's order. */
   const LIFTED_SITES = [
     "object 'fx_sqrt' · validation 'amount_root'",
     "object 'fx_sqrt' · field 'name' requiredWhen",
     "object 'fx_sqrt' · field 'tier' option 'gold' visibleWhen",
+    "object 'fx_sqrt' · field group 'g1' visibleWhen",
     "object 'fx_sqrt' · action 'fx_close' visible",
     "object 'fx_sqrt' · action 'fx_close' disabled",
   ];
@@ -232,7 +237,7 @@ describe('#22019 / #22032 — every pass over the object\'s body judges on this 
     const result = gateObject(withEverySite());
 
     expect(result.rulesRun).toContain('validateStackExpressions');
-    // [#22032 passes 1–4] Every lifted pass's finding, in the build's order, and nothing else.
+    // [#22032 passes 1–4, #26646] Every lifted pass's finding, in the build's order, and nothing else.
     expect(expressionFindings(result.errors).map((f) => f.where), dump(result)).toEqual(LIFTED_SITES);
     expect(expressionFindings(result.advisories), dump(result)).toEqual([]);
   });
@@ -244,9 +249,9 @@ describe('#22019 / #22032 — every pass over the object\'s body judges on this 
     // in its own walk order (flows, the object's body, actions, sharing rules, hooks).
     expect(all.map((i) => i.where), dump(all)).toEqual([
       OTHER_SITES[0],
-      ...LIFTED_SITES.slice(0, 3),
+      ...LIFTED_SITES.slice(0, 4),
       OTHER_SITES[1],
-      ...LIFTED_SITES.slice(3),
+      ...LIFTED_SITES.slice(4),
       OTHER_SITES[2],
       OTHER_SITES[3],
     ]);

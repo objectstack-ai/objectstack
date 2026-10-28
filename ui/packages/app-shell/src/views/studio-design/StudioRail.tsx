@@ -15,11 +15,19 @@
  * The width is `STUDIO_RAIL_WIDTH` in every pillar and every mode, with no
  * override: an Interfaces rail that widened while its navigation was being
  * edited moved the content column on every Edit and Done (objectui#12519).
+ *
+ * objectstack#26733 — a search that matches nothing is the rail's to say, once,
+ * for every pillar: the pillar filters its own list and hands in how many rows
+ * the query left (`search.matchCount`); the rail then names the query under the
+ * box and offers to clear it. A blank query, or a list that is empty before any
+ * search (`count === 0`), never shows that line: the pillar's own empty state
+ * speaks there.
  */
 
 import * as React from 'react';
 import { Plus, Search } from 'lucide-react';
 import { cn } from '@object-ui/components';
+import { t, tFormat, useMetadataLocale } from '../metadata-admin/i18n.js';
 import {
   STUDIO_RAIL_COUNT,
   STUDIO_RAIL_GROUP,
@@ -40,6 +48,12 @@ export interface StudioRailSearch {
   testId?: string;
   /** Accessible name for the input; falls back to the placeholder. */
   label?: string;
+  /**
+   * How many rows the current query leaves in the list. Zero, under a
+   * non-blank query, makes the rail say the query matched nothing and offer to
+   * clear it; undefined says nothing.
+   */
+  matchCount?: number;
 }
 
 export interface StudioRailProps {
@@ -86,6 +100,10 @@ export function StudioRail({
   ...rest
 }: StudioRailProps): React.ReactElement {
   const searchId = React.useId();
+  const searchRef = React.useRef<HTMLInputElement | null>(null);
+  const locale = useMetadataLocale();
+  const searchText = search?.value.trim() ?? '';
+  const noMatches = search !== undefined && search.matchCount === 0 && searchText !== '' && count !== 0;
   return (
     <nav
       data-testid={testId}
@@ -129,6 +147,7 @@ export function StudioRail({
           <div className="relative">
             <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
             <input
+              ref={searchRef}
               id={searchId}
               value={search.value}
               onChange={(e) => search.onChange(e.target.value)}
@@ -139,7 +158,25 @@ export function StudioRail({
           </div>
         </div>
       )}
-      <div className="min-h-0 flex-1 overflow-auto px-2 pb-3 pt-1">{children}</div>
+      <div className="min-h-0 flex-1 overflow-auto px-2 pb-3 pt-1">
+        {children}
+        {noMatches && (
+          <div data-testid="studio-rail-no-matches" className="px-2 py-3 text-[11px] text-muted-foreground">
+            <p>{tFormat('engine.list.emptyQuery', locale, { query: searchText })}</p>
+            <button
+              type="button"
+              data-testid="studio-rail-clear-search"
+              onClick={() => {
+                search?.onChange('');
+                searchRef.current?.focus();
+              }}
+              className="mt-1 rounded-sm font-medium text-foreground underline-offset-2 hover:underline"
+            >
+              {t('engine.studio.rail.clearSearch', locale)}
+            </button>
+          </div>
+        )}
+      </div>
       {footer && <div className="shrink-0 border-t px-3 py-2">{footer}</div>}
     </nav>
   );

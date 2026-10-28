@@ -1579,6 +1579,14 @@ const NOT_SCHEMA_RECEIVERS: Record<string, string> = {
   // hint text. The scan reads code with its string literals intact, so the
   // spelling presents as a receiver `current_user` reading a key `id`.
   current_user: "the RLS predicate grammar's `current_user.id`, a string literal in the owner arm's message text — not a receiver.",
+  // [#26591] The owner arm keeps, per controlled_by_parent detail, whether it
+  // opted in and whether it carries `owner_id` — this file's own fold; the
+  // authored reads behind it are `controlledByParentOwnerMayEdit(obj)` and
+  // `obj.fields`. And `sharing.controlledByParent.ownerMayEdit` is quoted as
+  // a string literal in the off-column verdict text, so it presents as a
+  // receiver `sharing` reading a key `controlledByParent`.
+  detail: "the owner arm's own `{ optedIn, ownerColumn }` fold of one detail, not an authored surface.",
+  sharing: "the opt-in's spelling `sharing.controlledByParent.ownerMayEdit`, a string literal in the owner arm's message text — not a receiver.",
 };
 
 const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: string; keys: () => string[] }> = [
@@ -1781,7 +1789,7 @@ describe('validateSecurityPosture — reads only keys the spec declares (meta-te
       'bodies', 'entries', 'targets', 'owners', 'extensions', 'byCarrier', 'writers', 'tiedWriters',
       'merged', 'baseFields', 'blamed',
       // #25760: the controlled-by-parent owner arm's own collections and the predicate string.
-      'cbpDetailsWithoutOptIn', // the detail names without the opt-in — JS Set methods.
+      'cbpDetails', // #26591: the resolving details by name — JS Map methods.
       'policies', // one set's `rowLevelSecurity` records — `.length`, a JS property.
       'predicate', // a policy's `using` / `check` text, a string — `.trim`.
     ]);
@@ -2011,6 +2019,29 @@ const REACHABILITY_CORPUS: Array<{ label: string; stack: Record<string, unknown>
     },
   },
   {
+    // [#26591] The same rule's second push site: an opted-in detail whose
+    // `update` policy keys the caller on its own user field, which the opt-in
+    // (the stored `owner_id` only) does not admit.
+    label: 'cbp-caller-policy-off-owner-column',
+    stack: {
+      objects: [
+        objectFixture({ name: 'invoice', sharingModel: 'private' }),
+        objectFixture({
+          name: 'line_item', sharingModel: 'controlled_by_parent',
+          sharing: { controlledByParent: { ownerMayEdit: true } },
+          fields: {
+            invoice: { type: 'master_detail', label: 'Invoice', reference: 'invoice', required: true },
+            assignee: { type: 'user', label: 'Assignee', reference: 'sys_user' },
+          },
+        }),
+      ],
+      permissions: [{
+        name: 'ps', label: 'PS', objects: {},
+        rowLevelSecurity: [{ name: 'assigned_lines', object: 'line_item', operation: 'update', using: 'assignee == current_user.id', enabled: true }],
+      }],
+    },
+  },
+  {
     label: 'grant-expired-at-authoring',
     stack: { data: [{ object: 'sys_user_position', records: [{ user_id: 'u1', position: 'p', valid_until: '2020-01-01T00:00:00Z' }] }] },
   },
@@ -2033,7 +2064,8 @@ describe('validateSecurityPosture — every branch is reachable without an undec
     // 16 since #23268: the external dial's alias and wider-than-internal sites left with the key.
     // 17 since #25575: allowDelete: false beside modifyAllRecords: true.
     // 18 since #25760: an owner-keyed update policy on a controlled_by_parent detail that has not opted in.
-    expect(pushedRuleIds()).toHaveLength(18);
+    // 19 since #26591: the same rule id, for a policy keyed only on a column the opt-in does not admit.
+    expect(pushedRuleIds()).toHaveLength(19);
   });
 
   it('reaches every `findings.push` site from that corpus', () => {

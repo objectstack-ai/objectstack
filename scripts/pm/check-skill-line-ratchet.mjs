@@ -600,7 +600,7 @@ export const CEILINGS = new Map([
   // tails leave the corpus; one rule per ≤120-byte line, no rule already stated in
   // SKILL.md). Landed count, headroom 0, same convention (lowering is always
   // legitimate).
-  ['.claude/skills/pm-dispatch/references/decision-analysis.md', 50],
+  ['.claude/skills/pm-dispatch/references/decision-analysis.md', 49],
   // 134 → 133: whole-text restructuring round, PR-2 (maintainer ruling
   // 2026-08-23) — the three write-side sanitizer rows consolidated to one
   // author rule + one measured-behaviour row per surface (body / comment).
@@ -1149,7 +1149,8 @@ export const CEILINGS = new Map([
   // 2026-08-17 rule in any case. Landed count, headroom 0, same convention.
   // Lowered 469 → 460 by the tool-first diet: nine readings a `scripts/pm` tool
   // now holds were deleted whole (lowering is always legitimate). Landed count.
-  ['.claude/skills/pm-dispatch/references/platform-readings.md', 460],
+  // 460 → 458 (#25753): lines that named objectui as a sibling repo retired; landed count.
+  ['.claude/skills/pm-dispatch/references/platform-readings.md', 458],
   // Per-operation REST/GraphQL/git channel mapping — which fleet operation has
   // a REST twin (each row executed in a real session, provenance date carried
   // per row), the handful that are GraphQL-only, and the queue-routing
@@ -1189,13 +1190,15 @@ export const CEILINGS = new Map([
   // 「各条规则的出处叙事、事故复盘 根本不重要啊，不需要写入skills啊」) — provenance dates,
   // ruling citations and incident narrative left; every rule stayed. Landed count,
   // headroom 0, same convention (lowering is always legitimate).
-  ['.claude/skills/pm-dispatch/references/rest-channel.md', 82],
+  // 82 → 80 (#25753): lines that named objectui as a sibling repo retired; landed count.
+  ['.claude/skills/pm-dispatch/references/rest-channel.md', 80],
   // Lowered 84 → 77 by the rules-only rewrite of the seven core references
   // (maintainer ruling: provenance narratives, incident post-mortems and rationale
   // tails leave the corpus; one rule per ≤120-byte line, no rule already stated in
   // SKILL.md). Landed count, headroom 0, same convention (lowering is always
   // legitimate).
-  ['.claude/skills/pm-dispatch/references/review-checklist.md', 77],
+  // 77 → 76 (#25753): lines that named objectui as a sibling repo retired; landed count.
+  ['.claude/skills/pm-dispatch/references/review-checklist.md', 76],
   // Lowered 80 → 69 by the rules-only rewrite of the seven core references
   // (maintainer ruling: provenance narratives, incident post-mortems and rationale
   // tails leave the corpus; one rule per ≤120-byte line, no rule already stated in
@@ -1228,7 +1231,8 @@ export const CEILINGS = new Map([
   // tails leave the corpus; one rule per ≤120-byte line, no rule already stated in
   // SKILL.md). Landed count, headroom 0, same convention (lowering is always
   // legitimate).
-  ['.claude/skills/pm-dispatch/references/seat-post-protocol.md', 91],
+  // 91 → 88 (#25753): the console-pin release precondition retired with the pin; landed count.
+  ['.claude/skills/pm-dispatch/references/seat-post-protocol.md', 88],
   // Per-repo「真绿」跑法索引 — the canonical test invocation, the gates a CI-log
   // grep cannot see, and the local preflight, one fact per line per repo. Added
   // by the protocol-text family PR, which could not carry its own ceiling: that
@@ -1381,7 +1385,8 @@ export const CEILINGS = new Map([
   // in place (③ and ④ of the gate merged onto one line), so the measured delta
   // is +4. Not a CROSS_FILE_MOVES destination, so no `ruledRaises` record
   // applies. Landed count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/filing-gate.md', 68],
+  // 68 → 66 (#25753): lines that named objectui as a sibling repo retired; landed count.
+  ['.claude/skills/pm-dispatch/references/filing-gate.md', 66],
   // The project layer above the seats (maintainer's word: ONE project form, the
   // instruction line 「pm-dispatch <席位…>」 is the summon, seats are read from the
   // seat posts' 🟢 line, takeover never waits for a walled account, mailbox PRs,
@@ -1478,13 +1483,13 @@ export const CEILINGS = new Map([
   // 「`lanes/director.md` 职责行」: the seat an app project summons reviews that
   // repo's business-rationale first touch. Measured +1, ceiling moved by +1;
   // recorded under the move below as a `ruledRaises` record.
-  ['.claude/skills/pm-dispatch/references/lanes/director.md', 88],
+  // 88 → 87 (#26765, main's governed-draft rule) → 86 (#25753): the objectui pin-chain line retired; landed count.
+  ['.claude/skills/pm-dispatch/references/lanes/director.md', 86],
   // Triage seat charter (maintainer ruling: the triage seat stays single; pickup
-  // alternates between the two multi-lane repos, oldest-first inside a repo, with a
-  // 4-hour starvation guard). A seat charter is read per seat session like every
-  // entry above. Set at the landed line count read from this ratchet's own run
-  // (headroom 0, same convention as above); it is a NEW file, so this is an added
-  // row and no other row moves.
+  // is oldest-first, with a 4-hour starvation guard). A seat charter is read per
+  // seat session like every entry above. Set at the landed line count read from
+  // this ratchet's own run (headroom 0, same convention as above); it is a NEW
+  // file, so this is an added row and no other row moves.
   // 7 → 8 (#25558): ruling D of director batch #10, comment 6378083450 —
   // maintainer 「#25558 记为 D」 (2026-10-24), adopting the record's workload
   // 「`lanes/triage.md`「应用仓无分诊席」之后补「应用仓业务理由由该项目召唤的
@@ -1542,14 +1547,20 @@ export const CEILINGS = new Map([
   // text needs, the ruling id and the delta quoted in the raising PR's body.
   // Not a CROSS_FILE_MOVES destination, so no `ruledRaises` record applies.
   // Landed count, headroom 0, same convention.
-  ['.claude/agents/os-dev.md', 404],
+  // 404 → 402 (#25753): lines that named objectui as a sibling repo retired; landed count.
+  ['.claude/agents/os-dev.md', 402],
   // #9473: the other four `.claude/skills/` are read in full by the sessions
   // that use them too — the erosion mechanism the ratchet exists to stop
   // isn't specific to the pm-dispatch surface. Set at current counts on
   // `origin/main` (headroom 0, same convention as the entries above).
-  ['.claude/skills/checklist-test/SKILL.md', 238],
+  // 238 → 246: the ruling of record that orders text into the file — the
+  // maintainer's 「以上应该写入你的 checklist skills」, recorded verbatim with the
+  // rulings it orders in comment 6433562861 — +8 measured lines (write doors,
+  // file-every-defect, auth/authz fix dispatch, QA run is not a lane card).
+  ['.claude/skills/checklist-test/SKILL.md', 246],
   ['.claude/skills/checklist-author/SKILL.md', 62],
-  ['.claude/skills/dogfood-verification/SKILL.md', 157],
+  // 157 → 140 (#25753): lines that named objectui as a sibling repo retired; landed count.
+  ['.claude/skills/dogfood-verification/SKILL.md', 140],
   // 328 → 334 (#10848): maintainer-ruled (2026-08-22, Option A) — convention 5
   // replaced with the pin's house sentence AND the pin docblock's one allowed
   // variant shape carried into the skill, +6 lines within the card's budget.

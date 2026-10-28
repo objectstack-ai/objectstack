@@ -60,8 +60,51 @@ set -euo pipefail
 #   recomputes it and overrides whatever we export.
 unset npm_config_globalconfig NPM_CONFIG_GLOBALCONFIG
 
+# No published tarball may carry tooling material (objectui#4846): a test, a
+# mock, a benchmark that imports `vitest`, a `*.tsbuildinfo`. objectui ran this
+# scan in its own `changeset:publish`; the ruling on objectui#4846 (comment
+# 5307574139) put it on the publish path, where a red scan stops the publish
+# while stopping it is still free. `--no-build` because `pnpm run release` has
+# just built what is about to be packed, so the scan reads exactly those
+# artifacts; a published package with nothing built is a finding, never a pass.
+#
+# Before npm's record starts, on purpose: the scan's own `npm pack --dry-run`
+# runs must not land in the record that `release-verify-npm.mjs` reads back.
+if ! node ui/scripts/check-published-dist-tooling.mjs --no-build; then
+  echo "::error::check-published-dist-tooling found tooling material in (or no build output for) a published @object-ui package. Refusing to publish; the scan above names each package and file."
+  exit 1
+fi
+
+# Keep npm's own answer for every package.
+#
+#   `changeset publish` (@changesets/cli 3.0.3, its pnpm branch) counts a
+#   package as published when `pnpm publish` exits 0 and prints nothing pnpm or
+#   npm said. pnpm 10 hands the upload to `npm publish`, and npm writes a debug
+#   log of every run, its `http fetch PUT <status>` line included. Pointing
+#   npm's logs dir at a record directory and lifting its 10-file cap keeps one
+#   log per npm run, so "npm accepted it and the registry is slow" can be told
+#   from "npm refused it" or "it was never uploaded". `release-verify-npm.mjs`
+#   names the directory (one spelling, under $RUNNER_TEMP) and reads it back;
+#   its header has the parse and what the record decides.
+#
+#   Only npm's log settings change here: what is published, by whom, and the
+#   `release` environment gating are untouched.
+NPM_RECORD_DIR="$(node scripts/release-verify-npm.mjs --start-npm-record)"
+export npm_config_logs_dir="$NPM_RECORD_DIR"
+export npm_config_logs_max=100000
+
 # Publish to npm and create the local version tags.
-changeset publish
+publish_status=0
+changeset publish || publish_status=$?
+
+# npm's answer per package, printed before anything else can fail. A report,
+# never the verdict: the verifier reads the record again and fails closed.
+node scripts/release-verify-npm.mjs --npm-answers \
+  || echo "::warning::could not print npm's per-package answers; scripts/release-verify-npm.mjs reads the record again."
+
+if [ "$publish_status" -ne 0 ]; then
+  exit "$publish_status"
+fi
 
 # Push every new tag in one atomic transaction (see header). --tags pushes ALL
 # local tags regardless of reachability; --follow-tags would push nothing here

@@ -19,7 +19,7 @@ import {
   packedFiles,
   toolingConventionFrom,
 } from '../check-published-dist-tooling.mjs';
-import { rootWorkflow, rootWorkflowFiles } from './helpers/root-ci';
+import { jobBlock, rootCi, rootWorkflow, rootWorkflowFiles, uiRun, withoutComments } from './helpers/root-ci';
 
 /**
  * objectui#4846 — no published package's build output may carry tooling material.
@@ -473,20 +473,52 @@ describe('wiring', () => {
     );
   });
 
-  // `runs nightly` retired with objectstack#25712. It read objectui's
-  // `published-dist-gate.yml`, which runs nowhere under the monorepo: GitHub
-  // runs the root `.github/workflows/` alone. That workflow is row 23 of the
-  // objectstack#25697 workflow roster, "kept, follow-up port", and the port
-  // brings the pin back against the root file that schedules the scan.
+  // The full-battery half (objectstack#26717). objectui scheduled the scan
+  // nightly in `published-dist-gate.yml` (roster row 23 of objectstack#25697);
+  // under the monorepo it runs in root `ci.yml`'s `ui-published-artifacts` job,
+  // which a pull request and a queue entry skip, over the release's own build.
+  const FULL_BATTERY_JOB = 'ui-published-artifacts';
+  const PER_PR_EVENTS = ['pull_request', 'merge_group'];
 
-  it('is NOT wired into any per-PR workflow — the ruling forbade a per-PR full-repo build', () => {
+  /** A job's own `if:` line, at the job's indent; '' when it has none. */
+  const jobIf = (block: string) => block.match(/^ {4}if: (.*)$/m)?.[1] ?? '';
+  const deniesPerPrEvents = (condition: string) =>
+    PER_PR_EVENTS.every((event) => condition.includes(`github.event_name != '${event}'`));
+
+  it("runs in ci.yml's full battery, after the release's build, with --no-build", () => {
+    const block = withoutComments(jobBlock(rootCi(), FULL_BATTERY_JOB));
+    expect(block).toContain(`run: ${uiRun('check:published-dist')} --no-build`);
+    expect(block.indexOf('run: pnpm build\n')).toBeGreaterThan(-1);
+    expect(block.indexOf('run: pnpm build\n')).toBeLessThan(block.indexOf(uiRun('check:published-dist')));
+    expect(deniesPerPrEvents(jobIf(block)), jobIf(block)).toBe(true);
+  });
+
+  it('is NOT run by any per-PR or queue job — the ruling forbade a per-PR full-repo build', () => {
     // Asked of the root `.github/workflows/`, the only workflows GitHub runs
-    // under the monorepo (objectstack#25712); `ui/.github/` runs nowhere.
-    const perPr = rootWorkflowFiles().filter((file) => /^on:[\s\S]*?\bpull_request:/m.test(rootWorkflow(file)));
+    // under the monorepo (objectstack#25712); `ui/.github/` runs nowhere. A
+    // workflow that subscribes a per-PR event may carry the scan only in a job
+    // whose own `if:` denies both of them: the ruling is about the build a
+    // pull request pays for, and such a job costs it nothing.
+    const perPr = rootWorkflowFiles().filter((file) =>
+      new RegExp(`^on:[\\s\\S]*?\\b(${PER_PR_EVENTS.join('|')}):`, 'm').test(rootWorkflow(file)),
+    );
     expect(perPr.length).toBeGreaterThan(0); // the scan itself must not be empty
+    let carriers = 0;
     for (const file of perPr) {
       const text = rootWorkflow(file);
-      expect(text.includes(GATE) || text.includes('check:published-dist'), file).toBe(false);
+      const jobsAt = text.search(/^jobs:[ \t]*$/m);
+      expect(jobsAt, file).toBeGreaterThan(-1);
+      const keys = [...text.slice(jobsAt).matchAll(/^ {2}([a-z0-9][a-z0-9_-]*):[ \t]*$/gm)].map((m) => m[1]);
+      expect(keys.length, file).toBeGreaterThan(0);
+      for (const key of keys) {
+        const block = withoutComments(jobBlock(text, key));
+        if (!block.includes(GATE) && !block.includes('check:published-dist')) continue;
+        carriers += 1;
+        expect(deniesPerPrEvents(jobIf(block)), `${file} job ${key}: if: ${jobIf(block)}`).toBe(true);
+      }
     }
+    // The carrier the case above pins is seen here too, so this loop cannot
+    // pass by reading no job at all.
+    expect(carriers).toBeGreaterThan(0);
   });
 });

@@ -637,31 +637,6 @@ export const RowLevelSecurityPolicySchema = lazySchema(() => strictObject(
     .describe('Whether this policy is active'),
 
   /**
-   * REMOVED — `priority` promised "conflict resolution" that cannot exist.
-   *
-   * No outcome depends on an order. On a read, the applicable policies' `using`
-   * clauses OR-combine (any match allows access). On an insert or an update,
-   * which predicates judge the written rows is decided once per operation
-   * across the applicable policies (the declared `check`s when any exists,
-   * otherwise each `using`; see `check`), and the chosen ones OR-combine. So
-   * there is never a conflict to order and evaluation order cannot change an
-   * outcome. Nothing ever read the key: the 2026-07-30
-   * security-subset liveness re-verification (#3896 follow-up) closed the call
-   * graph across the collection site, the projection round-trip and the
-   * compiler, and found no consumer. A semantically-void knob on a SECURITY
-   * policy is worse than dead — an author (very often an AI, ADR-0033) reads it
-   * as a precedence lever and reasons about policy interactions that do not
-   * exist. Removed per the #3715 / #3950 precedent; tombstoned so the removal
-   * is audible (tsc `never` + the parse-time prescription) instead of a silent
-   * strip.
-   */
-  priority: retiredKey(
-    '`rowLevelSecurity[].priority` was removed in @objectstack/spec 17.0.0. ' +
-    'It never had an effect. Delete the key — policy outcomes are unchanged. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
-
-  /**
    * REMOVED — `tags` promised "categorization and reporting" for governance and
    * compliance, and nothing ever read it (#20321, ADR-0049 enforce-or-remove).
    *
@@ -734,7 +709,7 @@ const DEFAULT_ROW_SCOPE_OBJECT_GUIDANCE =
  * this tree declares it.
  */
 export const DefaultRowScopeSchema = lazySchema(() => {
-  const { object: _implied, priority: _priority, tags: _tags, ...members } = RowLevelSecurityPolicySchema.shape;
+  const { object: _implied, tags: _tags, ...members } = RowLevelSecurityPolicySchema.shape;
   return strictObject(
     {
       surface: "this object's default row scope",

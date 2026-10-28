@@ -36,11 +36,16 @@ import '@objectstack/service-datasource';
 
 /**
  * Same probe artifact as the two-reader harness: a legacy shape in every
- * security collection, an `engines.protocol` floor that opens the door's
- * conversion window. The values asserted below are the door's measured output
- * for these bytes (DOOR_COPY in the harness). The range is `>=17.1.0`, not
- * `^17.1.0`: this boot runs the ADR-0087 D1 handshake, which refuses a caret on
- * 17 from protocol 18, and only the floor opens the window.
+ * security collection a 17.x conversion still reaches (the `allowRestore` /
+ * `allowPurge` grant bits, `accessLevel: 'full'`), an `engines.protocol` floor
+ * that opens the door's conversion window. The values asserted below are the
+ * door's measured output for these bytes (DOOR_COPY in the harness). The range
+ * is `>=17.1.0`, not `^17.1.0`: this boot runs the ADR-0087 D1 handshake,
+ * which refuses a caret on 17 from protocol 18, and only the floor opens the
+ * window. [#25767] The ≤16.x kits aged out, so `positions` and the `position`
+ * recipient are written canonically and the RLS carries no `priority`: the
+ * door refuses each legacy spelling outright now (pinned in the harness), and
+ * a boot over them would not start.
  */
 const ARTIFACT = {
   manifest: {
@@ -50,7 +55,7 @@ const ARTIFACT = {
     version: '2.0.0',
     engines: { protocol: '>=17.1.0' },
   },
-  roles: [{ name: 'sales_rep', label: 'Sales Rep' }],
+  positions: [{ name: 'sales_rep', label: 'Sales Rep' }],
   permissions: [
     {
       name: 'support_agent',
@@ -59,7 +64,7 @@ const ARTIFACT = {
         crm_ticket: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true, allowRestore: true, allowPurge: false },
       },
       rowLevelSecurity: [
-        { name: 'own_tasks', object: 'crm_task', operation: 'select', using: 'assignee == current_user.email', enabled: true, priority: 10 },
+        { name: 'own_tasks', object: 'crm_task', operation: 'select', using: 'assignee == current_user.email', enabled: true },
       ],
     },
   ],
@@ -71,7 +76,7 @@ const ARTIFACT = {
       object: 'crm_deal',
       accessLevel: 'full',
       condition: 'record.status == "open"',
-      sharedWith: { type: 'role', value: 'sales_mgr' },
+      sharedWith: { type: 'position', value: 'sales_mgr' },
     },
   ],
 };
@@ -154,7 +159,6 @@ describe('createStandaloneStack — the artifact boot serves ONE copy of each se
     expect(got.permission[0]).toMatchObject({ name: 'support_agent', isDefault: false, _packageVersion: '2.0.0' });
     expect(got.permission[0].objects.crm_ticket).not.toHaveProperty('allowRestore');
     expect(got.permission[0].objects.crm_ticket).toMatchObject({ allowTransfer: false, viewAllRecords: false, modifyAllRecords: false });
-    expect(got.permission[0].rowLevelSecurity[0]).not.toHaveProperty('priority');
   }, BOOT_TIMEOUT);
 
   it('control: the pre-step-2 composition (door + a default AppPlugin) reproduces the raw copy winning', async () => {

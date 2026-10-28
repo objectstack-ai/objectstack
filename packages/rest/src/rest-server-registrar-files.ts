@@ -20,10 +20,10 @@
  * moves the next body adds its module here once, and every reader widens with
  * it.
  *
- * Each reader keeps its own sum over the list and pins the list's `length`, so
- * a module added here makes every one of them re-read its number instead of
- * widening unnoticed. ⛔ Not a gate: nothing runs this list on its own, and a
- * reader that imports it stays the authority on what it counts.
+ * Each reader keeps its own sum over the list; none pins the list's `length`,
+ * so a module added here widens every reader with no edit to any of them.
+ * ⛔ Not a gate: nothing runs this list on its own, and a reader that imports
+ * it stays the authority on what it counts.
  *
  * Names are relative to this directory, which every file on the list lives in.
  */

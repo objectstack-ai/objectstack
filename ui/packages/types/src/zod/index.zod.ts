@@ -375,7 +375,7 @@ export {
 // ============================================================================
 export {
   ActionExecutionModeSchema,
-  ActionSchema,
+  CRUDActionSchema,
   DetailSchema,
   CRUDDialogSchema,
   CRUDComponentSchema,

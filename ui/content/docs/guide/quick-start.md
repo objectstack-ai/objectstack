@@ -138,6 +138,152 @@ Open [http://localhost:5173](http://localhost:5173). You should see a card and d
 3. **Renderer** - `SchemaRenderer` resolved each `type` and rendered React components.
 4. **Provider** - `SchemaRendererProvider` is where a host injects its `DataSource`; this app has none, so it passes `undefined`.
 
+## Expression Scope
+
+A `${…}` expression in a schema reads a root the host publishes. Publish those roots with
+`PredicateScopeProvider`:
+
+### Basic Usage
+
+```tsx
+import React from 'react'
+import { PredicateScopeProvider, SchemaRenderer } from '@object-ui/react'
+import type { DeclaredNode } from '@object-ui/types'
+// Importing the package registers every default renderer as a side effect —
+// there is no separate registration call.
+import '@object-ui/components'
+
+const schema: DeclaredNode = {
+  type: "page",
+  // An app page draws `title` as its heading; a page with no `pageType` is a
+  // record page, which leaves the heading to a `page:header` block.
+  pageType: "app",
+  title: "Dashboard",
+  children: {
+    type: "grid",
+    columns: 3,
+    children: [
+      { type: "statistic", label: "Total Users", value: "${stats.users}" },
+      { type: "statistic", label: "Revenue", value: "${stats.revenue}" },
+      { type: "statistic", label: "Orders", value: "${stats.orders}" }
+    ]
+  }
+}
+
+function App() {
+  // Every key of this object becomes a root the schema's expressions can read —
+  // `stats` here is what answers `${stats.users}`.
+  const scope = {
+    stats: { users: 1234, revenue: "$56,789", orders: 432 }
+  }
+
+  return (
+    <PredicateScopeProvider scope={scope}>
+      <SchemaRenderer schema={schema} />
+    </PredicateScopeProvider>
+  )
+}
+
+export default App
+```
+
+Expression scope reaches the renderer through the provider, never through a prop on the
+element. `SchemaRenderer` declares exactly one prop, `schema`, and forwards every other prop
+it is handed to the component the schema names — so a value passed as `data={…}` is neither
+read nor refused, and the expression that wanted it is returned as its own source text, with
+nothing thrown and one line on the console.
+
+⛔ `dataSource` is the **adapter** — the object data renderers call `find()` on — and not an
+expression root. It is a different channel from the expression scope: publish the values your
+`${…}` expressions read with `PredicateScopeProvider`, and inject the adapter your data
+components query with `SchemaRendererProvider`.
+
+## Copy-Paste Schemas
+
+A `${name.…}` in any of these reads the root `name` off the scope the host published — see
+[Expression Scope](#expression-scope) for the provider that publishes one. A head name nothing
+published is not an error: the expression is returned as its own source text.
+
+### Contact Form
+
+```json
+{
+  "type": "form",
+  "fields": [
+    { "name": "name", "type": "text", "label": "Full Name", "required": true },
+    { "name": "email", "type": "email", "label": "Email", "required": true },
+    { "name": "subject", "type": "select", "label": "Subject", "options": [
+      { "label": "General Inquiry", "value": "general" },
+      { "label": "Bug Report", "value": "bug" },
+      { "label": "Feature Request", "value": "feature" }
+    ]},
+    { "name": "message", "type": "textarea", "label": "Message", "required": true }
+  ],
+  "submitLabel": "Send Message"
+}
+```
+
+### Data Grid
+
+```json
+{
+  "type": "object-grid",
+  "properties": {
+    "objectName": "user",
+    "title": "Users",
+    "columns": [
+      { "field": "name", "label": "Name", "sortable": true },
+      { "field": "email", "label": "Email" },
+      { "field": "role", "label": "Role" },
+      { "field": "status", "label": "Status" },
+      { "field": "created_at", "label": "Joined" }
+    ],
+    "showSearch": true,
+    "operations": { "create": true, "update": true, "delete": true, "export": true }
+  }
+}
+```
+
+### Dashboard
+
+A row of live KPI tiles. A `dashboard` node's `widgets[]` takes `metric-card` entries and
+dataset-bound charts instead; see [Dashboard Plugin](/docs/plugins/plugin-dashboard).
+
+```json
+{
+  "type": "grid",
+  "columns": 4,
+  "children": [
+    { "type": "statistic", "label": "Revenue", "value": "${stats.revenue}", "trend": "up", "description": "+12%" },
+    { "type": "statistic", "label": "Orders", "value": "${stats.orders}", "trend": "up", "description": "+8%" },
+    { "type": "statistic", "label": "Customers", "value": "${stats.customers}", "trend": "up", "description": "+5%" },
+    { "type": "statistic", "label": "Conversion", "value": "${stats.conversion}", "trend": "down", "description": "-2%" }
+  ]
+}
+```
+
+### Kanban Board
+
+```json
+{
+  "type": "object-kanban",
+  "objectName": "tasks",
+  "groupBy": "status",
+  "cardTitle": "title",
+  "cardFields": ["assignee", "priority", "due_date"],
+  "columns": [
+    { "id": "todo", "title": "To Do", "className": "border-t-2 border-indigo-500" },
+    { "id": "in_progress", "title": "In Progress", "className": "border-t-2 border-amber-500" },
+    { "id": "review", "title": "In Review", "className": "border-t-2 border-blue-500" },
+    { "id": "done", "title": "Done", "className": "border-t-2 border-green-500" }
+  ]
+}
+```
+
+More schemas: [`ui/examples/schema-catalog`](https://github.com/objectstack-ai/objectstack/tree/main/ui/examples/schema-catalog)
+is the canonical catalog — the JSON schemas the docs render, a smoke test mounts, and AI agents
+use as a few-shot corpus.
+
 ## Next Steps
 
 ### Add Actions

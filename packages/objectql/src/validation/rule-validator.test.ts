@@ -71,20 +71,36 @@ describe('field requiredWhen enforcement (B2)', () => {
     expect(() => evaluateValidationRules(invoiceFields, { amount: 25 }, 'update', { previous: { status: 'sent' } })).not.toThrow();
   });
   // #3903 — the `conditionalRequired` alias read is RETIRED. Stored pre-17
-  // rows are lowered to `requiredWhen` by the ADR-0087 chain at rehydration
-  // (`applyConversionsToStoredItem`), so this validator only ever sees the
+  // rows were lowered to `requiredWhen` by the ADR-0087 chain at rehydration
+  // (`applyConversionsToStoredItem`), so this validator only ever saw the
   // canonical key; raw legacy input no longer gets a consumer-side fallback.
+  // [#25767] That kit was a ≤16.x retirement, and a retirement kit lives one
+  // protocol major past the major it retired in: at 18 the chain lowers
+  // nothing here any more. A row still carrying the alias is refused at the
+  // strict parse door (naming the protocol upgrade guide) and is for
+  // `os migrate meta --stored` on a release that still carried the step; this
+  // validator keeps ignoring the alias either way.
   it('does NOT read the retired conditionalRequired alias (PD #12 — no dialect fallback)', () => {
     const f = { fields: { amount: { type: 'currency', conditionalRequired: "record.status == 'sent'" } } } as any;
     expect(() => evaluateValidationRules(f, { status: 'sent' }, 'insert')).not.toThrow();
   });
-  it('enforces the rule once the stored-conversion chain has lowered the alias', async () => {
+  it('[#25767] the stored-conversion chain no longer lowers the aged-out alias — the rule is enforced on the canonical key only', async () => {
     const { applyConversionsToStoredItem } = await import('@objectstack/spec');
-    const storedRow = {
+    const legacyRow = {
       name: 'invoice',
       fields: { amount: { type: 'currency', conditionalRequired: "record.status == 'sent'" } },
     };
-    const converted = applyConversionsToStoredItem('object', storedRow) as any;
+    const untouched = applyConversionsToStoredItem('object', legacyRow) as any;
+    // No step of the chain replays the ≤16.x kit: the alias is neither lowered
+    // nor read, so the rule it once spelled is not enforced from this row.
+    expect(untouched.fields.amount).toEqual({ type: 'currency', conditionalRequired: "record.status == 'sent'" });
+    expect(() => evaluateValidationRules(untouched, { status: 'sent' }, 'insert')).not.toThrow();
+    // The canonical spelling is what the chain hands this validator, and it is enforced.
+    const canonicalRow = {
+      name: 'invoice',
+      fields: { amount: { type: 'currency', requiredWhen: "record.status == 'sent'" } },
+    };
+    const converted = applyConversionsToStoredItem('object', canonicalRow) as any;
     expect(converted.fields.amount.requiredWhen).toBe("record.status == 'sent'");
     expect(() => evaluateValidationRules(converted, { status: 'sent' }, 'insert')).toThrow(ValidationError);
   });

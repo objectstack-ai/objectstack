@@ -15,7 +15,7 @@ import {
 } from '../../ui';
 
 ComponentRegistry.register('avatar', 
-  ({ schema, className, ...props }: { schema: AvatarSchema; className?: string; [key: string]: any }) => (
+  ({ schema, className, ...props }: { schema: AvatarSchema; className?: string; [key: string]: unknown }) => (
     <Avatar className={className} {...props}>
       <AvatarImage src={schema.src} alt={schema.alt} />
       <AvatarFallback>{schema.fallback}</AvatarFallback>

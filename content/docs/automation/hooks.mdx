@@ -154,7 +154,7 @@ A hook's `ctx.api` runs with the context of the write that **fired** it. That is
 | `runAs` | The hook's `ctx.api` runs as |
 |:---|:---|
 | `'inherit'` *(default)* | the context of the triggering write — the behaviour every hook had before this key existed. |
-| `'system'` | elevated: a full-access, RLS-bypassing system principal. Row and field permissions do not apply, and the static `readonly` strip is skipped. |
+| `'system'` | elevated: an RLS-bypassing system principal. Row and field permissions do not apply, and the static `readonly` strip is skipped. Elevation stops at identity assignment: an insert, update, delete, transfer, restore or purge of `sys_user_position`, `sys_user_permission_set`, `sys_invitation` or `sys_member` from an app-authored hook's system context (`runAs: 'system'`, a system context it inherits, or `ctx.api.sudo()`) is refused with `PERMISSION_DENIED`, and a `runAs: 'system'` hook whose `language: 'js'` body writes one of them by name through `ctx.api.object('…')` is refused when it is saved — grant positions and permission sets from a hook with `runAs: 'user'`, so the delegated-administration gate judges the user it acts for, and change invitations and memberships through the organization endpoints the refusal names ([row 1b](/docs/permissions/system-context#1-authorization-and-scoping)). |
 | `'user'` | the triggering **user**, so the hook can never exceed that user's grants. A hook fired by a write that carried no user has no identity to scope to, so its `ctx.api` data operations are **refused** (`HOOK_UNSCOPED_DATA_ACCESS`) rather than run unscoped. |
 
 ```ts

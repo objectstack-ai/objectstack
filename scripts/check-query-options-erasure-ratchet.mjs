@@ -16,7 +16,7 @@
 //   • TEST residual. The 08-03 triage scoped the blocking rule to non-test code:
 //     an unknown share of the test sites are LEGITIMATE, because a test whose
 //     subject is off-contract engine input has to erase the type to construct
-//     input `tsc` would refuse. Those are held by one aggregate decrease-only
+//     input `tsc` would refuse. Those are held by one aggregate grow-never
 //     number instead, so the surface is measured and cannot grow unnoticed
 //     without a per-file ratchet going red on a legitimate rejection test.
 //
@@ -62,14 +62,16 @@
 //     `pnpm lint` — reported here too so one command explains the picture), or
 //   • a baselined file's count INCREASES (new erasure hiding behind an old
 //     entry — the invisible move), or
-//   • a baselined file's count DECREASED, or the file is clean/gone (progress!)
-//     — run with --update to ratchet the baseline down and commit it, or
 //   • a file was ADDED to the baseline relative to the merge base with main
 //     (the grandfather list is not a mute button), or
-//   • the aggregate TEST count moved in either direction: up is a new erasure,
-//     down is un-ratcheted progress. A ceiling left above reality silently
-//     licenses that many new erasures, which is how a ratchet stops meaning
-//     anything.
+//   • the aggregate TEST count rose above its ceiling (a new erasure).
+//
+// It is ONE-SIDED (#26444): a baselined file whose count DECREASED or that is
+// clean/gone, and a TEST count below its ceiling, PASS and are reported —
+// deleting or sweeping a file must not red a PR that never touched this gate.
+// The cost is stated rather than hidden: a ceiling left above reality licenses
+// that many new erasures until `--update` writes the lower number down, so the
+// report names that headroom on every run, and `--update` is what closes it.
 //
 // And it REFUSES to report at all (exit 2) when a file in either population
 // does not PARSE. ESLint's Node API returns a parse failure as a message
@@ -86,7 +88,7 @@
 // id. The counter therefore cannot drift from the rule: change the rule and
 // this re-measures against it.
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -176,11 +178,61 @@ async function measure(drop, targets = [LINT_TARGET]) {
     repoRoot,
   });
   const counts = {};
+  const linted = new Set();
   for (const result of results) {
+    const rel = relative(repoRoot, result.filePath).replace(/\\/g, '/');
+    linted.add(rel);
     const hits = result.messages.filter((m) => m.ruleId === QUERY_OPTIONS_RULE_ID).length;
-    if (hits > 0) counts[relative(repoRoot, result.filePath).replace(/\\/g, '/')] = hits;
+    if (hits > 0) counts[rel] = hits;
   }
-  return counts;
+  // Which lifted FILES the rule really ran on (#26444): linted, and with the rule
+  // on in the config ESLint resolved for that file. The test globs in `drop` are
+  // never a linted path, so only baselined files are looked up.
+  const measured = new Set();
+  for (const file of drop) {
+    if (!linted.has(file)) continue;
+    if (ruleIsOn(await eslint.calculateConfigForFile(resolve(repoRoot, file)))) measured.add(file);
+  }
+  return { counts, measured };
+}
+
+/** The rule is configured, and not to `off`, in a resolved per-file config. */
+function ruleIsOn(resolved) {
+  const setting = resolved?.rules?.[QUERY_OPTIONS_RULE_ID];
+  const severity = Array.isArray(setting) ? setting[0] : setting;
+  return severity !== undefined && severity !== 0 && severity !== 'off';
+}
+
+/**
+ * DEAD-SCAN REFUSAL 1 (#26444): baselined files still ON DISK that the non-test
+ * run did not measure, sorted. While the ratchet was two-sided, a file the run
+ * lost — not linted, or linted with its ignore not really lifted — dropped out
+ * of `current` and the DOWN direction redded. Now that drop would be a passing
+ * report, so it is refused here. A deleted file is not on disk and a swept file
+ * was measured, so both still pass. `exists` is injected for the self-test.
+ */
+function unmeasuredBaselined(baseline, measured, exists = (f) => existsSync(resolve(repoRoot, f))) {
+  return Object.keys(baseline).filter((file) => exists(file) && !measured.has(file)).sort();
+}
+
+/**
+ * DEAD-SCAN REFUSAL 2 (#26444): the test surface has no file keys to check, so
+ * its dead scan is the aggregate falling to ZERO in one run while the ceiling
+ * still holds sites — the shape of the test globs no longer being lifted, or the
+ * rule going blind on test code. Two-sided, that fall redded; one-sided it would
+ * be a passing report licensing the whole ceiling. A real sweep of the last test
+ * site is still possible: `--update` records it, and the zero ceiling it writes
+ * disarms this refusal. Returns the refusal text, or null.
+ */
+function testSurfaceCollapse({ testCeiling, testSites }) {
+  if (!(testCeiling > 0) || testSites !== 0) return null;
+  return (
+    `check-query-options-erasure-ratchet: the test surface measured 0 site(s) against a ceiling of ` +
+    `${testCeiling}. Every test-code erasure vanishing in one run is the shape of the test globs ` +
+    'no longer being lifted or the rule no longer running on test code, and since the ratchet ' +
+    'went one-sided (#26444) it would otherwise pass as a decrease. If the test surface really is ' +
+    'swept, `pnpm check:query-options-erasure --update` records the zero.'
+  );
 }
 
 const sum = (counts) => Object.values(counts).reduce((a, b) => a + b, 0);
@@ -213,21 +265,6 @@ export function diffRatchet({ baseline, current, testCeiling, testSites, addedBa
     }
   }
 
-  for (const [file, allowed] of Object.entries(baseline)) {
-    const now = current[file];
-    if (now === undefined) {
-      errors.push(
-        `${file}: baselined file is clean/gone (was ${allowed}) — ratchet DOWN: run ` +
-        `\`pnpm check:query-options-erasure --update\` and commit the baseline.`,
-      );
-    } else if (now < allowed) {
-      errors.push(
-        `${file}: erasure count fell ${allowed} → ${now} — ratchet DOWN: run ` +
-        `\`pnpm check:query-options-erasure --update\` and commit the baseline.`,
-      );
-    }
-  }
-
   // The key set must only ever SHRINK. Counts alone cannot see the last move: a
   // genuinely-erasing NEW file added to the baseline matches its own count and
   // sails through, which would turn the grandfather list into a general-purpose
@@ -252,15 +289,41 @@ export function diffRatchet({ baseline, current, testCeiling, testSites, addedBa
       `catch a wrong key; it removes an \`any\` and is a precondition for the day that ` +
       `exclusion lifts, not a compiler guard today.`,
     );
-  } else if (testSites < testCeiling) {
-    errors.push(
-      `test surface fell ${testCeiling} → ${testSites} site(s) — ratchet DOWN: run ` +
-      `\`pnpm check:query-options-erasure --update\` and commit the baseline. A ceiling ` +
-      `left above reality silently licenses that many new erasures.`,
-    );
   }
 
   return errors;
+}
+
+/**
+ * The decrease direction, as a REPORT rather than an error (#26444): a fall, a
+ * clean/gone file and a test surface below its ceiling all PASS. Each line names
+ * the headroom it leaves — the old number stays the ceiling until `--update`
+ * writes the lower one down — which is the report `--update` exists for.
+ */
+export function ratchetDownReport({ baseline, current, testCeiling, testSites }) {
+  const lines = [];
+  for (const [file, allowed] of Object.entries(baseline)) {
+    const now = current[file];
+    if (now === undefined) {
+      lines.push(
+        `${file}: baselined file is clean/gone (was ${allowed}). Passing; ` +
+        `\`pnpm check:query-options-erasure --update\` drops the entry.`,
+      );
+    } else if (now < allowed) {
+      lines.push(
+        `${file}: erasure count fell ${allowed} → ${now}. Passing; until ` +
+        `\`pnpm check:query-options-erasure --update\` records it, ${allowed} stays this file's ceiling.`,
+      );
+    }
+  }
+  if (testSites < testCeiling) {
+    lines.push(
+      `test surface fell ${testCeiling} → ${testSites} site(s). Passing; until ` +
+      `\`pnpm check:query-options-erasure --update\` records it, ${testCeiling} stays the ceiling ` +
+      `and licenses ${testCeiling - testSites} new test-code erasure(s).`,
+    );
+  }
+  return lines;
 }
 
 /** Baseline keys that are not present at the merge base with `main`. */
@@ -518,14 +581,15 @@ const SELF_TEST_VERDICT = 'check-query-options-erasure-ratchet self-test reached
 // remedy is to find what stopped registering.
 const SELF_TEST_BATTERIES = Object.freeze({
   '1. The rule, in both directions, over synthetic sources': 48,
-  '2. The ratchet comparison, in both directions.': 8,
+  '2. The ratchet comparison, in both directions.': 15,
   '3. The fatal-parse guard, in both directions (#10123).': 38,
   '5. Parser headroom: the population\'s deepest file must actually PARSE.': 8,
+  '6. A dead scan is refused, not reported as a decrease (#26444).': 8,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 4;
+const SELF_TEST_BATTERY_FLOOR = 5;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -679,15 +743,55 @@ async function selfTest() {
     ['identical + ceiling met is clean', { baseline: base, current: { ...base }, testCeiling: 10, testSites: 10, addedBaselineKeys: [] }, 0],
     ['a new file fails', { baseline: base, current: { ...base, 'c.ts': 1 }, testCeiling: 10, testSites: 10, addedBaselineKeys: [] }, 1],
     ['growth in a baselined file fails', { baseline: base, current: { 'a.ts': 3, 'b.ts': 1 }, testCeiling: 10, testSites: 10, addedBaselineKeys: [] }, 1],
-    ['a fall must be ratcheted down', { baseline: base, current: { 'a.ts': 1, 'b.ts': 1 }, testCeiling: 10, testSites: 10, addedBaselineKeys: [] }, 1],
-    ['a cleaned file must be dropped', { baseline: base, current: { 'a.ts': 2 }, testCeiling: 10, testSites: 10, addedBaselineKeys: [] }, 1],
+    ['a fall passes (one-sided)', { baseline: base, current: { 'a.ts': 1, 'b.ts': 1 }, testCeiling: 10, testSites: 10, addedBaselineKeys: [] }, 0],
+    ['a cleaned/gone file passes (one-sided)', { baseline: base, current: { 'a.ts': 2 }, testCeiling: 10, testSites: 10, addedBaselineKeys: [] }, 0],
+    ['growth still fails beside a fall elsewhere', { baseline: base, current: { 'a.ts': 1, 'b.ts': 2 }, testCeiling: 10, testSites: 10, addedBaselineKeys: [] }, 1],
     ['a key added to the baseline fails', { baseline: base, current: { ...base }, testCeiling: 10, testSites: 10, addedBaselineKeys: ['b.ts'] }, 1],
     ['test-surface growth fails', { baseline: base, current: { ...base }, testCeiling: 10, testSites: 11, addedBaselineKeys: [] }, 1],
-    ['test-surface shrink must be ratcheted down', { baseline: base, current: { ...base }, testCeiling: 10, testSites: 9, addedBaselineKeys: [] }, 1],
+    ['test-surface shrink passes (one-sided)', { baseline: base, current: { ...base }, testCeiling: 10, testSites: 9, addedBaselineKeys: [] }, 0],
   ];
   for (const [name, input, expected] of cases) {
     const got = diffRatchet(input).length;
     assert(got === expected, `diffRatchet: ${name} — expected ${expected} error(s), got ${got}`);
+  }
+  // The decrease direction's REPORT: every passing decrease prints one line.
+  const downCases = [
+    ['identical reports nothing', { baseline: base, current: { ...base }, testCeiling: 10, testSites: 10 }, 0],
+    ['a fall is reported', { baseline: base, current: { 'a.ts': 1, 'b.ts': 1 }, testCeiling: 10, testSites: 10 }, 1],
+    ['a cleaned/gone file is reported', { baseline: base, current: { 'a.ts': 2 }, testCeiling: 10, testSites: 10 }, 1],
+    ['a test-surface shrink is reported', { baseline: base, current: { ...base }, testCeiling: 10, testSites: 9 }, 1],
+    ['growth is not a decrease', { baseline: base, current: { 'a.ts': 3, 'b.ts': 1 }, testCeiling: 10, testSites: 11 }, 0],
+  ];
+  for (const [name, input, expected] of downCases) {
+    const got = ratchetDownReport(input).length;
+    assert(got === expected, `ratchetDownReport: ${name} — expected ${expected} line(s), got ${got}`);
+  }
+  assert(
+    ratchetDownReport({ baseline: {}, current: {}, testCeiling: 10, testSites: 7 })[0]?.includes('licenses 3 new'),
+    'ratchetDownReport: a test-surface shrink must name the headroom the stale ceiling licenses',
+  );
+
+  // ── 6. A dead scan is refused, not reported as a decrease (#26444). ──────
+  battery('6. A dead scan is refused, not reported as a decrease (#26444).');
+  {
+    const onDisk = () => true;
+    assert(unmeasuredBaselined(base, new Set(), onDisk).length === 2,
+      'an EMPTY measurement with every baselined file still on disk must refuse every one');
+    assert(unmeasuredBaselined(base, new Set(['a.ts']), onDisk).join(',') === 'b.ts',
+      'a partial measurement must refuse only the file it lost');
+    assert(unmeasuredBaselined(base, new Set(['a.ts']), (f) => f !== 'b.ts').length === 0,
+      'a DELETED baselined file must not be refused — it is a decrease, and decreases pass');
+    assert(unmeasuredBaselined(base, new Set(['a.ts', 'b.ts']), onDisk).length === 0,
+      'a measured file must not be refused, whatever its count now');
+    assert(testSurfaceCollapse({ testCeiling: 10, testSites: 0 }) !== null,
+      'an EMPTY test surface under a non-zero ceiling must refuse');
+    assert(testSurfaceCollapse({ testCeiling: 10, testSites: 1 }) === null,
+      'a test surface that fell but still reads sites is a decrease, not a dead scan');
+    assert(testSurfaceCollapse({ testCeiling: 0, testSites: 0 }) === null,
+      'a ceiling --update already wrote down to zero must not refuse');
+    assert(ruleIsOn({ rules: { [QUERY_OPTIONS_RULE_ID]: [2] } }) && !ruleIsOn({ rules: { [QUERY_OPTIONS_RULE_ID]: [0] } })
+      && !ruleIsOn({ rules: {} }),
+      'ruleIsOn must read a resolved severity: on for 2, off for 0 and for an absent rule');
   }
 
   // ── 3. The fatal-parse guard, in both directions (#10123). ───────────────
@@ -1038,8 +1142,11 @@ async function main() {
   // Two runs, one per population. The split is done by ESLint against the very
   // globs the rule uses, so there is no second definition of "is this a test
   // file" for the two halves to drift apart on.
-  const nonTest = sortKeys(await measure(new Set(Object.keys(baseline))));
-  const everything = sortKeys(await measure(new Set([...Object.keys(baseline), ...QUERY_OPTIONS_TEST_GLOBS])));
+  const nonTestRun = await measure(new Set(Object.keys(baseline)));
+  const nonTest = sortKeys(nonTestRun.counts);
+  const everything = sortKeys(
+    (await measure(new Set([...Object.keys(baseline), ...QUERY_OPTIONS_TEST_GLOBS]))).counts,
+  );
   const testOnly = sortKeys(
     Object.fromEntries(Object.entries(everything).filter(([file]) => !(file in nonTest))),
   );
@@ -1060,6 +1167,23 @@ async function main() {
     process.exit(0);
   }
 
+  const unmeasured = unmeasuredBaselined(baseline, nonTestRun.measured);
+  if (unmeasured.length > 0) {
+    console.error(
+      `check-query-options-erasure-ratchet: ${unmeasured.length} baselined file(s) are still on disk ` +
+      `but the rule did not run on them this time:\n${unmeasured.map((f) => `  ${f}`).join('\n')}\n` +
+      'Either ESLint did not lint them or their `ignores` entry was not lifted. Since the ratchet\n' +
+      'went one-sided (#26444) a file that drops out of the measurement would otherwise pass as a\n' +
+      'decrease — refusing rather than reporting a sweep that never happened.',
+    );
+    process.exit(2);
+  }
+  const collapse = testSurfaceCollapse({ testCeiling, testSites });
+  if (collapse !== null) {
+    console.error(collapse);
+    process.exit(2);
+  }
+
   const monotonicity = baselineKeysAddedSinceMergeBase(Object.keys(baseline));
   const errors = diffRatchet({
     baseline,
@@ -1068,6 +1192,11 @@ async function main() {
     testSites,
     addedBaselineKeys: monotonicity?.added ?? [],
   });
+  const down = ratchetDownReport({ baseline, current: nonTest, testCeiling, testSites });
+  if (down.length > 0) {
+    console.log(`↓ query-options-erasure ratchet: ${down.length} decrease(s) (passing, reported):`);
+    for (const line of down) console.log(`  • ${line}`);
+  }
 
   if (errors.length > 0) {
     console.error(`✗ query-options-erasure ratchet (${errors.length} problem(s)):\n`);
@@ -1087,8 +1216,8 @@ async function main() {
     `Every other non-test file under packages/ is covered by \`pnpm lint\`.`,
   );
   console.log(
-    `  test surface: ${testSites} site(s) in ${Object.keys(testOnly).length} file(s) — at the ` +
-    `ceiling, outside the blocking rule by the #4918 triage (a rejection test must be able ` +
+    `  test surface: ${testSites} site(s) in ${Object.keys(testOnly).length} file(s) — ` +
+    `${testSites === testCeiling ? 'at the ceiling' : `under the ceiling of ${testCeiling}`}, outside the blocking rule by the #4918 triage (a rejection test must be able ` +
     `to build off-contract input).`,
   );
   console.log(
@@ -1099,7 +1228,7 @@ async function main() {
   );
 }
 
-// The dispatch, behind the same predicate. This module exports `diffRatchet`,
+// The dispatch, behind the same predicate. This module exports `diffRatchet`, `ratchetDownReport`,
 // `measure` and the baseline helpers; unguarded, importing one of them ran two
 // full ESLint passes over packages/** inside the importer.
 if (isEntrypoint(import.meta.url)) {

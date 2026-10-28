@@ -124,6 +124,7 @@ import '@object-ui/components';
 import { SchemaRenderer, toRenderableSchema } from '@object-ui/react';
 import { CardSchema } from '@object-ui/types/zod';
 import { allExamples } from '../src/index.js';
+import { CATALOG_ENTRY_FLOOR } from './catalog-entry-floor.js';
 
 type Json = Record<string, unknown>;
 
@@ -213,11 +214,13 @@ function unreadKeys(node: Json, allowed: readonly string[]): string[] {
 
 describe('catalog corpus: every `card` node authors keys `ui:card` reads (objectui#6788)', () => {
   it('the walk is not vacuous — a broken collector would pass every case below', () => {
-    // Measured on d06059f24; these are floors, not equalities, so growth of
-    // the catalog does not fail the file — only a walk that stopped working.
-    expect(entries.length).toBeGreaterThanOrEqual(431);
-    expect(cards.length).toBeGreaterThanOrEqual(93);
-    expect(new Set(cards.map((c) => c.where.split('/')[0])).size).toBeGreaterThanOrEqual(19);
+    // Floors, not equalities, so growth of the catalog does not fail the file —
+    // only a walk that stopped working. About two thirds of the counts measured
+    // on objectstack 6a7c0fe3 (93 cards in 19 categories), so deleting an entry
+    // does not fail it either.
+    expect(entries.length).toBeGreaterThanOrEqual(CATALOG_ENTRY_FLOOR);
+    expect(cards.length).toBeGreaterThanOrEqual(62);
+    expect(new Set(cards.map((c) => c.where.split('/')[0])).size).toBeGreaterThanOrEqual(13);
   });
 
   it('every authored key is DECLARED by the shipped CardSchema', () => {

@@ -46,6 +46,8 @@
  * | `objects[].fields[].expression`        | `FieldSchema`                     |
  * | `objects[].fields[].options`           | `FieldSchema`                     |
  * | `options[].value` / `.visibleWhen`     | `SelectOptionSchema`              |
+ * | `objects[].fieldGroups`               | `ObjectSchema`                    |
+ * | `fieldGroups[].key` / `.visibleWhen`   | `ObjectFieldGroupSchema`          |
  * | `actions[].objectName`                 | the action schema                 |
  * | `sharingRules[].condition` / `.object` | `SharingRuleSchema`               |
  *
@@ -805,10 +807,10 @@ function rulePredicates(rule: AnyRec, path: string, depth = 0): RulePredicate[] 
  *    VISIBLE" was not merely imprecise here, it named the wrong property of
  *    the field.
  *
- * `conditionalRequired` also reaches this helper (the field walk still passes
- * it). It is a `retiredKey` in `FieldSchema` — the strict schema rejects it by
- * name — so the branch is inert on the parsed compile path, and it gets a
- * slot-agnostic clause rather than a fabricated fourth measurement.
+ * `conditionalRequired` reached this helper until #25767: its `FieldSchema`
+ * tombstone was a ≤16.x retirement kit and aged out, so the schema no longer
+ * declares the key and the field walk no longer passes it (the strict parse
+ * refuses it as an unknown key, naming the upgrade guide).
  *
  * ### Axis 2 — the prescription, by ROOT (#6713)
  *
@@ -934,6 +936,12 @@ export const FIELD_RULE_JUDGED_ROOTS: readonly string[] = [
  */
 const FIELD_RULE_USER_ROOTS = ['current_user', 'user', 'ctx', 'os'] as const;
 /**
+ * [#26646] The slot name an object's `fieldGroups[].visibleWhen` is judged
+ * under: the field `visibleWhen` slot's root verdict, located on the group
+ * and worded for it ({@link FIELD_RULE_SLOT_CONSEQUENCE}, {@link fieldRuleRootIssue}).
+ */
+const FIELD_GROUP_VISIBLE_WHEN_SLOT = 'field group visibleWhen';
+/**
  * The slot-agnostic clause — provably true for any slot, specific to none.
  * Used where the honest answer is "not measured for this slot", never as a
  * softening of a cell that WAS measured.
@@ -973,12 +981,6 @@ const FIELD_RULE_SLOT_CONSEQUENCE: Record<string, string> = {
     'whose requirement it cannot evaluate (ADR-0137 D2: the refusal names the field and the ' +
     'rule) — while the form does not mark the field required, so nothing on screen says why the ' +
     'save failed',
-  // Listed rather than left to the `??` below, so the map covers every slot
-  // the field walk passes and the default stays unreachable. `FieldSchema`
-  // declares this key only as a `retiredKey`, which rejects it by name, so
-  // there is no fourth runtime to measure — the honest clause is the generic
-  // one, not a fabricated fourth cell (#6716).
-  conditionalRequired: FIELD_RULE_SLOT_CONSEQUENCE_GENERIC,
   // [#22227] The deadline's settle predicate (objectui#11815 ruling D) joins
   // the family on the `visibleWhen` side: display only, nothing on the write
   // path reads it. Its one consumer — objectui's date cells, the host
@@ -987,6 +989,16 @@ const FIELD_RULE_SLOT_CONSEQUENCE: Record<string, string> = {
   // the honest cell until it does; re-measure and write the slot's own cell
   // then, as #6716 did for the other three.
   settledWhen: FIELD_RULE_SLOT_CONSEQUENCE_GENERIC,
+  // [#26646] A field group's section predicate takes the field `visibleWhen`
+  // slot's verdict, with its own fault direction: the form renderer's
+  // section gate (`sectionGateVisible`) evaluates it with the same engine,
+  // record assembly and host scope as a field's own `visibleWhen`, and
+  // resolves a fault to HIDDEN, not visible.
+  [FIELD_GROUP_VISIBLE_WHEN_SLOT]:
+    'the predicate faults wherever no host publishes that root, and a field group\'s gate fails ' +
+    'CLOSED: the whole group, header included, is hidden for everyone on that form or record page. ' +
+    'Where a host does publish it, the renderer resolves it and the group hides in that one form ' +
+    'only, while every other reader still returns the fields in it: a SILENT enforcement gap',
 };
 
 /**
@@ -1023,7 +1035,15 @@ export function fieldRuleRootIssue(
   // message stays stable; anything else falls back to SCOPE_ROOTS order,
   // which is stable too — never AST walk order.
   const root = FIELD_RULE_USER_ROOTS.find((r) => kept.includes(r)) ?? kept[0]!;
-  const prescription = (FIELD_RULE_USER_ROOTS as readonly string[]).includes(root)
+  // [#26646] A field group has no options and is not a field: its user-root
+  // prescription keeps only the two answers that apply to it.
+  const userRoot = (FIELD_RULE_USER_ROOTS as readonly string[]).includes(root);
+  const prescription = userRoot && slot === FIELD_GROUP_VISIBLE_WHEN_SLOT
+    ? `To hide the group's fields by role, declare field-level security on a permission set ` +
+      `for each field in the group (\`fields: { 'OBJECT.FIELD': { readable: false } }\`), which ` +
+      `the server enforces. To gate the group on record state, rewrite the predicate against ` +
+      `\`record\`.`
+    : userRoot
     ? `To gate the CHOICES of a select by user, move the predicate to the option's own ` +
       `\`visibleWhen\` (\`options: [{ …, visibleWhen: … }]\`) — the rule validator evaluates ` +
       `that one against \`current_user\` and its ADR-0068 aliases on every write, so the gate ` +
@@ -1090,7 +1110,9 @@ export function fieldRuleRootIssue(
   return {
     root,
     message:
-      `\`${slot}\` reads \`${root}\`, but a field-level conditional rule binds only ` +
+      (slot === FIELD_GROUP_VISIBLE_WHEN_SLOT
+        ? `\`visibleWhen\` reads \`${root}\`, but a field group's section predicate binds only `
+        : `\`${slot}\` reads \`${root}\`, but a field-level conditional rule binds only `) +
       `\`record\` (plus \`previous\`, and \`parent\` on a master-detail line item) — ` +
       `\`${root}\` is unbound here, so ` +
       `${FIELD_RULE_SLOT_CONSEQUENCE[slot] ?? FIELD_RULE_SLOT_CONSEQUENCE_GENERIC}. ` +
@@ -1965,8 +1987,8 @@ export interface StackExpressionOptions {
    *    `condition` called `sqrt` or read a bare `amount` saved with a 200 and
    *    then faulted on every write the rule judged;
    *  - [#22032, pass 2] the field-rule-slot pass over `fields[]` — each of
-   *    `requiredWhen` / `readonlyWhen` / `conditionalRequired` / `visibleWhen`
-   *    (and, since #22227, a deadline's `settledWhen`)
+   *    `requiredWhen` / `readonlyWhen` / `visibleWhen` (and, since #22227, a
+   *    deadline's `settledWhen`; `conditionalRequired` left with its tombstone, #25767)
    *    as a `record`-scoped predicate with its root verdict, plus the `parent`
    *    gate (a `readonlyWhen` / `requiredWhen` reading `parent` on an object
    *    without exactly one `master_detail`), the #4811 null-guard gate over
@@ -2852,8 +2874,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
                 // so this site is a member of `retired-key-migrate-sentence.test.ts`'s
                 // widened scan (#7030) on the same textual shape as the spec corpus — no
                 // interpolation lives in this clause, so nothing is lost switching quote style.
-                'Run `os migrate meta --from 16` to list the mechanical edits for existing '
-                  + 'sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
+                'This edit left `os migrate meta` with the protocol-16.x conversions: apply it by hand, or run the tool on a release that still carries the conversion — https://objectstack.ai/docs/protocol-upgrade.',
               source: JSON.stringify({ id: node.id, type: node.type, config: cfg }),
             });
           } else if (!fn) {
@@ -3133,7 +3154,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       // root verdict over FIELD_RULE_BOUND_ROOTS. Like `visibleWhen` it is
       // display only, so the server-side gates further down (the `parent`
       // gate, the null guard, the traversal refusal) do not apply to it.
-      for (const key of ['requiredWhen', 'readonlyWhen', 'conditionalRequired', 'visibleWhen', 'settledWhen'] as const) {
+      for (const key of ['requiredWhen', 'readonlyWhen', 'visibleWhen', 'settledWhen'] as const) {
         const where = `object '${objectName}' · field '${fname}' ${key}`;
         const raw = (f as AnyRec)[key];
         // [#13935] Verdict FIRST, emitted second. `check` needs to know which
@@ -3258,9 +3279,8 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       // unusable, and this gate is where the author meets it instead of the
       // first write in production.
       //
-      // `conditionalRequired` (retired alias) and `visibleWhen` (no
-      // server-enforced `parent` binding of its own) keep their verdicts
-      // untouched.
+      // `visibleWhen` (no server-enforced `parent` binding of its own) keeps
+      // its verdict untouched.
       // Destructured in the loop head on purpose: both predicate slots stay
       // LITERAL member reads (`f.readonlyWhen` / `f.requiredWhen`) rather than a
       // computed `f[key]`, so the #5017 meta-test's source scan still sees every
@@ -3304,8 +3324,8 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       // (both server-side seams first — the flow trigger-record half is
       // outstanding). When it is wired it needs `'fail-closed'`, like
       // `requiredWhen` above: a faulting `readonlyWhen` refuses the write since
-      // ADR-0137 D2 too. `conditionalRequired` / `visibleWhen` have no record-scoped
-      // total binding of their own. See the surface ledger in
+      // ADR-0137 D2 too. `visibleWhen` has no record-scoped total binding of
+      // its own. See the surface ledger in
       // `validate-null-guards.ts`.
       checkNullGuards(
         `object '${objectName}' · field '${fname}' requiredWhen`,
@@ -3326,6 +3346,32 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         refuseFieldTraversal(`object '${objectName}' · field '${fname}' ${slot}`, slot, raw, fieldRuleHolders);
       }
       judgeFieldFormula(fname, f);
+    }
+
+    // [#26646] A field group's section predicate — `fieldGroups[].visibleWhen`
+    // (ADR-0085 §5). The form renderer evaluates it with the same engine,
+    // record assembly and scope as a field's own `visibleWhen` and gates the
+    // WHOLE group fail-closed, so a predicate that faults (a bare reference,
+    // an unknown field) hides the group, header included, on every form and
+    // record page. It takes the field `visibleWhen` slot's verdict exactly:
+    // the `record`-scoped `check` and the root verdict over
+    // FIELD_RULE_BOUND_ROOTS, worded for the group. Display only, like
+    // `visibleWhen`, so none of the write-path gates above (the `parent` gate,
+    // the null guard, the traversal refusal) applies. Not fenced on an object
+    // write: the object save door runs this pass too, at this position.
+    // Located at the group's `key`, the name a field's `group` points back to.
+    //
+    // `fieldGroup.visibleWhen` is read LITERALLY so #5017's source scan checks
+    // it against `ObjectFieldGroupSchema`.
+    for (const fieldGroup of recordsOf(obj.fieldGroups)) {
+      const groupKey = typeof fieldGroup.key === 'string' ? fieldGroup.key : '?';
+      const where = `object '${objectName}' · field group '${groupKey}' visibleWhen`;
+      const raw: unknown = fieldGroup.visibleWhen;
+      const verdict = fieldRuleRootVerdict(FIELD_GROUP_VISIBLE_WHEN_SLOT, raw);
+      check(where, raw, objectName, 'record', verdict !== null);
+      if (verdict) {
+        issues.push({ where, message: verdict.message, source: verdict.source, severity: 'error' });
+      }
     }
   }
 

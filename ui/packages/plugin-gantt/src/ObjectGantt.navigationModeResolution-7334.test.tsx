@@ -24,10 +24,11 @@
  * defect's whole shape is "a drawer opens anyway": `navConfig` fell back to
  * `{ mode: 'drawer' }` for every gantt in the product, so a test asserting only
  * that something opened on click was green before the repair and green after
- * it, by construction. Worse, the four overlay modes are NOT separable from the
- * DOM here — `drawer`, `modal`, `split` and `popover` all render the one
+ * it, by construction. Worse, the overlay modes were NOT separable from the
+ * DOM here — `drawer`, `modal`, `split` and `popover` all rendered the one
  * `RecordDetailDrawer` at the tail of `ObjectGantt`, so no rendered assertion
- * can tell `modal` from `drawer` at all. The mode value is the only instrument
+ * could tell `modal` from `drawer` at all (`modal`, `split` and `popover` were
+ * retired by objectstack#26677; `drawer` is the one overlay mode left). The mode value is the only instrument
  * with the resolution this card needs.
  *
  * The instrument is a pass-through spy on `useNavigationOverlay`: it records
@@ -164,34 +165,36 @@ describe('ObjectGantt resolves the AUTHORED navigation mode (objectui#7334)', ()
     const nav = await resolveNav({ ...BASE, navigation: { mode: 'page' } });
     expect(nav.navigation?.mode).toBe('page');
     expect(nav.navigation?.mode).not.toBe('drawer');
-    // And the classification that follows from it: `page` is not one of the
-    // four overlay modes, so the component stops owning the click.
+    // And the classification that follows from it: `page` is not the overlay
+    // mode, so the component stops owning the click.
     expect(nav.mode).toBe('page');
     expect(nav.isOverlay).toBe(false);
   });
 
-  it('authored `modal` resolves to `modal` — the repair is not special-cased to one value', async () => {
-    // A SECOND non-default value, and deliberately a non-`drawer` OVERLAY one:
-    // it lands on the same `isOverlay` side as the fallback, so a repair that
-    // merely learned to recognise "page" would pass the case above and fail
-    // this one. ⛔ Not assertable from the DOM — `modal` and `drawer` render
-    // the identical `RecordDetailDrawer` in this component.
-    const nav = await resolveNav({ ...BASE, navigation: { mode: 'modal' } });
-    expect(nav.navigation?.mode).toBe('modal');
-    expect(nav.mode).toBe('modal');
-    expect(nav.isOverlay).toBe(true);
+  it('authored `new_window` resolves to `new_window` — the repair is not special-cased to one value', async () => {
+    // A SECOND non-default value. This row spelled `modal` until
+    // objectstack#26677 retired `modal`, `split` and `popover` from the spec's
+    // `NavigationMode`; `new_window` is the live non-default left beside
+    // `page`, so a repair that merely learned to recognise "page" still fails
+    // here.
+    const nav = await resolveNav({ ...BASE, navigation: { mode: 'new_window' } });
+    expect(nav.navigation?.mode).toBe('new_window');
+    expect(nav.mode).toBe('new_window');
+    expect(nav.isOverlay).toBe(false);
   });
 
-  it('authored `split` resolves to `split` too', async () => {
-    const nav = await resolveNav({ ...BASE, navigation: { mode: 'split' } });
-    expect(nav.navigation?.mode).toBe('split');
-    expect(nav.mode).toBe('split');
+  it('a block written without `mode` resolves to the spec\'s `drawer` default (objectstack#26677)', async () => {
+    // It resolved to the hook's `page` default before: the spec's default is
+    // `drawer` now, the same answer as this renderer's own fallback below.
+    const nav = await resolveNav({ ...BASE, navigation: { size: 'lg' } });
+    expect(nav.navigation?.mode).toBeUndefined();
+    expect(nav.mode).toBe('drawer');
     expect(nav.isOverlay).toBe(true);
   });
 
   it('REGRESSION GUARD: no authored navigation still resolves to `drawer`', async () => {
     // The fallback has to SURVIVE the repair. `ObjectGantt`'s own default is
-    // `drawer` and not the hook's `page` — every gantt in the product that
+    // `drawer` (the hook's own default too since objectstack#26677) — every gantt in the product that
     // authored nothing keeps opening its record drawer.
     const nav = await resolveNav({ ...BASE });
     expect(nav.navigation?.mode).toBe('drawer');
@@ -199,12 +202,14 @@ describe('ObjectGantt resolves the AUTHORED navigation mode (objectui#7334)', ()
     expect(nav.isOverlay).toBe(true);
   });
 
-  it('the four overlay modes classified at the read site are exactly the overlay half of the spec enum', async () => {
+  it('the overlay mode classified at the read site is exactly the overlay half of the spec enum', async () => {
     // ZONE 3 of the dispatch asked for this to be REPORTED rather than assumed:
-    // is the component's mode handling wider or narrower than the four it
-    // classifies? Measured — the spec publishes SEVEN modes; the component
-    // classifies the four overlay ones and leaves the other three to the hook.
-    const overlay = ['drawer', 'modal', 'split', 'popover'];
+    // is the component's mode handling wider or narrower than what it
+    // classifies? Measured — the spec publishes FOUR modes since
+    // objectstack#26677 (seven before: `modal`, `split` and `popover` were
+    // retired); the component classifies the one overlay mode, `drawer`, and
+    // leaves the other three to the hook.
+    const overlay = ['drawer'];
     const nonOverlay = ['page', 'new_window', 'none'];
     for (const mode of overlay) {
       const nav = await resolveNav({ ...BASE, navigation: { mode } });

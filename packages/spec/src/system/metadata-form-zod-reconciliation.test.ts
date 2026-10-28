@@ -1106,7 +1106,7 @@ describe('metadata form ↔ Zod reconciliation — a hand-written form held to i
 //
 // Pinned against a SYNTHETIC schema rather than against whichever live schema
 // happens to carry a tombstone today: tombstones age out (`retired-key.ts` says
-// ~two majors), and a self-test anchored to one would either rot or, worse, go
+// one major, #25767), and a self-test anchored to one would either rot or, worse, go
 // quietly vacuous the release its anchor is deleted — leaving a gate that
 // filters nothing and still reports green.
 // ────────────────────────────────────────────────────────────────────────────

@@ -23,7 +23,8 @@ import { BulkActionExecutionSchema } from './bulk-action.zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { EvaluatedExpressionInputSchema, ExpressionSchema } from '../shared/expression.zod';
 import { evaluatedExpressionUnionRefusal } from '../shared/evaluated-slot-union';
-import { I18nLabelSchema } from './i18n.zod';
+import { I18nLabelSchema, InlineLocaleMapSchema } from './i18n.zod';
+import { NON_BLANK_STRING } from '../shared/refinement-projection';
 import {
   ACTION_CONFIRM_TEXT_TEMPLATE_DESCRIBE,
   ACTION_SUCCESS_MESSAGE_TEMPLATE_DESCRIBE,
@@ -614,7 +615,8 @@ const TARGET_REQUIRED_TYPES: ReadonlySet<string> = new Set(
  * The `execute` alias was **removed in protocol 17** (#3855). `target` is the
  * only handler slot, so no consumer has a second slot to disagree about. An
  * authored `execute` is rejected with the rename prescription rather than
- * silently stripped; `os migrate meta --from 16` lists the edit for you to apply.
+ * silently stripped; `os migrate meta --from 16` listed the edit until the
+ * protocol-16.x conversion aged out with its kit (#25767).
  * 
  * @example Good action names
  * - 'on_close_deal'
@@ -648,7 +650,7 @@ const GLOBAL_NAV_RETIRED =
   + '`record_related`, `record_section`), or — for an action that deliberately has no UI home, '
   + 'such as an object-less one invoked over REST/MCP/AI — declare it headless with '
   + '`locations: []`, which keeps its capability gate, param contract and audit trail. '
-  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
+  + 'This edit left `os migrate meta` with the protocol-16.x conversions: apply it by hand, or run the tool on a release that still carries the conversion — https://objectstack.ai/docs/protocol-upgrade.';
 
 /**
  * Action Location — where an action is allowed to surface in the UI.
@@ -887,6 +889,37 @@ const ActionConditionInputSchema = z.union([z.boolean(), EvaluatedExpressionInpu
 const actionCopy = (key: 'confirmText' | 'successMessage') => actionCopyTemplateSlot(templateExpressionInput(ExpressionSchema, actionCopyRefusals(key, { localeMap: true })), key, { localeMap: true });
 
 /**
+ * [#26619] `disabledReason` — the sentence a greyed action shows to say WHY it
+ * is unavailable, beside the `disabled` predicate that greys it.
+ *
+ * An I18nLabel (a plain string translated at
+ * `objects.OBJECT._actions.ACTION.disabledReason`, or an inline locale map),
+ * so it takes the copy keys' translation route and not a predicate's. It is
+ * DISPLAY ONLY, and both halves of that are the contract:
+ *
+ * - it never enters the server's admission — a disabled action that is called
+ *   anyway is refused by its own rules (a hook, `requiredPermissions`), never
+ *   by this text, so a wrong reason misleads a reader and leaks nothing;
+ * - it is not an expression — no lint or evaluator reads it as a condition,
+ *   and a predicate-looking value is just a sentence.
+ *
+ * A blank string is refused: it would replace the console's default, "Not
+ * available for this record", with an empty tooltip. Omitting the key is how
+ * an author keeps that default. The rule is {@link NON_BLANK_STRING}, so the
+ * published JSON Schema carries it too (`minLength` + a `\S` pattern) rather
+ * than accepting a document the parse refuses. The locale-map arm is
+ * `InlineLocaleMapSchema` unchanged — the I18nLabel every other copy key takes.
+ */
+const DISABLED_REASON_BLANK =
+  'a blank `disabledReason` would replace the console\'s default reason, "Not available for this '
+  + 'record", with an empty tooltip. Write the sentence that says what is missing (e.g. "An '
+  + 'approved legal review is required first."), or omit the key to keep the default.';
+const actionDisabledReason = () => z.union([
+  z.string().refine(NON_BLANK_STRING, { message: DISABLED_REASON_BLANK }),
+  InlineLocaleMapSchema,
+]);
+
+/**
  * The object half of {@link ActionSchema}, before its refinements.
  *
  * A factory rather than a schema so `lazySchema`'s deferral still holds — the
@@ -915,6 +948,11 @@ const actionObject = () => strictObject({
     success: 'successMessage', successText: 'successMessage', toast: 'successMessage',
     visibleWhen: 'visible', showWhen: 'visible',
     disabledWhen: 'disabled',
+    // [#26619] The words an author reaches for when naming the greyed
+    // action's explanation by the surface it lands on (a tooltip, a hint) or
+    // by the copy keys' `*Message` family.
+    disabledMessage: 'disabledReason', disabledTooltip: 'disabledReason',
+    disabledHint: 'disabledReason', disabledText: 'disabledReason',
     style: 'variant', color: 'variant', appearance: 'variant',
     placement: 'locations', location: 'locations', position: 'locations',
     verb: 'method', httpMethod: 'method',
@@ -1267,21 +1305,6 @@ const actionObject = () => strictObject({
   execution: BulkActionExecutionSchema.optional().describe("The bulk dispatch contract this action's BODY is written for, in `bulkActionDefs`' own vocabulary: 'perRecord' = one dispatch per selected row carrying that row's `recordId` (the view's `bulkActions: ['<name>']` bare-string form); 'aggregate' = ONE dispatch for the whole selection carrying every id in `params._selectedIds` (a `bulkActionDefs` entry with `execution: 'aggregate'`). Optional with NO default — omit it only when the body genuinely serves both. A list view wiring a declared action under the other contract is refused by `@objectstack/lint` (`action-dispatch-contract-mismatch`)."),
 
   /**
-   * [REMOVED in protocol 17 — #3855] The deprecated alias of `target`.
-   * Tombstoned rather than deleted: `ActionSchema` is `strictObject`, so a
-   * plain deletion would reject the key — but with a generic unknown-key error
-   * that does not name `target`. The prescription is the payload: it carries
-   * the rename, so an author who wrote `execute` is told where the handler ref
-   * goes instead of only that the key is unknown. It also types the key
-   * `never`, so the mistake fails `tsc` before any parse runs.
-   */
-  execute: retiredKey(
-    '`execute` was removed in @objectstack/spec 17 — use `target`. ' +
-    'Rename the key; the value (a handler / flow / URL ref) is unchanged. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
-  
-  /**
    * User Input Requirements — the **parameter DEFINITION array** rendered as a
    * dialog before the action runs. `ActionParam[]`, never a values map.
    *
@@ -1556,6 +1579,11 @@ const actionObject = () => strictObject({
    * gone entirely.
    */
   disabled: ActionConditionInputSchema.optional().describe('Disabled predicate — `true`/`false` literal, CEL string, or `{dialect, source}` envelope. The action is shown but refused when it evaluates TRUE. Omit = never disabled.'),
+  /**
+   * Why the action is greyed — the reason `disabled` gives the user. Display
+   * only; the contract is on {@link actionDisabledReason}.
+   */
+  disabledReason: actionDisabledReason().optional().describe('Display-only reason a greyed action shows (its hover title and accessible description, or a menu item\'s second line) while `disabled` evaluates TRUE — the default-language string, or an inline locale map; translated at `objects.OBJECT._actions.ACTION.disabledReason` (`globalActions.ACTION.disabledReason` for an object-less action). Not a gate: the server refuses a call on its own rules (hooks, `requiredPermissions`), and nothing reads this as a condition. Omit = the default reason, "Not available for this record". A blank reason is refused.'),
 
   /**
    * [ADR-0066 D4] System capabilities required to INVOKE this action — a
@@ -1577,27 +1605,6 @@ const actionObject = () => strictObject({
   requiredPermissions: z.array(z.string()).optional().describe('[ADR-0066 D4] Capabilities required to invoke this action. Enforced with 403 on the platform action route (script/flow/modal + MCP) and mirrored as a UI hide; a `type: api` action pointed at a custom endpoint must re-check it there.'),
 
   /** Keyboard Shortcut */
-  // `shortcut` and `bulkEnabled` REMOVED by the 2026-07 #3896 audit close-out —
-  // both were authorable capability claims nothing enforced (ledger: dead,
-  // #3686 re-verification): ActionEngine registered them but no keydown path
-  // ever dispatched a shortcut, and the multi-select toolbar reads the LIST
-  // VIEW's bulkActions, never this flag. Tombstoned with the prescription;
-  // `action-inert-keys-removed` strips them from authored sources.
-  shortcut: retiredKey(
-    '`action.shortcut` was removed in @objectstack/spec 17.0.0 (audit close-out) — ' +
-    'it never triggered anything: no keydown listener feeds ActionEngine.getShortcuts(), and ' +
-    "objectui's keyboard stack (useKeyboardShortcuts) is hand-registered and never consults " +
-    'action metadata. Delete the key. For a real shortcut, register the key in the Console ' +
-    'keyboard stack and have its handler invoke the action by name. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
-  bulkEnabled: retiredKey(
-    '`action.bulkEnabled` was removed in @objectstack/spec 17.0.0 (audit close-out) — ' +
-    'the multi-select toolbar is driven by the LIST VIEW\'s `bulkActions` / `bulkActionDefs`, ' +
-    'never by this flag, so setting it changed nothing. Delete the key and declare the action ' +
-    "in the view's `bulkActions` instead. " +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
 
   /**
    * AI exposure block (ADR-0011). Opt-in, default off: an action is exposed

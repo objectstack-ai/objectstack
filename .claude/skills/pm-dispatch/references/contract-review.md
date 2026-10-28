@@ -18,21 +18,27 @@
 - 已发布面以包的 `exports` 映射为准:从入口类型图不可达、且 `exports` 不可寻址的 `.d.ts` 是
   出货字节,⛔ 不是已发布接受集,改它不触发 `Clause-②: yes`;legacy node10 深引用在契约之外。
 - 四面皆不碰 ⇒ CI 加席位自读 ⛔ 不起第二个 agent;谁跑 = 派发席,达档者席内审。
+- 派发席达档调用被配额拒(HTTP 429)⇒ ⛔ 不降档审;PR 落交接行、留等复核标记,交分诊席。
+- `Contract-review-handoff: triage — CONTRACT_REVIEW_TIER unavailable (<HTTP status / error>, <UTC time>) · head <sha>`
 - 复核记录 = 一条评论落 PR 或卡,席内与子代理同形;散文、dev 自评、`os-dev-report` 恒不算。
-- 同形 = `## Contract review` 题头、所审 head sha 独占码段、①②③ 逐项、独立性对、PASS/FAIL。
+- 同形 = `## Contract review` 题头、head sha 独占码段、①②③ 逐项(申报面外三面加 ④)、
+  独立性对、PASS/FAIL。
 - 同形含首行 `Served-tier:`:值写该面所定档的常量名 `CONTRACT_REVIEW_TIER` 或 `TIER_DEFAULT`;
   无此行不成裁决;模板 `node scripts/pm/record-recognisers.mjs --template`,申报面加 `--face declaration`。
 - 同形另带 `Local-runs:` 行:`none`,或 `probe — REASON` 具名唯一本地探针;
   有行必校,缺行旧记录不改判。
 - ① derived judgments 逐项:diff 引出的接受集与公开面变化逐条点名判对错。
 - ② semver 定级与 changeset 声明一致;③ 边界旗:dev 挂旗与 `open_questions` 逐旗答复或升级。
+- ④ 设计判断欠 schema、governed 规则文本、收窄三面,spec、skills、ADR 皆已在内 ⛔ 不另立面:
+  逐 `hits` 文件判改动对所引代码与验收场景是否成立,ADR 另判首个消费者与执行计划;
+  被引代码读而不审;①–④ 合称完整复核,余面同形无 ④,⛔ 无第二条记录。
+- 实质 head 各欠一轮完整复核;只落发现的 commit 由同一复核者 delta 复核;无 must-fix 即止。
 - 另记作者:PR `user.login` 非 `objectstack-fleet[bot]` ⇒ ③ 注点名该 login(脱中继写),落地前读。
-- 复核形状:只读 diff 与卡片,check 结论取 head 的 check-runs,⛔ 永不本地重跑派生门禁族。
-- 只喂卡片、既有裁决与 PR 本体,⛔ 不喂派发令与派发席自己的结论;简报写成对抗性。
 - 简报从 `node scripts/pm/record-recognisers.mjs --brief-template` 起稿:
   只读条款与输入集内建,⛔ 不删 ⛔ 行。
 - 隔离复核子代理暂存全写按所审 PR 命名的 `<scratchpad>/pr-<n>/`,⛔ 不读非本轮自写的暂存。
 - 独立性对:`Implemented-by:`/`Reviewed-by:` 取值同见 `--template`;子代理记采纳它的席位。
+- ④ 恒由起草者之外的 agent 达档跑,起草已达档不免;喂入同上,⛔ 不喂起草者的结论。
 - 轮次报告设复审清单专节,与呈裁清单同为强制审计。
 - 落地前检两条,过则 Tier S 入队、Tier H 等人批:① 达档条款②复核 PASS 在案(同形记录)。
 - 例外:纯重生成或只动上列散文面的 head 后移原记录继续管;判据机读已提交树;
@@ -45,5 +51,5 @@
 - 只作等复核标记,⛔ 不是闸门;单载体 = PR,卡上副本在规则外、不是要求。
 - 挂:ACCEPT 时条款②任一肢命中而现 head 无同形 PASS 在案 ⇒ 派发席同笔挂于 PR。
 - 摘:现 head 同形 PASS 在案 ⇒ 写记录的席同笔摘;PR 合并或关闭 ⇒ 派发席摘;FAIL 不摘。
-- 读者 = 维护者过滤 `is:pr is:open label:needs:contract-review` 与席位巡查、交接。
+- 只带标记无交接行者仍归本席,分诊 ⛔ 不碰;交接后 head 再动 ⇒ 新交接行或本席自审。
 - ⛔ 无 check、workflow、队列守卫或巡查脚本读它;入队只认同形记录,标记有无不改判。

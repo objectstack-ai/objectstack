@@ -1,6 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { isUniqueViolationError, uniqueViolationColumn } from '@objectstack/types';
+import { objectDisplayLabel } from './engine-validation-messages.js';
+import { resolveFieldLabel, type ValidationMessageContext } from './validation/record-validator.js';
 
 /**
  * The ADR-0112 envelope `engine.insert` (#14095) and `engine.update` (commit 9d7f7259f)
@@ -73,6 +75,22 @@ import { isUniqueViolationError, uniqueViolationColumn } from '@objectstack/type
  *    the same "object label" naming ruling B of #23556 / #23594 set for the
  *    approval notifications. The API names stay on `object` / `field` and open
  *    `developerMessage`, for diagnostics.
+ *  - **`fieldLabel`** — [#26867] the conflicting field's display name, the same
+ *    one `message` names it by, and ONLY when the field has one: a translation
+ *    in the writer's locale, else its declared `label`. Absent when there is no
+ *    `field`, or the field declares no label and the bundle holds none — the
+ *    API name is never repeated here. It is what the HTTP doors' user-facing
+ *    sentence names the field by ("A record with this Global SKU already
+ *    exists"), so the end user reads the label while `field` keeps the API key
+ *    for programs. One resolution feeds both sentences: the doors do not look
+ *    the label up a second time, and they could not — they hold no schema.
+ *  - **The writer's locale** — the labels are resolved on the ladder the record
+ *    validator and the `DELETE_RESTRICTED` refusal already climb (translation
+ *    bundle → declared `label` → API name: `resolveFieldLabel`,
+ *    `objectDisplayLabel`), in the locale of the write's execution context, so
+ *    a write made in `zh-CN` against a translated object reads its labels in
+ *    `zh-CN`. With no message context (a bare-kernel caller) they are the
+ *    declared labels, exactly as before.
  *
  * ## ⛔ What this deliberately does NOT do
  *
@@ -107,6 +125,12 @@ export class DuplicateRecordError extends Error {
   readonly cause: unknown;
   /** The remedy half — see the module header on why it is not in `message`. */
   readonly developerMessage: string;
+  /**
+   * [#26867] The conflicting field's display name in the writer's locale, when
+   * it has one (a translation, else its declared `label`); absent otherwise.
+   * See the module header.
+   */
+  readonly fieldLabel?: string;
 
   constructor(
     /** The object the refused write targeted. */
@@ -114,12 +138,13 @@ export class DuplicateRecordError extends Error {
     cause: unknown,
     /** The conflicting column, when the dialect determinably named one. */
     public readonly field?: string,
-    /** The declared labels the user-facing `message` names them by; absent ⇒ the API name. */
+    /** The display labels the user-facing `message` names them by; absent ⇒ the API name. */
     labels?: DuplicateRecordLabels,
   ) {
     super(buildDuplicateMessage(labels?.object || object, field && (labels?.field || field)));
     this.name = 'DuplicateRecordError';
     this.cause = cause;
+    if (field && labels?.field) this.fieldLabel = labels.field;
     this.developerMessage =
       `Duplicate record refused on object '${object}'` +
       (field ? `, field '${field}'` : '') +
@@ -166,24 +191,46 @@ function buildDuplicateMessage(object: string, field?: string): string {
  * Idempotent: an error that is already this envelope is returned as-is, so a
  * seam that wraps a value another seam already wrapped cannot bury the driver's
  * error one `cause` step deeper.
+ *
+ * `messages` is the write's message context — its locale and translator, the
+ * one the record validator renders with — and the labels are read in it.
  */
-export function envelopeUniqueViolation(error: unknown, object: string, schema?: unknown): unknown {
+export function envelopeUniqueViolation(
+  error: unknown,
+  object: string,
+  schema?: unknown,
+  messages?: ValidationMessageContext,
+): unknown {
   if (error instanceof DuplicateRecordError) return error;
   if (!isUniqueViolationError(error)) return error;
   const field = uniqueViolationColumn(error);
-  return new DuplicateRecordError(object, error, field, declaredLabels(schema, field));
+  return new DuplicateRecordError(object, error, field, displayLabels(schema, object, field, messages));
 }
 
 /**
- * The declared `label` of the object and of the conflicting field, read off the
- * registry's schema for the written object. A label that is absent, empty or not
- * a string is simply not returned, so the sentence falls back to the API name.
+ * The display labels of the object and of the conflicting field, read off the
+ * registry's schema for the written object in the writer's locale: translation
+ * bundle → declared `label`, the ladder `objectDisplayLabel` and
+ * `resolveFieldLabel` climb. Their last rung, the API name itself, is not
+ * returned: the sentence then falls back to the API name and `fieldLabel`
+ * stays absent.
  */
-function declaredLabels(schema: unknown, field: string | undefined): DuplicateRecordLabels {
+function displayLabels(
+  schema: unknown,
+  object: string,
+  field: string | undefined,
+  messages: ValidationMessageContext | undefined,
+): DuplicateRecordLabels {
   const s = schema as { label?: unknown; fields?: Record<string, { label?: unknown } | undefined> } | undefined;
-  const text = (v: unknown) => (typeof v === 'string' && v.trim() !== '' ? v : undefined);
+  const text = (v: unknown) => (typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined);
+  const declaredObject = text(s?.label);
+  const declaredField = field ? text(s?.fields?.[field]?.label) : undefined;
+  const objectLabel = objectDisplayLabel(object, declaredObject, messages ?? {});
+  const fieldLabel = field
+    ? resolveFieldLabel(field, { label: declaredField }, messages && { ...messages, objectName: object })
+    : undefined;
   return {
-    object: text(s?.label),
-    field: field ? text(s?.fields?.[field]?.label) : undefined,
+    object: objectLabel === object && declaredObject === undefined ? undefined : objectLabel,
+    field: fieldLabel === field && declaredField === undefined ? undefined : fieldLabel,
   };
 }

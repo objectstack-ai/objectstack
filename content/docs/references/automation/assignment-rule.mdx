@@ -1,0 +1,101 @@
+---
+title: Assignment Rule — Automation Protocol
+navTitle: Assignment Rule
+description: "Assignment Rule schemas of the ObjectStack Automation Protocol: AssignmentRule and 3 more — each property with its type, default and a TypeScript example."
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+<Callout type="info">
+**Source:** `packages/spec/src/automation/assignment-rule.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { AssignmentRuleSchema, AssignmentRuleEntrySchema, AssignmentStrategy, AssignmentTargetSchema } from '@objectstack/spec/automation';
+import type { AssignmentRule, AssignmentRuleEntry, AssignmentStrategy, AssignmentTarget } from '@objectstack/spec/automation';
+
+// Validate data
+const result = AssignmentRuleSchema.parse(data);
+```
+
+---
+
+## AssignmentRule
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Rule machine name (lowercase snake_case) |
+| **label** | `string` | optional | Display label |
+| **description** | `string` | optional | Administrative notes |
+| **object** | `string` | ✅ | The object whose inserted rows the rule routes (an `ownership: user` object) |
+| **active** | `boolean` | optional (default: `true`) | Whether the rule is evaluated |
+| **entries** | `{ name: string; criteria?: string \| object; assignTo: object; strategy?: Enum<'round_robin' \| 'least_loaded'>; … }[]` | ✅ | Ordered entries; the first whose criteria match the inserted row decides where it goes |
+| **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
+| **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
+| **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_packageId** | `string` | optional | Owning package machine id. |
+| **_packageVersion** | `string` | optional | Owning package version. |
+| **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
+
+### Nested Shape: `AssignmentRule.entries[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Entry machine name, unique within the rule (the round-robin cursor is kept per entry) |
+| **criteria** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | CEL over `record.*`, interpreted against the row being inserted (it is not stored yet). Absent = every row. |
+| **assignTo** | `{ type: Enum<'queue' \| 'user'>; value: string }` | ✅ | Where a matching row goes: a queue or one user |
+| **strategy** | `Enum<'round_robin' \| 'least_loaded'>` | optional | How one member of the target queue is chosen: 'round_robin' or 'least_loaded'. Only with a queue target; absent = the row parks in the queue for a member to claim. |
+| **load** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Required with 'least_loaded', refused otherwise: a CEL pushdown predicate over the object naming the rows that count as a member's open load (e.g. `record.status != "closed"`). There is no platform default, because what is open differs per object. |
+
+
+---
+
+## AssignmentRuleEntry
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Entry machine name, unique within the rule (the round-robin cursor is kept per entry) |
+| **criteria** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | CEL over `record.*`, interpreted against the row being inserted (it is not stored yet). Absent = every row. |
+| **assignTo** | `{ type: Enum<'queue' \| 'user'>; value: string }` | ✅ | Where a matching row goes: a queue or one user |
+| **strategy** | `Enum<'round_robin' \| 'least_loaded'>` | optional | How one member of the target queue is chosen: 'round_robin' or 'least_loaded'. Only with a queue target; absent = the row parks in the queue for a member to claim. |
+| **load** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Required with 'least_loaded', refused otherwise: a CEL pushdown predicate over the object naming the rows that count as a member's open load (e.g. `record.status != "closed"`). There is no platform default, because what is open differs per object. |
+
+### Nested Shape: `AssignmentRuleEntry.assignTo`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'queue' \| 'user'>` | ✅ | 'queue' routes into a queue (by machine name); 'user' names one owner (by id) |
+| **value** | `string` | ✅ | The queue machine name, or the user id |
+
+
+---
+
+## AssignmentStrategy
+
+### Allowed Values
+
+* `round_robin`
+* `least_loaded`
+
+
+---
+
+## AssignmentTarget
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'queue' \| 'user'>` | ✅ | 'queue' routes into a queue (by machine name); 'user' names one owner (by id) |
+| **value** | `string` | ✅ | The queue machine name, or the user id |
+
+
+---
+

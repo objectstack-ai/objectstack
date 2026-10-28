@@ -66,7 +66,7 @@ blocked / not-run,⛔ 不进标题计数;与 blocked 的分界是 fixture 债 vs
 - **全是 `api` / `build` / `cli`** → 不需要 console 构建。把框架拉起来
   (`objectstack dev`),驱动 REST/CLI。快(分钟级)。
 - **有任何 `browser` / `mixed`** → 需要 vendored console dist。它与 showcase 工作区
-  闭包**分开**构建(`pnpm objectui:build`,从钉住的 `.objectui-sha` 构建);它存在
+  闭包**分开**构建(在仓库根目录跑 `pnpm console:build`,源码在 `ui/`,改 Console 就改那里);它存在
   之前,第一次启动对 `/_console/` 是 404(dogfood §2 —— 真实前置条件,记录它,不要
   伪造 block)。给构建留预算(冷 monorepo 上 ~10–30 分钟);它占掉大头,浏览器驱动
   只是分钟级。
@@ -102,6 +102,8 @@ Tier 1 批量清掉,剩下的预算才对得起 Tier 2。
   `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --tier <paths>` 的输出、
   ⛔ 不凭记忆(floor sonnet · default opus · ceiling fable);每个给:该项 JSON、RUNNER.md、dogfood 技
   能、自己的端口/DB、结果不进仓规则(§4)。
+- **QA 运行不是车道卡。** runner(子代理或云卡)由发起本轮的会话直接派,⛔ 不走车道认领
+  与座位贴;pm-dispatch 只管写入门(§4)与安全修复派卡(Guardrails)。
 - **没有子代理工具时,顺序跑 —— 并在运行记录里声明这一轮是顺序执行的。** 规则与它
   的论证住在 `checklist-author` 技能(维护者所定,一处成文);⛔ 不留第二份拷贝。
 - 忠实执行每项的 `steps`,按各自声明的 `oracle` 判定每条 `acceptance` 与 `negative`
@@ -124,7 +126,10 @@ expected-fail 探针 —— 永不在真实缺陷上把条款打成绿。
 **issue 是纯文本 —— 永不放图。** 截图只为让你和子代理**现场**得出判定;它们是判断辅
 助,随运行环境一起丢弃。持久报告需要的是**复现规则,不是图片**。
 
-经 REST 代理 `POST .../issues` 立单(`Content-Type: application/json`;⛔ 永不 MCP `issue_write`,锁 1 已拒):
+GitHub 写入只走 pm-dispatch 写入门:仓根直调 `scripts/pm/issue-create.mjs`、`post-stamped.mjs`、
+`close-cards.mjs`,批量先 `write-pace.mjs --announce-batch N`,云容器内自走 fleet relay;⛔ 永不 MCP
+`issue_write`(锁 1 已拒)或裸 `curl`。写入被会话权限拦下 ⛔ 不绕行:待发文本落文件、终报给
+出路径与正文,放行后照序补发 —— 写入未落地即未收口。记录这样写:
 
 - **标题** —— `QA run · <selector> (<已判定>/<总数>) · <sha8> · <date> · <counts>`:唯一
   形状、严格解析、分数**强制**;语法与退役写法见 RUNNER.md「The record title」。
@@ -132,7 +137,7 @@ expected-fail 探针 —— 永不在真实缺陷上把条款打成绿。
   是协议载体、不入分诊 sweep,⛔ 不是可派发单元;工作标签随抽取出的缺陷卡走(RUNNER 抽取
   义务条款)。**这条在记录的整个生命周期成立** —— 收口与关闭时同样不补挂。
 - **正文**,按此顺序:
-  - **环境指纹** —— framework sha、`.objectui-sha`、端口、db、seed、时间戳。
+  - **环境指纹** —— framework sha(`ui/` 在内)、端口、db、seed、时间戳。
   - **范围** —— 选择器 + 每项所对的 `revision`。
   - **逐条款判定表** —— 项 · 条款 · 判定 · 一行**文本** oracle 证据
     (API/网络/构建/测试结果 —— 服务端真相,永不是像素)。
@@ -229,10 +234,13 @@ QA-source: #运行记录号 · area.item · 条款
 - **不伪造覆盖。** 缺 fixture → `blocked(fixture)` 带理由;console 没构建 → 构建它
   或记 `blocked(environment)`;证到一半的项是 `partial`,不是 `pass`。带证据的
   blocked 判定是一次成功运行;伪造的 pass 不是。
+- **每个产品问题同一轮经 §4 立 issue。** `fail` 条款与条款外探测同样,⛔ 不只留在运行记
+  录或聊天;认证 / 授权类按下一条。
 - **认证 / 授权漏洞的复现,永不发布到 GitHub 的任何地方** —— 不进运行 issue,不进跟踪
-  卡,不进评论。记下项 id、条款与 `detail withheld pending maintainer`,复现留在会话里,本轮以该报
-  告终局,⛔ 不等维护者。⚠ 这与 RUNNER 规则 2 是**同一条规则写在两处**,⛔ 两边都不是对
-  另一边的优先级主张;完整论证与它的维护者裁定在 RUNNER。
+  卡,不进评论。卡只载项 id、条款与 `detail withheld pending maintainer`,复现留在会话里;修复直
+  接经 pm-dispatch 派卡:席内 `mode:subagent` 派 `os-dev`,复现只进派发令,⛔ 不等维护者;runner 无
+  派发通道时由派它的会话接手。⚠ 这与 RUNNER 规则 2 是**同一条规则写在两处**,⛔ 两边
+  都不是对另一边的优先级主张;完整论证与它的维护者裁定在 RUNNER。
 - **不把 blocked 项当可运行的跑** —— 解析器隐藏它们正为此。
 - **一个选择器、一次运行、一张 issue;验证重测不立 issue,证据进 PR 正文(§5)。** release
   sweep 把 `since:vN` 与 `priority:P0` 作为分开的两轮跑 → 两张 issue,不要糊在一起。

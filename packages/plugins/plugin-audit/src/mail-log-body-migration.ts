@@ -160,8 +160,14 @@ export interface MailLogBodyMigrationOptions {
 /**
  * The two operations a run performs, whatever store it runs on: read one page
  * of `object`, and write one row's patch keeping its stored `updated_at`.
+ *
+ * Exported, with the two stores and the runner below, because this is the ONE
+ * ledger-copy rewrite: the key-material rewrite (`key-material-copy-migration.ts`)
+ * drives the same pages, stores and runner with its own list and planners, so
+ * the two never disagree about paging, the write's context or what counts as
+ * a failure.
  */
-interface CopyStore {
+export interface LedgerCopyStore {
   readPage(object: string, query: { where: Record<string, unknown>; fields: string[]; orderBy: Array<{ field: string; order: 'asc' }>; limit: number }): Promise<unknown>;
   write(object: string, id: string, patch: Record<string, unknown>, updatedAt: unknown): Promise<void>;
 }
@@ -179,6 +185,18 @@ export interface MailLogBodyMigrationReport {
   failures: number;
 }
 
+/** What a ledger-copy rewrite decides and says: the objects whose copies it reads, its two planners, and its log lines. */
+export interface LedgerCopyRewriteSpec {
+  /** The `object_name` values whose copies a run reads. */
+  objectNames: readonly string[];
+  planAudit: (row: Record<string, unknown>) => Record<string, unknown> | null;
+  planActivity: (row: Record<string, unknown>) => Record<string, unknown> | null;
+  /** The bracketed prefix of every log line. */
+  tag: string;
+  /** The run's one closing line. */
+  summary: (report: MailLogBodyMigrationReport, label: string) => string;
+}
+
 function asArray(result: unknown): Record<string, unknown>[] {
   if (Array.isArray(result)) return result as Record<string, unknown>[];
   if (result && typeof result === 'object' && Array.isArray((result as { records?: unknown }).records)) {
@@ -186,6 +204,62 @@ function asArray(result: unknown): Record<string, unknown>[] {
   }
   return [];
 }
+
+/** The hot store: the two copy tables through the engine. */
+export function ledgerCopyStoreOverEngine(engine: MailLogBodyMigrationEngine): LedgerCopyStore {
+  return {
+    readPage: (object, query) => engine.find(object, query, { context: SYSTEM_CTX }),
+    // A single-id write, as the platform: a system caller is exempt from the
+    // static-readonly strip every audit/activity field carries.
+    // `preserveAudit` with the stored `updated_at` keeps the row's own
+    // timestamp (the shape `comment-parent-pair-backfill.ts` takes): masking
+    // a copy is not an edit of the ledger row.
+    write: async (object, id, patch, updatedAt) => {
+      await engine.update(
+        object,
+        { ...patch, id, ...(updatedAt !== undefined && updatedAt !== null ? { updated_at: updatedAt } : {}) },
+        { context: SYSTEM_PRESERVING_CTX },
+      );
+    },
+  };
+}
+
+/**
+ * The archive store: `driver` is the archive datasource's registered driver
+ * (`engine.datasource(name)`); reads and writes go through it directly, as the
+ * Archiver itself does: no hook, no audit write, and the row's stored
+ * `updated_at` kept (`preserveAudit`). An archive table that was never created
+ * (nothing archived yet) holds no copy and reads as no rows; any other refused
+ * read is a failure, as on the hot run.
+ */
+export function ledgerCopyStoreOverArchiveDriver(driver: MailLogBodyArchiveDriver): LedgerCopyStore {
+  return {
+    readPage: async (object, query) => {
+      try {
+        return await driver.find(object, query as Parameters<MailLogBodyArchiveDriver['find']>[1]);
+      } catch (e) {
+        if (isMissingTableError(e, object)) return [];
+        throw e;
+      }
+    },
+    write: async (object, id, patch, updatedAt) => {
+      const keep = updatedAt !== undefined && updatedAt !== null;
+      await driver.update(object, id, { ...patch, ...(keep ? { updated_at: updatedAt } : {}) }, keep ? { preserveAudit: true } : undefined);
+    },
+  };
+}
+
+/** The mail-log rewrite's list, planners and words. */
+const MAIL_LOG_BODY_REWRITE: LedgerCopyRewriteSpec = {
+  objectNames: MAIL_LOG_OBJECTS,
+  planAudit: planMailLogBodyAuditRowPatch,
+  planActivity: planMailLogBodyActivityRowPatch,
+  tag: '[mail-log-body-migration]',
+  summary: (report, label) =>
+    `[mail-log-body-migration] ${report.apply ? 'masked' : 'would mask'} the mail body in ${report.rewritten} of ` +
+    `${report.scanned} ${label} cop(ies) of a mail-log row` +
+    (report.failures > 0 ? ` (${report.failures} failed — re-run to finish)` : ''),
+};
 
 /**
  * Mask the mail-log body in every `sys_audit_log` / `sys_activity` copy of a
@@ -197,69 +271,34 @@ export async function migrateMailLogBodyCopies(
   logger: MigrationLogger,
   options: MailLogBodyMigrationOptions = {},
 ): Promise<MailLogBodyMigrationReport> {
-  return runMailLogBodyCopies(
-    {
-      readPage: (object, query) => engine.find(object, query, { context: SYSTEM_CTX }),
-      // A single-id write, as the platform: a system caller is exempt from the
-      // static-readonly strip every audit/activity field carries.
-      // `preserveAudit` with the stored `updated_at` keeps the row's own
-      // timestamp (the shape `comment-parent-pair-backfill.ts` takes): masking
-      // a copy is not an edit of the ledger row.
-      write: async (object, id, patch, updatedAt) => {
-        await engine.update(
-          object,
-          { ...patch, id, ...(updatedAt !== undefined && updatedAt !== null ? { updated_at: updatedAt } : {}) },
-          { context: SYSTEM_PRESERVING_CTX },
-        );
-      },
-    },
-    logger,
-    options,
-    'audit/activity',
-  );
+  return runLedgerCopyRewrite(ledgerCopyStoreOverEngine(engine), logger, options, 'audit/activity', MAIL_LOG_BODY_REWRITE);
 }
 
 /**
  * The same mask over an ARCHIVE datasource — the store `sys_audit_log`'s
  * `lifecycle.archive.to` names, which the Archiver fills with verbatim copies
- * and the engine never routes the object to. `driver` is that datasource's
- * registered driver (`engine.datasource(name)`); the run reads and writes
- * through it directly, as the Archiver itself does: no hook, no audit write,
- * and the row's stored `updated_at` kept (`preserveAudit`). An archive table
- * that was never created (nothing archived yet) holds no copy and reads as no
- * rows; any other refused read is a failure, as on the hot run.
+ * and the engine never routes the object to ({@link ledgerCopyStoreOverArchiveDriver}).
  */
 export async function migrateArchivedMailLogBodyCopies(
   driver: MailLogBodyArchiveDriver,
   logger: MigrationLogger,
   options: MailLogBodyMigrationOptions = {},
 ): Promise<MailLogBodyMigrationReport> {
-  return runMailLogBodyCopies(
-    {
-      readPage: async (object, query) => {
-        try {
-          return await driver.find(object, query as Parameters<MailLogBodyArchiveDriver['find']>[1]);
-        } catch (e) {
-          if (isMissingTableError(e, object)) return [];
-          throw e;
-        }
-      },
-      write: async (object, id, patch, updatedAt) => {
-        const keep = updatedAt !== undefined && updatedAt !== null;
-        await driver.update(object, id, { ...patch, ...(keep ? { updated_at: updatedAt } : {}) }, keep ? { preserveAudit: true } : undefined);
-      },
-    },
-    logger,
-    options,
-    'archived audit',
-  );
+  return runLedgerCopyRewrite(ledgerCopyStoreOverArchiveDriver(driver), logger, options, 'archived audit', MAIL_LOG_BODY_REWRITE);
 }
 
-async function runMailLogBodyCopies(
-  store: CopyStore,
+/**
+ * Page the two copy tables of `store` for the copies of `spec.objectNames`, and
+ * rewrite every row a planner changed (only under `apply`). Keyset paging on
+ * `id`; a table it could not read, a row with no id and a write that threw are
+ * each counted as a failure, never read as clean.
+ */
+export async function runLedgerCopyRewrite(
+  store: LedgerCopyStore,
   logger: MigrationLogger,
-  options: MailLogBodyMigrationOptions,
+  options: { apply?: boolean; pageSize?: number; objects?: readonly MailLogBodyCopyObject[] },
   label: string,
+  spec: LedgerCopyRewriteSpec,
 ): Promise<MailLogBodyMigrationReport> {
   const apply = options.apply === true;
   const pageSize = options.pageSize && options.pageSize > 0 ? options.pageSize : MAIL_LOG_BODY_MIGRATION_PAGE_SIZE;
@@ -271,8 +310,8 @@ async function runMailLogBodyCopies(
     fields: readonly string[];
     plan: (row: Record<string, unknown>) => Record<string, unknown> | null;
   }> = [
-    { object: 'sys_audit_log' as const, fields: ['id', 'object_name', 'new_value', 'old_value', 'updated_at'], plan: planMailLogBodyAuditRowPatch },
-    { object: 'sys_activity' as const, fields: ['id', 'object_name', 'metadata', 'updated_at'], plan: planMailLogBodyActivityRowPatch },
+    { object: 'sys_audit_log' as const, fields: ['id', 'object_name', 'new_value', 'old_value', 'updated_at'], plan: spec.planAudit },
+    { object: 'sys_activity' as const, fields: ['id', 'object_name', 'metadata', 'updated_at'], plan: spec.planActivity },
   ].filter((t) => !only || only.has(t.object));
 
   for (const { object, fields, plan } of tables) {
@@ -281,7 +320,7 @@ async function runMailLogBodyCopies(
     // twice in one run.
     let after: string | undefined;
     for (;;) {
-      const copies: Record<string, unknown> = { object_name: { $in: [...MAIL_LOG_OBJECTS] } };
+      const copies: Record<string, unknown> = { object_name: { $in: [...spec.objectNames] } };
       const where = after === undefined ? copies : { $and: [copies, { id: { $gt: after } }] };
       let rows: Record<string, unknown>[];
       try {
@@ -293,7 +332,7 @@ async function runMailLogBodyCopies(
         // run says so (and the door exits non-zero).
         report.failures += 1;
         logger.warn(
-          `[mail-log-body-migration] could not read ${object} — its remaining rows were NOT examined: ` +
+          `${spec.tag} could not read ${object} — its remaining rows were NOT examined: ` +
             `${(e as Error)?.message ?? String(e)}`,
         );
         break;
@@ -311,7 +350,7 @@ async function runMailLogBodyCopies(
         const id = row.id;
         if (typeof id !== 'string' || id === '') {
           report.failures += 1;
-          logger.warn(`[mail-log-body-migration] ${object} row has no id — cannot rewrite it`);
+          logger.warn(`${spec.tag} ${object} row has no id — cannot rewrite it`);
           continue;
         }
         try {
@@ -319,7 +358,7 @@ async function runMailLogBodyCopies(
         } catch (e) {
           report.failures += 1;
           logger.warn(
-            `[mail-log-body-migration] failed to rewrite ${object}/${id}: ${(e as Error)?.message ?? String(e)}`,
+            `${spec.tag} failed to rewrite ${object}/${id}: ${(e as Error)?.message ?? String(e)}`,
           );
         }
       }
@@ -330,10 +369,6 @@ async function runMailLogBodyCopies(
     }
   }
 
-  logger.info?.(
-    `[mail-log-body-migration] ${apply ? 'masked' : 'would mask'} the mail body in ${report.rewritten} of ` +
-      `${report.scanned} ${label} cop(ies) of a mail-log row` +
-      (report.failures > 0 ? ` (${report.failures} failed — re-run to finish)` : ''),
-  );
+  logger.info?.(spec.summary(report, label));
   return report;
 }

@@ -78,6 +78,12 @@ import { ObjectFieldInspector } from './ObjectFieldInspector';
 import { FlowEdgeInspector } from './FlowEdgeInspector';
 import { FlowNodeInspector } from './FlowNodeInspector';
 import { encodeNestedNodeId, NESTED_NODE_KIND } from './flow-nested-selection';
+import { WIDGET_TYPE_META } from '../previews/widget-types';
+// The designer's `designer.*` / `perm.*` rows live in `@object-ui/i18n`'s `studio`
+// namespace, whose `zh` catalogue is fetched on demand (objectstack#25922).
+// Resident before any case, so the zh rows below read synchronously.
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+await loadStudioCatalogue('zh');
 
 afterEach(cleanup);
 
@@ -134,19 +140,14 @@ function mountWidget(lang: Lang, draft: Record<string, unknown>, selection: { ki
   ));
 }
 
-/** Stored widget `type` → the row its option label reads. */
-const WIDGET_TYPE_KEYS: ReadonlyArray<[string, string]> = [
-  ['metric', 'engine.inspector.widget.type.metric'],
-  ['bar', 'engine.inspector.widget.type.bar'],
-  ['horizontal-bar', 'engine.inspector.widget.type.horizontalBar'],
-  ['line', 'engine.inspector.widget.type.line'],
-  ['area', 'engine.inspector.widget.type.area'],
-  ['pie', 'engine.inspector.widget.type.pie'],
-  ['donut', 'engine.inspector.widget.type.donut'],
-  ['funnel', 'engine.inspector.widget.type.funnel'],
-  ['table', 'engine.inspector.widget.type.table'],
-  ['pivot', 'engine.inspector.widget.type.pivot'],
-];
+/**
+ * Stored widget `type` → the row its option label reads — read off the one
+ * widget registry the select derives its options from (objectstack#26745).
+ */
+const WIDGET_TYPE_KEYS: ReadonlyArray<[string, string]> = Object.values(WIDGET_TYPE_META).map((m) => [
+  m.id,
+  m.selectLabelKey,
+]);
 
 /** The widget-type select's trigger text, for a widget stored with `type`. */
 function widgetTypeTrigger(lang: Lang, type: string): string | null {

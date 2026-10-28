@@ -28,7 +28,7 @@ import {
 
 // A simple data-driven table
 ComponentRegistry.register('table', 
-  ({ schema, className, ...props }: { schema: TableSchema; className?: string; [key: string]: any }) => (
+  ({ schema, className, ...props }: { schema: TableSchema; className?: string; [key: string]: unknown }) => (
     <Table className={className} {...props}>
       {schema.caption && <TableCaption>{schema.caption}</TableCaption>}
       <TableHeader>

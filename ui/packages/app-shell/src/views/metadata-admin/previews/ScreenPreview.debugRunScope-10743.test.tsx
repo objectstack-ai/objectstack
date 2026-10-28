@@ -27,6 +27,10 @@
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent } from '@testing-library/react';
+// Module scope, per AGENTS.md 测试纪律: a boolean screen field reaches
+// `BooleanField` through a `React.lazy` factory inside `@object-ui/fields`;
+// importing the barrel here resolves that factory before any `findBy` budget.
+import '@object-ui/fields';
 
 vi.mock('../../../providers/AdapterProvider', () => ({
   useAdapter: () => ({ fake: 'adapter' }),
@@ -122,14 +126,14 @@ describe('the Debug run screen decides a sibling-field visibleWhen live (objectu
     expect(step?.note ?? '').not.toMatch(/"note"/);
   });
 
-  it('docs shape: ticking Create Opportunity reveals Opportunity Name; Plain (no predicate) is drawn throughout', () => {
+  it('docs shape: ticking Create Opportunity reveals Opportunity Name; Plain (no predicate) is drawn throughout', async () => {
     const { node, variables, step } = pauseAt(docsShape);
-    const { container } = render(<ScreenPreview node={node} variables={variables} />);
+    render(<ScreenPreview node={node} variables={variables} />);
     expect(screen.queryByText('Opportunity Name')).not.toBeInTheDocument();
     expect(screen.getByText('Plain')).toBeInTheDocument();
     expect(screen.getByText(/hidden by .*visible when/i)).toBeInTheDocument();
 
-    fireEvent.click(container.querySelector('#ff-createOpportunity')!);
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Create Opportunity?' }));
     expect(screen.getByText('Opportunity Name')).toBeInTheDocument();
     expect(screen.getByText('Plain')).toBeInTheDocument();
     expect(screen.queryByText(/hidden by .*visible when/i)).not.toBeInTheDocument();
@@ -138,15 +142,15 @@ describe('the Debug run screen decides a sibling-field visibleWhen live (objectu
     expect(step?.note ?? '').not.toMatch(/"opportunityName"/);
   });
 
-  it('docs shape with the flow variable declared (`createOpportunity: false` in the run, as the docs recommend): the tick still reveals the field', () => {
+  it('docs shape with the flow variable declared (`createOpportunity: false` in the run, as the docs recommend): the tick still reveals the field', async () => {
     // This is the shape that froze hardest: the run held `false`, the predicate
     // evaluated false against it, the field was dropped, and the checkbox the
     // author ticked in the preview changed nothing.
     const { node, variables } = pauseAt(docsShape, { createOpportunity: false });
     expect(variables).toEqual({ createOpportunity: false });
-    const { container } = render(<ScreenPreview node={node} variables={variables} />);
+    render(<ScreenPreview node={node} variables={variables} />);
     expect(screen.queryByText('Opportunity Name')).not.toBeInTheDocument();
-    fireEvent.click(container.querySelector('#ff-createOpportunity')!);
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Create Opportunity?' }));
     expect(screen.getByText('Opportunity Name')).toBeInTheDocument();
     expect(screen.getByText('Plain')).toBeInTheDocument();
   });

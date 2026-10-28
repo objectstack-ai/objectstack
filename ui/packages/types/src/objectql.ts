@@ -154,7 +154,6 @@ import type {
   // of `NamedListView` indexes it; see that member for why it cannot take its
   // type from this package's mirror like the other sixteen.
   ListView as SpecListView,
-  CalendarConfig as SpecCalendarConfig,
   // objectui#11168 slice 3 — the `object-tree` element's `tree` block, so
   // `ObjectTreeSchema.tree` below takes the protocol's own type. Aliased for
   // the reason `SpecGanttConfig` above is.
@@ -316,8 +315,10 @@ export type GanttConfig = SpecGanttConfig & {
   // The nine members below were declared ONLY in `plugin-gantt`'s package-private
   // `GanttConfigEx` intersection — the type `getGanttConfig` casts the `gantt`
   // block to. `ObjectGantt` honours every one of them on BOTH authoring faces
-  // (the `gantt: { … }` block AND the flattened top-level spelling declared on
-  // `ObjectGanttSchema`), and a type that lives inside the plugin can be
+  // (the `gantt: { … }` block AND the flattened top-level spelling, declared
+  // since objectstack#25923 on `plugin-gantt`'s own hand-off type
+  // `ObjectGanttFlatFields`, not on `ObjectGanttSchema`), and a type that lives
+  // inside the plugin can be
   // referenced by neither declaration — so the vocabulary is lifted here rather
   // than restated, and the two faces derive from ONE source that cannot fork.
   //
@@ -2278,6 +2279,22 @@ export interface ObjectFormSchema extends BaseSchema {
    */
   modalCloseButton?: boolean;
 
+  /**
+   * How the modal presentation lays out its sections — the
+   * `ComponentPropsMap['object-form']` member, by reference (objectstack#25923,
+   * work item 4). `ModalForm` puts each section on its own tab only for
+   * `'tabbed'` with more than one section to show; any other value stacks them.
+   */
+  contentLayout?: SpecObjectFormProps['contentLayout'];
+
+  /**
+   * Ask before discarding unsaved edits when a drawer or modal form is
+   * dismissed — the `ComponentPropsMap['object-form']` member, by reference
+   * (objectstack#25923, work item 4). `ModalForm` and `DrawerForm` ask unless
+   * it is `false`.
+   */
+  confirmOnDiscard?: SpecObjectFormProps['confirmOnDiscard'];
+
   // ─── Mobile UX (round 3) ────────────────────────────────
 
   /**
@@ -2485,6 +2502,8 @@ type ObjectFormSlotKey =
   | 'children'
   | 'className'
   | 'columns'
+  | 'confirmOnDiscard'
+  | 'contentLayout'
   | 'customFields'
   | 'data'
   // objectui#11070 — joins with `ObjectFormSchema.dataSource`. This slot
@@ -3314,20 +3333,20 @@ export interface NamedListView {
  * This used to be a hand-written interface mirroring the spec's six keys, and
  * it had drifted on exactly one of them: it required `mode`, under a doc
  * comment that itself said `@default 'page'` (objectui#4588). The spec declares
- * `mode: NavigationModeSchema.default('page')`
+ * `mode: NavigationModeSchema.default('drawer')` — `'page'` until
+ * objectstack#26677, which also retired `modal`, `split` and `popover`
  * (`@objectstack/spec` `ui/view.zod.ts` `NavigationConfigSchema`), and a
  * `.default()` lands on the AUTHORING side as `| undefined` — which is why the
  * spec publishes its own type as `z.input< typeof NavigationConfigSchema >`.
  * So `navigation: { openNewTab: true }` is legal authored metadata that lets
- * the mode default (to `'page'`, the mode `openNewTab` applies to), and the
- * hand copy refused it.
+ * the mode default, and the hand copy refused it.
  *
  * `index.ts` already re-exports that same spec type under its own name
  * (`NavigationConfig`), so this package published two disagreeing spellings of
  * one spec object. They are one type now. Per this file's rule above —
  * "Never Redefine Types. ALWAYS import them." — the per-key documentation lives
  * with the schema in the spec rather than being restated here, so there is no
- * third place to keep the `'page'` default in sync.
+ * third place to keep the default in sync.
  *
  * objectui#4550 / PR objectui#4586 made the same collapse for
  * `@object-ui/react`'s `NavigationConfig`.
@@ -3819,10 +3838,11 @@ export interface ObjectTreeSchema extends BaseSchema {
  *
  * The `object-gantt` node as `ObjectGantt` READS it: after `SchemaRenderer` has
  * hoisted the node's `properties` bag onto it, or as code composes it
- * (`ObjectView` and `ListView` flattening a stored gantt view, a host mounting
- * `<ObjectGantt schema={…}>`). That is why it still carries the flat
- * `GanttConfig` keys (`startDateField`, `viewMode`, …) and the `search` pair
- * the composers write.
+ * (`ObjectView` and `ListView` lowering a stored gantt view into the node's
+ * `gantt` block, a host mounting `<ObjectGantt schema={…}>`). Since
+ * objectstack#25923 it carries no flat `GanttConfig` key and no `search` pair:
+ * the spec refuses those on the node, and what the renderer still reads flat
+ * is `plugin-gantt`'s package-local hand-off type.
  *
  * It is NOT the shape of an AUTHORED `object-gantt` document. An authored node
  * takes its props in the spec's `properties` bag, whose members are
@@ -3831,8 +3851,7 @@ export interface ObjectTreeSchema extends BaseSchema {
  * `{ type: 'object-gantt', properties: { objectName, gantt: { startDateField,
  * endDateField, titleField }, … } }`. `ObjectGanttBlockSchema`
  * (`./zod/objectql.zod.ts`) judges it, and refuses a prop written flat on the
- * node by name. `SchemaRenderer` reads both spellings, so a node built in code
- * keeps its flat keys.
+ * node by name.
  */
 export interface ObjectGanttSchema extends BaseSchema {
   type: 'object-gantt';
@@ -3871,46 +3890,14 @@ export interface ObjectGanttSchema extends BaseSchema {
    * {@link ObjectMapSchema.data}.
    */
   data?: ViewData;
-  /** Field for task start date */
-  startDateField?: string;
-  /** Field for task end date */
-  endDateField?: string;
-  /** Field for task title/name */
-  titleField?: string;
-  /**
-   * Field for task dependencies.
-   *
-   * @deprecated Legacy alias — author {@link ObjectGanttSchema.dependenciesField}
-   * instead. The plural is the spec's spelling (`@objectstack/spec`
-   * `GanttConfigSchema.dependenciesField`); this singular has NO spec
-   * counterpart. It is pre-spec objectui vocabulary, and until objectui#6051 it
-   * was the ONLY dependencies spelling this interface declared — so for the whole
-   * time the alias existed the published type taught the non-spec key and hid the
-   * canonical one. That is what this tag exists to correct: the two were declared
-   * as equals, and a reader had no way to learn which one to write.
-   *
-   * Still accepted, deliberately. `getGanttConfig`'s flat branch reads
-   * `dependenciesField || dependencyField`, so metadata already written against
-   * this key renders unchanged and the canonical key wins wherever both carry a
-   * value. Deprecating is NOT removing: dropping the alias would narrow the
-   * accept set of a published surface, which is a separate enforce-or-remove
-   * decision (objectui#6470) and not something this marker takes.
-   */
-  dependencyField?: string;
-  /** Field for progress (0-100) */
-  progressField?: string;
-  /**
-   * Initial timeline granularity, honoured by BOTH renderer branches (the
-   * timeline and the resource-workload grid). DERIVED from the spec's
-   * `GanttConfigSchema.viewMode` member so the member list cannot drift
-   * (objectui#5074).
-   *
-   * Deliberately NO default: an omitted `viewMode` lets a persisted layout
-   * (保存布局, `persistLayoutKey`) seed the granularity before the renderer's
-   * `'day'` fallback. A default here would arrive downstream as an explicit
-   * author choice and defeat that seeding.
-   */
-  viewMode?: SpecGanttConfig['viewMode'];
+  // objectstack#25923 — the flat `GanttConfig` keys (`startDateField`,
+  // `viewMode`, the legacy `dependencyField` …) and the toolbar's `search` pair
+  // are NOT members of this interface. `ComponentPropsMap['object-gantt']`
+  // refuses every one of them on the node, and the {@link ObjectGanttSchema.gantt}
+  // block is their one spelling here: both producers (`ListView`, and
+  // `ObjectView`'s `generateViewSchema`) emit it. What the renderer still reads
+  // flat is typed on `plugin-gantt`'s package-local hand-off type, never on this
+  // published face (Commandment #0.1).
   /**
    * Skip weekends in duration / auto-schedule math (objectui#5903).
    *
@@ -4012,116 +3999,6 @@ export interface ObjectGanttSchema extends BaseSchema {
    */
   mobileReadOnly?: boolean;
 
-  // ── The flattened `GanttConfig` face (objectui#6051) ────────────────────────
-  //
-  // `getGanttConfig` (`plugin-gantt/src/ObjectGantt.tsx`) has two branches. The
-  // `gantt` block wins whenever it is present (objectui#6469); this flat face is
-  // read only when there is no block, and then only when `startDateField` AND
-  // `endDateField` are both present at the TOP LEVEL. The keys of the flat branch
-  // were declared by neither
-  // this interface nor `ObjectGridSchema`: they were reachable only through
-  // `BaseSchema`'s `[key: string]: any`, so `schema.colorField` type-checked as
-  // `any` with no cast anywhere to grep for. That is why the census behind this
-  // card is an AST enumeration and not a compile-and-observe — an index signature
-  // swallows exactly the evidence a type annotation would have produced.
-  //
-  // Every member below is DERIVED from {@link GanttConfig}, the same type the
-  // `gantt` block carries, so the flat spelling cannot drift from the block
-  // spelling. All are optional, matching the renderer: the flat branch reads each
-  // key bare and forwards `undefined` unchanged.
-  //
-  // ⚠️ WHICH face wins was NOT decided by objectui#6051, which declared these keys.
-  // It was settled afterwards by objectui#6469, inheriting the maintainer ruling on
-  // objectui#5018 (2026-08-17) that `plugin-map` shipped in PR #5156: the BLOCK
-  // wins, taken whole, and the shadowed flat keys are named in a dev-mode warning
-  // instead of being dropped silently. So a node carrying both spellings renders
-  // the `gantt` block's values — the reverse of the pre-#6469 order.
-
-  /**
-   * Record field carrying the bar's FILL colour: any CSS colour or a semantic
-   * palette name (red/orange/…), typically a server-computed status colour.
-   * When it is unset — or when the record's value is empty — the bar falls back
-   * to the record's own `status`/`state`/`priority`/`severity` value, so the
-   * timeline tells the same colour story as list/kanban. With neither, bars
-   * take the platform default blue.
-   */
-  colorField?: GanttConfig['colorField'];
-  /** Per-task alert stroke colour field. See {@link GanttConfig.borderColorField}. */
-  borderColorField?: GanttConfig['borderColorField'];
-  /**
-   * Record field holding this task's predecessors. The CANONICAL spelling — the
-   * flat branch reads `dependenciesField || dependencyField`, so the singular
-   * {@link ObjectGanttSchema.dependencyField} above stays accepted as the legacy
-   * alias and this one wins. That alias is `@deprecated` (objectui#6470): still
-   * read, no longer taught.
-   */
-  dependenciesField?: GanttConfig['dependenciesField'];
-  /**
-   * Record field holding this row's PARENT id — the single-parent pointer the
-   * task tree is built from: indentation, expand/collapse and summary rollup
-   * all follow it. An empty value, or one naming no loaded row, renders that
-   * row as a root. Leave unset for a flat chart; `groupByField` is the
-   * alternative, bucketing leaves under synthesized rows instead of a
-   * record-declared hierarchy.
-   */
-  parentField?: GanttConfig['parentField'];
-  /** Record field mapping onto a node kind (task/summary/milestone/group). */
-  typeField?: GanttConfig['typeField'];
-  /** Record field marking a row view-only. See {@link GanttConfig.lockField}. */
-  lockField?: GanttConfig['lockField'];
-  /** Record field carrying the row's own object API name (mixed-object trees). */
-  objectField?: GanttConfig['objectField'];
-  /** How a summary bar's span is computed. See {@link GanttConfig.summaryExtent}. */
-  summaryExtent?: GanttConfig['summaryExtent'];
-  /** Auto-collapse depth on first render. See {@link GanttConfig.defaultCollapsedDepth}. */
-  defaultCollapsedDepth?: GanttConfig['defaultCollapsedDepth'];
-  /**
-   * Extra record fields listed as label/value rows in a bar's hover tooltip, in
-   * the order given. Each entry is a field name (dot-paths allowed) or
-   * `{ field, label }` to set the label explicitly; otherwise the label comes
-   * from the object schema, falling back to a humanized field name, and the
-   * value is formatted by field type the way a list cell would render it. A row
-   * whose value is empty is DROPPED rather than dashed, so a mixed-object tree
-   * can list the union of every level's fields here. Any surviving rows replace
-   * the tooltip's default date · duration · progress line.
-   */
-  tooltipFields?: GanttConfig['tooltipFields'];
-  /** Baseline (planned) start field → planned-vs-actual reference bars. */
-  baselineStartField?: GanttConfig['baselineStartField'];
-  /** Baseline (planned) end field → planned-vs-actual reference bars. */
-  baselineEndField?: GanttConfig['baselineEndField'];
-  /** Dynamic group-by field, replacing the parent hierarchy. */
-  groupByField?: GanttConfig['groupByField'];
-  /** Render the per-resource load histogram instead of the timeline grid. */
-  resourceView?: GanttConfig['resourceView'];
-  /** Record field the resource view buckets by. Required for {@link resourceView}. */
-  assigneeField?: GanttConfig['assigneeField'];
-  /** Record field carrying each task's load units (default 1). */
-  effortField?: GanttConfig['effortField'];
-  /** Per-resource capacity ceiling (default 1); loads above it flag overload. */
-  capacity?: GanttConfig['capacity'];
-  /**
-   * Quick-filter dropdowns rendered above the chart — a row of multi-selects,
-   * each narrowing the visible bars by one record field. A dimension's options
-   * resolve from the object schema (a select's options, or the referenced
-   * records for a lookup), so the dropdown offers that field's full domain
-   * rather than only the values present in the loaded page; declare `options`
-   * on the dimension to override that with a fixed list.
-   */
-  quickFilters?: GanttConfig['quickFilters'];
-  /** Recompute the timeline range when filtering (default true). */
-  autoZoomToFilter?: GanttConfig['autoZoomToFilter'];
-  /** Shift segmentation for the day-mode timeline. See {@link GanttConfig.timeSegments}. */
-  timeSegments?: GanttConfig['timeSegments'];
-  /** Per-interaction switches. See {@link GanttConfig.interactions}. */
-  interactions?: GanttConfig['interactions'];
-  /** Base name for exported PNG/PDF files. See {@link GanttConfig.exportFileName}. */
-  exportFileName?: GanttConfig['exportFileName'];
-  /** Business time zone (IANA name) the calendar renders in. */
-  timeZone?: GanttConfig['timeZone'];
-  /** Whether the store persists dependency link TYPES (fs/ss/ff/sf). */
-  dependencyTypes?: GanttConfig['dependencyTypes'];
-
   // ── The BLOCK face (the `ObjectGridSchema`-style shape, objectui#6475) ──────
   //
   // `getGanttConfig`'s FIRST branch (`plugin-gantt/src/ObjectGantt.tsx`) reads
@@ -4178,20 +4055,6 @@ export interface ObjectGanttSchema extends BaseSchema {
   filter?: SpecObjectGanttProps['filter'];
   /** Sort configuration, forwarded as `$orderby` via `convertSortToQueryParams`. Array only — the legacy string clause is retired (objectui#8221). */
   sort?: SortConfig[];
-  /**
-   * Full-text search term, forwarded as `$search` (objectui#10250). The server
-   * resolves which fields it matches from the object's metadata (ADR-0061).
-   * `ListView` writes it from its toolbar Search box: the chart runs its own
-   * query, so without this key the box changed the list's fetch and nothing
-   * drawn.
-   */
-  search?: string;
-  /**
-   * Narrows the fields {@link ObjectGanttSchema.search} matches, forwarded as
-   * `$searchFields` — and only alongside a term, as a list's own query sends
-   * it. Same key and meaning as {@link ObjectGridSchema.searchableFields}.
-   */
-  searchableFields?: string[];
   /**
    * REFUSED BY NAME (objectui#9256, ADR-0049) — `object-gantt` reads NEITHER
    * content channel; see `children` below for the measurement.
@@ -4303,16 +4166,18 @@ export interface ObjectCalendarSchema extends BaseSchema {
   /**
    * The configuration container, and the FIRST thing this element's renderer
    * reads: `plugin-calendar/src/ObjectCalendar.tsx`'s `getCalendarConfig`
-   * returns this block whole when it is present, and only falls through to the
-   * flat members below when it is not.
+   * returns this block whole when it is present.
    *
-   * ⭐ This is where the five field-name keys are AUTHORED (objectui#8831):
+   * ⭐ This is the ONE spelling of the five field-name keys (objectui#8831,
+   * objectstack#25923):
    * `calendar: { startDateField, endDateField, titleField, colorField, allDayField }`.
    * `ComponentPropsMap['object-calendar']` refuses the same five written flat on
    * the node, and its diagnostic prescribes exactly this block (one key per
-   * concept, the spec's Prime Directive #12). The flat members below are the
-   * runtime handoff, declared because the renderer reads them, not a second
-   * spelling to write.
+   * concept, the spec's Prime Directive #12). This interface declares none of
+   * the five flat, so a fresh literal carrying one is a compile error; both
+   * producers (`ListView`, and `ObjectView`'s `generateViewSchema`) emit this
+   * block. The flat fallback `getCalendarConfig` still reads is typed on
+   * `plugin-calendar`'s package-local hand-off type (Commandment #0.1).
    *
    * `@objectstack/spec` declares the KEY and, since 17.7.0, its SHAPE:
    * `ComponentPropsMap['object-calendar'].calendar` is a strict copy of the list
@@ -4343,31 +4208,10 @@ export interface ObjectCalendarSchema extends BaseSchema {
    */
   calendar?: ObjectCalendarBlockConfig;
   /**
-   * Field for event start — the FLAT spelling, READ BUT NOT AUTHORED
-   * (objectui#8831). Write `calendar.startDateField` instead.
-   *
-   * This is the runtime handoff: `ObjectView` and `ListView` emit the five
-   * field-name keys flat on the `object-calendar` node they build, and
-   * `getCalendarConfig` reads them only when the node carries no
-   * {@link ObjectCalendarSchema.calendar} block. `@objectstack/spec` refuses
-   * the same five at this element with `unrecognized_keys`, and its diagnostic
-   * names the {@link ObjectCalendarSchema.calendar} block as the place to write
-   * them (one key per concept, its Prime Directive #12). The five stay declared
-   * here because the renderer reads them; a declaration records that read, it
-   * is not a second authoring spelling.
-   */
-  startDateField?: string;
-  /**
-   * Field for event end — the FLAT spelling, read but not authored. Write
-   * `calendar.endDateField`; see {@link ObjectCalendarSchema.startDateField}.
-   */
-  endDateField?: string;
-  /**
    * ⛔ RETIRED (objectui#8355, director ruling of 2026-09-16) — `dateField` was
-   * the pre-#2231 objectui spelling of {@link ObjectCalendarSchema.startDateField}
-   * and is refused BY NAME on both faces: `?: never` here, an
-   * `aliasKeyRefusal()` arm on the zod mirror (`zod/objectql.zod.ts`). Write
-   * `startDateField`.
+   * the pre-#2231 objectui spelling of `startDateField` and is refused BY NAME
+   * on both faces: `?: never` here, an `aliasKeyRefusal()` arm on the zod
+   * mirror (`zod/objectql.zod.ts`). Write `calendar.startDateField`.
    *
    * ⚠️ It is a TOMBSTONE, not a deletion, and the difference is the whole
    * ruling. `BaseSchema` is `.passthrough()` on the mirror (and carried
@@ -4379,85 +4223,15 @@ export interface ObjectCalendarSchema extends BaseSchema {
    */
   dateField?: never;
   /**
-   * ⛔ RETIRED (objectui#8355) — the pre-#2231 spelling of
-   * {@link ObjectCalendarSchema.endDateField}, refused by name for the reason
-   * spelled out on {@link ObjectCalendarSchema.dateField} above. Write
-   * `endDateField`.
+   * ⛔ RETIRED (objectui#8355) — the pre-#2231 spelling of `endDateField`,
+   * refused by name for the reason spelled out on
+   * {@link ObjectCalendarSchema.dateField} above. Write `calendar.endDateField`.
    *
    * ⚠️ This one degraded even more quietly than its sibling before the
    * retirement: the node still resolved through `startDateField`, so the
    * calendar drew, and only the end binding went missing.
    */
   endField?: never;
-  /**
-   * Field for event title — the FLAT spelling, read but not authored. Write
-   * `calendar.titleField`; see {@link ObjectCalendarSchema.startDateField}.
-   */
-  titleField?: string;
-  /**
-   * Record field carrying the event's colour — the FLAT spelling, read but not
-   * authored: write `calendar.colorField`, and see
-   * {@link ObjectCalendarSchema.startDateField} for why the flat member stays
-   * declared.
-   *
-   * The value is any CSS colour or a semantic palette name, typically a
-   * server-computed status colour. Resolved PER
-   * RECORD by `plugin-calendar/src/ObjectCalendar.tsx`, which falls back to the
-   * record's own `color` value and then to the platform default, so an authored
-   * value that never arrives is invisible rather than loud.
-   *
-   * DERIVED from {@link CalendarConfig}, the same type the `calendar` block
-   * carries, so the flat spelling cannot drift from the block spelling. That is
-   * verbatim the pattern objectui#6051 established for
-   * {@link ObjectGanttSchema.colorField} — the same key name, the same
-   * mechanism, on this same file — and the reason this member is an indexed
-   * access rather than a fresh `string`.
-   *
-   * Undeclared here until objectui#8466, so an authored value reached the
-   * renderer only through {@link BaseSchema}'s `[key: string]: any` — admitted,
-   * never examined — while `plugin-calendar/README.md` taught it as authorable.
-   */
-  colorField?: SpecCalendarConfig['colorField'];
-  /**
-   * Record field carrying the all-day flag — the FLAT spelling, read but not
-   * authored: write `calendar.allDayField`, and see
-   * {@link ObjectCalendarSchema.startDateField} for why the flat member stays
-   * declared.
-   *
-   * LOAD-BEARING since objectui#8026:
-   * the events pass in `plugin-calendar/src/ObjectCalendar.tsx` reads it and a
-   * change to the key genuinely changes what is drawn. It is also in
-   * that component's `getCalendarConfig` memo dependency list, which is what
-   * makes the change reach the screen.
-   *
-   * Through `@objectstack/spec` 17.4.0 this key was objectui-LOCAL in both
-   * positions: `CalendarConfigSchema` was a `strictObject` of exactly
-   * `startDateField`, `endDateField`, `titleField` and `colorField`, and
-   * answered `allDayField` and a nonsense key with the identical
-   * `unrecognized_keys` diagnostic (objectui#8651). Since 17.5.0 that schema
-   * declares `allDayField` too, so `calendar.allDayField` is a spec key like its
-   * four neighbours (objectui#11073). This flat member is still typed `string`
-   * rather than derived from {@link CalendarConfig}; the two types are equal.
-   *
-   * ⛔ Declaring it widens NO accept set, which is why Commandment #0.1 is not
-   * engaged. Measured on spec 17.3.0: `ComponentPropsMap['object-calendar']`
-   * refuses ALL FIVE flat field-name keys with `unrecognized_keys` — including
-   * {@link ObjectCalendarSchema.titleField},
-   * {@link ObjectCalendarSchema.startDateField} and
-   * {@link ObjectCalendarSchema.endDateField} above, which have shipped
-   * DECLARED for releases. This key is the fifth member of that flat handoff,
-   * not a new dialect. And under `BaseSchema`'s
-   * index signature the value was already `any`, so declaring only NARROWED.
-   *
-   * ⭐ Nor is it a new precedent: {@link CalendarViewSchema} — a sibling
-   * calendar interface in the same plugin, whose OWN renderer
-   * (`plugin-calendar/src/calendar-view-renderer.tsx`) reads the same five flat
-   * keys — has shipped all five declared, `allDayField` included, on both
-   * faces. Two interfaces, two renderers, one flat vocabulary: this interface
-   * was the odd one out, not the pioneer, and the pin keeps that shared
-   * vocabulary from drifting apart.
-   */
-  allDayField?: string;
   /**
    * Default view mode — the renderer's rendered set. `'agenda'` was retired
    * (`ed8df3e50`, following `b55a34647`): `CalendarView` renders no agenda view,
@@ -4538,6 +4312,21 @@ export interface ObjectCalendarSchema extends BaseSchema {
    * reads them, in `plugin-calendar`'s `calendarNavigationMembers-8652` test.
    */
   navigation?: ViewNavigationConfig;
+  /**
+   * BCP-47 tag the calendar formats its dates and times with — the
+   * `ComponentPropsMap['object-calendar']` member, by reference
+   * (objectstack#25923, work item 4). `plugin-calendar`'s registration
+   * boundary reads it off the node and drops a tag `Intl` refuses, the same
+   * answer as an absent key.
+   */
+  locale?: SpecObjectCalendarProps['locale'];
+  /**
+   * External loading state — the `ComponentPropsMap['object-calendar']`
+   * member, by reference (objectstack#25923, work item 4). Honoured only
+   * alongside an array `data`; a calendar fed by `staticData` or `objectName`
+   * owns its loading state and drops it.
+   */
+  loading?: SpecObjectCalendarProps['loading'];
   /**
    * REFUSED BY NAME (objectui#9256, ADR-0049) — `object-calendar` reads
    * NEITHER content channel; see `children` below for the measurement.

@@ -28,8 +28,9 @@
  *
  * What the rows establish:
  *
- *   - **`drawer`, `modal` and `popover` open the entry's record** in that
- *     overlay. `drawer` is the LIT CONTROL every "nothing happened" row below
+  *   - **`drawer`, and a block written without `mode` (the spec's `drawer`
+ *     default since objectstack#26677), open the entry's record** in the
+ *     drawer. `drawer` is the LIT CONTROL every "nothing happened" row below
  *     leans on.
  *   - **`none` and `preventNavigation` open nothing**, and the flag outranks an
  *     overlay mode.
@@ -45,17 +46,17 @@
  * the registration's description states them and a description is a claim
  * about this renderer. Unlike the board and the calendar, this renderer
  * supplies no drawer default, so an ABSENT key opens nothing, with a host
- * record navigator mounted or not; and `split` opens nothing, because the
- * timeline hands the split shell no main panel. A timeline that learns any of
- * these reddens its row, and the fix is to rewrite that description with it,
+ * record navigator mounted or not. (`split`, which opened nothing here, left
+ * the spec with objectstack#26677.) A timeline that learns this reddens its
+ * row, and the fix is to rewrite that description with it,
  * ⛔ not to relax the row.
  *
  * And `page`, pinned both ways. Since objectui#11293 `useNavigationOverlay`
  * hands a `page` click it has no `onNavigate` for to the record navigator the
  * HOST publishes (`RelatedRecordActionsContext.openRecord`), which the console
  * mounts on its custom pages, record pages and list views. So under such a
- * host `page`, and a block written without `mode` (the spec's `page` default),
- * open the record page; with no host navigator there is no record page to
+ * host `page` opens the record page (a block written without `mode` took the
+ * spec's `page` default until objectstack#26677 and now opens the drawer); with no host navigator there is no record page to
  * open, and the click opens nothing (objectui#11168 slice 3 round 4, the
  * board's `kanbanNavigationMembers-8652` host).
  */
@@ -162,13 +163,6 @@ describe('object-timeline `navigation` members decide the entry click (objectui#
     expect(open).not.toHaveBeenCalled();
   });
 
-  it.each(['modal', 'popover'] as const)('`mode: "%s"` opens the entry\'s record in that overlay', async (mode) => {
-    const { open } = await clickEntry({ mode });
-    await waitFor(() => expect(dialog()).not.toBeNull());
-    expect(openedRecord()).not.toBeNull();
-    expect(open).not.toHaveBeenCalled();
-  });
-
   it('`mode: "none"` opens nothing', async () => {
     const { open } = await clickEntry({ mode: 'none' });
     await expectNothingOpened(open, 'none');
@@ -193,15 +187,12 @@ describe('object-timeline `navigation` members decide the entry click (objectui#
     expect(open).toHaveBeenCalledWith(`/${OBJECT}/record/1`, '_blank');
   });
 
-  it.each(['drawer', 'modal', 'split', 'popover'] as const)(
-    '…and an overlay mode too: `openNewTab: true` beside `%s` opens a tab and no overlay',
-    async (mode) => {
-      const { open } = await clickEntry({ mode, openNewTab: true });
-      await waitFor(() => expect(open).toHaveBeenCalledTimes(1));
-      expect(open).toHaveBeenCalledWith(`/${OBJECT}/record/1`, '_blank');
-      expect(dialog()).toBeNull();
-    },
-  );
+  it('…and the overlay mode too: `openNewTab: true` beside `drawer` opens a tab and no overlay', async () => {
+    const { open } = await clickEntry({ mode: 'drawer', openNewTab: true });
+    await waitFor(() => expect(open).toHaveBeenCalledTimes(1));
+    expect(open).toHaveBeenCalledWith(`/${OBJECT}/record/1`, '_blank');
+    expect(dialog()).toBeNull();
+  });
 
   it('…but NOT `mode: "none"`: `none` beside `openNewTab: true` opens nothing', async () => {
     // objectui#11168 slice 5: the description says `openNewTab` outranks every
@@ -257,16 +248,14 @@ describe('the registration description\'s warnings are TRUE (objectui#8654)', ()
     await expectNothingOpened(open, 'page — rewrite the `navigation` description');
   });
 
-  it('with NO host navigator a block WITHOUT `mode` resolves to `page` — so it opens nothing either', async () => {
-    // `size` alone, written to widen an overlay, takes the spec's `page`
-    // default rather than a drawer. Compare the LIT CONTROL.
+  it('a block WITHOUT `mode` takes the spec\'s `drawer` default — it opens the drawer (objectstack#26677)', async () => {
+    // Until objectstack#26677 `size` alone took the spec's `page` default and,
+    // with no host navigator, opened nothing. The same block now opens the
+    // entry's record in the drawer, exactly like the LIT CONTROL.
     const { open } = await clickEntry({ size: 'lg' });
-    await expectNothingOpened(open, 'mode-less block — rewrite the `navigation` description');
-  });
-
-  it('`mode: "split"` opens NOTHING — the timeline hands the split shell no main panel', async () => {
-    const { open } = await clickEntry({ mode: 'split' });
-    await expectNothingOpened(open, 'split — rewrite the `navigation` description');
+    await waitFor(() => expect(dialog()).not.toBeNull());
+    expect(openedRecord()).not.toBeNull();
+    expect(open).not.toHaveBeenCalled();
   });
 });
 
@@ -305,12 +294,11 @@ describe('`page` opens the record page through the host\'s record navigator (obj
     expect(open).not.toHaveBeenCalled();
   });
 
-  it('a block WITHOUT `mode` resolves to `page`, and navigates the same way', async () => {
+  it('a block WITHOUT `mode` takes the spec\'s `drawer` default: it opens the drawer and does NOT navigate (objectstack#26677)', async () => {
     const { value, openRecord } = recordNavigatorHost();
     const { open } = await clickEntry({ size: 'lg' }, {}, value);
-    await waitFor(() => expect(openRecord).toHaveBeenCalledTimes(1));
-    expect(openRecord).toHaveBeenCalledWith(OBJECT, '1');
-    expect(dialog()).toBeNull();
+    await waitFor(() => expect(dialog()).not.toBeNull());
+    expect(openRecord).not.toHaveBeenCalled();
     expect(open).not.toHaveBeenCalled();
   });
 
@@ -326,7 +314,6 @@ describe('`page` opens the record page through the host\'s record navigator (obj
   it.each([
     ['the key ABSENT', undefined],
     ['`mode: "none"`', { mode: 'none' }],
-    ['`mode: "split"`', { mode: 'split' }],
   ] as const)('%s still opens nothing under the host, and does not navigate', async (why, navigation) => {
     const { value, openRecord } = recordNavigatorHost();
     const { open } = await clickEntry(navigation, {}, value);
@@ -369,14 +356,22 @@ describe('on a timeline that names no `objectName` there is no record page to op
     expect(open).not.toHaveBeenCalled();
   });
 
-  it.each([
-    ['`mode: "page"`', { mode: 'page' }],
-    ['a block without `mode`', { size: 'lg' }],
-  ] as const)('%s opens nothing, even under a host that publishes its record navigator', async (why, navigation) => {
+  it('`mode: "page"` opens nothing, even under a host that publishes its record navigator', async () => {
     const { value, openRecord } = recordNavigatorHost();
-    const { open } = await clickObjectlessEntry(navigation, value);
-    await expectNothingOpened(open, String(why));
+    const { open } = await clickObjectlessEntry({ mode: 'page' }, value);
+    await expectNothingOpened(open, '`mode: "page"`');
     expect(openRecord).not.toHaveBeenCalled();
+  });
+
+  it('a block without `mode` takes the spec\'s `drawer` default and opens the entry\'s record, host or not (objectstack#26677)', async () => {
+    // FLIPPED: the mode-less block took the spec's `page` default until
+    // objectstack#26677 and so opened nothing here. It now opens the drawer —
+    // the drawer needs no object name, exactly like the LIT CONTROL.
+    const { value, openRecord } = recordNavigatorHost();
+    const { open } = await clickObjectlessEntry({ size: 'lg' }, value);
+    await waitFor(() => expect(dialog()).not.toBeNull());
+    expect(openRecord).not.toHaveBeenCalled();
+    expect(open).not.toHaveBeenCalled();
   });
 
   it.each([

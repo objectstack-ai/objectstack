@@ -33,9 +33,11 @@ import type { PrincipalSessionMinter, PrintSession } from './principal-session.j
  *     once more AFTER step 5 — so even that probe never starts a browser
  *     before every other refusal has had its say.
  *  3. **The page.** The request names the page it expects; it must exist
- *     (`RESOURCE_NOT_FOUND` / `404`), be bound to the record's object, declare
- *     `print`, and be the object's default record page — the one page the
- *     console renders a record on (`VALIDATION_ERROR` / `400` for each).
+ *     (`RESOURCE_NOT_FOUND` / `404`), be a record page of the record's object,
+ *     and declare `print` (`VALIDATION_ERROR` / `400` for each). Any print page
+ *     of the object prints, the default record page or another one: the
+ *     default renders on the console's record route, any other page on its
+ *     named record-page route ({@link printPageUrl}).
  *  4. **The record, read AS THE CALLER.** A record the caller cannot read and
  *     a record that does not exist answer the same `RECORD_NOT_FOUND` / `404`,
  *     so the answer says nothing about a record the caller may not see. A user
@@ -167,6 +169,46 @@ function nonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
+/**
+ * True when `page` is a record page of `object`: its `type` is `'record'` and
+ * its `object` names that object.
+ *
+ * The same reading as the console's `isRecordPageOf` (`@object-ui/react`,
+ * `ui/packages/react/src/hooks/usePageAssignment.ts`), which is what the
+ * console's named record-page route asks before it draws the named page and
+ * what its record route filters the object's pages with. The console refuses
+ * every other name with a not-found state, so a page this function accepts is
+ * one the console draws, and a page it refuses is one a print could only put a
+ * not-found state (or no page at all) on paper for. No wider and no narrower:
+ * `type` is read exactly, as the console reads it, so a body that carries no
+ * `type` is not a record page here either (every door that parses or serves a
+ * page fills `PageSchema`'s declared default in).
+ */
+function isRecordPageOf(page: Record<string, unknown>, object: string): boolean {
+  return page.type === 'record' && page.object === object;
+}
+
+/**
+ * The console URL a record prints from on `page`, a record page of its object
+ * that declares `print` (checked before this is asked).
+ *
+ *  - The object's default record page renders on the console's record route,
+ *    `CONSOLE/apps/APP/OBJECT/record/ID`, which draws a record on that page.
+ *  - Any other print page renders on the console's named record-page route,
+ *    `CONSOLE/apps/APP/OBJECT/record/ID/page/PAGE` (`RECORD_NAMED_PAGE_ROUTE`,
+ *    `ui/packages/app-shell/src/console/AppContent.tsx`), which draws the named
+ *    page and never falls back to the default one.
+ *
+ * Every segment is encoded on its own, so a name carrying `/` or `?` stays the
+ * one segment it is.
+ */
+function printPageUrl(consoleUrl: string, req: ValidRequest, page: Record<string, unknown>): string {
+  const record =
+    `${consoleUrl}/apps/${encodeURIComponent(req.app)}/` +
+    `${encodeURIComponent(req.object)}/record/${encodeURIComponent(req.recordId)}`;
+  return defaultRecordPageObject(page) === req.object ? record : `${record}/page/${encodeURIComponent(req.page)}`;
+}
+
 /** What the engine's last probe answered. */
 type ProbeResult = { ok: true; version: string } | { ok: false; reason: string };
 
@@ -259,7 +301,7 @@ export class PrintService implements IPrintService {
 
     // ③ The page.
     const req = validateRequest(request);
-    this.refuseUnlessPrintPage(engine, req);
+    const page = this.refuseUnlessPrintPage(engine, req);
 
     // ④ The record, read as the caller.
     await this.refuseUnlessReadable(engine, req, context);
@@ -279,9 +321,7 @@ export class PrintService implements IPrintService {
 
     // Mint, render, archive — and revoke, whatever happened.
     const filename = req.filename ?? `${req.page}-${req.recordId}.pdf`;
-    const url =
-      `${placement.resolved.consoleUrl}/apps/${encodeURIComponent(req.app)}/` +
-      `${encodeURIComponent(req.object)}/record/${encodeURIComponent(req.recordId)}`;
+    const url = printPageUrl(placement.resolved.consoleUrl, req, page);
     const session: PrintSession = await minter.mint(context, PRINT_SESSION_TTL_SECONDS);
     try {
       const pdf = await driver.renderPdf({ url, cookie: session.cookie, timeoutMs: PRINT_RENDER_TIMEOUT_MS });
@@ -336,16 +376,17 @@ export class PrintService implements IPrintService {
     if (context.authGate) deny(`the user's sign-in is held by an authentication policy (${context.authGate.code})`);
   }
 
-  private refuseUnlessPrintPage(engine: PrintEngine, req: ValidRequest): void {
+  private refuseUnlessPrintPage(engine: PrintEngine, req: ValidRequest): Record<string, unknown> {
     const page = engine.registry.getItem<Record<string, unknown>>('page', req.page);
     if (!page || typeof page !== 'object') {
       printRefusal('RESOURCE_NOT_FOUND', 404, `There is no page named '${req.page}'.`);
     }
-    if (page.object !== req.object) {
+    if (!isRecordPageOf(page, req.object)) {
       printRefusal(
         'VALIDATION_ERROR',
         400,
-        `The page '${req.page}' is not a record page of '${req.object}', so it cannot print a ${req.object} record.`,
+        `The page '${req.page}' is not a record page of '${req.object}' (type: 'record', object: '${req.object}'), ` +
+          `so it cannot print a ${req.object} record.`,
       );
     }
     const print = page.print;
@@ -356,14 +397,7 @@ export class PrintService implements IPrintService {
         `The page '${req.page}' does not declare 'print', so it is not a print page. Declare print on the page to print records on it.`,
       );
     }
-    if (defaultRecordPageObject(page) !== req.object) {
-      printRefusal(
-        'VALIDATION_ERROR',
-        400,
-        `The page '${req.page}' is not the default record page of '${req.object}' (isDefault: true). The console ` +
-          'renders a record on its default record page only, so that is the one page a record can be printed on.',
-      );
-    }
+    return page;
   }
 
   private async refuseUnlessReadable(

@@ -9,9 +9,10 @@
  * That was one instance of a class: at audit time, six whole domains had zero
  * client expression. This ledger makes the class visible and ratchets it —
  * `route-ledger.conformance.test.ts` fails when a dispatcher domain appears
- * with no ledger entry, and when an entry claims a client method that does not
- * exist. A new route therefore lands with an explicit, reviewed disposition or
- * not at all.
+ * with no ledger entry, and (#26513) when a route the dispatcher plugin mounts
+ * has no row; the client-side guards fail when an entry claims a client method
+ * that does not exist. A new route therefore lands with an explicit, reviewed
+ * disposition or not at all.
  *
  * SCOPE. Dispatcher (`http-dispatcher.ts`) routes, expressed as
  * dispatcher-internal `cleanPath` patterns (prepend `/api/v1` for the wire
@@ -295,11 +296,16 @@ export const NON_DISPATCH_MOUNT_PREFIXES = [
  * "correct" the digits to make a build green — regenerate them, and read what
  * they moved by.
  *
- * It is a DELETION detector and deliberately NOT a route-granularity check
- * against what the dispatcher registers: whether this ledger should be checked
- * per route, given `DomainHandlerRegistry.list()` exposes domains and not
- * routes, is an open maintainer decision in #17041. A census stays correct
- * whichever way that is ruled.
+ * It is a DELETION detector, not a route-granularity check. That check lives
+ * in `route-ledger.conformance.test.ts` since #26513: every route
+ * `dispatcher-plugin.ts` mounts must have a row, so deleting a mounted route's
+ * row reds there. It sees only what the plugin mounts, so a row with no mount
+ * of its own spelling (a route only `dispatch()` answers behind a catch-all
+ * host, a `servedBy` specialization, a raw-app door) is still guarded per row
+ * by this census alone. Whether the ledger should be checked per route beyond
+ * the mount is an open maintainer question, left open and tracked at #26513
+ * (the issue it was first filed under no longer resolves). A census stays
+ * correct whichever way that is ruled; whether it retires is #26431's call.
  */
 export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
   // ── well-known ────────────────────────────────────────────────────────────
@@ -380,7 +386,10 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
     note: 'ADR-0126 §3 regime C, as ADR-0131 D6 amends it — switch ONE position (`:type` = `position`), permission set '
       + '(`:type` = `permission`) or declared sharing rule (`:type` = `sharing_rule`, resolved by the `sharingRules` service; '
       + 'its grants reconcile on the ledger write) or declared webhook (`:type` = `webhook`, resolved by the `declaredWebhooks` '
-      + 'reader; the webhook dispatcher refreshes its subscriptions on the ledger write) on/off for this deployment. Writes one `sys_metadata_activation` row through the engine and '
+      + 'reader; the webhook dispatcher refreshes its subscriptions on the ledger write) or declared ownership queue (`:type` = `queue`, '
+      + 'resolved by the `ownership-queue` service; the queue-recipient sharing rules naming it recompute on the ledger write) or '
+      + 'declared assignment rule (`:type` = `assignment_rule`, resolved in the engine\'s metadata registry, which the insert-time '
+      + 'evaluator reads) on/off for this deployment. Writes one `sys_metadata_activation` row through the engine and '
       + 'nothing else (⛔ no definition write, ⛔ no catalog row `active`: ADR-0131 D3 moved the switch into the ledger, and '
       + '`resolveUserAuthzGrants` reads only the ledger for these two types). Body `{ enabled?: boolean }`, the same reader as '
       + 'the action door. The same two authority tiers as `POST /automation/:name/toggle` and `POST /actions/_activation/:object/:action`: '

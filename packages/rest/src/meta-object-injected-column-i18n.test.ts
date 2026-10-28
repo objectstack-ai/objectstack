@@ -146,6 +146,7 @@ const ZH_CN = {
     updated_by: '更新人',
     owner_id: '所有者',
     owning_business_unit_id: '所属业务单元',
+    queue: '队列',
 };
 
 function labelsOf(fields: Record<string, any>): Record<string, unknown> {
@@ -157,6 +158,7 @@ function labelsOf(fields: Record<string, any>): Record<string, unknown> {
         updated_by: fields.updated_by?.label,
         owner_id: fields.owner_id?.label,
         owning_business_unit_id: fields.owning_business_unit_id?.label,
+        queue: fields.queue?.label,
     };
 }
 
@@ -165,10 +167,10 @@ function labelsOf(fields: Record<string, any>): Record<string, unknown> {
 // ---------------------------------------------------------------------------
 
 describe('#14972 — injected system columns reach the /meta/object reads localised', () => {
-    it('the fixture spreads all seven injected columns with their shipped English labels', () => {
+    it('the fixture spreads all eight injected columns with their shipped English labels', () => {
         expect(Object.keys(INJECTED).sort()).toEqual([
             'created_at', 'created_by', 'organization_id', 'owner_id',
-            'owning_business_unit_id', 'updated_at', 'updated_by',
+            'owning_business_unit_id', 'queue', 'updated_at', 'updated_by',
         ]);
         expect((SERVED.fields as any).organization_id.label).toBe('Organization');
     });
@@ -196,6 +198,7 @@ describe('#14972 — injected system columns reach the /meta/object reads locali
                 updated_by: 'Last Modified By',
                 owner_id: 'Owner',
                 owning_business_unit_id: 'Owning Business Unit',
+                queue: 'Queue',
             });
         }
     });

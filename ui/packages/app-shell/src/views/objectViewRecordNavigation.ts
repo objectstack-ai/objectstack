@@ -1,6 +1,6 @@
 /**
  * Record navigation of the Console `ObjectView` (`./ObjectView.tsx`): how a
- * row opens its record (drawer, modal, split, popover or page), the drawer's
+ * row opens its record (the drawer, or the page an object declares), the drawer's
  * `?recordId=` URL state, "expand to full page", and the record links the
  * list publishes, moved out of `ObjectViewInner` verbatim (objectstack#25992,
  * slice 6). Every input is passed in; the component reads the returned values.
@@ -8,7 +8,7 @@
 
 import { useMemo, useCallback, useEffect } from 'react';
 import type { NavigateFunction, Location, SetURLSearchParams } from 'react-router-dom';
-import { deriveRecordSurface, overlayWidthFor } from '@object-ui/plugin-view';
+import { overlayWidthFor } from '@object-ui/plugin-view';
 import { useNavigationOverlay } from '@object-ui/react';
 import type { ViewNavigationConfig } from '@object-ui/types';
 import { RECORD_DRAWER_PARAM } from '../urlParams.js';
@@ -50,15 +50,17 @@ export function useObjectViewRecordNavigation({
     unlabelledViewText: string;
     language: ReturnType<typeof useObjectTranslation>['language'];
 }) {
-    // Navigation overlay for record detail (supports drawer/modal/split/popover via config)
+    // Navigation overlay for record detail.
     // Priority: activeView.navigation > objectDef.navigation > default drawer.
     //
-    // Default mode = 'drawer'. Mirrors Linear / Notion / Airtable / Jira where
-    // record peek is the primary interaction and full-page is the upgrade.
-    // Direct URL access (`/record/:id`) still opens as a full page because
-    // RecordDetailView owns its own route — only same-page click navigation
-    // is drawer-by-default. Per-view config can still override (e.g. a heavy
-    // detail object can set `navigation.mode = 'page'`).
+    // Default mode = 'drawer' (objectstack#26677, maintainer ruling 2026-10-27:
+    // an object opens its records in the drawer, which expands to the full
+    // page — the same record page at two widths — and `page` only where the
+    // object declares it). Direct URL access (`/record/:id`) still opens as a
+    // full page because RecordDetailView owns its own route — only same-page
+    // click navigation is drawer-by-default. A view or object that declares
+    // `navigation.mode: 'page'` navigates to that route instead. The
+    // side-by-side pane is the reader's preference, read by `ObjectView`.
     const detailNavigation: ViewNavigationConfig = useMemo(
         () => {
             const authored = activeView?.navigation ?? objectDef.navigation;
@@ -75,12 +77,13 @@ export function useObjectViewRecordNavigation({
                     ),
                 };
             }
-            // objectstack-ai/objectstack#2578: derive surface + width from FIELD COUNT. Field-heavy → full
-            // page (cramped in a drawer); light → a drawer sized to the content
-            // and clamped to the viewport. Mobile always pages (in deriveRecordSurface).
-            return deriveRecordSurface(objectDef) === 'page'
-                ? { mode: 'page' }
-                : { mode: 'drawer', width: overlayWidthFor('auto', objectDef) };
+            // No authored navigation: the drawer, whatever the object's field
+            // count. Until objectstack#26677 a field-heavy object paged here by
+            // itself (`deriveRecordSurface`, objectstack-ai/objectstack#2578), a
+            // surface no author chose; `page` is now a declaration only. The
+            // drawer's WIDTH still follows the field count (`size: 'auto'`),
+            // clamped to the viewport.
+            return { mode: 'drawer', width: overlayWidthFor('auto', objectDef) };
         },
         [activeView?.navigation, objectDef]
     );
@@ -183,8 +186,7 @@ export function useObjectViewRecordNavigation({
                     return;
                 }
             }
-            // All other modes (page / modal / split / popover / new_window / none)
-            // — delegate to the hook.
+            // All other modes (page / new_window / none) — delegate to the hook.
             navOverlay.handleClick(record, event as any);
         },
         [navOverlay, searchParams, setSearchParams]

@@ -31,7 +31,7 @@ import { renderChildren } from '../../lib/utils';
 import { createElement, forwardRef, useContext } from 'react';
 import type { MouseEventHandler } from 'react';
 
-type AnyProps = { schema: any; className?: string; [key: string]: any };
+type AnyProps = { schema: any; className?: string; [key: string]: unknown };
 
 // Tags that take no children.
 const VOID_TAGS = new Set(['img', 'hr', 'br']);

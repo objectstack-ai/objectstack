@@ -347,7 +347,8 @@
       "traps": ["hydration-race", "single-datapoint", "stale-console-bundle"],
       "source": [
         "examples/app-showcase/e2e/showcase-smoke.spec.ts#SURFACES (SURFACES)",
-        ".github/workflows/showcase-smoke.yml",
+        "examples/app-showcase/test/showcase-smoke.live.test.ts",
+        ".github/workflows/test-nightly-tiers.yml",
         "objectui: packages/app-shell/src/chrome/ErrorBoundary.tsx (route-level fallback + recovery actions)",
         "examples/app-showcase/src/ui/apps/index.ts (nav truth)"
       ],
@@ -2515,7 +2516,7 @@
       "title": "Keyboard shortcut surface: `?` and ?shortcuts=1 open the dialog and Esc closes it, typing in an input never triggers it, the dialog lists exactly the shortcuts whose handler is mounted and every listed one fires (⌘K, ⌘/Ctrl+B shown as ⌘B, Esc, ?), the five formerly advertised dead accelerators (⌘/, N, R, ⌘E, ⌘D) are neither listed nor bound, and the AI-chat pair ⌘⇧O / ⌘⇧S is listed only on the page that handles it (objectui#11674)",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "browser",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -2526,7 +2527,7 @@
         ],
         "knownGaps": [
           "⌘⇧I (chat dock) is wired but the dock only exists when the AI surface is present — on a stock open boot the agent catalog is empty, the listener is not armed and ⌘⇧I is deliberately inert; that WHOLE cell (inert-when-gated AND armed-when-entitled) is scored by ai.console-ai-surface-gating — here record only that the accelerator's handler exists and is gated, never a second verdict",
-          "⌘⇧O / ⌘⇧S are advertised by the AI chat page itself, beside its handler (AiChatPage's useAdvertiseShortcut(NEW_CHAT_SHORTCUT / TOGGLE_CHATS_LIST_SHORTCUT) next to matchAiChatShortcut, objectui#11674), so the dialog lists them ONLY while that page is mounted. The off-page half is scorable on every stock boot: the dialog shows no AI-chat group and neither chord does anything. The on-page half needs the AI chat page, which is reachable only where the access-filtered agent catalog serves at least one agent, i.e. a deployment running the Cloud/Enterprise @objectstack/service-ai, or a console rebuilt with VITE_AI_BASE_URL pointing at such a server (ai.console-ai-surface-gating knownGaps). The open framework ships no agent server by design and CI has no such deployment, so that half scores blocked(environment) (QA run #21782, parked on #22017 row 9). objectui pins that the page's advertisements carry chords its matcher answers (KeyboardShortcutsDialog.wiredOnly-11674.test.tsx, the AI chat page describe) and the key-to-intent mapping (packages/app-shell/src/console/ai/__tests__/matchAiChatShortcut.test.ts); neither is a live on-page run"
+          "⌘⇧O / ⌘⇧S are advertised by the AI chat page itself, beside its handler (AiChatPage's useAdvertiseShortcut(NEW_CHAT_SHORTCUT / TOGGLE_CHATS_LIST_SHORTCUT) next to matchAiChatShortcut, objectui#11674), so the dialog lists them ONLY while that page is mounted. The off-page half is scorable on every stock boot: the dialog shows no AI-chat group and neither chord does anything. The on-page half needs the AI chat page, which is reachable only where the access-filtered agent catalog serves at least one agent, i.e. a deployment running the Cloud/Enterprise @objectstack/service-ai, or a console rebuilt with VITE_AI_BASE_URL pointing at such a server (ai.console-ai-surface-gating knownGaps). The open framework ships no agent server by design and CI has no such deployment, so that half scores blocked(environment) (QA run #21782, parked on #22017 row 9). Unit pins under ui/ cover the page's advertisements carrying chords its matcher answers (ui/packages/app-shell/src/chrome/KeyboardShortcutsDialog.wiredOnly-11674.test.tsx, the AI chat page describe) and the key-to-intent mapping (ui/packages/app-shell/src/console/ai/__tests__/matchAiChatShortcut.test.ts); neither is a live on-page run"
         ]
       },
       "steps": [
@@ -2555,13 +2556,13 @@
         {
           "clause": "the sidebar's displayed chord equals its binding: the dialog lists Toggle sidebar as `⌘ B` and lists no bare B; bare B does nothing and ⌘B / Ctrl+B toggle the sidebar. This was expected-fail K1a until objectui#11674 derived the dialog's rows from the mounted handlers",
           "oracle": "dom",
-          "verify": "the dialog's Navigation group reads `⌘ B` for Toggle sidebar and carries no bare-B row; a bare-B keypress leaves the sidebar state unchanged (read the sidebar's data-state), and ⌘B and Ctrl+B each flip it. objectui pins the same pair in packages/app-shell/src/chrome/KeyboardShortcutsDialog.wiredOnly-11674.test.tsx ('a listed row whose chord does nothing is caught: a bare B leaves the sidebar alone'), which this checkout carries as ui/packages/app-shell/src/chrome/KeyboardShortcutsDialog.wiredOnly-11674.test.tsx; run it at the run's framework SHA — the Console builds from this tree, so there is no separate objectui revision to name — to cite it beside the live read",
+          "verify": "the dialog's Navigation group reads `⌘ B` for Toggle sidebar and carries no bare-B row; a bare-B keypress leaves the sidebar state unchanged (read the sidebar's data-state), and ⌘B and Ctrl+B each flip it. ui/packages/app-shell/src/chrome/KeyboardShortcutsDialog.wiredOnly-11674.test.tsx pins the same pair ('a listed row whose chord does nothing is caught: a bare B leaves the sidebar alone'); run it at the run's framework SHA — the Console builds from this tree, so there is no separate objectui revision to name — to cite it beside the live read",
           "evidence": "the sidebar state trace + the dialog screenshot"
         },
         {
           "clause": "the advertised set equals the wired set: every row the dialog lists fires its own handler, and none of the five formerly advertised accelerators ⌘/ (focus search), N (create), R (refresh), ⌘E (edit), ⌘D (dark mode) is listed; each of the five still produces NO effect. Each probe is its own record: effect-absence proven against the specific once-advertised effect (focus, overlay, network refetch, edit surface, root theme class). This was expected-fail K1b until objectui#11674 made the dialog list only shortcuts whose handler is mounted",
           "oracle": "network",
-          "verify": "the step-3 inventory lists none of the five; per key, the once-advertised effect's own oracle stays silent (no focus change via document.activeElement, no ?form=new push, no list refetch on the wire, no edit route, documentElement class list unchanged); reproduce twice on fresh loads per RUNNER rule 2. objectui pins the listed half in KeyboardShortcutsDialog.wiredOnly-11674.test.tsx ('every row the console dialog lists fires its real handler, with ⌘ and with Ctrl')",
+          "verify": "the step-3 inventory lists none of the five; per key, the once-advertised effect's own oracle stays silent (no focus change via document.activeElement, no ?form=new push, no list refetch on the wire, no edit route, documentElement class list unchanged); reproduce twice on fresh loads per RUNNER rule 2. the listed half is pinned in ui/packages/app-shell/src/chrome/KeyboardShortcutsDialog.wiredOnly-11674.test.tsx ('every row the console dialog lists fires its real handler, with ⌘ and with Ctrl')",
           "evidence": "the five per-key traces/DOM reads"
         },
         {
@@ -2616,6 +2617,12 @@
           "date": "2026-10-26",
           "change": "acceptance[2].verify re-pointed off the retired pin: it told the runner to run the objectui pin from an objectui checkout at the .objectui-sha revision. There is no .objectui-sha any more: objectui lives in this repository under ui/ and the Console builds from the framework SHA (#26052). The pin is ui/packages/app-shell/src/chrome/KeyboardShortcutsDialog.wiredOnly-11674.test.tsx, run at the run's own SHA. Wording only: no clause changed. #26035 left this file's retired pin wording to the 18.2.0 ledger card #25845. Re-read at 9753d163",
           "ref": "#26035"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-27",
+          "change": "fixtures.knownGaps[1], acceptance[2].verify and acceptance[3].verify: the unit pins are named by their ui/ paths in this checkout instead of as objectui pins (#26626, maintainer-directed). No clause changed, no status changed",
+          "ref": "#26626"
         }
       ]
     },
@@ -3136,7 +3143,7 @@
       "title": "The settings audit trail keeps no fingerprint of a secret-valued setting that a reader can match offline: both ledgers record the platform's keyed digest or none, never the value or an unkeyed hash, so a caller who can only read the audit rows learns that the secret changed and nothing about its value",
       "since": "v17",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3159,10 +3166,10 @@
         "generate a fresh random value V1 for this run (never a value used anywhere else). As admin, PUT /api/settings/mail { provider: 'resend', api_key: V1, from_email: 'ops@example.com' }",
         "read the per-key ledger: GET /api/v1/data/sys_platform_setting_audit filtered to namespace=mail and key=api_key; capture the newest row (action set, encrypted true, new_hash). mail is a GLOBAL-scope namespace, and the per-key ledger of the global rung is the deployment-level sys_platform_setting_audit (ADR-0131 D7, packages/services/service-settings/src/settings-service-plugin.ts#settingAuditObjectFor); a tenant- or user-scope key's row lands in sys_setting_audit",
         "read the generic ledger: GET /api/v1/data/sys_audit_log filtered to action=config_change; capture the newest row for mail.api_key (object_name 'sys_platform_setting' — mail is a GLOBAL-scope namespace, and a global-scope value's row names the tenant-less table it lives in, packages/services/service-settings/src/config-change-audit.ts#CONFIG_CHANGE_GLOBAL_OBJECT_NAME; a tenant-scope key's row names 'sys_setting'; new_value is a JSON string carrying namespace, key, scope and digest; metadata carries encrypted: true)",
-        "OFFLINE, with no server key: compute the unkeyed digests a leak would carry — the FNV-1a 32 of V1's canonical JSON (the quoted string), spelled 'fnv32:' + 8 lowercase hex, which is the unkeyed digest this settings service writes for a non-secret key (packages/services/service-settings/src/crypto-adapter.ts#digest), and, belt and braces, the SHA-256 hex of V1 (bare, and with a 'sha256:' prefix) — and search both captured rows, every field, for each of them and for V1 itself",
+        "OFFLINE, with no server key: compute the unkeyed digests a leak would carry — the SHA-256 of V1's canonical JSON (the quoted string), spelled 'sha256:' + 64 lowercase hex, which is the unkeyed digest this settings service writes for a non-secret key (packages/services/service-settings/src/crypto-adapter.ts#settingAuditDigest), and, belt and braces, the bare SHA-256 hex of V1 and of its canonical JSON, and the FNV-1a 32 of its canonical JSON ('fnv32:' + 8 lowercase hex, the non-secret digest rows written before #26465 carry) — and search both captured rows, every field, for each of them and for V1 itself",
         "write V1 again, then a different value V2, then V1 a third time; re-read both ledgers and compare the fingerprints of the three writes",
         "reset the key: PUT /api/settings/mail { provider: 'log', api_key: null } (a null value is the reset; 'log' needs no api_key), then read the reset rows",
-        "control: write the NON-secret key mail.from_email and compute OFFLINE the FNV-1a 32 of its canonical JSON (the quoted string), spelled 'fnv32:' + 8 lowercase hex. Its rows must carry exactly that unkeyed digest. This proves step 4's offline search — which computes the same algorithm — WOULD have found an unkeyed digest, and that the keyed rule is scoped to secret-valued keys"
+        "control: write the NON-secret key mail.from_email and compute OFFLINE the SHA-256 of its canonical JSON (the quoted string), spelled 'sha256:' + 64 lowercase hex. Its rows must carry exactly that unkeyed digest. This proves step 4's offline search — which computes the same algorithm — WOULD have found an unkeyed digest, and that the keyed rule is scoped to secret-valued keys"
       ],
       "acceptance": [
         {
@@ -3172,7 +3179,7 @@
           "evidence": "both captured rows, quoted in full"
         },
         {
-          "clause": "a reader of the audit rows who holds no server key cannot confirm a guess: no fingerprint in either row can be reproduced from the value alone. No offline unkeyed digest of V1 — the FNV-1a 32 of its canonical JSON ('fnv32:…', the algorithm the service uses for non-secret keys), nor the SHA-256 of V1 with or without the sha256 prefix — matches anything in either row",
+          "clause": "a reader of the audit rows who holds no server key cannot confirm a guess: no fingerprint in either row can be reproduced from the value alone. No offline unkeyed digest of V1 — the SHA-256 of its canonical JSON ('sha256:…', the algorithm the service uses for non-secret keys), the bare SHA-256 of V1, nor the FNV-1a 32 of its canonical JSON ('fnv32:…') — matches anything in either row",
           "oracle": "api",
           "verify": "the step 4 offline search over both rows finds no hit, AND the step 7 control's offline digest DOES match the non-secret row. Without the control, a no-hit proves nothing about the search",
           "evidence": "the offline digest values, the two secret rows, and the matching control row"
@@ -3190,9 +3197,9 @@
           "evidence": "the two reset rows"
         },
         {
-          "clause": "non-secret settings are unchanged: a non-encrypted key keeps the unkeyed digest of its canonical JSON on both ledgers. The keyed rule applies to secret-valued keys only",
+          "clause": "non-secret settings record the unkeyed digest of their canonical JSON on both ledgers, the SHA-256 the per-key ledger's new_hash column declares. The keyed rule applies to secret-valued keys only",
           "oracle": "api",
-          "verify": "mail.from_email's rows carry the FNV-1a 32 digest of the quoted JSON string ('fnv32:' + 8 lowercase hex), computed offline in step 7",
+          "verify": "mail.from_email's rows carry the SHA-256 digest of the quoted JSON string ('sha256:' + 64 lowercase hex), computed offline in step 7",
           "evidence": "the control rows and the offline digest"
         },
         {
@@ -3203,7 +3210,7 @@
         }
       ],
       "negative": [
-        "an unkeyed digest of a secret-valued setting (the 'fnv32:' FNV-1a 32 of its canonical JSON, or a plain SHA-256 of the value, with or without a prefix) on EITHER ledger is a FAIL. Anyone who can read the audit rows could confirm a guessed value offline, and settings secrets are short, guessable values",
+        "an unkeyed digest of a secret-valued setting (the 'sha256:' SHA-256 of its canonical JSON, a plain SHA-256 of the value, or the 'fnv32:' FNV-1a 32 of its canonical JSON) on EITHER ledger is a FAIL. Anyone who can read the audit rows could confirm a guessed value offline, and settings secrets are short, guessable values",
         "the plaintext of a secret-valued setting in any field of either ledger is a FAIL",
         "a host with no keyed digest falling back to an unkeyed one is a FAIL; the rule is to record no fingerprint",
         "a secret write REFUSED because its audit fingerprint could not be computed is a FAIL: the audit trail never vetoes a settings save",
@@ -3214,7 +3221,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/services/service-settings/src/settings-audit-secret-digest.test.ts — acceptance[5] and negative[2]–[3] ONLY: the no-keyed-digest arm a stock boot cannot reach (knownGaps[0]), through 'legacy inline-adapter path with no provider records no fingerprint and reports it once' and 'a provider that refuses a keyed digest leaves the write intact and records no fingerprint'. The pin drives SettingsService over stub audit sinks. So its other cases — 'records the provider keyed digest on both ledgers, not the unkeyed hash of the value', 'is stable for equal values and distinct for different ones', 'records no fingerprint on a reset', the provider-wired inline-adapter case, and the non-secret 'keep the unkeyed adapter digest of the canonical JSON, unchanged' — are service-layer evidence for acceptance[0]–[4] and negative[0]–[1], never their pass: those score the ledger rows read back over the API (steps[0]–[6])"
+        "ref": "packages/services/service-settings/src/settings-audit-secret-digest.test.ts — acceptance[5] and negative[2]–[3] ONLY: the no-keyed-digest arm a stock boot cannot reach (knownGaps[0]), through 'legacy inline-adapter path with no provider records no fingerprint and reports it once' and 'a provider that refuses a keyed digest leaves the write intact and records no fingerprint'. The pin drives SettingsService over stub audit sinks. So its other cases — 'records the provider keyed digest on both ledgers, not the unkeyed hash of the value', 'is stable for equal values and distinct for different ones', 'records no fingerprint on a reset', the provider-wired inline-adapter case, and the non-secret 'record the declared SHA-256 of the canonical JSON on both ledgers, not the adapter digest (#26465)' — are service-layer evidence for acceptance[0]–[4] and negative[0]–[1], never their pass: those score the ledger rows read back over the API (steps[0]–[6])"
       },
       "source": [
         "packages/services/service-settings/src/settings-service.ts#secretAuditDigest (one helper supplies a secret write's fingerprint on both write branches, the sys_secret path and the legacy inline-adapter path: the provider's keyedDigest, or null with a once-per-key warn; never the adapter's unkeyed digest)",
@@ -3248,6 +3255,12 @@
           "date": "2026-10-20",
           "change": "automated.ref narrowed per clause — the sweep-wide rule-6 contradiction QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4) names at settings-audit acceptance[0]–[4], round 15 of wave anchor #24579. The ref listed seven cases whose names read as acceptance[0], [2], [3] and [4]. The pin drives SettingsService over stub audit sinks and never reads sys_platform_setting_audit or sys_audit_log over the API, which is what those clauses score. By RUNNER rule 6 (a pin scores only the layer it drives) it scores acceptance[5] and its negatives [2] and [3] only (QA run #24838 scored acceptance[0]–[4] live). Read at base b1676441ba. No clause changed",
           "ref": "#24891"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-27",
+          "change": "steps[3] and [6], acceptance[1].clause, [4] (clause, verify), negative[0] and automated.ref re-pointed: a non-secret setting's audit digest is now the SHA-256 the sys_setting_audit / sys_platform_setting_audit columns declare, spelled 'sha256:' + 64 hex (crypto-adapter.ts settingAuditDigest), no longer the adapter's FNV-1a 32 ('fnv32:'). The step-7 control computes the algorithm the service now writes, so it can still prove the offline search would find an unkeyed digest. Not loosened: the secret search keeps the FNV-1a 32 as a second net, so a secret row carrying either unkeyed form still fails",
+          "ref": "#26465"
         }
       ]
     },

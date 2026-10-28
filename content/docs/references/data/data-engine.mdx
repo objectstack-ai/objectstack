@@ -1307,14 +1307,14 @@ Transport spellings of the QueryAST slots — folded to canonical keys at the bo
 | **$top** | `integer \| string \| null` | optional | Transport spelling of `limit` (OData `$top`) — a non-negative integer, or the digits a querystring carries it as |
 | **$skip** | `integer \| string \| null` | optional | Transport spelling of `offset` (OData `$skip`) — a non-negative integer, or the digits a querystring carries it as |
 | **$orderby** | `Record<string, Enum<'asc' \| 'desc'>> \| Record<string, 1 \| -1> \| { field: string; order?: Enum<'asc' \| 'desc'> }[] \| null` | optional | Transport spelling of `orderBy` (OData `$orderby`) |
-| **$select** | `string \| string[] \| null` | optional | Transport spelling of `fields` (OData `$select`) |
+| **$select** | `string \| string[] \| null` | optional | Transport spelling of `fields` (OData `$select`) — at least one field name; a value naming no field (blank, only commas and spaces, an empty list, or a list with a blank name) is refused |
 | **$expand** | `string \| string[] \| Record<string, { object: string; fields?: string[]; where?: any; search?: string \| object; … }> \| null` | optional | Transport spelling of `expand` (OData `$expand`) |
 | **$search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … } \| null` | optional | Transport spelling of `search` (OData `$search`) |
 | **$searchFields** | `string \| string[] \| null` | optional | Transport spelling of `searchFields` (OData `$searchFields`) |
 | **$count** | `boolean \| Enum<'true' \| 'false'> \| null` | optional | Transport spelling of the response total-count flag (OData `$count`) |
 | **count** | `boolean \| Enum<'true' \| 'false'> \| null` | optional | Response total-count flag — only an explicit `false` skips the COUNT query |
 | **filter** | `[string, string, any] \| [string, string] \| [string, object, ...object[]] \| object[] \| Record<string, any> \| any \| null` | optional | Transport spelling of `where` |
-| **select** | `string \| string[] \| null` | optional | Transport spelling of `fields` |
+| **select** | `string \| string[] \| null` | optional | Transport spelling of `fields` — at least one field name; a value naming no field (blank, only commas and spaces, an empty list, or a list with a blank name) is refused |
 | **sort** | `Record<string, Enum<'asc' \| 'desc'>> \| Record<string, 1 \| -1> \| { field: string; order?: Enum<'asc' \| 'desc'> }[] \| null` | optional | Transport spelling of `orderBy` |
 | **skip** | `integer \| string \| null` | optional | Transport spelling of `offset` — a non-negative integer, or the digits a querystring carries it as |
 | **populate** | `string \| string[] \| null` | optional | Transport spelling of `expand` |
@@ -1385,14 +1385,14 @@ Transport spellings of the QueryAST slots — folded to canonical keys at the bo
 | **$top** | `integer \| string \| null` | optional | Transport spelling of `limit` (OData `$top`) — a non-negative integer, or the digits a querystring carries it as |
 | **$skip** | `integer \| string \| null` | optional | Transport spelling of `offset` (OData `$skip`) — a non-negative integer, or the digits a querystring carries it as |
 | **$orderby** | `Record<string, Enum<'asc' \| 'desc'>> \| Record<string, 1 \| -1> \| { field: string; order?: Enum<'asc' \| 'desc'> }[] \| null` | optional | Transport spelling of `orderBy` (OData `$orderby`) |
-| **$select** | `string \| string[] \| null` | optional | Transport spelling of `fields` (OData `$select`) |
+| **$select** | `string \| string[] \| null` | optional | Transport spelling of `fields` (OData `$select`) — at least one field name; a value naming no field (blank, only commas and spaces, an empty list, or a list with a blank name) is refused |
 | **$expand** | `string \| string[] \| Record<string, { object: string; fields?: string[]; where?: any; search?: string \| object; … }> \| null` | optional | Transport spelling of `expand` (OData `$expand`) |
 | **$search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … } \| null` | optional | Transport spelling of `search` (OData `$search`) |
 | **$searchFields** | `string \| string[] \| null` | optional | Transport spelling of `searchFields` (OData `$searchFields`) |
 | **$count** | `boolean \| Enum<'true' \| 'false'> \| null` | optional | Transport spelling of the response total-count flag (OData `$count`) |
 | **count** | `boolean \| Enum<'true' \| 'false'> \| null` | optional | Response total-count flag — only an explicit `false` skips the COUNT query |
 | **filter** | `[string, string, any] \| [string, string] \| [string, object, ...object[]] \| object[] \| Record<string, any> \| any \| null` | optional | Transport spelling of `where` |
-| **select** | `string \| string[] \| null` | optional | Transport spelling of `fields` |
+| **select** | `string \| string[] \| null` | optional | Transport spelling of `fields` — at least one field name; a value naming no field (blank, only commas and spaces, an empty list, or a list with a blank name) is refused |
 | **sort** | `Record<string, Enum<'asc' \| 'desc'>> \| Record<string, 1 \| -1> \| { field: string; order?: Enum<'asc' \| 'desc'> }[] \| null` | optional | Transport spelling of `orderBy` |
 | **skip** | `integer \| string \| null` | optional | Transport spelling of `offset` — a non-negative integer, or the digits a querystring carries it as |
 | **populate** | `string \| string[] \| null` | optional | Transport spelling of `expand` |

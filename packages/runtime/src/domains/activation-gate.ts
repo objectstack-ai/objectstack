@@ -82,7 +82,7 @@
 // authorization RUNG off the execution context, which is where "platform
 // operator, NOT a tenant user role" (ADR-0068 D2) still means that. The
 // built-in identity NAME is deliberately no longer imported: see the doc block.
-import { effectiveTenancyPosture, AuthzStoreUnavailableError } from '@objectstack/core';
+import { effectiveTenancyPosture, AuthzStoreUnavailableError, type MetadataActivationWriteContext } from '@objectstack/core';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps } from '../domain-handler-registry.js';
@@ -203,6 +203,29 @@ export const WEBHOOK_ACTIVATION_SUBJECT: ActivationSubject = {
     remedy:
         'To switch a declared webhook on or off for this installation, ask your platform operator; webhooks your ' +
         'organization authors under names of its own stay yours to create and switch.',
+};
+
+/**
+ * [ADR-0142 D1, ADR-0131 D6 regime C] The declared-queue door's wording. A
+ * declared queue is switched off for the installation; an organization still
+ * authors queues of its own (`sys_queue`), so the remedy names that half.
+ */
+export const QUEUE_ACTIVATION_SUBJECT: ActivationSubject = {
+    subject: 'a declared queue',
+    remedy:
+        'To switch a declared queue on or off for this installation, ask your platform operator; queues your ' +
+        'organization authors under names of its own stay yours to create and staff.',
+};
+
+/**
+ * [ADR-0142 D5] The declared-assignment-rule door's wording. Assignment rules
+ * are declared only (an organization authors none, ADR-0142 merge question
+ * 11), so the switch is the one lever and it is the operator's.
+ */
+export const ASSIGNMENT_RULE_ACTIVATION_SUBJECT: ActivationSubject = {
+    subject: 'a declared assignment rule',
+    remedy:
+        'To switch a declared assignment rule on or off for this installation, ask your platform operator.',
 };
 
 /**
@@ -424,4 +447,40 @@ export function refuseUngrantedActivationAuthoring(
             { code: ACTIVATION_DENY_CODE },
         ),
     };
+}
+
+/**
+ * [ADR-0126 §4] The context an activation door's ledger WRITE runs under: the
+ * caller's own execution context, elevated — `{ ...callerContext, isSystem: true }`.
+ *
+ * Called only after both gates above admitted the caller, so the elevation
+ * grants nothing the door has not already judged: the ledger object is
+ * engine-owned and writable only elevated. What the caller's context adds is
+ * the NAME — the engine stamps `created_by` / `updated_by` from its `userId`,
+ * and the audit plugin records `user_id` / `actor` from the same session — so
+ * the record of an install-wide switch says which administrator threw it. A
+ * bare system context, which the store falls back to, names nobody.
+ *
+ * Shared by every door that writes a `sys_metadata_activation` row for a
+ * caller, so the doors cannot disagree about who a row names. The flow door is
+ * the exception that proves it: its write happens behind
+ * `IAutomationService.toggleFlow`, so it hands over {@link activationCaller}
+ * and the automation service builds the context.
+ */
+export function activationWriteContext(context: HttpProtocolContext): MetadataActivationWriteContext {
+    const ec: unknown = context?.executionContext;
+    const caller = ec && typeof ec === 'object' ? (ec as Record<string, unknown>) : {};
+    return { ...caller, isSystem: true };
+}
+
+/**
+ * [#26474] Who an activation door's caller is, in the shape
+ * `IAutomationService.toggleFlow`'s `caller` declares: the signed-in user's id
+ * and nothing else. No positions, permissions or tenant: the gates above have
+ * already judged the caller, and the channel is attribution only. A context
+ * with no user yields `{}`, an unattributed write.
+ */
+export function activationCaller(context: HttpProtocolContext): { userId?: string } {
+    const userId = (context?.executionContext as { userId?: unknown } | undefined)?.userId;
+    return typeof userId === 'string' && userId !== '' ? { userId } : {};
 }

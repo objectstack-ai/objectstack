@@ -18,12 +18,13 @@ import {
   CardFooter
 } from '../../ui';
 import { forwardRef } from 'react';
+import type { RendererHostProps } from '../../lib/renderer-host-props';
 
 // Index signature on the parameter annotation, not on the `forwardRef` type
 // argument — mechanism note on `action:bar` (objectui#4422), pinned by
 // `__tests__/forwardref-props-annotation.guard.test.ts`.
 const CardRenderer = forwardRef<HTMLDivElement, { schema: CardSchema; className?: string }>(
-  ({ schema, className, ...props }: { schema: CardSchema; className?: string; [key: string]: any }, ref) => {
+  ({ schema, className, ...props }: { schema: CardSchema; className?: string; [key: string]: unknown } & RendererHostProps, ref) => {
     // Extract designer-related props
     const { 
         'data-obj-id': dataObjId, 

@@ -1,9 +1,17 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
+import {
+  MCP_OAUTH_SCOPE_DATA_READ,
+  MCP_OAUTH_SCOPE_DATA_WRITE,
+  MCP_OAUTH_SCOPE_ACTIONS,
+  MCP_OAUTH_SCOPE_METADATA_WRITE,
+} from '@objectstack/spec/ai';
+import type { AIToolDefinition } from '@objectstack/spec/contracts';
 
 import { MCPServerRuntime } from './mcp-server-runtime.js';
 import type { McpDataBridge, McpActionBridge } from './mcp-http-tools.js';
+import type { McpAuthoringToolRegistry, ToolExecutionResult } from './types.js';
 import { renderSkillMarkdown } from './skill-md.js';
 
 /**
@@ -64,7 +72,35 @@ function makeFullBridge(): McpDataBridge & McpActionBridge {
   };
 }
 
-async function listRegisteredToolNames(): Promise<string[]> {
+/**
+ * [#26464] A host-injected authoring registry, as the HTTP surface receives
+ * one. Names deliberately NOT in the data skill, so the only way the rendered
+ * skill can name them is the authoring section.
+ */
+const AUTHORING_TOOLS: AIToolDefinition[] = [
+  { name: 'create_object', description: 'Create a draft object.', parameters: { type: 'object', properties: {} } },
+  { name: 'verify_build', description: 'Validate the drafts.', parameters: { type: 'object', properties: {} } },
+];
+
+function makeAuthoringRegistry(): McpAuthoringToolRegistry {
+  return {
+    getAll: () => AUTHORING_TOOLS,
+    async execute(toolCall): Promise<ToolExecutionResult> {
+      return { type: 'tool-result', toolCallId: toolCall.toolCallId, toolName: toolCall.toolName, output: { type: 'text', value: '' } } as ToolExecutionResult;
+    },
+  };
+}
+
+const EVERY_SCOPE = [
+  MCP_OAUTH_SCOPE_DATA_READ,
+  MCP_OAUTH_SCOPE_DATA_WRITE,
+  MCP_OAUTH_SCOPE_ACTIONS,
+  MCP_OAUTH_SCOPE_METADATA_WRITE,
+];
+
+async function listRegisteredToolNames(
+  extra: { grantedScopes?: string[]; registry?: McpAuthoringToolRegistry } = {},
+): Promise<string[]> {
   const runtime = new MCPServerRuntime({ name: 'skill-guard', version: '0.0.0' });
   const body = { jsonrpc: '2.0', id: 1, method: 'tools/list' };
   const res = await runtime.handleHttpRequest(
@@ -76,7 +112,14 @@ async function listRegisteredToolNames(): Promise<string[]> {
       },
       body: JSON.stringify(body),
     }),
-    { bridge: makeFullBridge(), parsedBody: body },
+    {
+      bridge: makeFullBridge(),
+      parsedBody: body,
+      ...(extra.grantedScopes ? { toolOptions: { grantedScopes: extra.grantedScopes } } : {}),
+      ...(extra.registry
+        ? { authoring: { registry: extra.registry, principal: { userId: 'usr_guard' }, environmentId: 'env_guard' } }
+        : {}),
+    },
   );
   const json: any = await res.json();
   const tools: Array<{ name: string }> = json?.result?.tools ?? [];
@@ -92,5 +135,47 @@ describe('SKILL.md ↔ native tool surface drift guard', () => {
     const md = renderSkillMarkdown();
     const undocumented = registered.filter((name) => !md.includes(name));
     expect(undocumented, `tools registered but missing from SKILL.md — update packages/mcp/src/skill-md.ts: ${undocumented.join(', ')}`).toEqual([]);
+  });
+
+  it('[#26464] documents every tool the surface registers for a metadata:write token with an injected registry', async () => {
+    const registry = makeAuthoringRegistry();
+    const registered = await listRegisteredToolNames({ grantedScopes: EVERY_SCOPE, registry });
+    // Sanity: native surface plus the two injected tools.
+    expect(registered.length).toBeGreaterThanOrEqual(11);
+    for (const t of AUTHORING_TOOLS) expect(registered).toContain(t.name);
+
+    // The skill rendered for the SAME grant and the SAME registry names every one of them …
+    const md = renderSkillMarkdown({ grantedScopes: EVERY_SCOPE, authoringTools: registry.getAll() });
+    const undocumented = registered.filter((name) => !md.includes(name));
+    expect(undocumented, `tools registered but missing from the authoring SKILL.md: ${undocumented.join(', ')}`).toEqual([]);
+
+    // … and the skill rendered WITHOUT the scope names none of the injected ones,
+    // exactly as the surface registers none of them for that grant.
+    const withoutScope = await listRegisteredToolNames({
+      grantedScopes: EVERY_SCOPE.filter((s) => s !== MCP_OAUTH_SCOPE_METADATA_WRITE),
+      registry,
+    });
+    const mdWithoutScope = renderSkillMarkdown({
+      grantedScopes: EVERY_SCOPE.filter((s) => s !== MCP_OAUTH_SCOPE_METADATA_WRITE),
+      authoringTools: registry.getAll(),
+    });
+    for (const t of AUTHORING_TOOLS) {
+      expect(withoutScope).not.toContain(t.name);
+      expect(mdWithoutScope).not.toContain(t.name);
+    }
+  });
+
+  it('[#26464] the Build section names no native tool the same grant does not register (metadata:write alone has no data tool)', async () => {
+    const registry = makeAuthoringRegistry();
+    const native = await listRegisteredToolNames({ grantedScopes: EVERY_SCOPE });
+    expect(native.length).toBeGreaterThanOrEqual(9);
+    const metadataOnly = await listRegisteredToolNames({ grantedScopes: [MCP_OAUTH_SCOPE_METADATA_WRITE], registry });
+    expect(metadataOnly.sort()).toEqual(AUTHORING_TOOLS.map((t) => t.name).sort());
+
+    const md = renderSkillMarkdown({ grantedScopes: [MCP_OAUTH_SCOPE_METADATA_WRITE], authoringTools: registry.getAll() });
+    const section = md.slice(md.indexOf('## Build — authoring tools'), md.indexOf('## Conventions & gotchas'));
+    expect(section.length).toBeGreaterThan(0);
+    const taughtButUnregistered = native.filter((name) => section.includes(name) && !metadataOnly.includes(name));
+    expect(taughtButUnregistered, `the Build section teaches a tool this grant does not register: ${taughtButUnregistered.join(', ')}`).toEqual([]);
   });
 });

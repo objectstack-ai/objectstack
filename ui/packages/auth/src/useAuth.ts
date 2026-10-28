@@ -80,6 +80,7 @@ export function useAuth(): AuthContextValue {
       listInvitations: async () => { throw new Error('useAuth must be used within an AuthProvider'); },
       cancelInvitation: async () => { throw new Error('useAuth must be used within an AuthProvider'); },
       getInvitation: async () => { throw new Error('useAuth must be used within an AuthProvider'); },
+      getInvitationPreview: async () => { throw new Error('useAuth must be used within an AuthProvider'); },
       acceptInvitation: async () => { throw new Error('useAuth must be used within an AuthProvider'); },
       rejectInvitation: async () => { throw new Error('useAuth must be used within an AuthProvider'); },
       listUserInvitations: async () => { throw new Error('useAuth must be used within an AuthProvider'); },

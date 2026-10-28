@@ -59,10 +59,17 @@ export type BookInclude = string | { tag: string };
  * The trap here was PROXIMITY, not plausibility. `doc.translations` — two files
  * over, the same shape, the same name — is read on every path that renders a
  * doc. So a book's own map reads as the same feature switched on one level up.
- * It never was: the tree endpoint and the portal render `label` / `description`
- * verbatim, and the generic bundle translator covers view / action / object /
- * app / dashboard / page only (`i18n-resolver.ts`). A localized book was parsed,
- * stored, round-tripped — and rendered in the authoring locale to every reader.
+ * It never was: no resolver read a book's own map, and the tree endpoint and
+ * the portal rendered `label` / `description` verbatim. A localized book was
+ * parsed, stored, round-tripped — and rendered in the authoring locale to every
+ * reader.
+ *
+ * The spine's strings now localize through the one path the rest of the
+ * platform uses: the translation bundle's `books` group
+ * (`books.<name>.label` / `.description`, `books.<name>.groups.<key>.label`),
+ * overlaid by `translateBook` (`i18n-resolver.ts`) on `GET /meta/book` and on
+ * the tree. So the prescription is a move, not only a delete — and the inline
+ * map stays retired, because a second translation path is the trap.
  *
  * Shared by both levels deliberately: an author who localized one almost
  * certainly localized the other, and splitting the wording would make the second
@@ -70,13 +77,13 @@ export type BookInclude = string | { tag: string };
  */
 const BOOK_TRANSLATIONS_RETIRED =
   'Inline `translations` on a book (and on a book group) was removed in @objectstack/spec '
-  + '17.0.0 (ADR-0049) — no resolver ever read it. The book tree endpoint and the '
-  + 'docs portal render `label` / `description` verbatim in every locale, so a localized '
-  + 'book shipped its authoring-locale strings to every reader. Delete the key. NOTE the '
-  + 'near neighbour that DOES work: `doc.translations` is live and read on every doc render '
-  + 'path — localize the docs themselves, and the portal picks the reader\'s locale up from '
-  + 'there. '
-  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
+  + '17.0.0 (ADR-0049) — no resolver ever read it, so a localized book shipped its '
+  + 'authoring-locale strings to every reader. Delete the key and move each locale\'s strings '
+  + 'into the translation bundle: `books.<book>.label` / `.description` and '
+  + '`books.<book>.groups.<group_key>.label` (`os i18n extract` seeds them). The book list, '
+  + 'the book tree and the docs sidebar resolve those per reader locale. A doc\'s own title '
+  + 'and body still localize through `doc.translations`. '
+  + 'This edit left `os migrate meta` with the protocol-16.x conversions: apply it by hand, or run the tool on a release that still carries the conversion — https://objectstack.ai/docs/protocol-upgrade.';
 
 export const BookGroupSchema = lazySchema(() =>
   z.object({
@@ -84,7 +91,7 @@ export const BookGroupSchema = lazySchema(() =>
       .string()
       .regex(/^[a-z][a-z0-9_]*$/, 'group key must be lowercase snake_case')
       .describe('Stable group key (used by overrides, deep links, explicit `doc.group`)'),
-    label: z.string().describe('Section title — first-class, i18n-homed'),
+    label: z.string().describe('Section title — first-class, i18n-homed: translated by `books.<book>.groups.<key>.label` in the translation bundle'),
     // TOMBSTONE, not a deletion: `BookGroupSchema` is a plain `z.object` with
     // no `.strict()`, so a bare delete would have zod silently STRIP the key —
     // replacing one silent no-op with another. `retiredKey` types it `never`
@@ -150,7 +157,7 @@ export const BookSchema = lazySchema(() =>
       .string()
       .regex(/^[a-z][a-z0-9_]*$/, 'name must be lowercase snake_case')
       .describe('Book name (namespace prefix recommended, like every metadata name)'),
-    label: z.string().optional().describe('Display title'),
+    label: z.string().optional().describe('Display title — translated by `books.<book>.label` in the translation bundle'),
     description: z.string().optional(),
     // `translations` removed in 17.0.0 (#4667) — see BOOK_TRANSLATIONS_RETIRED.
     slug: z.string().optional().describe('Portal URL segment; defaults to name sans prefix'),

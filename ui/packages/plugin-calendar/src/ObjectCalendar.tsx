@@ -23,7 +23,7 @@
  */
 
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import type { ObjectCalendarSchema, DataSource, CalendarConfig } from '@object-ui/types';
+import type { ObjectCalendarSchema, ObjectCalendarBlockConfig, DataSource, CalendarConfig } from '@object-ui/types';
 import { CalendarView, type CalendarViewEvent } from './CalendarView';
 import { getVisibleDateRange } from './visibleDays';
 import { usePullToRefresh } from '@object-ui/mobile';
@@ -64,7 +64,6 @@ import {
   legacyRecordDrawerWidthKey,
   recordOverlayWidthStorageKey,
   toast,
-  useOverlayAnchor,
 } from '@object-ui/components';
 import {
   buildExpandFields,
@@ -133,6 +132,26 @@ import {
  */
 
 /**
+ * The five field-name keys written FLAT on the node: the package-local
+ * hand-off spelling (objectstack#25923, ui/AGENTS.md Commandment #0.1).
+ *
+ * `@objectstack/spec` refuses all five on `object-calendar` and prescribes the
+ * `calendar` block, so the published {@link ObjectCalendarSchema} declares
+ * none of them, and both producers in this tree (`ListView`, and
+ * `ObjectView`'s `generateViewSchema`) emit the block. `getCalendarConfig`
+ * still reads the flat five when a node carries no block, so a host that mounts
+ * `<ObjectCalendar schema={…}>` with them keeps its calendar; this type is that
+ * read, kept here, beside the one consumer, and off the authoring face.
+ * DERIVED from the block's own type, so the two spellings cannot fork.
+ */
+export type ObjectCalendarFlatFields = Partial<
+  Pick<ObjectCalendarBlockConfig, 'startDateField' | 'endDateField' | 'titleField' | 'colorField' | 'allDayField'>
+>;
+
+/** The node `ObjectCalendar` reads: the published schema plus {@link ObjectCalendarFlatFields}. */
+export type ObjectCalendarHandoff = ObjectCalendarSchema & ObjectCalendarFlatFields;
+
+/**
  * Props of the `ObjectCalendar` React component.
  *
  * Renamed off the bare `ObjectCalendarProps` (objectui#4650): from 17.0.0
@@ -149,7 +168,7 @@ import {
  * no importer breaks. Tripwire: `__tests__/spec-symbol-4650.test.ts`.
  */
 export interface ObjectCalendarComponentProps {
-  schema: ObjectCalendarSchema;
+  schema: ObjectCalendarHandoff;
   dataSource?: DataSource;
   className?: string;
   /** Pre-fetched records passed by a parent (e.g. ObjectView). When provided, skips internal data fetching. */
@@ -320,13 +339,17 @@ type ObjectCalendarConfig = CalendarConfig & {
  * `calendar-date-alias-refusal-8355.test.ts` and `plugin-list`'s
  * `ListView.calendarAliasRefused-8355.test.tsx`.
  */
-function getCalendarConfig(schema: ObjectCalendarSchema): ObjectCalendarConfig | null {
+function getCalendarConfig(schema: ObjectCalendarHandoff): ObjectCalendarConfig | null {
   // The declared configuration container — read FIRST, as the spec declares it.
   if (schema.calendar) {
     return schema.calendar as ObjectCalendarConfig;
   }
 
-  // The flat spelling, which `ObjectView` and `ListView` emit.
+  // The flat spelling — the package-local hand-off (`ObjectCalendarFlatFields`).
+  // No producer in this tree emits it since objectstack#25923 (`ListView` and
+  // `ObjectView` hand the view's block on as `calendar`), and the spec refuses
+  // it on an authored node; a host that mounts this component with it is the
+  // reader this branch keeps working.
   //
   // ⛔ The two alias rungs are spelled as a cast ON `schema` at each read site,
   // never through a renamed local. The repo's read census (objectui#6576's
@@ -1132,7 +1155,7 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
 
   // --- NavigationConfig support ---
   // Must be called before any early returns to satisfy React hooks rules
-  // When the local navigation mode is an overlay (drawer/modal), ignore the
+  // When the local navigation mode is the drawer overlay, ignore the
   // inherited onRowClick so the local overlay wins over parent page-nav.
   // No width is spelled here on purpose (objectui#6303, converging the calendar
   // on the shape #6305 gave ObjectGantt). `width` is `@deprecated [objectstack-ai/objectstack#2578 ->
@@ -1167,7 +1190,9 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
   // calendar carries the key only when the author wrote it. The members this
   // read honours are pinned in `__tests__/calendarNavigationMembers-8652.test.tsx`.
   const navConfig = schema.navigation ?? { mode: 'drawer' };
-  const navIsOverlay = navConfig.mode === 'drawer' || navConfig.mode === 'modal' || navConfig.mode === 'split' || navConfig.mode === 'popover';
+  // `drawer` is the one overlay mode the spec keeps (objectstack#26677), and
+  // the hook's own default for a block written without `mode`.
+  const navIsOverlay = (navConfig.mode ?? 'drawer') === 'drawer';
   const navigation = useNavigationOverlay({
     navigation: navConfig,
     // The record-page URL follows the RECORD SOURCE (`2ce2612df`): the very
@@ -1187,12 +1212,6 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
     objectName: schemaObjectName ?? schema.objectName,
     onRowClick: navIsOverlay ? undefined : onRowClick,
   });
-
-  // objectui#9299 item 3 — `popover` anchors to the EVENT the user clicked.
-  // `CalendarView` hands `onEventClick` a calendar event object, not a DOM
-  // event, so the anchor is recorded by a capture listener on this component's
-  // own container instead.
-  const { anchorRef, anchorCaptureProps } = useOverlayAnchor();
 
   // objectui#12082 — the calendar's two default writes are rows of the
   // affordance-to-grant map (`resolveAffordance` in `@object-ui/core`):
@@ -1446,8 +1465,9 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
    * `plugin-view`'s `ObjectView` — and app-shell reaches the first from two
    * faces, `ObjectView` (the object-view door) and `InterfaceListPage` (the
    * interface-page door). Every one of them hands this component the same
-   * shape: the shared `baseProps` bag plus whichever of `startDateField` /
-   * `endDateField` / `titleField` the author declared. NOTHING on the node
+   * shape: the shared `baseProps` bag plus a `calendar` block carrying whichever
+   * of `startDateField` / `endDateField` / `titleField` the author declared
+   * (flat on the node until objectstack#25923). NOTHING on the node
    * names the door, so there is nothing to infer from, and a door PROP would
    * have to be declared on the node's published schema and threaded through
    * four packages.
@@ -1499,20 +1519,16 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
   }
 
   /**
-   * The record overlay — ONE payload in whichever shell the author declared.
+   * The record overlay — the drawer.
    *
    * ⭐ objectui#9299. This used to be `<RecordDetailDrawer>`, which brought its
-   * own `Sheet` and had no `mode` parameter, so an authored `modal`, `split` or
-   * `popover` silently rendered the drawer (measured on PR objectui#9296). The
-   * payload now mounts through the shared `NavigationOverlay` — the same shell
-   * `ObjectGrid` and `ObjectTree` use — so the four declared modes mean the
-   * same thing on every view type.
-   *
-   * `mainContent` is what `split` needs: the calendar itself goes in the left
-   * panel beside the record panel (item 2). `popoverAnchorRef` is what
-   * `popover` needs: the event the user clicked (item 3).
+   * own `Sheet`; the payload mounts through the shared `NavigationOverlay` — the
+   * same shell `ObjectGrid` and `ObjectTree` use. The `modal`, `split` and
+   * `popover` shells it also drew here were retired with their spec values
+   * (objectstack#26677): the drawer, which expands to the full page, is the
+   * one overlay an authored `navigation` opens.
    */
-  const renderRecordOverlay = (mainContent?: React.ReactNode): React.ReactNode => {
+  const renderRecordOverlay = (): React.ReactNode => {
     if (!navigation.isOverlay || !navigation.isOpen || !navigation.selectedRecord) return null;
     const objectName = resolveRecordSourceObjectName(schema, dataConfig);
     const rec = navigation.selectedRecord as Record<string, any>;
@@ -1528,8 +1544,6 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
       <NavigationOverlay
         {...navigation}
         title={titleText}
-        mainContent={mainContent}
-        popoverAnchorRef={anchorRef}
         // One drag-resize implementation, one key, and a width the user had
         // already chosen under the retired `objectui.drawerWidth.OBJECT`
         // carries over rather than resetting (item 4).
@@ -1574,7 +1588,7 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
   };
 
   const calendarView = (
-    <div ref={pullRef} className={className} {...anchorCaptureProps}>
+    <div ref={pullRef} className={className}>
       {pullDistance > 0 && (
         <div
           className="flex items-center justify-center text-xs text-muted-foreground"
@@ -1742,23 +1756,6 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
 
     </div>
   );
-
-  // `split` (item 2): the calendar IS the main content — it moves into the
-  // overlay's left panel with the record panel beside it, rather than being
-  // covered by a drawer. Guarded on an OPEN overlay because the split shell
-  // renders nothing when closed; with nothing open the calendar renders alone,
-  // exactly as before.
-  if (
-    navigation.isOverlay
-    && navigation.mode === 'split'
-    && navigation.isOpen
-    && navigation.selectedRecord
-  ) {
-    const splitOverlay = renderRecordOverlay(calendarView);
-    // `null` means this record has no overlay at all (no object name / no id)
-    // — the calendar still has to render.
-    if (splitOverlay) return <>{splitOverlay}</>;
-  }
 
   return (
     <>

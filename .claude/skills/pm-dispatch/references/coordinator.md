@@ -30,7 +30,6 @@
 
 - 档位与 effort 的定法住 `execution-duties.md` 派发节:档位引 `dispatch-gates --tier`,effort 按卡难度。
 - 改技能(协议语义面)的卡恒契约复审档 `CONTRACT_REVIEW_TIER`;⛔ 不抄模型名。
-- 按派发令所写的 model 与 effort 开线程,⛔ 不等维护者原话;常设原话有则席位引作 `reason:`。
 
 ## 五、卡线程的 `needs_decision`(coordinator 收到时读;席位写分析时读)
 
@@ -46,4 +45,5 @@
 ## 七、语言与汇报(coordinator 与席位线程皆读)
 
 - 项目内对维护者用维护者的语言;GitHub 内容英文,照 SKILL.md 全体座位不变量。
-- 只在结果、阻塞或待裁决时向维护者汇报,与席位同规;例行进展进线程清单。
+- 向维护者报任一 PR 状态前同轮重读:merged、draft、auto_merge、在队、reviews、`mergeable_state`。
+- 无 APPROVED 也可能已被 ready 入队 ⇒ ⛔ 单读 reviews;已办即删;`dirty` ⇒ 退回线程先合 main。

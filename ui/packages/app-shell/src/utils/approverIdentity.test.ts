@@ -90,7 +90,7 @@ describe('APPROVER_DIRECTORY_BINDINGS is derived from the spec, not restated', (
   });
 
   it('skips the kinds whose source is not data rather than throwing', () => {
-    // `manager` (auto), `queue` (unsupported), `role` (enum) have no directory
+    // `manager` (auto), `queue` (registry and data, ADR-0142 D6), `role` (enum) have no directory
     // rows, and `position` (registry) has its own arm. A module-level throw
     // over a vocabulary change would white-screen the record page.
     for (const kind of ['manager', 'queue', 'role', 'field', 'expression', 'position']) {

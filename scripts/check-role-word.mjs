@@ -22,9 +22,12 @@
 //     because a verdict over the roots that DID resolve is a verdict about a
 //     population nobody configured (#9932), or
 //   • a file NOT in the baseline contains the word, or
-//   • a baselined file's count INCREASES, or
-//   • a baselined file's count DECREASED / file vanished (improvement!) —
-//     run with --update to ratchet the baseline down and commit it.
+//   • a baselined file's count INCREASES.
+//
+// It is ONE-SIDED (#26444): a baselined file whose count DECREASED, or that
+// vanished, PASSES and is reported — deleting or rewording a page must not red
+// a PR that never touched this gate. Until `--update` writes the lower count
+// down, the old number stays that file's ceiling; the report says so.
 //
 //   node scripts/check-role-word.mjs [--update]
 //   node scripts/check-role-word.mjs --self-test   # verify the checker's own rules
@@ -954,11 +957,12 @@ function grewMessage(file, allowed, count) {
 }
 
 /**
- * The two ratchet-DOWN verdicts, named and pure for the reason `grewMessage` was
+ * The two ratchet-DOWN reports, named and pure for the reason `grewMessage` was
  * made so: a message built inline is a message no assertion can reach — and
  * these two are now QUOTED by `relocationClause()` as the signal a relocating
  * author is told to look for, which is a coupling only a reachable string can
- * pin. The text each emits is unchanged.
+ * pin. Since #26444 they are REPORTS, not verdicts: a decrease passes, and these
+ * rows print on stdout beside whatever else the run concludes.
  *
  * ⛔ Neither offers the baseline-EXPANDING path, so neither carries the
  * maintainer-only marker and neither may acquire one: ratcheting down is
@@ -971,8 +975,8 @@ function grewMessage(file, allowed, count) {
  */
 function cleanOrGoneMessage(file, allowed) {
   return (
-    `${file}: ${RATCHET_DOWN_PHRASE} (was ${allowed}) — ratchet DOWN: run `
-    + '`node scripts/check-role-word.mjs --update` and commit the baseline.'
+    `${file}: ${RATCHET_DOWN_PHRASE} (was ${allowed}). Passing; `
+    + '`node scripts/check-role-word.mjs --update` drops the entry.'
   );
 }
 
@@ -984,8 +988,78 @@ function cleanOrGoneMessage(file, allowed) {
  */
 function improvedMessage(file, allowed, now) {
   return (
-    `${file}: role-word count improved ${allowed} → ${now} — ratchet DOWN: run `
-    + '`node scripts/check-role-word.mjs --update` and commit the baseline.'
+    `${file}: role-word count improved ${allowed} → ${now}. Passing; until `
+    + `\`node scripts/check-role-word.mjs --update\` records it, ${allowed} stays this file's ceiling.`
+  );
+}
+
+/**
+ * The whole comparison, as a pure function of the ledger and the scan, so the
+ * self-test can drive it in both directions (#26444). ONE-SIDED: a NEW file or
+ * a grown count is an error; a vanished file or a fallen count is a REPORT that
+ * leaves the verdict green.
+ *
+ * @param {Record<string, number>} baseline
+ * @param {Record<string, number>} current
+ * @returns {{errors: string[], down: string[]}}
+ */
+function ratchetVerdict(baseline, current) {
+  const errors = [];
+  const down = [];
+  for (const [file, count] of Object.entries(current)) {
+    const allowed = baseline[file];
+    if (allowed === undefined) {
+      errors.push(newUseMessage(file, count));
+    } else if (count > allowed) {
+      errors.push(grewMessage(file, allowed, count));
+    }
+  }
+  for (const [file, allowed] of Object.entries(baseline)) {
+    const now = current[file];
+    if (now === undefined) {
+      down.push(cleanOrGoneMessage(file, allowed));
+    } else if (now < allowed) {
+      down.push(improvedMessage(file, allowed, now));
+    }
+  }
+  return { errors, down };
+}
+
+// ── A baselined file the scan did not READ is a refusal (#26444) ───────────
+//
+// While the ratchet was two-sided, a scan that lost part of its population — a
+// root emptied, a skip widened over ledgered pages, the walk broken — dropped
+// those baselined files out of `current`, and the DOWN branch redded once per
+// file. One-sided, that same drop is a passing report, so "the page is gone"
+// and "the scan never opened it" have to be told apart HERE: a baselined file
+// still ON DISK that this run did not read is refused. A deleted page is not on
+// disk and passes; a swept page was read and passes. That is exactly the old
+// DOWN alarm with the two legitimate decreases taken out of it.
+
+/**
+ * Baselined files still on disk that the scan did not read, sorted.
+ * `exists` is injected so the self-test can drive it without a tree.
+ *
+ * @param {Record<string, number>} baseline
+ * @param {Set<string>} read repo-relative paths the walk returned
+ * @param {(path: string) => boolean} [exists]
+ * @returns {string[]}
+ */
+function unreadBaselined(baseline, read, exists = existsSync) {
+  return Object.keys(baseline).filter((file) => exists(file) && !read.has(file)).sort();
+}
+
+/**
+ * @param {string[]} unread
+ * @returns {string}
+ */
+function unreadBaselinedMessage(unread) {
+  return (
+    `check-role-word: ${unread.length} baselined file(s) are still on disk but this run did not `
+    + `read them — ${unread.join(', ')}. REFUSING to reach a verdict. The scan lost part of its `
+    + 'population (a root emptied, a skip widened, or the walk broke), and since the ratchet went '
+    + 'one-sided (#26444) a file that drops out of the scan would otherwise pass as a decrease. '
+    + 'If the narrowing is deliberate, `node scripts/check-role-word.mjs --update` records it.'
   );
 }
 
@@ -1007,21 +1081,25 @@ function improvedMessage(file, allowed, now) {
 //
 // That was safe only while the ledger was non-empty, and safe by ACCIDENT: a
 // scan that reads nothing drops every baselined file out of `current`, and the
-// ratchet-DOWN branch below then reports one "clean/gone" problem per baselined
+// ratchet-DOWN branch below then reported one "clean/gone" problem per baselined
 // file. Measured on this tree — ROOTS pointed at two non-existent directories,
 // ledger untouched — exit 1, raising exactly one problem per baselined file.
-// The magnitude is deliberately not written down, and no bound stands in its
-// place: the ratchet-DOWN loop below walks `Object.entries(baseline)` and
-// raises one error for every entry missing from `current`, so a dead scan
-// raises as many problems as the ledger holds — an identity that survives
+// Since the ratchet went one-sided (#26444) those rows are passing REPORTS, so
+// the alarm is now explicit instead: `unreadBaselined` refuses a ledgered page
+// still on disk that the scan did not read. Over an EMPTY ledger it has nothing
+// to check, and the input volume below is still the only thing that tells a
+// dead scan from a live one. The magnitude is deliberately not written down, and no bound
+// stands in its place: the ratchet-DOWN loop below walks `Object.entries(baseline)`
+// and reports one row for every entry missing from `current`, so a dead scan
+// reports as many rows as the ledger holds — an identity that survives
 // every `--update`, at any ledger size, including the empty one. A SHRINK-only
 // ledger admits no durable bound to state instead: a floor rots on the first
 // sanctioned ratchet-down (the very remedy this gate tells authors to run),
 // and a ceiling rots too, because the same `--update` is also the
 // baseline-EXPANDING path the #8435 marker above gates.
 //
-// That protection is a side effect of still owing debt, and it evaporates at
-// the exact moment this ratchet succeeds at its purpose: with the ledger
+// That protection was a side effect of still owing debt, and it evaporated at
+// the exact moment this ratchet succeeded at its purpose: with the ledger
 // empty, `current = {}` and `baseline = {}` raise nothing in either direction,
 // and the same ablation printed
 //
@@ -1214,9 +1292,11 @@ function updateSummary(scanned, ledger, exempt, generated) {
 // about today.
 //
 // A root that EXISTS and contributes nothing is a DIFFERENT condition and stays
-// green on purpose. That one is the zero-volume Scanned line's subject, and it
-// is what the per-root #9910 assertions below now test — the missing-root state
-// they were written against can no longer reach a success message at all.
+// green on purpose — unless the ledger lists a page under it, which
+// `unreadBaselined` refuses (#26444). That one is the zero-volume Scanned
+// line's subject, and it is what the per-root #9910 assertions below now test —
+// the missing-root state they were written against can no longer reach a
+// success message at all.
 
 /**
  * Which configured roots are absent, in ROOTS order.
@@ -1296,11 +1376,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'The generated-region exemption (#13586)': 7,
   'Direction of error: every malformed pair fails CLOSED and LOUD': 18,
   'The exemption at the PROGRAM level (2)': 6,
+  'The ratchet is ONE-SIDED: a decrease passes and is reported (#26444)': 7,
+  'A baselined file the scan did not READ is REFUSED (#26444)': 7,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 14;
+const SELF_TEST_BATTERY_FLOOR = 16;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -2322,6 +2404,89 @@ function selfTest() {
     rmSync(genSandbox, { recursive: true, force: true });
   }
 
+  // ── The ratchet is ONE-SIDED: a decrease passes and is reported (#26444) ──
+  //
+  // Driven through the same pure comparison the program runs, so a decrease
+  // that went red again — or an increase that stopped going red — fails here.
+  battery('The ratchet is ONE-SIDED: a decrease passes and is reported (#26444)');
+  {
+    const ledger = { 'content/docs/a.mdx': 2, 'content/docs/b.mdx': 1 };
+    const same = ratchetVerdict(ledger, { ...ledger });
+    expect('#26444 — an unchanged tree has no error and no report',
+      same.errors.length === 0 && same.down.length === 0);
+    const fell = ratchetVerdict(ledger, { 'content/docs/a.mdx': 1, 'content/docs/b.mdx': 1 });
+    expect('#26444 — a fallen count PASSES (no error) and is reported once',
+      fell.errors.length === 0 && fell.down.length === 1 && fell.down[0].includes('count improved'));
+    const gone = ratchetVerdict(ledger, { 'content/docs/a.mdx': 2 });
+    expect('#26444 — a vanished baselined file PASSES (no error) and is reported once',
+      gone.errors.length === 0 && gone.down.length === 1 && gone.down[0].includes(RATCHET_DOWN_PHRASE));
+    const grew = ratchetVerdict(ledger, { 'content/docs/a.mdx': 3, 'content/docs/b.mdx': 1 });
+    expect('#26444 — a grown count still FAILS',
+      grew.errors.length === 1 && grew.down.length === 0);
+    const fresh = ratchetVerdict(ledger, { ...ledger, 'content/docs/c.mdx': 1 });
+    expect('#26444 — a NEW file still FAILS',
+      fresh.errors.length === 1);
+    const mixed = ratchetVerdict(ledger, { 'content/docs/a.mdx': 3 });
+    expect('#26444 — a decrease elsewhere does not net against growth: one error, one report',
+      mixed.errors.length === 1 && mixed.down.length === 1);
+    expect('#26444 — the improved report names the old count as the ceiling it leaves until --update',
+      improvedMessage('content/docs/a.mdx', 4, 2).includes('4 stays'));
+  }
+
+  // ── A baselined file the scan did not READ is REFUSED (#26444) ──────────
+  //
+  // The pure legs prove the predicate tells a dead scan from a deletion and a
+  // sweep; the spawned legs prove the program consults it, using a ledgered
+  // page parked inside a skipped subtree — on disk, and never read.
+  battery('A baselined file the scan did not READ is REFUSED (#26444)');
+  {
+    const ledger = { 'content/docs/a.mdx': 2, 'skills/b.md': 1 };
+    const onDisk = () => true;
+    expect('#26444 — an EMPTY population with every ledgered page still on disk refuses every one',
+      unreadBaselined(ledger, new Set(), onDisk).length === 2);
+    expect('#26444 — a partial scan refuses only the pages it did not read',
+      unreadBaselined(ledger, new Set(['content/docs/a.mdx']), onDisk).join(',') === 'skills/b.md');
+    expect('#26444 — a DELETED page is not refused (it is a decrease, and decreases pass)',
+      unreadBaselined(ledger, new Set(['content/docs/a.mdx']), (f) => f !== 'skills/b.md').length === 0);
+    expect('#26444 — a page that was read is not refused, whatever its count now',
+      unreadBaselined(ledger, new Set(Object.keys(ledger)), onDisk).length === 0);
+    expect('#26444 — the refusal names the unread page and the --update remedy',
+      unreadBaselinedMessage(['skills/b.md']).includes('skills/b.md')
+        && unreadBaselinedMessage(['skills/b.md']).includes('--update'));
+
+    const SELF_UNREAD = fileURLToPath(import.meta.url);
+    const runUnread = (cwd) => {
+      const r = spawnSync(process.execPath, [SELF_UNREAD], { cwd, encoding: 'utf8' });
+      return { status: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
+    };
+    const unreadSandbox = mkdtempSync(join(tmpdir(), 'check-role-word-unread-'));
+    try {
+      const PAGE = 'unread-fixture.md';
+      const build = (leg, pageDir, ledgerKey, writePage = true) => {
+        const dir = join(unreadSandbox, leg);
+        for (const r of ROOTS) mkdirSync(join(dir, r), { recursive: true });
+        writeFileSync(join(dir, ROOTS[0], 'present.md'), '# Present\n');
+        if (writePage) {
+          mkdirSync(join(dir, pageDir), { recursive: true });
+          writeFileSync(join(dir, pageDir, PAGE), '# Approvals\n\nEvery approver holds a role.\n');
+        }
+        mkdirSync(join(dir, dirname(BASELINE_PATH)), { recursive: true });
+        writeFileSync(join(dir, BASELINE_PATH), JSON.stringify({ [ledgerKey]: 1 }));
+        return dir;
+      };
+      const hidden = `${skipTrees[0]}/${PAGE}`;
+      const dead = runUnread(build('dead', skipTrees[0], hidden));
+      expect('#26444 (program) — a ledgered page on disk that the walk never opens is REFUSED (exit 1)',
+        dead.status === 1 && dead.out.includes('did not read') && dead.out.includes(hidden));
+      const deletedKey = `${ROOTS[0]}/${PAGE}`;
+      const deleted = runUnread(build('deleted', ROOTS[0], deletedKey, false));
+      expect('#26444 (program) — the same ledger entry with the page DELETED passes (exit 0) and is reported',
+        deleted.status === 0 && deleted.out.includes(RATCHET_DOWN_PHRASE));
+    } finally {
+      rmSync(unreadSandbox, { recursive: true, force: true });
+    }
+  }
+
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -2512,22 +2677,18 @@ const baseline = existsSync(BASELINE_PATH)
   ? JSON.parse(readFileSync(BASELINE_PATH, 'utf8'))
   : {};
 
-const errors = [];
-for (const [file, count] of Object.entries(current)) {
-  const allowed = baseline[file];
-  if (allowed === undefined) {
-    errors.push(newUseMessage(file, count));
-  } else if (count > allowed) {
-    errors.push(grewMessage(file, allowed, count));
-  }
+const unread = unreadBaselined(
+  baseline, new Set(files.map((f) => relative('.', f).replace(/\\/g, '/'))));
+if (unread.length) {
+  console.error(unreadBaselinedMessage(unread));
+  process.exit(1);
 }
-for (const [file, allowed] of Object.entries(baseline)) {
-  const now = current[file];
-  if (now === undefined) {
-    errors.push(cleanOrGoneMessage(file, allowed));
-  } else if (now < allowed) {
-    errors.push(improvedMessage(file, allowed, now));
-  }
+
+const { errors, down } = ratchetVerdict(baseline, current);
+if (down.length) {
+  console.log(`check-role-word: ${down.length} baselined file(s) improved (passing, reported)\n`);
+  for (const d of down) console.log('  • ' + d);
+  console.log('');
 }
 
 if (errors.length) {

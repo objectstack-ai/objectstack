@@ -178,7 +178,7 @@ on:
   # action, and never by reading a cadence out of this file.
   workflow_dispatch: {}
   # Changes to the patrol itself get exercised before they merge — the same
-  # posture as engine-split-metric.yml. On a pull_request run the sweep still
+  # posture as test-nightly-tiers.yml. On a pull_request run the sweep still
   # executes (that is the point: the transport, the flags and the rendering are
   # proven on a real runner), but the anchor write is skipped and the rendered
   # body goes to the run's step summary instead. A PR must never rewrite the

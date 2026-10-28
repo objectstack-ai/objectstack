@@ -1906,40 +1906,41 @@ describe('FieldSchema - group property', () => {
 
 describe('FieldSchema — the `conditionalRequired` alias is REMOVED', () => {
   // #3754 lowered the alias into `requiredWhen` and dropped it from the output.
-  // Protocol 17 removes it from the spec entirely.
-  //
-  // TOMBSTONED rather than deleted, because `FieldSchema` is deliberately not
-  // `.strict()` — this object already carries a comment about the last time a
-  // key outlived its schema and got silently stripped (`dataQuality` / `cached`,
-  // #3726 / #3733). A silent strip here would mean the field is simply never
-  // required, with nothing to read anywhere.
-  it('rejects an authored `conditionalRequired` instead of silently stripping it', () => {
+  // Protocol 17 removed it from the spec entirely, tombstoned rather than
+  // deleted because `FieldSchema` was not `.strict()` then (#3726 / #3733).
+  // The field shape is strict now, and the tombstone was a 16.x retirement
+  // kit, so it aged out on #25767 (ADR-0087 D2 = A): the key is refused as a
+  // strict unknown key, and the refusal's trailing sentence names the
+  // protocol upgrade guide, where the `requiredWhen` prescription lives. What
+  // these pins keep is the half that matters — never a silent strip.
+  it('refuses an authored `conditionalRequired` as a strict unknown key instead of silently stripping it', () => {
     expect(() => FieldSchema.parse({
       type: 'text',
       conditionalRequired: "status = 'closed_won'",
-    })).toThrow(/`conditionalRequired` was removed/);
+    })).toThrow(/Unrecognized key\(s\) on this field: `conditionalRequired`/);
   });
 
-  it('carries the upgrade prescription in the rejection itself', () => {
+  it('points the refusal at the upgrade guide, where the prescription now lives', () => {
     let message = '';
     try {
       FieldSchema.parse({ type: 'text', conditionalRequired: 'amount > 1000' });
     } catch (err) {
       message = String(err);
     }
-    expect(message).toContain('use `requiredWhen`');
-    expect(message).toContain('os migrate meta');
+    expect(message).toContain('Keys retired before the previous protocol major are no longer prescribed here');
+    expect(message).toContain('https://objectstack.ai/docs/protocol-upgrade');
+    expect(message).not.toContain('os migrate meta');
   });
 
-  it('rejects it even when the canonical `requiredWhen` is also present', () => {
+  it('refuses it even when the canonical `requiredWhen` is also present', () => {
     expect(() => FieldSchema.parse({
       type: 'text',
       requiredWhen: "record.status == 'sent'",
       conditionalRequired: 'record.amount > 1000',
-    })).toThrow(/`conditionalRequired` was removed/);
+    })).toThrow(/Unrecognized key\(s\) on this field: `conditionalRequired`/);
   });
 
-  it('rejects it on the real authoring path — a field nested in an object', () => {
+  it('refuses it on the real authoring path — a field nested in an object', () => {
     // The removal has to bite where authors actually write fields, not only in
     // a bare `FieldSchema.parse()`.
     expect(() => ObjectSchema.parse({
@@ -1948,7 +1949,7 @@ describe('FieldSchema — the `conditionalRequired` alias is REMOVED', () => {
       fields: {
         amount: { type: 'currency', conditionalRequired: "record.stage == 'closing'" },
       },
-    })).toThrow(/`conditionalRequired` was removed/);
+    })).toThrow(/Unrecognized key\(s\) on this field: `conditionalRequired`/);
   });
 
   it('accepts the canonical `requiredWhen`, alone or beside `required`', () => {
@@ -1993,12 +1994,13 @@ describe('FieldSchema - conditional field rules (visibleWhen / readonlyWhen / re
     // The original assertion pinned the two keys as coexisting in the output;
     // #3754 inverted it to "canonical wins, alias dropped"; #3855 removes the
     // alias outright, so the pair is now unrepresentable at the input too — the
-    // strongest form of the same guarantee.
+    // strongest form of the same guarantee. The alias's tombstone aged out at
+    // 18 (#25767), so the refusal is the strict unknown-key one, guide link and all.
     expect(() => FieldSchema.parse({
       type: 'text',
       requiredWhen: "record.status == 'sent'",
       conditionalRequired: "record.status == 'closed_won'",
-    })).toThrow(/`conditionalRequired` was removed/);
+    })).toThrow(/`conditionalRequired`[\s\S]*https:\/\/objectstack\.ai\/docs\/protocol-upgrade/);
 
     const result = FieldSchema.parse({ type: 'text', requiredWhen: "record.status == 'sent'" });
     expect(result.requiredWhen).toEqual({ dialect: 'cel', source: "record.status == 'sent'" });

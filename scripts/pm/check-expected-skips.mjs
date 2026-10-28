@@ -4,8 +4,8 @@
 /**
  * check-expected-skips — the enqueue bar's SKIP half, made legible: given a PR
  * head, every `skipped` check-run is either an EXPECTED skip (a name the roster
- * below declares, with the mechanism that makes the skip normal) or it is
- * reported, classified as far as the API lets a reader tell (#18308).
+ * derived from the workflows admits, with the gate that makes the skip normal)
+ * or it is reported, classified as far as the API lets a reader tell (#18308).
  *
  *   node scripts/pm/check-expected-skips.mjs --pr 18315            # resolve the head, judge it
  *   node scripts/pm/check-expected-skips.mjs --head <sha>          # judge one commit's check-runs
@@ -35,37 +35,37 @@
  * The roster answers the NAME question: is this a check that legitimately
  * skips on this repository, and by what mechanism? A skipped name outside it is
  * the sentinel this check exists for — `Lint & Repo Gates`, `TypeScript Type
- * Check`, the two ci.yml aggregates (`Test Core`, `Dogfood Regression Gate`),
- * `Governed Surface Queue Guard` and the claim guards carry no `if:` and never
- * skip; the day one of them reads `skipped` is a filter someone added, a
- * rename, or a dependency that failed, and exit 4 names it.
+ * Check`, the ci.yml aggregates (`Test Core`, `Test UI`, `Dogfood Regression
+ * Gate`), `Governed Surface Queue Guard` and the claim guards carry no gate
+ * term and never skip; the day one of them reads `skipped` is a filter someone
+ * added, a rename, or a dependency that failed, and exit 4 names it.
  *
- * It does NOT answer the DIFF question — "should this ROSTERED job have run on
- * THIS diff?" — and the boundary is deliberate. For ci.yml's `filter`-gated
- * family the merge-queue build answers it: on `merge_group` the `docs`, `core`
- * and `crosspkg` outputs widen to `'true'` and those jobs run on the merged
- * tree before anything reaches `main` (the `|| 'true'` half of ci.yml's filter
- * contract, pinned by `--self-test`). Two exceptions. The five ui jobs: on
- * `merge_group` their outputs are the same paths filter read against the
- * queue's `base_sha`, so a queue build skips them exactly when the merged diff
- * touches no ui path, and main's hourly run widens them. And the
- * full-battery-only jobs (ci.yml's THE TWO SPEEDS), which skip on every PR
- * head and queue build and are answered by `main`'s push and hourly runs
- * instead. For the event- and label-conditional advisory jobs the reason
- * column names the condition a reader checks by hand. Deriving expectedness
- * live from the workflows' `paths` filters would answer the diff question, at
- * the cost of a SECOND evaluator of the platform's own semantics — the
- * dorny/paths-filter glob dialect, GitHub's expression language, matrix name
- * templates, the triggering event of each run — parity liabilities whose
- * failure shape is a confident, wrong "expected", which is the false green this
- * tree refuses everywhere else. The roster is instead TIED to the workflows
- * mechanically: `--self-test` parses each entry's workflow with the same `yaml`
- * package the docs build resolves and asserts the named job exists, carries the
- * roster's name, carries an `if:`, and that the `if:` spells the gate the entry
- * declares — so a renamed, deleted or re-gated job reddens the roster instead
- * of letting it rot into memory. A NEW gated job is caught from the other
- * side: its first skip is a name outside the roster, exit 4, until someone
- * declares it — or `deriveNonPrEventSkips` below admits its one exact shape.
+ * The roster is DERIVED, never listed (#26439): `deriveGatedSkips` reads each
+ * job's job-level `if:` and admits the job when one of its top-level `&&`
+ * conjuncts is a GATE TERM — a `filter` output (`needs.filter.outputs.<o> !=
+ * 'false'`, or a parenthesised `||` of those) whose output carries the
+ * `|| 'true'` widening, a per-PR event excluded (`github.event_name !=
+ * 'pull_request'` or `'merge_group'`), a pull_request action excluded, or a PR
+ * label read — under the name its skipped check-run carries (the raw `name:`,
+ * matrix template and all); `deriveNonPrEventSkips` admits one more shape. A
+ * gated job added to or renamed in a workflow is in the roster on its first
+ * run with no edit here, where a hand roster read it as exit 4 on every PR its
+ * gate said no to until someone added a row (#26111 was one such row).
+ *
+ * It does NOT answer the DIFF question — "should this gated job have run on
+ * THIS diff?" — and the boundary is deliberate. For ci.yml's `docs`, `core`
+ * and `crosspkg` outputs the merge-queue build answers it (they widen to
+ * `'true'` on `merge_group`); the ui outputs read the queue's own diff and the
+ * scheduled run widens them; the full-battery jobs are answered by `main`'s
+ * push and scheduled runs. Evaluating the `paths` filters or the expression
+ * language here would be a SECOND evaluator of the platform's semantics, whose
+ * failure shape is a confident, wrong "expected" — the false green this tree
+ * refuses everywhere else. So the derivation is a RECOGNISER: it reads a closed
+ * set of term spellings and evaluates none; a job whose `if:` reads the filter
+ * in any other spelling, or whose filter output lacks the widening, is REFUSED
+ * and named (`--roster`; the self-test holds the live refusal list at empty),
+ * and a job carrying no gate term is never admitted: whatever made it skip,
+ * its skip stays exit 4.
  *
  * ## What the API says about a skip, and what it does not
  *
@@ -181,280 +181,12 @@ const TOKEN = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? '';
  */
 export const OWN_PROXY_REARM_GUARD = 'OS_EXPECTED_SKIPS_PROXY_REARMED';
 
-/**
- * The gate KINDS a roster entry may declare, and the fragment of the job's
- * `if:` each one must spell. The self-test reads the live workflow and asserts
- * the fragment is there, which is what ties a roster row to the tree.
- *
- *   filter-output  ci.yml's `filter` job said `false` for every named output —
- *                  the job's `if:` spells `needs.filter.outputs.<o> != 'false'`
- *                  and the filter widens each output with `|| 'true'` where
- *                  its paths filter did not run (the ui outputs read it on
- *                  merge_group too).
- *   event          the job's `if:` excludes `github.event.action` values, so a
- *                  `labeled` / `unlabeled` / `edited` run of the same head skips.
- *   label          the job's `if:` reads a label literal — an opt-out (skip when
- *                  present) or an opt-in (skip when absent).
- */
-export const GATE_KINDS = Object.freeze(['filter-output', 'event', 'label']);
-
-/** The `if:` fragments a gate declaration commits its job to carrying. */
-export function gateSpellings(gate) {
-  switch (gate?.kind) {
-    case 'filter-output':
-      return (gate.outputs ?? []).map((o) => `needs.filter.outputs.${o} != 'false'`);
-    case 'event':
-      return ["github.event.action != 'labeled'"];
-    case 'label':
-      return [`'${gate.label}'`];
-    default:
-      return [];
-  }
-}
-
-const CORE_GATE = Object.freeze({ kind: 'filter-output', outputs: ['core'] });
-const EVENT_GATE = Object.freeze({ kind: 'event' });
-const EVENT_REASON =
-  "job-level `if:` excludes the `labeled` / `unlabeled` / `edited` pull_request events; each such event is its own run on the same head, beside the `opened` / `synchronize` run that concluded";
-const CORE_REASON =
-  "gated on ci.yml's `filter` job `core` output; a diff outside the core path set skips it on the PR head, and the merge-queue build widens every output to 'true' and runs it on the merged tree";
-const UI_GATE = Object.freeze({ kind: 'filter-output', outputs: ['ui_tree', 'ui'] });
-const UI_CONSUMERS_GATE = Object.freeze({ kind: 'filter-output', outputs: ['ui_tree', 'ui', 'ui_consumers'] });
-const UI_TREE_REASON =
-  "gated on ci.yml's `filter` job `ui_tree` output: it skips on every event while `ui/package.json` is absent (before the objectui import), and is not a required context";
-const UI_QUEUE_REASON =
-  "the merge-queue build reads the same paths filter against the queue's `base_sha`, so a queue entry whose merged diff touches none of those paths skips it too; main's hourly run widens it to 'true'";
-const FULL_BATTERY_REASON =
-  "full battery only (ci.yml's THE TWO SPEEDS): its `if:` excludes `pull_request` and `merge_group`, so it skips on every PR head and every queue build and runs on main's push, hourly schedule and dispatch runs";
-
-/**
- * THE ROSTER — declared once, here, as data. One row per check-run NAME that
- * skips by design on this repository, with the workflow job that produces it,
- * the gate kind (pinned against the live `if:` by `--self-test`) and a one-line
- * reason a seat can read at enqueue time.
- *
- * Measured, not remembered: the eleven names below are the union of every
- * `skipped` name over the ten landed heads the header lists. Five of them
- * (`Build Core`, `Temporal Conformance`, both matrix templates, `Dogfood Verify
- * CLI`) skipped on ALL ten; `Build Docs` and `Console Pin Gate` on all ten;
- * `Check Changeset` on all ten (every one carried `skip-changeset`);
- * `Packed-tarball smoke (opt-in)` on all ten; `Auto Label` and `Check PR Size`
- * on nine (the tenth head saw no `labeled` / `edited` event after its last
- * push); `Test Core (…/6)` on the three heads whose diff was outside both the
- * `core` and the `crosspkg` sets. Zero heads carried any other skipped name.
- * `Console Pin Gate`'s row left with its job when the objectui pin retired
- * (#25697); the recordings below drop its run the same way.
- *
- * ⛔ Adding a row is a declaration that the skip is BY DESIGN, and the row must
- * name the mechanism — a row added to silence an exit 4 without one is the
- * finding written somewhere quieter.
- *
- * The four `* UI` rows were added with their jobs (objectstack#25697), not
- * measured off landed heads: until objectui is imported under `ui/`, the
- * `ui_tree` output skips them on EVERY head, so the skip is by construction.
- * `Build UI Deps` joined them the same way (objectstack#25963): it builds the
- * closure the four replay, so its `if:` is their union, the `UI_CONSUMERS_GATE`
- * shape.
- *
- * These are the LISTED rows. The judge reads them beside the DERIVED ones —
- * `deriveNonPrEventSkips` below, one exact `if:` shape read off the tree — and
- * ⛔ a job that shape admits is never listed here: the derivation refuses a
- * name both halves carry.
- */
-export const EXPECTED_SKIPS = Object.freeze([
-  {
-    name: 'Check PR Size',
-    workflow: 'pr-automation.yml',
-    job: 'pr-size',
-    gate: EVENT_GATE,
-    reason: EVENT_REASON,
-  },
-  {
-    name: 'Auto Label',
-    workflow: 'pr-automation.yml',
-    job: 'auto-label',
-    gate: EVENT_GATE,
-    reason: EVENT_REASON,
-  },
-  {
-    name: 'Check Changeset',
-    workflow: 'pr-automation.yml',
-    job: 'changeset-check',
-    gate: { kind: 'label', label: 'skip-changeset' },
-    reason:
-      'job-level `if:` skips a PR carrying `skip-changeset` (the declared changeset opt-out) and the changeset-release PR; every run after the label lands reads skipped, the run before it concluded',
-  },
-  {
-    name: 'Packed-tarball smoke (opt-in)',
-    workflow: 'pack-smoke-optin.yml',
-    job: 'pack-smoke',
-    gate: { kind: 'label', label: 'needs:pack-smoke' },
-    reason: 'opt-in by the `needs:pack-smoke` label; skipped on every PR that does not carry it, once per pull_request event',
-  },
-  {
-    name: '18.x upgrade harness (opt-in)',
-    workflow: 'upgrade-harness-optin.yml',
-    job: 'upgrade-harness',
-    gate: { kind: 'label', label: 'needs:upgrade-harness' },
-    reason: 'opt-in by the `needs:upgrade-harness` label (the 18.x line\'s R2 check, #24522); skipped on every PR that does not carry it, once per pull_request event',
-  },
-  {
-    name: 'Build Core',
-    workflow: 'ci.yml',
-    job: 'build-core',
-    gate: CORE_GATE,
-    reason: `${CORE_REASON} (a REQUIRED context: the queue build is where its verdict is taken)`,
-  },
-  {
-    name: 'Temporal Conformance (live PG + MySQL)',
-    workflow: 'ci.yml',
-    job: 'temporal-conformance',
-    gate: CORE_GATE,
-    reason: `${FULL_BATTERY_REASON}; on a push it also needs the \`filter\` job's \`core\` output`,
-  },
-  {
-    name: 'Dogfood Regression Gate (${{ matrix.shard }}/3)',
-    workflow: 'ci.yml',
-    job: 'dogfood',
-    gate: CORE_GATE,
-    reason: `${FULL_BATTERY_REASON}; the raw matrix template IS the name a job skipped before matrix expansion reports (the aggregate \`Dogfood Regression Gate\` runs \`if: always()\` and never skips)`,
-  },
-  {
-    name: 'Dogfood Verify CLI',
-    workflow: 'ci.yml',
-    job: 'dogfood-verify',
-    gate: CORE_GATE,
-    reason: `${FULL_BATTERY_REASON}; on a push it also needs the \`filter\` job's \`core\` output`,
-  },
-  {
-    name: 'Test Core (${{ matrix.shard }}/8)',
-    workflow: 'ci.yml',
-    job: 'test',
-    gate: { kind: 'filter-output', outputs: ['core', 'crosspkg'] },
-    reason:
-      "gated on ci.yml's `filter` outputs `core` OR `crosspkg`; skips only when both said false (a diff outside packages/** AND outside the cross-package test-input roots such as scripts/**), the merge-queue build widens both to 'true'; the raw matrix template is the pre-expansion name (the aggregate `Test Core` runs `if: always()` and never skips)",
-  },
-  {
-    name: 'Build Docs',
-    workflow: 'ci.yml',
-    job: 'build-docs',
-    gate: { kind: 'filter-output', outputs: ['docs'] },
-    reason: "gated on ci.yml's `filter` job `docs` output (apps/docs, content, the lockfile, ci.yml itself); a diff outside it skips the docs build on the PR head",
-  },
-  {
-    name: 'Build UI Deps',
-    workflow: 'ci.yml',
-    job: 'ui-deps',
-    gate: UI_CONSUMERS_GATE,
-    reason: `${UI_TREE_REASON}; with ui/ present it runs on a ui/ path or one of the seven packages objectui consumes (the \`ui_consumers\` output) — the union of the four ui jobs' conditions, since it builds the closure they replay; ${UI_QUEUE_REASON}`,
-  },
-  {
-    name: 'Type Check UI',
-    workflow: 'ci.yml',
-    job: 'type-check-ui',
-    gate: UI_CONSUMERS_GATE,
-    reason: `${UI_TREE_REASON}; with ui/ present it runs on a ui/ path or one of the seven packages objectui consumes (the \`ui_consumers\` output); ${UI_QUEUE_REASON}`,
-  },
-  {
-    name: 'Test UI (${{ matrix.shard }}/16)',
-    workflow: 'ci.yml',
-    job: 'test-ui',
-    gate: UI_GATE,
-    reason: `${UI_TREE_REASON}; with ui/ present it runs on a ui/ path; ${UI_QUEUE_REASON}; the raw matrix template is the pre-expansion name`,
-  },
-  {
-    name: 'Lint UI',
-    workflow: 'ci.yml',
-    job: 'lint-ui',
-    gate: UI_GATE,
-    reason: `${UI_TREE_REASON}; with ui/ present it runs on a ui/ path; ${UI_QUEUE_REASON}`,
-  },
-  {
-    name: 'Build & E2E UI',
-    workflow: 'ci.yml',
-    job: 'build-e2e-ui',
-    gate: UI_CONSUMERS_GATE,
-    reason: `${UI_TREE_REASON}; with ui/ present it runs on a ui/ path or one of the seven packages objectui consumes (the \`ui_consumers\` output); ${UI_QUEUE_REASON}`,
-  },
-]);
-
 /** Conclusions that make a same-suite skip a dependency-skip suspect. */
 export const FAILED_CONCLUSIONS = Object.freeze(['failure', 'cancelled', 'timed_out', 'action_required', 'stale']);
 
 // ---------------------------------------------------------------------------
-// The roster's own hygiene — pure over a workflow reader so the self-test can
-// drive it against the live tree AND against synthetic drift.
+// Reading the tree the roster is derived from.
 // ---------------------------------------------------------------------------
-
-/**
- * Every row must be well-formed, unique by name, and TRUE of the tree: its job
- * exists in its workflow, carries the row's name, carries an `if:`, and that
- * `if:` spells the gate the row declares. For `filter-output` rows the
- * `filter` job's output must carry the `|| 'true'` widening, because the
- * reason column promises the job runs whenever the filter could not answer —
- * the queue build for the core-side outputs, the hourly run for every output —
- * a promise that is only true while that half of the filter contract stands.
- *
- * @param {readonly object[]} roster
- * @param {(file: string) => object|null} readWorkflow  parsed YAML, or null when unreadable
- * @returns {string[]} findings; empty means the roster is true of the tree
- */
-export function auditRoster(roster, readWorkflow) {
-  const findings = [];
-  const seen = new Set();
-  for (const row of roster) {
-    const label = typeof row?.name === 'string' && row.name ? row.name : '(unnamed row)';
-    for (const key of ['name', 'workflow', 'job', 'reason']) {
-      if (typeof row?.[key] !== 'string' || !row[key].trim()) findings.push(`${label}: missing \`${key}\``);
-    }
-    if (seen.has(row?.name)) findings.push(`${label}: duplicate name`);
-    seen.add(row?.name);
-    if (!GATE_KINDS.includes(row?.gate?.kind)) {
-      findings.push(`${label}: gate kind ${JSON.stringify(row?.gate?.kind)} is not one of ${GATE_KINDS.join(' | ')}`);
-      continue;
-    }
-    if (row.gate.kind === 'filter-output' && !(Array.isArray(row.gate.outputs) && row.gate.outputs.length > 0)) {
-      findings.push(`${label}: a filter-output gate names no outputs`);
-      continue;
-    }
-    if (row.gate.kind === 'label' && !(typeof row.gate.label === 'string' && row.gate.label)) {
-      findings.push(`${label}: a label gate names no label`);
-      continue;
-    }
-    if (typeof row.workflow !== 'string' || typeof row.job !== 'string') continue;
-    const wf = readWorkflow(row.workflow);
-    if (!wf || typeof wf !== 'object') {
-      findings.push(`${label}: workflow ${row.workflow} could not be read — a row this audit cannot verify is a refusal, not a pass`);
-      continue;
-    }
-    const job = wf.jobs?.[row.job];
-    if (!job || typeof job !== 'object') {
-      findings.push(`${label}: ${row.workflow} has no job \`${row.job}\` — deleted or renamed; correct or delete the row`);
-      continue;
-    }
-    const jobName = typeof job.name === 'string' ? job.name : row.job;
-    if (jobName !== row.name) {
-      findings.push(`${label}: ${row.workflow} job \`${row.job}\` is named ${JSON.stringify(jobName)} — the check-run name moved; correct the row`);
-    }
-    const cond = typeof job.if === 'string' ? job.if : job.if === undefined ? '' : String(job.if);
-    if (!cond.trim()) {
-      findings.push(`${label}: ${row.workflow} job \`${row.job}\` carries no \`if:\` — it cannot skip by design, so it does not belong in the roster`);
-      continue;
-    }
-    for (const fragment of gateSpellings(row.gate)) {
-      if (!cond.includes(fragment)) findings.push(`${label}: the job's \`if:\` does not spell ${fragment} — the declared gate is not the gate the job carries`);
-    }
-    if (row.gate.kind === 'filter-output') {
-      for (const output of row.gate.outputs) {
-        const expr = String(wf.jobs?.filter?.outputs?.[output] ?? '');
-        if (!expr.includes("|| 'true'")) {
-          findings.push(`${label}: ${row.workflow} filter output \`${output}\` lacks the \`|| 'true'\` widening the reason column relies on (${expr || 'absent'})`);
-        }
-      }
-    }
-  }
-  return findings;
-}
 
 /** Read one workflow file from a root, parsed; null when absent or unparsable. */
 export function workflowReader(root = ROOT) {
@@ -487,8 +219,8 @@ export function listWorkflowFiles(root = ROOT) {
 
 /**
  * The roster a live run judges with is a function of exactly these files, as
- * they sit in the checkout the command runs from: THIS file (the listed half,
- * and the derivation's code) and every workflow file (the derived half). A
+ * they sit in the checkout the command runs from: THIS file (the derivation's
+ * code) and every workflow file (what it derives the roster from). A
  * head's `pull_request` check-runs come from the workflows of the merge they
  * were built on — the head over its base branch's tip at that moment. So a checkout behind
  * the base reads a job rostered on the base since as an unexpected skip (exit
@@ -525,7 +257,7 @@ export function listWorkflowFiles(root = ROOT) {
  * they judge with the roster in hand, exactly as before.
  */
 
-/** This file, repo-relative: the listed half of the roster and the derivation's code. */
+/** This file, repo-relative: the derivation's code, one of the roster's sources. */
 export const ROSTER_SELF = 'scripts/pm/check-expected-skips.mjs';
 
 /** At most this many gap paths are printed; the rest are counted. */
@@ -590,7 +322,288 @@ export function renderRosterGap(gap, { ref, root = ROOT }) {
 }
 
 // ---------------------------------------------------------------------------
-// The DERIVED half — one job-level `if:` shape, read off the tree.
+// The roster, DERIVED — every job read once, two `if:` shapes recognised.
+// ---------------------------------------------------------------------------
+
+/**
+ * Every job in the tree, once, with the name its skipped check-run carries, and
+ * how many jobs carry each name. Both derivations read this one scan, so a name
+ * two jobs share is refused by either, and an unreadable workflow is refused
+ * once, by file.
+ *
+ * @param {readonly string[]} files        workflow file names under `WORKFLOW_DIR`
+ * @param {(file: string) => object|null} readWorkflow
+ */
+export function scanWorkflowJobs(files, readWorkflow) {
+  const unreadable = [];
+  const jobs = [];
+  for (const workflow of files) {
+    const wf = readWorkflow(workflow);
+    if (!wf || typeof wf !== 'object') {
+      unreadable.push({ workflow, job: null, reason: 'the workflow could not be read — none of its jobs is derived' });
+      continue;
+    }
+    const entries = wf.jobs && typeof wf.jobs === 'object' ? Object.entries(wf.jobs) : [];
+    for (const [key, job] of entries) {
+      if (!job || typeof job !== 'object') continue;
+      jobs.push({ workflow, wf, key, job, named: skippedCheckRunName(key, job) });
+    }
+  }
+  const bearers = new Map();
+  for (const j of jobs) {
+    if (!('name' in j.named)) continue;
+    bearers.set(j.named.name, (bearers.get(j.named.name) ?? 0) + 1);
+  }
+  return { jobs, unreadable, bearers, scanned: files.length };
+}
+
+/** The refusal a candidate earns before its gate is read, or null: an untellable or a shared name. */
+function nameRefusal({ named }, bearers) {
+  if (!('name' in named)) return named.refused;
+  const n = bearers.get(named.name);
+  return n > 1 ? `${n} jobs in the tree carry the check-run name ${JSON.stringify(named.name)} — a skip of the other would read expected` : null;
+}
+
+/**
+ * The events a per-PR exclusion term may name. Both fire FOR a pull request —
+ * its own runs and its queue build — so a job whose `if:` conjoins
+ * `github.event_name != '<e>'` skips on every such run by construction (ci.yml's
+ * full-battery jobs; THE TWO SPEEDS). ⛔ Closed on purpose: excluding `push` or
+ * `schedule` says nothing about a PR head.
+ */
+export const PR_EVENTS = Object.freeze(['pull_request', 'merge_group']);
+
+/** The term kinds `gateTerm` recognises, in the order a reason names them. */
+export const GATE_TERM_KINDS = Object.freeze(['filter-output', 'pr-event', 'event-action', 'label']);
+
+const FILTER_TERM = /^needs\.filter\.outputs\.([A-Za-z_][A-Za-z0-9_-]*)\s*!=\s*'false'$/;
+const PR_EVENT_TERM = /^github\.event_name\s*!=\s*'([a-z_]+)'$/;
+const EVENT_ACTION_TERM = /^github\.event\.action\s*!=\s*'([a-z_]+)'$/;
+const LABEL_TERM = /^(!?)contains\(\s*github\.event\.pull_request\.labels\.\*\.name\s*,\s*'([^']+)'\s*\)$/;
+/** Any read of a `filter` output: a job spelling one that `gateTerm` does not read is refused, never ignored. */
+const FILTER_MENTION = /\bneeds\.filter\.outputs\./;
+
+/**
+ * Split an expression at its TOP-LEVEL `op` (`&&` or `||`) — outside parentheses
+ * and outside `'…'` literals (where `''` is an escaped quote) — trimming each
+ * part; null when the parentheses or the quotes do not balance.
+ */
+export function splitTopLevel(expr, op) {
+  const parts = [];
+  let depth = 0;
+  let quoted = false;
+  let start = 0;
+  for (let i = 0; i < expr.length; i += 1) {
+    const c = expr[i];
+    if (quoted) {
+      if (c === "'") {
+        if (expr[i + 1] === "'") i += 1;
+        else quoted = false;
+      }
+      continue;
+    }
+    if (c === "'") quoted = true;
+    else if (c === '(') depth += 1;
+    else if (c === ')') {
+      depth -= 1;
+      if (depth < 0) return null;
+    } else if (depth === 0 && expr.startsWith(op, i)) {
+      parts.push(expr.slice(start, i).trim());
+      start = i + op.length;
+      i += op.length - 1;
+    }
+  }
+  if (depth !== 0 || quoted) return null;
+  parts.push(expr.slice(start).trim());
+  return parts;
+}
+
+/** The inside of `( … )` when ONE pair wraps the whole term, else null. */
+function unwrapParens(term) {
+  if (!term.startsWith('(') || !term.endsWith(')')) return null;
+  const inner = term.slice(1, -1);
+  // `(a) || (b)` also starts and ends with a parenthesis: its inside does not balance.
+  return splitTopLevel(inner, '||') === null ? null : inner.trim();
+}
+
+/**
+ * Read ONE top-level conjunct as a gate term, or answer null.
+ *
+ * ⛔ A recogniser, never an evaluator: each kind is one exact spelling, and a
+ * conjunct that is none of them is not a gate however it reads.
+ *
+ *   filter-output  `needs.filter.outputs.<o> != 'false'`, or a parenthesised
+ *                  `||` whose every term is one — false only when the filter
+ *                  said `false` for every output it names
+ *   pr-event       `github.event_name != '<e>'`, `<e>` in `PR_EVENTS`
+ *   event-action   `github.event.action != '<a>'` — a pull_request event of
+ *                  that action is its own run on the same head, and skips
+ *   label          `contains(github.event.pull_request.labels.*.name, '<l>')`,
+ *                  an opt-in, or its `!` negation, an opt-out
+ */
+export function gateTerm(conjunct) {
+  const term = String(conjunct ?? '').trim();
+  let m = FILTER_TERM.exec(term);
+  if (m) return { kind: 'filter-output', outputs: [m[1]] };
+  const inner = unwrapParens(term);
+  if (inner !== null) {
+    const alternatives = splitTopLevel(inner, '||') ?? [];
+    const outputs = alternatives.map((a) => FILTER_TERM.exec(a)?.[1] ?? null);
+    return outputs.length > 0 && outputs.every(Boolean) ? { kind: 'filter-output', outputs: [...new Set(outputs)] } : null;
+  }
+  m = PR_EVENT_TERM.exec(term);
+  if (m) return PR_EVENTS.includes(m[1]) ? { kind: 'pr-event', events: [m[1]] } : null;
+  m = EVENT_ACTION_TERM.exec(term);
+  if (m) return { kind: 'event-action', actions: [m[1]] };
+  m = LABEL_TERM.exec(term);
+  if (m) return { kind: 'label', label: m[2], mode: m[1] ? 'opt-out' : 'opt-in' };
+  return null;
+}
+
+/**
+ * Read a job-level `if:` as a GATE, or answer null: its top-level `&&`
+ * conjuncts (the whole optionally wrapped in one `${{ … }}`), the ones
+ * `gateTerm` recognises, and a count of the rest. A conjunction is false when
+ * any one conjunct is, so a single recognised term makes the skip by design;
+ * the rest (`!cancelled()`, a plan job's output, …) are counted, never read.
+ * `pr-event` and `event-action` terms merge (each one alone skips the job);
+ * `filter-output` groups stay apart, since each group is its own reason.
+ *
+ * @returns {{ terms: object[], other: number }|null}
+ */
+export function jobGate(cond) {
+  if (typeof cond !== 'string') return null;
+  let expr = cond.trim();
+  const wrapped = /^\$\{\{([\s\S]*)\}\}$/.exec(expr);
+  if (wrapped) expr = wrapped[1].trim();
+  if (!expr || expr.includes('${{') || expr.includes('}}')) return null;
+  const conjuncts = splitTopLevel(expr, '&&');
+  if (conjuncts === null) return null;
+  const terms = [];
+  let other = 0;
+  for (const c of conjuncts) {
+    const t = gateTerm(c);
+    if (t === null) {
+      other += 1;
+      continue;
+    }
+    const key = t.kind === 'pr-event' ? 'events' : t.kind === 'event-action' ? 'actions' : null;
+    const prior = key ? terms.find((p) => p.kind === t.kind) : null;
+    if (prior) prior[key] = [...new Set([...prior[key], ...t[key]])];
+    else terms.push(t);
+  }
+  if (terms.length === 0) return null;
+  terms.sort((a, b) => GATE_TERM_KINDS.indexOf(a.kind) - GATE_TERM_KINDS.indexOf(b.kind));
+  return { terms, other };
+}
+
+/** True when the output's expression keeps `docs` / `core` / `crosspkg`'s `merge_group` guard: the queue build runs the job. */
+function queueWidened(expr) {
+  return /github\.event_name\s*!=\s*'merge_group'\s*&&/.test(expr);
+}
+
+/**
+ * Why a gate's `filter` terms cannot be trusted, or null. The reason a filter
+ * skip is by design is ci.yml's filter contract — the job `needs` the filter,
+ * the output exists, and the output widens with `|| 'true'` wherever the paths
+ * filter did not answer — so a term that breaks any half is refused, and its
+ * job's skip stays exit 4.
+ */
+function filterTermProblem(wf, job, gate) {
+  const outputs = gate.terms.filter((t) => t.kind === 'filter-output').flatMap((t) => t.outputs);
+  if (outputs.length === 0) return null;
+  const needs = Array.isArray(job.needs) ? job.needs : typeof job.needs === 'string' ? [job.needs] : [];
+  if (!needs.includes('filter')) return "its `if:` reads the `filter` job's outputs but the job does not `needs: filter` — the outputs read empty and the gate is not the filter's";
+  for (const o of outputs) {
+    const expr = wf.jobs?.filter?.outputs?.[o];
+    if (typeof expr !== 'string') return `its \`if:\` reads \`needs.filter.outputs.${o}\`, which the workflow's \`filter\` job does not declare`;
+    if (!expr.includes("|| 'true'")) return `\`filter\` output \`${o}\` lacks the \`|| 'true'\` widening (${expr}) — where the paths filter does not answer, the job skips instead of running`;
+  }
+  return null;
+}
+
+const tick = (xs) => xs.map((x) => `\`${x}\``).join(' / ');
+
+/** The reason a derived gated row carries, built from the terms the job really spells. */
+function gatedReason(workflow, wf, gate, matrix) {
+  const parts = gate.terms.map((t) => {
+    if (t.kind === 'filter-output') {
+      const read = t.outputs.filter((o) => !queueWidened(String(wf.jobs?.filter?.outputs?.[o] ?? '')));
+      return (
+        `gated on ${workflow}'s \`filter\` output ${tick(t.outputs)}${t.outputs.length > 1 ? ' (it skips only when every one said false)' : ''}: ` +
+        'a diff outside those paths skips it on the PR head, ' +
+        (read.length === 0
+          ? "and the merge-queue build widens it to 'true' and runs it on the merged tree"
+          : "the merge-queue build reads the same paths filter against the queue's base, and the scheduled full run widens it to 'true'")
+      );
+    }
+    if (t.kind === 'pr-event') {
+      const where = [t.events.includes('pull_request') && 'every PR head', t.events.includes('merge_group') && 'every queue build'].filter(Boolean).join(' and ');
+      return `full battery only: its \`if:\` excludes ${tick(t.events)}, so it skips on ${where} and is answered by main's push and scheduled runs`;
+    }
+    if (t.kind === 'event-action') {
+      return `its \`if:\` excludes the ${tick(t.actions)} pull_request event(s); each such event is its own run on the same head, beside the run that concluded`;
+    }
+    return t.mode === 'opt-out'
+      ? `a PR carrying the \`${t.label}\` label skips it (the declared opt-out); every run after the label lands reads skipped`
+      : `opt-in by the \`${t.label}\` label; skipped on every PR that does not carry it, once per pull_request event`;
+  });
+  return (
+    `derived from ${workflow}'s job-level \`if:\` — ${parts.join('; ')}` +
+    (gate.other > 0 ? ` (plus ${gate.other} further condition(s) the recogniser does not read)` : '') +
+    (matrix ? '; skipped before its matrix expands, so the check-run carries the raw `name:` template' : '')
+  );
+}
+
+/**
+ * Derive the expected skips of every GATED job: each job, in every workflow
+ * file, whose job-level `if:` `jobGate` reads, under the name
+ * `skippedCheckRunName` gives it.
+ *
+ * A candidate is REFUSED — never admitted — when its name cannot be told, when
+ * another job anywhere in the tree carries the same check-run name, when one of
+ * its `filter` terms breaks the filter contract (`filterTermProblem`), or when
+ * its `if:` reads a `filter` output in a spelling `gateTerm` does not read (a
+ * new spelling must be recognised before it is trusted, never skipped past).
+ * Refusal is the safe direction: the skip stays exit 4, and the self-test holds
+ * the live tree's refusal list at empty, so the job's author hears about it
+ * rather than a landing seat.
+ *
+ * @returns {{ rows: object[], refused: { workflow: string, job: string|null, reason: string }[], scanned: number }}
+ */
+export function deriveGatedSkips(files, readWorkflow, scan = scanWorkflowJobs(files, readWorkflow)) {
+  const refused = [...scan.unreadable];
+  const rows = [];
+  for (const candidate of scan.jobs) {
+    const { workflow, wf, key, job, named } = candidate;
+    const gate = jobGate(job.if);
+    if (gate === null) {
+      if (FILTER_MENTION.test(typeof job.if === 'string' ? job.if : '')) {
+        refused.push({ workflow, job: key, reason: "its `if:` reads a `filter` output in a spelling the recogniser does not read — spell it `needs.filter.outputs.<o> != 'false'` (or a parenthesised `||` of those) as a top-level `&&` conjunct, or teach `gateTerm` the new spelling" });
+      }
+      continue;
+    }
+    const problem = nameRefusal(candidate, scan.bearers) ?? filterTermProblem(wf, job, gate);
+    if (problem) {
+      refused.push({ workflow, job: key, reason: problem });
+      continue;
+    }
+    rows.push(
+      Object.freeze({
+        name: named.name,
+        workflow,
+        job: key,
+        gate: Object.freeze({ kind: 'job-gate', terms: Object.freeze(gate.terms.map((t) => Object.freeze(t))), other: gate.other }),
+        derived: true,
+        reason: gatedReason(workflow, wf, gate, job.strategy?.matrix !== undefined),
+      }),
+    );
+  }
+  return { rows, refused, scanned: scan.scanned };
+}
+
+// ---------------------------------------------------------------------------
+// The second shape — a job selected ONLY by non-PR events.
 // ---------------------------------------------------------------------------
 
 /**
@@ -625,7 +638,8 @@ const MATRIX_REFERENCE = /^matrix\.[A-Za-z_][A-Za-z0-9_-]*$/;
  * skip where it was: outside the roster, exit 4. Measured refusals on this
  * tree: `release.yml` › `version-pr` (a `workflow_dispatch` term conjoined with
  * `inputs.refresh_version_pr`) and `merged-branch-reaper.yml` › `reap`
- * (`success()` and `inputs.dry_run` beside its event terms).
+ * (`success()` and `inputs.dry_run` beside its event terms) — the second is
+ * admitted by `jobGate` instead, for its top-level `!= 'pull_request'`.
  *
  * @param {unknown} cond  the job's `if:` as the YAML parser returned it
  * @returns {string[]|null}  the sorted, de-duplicated events; null when not this shape
@@ -654,7 +668,7 @@ export function nonPrEventGate(cond) {
  * literally (measured on PR #20748's head `a84b73af13`: the skipped check-run
  * of `scaffold-e2e.yml` › `registry-canary` is named
  * `Registry canary: ${{ matrix.template }}`, run 36658032070, as are ci.yml's
- * two listed templates). Only an expanded job's check-runs carry expanded
+ * gated matrix jobs). Only an expanded job's check-runs carry expanded
  * names, and an expanded job RAN, so no expanded name is ever a skip this
  * derivation must admit. Any expression other than a bare matrix reference —
  * `inputs.*`, `needs.*.outputs.*`, `github.*` — has an unmeasured skipped
@@ -682,59 +696,26 @@ export function skippedCheckRunName(key, job) {
 }
 
 /**
- * Derive the expected skips no one lists: every job, in every workflow file,
- * whose job-level `if:` `nonPrEventGate` admits, under the name
- * `skippedCheckRunName` gives it.
- *
- * The roster judges NAMES, so a derived name must mean ONE job. A candidate is
- * REFUSED — never admitted — when another job anywhere in the tree carries the
- * same check-run name (a skip of that other job would read expected), when the
- * listed roster already carries it (derive, don't list), or when its name
- * cannot be told. A workflow that cannot be read derives nothing and is
- * refused by file. Refusal is the safe direction: the skip stays exit 4. The
- * self-test holds the live tree's refusal list at empty, so the job's author
- * hears about it rather than a landing seat.
+ * Derive the expected skips of every job SELECTED only by non-PR events: each
+ * job, in every workflow file, whose job-level `if:` `nonPrEventGate` admits,
+ * under the name `skippedCheckRunName` gives it. The same name refusals as
+ * `deriveGatedSkips` apply (an untellable name, or one two jobs carry), off the
+ * same scan; a workflow that cannot be read derives nothing.
  *
  * @param {readonly string[]} files        workflow file names under `WORKFLOW_DIR`
  * @param {(file: string) => object|null} readWorkflow
- * @param {readonly object[]} [listed]     the listed roster the derived rows join
  * @returns {{ rows: object[], refused: { workflow: string, job: string|null, reason: string }[], scanned: number }}
  */
-export function deriveNonPrEventSkips(files, readWorkflow, listed = EXPECTED_SKIPS) {
-  const refused = [];
-  const jobs = [];
-  for (const workflow of files) {
-    const wf = readWorkflow(workflow);
-    if (!wf || typeof wf !== 'object') {
-      refused.push({ workflow, job: null, reason: 'the workflow could not be read — none of its jobs is derived' });
-      continue;
-    }
-    const entries = wf.jobs && typeof wf.jobs === 'object' ? Object.entries(wf.jobs) : [];
-    for (const [key, job] of entries) {
-      if (!job || typeof job !== 'object') continue;
-      jobs.push({ workflow, key, job, named: skippedCheckRunName(key, job) });
-    }
-  }
-  const bearers = new Map();
-  for (const j of jobs) {
-    if (!('name' in j.named)) continue;
-    bearers.set(j.named.name, (bearers.get(j.named.name) ?? 0) + 1);
-  }
-  const listedNames = new Set(listed.map((r) => r.name));
+export function deriveNonPrEventSkips(files, readWorkflow, scan = scanWorkflowJobs(files, readWorkflow)) {
+  const refused = [...scan.unreadable];
   const rows = [];
-  for (const { workflow, key, job, named } of jobs) {
+  for (const candidate of scan.jobs) {
+    const { workflow, key, job, named } = candidate;
     const events = nonPrEventGate(job.if);
     if (events === null) continue;
-    if (!('name' in named)) {
-      refused.push({ workflow, job: key, reason: named.refused });
-      continue;
-    }
-    if (bearers.get(named.name) > 1) {
-      refused.push({ workflow, job: key, reason: `${bearers.get(named.name)} jobs in the tree carry the check-run name ${JSON.stringify(named.name)} — a skip of the other would read expected` });
-      continue;
-    }
-    if (listedNames.has(named.name)) {
-      refused.push({ workflow, job: key, reason: `the listed roster already carries ${JSON.stringify(named.name)} — derive, don't list: delete the listed row` });
+    const problem = nameRefusal(candidate, scan.bearers);
+    if (problem) {
+      refused.push({ workflow, job: key, reason: problem });
       continue;
     }
     const matrix = job.strategy?.matrix !== undefined;
@@ -751,16 +732,34 @@ export function deriveNonPrEventSkips(files, readWorkflow, listed = EXPECTED_SKI
       }),
     );
   }
-  return { rows, refused, scanned: files.length };
+  return { rows, refused, scanned: scan.scanned };
 }
 
 /**
- * The roster the judge reads: the listed rows, then the rows derived from the
- * workflows under `root`. The derivation travels beside it for the report.
+ * The roster a tree yields: the gated rows, then the non-PR-event rows, off
+ * one scan. The two shapes cannot both admit a job (a non-PR-event `if:` is one
+ * disjunction, which `jobGate` never reads as a term), and a name two jobs
+ * carry is refused by both, so the joined roster is one row per name. The
+ * derivation travels beside it for the report; an unreadable workflow is
+ * refused once.
  */
+export function rosterFromTree(files, readWorkflow) {
+  const scan = scanWorkflowJobs(files, readWorkflow);
+  const gated = deriveGatedSkips(files, readWorkflow, scan);
+  const nonPr = deriveNonPrEventSkips(files, readWorkflow, scan);
+  const derivation = {
+    rows: [...gated.rows, ...nonPr.rows],
+    refused: [...gated.refused, ...nonPr.refused.filter((r) => r.job !== null)],
+    scanned: scan.scanned,
+    gated,
+    nonPr,
+  };
+  return { roster: Object.freeze([...derivation.rows]), derivation };
+}
+
+/** The roster the live judge reads: the one the workflows under `root` yield. */
 export function expectedSkipRoster(root = ROOT) {
-  const derivation = deriveNonPrEventSkips(listWorkflowFiles(root), workflowReader(root));
-  return { roster: Object.freeze([...EXPECTED_SKIPS, ...derivation.rows]), derivation };
+  return rosterFromTree(listWorkflowFiles(root), workflowReader(root));
 }
 
 // ---------------------------------------------------------------------------
@@ -787,7 +786,7 @@ export function classifySkip(run, failedBySuite) {
   return {
     kind: 'filter-miss',
     detail:
-      'a job-level condition did not select this head, on a name the roster does not expect to skip — a filter miss, a new gate, or a rename; add a roster row naming its mechanism only if the skip is by design',
+      'a job-level condition did not select this head, on a name the roster does not expect to skip — a filter miss, a gate the derivation does not read, or a rename; if the skip is by design, spell its gate as a term the derivation reads (`--roster` names every refusal)',
   };
 }
 
@@ -795,10 +794,10 @@ export function classifySkip(run, failedBySuite) {
  * Judge one head's check-runs payload against the roster.
  *
  * @param {object} payload   the REST `check-runs` listing ({ total_count, check_runs })
- * @param {readonly object[]} [roster]
+ * @param {readonly object[]} roster  the derived roster (`expectedSkipRoster` / `rosterFromTree`)
  * @returns {object} a judgement; `kind` is `judged`, `pending`, `empty` or `unreadable`
  */
-export function judgeCheckRuns(payload, roster = EXPECTED_SKIPS) {
+export function judgeCheckRuns(payload, roster) {
   if (!payload || typeof payload !== 'object' || !Array.isArray(payload.check_runs)) {
     return { kind: 'unreadable', reason: 'not a check-runs payload — no `check_runs` array' };
   }
@@ -1102,15 +1101,30 @@ export function renderReport(judgement, meta = {}) {
   return L;
 }
 
+/** A gate's terms in one short spelling: `filter core|crosspkg + pr-event pull_request|merge_group`. */
+export function gateTermsSpelling(terms) {
+  return terms
+    .map((t) =>
+      t.kind === 'filter-output'
+        ? `filter ${t.outputs.join('|')}`
+        : t.kind === 'pr-event'
+          ? `pr-event ${t.events.join('|')}`
+          : t.kind === 'event-action'
+            ? `event-action ${t.actions.join('|')}`
+            : `label ${t.mode} ${t.label}`,
+    )
+    .join(' + ');
+}
+
 /** The roster, rendered for a seat that wants to read it without a network. */
-export function renderRoster(roster = EXPECTED_SKIPS, derivation = null) {
-  const derived = roster.filter((r) => r.derived === true).length;
+export function renderRoster(roster, derivation = null) {
+  const nonPr = roster.filter((r) => r.gate.kind === 'non-pr-event').length;
   const L = [
-    `check-expected-skips: ${roster.length} expected-skip name(s) — ${roster.length - derived} listed in scripts/pm/check-expected-skips.mjs, ` +
-      `${derived} derived from ${derivation ? `${derivation.scanned} workflow file(s)` : 'the workflows'}`,
+    `check-expected-skips: ${roster.length} expected-skip name(s), every one derived from ${derivation ? `${derivation.scanned} workflow file(s)` : 'the workflows'} — ` +
+      `${roster.length - nonPr} by a job-level gate term, ${nonPr} by a non-PR-event-only \`if:\`; none listed by hand`,
   ];
   for (const row of roster) {
-    const detail = row.gate.outputs ? ` ${row.gate.outputs.join('|')}` : row.gate.label ? ` ${row.gate.label}` : row.gate.events ? ` ${row.gate.events.join('|')}` : '';
+    const detail = row.gate.terms ? ` ${gateTermsSpelling(row.gate.terms)}` : row.gate.events ? ` ${row.gate.events.join('|')}` : '';
     L.push(`  ${row.name}  [${row.workflow} › ${row.job}; gate: ${row.gate.kind}${detail}${row.derived === true ? '; derived' : ''}]`);
     L.push(`     ${row.reason}`);
   }
@@ -1260,15 +1274,104 @@ function fixtureRun(name, conclusion, suite = 1, extra = {}) {
 }
 
 /**
+ * The FIXTURE TREE the measured heads below are judged against: the gated jobs
+ * those heads were built from, with the `if:` spellings this repository's
+ * workflows carry, frozen here so the measured heads judge the DERIVATION and
+ * never this checkout's job names — a gated job renamed in a live workflow
+ * moves no case in this file. The sentinel jobs (`Lint & Repo Gates`, the
+ * aggregates) are in it so that "never admitted" is a claim about real shapes.
+ */
+const FILTER_WIDENED = (o) => `\${{ github.event_name != 'merge_group' && steps.changes.outputs.${o} || 'true' }}`;
+const CORE_IF = "${{ !cancelled() && needs.filter.outputs.core != 'false' }}";
+const FULL_BATTERY_IF = "${{ !cancelled() && needs.filter.outputs.core != 'false' && github.event_name != 'pull_request' && github.event_name != 'merge_group' }}";
+const EVENT_ACTION_IF = "github.event.action != 'labeled' && github.event.action != 'unlabeled' && github.event.action != 'edited'";
+const optInIf = (label) => `contains(github.event.pull_request.labels.*.name, '${label}') && (github.event.action != 'labeled' || github.event.label.name == '${label}')`;
+const FIXTURE_TREE = Object.freeze({
+  'ci.yml': {
+    jobs: {
+      filter: {
+        outputs: {
+          docs: FILTER_WIDENED('docs'),
+          core: FILTER_WIDENED('core'),
+          crosspkg: FILTER_WIDENED('crosspkg'),
+          ui: "${{ steps.changes.outputs.ui || 'true' }}",
+          ui_consumers: "${{ steps.changes.outputs.ui_consumers || 'true' }}",
+          ui_tree: "${{ steps.ui-tree.outputs.present || 'true' }}",
+        },
+      },
+      test: {
+        name: 'Test Core (${{ matrix.shard }}/6)',
+        needs: 'filter',
+        if: "${{ !cancelled() && (needs.filter.outputs.core != 'false' || needs.filter.outputs.crosspkg != 'false') }}",
+        strategy: { matrix: { shard: [1, 2, 3, 4, 5, 6] } },
+      },
+      'test-gate': { name: 'Test Core', needs: ['test', 'filter'], if: 'always()' },
+      'temporal-conformance': { name: 'Temporal Conformance (live PG + MySQL)', needs: 'filter', if: FULL_BATTERY_IF },
+      dogfood: { name: 'Dogfood Regression Gate (${{ matrix.shard }}/3)', needs: 'filter', if: FULL_BATTERY_IF, strategy: { matrix: { shard: [1, 2, 3] } } },
+      'dogfood-verify': { name: 'Dogfood Verify CLI', needs: 'filter', if: FULL_BATTERY_IF },
+      'dogfood-gate': { name: 'Dogfood Regression Gate', needs: ['dogfood', 'dogfood-verify', 'filter'], if: 'always()' },
+      'build-core': { name: 'Build Core', needs: 'filter', if: CORE_IF },
+      'build-docs': { name: 'Build Docs', needs: 'filter', if: "${{ !cancelled() && needs.filter.outputs.docs != 'false' }}" },
+      'ui-deps': {
+        name: 'Build UI Deps',
+        needs: 'filter',
+        if: "${{ !cancelled() && needs.filter.outputs.ui_tree != 'false' && (needs.filter.outputs.ui != 'false' || needs.filter.outputs.ui_consumers != 'false') }}",
+      },
+    },
+  },
+  'lint.yml': { jobs: { lint: { name: 'Lint & Repo Gates', if: 'always()' }, typecheck: { name: 'TypeScript Type Check', if: 'always()' } } },
+  'governed-surface-guard.yml': { jobs: { 'governed-surface-guard': { name: 'Governed Surface Queue Guard' } } },
+  'pr-automation.yml': {
+    jobs: {
+      'pr-size': { name: 'Check PR Size', if: EVENT_ACTION_IF },
+      'auto-label': { name: 'Auto Label', needs: 'pr-size', if: `!cancelled() && ${EVENT_ACTION_IF}` },
+      'changeset-check': {
+        name: 'Check Changeset',
+        if: "!contains(github.event.pull_request.labels.*.name, 'skip-changeset') && !(github.head_ref == 'changeset-release/main' && github.event.pull_request.user.login == 'github-actions[bot]')",
+      },
+    },
+  },
+  'pack-smoke-optin.yml': { jobs: { 'pack-smoke': { name: 'Packed-tarball smoke (opt-in)', if: optInIf('needs:pack-smoke') } } },
+  'upgrade-harness-optin.yml': { jobs: { 'upgrade-harness': { name: '18.x upgrade harness (opt-in)', if: optInIf('needs:upgrade-harness') } } },
+  'scaffold-e2e.yml': {
+    jobs: {
+      'scaffold-local': { name: 'Scaffold with repo dist', if: "github.event_name != 'schedule'" },
+      'registry-canary': {
+        name: 'Registry canary: ${{ matrix.template }}',
+        if: "github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'",
+        strategy: { matrix: { template: ['blank'] } },
+      },
+    },
+  },
+});
+
+/** A copy of the fixture tree, mutated: a reader and the file list for `rosterFromTree`. */
+function fixtureTree(mutate = () => {}) {
+  const doc = JSON.parse(JSON.stringify(FIXTURE_TREE));
+  mutate(doc);
+  return { files: Object.keys(doc).sort(), read: (f) => doc[f] ?? null };
+}
+
+/** The roster a (mutated) fixture tree derives. */
+function fixtureRoster(mutate) {
+  const tree = fixtureTree(mutate);
+  return rosterFromTree(tree.files, tree.read);
+}
+
+/** One skipped run of `name` beside a success, judged against a roster: the exit it earns. */
+function skipExit(name, roster) {
+  return verdictExit(judgeCheckRuns({ total_count: 2, check_runs: [fixtureRun('filter', 'success', 1), fixtureRun(name, 'skipped', 1)] }, roster));
+}
+
+/**
  * Measured 2026-09-16 on PR #18315's head `b671f83b` (the AGENTS.md-only
  * landing): 39 check-runs, 20 success / 19 skipped, four `PR Automation` runs
  * on one head. Names, conclusions and check-suite ids VERBATIM from the
- * listing, but for one name: the Test Core matrix template read `/6` then and
- * is re-spelled `/8` here, the matrix #25376 widened, because the roster
- * grades the live name; and one run is left out, `Console Pin Gate` (skipped,
- * suite 94769267631), whose job retired with the objectui pin (#25697), so 18
- * skipped remain. This is the real shape the roster must accept, kept here so the
- * measured family and the declared family cannot drift apart unnoticed.
+ * listing — the `/6` of the Test Core template included, since the fixture
+ * tree it is judged against is frozen with it — but for one run left out,
+ * `Console Pin Gate` (skipped, suite 94769267631), whose job retired with the
+ * objectui pin (#25697), so 18 skipped remain. This is the real shape the
+ * derivation must accept.
  */
 const MEASURED_18315 = [
   ['Auto Label', 'skipped', 94769348293],
@@ -1302,7 +1405,7 @@ const MEASURED_18315 = [
   ['Part-of PR must not also close its card', 'success', 94769267707],
   ['Temporal Conformance (live PG + MySQL)', 'skipped', 94769267631],
   ['Test Core', 'success', 94769267631],
-  ['Test Core (${{ matrix.shard }}/8)', 'skipped', 94769267631],
+  ['Test Core (${{ matrix.shard }}/6)', 'skipped', 94769267631],
   ['The card this PR closes must claim this branch', 'success', 94769267827],
   ['Type Check · consumer gates', 'success', 94769267736],
   ['Type Check · debt ledger', 'success', 94769267736],
@@ -1321,9 +1424,9 @@ function measuredPayload() {
  * success / 8 skipped, full `GET /commits/{head}/check-runs` listing. Names,
  * conclusions and check-suite ids VERBATIM but for one run left out,
  * `Console Pin Gate` (skipped, suite 99276458806), whose job retired with the
- * objectui pin (#25697), so 7 skipped remain. Its one skip outside the listed
- * roster is `Registry canary: ${{ matrix.template }}` (run 36658032070) —
- * the raw pre-expansion name the derived half exists to admit.
+ * objectui pin (#25697), so 7 skipped remain. One of them is
+ * `Registry canary: ${{ matrix.template }}` (run 36658032070) — the raw
+ * pre-expansion name the non-PR-event shape exists to admit.
  */
 const MEASURED_20748 = [
   ['Auto Label', 'success', 99276458818],
@@ -1390,7 +1493,6 @@ function spawnSelf(args) {
 export function selfTest() {
   const cases = [];
   const t = (name, actual, expected) => cases.push({ name, actual, expected, ok: Object.is(actual, expected) });
-  const readLive = workflowReader(ROOT);
 
   // ---- exit register -------------------------------------------------------
   t('exit register: OK is 0', EXIT_OK, 0);
@@ -1398,59 +1500,113 @@ export function selfTest() {
   t('exit register: NOT MEASURED is the repo-wide 3, imported not redeclared', EXIT_PREREQUISITE_NOT_MET, 3);
   t('exit register: the five codes are distinct', new Set([EXIT_OK, EXIT_SELF_TEST_FAILED, EXIT_UNCLASSIFIED, EXIT_PREREQUISITE_NOT_MET, EXIT_UNEXPECTED_SKIP]).size, 5);
 
-  // ---- the roster's own shape, and its truth on the live tree --------------
-  const liveFindings = auditRoster(EXPECTED_SKIPS, readLive);
-  t(`roster: true of this checkout's workflows (${liveFindings.length === 0 ? 'no finding' : liveFindings.join(' | ')})`, liveFindings.length, 0);
-  t('roster: every row carries a reason', EXPECTED_SKIPS.every((r) => typeof r.reason === 'string' && r.reason.length > 20), true);
-  t('roster: no duplicate names', new Set(EXPECTED_SKIPS.map((r) => r.name)).size, EXPECTED_SKIPS.length);
-  t('roster: every gate kind is declared', EXPECTED_SKIPS.every((r) => GATE_KINDS.includes(r.gate.kind)), true);
-  t('roster: the three matrix templates are spelled raw, as the API reports them', EXPECTED_SKIPS.filter((r) => r.name.includes('${{ matrix.shard }}')).length, 3);
-  t('roster: the roster is frozen data', Object.isFrozen(EXPECTED_SKIPS), true);
-  t('roster: a never-skipping required context is NOT in it (Lint & Repo Gates)', EXPECTED_SKIPS.some((r) => r.name === 'Lint & Repo Gates'), false);
-  t('roster: …nor the ci.yml aggregates, which run if: always()', EXPECTED_SKIPS.some((r) => r.name === 'Test Core' || r.name === 'Dogfood Regression Gate'), false);
-  t('roster: …nor the queue guard', EXPECTED_SKIPS.some((r) => r.name === 'Governed Surface Queue Guard'), false);
+  // ---- the gate recogniser: closed spellings, read, never evaluated ----------
+  const split = (expr, op) => JSON.stringify(splitTopLevel(expr, op));
+  t('split: top-level && only, parentheses and literals kept whole', split("a && (b && c) && 'x && y'", '&&'), JSON.stringify(['a', '(b && c)', "'x && y'"]));
+  t("split: an escaped '' quote stays inside its literal", split("'it''s && x' && b", '&&'), JSON.stringify(["'it''s && x'", 'b']));
+  t('split: unbalanced parentheses answer null', split('(a && b', '&&') === 'null' && split('a) && (b', '&&') === 'null', true);
+  t('split: an unclosed literal answers null', split("'a && b", '&&'), 'null');
+  const term = (c) => JSON.stringify(gateTerm(c));
+  t('term: a filter output', term("needs.filter.outputs.core != 'false'"), JSON.stringify({ kind: 'filter-output', outputs: ['core'] }));
+  t('term: a parenthesised || of filter outputs is ONE group', term("(needs.filter.outputs.core != 'false' || needs.filter.outputs.crosspkg != 'false')"), JSON.stringify({ kind: 'filter-output', outputs: ['core', 'crosspkg'] }));
+  t('term: NARROWNESS — a group with one non-filter alternative is no gate', term("(needs.filter.outputs.core != 'false' || github.event_name == 'push')"), 'null');
+  t("term: …nor another comparison of a filter output (== 'true' reads differently on an empty output)", term("needs.filter.outputs.core == 'true'"), 'null');
+  t('term: …nor (a) || (b), whose outer parentheses do not wrap one group', term("(needs.filter.outputs.a != 'false') || (needs.filter.outputs.b != 'false')"), 'null');
+  t('term: a per-PR event excluded (pull_request)', term("github.event_name != 'pull_request'"), JSON.stringify({ kind: 'pr-event', events: ['pull_request'] }));
+  t('term: …and merge_group', gateTerm("github.event_name != 'merge_group'")?.kind, 'pr-event');
+  t('term: NARROWNESS — excluding push or schedule says nothing about a PR head', term("github.event_name != 'push'") === 'null' && term("github.event_name != 'schedule'") === 'null', true);
+  t('term: …nor does selecting pull_request', term("github.event_name == 'pull_request'"), 'null');
+  t('term: a pull_request action excluded', term("github.event.action != 'labeled'"), JSON.stringify({ kind: 'event-action', actions: ['labeled'] }));
+  t('term: a label read is an opt-in', term("contains(github.event.pull_request.labels.*.name, 'needs:pack-smoke')"), JSON.stringify({ kind: 'label', label: 'needs:pack-smoke', mode: 'opt-in' }));
+  t('term: …and its negation an opt-out', gateTerm("!contains(github.event.pull_request.labels.*.name, 'skip-changeset')")?.mode, 'opt-out');
+  t('term: …but a double-quoted label is not a GitHub string', term('contains(github.event.pull_request.labels.*.name, "x")'), 'null');
+  t('term: status functions are never gates', term('!cancelled()') === 'null' && term('always()') === 'null' && term('success()') === 'null', true);
+  const jg = (c) => jobGate(c);
+  const uiDeps = jg(FIXTURE_TREE['ci.yml'].jobs['ui-deps'].if);
+  t('jobGate: the ui-deps shape is two filter groups beside one unread conjunct', JSON.stringify(uiDeps), JSON.stringify({ terms: [{ kind: 'filter-output', outputs: ['ui_tree'] }, { kind: 'filter-output', outputs: ['ui', 'ui_consumers'] }], other: 1 }));
+  t('jobGate: the full-battery shape merges its two event exclusions', JSON.stringify(jg(FULL_BATTERY_IF)?.terms.find((x) => x.kind === 'pr-event')?.events), JSON.stringify(['pull_request', 'merge_group']));
+  t('jobGate: the pr-automation shape merges three action exclusions into one term', JSON.stringify(jg(EVENT_ACTION_IF)?.terms), JSON.stringify([{ kind: 'event-action', actions: ['labeled', 'unlabeled', 'edited'] }]));
+  t('jobGate: a folded, multi-line if: reads the same', jg("!cancelled() &&\n  needs.filter.outputs.core != 'false'\n")?.terms[0]?.kind, 'filter-output');
+  t('jobGate: NARROWNESS — a filter term inside a top-level || is no gate', jg("needs.filter.outputs.core != 'false' || github.event_name == 'push'"), null);
+  t('jobGate: …nor always(), an absent if:, a non-string, or two ${{ }} blocks', [jg('always()'), jg(undefined), jg(true), jg("${{ needs.filter.outputs.a != 'false' }} && ${{ needs.filter.outputs.b != 'false' }}")].every((x) => x === null), true);
+  t('jobGate: …nor an if: whose parentheses do not balance', jg("!cancelled() && (needs.filter.outputs.core != 'false'"), null);
+  t('spelling: a gate renders in one short line', gateTermsSpelling(jg(FULL_BATTERY_IF).terms), 'filter core + pr-event pull_request|merge_group');
 
-  // The audit must go RED on synthetic drift, in every direction it claims to see.
-  const liveCi = readLive('ci.yml');
-  const withJob = (mutate) => {
-    const doc = JSON.parse(JSON.stringify(liveCi));
-    mutate(doc);
-    return (file) => (file === 'ci.yml' ? doc : readLive(file));
-  };
-  const coreRow = EXPECTED_SKIPS.find((r) => r.name === 'Build Core');
-  t('audit: a deleted job reds the row', auditRoster([coreRow], withJob((d) => delete d.jobs['build-core'])).some((f) => f.includes('has no job')), true);
-  t('audit: a renamed job reds the row', auditRoster([coreRow], withJob((d) => (d.jobs['build-core'].name = 'Build Kernel'))).some((f) => f.includes('is named')), true);
-  t('audit: a job that lost its if: reds the row (it cannot skip by design)', auditRoster([coreRow], withJob((d) => delete d.jobs['build-core'].if)).some((f) => f.includes('carries no `if:`')), true);
-  t('audit: a re-gated job reds the row', auditRoster([coreRow], withJob((d) => (d.jobs['build-core'].if = "${{ needs.filter.outputs.docs != 'false' }}"))).some((f) => f.includes('does not spell')), true);
-  t("audit: a filter output that lost its || 'true' widening reds the row", auditRoster([coreRow], withJob((d) => (d.jobs.filter.outputs.core = '${{ steps.changes.outputs.core }}'))).some((f) => f.includes("|| 'true'")), true);
-  t('audit: an unreadable workflow is a refusal, not a pass', auditRoster([coreRow], () => null).some((f) => f.includes('could not be read')), true);
-  t('audit: a row with no reason is a finding', auditRoster([{ ...coreRow, reason: '' }], readLive).some((f) => f.includes('missing `reason`')), true);
-  t('audit: a duplicate name is a finding', auditRoster([coreRow, coreRow], readLive).some((f) => f.includes('duplicate name')), true);
-  t('audit: an unknown gate kind is a finding', auditRoster([{ ...coreRow, gate: { kind: 'vibes' } }], readLive).some((f) => f.includes('is not one of')), true);
-  t('audit: a label row whose literal is not in the if: reds', auditRoster([{ ...EXPECTED_SKIPS.find((r) => r.name === 'Check Changeset'), gate: { kind: 'label', label: 'skip-tests' } }], readLive).some((f) => f.includes('does not spell')), true);
-  t('audit: a clean roster over the live tree yields zero findings for the label rows too', auditRoster(EXPECTED_SKIPS.filter((r) => r.gate.kind === 'label'), readLive).length, 0);
-  const uiDepsRow = EXPECTED_SKIPS.find((r) => r.name === 'Build UI Deps');
-  t('roster: Build UI Deps is rostered on the ui_consumers gate, the Type Check UI shape', uiDepsRow?.job === 'ui-deps' && uiDepsRow.gate === EXPECTED_SKIPS.find((r) => r.name === 'Type Check UI')?.gate, true);
-  t('audit: …and a deleted ui-deps job still reds its row', auditRoster([uiDepsRow], withJob((d) => delete d.jobs['ui-deps'])).some((f) => f.includes('has no job')), true);
-  t('audit: …as does a ui-deps if: that dropped the ui_consumers half', auditRoster([uiDepsRow], withJob((d) => (d.jobs['ui-deps'].if = "${{ !cancelled() && needs.filter.outputs.ui_tree != 'false' && needs.filter.outputs.ui != 'false' }}"))).some((f) => f.includes('does not spell')), true);
-  t('fixture: a skipped Build UI Deps on a head with no ui scope → exit 0', verdictExit(judgeCheckRuns({ total_count: 2, check_runs: [fixtureRun('Lint & Repo Gates', 'success'), fixtureRun('Build UI Deps', 'skipped')] })), 0);
+  // ---- the derivation, on the frozen fixture tree ----------------------------
+  const fx = fixtureRoster();
+  const fxNames = fx.roster.map((r) => r.name);
+  t('fixture tree: nothing refused', JSON.stringify(fx.derivation.refused), '[]');
+  t(
+    'fixture tree: admits exactly its gated and non-PR-event jobs',
+    JSON.stringify([...fxNames].sort()),
+    JSON.stringify(
+      [
+        'Test Core (${{ matrix.shard }}/6)', 'Temporal Conformance (live PG + MySQL)', 'Dogfood Regression Gate (${{ matrix.shard }}/3)', 'Dogfood Verify CLI',
+        'Build Core', 'Build Docs', 'Build UI Deps', 'Check PR Size', 'Auto Label', 'Check Changeset', 'Packed-tarball smoke (opt-in)', '18.x upgrade harness (opt-in)', CANARY_RAW_NAME,
+      ].sort(),
+    ),
+  );
+  t('fixture tree: a never-skipping required context is NOT admitted (Lint & Repo Gates, TypeScript Type Check)', fxNames.includes('Lint & Repo Gates') || fxNames.includes('TypeScript Type Check'), false);
+  t('fixture tree: …nor the aggregates, which run if: always()', fxNames.includes('Test Core') || fxNames.includes('Dogfood Regression Gate'), false);
+  t('fixture tree: …nor the queue guard (no if: at all)', fxNames.includes('Governed Surface Queue Guard'), false);
+  t("fixture tree: …nor scaffold-local, whose `!= 'schedule'` runs on every PR", fxNames.includes('Scaffold with repo dist'), false);
+  t('fixture tree: the raw matrix templates are the names, as the API reports a pre-expansion skip', fxNames.filter((n) => n.includes('${{ matrix.')).length, 3);
+  t('fixture tree: every row is derived and frozen, the roster too', fx.roster.every((r) => r.derived === true && Object.isFrozen(r)) && Object.isFrozen(fx.roster), true);
+  const fxRow = (name) => fx.roster.find((r) => r.name === name);
+  t("reason: a queue-widened output says the merge-queue build runs it", fxRow('Build Core')?.reason.includes("merge-queue build widens it to 'true'"), true);
+  t("reason: a ui output says the queue reads its own diff", fxRow('Build UI Deps')?.reason.includes("against the queue's base"), true);
+  t('reason: a full-battery job says so', fxRow('Dogfood Verify CLI')?.reason.includes('full battery only'), true);
+  t('reason: an opt-out label names its label', fxRow('Check Changeset')?.reason.includes('`skip-changeset` label skips it'), true);
+  t('reason: a matrix job names its raw template', fxRow('Test Core (${{ matrix.shard }}/6)')?.reason.includes('raw `name:` template'), true);
+  t('reason: unread conjuncts are counted, never hidden', fxRow('Build UI Deps')?.reason.includes('1 further condition(s)'), true);
+
+  // The acceptance, on the fixture tree: a gated job added or renamed needs no
+  // edit here, and every way a skip can stop being by design still reds.
+  const NEW_GATED = 'Brand New Gated Job';
+  const added = fixtureRoster((d) => (d['ci.yml'].jobs['brand-new'] = { name: NEW_GATED, needs: 'filter', if: CORE_IF })).roster;
+  t('ADD (the #26111 shape): a new gated job is in the roster on its first skip, nothing listed', skipExit(NEW_GATED, added), EXIT_OK);
+  t('ADD: …where the tree without it reads the same skip as ⛔', skipExit(NEW_GATED, fx.roster), EXIT_UNEXPECTED_SKIP);
+  const renamed = fixtureRoster((d) => (d['ci.yml'].jobs['build-docs'].name = 'Build Docs Site')).roster;
+  t('RENAME: the new name is expected', skipExit('Build Docs Site', renamed), EXIT_OK);
+  t('RENAME: …and the old name, skipped, reds (the rename is the news)', skipExit('Build Docs', renamed), EXIT_UNEXPECTED_SKIP);
+  t("DELETE: a deleted job's name reds", skipExit('Build Core', fixtureRoster((d) => delete d['ci.yml'].jobs['build-core']).roster), EXIT_UNEXPECTED_SKIP);
+  t('UN-GATE: a job that lost its if: reds when it skips (a required job silently not run)', skipExit('Build Core', fixtureRoster((d) => delete d['ci.yml'].jobs['build-core'].if).roster), EXIT_UNEXPECTED_SKIP);
+  t('UN-GATE: …as does a job whose if: became always()', skipExit('Build Core', fixtureRoster((d) => (d['ci.yml'].jobs['build-core'].if = 'always()')).roster), EXIT_UNEXPECTED_SKIP);
+  t('UN-GATE: …and an ungated job added to ci.yml reds when it skips', skipExit('Brand New Required Job', fixtureRoster((d) => (d['ci.yml'].jobs['brand-new'] = { name: 'Brand New Required Job', needs: 'filter' })).roster), EXIT_UNEXPECTED_SKIP);
+  t('RE-GATE: a job re-gated onto another output stays expected, its reason naming the new one', fixtureRoster((d) => (d['ci.yml'].jobs['build-core'].if = "${{ needs.filter.outputs.docs != 'false' }}")).roster.find((r) => r.name === 'Build Core')?.reason.includes('`docs`'), true);
+  const unwidened = fixtureRoster((d) => (d['ci.yml'].jobs.filter.outputs.core = '${{ steps.changes.outputs.core }}'));
+  t("CONTRACT: an output that lost its || 'true' widening refuses its jobs", unwidened.derivation.refused.filter((r) => r.reason.includes("|| 'true'")).length, 5);
+  t('CONTRACT: …and their skips red', skipExit('Build Core', unwidened.roster), EXIT_UNEXPECTED_SKIP);
+  const undeclared = fixtureRoster((d) => (d['ci.yml'].jobs['build-core'].if = "${{ needs.filter.outputs.kernel != 'false' }}"));
+  t('CONTRACT: an output the filter does not declare is refused', undeclared.derivation.refused.some((r) => r.job === 'build-core' && r.reason.includes('does not declare')) && skipExit('Build Core', undeclared.roster) === EXIT_UNEXPECTED_SKIP, true);
+  const noNeeds = fixtureRoster((d) => delete d['ci.yml'].jobs['build-core'].needs);
+  t('CONTRACT: a job reading the filter without needs: filter is refused', noNeeds.derivation.refused.some((r) => r.job === 'build-core' && r.reason.includes('needs: filter')) && skipExit('Build Core', noNeeds.roster) === EXIT_UNEXPECTED_SKIP, true);
+  const respelled = fixtureRoster((d) => (d['ci.yml'].jobs['build-core'].if = "${{ needs.filter.outputs.core == 'true' }}"));
+  t('LOUD: a filter read in a spelling the recogniser does not read is refused and named, never ignored', respelled.derivation.refused.some((r) => r.job === 'build-core' && r.reason.includes('does not read')) && skipExit('Build Core', respelled.roster) === EXIT_UNEXPECTED_SKIP, true);
+  const shared = fixtureRoster((d) => (d['lint.yml'].jobs['also-build-core'] = { name: 'Build Core' }));
+  t('NAMES: a gated name a second job carries is refused (a skip of the other would read expected)', shared.derivation.refused.some((r) => r.job === 'build-core' && r.reason.includes('2 jobs in the tree carry')) && skipExit('Build Core', shared.roster) === EXIT_UNEXPECTED_SKIP, true);
+  const untellable = fixtureRoster((d) => (d['ci.yml'].jobs['build-core'].name = 'Build ${{ inputs.target }}'));
+  t('NAMES: a gated job whose name cannot be told is refused', untellable.derivation.refused.some((r) => r.job === 'build-core' && r.reason.includes('inputs.target')), true);
+  const tree = fixtureTree();
+  const withUnreadable = rosterFromTree([...tree.files, 'broken.yml'], tree.read);
+  t('FILES: an unreadable workflow is refused once, by file, and derives nothing', withUnreadable.derivation.refused.filter((r) => r.workflow === 'broken.yml').length === 1 && withUnreadable.derivation.scanned === tree.files.length + 1, true);
 
   // ---- the judge -------------------------------------------------------------
-  const measured = judgeCheckRuns(measuredPayload());
+  const measured = judgeCheckRuns(measuredPayload(), fx.roster);
   t('measured head: judged (no pending run)', measured.kind, 'judged');
   t('measured head: 20 success', measured.success, 20);
   t('measured head: 18 skipped, every one expected', measured.expected.reduce((n, e) => n + e.count, 0), 18);
   t('measured head: zero unexpected skips', measured.unexpected.length, 0);
-  t('measured head: ten of ten rostered names appear', measured.expected.length, 10);
+  t('measured head: ten names appear, every one derived', measured.expected.length === 10 && measured.expected.every((e) => e.derived), true);
   t('measured head: exit 0', verdictExit(measured), 0);
   t('measured head: the multiplicity is reported (Auto Label ×3)', measured.expected.find((e) => e.name === 'Auto Label')?.count, 3);
   t('measured head: the report ends on the OK verdict line', renderReport(measured, { head: 'b671f83b', repo: 'objectstack-ai/objectstack' }).at(-1).startsWith('VERDICT check-expected-skips: OK'), true);
 
-  const oneExpected = judgeCheckRuns({ total_count: 2, check_runs: [fixtureRun('Lint & Repo Gates', 'success'), fixtureRun('Build Core', 'skipped')] });
+  const oneExpected = judgeCheckRuns({ total_count: 2, check_runs: [fixtureRun('Lint & Repo Gates', 'success'), fixtureRun('Build Core', 'skipped')] }, fx.roster);
   t('fixture: one expected skip → exit 0', verdictExit(oneExpected), 0);
   t('fixture: …and the reason travels with it', oneExpected.expected[0].reason.includes('merge-queue build'), true);
 
-  const oneUnexpected = judgeCheckRuns({ total_count: 2, check_runs: [fixtureRun('Build Core', 'skipped'), fixtureRun('Lint & Repo Gates', 'skipped')] });
+  const oneUnexpected = judgeCheckRuns({ total_count: 2, check_runs: [fixtureRun('Build Core', 'skipped'), fixtureRun('Lint & Repo Gates', 'skipped')] }, fx.roster);
   t('fixture: a skip outside the roster → exit 4', verdictExit(oneUnexpected), 4);
   t('fixture: …naming it', oneUnexpected.unexpected[0]?.name, 'Lint & Repo Gates');
   t('fixture: …classified as a filter miss when its suite holds no failure', oneUnexpected.unexpected[0]?.classification.kind, 'filter-miss');
@@ -1458,34 +1614,34 @@ export function selfTest() {
   t('fixture: …ending on the exit-4 verdict line', renderReport(oneUnexpected).at(-1).includes('(exit 4)'), true);
   t('fixture: the expected skip beside it is still counted', oneUnexpected.expected.length, 1);
 
-  const depSkip = judgeCheckRuns({
-    total_count: 3,
-    check_runs: [fixtureRun('filter', 'failure', 7), fixtureRun('Some New Lane', 'skipped', 7), fixtureRun('Lint & Repo Gates', 'success', 8)],
-  });
+  const depSkip = judgeCheckRuns(
+    { total_count: 3, check_runs: [fixtureRun('filter', 'failure', 7), fixtureRun('Some New Lane', 'skipped', 7), fixtureRun('Lint & Repo Gates', 'success', 8)] },
+    fx.roster,
+  );
   t('fixture: a skip beside a same-suite failure → exit 4 (the failure is the finding)', verdictExit(depSkip), 4);
   t('fixture: …classified as a dependency skip', depSkip.unexpected[0]?.classification.kind, 'dependency-skip');
   t('fixture: …naming the failed run', depSkip.unexpected[0]?.classification.detail.includes('`filter`=failure'), true);
   t('fixture: …and the failure itself is listed under other conclusions', depSkip.other[0]?.conclusion, 'failure');
-  t('fixture: a failure in ANOTHER suite does not make the skip a dependency skip', judgeCheckRuns({ total_count: 2, check_runs: [fixtureRun('filter', 'failure', 1), fixtureRun('Some New Lane', 'skipped', 2)] }).unexpected[0]?.classification.kind, 'filter-miss');
+  t('fixture: a failure in ANOTHER suite does not make the skip a dependency skip', judgeCheckRuns({ total_count: 2, check_runs: [fixtureRun('filter', 'failure', 1), fixtureRun('Some New Lane', 'skipped', 2)] }, fx.roster).unexpected[0]?.classification.kind, 'filter-miss');
 
-  const matrixMiss = judgeCheckRuns({ total_count: 1, check_runs: [fixtureRun('Nightly tiers (${{ matrix.shard }}/2)', 'skipped')] });
+  const matrixMiss = judgeCheckRuns({ total_count: 1, check_runs: [fixtureRun('Nightly tiers (${{ matrix.shard }}/2)', 'skipped')] }, fx.roster);
   t('fixture: a raw matrix template outside the roster → exit 4', verdictExit(matrixMiss), 4);
   t('fixture: …read as skipped before matrix expansion', matrixMiss.unexpected[0]?.classification.detail.includes('before matrix expansion'), true);
 
-  t('fixture: a rostered name that SUCCEEDED is not a skip', judgeCheckRuns({ total_count: 1, check_runs: [fixtureRun('Build Core', 'success')] }).expected.length, 0);
-  t('fixture: other conclusions do not move the skip verdict (failure beside all-expected skips → 0)', verdictExit(judgeCheckRuns({ total_count: 2, check_runs: [fixtureRun('Build Core', 'skipped', 1), fixtureRun('Lint & Repo Gates', 'failure', 2)] })), 0);
-  t('fixture: …but they are printed loudly', renderReport(judgeCheckRuns({ total_count: 1, check_runs: [fixtureRun('Lint & Repo Gates', 'failure')] })).some((l) => l.includes('other conclusions (1)')), true);
-  t('fixture: neutral is an "other" conclusion, never a skip', judgeCheckRuns({ total_count: 1, check_runs: [fixtureRun('X', 'neutral')] }).other[0]?.conclusion, 'neutral');
+  t('fixture: a rostered name that SUCCEEDED is not a skip', judgeCheckRuns({ total_count: 1, check_runs: [fixtureRun('Build Core', 'success')] }, fx.roster).expected.length, 0);
+  t('fixture: other conclusions do not move the skip verdict (failure beside all-expected skips → 0)', verdictExit(judgeCheckRuns({ total_count: 2, check_runs: [fixtureRun('Build Core', 'skipped', 1), fixtureRun('Lint & Repo Gates', 'failure', 2)] }, fx.roster)), 0);
+  t('fixture: …but they are printed loudly', renderReport(judgeCheckRuns({ total_count: 1, check_runs: [fixtureRun('Lint & Repo Gates', 'failure')] }, fx.roster)).some((l) => l.includes('other conclusions (1)')), true);
+  t('fixture: neutral is an "other" conclusion, never a skip', judgeCheckRuns({ total_count: 1, check_runs: [fixtureRun('X', 'neutral')] }, fx.roster).other[0]?.conclusion, 'neutral');
 
-  const pending = judgeCheckRuns({ total_count: 2, check_runs: [fixtureRun('Build Core', 'skipped'), { id: 1, name: 'Lint & Repo Gates', status: 'in_progress', conclusion: null, check_suite: { id: 1 } }] });
+  const pending = judgeCheckRuns({ total_count: 2, check_runs: [fixtureRun('Build Core', 'skipped'), { id: 1, name: 'Lint & Repo Gates', status: 'in_progress', conclusion: null, check_suite: { id: 1 } }] }, fx.roster);
   t('fixture: a check-run still running → NOT MEASURED (the skip set is not final)', verdictExit(pending), 3);
   t('fixture: …with the pending run named', pending.pending[0]?.name, 'Lint & Repo Gates');
-  t('fixture: zero check-runs → NOT MEASURED, never 0', verdictExit(judgeCheckRuns({ total_count: 0, check_runs: [] })), 3);
-  t('fixture: a payload without check_runs → NOT MEASURED', verdictExit(judgeCheckRuns({ hello: 'world' })), 3);
-  t('fixture: a null payload → NOT MEASURED', verdictExit(judgeCheckRuns(null)), 3);
-  t('fixture: a roster override is honoured (the judge is pure over its roster)', verdictExit(judgeCheckRuns({ total_count: 1, check_runs: [fixtureRun('Build Core', 'skipped')] }, [])), 4);
+  t('fixture: zero check-runs → NOT MEASURED, never 0', verdictExit(judgeCheckRuns({ total_count: 0, check_runs: [] }, fx.roster)), 3);
+  t('fixture: a payload without check_runs → NOT MEASURED', verdictExit(judgeCheckRuns({ hello: 'world' }, fx.roster)), 3);
+  t('fixture: a null payload → NOT MEASURED', verdictExit(judgeCheckRuns(null, fx.roster)), 3);
+  t('fixture: the judge is pure over its roster (an empty one expects nothing)', verdictExit(judgeCheckRuns({ total_count: 1, check_runs: [fixtureRun('Build Core', 'skipped')] }, [])), 4);
 
-  // ---- the derived half: the recogniser, one exact shape ---------------------
+  // ---- the second shape: selected only by non-PR events ----------------------
   const gate = (cond) => JSON.stringify(nonPrEventGate(cond));
   const BOTH = '["schedule","workflow_dispatch"]';
   t("derive: the measured canary if: reads as schedule | workflow_dispatch", gate("github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'"), BOTH);
@@ -1496,12 +1652,17 @@ export function selfTest() {
   t('derive: NARROWNESS — a pull_request term beside schedule is NOT admitted', gate("github.event_name == 'schedule' || github.event_name == 'pull_request'"), 'null');
   t('derive: …nor a push term (push fires on a PR branch)', gate("github.event_name == 'schedule' || github.event_name == 'push'"), 'null');
   t('derive: …nor merge_group (the queue build is a verdict, not a skip)', gate("github.event_name == 'merge_group'"), 'null');
-  t("derive: …nor a negation (scaffold-local's live `!= 'schedule'` runs on every PR)", gate("github.event_name != 'schedule'"), 'null');
-  t('derive: …nor an inputs conjunct (release.yml version-pr, live)', gate("github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.refresh_version_pr)"), 'null');
+  t("derive: …nor a negation (scaffold-local's `!= 'schedule'` runs on every PR)", gate("github.event_name != 'schedule'"), 'null');
+  t('derive: …nor an inputs conjunct (the release.yml version-pr shape)', gate("github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.refresh_version_pr)"), 'null');
   t(
-    'derive: …nor success() and inputs beside event terms (merged-branch-reaper.yml reap, live)',
+    'derive: …nor success() and inputs beside event terms (the merged-branch-reaper.yml reap shape)',
     gate("success() && github.event_name != 'pull_request' && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.dry_run == false))"),
     'null',
+  );
+  t(
+    "derive: …which jobGate admits instead, for its top-level != 'pull_request'",
+    JSON.stringify(jobGate("success() && github.event_name != 'pull_request' && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.dry_run == false))")?.terms),
+    JSON.stringify([{ kind: 'pr-event', events: ['pull_request'] }]),
   );
   t('derive: …nor a needs output', gate("github.event_name == 'schedule' || needs.filter.outputs.core != 'false'"), 'null');
   t('derive: …nor a matrix value', gate("github.event_name == 'schedule' || matrix.os == 'linux'"), 'null');
@@ -1518,7 +1679,7 @@ export function selfTest() {
   t('derive: a matrix reference on a job with no strategy.matrix is refused', 'refused' in skippedCheckRunName('x', { name: 'N: ${{ matrix.os }}' }), true);
   t('derive: a non-string name: is refused', 'refused' in skippedCheckRunName('x', { name: 42 }), true);
 
-  // A synthetic tree: every admission and every refusal the derivation claims.
+  // A synthetic tree: every admission and every refusal the shape claims.
   const synthetic = {
     'a.yml': {
       jobs: {
@@ -1531,7 +1692,6 @@ export function selfTest() {
       jobs: {
         weekly: { name: 'Shared', if: "github.event_name == 'schedule'" },
         always: { name: 'Shared' },
-        listed: { name: 'Build Core', if: "github.event_name == 'schedule'" },
         opaque: { name: 'Nightly ${{ inputs.target }}', if: "github.event_name == 'workflow_dispatch'" },
       },
     },
@@ -1543,28 +1703,38 @@ export function selfTest() {
   t('derive: …whose reason names the raw template', derivedSyn.rows[0]?.reason.includes('raw `name:` template'), true);
   t('derive: the mixed pull_request + schedule job is neither admitted nor refused (it is simply not this shape)', derivedSyn.rows.some((r) => r.job === 'mixed') || derivedSyn.refused.some((r) => r.job === 'mixed'), false);
   t('derive: a name two jobs carry is refused (a skip of the other would read expected)', refusedAt('weekly').includes('2 jobs in the tree carry'), true);
-  t("derive: a name the listed roster carries is refused (derive, don't list)", refusedAt('listed').includes("derive, don't list"), true);
   t('derive: a name that cannot be told is refused, with the reason', refusedAt('opaque').includes('inputs.target'), true);
   t('derive: an unreadable workflow is refused by file', derivedSyn.refused.some((r) => r.workflow === 'c.yml' && r.job === null), true);
   t('derive: …and the scan counts every file handed to it', derivedSyn.scanned, 3);
-  const synRoster = [...EXPECTED_SKIPS, ...derivedSyn.rows];
+  const synRoster = derivedSyn.rows;
   t('derive: the admitted raw-named skip judges exit 0', verdictExit(judgeCheckRuns({ total_count: 1, check_runs: [fixtureRun('Nightly: ${{ matrix.os }}', 'skipped')] }, synRoster)), 0);
   t('derive: NARROWNESS — the mixed pull_request + schedule job skipped still judges exit 4', verdictExit(judgeCheckRuns({ total_count: 1, check_runs: [fixtureRun('Mixed', 'skipped')] }, synRoster)), 4);
   t('derive: …and so does the refused shared name', verdictExit(judgeCheckRuns({ total_count: 1, check_runs: [fixtureRun('Shared', 'skipped')] }, synRoster)), 4);
 
-  // ---- the derived half on this checkout's workflows ---------------------------
+  // ---- this checkout's workflows: structural facts, no job name pinned ---------
+  // ⛔ No case here names a live gated job: a job added to or renamed in a
+  // workflow must move nothing in this file. What the live tree owes is that
+  // the derivation READS it — nothing refused, and something admitted where the
+  // filter contract lives.
   const liveFiles = listWorkflowFiles(ROOT);
   const live = expectedSkipRoster(ROOT);
-  const liveKeys = live.derivation.rows.map((r) => `${r.workflow} › ${r.job}`);
+  const readLive = workflowReader(ROOT);
   t('live derive: the workflow listing is not vacuous', liveFiles.length > 0 && live.derivation.scanned === liveFiles.length, true);
   t(`live derive: nothing refused on this tree (${live.derivation.refused.map((r) => `${r.workflow} › ${r.job}: ${r.reason}`).join(' | ') || 'none'})`, live.derivation.refused.length, 0);
-  t('live derive: scaffold-e2e.yml › registry-canary is derived under its raw name', live.derivation.rows.find((r) => r.workflow === 'scaffold-e2e.yml' && r.job === 'registry-canary')?.name, CANARY_RAW_NAME);
+  t('live derive: ci.yml carries the filter contract and the derivation reads it (at least one filter-gated row)', live.roster.some((r) => r.workflow === 'ci.yml' && r.gate.terms?.some((x) => x.kind === 'filter-output')), true);
+  const liveJob = (r) => readLive(r.workflow)?.jobs?.[r.job];
+  t('live derive: every admitted row is a real job carrying a string if:', live.roster.every((r) => typeof liveJob(r)?.if === 'string'), true);
+  t('live derive: no job whose if: is a bare status function (an aggregate) is admitted', live.roster.some((r) => /^\s*(\$\{\{\s*)?(always|success|failure|cancelled)\(\)\s*(\}\})?\s*$/.test(liveJob(r)?.if ?? '')), false);
   t(
-    "live derive: the measured refusals stay out (release.yml version-pr, merged-branch-reaper.yml reap, scaffold-e2e.yml's PR-running scaffold-local)",
-    ['release.yml › version-pr', 'merged-branch-reaper.yml › reap', 'scaffold-e2e.yml › scaffold-local'].some((k) => liveKeys.includes(k)),
+    'live derive: the never-skipping sentinels stay out (Lint & Repo Gates, TypeScript Type Check, Test Core, Test UI, Dogfood Regression Gate, Governed Surface Queue Guard)',
+    live.roster.some((r) => ['Lint & Repo Gates', 'TypeScript Type Check', 'Test Core', 'Test UI', 'Dogfood Regression Gate', 'Governed Surface Queue Guard'].includes(r.name)),
     false,
   );
-  t('live derive: the listed and derived halves share no name', live.derivation.rows.some((r) => EXPECTED_SKIPS.some((l) => l.name === r.name)), false);
+  t(
+    'live derive: the non-PR-event shape keeps its measured refusals out (release.yml version-pr, merged-branch-reaper.yml reap, scaffold-e2e.yml scaffold-local)',
+    live.derivation.nonPr.rows.some((r) => ['release.yml › version-pr', 'merged-branch-reaper.yml › reap', 'scaffold-e2e.yml › scaffold-local'].includes(`${r.workflow} › ${r.job}`)),
+    false,
+  );
   t('live derive: the joined roster is frozen and duplicate-free', Object.isFrozen(live.roster) && new Set(live.roster.map((r) => r.name)).size === live.roster.length, true);
 
   // ---- the roster's freshness: the roster in hand against the base's ----------
@@ -1579,14 +1749,14 @@ export function selfTest() {
   );
   t('freshness: AT TIP — a base whose sources equal the checkout leaves no gap', rosterGap(hereLive, new Map(hereLive)).length, 0);
   // The measured shape: a checkout one merge behind a base that added an opt-in
-  // job's workflow and its row. Blob ids are fixtures; only equality matters.
+  // job's workflow. Blob ids are fixtures; only equality matters.
   const NEW_JOB = '18.x upgrade harness (opt-in)';
   const NEW_WORKFLOW = `${WORKFLOW_DIR}/upgrade-harness-optin.yml`;
   const staleHere = new Map([[ROSTER_SELF, 'a'.repeat(40)], [`${WORKFLOW_DIR}/ci.yml`, 'c'.repeat(40)]]);
   const tipBase = new Map([[ROSTER_SELF, 'b'.repeat(40)], [`${WORKFLOW_DIR}/ci.yml`, 'c'.repeat(40)], [NEW_WORKFLOW, 'd'.repeat(40)]]);
   const behind = rosterGap(staleHere, tipBase);
   t(
-    "freshness: BEHIND — the gap names the base's new workflow and this file's changed roster, and nothing unchanged",
+    "freshness: BEHIND — the gap names the base's new workflow and this file's changed code, and nothing unchanged",
     JSON.stringify(behind.map((g) => `${g.kind} ${g.path}`)),
     JSON.stringify([`absent-here ${NEW_WORKFLOW}`, `differs ${ROSTER_SELF}`]),
   );
@@ -1601,36 +1771,33 @@ export function selfTest() {
   const wideGap = rosterGap(new Map(), new Map(Array.from({ length: 15 }, (_, i) => [`${WORKFLOW_DIR}/w${String(i).padStart(2, '0')}.yml`, 'e'.repeat(40)])));
   t('freshness: …a wide gap is capped and counted, never silently cut', renderRosterGap(wideGap, { ref: 'main' }).some((l) => l === '…and 3 more'), true);
   const newJobHead = { total_count: 2, check_runs: [fixtureRun(NEW_JOB, 'skipped', 1), fixtureRun('Build Core', 'skipped', 2)] };
-  t(
-    "freshness: WHY — the behind checkout's roster (no row for the new job) reads its skip as ⛔",
-    verdictExit(judgeCheckRuns(newJobHead, live.roster.filter((r) => r.name !== NEW_JOB))),
-    EXIT_UNEXPECTED_SKIP,
-  );
-  t("freshness: …where the base's roster reads it expected", verdictExit(judgeCheckRuns(newJobHead, live.roster)), EXIT_OK);
+  const behindRoster = fixtureRoster((d) => delete d['upgrade-harness-optin.yml']).roster;
+  t("freshness: WHY — the behind checkout's tree (no workflow for the new job) reads its skip as ⛔", verdictExit(judgeCheckRuns(newJobHead, behindRoster)), EXIT_UNEXPECTED_SKIP);
+  t("freshness: …where the base's tree reads it expected", verdictExit(judgeCheckRuns(newJobHead, fx.roster)), EXIT_OK);
   t(
     'freshness: a live verdict names whose roster judged it',
-    renderReport(judgeCheckRuns(newJobHead, live.roster), { rosterRef: 'main' }).at(-1),
+    renderReport(judgeCheckRuns(newJobHead, fx.roster), { rosterRef: 'main' }).at(-1),
     "VERDICT check-expected-skips: OK — 2 skipped check-run(s), every one in main's roster (exit 0)",
   );
   t(
     'freshness: …and the offline verdict line is byte-for-byte the old one',
-    renderReport(judgeCheckRuns(newJobHead, live.roster)).at(-1),
+    renderReport(judgeCheckRuns(newJobHead, fx.roster)).at(-1),
     'VERDICT check-expected-skips: OK — 2 skipped check-run(s), every one in the roster (exit 0)',
   );
 
-  // ---- the measured #20748 head: the card's pins -------------------------------
-  const m20748 = judgeCheckRuns(measured20748Payload(), live.roster);
-  t('measured #20748: the raw-named skipped canary judges exit 0 against the joined roster', verdictExit(m20748), 0);
+  // ---- the measured #20748 head ------------------------------------------------
+  const m20748 = judgeCheckRuns(measured20748Payload(), fx.roster);
+  t('measured #20748: the raw-named skipped canary judges exit 0', verdictExit(m20748), 0);
   t('measured #20748: 7 skipped, every one expected', m20748.expected.reduce((n, e) => n + e.count, 0) === 7 && m20748.unexpected.length === 0, true);
   t('measured #20748: …the canary read as a derived expected skip', m20748.expected.find((e) => e.name === CANARY_RAW_NAME)?.derived, true);
   t('measured #20748: …and the report tags it derived', renderReport(m20748).some((l) => l.includes(CANARY_RAW_NAME) && l.includes('; derived')), true);
-  t('measured #20748: the LISTED half alone still answers exit 4 on it (the derivation is what moved it)', judgeCheckRuns(measured20748Payload()).unexpected[0]?.name, CANARY_RAW_NAME);
-  const m20748Control = judgeCheckRuns(measured20748Payload([fixtureRun('TypeScript Type Check', 'skipped', 99276458889)]), live.roster);
+  t('measured #20748: the gated shape alone answers exit 4 on it (the non-PR-event shape is what admits it)', judgeCheckRuns(measured20748Payload(), fx.derivation.gated.rows).unexpected[0]?.name, CANARY_RAW_NAME);
+  const m20748Control = judgeCheckRuns(measured20748Payload([fixtureRun('TypeScript Type Check', 'skipped', 99276458889)]), fx.roster);
   t('measured #20748 CONTROL: a genuinely unexpected skip beside the canary still judges exit 4', verdictExit(m20748Control), 4);
   t('measured #20748 CONTROL: …naming only it', JSON.stringify(m20748Control.unexpected.map((u) => u.name)), '["TypeScript Type Check"]');
   t(
     "measured #20748 CONTROL: the canary's PR-running sibling skipped still judges exit 4",
-    verdictExit(judgeCheckRuns(measured20748Payload([fixtureRun('Scaffold with repo dist', 'skipped', 99276458880)]), live.roster)),
+    verdictExit(judgeCheckRuns(measured20748Payload([fixtureRun('Scaffold with repo dist', 'skipped', 99276458880)]), fx.roster)),
     4,
   );
 
@@ -1659,20 +1826,27 @@ export function selfTest() {
   t('argv: an unknown flag is an error', parseArgs(['--pr', '1', '--bogus']).errors[0], 'unknown argument: --bogus');
 
   // ---- the real CLI, offline, on payload files ---------------------------------
+  // The CLI judges with this checkout's roster, so its payloads are BUILT from
+  // that roster — one skip per live row — and name no job themselves.
+  const livePayload = (extra = []) => {
+    const runs = [fixtureRun('Lint & Repo Gates', 'success', 1), ...live.roster.map((r, i) => fixtureRun(r.name, 'skipped', 10 + i)), ...extra];
+    return { total_count: runs.length, check_runs: runs };
+  };
   const dir = mkdtempSync(join(tmpdir(), 'check-expected-skips-'));
   try {
     const okFile = join(dir, 'ok.json');
-    writeFileSync(okFile, JSON.stringify({ head_sha: 'b671f83b', ...measuredPayload() }));
+    writeFileSync(okFile, JSON.stringify({ head_sha: 'b671f83b', ...livePayload() }));
     const ok = spawnSelf(['--check-runs-json', okFile]);
-    t('cli: the measured head on disk → exit 0', ok.status, 0);
-    t('cli: …with the OK verdict line on stdout', ok.stdout.includes('VERDICT check-expected-skips: OK'), true);
+    t('cli: a head skipping every live derived name → exit 0', ok.status, 0);
+    t('cli: …with the OK verdict line on stdout', ok.stdout.includes(`VERDICT check-expected-skips: OK — ${live.roster.length} skipped check-run(s)`), true);
     t('cli: …naming the head it read from the payload', ok.stdout.includes('head b671f83b'), true);
+    t('cli: …every row tagged with its job and derived', live.roster.every((r) => ok.stdout.includes(`${r.name}  [${r.workflow} › ${r.job}; derived]`)), true);
     t('cli: …and the offline path compares no roster (no roster line on stderr)', ok.stderr.includes('roster:'), false);
 
     const badFile = join(dir, 'bad.json');
-    writeFileSync(badFile, JSON.stringify({ total_count: 2, check_runs: [fixtureRun('Build Core', 'skipped'), fixtureRun('TypeScript Type Check', 'skipped')] }));
+    writeFileSync(badFile, JSON.stringify(livePayload([fixtureRun('TypeScript Type Check', 'skipped', 2)])));
     const bad = spawnSelf(['--check-runs-json', badFile]);
-    t('cli: an unexpected skip on disk → exit 4', bad.status, 4);
+    t('cli: a required context skipped beside them → exit 4', bad.status, 4);
     t('cli: …naming it on stdout', bad.stdout.includes('TypeScript Type Check'), true);
     t('cli: …under the ⛔ heading', bad.stdout.includes('⛔ unexpected skips (1)'), true);
 
@@ -1703,19 +1877,8 @@ export function selfTest() {
     const usage = spawnSelf([]);
     t('cli: no mode → usage on stderr, exit 2', usage.status === 2 && usage.stderr.includes('usage:'), true);
     const roster = spawnSelf(['--roster']);
-    t('cli: --roster prints every row without a network', roster.status === 0 && EXPECTED_SKIPS.every((r) => roster.stdout.includes(r.name)), true);
-    t('cli: …the derived rows too, tagged derived', live.derivation.rows.length > 0 && live.derivation.rows.every((r) => roster.stdout.includes(`${r.name}  [${r.workflow} › ${r.job}; gate: non-pr-event`)), true);
-
-    const canaryFile = join(dir, 'canary.json');
-    writeFileSync(canaryFile, JSON.stringify({ head_sha: 'a84b73af13', ...measured20748Payload() }));
-    const canary = spawnSelf(['--check-runs-json', canaryFile]);
-    t('cli: the measured #20748 head on disk (raw-named skipped canary) → exit 0', canary.status, 0);
-    t('cli: …with the canary on stdout as a derived expected skip', canary.stdout.includes(`${CANARY_RAW_NAME}  [scaffold-e2e.yml › registry-canary; derived]`), true);
-    const canaryControlFile = join(dir, 'canary-control.json');
-    writeFileSync(canaryControlFile, JSON.stringify(measured20748Payload([fixtureRun('Lint & Repo Gates', 'skipped', 99276458889)])));
-    const canaryControl = spawnSelf(['--check-runs-json', canaryControlFile]);
-    t('cli: CONTROL — the same head plus a genuinely unexpected skip → exit 4', canaryControl.status, 4);
-    t('cli: …naming it under the ⛔ heading', canaryControl.stdout.includes('⛔ unexpected skips (1)') && canaryControl.stdout.includes('Lint & Repo Gates'), true);
+    t('cli: --roster prints every derived row with its gate, without a network', roster.status === 0 && live.roster.every((r) => roster.stdout.includes(`${r.name}  [${r.workflow} › ${r.job}; gate: ${r.gate.kind}`)), true);
+    t('cli: …under a header that says none is listed by hand', roster.stdout.split('\n')[0].includes('none listed by hand'), true);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -1736,6 +1899,7 @@ export function selfTest() {
   t('structural: …and having re-armed once, does not loop', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://127.0.0.1:1', [PROXY_REARM_GUARD]: '1' }, flagSupported: true }).rearm, false);
   t('structural: the board resolver is the shared one (default board pinned)', resolveSweepRepo({}).repo, DEFAULT_SWEEP_REPO);
   t('structural: the SKILL.md enqueue bar names this file', readFileSync(join(ROOT, '.claude/skills/pm-dispatch/SKILL.md'), 'utf8').includes('check-expected-skips.mjs'), true);
+  t("structural: no hand-listed roster survives (no exported roster array literal)", /export\s+const\s+EXPECTED_SKIPS\b/.test(positions), false);
   const liveRun = positions.slice(positions.indexOf('async function run('));
   t(
     'structural: the live path compares the roster with the base before it reads a check-run',
@@ -1750,17 +1914,17 @@ export function selfTest() {
     return { code: EXIT_SELF_TEST_FAILED, verdict: SELF_TEST_VERDICT };
   }
   console.log(
-    `✓ check-expected-skips self-test: ${cases.length} cases pass (the exit register; the roster's shape — reasons, no duplicates, ` +
-      'declared gate kinds — and its truth on this checkout\'s workflows, with the audit driven red on a deleted, renamed, un-gated and ' +
-      "re-gated job, a lost || 'true' widening and an unreadable workflow; the judge on the measured head (38 of its 39 runs) and on fixtures for an " +
-      'expected skip, an unexpected skip named as a filter miss, a same-suite failure read as a dependency skip, a raw matrix template, ' +
-      'other conclusions, a pending run and an empty head; the derived half — the non-PR-event recogniser admitting only its one shape and ' +
-      'refusing a pull_request / push / merge_group term, a negation and every live mixed if:, the raw-name rule, and the derivation ' +
-      'refusing a shared, a listed and an untellable name — on a synthetic tree and on this checkout\'s workflows; the roster\'s ' +
-      'freshness — git blob ids, this checkout\'s sources, the at-tip case leaving no gap and the behind case naming the base\'s new ' +
-      'workflow and the changed roster with the re-pin, and the false ⛔ a behind roster gives that gap exists to refuse; the measured #20748 ' +
-      'head judged 0 with its raw-named canary and 4 with a genuinely unexpected skip beside it; read classification for 422 / 404 / 401 / ' +
-      '403 / 5xx / network; argv; the real CLI on payload files for 0 / 4 / 3 and --json; and the structural no-write-path, ' +
+    `✓ check-expected-skips self-test: ${cases.length} cases pass (the exit register; the gate recogniser — top-level splitting, each ` +
+      'term kind read and every near-miss spelling refused; the derivation on a frozen fixture tree, admitting exactly its gated jobs ' +
+      'and none of the sentinels, with reasons built from the terms; a gated job ADDED or RENAMED needing no edit here, and a deleted, ' +
+      "un-gated or always() job, an unwidened, undeclared or un-needed filter output, an unread filter spelling, a shared or untellable " +
+      'name and an unreadable workflow each keeping its skip at exit 4; the judge on the measured head (38 of its 39 runs) and on fixtures ' +
+      'for an expected skip, an unexpected skip named as a filter miss, a same-suite failure read as a dependency skip, a raw matrix ' +
+      'template, other conclusions, a pending run and an empty head; the non-PR-event shape and its refusals; this checkout\'s workflows ' +
+      'read with nothing refused and no live job name pinned; the roster\'s freshness — git blob ids, this checkout\'s sources, the ' +
+      'at-tip and behind cases and the false ⛔ a behind tree gives; the measured #20748 head judged 0 with its raw-named canary and 4 ' +
+      'with a genuinely unexpected skip beside it; read classification for 422 / 404 / 401 / 403 / 5xx / network; argv; the real CLI on ' +
+      'payload files built from the live roster for 0 / 4 / 3 and --json; and the structural no-write-path, no-hand-list, ' +
       'single-sourced transport and SKILL.md pointer pins).',
   );
   return { code: EXIT_OK, verdict: SELF_TEST_VERDICT };

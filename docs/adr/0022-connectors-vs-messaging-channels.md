@@ -1,9 +1,10 @@
 # ADR-0022: Connectors vs Messaging Channels — Where "Push to Slack" Lives
 
-**Status**: Proposed (2026-05-31) — routing decision recorded; both substrates now exist independently (`connector-slack` built; `service-messaging` notify/outbox/preferences built), but the §3 shared-transport wiring — a Slack `MessagingChannel.send()` delegating to the Slack Connector — is unbuilt (no slack-channel in service-messaging). (2026-07-16 audit)
+**Status**: Accepted — 2026-10-27 (ruled on objectstack#26553, ADR batch 1; proposed 2026-05-31) — routing decision recorded; both substrates now exist independently (`connector-slack` built; `service-messaging` notify/outbox/preferences built), but the §3 shared-transport wiring — a Slack `MessagingChannel.send()` delegating to the Slack Connector — is unbuilt (no slack-channel in service-messaging). (2026-07-16 audit)
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0012](./0012-notification-platform.md) (Messaging Platform — outbound `notify` on a generalized outbox), [ADR-0013](./0013-bidirectional-messaging.md) (Bidirectional Messaging — Slack first), [ADR-0015](./0015-external-datasource-federation.md) (open mechanism / enterprise lifecycle split), [ADR-0018](./0018-unified-node-action-registry.md) (`connector_action` as baseline generic dispatch)
 **Consumers**: `@objectstack/spec` (`integration/`, future `messaging/`), `@objectstack/services/service-automation` (connector registry), future `@objectstack/service-messaging`, future `@objectstack/plugin-messaging-slack`, `@objectstack/connectors/*`
+**Amended by**: [ADR-0143](./0143-outbound-connector-auth-is-open-tier.md) (2026-10-27) — §4's connector-auth half moves to the open tier; see the note under §4.
 
 ---
 
@@ -112,6 +113,15 @@ This is the ADR-0012 "email = transport sub-system behind a channel" pattern, wi
 | Managed OAuth2 **install + token refresh**, credential vault (`service-secrets`), multi-tenant `sys_channel_account` lifecycle, premium connectors, marketplace | **enterprise** (per ADR-0015; ADR-0013 leans on `service-secrets` + OAuth — those are the enterprise bits) |
 
 A static Slack bot token is just a bearer credential, so a basic open-source Slack connector + channel is shippable in the framework; the managed-credential / OAuth-refresh / multi-tenant lifecycle is the enterprise line — the same split ADR-0015 drew for datasources and ADR-0018's addendum drew for connectors.
+
+> **Amendment note (2026-10-27, ADR-0143).** For **connectors**, the "Managed OAuth2 install + token
+> refresh" and connection-lifecycle part of the enterprise row above is reversed: outbound connector
+> auth is open tier. That covers OAuth2 grants, the vendor app-credential exchange, request signing,
+> per-dispatch refresh and the connection record. The rest of the row keeps this record's placement:
+> premium connectors, marketplace, the vault backend, and the `sys_channel_account` lifecycle of a
+> messaging channel, which ADR-0143 does not move. A Slack channel whose `send()` delegates to the
+> Slack connector (§3) inherits the open connector auth. The open/enterprise line also no longer
+> traces to ADR-0015, which never drew it. Every other decision here stands.
 
 ### 5. Anti-patterns this rules out
 

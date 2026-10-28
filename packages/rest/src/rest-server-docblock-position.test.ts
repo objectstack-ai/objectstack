@@ -141,7 +141,7 @@ describe('rest-server.ts docblock position', () => {
  * floor is that module's own measured count — the batch and approval modules
  * carry three apiece (the module header, the host interface's block and the
  * function's) — and a module added to the list needs one here before it reads.
- * The case below the loop pins the list's length and the sum of the floors.
+ * The case below the loop pins the sum of the floors.
  *
  * [#23050 slice 4] `sharing-routes.ts` carries eight: the module header, two
  * host interfaces' blocks and two functions' (it holds two registrars' bodies),
@@ -272,7 +272,7 @@ for (const { file, minBlocks } of MOVED_FILES) {
 }
 
 describe('[#23050 slice 3] the registrar list this pin reads', () => {
-    it('reads every module on it, each against its own floor — the length and the floors\' sum are pinned', () => {
+    it('reads every module on it, each against its own floor — the floors\' sum is pinned', () => {
         // A module added to the list makes this re-read its numbers rather than
         // widening unnoticed: 4 + 3 + 3 = 10 blocks over the three modules.
         // [#23050 slice 4] 4 + 3 + 3 + 8 = 18 over four, length 4 → 5.
@@ -295,7 +295,7 @@ describe('[#23050 slice 3] the registrar list this pin reads', () => {
         // [#23050 slice 13e] 4 + 3 + 3 + 8 + 3 + 8 + 5 + 3 + 3 + 3 + 3 + 3 + 5 + 5 + 3 + 5 + 3 = 70
         // over seventeen, length 17 → 18 (`meta-item-history-routes.ts` 3 → 5: the
         // published read's host interface and function).
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(18);
+        // [#26433] The list's length is no longer pinned: the list is the authority.
         expect(Object.keys(MOVED_FILE_FLOORS).sort())
             .toEqual(REST_SERVER_REGISTRAR_FILES.filter((file) => file !== FILE).sort());
         expect(MOVED_FILES.reduce((n, { minBlocks }) => n + minBlocks, 0)).toBe(70);

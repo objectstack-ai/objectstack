@@ -30,6 +30,7 @@ export type {
   ActionActivationRow,
   ActionActivationStore,
   ActionActivationStoreEngine,
+  ActionActivationWriteOptions,
 } from './action-activation.js';
 
 // Export Registry

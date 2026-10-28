@@ -550,8 +550,8 @@ pager or the record-count bar.
 
 The prop applies only to a paged grid, the view whose rows `ListView` fetches
 a page of. A board, a calendar or a grouped grid keeps its own rendering. When
-`compact` is absent (wide regions, unknown widths, the object list page and
-every other host), the list renders exactly as before.
+`compact` is absent (unknown widths, the object list page and every other host),
+the list renders exactly as before; a wide region passes `capped` instead (below).
 
 ### "View all"
 
@@ -568,6 +568,39 @@ The link is a real anchor: a plain left click navigates in the app through
 `openList`, and a modifier click (a new tab) follows the href. A host that
 publishes no `listHref`, or answers `null`, gets no link. An empty list draws
 no link either.
+
+## Capped posture in a wide page region — `capped`
+
+`ListViewProps` has a second posture prop, `capped`, a host prop for the same
+reason `compact` is one. The `list-view` page block passes it when
+`usePageRegionPosture()` answers `'full'`: the page region it sits in is half the
+page or wider (`main`, a full-width region).
+
+With `capped`, the list draws:
+
+- its first rows only: the query's window (`$top`) is the authored
+  `pagination.pageSize`, where a page block's `dataSource.limit` lands, and 5
+  (`CAPPED_LIST_DEFAULT_LIMIT`) when none is stated;
+- a short table of the view's first four visible columns
+  (`CAPPED_LIST_MAX_COLUMNS`), fixed to the block's width, so the rest are
+  dropped, not scrolled. A view with no declared columns draws the object's
+  `highlightFields` led by its name field, else each record's display name;
+- under the rows, a "View all N" link (`list.viewAllCount`) to the same
+  destination as the compact list's "View all".
+
+It does not draw the toolbar, the view tabs, the `#` row-number column, the
+pager or the record-count bar. Like `compact`, it applies only to a paged grid;
+`compact` wins when both are passed.
+
+### The tab badge — `onTotalChange`
+
+`onTotalChange(total)` is called with the number of records the list's query
+matched each time a load settles with a different answer. The `list-view` page
+block hands it the reporter `usePageTabCountReporter()` from
+`@object-ui/components` returns inside a `page:tabs` panel, so the tab's badge
+says how many records its list holds. `page:tabs` mounts a tab holding a list
+block while it is inactive (hidden), so the badge is there before the tab is
+opened; a tab with an authored `count` is not mounted early.
 
 ## Sorting (and why relational columns are not offered)
 
@@ -619,8 +652,8 @@ The ListView automatically persists the user's view type preference in localStor
 - 📦 [npm package](https://www.npmjs.com/package/@object-ui/plugin-list)
 - 📝 [Changelog](./CHANGELOG.md)
 - 🐛 [Report an issue](https://github.com/objectstack-ai/objectui/issues)
-- 🤝 [Contributing Guide](https://github.com/objectstack-ai/objectui/blob/main/CONTRIBUTING.md)
-- 🗺️ [Roadmap](https://github.com/objectstack-ai/objectui/blob/main/ROADMAP.md)
+- 🤝 [Contributing Guide](https://github.com/objectstack-ai/objectstack/blob/main/CONTRIBUTING.md)
+- 🗺️ [Roadmap](https://github.com/objectstack-ai/objectstack/blob/main/ROADMAP.md)
 
 ## License
 

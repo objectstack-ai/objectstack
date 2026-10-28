@@ -27,7 +27,9 @@ import { resolveIcon } from './resolve-icon';
 import { hasDeclaredVisibilityGate } from './visibility-gate';
 import { useAutoTriggerOnce } from './auto-trigger';
 import { readStaticParamValues } from './static-params';
+import { toRunnerVariant } from './runner-variant';
 import { DisabledReasonTrigger, describedByWithReason, useDisabledReason } from './disabled-reason';
+import type { RendererHostProps } from '../../lib/renderer-host-props';
 
 /**
  * The declared props. `schema` is `UIActionSchema` (objectui#4418) for the same
@@ -44,7 +46,7 @@ import { DisabledReasonTrigger, describedByWithReason, useDisabledReason } from 
 // `ActionIconProps` as the block's AUTHORED property bag (`actionType`, `label`, `variant`, …).
 // This is the React envelope that carries a node (`schema`, `context`, `disabled`, an open
 // tail) — a different layer, named as objectui#7265 named `RecordAlertRendererProps`.
-export interface ActionIconRendererProps {
+export interface ActionIconRendererProps extends RendererHostProps {
   schema: UIActionSchema & { type: string; className?: string; actionType?: string };
   className?: string;
   context?: Record<string, any>;
@@ -54,7 +56,7 @@ export interface ActionIconRendererProps {
    * signature, consumed by name below, never re-spread onto the DOM.
    */
   disabled?: boolean;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 // Index signature on the parameter annotation, not on the `forwardRef` type
@@ -120,6 +122,7 @@ const ActionIconRenderer = forwardRef<
     // earns it. See `./disabled-reason`.
     const disabledReason = useDisabledReason(
       hasDeclaredVisibilityGate(schema.disabled) && isDisabledPred,
+      schema.disabledReason,
     );
 
     const Icon = resolveIcon(schema.icon);
@@ -190,6 +193,9 @@ const ActionIconRenderer = forwardRef<
           // (objectui#13022).
           operation: schema.operation,
           confirmText: schema.confirmText,
+          // See action-button.tsx — the block's `variant` in the runner's
+          // dialect (objectstack#26665).
+          variant: toRunnerVariant(schema.variant),
           successMessage: schema.successMessage,
           // See action-button.tsx — success copy per handler outcome, the
           // toast's first rung (objectui#11344).

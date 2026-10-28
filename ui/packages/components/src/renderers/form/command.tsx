@@ -21,9 +21,10 @@ import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, Command
 // trading a no-icon failure for a WRONG-icon one, recorded as ruled out for
 // authored icon fields by objectui#5622 and #5633.
 import { resolveIcon } from '../action/resolve-icon';
+import type { RendererHostProps } from '../../lib/renderer-host-props';
 
 ComponentRegistry.register('command', 
-  ({ schema, ...props }: { schema: CommandSchema; [key: string]: any }) => {
+  ({ schema, ...props }: { schema: CommandSchema; [key: string]: unknown } & RendererHostProps) => {
     const { 
         'data-obj-id': dataObjId, 
         'data-obj-type': dataObjType,

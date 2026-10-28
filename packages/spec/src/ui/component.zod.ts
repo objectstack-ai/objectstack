@@ -527,12 +527,11 @@ const retiredComponentProps = (type: string) => {
  * JSON Schema and the authorable surface are byte-identical to the unmarked
  * key; it only records the instance in a module-private registry.
  *
- * {@link retiredComponentSlot} marks a TOMBSTONED spelling of a slot:
- * `page:card.body`, retired by #5775 (maintainer ruling 2026-08-06, direction
- * A — one composition key, `children`). It is not an authorable spelling, and
- * the authoring walks do not descend it; the renderers still read it as a
- * back-compat fallback for STORED documents, which is exactly the population
- * the conversion walker normalizes, so that walker keeps descending it.
+ * The registry's `retired` flag marked a TOMBSTONED spelling of a slot
+ * (`page:card.body`, retired by #5775) for the conversion walker alone. That
+ * tombstone aged out with the protocol-16.x retirements (ADR-0087 amendment
+ * 2026-10-26, #25767), so no row sets it today; the flag stays because the walk
+ * contract exposes it, and the next retired slot spelling sets it again.
  */
 const COMPONENT_SLOT_DECLARATIONS = new WeakMap<object, { readonly retired: boolean }>();
 
@@ -543,12 +542,6 @@ const COMPONENT_SLOT_DECLARATIONS = new WeakMap<object, { readonly retired: bool
  */
 function componentSlot<T extends z.ZodType>(schema: T): T {
   COMPONENT_SLOT_DECLARATIONS.set(schema, { retired: false });
-  return schema;
-}
-
-/** {@link componentSlot} for a tombstoned spelling of a slot — see the block above. */
-function retiredComponentSlot<T extends z.ZodType>(schema: T): T {
-  COMPONENT_SLOT_DECLARATIONS.set(schema, { retired: true });
   return schema;
 }
 
@@ -655,34 +648,6 @@ export const PageHeaderProps = strictObject({
     'Page title. Omit to let the renderer derive the heading from the record (the default for record pages) — set explicitly on non-record pages (dashboard, landing) with no record to derive from.',
   ),
   subtitle: I18nLabelSchema.optional().describe('Page subtitle'),
-  /**
-   * REMOVED (#6946, maintainer ruling 2026-08-09 「全部接受」 on objectui#3829,
-   * route (c) — retire upstream).
-   *
-   * A header icon nothing has ever drawn. `PageHeaderRenderer` resolves `icon`
-   * only per header ACTION (`action.icon`,
-   * inside the action pipeline) and never off the header's own props bag;
-   * `@object-ui/layout`'s `<PageHeader>` accepts an `icon` REACT prop from a
-   * host but — unlike `actions`, whose `schema?.actions ??
-   * schema?.properties?.actions` fallback sits four lines away in the same
-   * function — gives it no schema fallback, so an authored node cannot reach
-   * it. objectui's registration publishes no `icon` input either, which is
-   * what put this key in that repo's `UNPUBLISHED_EXEMPTIONS` map as a B-class
-   * "spec declares it, NO renderer read point" entry.
-   *
-   * The live mechanism is the record chrome (`recordChrome`, on by default)
-   * for the header's own identity, and each action's own `icon` for the
-   * buttons beside it.
-   */
-  icon: retiredKey(
-    '`page:header` property `icon` was removed in @objectstack/spec 17.0.0 (ADR-0087 D2) — '
-    + 'no renderer ever read it: objectui resolves `icon` only per header action (`action.icon`), '
-    + 'never off the header\'s own props bag, and the component registry never published it as an '
-    + 'input, so an authored value was accepted and dropped. Delete the key. The header\'s own '
-    + 'identity is drawn by the record chrome (`recordChrome`, on by default) and each action '
-    + 'carries its own `icon`. '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
   /**
    * REMOVED (#20758, ADR-0049 enforce-or-remove through the ADR-0087 D2 route,
    * the way `icon` above left this row; the spec half of objectui#11166).
@@ -850,18 +815,6 @@ export const PageTabsProps = strictObject({
    */
   tabStyle: z.enum(['line', 'card', 'pill']).default('line')
     .describe("Tab-strip visual style: 'line' underlines the active tab, 'card' frames each tab, 'pill' renders rounded pills"),
-  /**
-   * REMOVED (#6776). The declared spelling of `tabStyle`, unauthorable in any
-   * flat or JSX carrier because a page component's own dispatch key is also
-   * called `type`. The live mechanism is `tabStyle`.
-   */
-  type: retiredKey(
-    '`page:tabs` property `type` was removed in @objectstack/spec 17.0.0 (ADR-0087 D2) — '
-    + 'a props key named `type` collides with the page component\'s own dispatch key, so it is '
-    + 'unauthorable in the flat and JSX carriers and was never validated in them. Rename the key '
-    + 'to `tabStyle`; the value (`line` | `card` | `pill`) is unchanged. '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
   position: z.enum(['top', 'left']).default('top'),
   /**
    * Keep the tab strip visible when there is only one tab (#4001 batch A).
@@ -1021,32 +974,6 @@ export const PageCardProps = strictObject({
   title: I18nLabelSchema.optional(),
   bordered: z.boolean().default(true),
   /**
-   * REMOVED (#6946, maintainer ruling 2026-08-09 「全部接受」 on objectui#3829,
-   * route (c) — retire upstream).
-   *
-   * A card action list nothing has ever rendered. `PageCardRenderer`
-   * (`containers.tsx`) reads exactly four keys — `title`, `bordered`,
-   * `body ?? children`, `footer` — and returns a `<Card>` built from them;
-   * there is no actions area in the markup and no `actions` input in the
-   * registration, which is what put this key in objectui's
-   * `UNPUBLISHED_EXEMPTIONS` map as a B-class "spec declares it, NO renderer
-   * read point" entry. The card's sibling `page:header` DOES read `actions`
-   * off its bag, so the divergence was invisible to anyone reading the two
-   * declarations side by side.
-   *
-   * The live mechanism is composition: author the buttons as components in
-   * `children` or `footer` (`element:button`, `record:quick_actions`).
-   */
-  actions: retiredKey(
-    '`page:card` property `actions` was removed in @objectstack/spec 17.0.0 (ADR-0087 D2) — '
-    + 'no renderer ever read it: objectui\'s card renderer builds its `<Card>` from `title`, '
-    + '`bordered`, `children` and `footer` only, has no actions area, and the component registry '
-    + 'never published it as an input, so an authored value was accepted and dropped. Delete the '
-    + 'key and author the buttons as components in the card\'s `children` or `footer` '
-    + '(`element:button`, `record:quick_actions`), which is what actually renders. '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
-  /**
    * Card content, in order — the canonical composition slot, matching every
    * other container (`grid`, `flex`, `page:section`, `page:tabs` items).
    *
@@ -1058,22 +985,6 @@ export const PageCardProps = strictObject({
    * (Prime Directive #12). `footer` is a genuinely distinct slot and stays.
    */
   children: componentSlot(z.array(z.unknown()).optional().describe('Card content components, in order (the card body slot)')),
-  /**
-   * REMOVED (#5775). `body` was the declared spelling of the slot every other
-   * container calls `children`; the two are the same slot, and the renderer
-   * already reads both. The live mechanism is `children`.
-   *
-   * Marked a RETIRED slot spelling (#20940): the authoring walks do not
-   * descend it, the ADR-0087 conversion walker does — see
-   * {@link retiredComponentSlot}.
-   */
-  body: retiredComponentSlot(retiredKey(
-    '`page:card` property `body` was removed in @objectstack/spec 17.0.0 (ADR-0087 D2) — '
-    + 'it was a second spelling of the composition slot every other container calls `children`, '
-    + 'and the renderer reads both. Rename the key to `children`; the value (an array of child '
-    + 'components) is unchanged. '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  )),
   /**
    * Slot for footer content — a declared, rendered slot distinct from
    * `children` (objectui's `PageCardRenderer` draws it under the body), so
@@ -1319,35 +1230,6 @@ export const RecordDetailsProps = strictObject({
   guidanceSets: COMPONENT_LEVEL_GUIDANCE,
 }, {
   columns: z.enum(['1', '2', '3', '4']).default('2').describe('Number of columns for field layout (1-4)'),
-  /**
-   * REMOVED (#6946, maintainer ruling 2026-08-09 「全部接受」 on objectui#3818 —
-   * the removal direction).
-   *
-   * The declared `auto` | `custom` semantics were never implemented. objectui's
-   * `RecordDetailsRenderer` does read `layout`, but only to test it against
-   * `inline` | `compact` — two values this enum never permitted — so BOTH legal
-   * values fell to the same `vertical` branch and the key selected nothing.
-   * That is why it survived `check:react-declaration-parity`: objectui's
-   * registry declared `layout` with the same `auto` | `custom` enum this schema
-   * did, and the gate compares two DECLARATIONS, never a declaration against a
-   * renderer (AGENTS.md). A third spelling, `stacked` | `inline` | `compact`,
-   * sat in `@object-ui/types`' mirror — three declarations of one key, none of
-   * them the branch the renderer takes.
-   *
-   * The live mechanism is what you author: `sections` renders the explicit
-   * groups (the old `custom`), and omitting it falls back to the object's
-   * `highlightFields` (the old `auto`). objectui#3818 deletes the input and the
-   * dead branch on the next pin bump.
-   */
-  layout: retiredKey(
-    '`record:details` property `layout` was removed in @objectstack/spec 17.0.0 (ADR-0087 D2) — '
-    + 'its declared `auto` | `custom` semantics were never implemented: the renderer tests `layout` '
-    + 'only against `inline` | `compact`, two values the schema never permitted, so both legal '
-    + 'values took the same branch and the key selected nothing. Delete the key — the body is '
-    + 'already chosen by what you author: `sections` renders the explicit groups (the old '
-    + '`custom`), and omitting it falls back to the object\'s `highlightFields` (the old `auto`). '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
   /**
    * Field groups rendered as the detail body, IN ORDER.
    *
@@ -1756,10 +1638,10 @@ export const RecordRelatedListProps = strictObject({
    * binding: the ruling's own exclusion (a new gate defaults to no).
    *
    * RENDERED by the console. The block hands this key to its parent read
-   * (objectui: packages/plugin-detail/src/renderers/record-related-list.tsx,
+   * (ui/packages/plugin-detail/src/renderers/record-related-list.tsx,
    * whose `RecordRelatedListRenderer` passes `schema.parentDataSource` to
    * `ParentRecordBinding`; the read itself is
-   * objectui: packages/plugin-detail/src/renderers/recordBinding.tsx). Its
+   * ui/packages/plugin-detail/src/renderers/recordBinding.tsx). Its
    * `BoundRecordProvider` asks the page's own adapter, so under the caller's
    * identity, for one row (`$top: 1`) by the binding's `sort`, and provides
    * that row as the record context the list body reads. No row, or a read the
@@ -3377,40 +3259,6 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => strictObject({
   placeholder: I18nLabelSchema.optional().describe('Placeholder text'),
   /** Shown in place of the row list when the query returns nothing. */
   emptyText: I18nLabelSchema.optional().describe('Text shown when the query returns no records (default "No records")'),
-  /**
-   * REMOVED (#5775). A synonym of `labelField` — the same concept in two
-   * spellings, of which only `labelField` was ever read.
-   */
-  displayField: retiredKey(
-    '`element:record_picker` property `displayField` was removed in @objectstack/spec 17.0.0 '
-    + '(ADR-0087 D2) — it was a required declaration no renderer ever read, while the '
-    + 'renderer honoured `labelField` for the same thing and defaulted to `name`. Rename the key '
-    + 'to `labelField`; the value (a field name) is unchanged. '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
-  /**
-   * REMOVED (#5775). ADR-0049 enforce-or-remove: the control has no search
-   * box, so this narrowed nothing.
-   */
-  searchFields: retiredKey(
-    '`element:record_picker` property `searchFields` was removed in @objectstack/spec 17.0.0 '
-    + '(ADR-0049) — the picker renders a plain single-select with no search input, so no '
-    + 'renderer ever read it and it narrowed nothing. Delete the key. To restrict which records '
-    + 'the picker offers, use the component-level `dataSource.filter`, which the query path '
-    + 'does apply. '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
-  /**
-   * REMOVED (#5775). ADR-0049 enforce-or-remove: the control is a single-select
-   * `Select`, and a page variable binds one record id.
-   */
-  multiple: retiredKey(
-    '`element:record_picker` property `multiple` was removed in @objectstack/spec 17.0.0 '
-    + '(ADR-0049) — the picker is a single-select `Select` and the bound page variable '
-    + 'holds one record id, so `multiple: true` selected nothing extra and reported success. '
-    + 'Delete the key; multi-record selection is not implemented on this element. '
-    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 }));
@@ -6195,8 +6043,11 @@ export type ObjectKanbanPropsParsed = z.infer<typeof ObjectKanbanPropsSchema>;
 
 /**
  * The flat per-field spellings `ObjectCalendar` keeps reading as a
- * backward-compat fallback (`getCalendarConfig`; read points recorded in
- * `liveness/page.json`, row `regions`) and that `ObjectView`/`ListView` emit on their runtime handoff. Read, but
+ * stored-document fallback (`getCalendarConfig`; read points recorded in
+ * `liveness/page.json`, row `regions`). `ObjectView`/`ListView` hand the
+ * binding off in the `calendar` block, not flat (objectstack#25923), and the
+ * flat keys live on `plugin-calendar`'s own hand-off type, not on
+ * `@object-ui/types`' `ObjectCalendarSchema`. Read, but
  * NOT authorable — one composition key per concept (Prime Directive #12, the
  * `body` → `children` precedent on {@link PageContainerProps}): the authored
  * spelling is the `calendar` object.
@@ -6209,9 +6060,9 @@ const OBJECT_CALENDAR_FLAT_FIELD_GUIDANCE: readonly KeySetGuidance[] = [
     examples: ['startDateField', 'titleField'],
     prescription:
       'Write this as a key of the `calendar` config object instead — `calendar: { startDateField, '
-      + 'endDateField, titleField, colorField, allDayField }`. The flat spelling is the runtime handoff '
-      + '`ObjectView`/`ListView` emit and a stored-document fallback the renderer keeps reading; it is '
-      + 'not a second authorable spelling (one key per concept, Prime Directive #12).',
+      + 'endDateField, titleField, colorField, allDayField }`. `ObjectView`/`ListView` hand the binding '
+      + 'off in that block too; the flat spelling is only a stored-document fallback the renderer still '
+      + 'reads, not a second authorable spelling (one key per concept, Prime Directive #12).',
   },
 ];
 
@@ -7505,7 +7356,7 @@ export const ObjectMapPropsSchema = lazySchema(() => strictObject({
    * page, whatever they named.
    */
   navigation: NavigationConfigSchema.optional()
-    .describe('Marker-click navigation config — the same block `ListViewSchema.navigation` declares ({ mode, size, openNewTab, preventNavigation }), `mode` one of the seven `NavigationModeSchema` values'),
+    .describe('Marker-click navigation config — the same block `ListViewSchema.navigation` declares ({ mode, size, openNewTab, preventNavigation }), `mode` one of the four `NavigationModeSchema` values (`drawer` by default)'),
   enableClustering: z.boolean().optional()
     .describe('Group nearby markers into clusters. Absent, the renderer clusters only above 100 markers'),
 }));
@@ -7522,21 +7373,22 @@ export type ObjectMapProps = z.input<typeof ObjectMapPropsSchema>;
 export type ObjectMapPropsParsed = z.infer<typeof ObjectMapPropsSchema>;
 
 /**
- * The flat `GanttConfig` spellings `getGanttConfig`'s branch 2 reads and that
- * `ObjectView` / `ListView` EMIT when they flatten `options.gantt` — objectui's
- * own `FLAT_GANTT_CONFIG_KEYS` (read points recorded in `liveness/page.json`,
- * row `regions`). Read, but
+ * The flat `GanttConfig` spellings `getGanttConfig`'s branch 2 reads as a
+ * stored-document fallback — objectui's own `FLAT_GANTT_CONFIG_KEYS` (read
+ * points recorded in `liveness/page.json`, row `regions`). `ObjectView` /
+ * `ListView` hand the binding off in the `gantt` block, not flat
+ * (objectstack#25923). Read, but
  * NOT authorable, for the reason the map's twin set above records: objectui#6469
  * inherited the objectui#5018 ruling for this block, so the `gantt` block is the
  * authoring shape, it is taken WHOLE when present, and every flat key beside it
  * is named as ignored in a dev warning.
  *
- * The flat branch is the HOT path for this block — a hand-authored `gantt` block
- * reaching the renderer through either view layer has already been flattened —
- * which is exactly why the prescription matters here: an author who learned the
- * flat spelling from a view config (or from `@object-ui/types`'
- * `ObjectGanttSchema`, which declares the whole flat face) writes it on an SDUI
- * node next, where nothing flattens anything.
+ * The block branch is the path both view layers take — they hand the `gantt`
+ * block on whole — and the flat branch is only the stored-document fallback.
+ * The prescription still matters: an author who met the flat spelling in an
+ * older stored document writes it on an SDUI node next. The flat keys live on
+ * `plugin-gantt`'s package-local hand-off type (`ObjectGanttFlatFields`), not
+ * on `@object-ui/types`' `ObjectGanttSchema`, which declares only the block.
  *
  * Membership is `GanttConfigSchema`'s own shape plus the legacy singular
  * `dependencyField` alias the flat branch still reads beside `dependenciesField`
@@ -7561,9 +7413,10 @@ const OBJECT_GANTT_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
     examples: ['startDateField', 'endDateField', 'viewMode'],
     prescription:
       'Write this as a key of the `gantt` config object instead — `gantt: { startDateField, endDateField, '
-      + 'titleField, ... }`. The flat top-level spelling is the internal form `ObjectView`/`ListView` '
-      + 'produce when they flatten `options.gantt`, not a second authoring spelling: whenever a `gantt` '
-      + 'block is present the renderer takes it WHOLE and names every flat key beside it as ignored. The '
+      + 'titleField, ... }`. `ObjectView`/`ListView` hand the binding off in that block too; the flat '
+      + 'top-level spelling is only a stored-document fallback the renderer still reads, not a second '
+      + 'authoring spelling: whenever a `gantt` block is present the renderer takes it WHOLE and names '
+      + 'every flat key beside it as ignored. The '
       + 'legacy singular `dependencyField` is `dependenciesField` inside that block.',
   },
 ];
@@ -7631,7 +7484,7 @@ function objectGanttMarker() {
  * `mobileReadOnly`.
  *
  * Measured and deliberately NOT declared: the flat `GanttConfig` spellings (the
- * flatten product — {@link OBJECT_GANTT_FLAT_CONFIG_GUIDANCE}); `title`, which
+ * stored-document fallback — {@link OBJECT_GANTT_FLAT_CONFIG_GUIDANCE}); `title`, which
  * this renderer never reads (the export-name chain is `gantt.exportFileName` →
  * `label` → the OBJECT's label → `objectName`); a row cap — the reload's `$top`
  * is the platform ceiling, spread in as core's `nonGridRowCeilingQuery()` (one
@@ -7642,7 +7495,7 @@ function objectGanttMarker() {
  * reads, `search` and `searchableFields` (sent as `$search` / `$searchFields`),
  * which `ListView` writes onto the node it generates from its toolbar Search
  * box (its `case 'gantt'` arm) — a host-generated key pair in the same position
- * as the flatten product, and not declared here.
+ * as the flat fallback spellings, and not declared here.
  *
  * VALUE posture: `gantt` is the one config block in this family whose value
  * contract is already the SPEC's — the renderer validates it against
@@ -7698,7 +7551,7 @@ export const ObjectGanttPropsSchema = lazySchema(() => strictObject({
    * named.
    */
   navigation: NavigationConfigSchema.optional()
-    .describe("Task-click navigation config — the same block `ListViewSchema.navigation` declares ({ mode, size, openNewTab, preventNavigation }), `mode` one of the seven `NavigationModeSchema` values. The renderer's own default is `{ mode: 'drawer' }` when the key is absent"),
+    .describe("Task-click navigation config — the same block `ListViewSchema.navigation` declares ({ mode, size, openNewTab, preventNavigation }), `mode` one of the four `NavigationModeSchema` values (`drawer` by default). The renderer's own default is `{ mode: 'drawer' }` when the key is absent"),
   label: I18nLabelSchema.optional()
     .describe('Gantt label — the second link of the exported PNG/PDF file-name chain, after `gantt.exportFileName` and before the bound object\'s own label'),
   skipWeekends: z.boolean().optional()
@@ -7905,7 +7758,7 @@ export const ObjectTreePropsSchema = lazySchema(() => strictObject({
    * named.
    */
   navigation: NavigationConfigSchema.optional()
-    .describe('Row-click navigation config — the same block `ListViewSchema.navigation` declares ({ mode, size, openNewTab, preventNavigation }), `mode` one of the seven `NavigationModeSchema` values'),
+    .describe('Row-click navigation config — the same block `ListViewSchema.navigation` declares ({ mode, size, openNewTab, preventNavigation }), `mode` one of the four `NavigationModeSchema` values (`drawer` by default)'),
 }));
 /** Author state (ADR-0122: the bare name is the author state). */
 export type ObjectTreeProps = z.input<typeof ObjectTreePropsSchema>;
@@ -8748,7 +8601,7 @@ export interface PageComponentSlotPosition {
  * `page:card.footer`.
  *
  * A key is a slot exactly when its row wraps the key's schema in
- * `componentSlot` / `retiredComponentSlot` (module-private, top of this file);
+ * `componentSlot` (module-private, top of this file);
  * a key of a panel list's element object (`items: z.array(z.object({ children
  * }))`) so marked yields a panel position. The walks match a position by SHAPE
  * on every component, not by the type whose row declared it: `properties` is an

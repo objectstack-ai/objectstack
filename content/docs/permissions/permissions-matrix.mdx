@@ -41,8 +41,10 @@ principal with View/Modify All Data may read every record and still be refused a
 bulk copy of them. Export is an opt-in grant that must be stated explicitly —
 separating "may see all data" from "may take a bulk copy of it" is the
 segregation-of-duties case the axis exists for. The built-in
-`admin_full_access` / `organization_admin` sets therefore carry
-`allowExport: true` alongside their super-user bits.
+`admin_full_access` / `organization_admin` sets carry their super-user bits
+but no `allowExport`, so an admin holding only those sets cannot export. Grant
+export through an app or environment permission set that names each object
+with `allowExport: true`.
 
 The bypass is **posture-gated for row-level security** (ADR-0066 D2 ①): RLS
 policies are short-circuited only on objects whose posture permits it —

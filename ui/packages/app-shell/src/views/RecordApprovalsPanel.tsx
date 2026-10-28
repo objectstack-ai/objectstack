@@ -424,12 +424,13 @@ export const RecordApprovalsPanel: React.FC<RecordApprovalsPanelProps> = ({
       </div>
 
       <div className="px-4 py-3 space-y-3">
-        {/* Flow-level step strip — where in the multi-level flow this record
-            sits; present on the enriched pending row only (single reads).
-            Vertical at every step count (objectui#5554); the markup is the
-            one `ApprovalStepLine` the approval request page's decision panel
-            draws too (objectui#12491), and it draws nothing under two steps. */}
-        <ApprovalStepLine steps={pendingRequest?.flow_steps} />
+        {/* Flow-level step line — the pending request's own route, as the
+            approvals get serves it (`flow_route`, objectstack#26668): the
+            steps its run passed, the pending one, and the steps ahead the
+            flow's graph decides. Never the graph's trunk (`flow_steps`,
+            objectstack#26563). Vertical at every step count (objectui#5554);
+            it draws nothing under two steps. */}
+        <ApprovalStepLine steps={pendingRequest?.flow_route?.steps} />
 
         {/* Aggregation progress — the pending node's server-computed tally
             (unanimous / quorum approvals, per-group countersign), drawn by

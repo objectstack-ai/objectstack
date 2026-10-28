@@ -3457,11 +3457,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       old_hash: {
         label: "Hash anterior",
-        help: "SHA-256 del valor anterior (canonicalizado). Null cuando antes no estaba establecido."
+        help: "Resumen del valor anterior, nunca el texto plano: sha256: en hexadecimal para un valor normal, el resumen con clave hmac-sha256: para un valor secreto. Null cuando antes no estaba establecido, o para un valor secreto sin resumen con clave."
       },
       new_hash: {
         label: "Hash nuevo",
-        help: "SHA-256 del valor nuevo (canonicalizado). Null al restablecer."
+        help: "Resumen del valor nuevo, nunca el texto plano: sha256: en hexadecimal para un valor normal, el resumen con clave hmac-sha256: para un valor secreto. Null al restablecer, o para un valor secreto sin resumen con clave."
       },
       encrypted: {
         label: "Cifrado",

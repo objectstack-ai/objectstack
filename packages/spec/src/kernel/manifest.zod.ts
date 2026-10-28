@@ -987,45 +987,6 @@ export const ManifestSchema = strictObject({
     .describe('Navigation items this package contributes into apps owned by other packages'),
 
   /**
-   * REMOVED in v17 (#4914, ADR-0049 enforce-or-remove).
-   *
-   * `loading` carried the whole `PluginLoadingConfig` block — `strategy`,
-   * `preload`, `codeSplitting`, `dynamicImport`, `initialization`,
-   * `dependencyResolution`, `hotReload`, `caching`, `sandboxing`, `monitoring`
-   * — and NOTHING read any of it. It parsed, it entered the manifest, and it
-   * changed nothing. Tombstoned rather than deleted: when this landed
-   * `ManifestSchema` was not `.strict()`, so a plain deletion would have
-   * silently stripped the key, replacing an inert declaration with an invisible
-   * one; the surface has since been closed, and the tombstone stays because it
-   * types the key `never` and carries this prescription, which a bare refusal
-   * would not.
-   *
-   * See `plugin-loading.zod.ts` for the full record, including why `sandboxing`
-   * made this a security concern and not merely tidying.
-   */
-  loading: retiredKey(
-    '`manifest.loading` was removed in @objectstack/spec 17.0.0 (ADR-0049 ' +
-    'enforce-or-remove) — the entire block (`strategy`, `preload`, `codeSplitting`, ' +
-    '`dynamicImport`, `initialization`, `dependencyResolution`, `hotReload`, `caching`, ' +
-    '`sandboxing`, `monitoring`) had no runtime reader in any repo, so authoring it ' +
-    'configured nothing. Delete the key. Plugins are composed at boot — `defineStack` ' +
-    'registers them and the kernel runs `init` then `start` in an order topologically ' +
-    "resolved from each composed plugin's own `dependencies` / `optionalDependencies` " +
-    '(`resolvePluginOrder`); the set is fixed until the process restarts. ' +
-    '⚠️ `loading.sandboxing` in particular never isolated anything: it did not run ' +
-    'plugins in a process, vm, iframe or web-worker, and `allowedServices` gated no ' +
-    'call. If you were relying on it for isolation, you had none — and the plugin trust ' +
-    'tier (`manifest.runtime`) does not give it back: that tier is enforced at the cloud ' +
-    'marketplace PUBLISH gate only (an unverified publisher requesting the `node` tier is ' +
-    'rejected with HTTP 422 and forced to manual review), while load-side enforcement is ' +
-    'NOT implemented, so a locally installed plugin is not isolated by the tier it ' +
-    'declares. ⛔ Nor do the permission declarations give it back: the install-time ' +
-    'granted set is REGISTERED on the PluginPermissionEnforcer at load and queried by ' +
-    'nothing, so it refuses no operation. Neither surface confines a plugin today — do ' +
-    'not author either one expecting isolation.',
-  ),
-
-  /**
    * Platform Compatibility Requirements.
    * Specifies the minimum ObjectStack platform version required to run this package.
    * Used at install time to prevent incompatible packages from being installed.

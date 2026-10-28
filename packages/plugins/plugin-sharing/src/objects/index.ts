@@ -12,3 +12,6 @@
 export { SysRecordShare } from './sys-record-share.object.js';
 export { SysSharingRule } from './sys-sharing-rule.object.js';
 export { SysShareLink } from './sys-share-link.object.js';
+export { SysQueue } from './sys-queue.object.js';
+export { SysQueueMember } from './sys-queue-member.object.js';
+export { SysAssignmentCursor } from './sys-assignment-cursor.object.js';

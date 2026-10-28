@@ -147,6 +147,15 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     covers: ['security/sharing.zod.ts:CriteriaSharingRuleSchema.condition'],
     proof: 'packages/plugins/plugin-sharing/src/sharing-rule.test.ts',
   },
+  {
+    id: 'assignment-load',
+    summary: 'assignment-rule entry `load` → the filter a `least_loaded` member\'s open rows are counted by (ADR-0142 D5)',
+    dialect: 'cel', mode: 'compile', state: 'enforced', failPolicy: 'fail-closed',
+    enforcement: 'objectql/assignment-rules.ts route → @objectstack/formula compileCelToFilter, ANDed with the member\'s owner_id and the row\'s organization_id in the engine count',
+    covers: ['automation/assignment-rule.zod.ts:AssignmentRuleEntrySchema.load'],
+    proof: 'packages/objectql/src/ownership-queue.test.ts',
+    note: 'Not a security surface: it decides who is handed a row, never who may read one. It is COMPILE because the count is a pushdown query, and `fail-closed` describes what a `load` the compiler cannot lower does: the row parks in the queue with a warning, never a count over every row. Nothing before the runtime asks whether the compiler can lower it (the schema only requires `load` beside `least_loaded`).',
+  },
 
   // ── INTERPRET (per-record) — classified, fail-soft per ADR-0058 D5 ──
   {
@@ -162,6 +171,14 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     dialect: 'cel', mode: 'interpret', state: 'enforced', failPolicy: 'fail-soft-log',
     enforcement: '@objectstack/formula celEngine (interpret) via the hook runner',
     covers: ['data/hook.zod.ts:HookSchema.condition'],
+  },
+  {
+    id: 'cel-assignment-criteria',
+    summary: 'assignment-rule entry `criteria`, matched against the row being inserted (ADR-0142 D5)',
+    dialect: 'cel', mode: 'interpret', state: 'enforced', failPolicy: 'fail-soft-log',
+    enforcement: '@objectstack/formula ExpressionEngine.evaluate (interpret) over `record`, in objectql/assignment-rules.ts matches; a fault is warned once per entry and the entry does not match',
+    covers: ['automation/assignment-rule.zod.ts:AssignmentRuleEntrySchema.criteria'],
+    proof: 'packages/objectql/src/ownership-queue.test.ts',
   },
   {
     id: 'cel-formula',
@@ -202,18 +219,16 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
   },
   {
     // #22227 — the deadline's settle predicate (objectui#11815 ruling D). A row
-    // of its own rather than a fourth `cel-field-rule` cover: that row is
-    // `enforced` and names the evaluators of its three slots, and neither reads
-    // this one. The CEL is judged at authoring as the family's is; what is
-    // missing is the reader, so the honest tier is `unevaluated`.
+    // of its own rather than a fourth `cel-field-rule` cover: that row names
+    // the evaluators of its three slots, and this one has its own, the
+    // console's `isDeadlineSettled`. It was `experimental` / `unevaluated`
+    // until objectui#11815 landed that reader; re-stated in #26727.
     id: 'cel-field-deadline-settled',
-    summary: "a date / datetime deadline's settle predicate (Field.settledWhen) — display only, declared ahead of its renderer",
-    dialect: 'cel', mode: 'interpret', state: 'experimental', failPolicy: 'unevaluated',
+    summary: "a date / datetime deadline's settle predicate (Field.settledWhen) — display only",
+    dialect: 'cel', mode: 'interpret', state: 'enforced', failPolicy: 'fail-soft-log',
     enforcement:
-      'NO EVALUATOR FOUND — no runtime consumer yet, in either repo: nothing in this checkout reads the slot, and objectui @55e90fd has no `settledWhen` read at all (measured by grep). PARSE ONLY at the spec seam: `FieldSchema` refuses it off `date` / `datetime` and without `dueLike: true`. Its build-time reader is lint\'s field-rule pass (`validate-expressions.ts`), which judges the CEL as it judges `visibleWhen` (it parses, `record.<field>` only, the family\'s bound roots) at `os build`, `os validate` and the object save door — a reader of the source, not an evaluator of it',
+      'console (ui/) isDeadlineSettled (core/evaluator/deadlineSettled.ts) → evalRowPredicate → evalFieldPredicate (core/evaluator/fieldRules.ts) → @objectstack/formula celEngine (interpret), evaluated per record with the row bound as `record`, by every host that draws a date cell beside a row (grid, list, gallery, kanban, tree, the record detail sections and the approval snapshot); the verdict reaches the date / datetime cell as `deadlineSettled`, and a settled deadline paints no overdue wording and no overdue colour. A predicate that faults is logged once per predicate text (warnPredicateFailure, fieldRules.ts: no `warnOnError` is passed, so evalRowPredicate takes the evalFieldPredicate route) and answers NOT settled, so the deadline shows as it does without the key. Display only: nothing on the write path reads it. Judged at authoring by lint\'s field-rule pass (`validate-expressions.ts`) as `visibleWhen` is',
     covers: ['data/field.zod.ts:FieldSchema.settledWhen'],
-    // The reader is objectui#11815, Blocked-by #22227.
-    note: 'EXPERIMENTAL until its one reader lands: objectui\'s date cell, whose host evaluates the predicate per row and hands the cell one boolean. Re-state as `enforced`, naming that evaluator and its fail policy, when it lands. Display only by declaration: nothing on the write path will read it, so this row never carries a write-path refusal.',
   },
   {
     // Split out of `cel-field-rule` by #15500. Both keys used to be spelled

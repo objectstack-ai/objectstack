@@ -793,7 +793,7 @@ export interface ComponentRendererProps<TSchema extends BaseSchema = BaseSchema>
   /**
    * Additional properties passed to the renderer
    */
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 /**

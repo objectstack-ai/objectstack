@@ -143,6 +143,37 @@ describe('the permission-set clone door, on a booted showcase', () => {
         expect(badName.status).toBe(400);
     });
 
+    // [#26571] access-security.security-catalog-activation-and-clone-doors
+    // acceptance[3]'s arms that only the unit pin reached, now over HTTP.
+    it('the source\'s OWN name is 409 too — the catalog already holds it', async () => {
+        const res = await clone(token, DEFAULT_SET, { name: DEFAULT_SET, label: 'X' });
+        expect(res.status, await res.clone().text()).toBe(409);
+        expect(((await res.json()) as any).error?.code).toBe('RESOURCE_CONFLICT');
+    });
+
+    it('the body is closed and both keys are required — 400 VALIDATION_FAILED, and nothing is saved', async () => {
+        for (const body of [
+            { label: 'X' },
+            { name: 'closed_body_copy' },
+            { name: 'closed_body_copy', label: 'X', adminScope: {} },
+        ]) {
+            const res = await clone(token, DEFAULT_SET, body);
+            expect(res.status, JSON.stringify(body)).toBe(400);
+            expect(((await res.json()) as any).error?.code).toBe('VALIDATION_FAILED');
+        }
+        expect(await securityCatalogReaderOf(ql)!.resolve('permission', 'closed_body_copy')).toBeUndefined();
+    });
+
+    it('an anonymous caller is refused 401 at the floor, and nothing is saved', async () => {
+        const res = await stack.api(`/security/permission-sets/${DEFAULT_SET}/clone`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: 'anon_copy', label: 'Anon Copy' }),
+        });
+        expect(res.status).toBe(401);
+        expect(await securityCatalogReaderOf(ql)!.resolve('permission', 'anon_copy')).toBeUndefined();
+    });
+
     it('a caller without manage_metadata is refused 403, and nothing is saved', async () => {
         const member = await stack.signUp(MEMBER_EMAIL);
 

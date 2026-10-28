@@ -1218,8 +1218,8 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // that leave the router — see `organizations/resolveHomeUrl.ts`). Both the
   // declared landing and the launcher fallback are
   // part of the outer skeleton every host that mounts this component provides
-  // (see this file's header), and `RequireAiSurface` in `ConsoleShell.tsx`
-  // already bounces the same way for a surface this runtime cannot serve.
+  // (see this file's header), and the no-assistant screen `RequireAiSurface`
+  // in `ConsoleShell.tsx` shows leads home the same way.
   //
   // Telling "you may not enter THIS app" apart from "this app is not published"
   // is the other half of #4473 and stays gated on the backend permission-denied

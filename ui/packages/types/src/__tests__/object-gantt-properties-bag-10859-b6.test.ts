@@ -33,7 +33,7 @@
  * ## What is particular to this node
  *
  *   - The flat mirror also declared the whole `GanttConfig` vocabulary flat on
- *     the node (`startDateField`, `viewMode`, …, the flatten product
+ *     the node (`startDateField`, `viewMode`, …, the flat spelling
  *     `getGanttConfig` reads when there is no `gantt` block) and the legacy
  *     `dependencyField` alias. Each is refused by name and pointed at the
  *     bag's `gantt` block, the home the row gives them.
@@ -137,14 +137,16 @@ export type assertionEveryRowKeyIsOnTheArm = [
 
 /**
  * The TypeScript twin is RE-DECLARED, not retired: still published, still the
- * post-hoist reading with its flat members, still a member of the TypeScript
- * ObjectQL union. A narrowing or a removal here reddens `tsc`.
+ * post-hoist reading, still a member of the TypeScript ObjectQL union. A
+ * narrowing or a removal here reddens `tsc`. (objectstack#25923 moved its flat
+ * `GanttConfig` and search members to `plugin-gantt`'s hand-off type: the
+ * twin carries the `gantt` block, which is what the two rows below now read.)
  */
 export type assertionTwinStaysPublished = [
   Expect<Equal<TsObjectGanttSchema['type'], 'object-gantt'>>,
   Expect<Equal<TsObjectGanttSchema['objectName'], string | undefined>>,
-  Expect<Equal<TsObjectGanttSchema['startDateField'], string | undefined>>,
-  Expect<Equal<TsObjectGanttSchema['search'], string | undefined>>,
+  Expect<Equal<NonNullable<TsObjectGanttSchema['gantt']>['startDateField'], string>>,
+  Expect<Equal<Extract<'startDateField' | 'search', keyof TsObjectGanttSchema>, never>>,
   Expect<Equal<Extract<TsObjectQLComponentSchema, { type: 'object-gantt' }>, TsObjectGanttSchema>>,
 ];
 
@@ -253,9 +255,10 @@ describe('object-gantt validates in the spec\'s `properties` bag (objectui#10859
       type: 'object-gantt',
       properties: { objectName: 'task', navigation: {}, gantt: GANTT },
     } as const;
-    // Control: the spec's own row writes a default `mode` into its output.
+    // Control: the spec's own row writes a default `mode` into its output —
+    // `drawer` since objectstack#26677 (it was `page`).
     const specOut = SpecObjectGanttPropsSchema.parse(doc.properties) as unknown as { navigation: Record<string, unknown> };
-    expect(specOut.navigation.mode).toBe('page');
+    expect(specOut.navigation.mode).toBe('drawer');
     // This face validates and writes nothing.
     const result = safeValidateSchema(doc);
     expect(result.success).toBe(true);

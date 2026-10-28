@@ -342,6 +342,45 @@ export class MaskedValueWriteError extends Error {
 }
 
 /**
+ * [#26641] `explain` was asked about ANOTHER user, by an id no `sys_user` row
+ * has → `404 RECORD_NOT_FOUND`, naming the id.
+ *
+ * The explainer builds the explained principal through the authorization
+ * resolver, which synthesises the baseline anchor and sets for ANY id. So an
+ * id that names nobody (a typo, a deleted user, an id from another deployment)
+ * was explained as a baseline member and answered `200 allowed: true`: a
+ * verdict about a person who does not exist. As with an unknown object
+ * ({@link ExplainObjectNotFoundError}), nothing can be evaluated, so the honest
+ * answer is a refusal, not a verdict.
+ *
+ * `RECORD_NOT_FOUND` at 404 is the standard catalog's pair for "the record with
+ * this id does not exist", the answer `GET /data/sys_user/ID` gives for the
+ * same id, so it needs no ledger row. The REST door serves it through its
+ * classified-refusal arm, which keeps a declared 4xx `code` and `status`.
+ *
+ * Only a caller already admitted to explain someone else reaches this check,
+ * so it tells nobody new which ids exist: an anonymous caller is refused 401
+ * at the door and a caller who may not explain others gets their 403 before
+ * any existence read. The prefix is not the `[Security] Access denied`
+ * matcher, and the class carries both `status` and `statusCode`, for the
+ * reasons the classes above record.
+ */
+export class ExplainUserNotFoundError extends Error {
+  readonly code = 'RECORD_NOT_FOUND';
+  readonly status = 404;
+  readonly statusCode = 404;
+  readonly userId: string;
+  constructor(userId: string) {
+    super(
+      `[Security] Unknown user: explain was asked about user '${userId}', but no sys_user record has that id. `
+      + `No principal was evaluated, so this is NOT an access decision.`,
+    );
+    this.name = 'ExplainUserNotFoundError';
+    this.userId = userId;
+  }
+}
+
+/**
  * [#18253] `explain` was asked about an object name that no declaration on this
  * runtime answers to → `404 OBJECT_NOT_FOUND`.
  *
@@ -402,6 +441,42 @@ export class ExplainObjectNotFoundError extends Error {
     this.name = 'ExplainObjectNotFoundError';
     this.object = object;
     this.operation = operation;
+  }
+}
+
+/**
+ * [ADR-0142 D3/D4] A caller-supplied `queue` names no queue that resolves in
+ * the row's organization → `422 QUEUE_NOT_FOUND`.
+ *
+ * Raised by the ownership gate (middleware step 3.5) before the write: on an
+ * insert that names a queue, and on a MOVE (an update whose `queue` differs
+ * from the stored one). A queue resolves when a declared queue of that name is
+ * switched on, or the organization has a `sys_queue` row of that name; the
+ * column holds the machine name, so an id or a label resolves nowhere.
+ *
+ * Not a verdict: the name is wrong, and no grant would make it right. So the
+ * message does NOT carry the `[Security] Access denied` prefix, which is a
+ * MATCHER that would re-flatten this refusal into a 403 at the transports
+ * (see the classes above), and it carries both `status` and `statusCode`.
+ * An assignment rule whose target resolves nowhere is never this refusal: the
+ * row is written ownerless and the engine warns (ADR-0142 D5).
+ */
+export class QueueNotFoundError extends Error {
+  readonly code = 'QUEUE_NOT_FOUND';
+  readonly status = 422;
+  readonly statusCode = 422;
+  readonly object: string;
+  readonly queue: string;
+  constructor(object: string, queue: unknown) {
+    const name = typeof queue === 'string' ? queue : JSON.stringify(queue) ?? String(queue);
+    super(
+      `No queue named '${name}' exists in this organization, so a record of '${object}' cannot be put in it. `
+      + `Name a queue by its machine name (lowercase snake_case): one an installed app declares, or one of the `
+      + `organization's own queues.`,
+    );
+    this.name = 'QueueNotFoundError';
+    this.object = object;
+    this.queue = name;
   }
 }
 

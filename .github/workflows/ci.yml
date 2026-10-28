@@ -117,13 +117,13 @@ concurrency:
 # A `pull_request` or `merge_group` run carries the FAST SET: `Build Core`,
 # `Test Core` (affected-only) and `Build Docs`. `main`'s 4-hourly `schedule` run,
 # its `push` runs and an on-demand `workflow_dispatch` carry the FULL BATTERY:
-# the fast set plus the three jobs below that spell
+# the fast set plus the four jobs below that spell
 #
 #     github.event_name != 'pull_request' && github.event_name != 'merge_group'
 #
-# in their `if:` — `temporal-conformance`, `dogfood` (three shards) and
-# `dogfood-verify`. Nothing is deleted: the jobs moved off the
-# per-PR path. A red in one of them is a main-red for the owning lane, and the
+# in their `if:` — `temporal-conformance`, `dogfood` (three shards),
+# `dogfood-verify` and `ui-published-artifacts`. Nothing is deleted: the jobs
+# moved off the per-PR path, the last one never had one (#26717). A red in one of them is a main-red for the owning lane, and the
 # publish lane reads the full battery before its approval (release.yml's
 # `full-battery` job, `scripts/ci/scheduled-full-run.mjs --release-gate`).
 #
@@ -3006,8 +3006,17 @@ jobs:
       - name: Setup workspace
         uses: ./.github/actions/setup-workspace
 
-      - name: Setup Next.js cache
-        uses: actions/cache@v6
+      # The Next.js cache is RESTORED on every run and SAVED only on `push` and
+      # `schedule`, by "Save Next.js cache" at the end of this job -- the rule
+      # `.github/actions/setup-workspace` holds for the pnpm store, for the same
+      # reason: an entry saved on a pull request or merge-queue ref is
+      # restorable only from that ref, yet it counts toward the one 10 GB
+      # Actions cache pool and evicts `main`'s entries, which every pull request
+      # and queue run CAN restore. ⛔ No `pull_request` or `merge_group` run
+      # saves it.
+      - name: Restore Next.js cache
+        id: nextjs-cache
+        uses: actions/cache/restore@v6
         with:
           path: apps/docs/.next/cache
           key: ${{ runner.os }}-nextjs-${{ hashFiles('**/pnpm-lock.yaml') }}-${{ hashFiles('apps/docs/**.[jt]s', 'apps/docs/**.[jt]sx', 'content/**/*.mdx') }}
@@ -3073,9 +3082,9 @@ jobs:
       # this card exists to catch, arriving AFTER the gate reported green.
       # Assert the artifact rather than trusting the exit code.
       #
-      # `.next/BUILD_ID` cannot be a leftover from the cache step above: that
-      # step stores `apps/docs/.next/cache` ONLY, so nothing outside that
-      # subtree is ever restored. ⛔ Widening that cache path to
+      # `.next/BUILD_ID` cannot be a leftover from the cache restore above:
+      # the Next.js cache steps store `apps/docs/.next/cache` ONLY, so nothing
+      # outside that subtree is ever restored. ⛔ Widening that cache path to
       # `apps/docs/.next` would let this assertion pass without a build.
       - name: Assert the docs app actually built
         run: |
@@ -3085,6 +3094,31 @@ jobs:
             exit 1
           fi
           echo "Built docs app: BUILD_ID=$(cat apps/docs/.next/BUILD_ID)"
+
+      # The save half of "Restore Next.js cache" (its comment says why it runs
+      # on `push` and `schedule` only). It reproduces what the combined
+      # `actions/cache` post step did on those events, three ways:
+      #   - no status function in `if:`, so it runs only when every step above
+      #     succeeded -- the combined action's `post-if: success()`;
+      #   - skipped on an exact hit, which has nothing new to write;
+      #   - saved under `cache-primary-key`, the key the restore step resolved
+      #     BEFORE the build, which is the key the combined action saved under.
+      #     A key re-hashed here would hash `apps/docs/`, the tree the build
+      #     has just written into, so it could differ from the key the restore
+      #     looked up.
+      # A main-phase step, bounded and `continue-on-error` like the ui jobs'
+      # saves: a stalled or failed upload costs the next run time and says
+      # nothing about the docs build.
+      - name: Save Next.js cache
+        if: >-
+          (github.event_name == 'push' || github.event_name == 'schedule')
+          && steps.nextjs-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        timeout-minutes: 5
+        continue-on-error: true
+        with:
+          path: apps/docs/.next/cache
+          key: ${{ steps.nextjs-cache.outputs.cache-primary-key }}
 
   # ── THE ui/ JOBS (objectstack#25697, epic objectstack#25677) ──────────────
   # objectui is imported under `ui/` as a subtree. These four jobs are its CI,
@@ -3383,6 +3417,32 @@ jobs:
       # so without it a package that lacks one reads as passing.
       - name: Verify type-check coverage
         run: pnpm --dir ui run type-check:coverage
+
+      # objectui's `lockfile-integrity.yml` (objectui#8326), row 19 of the
+      # objectstack#25697 workflow roster, ported by objectstack#26717: a pull
+      # request's `pnpm-lock.yaml` may not give any package a second physical
+      # copy. The script's header has the mechanism and its boundary.
+      #
+      # It lives here because this job already checks out with
+      # `fetch-depth: 0`, so `origin/<base>` and the merge base are in the
+      # clone, and because it runs on every change to `pnpm-lock.yaml` (the
+      # `ui` filter lists it). Before the install on purpose: the gate reads
+      # two text files with Node builtins only, which Lint UI's pre-install
+      # import graph check holds. `pull_request` only, because the gate's
+      # subject is the pull request's delta against its base; a push or queue
+      # run has none of its own.
+      #
+      # ⛔ `continue-on-error` keeps it an ALARM, as objectui ran it: a finding
+      # prints an `::error::` annotation naming the packages on the pull
+      # request and does NOT fail this required job. Making it blocking is a
+      # maintainer decision (`NOT_A_GATE` in `ui/scripts/dependabot-merge-gate.mjs`
+      # says why), not a step edit.
+      - name: check:lockfile-integrity — compare this pull request's lockfile with its merge base
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: pnpm --dir ui run check:lockfile-integrity --base-ref "origin/${BASE_REF}"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -3721,6 +3781,74 @@ jobs:
           else
             pnpm --dir ui run test --shard=${{ matrix.shard }}/16 --reporter=default --reporter=github-actions
           fi
+
+  test-ui-gate:
+    # Stable required-check name for the sharded Test UI matrix (#26460, ruling
+    # A, comment 6435318516), in test-gate's shape and for test-gate's reason
+    # (#3622): a matrix publishes only `Test UI (k/16)`, so the bare `Test UI`
+    # context the ruleset requires can come from nothing but this job, and the
+    # shard count stays free to move without a settings edit. Until this job,
+    # none of the 16 shards was required and the queue landed PRs whose Test UI
+    # was red (#26419 → #26421).
+    #
+    # `name:` and `if: always()` are both load-bearing, as on test-gate. The
+    # name IS the required context (`check:required-contexts` pins the
+    # literal), and a gate that skips because a dependency failed publishes no
+    # context at all, which leaves the PR permanently pending (#3622). ⛔ Never
+    # `if: !cancelled()` here.
+    #
+    # The verdict reads the matrix rollup `needs.test-ui.result`, and only
+    # `success` passes, with one exception: `skipped`, when `filter` concluded
+    # `success` AND said the diff reaches no ui path (the shards' own `if:`).
+    # That is #4928's skipped-only-when-filter-succeeded guard, and it makes a
+    # queue build or PR that touches no ui path read green here the way Lint
+    # UI and Build & E2E UI read `skipped` there. Everything else is red:
+    # `failure`; `cancelled`, which is also what a shard killed by its own
+    # `timeout-minutes` reads (on a superseded push this paints the OLD sha
+    # red, which no required check reads); a `skipped` that `filter` does not
+    # explain; and any lifecycle value such as the `abandoned` test-gate met
+    # (run 31120902911). Unlike test-gate it counts no shard credentials: the
+    # Test UI shards publish none, and adding them is a change to `test-ui`,
+    # which is the ui lane's job.
+    name: Test UI
+    needs: [test-ui, filter]
+    # ── ROSTER DECLARATION (#10490) ───────────────────────────────────────
+    # `check:aggregator-roster` holds this equal to `needs:` in both
+    # directions. `filter` is the #4928 input, not a lane.
+    env:
+      OS_AGGREGATOR_MEMBERS: test-ui
+      OS_AGGREGATOR_NON_MEMBERS: filter
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Verify Test UI shard results
+        env:
+          OS_TEST_UI_RESULT: ${{ needs['test-ui'].result }}
+          OS_FILTER_RESULT: ${{ needs.filter.result }}
+          OS_UI_TREE: ${{ needs.filter.outputs.ui_tree }}
+          OS_UI: ${{ needs.filter.outputs.ui }}
+        run: |
+          echo "Test UI (k/16) rollup: '$OS_TEST_UI_RESULT'; filter: '$OS_FILTER_RESULT' (ui_tree='$OS_UI_TREE', ui='$OS_UI')."
+          case "$OS_TEST_UI_RESULT" in
+            success)
+              echo "✓ Test UI: every shard concluded success."
+              ;;
+            skipped)
+              if [ "$OS_FILTER_RESULT" = 'success' ] && { [ "$OS_UI_TREE" = 'false' ] || [ "$OS_UI" = 'false' ]; }; then
+                echo "✓ Test UI: the shards were skipped because filter found no ui path in this diff."
+              else
+                echo "::error title=Test UI::the Test UI shards were skipped, but filter (result '$OS_FILTER_RESULT', ui_tree='$OS_UI_TREE', ui='$OS_UI') does not explain the skip. A skip passes only when filter succeeded and said the diff reaches no ui path (#4928)."
+                exit 1
+              fi
+              ;;
+            *)
+              echo "::error title=Test UI::the Test UI shards concluded '$OS_TEST_UI_RESULT', not success. Read the red 'Test UI (k/16)' check-runs on this sha for the failing test; a shard killed by its timeout reads 'cancelled'."
+              exit 1
+              ;;
+          esac
 
   # ── Lint UI and Build & E2E UI: the ceilings (#25869 row F13) ──────────
   # objectui's rule (its lint.yml `Lint` ceiling): the smallest round number
@@ -4169,6 +4297,74 @@ jobs:
           fi
           echo "Console build artifact is ready."
 
+      # ── Two objectui gates that read this job's build (#26717) ──────────
+      # Rows 7 and 22 of the objectstack#25697 workflow roster, "kept,
+      # follow-up port": objectui ran them in its own workflows, which have run
+      # nowhere since #26058 deleted `ui/.github/workflows/`. Folded in here
+      # because this job already builds what they read, so neither pays a
+      # build of its own (row 22's note: no second Console build).
+      #
+      # The Console's eager-closure budget (objectui's performance-budget.yml).
+      # The Vite build above writes `ui/apps/console/dist/eager-closure.json`
+      # and `chunk-membership.json` in every build; the checker weighs them
+      # against the ceilings it carries, next to the reasoning behind each, so
+      # no size is copied into this file. Exit 1 is a size verdict, exit 2 a
+      # gauge that produced no trustworthy reading; both fail the step.
+      #
+      # On a pull request the checker also asks whether the ceilings it was
+      # checked out with are still the ones on the base branch (objectui#6245:
+      # GitHub does not re-run a PR's checks when the base moves). This step
+      # hands it the base branch's copy of the checker at two commits. It is
+      # `continue-on-error` and that is NOT a fail-open: when it cannot write
+      # both files the checker finds the variables unset and exits 2.
+      - name: check:eager-closure — resolve the base-branch ceiling constants
+        if: ${{ github.event_name == 'pull_request' }}
+        continue-on-error: true
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          CHECKER='ui/scripts/check-eager-closure-budget.mjs'
+          OUT="${RUNNER_TEMP}/eager-closure-ceilings"
+          mkdir -p "$OUT"
+
+          # The commit the merge ref was computed against.
+          if ! git cat-file -e "${PR_BASE_SHA}^{commit}" 2>/dev/null; then
+            git fetch --no-tags --depth=1 origin "$PR_BASE_SHA"
+          fi
+          git cat-file -p "${PR_BASE_SHA}:${CHECKER}" > "$OUT/pr-base.partial"
+          mv "$OUT/pr-base.partial" "$OUT/pr-base.mjs"
+
+          # The base branch as it stands now, which the merge would land on.
+          git fetch --no-tags --depth=1 origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          BASE_SHA=$(git rev-parse "refs/remotes/origin/${BASE_REF}")
+          git cat-file -p "${BASE_SHA}:${CHECKER}" > "$OUT/base.partial"
+          mv "$OUT/base.partial" "$OUT/base.mjs"
+
+          # Written only after both moves: a half-written pair would let the
+          # checker compare against a file it takes for the base branch.
+          {
+            echo "EAGER_CLOSURE_PR_BASE_SOURCE=$OUT/pr-base.mjs"
+            echo "EAGER_CLOSURE_BASE_SOURCE=$OUT/base.mjs"
+            echo "EAGER_CLOSURE_PR_BASE_SHA=$PR_BASE_SHA"
+            echo "EAGER_CLOSURE_BASE_SHA=$BASE_SHA"
+            echo "EAGER_CLOSURE_BASE_REF=$BASE_REF"
+          } >> "$GITHUB_ENV"
+
+          echo "Ceilings resolved: ${PR_BASE_SHA} (this checkout's base) vs ${BASE_SHA} (${BASE_REF} now)"
+
+      - name: check:eager-closure — weigh the Console's eager closure against its budget
+        run: pnpm --dir ui run check:eager-closure
+
+      # The built-artifact pins of @object-ui/components (objectui's ci.yml
+      # "Test (dist pins)"). They import the package's `dist/`, which the
+      # Test UI lane never builds (it resolves every package to `src`), so this
+      # is the only lane that runs them. The task's `dependsOn: ["build"]`
+      # replays the build the SDUI manifest step above already ran.
+      - name: test:dist — run the built-artifact pins of @object-ui/components
+        run: pnpm exec turbo run test:dist --filter=@object-ui/components
+
       - name: Get the Playwright version
         id: playwright-version
         run: |
@@ -4221,3 +4417,101 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
+
+  # ── UI Published Artifacts: two objectui gates over a full build (#26717) ─
+  # Rows 23 and 21 of the objectstack#25697 workflow roster, "kept, follow-up
+  # port" (objectui's published-dist-gate.yml and node-esm-load-gate.yml), both
+  # of which have run nowhere since #26058 deleted `ui/.github/workflows/`.
+  # Each one grades BUILT artifacts of every published @object-ui package, so
+  # each costs a full build, and objectui#4846's ruling (comment 5307574139)
+  # refused that build on every pull request. So this job is in the full
+  # battery only (THE TWO SPEEDS above `jobs:`): a pull request and a queue
+  # entry skip it, `main`'s push and schedule runs carry it, and the publish
+  # lane reads it before its approval. The blocking copy of the published-dist
+  # scan is on the publish path itself, `scripts/release-publish.sh`, which
+  # refuses to run `changeset publish` when the scan exits non-zero.
+  # `ui/scripts/__tests__/check-published-dist-tooling.test.ts` pins both
+  # halves of that.
+  #
+  # The build is the release's own (`pnpm build`, the first command of
+  # `pnpm run release`), and both gates then read it with `--no-build`, the
+  # order the publish path runs the scan in. `--no-build` cannot pass
+  # vacuously: a published package with nothing built is `no-build-output`,
+  # each gate asserts a floor on how much it inspected, and the ESM gate's
+  # provenance leg refuses an artifact whose turbo task log names another tree.
+  ui-published-artifacts:
+    name: UI Published Artifacts
+    needs: filter
+    # Build & E2E UI's condition, in the full battery only.
+    if: ${{ !cancelled() && needs.filter.outputs.ui_tree != 'false' && (needs.filter.outputs.ui != 'false' || needs.filter.outputs.ui_consumers != 'false') && github.event_name != 'pull_request' && github.event_name != 'merge_group' }}
+    runs-on: ubuntu-latest
+    # objectui gave each gate's full build 60 minutes, "generous, because a
+    # timeout here reads as a gate failure". One build now serves both.
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      NODE_OPTIONS: --max-old-space-size=4096
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      # The setup is spelled out, as in the ui jobs above, rather than the
+      # `setup-workspace` composite: `ui/scripts/check-pre-install-import-graph.mjs`
+      # finds a job's install by its `pnpm install` line, and reads every step
+      # of a job with none as running before `node_modules` exists, which the
+      # two gates below (they import `typescript`) cannot.
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+
+      - name: Setup pnpm
+        uses: ./.github/actions/setup-pnpm
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      # Restore-only, here and below: the per-push jobs above own saving the
+      # store and the turbo seeds.
+      - name: Restore pnpm cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-v3-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Restore Turbo cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .turbo/cache
+          key: ${{ runner.os }}-turbo-build-core-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-build-core-${{ github.ref_name }}-
+            ${{ runner.os }}-turbo-ui-deps-${{ github.ref_name }}-
+
+      - name: Build every package the release publishes
+        id: build
+        run: pnpm build
+
+      # objectui#4846: no published tarball may carry tooling material
+      # (`__tests__/`, `*.test.*`, `*.bench.*`, a `*.tsbuildinfo`, …). The file
+      # list is `npm pack --dry-run`'s, i.e. what npm would publish.
+      - name: check:published-dist — scan every published @object-ui tarball for tooling files
+        run: pnpm --dir ui run check:published-dist --no-build
+
+      # objectui#4538: every published ESM entry must load under Node's own
+      # resolver, with no bundler. The per-PR half is the specifier leg in
+      # Type Check UI (`check:esm-specifiers`); this is the load leg, the only
+      # one that sees a package broken by a DEPENDENCY. It runs whatever the
+      # scan above said, so one run reports both.
+      - name: check:node-esm-load — import every published ESM entry under plain Node
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: pnpm --dir ui run check:node-esm-load --no-build

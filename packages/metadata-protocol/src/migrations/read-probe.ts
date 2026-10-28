@@ -183,8 +183,12 @@ const MYSQL_CLIENTS: ReadonlySet<string> = new Set(['mysql', 'mysql2']);
  * honestly compile for that client" — and the caller's fallback probe is what
  * answers instead. ⛔ It is never resolved to a default family: a default is a
  * guess, and a guessed catalog arm is the fence's failure mode.
+ *
+ * Exported since #26630, when `partial-index-probe.ts` needed the same question
+ * answered to pick PostgreSQL's spelling for dropping a constraint-held index
+ * name: one classifier, so the two modules cannot disagree on what `pg` means.
  */
-function catalogFamilyOf(client?: string): 'sqlite' | 'postgres' | 'mysql' | undefined {
+export function catalogFamilyOf(client?: string): 'sqlite' | 'postgres' | 'mysql' | undefined {
   const c = String(client ?? '').toLowerCase();
   if (SQLITE_CLIENTS.has(c)) return 'sqlite';
   if (POSTGRES_CLIENTS.has(c)) return 'postgres';

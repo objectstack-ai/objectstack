@@ -18,7 +18,7 @@ import {
 import { renderChildren } from '../../lib/utils';
 
 ComponentRegistry.register('carousel', 
-  ({ schema, className, ...props }: { schema: CarouselSchema; className?: string; [key: string]: any }) => (
+  ({ schema, className, ...props }: { schema: CarouselSchema; className?: string; [key: string]: unknown }) => (
     <Carousel 
       opts={schema.opts} 
       orientation={schema.orientation || 'horizontal'}

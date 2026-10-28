@@ -66,6 +66,8 @@ import { PermissionSetSchema, findHierarchyScopeGrants } from './security/permis
 import { judgePermissionSetOwnerBinding } from './security/permission-set-owner-binding';
 import { CapabilityDeclarationSchema } from './security/capabilities';
 import { SharingRuleSchema } from './security/sharing.zod';
+import { QueueSchema } from './security/queue.zod';
+import { AssignmentRuleSchema } from './automation/assignment-rule.zod';
 
 import { ApiEndpointSchema, type ApiEndpoint } from './api/endpoint.zod';
 import {
@@ -823,6 +825,28 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
   capabilities: z.array(CapabilityDeclarationSchema).optional()
     .describe('[ADR-0066 D1] Authorization capabilities this package defines (seeded with package provenance)'),
   sharingRules: z.array(SharingRuleSchema).optional().describe('Record Sharing Rules'),
+  /**
+   * [ADR-0142 D1] Ownership queues this package DECLARES — named sets of
+   * people records can sit in until one of them claims the record. A declared
+   * queue's members name positions only; an organization staffs its own queues
+   * as `sys_queue` rows in Setup. Served from the registry, never copied into
+   * rows, and switched off through the activation ledger.
+   *
+   * A composition that declares queues must register the ownership-queue
+   * service (`@objectstack/plugin-sharing`): without it nothing resolves the
+   * names, so the boot is refused rather than served with inert queues.
+   */
+  queues: z.array(QueueSchema).optional()
+    .describe('[ADR-0142 D1] Ownership queues — named sets of people records can sit in until a member claims them'),
+  /**
+   * [ADR-0142 D5] Assignment rules this package DECLARES: per object, ordered
+   * entries routing an inserted, still-ownerless row to a queue (parked, or
+   * given to one member by `round_robin` / `least_loaded`) or to one user.
+   * Evaluated by the engine once per insert, after every `beforeInsert` hook;
+   * never on update. Requires the ownership-queue service, as `queues` does.
+   */
+  assignmentRules: z.array(AssignmentRuleSchema).optional()
+    .describe('[ADR-0142 D5] Assignment rules — route new ownerless records to a queue or a person, once, on insert'),
 
   /**
    * ObjectAPI: API Layer — the platform's OUTWARD integration face.
@@ -881,8 +905,7 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
       + 'is now always denied. Delete the key; publish public surfaces by declaration instead — a public '
       + "form view, a share link, or `book.audience: 'public'`. A stack that mounts no auth at all now "
       + 'fails at boot rather than silently serving object data to anonymous callers. '
-      + 'Run `os migrate meta --from 16` to list the mechanical edits for existing '
-      + 'sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
+      + 'This edit left `os migrate meta` with the protocol-16.x conversions: apply it by hand, or run the tool on a release that still carries the conversion — https://objectstack.ai/docs/protocol-upgrade.',
     ),
     /** Enable environment-scoped routing for data/meta/AI APIs. */
     enableProjectScoping: z.boolean().optional(),
@@ -1446,6 +1469,8 @@ export const COMPOSE_KEY_DISPOSITIONS = Object.freeze({
   permissions: 'concat',
   capabilities: 'concat',
   sharingRules: 'concat',
+  queues: 'concat',
+  assignmentRules: 'concat',
   apis: 'concat',
   webhooks: 'concat',
   agents: 'concat',
@@ -2686,6 +2711,11 @@ function joinDeclarationOrigins(origins: readonly string[]): string {
  * deliberately follows the resolution side, where the by-name collision the
  * card describes happens.)
  *
+ * Two embedded twins on ONE object never reach this walk on the strict path:
+ * the object parse refuses them first (#26725, `duplicate-action-names.ts`),
+ * because the object save door parses an object alone. This walk keeps the
+ * pairs that span two collections.
+ *
  * Every site counts, byte-identical twins included: the merge appends, so a
  * pair that is one declaration to the eye is two entries under one key in the
  * shipped artifact — `collectActionDeclarations` pushes every embedded entry,
@@ -2942,6 +2972,8 @@ const SAME_STACK_ENTRY_IDENTITY = Object.freeze({
   permissions: lastWinsByName('Permission set', 'permission sets'),
   capabilities: lastWinsByName('Capability', 'capabilities'),
   sharingRules: lastWinsByName('Sharing rule', 'sharing rules'),
+  queues: lastWinsByName('Queue', 'queues'),
+  assignmentRules: lastWinsByName('Assignment rule', 'assignment rules'),
   webhooks: lastWinsByName('Webhook', 'webhooks'),
   hooks: {
     identity: readEntryName,
@@ -4006,6 +4038,18 @@ function collectJobPullMappingErrors(config: ObjectStackDefinition): string[] {
  *   stack's OWN declarations (top level and every assembled package body) is
  *   also the boundary: a demo account can hold only what its application
  *   declares, never a platform set such as `admin_full_access`.
+ *
+ * And three about `manager`, which the provisioning resolves within this same
+ * list once every entry has its account:
+ *
+ * - **A manager that names no entry.** The boot has no account to link, so
+ *   the approval rung it was declared for would reach nobody.
+ * - **An entry that names itself.** The set-manager write refuses it, so the
+ *   link would never land, and an approval routed to the submitter is the
+ *   approval the manager rung exists to prevent.
+ * - **A chain that loops back on itself.** The set-manager write refuses the
+ *   link that closes the loop, so one entry of the loop would silently keep
+ *   no manager, and which one would depend on the order the boot walked them.
  */
 function collectDemoStaffErrors(config: ObjectStackDefinition): string[] {
   const errors: string[] = [];
@@ -4076,6 +4120,75 @@ function collectDemoStaffErrors(config: ObjectStackDefinition): string[] {
         'one account, so every entry after the first would never be applied. Give each demo account its own ' +
         'address.',
     );
+  }
+  errors.push(...collectDemoStaffManagerErrors(staff, indicesByEmail));
+  return errors;
+}
+
+/**
+ * The `manager` half of {@link collectDemoStaffErrors}: every `manager` must
+ * name another entry's address, and following the links from any entry must
+ * reach an entry with no manager. A repeated address resolves to its first
+ * entry here; the repeat itself is already refused above.
+ */
+function collectDemoStaffManagerErrors(
+  staff: readonly unknown[],
+  indicesByEmail: ReadonlyMap<string, number[]>,
+): string[] {
+  const errors: string[] = [];
+  // Entry index -> the entry index its `manager` resolves to.
+  const managerOf = new Map<number, number>();
+
+  for (const [i, entry] of staff.entries()) {
+    if (!isRecord(entry) || typeof entry.manager !== 'string' || !entry.manager) continue;
+    const where = `stack.demoStaff[${i}]`;
+    const address = entry.manager.trim().toLowerCase();
+    const target = indicesByEmail.get(address)?.[0];
+    if (target === i) {
+      errors.push(
+        `Demo account '${String(entry.name)}' (${where}) names itself as its manager ('${entry.manager}'). An ` +
+          'approval routed to the manager rung would reach the person who submitted it, so the link is never ' +
+          'written. Name another demo account, or leave manager out.',
+      );
+      continue;
+    }
+    if (target === undefined) {
+      errors.push(
+        `Demo account '${String(entry.name)}' (${where}) names manager '${entry.manager}', which is the address ` +
+          'of no demoStaff entry. A manager must be another demo account of this stack; declare that person in ' +
+          'demoStaff, or correct the address.',
+      );
+      continue;
+    }
+    managerOf.set(i, target);
+  }
+
+  // Walk each chain upward. An entry already known to reach a top (or to sit
+  // in a reported loop) ends the walk, so every link is followed once.
+  const settled = new Set<number>();
+  for (const start of managerOf.keys()) {
+    const path: number[] = [];
+    const onPath = new Set<number>();
+    let cursor: number | undefined = start;
+    while (cursor !== undefined && !settled.has(cursor) && !onPath.has(cursor)) {
+      path.push(cursor);
+      onPath.add(cursor);
+      cursor = managerOf.get(cursor);
+    }
+    if (cursor !== undefined && onPath.has(cursor)) {
+      const loop = path.slice(path.indexOf(cursor));
+      const names = [...loop, cursor].map((i) => {
+        const entry = staff[i];
+        return `'${isRecord(entry) ? String(entry.name) : `#${i}`}'`;
+      });
+      errors.push(
+        `The managers declared in \`demoStaff\` form a loop: ${names.join(' → ')} ` +
+          `(${joinDeclarationOrigins(loop.map((i) => `stack.demoStaff[${i}]`))}). A reporting chain must reach ` +
+          'someone with no manager; the link that closes the loop would be refused at the boot, leaving one of ' +
+          'these accounts with no manager. Remove manager from one of these entries.',
+      );
+    }
+    for (const i of path) settled.add(i);
   }
   return errors;
 }

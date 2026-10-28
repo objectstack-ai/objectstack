@@ -1,7 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { retiredKey } from '../shared/retired-key';
 import { strictObject } from '../shared/strict-object';
 import type { KeySetGuidance } from '../shared/suggestions.zod';
 // Package-internal, like `strict-object` itself — the `shared/index.ts` barrel
@@ -2021,21 +2020,6 @@ export const FieldSchema = lazySchema(() => {
   requiredWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — field is required when TRUE. A TRANSITION GATE, not an invariant: the write is refused only when the merged record violates the requirement AND the pre-write record complied — so the write that flips the predicate TRUE, an INSERT born inside the gate, and a write that clears the cell are all refused, while a row that was already missing the value keeps passing unrelated edits and state moves that stay inside the gate (ADR-0113 non-regression: adding the rule to a deployed object never bricks existing rows). Need an invariant every write must satisfy instead ('X may never exceed Y') — declare a `validations[]` `script` rule, which re-checks the merged record with no exemption. Enforced by `evaluateValidationRules`. Reads the bound record's OWN columns: the field level never reads a related record, so a read THROUGH a reference field (`record.account.tier`) faults on every row and refuses every write that reaches it — `objectstack validate` refuses it; put such a check in a `validations[]` `script` rule, whose `condition` is read one hop through a reference. The only slot; the `conditionalRequired` alias was removed in protocol 17."),
 
   /**
-   * [REMOVED in protocol 17 — #3855] The deprecated alias of `requiredWhen`.
-   * Tombstoned rather than deleted: `FieldSchema` is `strictObject` (#4001), so
-   * a plain deletion would reject the key — but with a generic unknown-key
-   * error that does not name `requiredWhen`. The prescription is the payload:
-   * it carries the rename, so an author who wrote `conditionalRequired` is told
-   * where the CEL predicate goes. It also types the key `never`, so the mistake
-   * fails `tsc` at the authoring site before any parse runs.
-   */
-  conditionalRequired: retiredKey(
-    '`conditionalRequired` was removed in @objectstack/spec 17 — use `requiredWhen`. ' +
-    'Rename the key; the value (a CEL predicate) is unchanged. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
-
-  /**
    * Deadline semantic — `date` / `datetime` only (DEADLINE_FIELD_TYPES).
    * objectui#11815, maintainer ruling D: overdue is DECLARED, never guessed.
    *
@@ -2321,7 +2305,7 @@ export const FieldSchema = lazySchema(() => {
   // `index` (field-level bool) removed in the 16.x line (#2377, ADR-0049): the
   // driver builds indexes from the object's `indexes[]` array; a field-level
   // `index: true` created no index. Declare the index in object `indexes[]`.
-  externalId: z.boolean().default(false).describe('Is external ID for upsert operations'),
+  externalId: z.boolean().default(false).describe('Not read: no upsert, import or seed matches on this flag. A seed dataset names its match field in its own `externalId`; an import names it in the mapping\'s `upsertKey`.'),
 
   // ADR-0010 — runtime protection envelope (internal — set by the loader).
   // `field` is a registered metadata type, so `MetadataPlugin`'s loader stamps

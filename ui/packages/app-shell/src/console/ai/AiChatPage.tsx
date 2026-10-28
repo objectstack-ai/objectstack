@@ -44,9 +44,6 @@ import {
   SheetDescription,
   SheetHeader,
   SheetTitle,
-  Empty,
-  EmptyTitle,
-  EmptyDescription,
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
@@ -118,7 +115,7 @@ import {
 } from '../../chrome/advertisedShortcuts.js';
 import { fetchPendingDraftCount } from '../../preview/draftStatus.js';
 import { draftPreviewPath } from '../../preview/draftSurface.js';
-import { emitMetadataRefresh, publishPlanApprovalPending } from '../../assistant/assistantBus.js';
+import { emitMetadataRefresh, publishPlanApprovalPending, subscribeMetadataRefresh } from '../../assistant/assistantBus.js';
 import { getRuntimeConfig, isAiStudioEnabled } from '../../runtime-config.js';
 import { makerConvergedOnBuild, makerVisibleAgents } from '../../hooks/surfaceAgent.js';
 import { useCanAuthorMetadata } from '../../hooks/useCanAuthorMetadata.js';
@@ -143,6 +140,7 @@ import { BuildDebugDrawer } from './BuildDebugDrawer.js';
 import { isConversationZh } from './conversationLanguage.js';
 import { resolveOutboundAgentText, type OutboundAgentTextKey } from './outboundAgentText.js';
 import { resolveApiBase } from './resolveApiBase.js';
+import { AiUnavailable } from './AiUnavailable.js';
 
 function partString(part: HydratedUIMessagePart, key: string): string | undefined {
   const value = part[key];
@@ -944,8 +942,8 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
     useAgents({ apiBase });
   const catalogNames = useMemo(() => agents.map((a) => a.name), [agents]);
   // Catalog resolved with no agent to talk to. The `/ai` route guard already
-  // redirects when discovery reports AI unavailable (Community Edition), so this
-  // is the secondary safety net: a deployment that reports AI enabled but serves
+  // shows `AiUnavailable` itself when the runtime serves no agent (Community
+  // Edition), so this is the secondary safety net: a deployment that reports AI enabled but serves
   // no agent (misconfig), a transient `/agents` failure, or a `VITE_AI_BASE_URL`
   // server that returns an empty list. Either way, degrade to a graceful state
   // instead of the agent-less echo chat (autoResponse) that ChatPane falls into.
@@ -1527,56 +1525,6 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
   );
 }
 
-/**
- * Graceful state for `/ai` when the agent catalog resolved empty — shown
- * instead of an agent-less echo chat. `hasError` distinguishes "AI not enabled
- * on this deployment" (Community Edition) from "couldn't reach the AI service"
- * (offline/misconfig), which also offers a retry. Either way there's a way out
- * (back to home), so the route never dead-ends.
- */
-function AiUnavailable({
-  hasError,
-  onRetry,
-  onHome,
-  t,
-}: {
-  hasError: boolean;
-  onRetry: () => void;
-  onHome: () => void;
-  t: (key: string, options?: Record<string, unknown>) => string;
-}) {
-  return (
-    <div className="flex flex-1 items-center justify-center p-6" data-testid="ai-unavailable">
-      <Empty>
-        <EmptyTitle>
-          {t('console.ai.unavailableTitle', { defaultValue: 'AI assistant unavailable' })}
-        </EmptyTitle>
-        <EmptyDescription>
-          {hasError
-            ? t('console.ai.unavailableError', {
-                defaultValue:
-                  "Couldn't reach the AI service. It may be temporarily offline — try again, or head back home.",
-              })
-            : t('console.ai.unavailableDescription', {
-                defaultValue:
-                  "This deployment doesn't have an AI assistant enabled. Everything else works as usual.",
-              })}
-        </EmptyDescription>
-        <div className="mt-6 flex flex-col items-center gap-3 sm:flex-row">
-          {hasError && (
-            <Button variant="outline" onClick={onRetry} data-testid="ai-unavailable-retry">
-              {t('console.ai.unavailableRetry', { defaultValue: 'Try again' })}
-            </Button>
-          )}
-          <Button onClick={onHome} data-testid="ai-unavailable-home">
-            {t('console.ai.unavailableHome', { defaultValue: 'Back to home' })}
-          </Button>
-        </div>
-      </Empty>
-    </div>
-  );
-}
-
 interface ChatPaneProps {
   /**
    * cloud#1610 — what the user is currently discussing, derived by the HOST
@@ -1831,9 +1779,26 @@ export function ChatPane({
         : prev ?? { name: appName, materialized: true },
     );
   }, []);
+  // The chat's build card's own answer per built app (its label and whether it
+  // says the app is live), keyed by the app's machine name. The canvas header
+  // reads it instead of deriving a publish state of its own, so the two can
+  // never disagree, and it follows the card when the build is published.
+  const [buildResults, setBuildResults] = useState<Record<string, { label?: string; live: boolean }>>({});
+  const handleBuildResult = useCallback(
+    ({ appName, label, live }: { appName: string; label?: string; live: boolean }) => {
+      setBuildResults((prev) => {
+        const cur = prev[appName];
+        if (cur && cur.label === label && cur.live === live) return prev;
+        return { ...prev, [appName]: { ...(label ? { label } : {}), live } };
+      });
+    },
+    [],
+  );
+  const canvasBuild = canvasApp ? buildResults[canvasApp.name] : undefined;
   // A different conversation is a different build session — close the pane.
   useEffect(() => {
     setCanvasApp(null);
+    setBuildResults({});
   }, [conversationId]);
 
   const activeAgentLabel = useMemo<string>(() => {
@@ -2722,6 +2687,7 @@ export function ChatPane({
         // Live lifecycle truth for draft cards: the server's pending count per
         // package, so reloaded conversations show Published/Publish honestly.
         fetchPendingDraftCount={fetchPendingDraftCount}
+        subscribeMetadataRefresh={subscribeMetadataRefresh}
         onPublishDrafts={async (packageId) => {
           // Promote the conversation's staged drafts to live (ADR-0033 gate —
           // the human still clicks). Same call as the floating chat + PackagesPage.
@@ -2895,6 +2861,7 @@ export function ChatPane({
         // ADR-0045: build materialized → canvas leaves the draft overlay for
         // the real (unlisted) app; the reload shows live seed rows.
         onBuildMaterialized={handleBuildMaterialized}
+        onBuildResult={handleBuildResult}
         // objectui#11666 — mirrored onto the assistant bus (effect above).
         onPlanApprovalPendingChange={setPlanApprovalPending}
         previewDraftLabel={t('console.ai.previewDraft', { defaultValue: 'Preview' })}
@@ -2931,6 +2898,8 @@ export function ChatPane({
           </div>
           <LiveCanvas
             appName={canvasApp!.name}
+            appLabel={canvasBuild?.label}
+            live={canvasBuild?.live}
             appSegment={canvasApp!.segment}
             materialized={canvasApp!.materialized}
             path={canvasApp!.path}
@@ -2956,6 +2925,8 @@ export function ChatPane({
         >
           <LiveCanvas
             appName={canvasApp.name}
+            appLabel={canvasBuild?.label}
+            live={canvasBuild?.live}
             appSegment={canvasApp.segment}
             materialized={canvasApp.materialized}
             path={canvasApp.path}

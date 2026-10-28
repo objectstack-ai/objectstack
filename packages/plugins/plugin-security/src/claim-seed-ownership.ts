@@ -202,6 +202,32 @@
  * write cannot store the result. A row whose own write is refused stays
  * unowned and is reported with the per-predicate warning, and the object's
  * other rows are still claimed.
+ *
+ * ## [#26825] …handed over a bounded batch at a time, yielding between batches
+ *
+ * On a synchronous driver (better-sqlite3, the wasm fallback) every `await` of
+ * a claim write resolves as a microtask, so ONE predicate write ran its whole
+ * per-row fan-out (the hooks above, an audit row per row, a file field's
+ * reference hooks) as one unbroken chain, and no request was read off a socket
+ * until it ended. Measured on `os serve --dev` over file-backed sqlite, a
+ * 1 500-row seed whose rows each carry a seed file: the NULL arm's one write
+ * took 2 641 ms, the event loop stalled 2.7 s, and a sign-in issued meanwhile
+ * answered in 2–2.9 s. The write is also one engine transaction, and SQLite's
+ * pool holds one connection, so no yield can land INSIDE it: the cure is a
+ * smaller write. The NULL arm's chunk is therefore written
+ * {@link CLAIM_HANDOVER_ROWS} ids at a time, and the claim yields one macrotask
+ * after every write ({@link yieldToEventLoop}); the by-row path yields after
+ * every {@link CLAIM_HANDOVER_ROWS} rows. A request now waits behind one
+ * batch, never behind a seed.
+ *
+ * Which rows are claimed, by whom, and with which audit rows is unchanged; so
+ * is a chunk every batch of which is refused (one warning, the chunk unowned).
+ * The unit of failure is the batch: when only some batches of a chunk are
+ * refused, the others stay claimed and one warning names the rows left
+ * unowned, which the next run claims, where one refused write used to leave
+ * the whole chunk unowned. The `owner_id = usr_system` arm is still one
+ * predicate write (no seed writes that owner in the shapes measured); it
+ * yields after it.
  */
 
 import { analyzeRelationshipTraversals } from '@objectstack/formula';
@@ -278,6 +304,36 @@ const CLAIM_WRITE_CTX = { isSystem: true, skipAutomations: true };
  * the trailing-batch branch instead of being recomputed row by row.
  */
 const CLAIM_PAGE_ROWS = Math.floor(MAX_BULK_PER_ROW_HOOK_ROWS / 2);
+
+/**
+ * [#26825] Seeded rows one hand-over write re-owns, and rows the by-row path
+ * writes between two yields: the bound on how long a request waits behind the
+ * claim on a synchronous driver.
+ *
+ * Measured, not derived: a claimed row cost about 1.8 ms of per-row hook work
+ * on `os serve --dev` over sqlite with a file field (2 641 ms for 1 500 rows),
+ * so a batch is about 90 ms. Far below {@link CLAIM_PAGE_ROWS}, so a batch is
+ * never refused for the per-row hook ceiling.
+ */
+const CLAIM_HANDOVER_ROWS = 50;
+
+/**
+ * [#26825] Yield one macrotask so the host's event loop can read pending I/O
+ * between two hand-over writes.
+ *
+ * A module-private copy, by ruling (#26825): the same four lines live in
+ * `@objectstack/metadata-protocol` (`seed-files.ts`, the seed loader's file
+ * work) and `@objectstack/core` (`import-runner.ts`, the import row loop),
+ * and in this plugin's multi-organization twin `claimOrgSeedOwnership`
+ * (`@objectstack/organizations`). None is exported, and exporting one would
+ * widen a published surface for a `setImmediate` promise.
+ */
+function yieldToEventLoop(): Promise<void> {
+  return new Promise<void>((resolve) => {
+    if (typeof setImmediate === 'function') setImmediate(resolve);
+    else setTimeout(resolve, 0);
+  });
+}
 
 /**
  * Fallback pages one predicate may take before this function gives up on it.
@@ -538,10 +594,69 @@ async function claimPredicate(
 }
 
 /**
+ * [#26825] {@link claimPredicate} over one unowned predicate, a batch of
+ * {@link CLAIM_HANDOVER_ROWS} seeded ids at a time, with one macrotask yielded
+ * after every write. The `owner_id = usr_system` predicate names no ids and is
+ * written as before, then yields.
+ *
+ * Returns the sum of the batches' counts. A batch whose write is refused
+ * leaves its rows unowned and the next batch is still written. If every batch
+ * is refused, the first refusal is rethrown, so the caller reports the
+ * predicate exactly as it did when the chunk was one write; if only some are,
+ * one warning names the rows left unowned and the first refusal.
+ */
+async function claimPredicateInBatches(
+  io: ObjectWriter,
+  objectName: string,
+  where: Record<string, unknown>,
+  logger: ClaimOwnershipOptions['logger'],
+): Promise<number> {
+  const named = (where.id as { $in?: unknown } | undefined)?.$in;
+  if (!Array.isArray(named)) {
+    try {
+      return await claimPredicate(io, objectName, where, logger);
+    } finally {
+      await yieldToEventLoop();
+    }
+  }
+  let claimed = 0;
+  const refused: string[] = [];
+  let firstError: unknown;
+  for (let at = 0; at < named.length; at += CLAIM_HANDOVER_ROWS) {
+    const batch = named.slice(at, at + CLAIM_HANDOVER_ROWS).map(String);
+    try {
+      claimed += await claimPredicate(io, objectName, { ...where, id: { $in: batch } }, logger);
+    } catch (e) {
+      if (refused.length === 0) firstError = e;
+      refused.push(...batch);
+    } finally {
+      await yieldToEventLoop();
+    }
+  }
+  if (refused.length === 0) return claimed;
+  if (refused.length === named.length) throw firstError;
+  logger?.warn?.(
+    `[security] claimSeedOwnership failed for ${objectName}; ${refused.length} of ${named.length} seeded row(s) ` +
+      'stay unowned until the claim next runs — the next seed settle (`app:seeded`, on this boot or a later one) ' +
+      'or the next platform-admin promotion',
+    {
+      object: objectName,
+      where: whereForLog(where),
+      refused: refused.length,
+      ids: refused.slice(0, 20),
+      error: (firstError as Error)?.message,
+    },
+  );
+  return claimed;
+}
+
+/**
  * [#25668] Re-own the given rows of one unowned predicate one write each: the
  * predicate's own terms plus the row's id, a compare-and-set the engine
  * evaluates over that one row. Never throws for a row: a refused row stays
  * unowned and is reported once for the batch, with the first refusal's message.
+ * [#26825] Yields one macrotask after every {@link CLAIM_HANDOVER_ROWS} rows and
+ * after the last.
  */
 async function claimRows(
   io: ObjectWriter,
@@ -554,7 +669,8 @@ async function claimRows(
   let countUnknown = false;
   const refused: string[] = [];
   let firstError: string | undefined;
-  for (const id of ids) {
+  for (let i = 0; i < ids.length; i += 1) {
+    const id = ids[i]!;
     try {
       const count = affectedRowCount(await io.reown({ ...where, id }));
       if (count === undefined) countUnknown = true;
@@ -563,6 +679,8 @@ async function claimRows(
       refused.push(id);
       firstError ??= (e as Error).message;
     }
+    // [#26825] A request waits behind one batch of rows, never the object.
+    if ((i + 1) % CLAIM_HANDOVER_ROWS === 0 || i === ids.length - 1) await yieldToEventLoop();
   }
   if (refused.length > 0) {
     logger?.warn?.(
@@ -747,8 +865,10 @@ function reportClaimPass(
  * {@link unownedPredicates} entry — the seeded ids' chunks under the NULL arm,
  * then the seed identity — paging that write only when the engine refuses it
  * for its per-row hook budget, and [#25668] one write per row instead on an
- * object whose stored expressions read `owner_id`. Returns a per-object summary
- * whose `count` is the sum of every write's affected-row count.
+ * object whose stored expressions read `owner_id`. [#26825] Either path writes
+ * {@link CLAIM_HANDOVER_ROWS} rows at most between two yields to the event loop.
+ * Returns a per-object summary whose `count` is the sum of every write's
+ * affected-row count.
  */
 export async function claimSeedOwnership(
   ql: any,
@@ -809,7 +929,8 @@ export async function claimSeedOwnership(
     seededRows += seededIds.length;
     // [#25668] One predicate write cannot store a per-row value of a stored
     // field the claim's `owner_id` moves; such an object is claimed by row.
-    const claim = storedExpressionReadsOwner(schema) ? claimPredicateByRow : claimPredicate;
+    // [#26825] Either way the claim yields between bounded batches of rows.
+    const claim = storedExpressionReadsOwner(schema) ? claimPredicateByRow : claimPredicateInBatches;
 
     let updated = 0;
     for (const where of unownedPredicates(seededIds)) {

@@ -406,8 +406,8 @@ Three rules the shape enforces, all of them closed since #4001:
 
 - **The top level is the declared group set and nothing else** — `objects`,
   `picklists`, `apps`, `messages`, `globalActions`, `dashboards`, `datasets`,
-  `reports`, `pages`, `flows`, `positions`, `permissions`, `metadataForms`,
-  `settingsCommon`. A group invented beside them
+  `reports`, `pages`, `flows`, `positions`, `permissions`, `books`,
+  `metadataForms`, `settingsCommon`. A group invented beside them
   (`"account"`, `"fields"`, `"list"`, `"industries"`) is rejected **by name**
   at both authoring doors, with the group to use instead named in the
   rejection.
@@ -470,9 +470,15 @@ through the one the renderer reads for that node:
 
 Both run in `GET /api/v1/meta`, which serves every type's `form` and `schema`
 already localised for the request's locale; a client deriving the schema itself
-with `z.toJSONSchema` applies the second one to its own copy. Only `label`
-crosses over to the schema (as `title`); `helpText` and `placeholder` stay on
-the form.
+with `z.toJSONSchema` applies the second one to its own copy, over a bundle it
+carries itself. Only `label` crosses over to the schema (as `title`); `helpText`
+and `placeholder` stay on the form.
+
+Because the server resolves this group, the bundle a console downloads when it
+opens — `GET /api/v1/i18n/translations/:locale` — leaves `metadataForms` out:
+`SERVER_RESOLVED_TRANSLATION_GROUPS` names it, and the response's `translations`
+is `ServedTranslationData`, the platform groups without it. Author it like any
+other group; it stays in the i18n service, which is where `/meta` reads it.
 
 **Naming an item-level property** therefore has three parts, none of which is
 a locale-catalog entry alone: the English name is a `.meta({ title: 'Action URL' })`
@@ -490,7 +496,7 @@ what the overlay writes back as the node's `title`.
 The contract is `t(key, locale, params?)` — the target locale is always passed
 explicitly, and the key itself is returned when no translation is found (there
 is no `defaultValue` option). The key is a **dot path into `TranslationData`**,
-so it starts at one of the fourteen declared groups.
+so it starts at one of the fifteen declared groups.
 
 ```typescript
 const i18n = kernel.getService('i18n');

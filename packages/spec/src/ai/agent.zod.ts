@@ -384,57 +384,6 @@ export const AgentSchema = lazySchema(() => strictObject({
   /** Capabilities — Skill-based (primary) */
   skills: z.array(z.string().regex(/^[a-z_][a-z0-9_]*$/)).optional().describe('Skill names to attach (Agent→Skill→Tool architecture)'),
 
-  /**
-   * [REMOVED in protocol 17 — #3894] The legacy inline
-   * `{type,name,description}[]` fallback.
-   *
-   * ADR-0064's central invariant is "an agent's tool set is the union of its
-   * surface-compatible skills' tools; nothing falls through to the global
-   * registry", and this field was the one seam that broke it: the runtime
-   * resolved `agent.tools[].name` against the FULL registry with no surface
-   * check, so an `ask`-surface agent could name an authoring tool and get it.
-   *
-   * Tombstoned rather than deleted: `AgentSchema` is `strictObject`, so a plain
-   * deletion would already REJECT the key — but only with a generic unknown-key
-   * error. The prescription is the payload. An author who wrote `tools` has to
-   * be told the specific thing this key's removal means: the capability moves
-   * into a skill, and ADR-0064's union is the only path from an agent to a tool
-   * — which this tombstone says and an unknown-key rejection cannot. It also
-   * types the key `never`, so the same mistake fails `tsc` at the authoring site
-   * before any parse runs. Those are the two channels an upgrading author, very
-   * often an AI (ADR-0033), actually reads (`shared/retired-key.ts`).
-   */
-  tools: retiredKey(
-    '`agent.tools` was removed in @objectstack/spec 17 — use `skills`. ' +
-    'An agent reaches exactly the tools its surface-compatible skills declare ' +
-    '(ADR-0064), so move each reference into a skill: a platform tool by its ' +
-    'registered name, or `action_<name>` for one of your own AI-exposed Actions. ' +
-    'This is NOT a rename — there is no key the value moves to: the migration ' +
-    'DELETES the key and emits a notice naming each tool that was listed, and ' +
-    'you re-declare each one in a skill by hand. ' +
-    'ADR-0064 itself still reads `Proposed` and is cloud-owned — that scopes its ' +
-    'RUNTIME half (tool resolution, which lives in cloud `service-ai`), not this ' +
-    'rejection: the authoring invariant binds you here, and ADR-0109 ' +
-    '(Accepted — implemented) is the in-repo record that carries it. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
-
-  /** Knowledge */
-  // `knowledge` REMOVED (#3896 audit close-out) — a GROUNDING claim nothing
-  // enforced: the RAG path never reads the agent record; `search_knowledge`
-  // takes `sourceIds` from the LLM's own tool-call arguments (cloud
-  // knowledge-tools.ts:96). An author who "scoped" retrieval here scoped
-  // nothing — the dangerous direction, same shape as tool.permissions.
-  knowledge: retiredKey(
-    '`agent.knowledge` was removed in @objectstack/spec 17.0.0 (audit close-out) — ' +
-    'declaring knowledge sources/indexes on an agent never scoped retrieval: the ' +
-    "`search_knowledge` tool takes `sourceIds` from the LLM's tool-call arguments, not from " +
-    'the agent record. Delete the block. Restrict retrieval at the knowledge-service / ' +
-    'source level (per-source permissions), and describe intended grounding in ' +
-    '`instructions` so the model asks for the right sources. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
-
   /** Interface */
   active: z.boolean().default(true),
   access: z.array(z.string()).optional().describe('Who can chat with this agent'),

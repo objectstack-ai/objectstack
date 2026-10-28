@@ -33,6 +33,9 @@ import { controlledByParentMasterRefusal } from './controlled-by-parent-master';
 // The ADR-0015 §4.2 binding predicate, shared with `defineStack`'s
 // cross-reference pass and the v18 stored-row listing. Internal to the spec.
 import { externalBindingDatasourceRefusal } from './external-binding-datasource';
+// The one-name-per-action predicate, shared with the v18 stored-row listing.
+// Internal to the spec.
+import { duplicateActionNames } from './duplicate-action-names';
 // The object's default row scope (the RLS policy shape without `object`) and the
 // roster object's declarative membership keys. No cycle: `security/rls.zod`
 // imports only zod, `shared/` and the resolver contract's constants.
@@ -163,13 +166,13 @@ const CAPABILITIES_RETIRED_KEY_GUIDANCE: Record<string, string> = {
     'soft-delete that never ran). Delete the key. For recoverability use per-field ' +
     '`trackHistory` (audit trail) or a `lifecycle` policy; soft delete is parked, ' +
     'and if built returns as a live enforced flag (ADR-0049 prune-or-build). ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
+    'This edit left `os migrate meta` with the protocol-16.x conversions: apply it by hand, or run the tool on a release that still carries the conversion — https://objectstack.ai/docs/protocol-upgrade.',
   mru:
     '`enable.mru` was removed from @objectstack/spec in the 16.x line (' +
     'ADR-0049) — Most-Recently-Used tracking was never implemented; no reader ' +
     'existed, so the flag changed nothing. Delete the key. If MRU tracking is ' +
     'built it returns as a live enforced flag (ADR-0049 prune-or-build). ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
+    'This edit left `os migrate meta` with the protocol-16.x conversions: apply it by hand, or run the tool on a release that still carries the conversion — https://objectstack.ai/docs/protocol-upgrade.',
 };
 
 /**
@@ -569,35 +572,6 @@ export const IndexSchema = lazySchema(() => strictObject({
   // is NOT NULL-safe (#5030).
   unique: DeclaredIndexUniqueScopeSchema.optional().default(false).describe("Whether the index enforces uniqueness, and at which scope (ADR-0120). 'global' = materialized over exactly `fields`, no organization column injected — one holder across the whole installation; 'organization' = the driver prepends the NULL-safe organization key part (COALESCE(organization_id, '__global__')) at registration — one holder per organization; false/omitted = not unique. Bare true is refused (retired at protocol 18 — it was the positional spelling of 'global'): state the scope. 'tenant'/'org' are rejected — the word is 'organization'").meta({ title: 'Unique' }),
 
-  // ── Tombstones (ADR-0049 / ADR-0087) ─────────────────────────────────
-  // Kept LAST in the shape on purpose — see the #5606 note in the block
-  // comment above. `IndexSchema` is not `.strict()`, so a plain delete would
-  // make Zod strip an authored value silently, which is the same no-op these
-  // keys already were (#3726 / #3733, the ADR-0104 class). The tombstone
-  // makes the removal audible in the two channels an upgrading author
-  // actually reads: `tsc` (input type `never`) and the parse itself.
-  // `object-index-type-partial-removed` strips both from stored/authored
-  // sources on the protocol-17 migration.
-  type: retiredKey(
-    '`indexes[].type` was removed in @objectstack/spec 17.0.0 (ADR-0049) — no driver ever ' +
-    'read it. `SqlDriver.syncDeclaredIndexes` creates every declared index through knex\'s ' +
-    '`table.index()` / `table.unique()`, which cannot express an access method, so the value ' +
-    'changed no DDL; its `.default(\'btree\')` merely made an inert knob show up in every parse ' +
-    'output. Delete the key. The index method is the driver/dialect\'s decision (Postgres ' +
-    'defaults to B-tree; `gin`/`gist`/`fulltext` are dialect-specific and are chosen by a ' +
-    'database-layer migration when a workload actually needs one). ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
-  partial: retiredKey(
-    '`indexes[].partial` was removed in @objectstack/spec 17.0.0 (ADR-0049) — no ' +
-    'driver ever emitted the `WHERE` clause, so a declared partial index was materialized as a ' +
-    'FULL index and the predicate silently did nothing. Delete the key. Partial indexes are ' +
-    'built at the database layer, not the declaration surface: issue `CREATE [UNIQUE] INDEX … ' +
-    'WHERE <predicate>` from a runtime migration (this is what `metadata-protocol`\'s ' +
-    '`ensureOverlayIndex` already does for `sys_metadata`). Drift detection is unaffected — it ' +
-    'reads partiality back from the database\'s own DDL, never from this key. ' +
-    'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
-  ),
 }));
 
 /**
@@ -1522,7 +1496,7 @@ const MANAGED_BY_SYSTEM_RETIRED =
   + 'and can be deleted; keep it only to NARROW. CSV `import` is deliberately NOT in that '
   + 'default: it stays opt-in per object via `userActions: { import: true }`, which '
   + 'is what a v16 `system` object already resolved to. '
-  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
+  + 'This edit left `os migrate meta` with the protocol-16.x conversions: apply it by hand, or run the tool on a release that still carries the conversion — https://objectstack.ai/docs/protocol-upgrade.';
 
 /**
  * Known-confusable schema keys → precise authoring guidance.
@@ -1574,8 +1548,9 @@ const UNKNOWN_KEY_GUIDANCE: Record<string, string> = {
   // the one upgrade channel every consumer is guaranteed to hit — an agent
   // bumping @objectstack/spec sees THIS message, not our docs site. Each entry
   // names what replaced the key and the version/decision that removed it.
-  // Tombstones age out too: drop an entry ~two majors after the removal
-  // (by then it's archaeology, not an upgrade; see CHANGELOG.md for history).
+  // Tombstones age out too: drop an entry one major after the removal (#25767;
+  // by then it's archaeology, not an upgrade — the protocol upgrade guide and
+  // CHANGELOG.md carry the history, and the strict refusal links the guide).
   namespace:
     '`namespace` was retired (ADR-0129 D3) — the object `name` IS the canonical id ' +
     'everywhere (API, ObjectQL, REST, SDK, DB table), so there is no separate namespace ' +
@@ -2314,6 +2289,30 @@ function refuseExternalBindingOnPrimaryDatasource(
   const refusal = externalBindingDatasourceRefusal(objectName, external, datasource);
   if (refusal === undefined) return;
   ctx.addIssue({ code: 'custom', path: [refusal.path], message: refusal.message });
+}
+
+/**
+ * [#26725] An object's `actions` array declares each action name once. One
+ * located issue per repeated name, at `['actions', <index>]` of its SECOND
+ * declaration, naming the name and every index. Before this, the object save
+ * door saved and published two actions under one name, and which one ran was
+ * undefined; `defineStack`'s duplicate action-key check refused the same pair
+ * only for a stack.
+ *
+ * Kept in the existing callback beside {@link refuseExternalBindingOnPrimaryDatasource}
+ * so it adds no check node the JSON Schema projection would have to drop.
+ * Predicate and message: `duplicate-action-names.ts`
+ * ({@link duplicateActionNames}), which the v18 stored-row listing reads too,
+ * so `os migrate meta --stored` lists each stored object this refuses.
+ *
+ * Metadata at rest still LOADS: a stored object this refuses registers under a
+ * `[metadata_spec_invalid]` diagnostic carrying this message, and its next
+ * save is refused.
+ */
+function refuseDuplicateActionNames(objectName: unknown, actions: unknown, ctx: z.RefinementCtx): void {
+  for (const duplicate of duplicateActionNames(objectName, actions)) {
+    ctx.addIssue({ code: 'custom', path: ['actions', duplicate.indexes[1]!], message: duplicate.message });
+  }
 }
 
 // ⚠️ ORDER IS LOAD-BEARING (#5593). This map used to live ~700 lines BELOW
@@ -3416,6 +3415,9 @@ const ObjectSchemaBase = strictObject(
   // [ADR-0015 §4.2 · #25168] An `external` binding is not on the platform's
   // managed primary datasource. See the helper's docblock.
   refuseExternalBindingOnPrimaryDatasource(object.name, object.external, object.datasource, ctx);
+  // [#26725] Each action name once in this object's `actions` — the name is the
+  // key the action runs under. See the helper's docblock.
+  refuseDuplicateActionNames(object.name, object.actions, ctx);
 }).overwrite((object) => {
   // [#23065] A `tree` that names no `reference` references this object, and the
   // parse writes that down after the refinements above judged what the author

@@ -88,8 +88,21 @@ export interface ApprovalRequestRow {
   payload_labels?: Record<string, string>;
   /** SLA deadline (`created_at + escalation.timeoutHours`), display-only. */
   sla_due_at?: string;
-  /** Owning flow's approval steps for progress display (single reads only). */
+  /**
+   * Owning flow's approval steps (single reads only): one trunk of the graph,
+   * not this request's route past a decision, so nothing draws it.
+   */
   flow_steps?: Array<{ id: string; label: string; state: 'done' | 'current' | 'upcoming' }>;
+  /**
+   * This request's own route (single reads only, objectstack#26668): the steps
+   * its run passed, its own, and while pending the steps ahead the graph alone
+   * decides; `ahead` says whether the route ends, waits on an undecided branch,
+   * or stops at a decided request.
+   */
+  flow_route?: {
+    steps: Array<{ id: string; label: string; state: 'done' | 'current' | 'upcoming' }>;
+    ahead: 'end' | 'undecided' | 'decided';
+  };
   /**
    * Server-computed aggregation progress (#3266) for pending multi-approver
    * requests: unanimous/quorum = approvals got/need; per_group = satisfied

@@ -46,6 +46,7 @@ import {
   MCP_OAUTH_SCOPE_DATA_READ,
   MCP_OAUTH_SCOPE_DATA_WRITE,
   MCP_OAUTH_SCOPE_ACTIONS,
+  MCP_OAUTH_SCOPE_METADATA_WRITE,
 } from '@objectstack/spec/ai';
 // [#15942 / #16293] The confirmation member the `run_action` door accepts and
 // forwards. Imported, never hand-spelled: the door that refuses (the runtime's
@@ -625,6 +626,33 @@ export function wireBridgeTools(
     registered.push(...registerActionTools(server, bridge as McpActionBridge, options));
   }
   return registered;
+}
+
+/**
+ * [#26464] Whether a grant admits the AUTHORING family — the host-injected
+ * authoring `ToolRegistry` the HTTP runtime bridges (`registerAuthoringTools`
+ * in `mcp-server-runtime.ts`) and the skill section that names those tools
+ * (`skill-md.ts`). One predicate for both, so the skill never teaches a tool
+ * the server would refuse.
+ *
+ * The refusal shape is the one the three native families already use: a tool
+ * outside the grant is NOT registered, so `tools/list` omits it and the SDK
+ * answers `tools/call` on it as an unknown tool — the same answer
+ * `create_record` gets without `data:write`.
+ *
+ * Deliberately stricter than the native families' rule on the UNDEFINED side.
+ * For data and action tools `grantedScopes: undefined` (API-key / session
+ * provenance) means "not scope-limited" and keeps the full surface, because
+ * every one of those calls is bounded by the caller's own permissions and RLS.
+ * Authoring lands metadata, and the ruling that opens it over MCP (cloud
+ * ADR-0112, the maintainer's 2026-10-27 ruling) opens it to a developer whose
+ * TOKEN carries the consent — so the family registers only when a scope list
+ * is present AND names `metadata:write`. A key or a session, having consented
+ * to nothing, is served no authoring tool; widening that to the headless track
+ * is a decision for its own card, not a default this predicate takes.
+ */
+export function grantsAuthoringTools(grantedScopes: readonly string[] | undefined): boolean {
+  return Array.isArray(grantedScopes) && grantedScopes.includes(MCP_OAUTH_SCOPE_METADATA_WRITE);
 }
 
 /**

@@ -22,6 +22,7 @@ import { resolveKeyedI18nLabel } from '@object-ui/react';
 // trading a no-icon failure for a WRONG-icon one, recorded as ruled out for
 // authored icon fields by objectui#5622 and #5633.
 import { resolveIcon } from '../action/resolve-icon';
+import type { RendererHostProps } from '../../lib/renderer-host-props';
 
 /**
  * `BreadcrumbSchema` declares FOUR authorable keys and this renderer used to
@@ -75,7 +76,7 @@ function collapseTrail(items: BreadcrumbItemType[], maxItems: unknown): Slot[] {
 }
 
 ComponentRegistry.register('breadcrumb', 
-  ({ schema, ...props }: { schema: BreadcrumbSchema; [key: string]: any }) => {
+  ({ schema, ...props }: { schema: BreadcrumbSchema; [key: string]: unknown } & RendererHostProps) => {
     const { 
         'data-obj-id': dataObjId, 
         'data-obj-type': dataObjType,

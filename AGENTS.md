@@ -276,8 +276,8 @@ localStorage / auth gotchas.
     the governed files. **The landing is tiered by the register; one Tier H path makes the whole PR Tier H.** **Tier H**
     (人合: every register row except `.claude/**`): those four lift only for an
     authorized APPROVED review by an account in `GOVERNED_APPROVERS`, on ANY commit and not dismissed; that word is
-    spent once per PR — the OWNING seat then lands it, later pushes included; the director seat requests the word as
-    ONE batch of at most five rows, and the click stays the maintainer's. **Tier S** (席内达档复核落地: all of
+    spent once per PR — the OWNING seat then lands it, later pushes included; the click stays the maintainer's.
+    **Tier S** (席内达档复核落地: all of
     `.claude/**`): those four lift once the PR thread or its card carries a `## Contract review` record for the PR's
     current head with `Served-tier: CONTRACT_REVIEW_TIER` and a PASS verdict and every check is green — the owning
     seat then lands it through the queue; the post-merge audit is the compensating control. A PR whose only governed
@@ -520,11 +520,11 @@ Even inside your own worktree, operate defensively:
    yet"; `in_progress` is not a pass. Arming a red PR does not queue it, it hides it:
    every poll then misreads "not on `main` yet" as "queued". Always read *two* things:
    the queue branch **and** `origin/main`. And **the queue enforces only the required
-   set** — eight contexts block: `Lint & Repo Gates` (all `check:*` gates), `TypeScript Type Check`,
-   `Test Core`, `Build Core`, `Governed Surface Queue Guard`, `Lint UI`, `Type Check UI` and
-   `Build & E2E UI`. A check outside those eight is advisory and rides through, and an advisory red
+   set** — nine contexts block: `Lint & Repo Gates` (all `check:*` gates), `TypeScript Type Check`,
+   `Test Core`, `Build Core`, `Governed Surface Queue Guard`, `Lint UI`, `Type Check UI`, `Test UI`
+   and `Build & E2E UI`. A check outside those nine is advisory and rides through, and an advisory red
    that lands rides `main`'s merge ref into every later PR until stanched. A required context is
-   matched by check-run name, so a rename detaches its gate silently — treat those eight names as contract.
+   matched by check-run name, so a rename detaches its gate silently — treat those nine names as contract.
    **Two speeds** (ruling record 6120820653): PR and queue runs carry the fast set, 10 minutes of
    wall per queue entry; `main`'s scheduled (4-hourly) and push runs carry the full battery — dogfood, e2e,
    `Temporal Conformance (live PG + MySQL)` — read by the publish lane before

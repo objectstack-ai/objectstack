@@ -308,7 +308,7 @@ describe('objectui#5233 — what must NOT be narrowed', () => {
  */
 describe('objectui#12504 census — the toolbar-to-view write family is retired', () => {
     const here = path.dirname(fileURLToPath(import.meta.url));
-    const objectViewCode = stripComments(['ObjectView.tsx', 'objectViewListRenderer.tsx'].map((file) => readFileSync(path.join(here, file), 'utf8')).join('\n'));
+    const objectViewCode = stripComments(['ObjectView.tsx', 'objectViewListRenderer.tsx', 'objectViewViewCrud.tsx'].map((file) => readFileSync(path.join(here, file), 'utf8')).join('\n'));
     const dataSourceCode = stripComments(
         readFileSync(path.join(here, '..', '..', '..', 'types', 'src', 'data.ts'), 'utf8'),
     );

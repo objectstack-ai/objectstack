@@ -355,6 +355,37 @@ const READERS: Record<string, Row> = {
     disposition: 'not-a-read',
     why: 'the name the injection writes the ADR-0117 D1 anchor under',
   },
+  'registry.ts#<module> :: queue': {
+    disposition: 'not-a-read',
+    why: 'the name the injection writes the ADR-0142 D3 ownership-queue column under',
+  },
+  'assignment-rules.ts#<module> :: owner_id': { disposition: 'not-a-read', why: VOCABULARY },
+  'assignment-rules.ts#<module> :: queue': { disposition: 'not-a-read', why: VOCABULARY },
+  'assignment-rules.ts#carriesQueueColumn :: resolveInjectedColumnProvenance()': {
+    disposition: 'excludes',
+    why: 'an object whose queue column is unprovisioned (federated) evaluates no assignment rule',
+  },
+  'assignment-rules.ts#leastLoaded :: organization_id': {
+    disposition: 'excludes',
+    via: 'carriesQueueColumn',
+    why: "counts a member's load only on an object whose platform columns have storage behind them",
+  },
+  'assignment-rules.ts#roundRobin :: organization_id': {
+    disposition: 'not-a-read',
+    why: 'keys the sys_assignment_cursor row, a platform table the engine itself reads and writes',
+  },
+  'assignment-rules.ts#route :: queue': {
+    disposition: 'not-a-read',
+    why: 'names the queue in a log entry; the row written is the one in hand',
+  },
+  'assignment-rules.ts#ruleOf :: queue': {
+    disposition: 'not-a-read',
+    why: "compares an assignment target's kind, not the column; it reads no row",
+  },
+  'plugin.ts#assertOwnershipQueueServicePresent :: queue': {
+    disposition: 'not-a-read',
+    why: 'names the metadata type the boot refusal lists; it reads no row',
+  },
   'registry.ts#declaresTenantIndex :: organization_id': {
     disposition: 'not-a-read',
     why: 'reads an index declaration, not a row',

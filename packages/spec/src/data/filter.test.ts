@@ -25,6 +25,8 @@ import {
   type QueryFilter,
   type FieldOperators,
 } from './filter.zod';
+import { DatasetSchema } from '../ui/dataset.zod';
+import { ObjectStackDefinitionSchema } from '../stack.zod';
 
 // ============================================================================
 // 3.1 Comparison Operators Tests
@@ -263,6 +265,18 @@ describe('[#25808] NowAnchorSchema — the now-anchored comparand', () => {
   it('is closed: an extra key is refused — there is no subDays', () => {
     expect(NowAnchorSchema.safeParse({ $now: true, addDays: 1, subDays: 1 }).success).toBe(false);
     expect(NowAnchorSchema.safeParse({ $now: true, addDays: -1, note: 'x' }).success).toBe(false);
+  });
+
+  it('[#26413] …and the `FilterCondition` save door refuses the extra key too, naming it', () => {
+    for (const [anchor, key] of [
+      [{ $now: true, addDays: -30, subDays: 7 }, 'subDays'],
+      [{ $now: true, addDays: GRACE, note: 'x' }, 'note'],
+    ] as const) {
+      const result = FilterConditionSchema.safeParse({ opened_at: { $lt: anchor } });
+      expect(result.success, key).toBe(false);
+      expect(JSON.stringify(result.error?.issues), key).toContain(`undeclared key \\"${key}\\"`);
+    }
+    expect(FilterConditionSchema.safeParse({ opened_at: { $lt: { $now: true, addDays: GRACE } } }).success).toBe(true);
   });
 
   it('is legal exactly where a { $field } reference is: the six scalar comparisons', () => {
@@ -1957,11 +1971,17 @@ describe('FieldReferenceSchema.addDays — a whole-day offset on a reference, an
       }).success).toBe(true);
     });
 
-    it('a DOT-PATH nested reference — exactly as `$field` itself allows', () => {
-      // The ruling's driving shape: `completed_at <= due_date + duty.grace_days`.
-      expect(FieldReferenceSchema.safeParse({
+    it('[#26601] NOT a dot-path nested reference — the offset column is a column of the same record', () => {
+      // Retires the reading that the dotted spelling validates and is answered
+      // in memory (the #14104 ruling-record correction): SQL push-down refuses
+      // it on every read, and the memory evaluator reads a lookup's id there on
+      // a stored row, counting the offset as zero days.
+      const result = FieldReferenceSchema.safeParse({
         $field: 'due_date', addDays: { $field: 'duty.grace_days' },
-      }).success).toBe(true);
+      });
+      expect(result.success).toBe(false);
+      expect(result.error?.issues[0]?.path).toEqual(['addDays', '$field']);
+      expect(result.error?.issues[0]?.message.startsWith(DOTTED_OFFSET_SENTENCE('duty.grace_days'))).toBe(true);
     });
 
     it('positive control — a bare reference is unchanged', () => {
@@ -1971,7 +1991,7 @@ describe('FieldReferenceSchema.addDays — a whole-day offset on a reference, an
     });
 
     it('rides in every ordering slot, on both the documentation and the ENFORCED copy', () => {
-      const ref = { $field: 'due_date', addDays: { $field: 'duty.grace_days' } };
+      const ref = { $field: 'due_date', addDays: { $field: 'grace_days' } };
       for (const op of ['$gt', '$gte', '$lt', '$lte'] as const) {
         expect(ComparisonOperatorSchema.safeParse({ [op]: ref }).success, op).toBe(true);
         expect(FieldOperatorsSchema.safeParse({ [op]: ref }).success, op).toBe(true);
@@ -2054,6 +2074,132 @@ describe('FieldReferenceSchema.addDays — a whole-day offset on a reference, an
       expect(firstIssue(result)?.path).toEqual(['$in', 0]);
       expect(firstIssue(result)?.message).toContain('$in member at index 0');
     });
+  });
+});
+
+// ============================================================================
+// [#26601] A DOTTED `addDays` offset — refused at every authoring door, in the
+// words SQL push-down already refuses it with on every read
+// ============================================================================
+
+/**
+ * `driver-sql`'s reason for the same refusal at read time
+ * (`sql-driver-cross-field-comparison.ts`), capitalised as a first sentence,
+ * plus the prescription. The save door and the first read say one sentence.
+ */
+function DOTTED_OFFSET_SENTENCE(ref: string): string {
+  return `The addDays offset "${ref}" is a dotted path, and SQL push-down compiles same-table column `
+    + 'references only (no relation traversal, no alias-qualified columns)';
+}
+
+describe('[#26601] a dotted addDays offset is refused at the save and validate doors', () => {
+  const SLA = 'contract_type.review_sla_days';
+  const ANCHOR = { $now: true, addDays: { $field: SLA } };
+  const PAIR = { $field: 'review_started_at', addDays: { $field: SLA } };
+  /** The walk's own wording, as the `FilterCondition` door reports it. */
+  const WALK_REASON = `the addDays offset "${SLA}" is a dotted path, and SQL push-down compiles same-table `
+    + 'column references only (no relation traversal, no alias-qualified columns).';
+  const MEASURED_SHAPE = { review_started_at: { $lt: ANCHOR } };
+  const DATASET = {
+    name: 'contract_review',
+    label: 'Contract review',
+    object: 'clm_contract',
+    include: ['contract_type'],
+    dimensions: [{ name: 'contract_type', field: 'contract_type', type: 'string' }],
+    measures: [{ name: 'total', aggregate: 'count' }],
+  };
+  const issuesOf = (result: { success: boolean; error?: { issues: Array<{ path: PropertyKey[]; message: string }> } }) =>
+    result.error?.issues ?? [];
+
+  it('the schemas themselves: FieldReferenceSchema.addDays and NowAnchorSchema.addDays', () => {
+    for (const [label, result] of [
+      ['reference', FieldReferenceSchema.safeParse(PAIR)],
+      ['anchor', NowAnchorSchema.safeParse(ANCHOR)],
+    ] as const) {
+      expect(result.success, label).toBe(false);
+      expect(issuesOf(result)[0]?.path, label).toEqual(['addDays', '$field']);
+      expect(issuesOf(result)[0]?.message.startsWith(DOTTED_OFFSET_SENTENCE(SLA)), label).toBe(true);
+      expect(issuesOf(result)[0]?.message, label).toContain('name a numeric column of the same record instead');
+      expect(issuesOf(result)[0]?.message, label).not.toMatch(/#\d{3,}/);
+    }
+  });
+
+  it('every ordering slot, on the documentation copy and the enforced copy', () => {
+    // `$eq` / `$ne` admit any comparand at the operator schema; the
+    // `FilterCondition` door below judges them through the comparand walk.
+    for (const comparand of [PAIR, ANCHOR]) {
+      for (const op of ['$gt', '$gte', '$lt', '$lte'] as const) {
+        const enforced = FieldOperatorsSchema.safeParse({ [op]: comparand });
+        expect(enforced.success, op).toBe(false);
+        expect(issuesOf(enforced)[0]?.path, op).toEqual([op, 'addDays', '$field']);
+        expect(issuesOf(enforced)[0]?.message.startsWith(DOTTED_OFFSET_SENTENCE(SLA)), op).toBe(true);
+      }
+      expect(ComparisonOperatorSchema.safeParse({ $lt: comparand }).success).toBe(false);
+    }
+  });
+
+  it('a data filter: the FilterCondition save door, at the slot, under $and / $or / $not too', () => {
+    for (const comparand of [PAIR, ANCHOR]) {
+      for (const op of ['$eq', '$ne', '$gt', '$gte', '$lt', '$lte'] as const) {
+        const result = FilterConditionSchema.safeParse({ review_started_at: { [op]: comparand } });
+        expect(result.success, op).toBe(false);
+        expect(issuesOf(result)[0]?.path, op).toEqual(['review_started_at', op]);
+        expect(issuesOf(result)[0]?.message, op).toContain(WALK_REASON);
+      }
+      for (const wrapped of [
+        { $and: [{ status: 'open' }, { review_started_at: { $lt: comparand } }] },
+        { $or: [{ review_started_at: { $gte: comparand } }] },
+        { $not: { review_started_at: { $lt: comparand } } },
+      ]) {
+        expect(FilterConditionSchema.safeParse(wrapped).success, JSON.stringify(wrapped)).toBe(false);
+      }
+    }
+  });
+
+  it('a dataset measure filter and a dataset filter: the dataset write door', () => {
+    const measure = DatasetSchema.safeParse({
+      ...DATASET,
+      measures: [...DATASET.measures, { name: 'over_sla', aggregate: 'count', filter: MEASURED_SHAPE }],
+    });
+    expect(measure.success).toBe(false);
+    expect(issuesOf(measure)[0]?.path).toEqual(['measures', 1, 'filter', 'review_started_at', '$lt']);
+    expect(issuesOf(measure)[0]?.message).toContain(WALK_REASON);
+    const scope = DatasetSchema.safeParse({ ...DATASET, filter: MEASURED_SHAPE });
+    expect(scope.success).toBe(false);
+    expect(issuesOf(scope)[0]?.path).toEqual(['filter', 'review_started_at', '$lt']);
+    expect(issuesOf(scope)[0]?.message).toContain(WALK_REASON);
+  });
+
+  it('the validate door: a stack carrying the dataset fails ObjectStackDefinitionSchema', () => {
+    const stack = (dataset: Record<string, unknown>) => ({
+      manifest: { id: 'com.example.dotted-offset', name: 'dotted_offset', version: '1.0.0', type: 'app' },
+      datasets: [dataset],
+    });
+    const result = ObjectStackDefinitionSchema.safeParse(stack({
+      ...DATASET,
+      measures: [...DATASET.measures, { name: 'over_sla', aggregate: 'count', filter: MEASURED_SHAPE }],
+    }));
+    expect(result.success).toBe(false);
+    expect(issuesOf(result).map((i) => i.path)).toEqual([['datasets', 0, 'measures', 1, 'filter', 'review_started_at', '$lt']]);
+    // CONTROL: the same stack with a same-record offset column passes the same door.
+    const sameRecord = { review_started_at: { $lt: { $now: true, addDays: { $field: 'review_sla_days' } } } };
+    expect(ObjectStackDefinitionSchema.safeParse(stack({
+      ...DATASET,
+      measures: [...DATASET.measures, { name: 'over_sla', aggregate: 'count', filter: sameRecord }],
+    })).success).toBe(true);
+  });
+
+  it('CONTROL: a same-record offset passes every door; a dotted BASE reference keeps its asymmetry', () => {
+    for (const comparand of [
+      { $now: true, addDays: { $field: 'review_sla_days' } },
+      { $field: 'review_started_at', addDays: { $field: 'review_sla_days' } },
+    ]) {
+      expect(FilterConditionSchema.safeParse({ review_started_at: { $lt: comparand } }).success).toBe(true);
+      expect(FieldOperatorsSchema.safeParse({ $lt: comparand }).success).toBe(true);
+    }
+    // Out of scope here: the reference's own `$field` — memory walks it, SQL
+    // refuses it — is unchanged by this rule.
+    expect(FilterConditionSchema.safeParse({ completed_on: { $lte: { $field: 'duty.due_on' } } }).success).toBe(true);
   });
 });
 

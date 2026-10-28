@@ -14,27 +14,32 @@ import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { textSlotTemplateRefusal } from '../automation/flow-text-slot-template';
 
 /**
- * The shape a locale tag must have: a 2–8 letter language subtag, then any
+ * The shape a locale tag must have: a 2–3 letter language subtag, then any
  * number of hyphen-separated 1–8 letter-or-digit subtags (`en`, `zh-CN`,
- * `zh-Hans-CN`, `es-419`). The same pattern as `SYS_USER_LOCALE_TAG_PATTERN`
- * (`@objectstack/platform-objects/identity`), the shape a user's own `locale`
- * column accepts, so a translation is stored only under tags a session can
- * ask for.
+ * `zh-Hans-CN`, `es-419`, `yue-HK`). The same pattern as
+ * `SYS_USER_LOCALE_TAG_PATTERN` (`@objectstack/platform-objects/identity`),
+ * the shape a user's own `locale` column accepts, so a translation is stored
+ * only under tags a session can ask for.
  *
  * Shape only, by decision: membership has no registry to check against
  * (`Intl.getCanonicalLocales('xx-YY')` succeeds, which is why
  * `shared/value-domain.zod.ts` dropped a `bcp47_locale` domain), and case is
  * not judged because the resolvers fold it (`zh-cn` resolves to `zh-CN`).
- * What it refuses is what no resolver ever matches: an underscore separator
- * (`zh_CN`), whitespace, a language name.
+ * The primary subtag is held to the 2–3 letters of the ISO 639 codes every
+ * tag in use starts with: BCP-47 reserves 4 letters and registers no 5–8
+ * letter language, so the only values that wider grammar ever admitted were
+ * words. What it refuses is what no resolver ever matches: an underscore
+ * separator (`zh_CN`), whitespace, a language name (`Chinese`,
+ * `Chinese (Simplified)`).
  */
-const LOCALE_TAG_SHAPE = /^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$/;
+const LOCALE_TAG_SHAPE = /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{1,8})*$/;
 
 const LOCALE_TAG_REFUSAL =
-  'must be a BCP-47 language tag such as `en`, `zh-CN` or `zh-Hans-CN`: a 2–8 letter language '
+  'must be a BCP-47 language tag such as `en`, `zh-CN` or `zh-Hans-CN`: a 2–3 letter language '
   + 'subtag, then hyphen-separated subtags. Refused since @objectstack/spec 18, because a translation '
-  + 'stored under any other spelling (`zh_CN`, a trailing space, a language name) is under a locale no '
-  + 'session ever asks for, so its strings never render. Separate subtags with `-`, not `_`.';
+  + 'stored under any other spelling (`zh_CN`, a trailing space, a language name such as `Chinese`) '
+  + 'is under a locale no session ever asks for, so its strings never render. Separate subtags with '
+  + '`-`, not `_`, and write the tag, not the name (`zh-CN`, not `Chinese`).';
 
 export const LocaleSchema = lazySchema(() => z
   .string()
@@ -125,6 +130,21 @@ export const FieldTranslationSchema = lazySchema(() => strictObject({
   help: z.string().optional().describe('Translated help text'),
   placeholder: z.string().optional().describe('Translated placeholder text for form inputs'),
   options: z.record(z.string(), z.string()).optional().describe('Option value to translated label map'),
+  /**
+   * The field's own `inlineTitle` — the heading of the inline child grid a
+   * `master_detail` / `lookup` field with `inlineEdit` draws on its PARENT's
+   * form. The field lives on the child object, so the address is the child's:
+   * `objects.<child>.fields.<field>.inlineTitle`. Overlaid by
+   * `translateObject` on the served child object, which is what the console's
+   * inline-subform pass copies the heading from.
+   *
+   * No fallback to the child object's translated plural label: an authored
+   * `inlineTitle` with no entry here keeps its authored text, because a
+   * bundle translates an attribute and never swaps another attribute in over
+   * authored text. An absent `inlineTitle` already renders the child's
+   * (translated) label.
+   */
+  inlineTitle: z.string().optional().describe("Translated inline master-detail grid title — overlays the field's own `inlineTitle`"),
 }).describe('Translation data for a single field'));
 
 export type FieldTranslation = z.input<typeof FieldTranslationSchema>;
@@ -177,6 +197,8 @@ const actionTranslationSchema = (surface: string) => strictObject({
     name: 'label', title: 'label',
     confirm: 'confirmText', confirmation: 'confirmText', confirmMessage: 'confirmText',
     success: 'successMessage', successText: 'successMessage', toast: 'successMessage',
+    disabledMessage: 'disabledReason', disabledTooltip: 'disabledReason',
+    disabledHint: 'disabledReason', disabledText: 'disabledReason',
     parameters: 'params', args: 'params', inputs: 'params',
     result: 'resultDialog', dialog: 'resultDialog',
   },
@@ -191,6 +213,9 @@ const actionTranslationSchema = (surface: string) => strictObject({
   description: z.string().optional().describe('Translated action description — the explanatory line under the title in the action\'s param dialog'),
   confirmText: z.string().optional().describe('Translated confirmation prompt'),
   successMessage: z.string().optional().describe('Translated success toast/message'),
+  // `ActionSchema.disabledReason` (#26619) — the display-only reason a greyed
+  // action shows; overlaid by `translateAction` like the copy keys above.
+  disabledReason: z.string().optional().describe('Translated reason a greyed action shows (hover title and accessible description) while its `disabled` predicate is TRUE'),
   // `ActionSchema.outcomeMessages` (#21095) — one translated message per
   // declared outcome, keyed by the same snake_case outcome name, so a bundle
   // key that could never match a handler's `outcome` is refused here rather
@@ -427,6 +452,7 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
    *   objects.<object>._actions.<action_name>.description
    *   objects.<object>._actions.<action_name>.confirmText
    *   objects.<object>._actions.<action_name>.successMessage
+   *   objects.<object>._actions.<action_name>.disabledReason
    *   objects.<object>._actions.<action_name>.outcomeMessages.<outcome>
    *   objects.<object>._actions.<action_name>.params.<param_name>.label
    *   objects.<object>._actions.<action_name>.params.<param_name>.helpText
@@ -676,8 +702,7 @@ const TRANSLATION_KEY_GUIDANCE: Record<LegacyObjectFirstKey | 'validationMessage
     + 'message on the rule itself (`object.validations[].message`), which the engine '
     + 'evaluates and returns on every rejected write, and translate it under the object-scoped '
     + "group 'objects.<object_name>._validations.<rule_name>.message', which the write "
-    + 'path resolves. Delete this key. Run '
-    + '`os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
+    + 'path resolves. Delete this key. This edit left `os migrate meta` with the protocol-16.x conversions: apply it by hand, or run the tool on a release that still carries the conversion — https://objectstack.ai/docs/protocol-upgrade.',
   o: "`o` is the retired object-first dialect, which no resolver reads — use 'objects.<object_name>'",
   app: "`app` is the retired object-first dialect, which no resolver reads — use 'apps.<app_name>'",
   nav: "`nav` is the retired object-first dialect, which no resolver reads — use 'apps.<app_name>.navigation.<node_id>.label'",
@@ -719,10 +744,10 @@ const PER_APP_SETTINGS_PLATFORM_ONLY =
   + '(`@objectstack/service-settings`\'s `settingsBuiltinTranslations`, typed '
   + '`PlatformTranslationData`); a key it does not translate falls back to the manifest\'s own '
   + 'literal, so correct it there rather than filling the gap from an application. For an '
-  + 'application\'s own copy use the fourteen groups this bundle does declare, in the order it '
+  + 'application\'s own copy use the fifteen groups this bundle does declare, in the order it '
   + "declares them — 'objects', 'picklists', 'apps', 'messages', 'globalActions', 'dashboards', "
-  + "'datasets', 'reports', 'pages', 'flows', 'positions', 'permissions', 'metadataForms', "
-  + "'settingsCommon'. "
+  + "'datasets', 'reports', 'pages', 'flows', 'positions', 'permissions', 'books', "
+  + "'metadataForms', 'settingsCommon'. "
   + "Note the last one: 'settingsCommon' IS "
   + 'on this face, so the Settings UI shell strings an application may translate (the source '
   + 'badges, under `settingsCommon.sourceLabels`) are NOT what is being refused here — only the '
@@ -764,7 +789,7 @@ const ITEM_SETTINGS_PLATFORM_ONLY =
   + '(`@objectstack/service-settings`\'s `settingsBuiltinTranslations`, typed '
   + '`PlatformTranslationData`); a key it does not translate falls back to the manifest\'s own '
   + 'literal, so correct it there rather than overriding it from an application. For an '
-  + 'application\'s own copy use the groups this item does declare — the same fourteen a per-app '
+  + 'application\'s own copy use the groups this item does declare — the same fifteen a per-app '
   + "bundle declares, 'settingsCommon' among them: the Settings UI shell strings an application "
   + 'may translate (the source badges, under `settingsCommon.sourceLabels`) are NOT what is being '
   + "refused here — only the per-namespace manifest copy under 'settings' is. "
@@ -803,12 +828,12 @@ const ITEM_TRANSLATION_KEY_GUIDANCE: Record<string, string> = {
  */
 /**
  * The translation groups an APPLICATION may author, as a shape rather than a
- * schema. Fourteen groups — the fifteenth, `settings`, is platform-only and lives in
+ * schema. Fifteen groups — the sixteenth, `settings`, is platform-only and lives in
  * {@link platformSettingsShape}.
  *
  * Three schemas need exactly these keys: {@link TranslationDataSchema} (one
- * entry of a per-app file-authored bundle — these fourteen and no more),
- * {@link PlatformTranslationDataSchema} (these fourteen plus `settings`) and
+ * entry of a per-app file-authored bundle — these fifteen and no more),
+ * {@link PlatformTranslationDataSchema} (these fifteen plus `settings`) and
  * {@link TranslationItemSchema} (the registered `translation` metadata type —
  * the per-app face plus `locale`, its identity keys and the ADR-0010
  * envelope; it carried the platform face's `settings` too until #19620). The item used to
@@ -944,6 +969,7 @@ const appTranslationDataShape = () => ({
    *   globalActions.<action_name>.description
    *   globalActions.<action_name>.confirmText
    *   globalActions.<action_name>.successMessage
+   *   globalActions.<action_name>.disabledReason
    *   globalActions.<action_name>.outcomeMessages.<outcome>
    *   globalActions.<action_name>.params.<param_name>.label
    *   globalActions.<action_name>.params.<param_name>.helpText
@@ -1141,6 +1167,10 @@ const appTranslationDataShape = () => ({
    *
    *   reports.<name>.label        → the report's own `label`
    *   reports.<name>.description  → the report's own `description`
+   *   reports.<name>.blocks.<block_name>.label / .description
+   *                               → a joined report block's own `label` /
+   *                                 `description`, keyed by the block's
+   *                                 required `name`
    *
    * The two strings the console's report index lists each report by, and the
    * report page's heading. Overlaid by `translateReport` (`i18n-resolver.ts`)
@@ -1149,9 +1179,9 @@ const appTranslationDataShape = () => ({
    * O), so, as on a dashboard, the catalog yields to a label or description
    * an org has re-authored on top of the packaged report (ADR-0029 D9.2a).
    *
-   * The face stops at those two strings. A report's selection (`dataset`,
-   * `rows`, `columns`, `values`) is machine names whose display copy is the
-   * dataset's, translated at `datasets.<dataset_name>`.
+   * The face stops at those strings. A report's selection (`dataset`,
+   * `rows`, `columns`, `values`), and a block's, is machine names whose
+   * display copy is the dataset's, translated at `datasets.<dataset_name>`.
    *
    * ⚠️ `label` and `description` are `I18nLabelSchema` at the authoring site,
    * so a report's copy may already be an inline `{ en, 'zh-CN' }` map.
@@ -1165,6 +1195,22 @@ const appTranslationDataShape = () => ({
   }, {
     label: z.string().optional().describe("Translated report label — overlays the report's own `label`"),
     description: z.string().optional().describe("Translated report description — overlays the report's own `description`"),
+    /**
+     * A joined report's block copy, keyed by the block's `name`
+     * (`JoinedReportBlockSchema.name`, required). The heading and caption the
+     * joined renderer draws above each block; without this slot a localized
+     * report showed a translated title over block headings left in the
+     * authoring language. Overlaid by `translateReport`, block by block, under
+     * the same packaged-base rule as the report's own two strings.
+     */
+    blocks: z.record(z.string(), strictObject({
+      surface: 'this joined report block translation',
+      history: TRANSLATION_HISTORY,
+      aliases: { name: 'label', title: 'label', heading: 'label' },
+    }, {
+      label: z.string().optional().describe("Translated block label — overlays the joined report block's own `label`"),
+      description: z.string().optional().describe("Translated block description — overlays the joined report block's own `description`"),
+    })).optional().describe('Joined report block translations keyed by block name'),
   })).optional().describe('Report translations keyed by report name'),
 
   /**
@@ -1728,6 +1774,41 @@ const appTranslationDataShape = () => ({
   })).optional().describe('Permission-set translations keyed by permission-set name'),
 
   /**
+   * Doc-book translations keyed by book name (`Book.name`,
+   * `system/book.zod.ts`, the stack's `books[]`).
+   *
+   *   books.<name>.label                     → the book's own `label`
+   *   books.<name>.description               → the book's own `description`
+   *   books.<name>.groups.<group_key>.label  → a group's `label`, by the group's `key`
+   *
+   * A book is the spine of a docs table of contents, and its strings frame
+   * every page of it: the book title and each section title in the docs
+   * sidebar. The pages themselves localize through `doc.translations`; the
+   * spine localizes here, the way an app's label and navigation labels do
+   * (`apps.<name>.navigation.<id>.label`, keyed by the stable node id as a
+   * group is by its stable `key`). Overlaid by `translateBook`
+   * (`i18n-resolver.ts`) on every served `book` document (`GET /meta/book`,
+   * the list the console's docs portal draws its sidebar from) and on the
+   * book `GET /meta/book/:name/tree` resolves. The inline map a book carried
+   * before 17.0.0 stays retired: one translation path, this one.
+   */
+  books: z.record(z.string(), strictObject({
+    surface: 'this book translation',
+    history: TRANSLATION_HISTORY,
+    aliases: { name: 'label', title: 'label', sections: 'groups', chapters: 'groups', toc: 'groups' },
+  }, {
+    label: z.string().optional().describe("Translated book title — overlays the book's own `label`"),
+    description: z.string().optional().describe("Translated book description — overlays the book's own `description`"),
+    groups: z.record(z.string(), strictObject({
+      surface: 'this book group translation',
+      history: TRANSLATION_HISTORY,
+      aliases: { name: 'label', title: 'label' },
+    }, {
+      label: z.string().describe("Translated section title — overlays the group's own `label`"),
+    })).optional().describe('Group (section) translations keyed by the group `key`'),
+  })).optional().describe('Doc-book translations keyed by book name'),
+
+  /**
    * Translations for **metadata-type configuration forms** — the forms
    * used by admins to author objects, fields, agents, flows, etc. in the
    * Studio metadata editor.
@@ -1941,10 +2022,10 @@ const platformSettingsShape = () => ({
  * One locale of a PER-APP translation bundle — `stack.translations`, and
  * everything {@link defineTranslationBundle} builds.
  *
- * Fourteen groups: every group the platform bundle declares EXCEPT `settings`,
+ * Fifteen groups: every group the platform bundle declares EXCEPT `settings`,
  * which is platform-only and is refused here by name with
  * {@link PER_APP_SETTINGS_PLATFORM_ONLY} as the remedy. See
- * {@link PlatformTranslationDataSchema} for the fifteen-group face and for why
+ * {@link PlatformTranslationDataSchema} for the sixteen-group face and for why
  * the two are separate namespaces.
  */
 export const TranslationDataSchema = lazySchema(() => strictObject({
@@ -1955,7 +2036,7 @@ export const TranslationDataSchema = lazySchema(() => strictObject({
   // `settings`, and an alias prescribing a key the shape rejects is a
   // suggestion the author cannot take (the `alias-integrity` audit judges
   // exactly that). Both spellings are answered by `guidance` above instead.
-  aliases: { object: 'objects', fields: 'objects', app: 'apps', page: 'pages', dashboard: 'dashboards', dataset: 'datasets', report: 'reports', picklist: 'picklists', flow: 'flows', position: 'positions', permission: 'permissions', permissionSets: 'permissions', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions' },
+  aliases: { object: 'objects', fields: 'objects', app: 'apps', page: 'pages', dashboard: 'dashboards', dataset: 'datasets', report: 'reports', picklist: 'picklists', flow: 'flows', position: 'positions', permission: 'permissions', permissionSets: 'permissions', book: 'books', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions' },
   // `locale` lives on the ITEM, not on a bundle entry (the bundle keys ARE the
   // locales). Naming it keeps the suggestion useful for an author who moved a
   // `translation` item into a bundle and left the field behind.
@@ -1965,7 +2046,7 @@ export const TranslationDataSchema = lazySchema(() => strictObject({
 export type TranslationData = z.input<typeof TranslationDataSchema>;
 
 /**
- * One locale of a PLATFORM translation bundle — the fifteen groups, `settings`
+ * One locale of a PLATFORM translation bundle — the sixteen groups, `settings`
  * included.
  *
  * The platform's own bundles are code, not authored metadata
@@ -2000,7 +2081,7 @@ export const PlatformTranslationDataSchema = lazySchema(() => strictObject({
   surface: 'this locale of the platform translation bundle',
   history: TRANSLATION_HISTORY,
   guidance: TRANSLATION_KEY_GUIDANCE,
-  aliases: { object: 'objects', fields: 'objects', app: 'apps', page: 'pages', dashboard: 'dashboards', dataset: 'datasets', report: 'reports', picklist: 'picklists', flow: 'flows', position: 'positions', permission: 'permissions', permissionSets: 'permissions', setting: 'settings', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions' },
+  aliases: { object: 'objects', fields: 'objects', app: 'apps', page: 'pages', dashboard: 'dashboards', dataset: 'datasets', report: 'reports', picklist: 'picklists', flow: 'flows', position: 'positions', permission: 'permissions', permissionSets: 'permissions', book: 'books', setting: 'settings', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions' },
   extraKeys: ['locale'],
 }, {
   ...appTranslationDataShape(),
@@ -2008,6 +2089,58 @@ export const PlatformTranslationDataSchema = lazySchema(() => strictObject({
 }).describe('Platform translation data — the per-app groups plus the platform-only `settings`'));
 
 export type PlatformTranslationData = z.input<typeof PlatformTranslationDataSchema>;
+
+/**
+ * The platform groups the SERVED document leaves out —
+ * `GET /i18n/translations/:locale` answers {@link ServedTranslationDataSchema},
+ * the platform face without these (#25785).
+ *
+ * A group belongs here when the server resolves it before it serves the
+ * surface the group translates, so no browser reads it from the served
+ * document. `metadataForms` is the one member: it translates Studio's
+ * metadata-type authoring forms, and those reach Studio already translated —
+ * the `/meta/types` handler applies `resolveMetadataTypeLabel`,
+ * `resolveMetadataFormLabels` and `resolveMetadataFormSchemaTitles` to each
+ * entry over the i18n service's in-process bundle before it answers. Carried in
+ * the served document as well, it was the second-largest group of every console
+ * open (75 KB of 221 KB raw on `examples/app-crm` zh-CN) and nothing read it.
+ *
+ * ⛔ Only the served document leaves these out. Every bundle face still
+ * declares the group, and the i18n service still holds it: the serving door
+ * copies the document without them and never edits the service's own tree,
+ * which is the tree `/meta/types` translates from.
+ */
+export const SERVER_RESOLVED_TRANSLATION_GROUPS = ['metadataForms'] as const;
+
+/**
+ * One locale of the SERVED translation document — what
+ * `GET /i18n/translations/:locale` answers: {@link PlatformTranslationDataSchema}
+ * without {@link SERVER_RESOLVED_TRANSLATION_GROUPS}.
+ *
+ * Its own `strictObject` rather than `.omit()` on the platform face, for the
+ * reason {@link appTranslationDataShape} gives against `.extend()`: the derived
+ * schema would keep the error map that closed over the base's keys, so a body
+ * still carrying `metadataForms` would be told the key it should not carry is
+ * a declared one. Closed, a served body that carries a server-resolved group
+ * fails this schema, which is what the response conformance suites parse with.
+ */
+export const ServedTranslationDataSchema = lazySchema(() => {
+  const { metadataForms: _serverResolved, ...appGroups } = appTranslationDataShape();
+  return strictObject({
+    surface: 'this locale of the served translation document',
+    history: TRANSLATION_HISTORY,
+    guidance: {
+      metadataForms:
+        "the served document leaves 'metadataForms' out: Studio's authoring forms are translated "
+        + 'on the server, and /meta/types serves each form already in the requested locale.',
+    },
+  }, {
+    ...appGroups,
+    ...platformSettingsShape(),
+  }).describe('Served translation data — the platform groups the browser reads, without the server-resolved `metadataForms`');
+});
+
+export type ServedTranslationData = z.input<typeof ServedTranslationDataSchema>;
 
 // ────────────────────────────────────────────────────────────────────────────
 // Translation Bundle (all locales)
@@ -2116,7 +2249,7 @@ export type TranslationConfig = z.input<typeof TranslationConfigSchema>;
  * to whoever — or whatever — authored it.
  *
  * `settings` is NOT on this door (#19620, ruling batch #210 item 2 letter B):
- * the item takes the PER-APP face, the same fourteen groups as
+ * the item takes the PER-APP face, the same fifteen groups as
  * {@link TranslationDataSchema}, and refuses `settings` (and the singular
  * `setting`) by name with {@link ITEM_SETTINGS_PLATFORM_ONLY} as the remedy.
  * The file door and the item door are two authoring surfaces for one app
@@ -2155,7 +2288,7 @@ export const TranslationItemSchema = lazySchema(() => strictObject({
   // this door no longer declares `settings`, and an alias prescribing a key
   // the shape rejects is a suggestion the author cannot take. Both spellings
   // are answered by `guidance` above instead.
-  aliases: { object: 'objects', app: 'apps', page: 'pages', dataset: 'datasets', report: 'reports', picklist: 'picklists', flow: 'flows', position: 'positions', permission: 'permissions', permissionSets: 'permissions', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions', lang: 'locale', language: 'locale' },
+  aliases: { object: 'objects', app: 'apps', page: 'pages', dataset: 'datasets', report: 'reports', picklist: 'picklists', flow: 'flows', position: 'positions', permission: 'permissions', permissionSets: 'permissions', book: 'books', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions', lang: 'locale', language: 'locale' },
 }, {
   ...appTranslationDataShape(),
   locale: LocaleSchema.describe('BCP-47 locale this item translates (e.g. "zh-CN")'),
@@ -2169,12 +2302,15 @@ export const TranslationItemSchema = lazySchema(() => strictObject({
   // Undeclared, they were stripped on every parse, so the metadata door quietly
   // discarded an item's own name on the way through.
   //
-  // Not snake_case-constrained the way `job.name` is: translation items are
-  // conventionally named after their locale (`zh-CN`), and the runtime sync
-  // reads `row.name` as a locale fallback for exactly that reason. Optional
-  // because `locale`, not `name`, is this type's required identity — that call
-  // was deliberate (a skipped item is invisible) and is not being reopened.
-  name: z.string().optional().describe('Item name — conventionally the locale code (`zh-CN`); the runtime sync falls back to it when `locale` is absent'),
+  // Named like every other metadata item: snake_case (`zh_cn`), with the BCP-47
+  // tag in `locale`. The save door's item-name grammar
+  // (`METADATA_ITEM_NAME_PATTERN`) refuses a tag-shaped name such as `zh-CN`,
+  // so this shape does not re-check it. The runtime sync still reads a
+  // tag-shaped `row.name` as a locale fallback, but only for rows stored before
+  // `locale` became required. Optional because `locale`, not `name`, is this
+  // type's required identity — that call was deliberate (a skipped item is
+  // invisible) and is not being reopened.
+  name: z.string().optional().describe('Item name — snake_case like every metadata item (e.g. `zh_cn`); the BCP-47 tag goes in `locale`'),
   label: z.string().optional().describe('Human-readable label shown in metadata lists'),
 
   // ADR-0010 — runtime protection envelope (internal — set by the loader).

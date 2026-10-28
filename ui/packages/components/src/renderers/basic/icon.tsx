@@ -12,6 +12,7 @@ import { SquareDashed } from 'lucide-react';
 import React, { forwardRef } from 'react';
 import { cn } from '../../lib/utils';
 import { describeIconLookup, resolveIcon } from '../action/resolve-icon';
+import type { RendererHostProps } from '../../lib/renderer-host-props';
 
 /**
  * The glyph rendered when the requested one does not resolve (objectui#5631).
@@ -108,7 +109,7 @@ import { describeIconLookup, resolveIcon } from '../action/resolve-icon';
 // argument — mechanism note on `action:bar` (objectui#4422), pinned by
 // `__tests__/forwardref-props-annotation.guard.test.ts`.
 const IconRenderer = forwardRef<SVGSVGElement, { schema: IconSchema; className?: string }>(
-  ({ schema, className, ...props }: { schema: IconSchema; className?: string; [key: string]: any }, ref) => {
+  ({ schema, className, ...props }: { schema: IconSchema; className?: string; [key: string]: unknown } & RendererHostProps, ref) => {
     // Extract designer-related props
     const { 
       'data-obj-id': dataObjId, 

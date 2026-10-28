@@ -873,14 +873,36 @@ export interface UIActionSchema {
    * the author's predicate and lives on the action.
    */
   disabled?: SpecAction['disabled'];
+
+  /**
+   * The reason the control gives while its declared {@link disabled} predicate
+   * is TRUE (`ActionSchema.disabledReason`, objectstack#26619): its hover title
+   * and accessible description, or a menu item's second line. Without it the
+   * renderers say "Not available for this record". Display copy only, never a
+   * condition. DERIVED from the spec: an `I18nLabel`, a string or an inline
+   * per-locale map, the renderers collapse to the active language.
+   */
+  disabledReason?: SpecAction['disabledReason'];
   
   /** Expression controlling enabled state (e.g., "hasPermission('edit')") */
   enabled?: string;
   
   // === Styling ===
   
-  /** Button variant */
-  variant?: 'default' | 'primary' | 'secondary' | 'destructive' | 'outline' | 'ghost';
+  /**
+   * Button variant — the vocabulary `@objectstack/spec`'s action block rows
+   * declare, by reference: the Button primitive's `default`, `destructive`,
+   * `outline`, `secondary`, `ghost` and `link`, plus `primary`, which renders
+   * as `default`.
+   *
+   * objectstack#26665: this is the BLOCK dialect, not the one `ActionSchema`
+   * speaks (`primary | secondary | danger | ghost | link`). The block rows
+   * refuse `danger`, so this type does too; the four block renderers translate
+   * at their forward to the runner, where `destructive` becomes `danger`
+   * (`toRunnerVariant` in `@object-ui/components`). `link` was missing here
+   * while the rows declared it: aligned, not widened.
+   */
+  variant?: SpecActionButtonProps['variant'];
   
   /**
    * Button size — the vocabulary `@objectstack/spec`'s `action:button` row

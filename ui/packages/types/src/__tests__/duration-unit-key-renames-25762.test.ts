@@ -37,7 +37,7 @@ import type { ToastSchema as ToastInterface } from '../feedback';
 import type { HoverCardSchema as HoverCardInterface, TooltipSchema as TooltipInterface } from '../overlay';
 import type { ReportComponentSchema as ReportInterface } from '../reports';
 import {
-  ActionSchema,
+  CRUDActionSchema,
   CarouselSchema,
   ChatbotEnhancedSchema,
   ChatbotFloatingSchema,
@@ -70,8 +70,8 @@ const CASES: readonly RenameCase[] = [
   { schema: ChatbotSchema, base: { type: 'chatbot', messages: [] }, at: [], retired: 'autoResponseDelay', renamed: 'autoResponseDelayMs', unit: 'milliseconds' },
   { schema: ChatbotEnhancedSchema, base: { type: 'chatbot-enhanced', messages: [] }, at: [], retired: 'autoResponseDelay', renamed: 'autoResponseDelayMs', unit: 'milliseconds' },
   { schema: ChatbotFloatingSchema, base: { type: 'chatbot-floating', messages: [] }, at: [], retired: 'autoResponseDelay', renamed: 'autoResponseDelayMs', unit: 'milliseconds' },
-  { schema: ActionSchema, base: { type: 'action', label: 'Go' }, at: [], retired: 'timeout', renamed: 'timeoutMs', unit: 'milliseconds' },
-  { schema: ActionSchema, base: { type: 'action', label: 'Go', retry: { maxAttempts: 2 } }, at: ['retry'], retired: 'delay', renamed: 'delayMs', unit: 'milliseconds' },
+  { schema: CRUDActionSchema, base: { type: 'action', label: 'Go' }, at: [], retired: 'timeout', renamed: 'timeoutMs', unit: 'milliseconds' },
+  { schema: CRUDActionSchema, base: { type: 'action', label: 'Go', retry: { maxAttempts: 2 } }, at: ['retry'], retired: 'delay', renamed: 'delayMs', unit: 'milliseconds' },
   { schema: ToastSchema, base: { type: 'toast' }, at: [], retired: 'duration', renamed: 'durationMs', unit: 'milliseconds' },
   { schema: TooltipSchema, base: { type: 'tooltip', content: 'Hi' }, at: [], retired: 'delayDuration', renamed: 'delayDurationMs', unit: 'milliseconds' },
   { schema: HoverCardSchema, base: { type: 'hover-card', ...node }, at: [], retired: 'openDelay', renamed: 'openDelayMs', unit: 'milliseconds' },

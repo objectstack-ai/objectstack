@@ -9,9 +9,10 @@
 import { ComponentRegistry } from '@object-ui/core';
 import type { KbdSchema } from '@object-ui/types';
 import { cn } from '../../lib/utils';
+import type { RendererHostProps } from '../../lib/renderer-host-props';
 
 ComponentRegistry.register('kbd', 
-  ({ schema, ...props }: { schema: KbdSchema; [key: string]: any }) => {
+  ({ schema, ...props }: { schema: KbdSchema; [key: string]: unknown } & RendererHostProps) => {
     const { 
         'data-obj-id': dataObjId, 
         'data-obj-type': dataObjType,

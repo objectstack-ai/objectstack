@@ -37,10 +37,20 @@ describe('useActionEngine', () => {
       type: 'url',
       target: '/details',
       locations: ['list_item'],
+      // @ts-expect-error `shortcut` is retired on `ActionDef` too, and for the
+      // same reason as `bulkEnabled` above: the inverse test needs metadata
+      // that still declares one. On its OWN entry rather than beside
+      // `global_nav` below: an object literal with a mistyped member is not
+      // also checked for excess members, so a directive on the second of two
+      // stale keys in one literal reports unused (TS2578) once `shortcut`
+      // stops being a declared `never` and becomes an unknown key — which it
+      // did when its spec tombstone aged out and `ActionDef` stopped
+      // mirroring it (objectstack#25767).
+      shortcut: 'ctrl+k',
     },
     {
       // Deliberately STALE, in the same posture as the `bulkEnabled` and
-      // `shortcut` keys this fixture also keeps: `global_nav` was retired from
+      // `shortcut` keys this fixture keeps on other entries: `global_nav` was retired from
       // the spec's `ACTION_LOCATIONS` in @objectstack/spec 17.0.0-rc.6
       // (objectstack#6888), so metadata like this can no longer be authored.
       // Kept rather than deleted because the coverage that matters now is the
@@ -55,10 +65,6 @@ describe('useActionEngine', () => {
       // pins it: were the location ever re-admitted to the spec, this line
       // would stop erroring and TS2578 would report the now-unused directive.
       locations: ['global_nav'],
-      // @ts-expect-error `shortcut` is retired on `ActionDef` too, and for the
-      // same reason as `bulkEnabled` above: the inverse test needs metadata
-      // that still declares one.
-      shortcut: 'ctrl+k',
     },
   ];
 

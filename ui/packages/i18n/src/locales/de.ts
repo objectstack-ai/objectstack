@@ -786,6 +786,9 @@ const de = {
     addRecord: "Datensatz hinzufügen",
     // objectui#12703 — the compact list's footer link to the object's list or the block's view.
     viewAll: "Alle anzeigen",
+    viewAllCount: "Alle {{count}} Datensätze anzeigen",
+    viewAllCount_one: "{{count}} Datensatz anzeigen",
+    viewAllCount_other: "Alle {{count}} Datensätze anzeigen",
     tabs: "Tabs",
     allRecords: "Alle Datensätze",
     userFilters: {
@@ -1787,6 +1790,7 @@ const de = {
       assistant: "Assistent",
       liveCanvas: "Live-Vorschau — {{app}} (Entwurf)",
       liveCanvasUnlisted: "Live-App — {{app}} (nicht gelistet bis zur Veröffentlichung)",
+      liveCanvasLive: "Live-App — {{app}}",
       loadingAgents: "Agenten werden geladen…",
       askAnything: "Fragen Sie irgendetwas…",
       askOrChangeApp: "Fragen Sie zu Ihren Daten oder lassen Sie mich diese App ändern…",
@@ -2533,6 +2537,9 @@ const de = {
       invitationDescription: "Verwenden Sie die E-Mail-Adresse, an die die Einladung gesendet wurde.",
       invitationSignUpButton: "Konto erstellen und beitreten",
       invitationSignInDivider: "oder mit einem bestehenden Konto anmelden",
+      invitationPreviewTitle: "{{inviter}} hat Sie eingeladen, {{organization}} beizutreten",
+      invitationPreviewTitleNoInviter: "Sie sind eingeladen, {{organization}} beizutreten",
+      invitationPreviewDescription: "Verwenden Sie die E-Mail-Adresse, an die die Einladung gesendet wurde ({{email}}).",
       showPasswordText: "Passwort anzeigen",
       hidePasswordText: "Passwort verbergen",
       footer: {
@@ -2545,6 +2552,7 @@ const de = {
       description: "Geben Sie Ihre Daten ein, um loszulegen",
       invitationTitle: "Konto erstellen, um beizutreten",
       invitationDescription: "Registrieren Sie sich mit der E-Mail-Adresse, an die die Einladung gesendet wurde. Nur mit dieser Adresse kann sie angenommen werden.",
+      invitationPreviewDescription: "Registrieren Sie sich mit der E-Mail-Adresse, an die die Einladung gesendet wurde ({{email}}). Nur mit dieser Adresse kann sie angenommen werden.",
       nameLabel: "Name",
       namePlaceholder: "Max Mustermann",
       emailLabel: "E-Mail",
@@ -2745,6 +2753,8 @@ const de = {
         dataRead: "Datensätze lesen (im Rahmen Ihrer eigenen Berechtigungen)",
         dataWrite: "Datensätze erstellen, ändern und löschen (im Rahmen Ihrer eigenen Berechtigungen)",
         actionsExecute: "Aktionen in Ihrem Namen ausführen (im Rahmen Ihrer eigenen Berechtigungen)",
+        metadataWrite: "Die Metadaten dieser App als Entwürfe erstellen und ändern (im Rahmen Ihrer eigenen Berechtigungen) – veröffentlicht werden sie von einer Person",
+        unrecognised: "Unbekannte Berechtigung: {{scope}}",
       },
       deny: "Ablehnen",
       authorize: "Autorisieren",
@@ -2881,6 +2891,7 @@ const de = {
     build: {
       title: "App erstellen",
       noCapability: "Das Erstellen von Apps ist in diesem System nicht verfügbar — es erfordert die Berechtigung „Metadaten verwalten“, die Ihr Konto nicht besitzt.",
+      inStudio: "Neu in Studio",
     },
     template: {
       title: "Mit einer Vorlage starten",
@@ -3095,6 +3106,8 @@ const de = {
     recordAccessDeniedDescription: "Sie haben keine Berechtigung, Datensätze dieses Typs anzuzeigen. Wenden Sie sich an Ihren Administrator, wenn Sie Zugriff benötigen.",
     recordLoadFailed: "Dieser Datensatz konnte nicht geladen werden",
     recordLoadFailedDescription: "Beim Laden ist etwas schiefgelaufen. Prüfen Sie Ihre Verbindung und versuchen Sie es erneut.",
+    recordAccessEnded: "Entscheidung erfasst",
+    recordAccessEndedDescription: "Ihr Genehmigungsschritt ist abgeschlossen, damit endet Ihr Zugriff auf diesen Datensatz.",
   },
   actionDialog: {
     title: "Aktionsparameter",
@@ -3693,7 +3706,7 @@ const de = {
       unknownPhase: "Unbekannte Build-Phase",
       nextStepsLead: "Als Nächstes können Sie sagen: {{steps}}",
       nextStepQuote: "„{{step}}“",
-      draftPosture: "Spätere Änderungen werden als Entwurf gespeichert, und Sie veröffentlichen sie in Studio.",
+      draftPosture: "Spätere Änderungen werden als Entwurf gespeichert; mit „Veröffentlichen“ hier im Chat gehen sie live.",
       checksPassed: "Prüfungen bestanden {{passed}}/{{total}}",
     },
     changes: {

@@ -1,8 +1,12 @@
 # @object-ui/app-shell
 
-**Minimal Application Shell for ObjectUI**
+**The ObjectOS Console's shell, views and Studio — a private workspace package**
 
-A lightweight, framework-agnostic rendering engine that enables third-party systems to integrate ObjectUI components without inheriting the full console infrastructure.
+> **Not published after 18.2.0.** This package exists to serve the ObjectOS Console
+> (`apps/console`), and a customisable console for a third-party host has no business
+> demand today, so it is `private: true` and no longer released to npm. The last published
+> version is 18.2.0, which the maintainer deprecates on npm after the 18.2 publish. Inside this
+> workspace `apps/console` and the `@object-ui/*` packages keep importing it as before.
 
 ## Purpose
 
@@ -15,9 +19,8 @@ This package provides the essential building blocks for rendering ObjectUI schem
 
 ## Installation
 
-```bash
-pnpm add @object-ui/app-shell
-```
+There is nothing to install from npm: the package is private (see above). Workspace
+consumers declare it as `"@object-ui/app-shell": "workspace:*"`.
 
 ## Requires a bundler — plain Node cannot import this package
 
@@ -196,7 +199,7 @@ reads as off, so a self-hosted admin's page load issues no request and logs no
 ## Default auth pages and the sign-up offer
 
 `DefaultLoginPage` and `DefaultRegisterPage` are the sign-in and sign-up pages
-a host mounts at `/login` and `/register` (`examples/console-starter` does).
+a host mounts at `/login` and `/register` (`apps/console` mounts its own pages there).
 They offer a generic sign-up only where the server would accept one. The
 server states that rule in two keys of `GET /api/v1/auth/config`:
 `emailPassword.disableSignUp` (the hard off switch) and
@@ -1096,15 +1099,6 @@ Third-Party App
 | Data Source | Any | ObjectStack |
 | Customization | Full control | Limited |
 
-## Examples
-
-See `examples/byo-backend-console` for a complete working example that demonstrates:
-- Custom routing with React Router
-- Custom data adapter (not ObjectStack)
-- Custom authentication
-- Cherry-picking only needed components
-- Building a console in ~100 lines of code
-
 ## Record create/edit modes
 
 The default `<DefaultAppContent>` shell mounts a global `<ModalForm>` for
@@ -1186,7 +1180,9 @@ for a longer walkthrough.
 
 When a record has approval requests, its detail page grows an **Approvals
 tab** — a peer of Details/Related with a request-count badge (#3461):
-which step the approval sits at (with the flow's step strip), the
+which step the approval sits at (with the step line of the route the
+approvals read serves for it: the steps its flow run passed, the pending one,
+then the steps ahead that the flow's graph decides), the
 server-computed decision progress (quorum tally, per-group 会签 ticks), the
 **waiting-on** approvers resolved to display names (group approvers labeled
 with their group), one chronological decision timeline merged across all of
@@ -1258,12 +1254,15 @@ Two more parts come from the same request row. A request no person submitted
 (its `submitter_id` absent or null, as the approvals get serves a request a
 flow run opened with no user context) is marked "Flow-initiated", above the
 summary; a request a person submitted carries no marker. Below the summary,
-when the owning flow has more than one approval step (`flow_steps`), the
-block draws the flow's vertical step line, done / current / upcoming, at any
-status: a decided request and a node with no progress tally draw it too. The
-line is the same stepper the record approvals panel draws, and it never
-scrolls sideways. The marker and the line's accessible name are the
-Approval Center's `approvalsInbox.*` rows.
+the block draws the vertical step line of the request's own route
+(`flow_route`, served by the approvals get) when it has more than one step,
+at any status: the steps the request's flow run passed, its own step, and,
+while it is pending, the steps ahead that the flow's graph alone decides.
+Past an undecided branch nothing is drawn. The line is the same stepper the
+record approvals panel draws, it never scrolls sideways, and it never draws
+the row's `flow_steps`, the flow graph's first branch at every decision. The
+marker and the line's accessible name are the Approval Center's
+`approvalsInbox.*` rows.
 
 ## User-scoped state (favorites, recent items)
 
@@ -1550,8 +1549,8 @@ const request: Pick<AppShellRuntimeConfig, 'hideSingleAppSwitcher'> = {
 - 📦 [npm package](https://www.npmjs.com/package/@object-ui/app-shell)
 - 📝 [Changelog](./CHANGELOG.md)
 - 🐛 [Report an issue](https://github.com/objectstack-ai/objectui/issues)
-- 🤝 [Contributing Guide](https://github.com/objectstack-ai/objectui/blob/main/CONTRIBUTING.md)
-- 🗺️ [Roadmap](https://github.com/objectstack-ai/objectui/blob/main/ROADMAP.md)
+- 🤝 [Contributing Guide](https://github.com/objectstack-ai/objectstack/blob/main/CONTRIBUTING.md)
+- 🗺️ [Roadmap](https://github.com/objectstack-ai/objectstack/blob/main/ROADMAP.md)
 
 ## License
 

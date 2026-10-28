@@ -279,8 +279,13 @@ describe('PrintService — the page (step ③)', () => {
   const invalid: Array<[string, unknown]> = [
     ['a page of another object', { ...PRINT_PAGE, object: 'account' }],
     ['a page that does not declare print', { ...PRINT_PAGE, print: undefined }],
-    ['a print page that is not the default record page', { ...PRINT_PAGE, isDefault: undefined }],
+    ['a non-default page that does not declare print', { ...PRINT_PAGE, isDefault: undefined, print: undefined }],
     ['a default page that is not a record page', { ...PRINT_PAGE, type: 'home' }],
+    ['a non-default print page that is not a record page', { ...PRINT_PAGE, type: 'app', isDefault: undefined }],
+    // The console's named record-page route reads a record page by its `type`
+    // exactly (`isRecordPageOf`), so a body that carries none is not one there.
+    ['a page that carries no type', { ...PRINT_PAGE, type: undefined, isDefault: undefined }],
+    ['a default page that carries no type', { ...PRINT_PAGE, type: undefined }],
   ];
   for (const [label, page] of invalid) {
     it(`${label}: VALIDATION_ERROR / 400, and the record is never read`, async () => {
@@ -398,6 +403,28 @@ describe('PrintService — mint, render, archive, revoke', () => {
     expect(h.assertMayAttach).toHaveBeenCalledWith('invoice', 'inv_1', USER);
     expect(h.revoke).toHaveBeenCalledTimes(1);
     expect(out).toEqual({ fileId: 'file_1', attachmentId: 'att_1', size: PDF.byteLength, filename: 'invoice_print-inv_1.pdf' });
+  });
+
+  it('a print page that is not the default record page prints on the console’s named record-page route', async () => {
+    const named = { ...PRINT_PAGE, name: 'invoice_document', isDefault: undefined };
+    const h = await harness({ page: named });
+    const out = await h.service.printRecordToFile({ ...REQUEST, page: 'invoice_document' }, USER);
+    expect(h.driver.renderPdf).toHaveBeenCalledWith({
+      url: `${CONSOLE}/apps/showcase/invoice/record/inv_1/page/invoice_document`,
+      cookie: expect.objectContaining({ value: COOKIE_VALUE }),
+      timeoutMs: PRINT_RENDER_TIMEOUT_MS,
+    });
+    expect(out.filename).toBe('invoice_document-inv_1.pdf');
+    expect(h.revoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('the default record page keeps the plain record route; every segment of the named route is encoded', async () => {
+    const h = await harness({ page: { ...PRINT_PAGE, name: 'doc/1', isDefault: false } });
+    await h.service.printRecordToFile({ ...REQUEST, recordId: 'inv 1', page: 'doc/1' }, USER);
+    expect(h.driver.renderPdf.mock.calls[0]![0].url).toBe(`${CONSOLE}/apps/showcase/invoice/record/inv%201/page/doc%2F1`);
+    const d = await harness();
+    await d.service.printRecordToFile(REQUEST, USER);
+    expect(d.driver.renderPdf.mock.calls[0]![0].url).toBe(`${CONSOLE}/apps/showcase/invoice/record/inv_1`);
   });
 
   it('the mint happens only after every refusal check, and the revoke after the archive', async () => {

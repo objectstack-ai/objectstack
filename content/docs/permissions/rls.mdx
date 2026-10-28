@@ -165,6 +165,7 @@ not this one):
 | `current_user.positions` | The user's positions (array) |
 | `current_user.org_user_ids` | User ids in the user's org (array) |
 | `current_user.email` | The user's email |
+| `current_user.KEY` | A set a roster object declares under [`membershipKeys`](/docs/references/security/rls#where-a-membership-key-comes-from) (array, read with `in`) |
 
 <Callout type="info">
 **`current_user.name` is deliberately not exposed.** Names aren't unique — a
@@ -172,9 +173,49 @@ policy keyed on a display name would hand a second "John Smith" someone else's
 rows. Match on `id` or `email`, which are.
 </Callout>
 
-Deployments can inject additional membership sets (team ids, territory codes)
-into the evaluation context, which lets policies express set membership without
-subqueries the grammar doesn't allow.
+Any other `current_user.KEY` is a **membership set**: a pre-resolved array that
+lets a policy express set membership without the subqueries the grammar doesn't
+allow. Declare it first — a `membershipKeys` entry on the **roster** object whose
+rows define the set names the user column (`userField`), the reference column
+whose values form the set (`valueField`) and an optional `filter` over the
+roster's own columns, and every policy reads the result as `current_user.KEY`:
+
+{/* os:check */}
+```typescript
+import { ObjectSchema } from '@objectstack/spec/data';
+import { definePermissionSet } from '@objectstack/spec';
+
+// Roster: one row per (portal user, account)
+export const AccountMember = ObjectSchema.create({
+  name: 'account_member',
+  sharingModel: 'private',
+  fields: {
+    user:    { type: 'user', required: true },
+    account: { type: 'lookup', reference: 'account', required: true },
+    active:  { type: 'boolean', defaultValue: true },
+  },
+  membershipKeys: {
+    portal_account_ids: { userField: 'user', valueField: 'account', filter: 'active == true' },
+  },
+});
+
+export const PortalAccess = definePermissionSet({
+  name: 'portal_user',
+  label: 'Portal User',
+  objects: { order: { allowRead: true } },
+  rowLevelSecurity: [
+    { name: 'portal_orders', object: 'order', operation: 'select', using: 'account in current_user.portal_account_ids' },
+  ],
+});
+```
+
+The set is read once per request, only when a policy reads the key, as a system
+read inside the caller's organization — the caller needs no read on the roster,
+and whoever can write roster rows can grant the key. A set no roster object
+holds (team ids, territory codes) comes from the deployment side instead: an
+installed plugin registers a membership resolver that supplies the key. A key
+both sources claim resolves from neither, and a key nothing supplies, or one
+over 1,000 values, matches no rows (fail closed).
 
 ## How policies compose
 

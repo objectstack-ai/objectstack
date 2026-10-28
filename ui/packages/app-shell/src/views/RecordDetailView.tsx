@@ -10,7 +10,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom';
-import { activityRowToFeedItem, InlineEditSaveBar, RecordMetaFooter, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, resolveTitleField, useRecordEditable } from '@object-ui/plugin-detail';
+import { activityRowToFeedItem, InlineEditSaveBar, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, resolveTitleField, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
 import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions } from '@object-ui/components';
 import { useAuth, createAuthenticatedFetch } from '@object-ui/auth';
 import { usePermissions } from '@object-ui/permissions';
@@ -19,7 +19,7 @@ import { ActionProvider, useObjectTranslation, useObjectLabel, useActionTextLoca
 import { buildExpandFields, captureUpdateUndoData, recordDelete, resolveAffordance, resolveRecordIdParamSeed, userActionPredicates, withoutDeniedFields, type AffordanceGrantPrincipal, type SchemaLike } from '@object-ui/core';
 import { toast } from 'sonner';
 import { useRecordPresence, PresenceAvatars, isCommentAuthor } from '@object-ui/collaboration';
-import { Database, ChevronLeft, Lock, AlertTriangle, RotateCw, Printer, FileText } from 'lucide-react';
+import { Database, ChevronLeft, Lock, AlertTriangle, RotateCw, Printer, FileText, CheckCircle2, Inbox } from 'lucide-react';
 import { MetadataPanel, useMetadataInspector } from './MetadataInspector.js';
 import { SkeletonDetail } from '../skeletons/index.js';
 import { ManagedByBadge, useManagedByNote } from '../components/ManagedByBadge.js';
@@ -36,6 +36,7 @@ import { withPageTabsUrlSync } from '../utils/pageTabsUrlSync.js';
 import { RECORD_DETAIL_TAB_PARAM, RECORD_TRAIL_PARAM, decodeRecordTrail, buildRecordTrailHref } from '../urlParams.js';
 import { resolveActionParams } from '@object-ui/fields';
 import { createConsoleServerActionHandler } from '../utils/consoleServerAction.js';
+import { withNewTabUrlFastPath } from '../utils/newTabUrlFastPath.js';
 import { modalTargetRefusalMessage } from '../utils/modalTargetDiagnostics.js';
 import { actionContextOrg } from '../utils/actionContextOrg.js';
 import { resolveHostAppSegment } from '../utils/appRoute.js';
@@ -809,6 +810,21 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     return buildDefaultPageSchema(objectDef as any, assignedSlots ? { slots: assignedSlots } : undefined);
   }, [assignedPage, assignedSlots, objectDef, namedPageBlocked]);
   const effectivePage = assignedPage || synthesizedPage;
+  // ─── One page at two widths (objectstack#26678) ──────────────────────
+  // The synthesized default page — and a slotted page that keeps the default
+  // tab strip — is laid out by the width of the container it occupies: three
+  // resident columns from 1280 px, two from 1024 px, the tab strip below that
+  // and whenever this view is embedded (drawer / split pane), whatever the
+  // screen. Measured on this view's root, never the viewport. An authored full
+  // page and an authored `slots.tabs` strip are drawn as authored, so they
+  // never measure. `null` until the first reading lands (a layout effect, so
+  // never painted): the page body is held for that one commit rather than
+  // mounting the tab strip only to replace it.
+  const [pageRootEl, setPageRootEl] = useState<HTMLDivElement | null>(null);
+  const pageColumnsEligible =
+    !assignedPage && !namedPageBlocked && !(assignedSlots && (assignedSlots as { tabs?: unknown }).tabs !== undefined);
+  const recordPageTier = useRecordPageTier(pageRootEl, { embedded: !!embedded, enabled: pageColumnsEligible });
+  const pageInColumnTier = recordPageTier === 'two-column' || recordPageTier === 'three-column';
   const [pageRecord, setPageRecord] = useState<any>(null);
   // 'idle' | 'loading' | 'loaded' | 'missing' | 'forbidden' | 'failed' —
   // distinguishes "haven't tried yet" from each way the read can end. The
@@ -828,14 +844,28 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // Every rejection used to land on `missing`, so a refused read told the
   // viewer the record "may have been deleted" — and they reported a lost record
   // instead of asking for access — and a transient failure looked final.
+  //   - `accessEnded` — a `missing` answer that follows this viewer's OWN
+  //     approval decision on this record (objectstack#26589, below).
   const [pageRecordStatus, setPageRecordStatus] = useState<
-    'idle' | 'loading' | 'loaded' | 'missing' | 'forbidden' | 'failed'
+    'idle' | 'loading' | 'loaded' | 'missing' | 'accessEnded' | 'forbidden' | 'failed'
   >('idle');
   // The record-load effect's own `loadRecord`, for the `failed` state's Retry
   // (objectui#11902). Held so Retry re-runs THE read the page already makes —
   // same request, same cancellation guard — rather than a second read path.
   // Cleared with the effect, so a Retry can never run a superseded load.
   const reloadPageRecordRef = useRef<(() => void) | null>(null);
+  // objectstack#26589 — the record this viewer just decided an approval on,
+  // as `objectName` + `recordId`. A pending approver with no standing access
+  // reads the record only while their step waits (objectstack#26180): the
+  // server revokes that read when the step ends, so the re-read that follows
+  // their own decision answers 404. That 404 is the read ENDING, not a lost
+  // record, and the load below draws `accessEnded` for it, not "Record not
+  // found". Only `handleApprovalActionDone` sets it, so any 404 that does not
+  // follow this viewer's decision on THIS record is still `missing`: the load
+  // compares it with the record it reads, so a move to another record never
+  // inherits it. Cleared by a read that answers the record (a viewer with
+  // standing access keeps reading it).
+  const decidedRecordRef = useRef<string | null>(null);
 
   // Permissions context.
   //
@@ -919,6 +949,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       setPageRecordStatus('idle');
       return;
     }
+    const decidedKey = `${objectName}:${pureRecordId}`;
     const expandFields: string[] = JSON.parse(pageRecordExpand);
     const params = expandFields.length > 0 ? { $expand: expandFields } : undefined;
     const loadRecord = () => {
@@ -930,11 +961,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         .then((rec: any) => {
           if (cancelled) return;
           if (rec && typeof rec === 'object') {
+            decidedRecordRef.current = null;
             setPageRecord(rec);
             setPageRecordStatus('loaded');
           } else {
             setPageRecord(null);
-            setPageRecordStatus('missing');
+            setPageRecordStatus(decidedRecordRef.current === decidedKey ? 'accessEnded' : 'missing');
           }
         })
         .catch((err: unknown) => {
@@ -1566,6 +1598,16 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     [authFetch],
   );
 
+  // The registered `api` handler: {@link apiHandler}, except that an action
+  // declaring `opensInNewTab` + `newTabUrl` takes the server-action handler's
+  // zero-roundtrip new-tab path against THIS page's record, sending no request
+  // — from the header and its more-menu alike (objectstack#26747). Same
+  // composition as `useConsoleActionRuntime`.
+  const apiActionHandler = useMemo(
+    () => withNewTabUrlFastPath(apiHandler, serverActionHandler),
+    [apiHandler, serverActionHandler],
+  );
+
   /**
    * `type: 'modal'` dispatch — same rule as the shared console runtime (see
    * `useConsoleActionRuntime.modalActionHandler`): CLIENT-SIDE ONLY. The
@@ -1737,10 +1779,15 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // engine-written mirrors (`approval_status`, stage fields) change with the
   // decision. `refreshAfter: true` on every declared decision action is what
   // calls this.
+  //
+  // objectstack#26589 — it also marks this record as the one this viewer just
+  // decided, BEFORE the re-read goes out, so a 404 that re-read answers draws
+  // the ended-access state instead of "Record not found".
   const handleApprovalActionDone = useCallback(() => {
+    if (objectName && pureRecordId) decidedRecordRef.current = `${objectName}:${pureRecordId}`;
     void approvalsRef.current.refresh();
     notifyRecordChanged();
-  }, [notifyRecordChanged]);
+  }, [notifyRecordChanged, objectName, pureRecordId]);
 
   // Discover reverse references: other objects with lookup/master_detail fields
   // pointing to the current object (e.g., order_item.order → order).
@@ -2008,9 +2055,14 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     () => (feedsEnabled ? effectivePage : stripDiscussionNodes(effectivePage)),
     [feedsEnabled, effectivePage],
   );
+  // In a column tier the page has no tab strip: every block it composes is
+  // on screen at open, so a feed block anywhere in it is (objectstack#26678).
   const feedConsumerOnScreen = useMemo(
-    () => feedPage != null && pageShowsNodeOnOpen(feedPage, FEED_CONSUMER_TYPES, activeTabParam),
-    [feedPage, activeTabParam],
+    () =>
+      feedPage != null
+      && ((pageInColumnTier && buildDefaultPageColumns(feedPage) !== null)
+        || pageShowsNodeOnOpen(feedPage, FEED_CONSUMER_TYPES, activeTabParam)),
+    [feedPage, activeTabParam, pageInColumnTier],
   );
   const [feedConsumerShown, setFeedConsumerShown] = useState(false);
   // Recorded during render, React's pattern for state derived from an earlier
@@ -2058,9 +2110,14 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       history: { entries: [] },
     });
   }, [historyEnabled, assignedPage, namedPageBlocked, objectDef, assignedSlots]);
+  // In a column tier History is a resident block of the timeline column, so
+  // its read goes out at open (objectstack#26678).
   const historyConsumerOnScreen = useMemo(
-    () => historyPage != null && pageShowsNodeOnOpen(historyPage, HISTORY_CONSUMER_TYPES, activeTabParam),
-    [historyPage, activeTabParam],
+    () =>
+      historyPage != null
+      && ((pageInColumnTier && buildDefaultPageColumns(historyPage) !== null)
+        || pageShowsNodeOnOpen(historyPage, HISTORY_CONSUMER_TYPES, activeTabParam)),
+    [historyPage, activeTabParam, pageInColumnTier],
   );
   const [historyConsumerShown, setHistoryConsumerShown] = useState(false);
   if (historyConsumerOnScreen && !historyConsumerShown) setHistoryConsumerShown(true);
@@ -3321,6 +3378,39 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     );
   }
 
+  // objectstack#26589 — the read ended with this viewer's own approval
+  // decision: the step that granted it is over (objectstack#26180 revokes it
+  // then), so say the decision landed and where their work continues, never
+  // that the record does not exist. The read is not kept any longer; the
+  // inbox link is the way on.
+  if (pageRecordStatus === 'accessEnded') {
+    return (
+      <div className="flex h-full items-center justify-center p-4">
+        <Empty data-testid="record-access-ended">
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+            <CheckCircle2 className="h-6 w-6 text-muted-foreground" />
+          </div>
+          <EmptyTitle>{t('empty.recordAccessEnded', { defaultValue: 'Decision recorded' })}</EmptyTitle>
+          <EmptyDescription>
+            {t('empty.recordAccessEndedDescription', {
+              defaultValue: 'Your approval step is complete, so your access to this record has ended.',
+            })}
+          </EmptyDescription>
+          {appName && (
+            <div className="mt-4">
+              <Button asChild variant="outline" size="sm">
+                <Link to={`/apps/${appName}/system/approvals`} data-testid="record-access-ended-inbox">
+                  <Inbox className="mr-1.5 h-4 w-4" />
+                  {t('notifications.openApprovalsInbox', { defaultValue: 'Open Approvals Inbox' })}
+                </Link>
+              </Button>
+            </div>
+          )}
+        </Empty>
+      </div>
+    );
+  }
+
   // objectui#11902 — a REFUSED read. The refusal is about the object, not this
   // record, so the copy names the object and never implies the record exists:
   // it shows no more than the server's own 403 already says (objectstack#8013).
@@ -3633,6 +3723,13 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // that tree would double-render the panel (tab + bottom fallback).
   const hasApprovalsNode = hasExplicitApprovals(renderedPage as any);
 
+  // objectstack#26678 — the page as its column tier draws it: the record
+  // header, then details | timeline | related, read off `renderedPage` itself
+  // so the columns hold exactly the blocks the tab strip would (pruning
+  // included). `null` in the tabbed tier, and for a page whose strip the
+  // partition cannot read, which then keeps its tabs.
+  const pageColumns = pageInColumnTier ? buildDefaultPageColumns(renderedPage) : null;
+
   // objectui#11958 (card ② of the objectstack#8346 ruling, M1, zero server) —
   // the record page's "print" action. The page this view renders for the
   // record is the page bound to it, and when that page declares `print` it is
@@ -3662,7 +3759,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   );
 
   return (
-    <div className="h-full bg-background overflow-hidden flex flex-col relative">
+    <div ref={setPageRootEl} className="h-full bg-background overflow-hidden flex flex-col relative" data-record-page-root="">
       {/* On a print page the shared chrome joins the print chrome row below,
           so the row's buttons are not drawn under it. */}
       {!pageDeclaresPrint && (
@@ -3787,7 +3884,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           onParamCollection={paramCollectionHandler}
           onResultDialog={resultDialogHandler}
           onModal={modalHandler}
-          handlers={{ api: apiHandler, flow: flowHandler, script: serverActionHandler, modal: modalActionHandler }}
+          handlers={{ api: apiActionHandler, flow: flowHandler, script: serverActionHandler, modal: modalActionHandler }}
         >
           <div className="flex-1 overflow-hidden flex flex-row">
             <div className="flex-1 overflow-auto p-3 sm:p-4 lg:p-6 scroll-pb-48">
@@ -3896,7 +3993,25 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                 parentRecord={pageRecord}
                 parentObjectFields={predicateFields}
               >
-                <SchemaRenderer schema={withPageTabsUrlSync(renderedPage, { defaultTab: activeTabParam, onTabChange: handleTabChange }) as any} />
+                {/* objectstack#26678 — the column tiers draw the same page's
+                    blocks as resident columns; `?tab=` addresses the strip,
+                    so it is read in the tabbed tier only. Nothing is drawn
+                    while the tier is unmeasured (one unpainted commit). */}
+                {pageColumns && (recordPageTier === 'two-column' || recordPageTier === 'three-column') ? (
+                  <RecordPageColumns
+                    tier={recordPageTier}
+                    columns={pageColumns}
+                    footer={
+                      <RecordMetaFooter
+                        data={readablePageRecord}
+                        objectSchema={objectDef}
+                        objectName={objectName}
+                      />
+                    }
+                  />
+                ) : recordPageTier === null ? null : (
+                  <SchemaRenderer schema={withPageTabsUrlSync(renderedPage, { defaultTab: activeTabParam, onTabChange: handleTabChange }) as any} />
+                )}
               </RelatedRecordActionsBridge>
               {/* Approval visibility fallback (objectui#3461) — synthesized
                   pages surface approvals as a TAB (`record:approvals` via
@@ -3940,11 +4055,14 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   so it does not move with the active tab. `readablePageRecord`
                   is the row every block on the page reads, and the footer
                   renders nothing when the record carries no audit field. */}
-              <RecordMetaFooter
-                data={readablePageRecord}
-                objectSchema={objectDef}
-                objectName={objectName}
-              />
+              {/* In a column tier the columns draw it (objectstack#26678). */}
+              {!pageColumns && (
+                <RecordMetaFooter
+                  data={readablePageRecord}
+                  objectSchema={objectDef}
+                  objectName={objectName}
+                />
+              )}
               {/* Record-level inline-edit Save/Cancel bar (objectui#2407 P2) —
                   commits the whole draft (highlights + body) in ONE atomic OCC
                   update; renders (sticky) only while editing. */}

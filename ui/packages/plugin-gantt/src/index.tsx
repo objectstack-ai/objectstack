@@ -129,8 +129,8 @@ export const ObjectGanttRenderer: React.FC<{ schema: any }> = elementDataSourceB
 const OBJECT_GANTT_NAVIGATION_DESCRIPTION =
   'What a task click opens — the `{ mode, size, openNewTab, preventNavigation }` block a list view declares. '
   + 'With the key ABSENT a click opens the task\'s record in a drawer, this renderer\'s own default. '
-  + '`mode` is an overlay (`drawer`, `modal`, `split`, `popover`), `new_window`, `page` or `none`, and a block written without `mode` takes the spec\'s `page` default. '
-  + '`drawer`, `modal` and `popover` open the task\'s record in that overlay, and `split` opens it beside the chart, which stays drawn; `none` opens nothing. '
+  + '`mode` is `drawer` (the overlay), `new_window`, `page` or `none`, and a block written without `mode` takes the spec\'s `drawer` default. '
+  + '`drawer` opens the task\'s record in the drawer; `none` opens nothing. '
   + '`page` opens the task\'s record page in the same tab and `new_window` opens it in a new tab. '
   + 'The gantt builds that address itself from the page it is on and does not use a record navigator the host publishes, so a host that publishes one changes nothing: '
   + 'on the object\'s own list or view route (`…/OBJECT/view/VIEW`) the address is the record page `…/OBJECT/record/ID`, while on any other page, such as a custom page, `/OBJECT/record/ID` is appended to the current address. '

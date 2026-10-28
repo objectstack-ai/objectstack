@@ -392,6 +392,13 @@ export async function findFileHolder(
   return hasFieldReferenceOwner(row) ? 'field-owner' : null;
 }
 
+/** Who {@link findFileHolder} found, in words an operator can look up. */
+function describeHolder(holder: Exclude<FileHolder, null>, row: Record<string, unknown>): string {
+  if (holder === 'attachment') return 'an attachment (a sys_attachment row)';
+  const field = row.ref_field != null && row.ref_field !== '' ? `.${String(row.ref_field)}` : '';
+  return `the record ${String(row.ref_object)}/${String(row.ref_id)}${field}`;
+}
+
 /**
  * The BATCHED form of {@link findFileHolder} — "which of these files is still
  * held?" — for callers holding many rows at once (commit c3c72a4bc).
@@ -582,7 +589,12 @@ async function tombstoneRefusedAttachFile(
  * (bytes reclaimed first) or vetoed (kept this sweep):
  *
  *  - `pending`: the upload was never completed; bytes may or may not exist.
- *    Best-effort byte delete, then confirm.
+ *    The same hold question first ({@link findFileHolder}): a record write
+ *    could once claim a pending file, and a system write still does (the seed
+ *    loader writes the record before `claimFiles` commits the row), so a held
+ *    pending row is the only pointer to bytes a record names. Held → veto and
+ *    warn, leaving it `pending`: committing it here would skip the byte check
+ *    `/upload/complete` makes. Unheld → best-effort byte delete, then confirm.
  *  - `deleted`: re-verify at sweep time that nothing holds the file on
  *    EITHER surface — zero `sys_attachment` join rows AND empty ownership
  *    columns (`ref_*`). Either found (hook bypass, restore, re-claim) →
@@ -636,11 +648,22 @@ export function createSysFileReapGuard(
 
       if (row.status === 'pending') {
         try {
+          const holder = await findFileHolder(engine, id, row);
+          if (holder) {
+            logger.warn(
+              `[storage] reap guard: kept pending sys_file ${id} past the pending-upload retention — ` +
+                `${describeHolder(holder, row)} still holds it, but its upload was never completed, so the ` +
+                `bytes were never checked against what the upload declared and downloads refuse it. Its ` +
+                `uploader completes it with POST /api/v1/storage/upload/complete; a record that lets go of ` +
+                `it hands it back to this sweep. Repeated each sweep until one of the two happens.`,
+            );
+            continue;
+          }
           if (storage && typeof row.key === 'string' && row.key) await storage.delete(row.key);
           confirmed.push(id);
         } catch (err) {
           logger.warn(
-            `[storage] reap guard: byte delete failed for pending sys_file ${id} (${(err as Error)?.message ?? err}); retrying next sweep`,
+            `[storage] reap guard: reclaim failed for pending sys_file ${id} (${(err as Error)?.message ?? err}); retrying next sweep`,
           );
         }
         continue;

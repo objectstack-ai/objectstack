@@ -1,6 +1,6 @@
 # ADR-0091: Grant lifecycle — effective-dated assignments, delegation, break-glass, recertification substrate
 
-- **Status:** Accepted
+**Status**: Accepted
   · **Amended** (2026-10-14, [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D3/D13): `sys_position_permission_set`, which D1 and the non-goals leave undated, and the `sys_position` row L2 adds `delegatable` to, are retired by #15204 stage 8 (`66949b7729`, 2026-10-13); a position's sets and its `delegatable` flag are its metadata-registry definition. D1's dated assignment rows stand.
 - **Date:** 2026-07-09 (proposed) · 2026-07-10 (accepted)
 - **Deciders:** jack@objectstack.ai

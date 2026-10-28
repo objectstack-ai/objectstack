@@ -73,24 +73,17 @@ dev 工作树、dev-server 端口、preview 浏览器全是**共享的**:并行�
 - [ ] ⚠️ **消融的 mutate 腿与 restore 腿都要重建 —— 但那条规则不是 dogfood 专属**:
       判据、preflight 与两次实测住在 `.claude/agents/os-dev.md`;⛔ 这里不留第二份拷贝。
 - [ ] `dist/` 已 gitignore —— 安全;永不提交构建产物。
-- [ ] **`/_console` UI 是 *vendored objectui 构建*,与框架 `dist` 是两回事。** 它由
-      `.objectui-sha` 钉住、按预构建 bundle 提供。已合并的 objectui 修复 —— *甚至
-      bump 过的 `.objectui-sha`* —— 在 vendored console 重建之前**不会活在 :3000
-      上**:运行中的服务器继续提供旧构建产物(BUILD 陈旧 ≠ PIN 陈旧)。所以**在宣布
-      :3000/_console 上发现 console/Studio UI 缺陷之前,先对当前 objectui 源码或全新
-      构建核一遍** —— vendored bundle 可能是旧的,缺陷可能上游已修。最快的权威核验 =
-      objectui 的 HMR console 指向你的服务器:
+- [ ] **`/_console` UI 是 *Console 构建*,与框架包的 `dist` 是两回事。** 它由
+      仓库根目录的 `pnpm console:build` 从 `ui/apps/console` 构建,拷进 `packages/console/dist`。
+      `ui/` 下已合并的修复在 Console 重建之前**不会活在 :3000 上**:运行中的服务器继续
+      提供旧构建产物。所以**在宣布 :3000/_console 上发现 console/Studio UI 缺陷之前,先
+      对当前 `ui/` 源码或全新构建核一遍** —— 构建可能是旧的,缺陷可能已修。最快的权威
+      核验 = `ui/` 的 HMR console 指向你的服务器:
       `VITE_SERVER_URL=http://localhost:<port> DEV_PROXY_TARGET=http://localhost:<port> pnpm --filter @object-ui/console dev`
       (独立 origin → 需要它自己的 `admin@objectos.ai/admin123` 登录)。跳过这步曾在
-      一个 objectui main 已修掉的 action-create 死路上白付一整圈 spawn-a-fix。
-- [ ] **漂移的构建不再静默启动(#7752)。** `build-console.sh` 把它构建所用的 SHA 盖
-      进 `packages/console/dist/.objectui-sha`;当这个章与仓库的 `.objectui-sha` pin
-      不一致时,`os dev` **拒绝挂载 `/_console`** 并打印补救 —— `/_console/` 404,横
-      幅不再宣传 console URL。那是要修的前置条件,不是产品缺陷:跑
-      **`pnpm objectui:build`**(在*钉住的* SHA 上重建 —— `objectui:refresh` 会把
-      pin 重新 bump 到你本地 `../objectui` 的 HEAD)再重启。`pnpm check:console-sha`
-      不启动也能报同一比较。`OS_ALLOW_CONSOLE_DRIFT=1` 是故意启动陈旧 bundle —— 那之
-      后你做的每个 console 观察,描述的都是一个仓库没有钉住的 commit。
+      一个上游已修掉的 action-create 死路上白付一整圈 spawn-a-fix。
+- [ ] **构建新鲜度由你自核。** `pnpm console:build` 产出的 dist 不盖 SHA 章,`os dev`
+      无从判定它是否陈旧,照常挂载 `/_console`;改过 `ui/` 就先在仓库根目录重建再观察。
 
 ## 3. 核验 —— 视觉 / API 先行,DOM 殿后(防误报规则)
 
@@ -104,8 +97,7 @@ dev 工作树、dev-server 端口、preview 浏览器全是**共享的**:并行�
 - [ ] **门的两侧都要测**:`requiresService`/`requiresObject`/权限门要在依赖存在*与*
       缺席两种状态下各验一次。
 - [ ] 服务端是权威可见性门(ADR-0124 D1)—— 客户端过滤只是「礼貌」。元数据开关不改
-      UI 时,先查强制在服务端(框架,可在本仓修)还是客户端(objectui console,另一
-      个仓)。
+      UI 时,先查强制在服务端(框架)还是客户端(`ui/` 的 console);两边都在本仓修。
 - [ ] 用 `preview_screenshot`(API 改动用 `preview_network`)向用户证明;loading
       spinner / 异步数据状态要显式写明,而不是声称你没等到的最终值。
 

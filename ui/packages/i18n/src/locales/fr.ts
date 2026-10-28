@@ -808,6 +808,10 @@ const fr = {
     addRecord: "Ajouter un enregistrement",
     // objectui#12703 — the compact list's footer link to the object's list or the block's view.
     viewAll: "Tout afficher",
+    viewAllCount: "Voir les {{count}} enregistrements",
+    viewAllCount_one: "Voir {{count}} enregistrement",
+    viewAllCount_many: "Voir les {{count}} d'enregistrements",
+    viewAllCount_other: "Voir les {{count}} enregistrements",
     tabs: "Onglets",
     allRecords: "Tous les enregistrements",
     userFilters: {
@@ -1832,6 +1836,7 @@ const fr = {
       assistant: "Assistant",
       liveCanvas: "Aperçu en direct — {{app}} (brouillon)",
       liveCanvasUnlisted: "Application en direct — {{app}} (non répertoriée jusqu'à publication)",
+      liveCanvasLive: "Application en direct — {{app}}",
       loadingAgents: "Chargement des agents…",
       askAnything: "Posez n'importe quelle question…",
       askOrChangeApp: "Posez une question sur vos données ou demandez-moi de modifier cette app…",
@@ -2583,6 +2588,9 @@ const fr = {
       invitationDescription: "Utilisez l'adresse e-mail à laquelle l'invitation a été envoyée.",
       invitationSignUpButton: "Créer un compte et rejoindre",
       invitationSignInDivider: "ou connectez-vous à un compte existant",
+      invitationPreviewTitle: "{{inviter}} vous invite à rejoindre {{organization}}",
+      invitationPreviewTitleNoInviter: "Vous êtes invité à rejoindre {{organization}}",
+      invitationPreviewDescription: "Utilisez l'adresse e-mail à laquelle l'invitation a été envoyée ({{email}}).",
       showPasswordText: "Afficher le mot de passe",
       hidePasswordText: "Masquer le mot de passe",
       footer: {
@@ -2595,6 +2603,7 @@ const fr = {
       description: "Entrez vos informations pour commencer",
       invitationTitle: "Créez un compte pour rejoindre",
       invitationDescription: "Inscrivez-vous avec l'adresse e-mail à laquelle l'invitation a été envoyée. Elle ne peut être acceptée qu'avec cette adresse.",
+      invitationPreviewDescription: "Inscrivez-vous avec l'adresse e-mail à laquelle l'invitation a été envoyée ({{email}}). Elle ne peut être acceptée qu'avec cette adresse.",
       nameLabel: "Nom",
       namePlaceholder: "Jean Dupont",
       emailLabel: "E-mail",
@@ -2795,6 +2804,8 @@ const fr = {
         dataRead: "Lire des enregistrements (dans la limite de vos propres autorisations)",
         dataWrite: "Créer, modifier et supprimer des enregistrements (dans la limite de vos propres autorisations)",
         actionsExecute: "Exécuter des actions en votre nom (dans la limite de vos propres autorisations)",
+        metadataWrite: "Créer et modifier les métadonnées de cette application sous forme de brouillons (dans la limite de vos propres autorisations) — une personne les publie",
+        unrecognised: "Autorisation non reconnue : {{scope}}",
       },
       deny: "Refuser",
       authorize: "Autoriser",
@@ -2931,6 +2942,7 @@ const fr = {
     build: {
       title: "Créer une application",
       noCapability: "La création d'applications n'est pas disponible dans ce système : elle requiert l'autorisation « Gérer les métadonnées », que votre compte ne possède pas.",
+      inStudio: "Nouveau dans Studio",
     },
     template: {
       title: "Partir d'un modèle",
@@ -3149,6 +3161,8 @@ const fr = {
     recordAccessDeniedDescription: "Vous n'avez pas la permission de consulter les enregistrements de ce type. Contactez votre administrateur si vous pensez devoir y accéder.",
     recordLoadFailed: "Impossible de charger cet enregistrement",
     recordLoadFailedDescription: "Une erreur s'est produite lors du chargement. Vérifiez votre connexion et réessayez.",
+    recordAccessEnded: "Décision enregistrée",
+    recordAccessEndedDescription: "Votre étape d'approbation est terminée : votre accès à cet enregistrement a pris fin.",
   },
   actionDialog: {
     title: "Paramètres d'action",
@@ -3760,7 +3774,7 @@ const fr = {
       unknownPhase: "Phase de création inconnue",
       nextStepsLead: "Ensuite, vous pouvez dire : {{steps}}",
       nextStepQuote: "« {{step}} »",
-      draftPosture: "Les modifications suivantes sont enregistrées comme brouillons, et vous les publiez dans Studio.",
+      draftPosture: "Les modifications suivantes sont enregistrées comme brouillons ; publiez-les avec « Publier » ici, dans le chat.",
       checksPassed: "Vérifications réussies {{passed}}/{{total}}",
     },
     changes: {

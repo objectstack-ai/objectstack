@@ -16,9 +16,12 @@
 //
 // Mirrors scripts/check-role-word.mjs. Fails when:
 //   • an example config is not in the baseline (translate it, or ratchet it in), or
-//   • a baselined count INCREASES — a newly untranslated declared string, or
-//   • a baselined count DECREASED / the example vanished (improvement!) —
-//     run with --update to ratchet down and commit the baseline.
+//   • a baselined count INCREASES — a newly untranslated declared string.
+//
+// It is ONE-SIDED (#26444): a baselined count that DECREASED, or a config that
+// vanished, PASSES and is reported — deleting an example or translating its
+// strings must not red a PR that never touched this gate. Until `--update`
+// writes the lower count down, the old number stays that config's ceiling.
 //
 //   node scripts/check-i18n-coverage.mjs [--update]
 //   node scripts/check-i18n-coverage.mjs --self-test  # prove the classifiers go red
@@ -116,8 +119,8 @@
 //     exit 0
 //
 // — the same sentence, and the same exit code, a real pass uses. What makes that
-// silent rather than merely wrong is an INTERLOCK: this is a two-sided ratchet, so
-// a config that vanishes is normally caught by the DOWN direction ("baselined
+// silent rather than merely wrong is an INTERLOCK: this was a two-sided ratchet, so
+// a config that vanished was normally caught by the DOWN direction ("baselined
 // config is gone"). But the population and the baseline were resolved the same
 // way, so a wrong root emptied them TOGETHER and left the comparison with nothing
 // to disagree about. Anchoring one side alone would not have been a fix — it would
@@ -178,10 +181,12 @@
 // finished — but the exposure is forward-looking, not closed: `app-crm` (5) and
 // `app-todo` (4) rule messages, plus `bulkActions` (18) and `datasets` (62), are
 // untranslated populations nobody is currently working, and a PR that starts
-// walking any of them will race this gate the same way. It fails safe either
+// walking any of them will race this gate the same way. It failed safe either
 // direction — the DOWN-direction remedy below is what caught both collisions — so
-// the cost is latency and re-derive rounds, not correctness; that is why the fix
-// here is one sentence in that remedy, not a mechanism.
+// the cost was latency and re-derive rounds, not correctness; that is why the fix
+// here is one sentence in that remedy, not a mechanism. Since the ratchet went
+// one-sided (#26444) only the UP half of such a race costs a round: a count that
+// moved DOWN underneath a PR is reported, and passes.
 import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync, writeFileSync, existsSync, openSync, closeSync, unlinkSync } from 'node:fs';
 import { dirname, join, posix, relative, resolve } from 'node:path';
@@ -222,11 +227,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'The build-prerequisite CLOSURE (#12564). What makes the remedy worth naming': 15,
   'The prerequisite refusal CLASS, and the advisory that names it (#14857).': 23,
   'The dispatch-gates declaration (#21011): the example configs and the trees they import': 10,
+  'The ratchet is ONE-SIDED: a decrease passes and is reported (#26444)': 6,
+  'A dead scan is refused, not reported as a decrease (#26444)': 6,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 6;
+const SELF_TEST_BATTERY_FLOOR = 8;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -556,8 +563,8 @@ function packageNameFromSpecifier(specifier) {
  * listing on the same grounds — "zero is a broken scan, not a clean repo".
  *
  * Judged on the UNION, deliberately, not per half. A single vanished config is
- * already this gate's business: the two-sided ratchet reports it as a DOWN and
- * tells the reader to `--update`. Refusing on an empty HALF would preempt that
+ * already this gate's business: the ratchet reports it as a DOWN (passing, since
+ * #26444) and tells the reader to `--update`. Refusing on an empty HALF would preempt that
  * legitimate path — the last example being retired is a real event, not a broken
  * scan. Only a total wipe is indistinguishable from a scan that read nothing, and
  * only a total wipe is refused here.
@@ -577,8 +584,8 @@ function emptyPopulationVerdict(configPaths) {
       `  ${REPO_ROOT}`,
       ``,
       `Zero is a broken scan, not a repo with nothing to translate (#4690). Note what`,
-      `an empty population costs THIS gate specifically: it is a two-sided ratchet, so`,
-      `a config that really did vanish is caught by the DOWN direction — but the`,
+      `an empty population costs THIS gate specifically: its DOWN direction reports`,
+      `a config that really did vanish, and passes — and the`,
       `population and the baseline are read the same way, so a tree this script cannot`,
       `read empties BOTH, leaving the comparison with nothing to disagree about and a`,
       `verdict identical to a real pass. Refusing rather than reporting OK over nothing.`,
@@ -746,6 +753,98 @@ function measureAllConfigs(configPaths, measure) {
 // as one that passed (#13798).
 const SELF_TEST_VERDICT = 'check-i18n-coverage self-test reached its verdict';
 
+/**
+ * The ratchet comparison, as a pure function of the baseline and the measured
+ * counts, so `--self-test` drives both directions (#26444). ONE-SIDED: a config
+ * not in the baseline, or a grown count, is an error; a vanished config or a
+ * fallen count is a REPORT that leaves the verdict green.
+ *
+ * @param {Record<string, number>} baseline
+ * @param {Record<string, number>} current
+ * @returns {{ errors: string[], down: string[] }}
+ */
+function ratchetVerdict(baseline, current) {
+  const errors = [];
+  const down = [];
+  for (const [file, count] of Object.entries(current)) {
+    const allowed = baseline[file];
+    if (allowed === undefined) {
+      errors.push(
+        `${file}: not baselined (${count} untranslated declared string(s)). ` +
+          `Translate them, or run \`node scripts/check-i18n-coverage.mjs --update\` to freeze the debt.`,
+      );
+    } else if (count > allowed) {
+      errors.push(
+        `${file}: untranslated declared strings grew ${allowed} → ${count}. ` +
+          `Something declared a label without translating it for a locale this example claims to support ` +
+          `(see \`i18n.supportedLocales\`). Run \`node scripts/check-i18n-bundles.mjs --write\` to scaffold the new keys, then translate them; \`os lint ${file}\` lists them.`,
+      );
+    }
+  }
+  for (const [file, allowed] of Object.entries(baseline)) {
+    const now = current[file];
+    if (now === undefined) {
+      down.push(
+        `${file}: baselined config is gone (was ${allowed}). Passing; ` +
+          `\`node scripts/check-i18n-coverage.mjs --update\` drops the entry.`,
+      );
+    } else if (now < allowed) {
+      down.push(
+        `${file}: untranslated declared strings improved ${allowed} → ${now}. Passing; until ` +
+          `\`node scripts/check-i18n-coverage.mjs --update\` records it, ${allowed} stays this config's ceiling. ` +
+          `If you did not touch this population, merge \`origin/main\` first — the movement is probably not yours.`,
+      );
+    }
+  }
+  return { errors, down };
+}
+
+/**
+ * The dead-scan refusal the one-sided ratchet needs (#26444). Two-sided, a
+ * round that lost configs, or whose content classifier went blind, redded
+ * through the DOWN direction; one-sided, both read as decreases. So:
+ *
+ *   - a baselined config still ON DISK that the round did not measure is
+ *     refused (a deleted config is not on disk, and passes);
+ *   - every measured config falling to ZERO in one round while the ledger still
+ *     held strings for them is refused. That is the shape of `os lint` renaming
+ *     its `i18n/` rules or the classifier no longer matching them — the pins on
+ *     `countI18nRuleIssues` hold the classifier against a recorded report, and
+ *     this holds it against the live CLI. A real last-string sweep is still
+ *     possible: `--update` writes the zeros, and an all-zero ledger disarms it.
+ *
+ * Pure, with `exists` injected for the self-test. Returns the text, or null.
+ *
+ * @param {Record<string, number>} baseline
+ * @param {Record<string, number>} current
+ * @param {(path: string) => boolean} [exists]
+ * @returns {string | null}
+ */
+function deadScanProblem(baseline, current, exists = (p) => existsSync(at(p))) {
+  const unmeasured = Object.keys(baseline).filter((k) => !(k in current) && exists(k)).sort();
+  if (unmeasured.length > 0) {
+    return (
+      `check-i18n-coverage: ${unmeasured.length} baselined config(s) are still on disk but this round did ` +
+        `not measure them — ${unmeasured.join(', ')}. Discovery lost part of its population; since the ` +
+        'ratchet went one-sided (#26444) a config that drops out would otherwise pass as a decrease. ' +
+        'If the narrowing is deliberate, `node scripts/check-i18n-coverage.mjs --update` records it.'
+    );
+  }
+  const shared = Object.keys(current).filter((k) => k in baseline);
+  const before = shared.reduce((n, k) => n + baseline[k], 0);
+  const now = shared.reduce((n, k) => n + current[k], 0);
+  if (before > 0 && now === 0) {
+    return (
+      `check-i18n-coverage: every measured config reads 0 untranslated string(s) against ${before} in the ` +
+        'baseline. All of them vanishing in one round is the shape of the `i18n/` rules being renamed in ' +
+        '`os lint` or the content classifier no longer matching them, and since the ratchet went one-sided ' +
+        '(#26444) it would otherwise pass as a decrease. If every string really is translated, ' +
+        '`node scripts/check-i18n-coverage.mjs --update` records the zeros.'
+    );
+  }
+  return null;
+}
+
 async function selfTest() {
   // The battery ledger this self-test's floor is evaluated against (#13489).
   // `battery()` opens a battery; every assertion below is attributed to the one
@@ -831,10 +930,12 @@ async function selfTest() {
     `an unreadable oclif block must yield a reason, not a guessed path; got ${JSON.stringify(undeclaredTarget)}`,
   );
 
-  // The content classifier. Its silent-failure mode is narrower than the
-  // prerequisite's — a classifier that stopped matching would drive every count
-  // to 0 and the ratchet's DOWN direction fails on that — but the `i18n/` prefix
-  // is a contract with `os lint --json`, so pin it rather than infer it.
+  // The content classifier. A classifier that stopped matching would drive every
+  // count to 0. Since the ratchet went one-sided (#26444) its DOWN direction
+  // REPORTS a fall rather than failing on it, so a live collapse to zero is
+  // refused by `deadScanProblem` and these pins hold the classifier against a
+  // recorded report. The `i18n/` prefix is a contract with `os lint --json`, so
+  // pin it rather than infer it.
   expect('#5862 counts i18n rules', countI18nRuleIssues(REAL_LINT_REPORT) === 2, `got ${countI18nRuleIssues(REAL_LINT_REPORT)}`);
   expect(
     '#5862 ignores other rules',
@@ -1322,6 +1423,54 @@ async function selfTest() {
   // body, where the extractor's self-test mask blanks the specifier, so the
   // import adds nothing to the population this file declares.
   // -------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // The ratchet is ONE-SIDED (#26444): a decrease passes and is reported, an
+  // increase still fails — driven through the same comparison the program runs.
+  // -------------------------------------------------------------------------
+  battery('The ratchet is ONE-SIDED: a decrease passes and is reported (#26444)');
+  {
+    const ledger = { 'examples/a/objectstack.config.ts': 4, 'examples/b/objectstack.config.ts': 1 };
+    const same = ratchetVerdict(ledger, { ...ledger });
+    expect('#26444 unchanged counts: no error, no report', same.errors.length === 0 && same.down.length === 0,
+      `got ${JSON.stringify(same)}`);
+    const fell = ratchetVerdict(ledger, { 'examples/a/objectstack.config.ts': 2, 'examples/b/objectstack.config.ts': 1 });
+    expect('#26444 a fallen count PASSES and is reported once', fell.errors.length === 0 && fell.down.length === 1,
+      `got ${JSON.stringify(fell)}`);
+    const gone = ratchetVerdict(ledger, { 'examples/a/objectstack.config.ts': 4 });
+    expect('#26444 a vanished config PASSES and is reported once', gone.errors.length === 0 && gone.down.length === 1,
+      `got ${JSON.stringify(gone)}`);
+    const grew = ratchetVerdict(ledger, { 'examples/a/objectstack.config.ts': 5, 'examples/b/objectstack.config.ts': 1 });
+    expect('#26444 a grown count still FAILS', grew.errors.length === 1 && grew.down.length === 0,
+      `got ${JSON.stringify(grew)}`);
+    const fresh = ratchetVerdict(ledger, { ...ledger, 'examples/c/objectstack.config.ts': 1 });
+    expect('#26444 an unbaselined config still FAILS', fresh.errors.length === 1, `got ${JSON.stringify(fresh)}`);
+    expect('#26444 the report names the old count as the ceiling it leaves until --update',
+      fell.down[0]?.includes('4 stays'), `got ${JSON.stringify(fell.down)}`);
+  }
+
+  battery('A dead scan is refused, not reported as a decrease (#26444)');
+  {
+    const ledger = { 'examples/a/objectstack.config.ts': 4, 'examples/b/objectstack.config.ts': 1 };
+    const onDisk = () => true;
+    expect('#26444 an EMPTY round with every baselined config still on disk is refused',
+      deadScanProblem(ledger, {}, onDisk) !== null, 'zero configs measured over a full ledger must red');
+    expect('#26444 a round that lost ONE config still on disk is refused, naming it',
+      deadScanProblem(ledger, { 'examples/a/objectstack.config.ts': 4 }, onDisk)?.includes('examples/b/') === true,
+      'a partial round must red and say which config it lost');
+    expect('#26444 a DELETED config is not refused (a decrease passes)',
+      deadScanProblem(ledger, { 'examples/a/objectstack.config.ts': 4 }, (k) => !k.includes('/b/')) === null,
+      'a config gone from disk is the decrease this card makes pass');
+    expect('#26444 every measured config at ZERO over a non-zero ledger is refused (the blind classifier)',
+      deadScanProblem(ledger, { 'examples/a/objectstack.config.ts': 0, 'examples/b/objectstack.config.ts': 0 }, onDisk) !== null,
+      'a classifier that stopped matching drives every count to 0 at once');
+    expect('#26444 a fall that leaves strings somewhere is not refused',
+      deadScanProblem(ledger, { 'examples/a/objectstack.config.ts': 0, 'examples/b/objectstack.config.ts': 1 }, onDisk) === null,
+      'a sweep of one config is a decrease, not a dead scan');
+    expect('#26444 an all-zero ledger that --update already wrote is not refused',
+      deadScanProblem({ 'examples/a/objectstack.config.ts': 0 }, { 'examples/a/objectstack.config.ts': 0 }, onDisk) === null,
+      'once the zeros are recorded there is nothing left to collapse');
+  }
+
   battery('The dispatch-gates declaration (#21011): the example configs and the trees they import');
   const { extractWatchHints, hintCovers } = await import('./pm/dispatch-gates.mjs');
   const ownPath = relative(REPO_ROOT, fileURLToPath(import.meta.url)).split('\\').join('/');
@@ -1776,36 +1925,17 @@ if (update) {
 
 const baseline = existsSync(at(BASELINE_PATH)) ? JSON.parse(readFileSync(at(BASELINE_PATH), 'utf8')) : {};
 
-const errors = [];
-for (const [file, count] of Object.entries(current)) {
-  const allowed = baseline[file];
-  if (allowed === undefined) {
-    errors.push(
-      `${file}: not baselined (${count} untranslated declared string(s)). ` +
-        `Translate them, or run \`node scripts/check-i18n-coverage.mjs --update\` to freeze the debt.`,
-    );
-  } else if (count > allowed) {
-    errors.push(
-      `${file}: untranslated declared strings grew ${allowed} → ${count}. ` +
-        `Something declared a label without translating it for a locale this example claims to support ` +
-        `(see \`i18n.supportedLocales\`). Run \`node scripts/check-i18n-bundles.mjs --write\` to scaffold the new keys, then translate them; \`os lint ${file}\` lists them.`,
-    );
-  }
+const dead = deadScanProblem(baseline, current);
+if (dead !== null) {
+  console.error(dead);
+  process.exit(1);
 }
-for (const [file, allowed] of Object.entries(baseline)) {
-  const now = current[file];
-  if (now === undefined) {
-    errors.push(
-      `${file}: baselined config is gone (was ${allowed}) — ratchet DOWN: ` +
-        `run \`node scripts/check-i18n-coverage.mjs --update\` and commit the baseline.`,
-    );
-  } else if (now < allowed) {
-    errors.push(
-      `${file}: untranslated declared strings improved ${allowed} → ${now} — ratchet DOWN: ` +
-        `run \`node scripts/check-i18n-coverage.mjs --update\` and commit the baseline. ` +
-        `If you did not touch this population, merge \`origin/main\` first — the movement is probably not yours.`,
-    );
-  }
+
+const { errors, down } = ratchetVerdict(baseline, current);
+if (down.length) {
+  console.log(`check-i18n-coverage: ${down.length} baselined config(s) improved (passing, reported)\n`);
+  for (const d of down) console.log('  • ' + d);
+  console.log('');
 }
 
 if (errors.length) {
