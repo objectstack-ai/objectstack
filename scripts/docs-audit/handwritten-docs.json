@@ -1,9 +1,10 @@
 {
   "readme": [
     "GENERATED — do not hand-edit. `node scripts/docs-audit/check-audit-scope.mjs --write`",
-    "derives this from the filesystem (every content/docs/**/*.mdx except references/,",
-    "via `affected-docs.mjs --all`); the same script without --write is a CI gate that",
-    "fails when this file and content/docs/ disagree in EITHER direction.",
+    "derives this from the filesystem (every content/docs/**/*.mdx except the generated",
+    "references/ and ui/components/, via `affected-docs.mjs --all`); the same script",
+    "without --write is a CI gate that fails when this file and content/docs/ disagree",
+    "in EITHER direction.",
     "",
     "THIS FILE IS THE SINGLE SOURCE for \"which docs are hand-written\". Two consumers:",
     "  1. .claude/workflows/docs-accuracy-audit.js — its body runs in a sandbox with no",
@@ -214,7 +215,6 @@
     "content/docs/ui/actions.mdx",
     "content/docs/ui/apps.mdx",
     "content/docs/ui/audience-based-interfaces.mdx",
-    "content/docs/ui/console.mdx",
     "content/docs/ui/create-vs-edit-form.mdx",
     "content/docs/ui/dashboards.mdx",
     "content/docs/ui/doc-pages.mdx",
@@ -226,8 +226,6 @@
     "content/docs/ui/public-data-collection.mdx",
     "content/docs/ui/react-pages.mdx",
     "content/docs/ui/reports.mdx",
-    "content/docs/ui/setup-app.mdx",
-    "content/docs/ui/studio.mdx",
     "content/docs/ui/translations.mdx",
     "content/docs/ui/views.mdx",
     "content/docs/upgrading.mdx"

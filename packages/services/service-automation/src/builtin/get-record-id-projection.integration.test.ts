@@ -15,8 +15,9 @@
  *  - a projection that already names `id` is handed over as written (no
  *    second `id`);
  *  - no projection stays a whole-row read (no projection is invented);
- *  - an empty projection is handed over as written, and the engine refuses it
- *    (#27008): the node fails with that refusal carried, never a whole-row read;
+ *  - an empty projection is refused by the node's own config contract
+ *    (`GetRecordConfigSchema.fields`, #27166), so the engine is never asked:
+ *    the node fails before any read, never a whole-row read;
  *  - the `find` branch (`limit > 1`) declares no top-level `id` and is not
  *    touched.
  *
@@ -161,18 +162,17 @@ describe('get_record answers the row id as output.id whatever its fields project
     expect(result.output).toEqual({ record: whole, id: rowId, object: OBJECT.name });
   });
 
-  it("empty fields: handed to the engine as written, and the node fails with the engine's refusal carried (#27008)", async () => {
+  it("empty fields: refused by the node's config contract before any read (#27166)", async () => {
     handed.length = 0;
     const result = await getRecord.execute(
       { id: 'read', type: 'get_record', config: { objectName: OBJECT.name, filter: { title: 'alpha' }, fields: [] } },
       new Map(),
       { runAs: 'system', flowName: 'pin_get_record_id' },
     );
-    expect(handed, 'the node hands the empty projection over unchanged, once').toEqual([{ method: 'findOne', fields: [] }]);
+    expect(handed, 'the engine is never asked').toEqual([]);
     expect(result.success, 'an empty projection is refused, never read as the whole row').toBe(false);
     expect(result.output).toBeUndefined();
-    expect(result.innerRefusal).toMatchObject({ code: 'VALIDATION_ERROR' });
-    expect(result.error).toMatch(/^get_record\(pin_get_record_id\) failed: ObjectQL\.findOne\('pin_get_record_id'\) names no field in 'fields'/);
+    expect(result.error).toContain("get_record 'read': config does not satisfy the get_record contract — config.fields: Name at least one field.");
   });
 
   it('a downstream update_record filtering on read.id updates the row the narrowed get_record read', async () => {
