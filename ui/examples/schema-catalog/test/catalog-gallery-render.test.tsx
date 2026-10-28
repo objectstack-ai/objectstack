@@ -154,8 +154,6 @@ import { SidebarProvider } from '@object-ui/components';
 import { registerLayout } from '@object-ui/layout';
 import { ComponentRegistry } from '@object-ui/core';
 import { SchemaRenderer, SchemaRendererContext, toRenderableSchema } from '@object-ui/react';
-import fs from 'node:fs';
-import path from 'node:path';
 import { allExamples } from '../src/index.js';
 import { CATALOG_ENTRY_FLOOR } from './catalog-entry-floor.js';
 
