@@ -3243,6 +3243,12 @@ const pt = {
     totals: "Totais",
     loading: "Carregando…",
     forbiddenMessage: "Você não tem permissão para ver os dados deste relatório.",
+    dateRange: {
+      from: "De",
+      to: "Até",
+      datasetUnreadable: "O período deste relatório não indica nenhuma dimensão, e não foi possível ler o conjunto de dados “{{dataset}}” para encontrar sua dimensão de data ({{reason}}).",
+      noSingleDateDimension: "O período deste relatório não indica nenhuma dimensão, e o conjunto de dados “{{dataset}}” declara {{total}} dimensões de data ({{found}}) quando precisa de exatamente uma. Indique a dimensão de data em dateRange.dimension do relatório.",
+    },
     aggregate: {
       count: "Contar",
       countDistinct: "Contar distintos",

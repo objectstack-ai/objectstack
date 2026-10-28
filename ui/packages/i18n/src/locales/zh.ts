@@ -1387,6 +1387,12 @@ const zh = {
     totals: '汇总',
     loading: '加载中…',
     forbiddenMessage: '你没有查看该报表数据的权限。',
+    dateRange: {
+      from: '开始',
+      to: '结束',
+      datasetUnreadable: '该报表的时间范围未指定维度，且无法读取数据集“{{dataset}}”以确定其日期维度（{{reason}}）。',
+      noSingleDateDimension: '该报表的时间范围未指定维度，而数据集“{{dataset}}”声明了 {{total}} 个日期维度（{{found}}），这里需要恰好一个。请在报表的 dateRange.dimension 中指定日期维度。',
+    },
     aggregate: {
       count: '计数',
       countDistinct: '去重计数',
