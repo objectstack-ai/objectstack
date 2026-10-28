@@ -3,7 +3,7 @@
 import { definePage } from '@objectstack/spec/ui';
 
 /**
- * Project detail — a slotted record page that surfaces the project's Tasks as
+ * Project detail — a full record page that surfaces the project's Tasks as
  * an INLINE-EDITABLE `record:line_items` grid (ObjectUI ADR-0001), beside the
  * read-only Tasks related list. The grid is the "view + edit the children
  * together" half of the master-detail story: open a project, edit its tasks in

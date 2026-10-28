@@ -260,6 +260,12 @@ resolved here.
    (`packages/plugins/plugin-auth/src/auth-plugin.ts#pages`). That file was
    already in the tree at `77781151d`, the very commit cited above.
 
+   > **Amended (2026-10-28) — the mechanism moves from slotted to full; the
+   > strip does not.** The `tabs` slot retired (#27053), so
+   > `SysOrganizationDetailPage` is now a `kind: 'full'` page that authors the
+   > same Members, Invitations, Teams strip in its own `page:tabs` node, with
+   > the header, highlights and discussion the slotted page rendered.
+
    ⭐ **What the measurement missed, stated so it transfers.** The search was
    exhaustive over the wrong space: scoped to `src/identity/` and to the
    `relatedList` key, while the declaration lives one directory over, in

@@ -813,18 +813,18 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   }, [assignedPage, assignedSlots, objectDef, namedPageBlocked]);
   const effectivePage = assignedPage || synthesizedPage;
   // ─── One page at two widths (objectstack#26678) ──────────────────────
-  // The synthesized default page — and a slotted page that keeps the default
-  // tab strip — is laid out by the width of the container it occupies: three
-  // resident columns from 1280 px, two from 1024 px, the tab strip below that
-  // and whenever this view is embedded (drawer / split pane), whatever the
+  // The synthesized default page — and a slotted page, which always keeps the
+  // default tab strip — is laid out by the width of the container it occupies:
+  // three resident columns from 1280 px, two from 1024 px, the tab strip below
+  // that and whenever this view is embedded (drawer / split pane), whatever the
   // screen. Measured on this view's root, never the viewport. An authored full
-  // page and an authored `slots.tabs` strip are drawn as authored, so they
-  // never measure. `null` until the first reading lands (a layout effect, so
-  // never painted): the page body is held for that one commit rather than
-  // mounting the tab strip only to replace it.
+  // page is drawn as authored, so it never measures (the slotted `tabs` slot
+  // that once opted a page out too retired, objectstack#27053). `null` until
+  // the first reading lands (a layout effect, so never painted): the page body
+  // is held for that one commit rather than mounting the tab strip only to
+  // replace it.
   const [pageRootEl, setPageRootEl] = useState<HTMLDivElement | null>(null);
-  const pageColumnsEligible =
-    !assignedPage && !namedPageBlocked && !(assignedSlots && (assignedSlots as { tabs?: unknown }).tabs !== undefined);
+  const pageColumnsEligible = !assignedPage && !namedPageBlocked;
   const recordPageTier = useRecordPageTier(pageRootEl, { embedded: !!embedded, enabled: pageColumnsEligible });
   const pageInColumnTier = recordPageTier === 'two-column' || recordPageTier === 'three-column';
   const [pageRecord, setPageRecord] = useState<any>(null);

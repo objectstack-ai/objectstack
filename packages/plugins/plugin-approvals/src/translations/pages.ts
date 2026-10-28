@@ -14,7 +14,7 @@
  * declared in that config all the same, so the coverage ratchet counts its
  * label against this section (see the config's own note). A page-level
  * `label` is the one key a bundle reaches on this page: every other string on
- * it is an inline locale map under `slots.*`, the ruled route for page prose.
+ * it is an inline locale map in `regions[].components[]`, the ruled route for page prose.
  *
  * ## Keeping the copy honest
  *
