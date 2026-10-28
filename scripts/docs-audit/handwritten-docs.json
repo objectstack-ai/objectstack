@@ -1,9 +1,10 @@
 {
   "readme": [
     "GENERATED — do not hand-edit. `node scripts/docs-audit/check-audit-scope.mjs --write`",
-    "derives this from the filesystem (every content/docs/**/*.mdx except references/,",
-    "via `affected-docs.mjs --all`); the same script without --write is a CI gate that",
-    "fails when this file and content/docs/ disagree in EITHER direction.",
+    "derives this from the filesystem (every content/docs/**/*.mdx except the generated",
+    "references/ and ui/components/, via `affected-docs.mjs --all`); the same script",
+    "without --write is a CI gate that fails when this file and content/docs/ disagree",
+    "in EITHER direction.",
     "",
     "THIS FILE IS THE SINGLE SOURCE for \"which docs are hand-written\". Two consumers:",
     "  1. .claude/workflows/docs-accuracy-audit.js — its body runs in a sandbox with no",

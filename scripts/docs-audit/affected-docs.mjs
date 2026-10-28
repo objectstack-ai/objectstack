@@ -11,7 +11,9 @@
 //   node scripts/docs-audit/affected-docs.mjs --bridge-coverage [--json]   # how much of the DECLARED client-bound route surface the `sdk` bridge can reach (diff-free)
 //
 // Scope: hand-written docs only = content/docs/**/*.mdx MINUS content/docs/references/**
-// (references are generated from packages/spec and handled by a separate regenerate pass).
+// and content/docs/ui/components/** (references are generated from packages/spec and
+// handled by a separate regenerate pass; the component reference is generated from
+// sdui.manifest.json by scripts/gen-sdui-reference.mjs, whose --check holds it).
 //
 // THE ABOVE SCOPE IS THE RECALL DENOMINATOR (#13306, maintainer ruling 2026-08-31). Any
 // recall figure for this tool — "of the docs pages that should have been listed, how many
@@ -198,7 +200,7 @@
 
 import { execSync } from 'node:child_process';
 import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { join, relative, sep } from 'node:path';
 // The one answer to "is this span a comment, or code?" (#9367). Dependency-free and
 // side-effect-free on import, so the no-install contract this script runs under holds.
 // `codeOnly` IS the tree's one comments+literals projection (#15776), imported
@@ -1074,9 +1076,11 @@ function walk(dir, out = []) {
   return out;
 }
 const docsRoot = join(repoRoot, 'content/docs');
-const refsRoot = join(repoRoot, 'content/docs/references');
+// The generated trees, each wholly written by its generator: `references/` by
+// packages/spec's build-docs.ts, `ui/components/` by scripts/gen-sdui-reference.mjs.
+const generatedRoots = ['content/docs/references', 'content/docs/ui/components'].map((r) => join(repoRoot, r) + sep);
 const handwritten = walk(docsRoot)
-  .filter((p) => !p.startsWith(refsRoot))
+  .filter((p) => !generatedRoots.some((root) => p.startsWith(root)))
   .map((p) => relative(repoRoot, p))
   .sort();
 
