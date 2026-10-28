@@ -120,7 +120,7 @@
 - 会话句柄按账号作用域:三个会话工具对另一账号建的会话一律答 `not found`。
 - 该答案与不存在不可区分,⛔ 不读作死亡信号;活性只认 GitHub 产出,draft-PR 即交报为此。
 - 五、桌面 `start_session`(`target: cloud`)实测六异。① 克隆发起会话所记分支,已删即开局死:
-- 先推同名指针分支到 `origin/main`,⛔ 不提交其上;复核 `get_session`→`branch`、`ls-remote --heads`。
+- 先推同名指针分支(= `origin/main`),⛔ 不提交其上;复核 `get_session`→`branch`、`ls-remote --heads`。
 - ② `model`/`effort` 同 trigger 流不可指:继承发起席位档,认领写明,或从卡档位的会话发起。
 - ③ 中继凭会话 id 自选 `dispatch`,⛔ 不传 `--session`;④ 席位 `list_sessions` 只列本地,不见它。
 - ⑤ Claude GitHub App 的 PR 后推送不触发工作流(复核 check-suites):末推后开 PR 或用户令牌重推。
