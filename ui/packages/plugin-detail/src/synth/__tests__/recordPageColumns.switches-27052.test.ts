@@ -35,13 +35,13 @@ const lead = {
 
 describe('recordTimelineDefaultReason — the timeline is on for a worked object (objectstack#27052)', () => {
   it('stage-field: `stageField` names a field', () => {
-    expect(recordTimelineDefaultReason({ name: 'deal', stageField: 'phase', fields: {} })).toBe('stage-field');
+    expect(recordTimelineDefaultReason({ stageField: 'phase', fields: {} })).toBe('stage-field');
   });
 
   it('option-kinds: a field whose options declare a lifecycle kind', () => {
     expect(recordTimelineDefaultReason(lead)).toBe('option-kinds');
     // An array-shaped field list reads the same.
-    expect(recordTimelineDefaultReason({ name: 'x', fields: Object.values(lead.fields) })).toBe('option-kinds');
+    expect(recordTimelineDefaultReason({ fields: Object.values(lead.fields) })).toBe('option-kinds');
   });
 
   it('`stageField: false` turns the stage role off: option kinds no longer count', () => {
@@ -49,8 +49,8 @@ describe('recordTimelineDefaultReason — the timeline is on for a worked object
   });
 
   it('files: `enable.files: true`', () => {
-    expect(recordTimelineDefaultReason({ name: 'account', enable: { files: true }, fields: {} })).toBe('files');
-    expect(recordTimelineDefaultReason({ name: 'account', enable: { files: false }, fields: {} })).toBeNull();
+    expect(recordTimelineDefaultReason({ enable: { files: true }, fields: {} })).toBe('files');
+    expect(recordTimelineDefaultReason({ enable: { files: false }, fields: {} })).toBeNull();
   });
 
   it('a `master_detail` parent and nothing else is off: owning child rows is a container, not a worked record', () => {
@@ -72,7 +72,7 @@ describe('recordTimelineDefaultReason — the timeline is on for a worked object
 describe('recordPageColumnDefaults (objectstack#27052)', () => {
   it('the timeline follows the derivation; the related column is on', () => {
     expect(recordPageColumnDefaults(lead)).toEqual({ timeline: true, related: true });
-    expect(recordPageColumnDefaults({ name: 'product', fields: {} })).toEqual({ timeline: false, related: true });
+    expect(recordPageColumnDefaults({ fields: {} })).toEqual({ timeline: false, related: true });
   });
 });
 
