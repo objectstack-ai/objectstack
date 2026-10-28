@@ -106,7 +106,7 @@ export class RecordCurrencyCodeRequiredError extends Error {
         + `holds an amount in the record's own currency (currencyMode: 'record'), and its currency code field `
         + `'${first.codeField}' is blank`
         + (hits.length > 1 ? ` (also: ${hits.slice(1).map((h) => `'${h.codeField}' for '${h.amountField}'`).join(', ')})` : '')
-        + `. Nothing was written. Write the record's ISO 4217 code (for example 'USD') into '${first.codeField}' `
+        + `. The row was not written. Write the record's ISO 4217 code (for example 'USD') into '${first.codeField}' `
         + `in the same write, or leave '${first.amountField}' empty. The server never fills a currency in: a form `
         + `pre-fills the organization's currency, and the stored code is always the one submitted.`,
     );
