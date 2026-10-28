@@ -9,7 +9,7 @@
 import * as React from 'react';
 import { cn, Button, Input, Popover, PopoverContent, PopoverTrigger, FilterBuilder, SortBuilder, NavigationOverlay, GroupingEditor, RefreshIndicator, DataErrorState, resolveIcon, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@object-ui/components';
 import type { SortItem } from '@object-ui/components';
-import { Search, Funnel, ArrowUpDown, X, EyeOff, Pencil, Group, Paintbrush, Download, Rows4, Rows3, Rows2, Share2, Printer, Plus, Trash2, CheckSquare, AlertTriangle, ShieldAlert, RotateCw, Loader2, Info } from 'lucide-react';
+import { Search, Funnel, ArrowUpDown, X, EyeOff, Pencil, Group, Paintbrush, Download, Rows4, Rows3, Rows2, Share2, Lock, Printer, Plus, Trash2, CheckSquare, AlertTriangle, ShieldAlert, RotateCw, Loader2, Info } from 'lucide-react';
 import type { FilterBuilderRowGroup } from '@object-ui/components';
 import { VALUELESS_FILTER_BUILDER_OPERATORS, isFilterValueComplete } from '@object-ui/components';
 import { ViewSwitcherDropdown } from './ViewSwitcher';
@@ -1070,6 +1070,9 @@ export const LIST_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'list.tabs': 'Tabs',
   'list.allRecords': 'All Records',
   'list.share': 'Share',
+  'list.sharingPersonal': 'Personal view',
+  'list.sharingCollaborative': 'Shared view',
+  'list.sharingLockedBy': 'Locked by {{user}}',
   'list.print': 'Print',
   // objectui#4462 — the Print button's tooltip/aria sentence. Borrowed from
   // `common.*` (like the `table.*`/`grid.*`/`detail.*` rows here) because the
@@ -6087,19 +6090,35 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             </Popover>
           )}
 
-          {/* Share — supports both ObjectUI visibility model and spec personal/collaborative model */}
-          {schema.sharing?.type && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 px-2 text-muted-foreground hover:text-primary text-xs transition-colors duration-150"
-              title={`Sharing: ${schema.sharing.type}`}
-              data-testid="share-button"
-            >
-              <Share2 className="h-3.5 w-3.5 mr-1.5" />
-              <span className="hidden sm:inline">{t('list.share')}</span>
-            </Button>
-          )}
+          {/* Sharing — a read-only indicator of the spec's `ViewSharingSchema`
+              (`type` + optional `lockedBy`), never a button. No view-sharing
+              control or endpoint exists to open, so a clickable "Share" here
+              was a dead button. `lockedBy` is the spec's free string ("User
+              who locked the view configuration"), rendered as written. */}
+          {schema.sharing?.type && (() => {
+            const sharingLabel = schema.sharing.type === 'personal'
+              ? t('list.sharingPersonal')
+              : t('list.sharingCollaborative');
+            const lockedBy = schema.sharing.lockedBy;
+            const lockedLabel = lockedBy ? t('list.sharingLockedBy', { user: lockedBy }) : undefined;
+            const hint = lockedLabel ? `${sharingLabel} · ${lockedLabel}` : sharingLabel;
+            return (
+              <span
+                className="inline-flex h-7 items-center px-2 text-muted-foreground text-xs"
+                title={hint}
+                data-testid="share-button"
+              >
+                <Share2 className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
+                <span className="hidden sm:inline">{sharingLabel}</span>
+                {lockedLabel && (
+                  <span className="inline-flex items-center ml-1.5" data-testid="sharing-locked-by">
+                    <Lock className="h-3 w-3 mr-1" aria-hidden="true" />
+                    <span className="hidden sm:inline">{lockedLabel}</span>
+                  </span>
+                )}
+              </span>
+            );
+          })()}
 
           {/* Print — hands off to the browser's own print dialog against the
               shared `@media print` sheet in `@object-ui/app-shell/styles.css`.
