@@ -295,8 +295,8 @@ export function closedFormAffordance({
 /**
  * The ONE field-gate step every `ObjectForm` layout draws its RESOLVED fields
  * through (objectui#10612): the default arm (flat and sectioned), `DrawerForm`
- * and `ModalForm` (sections, derived field groups and flat), and `TabbedForm`,
- * `SplitForm` and `WizardForm` (sections).
+ * and `ModalForm` (sections, derived field groups and flat), and `TabbedForm`
+ * and `WizardForm` (sections).
  *
  * Two gates, in one pass, so no layout can apply one and skip the other:
  *

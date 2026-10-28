@@ -14,10 +14,11 @@
  *
  * Renamed off `FormSection` (objectui#3161, objectstack#4115 ledger batch 7).
  * `@objectstack/spec/ui` owns `FormSection` for the authored section METADATA —
- * `{ name?, label?, description?, collapsible, collapsed, columns, pane?,
+ * `{ name?, label?, description?, collapsible, collapsed, columns,
  * visibleWhen?, fields }` — and this repo already uses that word for that
  * meaning in its own prose: `plugin-form/README.md` and the plugin docs both
- * write "spec `FormSection.pane`", `@object-ui/types` re-exports the spec type
+ * wrote "spec `FormSection.pane`" (retired with the split form, ADR-0050),
+ * `@object-ui/types` re-exports the spec type
  * as `SpecFormSection`, and its own authored dialect is `ObjectFormSection`. So
  * the name was taken twice over, and the file header said this component
  * "aligns with @objectstack/spec FormSection" — the canonical-claim comment the
@@ -28,7 +29,7 @@
  * ONE prop, so that renderer restates nothing. This one takes the metadata
  * FLATTENED into individual props (`label`, `description`, `collapsible`,
  * `collapsed`, `columns`) — a second vocabulary for the same keys, minus
- * `fields` (children instead), minus `name`, minus `pane`, minus `visibleWhen`,
+ * `fields` (children instead), minus `name`, minus `visibleWhen`,
  * plus render-only knobs. A declaration like that is exactly what the next
  * session would read as the authoritative shape of a form section.
  *

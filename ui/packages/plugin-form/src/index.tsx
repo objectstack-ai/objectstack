@@ -18,6 +18,7 @@ import {
 import { useObjectTranslation } from '@object-ui/i18n';
 import type { DataSource } from '@object-ui/types';
 import { ObjectForm } from './ObjectForm';
+import { ObjectFormContainer, isObjectFormContainerType } from './ObjectFormContainer';
 import { hasInlineFieldSource } from './submitTarget';
 
 export { ObjectForm };
@@ -49,8 +50,6 @@ export { TabbedForm } from './TabbedForm';
 export type { TabbedFormProps, TabbedFormSchema, FormSectionConfig } from './TabbedForm';
 export { WizardForm } from './WizardForm';
 export type { WizardFormProps, WizardFormSchema, WizardStepConfig } from './WizardForm';
-export { SplitForm } from './SplitForm';
-export type { SplitFormProps, SplitFormSchema } from './SplitForm';
 export { DrawerForm } from './DrawerForm';
 export type { DrawerFormProps, DrawerFormSchema } from './DrawerForm';
 export { ModalForm } from './ModalForm';
@@ -263,7 +262,12 @@ const ObjectFormRenderer: React.FC<{ schema: any; dataSource?: unknown }> = elem
       // `sections` (objectui#10254).
       requiresObject={!hasInlineFieldSource(schema)}
     >
-      {(bound) => <ObjectForm schema={bound} dataSource={dataSource} />}
+      {/* ADR-0050 Decision 4: a `formType` of `drawer` / `modal` names a
+          container, and the block is the caller that supplies it —
+          `ObjectForm` itself only lays the form out. */}
+      {(bound) => isObjectFormContainerType(bound?.formType)
+        ? <ObjectFormContainer schema={bound} dataSource={dataSource} />
+        : <ObjectForm schema={bound} dataSource={dataSource} />}
     </ElementDataSourceGate>
   );
 });
@@ -292,7 +296,7 @@ ComponentRegistry.register('object-form', ObjectFormRenderer, {
     { ...OBJECT_FORM_OBJECT_NAME_INPUT },
     { name: 'fields', type: 'array', description: 'Bare field names to show, in order (each looked up in the object schema). NOT the same vocabulary as `sections[].fields`, which also accepts the spec `FormFieldSchema` object (identity key `field`, e.g. `{ field: "note", colSpan: 2 }`) — that shape resolves to no name HERE and is silently skipped (SimpleObjectForm in ObjectForm.tsx; buildFlatFields in flatFields.ts for the drawer/modal presentations).' },
     { name: 'mode', type: 'enum', enum: ['create', 'edit', 'view'] },
-    { name: 'formType', type: 'enum', enum: ['simple', 'tabbed', 'wizard', 'split', 'drawer', 'modal'] },
+    { name: 'formType', type: 'enum', enum: ['simple', 'tabbed', 'wizard', 'drawer', 'modal'], description: 'The form layout (`simple`, `tabbed`, `wizard`), or the container the block opens it in (`drawer`, `modal`, drawn as a stacked form; `contentLayout: "tabbed"` puts a modal\'s sections on tabs). `split` was retired with ADR-0050: use `tabbed`, or `subforms` to edit child records beside the parent.' },
     { name: 'sections', type: 'array' },
     // The row's seven `I18nLabel` members (`ComponentPropsMap['object-form']`):
     // `title`, `description` here, and `submitText`, `cancelText`, `nextText`,
@@ -328,16 +332,12 @@ ComponentRegistry.register('object-form', ObjectFormRenderer, {
     // Wizard
     { name: 'allowSkip', type: 'boolean' },
     { name: 'showStepIndicator', type: 'boolean' },
-    // Split
-    { name: 'splitDirection', type: 'enum', enum: ['horizontal', 'vertical'] },
-    { name: 'splitSize', type: 'number' },
-    { name: 'splitResizable', type: 'boolean' },
     // Drawer
     { name: 'drawerSide', type: 'enum', enum: ['top', 'bottom', 'left', 'right'] },
     { name: 'drawerWidth', type: 'string' },
     // Modal
     { name: 'modalSize', type: 'enum', enum: ['sm', 'default', 'lg', 'xl', 'full'] },
-    { name: 'modalCloseButton', type: 'boolean', description: 'Show the modal presentation’s close (X) button. Default `true`; `false` hides it. Forwarded by `ObjectForm`’s modal route and honoured by `ModalForm` on both of its dialog arms. With the button hidden the modal still closes on Escape, and on the Cancel action when that is shown.' },
+    { name: 'modalCloseButton', type: 'boolean', description: 'Show the modal presentation’s close (X) button. Default `true`; `false` hides it. Forwarded by the block’s modal container and honoured by `ModalForm` on both of its dialog arms. With the button hidden the modal still closes on Escape, and on the Cancel action when that is shown.' },
     { name: 'contentLayout', type: 'enum', enum: ['simple', 'tabbed'], description: 'How the modal presentation lays out sections. `tabbed` differs from `simple` only when more than one section has a field to show (`ModalForm` tests `schema.contentLayout === "tabbed" && groups.length > 1`).' },
     { name: 'confirmOnDiscard', type: 'boolean', description: 'Ask before discarding unsaved edits when a drawer/modal form is dismissed. Set `false` to close immediately.' },
     // Record binding
@@ -587,7 +587,7 @@ ComponentRegistry.register('object-master-detail-form', MasterDetailFormRenderer
         'The child collections, one OBJECT per entry, judged by the spec\'s closed `details` entry: `childObject` (required) names the child object; `relationshipField` is the FK on the child back to the parent, derived from the child\'s metadata when omitted; `columns` are the line grid\'s columns as the spec\'s inline grid column objects (`{ name, … }`, never a bare field name), derived from the child\'s fields when omitted; `formFields` names the per-row form\'s fields; `inlineMode` is `grid` (editable cells) or `form` (list + per-row form); `amountField` is the CHILD column summed and `totalField` the PARENT field that sum is saved to; `title`, `minRows`, `maxRows` and `addLabel` dress the section and its grid. An undeclared member key is refused by name. `sortField` is not a member: the line-position field is derived from the child object (objectui#11070), and since `@objectstack/spec` 17.7.0 the entry refuses an authored `sortField` with the spec\'s retired-key message (objectstack-ai/objectstack#21589).',
     },
     { name: 'recordId', type: 'string', description: 'The parent record to load in `edit` mode. Leave unset for `create`.' },
-    // TWO values, not the six `object-form` declares (objectui#5939). A bare
+    // TWO values, not the five `object-form` declares (objectui#5939). A bare
     // `string` here let an out-of-vocabulary value match NO renderer branch and
     // fall through to the flat field list with no diagnostic — measured: a
     // `formType` of `'wizzard'` renders the parent half with its section headers
@@ -596,12 +596,12 @@ ComponentRegistry.register('object-master-detail-form', MasterDetailFormRenderer
     // `MasterDetailFormSchema.formType?: 'simple' | 'tabbed'`
     // (MasterDetailForm.tsx) and the coercion `formType === 'tabbed' ? 'tabbed'
     // : 'simple'` ObjectForm.tsx uses when it routes a `subforms` schema in here.
-    // The other four are reachable branches that BREAK this composition, each
-    // observed rather than assumed: `drawer`/`modal` host the parent half in a
-    // portal dialog outside the master-detail container, so the single bottom
-    // Save bar finds no `<form>` to submit; `wizard` mounts only the current
-    // step's fields and turns that Save bar into a `Next`; `split` renders two
-    // panels but persists through `dataSource.create` instead of the batch.
+    // The other three BREAK this composition, each observed rather than
+    // assumed: `drawer`/`modal` host the parent half in a portal dialog outside
+    // the master-detail container, so the single bottom Save bar finds no
+    // `<form>` to submit; `wizard` mounts only the current step's fields and
+    // turns that Save bar into a `Next`. (`split`, which persisted through
+    // `dataSource.create` instead of the batch, retired with ADR-0050.)
     // Declaring them would mint choices an authoring UI offers and this block
     // cannot honour.
     { name: 'formType', type: 'enum', enum: ['simple', 'tabbed'], description: 'How the PARENT half of the form is presented. The detail grids below it are unaffected.' },

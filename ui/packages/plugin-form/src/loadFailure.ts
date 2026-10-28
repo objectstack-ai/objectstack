@@ -9,8 +9,8 @@
 /**
  * The load error a record form shows, kept PER READ (objectui#10682).
  *
- * Each layout `ObjectForm` routes to (its default arm, `DrawerForm`,
- * `ModalForm`, `SplitForm`, `TabbedForm`, `WizardForm`) reads two things
+ * Each layout an `object-form` routes to (`ObjectForm`'s default arm,
+ * `DrawerForm`, `ModalForm`, `TabbedForm`, `WizardForm`) reads two things
  * before it can draw: the object schema (`getObjectSchema`) and the record
  * (`findOne`). Each used to keep ONE `error` that both reads wrote and nothing
  * cleared, and each renders its error screen ahead of the form, so one failed
