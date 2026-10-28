@@ -18,13 +18,22 @@
  * This file is the other half. It exists because objectui#4550 relaxed a
  * published type over an implementation it never described, and the whole case
  * for that relaxation is that the implementation already behaved this way —
- * `navigation?.mode ?? 'page'`, 140 lines below the declaration. A claim of
- * "behaviour is unchanged" that nothing executes is not a claim, so the default
- * is pinned here as an observable outcome, alongside every explicit mode the
- * hook switches on. If a later change moves the default, deletes a branch, or
- * makes a missing `mode` mean something other than `'page'`, this suite goes
- * red and the parity file stays green — which is exactly the split of duties
- * the two files are for.
+ * `navigation?.mode ?? <the spec's default>`, 140 lines below the declaration.
+ * A claim of "behaviour is unchanged" that nothing executes is not a claim, so
+ * the default is pinned here as an observable outcome, alongside every explicit
+ * mode the hook switches on. If a later change moves the default, deletes a
+ * branch, or makes a missing `mode` mean something other than the spec's
+ * default, this suite goes red and the parity file stays green — which is
+ * exactly the split of duties the two files are for.
+ *
+ * ⚠️ objectstack#26677 moved that default from `page` to `drawer` (the spec's
+ * `NavigationModeSchema.default('drawer')`, maintainer ruling 2026-10-27: an
+ * object opens its records in the drawer unless it declares `page`) and retired
+ * `modal`, `split` and `popover`. The rows below were FLIPPED with it, not
+ * deleted: a config without `mode` now opens the drawer and never calls
+ * `onNavigate`, and the empty config and the absent config — which used to be
+ * pinned as indistinguishable — are now pinned as DIFFERENT (the first is the
+ * spec's drawer default, the second stays the host's call).
  *
  * ⚠️ objectui#9874 rewrote one row here and added one. A navigation body
  * carrying `view: 'summary_view'` used to ride through into `onNavigate`'s
@@ -57,7 +66,7 @@ import type { NavigationConfig, NavigationMode } from '../useNavigationOverlay';
  * The exact value objectui#4550 reported the alias rejecting: a spec-authored
  * navigation config that omits `mode`. The spec permits the omission on
  * purpose — `packages/spec/src/ui/view.zod.ts` declares
- * `mode: NavigationModeSchema.default('page')`, and a `.default()` lands on the
+ * `mode: NavigationModeSchema.default('drawer')`, and a `.default()` lands on the
  * authoring side as `| undefined`.
  *
  * The second declaration is the pin. Before objectui#4550 it was the bug
@@ -122,35 +131,46 @@ const AS_ALIAS: NavigationConfig = AUTHORED_WITHOUT_MODE;
  * again.
  */
 const STORED_WITH_RETIRED_VIEW: Record<string, unknown> = {
+  // `mode: 'page'` is spelled out since objectstack#26677: an omitted mode now
+  // takes the `drawer` default, which never reaches `onNavigate` at all, and
+  // this body exists to prove the `page` branch keeps the name out of the
+  // mode slot.
+  mode: 'page',
   view: 'summary_view',
 };
 const AS_STORED = STORED_WITH_RETIRED_VIEW as NavigationConfig;
 
 /** Every mode the hook's `handleClick` switches on, for the exhaustiveness pin. */
 const EVERY_MODE: NavigationMode[] = [
-  'page',
   'drawer',
-  'modal',
-  'split',
-  'popover',
+  'page',
   'new_window',
   'none',
 ];
 
-const OVERLAY_MODES: NavigationMode[] = ['drawer', 'modal', 'split', 'popover'];
+/** `drawer` is the one overlay mode left (objectstack#26677). */
+const OVERLAY_MODES: NavigationMode[] = ['drawer'];
 
 const RECORD = { id: 'r1', name: 'Ada' };
 
-describe('useNavigationOverlay: a config without `mode` defaults to `page` (objectui#4550)', () => {
-  it('resolves `mode` to `page` and reports a non-overlay surface', () => {
+describe('useNavigationOverlay: a config without `mode` defaults to `drawer` (objectui#4550, objectstack#26677)', () => {
+  it('resolves `mode` to `drawer`, reports the overlay surface, and opens it on a click', () => {
     const onNavigate = vi.fn();
     const { result } = renderHook(() =>
       useNavigationOverlay({ navigation: AS_ALIAS, objectName: 'contacts', onNavigate }),
     );
 
-    expect(result.current.mode).toBe('page');
-    expect(result.current.isOverlay).toBe(false);
+    expect(result.current.mode).toBe('drawer');
+    expect(result.current.isOverlay).toBe(true);
     expect(result.current.isOpen).toBe(false);
+
+    act(() => {
+      result.current.handleClick(RECORD);
+    });
+
+    expect(result.current.isOpen).toBe(true);
+    expect(result.current.selectedRecord).toEqual(RECORD);
+    expect(onNavigate).not.toHaveBeenCalled();
   });
 
   it('routes a click through the `page` branch WITHOUT a stored `view` reaching the mode slot (objectui#9874)', () => {
@@ -192,24 +212,24 @@ describe('useNavigationOverlay: a config without `mode` defaults to `page` (obje
     );
   });
 
-  it('falls back to the `view` action when the config declares neither key', () => {
+  it('opens the drawer when the config declares neither key', () => {
     const onNavigate = vi.fn();
-    // A present-but-empty config is a different input from NO config: it takes
-    // the `mode === 'page'` branch rather than the `!navigation` early return.
-    // Both end at `onNavigate(id, 'view')`, and that agreement is the point —
-    // omitting `mode` must not become a third behaviour.
+    // A present-but-empty config takes the spec's `drawer` default, so the
+    // click opens the overlay and `onNavigate` is never asked to page.
     const { result } = renderHook(() =>
       useNavigationOverlay({ navigation: {}, objectName: 'contacts', onNavigate }),
     );
 
-    expect(result.current.mode).toBe('page');
+    expect(result.current.mode).toBe('drawer');
     act(() => {
       result.current.handleClick(RECORD);
     });
-    expect(onNavigate).toHaveBeenCalledWith('r1', 'view');
+    expect(result.current.isOpen).toBe(true);
+    expect(result.current.selectedRecord).toEqual(RECORD);
+    expect(onNavigate).not.toHaveBeenCalled();
   });
 
-  it('agrees with the no-config path it has to be indistinguishable from', () => {
+  it('parts from the no-config path: `{}` is the drawer default, NO config stays the host\'s call', () => {
     const withEmpty = vi.fn();
     const withNothing = vi.fn();
 
@@ -225,13 +245,19 @@ describe('useNavigationOverlay: a config without `mode` defaults to `page` (obje
       b.result.current.handleClick(RECORD);
     });
 
-    expect(withEmpty.mock.calls).toEqual(withNothing.mock.calls);
-    expect(a.result.current.mode).toBe(b.result.current.mode);
+    // Until objectstack#26677 both ended at `onNavigate('r1', 'view')`. The
+    // empty config now opens the drawer; the absent one is handed to the
+    // host's `onNavigate` exactly as before (a host withholds navigation by
+    // passing no config and no callback — see the hook's module docblock).
+    expect(withEmpty).not.toHaveBeenCalled();
+    expect(a.result.current.isOpen).toBe(true);
+    expect(withNothing.mock.calls).toEqual([['r1', 'view']]);
+    expect(b.result.current.isOpen).toBe(false);
   });
 });
 
 describe('useNavigationOverlay: explicit modes behave exactly as before', () => {
-  it('reports `isOverlay` for the four overlay modes and no others', () => {
+  it('reports `isOverlay` for the drawer and no other mode', () => {
     for (const mode of EVERY_MODE) {
       const { result } = renderHook(() => useNavigationOverlay({ navigation: { mode } }));
       expect(result.current.mode).toBe(mode);
@@ -239,7 +265,7 @@ describe('useNavigationOverlay: explicit modes behave exactly as before', () => 
     }
   });
 
-  it('opens the overlay and captures the record for drawer/modal/split/popover', () => {
+  it('opens the overlay and captures the record for the drawer', () => {
     for (const mode of OVERLAY_MODES) {
       const onNavigate = vi.fn();
       const { result } = renderHook(() =>

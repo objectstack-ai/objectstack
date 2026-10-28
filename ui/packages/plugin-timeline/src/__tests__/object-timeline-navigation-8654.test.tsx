@@ -94,13 +94,21 @@ describe('the installed spec declares `navigation` on `object-timeline` — the 
 
 describe.each(FACES)('`%s` judges the authored `properties.navigation` by the spec row (objectui#8654)', (_face, parse) => {
   it('a valid block parses, and so does every mode the spec declares', () => {
-    for (const mode of ['page', 'drawer', 'modal', 'split', 'popover', 'new_window', 'none'] as const) {
+    for (const mode of ['drawer', 'page', 'new_window', 'none'] as const) {
       expect(issuesOf(parse(authored({ mode }))), mode).toEqual([]);
     }
-    expect(issuesOf(parse(authored({ mode: 'modal', size: 'lg' })))).toEqual([]);
+    expect(issuesOf(parse(authored({ mode: 'drawer', size: 'lg' })))).toEqual([]);
     expect(issuesOf(parse(authored({ mode: 'page', openNewTab: true })))).toEqual([]);
     expect(issuesOf(parse(authored({ mode: 'none', preventNavigation: true })))).toEqual([]);
     expect(issuesOf(parse(authored({ mode: 'drawer', width: '720px' })))).toEqual([]);
+  });
+
+  it('a retired `mode` is refused at `properties.navigation.mode` (objectstack#26677)', () => {
+    // `modal`, `split` and `popover` left the spec's `NavigationMode`; the lit
+    // control is the row above, where `drawer` parses on the same document.
+    for (const mode of ['modal', 'split', 'popover']) {
+      expect(issuesOf(parse(authored({ mode }))), mode).toEqual(['properties.navigation.mode|invalid_value']);
+    }
   });
 
   it('a bad `mode` is refused at `properties.navigation.mode` — where the spec refuses it', () => {
@@ -168,7 +176,7 @@ export const BAD_TIMELINE_MODE_IS_REFUSED_AT_COMPILE_TIME: ObjectTimelineProps['
 export const TIMELINE_WITH_NAVIGATION: ObjectTimelineProps['schema'] = {
   type: 'timeline',
   objectName: OBJECT,
-  navigation: { mode: 'modal', size: 'lg' },
+  navigation: { mode: 'drawer', size: 'lg' },
 };
 
 /* ── The designer face: both registrations publish it ───────────────────── */

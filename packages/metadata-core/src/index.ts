@@ -133,3 +133,9 @@ export * from './object-field-type.js';
 // `view` write in `@objectstack/metadata-protocol`; both read this one rule, so
 // a form withdrawn by either declared switch is withdrawn everywhere.
 export * from './anonymous-form-intake.js';
+
+// [#26886] The mark on an `options` array resolved from a shared picklist,
+// shared by the resolution (`@objectstack/objectql`'s lean core closure) and the
+// load-time diagnostics (`@objectstack/metadata-protocol`), so the diagnostics
+// judge a field as its author wrote it.
+export * from './resolved-picklist-options.js';

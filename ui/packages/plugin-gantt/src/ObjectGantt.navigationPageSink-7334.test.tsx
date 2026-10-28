@@ -214,8 +214,11 @@ describe('an authored non-overlay navigation mode on a gantt reaches a real dest
     expect(openSpy).not.toHaveBeenCalled();
   });
 
-  it('CONTROL: authored `modal` — another overlay mode, same answer', async () => {
-    await clickFirstTask({ ...BASE, navigation: { mode: 'modal' } });
+  it('CONTROL: a block written without `mode` takes the spec\'s `drawer` default — same answer (objectstack#26677)', async () => {
+    // This row spelled `modal` until objectstack#26677 retired it; the second
+    // overlay input left is the mode-less block, which the spec defaults to
+    // `drawer`.
+    await clickFirstTask({ ...BASE, navigation: { size: 'lg' } });
 
     await waitFor(() => expect(screen.getByTestId('record-drawer')).toBeTruthy());
     expect(pushSpy).not.toHaveBeenCalled();

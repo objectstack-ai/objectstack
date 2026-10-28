@@ -43,9 +43,12 @@ import { uiRoot } from '../scripts/ui-root.mjs';
  * (with its objectui#11685 drawer clearance), `ThemeProvider`, the record
  * overlay host `NavigationOverlay` with the props `ObjectView` gives it, and
  * through it the Shadcn `Sheet` (drawer mode: both objectui#11685 paths, beside
- * the drawer and below its header) and `Dialog` (modal mode: the centred
- * dialog, toaster at its no-drawer anchor, top-centre below the top bar,
- * objectui#13340), both on `@radix-ui/react-dialog`; sonner
+ * the drawer and below its header); the Shadcn `Dialog` itself for the centred
+ * dialog (toaster at its no-drawer anchor, top-centre below the top bar,
+ * objectui#13340) — `NavigationOverlay`'s own modal face left with the retired
+ * `navigation.mode: 'modal'` (objectstack#26677), so the centred case mounts
+ * the primitive every other centred dialog is built on — both on
+ * `@radix-ui/react-dialog`; sonner
  * itself; React. The stylesheet is real Tailwind, compiled from the installed
  * `tailwindcss` for the class strings in those source files.
  *
@@ -83,13 +86,14 @@ const source = (rel: string) => path.join(REPO_ROOT, rel);
 const CONSOLE_TOASTER = source('packages/app-shell/src/chrome/ConsoleToaster.tsx');
 const THEME_PROVIDER = source('packages/app-shell/src/chrome/ThemeProvider.tsx');
 const NAVIGATION_OVERLAY = source('packages/components/src/custom/navigation-overlay.tsx');
+const DIALOG = source('packages/components/src/ui/dialog.tsx');
 
 /** The source files whose class strings the page draws with. */
 const STYLED_SOURCES = [
   CONSOLE_TOASTER,
   NAVIGATION_OVERLAY,
   source('packages/components/src/ui/sheet.tsx'),
-  source('packages/components/src/ui/dialog.tsx'),
+  DIALOG,
 ];
 
 const STUB_I18N = '\0toast-under-modal:i18n';
@@ -125,6 +129,7 @@ import { toast } from 'sonner';
 import { ConsoleToaster } from ${at(CONSOLE_TOASTER)};
 import { ThemeProvider } from ${at(THEME_PROVIDER)};
 import { NavigationOverlay } from ${at(NAVIGATION_OVERLAY)};
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from ${at(DIALOG)};
 
 const h = React.createElement;
 const log = [];
@@ -150,21 +155,31 @@ function RecordContent() {
 function Harness() {
   const [open, setOpen] = React.useState(false);
   openOverlay = () => setOpen(true);
+  const onOpenChange = (next) => { if (!next) log.push('drawer:close'); setOpen(next); };
+  // The centred case: the Shadcn \`Dialog\` primitive, since the record
+  // overlay's own modal face is retired (objectstack#26677).
+  const overlay = window.__overlayMode === 'dialog'
+    ? h(Dialog, { open, onOpenChange },
+        h(DialogContent, null,
+          h(DialogTitle, null, 'Product'),
+          h(DialogDescription, null, 'Record detail'),
+          h(RecordContent)))
+    : h(NavigationOverlay, {
+        mode: window.__overlayMode,
+        isOverlay: true,
+        isOpen: open,
+        selectedRecord: open ? { id: 'widget-42' } : null,
+        close: () => { log.push('drawer:close'); setOpen(false); },
+        setIsOpen: onOpenChange,
+        width: window.__drawerWidth,
+        title: 'Product',
+        onExpand: record('expand'),
+        expandLabel: 'Open as full page',
+        children: () => h(RecordContent),
+      });
   return h(ThemeProvider, null,
     h('main', { className: 'p-6', onClick: record('page') }, button('New', 'new')),
-    h(NavigationOverlay, {
-      mode: window.__overlayMode,
-      isOverlay: true,
-      isOpen: open,
-      selectedRecord: open ? { id: 'widget-42' } : null,
-      close: () => { log.push('drawer:close'); setOpen(false); },
-      setIsOpen: (next) => { if (!next) log.push('drawer:close'); setOpen(next); },
-      width: window.__drawerWidth,
-      title: 'Product',
-      onExpand: record('expand'),
-      expandLabel: 'Open as full page',
-      children: () => h(RecordContent),
-    }),
+    overlay,
     h(ConsoleToaster),
   );
 }
@@ -263,8 +278,12 @@ test.beforeAll(async () => {
 interface Configuration {
   name: string;
   viewport: { width: number; height: number };
-  /** `NavigationOverlay`'s mode: the record drawer, or the centred record dialog. */
-  mode: 'drawer' | 'modal';
+  /**
+   * The overlay: `NavigationOverlay`'s record drawer, or a centred Shadcn
+   * `Dialog` (the record overlay's own modal face was retired by
+   * objectstack#26677).
+   */
+  mode: 'drawer' | 'dialog';
   /** What `ObjectView` passes: `overlayWidthFor(...)`, `min(92vw, BUCKET px)`. */
   drawerWidth: string;
   /**
@@ -283,7 +302,7 @@ const CONFIGURATIONS: Configuration[] = [
   { name: '1440 sm drawer', viewport: { width: 1440, height: 900 }, mode: 'drawer', drawerWidth: 'min(92vw, 480px)', path: 'beside' },
   { name: '1024 md drawer', viewport: { width: 1024, height: 768 }, mode: 'drawer', drawerWidth: 'min(92vw, 720px)', path: 'below header' },
   { name: '390 phone drawer', viewport: { width: 390, height: 844 }, mode: 'drawer', drawerWidth: 'min(92vw, 480px)', path: 'below header' },
-  { name: '1440 centred dialog', viewport: { width: 1440, height: 900 }, mode: 'modal', drawerWidth: 'min(92vw, 720px)', path: 'top centre' },
+  { name: '1440 centred dialog', viewport: { width: 1440, height: 900 }, mode: 'dialog', drawerWidth: 'min(92vw, 720px)', path: 'top centre' },
 ];
 const BELOW_HEADER = CONFIGURATIONS[1];
 

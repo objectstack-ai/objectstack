@@ -55,6 +55,9 @@
 - 「无则关」= 首触即关 not_planned,带理由与入队三门,⛔ 不定 p3、不 hold;下行同此。
 - 所入车道队列 P0/P1 开着(= 未派发,在飞不算)时,三门皆无的 p2/p3 `tooling` 卡同样关。
 - 路由是分诊的技术判断,⛔ 永不升级哪个仓的问题;父单是协调节点,永不派发。
+- 涉 cloud 任一即算:修复/验收/必经步骤落 cloud 仓或托管面;cloud 卡半张或被其阻;因在 cloud。
+- 不算:只在 cloud 测得而修复与验收全在本仓;仅引 cloud 卡作历史;命中者归 cloud PM。
+- 已 `pm:dispatched` 到本仓车道的原地完工,评论注明涉 cloud 给 cloud PM,⛔ 认领中不迁。
 - 父单已有子结构的:父单队列标签即可,分诊逐个展开路由、补 `Blocked-by:` 排序。
 - 跨层功能点(≥2 层)立父单带 `area:*`+`pm:epic`+清单项级,逐层子单按 `Blocked-by:` 排。
 - 每张留一条英文审计评论(`Triage: lands in …; rationale: …`),可选带 `Size/model suggestion:` 行。
@@ -65,17 +68,14 @@
 - 执行席 ⛔ 不并卡,疑重复挂 `pm:retriage` 写明哪两张同文件同机制;同 assignee 者自关后卡。
 - 生产者在哪是常设分诊问题:declared ≠ enforced 形状的卡先问谁在写这个字段。
 - 首触答责任三问:谁的代码出险/有正路否/谁可达且有人用否;据答改卡范围、域与路由。
-- 发现分诊轮:`finding` 恒 = 待首次定级、定级即离标;hold 重验只在 `Restart-when:` 命中时发生。
 - ⛔ 不设逐卡豁免评论;每 fire 定完全部未定级 finding,优先于旧卡重验。
 - 三类外不可逆或有硬时限(发版即固化、只被消费的文件、过窗不可补)⇒ 不关,报维护者。
 - 三类外首触关闭只清门前存量,关 not planned(不等批准可否决重开);三类内无证据拒收。
 - 三类内再过时前提检查,三选一:晋级 / 关闭 not planned / hold;判级只在此轮,不在立单时。
-- ⛔ 写入前对每张卡现读当前状态;任何列表快照读数一律作废。
 - ⛔ 带 `pm:dispatched`/assignee/open 或 merged PR 引用的卡不动;例外:下三行、main-red 锚卡首触。
 - 在飞活性复查:认领逾一天无自有产出(commit/PR/评论)⇒ 敲门一次,首行键 `Owned-24h re-check:`。
 - 敲门后 `RECLAIM_AFTER_HOURS = 12` 小时无答复 ⇒ `label-write.mjs --release` 一笔中继释放,贴不动。
 - 释放:`Release:` 评论(出处三件)+ `Resume-from:` 行 + `pm:dispatched`→`pm:queue` + 清 assignee。
-- `pm:retriage` 每 fire 先答所求、同笔摘标;须维护者答的入箱;既裁砍项与席改标退回执行席。
 - retriage 的异议判据认内容(有评论写明所求)⛔ 不认形状(有一条异议评论)。
 - 人工地板(恒呈维护者):功能新增;ADR;协议/公开契约变化;破坏性或难回滚动作。
 - 人工地板同含:安全/权限边界;门禁削弱(降阈/删必查/抬上限/跳测);新增运行时第三方依赖;
