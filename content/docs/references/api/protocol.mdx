@@ -1788,7 +1788,7 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | :--- | :--- | :--- | :--- |
 | **objects** | `Record<string, { label?: string; pluralLabel?: string; description?: string; fields?: Record<string, object>; … }>` | optional | Object translations keyed by object name |
 | **picklists** | `Record<string, { label?: string; options: Record<string, string> }>` | optional | Picklist translations keyed by picklist name |
-| **apps** | `Record<string, { label: string; description?: string; navigation?: Record<string, object> }>` | optional | App translations keyed by app name |
+| **apps** | `Record<string, { label?: string; description?: string; navigation?: Record<string, object> }>` | optional | App translations keyed by app name |
 | **messages** | `Record<string, string>` | optional | UI message translations keyed by message ID |
 | **globalActions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Global action translations keyed by action name |
 | **dashboards** | `Record<string, { label?: string; description?: string; actions?: Record<string, object>; widgets?: Record<string, object>; … }>` | optional | Dashboard translations keyed by dashboard name |

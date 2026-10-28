@@ -131,3 +131,17 @@ describe('share-link request headers and 401 gates (objectui#11649)', () => {
     }
   });
 });
+
+describe('normalizeResolvedShare — the fields projection (objectstack#27121)', () => {
+  const FIELDS = { name: { label: 'Account Name', type: 'text' } };
+
+  it('carries `fields` through on both the enveloped and the bare body', () => {
+    expect(normalizeResolvedShare(enveloped({ record: RECORD, link: LINK, fields: FIELDS })).fields).toEqual(FIELDS);
+    expect(normalizeResolvedShare({ record: RECORD, link: LINK, fields: FIELDS }).fields).toEqual(FIELDS);
+  });
+
+  it('leaves `fields` absent when an older server omits it, so the page keeps its humanized labels', () => {
+    expect(normalizeResolvedShare(enveloped({ record: RECORD, link: LINK })).fields).toBeUndefined();
+    expect(normalizeResolvedShare({ record: RECORD, link: LINK }).fields).toBeUndefined();
+  });
+});

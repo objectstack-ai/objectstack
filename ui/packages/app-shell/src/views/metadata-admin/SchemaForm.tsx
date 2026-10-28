@@ -2907,6 +2907,40 @@ function RepeaterField({
 /* ----- RecordField — Record<string, item> editor -------------------------- */
 
 /**
+ * The `widget` a `type: 'record'` form row declares to get the KEY-ONLY face
+ * of {@link RecordField} (objectstack#26835).
+ *
+ * The default face mirrors each entry's key into the entry (`keyField.field`,
+ * `name` unless declared). That is right for a map of self-describing items
+ * (an object's `fields`), and wrong for a map whose entries are closed objects
+ * with no member that echoes the key: there the stamped key is an unknown key
+ * the schema refuses. A hook's `refusals` catalogue is that shape — the key IS
+ * the refusal code, and an entry is `{ message, status? }` and nothing else.
+ *
+ * The key-only face edits the same `Record<string, entry>`: add, rename and
+ * remove keys, edit each entry's fields, reorder by drag — and never writes the
+ * key into the value. A key is checked against the record's own served key
+ * schema (`propertyNames.pattern`, which the server derives from the spec's key
+ * schema), so the rule is the contract's and is never restated here;
+ * `keyField.field` / `regex` / `immutable` are not read (there is no stamped
+ * member, and a key is always renamable), while its `label` / `placeholder` /
+ * `helpText` still name the key column.
+ *
+ * Opt-in is by declaration on the form row (`widget: 'key-only-record'`), so
+ * any record field can take it and no metadata type is named here.
+ */
+export const KEY_ONLY_RECORD_WIDGET = 'key-only-record';
+
+/**
+ * The key rule a record's served schema declares, or `null` when it declares
+ * none. Read for the key-only face only — see {@link KEY_ONLY_RECORD_WIDGET}.
+ */
+function servedRecordKeyPattern(schema: JsonSchema | undefined): RegExp | null {
+  const pattern = (schema?.propertyNames as JsonSchema | undefined)?.pattern;
+  return typeof pattern === 'string' ? new RegExp(pattern) : null;
+}
+
+/**
  * Editor for `type: 'record'` form fields. The value is a name-keyed map
  * (`Record<string, item>`) where insertion order is display order.
  *
@@ -2918,7 +2952,8 @@ function RepeaterField({
  *    per-row sub-fields, similar to RepeaterField's card layout.
  *
  * The key is mirrored into the item as a property (default name: 'name')
- * so downstream consumers can treat each item as self-describing.
+ * so downstream consumers can treat each item as self-describing — except
+ * on the key-only face, which never writes it ({@link KEY_ONLY_RECORD_WIDGET}).
  *
  * See ADR-0007.
  */
@@ -2977,6 +3012,11 @@ function RecordField({
   const [keyError, setKeyError] = React.useState<string | null>(null);
   const [dragKey, setDragKey] = React.useState<string | null>(null);
   const [dropTarget, setDropTarget] = React.useState<string | null>(null);
+  // Key-only face: the key being renamed and its typed text. A rename moves the
+  // entry only once the text is a valid key, so an invalid intermediate
+  // spelling (`CLEAN_` on the way to `CLEAN_VERSION`) stays typeable.
+  const [keyDraft, setKeyDraft] = React.useState<{ key: string; text: string } | null>(null);
+  const [renameError, setRenameError] = React.useState<string | null>(null);
   // Delegate to a registered widget if the form spec asked for one
   // explicitly (e.g. `widget: 'airtable'`). The widget owns the entire UI.
   if (widget) {
@@ -3004,10 +3044,14 @@ function RecordField({
   }
 
   // Inline fallback — card list with a key column + sub-fields.
-  const keyProp = keyField?.field ?? 'name';
-  const keyLabel = keyField?.label ?? prettify(keyProp);
-  const keyRegex = keyField?.regex ? new RegExp(keyField.regex) : null;
-  const keyImmutable = keyField?.immutable !== false; // default true
+  const keyOnly = widget === KEY_ONLY_RECORD_WIDGET;
+  // The member the key is mirrored into; none on the key-only face.
+  const keyProp = keyOnly ? undefined : keyField?.field ?? 'name';
+  const keyLabel = keyField?.label ?? (keyProp ? prettify(keyProp) : t('engine.form.key', locale));
+  const keyRegex = keyOnly
+    ? servedRecordKeyPattern(schema)
+    : keyField?.regex ? new RegExp(keyField.regex) : null;
+  const keyImmutable = !keyOnly && keyField?.immutable !== false; // default true
   const record =
     value && typeof value === 'object' && !Array.isArray(value)
       ? (value as Record<string, Record<string, unknown>>)
@@ -3031,26 +3075,42 @@ function RecordField({
     }
     emit(next);
   };
-  const renameItem = (oldKey: string, newKey: string) => {
-    if (newKey === oldKey) return;
+  const renameItem = (oldKey: string, newKey: string): boolean => {
+    if (newKey === oldKey) return true;
+    const setError = keyOnly ? setRenameError : setKeyError;
+    if (keyOnly && !newKey) {
+      setError(t('engine.form.keyRequired', locale));
+      return false;
+    }
     if (record[newKey]) {
-      setKeyError(tFormat('engine.form.keyExists', locale, { key: newKey }));
-      return;
+      setError(tFormat('engine.form.keyExists', locale, { key: newKey }));
+      return false;
     }
     if (keyRegex && !keyRegex.test(newKey)) {
-      setKeyError(tFormat('engine.form.keyPattern', locale, { pattern: String(keyRegex) }));
-      return;
+      setError(tFormat('engine.form.keyPattern', locale, { pattern: String(keyRegex) }));
+      return false;
     }
     const next: Record<string, Record<string, unknown>> = {};
     for (const [k, v] of entries) {
       if (k === oldKey) {
-        next[newKey] = { ...v, [keyProp]: newKey };
+        next[newKey] = keyProp ? { ...v, [keyProp]: newKey } : v;
       } else {
         next[k] = v;
       }
     }
-    setKeyError(null);
+    setError(null);
     emit(next);
+    return true;
+  };
+  // Key-only face: hold the typed text, move the entry once it is a valid key.
+  const editKey = (key: string, text: string) => {
+    const trimmed = text.trim();
+    if (renameItem(key, trimmed)) {
+      setKeyDraft(null);
+      if (trimmed !== key && openKey === key) setOpenKey(trimmed);
+    } else {
+      setKeyDraft({ key, text });
+    }
   };
   const addItem = () => {
     const trimmed = pendingKey.trim();
@@ -3066,8 +3126,11 @@ function RecordField({
       setKeyError(tFormat('engine.form.keyPattern', locale, { pattern: String(keyRegex) }));
       return;
     }
-    const blank: Record<string, unknown> = { [keyProp]: trimmed };
-    specs.forEach((s) => { blank[s.field] = undefined; });
+    const blank: Record<string, unknown> = {};
+    if (keyProp) {
+      blank[keyProp] = trimmed;
+      specs.forEach((s) => { blank[s.field] = undefined; });
+    }
     emit({ ...record, [trimmed]: blank });
     setPendingKey('');
     setKeyError(null);
@@ -3158,18 +3221,36 @@ function RecordField({
             </div>
             {isOpen && (
               <div className="p-3 space-y-3">
-                <FieldRow
-                  name={keyProp}
-                  idPath={joinIdPath(idPath, idx)}
-                  schema={{ type: 'string' }}
-                  value={key}
-                  required
-                  readOnly={readOnly || keyImmutable}
-                  fieldSpec={{ field: keyProp, type: 'text', label: keyLabel, helpText: keyField?.helpText }}
-                  widgetContext={widgetContext}
-                  formData={row}
-                  onChange={(v) => renameItem(key, String(v ?? '').trim())}
-                />
+                {keyProp ? (
+                  <FieldRow
+                    name={keyProp}
+                    idPath={joinIdPath(idPath, idx)}
+                    schema={{ type: 'string' }}
+                    value={key}
+                    required
+                    readOnly={readOnly || keyImmutable}
+                    fieldSpec={{ field: keyProp, type: 'text', label: keyLabel, helpText: keyField?.helpText }}
+                    widgetContext={widgetContext}
+                    formData={row}
+                    onChange={(v) => renameItem(key, String(v ?? '').trim())}
+                  />
+                ) : (
+                  // The key-only face's key row: `key` is the row's name only —
+                  // it is never a member of the entry, so it never reaches `row`.
+                  <FieldRow
+                    name="key"
+                    idPath={joinIdPath(idPath, idx)}
+                    schema={{ type: 'string' }}
+                    value={keyDraft?.key === key ? keyDraft.text : key}
+                    required
+                    issues={keyDraft?.key === key && renameError ? [renameError] : undefined}
+                    readOnly={readOnly}
+                    fieldSpec={{ field: 'key', type: 'text', label: keyLabel, helpText: keyField?.helpText }}
+                    widgetContext={widgetContext}
+                    formData={row}
+                    onChange={(v) => editKey(key, String(v ?? ''))}
+                  />
+                )}
                 {specs.map((s) => {
                   const visibility = readVisibility(s);
                   if (visibility && !evaluatePredicate(visibility, buildPredicateCtx(row, hostScope))) return null;

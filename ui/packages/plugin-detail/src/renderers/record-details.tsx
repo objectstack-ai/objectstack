@@ -35,6 +35,7 @@ import {
 import { DetailView } from '../DetailView';
 import { hasCellValue } from '../emptiness';
 import { RecordPageProvenanceContext } from '../recordPageProvenance';
+import { RecordFieldAccessForRecord } from '../recordFieldAccess';
 import { deriveFieldGroupDetailEntries, type FieldGroupDetailEntry } from '../synth/buildDefaultPageSchema';
 import { useRecordAriaProps } from './recordComponentAria';
 import { recordBindingBlock } from './recordBinding';
@@ -1187,15 +1188,24 @@ const RecordDetailsBody: React.FC<RecordDetailsRendererProps> = ({
   return (
     <div className={className} {...designer} {...ariaProps}>
       <RecordPageProvenanceContext.Provider value={readsPageRecord}>
-        {/* objectui#12701 — the record is the context host's (the record
-            page's read, or the binding's row above); this body never reads it
-            again, it waits for `ctx.data`. */}
-        <DetailView
-          schema={synthesized}
+        {/* objectstack#27146 — the in-place edit's field locks are this
+            stored row's, asked of the server (`../recordFieldAccess`). */}
+        <RecordFieldAccessForRecord
+          objectName={ctx.objectName}
+          recordId={ctx.recordId}
           dataSource={ctx.dataSource}
-          inlineEdit={inlineEditDefault}
-          recordFromHost
-        />
+          enabled={inlineEditDefault}
+        >
+          {/* objectui#12701 — the record is the context host's (the record
+              page's read, or the binding's row above); this body never reads it
+              again, it waits for `ctx.data`. */}
+          <DetailView
+            schema={synthesized}
+            dataSource={ctx.dataSource}
+            inlineEdit={inlineEditDefault}
+            recordFromHost
+          />
+        </RecordFieldAccessForRecord>
       </RecordPageProvenanceContext.Provider>
     </div>
   );

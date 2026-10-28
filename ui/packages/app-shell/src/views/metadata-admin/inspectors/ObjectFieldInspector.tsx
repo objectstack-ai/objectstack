@@ -31,9 +31,10 @@
  * (objectui#12758): it wrote `relationshipName`, a key `FieldSchema` never
  * declared under any spelling, so typing into it put the field in the spec
  * banner and every autosave of the object came back `422 unrecognized_keys`.
- * The spec has no inverse-collection key on the child's field; the parent's
- * detail-page view of the child collection is `relatedList` /
- * `relatedListTitle`, a different concept, and declaring one is a spec card.
+ * The spec has no inverse-collection key on the child's field. The parent's
+ * detail-page view of the child collection is a different concept, declared
+ * by `relatedList` / `relatedListFilter` on this field, and the "Related list"
+ * section edits exactly those two (`RelatedListFields`).
  *
  * Rename: changing the `name` rewrites the field's key in-place and
  * re-issues the selection so the inspector stays bound to the same
@@ -104,6 +105,8 @@ import { FieldTypePicker } from './FieldTypePicker.js';
 import { CelPredicateField } from '../CelPredicateField.js';
 import type { CelLintIssue } from '../celAuthoring.js';
 import { t, tFormat, type SupportedLocale } from '../i18n.js';
+import { FilterConditionField } from './FilterConditionField.js';
+import type { FilterCondition } from './datasetFilterCondition.js';
 import { usePickerLoad, type LoadState } from '../loadState.js';
 
 
@@ -1204,6 +1207,16 @@ export function ObjectFieldInspector({
                 readOnly={readOnly}
                 locale={locale}
               />
+              {(type === 'lookup' || type === 'master_detail') && (
+                <RelatedListFields
+                  def={def}
+                  patchDef={patchDef}
+                  unsetDefKey={unsetDefKey}
+                  ownFields={view.entries}
+                  readOnly={readOnly}
+                  locale={locale}
+                />
+              )}
             </>
           )}
           {type === 'formula' && (
@@ -2093,6 +2106,126 @@ function LookupConfigFields({
           <InspectorCheckboxField label={tr('designer.field.lookup.allowCreate')} value={allowCreate} onCommit={(v) => patchDef({ allowCreate: v || undefined })} disabled={readOnly} />
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ─────────────── Related list on the parent (relatedList*) ─────────────── */
+
+/** The three states of `relatedList`, as the control names them. */
+type RelatedListMode = 'shown' | 'hidden' | 'primary';
+
+/**
+ * The stored `relatedList` as one of the control's three states. `true` and
+ * absent are the same declaration (the spec: "true/absent = shown"), so both
+ * read as `shown`.
+ */
+export function readRelatedListMode(value: unknown): RelatedListMode {
+  if (value === false) return 'hidden';
+  if (value === 'primary') return 'primary';
+  return 'shown';
+}
+
+const RELATED_LIST_MODES: ReadonlyArray<{ mode: RelatedListMode; labelKey: string; helpKey: string }> = [
+  { mode: 'shown', labelKey: 'designer.field.relatedList.shown', helpKey: 'designer.field.relatedList.help.shown' },
+  { mode: 'hidden', labelKey: 'designer.field.relatedList.hidden', helpKey: 'designer.field.relatedList.help.hidden' },
+  { mode: 'primary', labelKey: 'designer.field.relatedList.primary', helpKey: 'designer.field.relatedList.help.primary' },
+];
+
+/**
+ * How this relationship's child records appear on the PARENT's record page —
+ * the read-side mirror of `inlineEdit`, declared on the child's FK field.
+ *
+ *  - The three-state `relatedList` control: shown (the default — the key is
+ *    left ABSENT, the spec's own "true/absent = shown"), hidden (`false`), and
+ *    primary (`'primary'`), a core relationship. The primary state's wording,
+ *    "Primary (in body)", follows the record-page v3 ruling that a primary
+ *    related list is drawn in the record body as a full-width table (the
+ *    rendering half is the record-page card objectstack#27069).
+ *  - `relatedListFilter`: the list's declared scope, a `FilterCondition` over
+ *    THIS object's fields (the child's), edited with the same builder the
+ *    dataset designer and the list toolbar use (`FilterConditionField`). It is
+ *    offered only while the list is shown at all.
+ */
+function RelatedListFields({
+  def,
+  patchDef,
+  unsetDefKey,
+  ownFields,
+  readOnly,
+  locale,
+}: {
+  def: Record<string, unknown>;
+  patchDef: (patch: Record<string, unknown>) => void;
+  unsetDefKey: (key: string) => void;
+  ownFields: ReadonlyArray<{ name: string; def: Record<string, unknown> }>;
+  readOnly?: boolean;
+  locale?: string;
+}) {
+  const tr = (key: string) => t(key, locale);
+  const mode = readRelatedListMode(def.relatedList);
+  const reference = typeof def.reference === 'string' && def.reference ? (def.reference as string) : '';
+  const setMode = (next: RelatedListMode) => {
+    if (next === mode) return;
+    if (next === 'shown') unsetDefKey('relatedList');
+    else patchDef({ relatedList: next === 'hidden' ? false : 'primary' });
+  };
+  const filterFields = React.useMemo(
+    () => ownFields
+      .filter((e) => e.def.hidden !== true)
+      .map((e) => ({
+        value: e.name,
+        label: typeof e.def.label === 'string' && e.def.label ? (e.def.label as string) : e.name,
+        type: typeof e.def.type === 'string' ? (e.def.type as string) : 'text',
+      })),
+    [ownFields],
+  );
+  const filter = def.relatedListFilter && typeof def.relatedListFilter === 'object' && !Array.isArray(def.relatedListFilter)
+    ? (def.relatedListFilter as FilterCondition)
+    : undefined;
+  const headingId = React.useId();
+  return (
+    <div className="space-y-2 border-t pt-2.5" data-testid="field-related-list">
+      <div id={headingId} className="text-[11px] font-medium text-muted-foreground">{tr('designer.field.relatedList.heading')}</div>
+      <div role="radiogroup" aria-labelledby={headingId} className="inline-flex rounded-md border p-0.5">
+        {RELATED_LIST_MODES.map(({ mode: m, labelKey }) => (
+          <button
+            key={m}
+            type="button"
+            role="radio"
+            aria-checked={mode === m}
+            disabled={readOnly}
+            onClick={() => setMode(m)}
+            data-testid={`field-related-list-${m}`}
+            className={
+              'rounded px-2.5 py-1 text-xs transition-colors disabled:opacity-50 '
+              + (mode === m ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent hover:text-foreground')
+            }
+          >
+            {tr(labelKey)}
+          </button>
+        ))}
+      </div>
+      <p className="text-[10px] text-muted-foreground">
+        {tFormat(
+          RELATED_LIST_MODES.find((r) => r.mode === mode)!.helpKey,
+          locale,
+          { ref: reference || tr('designer.field.relatedList.parentFallback') },
+        )}
+      </p>
+      {mode !== 'hidden' && (
+        <FilterConditionField
+          testId="field-related-list-filter"
+          label={tr('designer.field.relatedList.filter')}
+          help={tr('designer.field.relatedList.filterHelp')}
+          value={filter}
+          onCommit={(fc) => (fc === undefined ? unsetDefKey('relatedListFilter') : patchDef({ relatedListFilter: fc }))}
+          fields={filterFields}
+          disabled={readOnly}
+          locale={(locale ?? 'en-US') as SupportedLocale}
+          advancedNote={tr('designer.field.relatedList.filterAdvanced')}
+        />
+      )}
     </div>
   );
 }

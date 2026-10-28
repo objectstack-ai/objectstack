@@ -1,12 +1,15 @@
 # ADR-0143: Outbound connector auth is open tier — OAuth2 grants, vendor app-credential exchange and request signing in one declarative auth contract
 
-**Status**: Proposed — 2026-10-27. `docs/adr/` is Tier H (Prime Directive #14): the maintainer's merge,
-with the four [open decisions](#decisions-put-to-the-maintainer) answered in this file, is the acceptance
-act. The six amendment notes this record names land in the same PR and take effect with it.
+**Status**: Accepted — 2026-10-28. Proposed 2026-10-27 (#26833, which also landed the six amendment
+notes this record names). The maintainer answered the four [decisions](#decisions-put-to-the-maintainer)
+on 2026-10-28. Each answer is recorded under its question, and D2.1, D2.3, D3, D4 and D7 state what the
+answers settle. `docs/adr/` is Tier H (Prime Directive #14).
 - **Deciders**: ObjectStack maintainer, 2026-10-27, verbatim and untranslated. On outbound connector OAuth:
   「OAuth 放开源层，先起草 ADR 修订」, 「平台基于 better-auth ，怎么会有没有 oauth」, 「创建issue 就行」. On request
   signing, the three recommendations of the MCP / OpenAPI directory survey: 「三条行动建议 立卡」 →
-  「建议 1+2立卡」 → 「3 不考虑」 (recommendation 2 is request signing).
+  「建议 1+2立卡」 → 「3 不考虑」 (recommendation 2 is request signing). On Q1–Q4, 2026-10-28: the
+  maintainer asked for an independent analysis of the four decisions with a recommendation for each, then
+  accepted the recommendations as written there: 「同意」.
 - **Amends**: the outbound-connector-auth tier placement — and nothing else — in
   [ADR-0018](./0018-unified-node-action-registry.md) "Out of scope (deliberately not baseline)",
   [ADR-0022](./0022-connectors-vs-messaging-channels.md) §4,
@@ -148,6 +151,9 @@ carry and forbid; exact key spelling is the spec slice's, reviewed against this 
      runs the MCP authorization flow (protected-resource metadata, authorization-server metadata,
      dynamic client registration, PKCE), and the registered client lives in the connection record (D3),
      never in metadata.
+   - They may also be supplied. A vendor MCP server without dynamic client registration takes a
+     pre-registered `clientId` and a client-secret `credentialRef`, as for any other `oauth2` instance.
+     HubSpot's remote server is one such vendor (Q3).
 2. **`app-credential`** — the non-interactive vendor exchange of an app id and secret for a short-lived
    access token, which is not an RFC 6749 grant: each vendor spells the request, the response fields
    and where the token rides differently.
@@ -163,20 +169,28 @@ carry and forbid; exact key spelling is the spec slice's, reviewed against this 
    - `keyId` and scheme-specific **non-secret** parameters (an app id, a region, a vendor
      public-key `credentialRef` where the scheme verifies responses).
    - The private key or HMAC secret is a `credentialRef`.
-   - A scheme enters the enum together with its signer and with test vectors reproducing the vendor's
-     published examples byte for byte. An enum member without a shipped signer is a declared-but-
-     unenforced property (ADR-0049) and is not admitted. A "generic HMAC" member is admitted only with a
+   - A scheme enters the enum together with its signer and its test vectors. Where the vendor publishes
+     a complete worked example, the vectors reproduce it byte for byte. Where it does not (a masked
+     secret, an unreachable page), the vectors are taken from the vendor's official SDK test suite, and
+     the test names that SDK and its version. An enum member without a shipped signer is a
+     declared-but-unenforced property (ADR-0049) and is not admitted.
+   - The signer seam carries an optional response-verification step beside request signing. A scheme
+     whose vendor signs its responses implements that step in its first release; `alipay-v3` does
+     (Q4). A "generic HMAC" member is admitted only with a
      canonical form pinned in the spec; without one, it is a dialect.
 
 ### D3 — Secrets are references; tokens are runtime state in a connection record
 
 - Every secret an author names is a `credentialRef`, resolved through `CredentialResolver` (ADR-0097 §3,
   unchanged). Publish keeps refusing an inline secret, now on the three new variants too.
-- Access tokens, refresh tokens, registered MCP clients and their expiry are **not metadata**. They live
-  in a connection record bound to the instance, encrypted at rest through the `secret` channel
-  (ADR-0100) or an equivalent the spec slice names. They never appear in `sys_metadata`, in
-  `GET /api/v1/automation/connectors`, in a connector descriptor, or in a log line.
-- Where that record lives is the [second decision](#q2--where-grants-are-stored).
+- Tokens, registered MCP clients and their expiry are **not metadata**. They never appear in
+  `sys_metadata`, in `GET /api/v1/automation/connectors`, in a connector descriptor, or in a log line.
+- Only what cannot be re-obtained unattended is persisted: the `authorization_code` refresh token, the
+  client a dynamic registration created, and the grant's status, scopes and expiry. These live in a
+  dedicated connection record bound to the instance (Q2), their secrets encrypted at rest through the
+  `secret` channel (ADR-0100).
+- Access tokens are never persisted. They live in an in-process cache. This includes every
+  `client_credentials` and `app-credential` token, which the configured secret re-derives at any time.
 
 ### D4 — Grant-bearing kinds resolve per dispatch, not at materialization
 
@@ -197,6 +211,11 @@ materialization.
 - An `authorization_code` instance whose connection has never been authorized is not an authoring fault
   and never fails a boot. It materializes `degraded` ("not connected") until an administrator connects
   it.
+- A connection is selected by the run's organization (Q1). A run that carries no organization, such as
+  a schedule (`packages/services/service-automation/src/runtime-identity.ts#resolveRunDataContext`),
+  uses the instance's connection only when exactly one exists. Otherwise the dispatch is refused with a
+  reason naming the missing organization. It never falls back to an arbitrary connection: this is
+  ADR-0073's "missing identity is refused" applied to the organization.
 
 ### D5 — Connecting is an authorized, server-side act
 
@@ -213,12 +232,13 @@ materialization.
 A grant obtained to call a vendor on the platform's behalf must not let anyone sign in to ObjectStack,
 and must not be revoked or replaced by an unrelated sign-in. Whatever the storage decision, this holds.
 
-### D7 — The unused runtime `oauth2` shape is settled by the spec slice
+### D7 — The unused runtime `oauth2` shape is retired
 
 `ConnectorOAuth2Schema` (`packages/spec/src/shared/connector-auth.zod.ts#ConnectorOAuth2Schema`) inlines a client secret and a refresh token
-and has no consumer. The spec slice that adds D2's `oauth2` variant either retires it or redefines it
-as the resolved, post-refresh shape a provider receives. Either way it goes through ADR-0087 and does
-not survive as a second authored dialect.
+and has no consumer. The spec slice that adds D2's `oauth2` variant **retires** it through ADR-0087. It
+is not redefined as a resolved shape. Under D4 a provider receives a credential source answered per
+dispatch, an interface rather than a schema, and that source is separate from `CredentialResolver`, which
+keeps resolving `credentialRef`s.
 
 ### What this record does not decide
 
@@ -234,8 +254,9 @@ not survive as a second authored dialect.
 
 ## Decisions put to the maintainer
 
-Four questions stay open in this draft. Each is answered here, in place, before the merge that
-accepts the record. The recommendations are the drafting seat's and bind nothing.
+The maintainer answered all four on 2026-10-28 by accepting an independent analysis's recommendations
+(see Deciders). Each question keeps its options as drafted, followed by the **Decision**. Where the
+decision departs from the drafted recommendation, it says so.
 
 ### Q1 — Connection ownership and execution identity
 
@@ -258,6 +279,10 @@ Is a connection shared by the organization, or held per user, and whose grant do
 principal (D1/D2) is unbuilt, and many runs carry no user, so B fails the commonest automation shapes.
 A covers every acceptance scenario #26702 names, and adding a scope key later is additive
 (`Metadata-protocol: added`), not a migration.
+
+**Decision (2026-10-28): A.** It comes with D4's rule for a run that carries no organization. Per-user
+connections stay a later additive key. The `oauth2` and `app-credential` variants carry no scope key
+now, and Console Connect / Reconnect is organization-level.
 
 ### Q2 — Where grants are stored
 
@@ -282,6 +307,19 @@ Reuse better-auth's `account` storage and refresh, or a dedicated connection obj
 **Recommendation: B.** A fails three of D3 / D6's requirements on today's columns, and closing them
 would bend a sign-in table into a second purpose.
 
+**Decision (2026-10-28): B, scoped as D3 states.** Only the refresh token, the dynamically registered
+client and the grant's status, scopes and expiry are persisted. Access tokens are not. Further reasons
+`sys_account` does not fit:
+- `(provider_id, account_id)` is a globally unique index, so two organizations connected to one vendor
+  tenant collide.
+- The token columns are kept out of the `secret` channel deliberately, because better-auth reads them
+  back through its own adapter.
+- Both points are in `packages/platform-objects/src/identity/sys-account.object.ts`.
+
+The connection object follows the shape of
+`packages/platform-objects/src/identity/sys-scim-connection-credential.object.ts`: an organization
+column, a revocation switch, an expiry, engine-owned, and a declared permission.
+
 ### Q3 — First products for the first acceptance
 
 Which vendors does the first acceptance target? One per grant kind keeps every new path exercised by a
@@ -298,6 +336,27 @@ real upstream:
 
 **Recommendation: A.** It is the union of the acceptance lines both parent cards already wrote.
 
+**Decision (2026-10-28): A, revised. This departs from the drafted recommendation.** HubSpot's remote
+MCP server has no dynamic client registration. Clients are pre-registered in HubSpot
+([HubSpot docs](https://developers.hubspot.com/docs/apps/developer-platform/build-apps/integrate-with-the-remote-hubspot-mcp-server)),
+so HubSpot alone cannot prove D2.1's discovery-and-registration path, the hardest new path. The first
+acceptance therefore targets:
+- `authorization_code` over MCP:
+  - **Notion's hosted MCP server is the live proof**
+    ([Notion docs](https://developers.notion.com/guides/mcp/build-mcp-client)). It provides dynamic
+    client registration, mandatory S256 PKCE, and a refresh token rotated on every refresh, so it
+    exercises D2.1, D4's single-flight refresh and atomic rotation, and the revoked → `degraded` path
+    at once.
+  - HubSpot is the second case, live or as a contract test, for the pre-registered `clientId` form.
+- `app-credential`: Feishu. WeCom's early token invalidation is a unit case for D4's refresh-once-on-401
+  rule.
+- `signed`: an Alipay v3 sandbox query, called over https. `signed` is instance-level `auth`: the
+  Alipay document declares no `securitySchemes`.
+- `client_credentials`, plus a dynamic-registration / PKCE contract test: against the platform's own
+  embedded OAuth authorization server (`@better-auth/oauth-provider`), which already issues
+  `client_credentials` tokens and has dynamic registration enabled
+  (`packages/plugins/plugin-auth/src/auth-manager-plugin-list.ts`).
+
 ### Q4 — Which signing schemes ship first
 
 The secret is always a `credentialRef` (D2.3); the question is the first members of the closed enum.
@@ -311,6 +370,19 @@ The secret is always a `credentialRef` (D2.3); the question is the first members
 
 **Recommendation: A.** The other schemes join the enum when a consumer declares one, each with its
 signer and vectors (D2.3). An enum listing schemes nobody implements would be declared-not-enforced.
+
+**Decision (2026-10-28): A, with three conditions.**
+1. **The Alipay member is named `alipay-v3`.** `RSA2` is the v2 gateway's `sign_type`; the v3 protocol
+   header is `ALIPAY-SHA256withRSA`. The first enum is
+   `'alipay-v3' | 'aliyun-acs3-hmac-sha256' | 'tencentcloud-tc3-hmac-sha256'`.
+2. **The signer seam carries response verification from the start (D2.3).** `alipay-v3` implements it
+   in its first release. WeChat Pay then joins later as one more signer, with no seam change.
+3. **The test-vector rule takes D2.3's relaxed form.** Of the three, only Aliyun publishes a complete,
+   reproducible worked example; Tencent masks its SecretKey. The rule as first drafted would have
+   admitted Aliyun alone.
+
+Option B's cost statement is partly out of date. New WeChat Pay merchants verify against a fixed
+platform public key rather than rotating certificates, but the response-verification half remains.
 
 ---
 
@@ -336,14 +408,18 @@ signer and vectors (D2.3). An enum listing schemes nobody implements would be de
 
 ## Acceptance (pinned from #26702 and #26710)
 
-- A declarative `provider: 'mcp'` instance pointing at an OAuth-protected vendor MCP server is
-  authorized once from the Console, and a flow `connector_action` dispatches end to end. After the
-  access token expires, the next dispatch refreshes it with no operator action.
+- A declarative `provider: 'mcp'` instance pointing at Notion's hosted MCP server, with no endpoints
+  and no `clientId` authored, is authorized once from the Console through dynamic client registration.
+  A flow `connector_action` then dispatches end to end. After the access token expires, the next
+  dispatch refreshes it with no operator action, and the rotated refresh token replaces the old one.
+  HubSpot covers the pre-registered `clientId` form, live or as a contract test (Q3).
 - A Feishu (or DingTalk) instance declared with `app-credential` dispatches through `openapi` or
   `rest`, and its token renews without a restart.
-- An `openapi` instance over the Alipay v3 document with `auth: { type: 'signed', scheme:
-  'alipay-rsa2', … }` dispatches a sandbox query. Signer unit tests reproduce the vendor's published
-  signatures byte for byte.
+- An `openapi` instance over the Alipay v3 document, normalized to JSON first, with
+  `auth: { type: 'signed', scheme: 'alipay-v3', … }`, dispatches a sandbox query over https and
+  verifies the response signature. Signer unit tests meet D2.3's vector rule.
+- `client_credentials` and the dynamic-registration flow pass a contract test against the embedded
+  OAuth authorization server.
 - An unknown `grant`, `vendor` or `scheme`, or an inline secret on any variant, is refused at publish
   with a located error.
 - No token, client secret or private key appears in `sys_metadata`, in

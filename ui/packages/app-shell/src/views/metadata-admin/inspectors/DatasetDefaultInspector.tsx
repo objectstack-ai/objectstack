@@ -20,8 +20,8 @@
  */
 
 import * as React from 'react';
-import { AlertTriangle, ArrowRight, ChevronDown, Plus, Trash2, X } from 'lucide-react';
-import { Badge, Button, FilterBuilder, Label, Popover, PopoverContent, PopoverTrigger } from '@object-ui/components';
+import { AlertTriangle, ArrowRight, Plus, Trash2, X } from 'lucide-react';
+import { Badge, Button, Label } from '@object-ui/components';
 import {
   InspectorShell,
   InspectorTextField,
@@ -35,7 +35,8 @@ import { InspectorComboField, type InspectorComboOption } from './InspectorCombo
 import { toFieldNameLoose, toFieldNameOrEmpty } from '../previews/object-fields-io.js';
 import { formatMeasure } from '@object-ui/core';
 import { useDisplayLocale } from '@object-ui/i18n';
-import { conditionToGroup, groupToCondition, isClearedGroup, type BuilderGroup, type FilterCondition } from './datasetFilterCondition.js';
+import { type FilterCondition } from './datasetFilterCondition.js';
+import { FilterConditionField } from './FilterConditionField.js';
 import {
   useObjectOptions,
   useDatasetFieldCatalog,
@@ -165,6 +166,21 @@ export function writeRowField<T extends { field?: string }>(row: T, field: strin
   return (isBlankField(field) ? rest : { ...rest, field }) as T;
 }
 
+/**
+ * Write a measure's display format: a key the picker leaves unset is removed
+ * rather than stored as `undefined`, the same rule as {@link writeRowField}, so
+ * the held draft and the body the save sends say the same thing — a measure on
+ * "inherit" carries no `currency` key at all.
+ */
+function writeMeasureFormat<T extends { format?: string; currency?: string }>(row: T, next: { format?: string; currency?: string }): T {
+  const { format: _format, currency: _currency, ...rest } = row;
+  return {
+    ...rest,
+    ...(next.format ? { format: next.format } : {}),
+    ...(next.currency ? { currency: next.currency } : {}),
+  } as T;
+}
+
 function SectionHeader({ title, count, onAdd, addLabel }: { title: string; count: number; onAdd?: () => void; addLabel: string }) {
   return (
     <div className="flex items-center justify-between">
@@ -196,23 +212,39 @@ function Advanced({ children, locale }: { children: React.ReactNode; locale: Sup
   );
 }
 
-/** Best-effort parse of a stored measure format into the picker's {kind, decimals}. */
-function parseMeasureFormat(format?: string, currency?: string): { kind: string; decimals: number } {
+/**
+ * Best-effort parse of a stored measure format into the picker's {kind, decimals}.
+ *
+ * `monetaryField` — the measure aggregates a `currency`-type field. Such a
+ * measure is monetary at runtime whether or not it names a `currency` (the
+ * analytics service resolves one from the field's fixed currency, then the
+ * tenant default), so a numeral format with no code reads back as "Currency ·
+ * inherit" — the state the picker wrote — rather than as a plain number.
+ */
+function parseMeasureFormat(format?: string, currency?: string, monetaryField = false): { kind: string; decimals: number } {
   const f = (format ?? '').trim();
   const m = f.match(/\.(0+)/);
   const decimals = m ? Math.min(m[1].length, 2) : 0;
   if (currency || /[$£€¥₹]/.test(f)) return { kind: 'currency', decimals };
+  if (monetaryField && f && !f.includes('%')) return { kind: 'currency', decimals };
   if (f.includes('%')) return { kind: 'percent', decimals };
   if (f) return { kind: 'number', decimals };
   return { kind: 'raw', decimals: 0 };
 }
 
-/** Generate {format, currency} from the picker selection. */
+/**
+ * Generate {format, currency} from the picker selection.
+ *
+ * An empty currency stays empty: no surface guesses a code. A measure with no
+ * `currency` inherits through the existing chain — the source field's fixed
+ * currency, then the tenant default — where a guessed `'USD'` would outrank
+ * both and show `$` on a CNY tenant's dashboard.
+ */
 function buildMeasureFormat(kind: string, decimals: number, currency: string): { format?: string; currency?: string } {
   const dp = decimals > 0 ? '.' + '0'.repeat(decimals) : '';
   switch (kind) {
     case 'number': return { format: `0,0${dp}`, currency: undefined };
-    case 'currency': return { format: `0,0${dp}`, currency: currency || 'USD' };
+    case 'currency': return { format: `0,0${dp}`, currency: currency || undefined };
     case 'percent': return { format: `0${dp}%`, currency: undefined };
     default: return { format: undefined, currency: undefined };
   }
@@ -223,10 +255,27 @@ function buildMeasureFormat(kind: string, decimals: number, currency: string): {
  * ⇄ the spec's `format`/`currency` strings and shows a live sample so a business
  * user never has to hand-write a numeral pattern.
  */
-function MeasureFormatField({ measure, onPatch, disabled, locale }: { measure: Measure; onPatch: (p: Partial<Measure>) => void; disabled?: boolean; locale: SupportedLocale }) {
-  const { kind, decimals } = parseMeasureFormat(measure.format, measure.currency);
-  const currency = measure.currency || 'USD';
-  const apply = (k: string, d: number, c: string) => onPatch(buildMeasureFormat(k, d, c));
+function MeasureFormatField({ measure, monetaryField, onPatch, disabled, locale }: { measure: Measure; monetaryField: boolean; onPatch: (p: { format?: string; currency?: string }) => void; disabled?: boolean; locale: SupportedLocale }) {
+  const parsed = parseMeasureFormat(measure.format, measure.currency, monetaryField);
+  // "Currency" with no code is not distinguishable on the wire from "Number"
+  // for a measure over a plain number field, so the kind the author just picked
+  // is held for as long as the stored format is still the one that pick wrote —
+  // otherwise the select would snap back to "Number" before a code is chosen.
+  const [held, setHeld] = React.useState<{ kind: string; format?: string; currency?: string } | null>(null);
+  const kind = held && held.format === measure.format && held.currency === measure.currency ? held.kind : parsed.kind;
+  const { decimals } = parsed;
+  const currency = measure.currency ?? '';
+  const apply = (k: string, d: number, c: string) => {
+    const next = buildMeasureFormat(k, d, c);
+    setHeld({ kind: k, ...next });
+    onPatch(next);
+  };
+  // Only a measure over a `currency` field has a chain to inherit from; any
+  // other measure without a code renders as a plain number, so it is offered
+  // no "inherit" row and asks for a code instead.
+  const currencyOptions = monetaryField
+    ? [{ value: '', label: t('engine.inspector.dataset.currencyInherit', locale) }, ...CURRENCY_OPTIONS]
+    : CURRENCY_OPTIONS;
   // The sample is a PREVIEW of authored formatting, so it has to be rendered
   // through the same channel as the surfaces it previews (objectui#4575): a
   // German session picking "Number · 1 decimal" is shown `1.234,5`, because
@@ -246,7 +295,7 @@ function MeasureFormatField({ measure, onPatch, disabled, locale }: { measure: M
         )}
       </div>
       {kind === 'currency' && (
-        <InspectorSelectField label={t('engine.inspector.dataset.currency', locale)} value={currency} options={CURRENCY_OPTIONS} onCommit={(v) => apply(kind, decimals, v)} disabled={disabled} />
+        <InspectorSelectField label={t('engine.inspector.dataset.currency', locale)} value={currency} options={currencyOptions} placeholder={t('engine.inspector.dataset.currencyChoose', locale)} onCommit={(v) => apply(kind, decimals, v)} disabled={disabled} />
       )}
       {kind !== 'raw' && (
         <p className="text-[10px] text-muted-foreground">
@@ -276,88 +325,6 @@ function RelWarning({ rel, onAdd, disabled, locale }: { rel: string; onAdd?: () 
         <button type="button" className="underline hover:no-underline" onClick={onAdd}>{t('engine.inspector.dataset.relWarningAdd', locale)}</button>
       )}
     </p>
-  );
-}
-
-/**
- * Visual filter editor for a dataset/measure `FilterCondition`. Wraps the shared
- * {@link FilterBuilder} (a flat AND of `field op value` rows) and converts to/from
- * the spec's Mongo-style `FilterCondition`. Filters it can't faithfully edit
- * (nested / `$or` / multi-op) degrade to a "edit in Source" note rather than being
- * silently rewritten. See {@link conditionToGroup} / {@link groupToCondition}.
- */
-function DatasetFilterField({ label, help, value, onCommit, fields, disabled, locale }: {
-  label: string;
-  help?: string;
-  value: FilterCondition | undefined;
-  onCommit: (fc: FilterCondition | undefined) => void;
-  fields: Array<{ value: string; label?: string; type?: string }>;
-  disabled?: boolean;
-  locale: SupportedLocale;
-}) {
-  // `fields` is handed to the READ half as well as to the builder: it is what
-  // lets a stored `$gt` on a date column read back as `after` — the operator
-  // that column's dropdown offers — instead of a `greaterThan` it does not
-  // list, which drew a blank operator trigger (objectui#9382).
-  const { group, representable } = conditionToGroup(value, fields);
-  const count = group.conditions.length;
-  /**
-   * Commit an edit — unless nothing survived serialization while rows are
-   * still on screen (objectui#9372).
-   *
-   * `groupToCondition` answers `undefined` both when the author CLEARED the
-   * filter and when every row was dropped, and this commit is what turns the
-   * second one into data loss: `onCommit` lands as `onPatch({ filter })`, the
-   * host applies it as `{ ...draft, ...patch }`, so `filter` is SET to
-   * `undefined` — the very patch shape `objectChangePatch` uses to erase it.
-   * An unmapped operator (`between`) or a blanked value on the only row would
-   * therefore destroy a working stored filter, silently.
-   *
-   * Holding the patch leaves the stored value alone, which is the whole
-   * requirement. ⛔ It is deliberately not "emit something anyway": a filter in
-   * a spelling that means something else is worse than one that was dropped.
-   * ⚠️ Known and accepted: the builder re-seeds its own state from `value`
-   * whenever the two differ, so an unexpressible row is lost from the panel on
-   * the next render the inspector happens to do. Losing an edit the bridge
-   * could never have stored is not in the same class as destroying one it had.
-   */
-  const commitFilterGroup = (g: BuilderGroup) => {
-    const next = groupToCondition(g);
-    if (next === undefined && !isClearedGroup(g)) return;
-    onCommit(next);
-  };
-  return (
-    <div className="space-y-1">
-      <Label className="text-xs text-muted-foreground">{label}</Label>
-      {!representable ? (
-        <p className="rounded-md border border-dashed bg-muted/30 px-2.5 py-1.5 text-[11px] text-muted-foreground">
-          {withSlots(t('engine.inspector.dataset.filterAdvanced', locale), {
-            source: <span className="font-medium">{t('engine.inspector.dataset.sourceTab', locale)}</span>,
-          })}
-        </p>
-      ) : (
-        <Popover>
-          <PopoverTrigger asChild>
-            <Button type="button" variant="outline" size="sm" disabled={disabled} className="h-8 w-full justify-between text-xs font-normal">
-              <span className="truncate text-left">
-                {count
-                  ? tFormat(count === 1 ? 'engine.inspector.dataset.filterConditionsOne' : 'engine.inspector.dataset.filterConditionsOther', locale, { count })
-                  : <span className="text-muted-foreground">{t('engine.inspector.dataset.addFilter', locale)}</span>}
-              </span>
-              <ChevronDown className="h-3.5 w-3.5 opacity-60 shrink-0" />
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent align="start" className="w-[440px] max-w-[90vw] p-3">
-            {fields.length === 0 ? (
-              <p className="text-xs text-muted-foreground">{t('engine.inspector.dataset.filterNeedsObject', locale)}</p>
-            ) : (
-              <FilterBuilder fields={fields as any} value={group as any} onChange={commitFilterGroup} />
-            )}
-          </PopoverContent>
-        </Popover>
-      )}
-      {help && <p className="text-[10px] text-muted-foreground">{help}</p>}
-    </div>
   );
 }
 
@@ -637,7 +604,7 @@ export function DatasetDefaultInspector({ draft, onPatch, readOnly, name, locale
 
       {/* Scope filter — the dataset's intrinsic FilterCondition */}
       <div className="border-t pt-3">
-        <DatasetFilterField
+        <FilterConditionField
           label={tr('engine.inspector.dataset.scopeFilter')}
           help={tr('engine.inspector.dataset.scopeFilterHelp')}
           value={datasetFilter}
@@ -754,8 +721,14 @@ export function DatasetDefaultInspector({ draft, onPatch, readOnly, name, locale
               {(() => { const rel = missingRelationship(m.field, include); return rel ? <RelWarning rel={rel} disabled={readOnly} locale={locale} onAdd={() => onPatch({ include: appendArray(include, rel) })} /> : null; })()}
               <Advanced locale={locale}>
                 <InspectorTextField label={tr('engine.inspector.dataset.labelOptional')} value={m.label ?? ''} onCommit={(v) => patchMeasure(i, { label: v || undefined })} placeholder={m.name || tr('engine.inspector.dataset.displayLabel')} disabled={readOnly} />
-                <MeasureFormatField measure={m} onPatch={(pp) => patchMeasure(i, pp)} disabled={readOnly} locale={locale} />
-                <DatasetFilterField
+                <MeasureFormatField
+                  measure={m}
+                  monetaryField={fieldOptions.find((o) => o.value === m.field)?.type === 'currency'}
+                  onPatch={(fmt) => onPatch({ measures: measures.map((mm, idx) => (idx === i ? writeMeasureFormat(mm, fmt) : mm)) })}
+                  disabled={readOnly}
+                  locale={locale}
+                />
+                <FilterConditionField
                   label={tr('engine.inspector.dataset.measureFilter')}
                   help={tr('engine.inspector.dataset.measureFilterHelp')}
                   value={m.filter}

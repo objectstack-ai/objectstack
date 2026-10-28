@@ -123,7 +123,10 @@ export type PlaceholderSpec = { key: string; literal?: never } | { literal: stri
 export type BlockPropField = (
   | { name: string; label: string; kind: 'text'; placeholder?: PlaceholderSpec }
   | { name: string; label: string; kind: 'number'; placeholder?: PlaceholderSpec }
-  | { name: string; label: string; kind: 'boolean' }
+  // `defaultValue` is what the renderer does when the key is ABSENT (a spec
+  // `.default(true)` such as `record:related_list.showViewAll`): the checkbox
+  // shows it, so an unset key never reads as the opposite of what renders.
+  | { name: string; label: string; kind: 'boolean'; defaultValue?: boolean }
   | { name: string; label: string; kind: 'select'; options: Array<{ value: string; label: string }> }
   | { name: string; label: string; kind: 'string-list'; placeholder?: PlaceholderSpec }
   // `addLabel` is REQUIRED (#3913). It was optional, and the inspector rendered
@@ -138,6 +141,10 @@ export type BlockPropField = (
   | { name: string; label: string; kind: 'object-picker'; placeholder?: PlaceholderSpec }
   | ({ name: string; label: string; kind: 'field-picker'; placeholder?: PlaceholderSpec } & ObjectSource)
   | ({ name: string; label: string; kind: 'field-list'; placeholder?: PlaceholderSpec } & ObjectSource)
+  // A spec `ViewFilterRule[]` (`{ field, operator, value }`), edited with the
+  // list toolbar's own filter builder — the `filter-builder` form widget — over
+  // the fields of the object the source names.
+  | ({ name: string; label: string; kind: 'filter-rules' } & ObjectSource)
 ) & { at?: 'dataSource' };
 
 /** Shared alignment options. The keys name the field (`align`), so reusing this
@@ -510,11 +517,45 @@ export const BLOCK_CONFIG: Record<string, BlockPropField[]> = {
   ],
 
   // ── Record context ────────────────────────────────────────────────────────
+  // Every prop `RecordRelatedListProps` declares that an author sets on a
+  // related list. The column, sort and filter pickers all read the CHILD object
+  // the block lists (`objectName`), never the page's record object.
   'record:related_list': [
     { name: 'objectName', label: 'engine.inspector.pageBlock.field.record:related_list.objectName', kind: 'object-picker' },
     { name: 'relationshipField', label: 'engine.inspector.pageBlock.field.record:related_list.relationshipField', kind: 'field-picker', objectFrom: 'self', objectProp: 'objectName' },
     { name: 'title', label: 'engine.inspector.pageBlock.field.record:related_list.title', kind: 'text' },
-    { name: 'limit', label: 'engine.inspector.pageBlock.field.record:related_list.limit', kind: 'number', placeholder: { literal: '10' } },
+    // The string arm of the `columns` union. A list that arrives in the
+    // `ListColumn` arm (a saved view's decoration) is shown as JSON instead,
+    // never flattened (the `field-list` case in PageBlockInspector).
+    { name: 'columns', label: 'engine.inspector.pageBlock.field.record:related_list.columns', kind: 'field-list', objectFrom: 'self', objectProp: 'objectName' },
+    // The array arm of `sort`. A stored string-arm sort is shown as JSON
+    // rather than as an empty list (the `array` case in PageBlockInspector).
+    {
+      name: 'sort', label: 'engine.inspector.pageBlock.field.record:related_list.sort', kind: 'array',
+      addLabel: 'engine.inspector.pageBlock.add.record:related_list.sort',
+      itemFields: [
+        { name: 'field', label: 'engine.inspector.pageBlock.field.record:related_list.sort.field', kind: 'field-picker', objectFrom: 'self', objectProp: 'objectName' },
+        {
+          name: 'order', label: 'engine.inspector.pageBlock.field.record:related_list.sort.order', kind: 'select',
+          options: [
+            { value: 'asc', label: 'engine.inspector.pageBlock.option.order.asc' },
+            { value: 'desc', label: 'engine.inspector.pageBlock.option.order.desc' },
+          ],
+        },
+      ],
+    },
+    { name: 'filter', label: 'engine.inspector.pageBlock.field.record:related_list.filter', kind: 'filter-rules', objectFrom: 'self', objectProp: 'objectName' },
+    // The spec's own default is 5; the placeholder states it rather than a
+    // number the renderer does not use.
+    { name: 'limit', label: 'engine.inspector.pageBlock.field.record:related_list.limit', kind: 'number', placeholder: { literal: '5' } },
+    { name: 'showViewAll', label: 'engine.inspector.pageBlock.field.record:related_list.showViewAll', kind: 'boolean', defaultValue: true },
+    // `{ picker: { object, valueField?, labelField?, filter? }, linkField?, label? }`
+    // — a nested shape this table has no field kind for yet, so JSON, which is
+    // still the only door that can ADD the key (Advanced lists existing keys).
+    {
+      name: 'add', label: 'engine.inspector.pageBlock.field.record:related_list.add', kind: 'json',
+      placeholder: { literal: '{ "picker": { "object": "sys_user" }, "linkField": "user_id" }' },
+    },
   ],
   'record:highlights': [
     { name: 'fields', label: 'engine.inspector.pageBlock.field.record:highlights.fields', kind: 'field-list', objectFrom: 'page' },
