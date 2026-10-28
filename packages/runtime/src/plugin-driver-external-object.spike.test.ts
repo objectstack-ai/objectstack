@@ -15,7 +15,7 @@
  *
  * One `describe` per step of the spike, (a) to (g) less (f): the gantt step is
  * a renderer question and lives in `ui/packages/plugin-gantt`
- * (`ObjectGantt.pluginDriverSpike.test.tsx`).
+ * (`ObjectGantt.pluginDriverTree.test.tsx`).
  *
  * Composition: the plugin set `@objectstack/verify`'s `bootStack` uses (engine,
  * sqlite-wasm default datasource for the platform's own objects, HTTP server,
