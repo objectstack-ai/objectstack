@@ -618,7 +618,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "currencyConfig.defaultCurrency": {
         label: "默认货币",
-        helpText: "fixed 模式字段的唯一货币，使用三个字符的 ISO 4217 代码（例如 USD、EUR）。默认为 CNY。dynamic 模式下不读取。"
+        helpText: "fixed 模式字段的唯一货币，使用三个字符的 ISO 4217 代码（例如 USD、EUR）。fixed 模式下必填，不会自动填入。dynamic 模式下不读取。"
       },
       step: {
         label: "步进值",

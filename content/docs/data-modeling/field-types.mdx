@@ -153,7 +153,7 @@ code lives in `currencyConfig`, never in the value.
 | `min` | `number` | — | Minimum value |
 | `max` | `number` | — | Maximum value |
 | `currencyConfig.currencyMode` | `'dynamic' \| 'fixed'` | `'dynamic'` | Whether the column is pinned to `defaultCurrency` (`fixed`) or displays in the tenant default currency, the `localization.currency` setting (`dynamic`); the value is a bare number either way |
-| `currencyConfig.defaultCurrency` | `string` | `'CNY'` | The column's currency code under `fixed`; not the displayed currency under `dynamic` |
+| `currencyConfig.defaultCurrency` | `string` | — | The column's currency code under `fixed`, where it is required; not the displayed currency under `dynamic` |
 
 ```typescript
 { name: 'price', label: 'Price', type: 'currency', currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' } }

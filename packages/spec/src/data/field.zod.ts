@@ -535,6 +535,27 @@ const CURRENCY_CONFIG_DECIMAL_PLACES_GUIDANCE: Readonly<Record<string, string>> 
 };
 
 /**
+ * The refusal a `fixed` currency config without a code meets (#27157, ruling
+ * 6464202770 on #27119, Q2 = X). Until this ruling the schema filled the code
+ * in with `'CNY'`, so the field silently became a yuan field.
+ */
+const CURRENCY_CONFIG_FIXED_WITHOUT_CODE =
+  '`currencyConfig.currencyMode: \'fixed\'` needs `defaultCurrency`, the field\'s one currency: '
+  + 'give its ISO 4217 code (e.g. `defaultCurrency: \'USD\'`), or use `currencyMode: \'dynamic\'` '
+  + 'to display amounts in the tenant default currency (the `localization.currency` setting). '
+  + 'Nothing fills a code in.';
+
+/** `fixed` ⇒ an authored `defaultCurrency`; `dynamic` reads none, so it needs none. */
+function refuseFixedCurrencyWithoutCode(
+  config: { currencyMode: 'dynamic' | 'fixed'; defaultCurrency?: string },
+  ctx: z.RefinementCtx,
+): void {
+  if (config.currencyMode === 'fixed' && config.defaultCurrency === undefined) {
+    ctx.addIssue({ code: 'custom', path: ['defaultCurrency'], message: CURRENCY_CONFIG_FIXED_WITHOUT_CODE });
+  }
+}
+
+/**
  * Currency Configuration Schema
  * Configuration for currency field type supporting multi-currency — and, in the
  * same shape, for a `formula` field whose `returnType` is `currency` (#22727).
@@ -548,6 +569,19 @@ const CURRENCY_CONFIG_DECIMAL_PLACES_GUIDANCE: Readonly<Record<string, string>> 
  * There is no decimal-places key: a currency's decimal places are its ISO 4217
  * minor unit (see {@link CURRENCY_CONFIG_DECIMAL_PLACES_GUIDANCE} for the
  * removed `precision`).
+ *
+ * `defaultCurrency` has no default (#27157, ruling 6464202770 on #27119, Q2 =
+ * X: an amount whose currency is not known takes the tenant default, and
+ * nothing guesses). It used to be `.default('CNY')`, so a `fixed` config with
+ * no code became a yuan field without anyone writing yuan, and every
+ * `dynamic` config's parse output carried a `'CNY'` its readers had to know to
+ * ignore — a default the #9689 principle forbids materializing. A `fixed`
+ * config now needs its code ({@link CURRENCY_CONFIG_FIXED_WITHOUT_CODE}); a
+ * `dynamic` one parses to output with no `defaultCurrency` unless one was
+ * written. Stored rows and built artifacts that carry the baked `'CNY'` on a
+ * `dynamic` config are stripped on rehydration by the ADR-0087 conversion
+ * `currency-config-dynamic-default-currency-removed`; a `fixed` row keeps its
+ * code, which was the live value.
  */
 export const CurrencyConfigSchema = lazySchema(() => strictObject({
   surface: 'this currency configuration',
@@ -556,13 +590,13 @@ export const CurrencyConfigSchema = lazySchema(() => strictObject({
   guidance: CURRENCY_CONFIG_DECIMAL_PLACES_GUIDANCE,
 }, {
   currencyMode: z.enum(['dynamic', 'fixed']).default('dynamic').describe('Currency mode. `fixed`: the field has one currency, `defaultCurrency`. `dynamic` (the default): the field has no currency of its own — amounts display in the tenant default currency (the `localization.currency` setting; a plain number when none is set) and `defaultCurrency` is not read. Neither mode is a per-record choice: the value is a bare number either way.'),
-  defaultCurrency: z.string().length(3).default('CNY').describe('The currency code (ISO 4217, e.g. USD, CNY, EUR) of a `fixed`-mode field: its one currency. Not read under `dynamic` (the default), where amounts display in the tenant default currency.'),
-  // #19992 — no `.superRefine()` / `.overwrite()` here any more. The #7918
-  // ISO 4217 contradiction check and the #11423 default-materializing
-  // `.overwrite()` both existed only for the removed `precision` key (see
-  // CURRENCY_CONFIG_DECIMAL_PLACES_GUIDANCE above), so parse output is now
-  // exactly `{ currencyMode, defaultCurrency }`.
-}));
+  defaultCurrency: z.string().length(3).optional().describe('The currency code (ISO 4217, e.g. USD, CNY, EUR) of a `fixed`-mode field: its one currency, required under `fixed`. Not read under `dynamic` (the default), where amounts display in the tenant default currency.'),
+  // #19992 — no `.overwrite()` here any more: the #7918 ISO 4217 contradiction
+  // check and the #11423 default-materializing `.overwrite()` both existed only
+  // for the removed `precision` key (see CURRENCY_CONFIG_DECIMAL_PLACES_GUIDANCE
+  // above). #27157 — the one refinement left is `fixed` ⇒ a code, below; parse
+  // output is `{ currencyMode }` plus the `defaultCurrency` the author wrote.
+}).superRefine(refuseFixedCurrencyWithoutCode));
 
 /**
  * Currency Value Schema
