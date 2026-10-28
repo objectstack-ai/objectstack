@@ -69,6 +69,13 @@
  * which exit — is the guard's.
  */
 
+// The self-test's one read of a GOVERNED file, declared so a card editing that
+// file derives this family (`dispatch-gates.mjs` `declaredSelfTestReads`; the
+// row is `GOVERNED_READ_FLOOR` in `dispatch-gates.data.mjs`). The derivation
+// grades it against the read the self-test really performs, so it cannot be
+// satisfied by deleting either half.
+// dispatch-gates: self-test-reads .claude/skills/pm-dispatch/references/project-forms.md -- the mailbox doorbell battery pins each of the seven key templates verbatim in that file's 〈信箱 PR〉 section, so a change to the keys' spelling there is judged here
+
 import process from 'node:process';
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
