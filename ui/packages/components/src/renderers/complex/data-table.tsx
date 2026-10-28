@@ -954,6 +954,17 @@ const STICKY_ROW_TINT =
   'bg-[image:linear-gradient(var(--os-row-tint,transparent),var(--os-row-tint,transparent))]';
 
 /**
+ * Whether `target` sits in a `selector` element that does NOT contain `row`:
+ * an overlay portalled out of the row whose React events still bubble to it
+ * (objectstack#26679). A table drawn inside a dialog is inside that dialog
+ * too, so the dialog it sits in is not one the click came from.
+ */
+function portalledFrom(target: HTMLElement, row: Element, selector: string): boolean {
+  const overlay = target.closest(selector);
+  return !!overlay && !overlay.contains(row);
+}
+
+/**
  * objectui#13188 — whether the viewer has selected text that touches `el`.
  * A drag that selects text ends in a `click` on the row or cell it started
  * in, so the row's open-record and the cell's start-edit read this first
@@ -3483,8 +3494,12 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                              target.closest('[role="menuitem"]') ||
                              target.closest('[role="menuitemcheckbox"]') ||
                              target.closest('[role="menuitemradio"]') ||
-                             target.closest('[role="dialog"]') ||
-                             target.closest('[role="alertdialog"]') ||
+                             // A dialog the click came FROM, portalled above
+                             // this row — never the dialog the table itself
+                             // sits in: a related list inside a record drawer
+                             // opens its rows like any other (objectstack#26679).
+                             portalledFrom(target, e.currentTarget, '[role="dialog"]') ||
+                             portalledFrom(target, e.currentTarget, '[role="alertdialog"]') ||
                              target.closest('[role="listbox"]') ||
                              target.closest('[role="option"]') ||
                              target.closest('[role="tab"]') ||

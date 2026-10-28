@@ -99,6 +99,8 @@ function makeClient(server: Server, opts: { draft: Record<string, unknown> | nul
       if (opts.rejectSaveTimeDraft && server.getDraftCalls > 1) throw new Error('draft read failed');
       return opts.draft ? { type: 'permission', name: 'sales_perms', item: opts.draft, version: 'v1' } : null;
     },
+    // objectstack#26840 — the package door reads its objects through the draft-overlaid door.
+    withPreviewDrafts() { return this; },
     // The package declares `a_account` only.
     list: async (type: string) => (type === 'object' ? [{ item: { name: 'a_account' } }] : []),
     get: async () => null,
@@ -168,8 +170,9 @@ describe('PermissionMatrixEditPage — the PACKAGE door saves onto the pending d
     // Out-of-scope rows come from the draft too: it is what this save replaces.
     expect(body.objects.b_order).toEqual(DRAFT.objects.b_order);
     expect(body.fields).toEqual(DRAFT.fields);
-    // CONTROL: the save-time draft read ran (#1 is the load).
-    expect(server.getDraftCalls).toBe(2);
+    // CONTROL: the save-time draft read ran (#1 is the load). objectstack#26858 —
+    // #3 is the read after the save that refreshes the draft's served verdict.
+    await waitFor(() => expect(server.getDraftCalls).toBe(3));
     expect(server.savedOpts[0]).toMatchObject({ mode: 'draft', packageId: 'app.a' });
     expect(screen.queryByText(REFUSAL)).toBeNull();
   });

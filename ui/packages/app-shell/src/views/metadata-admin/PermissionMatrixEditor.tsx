@@ -93,6 +93,13 @@ import { HistoryPanel } from './ResourceHistoryPage.js';
 import { useMetadataClient, useMetadataTypes, type RichMetadataTypeEntry } from './useMetadata.js';
 // objectui#11773 — the package door's draft save sends the version it was built on.
 import { readDraftForSave, useDraftSaveGuard } from './DraftConflictDialog.js';
+// objectstack#26858 — the served verdict the RLS clause editors read at their paths.
+import {
+  DraftVerdictContext,
+  draftEnvelopeDiagnostics,
+  editedItemDiagnostics,
+  type ServerDiagnostics,
+} from './draftVerdict.js';
 // objectui#11787 — the package door autosaves through the pillars' own autosave.
 import { useDraftAutoSave, type DraftSend } from '../studio-design/useDraftAutoSave.js';
 // objectui#12456 — the Studio Access pillar's presentation draws the shared item header.
@@ -773,10 +780,22 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
     forget: forgetSetVersion,
     dialog: draftConflictDialog,
   } = useDraftSaveGuard(client, reloadSet);
+  // The header's label as the published list serves it: that read is
+  // localized at the REST boundary (the server's permission-set translator),
+  // while the layered read the draft is built from carries the authored text.
+  // Display only — never written into `draft`, so a save keeps the authored
+  // label. `authored` is the published label it stands for; once the draft's
+  // label differs (an edit, a pending draft) the header shows the draft's.
+  const [servedLabel, setServedLabel] = React.useState<{ authored?: string; served: string } | null>(null);
   const [objects, setObjects] = React.useState<ObjectSummary[]>([]);
   const [fieldsByObject, setFieldsByObject] = React.useState<Record<string, FieldSummary[]>>({});
   const [expanded, setExpanded] = React.useState<Set<string>>(new Set());
   const [loading, setLoading] = React.useState(true);
+  // objectstack#26858 — the server's verdict on the set on screen: the pending
+  // draft's while the package door holds one (what its publish will refuse),
+  // else the layered read's. Taken off each read, never computed here.
+  const [servedVerdict, setServedVerdict] = React.useState<ServerDiagnostics | undefined>(undefined);
+  const verdictReadSeq = React.useRef(0);
   const [saving, setSaving] = React.useState(false);
   // objectui#11787 — when the package door's last draft save landed, for the
   // status line that replaces its Save button ("Saved 10:42").
@@ -821,10 +840,10 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
   // objectui#11799 — the same published read, held for the load below: a set
   // it does not list has never been published. The load runs after this
   // effect, so it reads this request rather than sending one of its own.
-  const publishedSetsRef = React.useRef<Promise<Array<{ name?: string }>> | null>(null);
+  const publishedSetsRef = React.useRef<Promise<Array<{ name?: string; label?: unknown }>> | null>(null);
   React.useEffect(() => {
     let cancelled = false;
-    const published = client.list<{ name?: string }>('permission', {});
+    const published = client.list<{ name?: string; label?: unknown }>('permission', {});
     publishedSetsRef.current = published;
     published
       .then((rows) => {
@@ -857,6 +876,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
     // that copy is the set being opened (the routed hop to it).
     setSaveRefusedAsLocked(null);
     setCloned((c) => (c && c.name === name ? c : null));
+    setServedLabel(null);
     (async () => {
       try {
         // ADR-0086 P2 (D6): under the package door a set is draft/published
@@ -907,6 +927,14 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         ]);
         if (cancelled) return;
         const pendingDraft = pendingRead?.answer ?? null;
+        verdictReadSeq.current += 1;
+        setServedVerdict(
+          editedItemDiagnostics({
+            hasDraft: !!pendingDraft,
+            draftDiagnostics: draftEnvelopeDiagnostics(pendingDraft),
+            layered: lay,
+          }),
+        );
         // ARTIFACT tier input (objectui#4518) — the `code` layer, and its
         // `provenance` (objectui#4526), of the SAME envelope the display
         // baseline comes from, so the writability verdict and the body on
@@ -964,6 +992,15 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         // live write is not pinned.
         if (pendingRead && packageId) recordSetRead(type, name, packageId, pendingRead.pin);
         else forgetSetVersion();
+        // A draft-only set has no served row and keeps its draft label.
+        const servedRow = publishedSets
+          ? (await publishedSets.catch(() => null))?.find((r) => r?.name === name)
+          : undefined;
+        if (cancelled) return;
+        const authoredLabel = (lay?.effective ?? lay?.code)?.label;
+        if (typeof servedRow?.label === 'string' && servedRow.label && servedRow.label !== authoredLabel) {
+          setServedLabel({ authored: authoredLabel, served: servedRow.label });
+        }
       } catch (err: any) {
         setError(err?.message ?? String(err));
       } finally {
@@ -1063,6 +1100,9 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
     },
   ).length;
   const saveHeld = celErrorTotal > 0 || rlsUnnamedCount > 0;
+
+  const headerLabel =
+    servedLabel && draft.label === servedLabel.authored ? servedLabel.served : draft.label;
 
   // Dirty detection — cheap JSON snapshot comparison against the last
   // loaded/saved baseline (same approach as ResourceEditPage). Every mutation
@@ -1423,6 +1463,13 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
           // baseline hasn't moved. Show what we just staged.
           resetDraftBaseline(toDisplayDraft(toSave));
         }
+        // objectstack#26858 — the draft this save stored carries its own publish
+        // verdict on its next read; the one held described the body before it.
+        // Read off the save's path, so a later read (or a load) wins.
+        const seq = ++verdictReadSeq.current;
+        void readDraftForSave(client, type, payload.name, packageId).then((read) => {
+          if (seq === verdictReadSeq.current) setServedVerdict(draftEnvelopeDiagnostics(read.answer));
+        });
         // Let the surface count it.
         onDraftSaved?.();
       } else {
@@ -1453,6 +1500,8 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         // fallback this line already spelled for the resolved-but-empty
         // (404-shaped) envelope.
         resetDraftBaseline(toDisplayDraft((lay?.effective ?? toSave) as PermissionSetDraft));
+        verdictReadSeq.current += 1;
+        setServedVerdict(editedItemDiagnostics({ hasDraft: false, draftDiagnostics: undefined, layered: lay }));
         setPostSaveRereadFailed(rereadFailed);
         // The write landed, so the server holds the set now whatever the
         // confirming read said (objectui#7611: its holders can be listed). Only
@@ -2032,7 +2081,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
           testId="access-item-header"
           leading={chrome.leading}
           icon={Shield}
-          title={draft.label || name}
+          title={headerLabel || name}
           apiName={name}
           chips={
             <>
@@ -2167,18 +2216,20 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
               {capabilitiesEl}
             </div>
             <div hidden={facetTab === null} data-testid="perm-tabpanel-facets" className="min-h-0 flex-1 overflow-auto">
-              <PermissionAdvancedFacets
-                draft={draft}
-                setDraft={setDraft}
-                writable={writable}
-                allSetNames={allSetNames}
-                loadObjectFields={loadObjectFields}
-                onCelErrorsChange={setCelErrorCount}
-                t={t}
-                only={facetTab}
-                packageBound={!!packageId}
-                objectAccessDefault={objectAccessDefault}
-              />
+              <DraftVerdictContext.Provider value={servedVerdict}>
+                <PermissionAdvancedFacets
+                  draft={draft}
+                  setDraft={setDraft}
+                  writable={writable}
+                  allSetNames={allSetNames}
+                  loadObjectFields={loadObjectFields}
+                  onCelErrorsChange={setCelErrorCount}
+                  t={t}
+                  only={facetTab}
+                  packageBound={!!packageId}
+                  objectAccessDefault={objectAccessDefault}
+                />
+              </DraftVerdictContext.Provider>
             </div>
           </div>
         )}
@@ -2273,7 +2324,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
             )}
             {/* The api-name already sits in the PageShell breadcrumb (font-mono),
                 so the summary carries the human label — no need to repeat it. */}
-            <span className="font-medium truncate">{draft.label || draft.name}</span>
+            <span className="font-medium truncate">{headerLabel || draft.name}</span>
             {provenanceBadgesEl}
             {writable && (
               <span className="text-xs text-muted-foreground shrink-0">{t('perm.basics.editHint')}</span>
@@ -2347,17 +2398,19 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
           {/* Advanced facets (ADR-0056 P3) — RLS / tab visibility / delegated
               admin scope, structured editors instead of raw JSON. Collapsed by
               default so they don't crowd the object matrix. */}
-          <PermissionAdvancedFacets
-            draft={draft}
-            setDraft={setDraft}
-            writable={writable}
-            allSetNames={allSetNames}
-            loadObjectFields={loadObjectFields}
-            onCelErrorsChange={setCelErrorCount}
-            t={t}
-            packageBound={!!packageId}
-            objectAccessDefault={objectAccessDefault}
-          />
+          <DraftVerdictContext.Provider value={servedVerdict}>
+            <PermissionAdvancedFacets
+              draft={draft}
+              setDraft={setDraft}
+              writable={writable}
+              allSetNames={allSetNames}
+              loadObjectFields={loadObjectFields}
+              onCelErrorsChange={setCelErrorCount}
+              t={t}
+              packageBound={!!packageId}
+              objectAccessDefault={objectAccessDefault}
+            />
+          </DraftVerdictContext.Provider>
           {/* ADR-0056 P4 — assigning users is a Setup act, so the DESIGN surface
               (Studio, embedded) never shows it. objectui#7611 — the Setup catalog
               IS this editor in the environment scope (ADR-0131 D3), so there the
@@ -2975,6 +3028,13 @@ function StudioObjectRow({
 }
 
 /**
+ * objectstack#26846 — the field sub-table's name cell, header and rows alike:
+ * pinned to the left edge of the matrix's scroll container, over an opaque
+ * background so the boxes scrolling under it do not show through.
+ */
+const FIELD_NAME_CELL = 'sticky left-0 z-[1] bg-background pr-2';
+
+/**
  * The inherited look, shared by object and field boxes: grey with a dashed
  * edge, so a box that draws a grant the set inherits never reads as one the
  * set declares for that row.
@@ -3131,6 +3191,10 @@ function FieldsSubTable({
     <div className="space-y-2">
       {/* Field toolbar (B4): filter + bulk over the visible field set. The
           filter only appears once one-by-one would actually hurt. */}
+      {/* objectstack#26846 — the count sits beside the filter it counts. At
+          the far end of the row it sat past the visible edge whenever the
+          matrix scrolled sideways (its floor is wider than the Studio
+          content column at 1440 px). */}
       <div className="flex flex-wrap items-center gap-2">
         {fields.length > 6 && (
           <Input
@@ -3141,6 +3205,12 @@ function FieldsSubTable({
             className="h-7 w-44 text-xs"
           />
         )}
+        <span
+          data-testid={`perm-field-count-${objectName}`}
+          className="shrink-0 whitespace-nowrap text-[11px] tabular-nums text-muted-foreground"
+        >
+          {visible.length} / {fields.length}
+        </span>
         {writable && (
           <div className="flex items-center gap-1">
             <Button
@@ -3172,9 +3242,6 @@ function FieldsSubTable({
             </Button>
           </div>
         )}
-        <span className="ml-auto text-[11px] text-muted-foreground">
-          {visible.length} / {fields.length}
-        </span>
       </div>
       {/* objectstack#26597 — what a grey box means, said once per sub-table. */}
       {visible.some((f) => fieldsState[`${objectName}.${f.name}`] === undefined) && (
@@ -3188,7 +3255,9 @@ function FieldsSubTable({
         <table className="w-full text-xs">
           <thead>
             <tr className="text-muted-foreground">
-              <th className="text-left py-1 font-medium">{t('perm.field.col.name')}</th>
+              {/* objectstack#26846 — the name column stays in view while the
+                  matrix scrolls sideways (FIELD_NAME_CELL). */}
+              <th className={cn('text-left py-1 font-medium', FIELD_NAME_CELL)}>{t('perm.field.col.name')}</th>
               <th className="px-2 py-1 font-medium w-16 text-center" title={t('perm.field.read')}>{t('perm.field.read')}</th>
               <th className="px-2 py-1 font-medium w-16 text-center" title={t('perm.field.edit')}>{t('perm.field.edit')}</th>
               <th className="px-2 py-1 font-medium text-left" title={t('perm.field.when.tip')}>{t('perm.field.when')}</th>
@@ -3204,7 +3273,7 @@ function FieldsSubTable({
               return (
                 <React.Fragment key={f.name}>
                   <tr className="border-t border-muted">
-                    <td className="py-1">
+                    <td className={cn('py-1', FIELD_NAME_CELL)} data-testid={`perm-field-name-${objectName}-${f.name}`}>
                       {f.label ?? f.name}
                       {f.label && (
                         <span className="ml-1 text-muted-foreground">({f.name})</span>

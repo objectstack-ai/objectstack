@@ -38,6 +38,7 @@ import { RecoveryPasswordReminder } from './RecoveryPasswordReminder.js';
 import { HomeActionCenter, HomeContinue, HomeActivity, HomePendingDraftsRow, type RecentItemContext } from './HomeRail.js';
 import { resolveI18nLabel } from '@objectstack/spec/ui';
 import { useHomeInbox } from '../../hooks/useHomeInbox.js';
+import { useLauncherApps } from '../../hooks/useLauncherApps.js';
 import { useNavigationContext } from '../../context/NavigationContext.js';
 import {
   appRouteSegment,
@@ -415,6 +416,12 @@ export function HomePage() {
   });
 
   const activeApps = filterActiveApps(apps);
+  // The apps the tiles and the System Settings link offer: the active list
+  // narrowed by the user's `/me/apps` answer, so an app a permission set hides
+  // draws no tile (objectstack#26838). The other readings below — the host
+  // app, a recent row's app label — keep the full list: a hidden app still
+  // opens, so a link into it or a label for it is still true.
+  const launcher = useLauncherApps(apps);
 
   /**
    * Which app hosts the app-independent pages this page links into — the
@@ -445,8 +452,8 @@ export function HomePage() {
    * user can open, exactly where its tile used to be drawn.
    */
   const setupPath = resolveSetupAppPath(activeApps);
-  const setupApp = activeApps.find((app) => `/apps/${appRouteSegment(app)}` === setupPath);
-  const launcherApps = setupApp ? activeApps.filter((app) => app !== setupApp) : activeApps;
+  const setupApp = launcher.apps.find((app) => `/apps/${appRouteSegment(app)}` === setupPath);
+  const launcherApps = setupApp ? launcher.apps.filter((app) => app !== setupApp) : launcher.apps;
   // When each tile's app was last open — the recent-items store's newest entry
   // inside it (objectui#12601; the reading is `lastOpenedByApp`'s).
   const lastOpened = lastOpenedByApp(launcherApps, recentItems);
@@ -527,8 +534,9 @@ export function HomePage() {
   // the verdict still in flight drops the admin entries and adds them back a
   // moment later. `isResolved` is true the instant `isAdmin` is, so an admin the
   // session already identifies waits nothing; this only holds the frame that
-  // would otherwise be built on a guess.
-  if (loading || !isAdminResolved) {
+  // would otherwise be built on a guess. The first `/me/apps` read joins it
+  // too, so a hidden app's tile is never drawn and then taken away.
+  if (loading || !isAdminResolved || launcher.pending) {
     return (
       <div className="flex flex-1 items-center justify-center py-20">
         <div className="text-muted-foreground">{t('home.loading', { defaultValue: 'Loading…' })}</div>

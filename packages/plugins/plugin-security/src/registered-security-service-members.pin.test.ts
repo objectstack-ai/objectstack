@@ -62,6 +62,7 @@ const DECLARED_MEMBERS = {
   getMetadataReadableFields: 'optional',
   getQueryableFields: 'optional',
   getWritableFields: 'optional',
+  getRecordFieldAccess: 'optional',
   resolvePermissionSetNames: 'required',
   resolvePermissionSetsForContext: 'optional',
   getEffectiveObjectPermissions: 'optional',

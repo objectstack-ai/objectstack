@@ -334,6 +334,12 @@ export function PackageOwdOverviewPanel({
     },
     [],
   );
+  // objectstack#26846 — a refusal answers the edits it was sent. Once every
+  // row is back at its loaded value ("No changes") there is nothing left for
+  // it to judge, so it goes; an edit that stays dirty keeps it.
+  React.useEffect(() => {
+    if (!isDirty) setSaveError(null);
+  }, [isDirty]);
 
   const doSave = React.useCallback(async () => {
     const changed = rowState.filter((s) => s.dirty);

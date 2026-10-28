@@ -103,6 +103,10 @@ export * from './data-error-classification.js';
 // a dev dependency only, so the plugin cannot be the home; both already depend
 // on this package, so adopting the reading adds no edge.
 export * from './share-password-header.js';
+// [#26991] The share-link resolve answer — the redacted record, the link, and
+// the display projection of exactly the fields that record carries — built once
+// for the same two mounts, from this home for the same reason.
+export * from './share-link-resolve-answer.js';
 
 // Placeholder for Kernel interface to avoid circular dependency
 // The actual Kernel implementation will satisfy this interface.

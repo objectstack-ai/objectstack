@@ -38,17 +38,21 @@ const INLINE = [
   { id: '3', name: 'Gamma task', start: '2024-03-01', end: '2024-03-20', status: 'done', project: 'Zephyr' },
 ];
 
-function inlineSchema(extra: Record<string, any> = {}) {
+/** `extra` lands on the node; `gantt` adds members to its `gantt` block. */
+function inlineSchema(extra: Record<string, any> = {}, gantt: Record<string, any> = {}) {
   return {
     type: 'gantt',
-    startDateField: 'start',
-    endDateField: 'end',
-    titleField: 'name',
+    gantt: {
+      startDateField: 'start',
+      endDateField: 'end',
+      titleField: 'name',
+      quickFilters: [
+        { field: 'status', label: '状态', options: ['todo', 'doing', 'done'] },
+        { field: 'project', label: '项目' },
+      ],
+      ...gantt,
+    },
     data: { provider: 'value', items: INLINE },
-    quickFilters: [
-      { field: 'status', label: '状态', options: ['todo', 'doing', 'done'] },
-      { field: 'project', label: '项目' },
-    ],
     ...extra,
   } as any;
 }
@@ -131,7 +135,7 @@ describe('ObjectGantt quick filters', () => {
 
   it('pins the range to the full task span when autoZoomToFilter is false', async () => {
     const { container, getByTestId } = render(
-      <ObjectGantt schema={inlineSchema({ autoZoomToFilter: false })} />,
+      <ObjectGantt schema={inlineSchema({}, { autoZoomToFilter: false })} />,
     );
     await waitFor(() => expect(gv(container)).toBeTruthy());
     const startBefore = gv(container).getAttribute('data-start');
@@ -150,9 +154,11 @@ describe('ObjectGantt quick filters', () => {
   it('does not render a filter bar when no quickFilters are configured', async () => {
     const schema: any = {
       type: 'gantt',
-      startDateField: 'start',
-      endDateField: 'end',
-      titleField: 'name',
+      gantt: {
+        startDateField: 'start',
+        endDateField: 'end',
+        titleField: 'name',
+      },
       data: { provider: 'value', items: INLINE },
     };
     const { container, queryByTestId } = render(<ObjectGantt schema={schema} />);
@@ -175,12 +181,14 @@ describe('ObjectGantt quick filters — tree-aware (保留祖先链)', () => {
   const treeSchema = () =>
     ({
       type: 'gantt',
-      startDateField: 'start',
-      endDateField: 'end',
-      titleField: 'name',
-      parentField: 'parentId',
+      gantt: {
+        startDateField: 'start',
+        endDateField: 'end',
+        titleField: 'name',
+        parentField: 'parentId',
+        quickFilters: [{ field: 'status', label: '状态', options: ['todo', 'doing', 'done'] }],
+      },
       data: { provider: 'value', items: TREE },
-      quickFilters: [{ field: 'status', label: '状态', options: ['todo', 'doing', 'done'] }],
     }) as any;
 
   it('keeps the full ancestor chain of a matched task', async () => {
@@ -259,13 +267,15 @@ describe('ObjectGantt quick filters — schema-driven options', () => {
     ({
       type: 'gantt',
       objectName: 'task',
-      startDateField: 'start',
-      endDateField: 'end',
-      titleField: 'name',
-      quickFilters: [
-        { field: 'status', label: '状态' },
-        { field: 'project', label: '项目' },
-      ],
+      gantt: {
+        startDateField: 'start',
+        endDateField: 'end',
+        titleField: 'name',
+        quickFilters: [
+          { field: 'status', label: '状态' },
+          { field: 'project', label: '项目' },
+        ],
+      },
       ...extra,
     }) as any;
 

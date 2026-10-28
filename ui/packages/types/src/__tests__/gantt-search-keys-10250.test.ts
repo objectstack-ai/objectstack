@@ -30,8 +30,8 @@
  * `ComponentPropsMap['object-gantt']` refuses both keys on the node: a key only
  * the host writes is typed on the package-local hand-off type, never on the
  * authoring face (ui/AGENTS.md Commandment #0.1). So both left this interface
- * and its mirror for `plugin-gantt`'s `ObjectGanttFlatFields`, where their types
- * are pinned now (`ganttHandoffFlatFields-25923.test.ts`). The rows below pin
+ * and its mirror for `plugin-gantt`'s `ObjectGanttSearchFields`, where their
+ * types are pinned now (`ganttHandoff-25923.test.ts`). The rows below pin
  * the absence; the paragraphs above are objectui#10250's reading, kept as written.
  */
 

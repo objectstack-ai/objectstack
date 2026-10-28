@@ -147,7 +147,7 @@ concurrency:
 #     self-test half of a gate whose scan runs elsewhere). An alias is a copy
 #     only when it is the same command, and a copy is what this rule removes;
 #   * its job sets up no pnpm (an install-free job elsewhere, such as
-#     check-links.yml or board-snapshot.yml, keeps the direct form);
+#     check-links.yml or fleet-patrols.yml's board-snapshot job, keeps it);
 #   * it predates this rule and its script has no alias yet. Those steps are
 #     not swept (#25919 「存量不横扫」); each gains an alias when its step is
 #     next rewired. Their comments say "invoked as `node` rather than through a
@@ -2539,21 +2539,21 @@ jobs:
       # per-PR path means an unrelated PR is never blocked by checklist drift.
       # Run it by hand: `pnpm check:platform-checklist`. See that dir's README.
       # Its red does have a reporting channel now, and it is NOT this file:
-      # `.github/workflows/platform-checklist-watchdog.yml` runs the gate on `main`
-      # daily and files or refreshes one issue when it is red.
+      # the `platform-checklist-watchdog` job of `.github/workflows/fleet-patrols.yml`
+      # runs the gate on `main` daily and files or refreshes one issue when it is red.
 
       # ⛔ …and the step below is NOT that wiring. What runs here is the STATIC PIN
       # over the watchdog workflow: it asserts the file exists, fires on
       # `schedule:` + `workflow_dispatch:`, carries NO `merge_group:` /
       # `pull_request_target:` trigger, that any `pull_request:` trigger is
-      # `paths`-filtered to the watchdog file ALONE, that no board write is
+      # `paths`-filtered to a frozen set of the four patrols' inputs, that no board write is
       # reachable from a pull_request run, and that the gate is invoked through its
       # package script rather than an inlined copy. Two file reads, no socket.
       #
-      # The watchdog's own `pull_request:` trigger names only itself, so it fires on
-      # no unrelated PR — that filter is what keeps the decision above intact, and
-      # pinning it is most of this step's job. It has to live HERE rather than
-      # inside the watchdog for the other half: a PR DELETING the watchdog would
+      # That trigger names only the patrols' inputs and no job there is required or
+      # reds on drift, so no unrelated PR is blocked — that filter keeps the decision
+      # above intact, and pinning it is most of this step's job. It has to live HERE
+      # rather than inside the watchdog for the other half: a PR DELETING it would
       # silence any check that lived inside it, and this job is the only place where
       # the absence of that file is observable before it merges.
       #
@@ -3422,6 +3422,7 @@ jobs:
           }
           run_self_test node scripts/ci/scheduled-full-run-card.mjs --self-test
           run_self_test node scripts/ci/nightly-tiers-card.mjs --self-test
+          run_self_test node scripts/ci/docker-rolling-tags.mjs --self-test
           run_self_test bash scripts/ci/board-snapshot-r2-upload.selftest.sh
           if [ -n "$failed" ]; then
             echo ""
@@ -3429,7 +3430,7 @@ jobs:
             printf "%s" "$failed"
             exit 1
           fi
-          echo "Moved workflow step bodies self-tests — all three ran and passed"
+          echo "Moved workflow step bodies self-tests — all four ran and passed"
 
       # Gate-family selection self-test (#16496). The "Select the gate families
       # this run pays for" step at the top of this job is a thin call into
@@ -4277,9 +4278,11 @@ jobs:
       # showed recent changes, and a search that truncated away fresh records.
       # #4720 restored those two sites and #4721 closed the external callers;
       # this stops the shape regrowing internally. Same ratchet mechanism as
-      # slot-lookup for the non-test residual, plus one aggregate decrease-only
-      # number for test code (a test whose subject IS off-contract engine input
-      # must be able to build it). Runs its own --self-test first.
+      # slot-lookup for the non-test residual, plus one aggregate number for
+      # test code (a test whose subject IS off-contract engine input must be
+      # able to build it). That number is one-sided (#26549): growth past its
+      # ceiling reds, a fall passes and is reported, and a fall to zero is
+      # refused as a dead scan. Runs its own --self-test first.
       #
       # Scoped (#16496): the same population and inputs as the slot-lookup
       # ratchet, with `scripts/query-options-erasure-baseline.json`.
@@ -5683,7 +5686,7 @@ jobs:
           fi
           if [ -n "$WHOLE" ]; then
             echo "Type-checking the whole workspace -- $WHOLE."
-            pnpm exec turbo run typecheck "${UNIVERSE[@]}"
+            pnpm exec turbo run typecheck "${UNIVERSE[@]}" --summarize
             exit 0
           fi
           pnpm exec turbo ls "${UNIVERSE[@]}" --output=json > "$RUNNER_TEMP/typecheck-universe.json"
@@ -5699,7 +5702,7 @@ jobs:
           printf '  %s\n' "${SELECTED[@]}"
           FILTERS=()
           for P in "${SELECTED[@]}"; do FILTERS+=("--filter=$P"); done
-          pnpm exec turbo run typecheck "${FILTERS[@]}"
+          pnpm exec turbo run typecheck "${FILTERS[@]}" --summarize
 
       # Seed the shared Turbo cache from main only (see the restore step above).
       #
@@ -5720,8 +5723,21 @@ jobs:
       # merge_group is deliberately NOT added to this condition — see the
       # "why queue-branch saves are not the win they look like" note on the
       # `typecheck` aggregator at the bottom of this file.
-      - name: Save Turbo cache (main only)
+      #
+      # The seed keeps only the entries this lane's two turbo runs used, as
+      # ci.yml Test Core's prune step does (#25452): the build's and the
+      # typecheck's `--summarize` summaries, both left in `.turbo/runs/`. A
+      # bookkeeping step, not a gate: no `continue-on-error`, and it exits 0 on
+      # every run-time path.
+      - name: Prune the Turbo cache to this run's tasks (main only)
+        id: prune-turbo-cache
         if: always() && github.event_name == 'push'
+        run: |
+          node scripts/ci/prune-turbo-cache.mjs --site 'Type Check · workspace' \
+            --cache .turbo/cache --run-summaries .turbo/runs
+
+      - name: Save Turbo cache (main only)
+        if: always() && github.event_name == 'push' && steps.prune-turbo-cache.outputs.save == 'true'
         uses: actions/cache/save@v6
         with:
           path: .turbo/cache

@@ -20,6 +20,29 @@ stated once here and the script's own header is the authority on detail.
 
 ---
 
+## Contents
+
+- [Communication](#communication)
+- [Build & Test](#build--test) — explanations: [`docs/agents/build-and-test.md`](docs/agents/build-and-test.md)
+- [Prime Directives](#prime-directives)
+- [Multi-agent working discipline](#multi-agent-working-discipline) — explanations:
+  [`docs/agents/multi-agent-discipline.md`](docs/agents/multi-agent-discipline.md)
+- [Monorepo Layout](#monorepo-layout)
+- [Protocol Domains (`packages/spec/src/`)](#protocol-domains-packagesspecsrc)
+- [Kernel](#kernel)
+- [Documentation Guardrails](#documentation-guardrails)
+- [Context Routing](#context-routing--apply-the-right-role-per-path)
+- [Skills (`skills/`)](#skills-skills)
+- [Patterns](#patterns)
+- [Route & surface ownership](#route--surface-ownership)
+- [Degradation log levels](#degradation-log-levels--warn-vs-error)
+- [Startup registry reads](#startup-registry-reads--never-record-a-verdict-the-boot-can-still-contradict)
+- [Writing a `--self-test`](#writing-a---self-test--it-must-be-capable-of-failing-when-it-runs-nothing)
+- [Post-Task Checklist](#post-task-checklist)
+- [Edit Sizing](#edit-sizing)
+
+---
+
 ## Communication
 
 语言规则分两件事:**和维护者说话用什么语言**,与**留在 GitHub 上的产物用什么语言**。
@@ -37,7 +60,7 @@ stated once here and the script's own header is the authority on detail.
 
 ```bash
 pnpm install          # deps
-pnpm run setup        # first-time: install + build spec (bare `pnpm setup` is pnpm's own built-in)
+pnpm run setup        # install + build spec only; `pnpm dev` needs `pnpm build` (bare `pnpm setup` is pnpm's own built-in)
 pnpm build            # turbo build (excludes docs)
 pnpm test             # turbo test
 pnpm typecheck        # turbo typecheck — per-package `tsc --noEmit`; tsup/vitest never type-check
@@ -63,10 +86,8 @@ naming only the old errors reads as "nearly graduated" to the next author.
 
 Three principles the ratchet's invariants encode:
 
-- **A package's `tsconfig.json` reaches every `*.test.ts` / `*.spec.ts` in it** —
-  `tsc --noEmit` reads that config, so a test it misses is hidden from the very check
-  the `typecheck` script advertises. `check:type-check-coverage` fails both spellings
-  per file: an `exclude` naming it, an `include` that never does. A sibling
+- **A package's `tsconfig.json` reaches every `*.test.ts` / `*.spec.ts` in it**
+  ([why](docs/agents/build-and-test.md#why-a-test-the-tsconfigjson-misses-is-hidden)). A sibling
   `tsconfig.test.json` named in the `typecheck` script may carry its own *module*
   semantics for vitest, never its own *strictness*.
 - **A `@ts-expect-error` in a file no tsc program compiles is a phantom check** — it
@@ -77,18 +98,14 @@ Three principles the ratchet's invariants encode:
   `scripts/check-test-typecheck.mts --package <dir>` — onboard by wiring, never by
   copying.
 - **A pile of TS7006 "implicitly any" is usually one broken import upstream**, not a
-  package that needs annotations: under `moduleResolution: NodeNext` a relative import
-  missing its `.js` extension does not resolve and every symbol it names becomes
-  `any`. Fix the extension first and re-measure.
+  package that needs annotations — a relative import missing its `.js` extension
+  ([why](docs/agents/build-and-test.md#ts7006-piles-the-missing-js-extension)). Fix the
+  extension first and re-measure.
 
 ### A test that reads outside its own package must be spelled so the gate can see it
 
-`pnpm check:cross-package-test-inputs` keeps CI's idea of a test's inputs equal to its
-real inputs: a test whose reads escape its package is invisible to both
-`turbo ls --affected` and the `test` task's input hashing, so a pin written to catch
-cross-package drift sits green through exactly the drift it exists to catch. The gate
-finds those tests by scanning source text, so it sees only the spellings it knows, and an
-unrecognised one produces no flag — no declaration, silently. Seed from
+`pnpm check:cross-package-test-inputs` sees only the spellings it knows
+([why](docs/agents/build-and-test.md#why-the-cross-package-gate-needs-a-spelling-it-knows)). Seed from
 `import.meta.url`, `__dirname` or a `findUp` walk, and write the escaping path as one of:
 
 ```ts
@@ -114,12 +131,8 @@ const REPO = findUp((dir) => existsSync(join(dir, 'pnpm-workspace.yaml')));
 The gate prints this list in its failure text, and `check-published-list-mirrors` holds
 the block above equal to it; this file is governed, so that gate can only ever go red.
 Need a spelling that is not here? **Extend the detector, add a `--self-test` case, and
-correct the block in the same edit** — ⛔ never route around it.
-
-Two things it deliberately does not flag: a path that climbs out and lands in
-`node_modules` (an installed dependency is not a repo source input), and a path that
-climbs out and comes straight back in. What it does flag is judged on the **shallowest**
-point a path reaches, not where it ends.
+correct the block in the same edit** — ⛔ never route around it. What it deliberately does not flag:
+[why](docs/agents/build-and-test.md#what-the-cross-package-gate-deliberately-does-not-flag).
 
 Clocked windows measure behaviour, never loading — a test that boots a real plugin chain
 pays its first load at module top; `pnpm check:test-source-alias` gates it. A gate grading a
@@ -135,18 +148,14 @@ layer at least as close to the code (ruling record 6120820653).
 
 | Scenario | Command | Notes |
 |:---|:---|:---|
-| **Frontend debug** (the Console in `ui/` calls backend) | `PORT=3000 pnpm dev` | `pnpm dev` = the **showcase** kitchen-sink app (default; best for exercising the platform). Port **must** be 3000 (UI hard-wired); persistent state; leave running. For the minimal CRM app instead: `PORT=3000 pnpm dev:crm`. |
-| **Backend-only debug** | `pnpm dev -- --fresh -p <random>` | Random high port; ephemeral tempdir; **you must kill it** when done |
-
-`--fresh`: ephemeral tempdir (auto-deleted on exit) + `--seed-admin` (POSTs sign-up, prints creds — default
-`admin@objectos.ai` / `admin123`, override via `--admin-email`/`--admin-password`). The seeded admin is auto-promoted to
-**platform admin** (the system seed identity `usr_system` is skipped), so Setup/Studio are reachable on first login.
+| **Frontend debug** (the Console in `ui/` calls backend) | `OS_PORT=3000 pnpm dev` | `pnpm dev` = the **showcase** kitchen-sink app (default; best for exercising the platform). Port 3000 is the default, not hard-wired: the Console dev proxy targets it unless `DEV_PROXY_TARGET` says otherwise, and a busy port shifts to the next free one, so read the port it prints (`PORT` is the legacy alias of `OS_PORT`); persistent state; leave running. For the minimal CRM app instead: `OS_PORT=3000 pnpm dev:crm`. |
+| **Backend-only debug** | `pnpm dev -- --fresh -p <random>` | Random high port; ephemeral tempdir; **you must kill it** when done ([what `--fresh` seeds](docs/agents/build-and-test.md#what-the-fresh-flag-seeds)) |
 
 Rules: never run two backends on port 3000; for backend tasks pick a random port and tear it down; **never kill a
 server you didn't start** (see Multi-agent discipline §8); always use a `pnpm dev`/`dev:crm`/`dev:showcase` script,
-not raw `pnpm --filter`. pnpm forwards the `--` separator itself into the child's argv, so this spelling only works
-where the receiving CLI tolerates a leading `--`. ⛔ Do not carry it over to test commands — vitest silently
-discards everything after a bare `--` (`.claude/agents/os-dev.md` → Toolchain traps).
+not raw `pnpm --filter`. ⛔ Do not carry the `--` separator over to test commands — vitest silently
+discards everything after a bare `--` (`.claude/agents/os-dev.md` → Toolchain traps;
+[why it works for dev scripts](docs/agents/build-and-test.md#why-the-separator-works-for-dev-scripts-and-not-for-vitest)).
 
 ```bash
 pnpm dev:crm -- --fresh -p 38421   # start; debug via curl
@@ -161,16 +170,15 @@ dist into `packages/console/` (`packages/console/build-dist.sh`). ⛔ Never hand
 
 **A registry change has a second half: regenerate the committed manifest** with
 `node scripts/gen-sdui-manifest-node.mjs`, which builds the registry under `ui/`, enumerates it from `ui/apps/console`
-(never an npm install) and takes no arguments; commit what it writes. CI's `Build & E2E UI` runs it too and fails
-when the committed `sdui.manifest.json` differs, the merge queue's combined tree included, and the console build
-ships that same tracked file in `packages/console/dist/`. Full procedure: `docs/releases-maintenance.md`.
+(never an npm install) and takes no arguments; commit what it writes
+([what CI does with it](docs/agents/build-and-test.md#the-sdui-manifest-in-ci)). Full procedure:
+`docs/releases-maintenance.md`.
 
 **Fast iteration on `ui/` src (no rebuild loop):** run the Console dev server —
 `pnpm --filter @object-ui/console dev` (Vite on **:5180**, HMR). Its `/api` proxy targets
-`DEV_PROXY_TARGET || http://localhost:3000`, so **run the backend you're testing on :3000** (`PORT=3000 pnpm dev` for
-showcase) and browse `:5180`. Note `:3001/_console` (or whatever the backend serves) is the **built** console, not
-your `ui/` src — only `:5180` reflects local UI edits. See `ui/AGENTS.md` for the app-id /
-localStorage / auth gotchas.
+`DEV_PROXY_TARGET || http://localhost:3000`, so **run the backend you're testing on :3000** (`OS_PORT=3000 pnpm dev`
+for showcase) and browse `:5180` ([why](docs/agents/build-and-test.md#which-console-3001_console-serves)).
+See `ui/AGENTS.md` for the app-id / localStorage / auth gotchas.
 
 ---
 ## Prime Directives
@@ -325,11 +333,7 @@ This repo is worked on by **multiple agents in parallel**, one worktree per task
 mandatory, hook-enforced, and specified in **Prime Directive #11**. What it does not cover:
 
 **⛔ `git stash` is the sharpest thing the worktree does NOT isolate — never run a bare
-`git stash push`/`pop`.** `refs/stash` lives in the **common** `.git` directory, so every
-linked worktree pushes onto and pops off **one shared LIFO stack**: your `pop` restores
-another agent's changes, your own work stays on the stack for them to take, and `pop`
-reports success — the only symptom is another agent's files in your `git status`, and a
-following `git add -A` commits their work into your PR. A PreToolUse hook
+`git stash push`/`pop`** ([why](docs/agents/multi-agent-discipline.md#the-shared-stash)). A PreToolUse hook
 (`.claude/hooks/guard-shared-stash.sh`; details and the `OS_ALLOW_STASH=1` escape in its
 header, self-test alongside) blocks the mutating forms — including `stash@{N}`, a
 *position* in a stack you don't own — allows `list`/`show`/`create` and `apply`/`store`
@@ -344,15 +348,9 @@ git worktree add ../objectstack-<task>-cmp <ref>        # a second tree to compa
 
 **⛔ The stash is one CASE — a worktree isolates your checkout and exactly four ref
 namespaces (`HEAD`, `refs/bisect`, `refs/worktree`, `refs/rewritten`) and NOTHING else:**
-not the object store, not `.git/config`, not any other ref. **`refs/remotes/*` is shared**
-— a sibling's fetch advances **your** `origin/main`, so `git checkout origin/main -- <paths>`
-restores wherever that ref points **now**, possibly newer than your base: another agent's
-merged work entering your tree under the name of a "revert", and **staged** on arrival by
-the rule below. **`FETCH_HEAD` is per CHECKOUT — the last fetch in this checkout wins**
-(a linked worktree has its own; the hazard is the shared primary checkout). It fails by
-**absence**, not wrong content: split from its `git fetch` by any intervening fetch,
-`git diff …FETCH_HEAD` **exits 0 printing nothing** — a confidently wrong "the change isn't
-there", worst for **reviewing** seats. Practices: pin `BASE=$(git rev-parse HEAD)` at
+not the object store, not `.git/config`, not any other ref; `refs/remotes/*` and `FETCH_HEAD`
+are the two that bite ([why](docs/agents/multi-agent-discipline.md#shared-refs-and-fetch_head)).
+Practices: pin `BASE=$(git rev-parse HEAD)` at
 worktree creation and restore against that commit, never a moving ref name; verify a
 named remote-tracking ref's content by occurrence counts on disk; fetch into a ref you
 own (`git fetch origin <branch>:refs/<ns>/<id> -f`) and read that; diff restored paths
@@ -361,9 +359,7 @@ spellings are both ordinary `git checkout` / `git fetch`, so a mechanical block 
 on correct usage.
 
 **A reading you cite is a count plus the tree it was taken against — repository and
-commit — or it is not a reading.** "Measured over the corpus" names `examples/app-crm` at
-its sha, never an application it is not; a moving ref is not an anchor, for a corpus
-exactly as for a `git diff`.
+commit — or it is not a reading** ([why](docs/agents/multi-agent-discipline.md#a-reading-names-its-tree)).
 
 **⛔ Nor the build cache** — turbo resolves the repo root through the **common** dir, so every
 worktree replays ONE `.turbo/cache`. Symptom: a typecheck failing on a package your diff never
@@ -372,21 +368,16 @@ that package. Ablating a build tool is a sanctioned producer; `--force` writes t
 
 **Doing reverse verification ("revert the fix, watch the diagnostics")? Commit the fix
 FIRST.** Committed, restoring is `git checkout <your-branch> -- <path>`, out of a commit
-that really exists. Against an **uncommitted** edit there is no restore point at all: the
-working tree is the only copy, the stash is banned above, and discarding local
-modifications is a normal, silent, exit-0 operation. Prove any retyped change identical
+that really exists ([why](docs/agents/multi-agent-discipline.md#reverse-verification-against-an-uncommitted-edit)).
+Prove any retyped change identical
 with `git diff` against a saved patch or `git hash-object <path>` (a matching `--stat`
 insertion count is **not** byte-identity), then re-run from the committed state so your
 red/green numbers are trustworthy.
 
 **⛔ And `git checkout <ref> -- <path>` STAGES what it retrieves — putting the file back
-with `cp` undoes only half of it.** It writes the **index** as well as the working tree,
-so the index holds the ref's content while the tree holds yours: `git status --porcelain`
-shows `MM` and `git show :<path>` reads back the ref's copy, but `git diff HEAD` is
-**clean** (it compares tree with HEAD and never consults the index), the tests pass
-because they read the tree, and a bare `git commit` builds from the **index** — a commit
-that deletes your own fix, in a PR whose body accurately describes a change it does not
-contain. Restore with `git checkout HEAD -- <path>` or
+with `cp` undoes only half of it**
+([why](docs/agents/multi-agent-discipline.md#what-a-checkout-from-a-ref-does-to-the-index)).
+Restore with `git checkout HEAD -- <path>` or
 `git restore --source=HEAD --staged --worktree <path>` — both reset index *and* tree —
 read `git status --porcelain` before you commit, and ⛔ never trust `git diff HEAD` alone
 after a checkout-from-ref. Better still, don't stage it at all:
@@ -394,10 +385,9 @@ after a checkout-from-ref. Better still, don't stage it at all:
 unstaged `M`.
 
 **A windowed history question ("how many commits on `<ref>` in `<window>`") goes through
-`scripts/pm/git-history.mjs` — answer, or REFUSE.** A shallow clone answers windowed
-`git log`/`rev-list` questions from truncated history at exit 0 with no warning; the tool
-proves the window is covered first. `historyHorizon()` is the read-only predicate for
-tools that answer their own question.
+`scripts/pm/git-history.mjs` — answer, or REFUSE**
+([why](docs/agents/multi-agent-discipline.md#windowed-history-on-a-shallow-clone)). `historyHorizon()` is the
+read-only predicate for tools that answer their own question.
 
 **Claim the issue BEFORE you write any code.** Every agent here shares one GitHub identity, so
 the assignee field is only a presence bit; the identity record is the `Claim:` comment — first
@@ -415,9 +405,8 @@ the comments — the comments decide, not the field: a `Claim:` from another ses
 ask, ⛔ never reassign; a bare assignee with no `Claim:` under it is a dispatch's step 1, not a
 foreign claim — not taken for the executor it was dispatched to, and not free for a seat picking
 for itself. Release is an explicit act: whoever moves a card out of ownership clears the assignee
-and posts a `Release:` line. Findings are filed unassigned; assign at the moment you start. The
-maintainer's own work under the shared account carries no claim comment and is indistinguishable
-from a dispatch — an accepted blind spot; per-seat identities are not introduced.
+and posts a `Release:` line. Findings are filed unassigned; assign at the moment you start
+([why](docs/agents/multi-agent-discipline.md#the-shared-identitys-accepted-blind-spot)).
 
 **Every GitHub write leaves through `scripts/pm/`, as `objectstack-fleet[bot]`, behind the shared write
 gate.** `fleet-token.mjs` mints the App token from `OS_FLEET_APP_ID` / `OS_FLEET_INSTALLATION_ID` /
@@ -427,9 +416,8 @@ else behind the gate (`--read` for reads). ⛔ Never a bare `curl` / `fetch` / `
 write; never a token in a remote URL, a `git config` value on disk or a log line. Each header is the authority.
 
 **State on your PR that you did not set belongs to another actor — ask, never "correct"
-it.** Under one shared identity every other participant's write arrives unsigned: the PM
-flipping your draft to ready and arming auto-merge, a bot re-labelling, the platform
-rewriting your body. A rewritten body is evidence about the body and of nothing else —
+it** ([why](docs/agents/multi-agent-discipline.md#unsigned-writes-under-one-identity)). A rewritten body is
+evidence about the body and of nothing else —
 ⛔ never extend it to the draft flag, which flipped back destroys an unqueued PR's
 auto-merge at once (§7's draft-flip re-arm note), invisibly. Read the timeline event's
 actor, or ask; undo only once you know who set it and why.
@@ -447,12 +435,10 @@ raw REST call) and the ACTION (create vs edit) — measured in this repository, 
 disagree, so ⛔ never generalise one to another; the readings live in pm-dispatch
 `references/platform-readings.md`. Send the footer you want stored, read the body back after
 every write, and ⛔ never re-send a body that already carries an appended footer. Durable
-attribution lives in body prose or a comment. **Issue comment:** the platform APPENDS that
-block — blank line, `---`, bare footer — and recognises only that shape (MCP
-`add_issue_comment` and direct REST agree: per-surface, not per-tool): a bare footer UNDER the
-rule line is stored byte-identical, one footer; a bare footer with NO rule line above it is not
-recognised and the whole block lands under it, leaving two; the session-URL form survives
-verbatim and a bare one lands under it, leaving two. ⛔ A tail bare footer on a comment is the
+attribution lives in body prose or a comment. **Issue comment:** the platform APPENDS the
+block above and recognises only that shape
+([why](docs/agents/multi-agent-discipline.md#how-the-platform-stores-a-comment-footer)). ⛔ A tail bare
+footer on a comment is the
 platform's, not your form downgraded. Which layer does this is unknown; don't go establishing
 it. **Commit message:** an agent commit ends with the model-free trailer pair
 `Claude-Session: https://claude.ai/code/session_<id>` and `Co-authored-by: Claude <noreply@anthropic.com>`, and the
@@ -479,10 +465,9 @@ Even inside your own worktree, operate defensively:
    workflow warns on fix PRs whose branch names no declared issue. A hit is a hint, not a
    claim — most heads carry no PR: ⛔ never skip a card on one, the `Claim:` comment decides.
 
-   ⛔ **Off `main` is literal — a stacked series, each PR branched off the one below, is NOT a supported form.** No
-   tooling represents it: squash landing destroys the ancestry link, so every descendant rewinds behind what landed and
-   pays a rebuild lap per landing; and a breaking changeset's ADR-0087 disposition is base-relative, so a stacked card's
-   two bases demand contradictory markers. A multi-card change uses a **trunk branch**: correct the trunk's disposition
+   ⛔ **Off `main` is literal — a stacked series, each PR branched off the one below, is NOT a supported form**
+   ([why](docs/agents/multi-agent-discipline.md#why-a-stacked-series-is-not-a-supported-form)). A multi-card change
+   uses a **trunk branch**: correct the trunk's disposition
    to `registered` before it merges, and pay the rebase laps. ⛔ No gate or merge-policy change is made for it.
 3. **Never force-push a *shared* branch, and never push `main`.** A force-push can
    clobber a parallel agent's work; `main` is shared — land all via PR. A branch is
@@ -502,11 +487,9 @@ Even inside your own worktree, operate defensively:
    only *your* lines and let the PR merge integrate the rest.
 6. **Don't rebase or force-update shared branches** to tidy other agents' commits.
 7. **Land through the merge queue: arm auto-merge on a PR that is already green,
-   accepted and non-draft, then let the queue merge it.** The queue rebuilds your PR
-   *as merged onto the current `main`*, re-runs the subscribing workflows on that
-   rebuilt generation, and lands it only if the required ones pass — the §10
-   re-verification, done by the platform, race-free. **Arm only what is already green
-   and accepted.**
+   accepted and non-draft, then let the queue merge it**
+   ([why](docs/agents/multi-agent-discipline.md#what-the-merge-queue-does-with-your-pr)). **Arm only what is
+   already green and accepted.**
 
    ⛔ **Three classes of PR never enter this path on green alone:** (a) a diff touching any **governed surface**
    (**Prime Directive #14**, which names them and holds the current list — **this file and `CLAUDE.md` are on it**,
@@ -517,69 +500,49 @@ Even inside your own worktree, operate defensively:
    its size** before you arm anything.
 
    **Green means the gate-carrying jobs' `conclusion` is `success`** — not "no failure
-   yet"; `in_progress` is not a pass. Arming a red PR does not queue it, it hides it:
-   every poll then misreads "not on `main` yet" as "queued". Always read *two* things:
+   yet"; `in_progress` is not a pass, and arming a red PR hides it
+   ([why](docs/agents/multi-agent-discipline.md#arming-a-red-pr-hides-it)). Always read *two* things:
    the queue branch **and** `origin/main`. And **the queue enforces only the required
    set** — nine contexts block: `Lint & Repo Gates` (all `check:*` gates), `TypeScript Type Check`,
    `Test Core`, `Build Core`, `Governed Surface Queue Guard`, `Lint UI`, `Type Check UI`, `Test UI`
-   and `Build & E2E UI`. A check outside those nine is advisory and rides through, and an advisory red
-   that lands rides `main`'s merge ref into every later PR until stanched. A required context is
+   and `Build & E2E UI`; a check outside those nine is advisory
+   ([why that matters](docs/agents/multi-agent-discipline.md#advisory-checks-ride-through)). A required context is
    matched by check-run name, so a rename detaches its gate silently — treat those nine names as contract.
-   **Two speeds** (ruling record 6120820653): PR and queue runs carry the fast set, 10 minutes of
-   wall per queue entry; `main`'s scheduled (4-hourly) and push runs carry the full battery — dogfood, e2e,
-   `Temporal Conformance (live PG + MySQL)` — read by the publish lane before
-   any approval. **Main-red:** a full-battery red is its lane's first work — triage files it under
+   **Two speeds** — PR and queue runs carry the fast set; `main`'s scheduled and push runs carry the full
+   battery ([detail](docs/agents/multi-agent-discipline.md#two-speeds-which-runs-carry-which-battery)).
+   **Main-red:** a full-battery red is its lane's first work — triage files it under
    the main-red convention, the lane's next PR fixes it, and ⛔ no lane PR arms the queue meanwhile.
 
-   **Re-arm awareness** — none of these is a reason to avoid the queue; all are reasons to
-   confirm a PR is still *in* it: a red queue build **ejects** your entry and drops
-   auto-merge, often on a package your PR never touched (it runs the merge group's affected
-   set, not just yours) — diagnose against `merge-queue-triage.yml`'s comment, recognise a
-   known-flaky signature, then re-arm once, never reflexively; **collateral eviction is
-   silent** (triage comments only on `failure`, so an entry cancelled because something
-   *ahead* failed gets nothing) — neither on `main` nor in the queue means dropped, re-arm;
-   **flipping back to draft drops an unqueued PR's auto-merge at once**, and it does not
-   return by itself — ready *first*, arm *second*. One non-fix: **a stale red does not
-   clear by re-running** — `rerun_failed_jobs` reuses the original run's commit and merge
-   ref, so a fix that landed on `main` since is invisible to it; only a new commit
-   (`git merge origin/main`) helps. Whether a direct `gh pr merge` is refused here is
-   deliberately unmeasured — do not establish it by attempting one.
+   **Re-arm awareness** ([measured](docs/agents/multi-agent-discipline.md#re-arm-awareness)): a red queue build
+   ejects your entry and drops auto-merge, and collateral eviction is silent — neither on `main` nor in the
+   queue means dropped; diagnose against `merge-queue-triage.yml`'s comment, then re-arm once, never
+   reflexively; ready *first*, arm *second* (flipping back to draft drops an unqueued PR's auto-merge); a stale
+   red clears only with a new commit (`git merge origin/main`), never by re-running; whether a direct
+   `gh pr merge` is refused here is deliberately unmeasured — do not establish it by attempting one.
 
    **Fallback, when the queue is unavailable:** merge serially, only after remote CI is
-   fully green, rebasing other open branches before merging the next. It loses badly
-   under load, which is why the queue is the default path, not an optimisation.
-8. **Testing needs a server? Start your own temporary one — never stop someone else's.**
-   A running dev server you didn't start probably belongs to another agent or the user;
-   killing it (or its port) breaks their in-flight work. Spin up your own instance on a
+   fully green, rebasing other open branches before merging the next
+   ([why](docs/agents/multi-agent-discipline.md#the-serial-merge-fallback)).
+8. **Testing needs a server? Start your own temporary one — never stop someone else's**
+   ([why](docs/agents/multi-agent-discipline.md#why-you-never-stop-someone-elses-server)). Spin up your own
+   instance on a
    random high port (`pnpm dev -- --fresh -p <random>`) and **shut it down yourself when
    the task is done** (`kill $(lsof -ti tcp:<port>)`). ⛔ One process table per container: **kill only a PID you
    recorded, and wait only on one, never a name** — `pgrep -f` matches the asking shell (`guard-process-kill.sh`).
 9. **After pulling `main` into a long-lived worktree, refresh its build state before you
-   trust a single test or gate.** A worktree open across several merges accumulates
-   artefacts stale relative to the source, and every one of them fails **as if your change
-   broke something** — naming other people's exports, other packages' files, or config you
-   never touched:
-
-   | stale artefact | how it presents | why it lies |
-   |---|---|---|
-   | `packages/spec/dist` | `check:api-surface` reports *other people's* exports as "N breaking (removed/narrowed)"; `check:i18n-coverage` rejects an example config for a value the spec allows | both read the built `.d.ts`, not `src/` |
-   | `node_modules` | a package fails to resolve a dependency it plainly declares (`Cannot find package 'hono'`) | the merge moved `pnpm-lock.yaml` |
-   | `packages/runtime/.objectstack/` | `datasource-autoconnect` sees each row 6× | gitignored fixture state accumulating across runs |
-
+   trust a single test or gate**
+   ([why](docs/agents/multi-agent-discipline.md#stale-build-state-after-a-merge-the-artefacts-that-lie)).
    So after any `git merge origin/main`:
    `pnpm install --frozen-lockfile && pnpm build && rm -rf packages/runtime/.objectstack`.
    Note `OS_SKIP_DTS=1` keeps
    a build fast but leaves no `.d.ts`, so `gen:api-surface` cannot run at all under it —
-   that one needs a real build. None of this is CI-visible (CI checks out fresh). Only
-   the first row has a gate: `check:dev-prereqs` refuses `pnpm dev` on a stale
-   `packages/spec/dist` (content-hash, never mtime); for every other row the prescription
-   above is the whole remedy — the gate's own pass line says "existence, not freshness"
-   so its green cannot be read as vouching for them.
-10. **A clean merge is not a working merge — but scope the re-check to the overlap.**
-   Git conflicts on overlapping lines; nothing warns you when two changes are
-   individually fine and jointly wrong. **Before opening a PR, pull `main`, refresh build
+   that one needs a real build.
+10. **A clean merge is not a working merge — but scope the re-check to the overlap**
+   ([why](docs/agents/multi-agent-discipline.md#why-a-clean-merge-is-not-a-working-merge)). **Before opening a
+   PR, pull `main`, refresh build
    state (§9), and run the full suite once.** After the PR is open, merge `main` only on a GitHub-reported
-   conflict, a `main`-caused CI red or a queue removal, then only the scoped re-checks; dogfood once, on the final head:
+   conflict, a `main`-caused CI red or a queue removal, then only the scoped re-checks; dogfood once, on the final head
+   ([detail](docs/agents/multi-agent-discipline.md#where-joint-breakage-surfaces)):
    - **Always:** rebuild what the merge touched, and if `packages/spec` moved on either
      side, `pnpm --filter @objectstack/spec build && pnpm --filter @objectstack/spec
      check:generated` — generated snapshots (`api-surface`, baselines) are the classic
@@ -590,46 +553,21 @@ Even inside your own worktree, operate defensively:
    - **Full `pnpm typecheck && pnpm test` again only when** the incoming commits touch
      the same packages or the same behavior your diff does, or a conflict occurred
      outside trivially-mechanical files.
-   - CI on the PR, and then the merge queue on its rebuilt generation (§7), validates the
-     merge commit itself — that second CI round is where joint breakage surfaces.
 11. **Generated artifacts don't text-merge — a driver defers them and `pre-commit`
-   collects the debt.** §10's "never trust git's textual merge of a generated file" is
-   mechanical: `.gitattributes` routes the generator-owned artifacts to `merge=os-regen`
-   (the list is the `.gitattributes` entries themselves; `pnpm check:merge-driver`
-   reconciles both directions), so a merge stops only on the hand-written files that
-   actually need you. The driver does **not** regenerate — git runs merge drivers while
-   the worktree still holds pre-merge sources, so a generator run there would describe a
-   half-merged tree; instead it records each path in `$GIT_DIR/os-regen-pending` and
-   `pre-commit` refuses the commit until those artifacts check clean. Sequence after a
-   merge unchanged from §9: rebuild, then `check:generated --fix`. Worth knowing:
+   collects the debt.** `.gitattributes` routes the generator-owned artifacts to `merge=os-regen`
+   (`pnpm check:merge-driver` reconciles both directions); the driver does **not** regenerate — it records
+   each path in `$GIT_DIR/os-regen-pending` and `pre-commit` refuses the commit until those artifacts
+   check clean ([why](docs/agents/multi-agent-discipline.md#generated-artifacts-and-the-merge-driver)).
+   Sequence after a merge unchanged from §9: rebuild, then `check:generated --fix`. Worth knowing:
    - **The MERGE commit itself is the one exemption, and it is a deferral, not a pass.**
      `scripts/pm/os-regen-merge.sh` is the in-repo authority for landing one onto `main`,
-     and its step 3 commits the merge **before** regenerating on purpose: the driver exits
-     0 while silently dropping one side, and no diffstat or `git diff` shows the drop, so
-     only a separate regeneration commit on a known-good base lets a reviewer read "what
-     main brought" apart from "what the change produces". `pre-commit` records it as a
-     deferral and holds you to it — the next commit must discharge it (every commit until
-     then is refused, and a second merge cannot defer onto an outstanding one), and
-     `.githooks/pre-push` refuses a push that still owes one. ⛔ So this step never needs
+     and its step 3 commits the merge **before** regenerating on purpose. ⛔ So this step never needs
      `--no-verify`, which skips *every* pre-commit check, not this one.
-   - **The driver is a LOCAL facility** — the merge queue rebuilds server-side where no
-     custom driver runs, so the three hottest artifacts are **sharded** per category/entry
-     (`authorable-surface/`, `json-schema.manifest/`, `api-surface/`) to keep parallel
-     spec PRs textually disjoint; every gate reads the whole directory as one set, so
-     ratchet semantics are unchanged (`packages/spec/scripts/lib/sharded-artifacts.ts`).
-   - **Corollary — a local `merge-tree` is NOT GitHub's mergeability**: a local
-     `git merge-tree` of any `merge=os-regen` path runs the same merge-ort machinery as
-     `git merge` and therefore honours the custom driver, while GitHub runs none, so the
-     two answer different questions about the same snapshot. Probe from a throwaway bare
-     clone with no driver registered that FETCHES both commits (`--shared` may copy only
-     what `refs/heads/**` reach; recipe: `os-regen-merge.sh`'s header): exit 1 with no
-     tree id, `not something we can merge`, is a missing object, never a conflict. ⛔ Never
+   - **Corollary — a local `merge-tree` is NOT GitHub's mergeability**: probe from a throwaway bare
+     clone with no driver registered that FETCHES both commits (recipe: `os-regen-merge.sh`'s header). ⛔ Never
      with `-c merge.os-regen.driver=` or `-c merge.os-regen.driver=false`, neither of which
      disables the driver: git runs the configured program, it fails, and every routed path
      is reported conflicted, including ones that text-merge cleanly.
-   - **Registration is per clone** (`pnpm install` → `prepare` →
-     `scripts/setup-git-hooks.mjs`); an unregistered clone falls back to git's default
-     text merge — older behaviour, not breakage.
    - **The ratchet baselines are deliberately excluded**: recomputing a shrink-only
      ratchet can *widen* it, laundering a new exemption in as merge noise — those
      conflicts are yours to read (`NOT_DRIVER_MANAGED` in `scripts/regen-artifacts.mjs`

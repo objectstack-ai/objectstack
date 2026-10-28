@@ -37,6 +37,7 @@ import { useMetadata } from '../providers/MetadataProvider.js';
 import { resolveKeyedI18nLabel, matchAppBySegment, appRouteSegment } from '../utils/index.js';
 import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
 import { useHomePath } from '../hooks/useHomePath.js';
+import { useLauncherApps } from '../hooks/useLauncherApps.js';
 import { SETUP_APP_NAME, SETUP_APP_PACKAGE_ID } from '../console/ConsoleShell.js';
 import { GO_HOME_SHORTCUT, shortcutKeycaps } from '../chrome/advertisedShortcuts.js';
 import { isSingleAppSwitcherHidden } from '../runtime-config.js';
@@ -83,7 +84,12 @@ export function AppSwitcher({ activeAppName, onAppChange, designInStudioPath }: 
   // this list is already permitted. Filtering it here would hide a builder's own
   // in-progress app from the builder. Pinned by
   // `__tests__/AppSwitcher.publishState.test.tsx`.
-  const activeApps = apps.filter((a: any) => a.active !== false && a.hidden !== true);
+  //
+  // An app the user's permission sets hide (`tabPermissions: hidden`) is not
+  // offered either: the menu offers what Home's tiles offer, narrowed by the
+  // `/me/apps` answer (objectstack#26838). The pill below still names such an app when the user
+  // is in it — it opens from a direct URL, so it is where they are.
+  const { apps: activeApps } = useLauncherApps(apps);
   // ADR-0048 (A) — route segment may be a package id; match by it (name fallback).
   const activeApp = matchAppBySegment(activeApps, activeAppName) || matchAppBySegment(apps.filter((a: any) => a.active !== false), activeAppName) || activeApps[0];
 

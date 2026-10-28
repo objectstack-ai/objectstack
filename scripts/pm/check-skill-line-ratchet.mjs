@@ -1307,7 +1307,9 @@ export const CEILINGS = new Map([
   // lane patrol (dispatch-runbook.md, line-neutral there). The human-ruling
   // floor and the risk / workload tests stayed intact. Landed count, headroom 0,
   // same convention (lowering is always legitimate).
-  ['.claude/skills/pm-dispatch/references/triage-duties.md', 103],
+  // Lowered 103 → 102 when the whole-card cloud route (PR #26749) merged with
+  // main's cloud-involvement lines; landed count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/triage-duties.md', 102],
   // execution-duties.md, raised 183 → 185 by the split-off-card ruling — an
   // ORDINARY raise, ⛔ not a cross-file move (card #23579). The text is two rule
   // lines beside the derived-sub-issue rules in 〈候选与批次〉: a queued card found
@@ -1727,7 +1729,13 @@ export const CEILINGS = new Map([
   // comment 6184004601. Landed count, headroom 0, same convention.
   // Lowered 1117 → 1112 by #25712 item 4: the objectui sibling-repo steps were
   // deleted once `ui/` became a workspace here. Landed count, headroom 0.
-  ['AGENTS.md', 1112],
+  // Lowered 1112 → 1050 by #26081 (ruling record 6417533492, letter A): the file
+  // gained a table of contents, and the MECHANISM prose of § Build & Test and
+  // § Multi-agent working discipline moved verbatim to the docs/agents topic pages,
+  // each rule staying as one executable sentence plus a pointer. A LOWERING, which
+  // needs no ruling of its own — the ruling is quoted because it ordered the move.
+  // Landed count, headroom 0.
+  ['AGENTS.md', 1050],
   // #9965: root CLAUDE.md is the other repo-root instruction file — same read
   // path (every seat session), same governance (Prime Directive #14). It is
   // structurally growth-prone in the way the ratchet is built for: it exists to
