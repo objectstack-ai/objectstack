@@ -1,0 +1,128 @@
+---
+title: "Plugin Form"
+---
+
+Advanced form components with validation, multi-step forms, and comprehensive field support.
+
+## Installation
+
+```bash
+npm install @object-ui/plugin-form
+```
+
+The props the [`object-form`](/docs/ui/components/plugins#object-form), [`embeddable-form`](/docs/ui/components/plugins#embeddable-form), [`object-master-detail-form`](/docs/ui/components/plugins#object-master-detail-form) nodes read on a page are generated from the spec into the component reference; this page covers using the plugin from React.
+
+## Features
+
+- **Form Builder** - Create complex forms from schemas
+- **Validation** - Built-in validation with custom rules
+- **Multi-Step Forms** - Wizard-style multi-step forms
+- **Field Types** - All standard HTML5 input types
+- **Form State** - Automatic state management
+- **Error Handling** - Field-level and form-level errors
+
+## Usage
+
+### Registration is a side effect of the import
+
+```ts
+import '@object-ui/plugin-form';
+```
+
+That single import is the whole of registration — there is no components map to
+iterate over. Importing the entry runs the five `ComponentRegistry.register(...)`
+calls in `packages/plugin-form/src/index.tsx`, which claim exactly these schema
+types:
+
+| Namespaced key | Bare-name fallback | Renderer behind it |
+| --- | --- | --- |
+| `plugin-form:object-form` | `object-form` | `ObjectForm` — metadata-driven form over one record |
+| `view:form` | none — `skipFallback: true` | the same renderer, under the view protocol |
+| `plugin-form:embeddable-form` | `embeddable-form` | `EmbeddableForm` — standalone public form |
+| `plugin-form:object-master-detail-form` | `object-master-detail-form` | `MasterDetailForm` — parent plus child line items in one submit |
+| `record:line_items` | none — `skipFallback: true` | `LineItemsPanel` — child grid bound to the record on the page |
+
+`ComponentRegistry.register` publishes `namespace:type`, and — unless the call
+passes `skipFallback: true` — the bare `type` as a back-compat fallback
+(`packages/core/src/registry/Registry.ts:194`, fallback at `:226`). The two
+`skipFallback` calls here are deliberate: bare `form` stays the basic
+`@object-ui/components` form, and bare `line_items` is left to whoever else
+claims it.
+
+The `form-analytics` node key is RETIRED (objectui#10859 batch 8): no schema
+produced it, and `objectui validate` refused it at `type`. `FormAnalytics` is still
+exported; mount the component directly where you need the submission dashboard.
+
+### Registering a component under your own key
+
+To serve one of this package's components under a key of your own, register the
+exported component — that is what a manual registration is here:
+
+```ts
+import { ComponentRegistry } from '@object-ui/core';
+import { ObjectForm } from '@object-ui/plugin-form';
+
+ComponentRegistry.register('my-form', ObjectForm, { namespace: 'my-app' });
+```
+
+The renderers this package registers for *itself* are internal wrappers rather
+than these exported components. `SchemaRenderer` hands a registered component
+its `schema`, but never a `dataSource` — that travels on
+`SchemaRendererContext` — so each wrapper resolves it from the context first.
+`ObjectForm` takes `dataSource` as a prop (optional, because inline
+`customFields` need no adapter), so a custom-key registration either supplies
+one or wraps the component the same way.
+
+The components are on the package's export surface — `ObjectForm`,
+`TabbedForm`, `WizardForm`, `SplitForm`, `DrawerForm`, `ModalForm`,
+`EmbeddableForm`, `MasterDetailForm`, `LineItemsPanel`, `FormAnalytics`,
+`FormSectionContainer` — alongside the layout helpers (`applyAutoLayout`,
+`inferColumns`, `filterCreateModeFields`, …) and the per-container schema types
+(`TabbedFormSchema`, `WizardFormSchema`, `ModalFormSchema`, …). There is no
+aggregate map among them.
+
+## What an edit save writes
+
+Which fields an edit save sends, and which fields and line-item actions a caller is offered, is the same in the SDK and the Console. It is documented under [What an edit save writes](/docs/ui/forms#what-an-edit-save-writes).
+
+## Field Types
+
+The plugin supports these field types:
+
+- **input** - Text, email, password, number, tel, url, etc.
+- **textarea** - Multi-line text input
+- **select** - Dropdown select
+- **checkbox** - Single checkbox
+- **radio-group** - Radio button group
+- **date-picker** - Date selection
+- **file-upload** - File upload
+
+## TypeScript Support
+
+`FormSchema` and `FormField` are protocol types, so they live in
+`@object-ui/types` alongside the rest of the JSON contract. This package imports
+them and does not re-export them — the form types on its own entry are the
+per-container ones (`TabbedFormSchema`, `WizardFormSchema`, `ModalFormSchema`,
+`SplitFormSchema`, `DrawerFormSchema`, `MasterDetailFormSchema`).
+
+```typescript
+import type { FormSchema, FormField } from '@object-ui/types';
+
+const emailField: FormField = {
+  name: 'email',
+  type: 'input',
+  inputType: 'email',
+  label: 'Email',
+  required: true
+};
+
+const loginForm: FormSchema = {
+  type: 'form',
+  fields: [emailField],
+  submitLabel: 'Sign In'
+};
+```
+
+## License
+
+MIT

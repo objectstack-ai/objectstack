@@ -1,0 +1,339 @@
+---
+title: "SidebarNav"
+description: "Sidebar navigation component with active state, icons, badges, nested items, and search"
+---
+
+The SidebarNav component provides a responsive sidebar navigation menu with support for icons, active states, badges, nested collapsible items, grouped navigation, and built-in search filtering.
+
+## Basic Usage
+
+```tsx
+import { SidebarNav } from '@object-ui/layout';
+import { Home, Users, Settings } from 'lucide-react';
+
+<SidebarNav
+  title="My Application"
+  items={[
+    {
+      title: 'Dashboard',
+      href: '/',
+      icon: Home
+    },
+    {
+      title: 'Users',
+      href: '/users',
+      icon: Users
+    },
+    {
+      title: 'Settings',
+      href: '/settings',
+      icon: Settings
+    }
+  ]}
+/>
+```
+
+## Component Props
+
+```ts
+interface SidebarNavProps {
+  items: NavItem[] | NavGroup[];  // Navigation items or grouped items
+  title?: string;                 // Sidebar title (default: "Application")
+  className?: string;             // Additional CSS classes
+  collapsible?: "offcanvas" | "icon" | "none";  // Sidebar collapse mode
+  searchEnabled?: boolean;        // Show search input to filter items
+  searchPlaceholder?: string;     // Placeholder for search input
+}
+
+interface NavItem {
+  title: string;                  // Item label
+  href: string;                   // Navigation URL
+  icon?: React.ComponentType;     // Lucide icon component
+  badge?: string | number;        // Badge text or count
+  badgeVariant?: 'default' | 'destructive' | 'outline';  // Badge style
+  children?: NavItem[];           // Nested collapsible sub-items
+}
+
+interface NavGroup {
+  label: string;                  // Group section label
+  items: NavItem[];               // Items in the group
+}
+```
+
+## Features
+
+### Active State
+
+The SidebarNav automatically highlights the active route based on the current URL:
+
+```plaintext
+// Current URL: /users
+// The "Users" menu item will be highlighted
+```
+
+### Icons
+
+Add Lucide icons to navigation items:
+
+```tsx
+import { SidebarNav } from '@object-ui/layout';
+import { 
+  LayoutDashboard, 
+  Users, 
+  FolderKanban, 
+  Settings 
+} from 'lucide-react';
+
+<SidebarNav
+  items={[
+    { title: 'Dashboard', href: '/', icon: LayoutDashboard },
+    { title: 'Team', href: '/team', icon: Users },
+    { title: 'Projects', href: '/projects', icon: FolderKanban },
+    { title: 'Settings', href: '/settings', icon: Settings }
+  ]}
+/>
+```
+
+### Badges
+
+Add badge counters or labels to navigation items with variant styling:
+
+```plaintext
+<SidebarNav
+  items={[
+    { title: 'Inbox', href: '/inbox', icon: Mail, badge: 12, badgeVariant: 'destructive' },
+    { title: 'Projects', href: '/projects', icon: FolderOpen, badge: '3 new', badgeVariant: 'outline' },
+    { title: 'Contacts', href: '/contacts', icon: Users, badge: 342 },
+  ]}
+/>
+```
+
+### Nested Items
+
+Create collapsible sub-navigation with the `children` property:
+
+```plaintext
+<SidebarNav
+  items={[
+    { title: 'Dashboard', href: '/dashboard', icon: Home },
+    {
+      title: 'Projects',
+      href: '/projects',
+      icon: FolderOpen,
+      badge: 5,
+      children: [
+        { title: 'Active', href: '/projects/active' },
+        { title: 'Archived', href: '/projects/archived' },
+        { title: 'Templates', href: '/projects/templates', badge: 2 },
+      ],
+    },
+    { title: 'Settings', href: '/settings', icon: Settings },
+  ]}
+/>
+```
+
+### Grouped Navigation
+
+Organize items into labeled sections using `NavGroup`:
+
+```plaintext
+<SidebarNav
+  items={[
+    {
+      label: 'Main',
+      items: [
+        { title: 'Dashboard', href: '/dashboard', icon: Home },
+        { title: 'Inbox', href: '/inbox', icon: Mail, badge: 5, badgeVariant: 'destructive' },
+      ],
+    },
+    {
+      label: 'Content',
+      items: [
+        { title: 'Documents', href: '/documents', icon: FileText },
+        { title: 'Projects', href: '/projects', icon: FolderOpen },
+      ],
+    },
+    {
+      label: 'Admin',
+      items: [
+        { title: 'Users', href: '/admin/users', icon: Users },
+        { title: 'Settings', href: '/settings', icon: Settings },
+      ],
+    },
+  ]}
+/>
+```
+
+### Search Filtering
+
+Enable built-in search to filter navigation items and their children:
+
+```plaintext
+<SidebarNav
+  items={navItems}
+  searchEnabled={true}
+  searchPlaceholder="Filter navigation..."
+/>
+```
+
+### Custom Title
+
+Set a custom title for the sidebar:
+
+```plaintext
+<SidebarNav
+  title="ObjectUI Dashboard"
+  items={navItems}
+/>
+```
+
+## Complete Example
+
+```tsx
+import { SidebarNav, type NavGroup } from '@object-ui/layout';
+import { 
+  Home,
+  Users,
+  FolderOpen,
+  BarChart,
+  Settings,
+  HelpCircle,
+  Mail
+} from 'lucide-react';
+
+const navigationItems: NavGroup[] = [
+  {
+    label: 'Workspace',
+    items: [
+      { title: 'Dashboard', href: '/', icon: Home },
+      { title: 'Inbox', href: '/inbox', icon: Mail, badge: 8, badgeVariant: 'destructive' },
+      {
+        title: 'Projects',
+        href: '/projects',
+        icon: FolderOpen,
+        badge: 3,
+        children: [
+          { title: 'Design System', href: '/projects/design' },
+          { title: 'API v2', href: '/projects/api', badge: 'WIP', badgeVariant: 'outline' },
+          { title: 'Mobile App', href: '/projects/mobile' },
+        ],
+      },
+    ],
+  },
+  {
+    label: 'System',
+    items: [
+      { title: 'Settings', href: '/settings', icon: Settings },
+      { title: 'Help', href: '/help', icon: HelpCircle },
+    ],
+  },
+];
+
+function App() {
+  return (
+    <SidebarNav
+      title="My CRM"
+      items={navigationItems}
+      searchEnabled={true}
+      searchPlaceholder="Search navigation..."
+    />
+  );
+}
+```
+
+## Usage with AppShell
+
+The SidebarNav is designed to work with AppShell:
+
+```tsx
+import { AppShell, SidebarNav } from '@object-ui/layout';
+import { Home, Info } from 'lucide-react';
+
+<AppShell
+  sidebar={
+    <SidebarNav
+      title="My App"
+      items={[
+        { title: 'Home', href: '/', icon: Home },
+        { title: 'About', href: '/about', icon: Info }
+      ]}
+    />
+  }
+>
+  <div>Your content</div>
+</AppShell>
+```
+
+## Styling
+
+The SidebarNav uses Shadcn UI Sidebar components:
+
+- **SidebarGroupLabel**: Section title
+- **SidebarMenuItem**: Individual menu items
+- **SidebarMenuButton**: Clickable button with active state
+- **SidebarMenuSub**: Nested sub-items container
+- **Badge**: Badge counters with variant styling
+
+### Active Item
+
+Active items receive:
+- Background color highlighting
+- Bold text
+- Visual indicator
+
+### Hover State
+
+Menu items on hover:
+- Subtle background change
+- Smooth transition
+- Cursor pointer
+
+## Responsive Behavior
+
+The SidebarNav works with the AppShell's responsive behavior:
+
+- **Desktop**: Full sidebar visible
+- **Mobile**: Collapsible sidebar with hamburger menu
+- **Tablet**: Medium-width sidebar
+
+## Navigation
+
+The SidebarNav uses React Router's `NavLink` for:
+- Client-side navigation
+- Active state detection
+- Browser history management
+- Back button support
+
+## Accessibility
+
+The SidebarNav includes:
+- Semantic `<nav>` element
+- Proper ARIA labels
+- Keyboard navigation
+- Focus management
+- Screen reader support
+- Collapsible sections with `aria-expanded`
+
+## Icon Guidelines
+
+Use Lucide React icons:
+
+```bash
+npm install lucide-react
+```
+
+Common icons:
+- `Home` - Dashboard/home
+- `Users` - Team/users
+- `Settings` - Settings/config
+- `FolderOpen` - Projects/files
+- `BarChart` - Analytics/reports
+- `Mail` - Messages/email
+- `Calendar` - Events/schedule
+- `FileText` - Documents
+
+## Related
+
+- [AppShell](/docs/frontend/app-shell) - Application shell layout
+- [PageHeader](/docs/ui/pages) - Page header component
+- [Sidebar](/docs/frontend/renderers) - Base sidebar component
