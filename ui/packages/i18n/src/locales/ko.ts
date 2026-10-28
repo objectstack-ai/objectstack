@@ -4426,6 +4426,8 @@ const ko = {
     },
   },
   filterBuilder: {
+    currency: '통화',
+    currencyNeedsAnd: '통화 금액은 모든 조건을 충족해야 할 때(AND)에만 선택한 통화로 비교됩니다.',
     where: "조건",
     and: "그리고",
     or: "또는",

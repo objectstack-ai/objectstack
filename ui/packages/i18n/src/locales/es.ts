@@ -4536,6 +4536,8 @@ const es = {
     },
   },
   filterBuilder: {
+    currency: 'Moneda',
+    currencyNeedsAnd: 'Un importe en moneda solo se compara en la moneda elegida cuando deben cumplirse todas las condiciones (Y).',
     where: "Donde",
     and: "Y",
     or: "O",

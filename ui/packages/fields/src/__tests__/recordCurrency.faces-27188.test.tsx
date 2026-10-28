@@ -14,13 +14,13 @@
 
 import { describe, it, expect, afterEach } from 'vitest';
 import React from 'react';
-import { render, cleanup, screen } from '@testing-library/react';
+import { render, cleanup, screen, fireEvent, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { LocalizationProvider } from '@object-ui/i18n';
 import { CurrencyCellRenderer } from '../index';
 import { CurrencyField } from '../widgets/CurrencyField';
 import { TextField } from '../widgets/TextField';
-import { currencyCodeGroups, isoCurrencyCodes } from '../widgets/CurrencyCodeField';
+import { currencyCodeGroups, isoCurrencyCodes, usedCurrencyCodesOf, CurrencyCodeField } from '../widgets/CurrencyCodeField';
 
 afterEach(cleanup);
 
@@ -93,6 +93,28 @@ describe('the record-currency code select (CurrencyCodeField)', () => {
     expect(groups.available).toEqual([]);
     expect(isoCurrencyCodes()).toContain('USD');
     expect(isoCurrencyCodes()).not.toContain('BTC');
+  });
+
+  it('reads the used codes the form renderer hands down on the field metadata', () => {
+    expect(usedCurrencyCodesOf({ usedCurrencyCodes: ['EUR', 5, 'GBP'] })).toEqual(['EUR', 'GBP']);
+    expect(usedCurrencyCodesOf({})).toEqual([]);
+    expect(usedCurrencyCodesOf(undefined)).toEqual([]);
+  });
+
+  it('offers the used codes in "Available", after the home currency', () => {
+    render(
+      <LocalizationProvider value={TENANT}>
+        <CurrencyCodeField
+          value=""
+          onChange={() => {}}
+          field={{ name: 'currency_code', type: 'text', valueDomain: 'iso_4217_currency', usedCurrencyCodes: ['GBP', 'EUR'] } as any}
+        />
+      </LocalizationProvider>,
+    );
+    fireEvent.click(screen.getByRole('combobox'));
+    const available = screen.getByText('Available').closest('[cmdk-group]') as HTMLElement;
+    const codes = within(available).getAllByRole('option').map((o) => o.textContent?.slice(0, 3));
+    expect(codes).toEqual([TENANT.currency, 'GBP', 'EUR']);
   });
 
   it('a text field declaring the ISO 4217 domain renders the select, not a free-text box', () => {

@@ -4427,6 +4427,8 @@ const de = {
     },
   },
   filterBuilder: {
+    currency: 'Währung',
+    currencyNeedsAnd: 'Ein Währungsbetrag wird nur dann in der gewählten Währung verglichen, wenn alle Bedingungen zutreffen müssen (UND).',
     where: "Wo",
     and: "UND",
     or: "ODER",

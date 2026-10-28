@@ -5074,6 +5074,8 @@ const en = {
     daysAgo_other: '{{count}}d ago',
   },
   filterBuilder: {
+    currency: 'Currency',
+    currencyNeedsAnd: 'A currency amount is compared within the chosen currency only when every condition must match (AND).',
     where: 'Where',
     and: 'AND',
     or: 'OR',

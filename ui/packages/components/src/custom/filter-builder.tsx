@@ -35,9 +35,17 @@ import {
   reportRetiredFieldType,
   toDateTimeInputValue,
 } from "@object-ui/core"
-import { createSafeTranslation } from "@object-ui/i18n"
+import { createSafeTranslation, useDisplayLocale, useLocalization } from "@object-ui/i18n"
 
 import { cn } from "../lib/utils"
+import { CurrencyCodePicker } from "./currency-code-picker"
+import {
+  currencyCompanionId,
+  currencyCompanionOf,
+  isCurrencyCompanion,
+  pairedCurrencyField,
+  syncRecordCurrencyRows,
+} from "./filterRecordCurrency"
 import { Badge } from "../ui/badge"
 import { Button } from "../ui/button"
 import { Checkbox } from "../ui/checkbox"
@@ -135,6 +143,13 @@ export interface FilterBuilderProps {
     displayField?: string
     /** ID field on the referenced object (defaults to "id") */
     idField?: string
+    /**
+     * A `record`-mode amount's sibling code field (its
+     * `currencyConfig.currencyField`, ADR-0144 D2). Set, the row draws a
+     * required currency picker and the builder emits `amount op X AND
+     * code = C` — see `filterRecordCurrency.ts`. Absent for every other field.
+     */
+    currencyField?: string
   }>
   value?: FilterBuilderRowGroup
   onChange?: (value: FilterBuilderRowGroup) => void
@@ -1149,6 +1164,12 @@ const useSafeFilterTranslation = createSafeTranslation(
     'filterBuilder.removeValue': 'Remove {{value}}',
     'filterBuilder.rangeStart': 'From',
     'filterBuilder.rangeEnd': 'To',
+    'filterBuilder.currency': 'Currency',
+    'filterBuilder.currencyNeedsAnd': 'A currency amount is compared within the chosen currency only when every condition must match (AND).',
+    'fields.currencyCode.search': 'Search currency…',
+    'fields.currencyCode.noResults': 'No currency found',
+    'fields.currencyCode.available': 'Available',
+    'fields.currencyCode.all': 'All currencies (ISO 4217)',
     'filterBuilder.operators.equals': 'Equals',
     'filterBuilder.operators.not_equals': 'Does not equal',
     'filterBuilder.operators.contains': 'Contains',
@@ -1455,10 +1476,27 @@ function FilterBuilder({
     }
   }, [value])
 
-  const handleChange = (newGroup: FilterBuilderRowGroup) => {
-    setFilterGroup(newGroup)
-    onChange?.(newGroup)
+  const { currency: homeCurrency } = useLocalization()
+  const needsValueInput = (operator: string) => {
+    return !VALUELESS_FILTER_BUILDER_OPERATORS.has(normalizeFilterBuilderOperator(operator))
   }
+  const locale = useDisplayLocale()
+
+  // Every emit settles the record-currency pairs (ADR-0144 D6): a
+  // value-comparing row on a `record`-mode amount is followed by its code
+  // condition, and a companion whose amount row is gone goes with it. On READ
+  // nothing is settled — opening a stored filter must not dirty its host —
+  // so a stored amount row without a companion shows a blank picker until
+  // the author's next edit.
+  const handleChange = (newGroup: FilterBuilderRowGroup) => {
+    const settled = syncRecordCurrencyRows(newGroup, fields, homeCurrency, needsValueInput)
+    setFilterGroup(settled)
+    onChange?.(settled)
+  }
+
+  // The rows drawn: a companion is drawn as its amount row's picker.
+  const visibleConditions = filterGroup.conditions.filter((c) => !isCurrencyCompanion(c, filterGroup))
+  const pairsCurrency = filterGroup.conditions.some((c) => pairedCurrencyField(c, fields, needsValueInput))
 
   const addCondition = () => {
     const newCondition: FilterBuilderRow = {
@@ -1474,9 +1512,30 @@ function FilterBuilder({
   }
 
   const removeCondition = (conditionId: string) => {
+    const companionId = currencyCompanionId(conditionId)
     handleChange({
       ...filterGroup,
-      conditions: filterGroup.conditions.filter((c) => c.id !== conditionId),
+      conditions: filterGroup.conditions.filter((c) => c.id !== conditionId && c.id !== companionId),
+    })
+  }
+
+  /** Set the code an amount row compares in (its companion's value). */
+  const changeCurrency = (conditionId: string, code: string) => {
+    const companionId = currencyCompanionId(conditionId)
+    const codeField = pairedCurrencyField(
+      filterGroup.conditions.find((c) => c.id === conditionId) ?? { field: "", operator: "equals" },
+      fields,
+      needsValueInput,
+    )
+    if (!codeField) return
+    const companion: FilterBuilderRow = { id: companionId, field: codeField, operator: "equals", value: code }
+    // A stored amount row may carry no companion yet: the pick writes one.
+    const held = filterGroup.conditions.some((c) => c.id === companionId)
+    handleChange({
+      ...filterGroup,
+      conditions: held
+        ? filterGroup.conditions.map((c) => (c.id === companionId ? companion : c))
+        : filterGroup.conditions.flatMap((c) => (c.id === conditionId ? [c, companion] : [c])),
     })
   }
 
@@ -1518,6 +1577,9 @@ function FilterBuilder({
   }
 
   const toggleLogic = () => {
+    // A paired group stays AND: under OR its pairs would split into
+    // `amount op X OR code = C`.
+    if (filterGroup.logic === "and" && pairsCurrency) return
     handleChange({
       ...filterGroup,
       logic: filterGroup.logic === "and" ? "or" : "and",
@@ -1641,9 +1703,8 @@ function FilterBuilder({
   // treated as value-taking, drawing a box to type a value into beside a
   // trigger reading `Is null` (objectui#9302). One operator, two spellings,
   // two different rows — which the fold rules out in either direction.
-  const needsValueInput = (operator: string) => {
-    return !VALUELESS_FILTER_BUILDER_OPERATORS.has(normalizeFilterBuilderOperator(operator))
-  }
+  // `needsValueInput` is declared near the top of the component: the
+  // record-currency pairing reads it during render.
 
   // Derived from the value FAMILY rather than from a second branch ladder over
   // the same type lists: the input a value is edited in and the type a value is
@@ -2066,13 +2127,16 @@ function FilterBuilder({
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium">{t('filterBuilder.where')}</span>
-          {filterGroup.conditions.length > 1 && (
+          {visibleConditions.length > 1 && (
             <Button
               type="button"
               variant="outline"
               size="sm"
               onClick={toggleLogic}
               className="h-7 text-xs"
+              disabled={filterGroup.logic === "and" && pairsCurrency}
+              title={pairsCurrency ? t('filterBuilder.currencyNeedsAnd') : undefined}
+              data-testid="filter-logic-toggle"
             >
               {filterGroup.logic === "or" ? t('filterBuilder.or') : t('filterBuilder.and')}
             </Button>
@@ -2092,11 +2156,22 @@ function FilterBuilder({
         )}
       </div>
 
+      {filterGroup.logic === "or" && pairsCurrency && (
+        <p className="text-xs text-destructive" role="alert" data-testid="filter-currency-needs-and">
+          {t('filterBuilder.currencyNeedsAnd')}
+        </p>
+      )}
+
       <div className="space-y-2">
-        {filterGroup.conditions.map((condition) => (
+        {visibleConditions.map((condition) => {
+          const pairsWith = pairedCurrencyField(condition, fields, needsValueInput)
+          // Four controls on a paired row, three on every other.
+          const span = pairsWith ? "col-span-3" : "col-span-4"
+          const code = pairsWith ? currencyCompanionOf(filterGroup, condition.id)?.value : undefined
+          return (
           <div key={condition.id} className="flex items-start gap-2">
             <div className="flex-1 grid grid-cols-12 gap-2">
-              <div className="col-span-4">
+              <div className={span}>
                 <Select
                   value={condition.field}
                   onValueChange={(value) => changeField(condition.id, value)}
@@ -2114,7 +2189,7 @@ function FilterBuilder({
                 </Select>
               </div>
 
-              <div className="col-span-4">
+              <div className={span}>
                 <Select
                   // The row's operator, resolved to the id actually MOUNTED
                   // below — see {@link mountedOperatorValue}. The row itself
@@ -2145,8 +2220,31 @@ function FilterBuilder({
               </div>
 
               {needsValueInput(condition.operator) && (
-                <div className="col-span-4">
+                <div className={span}>
                   {renderValueInput(condition)}
+                </div>
+              )}
+
+              {pairsWith && (
+                <div className={span}>
+                  <CurrencyCodePicker
+                    className="h-9 text-sm"
+                    value={typeof code === "string" ? code : undefined}
+                    onChange={(next) => changeCurrency(condition.id, next)}
+                    home={homeCurrency}
+                    locale={locale}
+                    labels={{
+                      placeholder: t('filterBuilder.currency'),
+                      search: t('fields.currencyCode.search'),
+                      noResults: t('fields.currencyCode.noResults'),
+                      available: t('fields.currencyCode.available'),
+                      all: t('fields.currencyCode.all'),
+                    }}
+                    invalid={typeof code !== "string" || code === ""}
+                    aria-label={t('filterBuilder.currency')}
+                    aria-required="true"
+                    data-testid="filter-currency-picker"
+                  />
                 </div>
               )}
             </div>
@@ -2162,7 +2260,8 @@ function FilterBuilder({
               <span className="sr-only">{t('filterBuilder.removeCondition')}</span>
             </Button>
           </div>
-        ))}
+          )
+        })}
       </div>
 
       {/* Every control here is `type="button"` on purpose: a bare <button> inside

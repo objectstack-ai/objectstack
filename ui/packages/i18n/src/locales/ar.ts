@@ -4860,6 +4860,8 @@ const ar = {
     },
   },
   filterBuilder: {
+    currency: 'العملة',
+    currencyNeedsAnd: 'لا تُقارن المبالغ بالعملة المختارة إلا عندما يجب تحقق كل الشروط (AND).',
     where: "حيث",
     and: "و",
     or: "أو",

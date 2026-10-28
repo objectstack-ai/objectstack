@@ -11,7 +11,7 @@ import { cn, Button, Input, Popover, PopoverContent, PopoverTrigger, FilterBuild
 import type { SortItem } from '@object-ui/components';
 import { Search, Funnel, ArrowUpDown, X, EyeOff, Pencil, Group, Paintbrush, Download, Rows4, Rows3, Rows2, Share2, Lock, Printer, Plus, Trash2, CheckSquare, AlertTriangle, ShieldAlert, RotateCw, Loader2, Info } from 'lucide-react';
 import type { FilterBuilderRowGroup } from '@object-ui/components';
-import { VALUELESS_FILTER_BUILDER_OPERATORS, isFilterValueComplete } from '@object-ui/components';
+import { VALUELESS_FILTER_BUILDER_OPERATORS, isFilterValueComplete, isCurrencyCompanion } from '@object-ui/components';
 import { ViewSwitcherDropdown } from './ViewSwitcher';
 import { ListEmptyState, hasDeclaredFilter, filterNamesCurrentUser } from './ListEmptyState';
 import { ListViewCompactHeader, ListViewCompactRows, ListViewCappedRows, CAPPED_LIST_DEFAULT_LIMIT } from './ListViewCompact';
@@ -33,7 +33,7 @@ import type { DependsOnInput, ListViewSchema, ObjectMapConfig } from '@object-ui
 import { detectStatusField, isSystemManagedField } from '@object-ui/types';
 import { usePullToRefresh } from '@object-ui/mobile';
 import { type ListViewVisualization, resolveConditionalFormatting, buildExpandFields, buildExportFileName, resolveAffordance, type SchemaLike, partitionRowsByPredicate, normalizeListViewSchema, isListViewVisualization, rowHeightToDensityMode, mergeFilterNodes, FilterOperatorError, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, PLATFORM_RECORD_COLUMNS, EXPANDABLE_FIELD_TYPES, UNMATERIALIZED_FIELD_TYPES, readObjectSortability, isPlatformSortableField, leadWithNameField, filterPlatformSortableSort, applyNonGridRowCeiling, type NonGridCeilingResult, resolveNameField, declaredNameField, resolveDependsOnFields, GANTT_CONFIG_SPELLING } from '@object-ui/core';
-import { useObjectLabel, useSafeFieldLabel, createSafeTranslation, useDisplayLocale, pickLocalized } from '@object-ui/i18n';
+import { useObjectLabel, useSafeFieldLabel, createSafeTranslation, useDisplayLocale, pickLocalized, recordCurrencyField } from '@object-ui/i18n';
 // Two resolvers, two vocabularies — the repo spells the distinction into the
 // NAMES (objectui#4167). `resolveInlineI18nLabel` is the spec's own
 // `resolveI18nLabel`: it resolves the INLINE per-locale map
@@ -4675,6 +4675,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   }, [currentView, schema, authoredFilter, currentSort, effectiveFields, hasAuthoredColumns, groupingConfig, rowColorConfig, navigation.handleClick, density.mode, galleryCardSize, inlineEdit, inlineEditOffered, objectDef, selfQueryFilter, ganttSearchTerm, gridOwnsGroupedFetch, calendarWindowed, handleCalendarVisibleRange, kanbanLanesPaged]);
 
   const hasFilters = currentFilters.conditions && currentFilters.conditions.length > 0;
+  // The count the toolbar shows: a record-mode amount's code condition is
+  // part of its amount row (objectstack#27188), not a filter of its own.
+  const shownFilterCount = (currentFilters.conditions ?? []).filter((c) => !isCurrencyCompanion(c, currentFilters)).length;
 
   /**
    * Every field this view can name, before any per-builder rule narrows it.
@@ -4763,6 +4766,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             // picker keys the lookup by its own `id` default, and `plugin-grid`'s
             // copy set copies no id column either.
             displayField: field.displayField,
+            // ADR-0144 D6: a `record`-mode amount's row pairs with its code
+            // field, so the filter compares within one currency.
+            ...(recordCurrencyField(field) ? { currencyField: recordCurrencyField(field) } : {}),
         }));
     }
 
@@ -5721,14 +5727,14 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 // `title` — with the active-filter count, which the badge
                 // would otherwise be alone in carrying (objectui#12500).
                 aria-label={hasFilters
-                  ? t('list.filterActive', { count: currentFilters.conditions?.length || 0 })
+                  ? t('list.filterActive', { count: shownFilterCount })
                   : t('list.filter')}
                 title={t('list.filter')}
               >
                 <Funnel className="h-3.5 w-3.5" />
                 {hasFilters && (
                   <span className="flex h-4 min-w-[16px] items-center justify-center text-[10px] font-medium text-muted-foreground tabular-nums">
-                    {currentFilters.conditions?.length || 0}
+                    {shownFilterCount}
                   </span>
                 )}
               </Button>

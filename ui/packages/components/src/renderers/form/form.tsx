@@ -45,6 +45,7 @@ import React from 'react';
 import { SchemaRendererContext, usePredicateScope, isPermissionError, extractWriteErrorMessage, extractFieldErrors, declaredUserMessage, delegationScopeMessage } from '@object-ui/react';
 import { createSafeTranslation } from '@object-ui/i18n';
 import type { RendererHostProps } from '../../lib/renderer-host-props';
+import { currencyCodeFieldNames, useUsedCurrencyCodes, withUsedCurrencyCodes } from './usedCurrencyCodes';
 
 /**
  * Whether a `section-divider` row draws anything: a heading, a blurb, or both.
@@ -2275,6 +2276,12 @@ ComponentRegistry.register('form',
     const schemaCtx = React.useContext(SchemaRendererContext);
     const contextDataSource = schemaCtx?.dataSource ?? null;
 
+    // The codes already stored on the object's records, for each
+    // record-currency code field's "available" group (ADR-0144 D8 rule 3).
+    // Read once per object and handed down on the field's own metadata.
+    const codeFieldNames = React.useMemo(() => currencyCodeFieldNames(fields as unknown[]), [fields]);
+    const usedCurrencyCodes = useUsedCurrencyCodes(contextDataSource, schema.objectName, codeFieldNames);
+
     // Field name → label, for the "select the parent first" gate hint (#2284).
     const fieldLabelByName = React.useMemo(() => {
       const m: Record<string, string> = {};
@@ -3753,7 +3760,9 @@ ComponentRegistry.register('form',
                   // is the declared metadata slot (#3090 — never the spec
                   // string); fall back to the field config itself when no
                   // metadata was stashed (standalone forms).
-                  field: field.field || field,
+                  // A record-currency code field also carries the codes its
+                  // object's records already hold (`usedCurrencyCodes`).
+                  field: withUsedCurrencyCodes(field.field || field, usedCurrencyCodes[name]),
                   ...formField,
                   inputType: fieldProps.inputType,
                   // The field's label, forwarded explicitly because the

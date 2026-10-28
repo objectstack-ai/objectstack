@@ -4483,6 +4483,8 @@ const zh = {
     daysAgo_other: '{{count}} 天前',
   },
   filterBuilder: {
+    currency: '币种',
+    currencyNeedsAnd: '只有在「全部条件都满足（AND）」时，币种金额才按所选币种比较。',
     where: '其中',
     and: '且',
     or: '或',
