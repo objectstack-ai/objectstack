@@ -308,8 +308,50 @@ export interface ApprovalRequestRow {
    * The owning flow's approval steps in graph order, for progress display
    * (resolved on single-request reads when the automation engine is
    * attached). `state` is relative to this request's node.
+   *
+   * It is ONE trunk of the graph: the walk from the start node takes the
+   * `approve` edge, else the `true` edge, else the first edge, at every node.
+   * It is not the route this request takes past a decision: a request a
+   * decision sent down another branch is not on it, and every entry then reads
+   * `upcoming`. A step line draws {@link ApprovalRequestRow.flow_route}, never
+   * this.
    */
   flow_steps?: Array<{ id: string; label: string; state: 'done' | 'current' | 'upcoming' }>;
+  /**
+   * This request's own route through its flow, for its step line (resolved on
+   * single-request reads, beside {@link ApprovalRequestRow.flow_steps}, when
+   * the request belongs to a flow run and the automation engine is attached).
+   * No step on it is guessed:
+   *
+   * - `done` steps are the approval steps the request's flow run has already
+   *   passed, read off the run's own request rows: an earlier request of the
+   *   same `flow_run_id`, on another node, `approved`. They come in the order
+   *   the run opened them; a step approved in several rounds is listed once,
+   *   at its latest round.
+   * - Then this request's own node: `done` once approved, else `current`
+   *   (as `flow_steps` marks it).
+   * - `upcoming` steps follow only for a PENDING request, and only as far as
+   *   the flow's graph alone decides them when each step approves: from this
+   *   node's `approve` edge on, through nodes with exactly one out-edge and no
+   *   condition. The walk stops at the first branch it cannot decide without
+   *   the run's data or a later decision: a `decision`, a conditioned edge,
+   *   several out-edges, a loop back, or a node that runs other nodes
+   *   (`subflow`, `map`, `loop`).
+   *
+   * `ahead` says what lies past the last step listed:
+   *
+   * - `end` — the walk reached the flow's end: nothing else is approved on
+   *   this route.
+   * - `undecided` — the walk stopped at a branch this request has not decided
+   *   yet. Steps past it are not listed, and the trunk is never listed in
+   *   their place.
+   * - `decided` — the request is decided, so nothing past it is walked. The
+   *   steps its run reached next are the later requests' own routes.
+   */
+  flow_route?: {
+    steps: Array<{ id: string; label: string; state: 'done' | 'current' | 'upcoming' }>;
+    ahead: 'end' | 'undecided' | 'decided';
+  };
   /**
    * ADR-0044 revision round of this request on its (run, node): 1 (or absent)
    * for the first round, 2 after one send-back-and-resubmit, … Carried in the

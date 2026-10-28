@@ -97,6 +97,7 @@ import {
   type ActingCaller,
 } from './approver-address.js';
 import { labelOrMachineName, requestDisplayLabels, slateLabelOf } from './display-labels.js';
+import { flowRoute, type RouteFlowGraph } from './approval-route.js';
 import {
   ADMIN_RESCUE_NOTE_SNAPSHOT_KEY,
   adminRescueNoteOf,
@@ -9089,6 +9090,10 @@ export class ApprovalService implements IApprovalService {
    * approval trunk; conditional side-steps show as part of the potential
    * path. Display-only and best-effort.
    *
+   * [#26668] The trunk is not this request's route, so a step line never
+   * draws it: the same read attaches the route itself, `flow_route`
+   * ({@link attachFlowRoute}), from the one flow lookup.
+   *
    * [#24863] A step is named the way the request's own step is: in the
    * reader's locale when `labels` picks its `flows.<flow>.approvals.<node_id>.label`,
    * else by the node's authored label. So the progress strip and the request's
@@ -9101,6 +9106,7 @@ export class ApprovalService implements IApprovalService {
       const flow: any = await this.automation.getFlow(flowName);
       if (!flow?.nodes?.length) return;
       const nodesById = new Map<string, any>(flow.nodes.map((n: any) => [n.id, n]));
+      await this.attachFlowRoute(row, flowName, flow, nodesById, labels);
       const steps: Array<{ id: string; label: string }> = [];
       const seen = new Set<string>();
       let cur: any = flow.nodes.find((n: any) => n.type === 'start');
@@ -9126,6 +9132,47 @@ export class ApprovalService implements IApprovalService {
           : i === currentIdx ? (row.status === 'approved' ? 'done' : 'current')
           : 'upcoming',
       }));
+    } catch { /* display-only — never fail the read */ }
+  }
+
+  /**
+   * [#26668] This request's own route (`flow_route`): the steps its run has
+   * passed, read off the run's own request rows, then its node, then — while
+   * it is pending — the steps the graph alone decides ahead. `flowRoute`
+   * (`approval-route.ts`) is the rule; this reads what it needs. The run's
+   * rows are read as the system: the route names steps and their labels,
+   * which `flow_steps` already served to the same reader.
+   *
+   * A step is named as `flow_steps` names it ([#24863]): the reader's label,
+   * else the node's authored label; a node no longer in the graph by the
+   * label its request stored. Display-only and best-effort.
+   */
+  private async attachFlowRoute(
+    row: ApprovalRequestRow,
+    flowName: string,
+    flow: RouteFlowGraph,
+    nodesById: Map<string, any>,
+    labels: ReaderLabels | undefined,
+  ): Promise<void> {
+    try {
+      if (!row.flow_run_id || !row.flow_node_id) return;
+      const runRows = await this.engine.find('sys_approval_request', {
+        where: { flow_run_id: row.flow_run_id },
+        fields: ['id', 'flow_node_id', 'status', 'created_at', 'current_step_label'],
+        limit: 1000,
+        context: SYSTEM_CTX,
+      });
+      const rows = Array.isArray(runRows) ? runRows : [];
+      const stored = new Map<string, string>();
+      for (const r of rows) {
+        if (typeof r?.flow_node_id === 'string' && typeof r?.current_step_label === 'string' && r.current_step_label) {
+          stored.set(r.flow_node_id, r.current_step_label);
+        }
+      }
+      const label = (nodeId: string): string =>
+        labels?.stepLabel(flowName, nodeId) ?? (nodesById.get(nodeId)?.label || stored.get(nodeId) || nodeId);
+      const route = flowRoute(row, flow, rows, label);
+      if (route) (row as any).flow_route = route;
     } catch { /* display-only — never fail the read */ }
   }
 
