@@ -65,6 +65,7 @@ import {
   type LoadedRecordSnapshot,
 } from './sanitize';
 import { closedFormAffordance, fieldWriteGate, gateFormFields } from './fieldWriteGate';
+import { RecordFieldAccessForForm } from './recordFieldAccess';
 import { ClosedAffordanceNotice } from './closedAffordanceNotice';
 import { seedCreateValues, omitServerResolvedDefaults } from './schemaDefaults';
 import { resolveInitialRecord } from './initialRecord';
@@ -310,7 +311,18 @@ const DIALOG_DEFAULT_COLUMNS = UNDECLARED_SECTION_COLUMNS;
 const clampColumns = (n: unknown): number | undefined =>
   typeof n === 'number' && n > 0 ? Math.min(Math.floor(n), 4) : undefined;
 
-export const ModalForm: React.FC<ModalFormProps> = ({
+/**
+ * An `edit` form for a stored record answers its field locks from that record
+ * (objectstack#26594) — see `recordFieldAccess.tsx`.
+ */
+export const ModalForm: React.FC<ModalFormProps> = ({ schema, ...rest }) => (
+  <RecordFieldAccessForForm schema={schema} dataSource={rest.dataSource}>
+    {/* `schema=` by name, so the handler-key census follows the document into the body. */}
+    <ModalFormBody schema={schema} {...rest} />
+  </RecordFieldAccessForForm>
+);
+
+const ModalFormBody: React.FC<ModalFormProps> = ({
   schema,
   dataSource,
   className,

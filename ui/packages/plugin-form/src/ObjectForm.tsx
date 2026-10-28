@@ -58,6 +58,7 @@ import {
 } from './sanitize';
 import { formWritePayload } from './writePayload';
 import { applyFieldPermissions, closedFormAffordance, fieldWriteGate, gateFormFields } from './fieldWriteGate';
+import { RecordFieldAccessForForm } from './recordFieldAccess';
 import { ClosedAffordanceNotice } from './closedAffordanceNotice';
 import { resolveInitialRecord } from './initialRecord';
 import { hasInlineFieldSource, isInlineFieldDef, noSubmitTargetError } from './submitTarget';
@@ -214,7 +215,18 @@ function localizeFormLabels(
  * />
  * ```
  */
-export const ObjectForm: React.FC<ObjectFormComponentProps> = ({
+/**
+ * An `edit` form for a stored record answers its field locks from that record
+ * (objectstack#26594) — see `recordFieldAccess.tsx`.
+ */
+export const ObjectForm: React.FC<ObjectFormComponentProps> = ({ schema, ...rest }) => (
+  <RecordFieldAccessForForm schema={schema} dataSource={rest.dataSource}>
+    {/* `schema=` by name, so the handler-key census follows the document into the body. */}
+    <ObjectFormBody schema={schema} {...rest} />
+  </RecordFieldAccessForForm>
+);
+
+const ObjectFormBody: React.FC<ObjectFormComponentProps> = ({
   schema: rawSchema,
   dataSource,
 }) => {

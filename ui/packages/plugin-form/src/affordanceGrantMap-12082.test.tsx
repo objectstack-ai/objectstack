@@ -806,8 +806,8 @@ const WRITE_SITES: Record<string, WriteSite> = {
     note: "the FALLBACK remove (an `add` config, no host delete) reads the same row the host's delete reads, so it never puts back a delete the host withheld",
   } as WriteSite,
   // ── plugin-form ──
-  'packages/plugin-form/src/DrawerForm.tsx :: DrawerForm > handleSubmit :: create': mapped(['createFormFields'], FIELD_WRITE_GATE),
-  'packages/plugin-form/src/DrawerForm.tsx :: DrawerForm > handleSubmit :: update': mapped(['editFormFields'], FIELD_WRITE_GATE),
+  'packages/plugin-form/src/DrawerForm.tsx :: DrawerFormBody > handleSubmit :: create': mapped(['createFormFields'], FIELD_WRITE_GATE),
+  'packages/plugin-form/src/DrawerForm.tsx :: DrawerFormBody > handleSubmit :: update': mapped(['editFormFields'], FIELD_WRITE_GATE),
   'packages/plugin-form/src/EmbeddableForm.tsx :: EmbeddableForm > handleSubmit :: create':
     outOfFamily('a public embeddable form submits with no signed-in principal, so there is no grant to read; the server\'s public-form policy decides'),
   'packages/plugin-form/src/LineItemsPanel.tsx :: LineItemsPanel > save :: batch':
@@ -816,8 +816,8 @@ const WRITE_SITES: Record<string, WriteSite> = {
     ...mapped(['createFormFields', 'editFormFields', 'relatedNew', 'relatedRowDelete'], MASTER_DETAIL, FIELD_WRITE_GATE),
     note: "the master's fields are its header ObjectForm's; its line grids' add reads relatedNew of the child, and remove relatedRowDelete on an EDIT form only — a create form's batch holds only creates, so a removed line there is never a server delete",
   } as WriteSite,
-  'packages/plugin-form/src/ModalForm.tsx :: ModalForm > handleSubmit :: create': mapped(['createFormFields'], FIELD_WRITE_GATE),
-  'packages/plugin-form/src/ModalForm.tsx :: ModalForm > handleSubmit :: update': mapped(['editFormFields'], FIELD_WRITE_GATE),
+  'packages/plugin-form/src/ModalForm.tsx :: ModalFormBody > handleSubmit :: create': mapped(['createFormFields'], FIELD_WRITE_GATE),
+  'packages/plugin-form/src/ModalForm.tsx :: ModalFormBody > handleSubmit :: update': mapped(['editFormFields'], FIELD_WRITE_GATE),
   'packages/plugin-form/src/ObjectForm.tsx :: SimpleObjectForm > handleSubmit :: create': mapped(['createFormFields'], FIELD_WRITE_GATE),
   'packages/plugin-form/src/ObjectForm.tsx :: SimpleObjectForm > handleSubmit :: update': mapped(['editFormFields'], FIELD_WRITE_GATE),
   'packages/plugin-form/src/SplitForm.tsx :: SplitForm > handleSubmit :: create': mapped(['createFormFields'], FIELD_WRITE_GATE),
