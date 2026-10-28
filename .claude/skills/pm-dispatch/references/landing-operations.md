@@ -4,8 +4,6 @@
 
 ## 入队与落地
 
-- fork PR = 提案,席位永不放行;采纳 diff 内部落地,见 `references/external-contributions.md`。
-- `pm:mailbox` 信箱 PR 不欠 CI、永不入队;落地台账与孤儿 PR 查询一律排除该标签。
 - 条款②入队闸门:翻 ready / 入队前先取 PR 实际 diff;diff 是事实,卡片语义是预测。
 - `--tier` 嫌疑行是提示非裁定;双肢命中任一 ⇒ 无达档条款②复核 PASS 在案 ⛔ 禁止入队。
 - 路径肢 = diff 触及契约面 `packages/spec/src/**` 非测试,含 error-code-ledger、`*.zod.ts` 契约 schema。
@@ -48,7 +46,6 @@
 - 车道 PM 的权责三件:验收(复核清单)、首次入队、确认 MERGED;落地执行在案判决,非自批。
 - 首次入队:ACCEPT 后挂 6–9 分钟 flip 定点,到点核门禁 job 结论。
 - 绿即经中继 op `pr_ready` + `automerge_enable` 落地,拼写见 `rest-channel.md`;未绿按阶梯重挂定点。
-- 直敲 `node scripts/pm/fleet-write/dispatch.mjs --repo OWNER/NAME --actions-file F`,⛔ 套壳:许可逐字匹配。
 - 写节流拒(exit 10) ⇒ 待 `node scripts/pm/write-pace.mjs --status` 现空槽再重试。
 - CI success webhook 不可靠:⛔ 不坐等,也 ⛔ 不忙轮询;定点文本照定时器写法纪律。
 - undraft 撞 429 ⇒ 落地入等 `resets at` 态:该刻记卡,到点一次重试;⛔ 不报阻塞、不自定节奏。
@@ -71,7 +68,6 @@
 - 取 open 卡清单对照预期 diff:预期之外从 open 消失的,就是被闭合关键词静默误关的卡。
 - 落地后再核一次落地判据本身:队列的合并同样走 os-regen,A 的静默吞并一样能发生。
 - MERGED 不是终点:发版后义务见 `release-aftercare.md`。
-- 会话席窗口内 PR 须在挂 `subscribe_pr_activity`,缺即补;⛔ 不早于报告,Routine 座位轮询。
 - PR 开出至 MERGED,每看一眼(唤醒/巡检/报告前)同读检查与 `mergeable_state`;`unknown` 即重读。
 - `dirty` ⇒ 当即合 `origin/main` 推新提交,⛔ 不等冲突通知;未见非 `dirty` ⛔ 不报无需你做。
 - MERGED 或关闭即退订,同刻把 `mode:cloud` 派的会话 `archive_session`。
@@ -81,7 +77,11 @@
 - 认领并派止血,⛔ 不等分诊首触、不等维护者;首触事后补,可改域、⛔ 不改动作。
 - 首道止血 = 回退引入红的提交(主干末绿与首红之间找),根因另立卡。
 - p0 fix-forward 止血跳队,限机械、根因已核实;维护者可按 governed 例外人工直合一行修复。
+- 止血非机械 ⇒ 锚卡点名归属车道、敲其信箱 `Request: main-red`;根因卡恒归该车道。
 - main-red 约定②:一个失败 check 只锚一张卡,先立者赢,后见者评论到锚卡,⛔ 不另立。
+- 约定③:锚卡一轮分诊(~60 分钟)无人认领 ⇒ 分诊与总监当轮轮报点名卡与归属车道。
+- 再一轮无人认领 ⇒ 分诊贴标准认领行、派一个 os-dev 只做止血;每轮一张,分诊不成车道。
+- 止血 PR 复核归车道席或总监,⛔ 非分诊;Tier H 仍等审批人;车道席到场经认领行交回。
 
 ## C. 依赖前棒才能转绿的 PR:draft 停放 + 签名级预期红清单
 

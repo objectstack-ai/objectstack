@@ -363,7 +363,7 @@ export function cardIdentity(workflowName) {
     legacy: (CADENCE_PREDECESSORS[cadence] ?? []).map((old) =>
       Object.freeze({ title: `${titlePrefix(old)} (${name})`, marker: `${markerPrefix(old)}-${slug}` })
     ),
-    labels: ['bug', 'domain:devx', 'priority:p1'],
+    labels: ['bug', 'domain:devx', 'priority:p0'],
   };
 }
 
@@ -1696,7 +1696,7 @@ async function selfTest() {
   // ── A STALE `pm:blocked` on the card a refresh rewrites ─────────────────
   battery('card refresh: a stale pm:blocked (the measured #23885 sequence)');
   const OWNER_REPO = 'objectstack-ai/objectstack';
-  const CARD_LABELS = ['bug', 'priority:p1', 'domain:devx'];
+  const CARD_LABELS = ['bug', 'priority:p0', 'domain:devx'];
   // The triage seat's parking comment on #23885 (6215815177), VERBATIM: the
   // line is DECORATED (a bullet and bold), and the comment also names #23908,
   // #23784, #6015 and objectstack-ai/objectui#12666 mid-sentence -- prose,
