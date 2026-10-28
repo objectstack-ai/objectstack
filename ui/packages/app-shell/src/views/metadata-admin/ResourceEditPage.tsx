@@ -126,7 +126,6 @@ import {
 import { readDraftForSave, useDraftSaveGuard } from './DraftConflictDialog.js';
 import {
   BUNDLE_MEMBER_PARAM,
-  bundleMemberOf,
   getMetadataResource,
   resolveResourceConfig,
   listAnchorsFor,
@@ -1175,7 +1174,10 @@ function MetadataResourceEditPageImpl({
     setLoadFailed(false);
     (async () => {
       try {
-        const scope = { ...(ownerPackageId ? { packageId: ownerPackageId } : {}), ...memberScope };
+        const scope = {
+          ...(ownerPackageId ? { packageId: ownerPackageId } : {}),
+          ...(bundleMember ? { member: bundleMember } : {}),
+        };
         // objectui#11773 — the draft is read at the address `doSave` writes
         // (`readActivePackageBinding`, the folded `?package=`), so the version
         // it serves is the one that save compares against.
@@ -1795,22 +1797,13 @@ function MetadataResourceEditPageImpl({
       // Refresh layered + draft state after save — scope to the same package
       // as the initial load (ADR-0048) so a same-name collision re-reads this
       // package's own row, not another's.
-      // objectstack#26649 — the save is addressed by its body's own member, so
-      // the re-read follows the member it wrote, which is the URL's unless the
-      // author changed the body's member field.
-      const savedMember = config.bundleMemberField
-        ? bundleMemberOf(itemToSave as Record<string, unknown>, config.bundleMemberField)
-        : bundleMember;
-      const refreshScope = {
-        ...(ownerPackageId ? { packageId: ownerPackageId } : {}),
-        ...(savedMember ? { member: savedMember } : {}),
-      };
+      const refreshScope = { ...(ownerPackageId ? { packageId: ownerPackageId } : {}), ...memberScope };
       // objectui#11799 — this save went into a draft, which makes no layer. An
       // item this page loaded with no layer still has none, and an item it
       // just created has never been published (the page then navigates to the
       // item, whose load reads it afresh). `/layers` answers 404 for both, so
       // it is not asked: the answer already held stands.
-      const layerless = createMode || (savedName === name && savedMember === bundleMember && holdsNoLayer(layered));
+      const layerless = createMode || (savedName === name && holdsNoLayer(layered));
       const [lay, draftResp] = await Promise.all([
         layerless ? layered : client.layered<any>(type, savedName, refreshScope),
         client.getDraft<any>(type, savedName, refreshScope).catch(() => null),
@@ -1853,23 +1846,10 @@ function MetadataResourceEditPageImpl({
         // author was working in. Without this the param is dropped and the
         // editor falls back to the user's default package, where the freshly
         // saved draft doesn't exist — so it reloads a blank form.
-        // objectstack#26649 — and the member it created, so the page that
-        // opens next reads that member and not the canonical one.
-        const next = new URLSearchParams(searchParams);
-        if (savedMember) next.set(BUNDLE_MEMBER_PARAM, savedMember);
-        else next.delete(BUNDLE_MEMBER_PARAM);
-        const qs = next.toString();
+        const qs = searchParams.toString();
         navigate(`../${encodeURIComponent(savedName)}${qs ? `?${qs}` : ''}`, {
           relative: 'path',
         });
-      } else if (savedMember !== bundleMember) {
-        // objectstack#26649 — the author moved the body's member field: the
-        // save wrote ANOTHER member, so the page now addresses that one, and
-        // its next publish, reset or discard cannot reach the member it left.
-        const next = new URLSearchParams(searchParams);
-        if (savedMember) next.set(BUNDLE_MEMBER_PARAM, savedMember);
-        else next.delete(BUNDLE_MEMBER_PARAM);
-        setSearchParams(next, { replace: true });
       }
     } catch (err: any) {
       // `err` is the client's parsed `MetadataError`: `MetadataClient`'s
