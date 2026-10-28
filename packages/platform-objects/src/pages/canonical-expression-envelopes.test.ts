@@ -243,7 +243,7 @@ describe('downgrade control — a shipped page, predicate downgraded to bare', (
     // half only this package can run, and the one that reds if the lint
     // detector is ablated or its import breaks.)
     const source = JSON.parse(JSON.stringify(pageExports.SysUserDetailPage)) as AnyRec;
-    const components = source.regions[0].components as AnyRec[];
+    const components = (source.regions as AnyRec[])[0]!.components as AnyRec[];
     const alertAt = components.findIndex(c => c.type === 'record:alert');
     const alert = components[alertAt]!;
     const authored = (alert.visibleWhen as AnyRec).source as string;
