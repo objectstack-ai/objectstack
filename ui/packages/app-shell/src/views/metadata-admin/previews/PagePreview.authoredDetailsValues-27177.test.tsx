@@ -19,7 +19,7 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, waitFor, cleanup } from '@testing-library/react';
+import { render, waitFor, within, cleanup } from '@testing-library/react';
 // Registers `record:details`, which the canvas resolves through the registry.
 import { buildDefaultPageSchema } from '@object-ui/plugin-detail';
 
@@ -57,8 +57,12 @@ const OBJECT = 'showcase_account';
 const OBJECT_DEF = {
   name: OBJECT,
   label: 'Account',
+  // The highlights strip takes this field, so the three below stay in the
+  // details body: the strip reads the same record context and draws its own.
+  highlightFields: ['website'],
   fields: {
     name: { type: 'text', label: 'Account Name' },
+    website: { type: 'text', label: 'Website' },
     account_code: { type: 'text', label: 'Account Code' },
     sales_region: {
       type: 'select',
@@ -74,6 +78,7 @@ const OBJECT_DEF = {
 const RECORD = {
   id: 'acc_1',
   name: 'Northwind',
+  website: 'northwind.example',
   account_code: 'NW-001',
   sales_region: 'amer',
   headquarters: { latitude: 37.7749, longitude: -122.4194 },
@@ -136,11 +141,19 @@ describe('PagePreview Design canvas: an authored record:details draws typed valu
       />,
     );
 
-    // Control: a plain text field reads as stored, before and after the fix.
-    await waitFor(() => expect(screen.getByText('NW-001')).toBeTruthy());
-    await waitFor(() => expect(screen.getByText('Americas')).toBeTruthy());
-    expect(screen.getByText(/37\.7749, -122\.4194/)).toBeTruthy();
-    expect(screen.queryByText('amer')).toBeNull();
-    expect(document.body.textContent).not.toContain('[Object]');
+    // The block draws its "bind a record" placeholder until the sample record
+    // is bound, so wait for the bound body.
+    const details = await waitFor(() => {
+      const el = document.querySelector('[data-obj-type="record:details"]:not([data-record-details-placeholder])');
+      expect(el).not.toBeNull();
+      // Control: a plain text field reads as stored, before and after the fix.
+      within(el as HTMLElement).getByText('NW-001');
+      return el as HTMLElement;
+    });
+    const body = within(details);
+    expect(body.getByText('Americas')).toBeTruthy();
+    expect(body.getByText(/37\.7749, -122\.4194/)).toBeTruthy();
+    expect(body.queryByText('amer')).toBeNull();
+    expect(details.textContent).not.toContain('[Object]');
   });
 });
