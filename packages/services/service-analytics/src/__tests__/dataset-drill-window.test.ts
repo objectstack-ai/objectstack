@@ -195,7 +195,7 @@ describe('#27074 — a windowed dataset answer reports the window in drillRanges
     for (const dateRange of [
       ['2026-07-01T00:00:00Z', '2026-09-30T12:00:00Z'],
       ['2026-07-01', '9999-12-31'],
-    ]) {
+    ] as Array<[string, string]>) {
       const result = await service([{ stage: 'won', cnt: 1 }], 'datetime').queryDataset(
         pipeline,
         { dimensions: ['stage'], measures: ['cnt'], timeDimensions: [{ dimension: 'close_date', dateRange }] },
