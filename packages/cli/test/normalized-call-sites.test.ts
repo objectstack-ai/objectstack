@@ -487,7 +487,11 @@ const READS: Readonly<Record<string, ReadRow>> = {
   },
   'utils/collect-docs.ts :: stack.books': {
     reads: 'top-level',
-    why: '`lintDocNavTargets` resolves a nav item\'s `book` against the artifact\'s own top-level `books` AND each package body\'s (`addBooks(body.books)` over `artifactPackages(stack)`), so the top-level read is one half of the union on purpose (#27090 measured it: the read was there before, hidden from this census by `codeOnly` losing its place in a nested template literal).',
+    why: '`lintDocNavTargets` resolves a nav item\'s `book` against the artifact\'s own top-level `books` AND each package body\'s (`addBooks(body.books)` over `artifactPackages(stack)`), so the top-level read is one half of the union on purpose (#27090 measured it: the read was there before, hidden from this census by `codeOnly` losing its place; #27210 measured the cause there as a regex literal holding a quote).',
+  },
+  'utils/collect-docs.ts :: stack.apps': {
+    reads: 'top-level',
+    why: '`lintDocNavTargets` walks the top level\'s apps when it carries the key, otherwise each package body\'s (`artifactPackages(stack)`): `resolveStackCollection`\'s rule, over a walk that refuses no entry shape. Measured on a two-package `preserve` app in `collect-docs.nav-target.test.ts` (#27210: before, a body\'s app was never judged, and a nested template literal hid this read from the census).',
   },
   'utils/format.ts :: stack': {
     reads: 'resolved',
