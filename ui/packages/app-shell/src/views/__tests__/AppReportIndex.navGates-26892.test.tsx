@@ -207,7 +207,14 @@ function paletteReports(): string[] {
     .sort();
 }
 
-/** The index has listed Delta, the report no gate can hide: its lists have answered. */
+/**
+ * The index has listed Delta, the report no gate can hide: its lists have
+ * answered. A settle for the NEGATIVE cases only: a case that expects a list
+ * waits on that whole list (objectstack#27116). The palette's two doors answer
+ * at different times (a nav-named report through its entry at once, Delta
+ * once the report list answers), so a wait on one entry says nothing about
+ * another.
+ */
 async function indexSettled() {
   await screen.findByRole('link', { name: 'Delta' });
 }
@@ -237,8 +244,7 @@ describe('the report index applies the navigation\'s member gates (objectstack#2
 
   it('(b) CONTROL: lists it for a member granted that permission', async () => {
     renderIndex(appWith(gammaEntry({ requiredPermissions: ['crm_forecast:read'] })), { forecastRead: true });
-    await screen.findByRole('link', { name: 'Gamma' });
-    expect(indexed()).toEqual(ALL);
+    await waitFor(() => expect(indexed()).toEqual(ALL));
   });
 
   it('(c) leaves out a report whose entry sits in a `visible: false` group', async () => {
@@ -263,21 +269,18 @@ describe('the report index applies the navigation\'s member gates (objectstack#2
 
   it('(e) CONTROL: an entry `visible: true` lists the report', async () => {
     renderIndex(appWith(gammaEntry({ visible: true })));
-    await screen.findByRole('link', { name: 'Gamma' });
-    expect(indexed()).toEqual(ALL);
+    await waitFor(() => expect(indexed()).toEqual(ALL));
   });
 
   it('(e) CONTROL: one entry the member is shown is enough, beside a hidden one', async () => {
     renderIndex(appWith(gammaEntry({ visible: false }), gammaEntry({ id: 'nav_gamma_2' })));
-    await screen.findByRole('link', { name: 'Gamma' });
-    expect(indexed()).toEqual(ALL);
+    await waitFor(() => expect(indexed()).toEqual(ALL));
   });
 
   it('(e) CONTROL: an app whose navigation names no report lists every report it owns', async () => {
     const app = { ...appWith(), navigation: [{ id: 'nav_accounts', type: 'object', objectName: 'crm_account', label: 'Accounts' }] };
     renderIndex(app);
-    await screen.findByRole('link', { name: 'Gamma' });
-    expect(indexed()).toEqual(ALL);
+    await waitFor(() => expect(indexed()).toEqual(ALL));
   });
 });
 
@@ -299,8 +302,7 @@ describe('⌘K applies the same gates to the app\'s reports (objectstack#26892)'
 
   it('(e) CONTROL: offers the report, once, when its entry is shown', async () => {
     renderPalette(appWith(gammaEntry({ visible: true })));
-    await paletteSettled();
-    expect(paletteReports()).toEqual(ALL);
+    await waitFor(() => expect(paletteReports()).toEqual(ALL));
   });
 });
 
@@ -355,8 +357,7 @@ describe('⌘K offers its navigation entries as the sidebar shows them (objectst
 
   it('(f) CONTROL: offers it, once, to a member granted that permission', async () => {
     renderPalette(appWith(gammaEntry({ requiredPermissions: ['crm_forecast:read'] })), { forecastRead: true });
-    await waitFor(() => expect(paletteReports()).toContain('Gamma'));
-    expect(paletteReports()).toEqual(ALL);
+    await waitFor(() => expect(paletteReports()).toEqual(ALL));
   });
 
   it('(f) offers neither door to a report whose entry sits in a `visible: false` group', async () => {

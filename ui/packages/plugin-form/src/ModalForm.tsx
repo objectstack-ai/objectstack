@@ -65,6 +65,7 @@ import {
   type LoadedRecordSnapshot,
 } from './sanitize';
 import { closedFormAffordance, fieldWriteGate, gateFormFields } from './fieldWriteGate';
+import { RecordFieldAccessForForm } from './recordFieldAccess';
 import { ClosedAffordanceNotice } from './closedAffordanceNotice';
 import { seedCreateValues, omitServerResolvedDefaults } from './schemaDefaults';
 import { resolveInitialRecord } from './initialRecord';
@@ -167,6 +168,14 @@ export interface ModalFormSchema {
   /** Internal content layout (ADR-0050, objectstack-ai/objectstack#1890): 'tabbed' renders sections as
    *  tabs inside the modal, so "modal + tabbed" composes. Default stacks them. */
   contentLayout?: 'simple' | 'tabbed';
+  /**
+   * The `tabbed` content layout's initially active tab (a section name) and
+   * tab strip position, as the spec's `FormView.defaultTab` / `tabPosition`
+   * declare them (objectstack-ai/objectstack#26843). Read by the tabbed arm
+   * only, the subforms arm included.
+   */
+  defaultTab?: string;
+  tabPosition?: 'top' | 'bottom' | 'left' | 'right';
   fields?: string[];
   customFields?: FormField[];
 
@@ -310,7 +319,18 @@ const DIALOG_DEFAULT_COLUMNS = UNDECLARED_SECTION_COLUMNS;
 const clampColumns = (n: unknown): number | undefined =>
   typeof n === 'number' && n > 0 ? Math.min(Math.floor(n), 4) : undefined;
 
-export const ModalForm: React.FC<ModalFormProps> = ({
+/**
+ * An `edit` form for a stored record answers its field locks from that record
+ * (objectstack#26594) — see `recordFieldAccess.tsx`.
+ */
+export const ModalForm: React.FC<ModalFormProps> = ({ schema, ...rest }) => (
+  <RecordFieldAccessForForm schema={schema} dataSource={rest.dataSource}>
+    {/* `schema=` by name, so the handler-key census follows the document into the body. */}
+    <ModalFormBody schema={schema} {...rest} />
+  </RecordFieldAccessForForm>
+);
+
+const ModalFormBody: React.FC<ModalFormProps> = ({
   schema,
   dataSource,
   className,
@@ -968,6 +988,11 @@ export const ModalForm: React.FC<ModalFormProps> = ({
             visibleWhen: g.visibleWhen,
             visibleWhenFault: g.visibleWhenFault,
           })),
+          // objectstack-ai/objectstack#26843 — the authored opening tab and
+          // strip position, which this arm dropped. The renderer opens on
+          // `defaultFieldTab` only when it names a tab it drew.
+          defaultFieldTab: schema.defaultTab,
+          fieldTabsPosition: schema.tabPosition,
         };
         return <SchemaRenderer schema={tabbedFormSchema} />;
       }
@@ -1150,12 +1175,25 @@ export const ModalForm: React.FC<ModalFormProps> = ({
                 // way the flat form path does.
                 initialValues: schema.initialValues,
                 initialData: schema.initialData,
+                // objectstack-ai/objectstack#26843 — the content layout, its
+                // tab keys and the field layout reach the parent header form,
+                // as the flat arm draws them; this call used to pass none, so
+                // a tabbed form with subforms opened stacked.
+                formType: schema.contentLayout === 'tabbed' ? 'tabbed' : 'simple',
+                defaultTab: schema.defaultTab,
+                tabPosition: schema.tabPosition,
+                layout: formLayout,
                 submitText: submitLabel,
                 cancelText: cancelLabel,
+                // The action bar answers the same two flags the flat arm's
+                // footer does: no Save bar when submit is hidden, and the
+                // Cancel button is drawn only when this host hands an
+                // `onCancel` (the dialog still closes on Escape and its X).
+                showSubmit,
                 details: subforms as any,
                 onSuccess: async (rec: any) => { await schema.onSuccess?.(rec); schema.onOpenChange?.(false); },
                 onError: schema.onError,
-                onCancel: () => schema.onOpenChange?.(false),
+                onCancel: showCancel ? () => schema.onOpenChange?.(false) : undefined,
               }}
               dataSource={dataSource}
             />

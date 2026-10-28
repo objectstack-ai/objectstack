@@ -105,6 +105,32 @@ describe('the host threads an email_template publish to the runtime gate (#25189
     expect(publishTemplate(cleanTemplate({ bodyHtml: '<p>{{ actual_amount | number:2 }}</p>' })).error).toBeNull();
   });
 
+  it('⭐ LIT — currency:@path publishes when the declared variables cover its path, and an undeclared one is refused in the same envelope', () => {
+    // `cleanTemplate` declares `user.name` and `link`: `user.currency_code` lies under no declared name.
+    const verdict = publishTemplate(cleanTemplate({ subject: 'Due {{ amount | currency:@user.currency_code }}' }));
+
+    expect(verdict.error, 'the caller throws this; null here means the door judged nothing').not.toBeNull();
+    expect((verdict.error as { code?: string }).code).toBe('INVALID_METADATA');
+    expect((verdict.error as { status?: number }).status).toBe(422);
+    const issues = (verdict.error as { issues?: Array<Record<string, unknown>> }).issues!;
+    expect(issues.map((i) => [i.rule, i.path])).toEqual([['email-template-hole-grammar', 'emailTemplates[0].subject']]);
+    expect(JSON.stringify(issues)).toContain('{{ amount | currency:@user.currency_code }}');
+
+    // Non-vacuous: the path the variables declare publishes, and so does any path when none is declared.
+    const declared = cleanTemplate({
+      subject: 'Due {{ amount | currency:@currency_code }}',
+      variables: [{ name: 'user.name', type: 'string' }, { name: 'link', type: 'url' }, { name: 'currency_code', type: 'string' }],
+    });
+    expect(publishTemplate(declared).error).toBeNull();
+    // (The `{{{link}}}` href needs its `url` declaration, so the no-variables body drops it.)
+    const undeclared = cleanTemplate({
+      subject: 'Due {{ amount | currency:@user.currency_code }}',
+      bodyHtml: '<p>Hi <b>{{user.name}}</b></p>',
+      variables: [],
+    });
+    expect(publishTemplate(undeclared).error).toBeNull();
+  });
+
   it('the same template publishes once the hole is moved to a supported placement', () => {
     const verdict = publishTemplate(cleanTemplate());
     expect(verdict.error, 'the refusal is about the placement, not about the type').toBeNull();

@@ -192,6 +192,12 @@ import { aggregateBackendFault, backendStatementFault, distinctBackendFault, unr
 // methods of the same names below hand each body what it reads (`PredicateEmitterHost`). The declarations
 // imported as types are named by docblocks here.
 import { applyEmptyOperator, applyJsonMembership, applyLike, applyLikePattern, applyNormalizedComparison, applyNullSafeNegative, type emptyJsonListPredicate, type emptyListUnsupportedDialectError, type likePatternPredicate, type textMatchPredicate, type undeclaredEmptyOperatorFieldError } from './sql-driver-predicate-emitters.js';
+// [#25521 cut 20] Date bucketing (`buildDateBucketExpr`); the method of the same name below hands the body what
+// it reads (`DateBucketHost`).
+import { buildDateBucketExpr } from './sql-driver-date-bucket.js';
+// [#25521 cut 21] The presumed-timestamp update; the two methods of the same names below hand the bodies what
+// they read (`PresumedTimestampHost`).
+import { resolveUpdatedAtColumnPresence, updateWithPresumedTimestamp } from './sql-driver-presumed-timestamp.js';
 import { makeDatabaseDirectory, probeAbsentSqliteDatabaseFile, SqliteDatabaseFileError } from './sqlite-database-file.js';
 import { jsonMembershipPredicate } from '@objectstack/core';
 import knex, { Knex } from 'knex';
@@ -5075,62 +5081,20 @@ export class SqlDriver implements IDataDriver {
     granularity: 'day' | 'week' | 'month' | 'quarter' | 'year',
     table?: string | null,
   ): { sql: string; bindings: any[] } | null {
-    if (!this.dateGranularityCapabilities[granularity]) return null;
-
-    const calendarDay = this.temporalFieldKind(table, field) === 'date';
-
-    if (this.isPostgres) {
-      const arg = calendarDay ? `(??)::date::timestamp` : `(??)::timestamptz AT TIME ZONE 'UTC'`;
-      switch (granularity) {
-        case 'year':    return { sql: `to_char(${arg}, 'YYYY')`, bindings: [field] };
-        case 'month':   return { sql: `to_char(${arg}, 'YYYY-MM')`, bindings: [field] };
-        case 'day':     return { sql: `to_char(${arg}, 'YYYY-MM-DD')`, bindings: [field] };
-        case 'quarter': return { sql: `to_char(${arg}, 'YYYY"-Q"Q')`, bindings: [field] };
-        case 'week':    return { sql: `to_char(${arg}, 'IYYY"-W"IW')`, bindings: [field] };
-      }
-    }
-
-    if (this.isMysql) {
-      const arg = calendarDay ? `??` : `convert_tz(??, @@session.time_zone, '+00:00')`;
-      switch (granularity) {
-        case 'year':    return { sql: `date_format(${arg}, '%Y')`, bindings: [field] };
-        case 'month':   return { sql: `date_format(${arg}, '%Y-%m')`, bindings: [field] };
-        case 'day':     return { sql: `date_format(${arg}, '%Y-%m-%d')`, bindings: [field] };
-        case 'quarter': return { sql: `concat(date_format(${arg}, '%Y'), '-Q', quarter(${arg}))`, bindings: [field, field] };
-        case 'week':    return { sql: `date_format(${arg}, '%x-W%v')`, bindings: [field] };
-      }
-    }
-
-    if (this.isSqlite) {
-      // `arg` is a bare `??` for a TEXT-stored column and an epoch→julian-day
-      // normalization for a `Field.datetime` one (#3773).
-      const { sql: arg, bindings: argBindings } = this.sqliteTemporalArg(field, table);
-      const fmt = (f: string) => ({ sql: `strftime('${f}', ${arg})`, bindings: [...argBindings] });
-      switch (granularity) {
-        case 'year':    return fmt('%Y');
-        case 'month':   return fmt('%Y-%m');
-        case 'day':     return fmt('%Y-%m-%d');
-        case 'quarter': return { sql: `(strftime('%Y', ${arg}) || '-Q' || ((cast(strftime('%m', ${arg}) as integer) - 1) / 3 + 1))`, bindings: [...argBindings, ...argBindings] };
-        case 'week': {
-          // [#21595] The ISO 8601 week, `YYYY-Www`: the label the PostgreSQL
-          // arm's `IYYY"-W"IW` and the MySQL arm's `%x-W%v` answer. A week
-          // belongs to the year of its Thursday. `'-3 days', 'weekday 4'` moves
-          // any day to the Thursday of its Monday-start week (a Monday moves
-          // +3, a Sunday -3), so that Thursday's `%Y` is the week-numbering
-          // year and `(%j - 1) / 7 + 1` of it is the week number. Both
-          // modifiers predate every SQLite this platform ships, unlike `%V`
-          // (see `dateGranularityCapabilities`). No zone is read, so a
-          // `Field.date` stays its calendar day.
-          const thursday = (f: string) => `strftime('${f}', ${arg}, '-3 days', 'weekday 4')`;
-          return {
-            sql: `(${thursday('%Y')} || '-W' || printf('%02d', (cast(${thursday('%j')} as integer) - 1) / 7 + 1))`,
-            bindings: [...argBindings, ...argBindings],
-          };
-        }
-      }
-    }
-
-    return null;
+    // [#25521 cut 20] The body moved to `sql-driver-date-bucket.ts` (see `DateBucketHost`).
+    const readDateGranularityCapabilities = () => this.dateGranularityCapabilities;
+    const readIsMysql = () => this.isMysql;
+    const readIsPostgres = () => this.isPostgres;
+    const readIsSqlite = () => this.isSqlite;
+    const host: ThisParameterType<typeof buildDateBucketExpr> = {
+      get dateGranularityCapabilities() { return readDateGranularityCapabilities(); },
+      get isMysql() { return readIsMysql(); },
+      get isPostgres() { return readIsPostgres(); },
+      get isSqlite() { return readIsSqlite(); },
+      sqliteTemporalArg: (...a) => this.sqliteTemporalArg(...a),
+      temporalFieldKind: (...a) => this.temporalFieldKind(...a),
+    };
+    return buildDateBucketExpr.call(host, field, granularity, table);
   }
 
   /**
@@ -7549,26 +7513,20 @@ export class SqlDriver implements IDataDriver {
    * snapshot — and, on Postgres, so it runs on a transaction that is still
    * usable (see {@link updateWithPresumedTimestamp}).
    */
-  protected async resolveUpdatedAtColumnPresence(
+  protected resolveUpdatedAtColumnPresence(
     object: string,
     trx?: Knex.Transaction,
   ): Promise<boolean | null> {
-    const physical = this.physicalTableByObject[object] ?? object;
-    const runner = trx ?? this.knex;
-    let builder = runner(physical);
-    const remoteSchema = this.physicalSchemaByObject[object];
-    if (remoteSchema) builder = builder.withSchema(remoteSchema);
-    let info: Record<string, unknown>;
-    try {
-      info = (await builder.columnInfo()) as Record<string, unknown>;
-    } catch {
-      // The probe itself failed — we learned nothing, so we may not claim the
-      // column is absent. The caller rethrows the write's own error.
-      return null;
-    }
-    const columns = Object.keys(info ?? {});
-    if (columns.length === 0) return null;
-    return columns.includes('updated_at');
+    // [#25521 cut 21] The body moved to `sql-driver-presumed-timestamp.ts` (see `PresumedTimestampHost`).
+    const readKnex = () => this.knex;
+    const readPhysicalSchemaByObject = () => this.physicalSchemaByObject;
+    const readPhysicalTableByObject = () => this.physicalTableByObject;
+    const host: ThisParameterType<typeof resolveUpdatedAtColumnPresence> = {
+      get knex() { return readKnex(); },
+      get physicalSchemaByObject() { return readPhysicalSchemaByObject(); },
+      get physicalTableByObject() { return readPhysicalTableByObject(); },
+    };
+    return resolveUpdatedAtColumnPresence.call(host, object, trx);
   }
 
   /**
@@ -7623,53 +7581,22 @@ export class SqlDriver implements IDataDriver {
    *   caller owns the WHERE and the tenant scope, so this method never rebuilds
    *   them and cannot get them wrong.
    */
-  protected async updateWithPresumedTimestamp(
+  protected updateWithPresumedTimestamp(
     object: string,
     formatted: Record<string, any>,
     options: DriverOptions | undefined,
     issue: (payload: Record<string, any>, options?: DriverOptions) => Promise<number>,
   ): Promise<number> {
-    const unstamped = (): Record<string, any> => {
-      const { updated_at: _dropped, ...rest } = formatted;
-      return rest;
+    // [#25521 cut 21] The body moved to `sql-driver-presumed-timestamp.ts` (see `PresumedTimestampHost`).
+    const readLogger = () => this.logger;
+    const readUpdatedAtColumnState = () => this.updatedAtColumnState;
+    const host: ThisParameterType<typeof updateWithPresumedTimestamp> = {
+      attemptWithoutPoisoning: (...a) => this.attemptWithoutPoisoning(...a),
+      get logger() { return readLogger(); },
+      resolveUpdatedAtColumnPresence: (...a) => this.resolveUpdatedAtColumnPresence(...a),
+      get updatedAtColumnState() { return readUpdatedAtColumnState(); },
     };
-    const settleAbsent = (): void => {
-      this.updatedAtColumnState.set(object, 'absent');
-      this.logger.warn(
-        `[sql-driver] '${object}' has no physical 'updated_at' column, so this driver will not ` +
-          'stamp one on update. The object is registered as managed, whose schema this ' +
-          "driver's own DDL would give `created_at`/`updated_at` — a table migrated out-of-band " +
-          'without them will keep a stale "last modified" for every consumer that reads it ' +
-          '(list-view sorts, delta sync, cache invalidation, audit). Add the column, or accept ' +
-          'that it is not tracked here.',
-      );
-    };
-
-    const parentTrx = options?.transaction as Knex.Transaction | undefined;
-    if (parentTrx) {
-      const attempt = await this.attemptWithoutPoisoning(parentTrx, (scoped) =>
-        issue(formatted, { ...options, transaction: scoped }),
-      );
-      if (attempt.ok) {
-        this.updatedAtColumnState.set(object, 'present');
-        return attempt.value;
-      }
-      const present = await this.resolveUpdatedAtColumnPresence(object, parentTrx);
-      if (present !== false) throw attempt.error;
-      settleAbsent();
-      return issue(unstamped(), options);
-    }
-
-    try {
-      const affected = await issue(formatted, options);
-      this.updatedAtColumnState.set(object, 'present');
-      return affected;
-    } catch (error) {
-      const present = await this.resolveUpdatedAtColumnPresence(object);
-      if (present !== false) throw error;
-      settleAbsent();
-      return issue(unstamped(), options);
-    }
+    return updateWithPresumedTimestamp.call(host, object, formatted, options, issue);
   }
 
   /**

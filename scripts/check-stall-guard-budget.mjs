@@ -456,9 +456,9 @@ export function scan(root, defaults, parseYaml) {
  *
  * NOT the job id alone. A job id is unique only within its own workflow file,
  * and this tree really does reuse three of them across files (`publish` in
- * docker-publish.yml and release.yml, `patrol` in half-state-patrol.yml and
- * release-coverage-patrol.yml, `registry-canary` in publish-smoke.yml and
- * scaffold-e2e.yml). Keyed on the id alone, two single-guard jobs in different
+ * checklist-status.yml, docker-publish.yml and release.yml, `pack-smoke` in
+ * pack-smoke-optin.yml and publish-smoke.yml, `registry-canary` in
+ * publish-smoke.yml and scaffold-e2e.yml). Keyed on the id alone, two single-guard jobs in different
  * files would be printed as siblings -- inventing a shared clock that does not
  * exist, which is the more dangerous direction to be wrong in.
  *

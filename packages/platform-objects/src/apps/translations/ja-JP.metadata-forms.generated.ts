@@ -2107,6 +2107,9 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "measures.currency": {
         label: "通貨"
       },
+      "measures.polarity": {
+        label: "極性"
+      },
       "measures.derived": {
         label: "派生元"
       },

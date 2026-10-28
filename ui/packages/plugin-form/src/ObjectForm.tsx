@@ -58,6 +58,7 @@ import {
 } from './sanitize';
 import { formWritePayload } from './writePayload';
 import { applyFieldPermissions, closedFormAffordance, fieldWriteGate, gateFormFields } from './fieldWriteGate';
+import { RecordFieldAccessForForm } from './recordFieldAccess';
 import { ClosedAffordanceNotice } from './closedAffordanceNotice';
 import { resolveInitialRecord } from './initialRecord';
 import { hasInlineFieldSource, isInlineFieldDef, noSubmitTargetError } from './submitTarget';
@@ -214,7 +215,18 @@ function localizeFormLabels(
  * />
  * ```
  */
-export const ObjectForm: React.FC<ObjectFormComponentProps> = ({
+/**
+ * An `edit` form for a stored record answers its field locks from that record
+ * (objectstack#26594) — see `recordFieldAccess.tsx`.
+ */
+export const ObjectForm: React.FC<ObjectFormComponentProps> = ({ schema, ...rest }) => (
+  <RecordFieldAccessForForm schema={schema} dataSource={rest.dataSource}>
+    {/* `schema=` by name, so the handler-key census follows the document into the body. */}
+    <ObjectFormBody schema={schema} {...rest} />
+  </RecordFieldAccessForForm>
+);
+
+const ObjectFormBody: React.FC<ObjectFormComponentProps> = ({
   schema: rawSchema,
   dataSource,
 }) => {
@@ -382,6 +394,12 @@ export const ObjectForm: React.FC<ObjectFormComponentProps> = ({
           initialValues: (schema as any).initialValues,
           initialData: (schema as any).initialData,
           formType: schema.formType === 'tabbed' ? 'tabbed' : 'simple',
+          // objectstack-ai/objectstack#26843 — the tabbed header's opening tab
+          // and strip position, and the field layout, which this rebuild
+          // dropped before the header form could read them.
+          defaultTab: schema.defaultTab,
+          tabPosition: schema.tabPosition,
+          layout: schema.layout,
           sections: schema.sections as any,
           fields: schema.fields as any,
           title: schema.title,
@@ -393,7 +411,10 @@ export const ObjectForm: React.FC<ObjectFormComponentProps> = ({
           details: (schema as any).subforms,
           onSuccess: schema.onSuccess,
           onError: schema.onError,
-          onCancel: schema.onCancel,
+          // The master-detail action bar draws Cancel only when handed an
+          // `onCancel`, so a hidden cancel button is no handler
+          // (objectstack-ai/objectstack#26843).
+          onCancel: schema.showCancel === false ? undefined : schema.onCancel,
           className: schema.className,
         }}
         dataSource={dataSource}

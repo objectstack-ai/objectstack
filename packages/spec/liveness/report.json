@@ -54,56 +54,54 @@
       "note": "objectui: DatasetReportChart plots `chart.xAxis` (dataset dimension) × `chart.yAxis` (measure) via useDatasetRows, honoring `type`/`title` (framework#1890/#3441). Supersedes the 2026-06 audit's DEAD finding. Sub-key `groupBy` stays experimental (its own describe marker) — the dataset renderer plots a single series and never reads it. Live on NON-joined reports only (#20161, re-read at the `.objectui-sha` pin f8a9d0fb): the one `report.chart` read (DatasetReportRenderer.tsx:1557) sits after the joined branch's return (:1462-1524), so on a `type: 'joined'` report the schema's refinement REFUSES `chart` rather than accepting a key nothing reads. A `joined` report draws no chart (packages/spec/src/ui/report.zod.ts, the joined-chart prescription, #20161; read point moved out of spec source, #23434): at objectui @f8a9d0fb0596 packages/plugin-report/src/DatasetReportRenderer.tsx#DatasetReportRenderer the joined branch draws each block as a `DatasetMatrixTable` / `DatasetReportTable` and returns before the one `report.chart` read, and no renderer reads a block's `chart`."
     },
     "dateRange": {
-      "status": "planned",
-      "verifiedAt": "2026-10-27",
-      "authorWarn": true,
-      "authorHint": "Keep it, but nothing reads it yet: the Console report page draws no date-range chip, so the report still shows every period until the report renderer reads this key.",
-      "note": "PLANNED RECORD (#26548, the spec half of ruling 6408567749 on #25873, letter B). The report period `{ dimension?, defaultRange, allowCustomRange }`: `defaultRange` / `allowCustomRange` are the dashboard declaration verbatim (DATE_RANGE_DEFAULT_RANGES, defaults this_month / true, held equal by report-date-range-export.test.ts); `dimension` names a dataset dimension that declares `type: date` (omitted = the dataset declares exactly one). The four dataset-aware cases are judged by the `@objectstack/lint` rule validate-report-date-range.ts at os validate / os build and at the report publish door. Refused on a `joined` container. PLANNED, not live: no renderer reads it. The report page posts its selection through `useDatasetRows` in ui/packages/plugin-report/src/DatasetReportRenderer.tsx#DatasetReportRenderer with no `timeDimensions` entry, and no source under ui/packages/plugin-report/src/ names `dateRange` (0 hits outside tests). The renderer contract is the TSDoc on `ReportSchema.dateRange`: the active window rides `selection.timeDimensions: [{ dimension, dateRange }]` with no `granularity` (a filter window ANDed with `runtimeFilter`), which the analytics service already accepts. Carrier: #25873, the ui renderer card, Blocked-by this one. Flip to `live` on the commit that cites the renderer read point, and drop `authorWarn` / `authorHint` in that same edit.",
+      "status": "live",
+      "verifiedAt": "2026-10-28",
+      "evidence": "ui/packages/plugin-report/src/DatasetReportRenderer.tsx#useDatasetRows, ui/packages/plugin-report/src/ReportDateRange.tsx#reportTimeWindow",
+      "note": "#25873 (ruling 6408567749, letter B; spec half #26548). The report period `{ dimension?, defaultRange, allowCustomRange }`: `defaultRange` / `allowCustomRange` are the dashboard declaration verbatim (DATE_RANGE_DEFAULT_RANGES, defaults this_month / true, held equal by report-date-range-export.test.ts); `dimension` names a dataset dimension that declares `type: date` (omitted = the dataset declares exactly one). The four dataset-aware cases are judged by the `@objectstack/lint` rule validate-report-date-range.ts at os validate / os build and at the report publish door. Refused on a `joined` container, and not read there. LIVE: a non-joined report that declares it draws a date-range chip (ReportDateRange.tsx#ReportDateRangeControl: All time, the dashboard's DATE_RANGE_PRESETS under the `dashboard.filters.range.*` labels, Custom… when allowed), and the active window rides every dataset query the report makes (grouped table, matrix cross-tab, embedded chart) through the single fetch choke point DatasetReportRenderer.tsx#useDatasetRows as ONE `selection.timeDimensions` entry `{ dimension, dateRange }` with no `granularity`: a preset by name, a custom pick as `[start, end]`, All time as no entry. The window is part of the refetch signature, so a new pick re-queries. A report without `dateRange` posts the selection it always did (no `timeDimensions` key, no chip, no dataset-definition read). Pinned by ui/packages/plugin-report/src/__tests__/DatasetReportRenderer.dateRange-25873.test.tsx.",
       "children": {
         "dimension": {
-          "status": "planned",
-          "verifiedAt": "2026-10-27",
-          "evidence": "packages/spec/src/ui/report.zod.ts#ReportSchema (declares `dimension` on the closed `dateRange` block)",
-          "note": "The dataset dimension the window applies to. Planned with its container: no renderer reads it. Its dataset-aware checks are live in lint (validate-report-date-range.ts: unknown, not a date, omitted with several date dimensions, omitted with none)."
+          "status": "live",
+          "verifiedAt": "2026-10-28",
+          "evidence": "ui/packages/plugin-report/src/ReportDateRange.tsx#useReportDateDimension",
+          "note": "The dataset dimension the window applies to. Declared, it is the `timeDimensions[].dimension` verbatim; omitted, the renderer reads the dataset definition (`/api/v1/meta/dataset/NAME` through the host's `apiFetch`, the ObjectChart dataset read) BEFORE any query and uses its one `type: date` dimension. Zero or several draws the authoring error in place of the report and queries nothing, so no unwindowed table renders under a period chip. Its dataset-aware checks are also live in lint (validate-report-date-range.ts)."
         },
         "defaultRange": {
-          "status": "planned",
-          "verifiedAt": "2026-10-27",
-          "evidence": "packages/spec/src/ui/report.zod.ts#ReportSchema (declares `defaultRange` over DATE_RANGE_DEFAULT_RANGES, default this_month)",
-          "note": "The preset the report opens on, the dashboard declaration verbatim. Planned with its container: no renderer reads it."
+          "status": "live",
+          "verifiedAt": "2026-10-28",
+          "evidence": "ui/packages/plugin-report/src/ReportDateRange.tsx#initialReportPeriod",
+          "note": "The preset the report opens on, the dashboard declaration verbatim; absent opens on the spec default this_month. `custom` opens the custom pick with no window (the spec's sentinel) until both ends are named."
         },
         "allowCustomRange": {
-          "status": "planned",
-          "verifiedAt": "2026-10-27",
-          "evidence": "packages/spec/src/ui/report.zod.ts#ReportSchema (declares `allowCustomRange`, default true)",
-          "note": "Whether the viewer may pick a custom range, the dashboard declaration verbatim. Planned with its container: no renderer reads it."
+          "status": "live",
+          "verifiedAt": "2026-10-28",
+          "evidence": "ui/packages/plugin-report/src/ReportDateRange.tsx#ReportDateRangeControl",
+          "note": "Whether the chip offers Custom… (two date inputs whose `[start, end]` goes on the wire). `false` removes the item; absent = true."
         }
       }
     },
     "exportOptions": {
-      "status": "planned",
-      "verifiedAt": "2026-10-27",
-      "authorWarn": true,
-      "authorHint": "Keep it, but nothing reads it yet: the Console report page draws no export control, so the report table cannot be downloaded until the report renderer reads this key.",
-      "note": "PLANNED RECORD (#26548, the spec half of ruling 6408567749 on #25873, letter B). The report export control `{ formats?, includeHeaders?, fileNamePrefix? }`: three members of the list export block (ReportExportOptionsSchema in packages/spec/src/ui/list-view-export-options.ts), formats `csv` / `xlsx` only, on by default (absent = both, `formats: []` = off). Who may export is NOT a report key: the control is gated on the viewer having `export` in the effective apiOperations of the dataset base object (ObjectPermission.allowExport, the predicate the list toolbar uses). Refused on a `joined` container. PLANNED, not live: no renderer reads it. The report page (ui/packages/plugin-report/src/DatasetReportRenderer.tsx#DatasetReportRenderer) draws no export control, no source under ui/packages/plugin-report/src/ names `exportOptions` (0 hits outside tests), and the client-side CSV writer in ui/packages/plugin-report/src/ReportExportEngine.ts serves the legacy presentation schema, not ReportSchema. The renderer writes XLSX in the browser: the list XLSX path is the server record stream, which cannot carry aggregated report rows. Carrier: #25873. Flip to `live` on the commit that cites the renderer read point, and drop `authorWarn` / `authorHint` in that same edit.",
+      "status": "live",
+      "verifiedAt": "2026-10-28",
+      "evidence": "ui/packages/plugin-report/src/ReportExport.tsx#ReportExportControl, ui/packages/plugin-report/src/DatasetReportRenderer.tsx#DatasetReportRenderer",
+      "note": "#25873 (ruling 6408567749, letter B; spec half #26548). The report export control `{ formats?, includeHeaders?, fileNamePrefix? }`: three members of the list export block (ReportExportOptionsSchema in packages/spec/src/ui/list-view-export-options.ts), formats `csv` / `xlsx` only, on by default (absent = both, `formats: []` = off). Refused on a `joined` container, and not read there. LIVE: a non-joined report draws an Export control (ReportExport.tsx#ReportExportControl, read from DatasetReportRenderer.tsx#DatasetReportRenderer as `report.exportOptions`) once its table has rows. The download is the table AS DRAWN: the grouped table or the matrix cross-tab hands the cells it renders, server totals included, up through ReportExport.tsx#ReportTableSnapshotContext, so the file carries the active `runtimeFilter` and period of the table's own query and nothing is re-queried or re-aggregated. Who may export is NOT a report key: the control is offered only when the viewer's effective apiOperations on the dataset base object (the query answer's `object`) include `export` (ObjectPermission.allowExport, the predicate the list toolbar uses, read through `@object-ui/permissions` usePermissions); an absent operation set (no provider, an unrestricted object) keeps it, as on the list. Both files are written in the browser: the list XLSX path is the server record stream, which cannot carry aggregated report rows, so the XLSX is built with ExcelJS imported only when asked for. Pinned by ui/packages/plugin-report/src/__tests__/DatasetReportRenderer.export-25873.test.tsx.",
       "children": {
         "formats": {
-          "status": "planned",
-          "verifiedAt": "2026-10-27",
-          "evidence": "packages/spec/src/ui/list-view-export-options.ts#ReportExportOptionsSchema (declares `formats`, csv / xlsx only)",
-          "note": "The formats the export control offers; absent = both, `[]` = off. Planned with its container: no renderer draws the control."
+          "status": "live",
+          "verifiedAt": "2026-10-28",
+          "evidence": "ui/packages/plugin-report/src/ReportExport.tsx#readReportExportFormats",
+          "note": "The formats the control offers, in the declared order; absent = csv and xlsx, `[]` draws no control."
         },
         "includeHeaders": {
-          "status": "planned",
-          "verifiedAt": "2026-10-27",
-          "evidence": "packages/spec/src/ui/list-view-export-options.ts#ReportExportOptionsSchema (declares `includeHeaders`, the list export member)",
-          "note": "Whether the download carries a header row. Planned with its container: no renderer draws the control."
+          "status": "live",
+          "verifiedAt": "2026-10-28",
+          "evidence": "ui/packages/plugin-report/src/ReportExport.tsx#buildReportCsv, ui/packages/plugin-report/src/ReportExport.tsx#buildReportXlsx",
+          "note": "Whether the download opens with the table's header row (dimension and measure labels as drawn); absent = true."
         },
         "fileNamePrefix": {
-          "status": "planned",
-          "verifiedAt": "2026-10-27",
-          "evidence": "packages/spec/src/ui/list-view-export-options.ts#ReportExportOptionsSchema (declares `fileNamePrefix`, the list export member)",
-          "note": "The download file name prefix, in place of the report label. Planned with its container: no renderer draws the control."
+          "status": "live",
+          "verifiedAt": "2026-10-28",
+          "evidence": "ui/packages/plugin-report/src/ReportExport.tsx#ReportExportControl",
+          "note": "Replaces the report label as the file name base; the name is built by `@object-ui/core` buildExportFileName (base-YYYYMMDD-HHMMSS.ext, the list export's builder)."
         }
       }
     },

@@ -672,8 +672,8 @@ export function selfTest({ tier = 'full' } = {}) {
   // invocation, so no case can pin a shape the tree does not have. Their
   // sources: `pr-automation.yml` (the `--base` gates), `ci.yml` (the shard
   // attestation), `engine-split-metric.yml` (`--days 90`),
-  // `required-set-patrol.yml` (a complete argv behind a continuation and a
-  // redirection), `prerelease-pin-watch.yml` (`--verbose 2>&1`; that workflow
+  // `fleet-patrols.yml`'s `required-set-patrol` job (a complete argv behind a
+  // continuation and a redirection), `prerelease-pin-watch.yml` (`--verbose 2>&1`; that workflow
   // left with the objectui pin, objectstack#25711, and its row stays as a
   // fixture of the shape). The live half at the end of the block re-reads the
   // others from the workflows themselves.
@@ -1046,8 +1046,8 @@ export function selfTest({ tier = 'full' } = {}) {
     );
     // A script invoked BOTH ways gets BOTH entries — the card's third clause,
     // read off the live tree. `check-release-section-coverage.mjs` is the
-    // specimen: `lint.yml` runs it bare, `release-coverage-patrol.yml` runs it
-    // bare AND `--strict`, and before the continuation join the `--strict` run
+    // specimen: `lint.yml` runs it bare, fleet-patrols.yml's
+    // `release-coverage-patrol` job runs it bare AND `--strict`, and before the continuation join the `--strict` run
     // had no entry of its own at all.
     const coverageKeys = new Set(direct.filter((i) => i.script === 'scripts/check-release-section-coverage.mjs').map((i) => i.check));
     t(

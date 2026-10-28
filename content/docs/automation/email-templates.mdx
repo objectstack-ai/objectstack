@@ -88,14 +88,37 @@ never needs triple braces.
 chaining. Decide the value in the caller that supplies the data — a default, a
 second format — and pass the finished value as its own variable.
 
-**The `currency` argument is a literal code.** `currency:EUR` formats in euros,
-and `currency` with no argument formats in US dollars. The argument is an ISO
-4217 code in three capital letters, never a path: `currency:currency_code` does
-not read the record's `currency_code`. `os validate`, `os build`, `os lint` and
-the metadata publish door refuse any other argument (`email-template-hole-grammar`,
-a `422 INVALID_METADATA` at the publish door), naming the hole and the rule. To
-show an amount in each record's own currency, format it in the caller that
-supplies the data and pass the formatted text as its own variable.
+**The `currency` argument is a literal code or a marked path.** A `currency`
+argument is either a literal ISO 4217 code in three capital letters
+(`currency:EUR`) or, in a mail template only, `@` followed by a path into the
+send's data whose value is such a code (`currency:@currency_code`). `currency`
+with no argument formats in US dollars.
+
+The marked path is how one template shows each record's amount in that record's
+own currency:
+
+```ts
+subject: 'Instalment overdue: {{ planned_amount | currency:@currency_code }}',
+```
+
+With `data` holding `planned_amount: 1234.5` and `currency_code: 'EUR'` it renders
+`€1,234.50` in `en-US`; with `currency_code: 'CNY'` it renders `CN¥1,234.50`. The
+value at the path must be the code in capitals, as stored: a missing or `null`
+value, a lowercase code (`eur`) or anything else makes the render fail with
+`TEMPLATE_INVALID`, naming the template, its locale, the hole and the value. The
+amount is never formatted in a default currency in its place.
+
+A bare argument is never read as a path: `currency:currency_code` is refused,
+and so are a lowercase or empty code, a quoted path and an `@` with no path
+after it. `os validate`, `os build`, `os lint` and the metadata publish door
+refuse these (`email-template-hole-grammar`, a `422 INVALID_METADATA` at the
+publish door), naming the hole and the rule. When the template declares
+`variables`, the same doors also refuse a marked path that none of them
+declares (a variable `contract` declares `contract.currency_code`).
+
+The `@` form belongs to mail templates. In-app template text (flow
+notifications, action and bulk-action copy) takes a literal code only and
+refuses `currency:@path` by name.
 
 **Where a hole may sit in `bodyHtml`.** The renderer's escaping is right for
 element text and for a quoted attribute value that holds plain text, so those
