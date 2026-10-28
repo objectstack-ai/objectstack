@@ -11,6 +11,11 @@ ObjectStack provides a **comprehensive set of field types** covering every data 
 **Import:** `import { FieldType, FieldSchema } from '@objectstack/spec/data'`
 </Callout>
 
+Each type below also says what the Console does with it: the form widget, the read-only
+display and the grid cell. Behaviour shared by many types, such as the empty-value
+affordance and the keys a widget receives at runtime, is described once under
+[How the Console renders a field](#how-the-console-renders-a-field).
+
 ---
 
 ## Text Types
@@ -29,6 +34,13 @@ Single-line plain text input.
 { name: 'first_name', label: 'First Name', type: 'text', maxLength: 100 }
 ```
 
+**In the Console:** a single-line input. `placeholder` is shown inside the empty input and
+`inlineHelpText` beside it. A regex check is not a field key (`FieldSchema` is strict and
+refuses `pattern`); declare a [`format` validation rule](/docs/data-modeling/validation#format-validation)
+on the object instead. The form does not pre-check that rule in the browser: a value that
+breaks it is refused when the record is saved, with the rule's `message` as the reason. In a
+grid the value is truncated to the column width.
+
 ### `textarea`
 Multi-line text input for longer content.
 
@@ -41,6 +53,10 @@ Multi-line text input for longer content.
 { name: 'description', label: 'Description', type: 'textarea', maxLength: 5000 }
 ```
 
+**In the Console:** a multi-line editor. `rows` sets the inline editor's height in text rows
+(fullscreen and dialog editors size themselves). `maxLength` is also the editor's native stop
+and drives a `{n}/{max}` character counter. In a grid long text is truncated.
+
 ### `email`
 Email address with built-in format validation.
 
@@ -51,6 +67,10 @@ Email address with built-in format validation.
 ```typescript
 { name: 'email', label: 'Email', type: 'email', required: true, unique: 'organization' }
 ```
+
+**In the Console:** an `email` input. Read-only, and in a grid, the value is a `mailto:` link.
+The address shape is checked on the server's write path, so a malformed address is refused on
+save whatever the client sent.
 
 ### `url`
 URL with format validation.
@@ -63,6 +83,10 @@ URL with format validation.
 { name: 'website', label: 'Website', type: 'url' }
 ```
 
+**In the Console:** a URL input. Read-only, and in a grid, an `http://` or `https://` value is a
+link that opens in a new tab with `rel="noopener noreferrer"`. Any other scheme (`javascript:`,
+`data:`) is shown as plain text, never as a link.
+
 ### `phone`
 Phone number field.
 
@@ -74,12 +98,21 @@ Phone number field.
 { name: 'phone', label: 'Phone', type: 'phone' }
 ```
 
+**In the Console:** a `tel` input, which opens the dial pad on a phone. Read-only, and in a
+grid, the value is a `tel:` link. The widget applies no input mask: the value is stored as
+typed.
+
 ### `password`
 Masked password input. On a generic object the value is **plaintext at rest** but **masked to `••••••••` on read** (ADR-0100) — it is *not* one-way hashed. One-way hashing is owned by the auth subsystem and applies only to its identity tables, never to an authored `password` field. For reversible encrypted-at-rest secrets (API keys, tokens, DB passwords), use the `secret` type instead; for login credentials, model them on the auth user object.
 
 ```typescript
 { name: 'password', label: 'Password', type: 'password', required: true }
 ```
+
+**In the Console:** a masked input with a show/hide toggle. Read-only, and in a grid, a stored
+`password` or `secret` value is drawn as a fixed mask (`••••••`), never as the value. An empty
+value draws the shared "No value" affordance instead, so a credential that was never set is
+distinguishable from one that is.
 
 ### `secret`
 Reversible, encrypted-at-rest value (DB password, API key, token). Unlike `password` (masked on read but plaintext at rest, or one-way hashed inside the auth subsystem), a `secret` is encrypted on write via the registered crypto provider, stored as an opaque ref on the row, and masked on read. Fail-closed: with no provider configured, writes throw rather than persist cleartext.
@@ -125,6 +158,20 @@ WYSIWYG rich text editor content.
 { name: 'content', label: 'Content', type: 'richtext' }
 ```
 
+**In the Console:** `markdown`, `html` and `richtext` share one editor, and `type` changes only
+how the stored text is displayed. `richtext` stores HTML and is displayed through the same
+pipeline as `html`. The editor is a plain textarea today: there is no formatting toolbar,
+preview pane or WYSIWYG mode, so `toolbar`, `preview`, `minHeight` and `maxHeight` are not
+field keys. `rows` sets the inline editor's height, and `maxLength` adds a native stop and a
+character counter, inline and in the fullscreen editor a form opens when it sets
+`mobile.fullscreenLongText`.
+
+Grids, record pages and read-only forms render the stored markup formatted. HTML is sanitized
+against a GitHub-style allow-list: links keep `http`, `https`, `mailto` and relative URLs,
+images keep `http`, `https` and relative URLs, and inline `style`, event-handler attributes,
+frames, objects and SVG or MathML content are not rendered. An element outside the allow-list
+shows its text without its tag. The markdown pipeline uses the same allow-list.
+
 ---
 
 ## Number Types
@@ -142,6 +189,21 @@ Numeric value with optional precision.
 ```typescript
 { name: 'quantity', label: 'Quantity', type: 'number', min: 0, max: 99999 }
 ```
+
+**In the Console:** a numeric input with a stepper (`step` sets the increment). The read-only
+display and the grid cell use tabular figures and show the value to the field's `scale`: a
+stored `1234.5` reads `1,234.50` at `scale: 2` and `1,234.5` with no `scale`. Thousands
+separators follow `useGrouping`:
+
+| `useGrouping` | `scale` | Separators |
+|:---|:---|:---|
+| `false` | any | none: `12345.5` |
+| `true` | any | always, even where the locale leaves four-digit numbers alone: `2,026` |
+| not set | `0` | none, since the value reads as a year or another ordinal: `2026` |
+| not set | anything else, or not set | the locale's own convention: `12,345.5` |
+
+The input is a native number box, so the browser filters what is typed. See
+[What a number input silently rewrites](#what-a-number-input-silently-rewrites).
 
 ### `currency`
 Monetary value. The stored value is a bare number in both modes; the currency
@@ -168,6 +230,13 @@ or runtime ever read it), each with a prescription to delete the key. The
 field-level `precision` is the amount's total digit count — a DECIMAL(18,2)
 amount declares `precision: 18` — and is never compared with the currency.
 
+**In the Console:** a numeric input with the currency's symbol. The read-only display, the
+grid cell, the input's `step` and the rounding applied when the input loses focus all use the
+currency's minor unit, so a JPY amount shows no decimals and a KWD amount shows three. With no
+currency resolved at all, an amount shows two decimals. A field-level `currency` key is
+refused: the currency is `currencyConfig`. The input is a native number box; see
+[What a number input silently rewrites](#what-a-number-input-silently-rewrites).
+
 ### `percent`
 Percentage value (0–100 or decimal).
 
@@ -182,6 +251,21 @@ Percentage value (0–100 or decimal).
 { name: 'discount', label: 'Discount', type: 'percent', min: 0, max: 100 }
 ```
 
+**How a percent is stored.** A `percent` field stores a **fraction** unless it declares a `max`
+above 1, in which case it stores **whole percentage points** (`percentScaleOf` in
+`@objectstack/spec/data`). With no `max`, or `max: 1`, a stored `0.75` is displayed as `75%` and
+a typed `90` is stored as `0.9`. With `max: 100` (any `max` above 1), a stored `75` is `75%` and a
+stored `1` is `1%`. Every surface reads the same declaration (the input, the read-only text,
+the grid cell and footer, the record header, gantt tooltips, gallery cards and dashboard
+tiles), so one stored value shows one percentage everywhere; none of them guesses the storage
+from the value's size.
+
+**In the Console:** `scale` is the number of decimals the percent shows, in the input's step,
+the read-only display and the grid cell: a stored `0.855` shows `85.50%` at `scale: 2` and `86%`
+with no `scale`. `precision` is the stored total digit count and never sets the displayed
+decimals. The input is a native number box; see
+[What a number input silently rewrites](#what-a-number-input-silently-rewrites).
+
 ---
 
 ## Date & Time Types
@@ -193,6 +277,12 @@ Date value (no time component).
 { name: 'birth_date', label: 'Birth Date', type: 'date' }
 ```
 
+**In the Console:** a date picker. A date is a calendar day and shows the same day in every
+time zone. The grid cell shows a relative face ("3 days ago") for recent dates and an absolute
+date otherwise. There is no date-range key: a field's `min` / `max` are numbers, so bound a
+date with a validation rule. A date can be declared a deadline; see
+[Deadlines: `dueLike` and `settledWhen`](#deadlines-duelike-and-settledwhen).
+
 ### `datetime`
 Date and time value with timezone support.
 
@@ -200,12 +290,52 @@ Date and time value with timezone support.
 { name: 'created_at', label: 'Created At', type: 'datetime', readonly: true }
 ```
 
+**In the Console:** a combined date and time picker. A datetime is an instant and renders in
+the workspace's time zone, the `timezone` that `GET /api/v1/auth/me/localization` answers;
+without one it renders in the viewer's own zone. A datetime can be declared a deadline; see
+[Deadlines: `dueLike` and `settledWhen`](#deadlines-duelike-and-settledwhen).
+
 ### `time`
 Time-only value (no date component).
 
 ```typescript
 { name: 'start_time', label: 'Start Time', type: 'time' }
 ```
+
+**In the Console:** a 24-hour `HH:mm` time input (`14:30` is 2:30 PM).
+
+### Deadlines: `dueLike` and `settledWhen`
+
+`dueLike: true` declares a `date` or `datetime` field a deadline. Once it has passed, the
+Console shows relative overdue wording ("Overdue 3d") instead of the neutral "3 days ago", and
+colours the value red. Without the key nothing is inferred from the field's name: a past
+`due_date` reads like any past date. Both keys are refused on any other type, and both are
+display only: nothing on the write path reads them.
+
+`settledWhen` says when the deadline is settled for one record: a CEL predicate over the
+record's own columns, read as `record`, written as a string or as the expression envelope. It
+is accepted only beside `dueLike: true`. While it holds, no overdue wording or colour applies to
+that record.
+
+```typescript
+{ name: 'due_date', label: 'Due Date', type: 'date', dueLike: true, settledWhen: "record.status == 'done'" }
+```
+
+Every view that draws the date beside its record (the grid, the record page, related lists,
+kanban and gallery cards, the compact list and the tree) evaluates `settledWhen` against that
+record, so a done task's past due date reads neutral while an open one's reads overdue. A
+predicate that fails to evaluate leaves the deadline unsettled.
+
+- **The predicate reads the record as the view fetched it.** A grid, a list view and a related
+  list add the fields `settledWhen` reads to their own query, so those fields need not be
+  columns. A field the viewer may not read is never fetched, so for that viewer a deadline
+  whose predicate reads it stays unsettled. An approval's record summary judges the deadline
+  against the snapshot it shows.
+- **The affordance is day-granular.** It compares calendar days, so a datetime a few hours past
+  its deadline still reads "Today" and is not red. The red starts the day after the deadline;
+  the "Overdue Nd" wording starts a day later (the shortest is "Overdue 2d") and stops once the
+  relative face falls back to an absolute date. The red does not stop with it: a long-overdue
+  deadline reads as a plain past date, in red.
 
 ---
 
@@ -217,6 +347,17 @@ Standard true/false field.
 ```typescript
 { name: 'is_active', label: 'Active', type: 'boolean', defaultValue: true }
 ```
+
+**In the Console:** a switch in forms. Read-only, a `true` reads "Yes" and a `false` reads "No";
+in a grid the value is a disabled checkbox named by the field's label. A field named
+`completed`, `is_completed`, `done` or `is_done` draws a green "Completed" or an outlined "Not
+completed" indicator instead; every other name, `active` and `enabled` included, draws the
+checkbox.
+
+Only a real boolean is a value of a boolean field: the wire value of `boolean` and `toggle` is a
+JSON boolean. `null`, `0`, `1`, `''`, `'true'` and `'false'` all draw the "No value" affordance,
+because the record holds no boolean there. Repairing SQL `0`/`1` or the strings `'true'` /
+`'false'` is the producer's job (driver read-coercion, CSV import), never the widget's.
 
 ### `toggle`
 Toggle switch (functionally identical to boolean, different UI).
@@ -255,6 +396,38 @@ Single-choice dropdown.
   ]
 }
 ```
+
+**In the Console:** a dropdown, drawn in grids as a coloured badge per value. An option
+authored with an empty or whitespace-only `label` (the field designer writes one when only the
+value box is filled) is displayed by its `value` in every option widget (`select`,
+`multiselect`, `radio`, `checkboxes`), editable or read-only. That is a display fallback, not a
+repair: the stored option keeps its empty label, so give every option a real one.
+
+**Cascading and gated options.** An option's `visibleWhen` predicate offers the option only
+while it is true. It reads the live `record` and `current_user`, so one mechanism covers both
+dependent lists (country → province → city) and options offered only to some users. Declare
+the controlling fields with `dependsOn` (an array of field names). While any of them is empty
+the control is gated with a hint ("Select country first") instead of an unfiltered list; when a
+controlling value changes, the list is re-evaluated and a selection that is no longer offered
+is cleared. The clear is saved like any other edit: a single select or radio is written as
+`null`, and a multiple select keeps only the values still offered.
+
+```typescript
+{
+  name: 'province', label: 'Province', type: 'select', dependsOn: ['country'],
+  options: [
+    { label: 'Zhejiang', value: 'zj', visibleWhen: "record.country == 'cn'" },
+    { label: 'California', value: 'ca', visibleWhen: "record.country == 'us'" },
+    { label: 'Public (external)', value: 'public', visibleWhen: "'admin' in current_user.positions" },
+  ],
+}
+```
+
+Option `visibleWhen` is the one visibility predicate the server also enforces: a write of a
+value whose predicate is false, or cannot be evaluated, is refused. A third level (`city`,
+`dependsOn: ['province']`) chains the same way. Option lists suit small, static
+dictionaries; when the data is large, changes over time or is shared across forms, model each
+level as a `lookup` with `dependsOn`, whose candidate query is filtered on the server and paged.
 
 ### `multiselect`
 Multi-choice dropdown. Same `options` property as `select`.
@@ -315,6 +488,41 @@ Reference to a record in another object (foreign key).
 { name: 'company', label: 'Company', type: 'lookup', reference: 'account' }
 ```
 
+**In the Console:** a two-level picker.
+
+- **Typeahead.** The trigger opens a popover that fetches candidates from the referenced
+  object, searches as the user types (debounced), and shows "Showing X of Y" when there are
+  more. `displayField` names each candidate's label (default: the referenced object's name or
+  title field) and `descriptionField` a secondary line under it.
+- **Record Picker.** A "Browse all" button beside the trigger, and a "Show all results" link in
+  the popover, open a dialog with a multi-column table, server-side search, column sorting,
+  paging and keyboard navigation (arrow keys, Enter or Space to pick). `lookupColumns` sets its
+  columns (a field name or `{ field, label, width }`), `lookupPageSize` its page size
+  (default 10), and `lookupFilters` restricts the candidates. Without `lookupColumns` the
+  columns are inferred from the display field.
+- **Quick create.** `allowCreate: true` offers "Create new" when nothing matches, creating a
+  record from the typed text. It suits objects whose only required field is the display field.
+- **Dependent lookups.** `dependsOn` scopes the candidates by sibling fields: an array of field
+  names, or `{ field, param }` entries when the filter parameter differs from the local field
+  name. While a controlling value is empty the trigger is gated ("Select account first"); once
+  it is set, every candidate query (typeahead, Record Picker and people picker) carries it as a
+  filter no user input can override.
+
+```typescript
+{
+  name: 'contact', label: 'Contact', type: 'lookup', reference: 'contact',
+  displayField: 'name', descriptionField: 'email',
+  lookupColumns: ['name', { field: 'email', label: 'Email', width: '220px' }],
+  lookupPageSize: 15,
+  dependsOn: [{ field: 'account', param: 'account_id' }],
+}
+```
+
+In a grid, a lookup shows the referenced record's label, or one chip per record when
+`multiple` is set. Which record field a pick stores (`id` unless told otherwise) is picker
+configuration, not a field key: `FieldSchema` refuses `idField`, and a form entry, an action
+parameter or an inline grid column sets it instead.
+
 ### `user`
 Person picker — a lookup specialized to the built-in `sys_user` object. Stored identically to `lookup` (foreign key to `sys_user.id`; `multiple: true` stores an array) and resolved through the same `$expand` machinery. Supports `defaultValue: 'current_user'` to stamp the acting user's id on insert.
 
@@ -323,6 +531,14 @@ Field.user({ label: 'Assignee' })
 Field.user({ label: 'Watchers', multiple: true })
 Field.user({ label: 'Owner', defaultValue: 'current_user' })
 ```
+
+**In the Console:** a search-first people picker that delegates to the lookup picker with the
+reference fixed to `sys_user`, so it searches users by name and email as you type, and shows
+each candidate's business unit and email beside the name. Read-only and in grids the value
+is an avatar (initials when there is no image) with the name, and several users show as
+overlapping avatars with a count. There is no separate owner type: a record owner is a `user`
+field named `owner`, usually `readonly` with `defaultValue: 'current_user'`, and `type: 'owner'`
+is refused.
 
 ### `master_detail`
 Parent-child relationship (cascading delete by default).
@@ -347,6 +563,32 @@ Parent-child relationship (cascading delete by default).
 }
 ```
 
+**The inline grid in the Console.** With `inlineEdit: 'grid'` (or `true` resolving to the grid)
+the parent's form edits the children as rows of a table:
+
+- **Columns.** Without `inlineColumns` the columns are derived from the child object. An
+  explicit column (`InlineGridColumn`) names the child field in `name` and may set `label`,
+  `width` (pixels), `required` and `type`. A column's `type` is one of nine cell controls:
+  `text`, `number`, `currency`, `date`, `datetime`, `time`, `select`, `lookup` and `file`.
+  Declaring `type` opts the column out of derivation, so supply what the control needs
+  (`options` for a select, `reference` and `displayField` for a lookup).
+- **File cells.** A `file` column is an upload control in the cell, with removable chips and
+  thumbnails for images; `accept` and `multiple` restrict it. Derived columns map `file`,
+  `image` and `avatar` child fields to `file` cells, an image field accepting `image/*`. Shown as
+  text, a file cell reads the file's name, or a count when it holds several.
+- **Booleans.** A derived `boolean` or `toggle` child field becomes a `select` cell storing
+  `'true'` / `'false'`, labelled in the session language.
+- **Currency.** A `currency` cell shows the resolved currency's symbol, and decimals of that
+  currency's minor unit; `prefix` replaces the symbol only.
+- **Order.** When the columns are derived and the child object has a field named `position`, `sort_order`, `sequence`,
+  `line_no`, `line_number` or `sort`, the grid stamps each row's index into it whenever a row is
+  added, removed, duplicated or dragged, so the order is saved with the rows.
+- **Total.** `inlineAmountField` names the numeric child field summed into the footer.
+
+`inlineEdit: true` picks the form factor itself: a child with a single file, image or avatar
+field keeps the grid, while a form-only field (textarea, rich text, JSON, location) or several
+rich fields tips it to a per-row form. An explicit `'grid'` or `'form'` always wins.
+
 #### A relationship never targets a stored-metadata table
 
 A `lookup` or `master_detail` whose `reference` is `sys_metadata` or `sys_metadata_history` is refused by `os validate`, `os build` and the object save door alike. Those rows carry serialized metadata bodies, which are served only through the metadata API (`GET /api/v1/meta/:type/:name`), where the body is projected; the engine never hydrates a reference into them, so `$expand` would keep the stored id and never nest the row, and a master-detail child's `parent` root would stay unbound, refusing every write a `parent` rule judges. To point a record at a metadata item, store its type and name in `text` fields and read the item through the metadata API.
@@ -368,6 +610,16 @@ Self-referential hierarchy (e.g., categories, org chart).
 
 Media fields store a reference to an uploaded file. They take the universal field properties (`multiple` is honored for `file` and `image`). Two more field properties apply to the media family (`file`, `image`, `avatar`, `video` and `audio`) and constrain the referenced file: `accept`, the permitted upload types as MIME types or extensions (e.g. `["image/*", ".pdf"]`), offered to the file picker and enforced on write; and `maxSize`, the maximum permitted file size in bytes, enforced on write against the stored file size, not just checked in the browser. A create or update whose referenced file violates either is refused with `400 ERR_FILE_CONSTRAINT`, and the error message names the field and the constraint. Storage itself is configured at the storage-provider layer, not on the field.
 
+**In the Console:** the stored value is the bare `sys_file` id the upload minted (an array of
+ids when `multiple` is set). The widget uploads through the Console's upload provider, and an
+upload that comes back with no id is refused with "did not complete", leaving the field
+unchanged. A pick larger than `maxSize` is refused before the upload starts. A file the reader
+may not open (its `sys_file` row is not readable) arrives as `{ id, metadataRefused: true }`
+and every file, image and avatar renderer draws a lock labelled "Restricted file" instead of a
+name or thumbnail; the download link still points at the id, and the download endpoint decides
+access. Records written before files were stored as references may still hold an inline
+`{ name, size, mime_type, url }` object, which is still rendered and never written.
+
 ### `image`
 Image file with optional validation.
 
@@ -375,12 +627,18 @@ Image file with optional validation.
 { name: 'photo', label: 'Photo', type: 'image' }
 ```
 
+Images show as a thumbnail grid in the form, with remove on hover, and as up to three
+thumbnails plus a count in a grid cell. `accept` defaults to `image/*`.
+
 ### `file`
 Generic file attachment.
 
 ```typescript
 { name: 'attachment', label: 'Attachment', type: 'file', multiple: true }
 ```
+
+Files show as a list with names and sizes in the form, and as the file's name (or a count) in a
+grid cell.
 
 ### `avatar`
 Profile image (typically square, small).
@@ -418,6 +676,13 @@ Calculated field using a CEL expression (see [Expressions](/docs/data-modeling/f
 ```typescript
 { name: 'total', label: 'Total', type: 'formula', expression: 'record.quantity * record.unit_price', returnType: 'number' }
 ```
+
+**In the Console:** the value is computed on the server and shown read-only; the widget never
+evaluates the expression. The form and the grid cell draw it by `returnType`: `number` is
+formatted as a number field formats it (to the field's `scale`), `boolean` as Yes / No in the
+UI language (a non-boolean reads empty), `date` as the date field's absolute face (not the
+grid's relative one), and `text` in a monospace font. With no `returnType`, a number is drawn
+as a number and anything else as text; nothing is inferred from the expression.
 
 #### `expression` on a stored field
 
@@ -479,6 +744,11 @@ out of the filter (a status change) keeps the parent current:
 }
 ```
 
+**In the Console:** the roll-up is shown read-only, drawn by the same rule in the form and the
+grid cell: a number is formatted as a number field formats it, keeping its own precision unless
+the field sets a `scale` (`15750.5` reads `15,750.5`; at `scale: 2`, `15,750.50`), and anything
+else is shown as text.
+
 ### `autonumber`
 Auto-incrementing number with format template.
 
@@ -504,6 +774,26 @@ identifier, but it is **not** a legally gapless document number. Treat that
 guarantee as a separate requirement to satisfy explicitly, not something
 `autonumber` already gives you.
 </Callout>
+
+**Format tokens.** `autonumberFormat` is literal text with `{...}` tokens, read by
+`parseAutonumberFormat` (`@objectstack/spec/data`); the query engine and the SQL drivers share
+one renderer, so these are the whole grammar:
+
+| Token | Renders |
+|:---|:---|
+| `{0}`, `{00}`, `{0000}`, … | The counter, zero-padded to at least that many digits (one per format) |
+| `{YYYY}`, `{YY}`, `{MM}`, `{DD}`, `{YYYYMMDD}` | The generation date in the business time zone |
+| `{field_name}` | The value of another field on the same record |
+
+Date tokens are exact and case-sensitive, and there is no quarter, week or time token: any other
+name in braces is a field token, so `{Q}` reads a field called `Q`. A referenced field must exist
+on the object and be set before the record is created. The counter is scoped to whatever renders
+before it, so `'ORD-{YYYY}-{0000}'` restarts each year and `'ORD-{0000}'` keeps one count. Omitted,
+the format is `{0000}`. The older `format` key is the same pattern and is still accepted, but
+`autonumberFormat` wins when both are set.
+
+**In the Console:** the number is assigned on insert, so a create form shows the field empty
+and the value appears once the saved record comes back.
 
 ---
 
@@ -568,6 +858,12 @@ Geographic coordinates. Stored as `{ lat, lng, altitude?, accuracy? }` (`lat` �
 { name: 'headquarters', label: 'Location', type: 'location' }
 ```
 
+**In the Console:** the user types a latitude-then-longitude pair (`37.7749, -122.4194`) and the
+value is displayed the same way; only the stored keys are `lat` / `lng`. There is no zoom key on
+the field. To plot the records of an object on a map, use an `object-map` view or page node whose
+`map` input names the field in `locationField` (with `titleField`, `zoom` and a fallback
+`center` used when no record matches).
+
 ### `address`
 Structured postal address. Stored as `{ street, city, state, postalCode, country, countryCode, formatted }` (all parts optional). No per-type config properties. The schema is strict (#13802): an undeclared key such as `postal_code` or `zipCode` is refused with a rename to `postalCode`, not silently dropped.
 
@@ -591,6 +887,23 @@ Raw JSON data.
 
 ```typescript
 { name: 'metadata', label: 'Metadata', type: 'json' }
+```
+
+**In the Console:** `json`, `composite` and `record` share a JSON text editor. A `json` value need
+not be an object: an array, number, string, boolean or `null` is shown as its JSON text and parsed
+back as itself. Text that does not parse is refused: it stays in the box marked "Invalid JSON",
+the value is not updated, and the form will not submit until it parses. An empty box sets `null`.
+The editor checks syntax only; a value's shape is declared with a
+[`json_schema` validation rule](/docs/data-modeling/validation#json-schema-validation) on the
+object, since the field has no `schema` key.
+
+In a grid a `json` value is single-line JSON truncated to the column, with the full text in the
+tooltip. A `composite` or `record` value is one line of labelled sub-values instead (labels are
+the humanized keys), on the record page as well:
+
+```text
+composite  { width: 10, height: 20 }                               →  Width 10 · Height 20
+record     { primary: { name: "A", score: 9 }, backup: { … } }      →  Primary (Name A · Score 9) · Backup (…)
 ```
 
 ### `color`
@@ -673,6 +986,10 @@ An earlier nested `vectorConfig` object was removed — the field builder no lon
 // embedding: Field.vector(1536, { label: 'Embedding' })
 ```
 
+**In the Console:** a vector is read-only. The form shows a preview of its first three values to
+four decimals plus the dimensionality (`[0.1234, -0.5678, 0.9012...] (768D)`); a grid cell shows
+`[Vector]`.
+
 ---
 
 ## Universal Field Properties
@@ -704,6 +1021,42 @@ These properties are available on **all** field types:
 | `requiredWhen` | `Expression` | — | Require field when predicate is true |
 
 ---
+
+## How the Console renders a field
+
+### Metadata keys and widget props
+
+The keys on this page are **metadata**: authored on the object, validated when it is
+published. A field widget also receives **props** at runtime, and those are never metadata:
+the live value and its `onChange`, the host's `className` and `disabled`, a data source for
+widgets that query records, the values of sibling fields for cascades, and the DOM and ARIA
+attributes the form control minted. Writing one of those on a field definition publishes a key
+the strict `FieldSchema` refuses. A custom widget receives the authored field under one carrier
+(`field`) beside the props; its type, `FieldWidgetComponentProps` in `@object-ui/fields`, is
+closed, so a misspelled prop is a compile error. Use `toDomProps(props)` to pass only what may
+reach a DOM element, never a bare `{...props}` spread. A field's `widget` key names a
+registered component to render it instead of the type's default.
+
+### Empty values
+
+An absent value (`null`, `undefined`, `''` or `[]`) draws one shared "No value" affordance, an
+em-dash with that accessible name, in every widget and grid cell. A value the wire contract
+does not allow for the type, such as `'true'` on a boolean, draws the same affordance: the
+renderer keeps no second reading of off-contract data.
+
+### What a number input silently rewrites
+
+`number`, `currency` and `percent` render a native `type="number"` input, so the browser decides
+what the box accepts, and only one of the two outcomes is announced:
+
+- **Announced.** Text the browser cannot read at all (`1e`, a lone `-`, a lone `.`) stays visible
+  while the input's value is empty. The field is marked `aria-invalid` and reads "Not saved: the
+  text in this box is not a number."
+- **Not announced.** Text the browser truncates as it arrives: pasting `1.2.3` stores `1.23`, and
+  `0x10` stores `10` (on a fractional percent field, `0.0123` and `0.1`). The extra characters
+  never reach the form, so no warning is possible.
+
+"No warning" therefore does not mean "the value is right".
 
 ## Choosing a Field Type
 

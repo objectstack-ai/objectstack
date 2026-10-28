@@ -13,6 +13,8 @@
     "forms",
     "doc-pages",
     "setup-app",
+    "console",
+    "studio",
     "components",
     "---Recipes---",
     "create-vs-edit-form",

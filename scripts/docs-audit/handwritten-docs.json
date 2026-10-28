@@ -215,6 +215,7 @@
     "content/docs/ui/actions.mdx",
     "content/docs/ui/apps.mdx",
     "content/docs/ui/audience-based-interfaces.mdx",
+    "content/docs/ui/console.mdx",
     "content/docs/ui/create-vs-edit-form.mdx",
     "content/docs/ui/dashboards.mdx",
     "content/docs/ui/doc-pages.mdx",
@@ -227,6 +228,7 @@
     "content/docs/ui/react-pages.mdx",
     "content/docs/ui/reports.mdx",
     "content/docs/ui/setup-app.mdx",
+    "content/docs/ui/studio.mdx",
     "content/docs/ui/translations.mdx",
     "content/docs/ui/views.mdx",
     "content/docs/upgrading.mdx"

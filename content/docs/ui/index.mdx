@@ -34,6 +34,7 @@ export const CrmApp = App.create({
 - **Branding** colours an app: `app.branding.primaryColor` / `accentColor` drive the console's `--primary` / `--accent` variables. (The standalone `themes` collection was retired in spec 17.1, ADR-0049 — it was parsed but never applied.)
 - **Public forms** expose a scoped slice of an object to external audiences through **anonymous entry routes** for public data collection ([Forms](/docs/ui/forms), [public data collection](/docs/ui/public-data-collection)).
 - The **Setup App** — the platform's built-in administration UI — is itself rendered from the same protocol ([Setup App](/docs/ui/setup-app)).
+- The **Console** renders all of it for end users, and **Studio** is where it is authored without code ([Console](/docs/ui/console), [Studio](/docs/ui/studio)).
 
 ## What's in this module
 
@@ -50,6 +51,8 @@ export const CrmApp = App.create({
   <Card href="/docs/ui/forms" title="Forms" description="Public and internal form patterns" />
   <Card href="/docs/ui/doc-pages" title="Doc Pages" description="Ship package documentation rendered in the console" />
   <Card href="/docs/ui/setup-app" title="Setup App" description="The built-in administration UI" />
+  <Card href="/docs/ui/console" title="Console" description="How the Console renders your metadata: record surfaces, per-user state, broken predicates" />
+  <Card href="/docs/ui/studio" title="Studio" description="Object design, the Flow Designer, drafts and metadata diagnostics" />
   <Card href="/docs/ui/components" title="Component Reference" description="Every component a page can place, with its inputs, generated from the component manifest" />
 </Cards>
 

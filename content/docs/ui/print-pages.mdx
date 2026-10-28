@@ -49,6 +49,41 @@ page that is not a record page of the object (`type: 'record'` with that
 `object`), or that declares no `print`, is refused rather than printed as some
 other page.
 
+## Print in the browser
+
+A user can print a print page without the service. When the record page bound to a
+record declares `print`, the record view shows a **Print** button that opens the browser's
+print preview of that page; saving a PDF there is the browser's own "Save as PDF". A print
+page that is not the object's default opens for the same record at
+`/apps/APP/OBJECT/record/ID/page/PAGE`, with the same button. PAGE must be a record page
+bound to OBJECT: any other name shows "Page not found", never the default page, so that URL
+never puts a different document on paper. (Printing from the browser, `print` is also
+accepted on a `home` or `app` page; the service prints record pages only.)
+
+The console mounts a print stylesheet for a page that declares `print`, and only for it.
+Every rule sits inside `@media print`, so the page on screen is unchanged and is itself the
+preview. Only the print page reaches paper: the console chrome and the record view's own
+panels are hidden, and the page runs onto as many sheets as it needs.
+
+| Key | On paper |
+|:---|:---|
+| `paperSize` (`A4`, `A5`, `Letter`, `Legal`), `orientation` | `@page { size }`; A4 portrait when omitted |
+| `margins` | The `@page` margin, one side per key, in millimetres; a side left out keeps the console default |
+| `pageNumbers` | "page / pages" in the bottom-right margin box |
+| `repeatHeader`, `repeatFooter` | The page's `header` / `footer` region repeated on every sheet |
+| `repeatTableHeaders` | A table's column headings repeated on every sheet it runs onto; on when omitted |
+| `avoidBreakInside` | `break-inside: avoid` on each block of a region |
+
+Blocks print whole:
+
+- `record:line_items` loads at most its row cap (`limit`, 500 when unset). On a print page,
+  when the child object has more lines than that, the block draws the cap's lines and a
+  note naming the cap and, when the server reports one, the total, so a printed copy never
+  drops lines silently.
+- A collapsible `record:details` section draws open, and a section prints every declared
+  field, empty ones included, with no "Show N empty fields" row. A section's `hideEmpty`
+  still hides what it hides.
+
 ## Compose the print service
 
 The service is composed explicitly; a deployment that does not list it never
