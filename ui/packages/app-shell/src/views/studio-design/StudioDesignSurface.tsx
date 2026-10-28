@@ -6327,6 +6327,11 @@ export function DataPillar({
     </>
   ) : undefined;
 
+  const objectNeedle = query.trim().toLowerCase();
+  const shownObjects = objects.filter(
+    (o) => !objectNeedle || o.label.toLowerCase().includes(objectNeedle) || o.name.toLowerCase().includes(objectNeedle),
+  );
+
   return (
     <div ref={pillarRef} className="flex h-full flex-col">
       {objConflictDialog}
@@ -6345,7 +6350,12 @@ export function DataPillar({
           onAdd={readOnly ? undefined : openCreateObject}
           addLabel={t('engine.studio.data.newObject', locale)}
           addTestId="studio-rail-add"
-          search={{ value: query, onChange: setQuery, placeholder: t('engine.studio.data.searchObjects', locale) }}
+          search={{
+            value: query,
+            onChange: setQuery,
+            placeholder: t('engine.studio.data.searchObjects', locale),
+            matchCount: shownObjects.length,
+          }}
           isMobile={isMobile}
           open={railOpen}
         >
@@ -6354,32 +6364,25 @@ export function DataPillar({
               {error ? t('engine.studio.loadFailed', locale) : objectsLoaded ? t('engine.studio.data.noObjects', locale) : t('engine.studio.loading', locale)}
             </p>
           )}
-          {objects
-            .filter(
-              (o) =>
-                !query.trim() ||
-                o.label.toLowerCase().includes(query.trim().toLowerCase()) ||
-                o.name.toLowerCase().includes(query.trim().toLowerCase()),
-            )
-            .map((o) => {
-              const Icon = getIcon(o.icon);
-              return (
-                <StudioRailRow
-                  key={o.name}
-                  active={current?.name === o.name}
-                  onClick={() => {
-                    // objectstack#26705 — another object's load replaces the
-                    // buffer the held edit lives in; the open one keeps it.
-                    if (current?.name !== o.name && !confirmDropUnsavedWork(objHeld !== null, locale)) return;
-                    setCurrent(o);
-                    if (isMobile) setRailOpen(false);
-                  }}
-                  icon={<Icon className="h-4 w-4 shrink-0" />}
-                >
-                  {o.label}
-                </StudioRailRow>
-              );
-            })}
+          {shownObjects.map((o) => {
+            const Icon = getIcon(o.icon);
+            return (
+              <StudioRailRow
+                key={o.name}
+                active={current?.name === o.name}
+                onClick={() => {
+                  // objectstack#26705 — another object's load replaces the
+                  // buffer the held edit lives in; the open one keeps it.
+                  if (current?.name !== o.name && !confirmDropUnsavedWork(objHeld !== null, locale)) return;
+                  setCurrent(o);
+                  if (isMobile) setRailOpen(false);
+                }}
+                icon={<Icon className="h-4 w-4 shrink-0" />}
+              >
+                {o.label}
+              </StudioRailRow>
+            );
+          })}
         </StudioRail>
 
         <div className={cn('flex min-w-0 flex-1 flex-col overflow-hidden', DATA_CONTENT_CONTAINER)} data-testid="data-content-column">
@@ -7978,6 +7981,7 @@ export function AutomationsPillar({
             onChange: setRailQuery,
             placeholder: t('engine.studio.designer.search', locale),
             testId: 'auto-rail-search',
+            matchCount: shownFlows.length,
           }}
           footer={railLegend}
           isMobile={isMobile}
@@ -8039,11 +8043,6 @@ export function AutomationsPillar({
               </StudioRailGroup>
             );
           })}
-          {flows.length > 0 && shownFlows.length === 0 && (
-            <p className="px-2 py-3 text-[11px] text-muted-foreground">
-              {tFormat('engine.list.emptyQuery', locale, { query: railQuery.trim() })}
-            </p>
-          )}
           {flows.length === 0 && !creating && (error || !listed || openCreateFlow) && (
             <p className="px-2 py-3 text-[11px] text-muted-foreground">
               {error
@@ -8896,7 +8895,12 @@ export function AccessPillar({
           onAdd={openCreateSet}
           addLabel={t('engine.studio.access.new', locale)}
           addTestId="studio-rail-add"
-          search={{ value: query, onChange: setQuery, placeholder: t('engine.studio.access.search', locale) }}
+          search={{
+            value: query,
+            onChange: setQuery,
+            placeholder: t('engine.studio.access.search', locale),
+            matchCount: filtered.length,
+          }}
           pinned={
             // Pinned sibling surface: the package-wide Record Sharing Baseline
             // (OWD) overview (objectui#2505). Same package-author ownership as
