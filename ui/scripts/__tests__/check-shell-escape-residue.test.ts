@@ -705,8 +705,9 @@ describe('wiring — the gate is reachable by name, and classified', () => {
   });
 
   it('is classified as a required context — the merge_group floor DERIVES from that list', () => {
-    // objectui#6160 / PR #6187: `merge-queue-reporting.test.ts` reads
-    // `REQUIRED_CONTEXTS` to decide which workflows must subscribe the queue,
+    // objectui#6160 / PR #6187: `merge-queue-reporting.test.ts`, retired by
+    // objectstack#26944, read `REQUIRED_CONTEXTS` to decide which workflows must
+    // subscribe the queue,
     // and `dependabot-merge-gate.mjs` would let a Dependabot merge past an
     // unclassified blocking check (objectui#6135).
     // Since objectui#12214 the check reports as a step of the ONE `Repo Gates`

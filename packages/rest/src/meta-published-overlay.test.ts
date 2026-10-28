@@ -47,6 +47,16 @@ import { MetadataManager } from '@objectstack/metadata';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { RestServer } from './rest-server.js';
 
+/**
+ * [#26708] The packages this file's saves name, installed: a save naming a
+ * package no installed package has is refused (`WRITABLE_PACKAGE_REQUIRED`)
+ * before any gate this file pins is reached. Each answers a manifest that
+ * declares no dependencies, as an authored base does.
+ */
+const INSTALLED_PACKAGES: ReadonlySet<string> = new Set(['app.projects']);
+const installedPackage = (id: string) => (INSTALLED_PACKAGES.has(id) ? { manifest: { id } } : undefined);
+
+
 const PUBLISHED = '/api/v1/meta/:type/:name/published';
 
 interface Row {
@@ -144,7 +154,7 @@ function makeStubEngine(opts: { failSysMetadataReads?: Error } = {}) {
             registerItem: () => {},
             registerObject: () => {},
             getItem: () => undefined,
-            getPackage: () => undefined,
+            getPackage: installedPackage,
         },
     };
     return { engine, rows };
@@ -510,7 +520,7 @@ describe('[#21002] the published door follows the layered read for a shipped flo
         engine.registry = {
             registerItem: () => {},
             registerObject: () => {},
-            getPackage: () => undefined,
+            getPackage: installedPackage,
             getItem: (type: string, name: string) =>
                 (type === 'flow' || type === 'flows') && name === SHIPPED ? loaderEntry : undefined,
         };
@@ -639,7 +649,7 @@ describe('[#21986] the published door serves a code-defined datasource\'s code d
         engine.registry = {
             registerItem: () => {},
             registerObject: () => {},
-            getPackage: () => undefined,
+            getPackage: installedPackage,
             getItem: () => undefined,
             getAllPackages: () => [{
                 manifest: {

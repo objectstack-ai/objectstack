@@ -32,6 +32,7 @@ import { ActionResultDialog, type ResultDialogState } from './ActionResultDialog
 import { FlowRunner, type ScreenFlowState, type ScreenSpec } from './FlowRunner.js';
 import { FlowRefusalNotice, type FlowRefusalState } from './FlowRefusalNotice.js';
 import { RelatedRecordActionsBridge } from './RelatedRecordActionsBridge.js';
+import { RecordDrawerReturnLink, RecordPageDrawerHost } from './recordDrawerStack.js';
 import { withPageTabsUrlSync } from '../utils/pageTabsUrlSync.js';
 import { RECORD_DETAIL_TAB_PARAM, RECORD_TRAIL_PARAM, decodeRecordTrail, buildRecordTrailHref } from '../urlParams.js';
 import { resolveActionParams } from '@object-ui/fields';
@@ -3758,7 +3759,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     </>
   );
 
-  return (
+  const pageTree = (
     <div ref={setPageRootEl} className="h-full bg-background overflow-hidden flex flex-col relative" data-record-page-root="">
       {/* On a print page the shared chrome joins the print chrome row below,
           so the row's buttons are not drawn under it. */}
@@ -3888,14 +3889,25 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         >
           <div className="flex-1 overflow-hidden flex flex-row">
             <div className="flex-1 overflow-auto p-3 sm:p-4 lg:p-6 scroll-pb-48">
-              {originFrom?.pathname && originFrom?.label && (
-                <Link
-                  to={originFrom.pathname}
-                  className="inline-flex items-center gap-1 mb-3 text-sm text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                  <span>{originFrom.label}</span>
-                </Link>
+              {/* The way back: the origin link, and on a page a drawer's ⤢
+                  opened, the way back into that drawer (objectstack#26679).
+                  Neither is drawn inside a drawer — the drawer's own bar is
+                  its way back, and the page's history state is not its. */}
+              {!embedded && (
+                <div className="flex items-center justify-between gap-3 empty:hidden">
+                  {originFrom?.pathname && originFrom?.label && (
+                    <Link
+                      to={originFrom.pathname}
+                      className="inline-flex items-center gap-1 mb-3 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                      <span>{originFrom.label}</span>
+                    </Link>
+                  )}
+                  <div className="mb-3 ml-auto empty:hidden">
+                    <RecordDrawerReturnLink />
+                  </div>
+                </div>
               )}
               {/* objectui#12906 — the print page's screen-only chrome. A page
                   that declares `print` holds only the printable component
@@ -4138,5 +4150,30 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         onClose={() => setFlowRefusal(s => ({ ...s, open: false }))}
       />
     </div>
+  );
+  // A drawer draws this view embedded and is its own host. A page is the host
+  // of the drawer its related rows and lookups open over it
+  // (objectstack#26679): the same in-place stack, drawn by this same view.
+  if (embedded) return pageTree;
+  return (
+    <RecordPageDrawerHost
+      appName={appName}
+      objects={objects}
+      pageObjectName={objectName}
+      pageRecordId={pureRecordId ?? undefined}
+      pageTitle={recordTitle}
+      renderRecord={(level) => (
+        <RecordDetailView
+          dataSource={dataSource}
+          objects={objects}
+          onEdit={onEdit}
+          objectNameOverride={level.objectName}
+          recordIdOverride={level.recordId}
+          embedded
+        />
+      )}
+    >
+      {pageTree}
+    </RecordPageDrawerHost>
   );
 }

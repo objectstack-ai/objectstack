@@ -103,6 +103,14 @@ async function bootStore() {
     engine.registry.registerObject(SysMetadataHistoryObject as any, TEST_PACKAGE_ID);
     engine.registry.registerObject(SysMetadataAuditObject as any, TEST_PACKAGE_ID);
     await engine.syncSchemas();
+    // [#26708] Both packages the seeds name are installed, as authored bases
+    // that bind this file's `task` object: a save naming a package no installed
+    // package has is refused before it is written.
+    for (const id of [PROBE_PKG, OTHER_PKG]) {
+        engine.registry.installPackage({
+            id, name: id, version: '1.0.0', dependencies: { [TEST_PACKAGE_ID]: '*' },
+        } as any, 'authored');
+    }
     const protocol = new ObjectStackProtocolImplementation(engine as any);
     const seed = (type: string, name: string, item: unknown, packageId?: string) =>
         protocol.saveMetaItem({ type, name, item, ...(packageId ? { packageId } : {}) } as any);

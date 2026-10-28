@@ -144,8 +144,10 @@ describe('object-calendar — an AUTHORED `locale` reaches the header popover (o
       type: 'plugin-calendar:object-calendar',
       id: 'n',
       objectName: 'accounts',
-      startDateField: 'start_at',
-      titleField: 'name',
+      calendar: {
+        startDateField: 'start_at',
+        titleField: 'name',
+      },
       data: [{ id: 'r1', name: 'Standup', start_at: new Date(2020, 2, 10, 10).toISOString() }],
       ...extra,
     } as never

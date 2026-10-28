@@ -184,6 +184,10 @@ describe('#23646 — an orphan adoption moves an adopted object\'s registry owne
         engine.registerDriver(makeMemoryDriver(stores, drops), true);
         await kernel.use(new ObjectQLPlugin({ ql: engine }));
         await kernel.bootstrap();
+        // [#26708] The workspaces the saves below name are installed, as
+        // authored bases: a save naming a package no installed package has
+        // is refused before it is written.
+        for (const id of [Q, R]) engine.registry.installPackage({ id, name: id, version: '1.0.0' } as any, 'authored');
         return { kernel, engine, protocol: kernel.getService('protocol') };
     }
 

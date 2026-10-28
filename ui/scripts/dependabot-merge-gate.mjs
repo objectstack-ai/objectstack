@@ -52,8 +52,8 @@
  *
  * The gate does NOT ask GitHub "are the required checks green?" — that question
  * is answered by the branch-protection required set, a repository-SETTINGS
- * surface this repository cannot WRITE (`content/docs/guide/ci-cd-pipeline.md`,
- * "Merge Queue", step 3): enrolling, removing or renaming a context there is a
+ * surface this repository cannot WRITE (objectui's CI guide page said so in its
+ * "Merge Queue" step 3 until objectstack#26944 deleted the page): enrolling, removing or renaming a context there is a
  * maintainer action, and `GET /repos/{owner}/{repo}/branches/{branch}/protection`
  * answers `403 Resource not accessible by integration` to the token a job here
  * runs under.
@@ -159,8 +159,8 @@ import { isEntrypoint } from './invoked-as.mjs';
  * draft for the maintainer is the healthy case, and a check red on the healthy
  * case is a permanently red check (objectui#6596). Its refusal lives on the
  * `merge_group` leg. Listing it here is still correct and still load-bearing:
- * this list is what `merge-queue-reporting.test.ts` derives the `merge_group`
- * subscription floor from, and a guard whose whole point is the queue build must
+ * this list is what `merge-queue-reporting.test.ts` derived the `merge_group`
+ * subscription floor from (retired by objectstack#26944), and a guard whose whole point is the queue build must
  * be inside that floor. What it costs a Dependabot bump depends on the
  * ecosystem. An `npm` bump touches no governed path, so the check reports CLEAR
  * without making a single API call. A `github-actions` bump edits
@@ -302,7 +302,7 @@ export const NOT_A_GATE = Object.freeze({
   'Test (coverage shard 7/8)': COVERAGE_SHARD_NOT_A_GATE,
   'Test (coverage shard 8/8)': COVERAGE_SHARD_NOT_A_GATE,
   'Live E2E (informational)':
-    'live-e2e.yml is declared INFORMATIONAL and NON-REQUIRED in its own header, and ci-cd-pipeline.md says in as many words not to add it to required checks. It carries no `continue-on-error` since objectui#8084 — that flag left this check run red anyway and only inverted the workflow-run conclusion — so a red here is a real red, ignored because the lane is advisory and never because the check could not fail.',
+    'live-e2e.yml is declared INFORMATIONAL and NON-REQUIRED in its own header, which is not to be added to required checks. It carries no `continue-on-error` since objectui#8084 — that flag left this check run red anyway and only inverted the workflow-run conclusion — so a red here is a real red, ignored because the lane is advisory and never because the check could not fail.',
   label:
     'labeler.yml applies labels. It is a mutation, not a verdict — nothing about the change is judged by it.',
   'Changeset Overwrite Report':

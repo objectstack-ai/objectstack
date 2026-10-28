@@ -949,11 +949,16 @@ function ApprovalsQueue() {
     return Array.from(set).sort();
   }, [rows]);
 
-  /** Unique object names present in current rows (for filter dropdown). */
+  /**
+   * Unique objects present in current rows (for filter dropdown): filtered by
+   * machine name, shown by the label the row serves, which the approvals door
+   * picks in the reader's language (objectstack#26883).
+   */
   const objectOptions = useMemo(() => {
-    const set = new Set<string>();
-    for (const r of rows) if (r.object_name) set.add(r.object_name);
-    return Array.from(set).sort();
+    const byName = new Map<string, string>();
+    for (const r of rows) if (r.object_name && !byName.has(r.object_name)) byName.set(r.object_name, objectDisplay(r));
+    return Array.from(byName, ([value, label]) => ({ value, label }))
+      .sort((a, b) => a.label.localeCompare(b.label));
   }, [rows]);
 
   /** Client-side filtered + sorted rows shown in table. */
@@ -969,7 +974,7 @@ function ApprovalsQueue() {
       if (tab !== 'pending') return true;
       if (!q) return true;
       const hay = [
-        r.process_name, r.process_label, r.step_label, r.object_name,
+        r.process_name, r.process_label, r.step_label, r.object_name, r.object_label,
         r.record_id, r.record_title, r.submitter_id, r.submitter_name,
         ...(r.pending_approvers || []),
       ].filter(Boolean).join(' ').toLowerCase();
@@ -1301,7 +1306,7 @@ function ApprovalsQueue() {
                   <SelectContent>
                     <SelectItem value="all">{tr('allObjects', 'All objects')}</SelectItem>
                     {objectOptions.map((o) => (
-                      <SelectItem key={o} value={o}>{o}</SelectItem>
+                      <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>

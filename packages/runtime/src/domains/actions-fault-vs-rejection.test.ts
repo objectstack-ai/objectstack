@@ -178,10 +178,10 @@ describe('an unexpected FAULT is a 500', () => {
         expect(response.body.error.message).toBe('Internal server error');
     });
 
-    it("the sandbox's OWN internal errors — a timeout, a capability denial", async () => {
+    it("the sandbox's OWN internal errors — a timeout, a marshalling failure", async () => {
         // A `SandboxError` with no `innerMessage` is the sandbox failing, not
-        // user code rejecting: a timeout, a denied capability, a marshalling
-        // failure. Precisely the class an operator wants to alert on, and
+        // user code rejecting: a timeout, a marshalling failure. (A denied
+        // capability was one until #26965; it is a coded 403 refusal now.) Precisely the class an operator wants to alert on, and
         // precisely what a 200 made invisible.
         const response = await invoke(new SandboxError('action timed out after 5000ms'));
 

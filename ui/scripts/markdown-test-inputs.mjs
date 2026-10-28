@@ -726,7 +726,7 @@ export const ADJUDICATED = new Map([
     'scripts/__tests__/check-control-bytes.test.ts',
     {
       reads: [],
-      notRead: ['content/docs/guide/ci-cd-pipeline.md', 'packages/core/README.md'],
+      notRead: ['content/docs/guide/deployment.md', 'packages/core/README.md'],
     },
   ],
   [
@@ -752,18 +752,6 @@ export const ADJUDICATED = new Map([
     },
   ],
   [
-    'scripts/__tests__/check-doc-example-shared-reader.test.ts',
-    {
-      reads: ['content/docs/guide/ci-cd-pipeline.md'],
-    },
-  ],
-  [
-    'scripts/__tests__/check-doc-example-types.test.ts',
-    {
-      reads: ['content/docs/guide/ci-cd-pipeline.md'],
-    },
-  ],
-  [
     'scripts/__tests__/check-doc-expression-carriage.test.ts',
     {
       // `packages/**` for the same reason as the entry above: this census takes
@@ -783,22 +771,6 @@ export const ADJUDICATED = new Map([
       notRead: ['packages/core/README.md'],
     },
   ],
-  [
-    'scripts/__tests__/check-doc-json-fences.test.ts',
-    {
-      // objectui#5250: the agreement test walks the JSON-fence gate's own scan
-      // surface (the CI pipeline guide it also reads by name is inside it).
-      // objectui#12131 widened that surface to the published READMEs: the root
-      // `README.md` and every `packages/NAME/README.md`, a leg taken by IMPORT
-      // from `check-doc-component-types.mjs`, hence `packages/**` as in the
-      // carriage census's entry above. objectui#12204 added the gate's fourth
-      // leg, the published skill bundle -- every `.md` under `skills/objectui/`,
-      // its anchor `rules/protocol.md` -- so the walk reads that tree too; the
-      // two bundle pages the scanner resolves by name (`SKILL.md`, the anchor)
-      // are fixture keys of the leg's order and anchor pins, inside the tree.
-      reads: ['content/docs/**', 'packages/**', 'skills/objectui/**'],
-    },
-  ],
   // `./*` rather than the eight root documents it used to list, and the
   // distinction is the whole of objectui#9142. This test does not read a list
   // of root documents -- it runs `git ls-files -- '*.md'`, keeps the paths with
@@ -811,12 +783,6 @@ export const ADJUDICATED = new Map([
     'scripts/__tests__/check-doc-links.test.ts',
     {
       reads: ['./*', 'apps/**', 'content/docs/**', 'docs/adr/**', 'docs/audits/**', 'examples/**', 'packages/**'],
-    },
-  ],
-  [
-    'scripts/__tests__/check-doc-snippet-emitted-census.test.ts',
-    {
-      reads: ['apps/console/docs/UI_IMPROVEMENT_PROPOSAL.md', 'apps/console/docs/deployment.md', 'apps/console/docs/error-tracking.md', 'content/docs/**', 'docs/adr/**', 'docs/audits/**', 'packages/**'],
     },
   ],
   [
@@ -833,7 +799,7 @@ export const ADJUDICATED = new Map([
     'scripts/__tests__/check-docs-route-eager-closure.test.ts',
     {
       reads: [],
-      notRead: ['content/docs/guide/ci-cd-pipeline.md'],
+      notRead: ['content/docs/guide/deployment.md'],
     },
   ],
   // Reads no markdown: the root-document literals are fixture INPUTS to a pure path classifier.
@@ -842,18 +808,6 @@ export const ADJUDICATED = new Map([
     {
       reads: [],
       notRead: ['AGENTS.md', 'CLAUDE.md'],
-    },
-  ],
-  [
-    'scripts/__tests__/check-handler-key-read-sites.test.ts',
-    {
-      reads: ['content/docs/guide/ci-cd-pipeline.md'],
-    },
-  ],
-  [
-    'scripts/__tests__/check-new-cross-file-line-citations.test.ts',
-    {
-      reads: ['content/docs/guide/ci-cd-pipeline.md'],
     },
   ],
   // Reads no markdown: the three documents below are ARGUMENTS to a path
@@ -884,32 +838,10 @@ export const ADJUDICATED = new Map([
       reads: ['packages/**'],
     },
   ],
-  // objectui#9502 widened this suite to read prose: the repaired carriers must
-  // point at the gate instead of restating the ruleset's membership, and the
-  // untouched `AGENTS.md` carrier is the positive control that proves the
-  // detector still fires.
-  [
-    'scripts/__tests__/check-required-check-set.test.ts',
-    {
-      reads: ['AGENTS.md', 'content/docs/guide/ci-cd-pipeline.md'],
-    },
-  ],
   [
     'scripts/__tests__/check-shell-escape-residue.test.ts',
     {
       reads: ['.claude/skills/**', 'AGENTS.md', 'CLAUDE.md', 'content/docs/**', 'skills/objectui/**'],
-    },
-  ],
-  [
-    'scripts/__tests__/check-skill-eval-tokens.test.ts',
-    {
-      reads: ['content/docs/guide/ci-cd-pipeline.md', 'skills/objectui/**'],
-    },
-  ],
-  [
-    'scripts/__tests__/check-skill-examples.test.ts',
-    {
-      reads: ['.claude/skills/**', 'content/docs/guide/ci-cd-pipeline.md', 'skills/objectui/**'],
     },
   ],
   [
@@ -957,12 +889,6 @@ export const ADJUDICATED = new Map([
       walker: 'not-markdown: package `src/` directories',
     },
   ],
-  [
-    'scripts/__tests__/lint-workflow.test.ts',
-    {
-      reads: ['content/docs/guide/ci-cd-pipeline.md'],
-    },
-  ],
   // objectui#9194. Names one page -- the one that legitimately teaches nested
   // fences -- to pin that a block quoted inside a longer run stays that run's
   // body. The whole scan surface is reached too, but through the two gates' own
@@ -983,12 +909,6 @@ export const ADJUDICATED = new Map([
     {
       reads: [],
       notRead: ['AGENTS.md', 'packages/app-shell/README.md', 'packages/plugin-dashboard/README.md'],
-    },
-  ],
-  [
-    'scripts/__tests__/merge-queue-reporting.test.ts',
-    {
-      reads: ['content/docs/guide/ci-cd-pipeline.md'],
     },
   ],
   // objectstack#26080 folded `QUICK_REFERENCE.md` into the repository root's

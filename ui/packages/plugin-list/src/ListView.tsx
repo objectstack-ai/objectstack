@@ -15,7 +15,7 @@ import { VALUELESS_FILTER_BUILDER_OPERATORS, isFilterValueComplete } from '@obje
 import { ViewSwitcherDropdown } from './ViewSwitcher';
 import { ListEmptyState, hasDeclaredFilter, filterNamesCurrentUser } from './ListEmptyState';
 import { ListViewCompactHeader, ListViewCompactRows, ListViewCappedRows, CAPPED_LIST_DEFAULT_LIMIT } from './ListViewCompact';
-import { ViewSettingsPopover } from './components/ViewSettingsPopover';
+import { ViewSettingsPopover, type ViewSettingsRecordOpen } from './components/ViewSettingsPopover';
 import { UserFilters } from './UserFilters';
 import {
   calendarWindowCovers,
@@ -414,6 +414,17 @@ export interface ListViewProps {
    */
   rowAdornment?: (record: Record<string, unknown>) => React.ReactNode;
   /**
+   * A host-drawn node beside each row's record LINK in the grid
+   * (objectstack#26681), handed to `ObjectGrid`'s `recordLinkAdornment`: after
+   * the link cell the row's record opens from, never inside it. Called with
+   * the row record; `null` draws nothing. The console's object list passes an
+   * "open as full page" arrow for a row that opens the drawer.
+   *
+   * A HOST prop, never a schema key, for the reason `rowAdornment` is one.
+   * Only the grid is handed it. Absent ⇒ every row is exactly what it was.
+   */
+  recordLinkAdornment?: (record: Record<string, unknown>) => React.ReactNode;
+  /**
    * The VIEW'S OWN hidden fields and row height, for a host that lays the
    * user's own preference over them in `schema` (objectui#12949). The Display
    * control's trigger count and its "Reset to view default" compare these two
@@ -466,6 +477,29 @@ export interface ListViewProps {
    * that draws the rows it fetched answers; other kinds never call it.
    */
   onTotalChange?: (total: number) => void;
+  /**
+   * Called with the rows the list shows, in the order it shows them, each
+   * time that set changes once a load settles — another page, sort, filter or
+   * search (objectstack#26679). The console's object page hands it to its
+   * record drawer, whose `↑` `↓` at the root step through these rows. Answered
+   * where `onTotalChange` is: a paged grid that draws the rows it fetched; any
+   * other kind (a board, a calendar, a grouped grid) has no single row order
+   * and answers with no rows, so a host never steps through a stale set.
+   *
+   * A HOST prop, never a schema key: the rows are the list's runtime state.
+   */
+  onRowsChange?: (rows: ReadonlyArray<Record<string, unknown>>) => void;
+  /**
+   * The Display control's Open records section (objectstack#26681): how a row
+   * opens its record — the mode the host resolved for this object and view,
+   * the reader's own drawer | split preference and its setter. See
+   * `ViewSettingsRecordOpen`.
+   *
+   * A HOST prop, never a schema key: the preference is the reader's, kept by
+   * the host, and the setter is a function value no document can carry.
+   * Absent ⇒ the panel draws no such section, exactly as before.
+   */
+  recordOpen?: ViewSettingsRecordOpen;
 }
 
 // Helper to convert FilterBuilder group to ObjectStack AST.
@@ -1091,6 +1125,12 @@ export const LIST_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'list.layout': 'Layout',
   'list.rowNumbers': 'Row numbers',
   'list.resetToViewDefault': 'Reset to view default',
+  // The Display control's Open records section (objectstack#26681).
+  'list.recordOpen': 'Open records',
+  'list.recordOpenDrawer': 'Drawer',
+  'list.recordOpenSplit': 'Split',
+  'list.recordOpenNote': 'Your own preference, not part of the object’s declaration. Both expand to the full page.',
+  'list.recordOpenDeclaredPage': 'This object is declared to open as a full page',
   // Heading of the record-detail overlay this view opens when a child view's
   // row is clicked (objectui#3426). Borrowed from the `detail.*` namespace
   // rather than minted as `list.recordDetail`: `NavigationOverlay` already
@@ -1511,10 +1551,13 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   toolbarLeading,
   defaultRowNumbers = true,
   rowAdornment,
+  recordLinkAdornment,
   compact = false,
   capped = false,
   onTotalChange,
+  onRowsChange,
   viewDefaults,
+  recordOpen,
   ...props
 }: ListViewProps & { [key: string]: any }, ref) => {
   // The switcher can be enabled either by the host component (prop) or by
@@ -5442,6 +5485,25 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   React.useEffect(() => {
     if (settledTotal != null) onTotalChangeRef.current?.(settledTotal);
   }, [settledTotal]);
+  // objectstack#26679 — the rows on show, for a host that steps through them.
+  // Keyed on the ids in their order (never on the identity of `data` or of
+  // the callback, AGENTS.md #10), so an equal refetch reports nothing new; a
+  // load in flight keeps the last answer, as the count does.
+  const onRowsChangeRef = React.useRef(onRowsChange);
+  React.useEffect(() => {
+    onRowsChangeRef.current = onRowsChange;
+  });
+  const rowSequenceShown = paginate && surfaceDrawsFetchedRows;
+  const shownRowsSettled = rowSequenceShown ? !loading && !loadError : true;
+  const shownRowsKey = rowSequenceShown
+    ? JSON.stringify(data.map((row: any) => row?.id ?? row?._id ?? null))
+    : '[]';
+  const shownRowsRef = React.useRef(data);
+  shownRowsRef.current = rowSequenceShown ? data : [];
+  React.useEffect(() => {
+    if (!shownRowsSettled) return;
+    onRowsChangeRef.current?.(shownRowsRef.current);
+  }, [shownRowsKey, shownRowsSettled]);
 
   return (
     <div
@@ -5979,6 +6041,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                   }}
                 />
               ) : undefined}
+              recordOpen={recordOpen}
               showGroup={toolbarFlags.showGroup}
               groupingConfig={groupingConfig}
               setGroupingConfig={changeGrouping}
@@ -6455,6 +6518,11 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               // objectui#13330 — the host's node beside each row's title, on
               // the grid's host channel (a React prop, never a node key).
               ? { rowAdornment }
+              : {})}
+            {...(viewComponentSchema.type === 'object-grid' && recordLinkAdornment
+              // objectstack#26681 — the host's node beside each row's record
+              // link, on the grid's host channel (a React prop, never a node key).
+              ? { recordLinkAdornment }
               : {})}
             // [objectui#12081] A windowed calendar keeps drawing while the
             // next window loads (the refresh bar above says so), and shows its

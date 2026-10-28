@@ -369,6 +369,12 @@ export class QuickJSScriptRunner implements ScriptRunner {
                   ? e['${SANDBOX_REFUSAL_PROP}']
                   : undefined;
               } catch (_) { globalThis.__errorRefusal = undefined; }
+              try {
+                globalThis.__errorFromHost = (e && typeof e['${SANDBOX_HOST_ERROR_OF_PROP}'] === 'string'
+                  && e['${SANDBOX_HOST_ERROR_OF_PROP}'] === JSON.stringify([e.message, typeof e.code === 'string' ? e.code : null]))
+                  ? true
+                  : undefined;
+              } catch (_) { globalThis.__errorFromHost = undefined; }
             }`;
       // A job body takes the hook's `(ctx)` wrapper (#21489): it has no input to
       // hand in as a first parameter, and `JobSchema.body` documents `ctx` as
@@ -382,12 +388,12 @@ export class QuickJSScriptRunner implements ScriptRunner {
       // the wrapper's second line.
       const SETTLE = '((p, onOk, onErr) => (p.then(onOk, onErr), p))';
       const wrapped = args.origin.kind !== 'action'
-        ? `globalThis.__result = undefined; globalThis.__error = undefined; globalThis.__errorInfo = undefined; globalThis.__errorRefusal = undefined;
+        ? `globalThis.__result = undefined; globalThis.__error = undefined; globalThis.__errorInfo = undefined; globalThis.__errorRefusal = undefined; globalThis.__errorFromHost = undefined;
             ${SETTLE}((async (ctx) => { ${args.source} })(globalThis.__ctx),
               function(v){ globalThis.__result = JSON.stringify(v === undefined ? null : v); },
               ${REJECT_HANDLER}
             );`
-        : `globalThis.__result = undefined; globalThis.__error = undefined; globalThis.__errorInfo = undefined; globalThis.__errorRefusal = undefined;
+        : `globalThis.__result = undefined; globalThis.__error = undefined; globalThis.__errorInfo = undefined; globalThis.__errorRefusal = undefined; globalThis.__errorFromHost = undefined;
             ${SETTLE}((async (input, ctx) => { ${args.source} })(globalThis.__input, globalThis.__ctx),
               function(v){ globalThis.__result = JSON.stringify(v === undefined ? null : v); },
               ${REJECT_HANDLER}
@@ -475,9 +481,9 @@ export class QuickJSScriptRunner implements ScriptRunner {
           const budget = budgetError(pumps);
           if (budget) throw budget;
           const info = readErrorInfo(vm);
-          // [#4431] A SANDBOX fault that crossed `__error` — a capability
-          // denial thrown synchronously inside a host function, an unavailable
-          // `ctx.api`, a marshalling failure. It is not an outcome the body
+          // [#4431] A SANDBOX fault that crossed `__error` — an unavailable
+          // `ctx.api`, a marshalling failure, any other host-side fault thrown
+          // synchronously inside a host function. It is not an outcome the body
           // chose to report, so it gets neither the `<kind> '<name>' threw:`
           // wrapper (nothing threw — the sandbox refused) nor an
           // `innerMessage` (there is no business message; `SandboxError`'s own
@@ -486,9 +492,10 @@ export class QuickJSScriptRunner implements ScriptRunner {
           // as a CRASH and answers 500 through `errorFromThrown`, instead of
           // the 400 a denial used to get — and the client sees the capability
           // text without the `SandboxError: ` debug prefix.
-          // [#26903] A HOOK body's capability denial does not arrive here: it
-          // crosses as a coded refusal (`throwCapabilityDenial`) and takes the
-          // relay below like a body's own coded throw.
+          // [#26903/#26965] A capability denial does not arrive here, whatever
+          // the body's origin: it crosses as a coded refusal
+          // (`throwCapabilityDenial`) and takes the relay below like a body's
+          // own coded throw.
           if (info?.sandboxFault) {
             throw new SandboxError(withoutSandboxErrorPrefix(String(errStr)));
           }
@@ -522,6 +529,10 @@ export class QuickJSScriptRunner implements ScriptRunner {
             info,
           );
           if (relayed !== undefined) relayedRefusals.add(thrown);
+          // [#26170] …and an error a HOST call raised that the body let leave
+          // unchanged is remembered as such, so a hook's refusal catalogue
+          // answers only the body's own throws (`isHostRelayedSandboxError`).
+          if (readErrorFromHost(vm)) hostRelayedErrors.add(thrown);
           throw thrown;
         }
 
@@ -1502,6 +1513,13 @@ function hostErrorToVm(vm: QuickJSContext, err: unknown): QuickJSHandle {
       vm.setProp(errH, SANDBOX_REFUSAL_OF_PROP, of);
       of.dispose();
     }
+    // [#26170] Every marshalled host error carries the `message` and `code` it
+    // crossed with, so the reject handler can tell it leaving unchanged from
+    // an error the body made (see SANDBOX_HOST_ERROR_OF_PROP). Not enumerable:
+    // the body reads the same keys off a host error as before (#3918's allowlist).
+    const hostOf = vm.newString(JSON.stringify([vmMessage, typeof e?.code === 'string' && e.code ? e.code : null]));
+    vm.defineProp(errH, SANDBOX_HOST_ERROR_OF_PROP, { value: hostOf, configurable: true, enumerable: false });
+    hostOf.dispose();
   } catch {
     /* keep the bare name/message error */
   }
@@ -1688,6 +1706,11 @@ function releaseEngineRefusalHandles(vm: QuickJSContext, bodyPromise: QuickJSHan
  * denials — `ctx.api.*`, `ctx.log`, `ctx.crypto`, `ctx.api.transaction` — were
  * misclassified.
  *
+ * [#26903/#26965] Capability denials have since left this marker for every
+ * origin: they cross as a coded `403` refusal ({@link throwCapabilityDenial}).
+ * The marker still carries the other host-side faults (an unavailable
+ * `ctx.api`, a marshalling failure).
+ *
  * ## Why a marker and not the name
  *
  * `__error` is a FLATTENED `<name>: <message>` string by design (every existing
@@ -1742,6 +1765,24 @@ const SANDBOX_REFUSAL_PROP = '__objectstackRefusalSentence';
  * "re-thrown unchanged" test {@link SANDBOX_REFUSAL_PROP} is gated on.
  */
 const SANDBOX_REFUSAL_OF_PROP = '__objectstackRefusalOf';
+
+/**
+ * [#26170] The `[message, code]` a marshalled HOST error crossed into the VM
+ * with, as one JSON string — the "re-thrown unchanged" test the
+ * `__errorFromHost` channel is gated on.
+ *
+ * A hook that declares a refusal catalogue (`HookSchema.refusals`) refuses by
+ * code only, and its catalogue answers the throws the BODY made. An error a
+ * host call raised — a `ctx.api` write the engine refused (`VALIDATION_FAILED`,
+ * `RECORD_NOT_FOUND`, `PERMISSION_DENIED`), a nested hook's refusal — that the
+ * body lets leave is the platform speaking, not the body, and passes through
+ * the catalogue untouched. Both arrive at the body runner as a `SandboxError`
+ * with an `innerMessage` and a `code`, so the difference is recorded here,
+ * where it is still visible: a body that rewrote the error's `message` or
+ * `code` before throwing it is speaking for itself, the line
+ * {@link SANDBOX_REFUSAL_OF_PROP} draws for the nested-refusal relay.
+ */
+const SANDBOX_HOST_ERROR_OF_PROP = '__objectstackHostErrorOf';
 
 /**
  * [#17265] The caller-addressed BUSINESS sentence a sandboxed body threw, or
@@ -1801,20 +1842,22 @@ function throwSandboxFault(vm: QuickJSContext, message: string): never {
 }
 
 /**
- * [#26903] The code and status a HOOK body's capability denial is answered
- * with: the standard catalog's `INSUFFICIENT_PRIVILEGES` ("operation requires
- * higher privileges", `@objectstack/spec` `errors.zod.ts`), at its 403.
+ * [#26903/#26965] The code and status a body's capability denial is answered
+ * with, for every origin: the standard catalog's `INSUFFICIENT_PRIVILEGES`
+ * ("operation requires higher privileges", `@objectstack/spec`
+ * `errors.zod.ts`), at its 403.
  */
-const HOOK_CAPABILITY_REFUSAL_CODE = 'INSUFFICIENT_PRIVILEGES';
-const HOOK_CAPABILITY_REFUSAL_STATUS = 403;
+const CAPABILITY_REFUSAL_CODE = 'INSUFFICIENT_PRIVILEGES';
+const CAPABILITY_REFUSAL_STATUS = 403;
 
 /**
  * [#26903] Throw a capability gate's denial OUT OF a host function.
  *
- * In a HOOK body the denial is a REFUSAL, not the sandbox faulting: the hook's
- * metadata did not grant what its body called, and the caller whose save fired
- * the hook is owed a coded answer naming the hook and the capability, not the
- * sanitised `500 INTERNAL_ERROR` {@link throwSandboxFault} reaches. So the VM
+ * The denial is a REFUSAL, not the sandbox faulting: the body's own metadata
+ * did not grant what it called, and the caller (whose save fired the hook, or
+ * who invoked the action) is owed a coded answer naming the body and the
+ * capability, not the sanitised `500 INTERNAL_ERROR` {@link throwSandboxFault}
+ * reaches. So the VM
  * error carries `code` and `status` the way a body's own
  * `throw Object.assign(new Error(…), { code, status })` does, and the pump loop
  * builds the same `SandboxError` (with `innerMessage`) it builds for that
@@ -1829,8 +1872,11 @@ const HOOK_CAPABILITY_REFUSAL_STATUS = 403;
  * `innerMessage` is what it relays as a NESTED body's refusal (which the outer
  * catch then does not log). Neither is true of this denial.
  *
- * An action or job body's denial keeps the #4431 fault contract
- * ({@link SANDBOX_FAULT_PROP}); this card ruled on hooks only.
+ * [#26965] One gate, one answer: an action or job body's denial is the same
+ * refusal (it was the #4431 fault, a bare 500, until that card). The remedy
+ * names the owner from the origin — the hook's, the action's or the job's
+ * `body.capabilities` — here, once. A job reaches no HTTP caller; its run
+ * records this sentence, and the BodyRunner keeps its `error` line for it.
  */
 function throwCapabilityDenial(
   vm: QuickJSContext,
@@ -1838,10 +1884,9 @@ function throwCapabilityDenial(
   capability: HookBodyCapability,
   message: string,
 ): never {
-  if (origin.kind !== 'hook') throwSandboxFault(vm, message);
   const refusal = Object.assign(
-    new Error(`${message.replace(/\.$/, '')}. Grant it by adding '${capability}' to the hook's body.capabilities.`),
-    { name: 'SandboxError', code: HOOK_CAPABILITY_REFUSAL_CODE, status: HOOK_CAPABILITY_REFUSAL_STATUS },
+    new Error(`${message.replace(/\.$/, '')}. Grant it by adding '${capability}' to the ${origin.kind}'s body.capabilities.`),
+    { name: 'SandboxError', code: CAPABILITY_REFUSAL_CODE, status: CAPABILITY_REFUSAL_STATUS },
   );
   throw hostErrorToVm(vm, refusal);
 }
@@ -2018,13 +2063,12 @@ export class SandboxError extends Error {
    * message without the `<kind> '<name>' threw:` debug wrapper that lives in
    * `.message`. Safe to surface to end users (e.g. an action's error toast);
    * the wrapped `.message` stays for server logs. Undefined for the sandbox's
-   * own internal errors (capability denials, timeouts, marshalling failures),
-   * which have no user-meaningful inner message.
+   * own internal errors (timeouts, marshalling failures), which have no
+   * user-meaningful inner message.
    *
-   * [#26903] Except a HOOK body's capability denial: that is a refusal naming
-   * the hook and the capability, so it carries this field and its `code`/
-   * `status` (see `throwCapabilityDenial`). An action or job body's denial is
-   * still the fault described above.
+   * [#26903/#26965] A capability denial is not one of those: it is a refusal
+   * naming the body and the capability, so it carries this field and its
+   * `code`/`status` (see `throwCapabilityDenial`), whatever the body's origin.
    */
   readonly innerMessage?: string;
   /**
@@ -2077,8 +2121,8 @@ export interface SandboxErrorInfo {
   /** [commit 79c46da90] See {@link SandboxError.userMessage}. */
   userMessage?: string;
   /**
-   * [#4431] The error that crossed `__error` was the SANDBOX's own fault — a
-   * denied capability, an unavailable `ctx.api`, a marshalling failure — not
+   * [#4431] The error that crossed `__error` was the SANDBOX's own fault — an
+   * unavailable `ctx.api`, a marshalling failure — not
    * user code rejecting. Read by the pump loop, which then leaves
    * `innerMessage` undefined so the #3951 crash contract's "SandboxError with
    * no innerMessage → 500" holds for in-VM host-call denials too.
@@ -2120,6 +2164,33 @@ function readRelayedRefusal(vm: QuickJSContext): string | undefined {
  * is a fact about the hop, not something a caller may hand the error.
  */
 const relayedRefusals = new WeakSet<object>();
+
+/**
+ * [#26170] The errors this runner built from a HOST error the body let leave
+ * unchanged ({@link SANDBOX_HOST_ERROR_OF_PROP}). Identity, not a field, for
+ * the reason {@link relayedRefusals} gives.
+ */
+const hostRelayedErrors = new WeakSet<object>();
+
+/**
+ * [#26170] Was this error raised by a host call (the engine, a nested hook)
+ * and re-thrown by the body unchanged, rather than made by the body?
+ */
+export function isHostRelayedSandboxError(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && hostRelayedErrors.has(err);
+}
+
+/** [#26170] Read the `__errorFromHost` channel the wrapper's reject handler writes. */
+function readErrorFromHost(vm: QuickJSContext): boolean {
+  try {
+    const h = vm.getProp(vm.global, '__errorFromHost');
+    const raw = vm.dump(h);
+    h.dispose();
+    return raw === true;
+  } catch {
+    return false;
+  }
+}
 
 /** [#26153] Was this error a nested body's refusal relayed across the VM hop? */
 export function isRelayedSandboxRefusal(err: unknown): boolean {

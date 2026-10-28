@@ -109,13 +109,14 @@ export interface SecurityServiceHost {
   getQueryableFields: SecurityPlugin['getQueryableFields'];
   getReadFilter: SecurityPlugin['getReadFilter'];
   getReadableFields: SecurityPlugin['getReadableFields'];
+  getRecordFieldAccess: SecurityPlugin['getRecordFieldAccess'];
   getWritableFields: SecurityPlugin['getWritableFields'];
   resolvePermissionSetsForContext: SecurityPlugin['resolvePermissionSetsForContext'];
 }
 
 /** The `security` service registration `SecurityPlugin#start` runs; the comment above its call there is its contract. */
 export function registerSecurityService(
-  this: Pick<SecurityServiceHost, 'acceptedDefaultPermissionSets' | 'canExport' | 'canReadObject' | 'checkAuthoredRowWrite' | 'checkControlledByParentWrite' | 'declareEveryone' | 'delegatedAdminGate' | 'describePositionGrants' | 'explainAccessForCaller' | 'getEffectiveObjectPermissions' | 'getMetadataReadableFields' | 'getObjectSecurityMeta' | 'getQueryableFields' | 'getReadFilter' | 'getReadableFields' | 'getWritableFields' | 'logger' | 'ownershipFloorAlternates' | 'permissionEvaluator' | 'ql' | 'resolvePermissionSetsForContext' | 'tenancyPosture'>,
+  this: Pick<SecurityServiceHost, 'acceptedDefaultPermissionSets' | 'canExport' | 'canReadObject' | 'checkAuthoredRowWrite' | 'checkControlledByParentWrite' | 'declareEveryone' | 'delegatedAdminGate' | 'describePositionGrants' | 'explainAccessForCaller' | 'getEffectiveObjectPermissions' | 'getMetadataReadableFields' | 'getObjectSecurityMeta' | 'getQueryableFields' | 'getReadFilter' | 'getReadableFields' | 'getRecordFieldAccess' | 'getWritableFields' | 'logger' | 'ownershipFloorAlternates' | 'permissionEvaluator' | 'ql' | 'resolvePermissionSetsForContext' | 'tenancyPosture'>,
   ctx: PluginContext,
   ql: IObjectQLEngine,
   metadata: IMetadataService,
@@ -154,6 +155,12 @@ export function registerSecurityService(
       // [#18386] Its write-side twin: the fields step 2.5 would not refuse.
       // The import template narrows its columns by it. See getWritableFields.
       getWritableFields: (object: string, context?: any) => this.getWritableFields(object, context),
+      // [#26594] The field projection of ONE record: its edit half is step
+      // 2.5's own verdict on the stored row, so a row-conditioned lock (`when`)
+      // disables a field only on the rows it names. A record's edit form reads
+      // it. See getRecordFieldAccess.
+      getRecordFieldAccess: (object: string, recordId: string, context?: any) =>
+        this.getRecordFieldAccess(object, recordId, context),
       // [#20935] Its query-side twin: the fields steps 2.5b and 2.9 would not
       // refuse as a group key, an aggregate input, a filter or a sort key. A
       // field served MASKED is readable and NOT queryable, so a door that

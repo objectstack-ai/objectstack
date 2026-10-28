@@ -202,7 +202,7 @@ describe('objectui#12291 — an object quick-create cannot satisfy hands the day
     render(
       <SchemaRendererProvider dataSource={ds}>
         <SchemaRenderer
-          schema={{ type: 'object-calendar', id: 'n', objectName: 'showcase_task', startDateField: 'due_date', titleField: 'title' } as never}
+          schema={{ type: 'object-calendar', id: 'n', objectName: 'showcase_task', calendar: { startDateField: 'due_date', titleField: 'title' } } as never}
           data={[]}
           onEdit={onEdit}
         />

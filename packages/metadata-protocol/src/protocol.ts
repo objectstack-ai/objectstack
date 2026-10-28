@@ -421,6 +421,8 @@ import { hierarchyResolverMounted, orgWallEnforced, rlsMembershipResolverKeys, t
 import { flowRegistrationsOf, resolveFlowCanonicalizer, resolveFlowRegistrationReader } from './protocol-automation-flow-reads.js';
 // [#25467 cut 28] The code-datasource predicates: declared by an installed package, or registered by the host.
 import { isDeclaredCodeDatasource, isHostCodeDatasource } from './protocol-code-datasource-predicates.js';
+// [#25467 cut 29] The legacy-organization row filters: which rows a not-yet-migrated database still holds.
+import { legacyOrganizationRowsOf, withoutLegacyOrganizationRows } from './protocol-legacy-organization-rows.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -10210,18 +10212,20 @@ export class ObjectStackProtocolImplementation implements
     }
 
     private async withoutLegacyOrganizationRows<R>(table: string, rows: R[] | null | undefined, context?: unknown): Promise<R[]> {
-        if (!rows || rows.length === 0) return rows ?? [];
-        const legacy = await this.legacyOrganizationRowsOf(table, context);
-        return legacy.size === 0 ? rows : rows.filter((row) => !legacy.has(String((row as { id?: unknown }).id)));
+        // [#25467 cut 29] The body moved to `protocol-legacy-organization-rows.ts` (see `LegacyOrganizationRowsHost`).
+        const host: ThisParameterType<typeof withoutLegacyOrganizationRows> = {
+            legacyOrganizationRowsOf: (...a) => this.legacyOrganizationRowsOf(...a),
+        };
+        return (withoutLegacyOrganizationRows<R>).call(host, table, rows, context);
     }
 
     private legacyOrganizationRowsOf(table: string, context?: unknown): Promise<ReadonlyMap<string, string>> {
-        const transaction = (context as { transaction?: unknown } | undefined)?.transaction;
-        return readLegacyOrganizationRows(
-            (this.engine as { getDriverForObject?: (objectName: string) => unknown }).getDriverForObject?.(table),
-            table,
-            transaction !== undefined ? { transaction } : {},
-        );
+        // [#25467 cut 29] The body moved to `protocol-legacy-organization-rows.ts` (see `LegacyOrganizationRowsHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof legacyOrganizationRowsOf> = {
+            get engine() { return readEngine(); },
+        };
+        return legacyOrganizationRowsOf.call(host, table, context);
     }
 
     /**
@@ -16153,8 +16157,10 @@ export class ObjectStackProtocolImplementation implements
      * members mirror that emitter's.
      *
      * Scoped to `flow` (the 2026-09-30 ruling recorded on the card, point 5):
-     * `/meta`'s handling of every OTHER type is unchanged, so for those this
-     * returns `null` and the caller proceeds exactly as before.
+     * for every OTHER type this returns `null`. [#26708] The named-base rule
+     * alone has since been generalised: `saveMetaItem` asks
+     * {@link uninstalledNamedBaseRefusal} for every type right after this
+     * method, so a view naming an uninstalled base is refused there, not here.
      *
      * @returns the refusal to relay verbatim, or `null` when the write may
      *          proceed on these grounds.
@@ -16174,21 +16180,11 @@ export class ObjectStackProtocolImplementation implements
             if (locked) return locked;
         }
         // [#20863] The named-base rule (see the docblock): a base the write
-        // names must be a package the registry holds as installed.
-        const namedBase = folded.packageId;
-        if (namedBase && namedBase !== 'sys_metadata' && this.resolveWritePackageScope(namedBase) === undefined) {
-            const err = new Error(
-                `Cannot save flow '${folded.name}' into package '${namedBase}': no package with that id is `
-                + `installed in this deployment, so the flow would be stored bound to a package that does not `
-                + `exist. Name an installed writable package as the flow's base (or create one first), or save `
-                + `the flow without naming a package. Nothing was written.`,
-            );
-            (err as any).code = 'WRITABLE_PACKAGE_REQUIRED';
-            (err as any).status = 422;
-            (err as any).packageId = namedBase;
-            (err as any).docs = 'docs/adr/0070-package-first-authoring.md';
-            return err;
-        }
+        // names must be a package the registry holds as installed. [#26708]
+        // The rule is {@link uninstalledNamedBaseRefusal}'s, which
+        // `saveMetaItem` asks for every other type too.
+        const unbound = this.uninstalledNamedBaseRefusal({ type: singular, name: folded.name, packageId: folded.packageId });
+        if (unbound) return unbound;
         if (shipped) return null;
         if (!isCodeArtifactBody(folded.item)) return null;
         const stamped = String((folded.item as { _packageId?: unknown })._packageId);
@@ -16203,6 +16199,81 @@ export class ObjectStackProtocolImplementation implements
         );
         (err as any).code = 'INVALID_METADATA';
         (err as any).status = 422;
+        return err;
+    }
+
+    /**
+     * [#20863, #26708, ADR-0070 D1] THE NAMED-BASE RULE, for every metadata
+     * type: a base an authoring write NAMES must be a package this deployment
+     * has installed. Returns the refusal to throw, or `null` when the write
+     * names no package, names the `sys_metadata` sentinel, or names an
+     * installed one.
+     *
+     * Lifted out of {@link tenantAuthoredWriteRefusal} — where it was the
+     * flow-only rule between the lock and the provenance check (that
+     * docblock's named-base section is this rule's record: what "installed"
+     * reads, why the sentinel is package-less, the fail direction, and why the
+     * code is `WRITABLE_PACKAGE_REQUIRED` / 422). The flow arm still asks it
+     * at that position, and `saveMetaItem` asks it for every type, draft and
+     * active alike: a save naming an id no installed package has stored the
+     * item bound to a package that does not exist — with no manifest there is
+     * no namespace, so the object prefix rule was skipped too, and
+     * `publish-drafts` on that id then served the item live.
+     *
+     * The sentence names the type the write names; for a flow it is the
+     * sentence the flow arm always answered, byte for byte.
+     *
+     * [#26921] Two more doors ask it, about a binding the CALLER did not name
+     * but the item's stored rows give — rows bound to such an id were stored
+     * before the save door refused one, and these two doors still extended
+     * or published them:
+     *
+     *  - `inherited`: a save naming no package, whose address the item's rows
+     *    give (#11087 / ADR-0048: the package of its active row, or of its
+     *    lone draft). It kept the phantom binding.
+     *  - `verb: 'publish'`: the per-item publish ({@link promoteDraftForPublish}),
+     *    named or not — the package its promotion lands in. It served the
+     *    draft live, the way `publish-drafts` did before it refused the id.
+     *
+     * Same rule and envelope; only the sentence says which write was refused
+     * and the way out. Saving "without naming a package" is no way out there
+     * (that save inherits the binding), so those two name the ones that are:
+     * creating a package with that id, or removing the rows bound to it — a
+     * delete naming the id still removes the active row, and discarding the
+     * drafts under it removes those. ⛔ Nothing here migrates or deletes a
+     * stored row: the author chooses.
+     */
+    private uninstalledNamedBaseRefusal(
+        request: { type: string; name: string; packageId?: string | null },
+        how: { verb?: 'save' | 'publish'; inherited?: boolean } = {},
+    ): Error | null {
+        const namedBase = request.packageId;
+        if (!namedBase || namedBase === 'sys_metadata') return null;
+        if (this.resolveWritePackageScope(namedBase) !== undefined) return null;
+        const type = PLURAL_TO_SINGULAR[request.type] ?? request.type;
+        // Kept under the REST door's client-message bound (`truncateClientMessage`)
+        // for ordinary names, so the last sentence reaches the caller.
+        const storedWayOut = `Create a package with that id first, or remove the rows bound to it (a delete naming `
+            + `that package; discard-drafts for drafts) and save again, into an installed writable package or with `
+            + `no package.`;
+        const err = new Error(
+            how.verb === 'publish'
+                ? `Cannot publish ${type} '${request.name}' into package '${namedBase}': no package with that id `
+                    + `is installed in this deployment, so the ${type} would go live bound to a package that does `
+                    + `not exist. ${storedWayOut} Nothing was published.`
+                : how.inherited
+                    ? `Cannot save ${type} '${request.name}' without naming a package: its stored rows are bound to `
+                        + `package '${namedBase}', which is not installed in this deployment, and this save would `
+                        + `extend that binding. ${storedWayOut} Nothing was written.`
+                    : `Cannot save ${type} '${request.name}' into package '${namedBase}': no package with that id is `
+                        + `installed in this deployment, so the ${type} would be stored bound to a package that does not `
+                        + `exist. Name an installed writable package as the ${type}'s base (or create one first), or save `
+                        + `the ${type} without naming a package. Nothing was written.`,
+        );
+        (err as any).code = 'WRITABLE_PACKAGE_REQUIRED';
+        (err as any).status = 422;
+        (err as any).packageId = namedBase;
+        (err as any).docs = 'docs/adr/0070-package-first-authoring.md';
         return err;
     }
 
@@ -20256,6 +20327,12 @@ export class ObjectStackProtocolImplementation implements
                 ...(request.packageId ? { packageId: request.packageId } : {}),
             });
             if (authored) throw authored;
+            // [#26708] …and the named-base rule for EVERY type, draft or
+            // active: a base the save names must be an installed package. A
+            // flow was asked it just above, at its own position; the second
+            // ask answers the same. See {@link uninstalledNamedBaseRefusal}.
+            const unbound = this.uninstalledNamedBaseRefusal(request);
+            if (unbound) throw unbound;
         }
         request.item = stripDerivedProvenance(request.item);
         // [#6562] …and OUR OWN injected system columns, for the same reason and
@@ -20503,6 +20580,43 @@ export class ObjectStackProtocolImplementation implements
 
         const singularType = PLURAL_TO_SINGULAR[request.type] ?? request.type;
 
+        // [#23712] The draft a draft save naming no package writes
+        // ({@link packagelessDraftAddress}): the repository resolves its
+        // binding (#11087), so `packageId` stays empty, but the address is
+        // read here for the two gates below that judge the row it lands in.
+        // Read once, for the same authoring saves the publish-mode address
+        // above is resolved for.
+        const draftAddress = mode === 'draft'
+            && request.packageId == null
+            && request.source === undefined
+            && request.writeFace !== 'package-duplicate'
+            ? await this.packagelessDraftAddress(
+                singularType, request.name, itemDiscriminator(singularType, request.item),
+            )
+            : undefined;
+
+        // [#26921] THE NAMED-BASE RULE for the binding a save naming no
+        // package INHERITS: the package its address gives (the resolved
+        // `packageId` above for a publish-mode save; the draft address's
+        // package for a draft save) must be installed too. Rows bound to an id
+        // no installed package has were stored before the save door refused
+        // naming one, and this save kept extending them. Refused, naming the
+        // id and the way out, ⛔ never re-homed package-less in silence: that
+        // would move the item without a word. Not asked of a save that names a
+        // package (asked above as named) nor of the server-stated rewrites,
+        // which resolve no address. An ambiguous draft address is left to the
+        // repository's `409`, as before. See {@link uninstalledNamedBaseRefusal}.
+        if (namedNoPackage && request.source === undefined && request.writeFace !== 'package-duplicate') {
+            const inherited = mode === 'draft'
+                ? draftAddress && draftAddress.kind !== 'ambiguous' ? draftAddress.into : null
+                : request.packageId ?? null;
+            const unboundInherited = this.uninstalledNamedBaseRefusal(
+                { type: singularType, name: request.name, packageId: inherited },
+                { inherited: true },
+            );
+            if (unboundInherited) throw unboundInherited;
+        }
+
         // [ADR-0029 D9.9 / #6995] The refusal that is about REPRESENTABILITY
         // rather than authorization: an `object` overlay bound to a package
         // that does not own the object. See
@@ -20530,16 +20644,9 @@ export class ObjectStackProtocolImplementation implements
         // `Q`, or a lone draft bound to `Q`, is `Q`'s: judged with the
         // request's empty package, the sentinel owner read `own` and the save
         // answered `200` for a draft no publish can serve. An ambiguous
-        // address is left to the repository's `409`, as before.
+        // address is left to the repository's `409`, as before. The address
+        // is the one read above, before the named-base rule's inherited arm.
         if (singularType === 'object') {
-            const draftAddress = mode === 'draft'
-                && request.packageId == null
-                && request.source === undefined
-                && request.writeFace !== 'package-duplicate'
-                ? await this.packagelessDraftAddress(
-                    singularType, request.name, itemDiscriminator(singularType, request.item),
-                )
-                : undefined;
             const writtenPackage = draftAddress && draftAddress.kind !== 'ambiguous'
                 ? draftAddress.into
                 : request.packageId;
@@ -22795,6 +22902,20 @@ export class ObjectStackProtocolImplementation implements
             throw withPendingAudit(_publishLockRefusal.err, _publishLockRefusal.audit);
         }
         if (addressRefusal) throw addressRefusal;
+        // [#26921] THE NAMED-BASE RULE at the promotion: the package the
+        // draft goes live in — named by the caller, or given by the item's
+        // rows when it names none — must be installed. A draft bound to an id
+        // no installed package has was stored before the save door refused
+        // naming one, and promoting it served it live, owned by nothing (no
+        // manifest, so no namespace, uninstall or export). `publish-drafts`
+        // refuses such an id at its door before it gets here; this is the
+        // per-item publish, and it is refused before the draft is read.
+        // Nothing is migrated or deleted. See {@link uninstalledNamedBaseRefusal}.
+        const unboundBase = this.uninstalledNamedBaseRefusal(
+            { type: singularType, name: request.name, packageId: promoteInto },
+            { verb: 'publish' },
+        );
+        if (unboundBase) throw unboundBase;
         const draftForGate = await repo.get(
             { type: singularType, name: request.name, org: 'env' } as Parameters<typeof repo.get>[0],
             { state: 'draft', packageId: draftKey, ...memberOption(request.member) },

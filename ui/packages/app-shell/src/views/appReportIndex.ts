@@ -49,12 +49,31 @@
  * dataset list does not hold, or one that names no object, refuses nothing.
  * No permission provider mounted, `can` answers `true`.
  *
+ * ## Which the navigation shows the member (objectstack#26892)
+ *
+ * A report that one or more entries of the app's navigation name is listed
+ * only when the member is shown at least one of those entries, under the
+ * sidebar's own gates (`navEntriesShownToMember` over `useNavMemberGates`):
+ * an entry its `visible`, `requiredPermissions` or runtime-capability gates
+ * hide, one the object-read prune drops, one inside a group those gates hide,
+ * and one whose API read has not answered yet do not count. Before this, a
+ * report the app's package owns was listed through the owner rule even when
+ * the navigation hid its entry from the member, and it opened empty for them.
+ * At least one, not every: a member shown any entry that names the report can
+ * open it from the sidebar already.
+ *
+ * A report no entry names keeps the read rule alone: the index is its only
+ * door (objectui#13020), and no navigation gate speaks about it.
+ *
  * ## What it reads
  *
  * The report list and the dataset list (`MetadataProvider`'s cache, one
  * `/meta/:type` read each), and the permissions the shell already holds. ⛔
- * Never the object registry. And nothing at all while `enabled` is false: the
- * lists are lazy getters, and a closed palette reads nothing.
+ * Never the object registry. Neither list while `enabled` is false: the lists
+ * are lazy getters, and a closed palette reads neither. The navigation gates
+ * are the caller's `useNavMemberGates()`, the sidebar's: the reads they make
+ * (the app's object scope, each entry's API binding) are the sidebar's reads,
+ * through the same readers, and this module makes none of its own.
  *
  * Internal module: not re-exported by the package entry.
  */
@@ -64,6 +83,8 @@ import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { metadataText } from '../hooks/useNavTargetLabel.js';
 import { mayReadObject, type ObjectReadCheck } from '../utils/navObjectReadGate.js';
+import { navEntriesShownToMember, type NavMemberGates } from '../hooks/useNavMemberGates.js';
+import type { NavigationItem } from '@object-ui/types';
 
 /** The members this module reads off a served report document. */
 export interface ServedReport {
@@ -110,17 +131,41 @@ export function flattenNavigation(items: readonly any[]): any[] {
   return result;
 }
 
-/** The report names `type: 'report'` entries of the app's served navigation name. */
-function navigationReportNames(app: unknown): Set<string> {
+/** The app's served navigation tree, or `undefined` when it serves none. */
+function navigationOf(app: unknown): unknown[] | undefined {
   const navigation = app && typeof app === 'object' ? (app as { navigation?: unknown }).navigation : undefined;
+  return Array.isArray(navigation) ? navigation : undefined;
+}
+
+/** The report names the `type: 'report'` entries of `items` name, at any depth. */
+function reportNamesIn(items: readonly unknown[]): Set<string> {
   const out = new Set<string>();
-  if (!Array.isArray(navigation)) return out;
-  for (const item of flattenNavigation(navigation)) {
+  for (const item of flattenNavigation(items)) {
     if (item && typeof item === 'object' && item.type === 'report' && nonEmptyString(item.reportName)) {
       out.add(item.reportName);
     }
   }
   return out;
+}
+
+/** The report names `type: 'report'` entries of the app's served navigation name. */
+function navigationReportNames(app: unknown): Set<string> {
+  const navigation = navigationOf(app);
+  return navigation ? reportNamesIn(navigation) : new Set<string>();
+}
+
+/**
+ * Whether the app's navigation lets the member see the report named `name`:
+ * a report no entry names, yes; one that entries name, only when `gates` show
+ * the member at least one of them (`navEntriesShownToMember`, the sidebar's
+ * walk).
+ */
+export function navigationShowsReport(app: unknown, gates: NavMemberGates): (name: string) => boolean {
+  const navigation = navigationOf(app);
+  const named = navigation ? reportNamesIn(navigation) : new Set<string>();
+  if (!navigation || named.size === 0) return () => true;
+  const shown = reportNamesIn(navEntriesShownToMember(navigation as NavigationItem[], gates));
+  return (name) => !named.has(name) || shown.has(name);
 }
 
 /**
@@ -202,15 +247,21 @@ export interface AppReportEntries {
 const NOT_READ: AppReportEntries = { entries: [], loading: false };
 
 /**
- * The reports `app` ships that this member may open, labelled and sorted. With
- * `enabled` false it reads nothing and answers no entry.
+ * The reports `app` ships that this member may open and the app's navigation
+ * shows them, labelled and sorted. `gates` are the member's navigation gates,
+ * the caller's `useNavMemberGates()`, or `null` on a frame with no app. With
+ * `enabled` false, or no gates, it reads neither list and answers no entry.
  */
-export function useAppReportEntries(app: unknown, enabled: boolean): AppReportEntries {
+export function useAppReportEntries(
+  app: unknown,
+  enabled: boolean,
+  gates: NavMemberGates | null,
+): AppReportEntries {
   const metadata = useMetadata();
   const { can } = usePermissions();
   const { reportLabel } = useObjectLabel();
   const { language } = useObjectTranslation();
-  if (!enabled) return NOT_READ;
+  if (!enabled || !gates) return NOT_READ;
 
   // Read through the lazy getters: each starts its list's one read.
   const reports = metadata.reports;
@@ -222,8 +273,9 @@ export function useAppReportEntries(app: unknown, enabled: boolean): AppReportEn
   if (pending('report') || pending('dataset')) return { entries: [], loading: true };
 
   const datasetObjects = datasetObjectIndex(datasets);
+  const shownByNavigation = navigationShowsReport(app, gates);
   const entries = appShippedReports(reports, app)
-    .filter((report) => mayOpenReport(report, datasetObjects, can))
+    .filter((report) => shownByNavigation(report.name as string) && mayOpenReport(report, datasetObjects, can))
     .map((report): AppReportEntry => {
       const name = report.name as string;
       const text = metadataText(report.label, language);

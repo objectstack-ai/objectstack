@@ -25,9 +25,16 @@ vi.mock('./GanttView', () => ({
 
 const SCHEMA: any = {
   type: 'gantt',
-  startDateField: 'start',
-  endDateField: 'end',
-  titleField: 'name',
+  gantt: {
+    startDateField: 'start',
+    endDateField: 'end',
+    titleField: 'name',
+    quickFilters: [
+      { field: 'status', label: 'Status', options: ['todo', 'doing', 'done'] },
+      // No record carries `owner` → zero options → renders the `empty` placeholder.
+      { field: 'owner', label: 'Owner' },
+    ],
+  },
   data: {
     provider: 'value',
     items: [
@@ -36,11 +43,6 @@ const SCHEMA: any = {
       { id: '3', name: 'Gamma task', start: '2024-03-01', end: '2024-03-20', status: 'done' },
     ],
   },
-  quickFilters: [
-    { field: 'status', label: 'Status', options: ['todo', 'doing', 'done'] },
-    // No record carries `owner` → zero options → renders the `empty` placeholder.
-    { field: 'owner', label: 'Owner' },
-  ],
 };
 
 describe('ObjectGantt quick-filter labels without an I18nProvider (objectstack#5427)', () => {

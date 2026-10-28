@@ -112,7 +112,8 @@ Other examples: `pnpm dev:crm`, `pnpm dev:todo`. Docs site: `pnpm docs:dev`.
 1. **Start from an issue.** Pick one from the
    [issue tracker](https://github.com/objectstack-ai/objectstack/issues), or open one
    that describes the bug or the proposal before you write code.
-   [docs/NORTH-STAR.md](./docs/NORTH-STAR.md) shows where the project is going.
+   [docs/NORTH-STAR.md](./docs/NORTH-STAR.md), the project's one North Star, shows where the project is going
+   and what comes first; an English summary closes it.
 2. **Branch off an up-to-date `main`, one branch and one pull request per issue**,
    with the issue number in the branch name:
 
@@ -265,6 +266,14 @@ vitest 调用被拒绝:从包目录跑 vitest 会静默跑错测试集 (objectui
 ```
 
 Its "repository root" is `ui/`. The guard is `ui/scripts/vitest-invocation-guard.mjs`.
+
+### UI CI
+
+GitHub runs only the workflows in the repository root's
+[workflow directory](./.github/workflows/), so a `ui/` change is checked by the same
+`ci.yml` as the rest of the repository: its `Lint UI`, `Type Check UI`, `Test UI` and
+`Build & E2E UI` jobs run when a pull request changes `ui/`. Read those jobs for what each one
+runs; `ui/` keeps no CI guide of its own.
 
 ### UI examples
 

@@ -263,6 +263,11 @@ describe('#23712 — a draft save naming no package of an object its package-les
         try {
             const k = await boot(stores, drops);
             expect(k.engine.registry.getObjectOwner(NAME)?.packageId).toBe(SENTINEL);
+            // [#26921] The packages those rows are bound to are installed, as
+            // a boot or `POST /packages` installs them: a save naming no
+            // package over rows bound to an id the registry lacks is refused
+            // by the named-base rule before the overlay check these pins read.
+            for (const id of [P, Q]) k.engine.registry.installPackage({ id, name: id, version: '1.0.0' } as any, 'authored');
             return k;
         } finally {
             warn.mockRestore();

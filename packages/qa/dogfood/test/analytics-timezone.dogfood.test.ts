@@ -123,6 +123,8 @@ describe('dogfood: org timezone drives analytics date bucketing (#1982/#2018)', 
     // The regression: before #2018 this stayed on 2024-03-01 (tz dropped) or
     // returned cnt 0. The org timezone must move it to 2024-02-29.
     expect(la['2024-02-29']).toBe(N_LEADS);
-    expect(la['2024-03-01']).toBeUndefined();
+    // 2024-03-01 now lies between the boundary leads and the seed's own, so it
+    // comes back as an empty bucket (#26893): present, and no lead counted.
+    expect(la['2024-03-01']).toBe(0);
   });
 });

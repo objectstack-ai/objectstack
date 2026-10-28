@@ -136,8 +136,15 @@ describe('[#20867] a draft preview keys 0050-06-15 as the published path does', 
     },
   });
 
+  // The buckets that hold rows. Between them the executor fills the empty
+  // ones (#26893) — up to its bound, so the year axis gains 1,975 empty years
+  // and the finer ones are left as grouped; either way the keys pinned here are
+  // the two real ones.
   const keysOf = (rows: Record<string, unknown>[]) =>
-    rows.map((r) => [r.spent_on, r.expense_count]).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+    rows
+      .filter((r) => Number(r.expense_count) > 0)
+      .map((r) => [r.spent_on, r.expense_count])
+      .sort((a, b) => String(a[0]).localeCompare(String(b[0])));
 
   it.each([
     ['year', '0050', '2026'],

@@ -70,8 +70,8 @@
  *
  * Both name the account the sign-in resolved to, the outcome (the action plus
  * the refusal's machine code), and the client fingerprint read by the same rule
- * better-auth applies when it stamps a session row — so a refused attempt and a
- * successful one from the same client carry the same `ip_address`.
+ * the session hook applies when it stamps a session row — so a refused attempt
+ * and a successful one from the same client carry the same `ip_address`.
  *
  * ⛔ Neither event carries anything the caller typed. The password is never
  * read here, and the submitted identifier is never recorded either: the row
@@ -81,6 +81,7 @@
  */
 
 import { getIP } from '@better-auth/core/utils/ip';
+import { canonicalClientAddress } from './client-address-canonical.js';
 
 /**
  * The audit sink's shape, declared LOCALLY so plugin-auth takes no runtime
@@ -205,26 +206,32 @@ export interface SignInClientFingerprint {
 }
 
 /**
- * Read the client fingerprint of a sign-in request by better-auth's OWN rule —
- * the one `internalAdapter.createSession` applies when it stamps a session row
- * (`getIP(headers, options)` over the endpoint's headers, and the
- * `user-agent` header), which is where every `login` row's `ip_address` comes
- * from. A refused sign-in mints no session row to copy them from, so the same
+ * Read the client fingerprint of a sign-in request by the rule a session row
+ * is stamped by, which is where every `login` row's `ip_address` comes from:
+ * `establishedAddress` — the address the server established for the request,
+ * which the caller reads from `handleRequest`'s request state
+ * (`readRequestClientAddress`) — else better-auth's own
+ * `getIP(headers, options)` over the endpoint's headers, either in its
+ * RFC 5952 text (`client-address-canonical.ts`); and the `user-agent` header.
+ * A refused sign-in mints no session row to copy them from, so the same
  * resolution is applied to the same request instead. ⛔ Not a second IP rule:
- * whatever better-auth's `advanced.ipAddress` configuration answers for a
- * session row, it answers here.
+ * the session hook (`auth-manager-database-hooks.ts`, `session.create.before`)
+ * answers the same two sources in the same order.
  */
-export function signInClientFingerprint(ctx: unknown): SignInClientFingerprint {
+export function signInClientFingerprint(ctx: unknown, establishedAddress?: string): SignInClientFingerprint {
   const c = ctx as { headers?: unknown; request?: { headers?: unknown }; context?: { options?: unknown } } | null;
   const headers = (c?.headers ?? c?.request?.headers) as Headers | undefined;
   if (!headers || typeof (headers as Headers).get !== 'function') return {};
-  let ipAddress: string | undefined;
-  try {
-    const options = c?.context?.options as Parameters<typeof getIP>[1] | undefined;
-    ipAddress = options ? str(getIP(headers, options)) : undefined;
-  } catch {
-    ipAddress = undefined;
+  let ipAddress = str(establishedAddress);
+  if (!ipAddress) {
+    try {
+      const options = c?.context?.options as Parameters<typeof getIP>[1] | undefined;
+      ipAddress = options ? str(getIP(headers, options)) : undefined;
+    } catch {
+      ipAddress = undefined;
+    }
   }
+  ipAddress = canonicalClientAddress(ipAddress);
   const userAgent = str(headers.get('user-agent'));
   return {
     ...(ipAddress ? { ipAddress } : {}),

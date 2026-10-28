@@ -91,6 +91,8 @@ export interface NavNode {
   label?: I18nLabel;
   type?: string;
   icon?: string;
+  /** The spec's sort weight within a level (lower = first); read through `inMenuOrder` only. */
+  order?: number;
   children?: NavNode[];
   /**
    * The surface-binding target keys — CANONICAL SPELLINGS ONLY (objectui#4881).

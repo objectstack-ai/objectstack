@@ -6,57 +6,69 @@
  * prefers the record beside the list (`utils/recordOpenPreference.ts`,
  * objectstack#26677) — stays in the component, where it wraps the list
  * itself. Every value is passed in as a prop.
+ *
+ * Since objectstack#26679 the drawer is the in-place stack of
+ * `./recordDrawerStack.tsx`: its root is the list row `?recordId=` names, a
+ * related row or a lookup inside it opens one level down, and its bar names
+ * no object (maintainer ruling 2 on that card).
  */
 
-import { NavigationOverlay } from '@object-ui/components';
-import type { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
+import type { useObjectTranslation } from '@object-ui/i18n';
 import { RecordDetailView } from './RecordDetailView.js';
+import { RecordStackDrawer, useRecordDrawerStack } from './recordDrawerStack.js';
 import type { useObjectViewRecordNavigation } from './objectViewRecordNavigation.js';
 import type { ConsoleObjectViewProps } from './ObjectView.js';
+
+type RecordNavigation = ReturnType<typeof useObjectViewRecordNavigation>;
 
 export function ObjectViewRecordOverlay({
     navOverlay,
     handleDrawerClose,
-    objectLabel,
     objectDef,
     handleExpandDrawer,
+    drawerRoot,
+    drawerRestore,
+    handleRootStep,
     t,
     dataSource,
     objects,
     onEdit,
 }: {
-    navOverlay: ReturnType<typeof useObjectViewRecordNavigation>['navOverlay'];
-    handleDrawerClose: ReturnType<typeof useObjectViewRecordNavigation>['handleDrawerClose'];
-    objectLabel: ReturnType<typeof useObjectLabel>['objectLabel'];
+    navOverlay: RecordNavigation['navOverlay'];
+    handleDrawerClose: RecordNavigation['handleDrawerClose'];
     objectDef: ConsoleObjectViewProps['objects'][number];
-    handleExpandDrawer: ReturnType<typeof useObjectViewRecordNavigation>['handleExpandDrawer'];
+    handleExpandDrawer: RecordNavigation['handleExpandDrawer'];
+    drawerRoot: RecordNavigation['drawerRoot'];
+    drawerRestore: RecordNavigation['drawerRestore'];
+    handleRootStep: RecordNavigation['handleRootStep'];
     t: ReturnType<typeof useObjectTranslation>['t'];
     dataSource: ConsoleObjectViewProps['dataSource'];
     objects: ConsoleObjectViewProps['objects'];
     onEdit: ConsoleObjectViewProps['onEdit'];
 }) {
+    // The root steps through the rows the list shows (objectstack#26679).
+    const stack = useRecordDrawerStack({ root: drawerRoot, restoredPath: drawerRestore, onRootStep: handleRootStep });
     return (
-             <NavigationOverlay
-                 {...navOverlay}
-                 setIsOpen={(open: boolean) => { if (!open) handleDrawerClose(); }}
-                 title={objectLabel(objectDef)}
+             <RecordStackDrawer
+                 stack={stack}
+                 open={navOverlay.isOpen}
+                 mode={navOverlay.mode}
+                 width={navOverlay.width}
+                 onClose={handleDrawerClose}
                  onExpand={handleExpandDrawer}
                  expandLabel={t('console.objectView.expandToPage', { defaultValue: 'Open as full page' })}
                  storageKey={`drawer-width:${objectDef.name}`}
-             >
-                 {(record: Record<string, unknown>) => {
-                     const recordId = (record.id || record._id) as string;
-                     return (
-                         <RecordDetailView
-                             dataSource={dataSource}
-                             objects={objects}
-                             onEdit={onEdit}
-                             objectNameOverride={objectDef.name}
-                             recordIdOverride={recordId}
-                             embedded
-                         />
-                     );
-                 }}
-             </NavigationOverlay>
+                 objects={objects}
+                 renderRecord={(level) => (
+                     <RecordDetailView
+                         dataSource={dataSource}
+                         objects={objects}
+                         onEdit={onEdit}
+                         objectNameOverride={level.objectName}
+                         recordIdOverride={level.recordId}
+                         embedded
+                     />
+                 )}
+             />
     );
 }

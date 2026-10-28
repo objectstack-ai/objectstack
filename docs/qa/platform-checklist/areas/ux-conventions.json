@@ -9,7 +9,7 @@
       "title": "Every user-initiated write answers visibly — success names what changed, a refusal says why, and a no-op claims nothing",
       "since": "v17.7",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -34,7 +34,7 @@
         "record create — New form save on showcase_task",
         "record inline edit — double-click a Priority cell on the task grid (the grid has no 'Edit inline' button), change it, then Save row or Save All",
         "bulk delete — select two rows → Delete in the selection bar → confirm",
-        "kanban move — drag a card Backlog → To Do (direct manipulation: the card in its new column IS the success feedback; a refused move must revert with an error)",
+        "kanban move — drag a card Backlog → To Do (direct manipulation: the card in its new column IS the success feedback; a move the transition rule blocks never leaves the client — its lane is dimmed, data-kanban-drop-blocked, and the drop sends nothing, #25933)",
         "declared record action — Mark Done on a task record (declared successMessage 'Task marked done.', examples/app-showcase/src/ui/actions/index.ts#MarkDoneAction)",
         "param action dialog — Setup → Users → Invite User → Confirm (declared successMessage 'Invitation sent to ${result.email}')",
         "approval decision — open the request from the approvals page, /_console/apps/com.example.showcase/system/approvals (the 'Approvals inbox' link opens the review-queue page, which is not where the decision is taken). The route has no drawer: opening a request navigates to its record page (sys_approval_request_detail), where the decision is taken → Approve with a comment",
@@ -49,8 +49,8 @@
         "for each variant perform the write once, then within ~2 s capture a screenshot and the DOM of every feedback region — toasts ([data-sonner-toast]), role=status / role=alert regions, and the surface's own save indicator — recording the verbatim text, or its absence",
         "for each variant read server-side whether the write landed (GET the record, the metadata item or the sys_ row) and record the request's status from the network log",
         "repeat the record rows signed in as the member persona, on member-owned records — the stock member's set (showcase_member_default) grants showcase_task read + create only, and the console applies it up front: it offers the member no inline edit, no row selection and no kanban drag, so those three rows cannot be driven as the member (record them as not offered, never as refused). The member's create row runs; for the refusal row use the member's Mark Done on a task record, which answers 403 PERMISSION_DENIED (its error feedback is clause 3's to score). To drive the edit rows as a member, bind the member to the contributor position (showcase_contributor grants task edit, not delete)",
-        "negative pass: (a) submit the create form with a required field empty; then break a validation rule — showcase_task's only rule is the UPDATE-time state machine task_status_flow (no create-time rule exists), so drive it as a refused transition, e.g. a kanban move Backlog → Done; (b) open an inline editor and leave it without changing the value",
-        "where a variant offers Undo, click it and read the record back — on stock the import does (knownGaps[3]): run the two-row CSV import as a job, once creating and once updating, then 'Undo import' from the import history and read the rows back"
+        "negative pass: (a) submit the create form with a required field empty; then break a validation rule — showcase_task's only rule is the UPDATE-time state machine task_status_flow (no create-time rule exists), so drive it as a refused transition, Backlog → Done, on the record form or an inline status edit. ⛔ Not the kanban: the drop gate (#25933, ui/packages/plugin-kanban/src/KanbanImpl.tsx) dims a lane the transition rule blocks (data-kanban-drop-blocked) and a drop there sends no request, so no refusal reaches the server; record the dimmed lane as that surface's answer; (b) open an inline editor and leave it without changing the value",
+        "where a variant offers Undo, click it and read the record back — on stock the import does (knownGaps[3]): run the two-row CSV import as a job, once creating and once updating, then 'Undo import' from the import history — it asks through the browser's native window.confirm (ui/packages/plugin-grid/src/ImportWizard.tsx), unlike Studio discard's in-app dialog, so a driver accepts it as a dialog event — and read the rows back"
       ],
       "acceptance": [
         {
@@ -62,7 +62,7 @@
         {
           "clause": "success feedback names its subject: a record-level write names the record or item (its title, label or display name) or the count; a singleton page (settings) and a named automation (e.g. Flow \"X\" completed) are their own subject and pass as they are; a bare 'Success' / 'Done' or a machine name never passes",
           "oracle": "screenshot",
-          "verify": "two steps per row. First classify the write: record-level (a record create, edit or delete, the import, the approval decision, a record or param action, a Studio item) or singleton / named automation (the settings save, a named Flow run). Then score it by that class's test. Record-level: PASS when the captured text names the record or item (record title or display name, invitee email, package or item label, e.g. 'Approved \"EXP-2001\"') or the count ('N created · M skipped', '1 row saved'); text that names only the object ('Task created successfully') scores FAIL — the console's record create and edit toasts read that way until ui card #26172 lands, so those rows are expected FAILs that cite it. Singleton / named automation: PASS when the text names that page or automation ('Settings saved', 'Flow \"Reassign Task\" completed'). In either class a generic 'Done' / 'Success' or a raw snake_case name scores FAIL for that row",
+          "verify": "two steps per row. First classify the write: record-level (a record create, edit or delete, the import, the approval decision, a record or param action, a Studio item) or singleton / named automation (the settings save, a named Flow run). Then score it by that class's test. Record-level: PASS when the captured text names the record or item (record title or display name, invitee email, package or item label, e.g. 'Approved \"EXP-2001\"') or the count ('N created · M skipped', '1 row saved'); text that names only the object ('Task created successfully') scores FAIL — the console's record create and edit toasts read that way until #26172 (the dialog paths) and #26461 (the full-page /new and /edit form route) — both closed fixed, so those rows are now expected PASS, and a toast naming only the object is a regression. Singleton / named automation: PASS when the text names that page or automation ('Settings saved', 'Flow \"Reassign Task\" completed'). In either class a generic 'Done' / 'Success' or a raw snake_case name scores FAIL for that row",
           "evidence": "the verbatim feedback strings"
         },
         {
@@ -141,6 +141,12 @@
           "date": "2026-10-26",
           "change": "acceptance[1] clause and verify reworded to the maintainer's ruling on the object-only success strings QA run #25817 (release-18.2.0-manual-set at 6679644a, objectui pin b41ed7f68956) asked about: ruling comment 6417978207 on #25849, letter C — a record-level write names the record (its title) or the count; a singleton page (settings) and a named automation (Flow \"X\" completed) are their own subject and pass as they are, and the clause states that boundary. verify now classifies each row (record-level, or singleton / named automation) before scoring it by that class's test. Not loosened: a generic 'Success' / 'Done' or a machine name still FAILS, and a record-level toast that names only the object ('Task created successfully') is an expected FAIL until the ui card #26172 lands. The 2026-10-07 instruction the clause rests on (every write has feedback; no machine names) is unchanged in meaning",
           "ref": "#25849"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-27",
+          "change": "steps[4], variants[3], acceptance[1].verify and steps[5] follow the console at the wave-2 head. Checklist-accuracy findings of the 18.2.0 wave 2 (QA run #26456, release-18.2.0-w2-manual-browser, at 756220c4; wave anchor #25807, slice A): the kanban refused-transition leg is no longer drivable (the #25933 drop gate dims a blocked lane and a drop sends nothing), the record create/edit rows are no longer expected FAILs (#26172 and #26461 both closed fixed), and the import Undo confirms through window.confirm. Re-read at base e4ba846f (KanbanImpl.tsx data-kanban-drop-blocked; ImportWizard.tsx undo confirm). The dimmed lane carries no reason text; that is reported on the wave anchor as an observation, not edited here. No clause's assertion changed",
+          "ref": "#25807"
         }
       ]
     },

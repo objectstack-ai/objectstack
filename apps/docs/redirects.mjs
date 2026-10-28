@@ -20,6 +20,9 @@ export const docsRedirects = [
   ['/docs/getting-started/core-concepts', '/docs/concepts'],
   ['/docs/getting-started/architecture', '/docs/concepts/architecture'],
   ['/docs/concepts/terminology', '/docs/getting-started/glossary'],
+  // The architecture page was published as `north-star`; "North Star" now names
+  // only docs/NORTH-STAR.md (goals and priority), so the page took an honest slug.
+  ['/docs/concepts/north-star', '/docs/concepts/architecture-overview'],
   // data-modeling
   ['/docs/guides/data-modeling', '/docs/data-modeling'],
   ['/docs/guides/metadata/object', '/docs/data-modeling/objects'],

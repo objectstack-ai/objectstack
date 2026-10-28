@@ -8,8 +8,8 @@ import { test, expect } from '@playwright/test';
  * only the server can answer the question the issue asked: does it accept a
  * rule array in `$filter`? It does not. Measured against the published backend
  * backend this lane pins — `OBJECTSTACK_VERSION` in `e2e/live/ci/backend.env`,
- * held to the lockfile by `scripts/__tests__/ci-cd-pipeline-doc.test.ts`
- * (objectui#7689), with the showcase-app commit derived from it at boot from
+ * once held to the lockfile by objectui's CI-guide pin test (objectui#7689; deleted by
+ * objectstack#26058), with the showcase-app commit derived from it at boot from
  * the matching `@objectstack/cli` release tag (objectui#7964). That pin has
  * moved since this measurement was first taken, which is why it is named by
  * FILE and not by value: a version literal written here goes stale behind the

@@ -97,6 +97,8 @@ function makeClient(server: Server) {
     // Serves BOTH the pillar rail (list('permission', { packageId })) and the
     // embedded matrix (list('object', { packageId }) + list('permission', {})
     // for the assignable-set allowlist).
+    // objectstack#26840 — the Access matrix reads its objects through the draft-overlaid door.
+    withPreviewDrafts() { return this; },
     list: async (type: string) => {
       if (type === 'permission') {
         return Object.values(server.byName).map((s) => ({ name: s.name, label: s.label }));

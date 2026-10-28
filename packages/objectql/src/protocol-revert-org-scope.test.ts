@@ -212,6 +212,11 @@ describe('#7559 — the revert reads the history row under the key the writer st
         engine.registry.registerObject(sysMetadataObject, 'test');
         engine.registry.registerObject(sysMetadataHistoryObject, 'test');
         engine.registry.registerObject(sysMetadataCommitObject, 'test');
+        // [#26708] The package the drafts name is installed, as an authored base
+        // that binds the `test` objects its grid reads: a save naming a package
+        // no installed package has is refused, and an installed package's write
+        // is judged against its declared closure.
+        engine.registry.installPackage({ id: PKG, name: PKG, version: '1.0.0', dependencies: { test: '*' } } as any, 'authored');
         protocol = new ObjectStackProtocolImplementation(engine);
         (protocol as any).ensureOverlayIndex = async () => {};
     });

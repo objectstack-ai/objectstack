@@ -113,6 +113,15 @@ async function boot(opts: { item?: { type: string; name: string }; permissions?:
     engine.registry.registerObject(SysMetadataHistoryObject as any, TEST_PACKAGE_ID);
     engine.registry.registerObject(SysMetadataAuditObject as any, TEST_PACKAGE_ID);
     await engine.syncSchemas();
+    // [#26708] The packages the saves below name are installed, as authored
+    // bases that bind this file's `task` object: a save naming a package no
+    // installed package has is refused, and an installed package's write is
+    // judged against its declared closure.
+    for (const id of [PKG, 'com.probe.other', 'com.probe.q', 'com.probe.r']) {
+        engine.registry.installPackage({
+            id, name: id, version: '1.0.0', dependencies: { [TEST_PACKAGE_ID]: '*' },
+        } as any, 'authored');
+    }
 
     const protocol = new ObjectStackProtocolImplementation(engine as any);
     const config = { api: { requireAuth: false }, metadata: { enableCache: false } };

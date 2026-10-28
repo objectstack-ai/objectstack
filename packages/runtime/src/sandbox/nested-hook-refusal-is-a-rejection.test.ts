@@ -30,7 +30,7 @@
  *
  * The marker's own sibling pin already named this risk — "a marker applied too
  * broadly would turn every failed write into a 500"
- * (`capability-denial-is-a-fault.test.ts`) — and measured it with a plain
+ * (`capability-denial-is-a-refusal.test.ts`, then named `-is-a-fault`) — and measured it with a plain
  * `ValidationError`, which is not a `SandboxError` and so never tripped the
  * `instanceof`. A NESTED sandboxed refusal is.
  *
@@ -38,8 +38,9 @@
  *
  * The discriminator is the one `/data` asks (`sandboxBusinessMessage`, #11588):
  * does the error carry a caller-addressed business sentence that is not a
- * script fault? A refusal does and stays a rejection; a capability denial and a
- * nested CRASH do not and stay faults. So `/data`'s answer and the action
+ * script fault? A refusal does and stays a rejection; a nested CRASH does not
+ * and stays a fault. [#26965] A capability denial is a coded refusal (`403
+ * INSUFFICIENT_PRIVILEGES`) since that card, no longer the #4431 fault. So `/data`'s answer and the action
  * route's answer are the same answer, per route and per status.
  */
 
@@ -214,9 +215,10 @@ describe('[#17265] the FAULT side of the #4431 contract is untouched', () => {
         expect(response.body.error.code).toBe('INTERNAL_ERROR');
     });
 
-    it('a capability denial inside the action body is still a fault', async () => {
-        // The #4431 case itself: the sandbox refused before user code ran, so
-        // there is no business message to carry and the 500 must stand.
+    it('[#26965] a capability denial inside the action body is a coded 403 refusal, not the #4431 fault', async () => {
+        // The #4431 case itself, FLIPPED by #26965: one gate, one answer. The
+        // action body's denial is the refusal a hook body's is (#26903),
+        // naming the action, the capability and the remedy.
         const err = await runner.runScript(
             {
                 language: 'js',
@@ -228,7 +230,10 @@ describe('[#17265] the FAULT side of the #4431 contract is untouched', () => {
         ).then(() => null, (e: any) => e);
 
         expect(err).toBeInstanceOf(SandboxError);
-        expect(err.innerMessage).toBeUndefined();
-        expect((await wireAnswer(err)).status).toBe(500);
+        expect(err.innerMessage).toContain("capability 'api.read' not granted to action 'submit_contract'");
+        const response = await wireAnswer(err);
+        expect(response.status).toBe(403);
+        expect(response.body.error.code).toBe('INSUFFICIENT_PRIVILEGES');
+        expect(response.body.error.message).toBe(err.innerMessage);
     });
 });

@@ -123,3 +123,56 @@
 **现在不做**:云服务的旅程(注册、控制面、托管)另有自己的清单;企业版内置 Agent 属 cloud 仓,不在本仓的路与清单里;计费未建。
 
 **账本**:能力与验证的账本是 `docs/qa/platform-checklist/`,本页不复制它。本页不带任何数字;数字从命令来。
+
+---
+
+## English summary
+
+A reading aid for readers without Chinese. The Chinese text above is the original and is what governs; this summary
+restates its opening, its one measure and how to read its ladder, and adds nothing to them.
+
+**The four opening questions**
+
+- **What we are** (我们是什么) — the ontology is the software: an executable business ontology (objects and fields,
+  relationships, actions, permissions, flows, agent and tool definitions) that AI writes, the runtime runs, people and
+  agents use, and you own; startup stage. Views, dashboards, apps and translations are projections of the ontology —
+  the surfaces through which people use, see and verify it today.
+- **Who it is for** (给谁) — third-party developers, AI agents first with a human accepting: the AI writes applications
+  in our metadata protocol, the human looks at the result and decides. The applications' end users are business staff
+  in companies, who use them through agents and the UI.
+- **What gets built** (做出来的是什么) — **AI-native enterprise management applications**: business objects and records,
+  views to see the data, forms that work, permissions that really hold, approvals and automation, business reports,
+  sign-in and identity, an API others can call, files, the customer's language, and changing the application while it
+  runs without writing code. AI-native means the application carries an agent that can operate it for the user: this
+  repository (the community edition) exposes objects and actions over MCP and users connect their own agent; the
+  enterprise edition builds the agent into the UI, and that half lives in the cloud repository. Missing any one of
+  these, it is not this application. The line is a definition, not a checklist — what each item must do and how it is
+  verified is in `docs/qa/platform-checklist/`. Reference implementation: hotcrm. Two kinds of user: today business
+  staff through the UI and acceptors through the console, tomorrow agents through MCP; every step of the road must hold
+  for both.
+- **What counts as done** (什么算做好) — an application built on the protocol is done only once it passes verification:
+  the checklist items its metadata maps to pass in one run, and `objectstack verify` is green on it. A delivery that
+  has not passed verification is not done.
+
+**The one measure: the road** (唯一的度量,那条路)
+
+A new AI developer, a human accepting alongside, starts from `npm create objectstack`: ① write metadata → ② run it
+locally and see it → ③ verification loudly rejects what is wrong and lets through what is right → ④ publish and
+install into an environment → ⑤ connect an agent (MCP in the community edition) and have it complete one real business
+operation in the application → ⑥ iterate once on a one-sentence customer request. Walk it for real every week and
+record the result as a run record. The first step that breaks is the current P0; a step that runs but gives a wrong
+result is P2. Each promise is kept by a step: ① AI can write it · ②③ it executes · ④ you own it · ⑤ agents can operate
+it · ⑥ it closes the loop.
+
+**How to read the ladder** (路上的功能点)
+
+- The ladder lists the features the platform has to deliver, one per line, under the road's steps ① to ⑥; top to
+  bottom is the order. The table is the roadmap: editing it changes priority.
+- Each row reads `axis · feature (in business language) · checklist area · item ids`, and one feature is a whole strip
+  from protocol through runtime to the frontend. Every item in `docs/qa/platform-checklist/` belongs to exactly one
+  row; a feature whose items are not written yet is marked 「清单项待写」 (checklist item to be written). An id without a
+  prefix belongs to the checklist area before it; an id from another area is written in full.
+- Grading reads the ladder (优先级): safety and data integrity always come first and do not wait for the road; a broken
+  road step or a broken checklist capability is P0/P1, one that runs but is wrong is P2, and work on neither the road
+  nor the checklist is p3 or not done. Change the table to change priority — ⛔ never re-grade card by card. The rest
+  of 优先级 and the paragraphs after it (阶段姿态, 仪器为车队服务, 现在不做, 账本) are read in the Chinese text above.
