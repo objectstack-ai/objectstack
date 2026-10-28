@@ -1465,9 +1465,11 @@ export class EmailService implements IEmailService {
     // redirect. The derived fallback was already right: `htmlToText` decodes
     // the entities the HTML render introduced.
     //
-    // A hole the shared grammar refuses throws `TEMPLATE_INVALID` from the
-    // renderer: this names the template and its locale in front of the hole,
-    // and the send or render fails rather than deliver a wrong value.
+    // A hole the shared grammar refuses, and a `currency:@path` hole whose
+    // path holds no ISO 4217 code in this send's data, throw
+    // `TEMPLATE_INVALID` from the renderer: this names the template and its
+    // locale in front of the hole, and the send or render fails rather than
+    // deliver a wrong value.
     let subject: string;
     let html: string;
     let text: string;

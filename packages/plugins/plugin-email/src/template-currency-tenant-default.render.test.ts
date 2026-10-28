@@ -90,6 +90,7 @@ describe('no argument and no tenant default: refused, nothing sent', () => {
     const message = await render.catch((e: Error) => e.message);
     expect(message).toContain('localization.currency');
     expect(message).toContain('currency:EUR');
+    expect(message).toContain('currency:@currency_code');
     expect(message).not.toContain('$');
   });
 
@@ -108,6 +109,12 @@ describe('no argument and no tenant default: refused, nothing sent', () => {
     expect(() => renderTemplate('<p>{{ amt | currency }}</p>', { amt: 1 })).toThrow(/^TEMPLATE_INVALID: the hole \{\{ amt \| currency \}\}/);
     expect(() => renderTemplate('<p>{{{ amt | currency }}}</p>', { amt: 1 })).toThrow(/^TEMPLATE_INVALID: /);
     expect(() => renderPlainTextTemplate('Due {{ amt | currency }}', { amt: 1 })).toThrow(/^TEMPLATE_INVALID: /);
+  });
+
+  it('a marked path names its own code and needs no tenant default', async () => {
+    const { svc } = makeService([{ ...overdue('en-US'), subject: 'Due {{ planned_amount | currency:@currency_code }}', body_html: '<p>x</p>', body_text: 'x' }]);
+    const out = await svc.renderTemplate({ template: 'contract.overdue', data: { ...data, currency_code: 'JPY' } });
+    expect(out.subject).toBe('Due ¥1,235');
   });
 
   it('a template with no no-argument currency hole needs no tenant default', async () => {

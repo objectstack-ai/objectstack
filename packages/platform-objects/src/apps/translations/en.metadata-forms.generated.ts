@@ -937,6 +937,18 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Memory Mb",
         helpText: "Per-invocation memory cap (MB, max 256)"
       },
+      refusals: {
+        label: "Refusals",
+        helpText: "Refusal catalogue, keyed by the SCREAMING_SNAKE code the body throws (e.g. CLEAN_VERSION_REQUIRED). The caller reads the declared message, translated into their language, with the declared status. JavaScript (L2) bodies only"
+      },
+      "refusals.message": {
+        label: "Message",
+        helpText: "The sentence the user reads when the body throws this code — plain text, with no placeholders"
+      },
+      "refusals.status": {
+        label: "Status",
+        helpText: "HTTP status of the refusal (400–499). Absent: 400"
+      },
       handler: {
         label: "Handler",
         helpText: "Handler function name (deprecated — prefer `body`)"
@@ -2094,6 +2106,9 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "measures.currency": {
         label: "Currency"
+      },
+      "measures.polarity": {
+        label: "Polarity"
       },
       "measures.derived": {
         label: "Derived From"

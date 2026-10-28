@@ -118,5 +118,11 @@ describe('currencyDefaultRefusal', () => {
     const refusal = currencyDefaultRefusal('{{ x | currency }}', undefined);
     expect(refusal).toContain('{{ x | currency }}');
     expect(refusal).toContain('Setup → Localization');
+    expect(refusal).not.toContain('@');
+  });
+
+  it('names the marked-path form in the mail dialect only', () => {
+    expect(currencyDefaultRefusal('{{ x | currency }}', 'EUR', 'mail')).toBeNull();
+    expect(currencyDefaultRefusal('{{ x | currency }}', undefined, 'mail')).toContain('`currency:@currency_code`');
   });
 });

@@ -15,7 +15,8 @@ export const entry: SemanticMigration = {
     + 'bodyText, flow text slots (notify, http, screen, end), action and bulk-action confirmText / successMessage',
   replacement: 'nothing, where the amount is in the organization\'s default currency (Setup → Localization, the '
     + '`localization.currency` setting). Where the amount is in one fixed currency, name it: '
-    + '`{{ amount | currency:USD }}`',
+    + '`{{ amount | currency:USD }}`. Where a mail template shows each record\'s amount in that record\'s own '
+    + 'currency, read the code from the send\'s data: `{{ amount | currency:@currency_code }}`',
   reason:
     'A behaviour change with no text to rewrite. The hole used to format in US dollars whatever currency the '
     + 'amount was in, a default nobody chose. It now formats in the organization\'s default currency, the code a '

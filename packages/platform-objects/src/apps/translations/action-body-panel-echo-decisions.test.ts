@@ -701,11 +701,15 @@ describe('#19403 round 5 — the blind spot, FIFTH shape: one schema, two forms,
     // it asserts `carrying.has('hook') === false`, and that assertion is TRUE
     // and CORRECT — `hookForm` enumerates no repeater at all — while seven
     // children sit enumerated and outside it.
+    // 9 since #26835: the hook form offers the `refusals` record, whose two
+    // entry fields (`message`, `status`) are enumerated the same way.
     expect(HOOK_ENUMERATED.covered.length, 'hookForm enumerates no repeater row properties').toBe(0);
-    expect(HOOK_ENUMERATED.skipped.length).toBe(7);
+    expect(HOOK_ENUMERATED.skipped.length).toBe(9);
     for (const child of SHARED_BODY_CHILDREN) expect(HOOK_ENUMERATED.skipped).toContain(`body.${child}`);
     expect(HOOK_ENUMERATED.skipped).toContain('retryPolicy.maxRetries');
     expect(HOOK_ENUMERATED.skipped).toContain('retryPolicy.backoffMs');
+    expect(HOOK_ENUMERATED.skipped).toContain('refusals.message');
+    expect(HOOK_ENUMERATED.skipped).toContain('refusals.status');
     //
     // ⇒ one composite, two forms, two different greens: a lit control that
     // passes on a sibling repeater, and a dark control that is right about
