@@ -270,6 +270,7 @@ dispatches the standard create action — `{ type: 'create', payload: {} }` — 
 the same action channel every other `calendar-view` gesture uses, so the host
 decides what a "create" means (open a form, navigate, call an API).
 
+{/* doc-snippet: fragment — a SHAPE excerpt continuing the "CalendarView Usage" block above, which is where the event array is written inline: `events` is the READER's own data and is not defined in this block (measured: TS2552 x1) */}
 ```tsx
 const schema = {
   type: 'calendar-view',
@@ -554,6 +555,7 @@ The `@object-ui/plugin-calendar-view` package has been merged into this package.
 npm install @object-ui/plugin-calendar-view
 ```
 
+{/* doc-snippet: fragment — a migration guide's "Before" block, quoting the RETIRED `@object-ui/plugin-calendar-view` package on purpose: it was merged into `@object-ui/plugin-calendar` and no longer exists, so the specifier resolves nowhere and must not compile (measured: TS2882 x1, TS2307 x1). Correct documentation about code that is gone */}
 ```tsx
 import '@object-ui/plugin-calendar-view'
 import { CalendarView } from '@object-ui/plugin-calendar-view'

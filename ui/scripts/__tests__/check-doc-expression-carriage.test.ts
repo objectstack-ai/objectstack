@@ -372,7 +372,10 @@ describe('check-doc-expression-carriage: `json` is strict, `jsonc` keeps the tol
    * 0) and prints the ruled remedy.
    */
   it('names file, fence line, language and parse error, and the CLI prints the `jsonc` retag remedy', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'carriage-strict-'));
+    // A `ui/` inside the temp dir: the pages leg reads `../content/docs/frontend`,
+    // one level above the root (objectstack#27145), and must land inside the tree.
+    const root = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'carriage-strict-')), 'ui');
+    fs.mkdirSync(root);
     const page = `${DOCS_ROOT}/guide/fences.md`;
     const annotated = ['{', '  // VS Code settings are JSONC', '  "objectui.preview.port": 3000', '}'];
     fs.mkdirSync(path.join(root, DOCS_ROOT, 'guide'), { recursive: true });
@@ -407,7 +410,7 @@ describe('check-doc-expression-carriage: `json` is strict, `jsonc` keeps the tol
     expect(run.status, run.stderr).toBe(0);
     expect(run.stdout).toContain(`${page}:7  (json)  invalid-json: `);
     expect(run.stdout).toContain(UNPARSED_PRESCRIPTIONS.json);
-    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(path.dirname(root), { recursive: true, force: true });
   });
 });
 
@@ -504,7 +507,9 @@ describe('check-doc-expression-carriage: the scan surface is check:doc-types’,
     const census = analyze(ROOT, { channels: deriveChannels(ROOT), carriage: await loadCarriage() });
     const documents: string[] = census.documents;
 
-    expect(documents.filter((f) => f.startsWith(`${DOCS_ROOT}/`)).length).toBeGreaterThan(100);
+    // 100 until objectstack#27145 moved the SDK pages to the monorepo's
+    // `content/docs/frontend` as fewer, larger ones: 34 when re-measured.
+    expect(documents.filter((f) => f.startsWith(`${DOCS_ROOT}/`)).length).toBeGreaterThan(25);
 
     const appDirs = appDocsDirs(ROOT).map((abs: string) => path.relative(ROOT, abs).split(path.sep).join('/'));
     expect(appDirs, `no ${APP_DOCS.dir}/*/${APP_DOCS.subdir} tree exists, so that leg pins nothing`).not.toEqual([]);
@@ -519,7 +524,7 @@ describe('check-doc-expression-carriage: the scan surface is check:doc-types’,
     ).toBeGreaterThan(10);
 
     for (const name of ROOT_PAGES) expect(documents).toContain(name);
-    expect(documents).toContain(`${DOCS_ROOT}/guide/quick-start.md`);
+    expect(documents).toContain(`${DOCS_ROOT}/quick-start.mdx`);
   });
 
   it('names the surface it walked in the summary it prints', () => {
@@ -554,7 +559,10 @@ describe('check-doc-expression-carriage: the census on a fixture tree', () => {
    * takes its slot: the leg the root pages followed in walk order.
    */
   function fixtureTree(): string {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'carriage-docs-'));
+    // A `ui/` inside the temp dir: the pages leg reads `../content/docs/frontend`,
+    // one level above the root (objectstack#27145), and must land inside the tree.
+    const root = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'carriage-docs-')), 'ui');
+    fs.mkdirSync(root);
     const docs = path.join(root, DOCS_ROOT, 'guide');
     fs.mkdirSync(docs, { recursive: true });
     fs.writeFileSync(path.join(docs, 'bad.md'), ['# Bad', '', ...defect].join('\n'));
@@ -601,7 +609,7 @@ describe('check-doc-expression-carriage: the census on a fixture tree', () => {
     expect(census.sites.find((site: { file: string }) => site.file === `${DOCS_ROOT}/guide/bad.md`)).toMatchObject({
       line: 6,
     });
-    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(path.dirname(root), { recursive: true, force: true });
   });
 
   /**
@@ -622,7 +630,7 @@ describe('check-doc-expression-carriage: the census on a fixture tree', () => {
     expect(narrowed.counters.files).toBe(2);
     expect(narrowed.sites).toHaveLength(1);
     expect(narrowed.sites[0]).toMatchObject({ file: `${DOCS_ROOT}/guide/bad.md` });
-    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(path.dirname(root), { recursive: true, force: true });
   });
 
   it('lists the documents it walked, in walk order: guide tree, app docs, package READMEs', () => {
@@ -633,7 +641,7 @@ describe('check-doc-expression-carriage: the census on a fixture tree', () => {
       `${APP_DOCS.dir}/console/${APP_DOCS.subdir}/guide.md`,
       FIXTURE_README,
     ]);
-    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(path.dirname(root), { recursive: true, force: true });
   });
 });
 
@@ -680,62 +688,24 @@ describe('check-doc-expression-carriage: the real tree, and the posture', () => 
     expect(jsonc, 'the corpus must still hold jsonc fences for this pin to mean anything').toBeDefined();
     expect(jsonc!.fences).toBeGreaterThan(0);
     expect(jsonc!.unparsed).toBe(0);
-    const page = census.fences.filter(
-      (fence: { file: string }) => fence.file === `${DOCS_ROOT}/guide/record-edit-modes.md`,
-    );
-    expect(page.length, 'record-edit-modes.md must be inside this census').toBeGreaterThan(0);
-    expect(page.every((fence: { lang: string; ok: boolean }) => fence.lang === 'jsonc' && fence.ok)).toBe(true);
+    // The page that proved it necessary left the tree with objectstack#27145's
+    // docs fold (its record-edit-modes guide was not carried over), so what is
+    // pinned now is that the jsonc fences the corpus does hold are judged.
+    expect(
+      census.fences.filter((fence: { lang: string; ok: boolean }) => fence.lang === 'jsonc').every(
+        (fence: { ok: boolean }) => fence.ok,
+      ),
+    ).toBe(true);
   });
 
-  /**
-   * objectui#8334. ⚠️ This pin used to read `expect(census.unscannedJsonLike).toEqual([])`
-   * — and it PASSED, for the worst possible reason: the leg it pinned required a
-   * strict JSON parse, so an entire dialect was invisible to it and the empty
-   * list was a blindness rather than a clean corpus.
-   *
-   * ⛔ Its failure message was worse than the pin. It instructed the next reader
-   * to "Widen `JSON_FENCE_LANGUAGES` deliberately" — the one fix PR objectui#8324
-   * REJECTED by content, because `plaintext` is not a JSON dialect and admitting
-   * it lets every future JSON-in-plaintext block through unjudged. A defect
-   * reasoned from written prose reproduces itself while the prose stands, so the
-   * prose is corrected here and not only in the gate.
-   *
-   * What replaces it is the opposite shape: a FLOOR proving the measurement can
-   * see the class, ⛔ per file rather than one summed total — a summed floor
-   * cannot tell "every page still measured" from "one page the matcher quietly
-   * stopped matching, and another that grew two blocks".
-   */
-  it('SEES the JS object-literal dialect the coverage line used to lie about', async () => {
-    const census = analyze(ROOT, { channels: deriveChannels(ROOT), carriage: await loadCarriage() });
-    const literals = census.unscannedJsonLike.filter(
-      (fence: { dialect: string }) => fence.dialect === 'object-literal',
-    );
-    // ⛔ Per file. Each of the five the card measured must still be SEEN; a zero
-    // on any one of them is the blindness this card exists to remove, and the
-    // summary would print `none` over it again.
-    for (const file of [
-      `${DOCS_ROOT}/components/complex/filter-ui.mdx`,
-      `${DOCS_ROOT}/components/complex/sort-ui.mdx`,
-      `${DOCS_ROOT}/components/complex/view-switcher.mdx`,
-      `${DOCS_ROOT}/components/feedback/toaster.mdx`,
-      `${DOCS_ROOT}/components/navigation/header-bar.mdx`,
-    ]) {
-      expect(
-        literals.filter((fence: { file: string }) => fence.file === file).length,
-        `${file} authors a node tree as a JS object literal in an unscanned fence. The blind-spot ` +
-          'measurement must REPORT it. If this page was legitimately retagged ```json, it has moved ' +
-          'into the judged population — drop it from this list; do NOT delete the list.',
-      ).toBeGreaterThan(0);
-    }
-    // ⛔ NOT an equality on the total: that number moves with every docs page and
-    // pinning it would make a report-only gate blocking through the back door.
-    // A floor is what distinguishes a measurement from a snapshot.
-    expect(
-      literals.length,
-      'the object-literal leg reported nothing at all on a corpus that demonstrably holds this ' +
-        'dialect — the leg has stopped matching and its zero is not readable.',
-    ).toBeGreaterThanOrEqual(5);
-  });
+  // objectui#8334's real-tree pin stood here: a per-file floor over the five
+  // renderer pages that authored node trees as JS object literals in unscanned
+  // fences. objectstack#27145's docs fold merged those pages into the generated
+  // component reference, and the corpus holds none of the dialect now, so the
+  // pin had no subject left. What keeps the leg readable is unchanged: the
+  // dialect controls above prove it sees the object-literal fixture and stays
+  // silent on a TS interface body, and a page that brings the dialect back is
+  // reported by the census like any other.
 
   /**
    * Triage's binding fence on objectui#8334, pinned mechanically rather than
@@ -809,7 +779,9 @@ describe('check-doc-expression-carriage: the real tree, and the posture', () => 
     const run = spawnSync(process.execPath, [GATE], { cwd: ROOT, encoding: 'utf8' });
     expect(run.status, run.stderr).toBe(0);
     expect(run.stdout).toContain('Controls pass');
-    expect(run.stdout).toContain('Report-only');
+    // The corpus carried findings until objectstack#27145's docs fold; it may
+    // carry none, and then the clean line stands where the report-only one was.
+    expect(run.stdout).toMatch(/Report-only|No documented json fence authors/);
     // The findings themselves go to stdout, never stderr: nothing downstream
     // should be able to read them as a failure.
     expect(run.stderr).toBe('');

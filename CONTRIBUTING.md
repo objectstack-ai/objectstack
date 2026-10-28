@@ -223,7 +223,7 @@ pnpm exec turbo run build --filter='./*/*'       # Build every ui package (turbo
 pnpm exec turbo run type-check --filter='./*/*'  # Run tsc --noEmit across the ui packages (turbo)
 pnpm exec turbo run lint --filter='./*/*'        # Run eslint across the ui packages (turbo)
 pnpm dev                                         # The Console's Vite dev server, on :5180
-pnpm docs:check-links                            # The internal-link check CI runs on the ui READMEs and docs
+pnpm docs:check-links                            # The internal-link check CI runs on the ui docs and READMEs
 pnpm test:e2e                                    # End-to-end tests (playwright)
 ```
 
@@ -297,18 +297,20 @@ The [package directory](#package-directory) lists every `@object-ui/*` package b
 
 ### UI documentation
 
-ObjectUI's guides are pages of the documentation site, under `content/docs/frontend/`
-(*Custom front-end*), and follow the `content/docs/` rules above. `ui/docs/` is not part of the site.
+ObjectUI's guides are pages of the documentation site, in its *Custom Front-end* section
+([content/docs/frontend](./content/docs/frontend)), and follow the documentation rules above.
+`ui/docs/` is not part of the site.
 
 - **A code block in an ADR or a dated audit is a specimen, not an example to copy.** Fence it
-  `plaintext`, never `ts` / `tsx`: a gate compiles the code fences of `content/docs/frontend/`, and
-  a record edited until it compiles says something it never said. Code a reader may copy
-  belongs in `content/docs/frontend/` or the skills tree.
+  `plaintext`, never `ts` / `tsx`: a gate compiles the code fences of the Custom Front-end
+  pages, and a record edited until it compiles says something it never said. Code a reader may
+  copy belongs in those pages or the skills tree.
 - **A `json` fence must pass a strict `JSON.parse`.** A block annotated with comments or
   trailing commas is fenced `jsonc`, and must still be one JSON document once those are
   removed; a `${…}` expression stays on one line inside its string.
 - **Internal links are checked offline.** `pnpm docs:check-links` resolves every relative
-  path in the ui READMEs and `ui/docs/` against the checkout, and CI runs it on every change.
+  path and site route on the Custom Front-end pages, the ui READMEs and `ui/docs/` against the
+  checkout, and CI runs it on every change.
 
 ObjectUI's [Quick Start](./content/docs/frontend/quick-start.mdx) and
 [Component Registry](./content/docs/frontend/component-registry.mdx) guides are the place to

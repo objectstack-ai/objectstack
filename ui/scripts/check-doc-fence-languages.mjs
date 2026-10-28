@@ -202,7 +202,7 @@ export function appDocsDirs(root) {
  * ⭐ objectstack#26080 emptied it. The root `README.md` was folded into the
  * repository's root README, which lives outside this tree, and its examples —
  * the flagship "Basic Usage" page, the four copy-paste schemas — moved to
- * `content/docs/guide/quick-start.md`, which the `DOCS_ROOT` walk already
+ * `content/docs/frontend/quick-start.mdx`, which the `DOCS_ROOT` walk already
  * reads: the same fences, judged on the guide leg instead. Re-pointing the
  * entry there would list that page twice. The array stays, with the guard over
  * it, so a page added at the root later joins the way objectui#7115's did.
@@ -359,21 +359,15 @@ export function census(documents) {
  * the line when it reaches 0. That is objectui#5867's batches, and no entry
  * records a judgement anyone has to re-make.
  *
- * ⚠️ ONE entry is different in kind and is labelled rather than left to be
- * re-derived. `content/docs/components/form/file-upload.mdx` is the block this
- * card surfaced, and it is NOT merely blocked — objectui#6138 measured that a
- * block declaring its OWN `interface` and then being checked against it compiles
- * VACUOUSLY, and `file-upload.mdx:27` opens `interface FileUploadSchema {`. Its
- * line comes down when objectui#6138 rules on what such a block should be, not
- * when someone re-fences it; re-fencing it today would add a block that reports
- * green while checking nothing.
+ * The last two lines (`content/docs/components/basic/text.mdx` and
+ * `content/docs/components/form/file-upload.mdx`, the latter held for
+ * objectui#6138's ruling on a block checked against its own `interface`) left
+ * with their pages when the objectui.org site was retired. The list is empty,
+ * its intended steady state: a new line is a new synonym-fenced block.
  *
  * @type {Map<string, number>}
  */
-export const KNOWN_UNHIGHLIGHTED_TS_FENCES = new Map([
-  ['content/docs/components/basic/text.mdx', 1],
-  ['content/docs/components/form/file-upload.mdx', 1],
-]);
+export const KNOWN_UNHIGHLIGHTED_TS_FENCES = new Map([]);
 
 /** Split observed counts against the baseline. Both directions are failures. */
 export function reconcile(observed, baseline) {

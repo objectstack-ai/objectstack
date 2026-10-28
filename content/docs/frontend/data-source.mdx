@@ -164,6 +164,7 @@ class UserDataSource implements DataSource<User> {
 
 ObjectUI uses OData-style query keys for broad compatibility:
 
+{/* doc-snippet: fragment — continues the adapter block above: dataSource is the adapter created there, and repeating its construction here would bury the query keys this section is about */}
 ```typescript
 await dataSource.find('users', {
   $select: ['id', 'name', 'email'],

@@ -123,7 +123,7 @@ import { labelPath, skillBundleBase, skillsWalk } from '../skill-bundle-root.mjs
  *
  * ## What objectui#3855 added: the hole was the CLASSIFICATION, not the regex
  *
- * objectui#3855 arrived asking why this gate "missed" `content/docs/guide/plugins.md`,
+ * objectui#3855 arrived asking why this gate "missed" `../content/docs/frontend/plugins/index.mdx`,
  * whose plugin `package.json` skeleton taught `typescript` `^5.0.0` and `vite` `^5.0.0`
  * against a workspace on `^6.0.3` and `^8.2.1` — one major and three majors behind. It did
  * not miss them. Both lines MATCHED (`TypeScript` and `Vite` are `TOOLCHAIN` words and the
@@ -268,7 +268,7 @@ import { labelPath, skillBundleBase, skillsWalk } from '../skill-bundle-root.mjs
  *     of their own — `apps/console` plus the `examples/*` starters, 3 to 4 declarers
  *     today, too thin for the current floor). What is NOT an acceptable answer is
  *     demoting them to `sample`: that class is what let three majors of drift sit in
- *     `content/docs/guide/plugins.md` for months, and it is what left these four literals
+ *     `../content/docs/frontend/plugins/index.mdx` for months, and it is what left these four literals
  *     unread for the whole life of this gate.
  *
  * The criterion those two paragraphs share, and the one the react/tailwind lines fail:
@@ -617,7 +617,7 @@ import { labelPath, skillBundleBase, skillsWalk } from '../skill-bundle-root.mjs
  * ## The version-heading exemption is deliberately narrow, and here is why
  *
  * The obvious spelling — "a heading containing something that looks like a version" —
- * silently exempts an entire document. Measured: `content/docs/rfcs/0001-clipboard-paste.md`
+ * silently exempts an entire document. Measured: `docs/rfcs/0001-clipboard-paste.md`
  * numbers its sections `### 1.1`, `### 5.1`, `### 7.3`, and 18 of those match a loose
  * pattern. The whole RFC would have dropped out of the scan while the gate reported
  * green.
@@ -632,7 +632,7 @@ import { labelPath, skillBundleBase, skillsWalk } from '../skill-bundle-root.mjs
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
 /**
- * The three surfaces this gate reads.
+ * The surfaces this gate reads.
  *
  * The first two are the ones objectui#3697 names. Both are read by humans looking for
  * the version they must install, and both are already walked by `check-doc-links.mjs`
@@ -646,8 +646,13 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
  * version; `check-doc-links.mjs` has no `skills` row at all. So until this row landed,
  * every version literal in the agent-facing tree was invisible to every gate in
  * `scripts/` — see the objectui#4981 section in the header for what the widening found.
+ *
+ * objectstack#27145 retired this workspace's own `content/docs` with its site. The SDK
+ * pages it held live on in the root docs tree, read here as `../content/docs/frontend`,
+ * and the one RFC that was not a page moved to `docs/rfcs`, which is its own row so the
+ * numbered-heading pin below keeps a subject.
  */
-const SCAN_ROOTS = ['content/docs', 'packages/*/README.md', 'skills'] as const;
+const SCAN_ROOTS = ['../content/docs/frontend', 'docs/rfcs', 'packages/*/README.md', 'skills'] as const;
 
 /**
  * The `skills` root is the published bundle, which the cutover moved into the
@@ -1044,14 +1049,14 @@ const PEER_RESTATEMENT_OK =
 const KNOWN_CLAIMS: KnownClaim[] = [
   // --- content/docs ------------------------------------------------------------
   {
-    file: 'content/docs/guide/building-crud-app.md',
+    file: '../content/docs/frontend/building-crud-app.mdx',
     claim: 'Node 22.x',
     kind: 'anchored',
     workflowVersionKey: 'node-version',
     why: "Anchored on the node-version declarations in .github/workflows and .github/actions - literal, or read from .nvmrc through node-version-file (objectstack#26421) - and ASSERTED against them by the workflow-version assertion below, which re-reads them on every run and demands this page state their major (objectui#6400). Written by objectui#6307, which replaced an invented consumer floor (`**Node.js** 20+`) on this page. The sentence around it states what CI EXERCISES, not what a reader's project requires - no manifest in this tree declares a consumer engines.node, so a floor here would be a number nobody measured. The declaration count this reason used to quote left it in objectui#6400: it had already drifted, and a count no run re-takes is what that card is about.",
   },
   {
-    file: 'content/docs/guide/building-crud-app.md',
+    file: '../content/docs/frontend/building-crud-app.mdx',
     claim: 'pnpm 10.x',
     kind: 'anchored',
     manifestVersionField: 'packageManager',
@@ -1060,20 +1065,18 @@ const KNOWN_CLAIMS: KnownClaim[] = [
   // The two entries objectui's CI guide page carried (`node-version: 20`,
   // objectui#6409's, and `Node 22.x`, objectui#6400's) left with the page:
   // objectstack#26944 deleted it.
+  // Three more left with objectstack#27145's docs fold: the layout page's quote of
+  // the page:header icon tombstone (`@objectstack/spec 17.0.0`) went with its
+  // trimmed page-header section, and plugin-markdown's fake-changelog demo string
+  // (`react | 18.2.0`, `vite | 4.5.0`) went with its trimmed examples.
   {
-    file: 'content/docs/guide/layout.md',
-    claim: '@objectstack/spec 17.0.0',
-    kind: 'unanchored',
-    why: 'A verbatim quotation of the icon tombstone\'s own refusal message — "`page:header` property `icon` was removed in @objectstack/spec 17.0.0 (#6946, ADR-0087 D2)" — kept verbatim on purpose (objectui#5923 / PR #6082): the page quotes what the canonical node actually tells an author holding the key, rather than inventing a rationale, so a reader learns why their schema is rejected in the words that reject it. The version names when a removal SHIPPED — a historical fact that cannot go stale the way a "current version" claim does — but nothing in this tree re-reads the installed spec\'s describe text, so if @objectstack/spec ever rewords the tombstone this quote drifts from the message while the fact underneath stays true. That drift risk is the price of quoting, accepted deliberately over paraphrase.',
-  },
-  {
-    file: 'content/docs/guide/plugins.md',
+    file: '../content/docs/frontend/plugins/index.mdx',
     claim: 'react": "^19.0.0',
     kind: 'sample',
     why: 'A peerDependencies range in the plugin skeleton: what the copied plugin ACCEPTS from its host, which its author owns and may legitimately widen or narrow. Stays a sample while the two devDependency ranges in the same block became anchored in objectui#3855 - installed-here versus accepted-from-the-host is the distinction, not which fence the line sits in.',
   },
   {
-    file: 'content/docs/guide/plugins.md',
+    file: '../content/docs/frontend/plugins/index.mdx',
     // Reads as a `react` claim and is not one: the scan matches the TAIL of the scoped
     // package name (`@vitejs/plugin-react`), because `React` is a TOOLCHAIN word and the
     // `-` before it is a word boundary. The dep this entry is anchored on is the one
@@ -1085,50 +1088,38 @@ const KNOWN_CLAIMS: KnownClaim[] = [
     why: 'The third devDependency of the same in-workspace skeleton, added in objectui#4961 - and added because it was MISSING, not because its range had drifted: step 5 of the same numbered tutorial imports @vitejs/plugin-react in vite.config.ts and calls react() in plugins, while step 6 never declared it, so a reader following 1-6 failed on their first pnpm build with an import of a package they were never told to install. Same shape as the closed objectui#3716 and #3742, which fixed it on the create-plugin generator side while this hand-written page was never walked. Anchored on the same unanimous evidence as its two neighbours: all 19 packages/plugin-<name> manifests declare ^6.0.5.',
   },
   {
-    file: 'content/docs/guide/plugins.md',
+    file: '../content/docs/frontend/plugins/index.mdx',
     claim: 'typescript": "^6.0.3',
     kind: 'anchored',
     skeletonDep: 'typescript',
     why: 'A devDependency of the same skeleton, which is an IN-WORKSPACE plugin (workspace:* deps, vite build && tsc --emitDeclarationOnly), so the compiler it builds with is this repo\'s and not the reader\'s. Asserted against the in-repo plugin manifests by the plugin-skeleton assertion below (objectui#3855); it read ^5.0.0, one major behind, while classified as a sample nothing could check.',
   },
   {
-    file: 'content/docs/guide/plugins.md',
+    file: '../content/docs/frontend/plugins/index.mdx',
     claim: 'vite": "^8.2.1',
     kind: 'anchored',
     skeletonDep: 'vite',
     why: 'Same skeleton, same anchor, same assertion (objectui#3855). This was the worst of the pair: it read ^5.0.0 against a workspace unanimously on ^8.2.1 — three majors — and the entry excusing it said the plugin author picks their own bundler version, which is not what a workspace:* manifest with a vite build script means.',
   },
   {
-    file: 'content/docs/guide/quick-start.md',
+    file: '../content/docs/frontend/quick-start.mdx',
     claim: 'Node 22.x',
     kind: 'anchored',
     workflowVersionKey: 'node-version',
     why: 'Same anchor, same assertion and same objectui#6307 rewrite as the building-crud-app.md entry above: the node-version declarations in .github/workflows and .github/actions, literal or through .nvmrc, are re-read and compared on every run (objectui#6400, objectstack#26421). This page carried the same invented floor in two bullets, `**Node.js** 20+` and `**pnpm** 9+`, and both were invisible to this scan until SEP admitted emphasis markers.',
   },
   {
-    file: 'content/docs/guide/quick-start.md',
+    file: '../content/docs/frontend/quick-start.mdx',
     claim: 'pnpm 10.x',
     kind: 'anchored',
     manifestVersionField: 'packageManager',
     why: "Same anchor, same assertion and same objectui#6307 rewrite as the building-crud-app.md pnpm entry above: the root packageManager field is re-read and compared on every run (objectui#6447), in place of `**pnpm** 9+`. This reason carried its neighbour's corepack-step count BY REFERENCE - it inherited the number without restating it - and lost it in the same change, which is the shape a claim-by-reference makes possible and worth naming.",
   },
   {
-    file: 'content/docs/guide/theming.md',
+    file: '../content/docs/frontend/theming.mdx',
     claim: 'Tailwind CSS v3.3',
     kind: 'unanchored',
     why: 'A capability floor for RTL logical properties ("requires v3.3+ or v4"), not a claim about the version shipped here. Satisfied by the ^4.x this repo uses, but nothing can check it.',
-  },
-  {
-    file: 'content/docs/plugins/plugin-markdown.mdx',
-    claim: 'react | 18.2.0',
-    kind: 'sample',
-    why: 'Demo content inside a template literal: a fake changelog fed to the markdown renderer to show a table. Names no real dependency of this repo.',
-  },
-  {
-    file: 'content/docs/plugins/plugin-markdown.mdx',
-    claim: 'vite | 4.5.0',
-    kind: 'sample',
-    why: 'Second row of the same fake changelog demo string.',
   },
 
   // --- packages/<name>/README.md ----------------------------------------------
@@ -2210,7 +2201,9 @@ describe('doc version claims - the scan itself', () => {
     // removed constantly and this test must not become a file-count pin. What it
     // must catch is a scan that silently collapsed to nothing — the failure mode
     // that would make every other assertion in this file vacuously true.
-    expect(scannedFiles.length, 'the scan roots resolved to implausibly few files').toBeGreaterThan(150);
+    // 150 until objectstack#27145 folded the SDK pages into content/docs/frontend
+    // as fewer, larger pages: 90 files when re-measured.
+    expect(scannedFiles.length, 'the scan roots resolved to implausibly few files').toBeGreaterThan(60);
     expect(
       allClaims.length,
       'the claim regexes matched implausibly little - they were measured at 38 hits on d46b40324',
@@ -2477,9 +2470,9 @@ describe('doc version claims - the scan itself', () => {
     // And the exemption must not have swallowed the RFC in practice, either.
     expect(
       exemptClaims.map((c) => c.file),
-      'content/docs/rfcs/0001-clipboard-paste.md was structurally exempted - its numbered ' +
+      'docs/rfcs/0001-clipboard-paste.md was structurally exempted - its numbered ' +
         'headings are being read as release sections again',
-    ).not.toContain('content/docs/rfcs/0001-clipboard-paste.md');
+    ).not.toContain('docs/rfcs/0001-clipboard-paste.md');
   });
 });
 

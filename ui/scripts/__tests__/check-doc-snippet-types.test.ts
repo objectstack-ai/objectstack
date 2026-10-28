@@ -93,7 +93,11 @@ interface Finding {
 }
 
 function tempTree(files: Record<string, string>): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'doc-snippet-gate-'));
+  // The root is a `ui/` inside the temp dir: the gate reads its pages from
+  // `../content/docs/frontend` (objectstack#27145), one level above the root,
+  // so a fixture page keyed that way lands beside the root and inside the tree.
+  const root = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'doc-snippet-gate-')), 'ui');
+  fs.mkdirSync(root);
   for (const [rel, content] of Object.entries(files)) {
     const full = path.join(root, rel);
     fs.mkdirSync(path.dirname(full), { recursive: true });
@@ -105,17 +109,6 @@ function tempTree(files: Record<string, string>): string {
 
 const FENCE = '```';
 
-/**
- * The corpus specimen behind objectui#7555 — a `tsx` block whose body assigns a
- * template literal holding a README sample, and inside that literal the line
- * `npm install project-name`.
- */
-const README_SAMPLE_DOC = 'content/docs/plugins/plugin-markdown.mdx';
-// 195 until objectui#6972 replaced two prop-table rows above it with a
-// retirement blockquote (+11 lines); 206 until objectui#8125's annotation sweep
-// added one `import type` line to the page's first block (+1 line);
-// re-declared here each time, as this pin intends.
-const README_SAMPLE_FENCE_LINE = 207;
 
 /**
  * The regex reader objectui#7555 removed from both gates, kept HERE and only
@@ -357,7 +350,7 @@ describe('fence scanning', () => {
 
   it('reports a blockquoted marker that declares nothing, instead of never seeing it', () => {
     const root = tempTree({
-      'content/docs/a.mdx': [
+      '../content/docs/frontend/a.mdx': [
         '> {/* doc-snippet: fragment \u2014 nothing follows this */}',
         '>',
         '> Just prose.',
@@ -369,7 +362,7 @@ describe('fence scanning', () => {
 
   it('reports a marker that declares nothing rather than ignoring it', () => {
     const root = tempTree({
-      'content/docs/a.mdx': ['{/* doc-snippet: fragment — nothing follows this */}', '', 'Just prose.'].join('\n'),
+      '../content/docs/frontend/a.mdx': ['{/* doc-snippet: fragment — nothing follows this */}', '', 'Just prose.'].join('\n'),
     });
     const findings = analyze({ root, ungated: {} }).findings as Finding[];
     expect(findings.map((f) => f.reason)).toContain('stale-fragment-marker');
@@ -377,7 +370,7 @@ describe('fence scanning', () => {
 
   it('rejects a fragment declaration with no written reason', () => {
     const root = tempTree({
-      'content/docs/a.mdx': ['{/* doc-snippet: fragment — short */}', `${FENCE}ts`, 'x', FENCE].join('\n'),
+      '../content/docs/frontend/a.mdx': ['{/* doc-snippet: fragment — short */}', `${FENCE}ts`, 'x', FENCE].join('\n'),
     });
     const findings = analyze({ root, ungated: {} }).findings as Finding[];
     expect(findings.map((f) => f.reason)).toContain('unexplained-fragment');
@@ -404,13 +397,13 @@ describe('objectui#7505 — a fragment reason may not claim the block was checke
     ['# T', '', `{/* doc-snippet: fragment — ${reason} */}`, `${FENCE}ts`, 'const x: Broken =', FENCE].join('\n');
 
   const reasonsOf = (reason: string) =>
-    (analyze({ root: tempTree({ 'content/docs/a.mdx': claimDoc(reason) }), ungated: {} }).findings as Finding[])
+    (analyze({ root: tempTree({ '../content/docs/frontend/a.mdx': claimDoc(reason) }), ungated: {} }).findings as Finding[])
       .map((f) => f.reason);
 
   it('turns red on the spelling that was actually written here, and names itself', () => {
     const findings = analyze({
       root: tempTree({
-        'content/docs/a.mdx': claimDoc(
+        '../content/docs/frontend/a.mdx': claimDoc(
           'a SIGNATURE excerpt, checked against the shipped `dist/index.d.ts` with the same type',
         ),
       }),
@@ -418,7 +411,8 @@ describe('objectui#7505 — a fragment reason may not claim the block was checke
     }).findings as Finding[];
     const claim = findings.find((f) => f.reason === 'verification-claim-on-fragment');
     expect(claim, 'the combination this card exists to refuse went green').toBeDefined();
-    expect(claim!.site).toBe('content/docs/a.mdx:4');
+    // fixture-address: a fixture site in a throwaway tree, ⛔ not a pointer into this tree
+    expect(claim!.site).toBe('../content/docs/frontend/a.mdx:4');
     // The remedy has to reach the author who is standing in front of the red.
     expect(claim!.detail).toContain('checked');
     expect(claim!.detail).toContain('compiled tier');
@@ -426,7 +420,7 @@ describe('objectui#7505 — a fragment reason may not claim the block was checke
 
   it('is a verdict about the document, not a precondition — it leaves through exit 1', () => {
     const findings = analyze({
-      root: tempTree({ 'content/docs/a.mdx': claimDoc('a shape excerpt, verified member for member') }),
+      root: tempTree({ '../content/docs/frontend/a.mdx': claimDoc('a shape excerpt, verified member for member') }),
       ungated: {},
     }).findings as Finding[];
     expect(findings.map((f) => f.reason)).toContain('verification-claim-on-fragment');
@@ -438,7 +432,7 @@ describe('objectui#7505 — a fragment reason may not claim the block was checke
     // No marker, so the block is in the compiled tier — where the claim is one
     // this gate re-verifies on every commit, which is the shape the rule wants.
     const root = tempTree({
-      'content/docs/a.mdx': [
+      '../content/docs/frontend/a.mdx': [
         '# T',
         '',
         `${FENCE}ts`,
@@ -508,7 +502,8 @@ describe('objectui#7505 — a fragment reason may not claim the block was checke
     // Guards the pin above against going vacuous: this gate must still be
     // reading a real population of declared fragments for "zero" to mean
     // anything, and that population must not have moved into the compiled tier.
-    expect(state.declaredFragments.length).toBeGreaterThan(100);
+    // 100 until objectstack#27145's docs fold, which left 92 when re-measured.
+    expect(state.declaredFragments.length).toBeGreaterThan(60);
   });
 
   it('states the rule in its own header, so it cannot drift out of the source', () => {
@@ -522,31 +517,31 @@ describe('objectui#7505 — a fragment reason may not claim the block was checke
 
 describe('the coverage ledger is re-derived, never trusted', () => {
   it('fails on an entry naming a document that does not exist', () => {
-    const root = tempTree({ 'content/docs/a.mdx': [`${FENCE}ts`, 'export const a = 1;', FENCE].join('\n') });
-    const findings = analyze({ root, ungated: { 'content/docs/gone.mdx': 'a reason long enough' } })
+    const root = tempTree({ '../content/docs/frontend/a.mdx': [`${FENCE}ts`, 'export const a = 1;', FENCE].join('\n') });
+    const findings = analyze({ root, ungated: { '../content/docs/frontend/gone.mdx': 'a reason long enough' } })
       .findings as Finding[];
     expect(findings.some((f) => f.reason === 'stale-ungated-entry')).toBe(true);
   });
 
   it('fails on an entry for a document that holds no snippet at all', () => {
-    const root = tempTree({ 'content/docs/a.mdx': 'Only prose lives here.' });
-    const findings = analyze({ root, ungated: { 'content/docs/a.mdx': 'a reason long enough' } })
+    const root = tempTree({ '../content/docs/frontend/a.mdx': 'Only prose lives here.' });
+    const findings = analyze({ root, ungated: { '../content/docs/frontend/a.mdx': 'a reason long enough' } })
       .findings as Finding[];
     expect(findings.some((f) => f.reason === 'stale-ungated-entry')).toBe(true);
   });
 
   it('fails on an entry with no written reason — a bare path is not a declaration', () => {
-    const root = tempTree({ 'content/docs/a.mdx': [`${FENCE}ts`, 'export const a = 1;', FENCE].join('\n') });
-    const findings = analyze({ root, ungated: { 'content/docs/a.mdx': '' } }).findings as Finding[];
+    const root = tempTree({ '../content/docs/frontend/a.mdx': [`${FENCE}ts`, 'export const a = 1;', FENCE].join('\n') });
+    const findings = analyze({ root, ungated: { '../content/docs/frontend/a.mdx': '' } }).findings as Finding[];
     expect(findings.some((f) => f.reason === 'unexplained-ungated-entry')).toBe(true);
   });
 
   it('covers a document nobody declared — the default is COVERED, so a new page is gated on arrival', () => {
     const root = tempTree({
-      'content/docs/new-page.mdx': [`${FENCE}ts`, 'export const a = 1;', FENCE].join('\n'),
+      '../content/docs/frontend/new-page.mdx': [`${FENCE}ts`, 'export const a = 1;', FENCE].join('\n'),
     });
     const state = analyze({ root, ungated: {} });
-    expect(state.covered).toContain('content/docs/new-page.mdx');
+    expect(state.covered).toContain('../content/docs/frontend/new-page.mdx');
     expect(state.compiled).toHaveLength(1);
   });
 
@@ -560,8 +555,10 @@ describe('the coverage ledger is re-derived, never trusted', () => {
 describe('this repository', () => {
   it('scans a plausible number of documents — an empty walk makes every verdict vacuous', () => {
     const documents = listDocuments(repoRoot);
-    expect(documents.length).toBeGreaterThan(100);
-    expect(documents.some((d: string) => d.startsWith('content/docs/'))).toBe(true);
+    // 100 until objectstack#27145 moved the pages to content/docs/frontend as
+    // fewer, larger ones: 97 documents with the READMEs when re-measured.
+    expect(documents.length).toBeGreaterThan(60);
+    expect(documents.some((d: string) => d.startsWith('../content/docs/frontend/'))).toBe(true);
     expect(documents.some((d: string) => /^packages\/[^/]+\/README\.md$/.test(d))).toBe(true);
   });
 
@@ -616,11 +613,11 @@ describe('this repository', () => {
 /*
  * objectstack#26080 folded the root README into the repository's root README,
  * outside this tree, and moved its examples — every ts/tsx block this pin was
- * about — to `content/docs/guide/quick-start.md`, so `ROOT_PAGES` is empty and
+ * about — to `content/docs/frontend/quick-start.mdx`, so `ROOT_PAGES` is empty and
  * the far end of the walk above is pinned on that page: in the scan set, off the
  * ledger, and contributing blocks to the compiled tier.
  */
-const QUICK_START = 'content/docs/guide/quick-start.md';
+const QUICK_START = '../content/docs/frontend/quick-start.mdx';
 
 describe('objectui#7115 — the root README examples are in the scan set, on the quick-start page', () => {
   it('listDocuments reaches the page they moved to', () => {
@@ -643,12 +640,16 @@ describe('objectui#7115 — the root README examples are in the scan set, on the
     // objectstack#26080, so a stray root README is not collected — the entry is
     // what decides, never the file's presence.
     expect([...ROOT_PAGES]).toEqual([]);
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'check-doc-snippet-types-rootpages-'));
+    // A `ui/` inside the temp dir, so the pages leg (`../content/docs/frontend`)
+    // reads an empty sibling rather than whatever sits beside the system tmpdir.
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), 'check-doc-snippet-types-rootpages-'));
+    const dir = path.join(base, 'ui');
+    fs.mkdirSync(dir);
     try {
       fs.writeFileSync(path.join(dir, 'README.md'), '# root\n');
       expect(listDocuments(dir)).toEqual([]);
     } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(base, { recursive: true, force: true });
     }
   });
 
@@ -1190,7 +1191,7 @@ describe('third-party resolution reaches exactly as far as the imported packages
   /** A workspace package with its own `node_modules`, the way pnpm links one. */
   function treeWithDependency(files: Record<string, string> = {}): string {
     return tempTree({
-      'content/docs/a.mdx': [FENCE + 'ts', "import 'declared-dep';", FENCE].join('\n'),
+      '../content/docs/frontend/a.mdx': [FENCE + 'ts', "import 'declared-dep';", FENCE].join('\n'),
       'packages/pkg-a/package.json': JSON.stringify({
         name: 'pkg-a',
         dependencies: { 'declared-dep': '^1.0.0' },
@@ -1546,36 +1547,18 @@ describe('the ROOT BOUND — what only this repository declares does not resolve
       // import of `project-name` under the regex reader each gate carried
       // privately until objectui#7555. A false refusal would red a document
       // that is correct.
-      const found = moduleSpecifiersOf(
-        parse("export const readme = `\n# Project\n\nimport x from 'project-name';\n`;\n"),
-      ) as string[];
+      const code = "export const readme = `\n# Project\n\nimport x from 'project-name';\n`;\n";
+      const found = moduleSpecifiersOf(parse(code)) as string[];
       expect(found).toEqual([]);
-    });
-
-    it('reports nothing for the corpus block that finding measured', () => {
-      // The synthetic pin above paraphrases the specimen; this one is the
-      // specimen. Keyed on the fence LINE, so an edit above it forces a
-      // re-declaration here rather than a row that silently covers nothing —
-      // the convention `KNOWN_ROOT_DEVDEP_EXAMPLES` already uses in the skills
-      // gate's suite.
-      const state = analyze({}) as unknown as {
-        compiled: { doc: string; fenceLine: number; body: string }[];
-      };
-      const site = `${README_SAMPLE_DOC}:${README_SAMPLE_FENCE_LINE}`;
-      const block = state.compiled.find(
-        (b) => b.doc === README_SAMPLE_DOC && b.fenceLine === README_SAMPLE_FENCE_LINE,
-      );
-      expect(block, `no compiled block at ${site}`).toBeDefined();
-      expect(block!.body, `the README sample moved out of ${site}`).toContain(
-        'npm install project-name',
-      );
-      expect(moduleSpecifiersOfBlock(block!.body)).toEqual([]);
       // The retired reader, kept as this pin's CONTRAST: without it, the
       // assertion above would hold just as well for a block that imports
-      // nothing and has no template literal either, and the pin would stop
-      // being about the defect it was written for.
-      expect(retiredRegexReader(block!.body)).toEqual(['project-name']);
+      // nothing and has no template literal either. The corpus specimen this
+      // pin paraphrases (the plugin-markdown page's README demo) left the tree
+      // with objectstack#27145's docs fold, which trimmed that example, so the
+      // contrast is drawn here, on the paraphrase.
+      expect(retiredRegexReader(code)).toEqual(['project-name']);
     });
+
   });
 
   describe('end to end, over a throwaway tree', () => {
@@ -1768,7 +1751,7 @@ describe('the ROOT BOUND — what only this repository declares does not resolve
 describe('what the snippets make the gate build is read by the same reader (objectui#7555)', () => {
   const treeWithBlock = (body: string): string =>
     tempTree({
-      'content/docs/sample.mdx': [`${FENCE}tsx`, body, FENCE].join('\n'),
+      '../content/docs/frontend/sample.mdx': [`${FENCE}tsx`, body, FENCE].join('\n'),
       'packages/pkg-a/package.json': JSON.stringify({ name: '@fixture/pkg-a', types: 'dist/index.d.ts' }),
     });
 
@@ -1801,7 +1784,7 @@ describe('the exit path — "I could not run" is not "I ran and found errors" (o
   /** A workspace package that DECLARES built types, with nothing built. */
   const unbuiltTree = (types: string): string =>
     tempTree({
-      'content/docs/a.mdx': [`${FENCE}ts`, "import '@fixture/pkg-a';", FENCE].join('\n'),
+      '../content/docs/frontend/a.mdx': [`${FENCE}ts`, "import '@fixture/pkg-a';", FENCE].join('\n'),
       'packages/pkg-a/package.json': JSON.stringify({ name: '@fixture/pkg-a', types }),
     });
 
@@ -1834,9 +1817,10 @@ describe('the exit path — "I could not run" is not "I ran and found errors" (o
 
   it('leaves ledger findings OUT of the preconditions — those ARE verdicts, and they exit 1', () => {
     const findings: Finding[] = [
-      { reason: 'stale-ungated-entry', site: 'content/docs/gone.mdx' },
-      { reason: 'unexplained-fragment', site: 'content/docs/a.mdx:3' },
-      { reason: 'stale-fragment-marker', site: 'content/docs/a.mdx:7' },
+      { reason: 'stale-ungated-entry', site: '../content/docs/frontend/gone.mdx' },
+      // fixture-address: a fixture site in a throwaway tree, ⛔ not a pointer into this tree
+      { reason: 'unexplained-fragment', site: '../content/docs/frontend/a.mdx:3' },
+      { reason: 'stale-fragment-marker', site: '../content/docs/frontend/a.mdx:7' },
     ];
     expect(blockingPreconditions(findings)).toEqual([]);
   });
@@ -1909,7 +1893,7 @@ describe('the printed build command says what it does NOT build (objectui#7795)'
 
   it('counts the workspace from what the gate itself read, not from a number written down', () => {
     const root = tempTree({
-      'content/docs/a.mdx': [`${FENCE}ts`, 'export const x = 1;', FENCE].join('\n'),
+      '../content/docs/frontend/a.mdx': [`${FENCE}ts`, 'export const x = 1;', FENCE].join('\n'),
       'packages/pkg-a/package.json': JSON.stringify({ name: '@fixture/pkg-a', types: './dist/index.d.ts' }),
       'packages/pkg-b/package.json': JSON.stringify({ name: '@fixture/pkg-b', types: './dist/index.d.ts' }),
     });

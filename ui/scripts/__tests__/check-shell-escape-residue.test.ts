@@ -586,7 +586,8 @@ describe('repo state — the gate is green on this tree, over a real population'
       'CLAUDE.md',
       'skills',
       '.claude/skills',
-      'content/docs',
+      // The SDK pages, in the monorepo's docs collection since objectstack#27145.
+      '../content/docs/frontend',
     ]);
     // Every floor is PER ROOT. A whole-surface floor is the shape that let
     // objectui#7251's move through, so there is deliberately no such row here.
@@ -649,7 +650,9 @@ describe('repo state — the gate is green on this tree, over a real population'
     // when this landed.
     expect(result.unresolved).toEqual([]);
     expect(result.census.rootsResolved).toBe(SCAN_ROOTS.length);
-    expect(result.census.files).toBeGreaterThan(100);
+    // 100 until objectstack#27145 moved the SDK pages to the monorepo's
+    // `content/docs/frontend` as fewer, larger ones: 56 files when re-measured.
+    expect(result.census.files).toBeGreaterThan(40);
     expect(result.census.fences).toBeGreaterThan(FENCE_FLOOR);
     expect(result.vacuous).toEqual([]);
     expect(result.uncovered).toEqual([]);
