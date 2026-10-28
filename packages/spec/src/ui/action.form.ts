@@ -150,7 +150,7 @@ export const actionForm = defineForm({
         // `FormSelectOptionSchema.value` applies: the enum derives.
         { field: 'openIn', visibleWhen: "data.type == 'url'", helpText: "Where to open a static `target` URL — 'self' navigates in place, 'new-tab' opens a new browser tab. Omitted, an absolute or external URL opens in a new tab and a relative one navigates in place." },
         { field: 'opensInNewTab', type: 'boolean', helpText: "Open the action RESULT in a new tab: the renderer pre-opens the tab synchronously on click (popup-blocker-safe) and navigates it to the handler's redirectUrl. Distinct from `openIn`, which routes a static URL target." },
-        { field: 'newTabUrl', label: 'New-tab URL', type: 'text', visibleWhen: "data.opensInNewTab == true", helpText: 'Direct new-tab URL template, with a {recordId} placeholder. Set together with `opensInNewTab` the renderer navigates the pre-opened tab here immediately and posts nothing — so the endpoint must enforce auth itself.' },
+        { field: 'newTabUrl', label: 'New-tab URL', type: 'text', visibleWhen: "data.opensInNewTab == true", helpText: 'Path on this backend, starting with / (e.g. /sso-open/{recordId}), with a {recordId} placeholder. Set together with `opensInNewTab` the renderer navigates the pre-opened tab to the backend origin + this path immediately and posts nothing — so the endpoint must enforce auth itself. An absolute URL is refused; for an external page use a url action with Open In set to new-tab.' },
       ],
     },
     {

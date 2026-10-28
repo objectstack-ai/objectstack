@@ -57,8 +57,9 @@ defineFlow({
 **`position` vs `org_membership_level`.** `{ type: 'position', value: 'finance_manager' }` routes
 to the holders of a position (`sys_user_position`, ADR-0090 D3). `org_membership_level` is a
 different thing — the better-auth **org-membership tier**, whose only values are
-`owner`/`admin`/`member`. A position name authored there matches nobody and the request stalls;
-`os lint` flags it (`approval-approver-not-membership-tier`).
+`owner`/`admin`/`member`. A position name authored there matches nobody, so that approver adds no one
+to the request, and a slate left naming no one goes to the node's `onEmptyApprovers`; `os lint` flags it
+(`approval-approver-not-membership-tier`).
 
 Authored `type: 'role'` on 15.x? That is the deprecated spelling of `org_membership_level`
 (ADR-0090 D3): it still resolves, warns at runtime, and is removed in the next major. It resolves

@@ -747,6 +747,12 @@ export const OBJECT_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     // Name lists.
     highlightFields: names,
     searchableFields: names,
+    // [#27069] Related-list order: each entry names a CHILD object, or
+    // `object.field` for one of that child's FKs to this object, never a field
+    // of this object, so nothing here is this object's to deny. Read as
+    // unclassified it would over-mask an entry whose child shares a denied
+    // field's name.
+    relatedLists: keep,
     // Expressions.
     titleFormat: expression,
     // Rule entries — dropped whole when they mention a denied field.
@@ -772,6 +778,9 @@ export const OBJECT_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     fieldGroups: arrayOf(block({
         key: keep, label: keep, icon: keep, description: keep, collapse: keep,
         defaultExpanded: keep, collapsible: keep, collapsed: keep, visibleWhen: expression,
+        // [#27069] A child relationship (child object, or `object.field`), as a
+        // `relatedLists` entry is: no field of this object.
+        relatedList: keep,
     })),
     tenancy: block({ enabled: keep, tenantField: pointer }),
     lifecycle: block({

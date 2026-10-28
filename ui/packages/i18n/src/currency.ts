@@ -31,11 +31,16 @@
  * `FieldSchema` guidance says a field without a fixed currency "uses the tenant
  * default at runtime". No value carries a user-selected code today (a currency
  * value is a bare number), so a dynamic field reads the tenant default, never
- * its `defaultCurrency`. That matters beyond authored dynamic configs: the
- * spec parses an EMPTY `currencyConfig` to
- * `{ currencyMode: 'dynamic', defaultCurrency: 'CNY' }`, which must not render
- * as yuan. If a value ever carries its own selected code, that code is the one
- * to win, ahead of the tenant default.
+ * its `defaultCurrency`. That matters beyond authored dynamic configs: until
+ * @objectstack/spec dropped the `'CNY'` default (#27157), the spec parsed an
+ * EMPTY `currencyConfig` to `{ currencyMode: 'dynamic', defaultCurrency: 'CNY' }`,
+ * and rows stored or built by that parse still carry it until a rehydration
+ * strips it; it must not render as yuan. The spec now refuses a `fixed`
+ * config without a code at authoring and save, but a stored row saved that
+ * way before is kept as authored and still loads with no code; step 2 skips
+ * it and the tenant default shows, as it always did. If a value ever carries
+ * its own selected code, that code is the one to win, ahead of the tenant
+ * default.
  *
  * This is the single resolution every field / measure / cell renderer shares -
  * ending the per-renderer drift where some read only `currency`, others only

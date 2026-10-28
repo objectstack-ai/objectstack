@@ -2779,8 +2779,9 @@ const APPROVAL_APPROVER_NOT_MEMBERSHIP_TIER_EXPLANATION: RuleExplanation = {
       'case-insensitively.',
     'After ADR-0090 D3 renamed `sys_role` to `sys_position`, an approver authored as ' +
       '`{ type: \'role\', value: \'sales_manager\' }` finds no member row: the expansion falls back ' +
-      'to the `role:sales_manager` literal, and the request waits on an approver that can never ' +
-      'act. A business role is always a position, resolved through `sys_user_position`.',
+      'to the `role:sales_manager` literal, a slot no one can act on. A slate that names no one ' +
+      'else is decided by the node\'s `onEmptyApprovers`, as any empty slate is. A business role is ' +
+      'always a position, resolved through `sys_user_position`.',
     'A warning, not an error: the runtime keeps its literal fallback rather than refusing the node. ' +
       'When the value is not a tier, this finding is reported instead of ' +
       '`approval-approver-type-deprecated` on the same approver: the bad value is the more serious ' +
@@ -3773,6 +3774,30 @@ const OBJECT_FIELD_REF_UNKNOWN_EXPLANATION: RuleExplanation = {
       'scalar role pointers.',
     'The verdict names the nearest field of the addressed object when one is close ("Did you mean"), ' +
       'and the fix line names the position\'s remedy only, without listing that object\'s fields.',
+  ],
+};
+
+// ── Related-list names (`validate-related-list-refs.ts`) ───────────────────
+
+const RELATED_LIST_REF_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'related-list-ref-unknown',
+  covers: 'what a related-list entry may name',
+  paragraphs: [
+    'An object names its related lists in two places: `relatedLists`, the business order of its ' +
+      'record page\'s related lists, and a field group\'s `relatedList`, which places one list\'s table ' +
+      'in the record body. Each name must match an INBOUND relationship: a `lookup` or ' +
+      '`master_detail` field of a child object whose `reference` is this object. A bare child name ' +
+      'matches every such field of that child; `object.field` matches that one FK, which is how to ' +
+      'pick one when a child points at this object more than once.',
+    'A name that matches nothing places nothing, silently: the record page keeps its derived order ' +
+      'and the group draws no table. So it is an error, the verdict `defineStack` gives on ' +
+      '`os validate` and `os build`, and at the runtime publish gate, which runs no `defineStack`. ' +
+      'The audit and ownership FKs (`created_by`, `updated_by`, `owner_id`) never become a related ' +
+      'list, so they are not names an entry may use.',
+    'A child the stack does not declare is judged only where the stack is everything the host ' +
+      'serves: at the publish gate with no package closure in force. Under a closure, and on the ' +
+      'CLI, such a child may belong to another package, so this rule does not judge it; on the ' +
+      'CLI `defineStack` does, against the artifact\'s packages.',
   ],
 };
 
@@ -5234,6 +5259,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [NAV_OBJECT_UNSERVABLE_EXPLANATION.rule]: NAV_OBJECT_UNSERVABLE_EXPLANATION,
   [NAV_TARGET_UNRESOLVED_EXPLANATION.rule]: NAV_TARGET_UNRESOLVED_EXPLANATION,
   [OBJECT_FIELD_REF_UNKNOWN_EXPLANATION.rule]: OBJECT_FIELD_REF_UNKNOWN_EXPLANATION,
+  [RELATED_LIST_REF_UNKNOWN_EXPLANATION.rule]: RELATED_LIST_REF_UNKNOWN_EXPLANATION,
   [OBJECT_REFERENCE_UNKNOWN_EXPLANATION.rule]: OBJECT_REFERENCE_UNKNOWN_EXPLANATION,
   [OBJECT_REFERENCE_UNREGISTERED_PLATFORM_EXPLANATION.rule]: OBJECT_REFERENCE_UNREGISTERED_PLATFORM_EXPLANATION,
   [CAPABILITY_REFERENCE_UNKNOWN_EXPLANATION.rule]: CAPABILITY_REFERENCE_UNKNOWN_EXPLANATION,
