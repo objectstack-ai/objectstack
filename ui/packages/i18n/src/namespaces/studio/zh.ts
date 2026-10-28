@@ -1459,6 +1459,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.form.masterDetailSchemaError': 'master-detail 组件要求 JSON Schema 上存在 items.properties（或 anyOf 分支包含该结构）。',
   'engine.form.missingField': '表单布局中声明了字段 {field}，但 schema 中不存在，已跳过。',
   'engine.form.fallbackJson': '组件 {widget} 尚未注册自定义渲染器，暂时使用 JSON 编辑。',
+  'engine.form.key': '键名',
   'engine.form.keyRequired': '键名必填',
   'engine.form.keyExists': '键名 "{key}" 已存在',
   'engine.form.keyPattern': '键名必须匹配 {pattern}',

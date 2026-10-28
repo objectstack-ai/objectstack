@@ -1233,7 +1233,9 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // 690 since #26602: the dataset form's measures repeater offers `polarity`
       // (which direction of a KPI delta is good news) — one row label, authored
       // in all three locales.
-      expect(translated.length, `${locale} positive control`).toBe(690);
+      // 693 since #26835: the hook form's `refusals` record and its `message` /
+      // `status` entry fields — three row labels, authored in all three locales.
+      expect(translated.length, `${locale} positive control`).toBe(693);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the
