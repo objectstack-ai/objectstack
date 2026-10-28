@@ -15,7 +15,7 @@ import type { useObjectListPreferences, ListViewPreference } from '../context/Li
 const ObjectChart = lazy(() =>
   import('@object-ui/plugin-charts').then((m) => ({ default: m.ObjectChart })),
 );
-import { ListView } from '@object-ui/plugin-list';
+import { ListView, type ListViewProps } from '@object-ui/plugin-list';
 import type { ListViewSchema, TreeViewConfig } from '@object-ui/types';
 import type { useAuth } from '@object-ui/auth';
 import type { useActionTextLocalizer } from '@object-ui/react';
@@ -37,6 +37,7 @@ import {
     isSameOptionsValue,
 } from './objectViewOptions.js';
 import { keepInlineEditModeForTheSession } from './objectViewChrome.js';
+import { composeRowAdornment } from './objectViewOpenAsPage.js';
 import type { useObjectViewIdentity } from './objectViewIdentity.js';
 import type { useObjectViewRecordNavigation } from './objectViewRecordNavigation.js';
 import type { useObjectViewToolbarAffordances } from './objectViewToolbarAffordances.js';
@@ -70,6 +71,8 @@ export function useObjectViewListRenderer({
     actions,
     handleRowClick,
     navOverlay,
+    recordOpen,
+    openAsPage,
     urlFilters,
     initialUfSelections,
     handleUserFilterSelectionsChange,
@@ -101,6 +104,10 @@ export function useObjectViewListRenderer({
     actions: ReturnType<typeof useObjectActions>;
     handleRowClick: ReturnType<typeof useObjectViewRecordNavigation>['handleRowClick'];
     navOverlay: ReturnType<typeof useObjectViewRecordNavigation>['navOverlay'];
+    /** objectstack#26681 — the Display menu's Open records section. */
+    recordOpen: NonNullable<ListViewProps['recordOpen']>;
+    /** objectstack#26681 — the name cell's ↗ (`./objectViewOpenAsPage.tsx`), or `null` for none. */
+    openAsPage: { objectName: string; label: string } | null;
     urlFilters: ReturnType<typeof useObjectViewUrlFilters>['urlFilters'];
     initialUfSelections: ReturnType<typeof useObjectViewUrlFilters>['initialUfSelections'];
     handleUserFilterSelectionsChange: ReturnType<typeof useObjectViewUrlFilters>['handleUserFilterSelectionsChange'];
@@ -905,11 +912,16 @@ export function useObjectViewListRenderer({
                 // objectui#13330 — on a managed environment, the Users list
                 // marks a user who holds nothing beyond the baseline. A host
                 // prop the grid draws beside the row's title.
-                rowAdornment={managedUsers ? managedUserMarker : undefined}
+                //
+                // objectstack#26681 — and, for a row that opens the drawer, the
+                // ↗ that opens its record as the full page (after the marker).
+                rowAdornment={composeRowAdornment(managedUsers ? managedUserMarker : undefined, openAsPage)}
+                // objectstack#26681 — the Display menu's Open records section.
+                recordOpen={recordOpen}
                 dataSource={ds}
             />
         );
-    }, [inSetup, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, navOverlay, actions, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, viewTabBar, viewTabRow, managedUsers, managedUserMarker]);
+    }, [inSetup, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, navOverlay, actions, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, viewTabBar, viewTabRow, managedUsers, managedUserMarker, recordOpen, openAsPage]);
 
     return { renderListView };
 }

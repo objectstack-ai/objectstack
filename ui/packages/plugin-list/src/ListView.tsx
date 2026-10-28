@@ -15,7 +15,7 @@ import { VALUELESS_FILTER_BUILDER_OPERATORS, isFilterValueComplete } from '@obje
 import { ViewSwitcherDropdown } from './ViewSwitcher';
 import { ListEmptyState, hasDeclaredFilter, filterNamesCurrentUser } from './ListEmptyState';
 import { ListViewCompactHeader, ListViewCompactRows, ListViewCappedRows, CAPPED_LIST_DEFAULT_LIMIT } from './ListViewCompact';
-import { ViewSettingsPopover } from './components/ViewSettingsPopover';
+import { ViewSettingsPopover, type ViewSettingsRecordOpen } from './components/ViewSettingsPopover';
 import { UserFilters } from './UserFilters';
 import {
   calendarWindowCovers,
@@ -466,6 +466,17 @@ export interface ListViewProps {
    * that draws the rows it fetched answers; other kinds never call it.
    */
   onTotalChange?: (total: number) => void;
+  /**
+   * The Display control's Open records section (objectstack#26681): how a row
+   * opens its record — the mode the host resolved for this object and view,
+   * the reader's own drawer | split preference and its setter. See
+   * `ViewSettingsRecordOpen`.
+   *
+   * A HOST prop, never a schema key: the preference is the reader's, kept by
+   * the host, and the setter is a function value no document can carry.
+   * Absent ⇒ the panel draws no such section, exactly as before.
+   */
+  recordOpen?: ViewSettingsRecordOpen;
 }
 
 // Helper to convert FilterBuilder group to ObjectStack AST.
@@ -1091,6 +1102,12 @@ export const LIST_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'list.layout': 'Layout',
   'list.rowNumbers': 'Row numbers',
   'list.resetToViewDefault': 'Reset to view default',
+  // The Display control's Open records section (objectstack#26681).
+  'list.recordOpen': 'Open records',
+  'list.recordOpenDrawer': 'Drawer',
+  'list.recordOpenSplit': 'Split',
+  'list.recordOpenNote': 'Your own preference, not part of the object’s declaration. Both expand to the full page.',
+  'list.recordOpenDeclaredPage': 'This object is declared to open as a full page',
   // Heading of the record-detail overlay this view opens when a child view's
   // row is clicked (objectui#3426). Borrowed from the `detail.*` namespace
   // rather than minted as `list.recordDetail`: `NavigationOverlay` already
@@ -1515,6 +1532,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   capped = false,
   onTotalChange,
   viewDefaults,
+  recordOpen,
   ...props
 }: ListViewProps & { [key: string]: any }, ref) => {
   // The switcher can be enabled either by the host component (prop) or by
@@ -5979,6 +5997,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                   }}
                 />
               ) : undefined}
+              recordOpen={recordOpen}
               showGroup={toolbarFlags.showGroup}
               groupingConfig={groupingConfig}
               setGroupingConfig={changeGrouping}
