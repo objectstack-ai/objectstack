@@ -10,7 +10,11 @@ import * as React from 'react';
 import { Badge, Button, cn } from '@object-ui/components';
 import { SchemaRenderer, toRenderableSchema } from '@object-ui/react';
 import { PanelRightClose, PanelRightOpen } from 'lucide-react';
-import type { DefaultPageColumns } from './synth/recordPageColumns';
+import {
+  recordPageArrangementFor,
+  type DefaultPageColumns,
+  type RecordPageColumnSwitches,
+} from './synth/recordPageColumns';
 import { useDetailTranslation } from './useDetailTranslation';
 import { RelatedListCompactContext } from './relatedListCompact';
 
@@ -26,8 +30,16 @@ export interface RecordPageColumnsProps {
    * two-column tier (where the related column is a rail that may be closed).
    */
   footer?: React.ReactNode;
+  /**
+   * The reader's column switches (objectstack#27052): a column that is off is
+   * not drawn — the timeline folds into the related column's 「动态」 card, the
+   * related column into the rail (`recordPageArrangementFor`). Absent: both on.
+   */
+  switches?: RecordPageColumnSwitches;
   className?: string;
 }
+
+const ALL_COLUMNS_ON: RecordPageColumnSwitches = { timeline: true, related: true };
 
 /**
  * Grid templates by which columns have content. Literal strings, so
@@ -82,114 +94,148 @@ const COLUMN_STACK = 'flex min-w-0 flex-col gap-4 [&>*:has(>[hidden]:only-child)
  * tier: three columns do not fit. Closed, its lists are not mounted, so they
  * read nothing until opened. Whether it is open is this view's ephemeral
  * state.
+ *
+ * The reader's switches (objectstack#27052) take a column out: with the
+ * timeline off the related column is resident in its place and the
+ * timeline's blocks are its foot card (「动态」); with the related column off
+ * it stays in the rail. `data-record-columns-shown` names the resident
+ * columns.
  */
-export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({ tier, columns, footer, className }) => {
+export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
+  tier,
+  columns,
+  footer,
+  switches = ALL_COLUMNS_ON,
+  className,
+}) => {
   const { t } = useDetailTranslation();
   const railId = React.useId();
   const toggleRef = React.useRef<HTMLButtonElement>(null);
   const [railOpen, setRailOpen] = React.useState(false);
+  const arrangement = recordPageArrangementFor(tier, switches);
   const hasTimeline = columns.timeline.length > 0;
-  const hasRelated = columns.related.length > 0;
+  const hasRelatedLists = columns.related.length > 0;
+  // objectstack#27052 — a timeline the reader switched off is not a column:
+  // its blocks are the related column's foot card, under the lists.
+  const foldTimeline = arrangement.timelineFolded && hasTimeline;
+  const hasRelated = hasRelatedLists || foldTimeline;
+  const residentTimeline = hasTimeline && arrangement.columns.includes('timeline');
+  const residentRelated = hasRelated && !arrangement.relatedRail;
+  const relatedInRail = hasRelated && arrangement.relatedRail;
   const relatedLabel = t('detail.related');
+  const foldedTimelineLabel = t('detail.timelineFolded');
 
-  // The provenance footer closes the related column; a page with no related
-  // column (three-column tier) closes its details column with it instead.
-  const footerUnderDetails = tier === 'three-column' && !hasRelated;
+  // The provenance footer closes the related column where it is resident; a
+  // three-column page without one closes its details column with it instead,
+  // and a two-column page draws it under the columns.
+  const footerUnderRelated = residentRelated;
+  const footerUnderDetails = !residentRelated && tier === 'three-column';
+  const footerUnderColumns = !footerUnderRelated && !footerUnderDetails;
   const detailsColumn = (
     <div className={COLUMN_STACK} data-record-column="details">
       {drawNodes(columns.details)}
       {footerUnderDetails && footer}
     </div>
   );
-  const timelineColumn = hasTimeline ? (
+  const timelineColumn = residentTimeline ? (
     <div className={COLUMN_STACK} data-record-column="timeline">
       {drawNodes(columns.timeline)}
     </div>
   ) : null;
+  const relatedContent = (
+    <>
+      {drawRelatedNodes(columns.related)}
+      {foldTimeline && (
+        <section
+          className="flex flex-col gap-4 rounded-lg border border-border bg-card p-4"
+          aria-label={foldedTimelineLabel}
+          data-record-folded-timeline=""
+        >
+          <h2 className="text-sm font-semibold text-foreground">{foldedTimelineLabel}</h2>
+          {drawNodes(columns.timeline)}
+        </section>
+      )}
+    </>
+  );
 
-  let body: React.ReactNode;
-  if (tier === 'three-column') {
-    const template = hasTimeline
-      ? hasRelated ? THREE_COLUMN_TEMPLATE.all : THREE_COLUMN_TEMPLATE.noRelated
-      : hasRelated ? THREE_COLUMN_TEMPLATE.noTimeline : THREE_COLUMN_TEMPLATE.detailsOnly;
-    body = (
-      <div className={cn('grid items-start gap-6', template)} data-record-columns="">
-        {detailsColumn}
-        {timelineColumn}
-        {hasRelated && (
-          <aside className={COLUMN_STACK} data-record-column="related" aria-label={relatedLabel}>
-            {drawRelatedNodes(columns.related)}
-            {footer}
-          </aside>
-        )}
-      </div>
-    );
-  } else {
-    const closeRail = () => {
-      setRailOpen(false);
-      toggleRef.current?.focus();
-    };
-    body = (
-      <>
-        {hasRelated && (
-          <div className="flex justify-end" data-record-columns-toolbar="">
-            <Button
-              ref={toggleRef}
-              type="button"
-              variant={railOpen ? 'secondary' : 'outline'}
-              size="sm"
-              className="gap-1.5"
-              aria-expanded={railOpen}
-              aria-controls={railId}
-              onClick={() => setRailOpen((open) => !open)}
-              data-testid="record-related-rail-toggle"
-            >
-              {railOpen ? (
-                <PanelRightClose className="h-3.5 w-3.5" aria-hidden />
-              ) : (
-                <PanelRightOpen className="h-3.5 w-3.5" aria-hidden />
-              )}
-              <span>{relatedLabel}</span>
-              {columns.relatedCount > 0 && (
-                <Badge variant="secondary" className="h-4 min-w-[1rem] justify-center px-1 text-[10px] leading-none">
-                  {columns.relatedCount}
-                </Badge>
-              )}
-            </Button>
-          </div>
-        )}
-        <div className="relative">
-          <div
-            className={cn('grid items-start gap-6', hasTimeline ? 'grid-cols-2' : 'grid-cols-1')}
-            data-record-columns=""
+  const template = residentTimeline
+    ? residentRelated
+      ? THREE_COLUMN_TEMPLATE.all
+      : tier === 'three-column' ? THREE_COLUMN_TEMPLATE.noRelated : 'grid-cols-2'
+    : residentRelated ? THREE_COLUMN_TEMPLATE.noTimeline : THREE_COLUMN_TEMPLATE.detailsOnly;
+  const closeRail = () => {
+    setRailOpen(false);
+    toggleRef.current?.focus();
+  };
+  const body = (
+    <>
+      {relatedInRail && (
+        <div className="flex justify-end" data-record-columns-toolbar="">
+          <Button
+            ref={toggleRef}
+            type="button"
+            variant={railOpen ? 'secondary' : 'outline'}
+            size="sm"
+            className="gap-1.5"
+            aria-expanded={railOpen}
+            aria-controls={railId}
+            onClick={() => setRailOpen((open) => !open)}
+            data-testid="record-related-rail-toggle"
           >
-            {detailsColumn}
-            {timelineColumn}
-          </div>
-          {hasRelated && railOpen && (
-            <aside
-              id={railId}
-              aria-label={relatedLabel}
-              className={cn(
-                COLUMN_STACK,
-                'absolute right-0 top-0 z-20 min-h-full w-80 max-w-full border-l border-border bg-background pb-4 pl-4 shadow-[-12px_0_24px_-20px_rgba(0,0,0,0.35)]',
-              )}
-              data-record-column="related"
-              onKeyDown={(event) => {
-                if (event.key === 'Escape') {
-                  event.stopPropagation();
-                  closeRail();
-                }
-              }}
-            >
-              {drawRelatedNodes(columns.related)}
+            {railOpen ? (
+              <PanelRightClose className="h-3.5 w-3.5" aria-hidden />
+            ) : (
+              <PanelRightOpen className="h-3.5 w-3.5" aria-hidden />
+            )}
+            <span>{relatedLabel}</span>
+            {columns.relatedCount > 0 && (
+              <Badge variant="secondary" className="h-4 min-w-[1rem] justify-center px-1 text-[10px] leading-none">
+                {columns.relatedCount}
+              </Badge>
+            )}
+          </Button>
+        </div>
+      )}
+      <div className="relative">
+        <div
+          className={cn('grid items-start gap-6', template)}
+          data-record-columns=""
+          data-record-columns-shown={['details', residentTimeline && 'timeline', residentRelated && 'related']
+            .filter(Boolean)
+            .join(' ')}
+        >
+          {detailsColumn}
+          {timelineColumn}
+          {residentRelated && (
+            <aside className={COLUMN_STACK} data-record-column="related" aria-label={relatedLabel}>
+              {relatedContent}
+              {footerUnderRelated && footer}
             </aside>
           )}
         </div>
-        {footer}
-      </>
-    );
-  }
+        {relatedInRail && railOpen && (
+          <aside
+            id={railId}
+            aria-label={relatedLabel}
+            className={cn(
+              COLUMN_STACK,
+              'absolute right-0 top-0 z-20 min-h-full w-80 max-w-full border-l border-border bg-background pb-4 pl-4 shadow-[-12px_0_24px_-20px_rgba(0,0,0,0.35)]',
+            )}
+            data-record-column="related"
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                event.stopPropagation();
+                closeRail();
+              }
+            }}
+          >
+            {relatedContent}
+          </aside>
+        )}
+      </div>
+      {footerUnderColumns && footer}
+    </>
+  );
 
   return (
     <div
