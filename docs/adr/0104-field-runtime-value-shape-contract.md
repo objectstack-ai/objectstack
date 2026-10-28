@@ -170,6 +170,17 @@ either adopted by the contract and enforced, or deleted — it does not remain
 exported-but-dead. An exported-but-unconsumed value schema is exactly the
 inert metadata ADR-0078 forbids.
 
+> **Note 2026-10-28 (#27183; [ADR-0144](./0144-multi-currency-record-currency-dated-rates-write-time-home-projection.md)).**
+> This paragraph's currency sentence needs two corrections.
+> First, the deletion it records has not happened yet. At `cdec7473`,
+> `CurrencyValueSchema` is still exported and marked `@deprecated`
+> (`packages/spec/src/data/field.zod.ts:581`, its type at `:3062`). The
+> retirement is carried by #27182, which records its landing here.
+> Second, multi-currency keeps this decision. ADR-0144 (ruling `6465431966`
+> on #27119) puts a record's currency in a sibling ISO 4217 code field that
+> the amount names through `currencyField`, never in the value, so a
+> `currency` value stays a bare number.
+
 **Consumers converge on the contract** (each keeps its role, loses its private
 type lists):
 
