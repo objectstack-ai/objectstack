@@ -1,6 +1,7 @@
 ---
 '@objectstack/platform-objects': patch
 '@objectstack/spec': patch
+'@objectstack/cli': patch
 ---
 
 feat(platform-objects): `sys_exchange_rate` — an organization's dated exchange rates, with a Setup list under Localization
@@ -15,5 +16,6 @@ A new system object holds the rates multi-currency amounts are converted with, o
 - **One rate per currency per day.** `(currency, effective_date)` is unique within an organization; two organizations may each hold their own EUR rate for the same day.
 - **Who.** Per organization (its `organization_id` is injected and the tenant wall scopes it). Organization administrators read and write it; rank-and-file members do not see it. Every change is captured in the audit log and shown on the record's History tab.
 - **Where.** Setup → Configuration → Exchange Rates, directly under Localization. `PlatformObjectsPlugin` registers the object with the other platform-infrastructure objects. `PLATFORM_OBJECTS_BY_PACKAGE` (`@objectstack/spec`) lists it under `platform-objects`, so a reference to `sys_exchange_rate` resolves as a real platform object.
+- **Upgrade ceremony.** The organization-ownership inventory (`@objectstack/cli`) lists `sys_exchange_rate`, so `os migrate organization-ownership` plans it instead of refusing it as an uninventoried platform table.
 
 Nothing reads the table yet: the write-time home-currency conversion that uses it ships in the same release.
