@@ -155,6 +155,9 @@ import '@object-ui/components'
 
 const schema: DeclaredNode = {
   type: "page",
+  // An app page draws `title` as its heading; a page with no `pageType` is a
+  // record page, which leaves the heading to a `page:header` block.
+  pageType: "app",
   title: "Dashboard",
   children: {
     type: "grid",
