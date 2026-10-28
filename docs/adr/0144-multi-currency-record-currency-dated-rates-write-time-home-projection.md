@@ -9,10 +9,17 @@
   in the summon chat. The ruling's own text is the authority this record executes; where the two differ, the ruling
   wins and this record is corrected.
 - **Builds on**: [ADR-0104](./0104-field-runtime-value-shape-contract.md) D1 (a `currency` value is a bare number,
-  kept here), [ADR-0112](./0112-error-code-vocabulary-and-ledger.md) (the codes and envelope of every refusal this
-  record names).
-- **Amends**: no decision. ADR-0104 gains a dated note under D1's "Reality wins" paragraph. The note points here and at
-  #27182, the card that retires `CurrencyValueSchema`.
+  kept here). [ADR-0112](./0112-error-code-vocabulary-and-ledger.md) governs the runtime refusals only: a blank record
+  currency code and a missing rate ([Open item](#open-items) 9). It sets their codes and envelope on the wire, and any
+  new code is registered in ADR-0112's extension ledger. The build-time refusals this record names are authoring
+  diagnostics, not wire errors.
+  [ADR-0029](./0029-kernel-object-ownership-and-platform-objects-decomposition.md) D1, D3 and D6 (a first-party
+  capability owns its `sys_*` objects, one owner per object, and `platform-objects` is being decomposed) and
+  [ADR-0028](./0028-metadata-naming-and-namespace-isolation.md) (Deferred; the `sys` namespace design it records)
+  govern where `sys_exchange_rate` may live. #27185 settles its owner against them (D3).
+- **Amends**: no decision. ADR-0104 gains a dated note at the end of its D1 section: multi-currency keeps D1's
+  bare-number value. For the `CurrencyValueSchema` retirement, the note points to #27182 (PR #27233), which carries its
+  own note under D1's "Reality wins" paragraph.
 - **Evidence**: epic [#8345](https://github.com/objectstack-ai/objectstack/issues/8345), with its measurement round
   [`6041378776`](https://github.com/objectstack-ai/objectstack/issues/8345#issuecomment-6041378776) and the spec seat's
   shape verdict [`6041482631`](https://github.com/objectstack-ai/objectstack/issues/8345#issuecomment-6041482631);
@@ -30,8 +37,9 @@
 - `sys_exchange_rate { currency, rate, effective_date, source }` holds dated rates against the organization's home
   currency, which is `localization.currency`. In v1, rows are entered by hand or imported. A provider feed is an app flow
   that writes rows.
-- At write, the engine converts the amount at the document date's rate. It stores the result in a declared home field
-  (`homeAmount`) together with the rate it used. A missing rate refuses the write. A corrected rate reaches stored
+- At write, the engine converts the amount at the document date's rate. The amount field's `homeAmount` declaration
+  names the stored home field (`homeAmount.field`) that receives the result, and the author-declared field that stores
+  the rate used. A missing rate refuses the write. A corrected rate reaches stored
   rows only through an explicit recompute.
 - A raw aggregate over a record-mode field refuses at build unless it groups by the code field. Consolidated totals
   read the stored home field.
@@ -88,7 +96,7 @@ aggregation. The ruling names them by topic ("Q0 A", "rates A", "home currency A
   `objectstack build` byte-stable, so a formula function cannot read a rate table.
 - **`CurrencyValueSchema` is still exported**, marked `@deprecated`
   (`packages/spec/src/data/field.zod.ts#CurrencyValueSchema`, its type `#CurrencyValue`), although ADR-0104 D1 says it
-  "is deleted". #27182 retires it.
+  "is deleted". #27182 retires it, in PR #27233.
 - **Today's numbers are silently wrong** (from the measurement round's probes over a real ObjectQL engine; the scratch
   files were run and deleted and are not re-run for this record). The probes model a record currency the way authors
   do today, as a sibling text field. `sum` over a USD row of 100 and an EUR row of 100 answers `200 "USD"`. A `summary`
@@ -159,13 +167,18 @@ pairing.
 - In v1, rows come from manual entry and import. Provider feeds come "by an app flow", which writes rows; the
   platform ships no feed.
 - A missing rate refuses (D5).
+- Which package owns the object is #27185's to settle against ADR-0029 D1, D3 and D6 and ADR-0028
+  ([Open item](#open-items) 11). Workload row M1-1 and the epic's territory name `packages/platform-objects/src`,
+  which ADR-0029 D6 is decomposing.
 
 ### D4 — Q2: the home currency is `localization.currency`, locked once used (letter A)
 
 - The organization's home currency is the existing `localization.currency` setting. There is no second currency
   setting.
-- It is locked "once a rate row or a home-amount declaration exists". M1-3 (#27198) builds the lock. `service-settings`
-  has no write-side predicate hook today (workload row M1-3).
+- It is locked "once a rate row or a home-amount declaration exists". M1-3 (#27198) builds the lock.
+  `service-settings` has no write-side guard today that can refuse a value change on engine state (workload row M1-3).
+  `config-change-audit.ts` runs after the fact, and the write-path predicate `providesConfidentiality` concerns secret
+  posture, not a value change.
 
 ### D5 — Q3: the conversion runs at write and is stored with its rate (letter A)
 
@@ -176,9 +189,14 @@ pairing.
   counts as missing in the first place is [Open item](#open-items) 2.
 - A corrected rate reaches stored rows only through "an explicit recompute operation". Changing a rate row does not, on
   its own, rewrite stored home amounts.
-- The declaration key is `homeAmount`. The ruling: "the `homeAmount` key never ships ahead of the engine". Workload
-  row M2-1 drafts its shape as `homeAmount: { field, rateDate, rateField? }`. #27191 fixes the shape under contract
-  review; see [Open items](#open-items) 1 and 2.
+- The declaration key is `homeAmount`. The ruling: "the `homeAmount` key never ships ahead of the engine".
+  `homeAmount` is the declaration on the amount field, and `homeAmount.field` names the stored home field.
+- **Whenever `homeAmount` is declared, both its document-date pointer and its rate pointer are required.** D1 stores
+  the amount "with the rate used", and D8 rule 2 lets that rate live only in a field "declared by the app author and
+  referenced by pointer". The conversion runs "from the document date's rate", and under the same rule the document
+  date is an author-declared field named by a pointer, with no default for the engine to guess. Workload row M2-1 and
+  #27191's card body draft the rate pointer as optional (`rateField?`). This record corrects that to required. Only the
+  spelling of the two pointers is #27191's ([Open item](#open-items) 1).
 
 ### D6 — Q4: raw aggregates over a record-mode field refuse, and consolidation reads the home field (letter A)
 
@@ -215,9 +233,10 @@ pairing.
    `skills/**`, "never a contract".
 3. **"Enabled currencies" are derived, not a setting.** They are the home currency, plus every currency with a rate
    row, plus the codes already used.
-4. **The form pre-fills the organization's currency at the renderer, and the stored value is always explicit.** Read
-   plainly, the organization's currency reaches a new record only as a pre-filled value the user submits, and the
-   server never fills in the code.
+4. **The form pre-fills the organization's currency at the renderer, and the stored value is always explicit.** This
+   record reads the rule to mean that the organization's currency reaches a new record only as a pre-filled value the
+   user submits, and that the server never fills in the code. #27186's refusal of a blank code (drafted as
+   `ERR_CURRENCY_CODE_REQUIRED`, workload row M0-2) is the enforcement that makes the reading true.
 5. **Metadata never names the home currency.** "the home field is a `dynamic`-mode currency field", so it displays in
    `localization.currency`, as every `dynamic` field does.
 
@@ -271,8 +290,8 @@ D8 already excludes a switch, injected columns, fixed field names and a setting 
 ## Consequences
 
 - **The change is additive.** `record` is a new mode, `dynamic` and `fixed` keep their meaning and stored rows are not
-  touched. An app that never writes `record` sees no change. The two spec cards that add keys (#27184, #27191) declare
-  `Metadata-protocol: added`.
+  touched. An app that never writes `record` sees no change. Three cards declare `Metadata-protocol: added`: the two that add
+  authorable keys (#27184, #27191) and the seam card that adds the analytics wire key (#27187).
 - **Two steps cannot be undone once used** (design record §13). One is the home-currency lock. The other: an object
   with record-mode amounts and a home field returns to a single currency only through a data migration.
 - **Today's relabel hazard closes where the feature is used** (the measurement round's Q2 recommendation). Once the
@@ -289,12 +308,11 @@ D8 already excludes a switch, injected columns, fixed field names and a setting 
 The ruling does not decide the items below. Each belongs to the card named, and is settled under that card's review.
 Where a source leans one way, the lean is quoted here, not adopted. This record is amended with each answer.
 
-1. **The document-date pointer and the stored-rate pointer: spelling and whether they are required** (#27191). The
-   ruling fixes that the rate is the document date's and that the rate used is stored. Workload row M2-1 drafts
-   `homeAmount: { field, rateDate, rateField? }`. In that draft, `rateDate` is "a `date`/`datetime` field on the same
-   object (⛔ no default)" and `rateField` is optional. The design record §6 says the document date must be declared
-   explicitly and must not default to `created_at` (「⛔ 不默认 created_at」). An optional `rateField` sits against the
-   ruling's "STORED with the rate used", and #27191 reconciles the two.
+1. **The spelling of the document-date pointer and the rate pointer** (#27191). Only the names are open. Both
+   pointers are required whenever `homeAmount` is declared (D5, from D1 and D8 rule 2). The optional `rateField?` of
+   workload row M2-1 and #27191 is corrected to required. Workload row M2-1 drafts the names `rateDate` and
+   `rateField`; in that draft, `rateDate` is "a `date`/`datetime` field on the same object (⛔ no default)". The design
+   record §6 says the document date must not default to `created_at` (「⛔ 不默认 created_at」).
 2. **Which row counts as "the document date's rate"** (#27192). The ruling says "a platform rate table by effective
    date". Workload row M2-2 and the measurement round read this as the row with the latest `effective_date` on or before
    the document date. The measurement round also rules out a "nearest-future rate". The design record §5 says
@@ -324,6 +342,10 @@ Where a source leans one way, the lean is quoted here, not adopted. This record 
 10. **Which aggregates count as "raw"** (#27186, #27187). The sources list `sum`, `avg`, `min` and `max`; `count`
     reads no amount. The per-row `currency` on grouped analytics results (workload row M0-3) is the contract half of
     #27187.
+11. **The owner package of `sys_exchange_rate`** (#27185). Workload row M1-1 and the epic's territory name
+    `packages/platform-objects/src`. ADR-0029 D1, D3 and D6 give a first-party capability ownership of its `sys_*`
+    objects and decompose `platform-objects`, and ADR-0028 (Deferred) records the `sys` namespace design. #27185
+    settles the owner against them.
 
 ## Verification notes
 
