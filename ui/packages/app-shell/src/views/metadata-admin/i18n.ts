@@ -255,6 +255,9 @@ const ENGINE_STRINGS_EN: Record<string, string> = {
   'engine.list.col.accessLevel': 'Access',
   'engine.list.col._packageId': 'Package',
   'engine.list.col.criteria': 'Criteria',
+  // objectstack#26649 — the member column of a type whose identity is
+  // `(name, locale)` (`bundleMemberField`).
+  'engine.list.col.locale': 'Locale',
   'engine.list.col.actions': 'Actions',
   // objectstack#25333 — the position list's served columns (`PositionGrantCells.tsx`).
   'engine.list.col._holderCount': 'Holders',
@@ -959,6 +962,7 @@ const ENGINE_STRINGS_ZH: Record<string, string> = {
   'engine.list.col.accessLevel': '访问级别',
   'engine.list.col._packageId': '软件包',
   'engine.list.col.criteria': '条件',
+  'engine.list.col.locale': '语言',
   'engine.list.col.actions': '操作',
   'engine.list.col._holderCount': '持有人数',
   'engine.list.col._grantedPermissionSets': '权限集',
