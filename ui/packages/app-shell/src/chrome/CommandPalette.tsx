@@ -73,6 +73,7 @@ import { fetchPackages, type PkgEntry } from '../views/studio-design/packages-io
 import { isPackageLessItem, studioOrgScopePath } from '../views/studio-design/studioScope.js';
 import { DESIGNER_SURFACE_PARAM, formatSurfaceParam } from '../views/metadata-admin/nav-selection.js';
 import { flattenNavigation, useAppReportEntries } from '../views/appReportIndex.js';
+import { useServedApps } from '../hooks/useLauncherApps.js';
 
 /** The palette of the active app: the frame `ConsoleLayout` draws for `/apps/APP`. */
 interface AppCommandPaletteProps {
@@ -235,7 +236,10 @@ function CommandPaletteBody(props: CommandPaletteProps) {
   const appReports = useAppReportEntries(activeApp, open && !inStudio).entries.filter(
     (entry) => !navReportNames.has(entry.name) && matches(entry.label, entry.name),
   );
-  const switchableApps = apps.filter((a) => a.active !== false);
+  // Every active app, `hidden` ones included, minus an app the user's
+  // permission sets hide: the palette offers none that Home's tiles and the
+  // switcher withhold for that reason (objectstack#26838).
+  const switchableApps = useServedApps(apps.filter((a) => a.active !== false));
   const appItems =
     switchableApps.length > 1
       ? switchableApps.filter((app) => matches(resolveKeyedI18nLabel(app.label, t), app.name))

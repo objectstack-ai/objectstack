@@ -199,14 +199,28 @@ export function useLauncherApps<T extends LauncherAppLike>(
   apps: readonly T[] | null | undefined,
 ): LauncherApps<T> {
   const state = useContext(LauncherAppsContext);
-  const openable = filterActiveApps(apps);
-  if (state?.status !== 'ready') return { apps: openable, pending: state?.status === 'pending' };
-  const { served, asked } = state.answer;
   return {
-    apps: openable.filter((app) => {
-      const name = app?.name;
-      return typeof name !== 'string' || served.has(name) || !asked.has(name);
-    }),
-    pending: false,
+    apps: narrowByAnswer(state, filterActiveApps(apps)),
+    pending: state?.status === 'pending',
   };
+}
+
+/**
+ * `apps` minus every app the user's `/me/apps` answer was asked about and did
+ * not list, with no other filter: for a surface that keeps its own rule for
+ * which apps it lists (the command palette lists `hidden` apps too) but offers
+ * none a permission set hides. Unchanged outside a provider or without an
+ * answer, exactly as {@link useLauncherApps}.
+ */
+export function useServedApps<T extends LauncherAppLike>(apps: readonly T[]): T[] {
+  return narrowByAnswer(useContext(LauncherAppsContext), apps);
+}
+
+function narrowByAnswer<T extends LauncherAppLike>(state: LauncherAppsState | null, apps: readonly T[]): T[] {
+  if (state?.status !== 'ready') return [...apps];
+  const { served, asked } = state.answer;
+  return apps.filter((app) => {
+    const name = app?.name;
+    return typeof name !== 'string' || served.has(name) || !asked.has(name);
+  });
 }

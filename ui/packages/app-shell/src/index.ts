@@ -239,6 +239,7 @@ export {
   useHomePath,
   LauncherAppsProvider,
   useLauncherApps,
+  useServedApps,
 } from './hooks/index.js';
 export type { FavoriteItem, LauncherApps, LauncherAppsProviderProps } from './hooks/index.js';
 

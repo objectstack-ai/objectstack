@@ -66,6 +66,7 @@ export { useHomePath } from './useHomePath.js';
 export {
   LauncherAppsProvider,
   useLauncherApps,
+  useServedApps,
   type LauncherApps,
   type LauncherAppsProviderProps,
 } from './useLauncherApps.js';
