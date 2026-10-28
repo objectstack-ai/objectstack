@@ -4,7 +4,7 @@
 
 feat(lint)!: `email-template-hole-grammar` refuses an email template hole whose text after the `|` is not a formatter name, stating the formatter shape
 
-Clause-②: no (narrowing) — `os validate`, `os build`, `os lint` and the metadata publish door (`422 INVALID_METADATA`) refuse an `email_template` whose `subject`, `bodyText` or `bodyHtml` writes a path followed by `|` and text that is not a formatter name (`{{ due | date-long }}`, `{{ x | two words }}`, `{{ x | }}`), which they accepted before. No accept set is widened, and no export or rule id is added or removed.
+Clause-②: no (narrowing) — `os validate`, `os build`, `os lint` and the metadata publish door (`422 INVALID_METADATA`) refuse an `email_template` whose `subject`, `bodyText` or `bodyHtml` writes a path followed by `|` and text that is not a formatter name (`{{ due | date-long }}`, `{{ x | two words }}`, `{{ x | }}`), which they accepted before. One spelling is widened: a double-quoted `currency` argument (`currency:"EUR"`), refused before by `currency-code-literal` because the mail grammar kept its quotes, is now read as `EUR` and accepted, as in-app. The narrowing is the BREAKING arm and decides the level. No export or rule id is added or removed.
 Metadata-protocol: narrowed
 
 <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped: a hole whose formatter part never formatted anything (the renderer printed it as written) is now refused where it is authored. A conversion cannot know which formatter was meant, and the refusal names the hole and states the shape, so there is no key for a migration to rewrite and no tombstone. -->

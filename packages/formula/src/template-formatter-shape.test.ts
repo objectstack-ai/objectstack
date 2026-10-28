@@ -24,6 +24,8 @@ const PARTS: ReadonlyArray<readonly [part: string, accepted: boolean]> = [
   ["default:it's", true],
   ["default:'n/a'", true],
   ['default:"n/a"', true],
+  ['currency:"EUR"', true],
+  ['date:"long"', true],
   ['number: 2', true],
   ['upper:', true],
   ['date-long', false],
@@ -85,6 +87,8 @@ describe('the mail grammar', () => {
     expect(parseMailHole(' amount | currency :EUR ')).toEqual({ path: 'amount', formatter: 'currency', arg: 'EUR' });
     expect(parseMailHole(" note | default:it's ")).toEqual({ path: 'note', formatter: 'default', arg: "it's" });
     expect(parseMailHole(' note | default:"n/a" ')).toEqual({ path: 'note', formatter: 'default', arg: 'n/a' });
+    // A double-quoted `currency` code was refused while the mail grammar kept its quotes; it reads as in-app now.
+    expect(parseMailHole(' amount | currency:"EUR" ')).toEqual({ path: 'amount', formatter: 'currency', arg: 'EUR' });
     expect(parseMailHole(' amount | currency :@currency_code ')).toEqual({
       path: 'amount',
       formatter: 'currency',

@@ -13,7 +13,7 @@ Metadata-protocol: narrowed
 
 - **Before.** `{{ due | date-long }}` rendered the text `{{ due | date-long }}` in every face. So did `{{ amount | currency :EUR }}` and `{{ note | default:it's }}`, though the in-app dialect formats both.
 - **Now.** A formatter part that is not a formatter name makes the render throw `TEMPLATE_INVALID: email template NAME (locale=LOCALE): the hole … writes 'date-long' where the formatter name goes …`, stating the shape and listing the known formatters; `sendTemplate` sends nothing. The authoring doors refuse the same hole first (`email-template-hole-grammar`), so this is reached only by a template stored before that rule, until its next publish. `renderTemplate` and `renderPlainTextTemplate` throw it too when handed a body directly.
-- **Read as in-app.** `{{ amount | currency :EUR }}` now renders `€1,234.50`, `{{ note | default:it's }}` renders `it's` for an empty value, and `default:"n/a"` supplies `n/a` without its quotes.
+- **Read as in-app.** `{{ amount | currency :EUR }}` now renders `€1,234.50`, `{{ note | default:it's }}` renders `it's` for an empty value, and every double-quoted argument loses one enclosing quote mark at each end: `default:"n/a"` supplies `n/a`, `date:"long"` formats in the long style, `number:"2"` with two digits, `truncate:"80"` at 80, `default:""` supplies nothing, and `currency:"EUR"`, refused before, formats in EUR.
 - **Still verbatim.** Brace text whose part before any `|` is not a path (`{{ not a path }}`, `{{}}`, `{{ | upper }}`) is the template's own text and renders as written.
 
 **The remedy.** Republish the template with the formatter written as one of the names the refusal lists, optionally followed by `:` and its argument.
