@@ -1844,8 +1844,8 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "アクションの実行結果を新しいタブで開きます。レンダラーはクリック時に同期的にタブを先に開き（ポップアップブロックを回避します）、ハンドラーが返す redirectUrl へ遷移させます。静的な URL の行き先を決める `openIn` とは別物です。"
       },
       newTabUrl: {
-        label: "新しいタブの URL テンプレート",
-        helpText: "新しいタブで直接開く URL テンプレート。{recordId} プレースホルダーが使えます。`opensInNewTab` と併せて設定すると、レンダラーは先に開いたタブをただちにここへ遷移させ、アクションの POST は行いません。したがってこのエンドポイントは自前で認証を強制する必要があります。"
+        label: "新しいタブのパス",
+        helpText: "このバックエンド上のパスで、/ で始めます（例: /sso-open/{recordId}）。{recordId} プレースホルダーが使えます。`opensInNewTab` と併せて設定すると、レンダラーは先に開いたタブをただちに「バックエンドのオリジン + このパス」へ遷移させ、アクションの POST は行いません。したがってこのエンドポイントは自前で認証を強制する必要があります。絶対 URL は拒否されます。外部ページを開くには、url タイプのアクションで「リンクを開く場所」を new-tab にしてください。"
       },
       locations: {
         label: "表示位置",

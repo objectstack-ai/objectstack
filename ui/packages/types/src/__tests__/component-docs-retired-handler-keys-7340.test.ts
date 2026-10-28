@@ -339,12 +339,16 @@ describe('the retired population is measured off the shipped tree (objectui#7340
     // new key, which `DataModelDesigner` draws — but the old spelling is now the
     // same `on*?: never` shape this census reads, refused by name with the
     // migration, so it is counted here like `onUpdate` above.
+    //
+    // ⭐ 31 → 29, and `ai.ts` leaves this census: `@object-ui/plugin-ai` RETIRED
+    // (objectstack#25921) and its three declarations are `never` tombstones, so
+    // `onApplySuggestion` / `onRejectSuggestion` left the shipped tree whole —
+    // the #8802 kind of shrink. The three runtime slots left LIVE with them.
     const split: Record<string, number> = {};
     for (const m of RETIRED) split[m.file] = (split[m.file] ?? 0) + 1;
     expect({ total: RETIRED.length, split }).toEqual({
-      total: 31,
+      total: 29,
       split: {
-        'ai.ts': 2,
         'complex.ts': 2,
         'crud.ts': 3,
         'data-display.ts': 4,
@@ -374,8 +378,6 @@ describe('the retired population is measured off the shipped tree (objectui#7340
     // to classify. They are not "live again": the document that could have
     // carried them is refused at its `type`.
     expect(UNAMBIGUOUSLY_RETIRED_NAMES).toEqual([
-      // objectui#10874 — declared on `AIFormAssistSchema` alone, read by nothing.
-      'onApplySuggestion',
       // objectui#9342 — no shipped interface declares an `onCardMove` callable
       // any more. `KanbanRendererProps.onCardMove` is a React prop on
       // `@object-ui/plugin-kanban`, not a member of a `@object-ui/types`
@@ -388,6 +390,9 @@ describe('the retired population is measured off the shipped tree (objectui#7340
       // `deleteBehavior`, not a handler; no shipped interface declares the name
       // otherwise.
       'onDelete',
+      // objectstack#25921 — its one LIVE declaration, `AIRecommendationsSchema.onDismiss`,
+      // left with `@object-ui/plugin-ai`; only `?: never` spellings remain.
+      'onDismiss',
       'onExpandChange',
       // objectui#7068: the legacy `ActionSchema.onFailure` callback object — no
       // shipped interface declares an `onFailure` at all any more. `onSuccess`
@@ -400,8 +405,6 @@ describe('the retired population is measured off the shipped tree (objectui#7340
       // `@object-ui/types` document interface, so it is not in this census's
       // population — the same reading as `onCardMove` above.
       'onQuickAdd',
-      // objectui#10874 — declared on `AIFormAssistSchema` alone, read by nothing.
-      'onRejectSuggestion',
       'onSave',
       'onSelectChange',
       'onSendMessage',

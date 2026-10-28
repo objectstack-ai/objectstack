@@ -6,6 +6,7 @@ import { FilterConditionSchema } from './filter.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { retiredKey } from '../shared/retired-key';
 import { strictObject } from '../shared/strict-object';
+import { transportProjectionArray } from './projection-names-a-field';
 
 /**
  * QueryAST — Abstract Syntax Tree for data queries.
@@ -516,7 +517,7 @@ const BaseQuerySchema = z.object({
   object: z.string().describe('Object name (e.g. account)'),
   
   /** Select Clause */
-  fields: z.array(FieldNodeSchema).optional().describe("Fields to retrieve — names of the queried object's OWN columns. A dotted path (`owner.name`) is not a projection: no driver resolves one, and the ingress refuses it with `400 INVALID_FIELD`. Related data is read with `expand`, whose nested QueryAST both filters (`where`) and selects (`fields`) the related record's columns. The projection must RETAIN the foreign-key column: `fields: ['title']` with `expand: 'project_id'` resolves nothing, because the relation is carried by that key — add `'project_id'` and it works. Where the value is wanted on the queried object itself, denormalise it onto that object (a stored field, written when the source changes), the same remedy the sort axis prescribes."),
+  fields: transportProjectionArray(FieldNodeSchema).optional().describe("Fields to retrieve — names of the queried object's OWN columns, at least one: omit `fields` to read every column, because an empty list or a blank name is refused rather than read as every column. A dotted path (`owner.name`) is not a projection: no driver resolves one, and the ingress refuses it with `400 INVALID_FIELD`. Related data is read with `expand`, whose nested QueryAST both filters (`where`) and selects (`fields`) the related record's columns. The projection must RETAIN the foreign-key column: `fields: ['title']` with `expand: 'project_id'` resolves nothing, because the relation is carried by that key — add `'project_id'` and it works. Where the value is wanted on the queried object itself, denormalise it onto that object (a stored field, written when the source changes), the same remedy the sort axis prescribes."),
   
   /** Where Clause (Filtering) */
   where: FilterConditionSchema.optional().describe('Filtering criteria (WHERE)'),

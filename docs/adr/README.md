@@ -13,12 +13,12 @@
 
 ## Summary
 
-144 records under `docs/adr/` (139 numbers), 11 under `ui/docs/adr/` (listed separately below).
+145 records under `docs/adr/` (140 numbers), 11 under `ui/docs/adr/` (listed separately below).
 
 | Status | Records |
 |---|---|
 | Accepted | 126 |
-| Proposed | 4 |
+| Proposed | 5 |
 | Superseded | 4 |
 | Draft | 3 |
 | Deferred | 2 |
@@ -26,7 +26,7 @@
 | Amended | 1 |
 | Partially implemented | 1 |
 | Revised | 1 |
-| **Total** | **144** |
+| **Total** | **145** |
 
 ## Shared numbers
 
@@ -211,6 +211,7 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0141](./0141-inter-app-dependency-declared-checked-before-install.md) | An app may depend on another installed app — declared in `manifest.dependencies`, checked once before install… | Proposed — 2026-10-25; first draft 2026-10-24. `docs/adr/` is Tier H (Prim… | 2026-10-25 | — | — |
 | [ADR-0142](./0142-ownership-queue-membership-claim-and-assignment-rules.md) | An ownership queue is a platform primitive — a queue entity, membership through the existing recipient kinds,… | Proposed — 2026-10-25 · Amended (2026-10-28, ruling `6457475657` on #25769… | 2026-10-25 | — | — |
 | [ADR-0143](./0143-outbound-connector-auth-is-open-tier.md) | Outbound connector auth is open tier — OAuth2 grants, vendor app-credential exchange and request signing in o… | Accepted — 2026-10-28. Proposed 2026-10-27 (#26833, which also landed the… | 2026-10-28 | — | — |
+| [ADR-0145](./0145-ui-deprecation-tombstones-retire-on-the-spec-window.md) | A `?: never` tombstone on the ui authoring face retires on the spec's own window — one major after the retire… | Proposed — 2026-10-28. `docs/adr/` is Tier H (Prime Directive #14): this r… | 2026-10-28 | — | — |
 
 ## ObjectUI registry — `ui/docs/adr/` (`ui-` prefix)
 

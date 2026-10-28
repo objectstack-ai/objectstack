@@ -303,9 +303,9 @@ export interface BuildPageOptions {
    *   condition is met.
    * - `details` — replaces the Details tab body (the `record:details`
    *   node). Other tabs (Related / Activity / History) are unaffected.
-   * - `tabs` — replaces the entire `page:tabs` node. Wins over
-   *   `details` when both are provided. Use this to add or reorder
-   *   tabs.
+   *   There is no `tabs` slot (objectstack#27053): the strip is composed
+   *   from the object's roles and relationship flags, and a page that
+   *   needs its own strip is a `kind: 'full'` page, drawn as authored.
    * - `discussion` — replaces `record:discussion`. Fires even when
    *   `hideDiscussion` is true (the override is explicit intent to
    *   surface a custom footer).
@@ -324,7 +324,6 @@ export interface BuildPageOptions {
     alerts?: any | any[];
     highlights?: any | any[];
     details?: any | any[];
-    tabs?: any | any[];
     discussion?: any | any[];
     rightRail?: any | any[];
   };
@@ -1164,13 +1163,10 @@ export function buildDefaultPageSchema(
   const hideRelatedTab =
     options.hideRelatedTab ?? willEmitRail;
 
-  // 4) Tabs — `tabs` slot wins over `details` slot when both are
-  //    provided (broader override). When only `details` is provided,
-  //    splice it into the Details tab body and keep Related/Activity/
-  //    History tabs synthesized.
-  if ('tabs' in slots && slots.tabs !== undefined) {
-    components.push(...toNodeArray(slots.tabs));
-  } else if ('details' in slots && slots.details !== undefined) {
+  // 4) Tabs — always the synthesized strip (the `tabs` slot that replaced
+  //    it retired, objectstack#27053). A `details` slot is spliced into the
+  //    Details tab body; Related/Activity/History tabs stay synthesized.
+  if ('details' in slots && slots.details !== undefined) {
     const detailsBody = toNodeArray(slots.details);
     const tabsNode = buildDefaultTabs(def, {
       sections: options.sections,

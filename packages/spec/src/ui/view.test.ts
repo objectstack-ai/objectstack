@@ -3219,11 +3219,21 @@ describe('FormViewSchema - buttons & defaults', () => {
       buttons: {
         submit: { show: true, label: 'Save' },
         cancel: { show: true, label: 'Discard' },
-        reset: { show: false },
       },
     });
     expect(result.buttons?.submit).toEqual({ show: true, label: 'Save' });
-    expect(result.buttons?.reset).toEqual({ show: false });
+    expect(result.buttons?.cancel).toEqual({ show: true, label: 'Discard' });
+  });
+
+  it('refuses `buttons.reset` — a retiredKey() tombstone (#27153): no form drew a reset button', () => {
+    const r = FormViewSchema.safeParse({
+      type: 'simple',
+      sections: [{ fields: ['name'] }],
+      buttons: { submit: { show: true }, reset: { show: false } },
+    });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues.map((i) => i.path.join('.'))).toEqual(['buttons.reset']);
+    expect(r.error!.issues[0]!.message).toMatch(/buttons\.reset.*was removed.*Delete the key/s);
   });
 
   it('should accept a partial buttons block (each button optional)', () => {

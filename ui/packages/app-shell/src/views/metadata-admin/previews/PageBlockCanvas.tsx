@@ -223,8 +223,10 @@ export interface PageBlockCanvasProps {
 
 /** Canonical record-page slots, in render order. A `kind:'slotted'` page
  *  overrides individual slots; unoverridden ones are filled by the synthesizer.
- *  We surface all of them so an author can override an inherited slot too. */
-export const SLOT_ORDER = ['header', 'actions', 'alerts', 'highlights', 'details', 'tabs', 'discussion'] as const;
+ *  We surface all of them so an author can override an inherited slot too.
+ *  There is no `tabs` slot (objectstack#27053): the tab strip is composed from
+ *  the object, and a page that needs its own strip is a `kind:'full'` page. */
+export const SLOT_ORDER = ['header', 'actions', 'alerts', 'highlights', 'details', 'discussion'] as const;
 
 /** slots object → one region per slot (single component normalised to array). */
 export function slotsToRegions(slots: Record<string, unknown> | undefined): Region[] {

@@ -2600,19 +2600,19 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'record is the semantic entry `page-requires-non-compiled-kind-refused`.',
   },
   {
-    id: 'page-slots-details-beside-tabs-refused',
-    order: 92,
+    id: 'page-slots-tabs-retired',
+    order: 112,
     text:
-      'It also refuses a page that authors both `slots.details` and `slots.tabs`. The two slots read '
-      + 'as independent and are not: `details` is the body of the Details tab, that tab lives inside '
-      + 'the synthesized `page:tabs` strip, and `tabs` replaces the whole strip, so the console\'s '
-      + 'synthesizer never read a `details` authored beside it and its sections and hidden fields '
-      + 'silently never applied. `PageSchema` now refuses the pair at `slots.details`, naming both '
-      + 'slots and the fix — the `record:details` component as the `children` of a `tabs` item — so '
-      + '`objectstack validate` and the metadata save door agree; the platform\'s own `sys_user_detail` '
-      + 'page moved its details body into its first tab. No key is removed, so there is no tombstone, '
-      + 'and no D2 conversion exists: which tab carries the body is the author\'s decision. Its D3 '
-      + 'record is the semantic entry `page-slots-details-beside-tabs-refused`.',
+      'It also retires the record page\'s `slots.tabs` (ADR-0085; maintainer ruling on the record-page '
+      + 'definition surfaces): the slot replaced the whole synthesized tab strip, dropping the related '
+      + 'lists, approvals, attachments and history the platform composes from the object, and kept the '
+      + 'page tabbed at every width instead of taking the record page\'s columns. The slot map keeps '
+      + 'six slots; `slots.tabs` is a tombstone carrying the prescription, and `related` / '
+      + '`relatedLists`, which were aliases into it, are refused with the same remedy: set '
+      + '`relatedList` on the child\'s reference field, author `slots.details` for the Details body, and '
+      + 'make a page that needs its own strip `kind: \'full\'`. The `details` + `tabs` pair refusal left '
+      + 'with the slot. The D2 conversion `page-slots-tabs-removed` strips the slot from stored pages, '
+      + 'retired from the load path; its D3 record is the semantic entry `page-slots-tabs-retired`.',
   },
   {
     id: 'permission-admin-scope-binding-authoring-retired',
@@ -2985,6 +2985,17 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`form-layout-inline-grid-to-vertical` rewrites them to `vertical` (behaviour-preserving, '
       + '`columns` untouched) on `object-form` page components, on every form payload a view '
       + 'carries, and on the assembled-manifest `viewItems` channel.',
+  },
+  {
+    id: 'ui-form-view-buttons-reset-retired',
+    order: 113,
+    text:
+      'It also retires the form view\'s `buttons.reset` (ADR-0049): no form drew a reset button and '
+      + 'its label was never read, so a form has `submit` and `cancel` only. The key is refused at '
+      + 'parse with its prescription; the D2 conversion `form-view-buttons-reset-removed` strips it '
+      + 'from existing sources and stored rows, so a form that `reset.show: true` cleared after a save '
+      + 'stops clearing; an author who wants that declares `submitBehavior: { kind: \'continue\' }`. '
+      + 'Its D3 record is the semantic entry `ui-form-view-buttons-reset-retired`.',
   },
   {
     id: 'ui-form-view-type-layout-only',

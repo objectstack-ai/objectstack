@@ -114,6 +114,28 @@ function FieldPickerField({ label, objectName, value, onCommit, disabled }: {
   return <InspectorSelectField label={label} value={value || undefined} options={options} onCommit={onCommit} disabled={disabled} />;
 }
 
+/**
+ * The visible label over a LIST of rows, and the group it names. A label that
+ * heads several controls is not a `for` pairing (that names one control), so
+ * the container takes `role="group"` and answers the label's id by IDREF —
+ * `ColorPropField`'s pattern. Its own component for the same reason as that
+ * one: the id is minted with `React.useId()` per instance, and `renderField`
+ * (a function run in a loop over array items, not a component) cannot call a
+ * hook, while a caller-derived id would repeat across two array rows carrying
+ * the same property and resolve to the first group.
+ */
+function LabelledListGroup({ label, className, children }: {
+  label: string; className: string; children: React.ReactNode;
+}) {
+  const labelId = React.useId();
+  return (
+    <div role="group" aria-labelledby={labelId} className={className}>
+      <Label id={labelId} className="text-xs text-muted-foreground">{label}</Label>
+      {children}
+    </div>
+  );
+}
+
 /** Editable list of field names — each row a field dropdown (or text fallback). */
 function FieldListField({ label, objectName, value, onChange, disabled, locale }: {
   label: string; objectName: string | undefined; value: unknown; onChange: (v: string[]) => void; disabled?: boolean;
@@ -122,8 +144,7 @@ function FieldListField({ label, objectName, value, onChange, disabled, locale }
   const options = useFieldOptions(objectName);
   const arr: string[] = Array.isArray(value) ? (value as string[]) : [];
   return (
-    <div className="space-y-1.5">
-      <Label className="text-xs text-muted-foreground">{label}</Label>
+    <LabelledListGroup label={label} className="space-y-1.5">
       {arr.map((s, i) => (
         <div key={i} className="flex items-center gap-1.5">
           {options.length > 0 ? (
@@ -137,6 +158,7 @@ function FieldListField({ label, objectName, value, onChange, disabled, locale }
             </div>
           ) : (
             <Input className="h-8 text-sm" value={String(s ?? '')} placeholder={t('engine.inspector.pageBlock.fieldPlaceholder', locale)} disabled={disabled}
+              aria-label={`${label} ${i + 1}`}
               onChange={(e) => { const n = [...arr]; n[i] = e.target.value; onChange(n); }} />
           )}
           <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={disabled}
@@ -151,7 +173,7 @@ function FieldListField({ label, objectName, value, onChange, disabled, locale }
           <Plus className="mr-1 h-3.5 w-3.5" /> {t('engine.inspector.pageBlock.list.add', locale)}
         </Button>
       )}
-    </div>
+    </LabelledListGroup>
   );
 }
 
@@ -180,6 +202,10 @@ function InspectorJsonField({ label, value, onCommit, disabled, placeholder, loc
   // message is resolved at render and follows a locale switch instead of
   // freezing whatever language was active when the parse failed.
   const [invalid, setInvalid] = React.useState(false);
+  // Minted here, not derived from the label or the prop name: `renderField`
+  // draws this editor inside array rows too, where a caller-derived id would
+  // repeat and `for` would resolve to the first row's textarea.
+  const id = React.useId();
   React.useEffect(() => { setText(initial); setInvalid(false); }, [initial]);
   const commit = () => {
     if (disabled) return;
@@ -195,8 +221,9 @@ function InspectorJsonField({ label, value, onCommit, disabled, placeholder, loc
   };
   return (
     <div className="space-y-1">
-      <Label className="text-xs text-muted-foreground">{label}</Label>
+      <Label htmlFor={id} className="text-xs text-muted-foreground">{label}</Label>
       <textarea
+        id={id}
         value={text}
         onChange={(e) => setText(e.target.value)}
         onBlur={commit}
@@ -620,12 +647,15 @@ export function PageBlockInspector({ selection, draft, onPatch, onClearSelection
         );
       case 'string-list': {
         const arr = Array.isArray(read(f.name)) ? (read(f.name) as unknown[]) : [];
+        // Each row's input is named from the list's label plus its position:
+        // the placeholder is the only other text it carries, and it repeats.
+        const label = fieldLabel(f.label);
         return (
-          <div key={k} className="space-y-1.5">
-            <Label className="text-xs text-muted-foreground">{fieldLabel(f.label)}</Label>
+          <LabelledListGroup key={k} label={label} className="space-y-1.5">
             {arr.map((s, i) => (
               <div key={i} className="flex items-center gap-1.5">
                 <Input className="h-8 text-sm" value={String(s ?? '')} placeholder={placeholderText(f.placeholder)} disabled={readOnly}
+                  aria-label={`${label} ${i + 1}`}
                   onChange={(e) => { const next = [...arr]; next[i] = e.target.value; write(f.name, next); }} />
                 <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={readOnly}
                   aria-label={t('engine.inspector.pageBlock.list.remove', locale)}
@@ -639,7 +669,7 @@ export function PageBlockInspector({ selection, draft, onPatch, onClearSelection
                 <Plus className="mr-1 h-3.5 w-3.5" /> {t('engine.inspector.pageBlock.list.add', locale)}
               </Button>
             )}
-          </div>
+          </LabelledListGroup>
         );
       }
       case 'array': {
@@ -649,8 +679,7 @@ export function PageBlockInspector({ selection, draft, onPatch, onClearSelection
         if (read(f.name) !== undefined && !Array.isArray(read(f.name))) return jsonFallback();
         const arr = Array.isArray(read(f.name)) ? (read(f.name) as unknown[]) : [];
         return (
-          <div key={k} className="space-y-2">
-            <Label className="text-xs text-muted-foreground">{fieldLabel(f.label)}</Label>
+          <LabelledListGroup key={k} label={fieldLabel(f.label)} className="space-y-2">
             {arr.map((item, i) => {
               const itemObj = item && typeof item === 'object' ? (item as Record<string, unknown>) : {};
               return (
@@ -679,7 +708,7 @@ export function PageBlockInspector({ selection, draft, onPatch, onClearSelection
                 <Plus className="mr-1 h-3.5 w-3.5" /> {fieldLabel(f.addLabel)}
               </Button>
             )}
-          </div>
+          </LabelledListGroup>
         );
       }
       case 'object-picker':

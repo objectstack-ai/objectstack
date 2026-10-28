@@ -290,7 +290,7 @@ export function PagePreview({ draft, editing, selection, onSelectionChange, onPa
   // canonical default page from the bound object's schema and apply the slot
   // overrides via the SAME `buildDefaultPageSchema(objectDef, { slots })` path,
   // so omitted slots fall through to the synthesized header/details/discussion
-  // while authored slots (highlights/tabs/…) override in place. Non-slotted
+  // while authored slots (highlights/details/…) override in place. Non-slotted
   // pages render their authored schema unchanged.
   const isSlotted = (draft as { kind?: string })?.kind === 'slotted';
   // The "More details" heading, resolved exactly as the running app resolves it

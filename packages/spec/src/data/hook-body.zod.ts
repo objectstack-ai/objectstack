@@ -252,8 +252,6 @@ export type ScriptBodyParsed = z.infer<typeof ScriptBodySchema>;
  * The compiled-module path (`.mjs` envelope) is intentionally **not** part of
  * this union. All bodies are pure metadata and travel inside the project
  * artifact JSON — no separate runtime module is required.
- *
- * @see content/docs/concepts/north-star.mdx — "Metadata-only runtime"
  */
 export const HookBodySchema = z.discriminatedUnion('language', [
   ExpressionBodySchema,

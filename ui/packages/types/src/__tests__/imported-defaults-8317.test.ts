@@ -145,7 +145,6 @@ import {
   checkDashboardWidgetMetricMeasureArity,
   checkDashboardWidgetChartMeasureArity,
   checkPageRequiresKind,
-  checkPageSlotPair,
   checkPageRegionPlacement,
   checkPageDefaultPlacement,
   checkPageMainRegionWidth,
@@ -726,10 +725,8 @@ describe('the import boundary strips every imported default (objectui#8317)', ()
       // `PageNodeSchema` and `PageKindNodeSchema`.
       ['checkDashboardWidgetChartMeasureArity', checkDashboardWidgetChartMeasureArity],
       ['checkPageRequiresKind', checkPageRequiresKind],
-      // objectui#12030: the page slot-pair check `@objectstack/spec` 18 adds to
-      // `PageSchema`, re-attached on `PageNodeSchema` and `PageKindNodeSchema`
-      // under the same ruling.
-      ['checkPageSlotPair', checkPageSlotPair],
+      // objectui#12030's page slot-pair check left this list with the `tabs`
+      // slot (objectstack#27053): the spec no longer carries it.
       // objectui#12370's page view-data check left this list with objectui#12666: objectstack#23784
       // removed it from the spec, and no mirror attaches it.
       // objectui#12626: the two page checks `@objectstack/spec` 18.0.0-next.2 adds to
