@@ -70,6 +70,7 @@
   "src/ui/element-flat-binding-retirement.test.ts",
   "src/ui/element-text-variant-heading-retirement.test.ts",
   "src/ui/form-field-public-picker-retirement.test.ts",
+  "src/ui/form-view-buttons-reset-retirement.test.ts",
   "src/ui/form-view-type-layout-retirement.test.ts",
   "src/ui/master-detail-detail-sort-field-retirement.test.ts",
   "src/ui/navigation-mode-retirement.test.ts",

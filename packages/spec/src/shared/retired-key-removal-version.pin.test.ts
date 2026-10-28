@@ -404,6 +404,10 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
       'recordAction',
     ),
   ],
+  // #27153: `buttons.reset`, tombstoned inside the live `buttons` block.
+  'form-view-buttons-reset-removed': [
+    tombstone((FormViewSchema.shape.buttons as unknown as { unwrap: () => unknown }).unwrap(), 'view.form.buttons', 'reset'),
+  ],
   // #27155: the form view `type` narrowed to the form's layout — each retired
   // member refused by the enum's own error map, plus the three split-only keys
   // tombstoned beside it.
