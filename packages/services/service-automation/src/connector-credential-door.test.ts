@@ -107,7 +107,9 @@ function fakeProvider() {
                 name: ctx.name,
                 label: ctx.label,
                 type: 'api',
-                authentication: { type: 'none' },
+                // As the rest provider does: the runtime def carries the
+                // resolved auth, token included — what a descriptor must not leak.
+                authentication: ctx.auth ?? { type: 'none' },
                 actions: [{ key: 'request', label: 'Request' }],
             } as unknown as Connector,
             handlers: {
