@@ -82,9 +82,9 @@ export function PublishReportTableSnapshot({ snapshot }: { snapshot: ReportTable
   return null;
 }
 
-export type ReportExportFormat = 'csv' | 'xlsx';
+export type ReportTableExportFormat = 'csv' | 'xlsx';
 
-const REPORT_EXPORT_FORMATS: readonly ReportExportFormat[] = ['csv', 'xlsx'];
+const REPORT_EXPORT_FORMATS: readonly ReportTableExportFormat[] = ['csv', 'xlsx'];
 
 /** The `exportOptions` shape the renderer reads (validated by `ReportSchema`). */
 export interface ReportExportOptionsLike {
@@ -94,13 +94,13 @@ export interface ReportExportOptionsLike {
 }
 
 /** The formats the control offers: absent → both; `[]` → none; order as declared. */
-export function readReportExportFormats(options: unknown): ReportExportFormat[] {
+export function readReportExportFormats(options: unknown): ReportTableExportFormat[] {
   const formats = (options as ReportExportOptionsLike | undefined)?.formats;
   if (!Array.isArray(formats)) return [...REPORT_EXPORT_FORMATS];
-  const out: ReportExportFormat[] = [];
+  const out: ReportTableExportFormat[] = [];
   for (const f of formats) {
-    if ((REPORT_EXPORT_FORMATS as readonly unknown[]).includes(f) && !out.includes(f as ReportExportFormat)) {
-      out.push(f as ReportExportFormat);
+    if ((REPORT_EXPORT_FORMATS as readonly unknown[]).includes(f) && !out.includes(f as ReportTableExportFormat)) {
+      out.push(f as ReportTableExportFormat);
     }
   }
   return out;
@@ -191,7 +191,7 @@ export function ReportExportControl({ exportOptions, label, name, snapshot }: Re
   const reportLabel = pickLocalized(label, language) || name || '';
   const prefix = typeof options.fileNamePrefix === 'string' ? options.fileNamePrefix : undefined;
 
-  const run = async (format: ReportExportFormat) => {
+  const run = async (format: ReportTableExportFormat) => {
     setBusy(true);
     setError(null);
     try {
