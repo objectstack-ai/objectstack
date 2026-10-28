@@ -200,6 +200,7 @@ describe('ObjectListViewInspector — the copilot’s draft marks (objectui#1272
       tFormat('engine.studio.draftMark.sourceItems', 'en-US', {
         items: '"Reader", "Due date"',
         count: 2,
+        agent: tFormat('engine.studio.draftMark.agent.copilot', 'en-US', {}),
         when: tFormat('engine.studio.draftMark.minutesAgo', 'en-US', { n: 2 }),
       }),
     );
@@ -216,7 +217,10 @@ describe('ObjectListViewInspector — the copilot’s draft marks (objectui#1272
     expect(chipsOf(panel)).toEqual(['kanban.titleField']);
     expect(markedElements(panel)).toEqual([]);
     expect(within(panel).getByTestId('studio-draft-source')).toHaveTextContent(
-      tFormat('engine.studio.draftMark.source', 'en-US', { when: tFormat('engine.studio.draftMark.minutesAgo', 'en-US', { n: 5 }) }),
+      tFormat('engine.studio.draftMark.source', 'en-US', {
+        agent: tFormat('engine.studio.draftMark.agent.copilot', 'en-US', {}),
+        when: tFormat('engine.studio.draftMark.minutesAgo', 'en-US', { n: 5 }),
+      }),
     );
   });
 

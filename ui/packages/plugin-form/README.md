@@ -209,7 +209,7 @@ unknown-component placeholder.
 | `submitLabel` / `cancelLabel` | `string` | button text |
 | `showCancel` / `showActions` | `boolean` | action-row composition |
 | `mobileStickyActions` | `boolean` | pin the action row on small viewports |
-| `layout` | `'vertical' \| 'horizontal'` | label placement |
+| `layout` | `'vertical' \| 'horizontal'` | label placement: `vertical` puts each label above its field (the default); `horizontal` puts it in a fixed column beside the field from the `sm` breakpoint up, and stacks it above the field below `sm` |
 | `columns` | `number` | grid width (1–4) |
 | `validationMode` | `'onSubmit' \| 'onBlur' \| 'onChange' \| 'onTouched' \| 'all'` | when the rules run |
 | `resetOnSubmit` / `disabled` | `boolean` | |

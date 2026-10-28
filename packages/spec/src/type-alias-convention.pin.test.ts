@@ -285,7 +285,7 @@ import type * as M194 from './automation/assignment-rule.zod.js';
 import type * as M195 from './security/queue.zod.js';
 
 // ---------------------------------------------------------------------------
-// 797 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 798 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -614,6 +614,7 @@ export type Iso_api_protocol__MarkAllNotificationsReadRequestSchema = Assert<Eq<
 export type Iso_api_protocol__MarkAllNotificationsReadResponseSchema = Assert<Eq< z.input< typeof M28.MarkAllNotificationsReadResponseSchema >, z.infer< typeof M28.MarkAllNotificationsReadResponseSchema > >>;
 export type Iso_api_protocol__MarkNotificationsReadRequestSchema = Assert<Eq< z.input< typeof M28.MarkNotificationsReadRequestSchema >, z.infer< typeof M28.MarkNotificationsReadRequestSchema > >>;
 export type Iso_api_protocol__MarkNotificationsReadResponseSchema = Assert<Eq< z.input< typeof M28.MarkNotificationsReadResponseSchema >, z.infer< typeof M28.MarkNotificationsReadResponseSchema > >>;
+export type Iso_api_protocol__MetadataAuthoringClientSchema = Assert<Eq< z.input< typeof M28.MetadataAuthoringClientSchema >, z.infer< typeof M28.MetadataAuthoringClientSchema > >>;
 export type Iso_api_protocol__MetadataAuthoringSurfaceSchema = Assert<Eq< z.input< typeof M28.MetadataAuthoringSurfaceSchema >, z.infer< typeof M28.MetadataAuthoringSurfaceSchema > >>;
 export type Iso_api_protocol__PublishMetaItemRequestSchema = Assert<Eq< z.input< typeof M28.PublishMetaItemRequestSchema >, z.infer< typeof M28.PublishMetaItemRequestSchema > >>;
 export type Iso_api_protocol__PublishMetaItemResponseSchema = Assert<Eq< z.input< typeof M28.PublishMetaItemResponseSchema >, z.infer< typeof M28.PublishMetaItemResponseSchema > >>;
@@ -1731,7 +1732,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 797 isomorphic pins', () => {
+  it('still declares all 798 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2657,11 +2658,16 @@ describe('ADR-0122 type-alias convention', () => {
     // and no transform — so it is pinned here
     // (Iso_ui_dataset__DatasetMeasurePolarity) rather than given a `…Parsed`
     // synonym. +1 added.
-    // 798 -> 797 is #27182: `CurrencyValueSchema` (`data/field.zod.ts`), the
+    // 798 -> 799 is #27176: `MetadataAuthoringClientSchema`
+    // (`api/protocol.zod.ts`), the OAuth client an MCP build-door write names —
+    // a required id and an optional name, no default and no transform — so it
+    // is pinned here (Iso_api_protocol__MetadataAuthoringClientSchema) rather
+    // than given a `…Parsed` synonym. +1 added.
+    // 799 -> 798 is #27182: `CurrencyValueSchema` (`data/field.zod.ts`), the
     // never-consumed `{value, currency}` shape a currency value never had (it
     // is a bare number, ADR-0104 D1), is deleted, and its pin
     // (Iso_data_field__CurrencyValueSchema) goes with it. -1 removed.
-    expect(pins).toHaveLength(797);
+    expect(pins).toHaveLength(798);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either

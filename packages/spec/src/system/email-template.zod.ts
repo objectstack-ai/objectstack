@@ -102,14 +102,15 @@ const EMAIL_TEMPLATE_IS_SYSTEM_REMOVED =
  * mail renderer and the `email-template-hole-grammar` authoring rule quote the
  * same constant, and the formula package pins this text against it. The spec
  * only states the grammar: the formula package judges it and plugin-email
- * renders it. It promises no refusal of an unknown formatter name: none
- * exists today (the mail renderer prints such a hole raw; #26948).
+ * renders it. A formatter name the template engine does not know is refused
+ * by the same grammar (`known-formatter`), at authoring and at send.
  */
 const MAIL_TEMPLATE_HOLES =
   "Holes are `{{ path }}` or `{{ path | formatter[:arg] }}` over the send's `data`, with at most one formatter "
-  + 'per hole (a second, chained formatter is refused). A `currency` argument is either a literal ISO 4217 '
-  + "code in three capital letters (`currency:EUR`) or, in a mail template only, `@` followed by a path into the "
-  + "send's data whose value is such a code (`currency:@currency_code`).";
+  + 'per hole (a second, chained formatter is refused), and that formatter is one the template engine knows '
+  + '(an unknown name, such as a misspelled `curency`, is refused, naming the known formatters). A `currency` '
+  + 'argument is either a literal ISO 4217 code in three capital letters (`currency:EUR`) or, in a mail template '
+  + "only, `@` followed by a path into the send's data whose value is such a code (`currency:@currency_code`).";
 
 export const EmailTemplateDefinitionVariableSchema = lazySchema(() => z.object({
   name: z.string().describe(

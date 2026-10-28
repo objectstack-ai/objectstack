@@ -162,7 +162,8 @@ jobs:
       # filter below and the `test` job's `if:` (#9829, #10015).
       crosspkg: ${{ github.event_name != 'merge_group' && steps.changes.outputs.crosspkg || 'true' }}
       # The objectui tree under `ui/` (objectstack#25677). Three outputs, read
-      # together by the four `* UI` jobs at the bottom of this file:
+      # together by the five `* UI` jobs at the bottom of this file (Type Check
+      # UI, Test UI, Lint UI, Build & E2E UI and Live E2E UI):
       #   ui            — a path under ui/, a root file the ui jobs build from
       #                   (the lockfile, the workspace, turbo.json), or a root
       #                   the ui gates read (every root workflow, the prompts,
@@ -175,7 +176,7 @@ jobs:
       # On merge_group `ui` and `ui_consumers` come from the queue diff
       # (objectstack#25867): an entry whose merged diff against
       # `merge_group.base_sha` touches no ui path and none of the seven
-      # packages skips the four ui jobs, exactly as the same diff does on its
+      # packages skips the five ui jobs, exactly as the same diff does on its
       # PR head; an entry that touches one runs them. If the step fails (the
       # base cannot be fetched, the diff errors), it is `continue-on-error`
       # there, its outputs are empty and `|| 'true'` runs every ui job.
@@ -3539,9 +3540,6 @@ jobs:
       - name: Verify changed en strings were followed by the nine translations
         run: pnpm --dir ui run check:i18n-drift
 
-      - name: Verify the metadata-admin designer string tables stay paired
-        run: pnpm --dir ui run check:i18n-designer-parity
-
       - name: Type-check the ui scripts
         run: pnpm --dir ui run type-check:scripts
 
@@ -4447,6 +4445,185 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
+
+  # ── Live E2E UI: the Console against a real backend (#27154) ─────────────
+  # Row 17 of the objectstack#25697 workflow roster, objectui's `live-e2e.yml`,
+  # "kept, follow-up port": it has run nowhere since #26058 deleted
+  # `ui/.github/workflows/`. Ruling 6435339772 Q1 A made it required; ruling
+  # 6464191239 letter D re-based it on the WORKSPACE backend, so it runs the
+  # HEAD Console against the HEAD backend and no published version is pinned
+  # anywhere (`ui/e2e/live/ci/backend.env` says why the pin retired).
+  #
+  # What it runs: the four allowlisted live specs, `test:e2e:live:ci`, with
+  # `--retries 0` (the config's own value, stated again on the command line),
+  # against `objectstack dev --seed-admin --fresh` serving `examples/app-showcase`
+  # from this tree's own built CLI (`ui/e2e/live/ci/start-backend.sh`) and the
+  # Console's production build served by `vite preview`, whose `/api` proxy
+  # (the Console's `server.proxy`, which preview inherits) points at that
+  # backend through DEV_PROXY_TARGET. ⛔ No retry wrapper and no
+  # `continue-on-error` anywhere in this job: a red run is a red check.
+  #
+  # Gated as Build & E2E UI is. Not behind Build UI Deps: this job builds a
+  # larger closure (the CLI and the showcase app's) than the seven packages that
+  # job hands on, so it restores Build Core's turbo seed instead.
+  #
+  # Ceiling: there is no CI population yet, so it is derived from one cold
+  # local run on 4 shared cores (#27154, 2026-10-28), by the rule above Lint UI:
+  # install 60 s + closure build 384 s + Console build 119 s + backend boot
+  # 19 s + specs 26 s + browser provisioning and setup ~120 s ≈ 730 s
+  # (12.2 min) => max(36.5, 27.2) => 40. Re-derive from the first population.
+  live-e2e-ui:
+    name: Live E2E UI
+    needs: filter
+    if: ${{ !cancelled() && needs.filter.outputs.ui_tree != 'false' && (needs.filter.outputs.ui != 'false' || needs.filter.outputs.ui_consumers != 'false') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    env:
+      # The Console's build OOMs at Node's default heap (see Build & E2E UI).
+      NODE_OPTIONS: --max-old-space-size=4096
+      # LIVE_BACKEND_DIR is set on the two steps that run the scripts: the
+      # `runner` context is not available in a job-level `env:`, and a
+      # workflow that names it there does not validate at all.
+      LIVE_BACKEND_PORT: '4010'
+      LIVE_API_URL: http://localhost:4010
+      LIVE_APP_URL: http://localhost:5190
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+
+      - name: Setup pnpm
+        uses: ./.github/actions/setup-pnpm
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      # Restore only, here and below: Build UI Deps saves the store and Build
+      # Core the turbo seed.
+      - name: Restore pnpm cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-v3-
+
+      - name: Restore Turbo cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .turbo/cache
+          key: ${{ runner.os }}-turbo-build-core-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-build-core-${{ github.ref_name }}-
+            ${{ runner.os }}-turbo-build-core-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The backend's closure (the CLI and the showcase app, the `pkg...` form
+      # Dogfood Verify CLI uses) plus the seven packages the Console builds
+      # against, the same filters as Build & E2E UI's build step.
+      - name: Build the workspace backend and the @objectstack packages objectui consumes
+        run: |
+          pnpm exec turbo run build --concurrency=4 \
+            --filter=@objectstack/cli... \
+            --filter=@objectstack/example-showcase... \
+            --filter=@objectstack/spec... \
+            --filter=@objectstack/client... \
+            --filter=@objectstack/core... \
+            --filter=@objectstack/formula... \
+            --filter=@objectstack/lint... \
+            --filter=@objectstack/sdui-parser... \
+            --filter=@objectstack/types...
+
+      # Served at the root, where the live specs navigate.
+      - name: Build the Console for the live lane
+        env:
+          VITE_BASE_PATH: /
+        run: pnpm --dir ui/apps/console exec vite build
+
+      - name: Get the Playwright version
+        id: playwright-version
+        run: |
+          set -eo pipefail
+          if ! version=$(pnpm --dir ui list @playwright/test --depth=0 --json | jq -r '.[0].devDependencies["@playwright/test"].version'); then
+            echo "::error::Reading the @playwright/test version failed (pnpm list --json | jq). Refusing to write a Playwright browser cache key from it."
+            exit 1
+          fi
+          if [ -z "$version" ] || [ "$version" = "null" ]; then
+            echo "::error::Could not resolve the @playwright/test version (got: '${version}'). Refusing to write an empty or null version into the Playwright browser cache key."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      # Build & E2E UI saves this key; this job only reads it.
+      - name: Restore Playwright browsers
+        id: playwright-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
+
+      - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: pnpm --dir ui exec playwright install chromium
+
+      - name: Ensure Chromium can launch
+        working-directory: ui/scripts
+        run: bash ensure-chromium-ready.sh
+
+      - name: Boot the workspace backend
+        env:
+          LIVE_BACKEND_DIR: ${{ runner.temp }}/live-backend
+        run: bash ui/e2e/live/ci/start-backend.sh
+
+      # In the background for the rest of the job; the runner reaps it at job
+      # end. Ready = the Console's index answers through the preview server.
+      - name: Serve the Console with vite preview
+        env:
+          DEV_PROXY_TARGET: http://localhost:4010
+        run: |
+          cd ui/apps/console
+          nohup pnpm exec vite preview --port 5190 --strictPort > "$RUNNER_TEMP/vite-preview.log" 2>&1 &
+          deadline=$((SECONDS + 60))
+          until curl -sf -o /dev/null http://localhost:5190/; do
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::vite preview did not answer on :5190 within 60 s."
+              cat "$RUNNER_TEMP/vite-preview.log"
+              exit 1
+            fi
+            sleep 1
+          done
+          echo "vite preview answers on :5190, proxying /api to :4010."
+
+      - name: Run the live e2e specs
+        run: pnpm --dir ui run test:e2e:live:ci --retries 0
+
+      - name: Stop the workspace backend
+        if: ${{ always() }}
+        env:
+          LIVE_BACKEND_DIR: ${{ runner.temp }}/live-backend
+        run: bash ui/e2e/live/ci/stop-backend.sh
+
+      - name: Upload failure artefacts
+        if: ${{ !cancelled() && failure() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ui-live-e2e-failure-artifacts
+          path: |
+            ui/test-results/
+            ${{ runner.temp }}/live-backend/backend.log
+            ${{ runner.temp }}/vite-preview.log
+          retention-days: 14
 
   # ── UI Published Artifacts: two objectui gates over a full build (#26717) ─
   # Rows 23 and 21 of the objectstack#25697 workflow roster, "kept, follow-up

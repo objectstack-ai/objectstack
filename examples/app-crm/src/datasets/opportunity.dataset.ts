@@ -27,9 +27,12 @@ export const OpportunityDataset = defineDataset({
     { name: 'close_date', label: 'Close Date', field: 'close_date', type: 'date', dateGranularity: 'month' },
   ],
 
+  // The amount measures carry no `currency`: they inherit the `amount` field's
+  // currency, which is the tenant default (ADR-0104 D1). A hard-coded code here
+  // would print `$` for a tenant whose books are in another currency.
   measures: [
     { name: 'opp_count', label: 'Opportunities', aggregate: 'count' },
-    { name: 'total_amount', label: 'Total Amount', aggregate: 'sum', field: 'amount', format: '0,0', currency: 'USD' },
-    { name: 'avg_amount', label: 'Avg Deal Size', aggregate: 'avg', field: 'amount', format: '0,0', currency: 'USD' },
+    { name: 'total_amount', label: 'Total Amount', aggregate: 'sum', field: 'amount', format: '0,0' },
+    { name: 'avg_amount', label: 'Avg Deal Size', aggregate: 'avg', field: 'amount', format: '0,0' },
   ],
 });

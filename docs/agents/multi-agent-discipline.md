@@ -123,7 +123,7 @@ Arming a red PR does not queue it, it hides it:
 
 ← [`AGENTS.md` › Multi-agent working discipline](../../AGENTS.md#multi-agent-working-discipline)
 
-A check outside those nine is advisory and rides through, and an advisory red
+A check outside those ten is advisory and rides through, and an advisory red
    that lands rides `main`'s merge ref into every later PR until stanched.
 
 ## Two speeds: which runs carry which battery

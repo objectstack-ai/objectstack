@@ -74,6 +74,13 @@
  *      targets — true of the shipped bundle against a partial stack too, and the
  *      reason no test here does that.
  *
+ * One protocol-forced edit since the lift, not a re-sync: when the form view
+ * `type` became the form's layout only (ADR-0050, #27155), the `split` and
+ * `quick` forms' retired `type: 'split'` / `'drawer'` stopped parsing, so they
+ * read `tabbed` / `simple` here and the two `pane` keys are gone. The specimen
+ * — which sections carry a `name` — is untouched, and no finding depends on a
+ * form's `type`.
+ *
  * Nothing else failed to survive the lift. `Field.lookup('showcase_account')` on
  * the contact object still points at an object this stack does not declare —
  * that is unchanged from the live-import tests, which composed the same partial
@@ -328,17 +335,17 @@ export const SnapshotTaskViews = defineView({
     },
 
     split: {
-      type: 'split',
+      type: 'tabbed',
       data: taskData,
       sections: [
-        { name: 'split_task', label: 'Task', pane: 'primary', columns: 1, fields: ['title', 'status', 'assignee'] },
-        { name: 'split_schedule', label: 'Schedule', pane: 'secondary', columns: 1, fields: ['start_date', 'due_date', 'progress'] },
+        { name: 'split_task', label: 'Task', columns: 1, fields: ['title', 'status', 'assignee'] },
+        { name: 'split_schedule', label: 'Schedule', columns: 1, fields: ['start_date', 'due_date', 'progress'] },
       ],
     },
 
     // ⛔ SPECIMEN — `quick`'s single section declares a label and NO `name`.
     quick: {
-      type: 'drawer',
+      type: 'simple',
       data: taskData,
       sections: [{ label: 'Quick Edit', columns: 1, fields: ['status', 'priority', 'progress'] }],
     },

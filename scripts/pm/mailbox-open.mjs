@@ -2,7 +2,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * mailbox-open — open (or close) a project's cross-account mailbox PR (#25417).
+ * mailbox-open — open (or close) a seat's mailbox PR (#25417; one per seat since the per-seat doorbell).
  *
  *   node scripts/pm/mailbox-open.mjs --repo owner/name --login <login> [--base main] [--dry-run] [--json]
  *   node scripts/pm/mailbox-open.mjs --repo owner/name --login <login> --head <branch> [--dry-run]
@@ -15,17 +15,25 @@
  * shares is GitHub. A comment on a pull request wakes the session subscribed
  * to it — measured on #25392: a relay comment woke the subscribed thread in
  * ~70 s, a comment from a second account in 4 s. An issue comment wakes
- * nothing. So each lane project keeps ONE draft PR as its mailbox: labelled
- * `pm:mailbox`, on the branch `mailbox/<login>` (the account that holds the
- * project), subscribed by a resident thread, ⛔ never merged, closed when the
- * account hands over. The protocol text (who writes `To: <login>`, who
- * subscribes) is the pm-dispatch skill's; this file is only the tooling.
+ * nothing. So each SEAT — a lane seat, the triage seat, the director seat —
+ * keeps ONE draft PR as its mailbox: labelled `pm:mailbox` and `pinned`, on
+ * the branch `mailbox/<login>` (the account that holds the seat), its body's
+ * first line `To: <login>`, opened at seating and subscribed by the seated
+ * session, ⛔ never merged, closed at hand-over or account switch (the
+ * successor opens its own). A comment on it is ONE line opening with one of
+ * the seven doorbell keys (`Request:` / `Notify:`), read by
+ * `record-recognisers.mjs`. The protocol text — the keys, who sends what to
+ * whom — is the pm-dispatch skill's `references/project-forms.md` 〈信箱 PR〉;
+ * this file is only the tooling.
  *
  * ## What it does, in order (open)
  *
  *   ① READ the open pulls and REFUSE (exit 4) when one already carries
  *      `pm:mailbox` for this login — by head `mailbox/<login>` or by the body's
- *      `Mailbox-of: <login>` line. One mailbox per account per repo.
+ *      `To: <login>` line. One mailbox per login per repo, which IS one per
+ *      seat: a login holds one seat at a time, and a lane's second seat is a
+ *      second login (measured 2026-10-28 on the seat posts, so this refusal
+ *      needed no seat name).
  *   ② the BRANCH. Default: one empty commit on `origin/<base>` (`git
  *      commit-tree` of the base's own tree — no checkout, no index, no working
  *      tree touched), pushed as `mailbox/<login>` through `with-fleet.sh
@@ -36,8 +44,17 @@
  *      pushed branch, as #25392 used) and skips the push; it must be ahead of
  *      `<base>`, because GitHub refuses a pull with no commits.
  *   ③ ONE relay stroke: `pr_create` (draft is forced by the relay) with labels
- *      `pm:mailbox` and `skip-changeset`, sent through
- *      `fleet-write/dispatch.mjs` as `objectstack-fleet[bot]`.
+ *      `pm:mailbox`, `pinned` and `skip-changeset`, sent through
+ *      `fleet-write/dispatch.mjs` as `objectstack-fleet[bot]`. `pinned` is
+ *      `stale.yml`'s `exempt-pr-labels` entry (`pm:mailbox` is not one), so
+ *      without it a quiet mailbox is marked stale after 30 days and closed 7
+ *      days later. ⚠️ Measured 2026-10-28: the `pinned` label does not EXIST
+ *      on objectstack-ai/objectstack (`GET /labels/pinned` → 404, as does
+ *      `work-in-progress`; only `security` of the three exists), so the first
+ *      open reads its label set back — the labels leg POSTs the name, and
+ *      whether the platform creates a missing label there is a reading that
+ *      open takes, not one this header asserts. `ensure-pm-labels.sh` is where
+ *      a label the fleet relies on is created.
  *   ④ READ the new pull's number back off its head and print it — the number
  *      `subscribe_pr_activity` takes.
  *
@@ -80,7 +97,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import process from 'node:process';
@@ -103,7 +120,9 @@ export const MAILBOX_LABEL = 'pm:mailbox';
 /** Appended to every search query that enumerates open PRs for landing. */
 export const LEDGER_EXCLUSION = `-label:${MAILBOX_LABEL}`;
 export const MAILBOX_BRANCH_PREFIX = 'mailbox/';
-const PR_LABELS = Object.freeze([MAILBOX_LABEL, 'skip-changeset']);
+/** The stale sweep's exemption label (`.github/workflows/stale.yml` `exempt-pr-labels`); a mailbox is quiet by design. */
+export const STALE_EXEMPT_LABEL = 'pinned';
+const PR_LABELS = Object.freeze([MAILBOX_LABEL, STALE_EXEMPT_LABEL, 'skip-changeset']);
 
 const REPO_SHAPE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 // GitHub's own login rule: alphanumerics and single inner hyphens, ≤ 39.
@@ -166,13 +185,13 @@ export function bodyFooter(session) {
 
 export function mailboxBody({ login, session = null }) {
   return [
-    `Mailbox-of: ${login}`,
+    `To: ${login}`,
     '',
-    `The cross-account mailbox of the Claude Code project held by \`${login}\` (\`${MAILBOX_LABEL}\`).`,
+    `The mailbox of the seat held by \`${login}\` (\`${MAILBOX_LABEL}\`): one per seat, opened at seating, subscribed by the seated session.`,
     '',
-    '- ⛔ Never merged, never readied. Closed on account handover: `node scripts/pm/mailbox-open.mjs --close <this number>`.',
-    `- A message is a comment whose first line is \`To: <login>\`; the resident thread subscribed to this PR reads it.`,
-    '- **CI: owes none.** `skip-changeset` exempts Check Changeset; any other check red on this empty diff is RED BY DESIGN — never fix, rerun or report it.',
+    '- ⛔ Never merged, never readied. Closed at hand-over or account switch: `node scripts/pm/mailbox-open.mjs --close N` (N = this number); the successor opens its own.',
+    '- A message is ONE comment whose first line is one of the seven doorbell keys (`Request:` / `Notify:`; pm-dispatch `references/project-forms.md` 〈信箱 PR〉): one event, one line, keys and numbers only. Nothing else is allowed here — no acknowledgements, no re-sends.',
+    `- **CI: owes none.** \`skip-changeset\` exempts Check Changeset; any other check red on this empty diff is RED BY DESIGN — never fix, rerun or report it. \`${STALE_EXEMPT_LABEL}\` keeps the stale sweep off it.`,
     `- Excluded from every landing ledger: queries add \`${LEDGER_EXCLUSION}\`.`,
   ].join('\n') + bodyFooter(session);
 }
@@ -187,21 +206,22 @@ export function planOpen({ repo, login, head = null, base = 'main', session = nu
 
 export function planClose({ repo, pull }) {
   const actions = [
-    { op: 'comment', issue: pull, body: 'Mailbox closed: the account holding this project handed over. A successor opens its own with `scripts/pm/mailbox-open.mjs`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_' },
+    { op: 'comment', issue: pull, body: 'Mailbox closed: the seat handed over or switched account. The successor opens its own with `scripts/pm/mailbox-open.mjs`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_' },
     { op: 'issue_patch', issue: pull, state: 'closed' },
   ];
   return { kind: 'close', repo, pull, actions, errors: validateStroke(repo, actions) };
 }
 
 const labelNames = (pr) => (Array.isArray(pr?.labels) ? pr.labels.map((l) => (typeof l === 'string' ? l : l?.name)) : []);
-const mailboxOf = (pr) => /^Mailbox-of: (\S+)/.exec(typeof pr?.body === 'string' ? pr.body : '')?.[1] ?? null;
+/** The body's first line, `To: <login>` — the addressee, which is the seat the mailbox belongs to. */
+const addresseeOf = (pr) => /^To: (\S+)/.exec(typeof pr?.body === 'string' ? pr.body : '')?.[1] ?? null;
 
-/** The open `pm:mailbox` pulls that belong to `login`, by head branch or by the body's `Mailbox-of:` line. Pure. */
+/** The open `pm:mailbox` pulls that belong to `login`, by head branch or by the body's `To:` line. Pure. */
 export function openMailboxesOf(pulls, login) {
   const want = String(login).toLowerCase();
   return (Array.isArray(pulls) ? pulls : []).filter((pr) => {
     if (pr?.state !== 'open' || !labelNames(pr).includes(MAILBOX_LABEL)) return false;
-    return String(pr?.head?.ref ?? '').toLowerCase() === mailboxBranch(want) || String(mailboxOf(pr) ?? '').toLowerCase() === want;
+    return String(pr?.head?.ref ?? '').toLowerCase() === mailboxBranch(want) || String(addresseeOf(pr) ?? '').toLowerCase() === want;
   });
 }
 
@@ -359,7 +379,7 @@ let selfTestReachedVerdict = false;
 
 const SELF_TEST_BATTERIES = Object.freeze({
   'arguments: the two modes and every refusal': 10,
-  'the open plan: branch, labels, body, and the relay validator': 8,
+  'the open plan: branch, labels, body, and the relay validator': 9,
   'the close plan: comment then close, judged by the validator': 3,
   'finding an open mailbox: head, body line, label, state': 6,
   'refusing to close what is not an open mailbox': 4,
@@ -403,9 +423,10 @@ async function selfTest() {
   const p = planOpen({ repo: 'objectstack-ai/objectstack', login: 'os-bill', session: 'cse_01ABC' });
   t('the default branch is mailbox/<login> and it is pushed', [p.branch, p.push], ['mailbox/os-bill', true]);
   t('one pr_create action, base main', [p.actions.length, p.actions[0].op, p.actions[0].base, p.actions[0].head], [1, 'pr_create', 'main', 'mailbox/os-bill']);
-  t('labels: pm:mailbox and skip-changeset (the changeset-check exemption)', p.actions[0].labels, ['pm:mailbox', 'skip-changeset']);
-  t('the body opens with Mailbox-of: <login>', p.actions[0].body.split('\n')[0], 'Mailbox-of: os-bill');
-  t('the body states the CI posture and the never-merged rule', [/RED BY DESIGN/.test(p.actions[0].body), /Never merged/.test(p.actions[0].body)], [true, true]);
+  t('labels: pm:mailbox, pinned (the stale-sweep exemption) and skip-changeset (the changeset-check exemption)', p.actions[0].labels, ['pm:mailbox', 'pinned', 'skip-changeset']);
+  t('⭐ pinned IS stale.yml\'s exemption, read off the workflow — and pm:mailbox is not one', (() => { const y = readFileSync(join(REPO_ROOT, '.github', 'workflows', 'stale.yml'), 'utf8'); const m = /exempt-pr-labels:\s*'([^']*)'/.exec(y); const names = m ? m[1].split(',').map((s) => s.trim()) : []; return [names.includes(STALE_EXEMPT_LABEL), names.includes(MAILBOX_LABEL)]; })(), [true, false]);
+  t('the body opens with To: <login> — the addressee is the seat', p.actions[0].body.split('\n')[0], 'To: os-bill');
+  t('the body states the CI posture, the never-merged rule and the closed vocabulary', [/RED BY DESIGN/.test(p.actions[0].body), /Never merged/.test(p.actions[0].body), /seven doorbell keys/.test(p.actions[0].body) && /no acknowledgements/.test(p.actions[0].body)], [true, true, true]);
   t('the relay validator accepts the stroke', p.errors, []);
   const ph = planOpen({ repo: 'o/r', login: 'os-bill', head: 'claude/project-thread-x' });
   t('--head names the branch and skips the push', [ph.branch, ph.push, ph.actions[0].head], ['claude/project-thread-x', false, 'claude/project-thread-x']);
@@ -420,7 +441,7 @@ async function selfTest() {
   battery('finding an open mailbox: head, body line, label, state');
   const pr = (o) => ({ state: 'open', number: 1, labels: [{ name: 'pm:mailbox' }], head: { ref: 'x' }, body: '', ...o });
   t('found by head mailbox/<login>', openMailboxesOf([pr({ head: { ref: 'mailbox/os-bill' } })], 'os-bill').length, 1);
-  t('found by the body line on another head', openMailboxesOf([pr({ body: 'Mailbox-of: os-bill\n\nx' })], 'os-bill').length, 1);
+  t('found by the body line on another head', openMailboxesOf([pr({ body: 'To: os-bill\n\nx' })], 'os-bill').length, 1);
   t('login match is case-insensitive', openMailboxesOf([pr({ head: { ref: 'mailbox/OS-Bill' } })], 'os-bill').length, 1);
   t('without the label it is not a mailbox', openMailboxesOf([pr({ labels: [], head: { ref: 'mailbox/os-bill' } })], 'os-bill').length, 0);
   t('another login’s mailbox is not ours', openMailboxesOf([pr({ head: { ref: 'mailbox/os-elon' } })], 'os-bill').length, 0);

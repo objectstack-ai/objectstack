@@ -8689,6 +8689,161 @@ const connectorConnectionTimeoutMsRemoved: MetadataConversion = {
 };
 
 /**
+ * The form view `type` members `split`, `drawer` and `modal` leave the enum,
+ * and the split-only keys `sections[].pane` (and the legacy `groups[].pane`),
+ * `splitSize` and `splitResizable` leave the shape (protocol 18, #27155 —
+ * ADR-0050 Accepted by ruling 6464210455 on #27032, letter A′: `type` is the
+ * form's layout only; where a form opens is the caller's open mode).
+ *
+ * Authoring refuses each member by name (`enumWithRetiredValues` on
+ * `FormViewSchema.type`, `ui/view.zod.ts`) and each key by its `retiredKey()`
+ * tombstone. Deleting is the whole edit: a form whose `type` was retired lands
+ * on the `simple` default, the conversion invents no layout. The keys go on
+ * every form, whatever its `type`: each is refused on every form now, and a
+ * `pane` on a non-split form was already a parse error. `splitDirection`,
+ * `drawerSide`, `drawerWidth` and `modalSize` stay — the first three for the
+ * React `ObjectForm` block contract (#27159), `modalSize` because the
+ * console's record dialog reads it on every layout.
+ *
+ * **Reach: every FORM payload**, exactly as
+ * {@link formViewSubformColumnsCanonicalized} below: {@link mapViewPayloads}
+ * (`form`, `formViews.*`, a form view item's `config`, a flattened form
+ * overlay — the stored-row seam wraps a `view` row as `{ views: [row] }`) and
+ * the assembled-manifest `viewItems` channel ({@link ASSEMBLED_VIEW_ITEMS_KEY}).
+ * A list payload is never judged.
+ *
+ * The enum accepted all six members through 18.2.0 and `PUT /meta/view`
+ * persists form views, so a stored `view` row CAN carry a retired member;
+ * `applyConversionsToStoredItem` replays this entry over it. **Retired from
+ * the load path from day one**, as {@link navigationModeOverlayValuesRemoved}
+ * is: a live author meets the parse's prescription, and this entry serves
+ * stored-row rehydration, assembled artifacts and `os migrate meta`.
+ * Idempotent by construction: a converted form carries no retired member and
+ * none of the three keys.
+ *
+ * The D3 entry `ui-form-view-type-layout-only` carries what the edit cannot
+ * decide: whether a former `split` form reads better `tabbed`, and how the
+ * caller of a former `drawer` / `modal` form opens it.
+ */
+const formViewPresentationTypesRemoved: MetadataConversion = {
+  id: 'form-view-presentation-types-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '18.2.0',
+  surface:
+    "view.form.type / view.formViews.<key>.type ('split' | 'drawer' | 'modal') / "
+    + 'view.form.sections[].pane / view.form.splitSize / view.form.splitResizable',
+  summary:
+    "form view `type` members 'split' / 'drawer' / 'modal' removed (`type` is the form's layout — "
+    + "simple, tabbed or wizard; where a form opens is the caller's open mode, and a record beside its "
+    + 'list is a reader\'s preference), with the split-only keys `sections[].pane`, `splitSize` and '
+    + '`splitResizable`. The retired member is deleted, which lands the form on the `simple` default',
+  apply(stack, emit) {
+    const RETIRED_TYPES: ReadonlySet<unknown> = new Set(['split', 'drawer', 'modal']);
+    const stripSectionPanes = (form: Dict, key: 'sections' | 'groups', path: string): Dict => {
+      const sections = form[key];
+      if (!Array.isArray(sections)) return form;
+      let changed = false;
+      const next = sections.map((section, i) => {
+        if (!isDict(section)) return section;
+        const stripped = stripKeys(section, ['pane'], emit, `${path}.${key}[${i}]`);
+        if (stripped !== section) changed = true;
+        return stripped;
+      });
+      return changed ? { ...form, [key]: next } : form;
+    };
+    const convertForm = (form: Dict, path: string): Dict => {
+      let next = form;
+      if (RETIRED_TYPES.has(next.type)) {
+        emit({ from: String(next.type), to: '(removed)', path: `${path}.type` });
+        next = { ...next };
+        delete next.type;
+      }
+      next = stripKeys(next, ['splitSize', 'splitResizable'], emit, path);
+      next = stripSectionPanes(next, 'sections', path);
+      return stripSectionPanes(next, 'groups', path);
+    };
+    const withViews = mapViewPayloads(stack, (payload, kind, path) =>
+      kind === 'form' ? convertForm(payload, path) : payload);
+    return mapCollection(withViews, ASSEMBLED_VIEW_ITEMS_KEY, (item, path) => {
+      if (item.viewKind !== 'form') return item;
+      if (isDict(item.config)) {
+        const config = convertForm(item.config, `${path}.config`);
+        return config === item.config ? item : { ...item, config };
+      }
+      // A flattened form overlay — the body IS the payload. A present but
+      // malformed `config` is neither shape and is left for the parse.
+      return item.config === undefined ? convertForm(item, path) : item;
+    });
+  },
+  fixture: {
+    before: {
+      views: [
+        {
+          object: 'fv_task',
+          // A live layout rides through by reference.
+          form: { type: 'tabbed', sections: [{ label: 'Main', fields: ['title'] }] },
+          formViews: {
+            // A split form: the member, both panes and both split keys go;
+            // `splitDirection` stays (the React block contract still reads it).
+            beside: {
+              type: 'split',
+              splitSize: 40,
+              splitResizable: true,
+              splitDirection: 'vertical',
+              sections: [
+                { label: 'Task', pane: 'primary', fields: ['title'] },
+                { label: 'Schedule', pane: 'secondary', fields: ['due_date'] },
+              ],
+            },
+            // A drawer form: the member goes, its other keys stay.
+            quick: { type: 'drawer', drawerSide: 'left', sections: [{ label: 'Quick', fields: ['status'] }] },
+            // A modal form whose sections ride the legacy `groups` alias.
+            dialog: { type: 'modal', modalSize: 'lg', groups: [{ label: 'Edit', fields: ['title'] }] },
+          },
+        },
+        // A form view item record: the payload is `config`.
+        { name: 'fv_task.peek', object: 'fv_task', viewKind: 'form', config: { type: 'modal' } },
+        // A list payload is never judged.
+        { name: 'fv_task.all', object: 'fv_task', viewKind: 'list', config: { type: 'grid', columns: ['title'] } },
+      ],
+      viewItems: [
+        // An assembled flattened form overlay — the body IS the payload.
+        { name: 'fv_task.side', object: 'fv_task', viewKind: 'form', type: 'drawer' },
+      ],
+    },
+    after: {
+      views: [
+        {
+          object: 'fv_task',
+          form: { type: 'tabbed', sections: [{ label: 'Main', fields: ['title'] }] },
+          formViews: {
+            beside: {
+              splitDirection: 'vertical',
+              sections: [
+                { label: 'Task', fields: ['title'] },
+                { label: 'Schedule', fields: ['due_date'] },
+              ],
+            },
+            quick: { drawerSide: 'left', sections: [{ label: 'Quick', fields: ['status'] }] },
+            dialog: { modalSize: 'lg', groups: [{ label: 'Edit', fields: ['title'] }] },
+          },
+        },
+        { name: 'fv_task.peek', object: 'fv_task', viewKind: 'form', config: {} },
+        { name: 'fv_task.all', object: 'fv_task', viewKind: 'list', config: { type: 'grid', columns: ['title'] } },
+      ],
+      viewItems: [
+        { name: 'fv_task.side', object: 'fv_task', viewKind: 'form' },
+      ],
+    },
+    // `beside`: the member, `splitSize`, `splitResizable` and two panes (5);
+    // `quick`, `dialog`, the item record and the assembled overlay: one member
+    // each (4). The tabbed form and the list emit none.
+    expectedNotices: 9,
+  },
+};
+
+/**
  * `subforms[].columns[].field` → `name` on every form view — the mechanical
  * half of the #20901 closure of the form-view carrier (protocol 18).
  *
@@ -10840,6 +10995,224 @@ const listViewSortStringClauseToArray: MetadataConversion = {
  * rewrites, beside the {@link ACTION_RUNNER_BLOCK_TYPES} nodes.
  */
 const ACTION_CONTAINER_BLOCK_TYPES = new Set(['action:group', 'action:menu']);
+
+/**
+ * An action block's `variant: 'destructive'` → `'danger'` (protocol 18, #26779).
+ *
+ * The action variant was spelled in two dialects. `ActionSchema.variant`, the
+ * declaration the action runner dispatches, says `danger`; the four action
+ * blocks' rows (`action:button`, `action:icon`, `action:group`, `action:menu`
+ * and the containers' members) took the Button primitive's word,
+ * `destructive`, and refused `danger`. So one destructive action changed
+ * spelling between a declaration and a block, and each block renderer mapped
+ * `destructive` onto `danger` at its forward to the runner (#26665). The rows
+ * now take `danger` and refuse `destructive` with the rename
+ * (`refuseActionBlockDestructiveVariant`, `ui/component.zod.ts`).
+ *
+ * **Lossless**: on a block both spellings draw the primitive's destructive
+ * button and ask a `confirmText` question through the destructive confirm
+ * button, so the rewrite changes no rendering and no run. A page's
+ * `properties` is not parsed on the metadata load path, so a stored page
+ * written with `destructive` keeps rendering only while a renderer keeps the
+ * old word; this entry carries it across at the stored-row seam, the
+ * artifact door and `os migrate meta --write`, which is why the block
+ * renderers forward `danger` directly and keep no `destructive` bridge.
+ *
+ * Its surfaces are value renames and nothing else: `properties.variant` on
+ * each of the four block nodes (the containers' own value is their trigger's),
+ * and `variant` on each `action:group` / `action:menu` member of
+ * `properties.actions`. `action:bar` is visited too, though it has no row
+ * here: the bar spreads each member of `properties.actions` and
+ * `properties.systemActions` onto an `action:button` (or folds it into its
+ * `action:menu`) with `variant: member.variant || properties.variant`, so a
+ * stored bar written `destructive` reaches the block renderers, which no
+ * longer read that word, and would fall back to a plain button with no
+ * refusal anywhere to say so. Its own `variant` and its members' are renamed
+ * as the four blocks' are. Every other value is left alone, and so is every
+ * other component type: `destructive` stays the Button primitive's word on
+ * `element:button` and the other primitive-backed components, which this
+ * entry never reads. A member that is not an object, or a list that is not an
+ * array, is left as stored. The reach is every position `mapPageComponents`
+ * visits — regions, slots, nested containers — the props gate's own reach.
+ * Idempotent by construction: a rewritten value reads `'danger'`, which this
+ * entry never touches.
+ *
+ * **Retired from the load path from day one**, as
+ * {@link pageActionRowNavigationExecutorToUrl} is: the authoring door teaches
+ * with the rows' refusal, and this entry serves the paths that rewrite
+ * EXISTING data.
+ */
+const pageActionBlockVariantDestructiveToDanger: MetadataConversion = {
+  id: 'page-action-block-variant-destructive-to-danger',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '18.2.0',
+  surface: 'page.component.action:button.variant / page.component.action:icon.variant / '
+    + 'page.component.action:group.variant / page.component.action:menu.variant / '
+    + 'page.component.action:group.actions[].variant / page.component.action:menu.actions[].variant / '
+    + 'page.component.action:bar.variant / page.component.action:bar.actions[].variant / '
+    + 'page.component.action:bar.systemActions[].variant',
+  summary:
+    "action block variant 'destructive' → 'danger' — the spelling ActionSchema.variant and the action runner "
+    + 'use; on a block both draw the destructive button and confirm through the destructive confirm button, '
+    + 'so the rename is lossless',
+  apply(stack, emit) {
+    return mapPageComponents(stack, (component, path) => {
+      const type = component.type;
+      if (typeof type !== 'string') return component;
+      const memberLists = ACTION_CONTAINER_BLOCK_TYPES.has(type)
+        ? ['actions'] as const
+        : type === 'action:bar'
+          ? ['actions', 'systemActions'] as const
+          : ACTION_RUNNER_BLOCK_TYPES.has(type) ? [] as const : undefined;
+      if (!memberLists) return component;
+      const properties = component.properties;
+      if (!isDict(properties)) return component;
+      let next = properties;
+      if (properties.variant === 'destructive') {
+        emit({ from: 'destructive', to: 'danger', path: `${path}.properties.variant` });
+        next = { ...next, variant: 'danger' };
+      }
+      for (const key of memberLists) {
+        const members = properties[key];
+        if (!Array.isArray(members)) continue;
+        let changed = false;
+        const nextMembers = members.map((member, i) => {
+          if (!isDict(member) || member.variant !== 'destructive') return member;
+          changed = true;
+          emit({ from: 'destructive', to: 'danger', path: `${path}.properties.${key}[${i}].variant` });
+          return { ...member, variant: 'danger' };
+        });
+        if (changed) next = { ...next, [key]: nextMembers };
+      }
+      return next === properties ? component : { ...component, properties: next };
+    });
+  },
+  fixture: {
+    before: {
+      pages: [
+        {
+          name: 'ops_cleanup',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                // The measured shape: a destructive button with a confirm question.
+                {
+                  type: 'action:button',
+                  properties: { label: 'Purge', actionType: 'script', variant: 'destructive', confirmText: 'This cannot be undone.' },
+                },
+                { type: 'action:icon', properties: { icon: 'trash', actionType: 'script', variant: 'destructive' } },
+                // Canonical already, and another value: untouched.
+                { type: 'action:button', properties: { label: 'Archive', actionType: 'script', variant: 'danger' } },
+                { type: 'action:button', properties: { label: 'Open', actionType: 'url', target: '/apps/ops', variant: 'outline' } },
+                // The Button primitive's own word on another component: not this entry's.
+                { type: 'element:button', properties: { label: 'Reset', variant: 'destructive' } },
+                // A container's trigger and one of its members: both renamed, the other member untouched.
+                {
+                  type: 'action:group',
+                  properties: {
+                    variant: 'destructive',
+                    actions: [
+                      { label: 'Delete', type: 'script', variant: 'destructive' },
+                      { label: 'Copy', type: 'script', variant: 'ghost' },
+                    ],
+                  },
+                },
+                // Nested one container down.
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'Danger zone',
+                    children: [
+                      { type: 'action:menu', properties: { actions: [{ label: 'Drop', type: 'script', variant: 'destructive' }] } },
+                    ],
+                  },
+                },
+                // A bar: no row of its own, but its members reach the block renderers.
+                {
+                  type: 'action:bar',
+                  properties: {
+                    actions: [{ name: 'purge', label: 'Purge', type: 'script', variant: 'destructive' }],
+                    systemActions: [{ name: 'sys_delete', label: 'Delete', type: 'script', variant: 'destructive' }],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        // A slotted record page's named slot.
+        {
+          name: 'ops_cleanup_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            header: { type: 'action:icon', properties: { icon: 'trash', actionType: 'script', variant: 'destructive' } },
+          },
+        },
+      ],
+    },
+    after: {
+      pages: [
+        {
+          name: 'ops_cleanup',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                {
+                  type: 'action:button',
+                  properties: { label: 'Purge', actionType: 'script', variant: 'danger', confirmText: 'This cannot be undone.' },
+                },
+                { type: 'action:icon', properties: { icon: 'trash', actionType: 'script', variant: 'danger' } },
+                { type: 'action:button', properties: { label: 'Archive', actionType: 'script', variant: 'danger' } },
+                { type: 'action:button', properties: { label: 'Open', actionType: 'url', target: '/apps/ops', variant: 'outline' } },
+                { type: 'element:button', properties: { label: 'Reset', variant: 'destructive' } },
+                {
+                  type: 'action:group',
+                  properties: {
+                    variant: 'danger',
+                    actions: [
+                      { label: 'Delete', type: 'script', variant: 'danger' },
+                      { label: 'Copy', type: 'script', variant: 'ghost' },
+                    ],
+                  },
+                },
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'Danger zone',
+                    children: [
+                      { type: 'action:menu', properties: { actions: [{ label: 'Drop', type: 'script', variant: 'danger' }] } },
+                    ],
+                  },
+                },
+                {
+                  type: 'action:bar',
+                  properties: {
+                    actions: [{ name: 'purge', label: 'Purge', type: 'script', variant: 'danger' }],
+                    systemActions: [{ name: 'sys_delete', label: 'Delete', type: 'script', variant: 'danger' }],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        {
+          name: 'ops_cleanup_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            header: { type: 'action:icon', properties: { icon: 'trash', actionType: 'script', variant: 'danger' } },
+          },
+        },
+      ],
+    },
+    // The button, the icon, the group's trigger, the group member, the nested
+    // menu member, the bar's two members and the slotted header icon.
+    expectedNotices: 8,
+  },
+};
 
 /**
  * A page action row's executor value `'navigation'` → `'url'` (protocol 18).
@@ -14312,6 +14685,7 @@ const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
   { conversion: formFieldPublicPickerRemoved, order: 53 },
   { conversion: formLayoutInlineGridToVertical, order: 40 },
   { conversion: formViewOptionDefaultRemoved, order: 17 },
+  { conversion: formViewPresentationTypesRemoved, order: 78 },
   { conversion: formViewSubformColumnsCanonicalized, order: 51 },
   { conversion: hookTimeoutToTimeoutMs, order: 21 },
   { conversion: jobTimeoutToTimeoutMs, order: 22 },
@@ -14328,6 +14702,7 @@ const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
   { conversion: objectKanbanQuickAddRemoved, order: 15 },
   { conversion: objectMasterDetailFormDetailSortFieldRemoved, order: 60 },
   { conversion: objectTenancyOrganizationFieldRemoved, order: 35 },
+  { conversion: pageActionBlockVariantDestructiveToDanger, order: 77 },
   { conversion: pageActionRowNavigationExecutorToUrl, order: 63 },
   { conversion: pageActionRowPatchRemoved, order: 70 },
   { conversion: pageAssignedProfilesRemoved, order: 31 },

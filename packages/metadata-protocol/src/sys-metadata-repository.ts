@@ -93,10 +93,10 @@ import { isOriginGatedType, managedItemSealedSentence, packagedBaseRegimePrescri
 // its value from a selector or a body — owned by the migration that keys the
 // overlay index on it, so the key and the write head cannot disagree.
 import { OVERLAY_MEMBER_COLUMN, overlayMemberOfBody, overlayMemberValue } from './migrations/overlay-index.js';
-import type { MetadataAuthoringSurface } from '@objectstack/spec/api';
+import type { MetadataAuthoringClient, MetadataAuthoringSurface } from '@objectstack/spec/api';
 // [#24395] The draft save's per-key provenance — the diff, the keep rule and
 // the stored form, one module the strict draft read reads it back through.
-import { draftChangedPaths, mergeDraftChanges, storedDraftChanges } from './draft-changes.js';
+import { draftChangedPaths, mergeDraftChanges, storedDraftChanges, type DraftChangeStamp } from './draft-changes.js';
 
 /**
  * Canonicalise a driver-materialised timestamp into the ISO-8601 string the
@@ -980,7 +980,7 @@ export class SysMetadataRepository implements MetadataRepository {
       ctx: Record<string, unknown>;
       member: string | null | undefined;
       targetPackageId: string | null;
-      stamp: { by: MetadataAuthoringSurface; actor: string | null; at: string };
+      stamp: DraftChangeStamp;
     },
   ): Promise<string | undefined> {
     let replaced: any | null = existing;
@@ -1065,6 +1065,13 @@ export class SysMetadataRepository implements MetadataRepository {
        * `migrate-stored` rewrite) states. Ignored on an `active` put.
        */
       draftChangesBy?: MetadataAuthoringSurface;
+      /**
+       * [#27176] The OAuth client a `draft` put by `draftChangesBy: 'mcp'`
+       * records beside `by` on every key path it changes. The caller has
+       * already checked it is stated only with `mcp`; ignored wherever
+       * `draftChangesBy` is.
+       */
+      draftChangesClient?: MetadataAuthoringClient;
     },
   ): Promise<PutResult> {
     this.assertOpen();
@@ -1178,7 +1185,12 @@ export class SysMetadataRepository implements MetadataRepository {
       if (state === 'draft' && opts.draftChangesBy !== undefined) {
         const draftChanges = await this.recordDraftChanges(ref, body, existing, {
           ctx, member, targetPackageId: parentRowData.package_id as string | null,
-          stamp: { by: opts.draftChangesBy, actor: opts.actor ?? null, at: now },
+          stamp: {
+            by: opts.draftChangesBy,
+            actor: opts.actor ?? null,
+            at: now,
+            ...(opts.draftChangesClient ? { client: opts.draftChangesClient } : {}),
+          },
         });
         if (draftChanges !== undefined) parentRowData.draft_changes = draftChanges;
       }

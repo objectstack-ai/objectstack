@@ -163,7 +163,7 @@ import {
   DESIGNER_TABLE,
   DESIGNER_TABLE_PAIRS,
   readDesignerPairs,
-} from './check-i18n-designer-table-parity.mjs';
+} from './check-i18n-dead-keys.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 import { revPath } from './workspace-root.mjs';
 
@@ -624,14 +624,15 @@ export function treeExistsAt(root, ref) {
  * `after` pair, its own single follower, and its own ledger section instead;
  * `findDrift` is reused unchanged.
  *
- * ## Why the 55 one-sided keys need no ledger here
+ * ## Why the 54 one-sided keys need no ledger here
  *
- * `ENGINE_STRINGS_ZH` carries 55 keys `ENGINE_STRINGS_EN` deliberately lacks.
+ * `ENGINE_STRINGS_ZH` carries 54 keys `ENGINE_STRINGS_EN` deliberately lacks.
  * This gate never sees them: it iterates the `en` side, and its per-key rule —
  * "a pack that does not define the key is skipped for that key" — already
  * handles the reverse direction. Key-set asymmetry is not this gate's business,
- * exactly as stated for the packs; `check-i18n-designer-table-parity.mjs` owns
- * that state invariant.
+ * exactly as stated for the packs; the namespace's own parity
+ * (`packages/i18n/src/__tests__/studio-namespace.test.ts`) and the pair-parity
+ * pin in `__tests__/check-i18n-dead-keys.test.ts` own that state invariant.
  */
 
 /** The designer table's one follower. `en` leads, `zh` follows. */
@@ -817,7 +818,7 @@ if (invokedDirectly) {
   console.log(
     `Compared ${DESIGNER_TABLE} over the same range: ${designer.counters.changedEnKeys} en value(s) ` +
       `changed (${designer.counters.addedEnKeys} key(s) added, ${designer.counters.removedEnKeys} removed ` +
-      `— those are check:i18n-designer-parity's), ${designer.counters.followedPacks} zh value(s) followed, ` +
+      `— key-set parity is the designer pair-parity pin's), ${designer.counters.followedPacks} zh value(s) followed, ` +
       `${designer.counters.absentInPack} key(s) skipped because the zh table does not define them, ` +
       `${designerSplit.waived.length} finding(s) waived by the ledger` +
       (designer.baseFileMissing
