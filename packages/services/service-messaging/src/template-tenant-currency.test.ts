@@ -9,7 +9,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { createEmailChannel } from './email-channel.js';
 import { createInboxChannel } from './inbox-channel.js';
 import { NotificationTemplateStore } from './template-renderer.js';
@@ -44,8 +44,8 @@ function fakeData() {
         },
         async find() { return []; },
         async insert(_o: string, r: any) { return { id: 'x', ...r }; },
-        async update() { return {}; },
-        async delete() { return {}; },
+        async update(_o: string, d: any, options: any) { assertEngineUpdateDispatch(d, options); return {}; },
+        async delete(_o: string, options: any) { assertEngineDeleteDispatch(options); return {}; },
     } as any;
 }
 
