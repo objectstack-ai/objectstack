@@ -663,7 +663,7 @@ and [Connect an MCP Client](/docs/ai/connect-mcp).
 
 | Symptom | Cause → fix |
 |:---|:---|
-| Button doesn't appear | `locations` doesn't include the surface; or the `visible` CEL throws (e.g. a bare, unprefixed field name) and fail-closed hides it; or the user fails `requiredPermissions` |
+| Button doesn't appear | `locations` doesn't include the surface (empty `locations` is right for a selection-only action that a list view's `bulkActions` places); or the `visible` CEL throws (e.g. a bare, unprefixed field name) and fail-closed hides it; or the user fails `requiredPermissions`, which hides the button at every location with no greyed-out control and no message |
 | Click → `Action 'x' … not found` | `target`-style script with no registered handler — add the `registerAction` call in `onEnable` (Path B above) |
 | REST → 400 naming the action's `type` | The type has no server dispatch (`url`/`modal`/`form`/`api`) — open its `target` in the client, or call that endpoint directly |
 | Appears in UI, missing from `list_actions` (MCP) | `ai.exposed` not `true`, `ai.description` under 40 characters, or the type isn't headless-callable |

@@ -144,7 +144,7 @@ export type BulkActionExecution = z.input<typeof BulkActionExecutionSchema>;
  * to name it beside min/max/step, and the sweep found no FORM widget reading it
  * at all.
  *
- * ⚠️ The prescription refuses the obvious-sounding remedy for all but two of
+ * ⚠️ The prescription refuses the obvious-sounding remedy for all but six of
  * these keys. An AUTHORED def's params reach the dialog as written: nothing on
  * that path consults the object's field definitions. The bulk surface's
  * field-backed route is the PROMOTED def, an action the object declares, named
@@ -157,15 +157,16 @@ export type BulkActionExecution = z.input<typeof BulkActionExecutionSchema>;
  * carries the field's `type`, translated `label`, `options`, `required`,
  * `description` (as the help text), `placeholder`, `defaultValue`, `multiple`,
  * `accept` and `maxSize`, plus a reference-bearing field's `reference`,
- * `displayField` and `dependsOn`. From THIS list only `accept` and `maxSize`
- * make the trip. The lookup settings `lookupFilters` / `lookupColumns` /
- * `lookupPageSize` / `descriptionField` are resolved and then dropped by the
- * bulk adapter, and the rest are never read off the field (`idField` has no
+ * `displayField` and `dependsOn`, and that field's lookup settings
+ * `lookupFilters` / `lookupColumns` / `lookupPageSize` / `descriptionField`,
+ * which reach the selection bar's picker as they reach the single-record
+ * dialog's. From THIS list only those four and `accept` / `maxSize` make the
+ * trip, and the rest are never read off the field (`idField` has no
  * `FieldSchema` spelling to declare; the resolver's snake `id_field` read is
- * dropped with the lookup settings). So
- * "declare it on the field and let the dialog inherit" is right for `accept` /
- * `maxSize` on a promoted def, and a confidently wrong answer for every other
- * key here, the shape this campaign has already shipped more than once.
+ * still not carried onto the bulk param). So
+ * "declare it on the field and let the dialog inherit" is right for those six
+ * keys on a promoted def, and a confidently wrong answer for every other key
+ * here, the shape this campaign has already shipped more than once.
  */
 const BULK_PARAM_WIDGET_CONFIG_KEYS = [
   'min', 'max', 'step', 'precision', 'scale', 'rows',
@@ -257,12 +258,13 @@ export const BulkActionParamSchema = lazySchema(() => strictObject(
         + 'field-backed param (`{ field }`), named in the view\'s `bulkActions`. That route '
         + 'carries the field\'s `type`, `label`, `options`, `required`, `description` (as the help '
         + 'text), `placeholder`, `defaultValue`, `multiple`, `accept` and `maxSize`, plus a '
-        + 'reference field\'s `reference`, `displayField` and `dependsOn`. ⛔ So of these keys only '
-        + '`accept` / `maxSize` arrive that way: the picker settings `lookupFilters` / '
-        + '`lookupColumns` / `lookupPageSize` / `descriptionField` are dropped on the bulk path, '
-        + 'and the rest are never read off the field. Remove the key, or for `accept` / '
-        + '`maxSize` move the param onto a promoted action; open an issue if a bulk param '
-        + 'genuinely needs a key declared here.',
+        + 'reference field\'s `reference`, `displayField` and `dependsOn` and its picker settings '
+        + '`lookupFilters` / `lookupColumns` / `lookupPageSize` / `descriptionField`, which reach '
+        + 'the selection bar\'s picker as they reach the single-record dialog\'s. ⛔ So of these '
+        + 'keys only `accept` / `maxSize` and those four picker settings arrive that way, and the '
+        + 'rest are never read off the field. Remove the key, or for one of those six move the '
+        + 'param onto a promoted action; open an issue if a bulk param genuinely needs a key '
+        + 'declared here.',
     }],
     history:
       'Until this shape was closed, `params[]` was `.passthrough()` — every unknown key rode through '
