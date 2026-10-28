@@ -1796,6 +1796,7 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | **reports** | `Record<string, { label?: string; description?: string; blocks?: Record<string, object> }>` | optional | Report translations keyed by report name |
 | **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string; … }>` | optional | Page translations keyed by page name |
 | **flows** | `Record<string, { label?: string; successMessage?: string; errorMessage?: string; screens?: Record<string, object>; … }>` | optional | Screen-flow translations keyed by flow name |
+| **hooks** | `Record<string, { refusals?: Record<string, object> }>` | optional | Hook translations keyed by hook name |
 | **positions** | `Record<string, { label?: string; description?: string }>` | optional | Position translations keyed by position name |
 | **permissions** | `Record<string, { label?: string; description?: string }>` | optional | Permission-set translations keyed by permission-set name |
 | **books** | `Record<string, { label?: string; description?: string; groups?: Record<string, object> }>` | optional | Doc-book translations keyed by book name |
