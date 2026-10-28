@@ -63,6 +63,12 @@ export {
 } from './useUrlOverlay.js';
 export { useTenancyPosture } from './useTenancyPosture.js';
 export { useHomePath } from './useHomePath.js';
+export {
+  LauncherAppsProvider,
+  useLauncherApps,
+  type LauncherApps,
+  type LauncherAppsProviderProps,
+} from './useLauncherApps.js';
 export { useTrackRouteAsRecent, type UseTrackRouteAsRecentOptions } from './useTrackRouteAsRecent.js';
 export {
   sanitizeChatMessagesForCache,
