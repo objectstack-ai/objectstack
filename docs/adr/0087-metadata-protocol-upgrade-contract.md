@@ -753,6 +753,7 @@ gate's log and its `--list` output.
 <!-- adr-0087: not-required (type-surface-only <path>#<a>.<b>.<member>[, ...]) <why> -->
 <!-- adr-0087: not-required (runtime-export-retired <package>#<Export>[, ...]) <why> -->
 <!-- adr-0087: not-required (runtime-export-retired <package>#<Type>.<member>[, ...]) <why> -->
+<!-- adr-0087: not-required (runtime-export-retired <package>#*) <why> -->
 ```
 
 **The vocabulary is closed, and every exemption is re-verified on every run** — an
@@ -763,8 +764,9 @@ avoid. `registered` must name ids that resolve *and* are new in the diff;
 `no-migration-prescription` is refused by a body that carries a migration
 prescription; `runtime-interface-only` is the subject of the rest of this
 addendum; `type-surface-only` — the sixth, added 2026-08-30 — is the subject of
-the addendum after it; and `runtime-export-retired` — the seventh, added 2026-10-12 —
-is the subject of the addendum after that. The checks live in
+the addendum after it; and `runtime-export-retired` — the seventh, added 2026-10-12,
+whose whole-package operand `<package>#*` was added 2026-10-27 (#26220) — is the
+subject of the addendum after that. The checks live in
 [`scripts/check-adr-0087-registration.mjs`](../../scripts/check-adr-0087-registration.mjs),
 which is also where each one's measured history is written down.
 
@@ -1035,12 +1037,14 @@ fails predicates 2 and 3 outright — it bumps `@objectstack/spec` and adds
 
 ## Addendum (2026-10-12) — the seventh category: a published runtime EXPORT retirement (#22918)
 
-The vocabulary above gained a seventh answer, with two operand kinds that may be
-mixed in one marker:
+The vocabulary above gained a seventh answer, with three operand kinds that may be
+mixed in one marker (the third, `<package>#*`, amended 2026-10-27, #26220 — see the
+second 2026-10-27 amendment note under D9):
 
 ```text
 <!-- adr-0087: not-required (runtime-export-retired <package>#<Export>[, ...]) <why> -->
 <!-- adr-0087: not-required (runtime-export-retired <package>#<Type>.<member>[, ...]) <why> -->
+<!-- adr-0087: not-required (runtime-export-retired <package>#*) <why> -->
 ```
 
 ### The dead end it closes
@@ -1161,16 +1165,19 @@ package's root entry is followed through the same mapping.
 >    workspace with a published entry: a workspace member, not `private`, whose entry maps
 >    as above (an unmappable entry is refused, as for any operand). At HEAD it is absent
 >    from the workspace: no `package.json` (its base manifest is gone, and no workspace
->    manifest carries its name, so a package that moved or was renamed is not deleted),
->    not in `pnpm-workspace.yaml` (no glob names its directory literally), and not in the
->    changesets fixed group (no `fixed` group in `.changeset/config.json` lists it; a
->    missing or unreadable config is refused, never read as an empty group).
+>    manifest carries its name, so a package that moved, its directory renamed, is not
+>    deleted), not in `pnpm-workspace.yaml` (no glob names its directory literally), and
+>    not in the changesets fixed group (no `fixed` group in `.changeset/config.json` lists
+>    it; a missing or unreadable config is refused, never read as an empty group).
 > 2. **no-metadata-surface** asks the package what it asks an export, at the merge base:
 >    none of the package's files is a metadata surface, and no metadata surface outside it
->    imports it in code, by its root or a subpath.
-> 3. **from-operands-named**: the FROM → TO block names the package on **one** line, by its
->    package name (`` - FROM `<package>` TO … ``). Its exports take no line of their own,
->    and a FROM line naming one is out of range, as any operand the marker does not name is.
+>    names it in code (comment spans masked, as `metadataSurfaceReference` reads): an
+>    import specifier, by its root or a subpath, or any other occurrence of the package
+>    name, a string value included.
+> 3. **from-operands-named**: the FROM → TO block names the package on a single line, not
+>    one per export, by its package name (`` - FROM `<package>` TO … ``). Its exports take
+>    no line of their own, and a FROM line naming one is out of range, as any operand the
+>    marker does not name is.
 >
 > An export or member operand on a package deleted at HEAD stays refused at predicate 1,
 > and the refusal names the `<package>#*` spelling. Nothing else about the category

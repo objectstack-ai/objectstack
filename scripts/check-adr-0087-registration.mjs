@@ -463,7 +463,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'REX-L: the compiler is loaded only when a marker names the category': 6,
   'WS (#26220): ui workspace packages, `.tsx` modules, aliases and shims': 11,
   'IX (#26220): predicate 4 reads an `any` index signature; the entry may be `src/index.tsx`': 52,
-  'WP (#26220): a deleted published package is retired whole, `<package>#*`': 50,
+  'WP (#26220): a deleted published package is retired whole, `<package>#*`': 55,
   'G6: a changeset that was ALREADY breaking at base is inherited': 1,
   'R15: a changeset RENAMED AND turned breaking in the same commit': 5,
   'G10: a PURE rename of an ALREADY-breaking stock changeset': 3,
@@ -4796,26 +4796,36 @@ function verifyWholePackageRetired(pkg, { base, head, cwd, packagesAt, kit }) {
 
 /**
  * Predicate 2 for a whole package: the first metadata surface OUTSIDE `pkgDir` whose
- * code imports `pkg` (its root or a subpath) -- `from '…'`, a bare `import '…'`,
- * `import('…')` or `require('…')` -- or null. Read with comment spans blanked, as
- * `metadataSurfaceReference` reads: a docblock naming the package reaches nothing.
+ * CODE names `pkg`, or null -- D9's "no metadata surface references it in code",
+ * read as `metadataSurfaceReference` reads an export: comment spans blanked, string
+ * literals left standing. A package name can sit in code only inside a string, so
+ * any occurrence counts -- a plugin id or package reference held as a VALUE as much
+ * as an import. An import specifier (`from '…'`, a bare `import '…'`, `import('…')`,
+ * `require('…')`, by the root or a subpath) is the case reported as `import`; every
+ * other occurrence is a `mention`. A name that merely starts with `pkg`
+ * (`plugin-xy` for `plugin-x`) is not it.
  *
  * @param {string} pkg
  * @param {string} pkgDir the package's directory, no trailing slash
  * @param {Map<string, string>} surfaceTexts path -> text of every metadata surface
- * @returns {{ hitPath: string, line: string } | null}
+ * @returns {{ kind: 'import'|'mention', hitPath: string, line: string } | null}
  */
-export function packageImporter(pkg, pkgDir, surfaceTexts) {
+export function packageReference(pkg, pkgDir, surfaceTexts) {
   const name = pkg.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
   const spec = new RegExp(`(?:\\bfrom\\s*|\\bimport\\s*\\(\\s*|\\brequire\\s*\\(\\s*|^\\s*import\\s+)(['"])${name}(?:/[^'"\\n]*)?\\1`, 'm');
+  const mention = new RegExp(`(?<![\\w@./-])${name}(?![\\w.-])`);
+  // `maskComments` blanks in place, so an offset in `code` is the same offset in the file.
+  const lineAt = (raw, code, at) => {
+    const end = code.indexOf('\n', at);
+    return raw.slice(code.lastIndexOf('\n', at) + 1, end < 0 ? undefined : end).trim();
+  };
   for (const [hitPath, rawText] of surfaceTexts) {
     if (hitPath.startsWith(`${pkgDir}/`) || !rawText.includes(pkg)) continue;
     const code = maskComments(rawText);
-    const m = spec.exec(code);
-    if (!m) continue;
-    // `maskComments` blanks in place, so an offset in `code` is the same offset in the file.
-    const end = code.indexOf('\n', m.index);
-    return { hitPath, line: rawText.slice(code.lastIndexOf('\n', m.index) + 1, end < 0 ? undefined : end).trim() };
+    const imp = spec.exec(code);
+    if (imp) return { kind: 'import', hitPath, line: lineAt(rawText, code, imp.index) };
+    const m = mention.exec(code);
+    if (m) return { kind: 'mention', hitPath, line: lineAt(rawText, code, m.index) };
   }
   return null;
 }
@@ -5127,7 +5137,7 @@ export function verifyRuntimeExportRetired(refs, { base, head, cwd, body, packag
     const t = `\`runtime-export-retired ${op.ref}\` [predicate 2: no-metadata-surface]`;
     if (op.whole) {
       // The same question, asked of the PACKAGE: none of its files is a metadata
-      // surface, and no metadata surface outside it imports it.
+      // surface, and no metadata surface outside it names it in code.
       let own = [];
       try { own = git(['ls-tree', '-r', '--name-only', base, '--', `${r.pkgDir}/`], cwd).split('\n').map((s) => s.trim()).filter(Boolean); } catch { /* listed below as none */ }
       const site = own.find((f) => metadataSurfaceKind(f) !== null);
@@ -5140,11 +5150,12 @@ export function verifyRuntimeExportRetired(refs, { base, head, cwd, body, packag
         continue;
       }
       metadataTexts ??= showManyOrNull(base, surfacePaths, cwd);
-      const importer = packageImporter(op.pkg, r.pkgDir, metadataTexts);
-      if (importer) {
+      const hit = packageReference(op.pkg, r.pkgDir, metadataTexts);
+      if (hit) {
         problems.push(
-          `${t} is false: ${importer.hitPath} (${metadataSurfaceKind(importer.hitPath)}) IMPORTS \`${op.pkg}\`:\n` +
-          `        ${importer.line.slice(0, 140)}\n` +
+          `${t} is false: ${hit.hitPath} (${metadataSurfaceKind(hit.hitPath)}) ` +
+          `${hit.kind === 'import' ? 'IMPORTS' : 'names'} \`${op.pkg}\` IN CODE:\n` +
+          `        ${hit.line.slice(0, 140)}\n` +
           '      A package a metadata surface reaches HAS a metadata surface (comment spans are already excluded).',
         );
         continue;
@@ -8217,6 +8228,10 @@ function selfTest() {
     red('WP-R10 a metadata surface OUTSIDE the package imports it at the merge base', wp({
       base: { 'packages/spec/src/ui/widget.zod.ts': `import { Widget } from '${WP_PKG}';\nexport const W = Widget;\n` },
     }), [P2, /packages\/spec\/src\/ui\/widget\.zod\.ts \(a Zod schema\) IMPORTS `@object-ui\/plugin-x`/]);
+    red('WP-R14 a metadata surface OUTSIDE the package names it as a string VALUE (no import) at the merge base', wp({
+      base: { 'packages/platform-objects/src/ui/widget-host.object.ts': `export const WidgetHost = { name: 'widget_host', plugin: '${WP_PKG}' };\n` },
+    }), [P2, /packages\/platform-objects\/src\/ui\/widget-host\.object\.ts \(an object definition\) names `@object-ui\/plugin-x` IN CODE/,
+      /plugin: '@object-ui\/plugin-x'/]);
     red('WP-R11 no FROM line names the package', wp({ cs: WP_CS('Nothing else to do.') }),
       [/the named operand `@object-ui\/plugin-x#\*` has no FROM side/, /- FROM `@object-ui\/plugin-x` TO/]);
     red('WP-R12 one FROM line per EXPORT instead of the package line', wp({ cs: WP_CS('- FROM `Widget` TO nothing: delete the import.') }),
@@ -8236,10 +8251,17 @@ function selfTest() {
       ['packages/spec/src/b.zod.ts', "import { X } from '@object-ui/plugin-xy';\n"],
       ['ui/packages/plugin-x/src/c.zod.ts', `import '${WP_PKG}';\n`],
     ]);
-    assert(packageImporter(WP_PKG, 'ui/packages/plugin-x', texts)?.hitPath === 'packages/spec/src/a.zod.ts',
-      'WP-U3: a SUBPATH import is an import of the package; the package\'s own files are skipped');
-    assert(packageImporter(WP_PKG, 'ui/packages/plugin-x', new Map([...texts].slice(1))) === null,
+    const u3 = packageReference(WP_PKG, 'ui/packages/plugin-x', texts);
+    assert(u3?.hitPath === 'packages/spec/src/a.zod.ts' && u3.kind === 'import',
+      `WP-U3: a SUBPATH import is an import of the package; the package's own files are skipped (${JSON.stringify(u3)})`);
+    assert(packageReference(WP_PKG, 'ui/packages/plugin-x', new Map([...texts].slice(1))) === null,
       'WP-U4: a package whose name merely STARTS with the name (`plugin-xy`) is not the package');
+    const u5 = packageReference(WP_PKG, 'ui/packages/plugin-x', new Map([
+      ['packages/spec/src/c.zod.ts', `// '${WP_PKG}' in a comment\nexport const C = { from: 'x' };\n`],
+      ['packages/spec/src/d.zod.ts', `export const D = { plugin: '${WP_PKG}' };\n`],
+    ]));
+    assert(u5?.kind === 'mention' && u5.hitPath === 'packages/spec/src/d.zod.ts' && u5.line === `export const D = { plugin: '${WP_PKG}' };`,
+      `WP-U5: a string VALUE naming the package is a reference in code, reported with its line; a comment is not (${JSON.stringify(u5)})`);
   }
 
   // ---- G6: a changeset that was ALREADY breaking at base is inherited -------
