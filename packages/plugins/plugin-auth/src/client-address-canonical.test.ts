@@ -1,7 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
 // The stored text of a client address (`./client-address-canonical.ts`):
-// RFC 5952 for IPv6, the value as it came otherwise. The integration half —
+// an IPv4-mapped address unmapped, RFC 5952 for other IPv6, the value as it
+// came otherwise. The integration half —
 // that every seam storing a sign-in's address goes through it — is
 // `session-client-address-capture.test.ts`.
 
@@ -23,9 +24,13 @@ describe('canonicalClientAddress', () => {
     ['a single zero group is not compressed (§4.2.2)', '2001:db8:0:1:1:1:1:1', '2001:db8:0:1:1:1:1:1'],
     ['a misplaced :: is moved to the longest run', '2001:db8::1:0:0:0:1', '2001:db8:0:1::1'],
     ['already canonical', '::1', '::1'],
-    // RFC 5952 §5.
-    ['IPv4-mapped keeps the mixed notation', '::ffff:203.0.113.7', '::ffff:203.0.113.7'],
-    ['IPv4-mapped in hexadecimal gains the mixed notation', '0:0:0:0:0:FFFF:CB00:7107', '::ffff:203.0.113.7'],
+    // An IPv4-mapped address is the IPv4 address it maps.
+    ['IPv4-mapped', '::ffff:203.0.113.7', '203.0.113.7'],
+    ['IPv4-mapped loopback (a local dual-stack listener)', '::ffff:127.0.0.1', '127.0.0.1'],
+    ['IPv4-mapped in hexadecimal', '0:0:0:0:0:FFFF:CB00:7107', '203.0.113.7'],
+    ['IPv4-mapped in full, uppercase', '0000:0000:0000:0000:0000:FFFF:203.0.113.7', '203.0.113.7'],
+    ['IPv4-mapped with a zone drops the zone', '::ffff:203.0.113.7%eth0', '203.0.113.7'],
+    ['::ffff:0:0/96 only: the IPv4-translated prefix is not unmapped', '::ffff:0:203.0.113.7', '::ffff:0:cb00:7107'],
     ['an embedded IPv4 that is not mapped is written in hexadecimal', '64:ff9b::203.0.113.7', '64:ff9b::cb00:7107'],
     // A zone identifier is kept as it came.
     ['a zone identifier', 'FE80:0:0:0:0:0:0:1%eth0', 'fe80::1%eth0'],

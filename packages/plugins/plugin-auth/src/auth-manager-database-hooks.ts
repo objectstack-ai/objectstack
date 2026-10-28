@@ -287,7 +287,7 @@ export function composeDatabaseHooks(
   // [#26638] The session row's `ip_address` is the address the server
   // established for this request (the client-address trust rule,
   // `client-address.ts`, carried in the request state by `handleRequest`), in
-  // its RFC 5952 text (`client-address-canonical.ts`). better-auth fills the
+  // its stored text (`client-address-canonical.ts`). better-auth fills the
   // field from its own reader, which re-derives that address and stores its
   // rate-limit bucket instead: an IPv6 address expanded and masked to its /64
   // network, an IPv4-mapped one unmapped. No established address (a

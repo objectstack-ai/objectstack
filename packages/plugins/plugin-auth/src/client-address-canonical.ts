@@ -1,8 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The ONE text form a stored client address takes: RFC 5952 for IPv6, the
- * value as it came for everything else.
+ * The ONE text form a stored client address takes: IPv4 as it came (an
+ * IPv4-mapped IPv6 address included, unmapped), RFC 5952 for every other IPv6
+ * address, the value as it came for everything else.
  *
  * ## Where it is applied
  *
@@ -38,9 +39,14 @@
  *
  *  - IPv6 (`isIPv6` from `node:net`): lowercase hexadecimal, no leading zeros
  *    in a group, and the longest run of two or more zero groups (the first, on
- *    a tie) written `::` — RFC 5952 §4. An IPv4-mapped address
- *    (`::ffff:0:0/96`) keeps the mixed notation of RFC 5952 §5,
- *    `::ffff:192.0.2.1`. A zone identifier (`%eth0`) is kept as it came.
+ *    a tie) written `::` — RFC 5952 §4. A zone identifier (`%eth0`) is kept
+ *    as it came.
+ *  - An IPv4-mapped address (`::ffff:0:0/96`) is the dotted IPv4 address it
+ *    maps, `::ffff:192.0.2.1` → `192.0.2.1`. A dual-stack listener reports every
+ *    IPv4 client in that form (a local `os dev` on an IPv6-capable host reads
+ *    `::ffff:127.0.0.1`), and an IPv4 client's address is stored unchanged, so
+ *    it reads the same whichever stack accepted the connection. A zone on such
+ *    an address is dropped: an IPv4 address has none.
  *  - Anything else, IPv4 included, is returned unchanged. An unparseable value
  *    is stored as it came: this never throws, and no sign-in is refused over
  *    the text of an address.
@@ -107,7 +113,8 @@ function compressIPv6(groups: readonly number[]): string {
 
 /**
  * `address` in the form a stored client address takes (see the module
- * header): RFC 5952 for IPv6, unchanged otherwise. `undefined` stays
+ * header): an IPv4-mapped address unmapped, RFC 5952 for other IPv6,
+ * unchanged otherwise. `undefined` stays
  * `undefined`. Never throws.
  */
 export function canonicalClientAddress(address: string): string;
@@ -119,10 +126,10 @@ export function canonicalClientAddress(address: string | undefined): string | un
   const zone = zoneAt === -1 ? '' : address.slice(zoneAt);
   const groups = ipv6Groups(bare);
   if (!groups) return address;
-  // §5: an IPv4-mapped address keeps the mixed notation.
+  // An IPv4-mapped address is the IPv4 address it maps.
   if (groups.slice(0, 5).every((g) => g === 0) && groups[5] === 0xffff) {
     const [g6, g7] = [groups[6]!, groups[7]!];
-    return `::ffff:${g6 >> 8}.${g6 & 0xff}.${g7 >> 8}.${g7 & 0xff}${zone}`;
+    return `${g6 >> 8}.${g6 & 0xff}.${g7 >> 8}.${g7 & 0xff}`;
   }
   return `${compressIPv6(groups)}${zone}`;
 }

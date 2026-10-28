@@ -161,14 +161,15 @@ describe('a sign-in stores its client address in RFC 5952 text, the same on ever
     expect(seen.lastLoginIp).toBe('2001:db8::1');
   });
 
-  it('an IPv4-mapped peer keeps the mixed notation of RFC 5952 §5', async () => {
+  it('an IPv4 client reported by a dual-stack listener (::ffff:203.0.113.7) is stored as its IPv4 address', async () => {
     const d = await serve({});
 
     const seen = await d.observe('::ffff:203.0.113.7');
 
-    expect(seen.session.ip_address).toBe('::ffff:203.0.113.7');
-    expect(seen.refused).toBe('::ffff:203.0.113.7');
-    expect(seen.lastLoginIp).toBe('::ffff:203.0.113.7');
+    expect(seen.session.ip_address).toBe('203.0.113.7');
+    expect(seen.login).toBe('203.0.113.7');
+    expect(seen.refused).toBe('203.0.113.7');
+    expect(seen.lastLoginIp).toBe('203.0.113.7');
   });
 
   it('an IPv4 peer is stored as it came', async () => {
