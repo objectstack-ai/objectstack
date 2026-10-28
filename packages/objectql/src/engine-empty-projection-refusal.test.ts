@@ -71,6 +71,7 @@ function makeDriver() {
         if (!v.every((arm) => matches(row, arm))) return false;
         continue;
       }
+      if (k.startsWith('$')) throw new Error(`driver double does not implement the '${k}' combinator`);
       if (v && typeof v === 'object' && '$in' in (v as any)) {
         if (!(v as any).$in.map(String).includes(String(row[k]))) return false;
         continue;
