@@ -16,8 +16,8 @@ import { definePage } from '@objectstack/spec/ui';
  *   • `record:quick_actions` — object Actions surfaced as inline buttons.
  *   • `record:highlights` + `record:details` — the standard compact + section
  *                            layout.
- * `kind: 'full'` — this page fully owns the record layout (vs the slotted
- * Project page which only overrides the tabs slot).
+ * `kind: 'full'` — this page fully owns the record layout, as the Project
+ * page does for its own tab strip.
  */
 export const TaskDetailPage = definePage({
   name: 'showcase_task_detail',

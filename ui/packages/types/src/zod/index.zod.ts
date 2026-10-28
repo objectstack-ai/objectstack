@@ -441,8 +441,13 @@ export {
 } from './views.zod.js';
 
 // ============================================================================
-// AI Components - `@object-ui/plugin-ai` (objectui#10859)
+// AI Components — RETIRED with `@object-ui/plugin-ai` (objectstack#25921)
 // ============================================================================
+// Every name below is a `@deprecated` `z.never()` tombstone that accepts
+// nothing; it leaves this block under objectstack#25912's sunset rule. The three
+// literals' refusal arms (`RetiredAIFormAssistNodeSchema` and its siblings) take
+// the arms' place inside `AnyComponentSchema` and are deliberately NOT exported —
+// nothing outside this package parses against a refusal arm.
 export {
   AIConfigSchema,
   AIFieldSuggestionSchema,
@@ -574,7 +579,7 @@ import { ObjectQLComponentSchema, ObjectQLPublicBlockComponentSchema } from './o
 import { CRUDComponentSchema } from './crud.zod.js';
 import { ReportUnionSchema } from './reports.zod.js';
 import { ViewComponentSchema } from './views.zod.js';
-import { AIComponentSchema } from './ai.zod.js';
+import { RetiredAIFormAssistNodeSchema, RetiredAIRecommendationsNodeSchema, RetiredNLQueryNodeSchema } from './ai.zod.js';
 import { ProductBlockComponentSchema } from './product-blocks.zod.js';
 import { DesignerUnionSchema } from './designer.zod.js';
 import { PublicBlockComponentSchema } from './public-blocks.zod.js';
@@ -681,7 +686,10 @@ export const AnyComponentSchema = defineNodeComponentUnion(z.discriminatedUnion(
   CRUDComponentSchema,
   ReportUnionSchema,
   ViewComponentSchema,
-  AIComponentSchema,
+  // objectstack#25921 — the three retired `@object-ui/plugin-ai` literals' named refusals.
+  RetiredAIFormAssistNodeSchema,
+  RetiredAIRecommendationsNodeSchema,
+  RetiredNLQueryNodeSchema,
   DesignerUnionSchema,
   PublicBlockComponentSchema,
   // objectui#12954 — the retired `cloud:plan-status` literal's named refusal.

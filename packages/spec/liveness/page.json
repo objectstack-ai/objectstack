@@ -240,7 +240,7 @@
     },
     "slots": {
       "status": "live",
-      "note": "slotted-page override map (header/actions/alerts/highlights/details/tabs/discussion) — objectui plugin-detail; Preview render in objectui#1948. Verified in the Studio Design slot editor during the dogfood."
+      "note": "slotted-page override map (header/actions/alerts/highlights/details/discussion; the tabs slot is a tombstone) — objectui plugin-detail; Preview render in objectui#1948. Verified in the Studio Design slot editor during the dogfood."
     }
   }
 }

@@ -207,13 +207,14 @@ synthesizer fills in the rest. A slotted page authors `slots`, not `regions`:
 | `alerts` | The alert banners above the body |
 | `highlights` | The highlights strip |
 | `details` | The body of the Details tab; the other tabs stay synthesized |
-| `tabs` | The whole tab strip, to add, remove or reorder tabs |
 | `discussion` | The discussion panel |
 
 Each slot takes one component or an array of them, and replaces its part whole: there is no
-deep merge. `details` and `tabs` are refused together, because the Details tab lives inside
-the strip `tabs` replaces; to replace both, put `record:details` in the first `tabs` item
-and author no `details` slot. A slotted `tabs` strip stays a strip at every width.
+deep merge. There is no `tabs` slot: the tab strip is composed from the object's fields and
+relationship flags. To change which related lists appear or their order, set `relatedList` /
+`relatedList: 'primary'` on the child's reference field; a page that needs its own strip is
+`kind: 'full'`, drawn as authored. `slots.tabs`, `slots.related` and `slots.relatedLists` are
+refused by name, and `os migrate meta --from 17` drops a stored `slots.tabs`.
 
 {/* os:check */}
 ```typescript

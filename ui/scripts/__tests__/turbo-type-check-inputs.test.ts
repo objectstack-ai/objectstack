@@ -4,6 +4,7 @@ import {
   packagesWithScript,
   rel,
   repoFilesOnDisk,
+  liveTurboConfig,
   rootAnchoredInputs,
 } from './helpers/turbo-inputs';
 import { outOfPackageFiles } from './helpers/tsc-program';
@@ -131,7 +132,7 @@ const INPUTS_NOT_DERIVABLE: ReadonlyMap<string, string> = new Map([
 
 const PACKAGES = packagesWithScript(TASK);
 const DERIVED = PACKAGES.map((pkg) => ({ ...pkg, outside: outOfPackageFiles(pkg.dir, pkg.script) }));
-const ROOT_INPUTS = rootAnchoredInputs(TASK);
+const ROOT_INPUTS = rootAnchoredInputs(TASK, liveTurboConfig());
 const MATCHERS = ROOT_INPUTS.map((glob) => ({ glob, re: globToRegExp(glob) }));
 
 describe('turbo `type-check` inputs cover every out-of-package file (objectui#3514)', () => {

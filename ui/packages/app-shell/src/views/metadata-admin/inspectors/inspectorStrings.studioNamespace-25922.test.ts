@@ -29,6 +29,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
 import { t, tOptional } from '../i18n';
+// The i18n pin's own family list (a test-support module, not a package export).
+import { STUDIO_ZH_ONLY_FAMILIES } from '../../../../../i18n/src/__tests__/studio-zh-only-families';
 
 const EN = await loadStudioCatalogue('en');
 // Resident before any case, so the zh lookups below read synchronously.
@@ -152,6 +154,8 @@ const ZH_ONLY_FLOOR: Readonly<Record<string, number>> = Object.freeze({
  * here from the retired `check:i18n-designer-parity` gate with slice S7. A
  * citation is `{ file, anchor }`, the anchor is TEXT and never a line number,
  * and it must occur exactly once in its file or it stops locating anything.
+ * Its prefixes are held equal to `STUDIO_ZH_ONLY_FAMILIES`, the list the i18n
+ * pin `studio-namespace.test.ts` allows, so neither can widen alone.
  */
 const ZH_ONLY_REASONS = Object.freeze([
   {
@@ -246,6 +250,10 @@ describe('the namespace is the only home (objectstack#25922 slice S7)', () => {
       ...['zh-CN', 'zh', 'zh-TW'].filter((locale) => tOptional(key, locale) !== ZH[key]).map((l) => `zh-side ${l} ${key}`),
     ]);
     expect(wrong).toEqual([]);
+  });
+
+  it('a reason is given for exactly the families the i18n pin allows', () => {
+    expect(ZH_ONLY_REASONS.map((f) => f.prefix).sort()).toEqual([...STUDIO_ZH_ONLY_FAMILIES].sort());
   });
 
   it.each(ZH_ONLY_REASONS.map((f) => [f.prefix, f] as const))('%s: its citation anchor occurs exactly once', (_prefix, family) => {

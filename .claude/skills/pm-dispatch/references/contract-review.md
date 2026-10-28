@@ -20,6 +20,12 @@
 - 四面皆不碰 ⇒ CI 加席位自读 ⛔ 不起第二个 agent;谁跑 = 派发席,达档者席内审。
 - 派发席达档调用被配额拒(HTTP 429)⇒ ⛔ 不降档审;PR 落交接行、留等复核标记,交分诊席。
 - `Contract-review-handoff: triage — CONTRACT_REVIEW_TIER unavailable (<HTTP status / error>, <UTC time>) · head <sha>`
+- 分诊只接无人在审的欠审 PR(draft 亦算):现 head 无记录、无活认领,且 (a)(b)(c) 之一成立。
+- (a) 交接行点名现 head 或 PR 带等复核标记,同轮接;(b) 现 head 已等满一轮分诊(约 60 分钟);
+- (c) 车道席已收班或不在总表;欠审清单 = `node scripts/pm/check-owed-reviews.mjs`,只读。
+- 车道或分诊起审前读 PR:现 head 有记录或活认领 ⇒ ⛔ 不起;否则先落认领行,一 head 一行:
+- `Contract-review-claim: <session> · head <full sha> · <UTC>`
+- 认领随 head 移动或贴后 2 小时无记录失效;同 head 双认 ⇒ 车道胜,分诊回帖撤回、弃产出。
 - 复核记录 = 一条评论落 PR 或卡,席内与子代理同形;散文、dev 自评、`os-dev-report` 恒不算。
 - 同形 = `## Contract review` 题头、head sha 独占码段、①②③ 逐项(申报面外三面加 ④)、
   独立性对、PASS/FAIL。
@@ -51,5 +57,4 @@
 - 只作等复核标记,⛔ 不是闸门;单载体 = PR,卡上副本在规则外、不是要求。
 - 挂:ACCEPT 时条款②任一肢命中而现 head 无同形 PASS 在案 ⇒ 派发席同笔挂于 PR。
 - 摘:现 head 同形 PASS 在案 ⇒ 写记录的席同笔摘;PR 合并或关闭 ⇒ 派发席摘;FAIL 不摘。
-- 只带标记无交接行者仍归本席,分诊 ⛔ 不碰;交接后 head 再动 ⇒ 新交接行或本席自审。
-- ⛔ 无 check、workflow、队列守卫或巡查脚本读它;入队只认同形记录,标记有无不改判。
+- ⛔ 无 check、workflow 或队列守卫读标记与认领行;入队只认同形记录,标记有无不改判。

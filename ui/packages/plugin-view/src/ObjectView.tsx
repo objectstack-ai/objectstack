@@ -864,11 +864,11 @@ type FormMode = 'create' | 'edit' | 'view';
  * ## The verdict
  *
  * The delegation branch in `renderContent` below reads 30 distinct keys off
- * the object-view node through `(schema as any).K` and forwards them to the
- * host's list renderer. Three of them — `data`, `navigation`,
- * `searchableFields`, listed in
+ * the object-view node and forwards them to the host's list renderer. Three
+ * of them — `data`, `navigation`, `searchableFields`, listed in
  * {@link OBJECT_VIEW_DECLARED_FORWARDED_KEYS} — are declared members of
- * `ObjectViewSchema`. The other 27, listed here, are not, and stay that way:
+ * `ObjectViewSchema` and are read without a cast. The other 27, listed here,
+ * are read through `(schema as any).K`, are not declared, and stay that way:
  * they are HOST-COMPOSITION surface, not authored surface. This constant is
  * their single home; the branch is fenced by `#region` markers so the pin in
  * `src/__tests__/objectViewHostSurface.test.tsx` fails BY NAME when a read is
@@ -986,9 +986,10 @@ export const OBJECT_VIEW_HOST_COMPOSITION_KEYS = [
 ] as const;
 
 /**
- * The other three keys the same branch reads through `(schema as any)`: these
- * ARE declared members of `ObjectViewSchema` (`data` via `BaseSchema`), so
- * they are authored surface and are NOT part of the objectui#5097 exemption.
+ * The other three keys the same branch reads off the node: these ARE declared
+ * members of `ObjectViewSchema` (`data` via `BaseSchema`), so they are
+ * authored surface, are read as `schema.K` with no cast, and are NOT part of
+ * the objectui#5097 exemption.
  * They are listed so the pin can assert the split, not just the exempt half —
  * a read that moves from this list into the one above is a key losing its
  * declaration, and must fail loudly.
@@ -2954,9 +2955,11 @@ export const ObjectView: React.FC<ObjectViewProps> = ({
     // If a custom renderListView is provided, use it
     // #region object-view HOST-COMPOSITION SURFACE (objectui#5097)
     //
-    // 30 of the values assembled below are read off the object-view node with
-    // `(schema as any).K`. Three are declared members of `ObjectViewSchema`;
-    // the other 27 are NOT, deliberately: the maintainer ruling of 2026-08-18
+    // 30 of the values assembled below are read off the object-view node. Three
+    // are declared members of `ObjectViewSchema`
+    // (`OBJECT_VIEW_DECLARED_FORWARDED_KEYS`) and are read as `schema.K`, with
+    // no cast; the other 27 are read with `(schema as any).K` because they are
+    // NOT declared, deliberately: the maintainer ruling of 2026-08-18
     // on objectui#5097 (verbatim 「同意」) ruled them HOST-COMPOSITION surface,
     // not authored surface, because this branch is entered only when a HOST
     // passes `renderListView` and the registered renderer never does.
@@ -3106,16 +3109,16 @@ export const ObjectView: React.FC<ObjectViewProps> = ({
           // never reaches the renderer.
           // objectui#8980 / objectui#7928's open half: the cast on the
           // named-view config is GONE — `data` is a declared `NamedListView`
-          // member now, so the read and the declaration are one fact. The
-          // `activeView` and node rungs keep their casts: the host `views` entry
-          // is an untyped host shape and `data` on the node is one of the 27
-          // objectui#5097 host-composition keys.
-          data: currentNamedViewConfig?.data ?? (activeView as any)?.data ?? (schema as any).data,
+          // member now, so the read and the declaration are one fact. The node
+          // rung is uncast for the same reason: `data` is declared on the node
+          // (via `BaseSchema`). The `activeView` rung keeps its cast: the host
+          // `views` entry is an untyped host shape.
+          data: currentNamedViewConfig?.data ?? (activeView as any)?.data ?? schema.data,
           // Propagate new spec properties (P0/P1/P2)
-          navigation: currentNamedViewConfig?.navigation ?? activeView?.navigation ?? (schema as any).navigation,
+          navigation: currentNamedViewConfig?.navigation ?? activeView?.navigation ?? schema.navigation,
           selection: currentNamedViewConfig?.selection ?? activeView?.selection ?? (schema as any).selection,
           pagination: currentNamedViewConfig?.pagination ?? activeView?.pagination ?? (schema as any).pagination,
-          searchableFields: currentNamedViewConfig?.searchableFields ?? activeView?.searchableFields ?? (schema as any).searchableFields,
+          searchableFields: currentNamedViewConfig?.searchableFields ?? activeView?.searchableFields ?? schema.searchableFields,
           resizable: currentNamedViewConfig?.resizable ?? activeView?.resizable ?? (schema as any).resizable,
           hiddenFields: currentNamedViewConfig?.hiddenFields ?? activeView?.hiddenFields ?? (schema as any).hiddenFields,
           // objectui#8980 — TWO SLOTS THAT HAD NO RUNG ON THIS BRANCH AT ALL.

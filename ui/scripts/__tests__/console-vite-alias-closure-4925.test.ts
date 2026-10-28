@@ -64,8 +64,8 @@ import ts from 'typescript';
  * `pnpm-workspace.yaml` lists EVERY workspace package (46 at the time of
  * writing); the console's closure is 34 of them. A naive `table == workspace`
  * assertion therefore reds on day one over packages the console legitimately
- * does not import — `@object-ui/cli`, `@object-ui/plugin-ai`,
- * `@object-ui/runner`, `@object-ui/test-support`, the examples. The workspace
+ * does not import — `@object-ui/cli`, `@object-ui/runner`,
+ * `@object-ui/test-support`, the examples. The workspace
  * manifest's role here is to say what a workspace package IS, not what the
  * console needs; the closure says what it needs. `does not demand an alias for a
  * workspace package the console never imports` below is a standing negative
@@ -95,7 +95,8 @@ import ts from 'typescript';
  *    floor, and a deletion cannot create a stale entry). Observed exactly that —
  *    1 failed, 7 passed, the finding reading `@object-ui/plugin-map (reached via
  *    apps/console/src/register-plugins.ts imports '@object-ui/plugin-map')`.
- *  - NEGATIVE control — `@object-ui/plugin-ai` is a `packages/*` workspace
+ *  - NEGATIVE control — `@object-ui/plugin-ai` (since its retirement,
+ *    objectstack#25921, `@object-ui/cli`) is a `packages/*` workspace
  *    package with no alias entry and no place in the closure. UNMUTATED this
  *    file is green, which is the control: the table is not being held to the
  *    workspace manifest. It is also asserted by name below, and probed the other
@@ -501,10 +502,12 @@ describe('objectui#4925 — apps/console workspace alias table vs. its import cl
     ).toBeGreaterThan(0);
 
     // Named, so the control cannot be satisfied by an empty-ish coincidence:
-    // plugin-ai is shaped exactly like the plugins the console DOES alias.
-    expect(WORKSPACE.has('@object-ui/plugin-ai')).toBe(true);
-    expect(closure.packages.has('@object-ui/plugin-ai')).toBe(false);
-    expect(aliasPackages.has('@object-ui/plugin-ai')).toBe(false);
+    // `@object-ui/cli` is a published `packages/*` library with an `exports` map,
+    // the shape the console's aliased packages have. (The name here was
+    // `@object-ui/plugin-ai` until that package retired, objectstack#25921.)
+    expect(WORKSPACE.has('@object-ui/cli')).toBe(true);
+    expect(closure.packages.has('@object-ui/cli')).toBe(false);
+    expect(aliasPackages.has('@object-ui/cli')).toBe(false);
   });
 
   it('aliases every closure package at that package\'s own workspace directory', () => {
