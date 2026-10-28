@@ -82,6 +82,17 @@ never needs triple braces.
   same way they do in-app. `datetime` honours the reference timezone the caller
   passes; calendar-day `date` values are timezone-naive.
 
+**The formatter is one word, optionally followed by `:` and its argument.**
+`{{ due | date-long }}` and `{{ x | two words }}` are refused by the same doors
+and rule, naming the hole and the shape, where the renderer used to print the
+hole to the reader as written. Mail reads a formatter part exactly as in-app
+templates do: `{{ amount | currency :EUR }}` is `currency` with `EUR`, and
+`default:'n/a'` and `default:"n/a"` both supply `n/a`. Brace text with no path
+before the `|` (`{{ not a path }}`, `{{ | upper }}`) is not a hole and stays as
+written. A template stored before this rule fails its render with
+`TEMPLATE_INVALID` and sends nothing; republish it with the formatter written
+in that shape.
+
 **The formatter is one the whitelist names.** `{{ amount | curency:EUR }}` is
 refused by `os validate`, `os build`, `os lint` and the metadata publish door
 (`email-template-hole-grammar`, a `422 INVALID_METADATA` at the publish door),
@@ -151,8 +162,6 @@ Three properties of the renderer to author around:
 - **There are no loops, conditionals or partials.** A template is a data-only
   rendering by design; branching belongs in the caller, which passes in the
   already-decided values.
-
-An unknown formatter falls back to the raw value rather than failing the render.
 
 ## Declared variables
 

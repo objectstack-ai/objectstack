@@ -145,8 +145,14 @@ export const TEMPLATE_FORMATTERS: string[] = Object.keys(FORMATTERS);
 // both template dialects: this engine's (in-app slots, ADR-0032 §3) and the
 // mail renderer's (`mail-hole-grammar.ts`, read by `@objectstack/plugin-email`
 // and by `@objectstack/lint`'s email template rule). Each dialect parses its
-// own path; what follows the first `|` is judged here, once.
+// own path; what follows the first `|` is split into a name and an argument
+// by `splitHoleFormatter` and judged here, once, so the two dialects accept
+// exactly the same formatter parts.
 //
+// - A formatter is a name of one word, optionally followed by `:` and its
+//   argument. The mail renderer used to print any other text after the `|`
+//   (`{{ due | date-long }}`, `{{ x | two words }}`) to the reader as
+//   written, while this engine refused it.
 // - One formatter per hole. A second `|` used to be read as part of the first
 //   formatter's argument, so `{{ x | default:0 | number:2 }}` rendered the
 //   text `0 | number:2` — formatter syntax printed to the reader — and
@@ -166,6 +172,7 @@ export const TEMPLATE_FORMATTERS: string[] = Object.keys(FORMATTERS);
 /** The rule a refused hole breaks. */
 export type TemplateHoleGrammarRule =
   | 'one-formatter'
+  | 'formatter-shape'
   | 'known-formatter'
   | 'currency-code-literal'
   | 'currency-code-path-mail-only'
@@ -190,6 +197,31 @@ export interface TemplateHoleGrammarRefusal {
 
 /** A formatter name as a hole writes one; any other text after the `|` names no formatter. */
 const WORD_RE = /^\w+$/;
+
+/** A hole's formatter part, split into the formatter name and its argument. */
+export interface HoleFormatterParts {
+  /** The text before the first `:`, trimmed: the formatter name when the hole is well formed. */
+  name: string;
+  /** The text after the first `:`, trimmed, one enclosing quote mark removed at each end; absent when no `:` was written. */
+  arg?: string;
+}
+
+/**
+ * Split a hole's formatter part (the text after its first `|`, trimmed) into
+ * a name and an argument — the one tokenizer both template dialects read, so
+ * a formatter part one of them accepts is never one the other refuses or
+ * prints. `currency :EUR` is `currency` with `EUR`, and `default:'n/a'` and
+ * `default:"n/a"` both give `n/a`. The name is judged by
+ * {@link judgeHoleFormatter}.
+ */
+export function splitHoleFormatter(formatterPart: string): HoleFormatterParts {
+  const colon = formatterPart.indexOf(':');
+  if (colon === -1) return { name: formatterPart };
+  return {
+    name: formatterPart.slice(0, colon).trim(),
+    arg: formatterPart.slice(colon + 1).trim().replace(/^['"]|['"]$/g, ''),
+  };
+}
 
 /** An ISO 4217 alphabetic code: three capital letters, the form `Intl` formats with. */
 const CURRENCY_CODE_RE = /^[A-Z]{3}$/;
@@ -288,7 +320,10 @@ function chainsASecondFormatter(formatterPart: string): boolean {
 /**
  * Judge one hole's formatter against the grammar both template dialects share.
  *
- * A formatter the hole names must be one {@link TEMPLATE_FORMATTERS} holds
+ * The name ({@link splitHoleFormatter}) must be one word (`formatter-shape`):
+ * the mail renderer used to print `{{ due | date-long }}` to the reader as
+ * written; the in-app dialect refuses such a hole in its own parse and keeps
+ * its own wording. A formatter the hole names must be one {@link TEMPLATE_FORMATTERS} holds
  * (`known-formatter`). The mail renderer used to print the raw value for any
  * other name, so `{{ amount | curency:EUR }}` sent `1234.5` where money was
  * meant; the in-app dialect refuses such a hole in its own parse, before this
@@ -319,7 +354,18 @@ export function judgeHoleFormatter(
         + 'passing the finished value as its own variable.',
     };
   }
-  if (WORD_RE.test(formatter) && !TEMPLATE_FORMATTERS.includes(formatter)) {
+  if (!WORD_RE.test(formatter)) {
+    return {
+      rule: 'formatter-shape',
+      message:
+        `the hole ${hole} ${formatter === '' ? 'writes no formatter name after the `|`' : `writes '${formatter}' where the formatter name goes`}, `
+        + 'so it would never format the value: a formatter is one word, optionally followed by `:` and its '
+        + `argument, \`{{ path | formatter[:arg] }}\`. Known formatters: ${TEMPLATE_FORMATTERS.join(', ')}. Write one `
+        + 'of them, or format the value in the caller that supplies the data and pass the finished text as its own '
+        + 'variable.',
+    };
+  }
+  if (!TEMPLATE_FORMATTERS.includes(formatter)) {
     return {
       rule: 'known-formatter',
       message:
@@ -427,13 +473,7 @@ function parseHole(inner: string): ParsedHole | null {
   if (!PATH_ONLY_RE.test(path)) return null;
   const filterPart = inner.slice(pipe + 1).trim();
   // `name` or `name:arg` or `name:'arg'`
-  const colon = filterPart.indexOf(':');
-  let name = filterPart;
-  let arg: string | undefined;
-  if (colon !== -1) {
-    name = filterPart.slice(0, colon).trim();
-    arg = filterPart.slice(colon + 1).trim().replace(/^['"]|['"]$/g, '');
-  }
+  const { name, arg } = splitHoleFormatter(filterPart);
   const refusal = judgeHoleFormatter(`{{${inner}}}`, filterPart, name, arg);
   // A chained hole is refused by the one-formatter rule before its first
   // formatter's name is looked up (`upper | lower` names no formatter).

@@ -28,7 +28,8 @@
  *
  * The hole grammar is `@objectstack/formula`'s (`mailHolePattern`,
  * `parseMailHole`), the one copy the authoring rule and the placement judge
- * read too. A hole that grammar REFUSES — a second formatter
+ * read too. A hole that grammar REFUSES — text after the `|` that is not a
+ * formatter name (`{{ due | date-long }}`), a second formatter
  * (`{{ x | default:0 | number:2 }}`), a formatter the whitelist does not name
  * (`{{ amount | curency:EUR }}`), or a `currency` argument that is not a
  * literal ISO 4217 code — is refused at authoring and publish; one that still

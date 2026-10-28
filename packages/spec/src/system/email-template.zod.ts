@@ -107,7 +107,8 @@ const EMAIL_TEMPLATE_IS_SYSTEM_REMOVED =
  */
 const MAIL_TEMPLATE_HOLES =
   "Holes are `{{ path }}` or `{{ path | formatter[:arg] }}` over the send's `data`, with at most one formatter "
-  + 'per hole (a second, chained formatter is refused), and that formatter is one the template engine knows '
+  + 'per hole (a second, chained formatter is refused). A formatter is one word, optionally followed by `:` and '
+  + 'its argument (text that is not, such as `date-long`, is refused), and it is one the template engine knows '
   + '(an unknown name, such as a misspelled `curency`, is refused, naming the known formatters). A `currency` '
   + 'argument is either a literal ISO 4217 code in three capital letters (`currency:EUR`) or, in a mail template '
   + "only, `@` followed by a path into the send's data whose value is such a code (`currency:@currency_code`).";
