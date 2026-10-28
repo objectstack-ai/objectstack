@@ -11,6 +11,7 @@ import {
   listAudienceBindingSuggestions,
   confirmAudienceBindingSuggestion,
   dismissAudienceBindingSuggestion,
+  reopenAudienceBindingSuggestion,
   SuggestionNotFoundError,
   SuggestionStateError,
   readAcceptedDefaultPermissionSetsOption,
@@ -275,6 +276,10 @@ describe('the deployment authority (#22621 → A)', () => {
     await expect(dismissAudienceBindingSuggestion(makeDeps(ql), TENANT_ADMIN_CTX, id))
       .rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
     expect(rows(ql)[0].status).toBe('pending');
+    await dismissAudienceBindingSuggestion(makeDeps(ql), ADMIN_CTX, id);
+    await expect(reopenAudienceBindingSuggestion(makeDeps(ql), TENANT_ADMIN_CTX, id))
+      .rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+    expect(rows(ql)[0].status).toBe('dismissed');
     expect(everyoneSets(ql)).toEqual(BASELINE);
   });
 });
@@ -479,6 +484,119 @@ describe('dismissAudienceBindingSuggestion', () => {
     const listed = await listAudienceBindingSuggestions(deps2, ADMIN_CTX, {});
     await dismissAudienceBindingSuggestion(deps2, ADMIN_CTX, listed.suggestions[0].id);
     await expect(dismissAudienceBindingSuggestion(deps2, ADMIN_CTX, listed.suggestions[0].id)).rejects.toBeInstanceOf(SuggestionStateError);
+  });
+});
+
+/**
+ * [#27149] Re-opening takes a "no" back: a dismissed or revoked row returns to
+ * `pending`. ⛔ It is not an acceptance — nothing is granted until the
+ * existing confirm accepts the row, high-risk gate included.
+ */
+describe('reopenAudienceBindingSuggestion — back to pending, never an implicit accept', () => {
+  it('dismiss → re-open → pending, listed as pending, then accepted through the existing confirm', async () => {
+    const ql = makeQl([CRM_PACKAGE]);
+    const deps = makeDeps(ql);
+    const { suggestions } = await listAudienceBindingSuggestions(deps, ADMIN_CTX, {});
+    const id = suggestions[0].id;
+    await dismissAudienceBindingSuggestion(deps, ADMIN_CTX, id);
+
+    const { suggestion } = await reopenAudienceBindingSuggestion(deps, ADMIN_CTX, id);
+
+    // Indistinguishable from a suggestion never answered — what the sync's own re-open writes.
+    expect(suggestion).toMatchObject({ id, status: 'pending', deployment_decision: false, resolved_by: null, resolved_at: null });
+    expect(everyoneSets(ql)).toEqual(BASELINE);
+    // The list (which reconciles first) keeps it pending: the sync does not undo the re-open.
+    const pending = await listAudienceBindingSuggestions(deps, ADMIN_CTX, { status: 'pending' });
+    expect(pending.suggestions.map((r: any) => r.id)).toEqual([id]);
+    expect(pending.synced).toMatchObject({ created: 0, confirmedObserved: 0, pruned: 0, reopened: 0 });
+
+    const accepted = await confirmAudienceBindingSuggestion(deps, ADMIN_CTX, id);
+    expect(accepted).toMatchObject({ bindingCreated: true, suggestion: { status: 'confirmed', deployment_decision: true } });
+    expect(everyoneSets(ql)).toContain('crm_readonly');
+  });
+
+  it('revoke → re-open grants nothing: the set stays out of everyone until confirmed', async () => {
+    const ql = makeQl([CRM_PACKAGE]);
+    const deps = makeDeps(ql);
+    const { suggestions } = await listAudienceBindingSuggestions(deps, ADMIN_CTX, {});
+    const id = suggestions[0].id;
+    await confirmAudienceBindingSuggestion(deps, ADMIN_CTX, id);
+    await dismissAudienceBindingSuggestion(deps, ADMIN_CTX, id);
+    expect(everyoneSets(ql)).toEqual(BASELINE);
+
+    await reopenAudienceBindingSuggestion(deps, ADMIN_CTX, id);
+
+    expect(rows(ql)[0].status).toBe('pending');
+    expect(everyoneSets(ql)).toEqual(BASELINE);
+    // Every later derivation agrees: a pending row is not an acceptance.
+    await deps.rederiveEveryone();
+    await syncAudienceBindingSuggestions(ql);
+    expect(everyoneSets(ql)).toEqual(BASELINE);
+    expect((await readAcceptedEveryoneSets(ql)).accepted).toEqual([]);
+  });
+
+  it('the re-accept still runs the high-risk gate (ADR-0090 D7)', async () => {
+    const ql = makeQl([CRM_PACKAGE]);
+    const deps = makeDeps(ql);
+    const { suggestions } = await listAudienceBindingSuggestions(deps, ADMIN_CTX, {});
+    const id = suggestions[0].id;
+    await dismissAudienceBindingSuggestion(deps, ADMIN_CTX, id);
+    await reopenAudienceBindingSuggestion(deps, ADMIN_CTX, id);
+    CRM_PACKAGE.manifest.permissions[0].objects = { crm_account: { allowRead: true, viewAllRecords: true } } as any;
+    try {
+      await expect(confirmAudienceBindingSuggestion(deps, ADMIN_CTX, id))
+        .rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+      expect(rows(ql)[0].status).toBe('pending');
+      expect(everyoneSets(ql)).toEqual(BASELINE);
+    } finally {
+      CRM_PACKAGE.manifest.permissions[0].objects = { crm_account: { allowRead: true } };
+    }
+  });
+
+  it('refuses a pending, an accepted and an observed row by name — 409, nothing written', async () => {
+    const ql = makeQl([CRM_PACKAGE]);
+    const deps = makeDeps(ql);
+    const { suggestions } = await listAudienceBindingSuggestions(deps, ADMIN_CTX, {});
+    const id = suggestions[0].id;
+    const refused = (status: string) => ({
+      code: 'SUGGESTION_STATE',
+      statusCode: 409,
+      message: expect.stringMatching(new RegExp(`^Audience-binding suggestion '${id}' is ${status}, not dismissed`)),
+    });
+
+    await expect(reopenAudienceBindingSuggestion(deps, ADMIN_CTX, id)).rejects.toMatchObject(refused('pending'));
+    expect(rows(ql)[0]).toMatchObject({ status: 'pending', deployment_decision: false });
+
+    await confirmAudienceBindingSuggestion(deps, ADMIN_CTX, id);
+    await expect(reopenAudienceBindingSuggestion(deps, ADMIN_CTX, id)).rejects.toMatchObject(refused('confirmed'));
+    expect(rows(ql)[0]).toMatchObject({ status: 'confirmed', deployment_decision: true, resolved_by: 'usr_admin' });
+    expect(everyoneSets(ql)).toContain('crm_readonly');
+
+    const observedQl = makeQl([CRM_PACKAGE]);
+    declareInBaseline(observedQl, 'crm_readonly');
+    const observed = await listAudienceBindingSuggestions(makeDeps(observedQl), ADMIN_CTX, {});
+    await expect(reopenAudienceBindingSuggestion(makeDeps(observedQl), ADMIN_CTX, observed.suggestions[0].id))
+      .rejects.toMatchObject({ code: 'SUGGESTION_STATE', statusCode: 409 });
+    expect(rows(observedQl)[0].status).toBe('confirmed');
+  });
+
+  it('404s an unknown id, and refuses a dismissal whose set is no longer suggested — the decision stays on record', async () => {
+    const ql = makeQl([CRM_PACKAGE]);
+    const deps = makeDeps(ql);
+    await expect(reopenAudienceBindingSuggestion(deps, ADMIN_CTX, 'sug_missing'))
+      .rejects.toBeInstanceOf(SuggestionNotFoundError);
+
+    const { suggestions } = await listAudienceBindingSuggestions(deps, ADMIN_CTX, {});
+    const id = suggestions[0].id;
+    await dismissAudienceBindingSuggestion(deps, ADMIN_CTX, id);
+    ql.registry.getAllPackages = () => [];
+
+    await expect(reopenAudienceBindingSuggestion(deps, ADMIN_CTX, id))
+      .rejects.toMatchObject({ code: 'SUGGESTION_STATE', statusCode: 409 });
+    // Not re-opened, so the next sync does not prune it: the dismissal stays as history.
+    await syncAudienceBindingSuggestions(ql);
+    expect(rows(ql)).toHaveLength(1);
+    expect(rows(ql)[0].status).toBe('dismissed');
   });
 });
 
@@ -815,6 +933,7 @@ describe('[ADR-0131 D5] the walled posture: deployment-level acceptance is host 
     for (const door of [
       confirmAudienceBindingSuggestion(deps, OPERATOR_CTX, 'sug_any'),
       dismissAudienceBindingSuggestion(deps, OPERATOR_CTX, 'sug_any'),
+      reopenAudienceBindingSuggestion(deps, OPERATOR_CTX, 'sug_any'),
       listAudienceBindingSuggestions(deps, OPERATOR_CTX, {}),
     ]) {
       const refusal = door.catch((e: unknown) => e);

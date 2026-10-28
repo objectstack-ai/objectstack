@@ -94,6 +94,7 @@ export {
   listAudienceBindingSuggestions,
   confirmAudienceBindingSuggestion,
   dismissAudienceBindingSuggestion,
+  reopenAudienceBindingSuggestion,
   SuggestionNotFoundError,
   SuggestionStateError,
 } from './suggested-audience-bindings.js';

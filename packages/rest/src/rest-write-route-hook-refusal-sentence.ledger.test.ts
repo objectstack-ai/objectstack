@@ -354,6 +354,7 @@ const ANSWERS_THE_SENTENCE: Record<string, Driver> = {
     'POST /api/v1/sharing/rules/:idOrName/evaluate': { called: 'sharingRules.evaluateRule', answers: REFUSED_400 },
     'POST /api/v1/security/suggested-bindings/:id/confirm': { called: 'security.confirmAudienceBindingSuggestion', answers: REFUSED_400 },
     'POST /api/v1/security/suggested-bindings/:id/dismiss': { called: 'security.dismissAudienceBindingSuggestion', answers: REFUSED_400 },
+    'POST /api/v1/security/suggested-bindings/:id/reopen': { called: 'security.reopenAudienceBindingSuggestion', answers: REFUSED_400 },
     'POST /api/v1/approvals/requests/:id/approve': { called: 'approvals.decide', body: {}, answers: REFUSED_400 },
     'POST /api/v1/approvals/requests/:id/reject': { called: 'approvals.decide', body: {}, answers: REFUSED_400 },
     'POST /api/v1/approvals/requests/:id/recall': { called: 'approvals.recall', body: {}, answers: REFUSED_400 },
