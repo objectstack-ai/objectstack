@@ -44,6 +44,8 @@ function makeClient(server: Server): FakeClient {
       server.draftReads.push(args);
       return server.draft ? { type: 'permission', name: 'sales_perms', item: server.draft.body, version: server.draft.version } : null;
     },
+    // objectstack#26840 — the package door reads its objects through the draft-overlaid door.
+    withPreviewDrafts() { return this; },
     list: async (type: string) => (type === 'object' ? [{ item: { name: 'a_account' } }] : type === 'permission' ? [PUBLISHED] : []),
     get: async () => null,
     save: async (_type: string, _name: string, payload: Record<string, unknown>, saveOpts?: Record<string, unknown>) => {

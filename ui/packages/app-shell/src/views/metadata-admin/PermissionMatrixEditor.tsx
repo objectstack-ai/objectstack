@@ -195,6 +195,30 @@ interface ObjectSummary {
    * `owd` unset renders as the D1 fail-closed default (private).
    */
   owd?: string;
+  /**
+   * Served from its pending draft (`_draft`), not from the published version
+   * (objectstack#26840). Only the package door reads drafts, so it is never
+   * set at environment scope. Badged with the object picker's draft mark.
+   */
+  draft?: boolean;
+}
+
+/**
+ * Read one object's merged definition for its field rows and the RLS editor.
+ *
+ * objectstack#26840 — under the package door the read goes through the
+ * draft-overlaid door, as the object list does: a draft-only object has no
+ * published definition, so the plain read answers it with no fields. The
+ * server serves the pending draft when there is one and the published object
+ * otherwise (`useObjectFields`, the same read). The environment door reads
+ * the published definition, as before.
+ */
+function readObjectDefinition(
+  client: ReturnType<typeof useMetadataClient>,
+  packageId: string | undefined,
+  objectName: string,
+): Promise<unknown> {
+  return (packageId ? client.withPreviewDrafts(true) : client).get<any>('object', objectName);
 }
 
 /**
@@ -853,7 +877,15 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
             : readLayered(),
           // In package scope, list only the objects this package declares
           // (ADR-0086 P0) — otherwise the whole environment leaks into the panel.
-          client.list<any>('object', packageId ? { packageId } : {}).catch(() => []),
+          // objectstack#26840 — and read the draft-overlaid list there, so a
+          // package whose objects are still drafts can be secured before its
+          // first publish: each pending draft is served with a `_draft` mark
+          // (the object picker's read, `useObjectCatalog`). The environment
+          // door keeps the published list: only the package door authors drafts.
+          (packageId
+            ? client.withPreviewDrafts(true).list<any>('object', { packageId })
+            : client.list<any>('object', {})
+          ).catch(() => []),
           draftReadForSave,
         ]);
         if (cancelled) return;
@@ -892,6 +924,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
               label: item?.label,
               accessDefault: item?.access?.default as ObjectSummary['accessDefault'],
               owd: typeof item?.sharingModel === 'string' ? item.sharingModel : undefined,
+              ...(item?._draft === true ? { draft: true } : {}),
             };
           })
           .filter((o) => !!o.name)
@@ -938,7 +971,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
       // and misses fields carried inline on a published object, which left
       // this editor showing "no fields" for objects that clearly have them.
       // `fields` may come back as an array or as a `{ [name]: def }` map.
-      const obj = (await client.get<any>('object', objectName)) as
+      const obj = (await readObjectDefinition(client, packageId, objectName)) as
         | { fields?: Record<string, any> | Array<any> }
         | null;
       const raw = obj?.fields;
@@ -968,7 +1001,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
   const loadObjectFields = React.useCallback(
     async (objectName: string): Promise<string[]> => {
       try {
-        const obj = (await client.get<any>('object', objectName)) as
+        const obj = (await readObjectDefinition(client, packageId, objectName)) as
           | { fields?: Record<string, any> | Array<any> }
           | null;
         const raw = obj?.fields;
@@ -984,7 +1017,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         return [];
       }
     },
-    [client],
+    [client, packageId],
   );
 
   // Count of blocking CEL parse errors in the RLS editor — gates Save
@@ -2385,6 +2418,12 @@ function PermissionTable({
                       {t('perm.posture.private')}
                     </Badge>
                   )}
+                  {o.draft && (
+                    // objectstack#26840 — the object picker's draft mark (`ObjectPicker`).
+                    <span data-draft-marker="" className="ml-2 align-middle text-[10px] text-muted-foreground">
+                      {t('engine.inspector.draftSuffix')}
+                    </span>
+                  )}
                   <Badge
                     variant="outline"
                     className={
@@ -2743,6 +2782,12 @@ function StudioObjectRow({
             >
               {t('perm.posture.private')}
             </Badge>
+          )}
+          {o.draft && (
+            // objectstack#26840 — the object picker's draft mark (`ObjectPicker`).
+            <span data-draft-marker="" className="ml-2 align-middle text-[10px] text-muted-foreground">
+              {t('engine.inspector.draftSuffix')}
+            </span>
           )}
         </td>
         <td className="px-3 py-1 align-middle">

@@ -128,6 +128,8 @@ function makeClient(server: Server) {
     // Serves the Access rail (list('permission')), the embedded matrix
     // (list('object') + object get), the header's app probe (list('app')),
     // and — after a pillar switch — the Interfaces pillar's app resolution.
+    // objectstack#26840 — the Access matrix reads its objects through the draft-overlaid door.
+    withPreviewDrafts() { return this; },
     list: async (type: string) => {
       if (type === 'permission') {
         return Object.values(server.byName).map((s) => ({ name: s.name, label: s.label }));
