@@ -813,10 +813,6 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "筛选",
         helpText: "仅聚合匹配该判定式的子记录（例如 status == received）"
       },
-      externalId: {
-        label: "外部 ID",
-        helpText: "标记为外部 ID 用于 upsert 操作"
-      },
       storage: {
         label: "存储约束",
         helpText: "物理存储约束（ADR-0113）：写入契约刻意不隐含的 DDL。未设置：不要求任何约束。"
