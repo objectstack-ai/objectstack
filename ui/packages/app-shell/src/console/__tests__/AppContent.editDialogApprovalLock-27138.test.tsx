@@ -28,7 +28,7 @@
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 import React from 'react';
-import { render, cleanup, waitFor, screen } from '@testing-library/react';
+import { render, cleanup, waitFor } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { registerAllFields } from '@object-ui/fields';
 
