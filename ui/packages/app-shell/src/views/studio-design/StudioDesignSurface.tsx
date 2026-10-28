@@ -230,6 +230,13 @@ import { getMetadataResource } from '../metadata-admin/registry.js';
 import { useMetadataClient, useMetadataTypes } from '../metadata-admin/useMetadata.js';
 // objectui#11773 — every draft save of an existing item sends the version its buffer was built on.
 import { readDraftForSave, useDraftSaveGuard } from '../metadata-admin/DraftConflictDialog.js';
+// objectstack#26858 — the served verdict a flow's inspectors read at their own paths.
+import {
+  DraftVerdictContext,
+  draftEnvelopeDiagnostics,
+  editedItemDiagnostics,
+  type ServerDiagnostics,
+} from '../metadata-admin/draftVerdict.js';
 import {
   DESIGNER_SURFACE_PARAM,
   formatSurfaceParam,
@@ -8238,6 +8245,20 @@ export function AutomationsPillar({
   const [loading, setLoading] = React.useState(false);
   const [saving, setSaving] = React.useState<false | 'draft' | 'publish'>(false);
   const [hasDraft, setHasDraft] = React.useState(false);
+  // objectstack#26858 — the server's verdict on the flow on screen: the pending
+  // draft's (what its publish will refuse), else the layered read's. Taken off
+  // each read, never computed here; the inspectors read it at their paths.
+  const [flowVerdict, setFlowVerdict] = React.useState<ServerDiagnostics | undefined>(undefined);
+  const flowVerdictSeq = React.useRef(0);
+  const rereadFlowVerdict = React.useCallback(
+    (flowName: string) => {
+      const seq = ++flowVerdictSeq.current;
+      void readDraftForSave(client, 'flow', flowName, draftPackageId).then((read) => {
+        if (seq === flowVerdictSeq.current) setFlowVerdict(draftEnvelopeDiagnostics(read.answer));
+      });
+    },
+    [client, draftPackageId],
+  );
   // objectui#11785 — a load failure as it was (`plainRefusal`), a refused save
   // as an author sentence naming the step and its input, raw text behind Details.
   const [error, setError] = React.useState<StudioRefusal | null>(null);
@@ -8482,6 +8503,14 @@ export function AutomationsPillar({
         // Served draft as-is, baseline only without one (objectui#10765).
         setDraft(draftBody ?? baseline);
         setDraftFor(`flow:${current.name}`);
+        flowVerdictSeq.current += 1;
+        setFlowVerdict(
+          editedItemDiagnostics({
+            hasDraft: !!draftBody,
+            draftDiagnostics: draftEnvelopeDiagnostics(draftRead.answer),
+            layered: layRaw,
+          }),
+        );
         // objectui#11773 — the next save is pinned to what the draft read served.
         recordFlowRead('flow', current.name, draftPackageId, draftRead.pin);
         setHasDraft(!!draftBody);
@@ -8521,6 +8550,8 @@ export function AutomationsPillar({
       // objectui#11773 — the author chose the saved version; the load replaces the buffer.
       if (outcome === 'reloaded') return;
       setHasDraft(true);
+      // objectstack#26858 — the stored draft carries its own verdict now.
+      rereadFlowVerdict(current.name);
       // objectui#11204 — clean only if nothing was edited while it was in flight.
       if (sent.unmoved()) setAutoDirty(false);
       onDraftSaved?.({ type: 'flow', name: current.name });
@@ -8530,7 +8561,7 @@ export function AutomationsPillar({
     } finally {
       setSaving(false);
     }
-  }, [saveFlowDraft, current, draft, draftPackageId, onDraftSaved, locale]);
+  }, [saveFlowDraft, current, draft, draftPackageId, onDraftSaved, locale, rereadFlowVerdict]);
   // objectui#11786 — an edit that leaves a step's required input out (a step
   // just added, before it is filled in) is held, not sent: the server would
   // refuse the flow with a 422 naming that input. The step's inspector hints the
@@ -8590,6 +8621,7 @@ export function AutomationsPillar({
       // objectui#11773 — a reload replaced the buffer the flip was taken on.
       if ((await saveFlowDraft('flow', flowName, nextDraft, { mode: 'draft', packageId: draftPackageId, surface: 'studio' })) === 'reloaded') return;
       setHasDraft(true);
+      rereadFlowVerdict(flowName);
       onDraftSaved?.({ type: 'flow', name: flowName });
       toast.success(next ? t('engine.studio.auto.enabledToast', locale) : t('engine.studio.auto.disabledToast', locale));
     } catch (e) {
@@ -8607,7 +8639,7 @@ export function AutomationsPillar({
     } finally {
       setSaving(false);
     }
-  }, [saveFlowDraft, current, draft, draftPackageId, onDraftSaved, locale, readOnly, sendingFlowDraft]);
+  }, [saveFlowDraft, current, draft, draftPackageId, onDraftSaved, locale, readOnly, sendingFlowDraft, rereadFlowVerdict]);
 
   // The rail's "+" — and the empty block's button, which runs this same
   // handler (objectui#12514). objectui#11553 — no "New" in the package-less
@@ -8679,6 +8711,8 @@ export function AutomationsPillar({
   const focusConfigInput = useShowInputFocus(configBodyRef);
   const configBodyEl =
     selection && inspector && current && flowLoaded ? (
+      // objectstack#26858 — the inspectors read the served verdict at their paths.
+      <DraftVerdictContext.Provider value={flowVerdict}>
       <div ref={configBodyRef} className="contents">
         {React.createElement(inspector, {
           type: 'flow',
@@ -8694,6 +8728,7 @@ export function AutomationsPillar({
           locale,
         })}
       </div>
+      </DraftVerdictContext.Provider>
     ) : designersUnregistered ? (
       <div className="flex flex-col items-center gap-2 px-2 py-10 text-center text-xs text-muted-foreground">
         <Ban className="h-5 w-5" />
