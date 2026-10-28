@@ -25,7 +25,7 @@ Namespace `action`.
 | `icon` | `string` |  | — |
 | `actionType` | `enum`: `script`, `url`, `modal`, `flow`, `api` |  | — |
 | `target` | `string` |  | — |
-| `variant` | `enum`: `default`, `primary`, `secondary`, `destructive`, `outline`, `ghost` |  | — |
+| `variant` | `enum`: `default`, `primary`, `secondary`, `danger`, `outline`, `ghost` |  | — |
 | `size` | `enum`: `default`, `sm`, `md`, `lg`, `icon` |  | Button size: the Button primitive's `default`, `sm`, `lg` or `icon`, plus `md`, which renders as `default` (default: `default`) |
 | `className` | `string` |  | — |
 | `visible` | `boolean` \| `string` \| `object` |  | Visibility predicate: `true`/`false`, a bare CEL expression, or the `{ dialect: 'cel', source }` envelope, evaluated against the row the host binds; the button is not rendered when it is false, nor when the predicate fails to evaluate. Omit for always-visible |
@@ -76,7 +76,7 @@ Namespace `action`.
 | `icon` | `string` |  | — |
 | `actionType` | `enum`: `script`, `url`, `modal`, `flow`, `api` |  | — |
 | `target` | `string` |  | — |
-| `variant` | `enum`: `default`, `secondary`, `destructive`, `outline`, `ghost` |  | — |
+| `variant` | `enum`: `default`, `secondary`, `danger`, `outline`, `ghost` |  | — |
 | `className` | `string` |  | — |
 | `visible` | `boolean` \| `string` \| `object` |  | Visibility predicate: `true`/`false`, a bare CEL expression, or the `{ dialect: 'cel', source }` envelope, evaluated against the row the host binds; the icon is not rendered when it is false. Omit for always-visible |
 | `disabled` | `boolean` \| `string` \| `object` |  | Disabled predicate, in the same three shapes as `visible`: the icon is shown but cannot be pressed while it holds. Omit for never-disabled |
