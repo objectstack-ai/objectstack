@@ -283,15 +283,6 @@ describe('buildDefaultPageSchema', () => {
     expect(types).not.toContain('record:discussion');
   });
 
-  it('hideHighlights / hidePath each drop their component', () => {
-    const types = buildDefaultPageSchema(leadDef, {
-      hideHighlights: true,
-      hidePath: true,
-    }).regions[0].components.map((c: any) => c.type);
-    expect(types).not.toContain('record:highlights');
-    expect(types).not.toContain('record:path');
-  });
-
   it('options override auto-derivation', () => {
     const page = buildDefaultPageSchema(leadDef, {
       highlightFields: ['email'],
@@ -305,11 +296,9 @@ describe('buildDefaultPageSchema', () => {
     expect(props(path).stages).toEqual([{ value: 'hot', label: 'Hot' }]);
   });
 
-  it('page:header.recordChrome defaults to true and can be turned off', () => {
-    const on = buildDefaultPageSchema(leadDef).regions[0].components[0];
-    const off = buildDefaultPageSchema(leadDef, { recordChrome: false }).regions[0].components[0];
-    expect(props(on).recordChrome).toBe(true);
-    expect(props(off).recordChrome).toBe(false);
+  it('page:header.recordChrome is always true on the synthesized page', () => {
+    const header = buildDefaultPageSchema(leadDef).regions[0].components[0];
+    expect(props(header).recordChrome).toBe(true);
   });
 
   it('page:tabs always carries a details tab containing record:details', () => {
@@ -359,9 +348,8 @@ describe('buildDefaultPageSchema', () => {
 
     it('emits Related tab with one record:related_list per entry', () => {
       const page = buildDefaultPageSchema(leadDef, {
-        // The Related tab is the default home for related lists. The
-        // Reference Rail is opt-in (`showReferenceRail`), so it stays off
-        // here and the Related tab renders even with 2+ related lists.
+        // The Related tab is the default home for related lists; the
+        // synthesized page emits no reference rail (objectstack#27055).
         related: [
           {
             objectName: 'task',
@@ -411,100 +399,19 @@ describe('buildDefaultPageSchema', () => {
       expect(related.children.map((c: any) => props(c).objectName)).toEqual(['task', 'note']);
     });
 
-    it("relatedLayout:'tabs' gives every related list its own tab, ignoring isPrimary", () => {
-      const tabs = buildDefaultTabs(leadDef, {
-        relatedLayout: 'tabs',
-        related: [
-          { objectName: 'task', relationshipField: 'lead_id', title: 'Tasks' },
-          { objectName: 'note', relationshipField: 'parent_id', title: 'Notes' },
-        ],
-      });
-      const labels = tabItems(tabs).map((t: any) => t.label);
-      expect(labels).toEqual(['Details', 'Tasks', 'Notes']);
-      expect(labels).not.toContain('Related');
-    });
-
-    it("relatedLayout:'stack' collapses all lists into one Related tab, ignoring isPrimary", () => {
-      const tabs = buildDefaultTabs(leadDef, {
-        relatedLayout: 'stack',
-        related: [
-          { objectName: 'opportunity', relationshipField: 'lead_id', title: 'Opportunities', isPrimary: true },
-          { objectName: 'task', relationshipField: 'lead_id', title: 'Tasks' },
-        ],
-      });
-      const labels = tabItems(tabs).map((t: any) => t.label);
-      expect(labels).toEqual(['Details', 'Related']);
-      const related = tabItems(tabs).find((t: any) => t.label === 'Related');
-      expect(related.children).toHaveLength(2);
-    });
-
-    it('does NOT emit a Reference Rail by default, keeping the Related tab', () => {
+    it('emits no reference rail and no aside region, keeping the Related tab', () => {
       const page = buildDefaultPageSchema(leadDef, {
         related: [
           { objectName: 'task', relationshipField: 'lead_id' },
           { objectName: 'note', relationshipField: 'parent_id' },
         ],
       });
-      // No aside region — the rail is opt-in.
-      expect(page.regions.find((r: any) => r.name === 'aside')).toBeUndefined();
-      // Related tab survives (Details + Related).
+      // One region: the opt-in rail and the `rightRail` slot are gone
+      // (objectstack#27055, ADR-0085).
+      expect(page.regions.map((r: any) => r.name)).toEqual(['main']);
       const tabs = page.regions[0].components.find((c: any) => c.type === 'page:tabs');
       const labels = tabItems(tabs).map((t: any) => t.label);
       expect(labels).toContain('Related');
-    });
-
-    it('emits a Reference Rail aside region and suppresses the duplicate Related tab when showReferenceRail is on and 2+ related lists are present', () => {
-      const page = buildDefaultPageSchema(leadDef, {
-        showReferenceRail: true,
-        related: [
-          { objectName: 'task', relationshipField: 'lead_id' },
-          { objectName: 'note', relationshipField: 'parent_id' },
-        ],
-      });
-      // Related tab is suppressed (Details only)
-      const tabs = page.regions[0].components.find((c: any) => c.type === 'page:tabs');
-      expect(tabItems(tabs)).toHaveLength(1);
-      expect(tabItems(tabs)[0].label).toBe('Details');
-      // Aside region emitted with the rail
-      const aside = page.regions.find((r: any) => r.name === 'aside');
-      expect(aside).toBeDefined();
-      expect(aside.components[0].type).toBe('record:reference_rail');
-      expect(props(aside.components[0]).entries).toHaveLength(2);
-      expect(props(aside.components[0]).entries[0].objectName).toBe('task');
-    });
-
-    it('emits aside region from slots.rightRail even without any related lists', () => {
-      const page = buildDefaultPageSchema(leadDef, {
-        slots: {
-          rightRail: [
-            { type: 'card', title: 'Workflow status', children: [] },
-          ],
-        },
-      });
-      const aside = page.regions.find((r: any) => r.name === 'aside');
-      expect(aside).toBeDefined();
-      // No reference rail (no related lists), only the slot contribution
-      expect(aside.components).toHaveLength(1);
-      expect(aside.components[0].type).toBe('card');
-      expect(aside.components[0].title).toBe('Workflow status');
-    });
-
-    it('appends slots.rightRail after the auto-emitted reference rail', () => {
-      const page = buildDefaultPageSchema(leadDef, {
-        showReferenceRail: true,
-        related: [
-          { objectName: 'task', relationshipField: 'lead_id' },
-          { objectName: 'note', relationshipField: 'parent_id' },
-        ],
-        slots: {
-          rightRail: { type: 'card', title: 'Activity' },
-        },
-      });
-      const aside = page.regions.find((r: any) => r.name === 'aside');
-      expect(aside).toBeDefined();
-      expect(aside.components).toHaveLength(2);
-      expect(aside.components[0].type).toBe('record:reference_rail');
-      expect(aside.components[1].type).toBe('card');
     });
 
     it('emits Activity tab when showActivity is true', () => {
@@ -546,89 +453,6 @@ describe('buildDefaultPageSchema', () => {
       ]);
     });
 
-    describe("relatedLayout: 'tabs'", () => {
-      const related = [
-        {
-          objectName: 'task',
-          relationshipField: 'lead_id',
-          title: 'Tasks',
-          limit: 10,
-          icon: 'check',
-        },
-        {
-          objectName: 'note',
-          relationshipField: 'parent_id',
-        },
-      ];
-
-      it("gives each related list its own peer tab instead of one shared Related tab", () => {
-        const page = buildDefaultPageSchema(leadDef, {
-          related,
-          relatedLayout: 'tabs',
-        });
-        const tabs = page.regions[0].components.find(
-          (c: any) => c.type === 'page:tabs',
-        );
-        // Details + one tab per related child (no shared 'Related' tab).
-        expect(tabItems(tabs).map((t: any) => t.label)).toEqual([
-          'Details',
-          'Tasks',
-          'note',
-        ]);
-        const tasksTab = tabItems(tabs)[1];
-        expect(tasksTab.icon).toBe('check');
-        expect(tasksTab.children).toHaveLength(1);
-        expect(tasksTab.children[0].type).toBe('record:related_list');
-        expect(props(tasksTab.children[0]).objectName).toBe('task');
-        expect(props(tasksTab.children[0]).relationshipField).toBe('lead_id');
-        expect(props(tasksTab.children[0]).limit).toBe(10);
-        // The second related child (no title) falls back to its objectName.
-        expect(props(tabItems(tabs)[2].children[0]).objectName).toBe('note');
-      });
-
-      it("defaults to the stacked 'Related' tab when relatedLayout is omitted", () => {
-        const page = buildDefaultPageSchema(leadDef, { related });
-        const tabs = page.regions[0].components.find(
-          (c: any) => c.type === 'page:tabs',
-        );
-        expect(tabItems(tabs).map((t: any) => t.label)).toEqual([
-          'Details',
-          'Related',
-        ]);
-        expect(tabItems(tabs)[1].children).toHaveLength(2);
-      });
-
-      it("still honours hideRelatedTab (no related tabs emitted)", () => {
-        const page = buildDefaultPageSchema(leadDef, {
-          related,
-          relatedLayout: 'tabs',
-          hideRelatedTab: true,
-        });
-        const tabs = page.regions[0].components.find(
-          (c: any) => c.type === 'page:tabs',
-        );
-        expect(tabItems(tabs).map((t: any) => t.label)).toEqual(['Details']);
-      });
-
-      it("keeps Activity / History after the per-table tabs", () => {
-        const page = buildDefaultPageSchema(leadDef, {
-          related,
-          relatedLayout: 'tabs',
-          showActivity: true,
-          history: { entries: [], loading: false },
-        });
-        const tabs = page.regions[0].components.find(
-          (c: any) => c.type === 'page:tabs',
-        );
-        expect(tabItems(tabs).map((t: any) => t.label)).toEqual([
-          'Details',
-          'Tasks',
-          'note',
-          'Activity',
-          'History',
-        ]);
-      });
-    });
   });
 
   describe('slice I — slot overrides', () => {
@@ -768,14 +592,6 @@ describe('buildDefaultPageSchema', () => {
       const types = nodes.map((n) => n.type);
       expect(types).toContain('record:highlights');
       expect(types).toContain('record:path');
-    });
-
-    it('buildDefaultHighlights respects hideHighlights / hidePath flags', () => {
-      const nodes = buildDefaultHighlights(leadDef, {
-        hideHighlights: true,
-        hidePath: true,
-      });
-      expect(nodes).toHaveLength(0);
     });
 
     it('buildDefaultTabs emits Details/Related/Activity/History in order', () => {
@@ -1198,13 +1014,6 @@ describe('buildDefaultTabs — stable tab values (objectui#2257)', () => {
     expect(tabItems(tabs).map((i: any) => i.value)).toEqual([
       'details', 'related:invoice', 'related', 'activity', 'history',
     ]);
-  });
-
-  it('relatedLayout tabs → every child gets related:<child>; stack → one related', () => {
-    const asTabs = buildDefaultTabs(undefined, { related: [relA, relB], relatedLayout: 'tabs' });
-    expect(tabItems(asTabs).map((i: any) => i.value)).toEqual(['details', 'related:invoice', 'related:note']);
-    const stacked = buildDefaultTabs(undefined, { related: [relA, relB], relatedLayout: 'stack' });
-    expect(tabItems(stacked).map((i: any) => i.value)).toEqual(['details', 'related']);
   });
 
   it('values stay stable when the related list shrinks (URL tokens must not shift)', () => {

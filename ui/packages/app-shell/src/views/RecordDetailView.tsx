@@ -3824,11 +3824,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         related: synthParts.related,
         history: synthParts.history,
         approvals: synthParts.approvals,
-        // ADR-0085 removed the per-object `detail.*` presentation
-        // toggles (show/hideReferenceRail, hideRelatedTab, relatedLayout)
-        // — the synth defaults apply; per-page layout goes through an
-        // assigned Page schema (`record:reference_rail` stays available
-        // there as a renderer capability).
+        // ADR-0085 admits no surface hints: the default page is drawn
+        // from the object's semantic roles, and per-page layout goes
+        // through an assigned Page schema (`record:reference_rail` stays
+        // available there as a renderer capability).
         ...(assignedSlots ? { slots: assignedSlots } : {}),
       });
 

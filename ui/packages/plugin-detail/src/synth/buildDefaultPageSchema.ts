@@ -154,37 +154,15 @@ export interface BuildPageOptions {
   hideDiscussion?: boolean;
   /** Suppress the auto-emitted Attachments tab (`enable.files`, objectstack#4358). */
   hideAttachments?: boolean;
-  /** Suppress the auto-prepended `record:highlights` strip. */
-  hideHighlights?: boolean;
-  /** Suppress the auto-prepended `record:path` stepper. */
-  hidePath?: boolean;
-  /**
-   * Opt in to the Reference Rail (aside region with
-   * `record:reference_rail`). The rail is OFF by default — it fans out a
-   * collection query per related list, which is wasteful on records the
-   * author never intended to summarize. Set `showReferenceRail: true` on
-   * this options object to surface it — that is the only route: ADR-0085
-   * removed the per-object `detail` hints block, so no object definition
-   * can switch the rail on, and a per-page rail is an authored
-   * `record:reference_rail` node in an assigned Page schema. It then
-   * emits only when `related` has at least 2 entries.
-   * Pinned by `__tests__/referenceRailRoute-9816.test.ts`.
-   */
-  showReferenceRail?: boolean;
-  /**
-   * Force-suppress the Reference Rail even when `showReferenceRail` is on.
-   * Retained for callers that toggle the rail off contextually.
-   */
-  hideReferenceRail?: boolean;
-  /**
-   * Suppress the auto-emitted `Related` tab in `buildDefaultTabs`.
-   * Auto-set to `true` by `buildDefaultPageSchema` when the Reference
-   * Rail is being emitted, to avoid showing the same related-list data
-   * in two places (the rail and the tab). Authors can override.
-   */
-  hideRelatedTab?: boolean;
-  /** Pass-through to `page:header.recordChrome`. Defaults to true. */
-  recordChrome?: boolean;
+  // objectstack#27055 (ADR-0085) — the per-surface presentation hints this
+  // options bag used to carry are GONE: `hideHighlights`, `hidePath`,
+  // `showReferenceRail`, `hideReferenceRail`, `hideRelatedTab`,
+  // `relatedLayout`, `recordChrome` and the `slots.rightRail` slot. No console
+  // caller passed any of them, ADR-0085 admits no surface hints, and
+  // `rightRail` is not a slot the spec's strict slot enum names. The default
+  // page is drawn from the object's semantic roles alone; a page that wants
+  // a reference rail places an authored `record:reference_rail` node (the
+  // renderer stays registered for exactly that).
   /**
    * Action definitions to surface in the header. When provided and
    * non-empty, the synthesizer emits a `record:quick_actions` node
@@ -241,30 +219,10 @@ export interface BuildPageOptions {
     /**
      * `relatedList: 'primary'` — a CORE relationship. Under the default
      * layout this list is promoted to its OWN tab; non-primary lists collapse
-     * into a single "Related" tab. Ignored when `relatedLayout` forces a
-     * uniform layout.
+     * into a single "Related" tab.
      */
     isPrimary?: boolean;
   }>;
-  /**
-   * How the related child lists are laid out under the tab strip.
-   *
-   * - **default (unset)** — the ADR-0085 prominence rule: lists flagged
-   *   `relatedList: 'primary'` (`isPrimary`) each get their OWN tab; every
-   *   other related list collapses into a single stacked `Related` tab. With
-   *   no primary lists this is identical to the legacy stacked behavior, so
-   *   the change is opt-in per relationship — never a surprise.
-   * - `'stack'` — app-level override: ALL related lists stack vertically
-   *   inside one `Related` tab, ignoring `isPrimary`.
-   * - `'tabs'` — app-level override: EVERY related child gets its own peer
-   *   tab (label = the child's `title`, falling back to `objectName`),
-   *   ignoring `isPrimary`.
-   *
-   * Precise per-tab ordering / filtered splits / non-relationship tabs are a
-   * custom Page concern (Tier 2) — this synthesizer only covers the derived
-   * default. Ignored when the `Related` tab is suppressed (`hideRelatedTab`).
-   */
-  relatedLayout?: 'stack' | 'tabs';
   /**
    * When true, emit an Activity tab that renders `record:activity`.
    * The activity renderer fetches its own data via RecordContext.
@@ -309,14 +267,6 @@ export interface BuildPageOptions {
    * - `discussion` — replaces `record:discussion`. Fires even when
    *   `hideDiscussion` is true (the override is explicit intent to
    *   surface a custom footer).
-   * - `rightRail` — additional component(s) to drop into the
-   *   right-side `aside` region (the same region that hosts the
-   *   auto-emitted `record:reference_rail`). When provided, the
-   *   `aside` region is always rendered — even when no reference
-   *   rail would otherwise be emitted — so plugins can contribute
-   *   contextual side panels (activity feed, related summary,
-   *   workflow status, presence list, etc.) without depending on
-   *   the related-list heuristic.
    */
   slots?: {
     header?: any | any[];
@@ -326,7 +276,6 @@ export interface BuildPageOptions {
     details?: any | any[];
     tabs?: any | any[];
     discussion?: any | any[];
-    rightRail?: any | any[];
   };
 }
 
@@ -689,10 +638,13 @@ export function deriveHighlightFields(
  */
 export function buildDefaultHeader(
   _def: ObjectDefLike | undefined,
-  options: Pick<BuildPageOptions, 'recordChrome'> & { actions?: any[] } = {},
+  options: { actions?: any[] } = {},
 ): any {
+  // `recordChrome` is the `page:header` prop that draws the title as the
+  // record chip; the default record page always wants it, so it is written
+  // as `true` rather than read off a caller hint (objectstack#27055).
   return componentNode('page:header', {
-    recordChrome: options.recordChrome !== false,
+    recordChrome: true,
     ...(Array.isArray(options.actions) && options.actions.length > 0
       ? { actions: options.actions }
       : {}),
@@ -725,19 +677,17 @@ export function buildDefaultActions(
  */
 export function buildDefaultHighlights(
   def: ObjectDefLike | undefined,
-  options: Pick<BuildPageOptions,
-    'highlightFields' | 'statusField' | 'stages' | 'hideHighlights' | 'hidePath'
-  > = {},
+  options: Pick<BuildPageOptions, 'highlightFields' | 'statusField' | 'stages'> = {},
 ): any[] {
   const statusField = options.statusField ?? detectStatusField(def);
   const stages = options.stages ?? (statusField ? deriveStages(def, statusField) : null);
   const highlightFields =
     options.highlightFields ?? deriveHighlightFields(def, statusField);
   const out: any[] = [];
-  if (!options.hideHighlights && highlightFields.length > 0) {
+  if (highlightFields.length > 0) {
     out.push(componentNode('record:highlights', { fields: highlightFields }));
   }
-  if (!options.hidePath && statusField && stages && stages.length > 0) {
+  if (statusField && stages && stages.length > 0) {
     out.push(componentNode('record:path', { statusField, stages }));
   }
   return out;
@@ -950,7 +900,7 @@ export function buildDefaultDetails(
 export function buildDefaultTabs(
   def: ObjectDefLike | undefined,
   options: Pick<BuildPageOptions,
-    'sections' | 'related' | 'showActivity' | 'history' | 'highlightFields' | 'statusField' | 'hideRelatedTab' | 'relatedLayout' | 'hideAttachments' | 'approvals'
+    'sections' | 'related' | 'showActivity' | 'history' | 'highlightFields' | 'statusField' | 'hideAttachments' | 'approvals'
   > = {},
 ): any {
   const statusField = options.statusField ?? detectStatusField(def);
@@ -963,11 +913,7 @@ export function buildDefaultTabs(
   const items: any[] = [
     { label: 'Details', value: 'details', children: [buildDefaultDetails(def, options.sections, highlightFields)] },
   ];
-  if (
-    !options.hideRelatedTab &&
-    Array.isArray(options.related) &&
-    options.related.length > 0
-  ) {
+  if (Array.isArray(options.related) && options.related.length > 0) {
     const relatedNode = (rel: NonNullable<BuildPageOptions['related']>[number]) =>
       componentNode('record:related_list', {
         title: rel.title,
@@ -993,24 +939,15 @@ export function buildDefaultTabs(
       ...(rel.icon ? { icon: rel.icon } : {}),
       children: [relatedNode(rel)],
     });
-    if (options.relatedLayout === 'tabs') {
-      // App-level override: one peer tab per related child.
-      for (const rel of options.related) items.push(asOwnTab(rel));
-    } else if (options.relatedLayout === 'stack') {
-      // App-level override: all related lists share one stacked `Related` tab.
-      items.push({ label: 'Related', value: 'related', children: options.related.map(relatedNode) });
-    } else {
-      // DEFAULT (rule Z, ADR-0085 prominence): `isPrimary` lists become their
-      // own tab; the rest collapse into one `Related` tab. Owned-before-lookup
-      // order is preserved by deriveRelatedLists upstream. With no primary
-      // lists this is identical to the legacy stacked default (opt-in per
-      // relationship, never a surprise).
-      const primary = options.related.filter((r) => r.isPrimary);
-      const rest = options.related.filter((r) => !r.isPrimary);
-      for (const rel of primary) items.push(asOwnTab(rel));
-      if (rest.length > 0) {
-        items.push({ label: 'Related', value: 'related', children: rest.map(relatedNode) });
-      }
+    // Rule Z, ADR-0085 prominence: `isPrimary` lists become their own tab;
+    // the rest collapse into one `Related` tab. Owned-before-lookup order is
+    // preserved by deriveRelatedLists upstream. With no primary lists this is
+    // the stacked default (opt-in per relationship, never a surprise).
+    const primary = options.related.filter((r) => r.isPrimary);
+    const rest = options.related.filter((r) => !r.isPrimary);
+    for (const rel of primary) items.push(asOwnTab(rel));
+    if (rest.length > 0) {
+      items.push({ label: 'Related', value: 'related', children: rest.map(relatedNode) });
     }
   }
   // Approvals tab (objectui#3461) — emitted only when the host reports the
@@ -1115,12 +1052,7 @@ export function buildDefaultPageSchema(
   if ('header' in slots && slots.header !== undefined) {
     components.push(...toNodeArray(slots.header));
   } else {
-    components.push(
-      buildDefaultHeader(def, {
-        recordChrome: options.recordChrome,
-        actions: options.headerActions,
-      }),
-    );
+    components.push(buildDefaultHeader(def, { actions: options.headerActions }));
   }
 
   // 2) Header action bar — only emitted as a separate node when an
@@ -1147,22 +1079,8 @@ export function buildDefaultPageSchema(
       highlightFields: options.highlightFields,
       statusField: options.statusField,
       stages: options.stages,
-      hideHighlights: options.hideHighlights,
-      hidePath: options.hidePath,
     }));
   }
-
-  // Decide whether to emit the Reference Rail. When emitted, suppress
-  // the duplicate Related tab to avoid showing the same data twice
-  // (HubSpot/Dynamics convention). Authors can opt out of either via
-  // `hideReferenceRail` / `hideRelatedTab`.
-  const willEmitRail =
-    options.showReferenceRail === true &&
-    !options.hideReferenceRail &&
-    Array.isArray(options.related) &&
-    options.related.length >= 2;
-  const hideRelatedTab =
-    options.hideRelatedTab ?? willEmitRail;
 
   // 4) Tabs — `tabs` slot wins over `details` slot when both are
   //    provided (broader override). When only `details` is provided,
@@ -1180,8 +1098,6 @@ export function buildDefaultPageSchema(
       approvals: options.approvals,
       highlightFields: options.highlightFields,
       statusField: options.statusField,
-      hideRelatedTab,
-      relatedLayout: options.relatedLayout,
       hideAttachments: options.hideAttachments,
     });
     // Replace the first tab's children (Details) with the override. The items
@@ -1201,8 +1117,6 @@ export function buildDefaultPageSchema(
       approvals: options.approvals,
       highlightFields: options.highlightFields,
       statusField: options.statusField,
-      hideRelatedTab,
-      relatedLayout: options.relatedLayout,
       hideAttachments: options.hideAttachments,
     }));
   }
@@ -1216,11 +1130,10 @@ export function buildDefaultPageSchema(
     components.push(buildDefaultDiscussion());
   }
 
-  // 6) Reference Rail — Salesforce/HubSpot-style aside summary of
-  //    related collections. Auto-emit only when the record has at
-  //    least 2 related lists; otherwise the rail is mostly noise.
-  //    Hidden on screens below `xl` so the main column owns full width
-  //    at common laptop widths.
+  // ADR-0085 (objectstack#27055): the synthesized page has ONE region. The
+  // opt-in reference rail and the `rightRail` slot that used to add an
+  // `aside` here are gone; an authored page places `record:reference_rail`
+  // itself.
   const regions: any[] = [
     {
       name: 'main',
@@ -1228,38 +1141,6 @@ export function buildDefaultPageSchema(
       components,
     },
   ];
-
-  const rightRailExtras = toNodeArray(slots.rightRail);
-  const willEmitAside = willEmitRail || rightRailExtras.length > 0;
-
-  if (willEmitAside) {
-    const asideComponents: any[] = [];
-    if (willEmitRail) {
-      // No `icon` on rail entries: `ReferenceRailEntrySchema` is `$strict`
-      // without it, so emitting `rel.icon` here wrote a key the spec refuses
-      // at save — and no render path ever read it (objectui#5494).
-      asideComponents.push(componentNode('record:reference_rail', {
-        entries: (options.related as any[]).map((rel) => ({
-          objectName: rel.objectName,
-          relationshipField: rel.relationshipField,
-          title: rel.title,
-          displayField: rel.displayField,
-          limit: 3,
-        })),
-      }));
-    }
-    // Author-contributed right-rail nodes follow the reference rail so the
-    // canonical "related" summary stays anchored at the top.
-    if (rightRailExtras.length > 0) {
-      asideComponents.push(...rightRailExtras);
-    }
-    regions.push({
-      name: 'aside',
-      width: 'small',
-      className: 'hidden xl:flex flex-col gap-4',
-      components: asideComponents,
-    });
-  }
 
   return {
     type: 'record',

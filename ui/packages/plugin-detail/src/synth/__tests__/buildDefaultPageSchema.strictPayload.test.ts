@@ -120,11 +120,7 @@ describe('ADR-0089 D3a — the Studio create payload parses server-side (objectu
   });
 
   it('is accepted when the caller suppresses every optional slot', () => {
-    const body = createBody(leadDef, {
-      hideDiscussion: true,
-      hideHighlights: true,
-      hidePath: true,
-    });
+    const body = createBody(leadDef, { hideDiscussion: true, hideAttachments: true });
     expect(issuesOf(PageSchema.safeParse(body))).toEqual([]);
   });
 
@@ -145,13 +141,9 @@ describe('ADR-0089 D3a — the Studio create payload parses server-side (objectu
       approvals: { node: { currentUserId: 'u_1' } },
     };
     const filesDef = { ...leadDef, enable: { files: true } };
-    // Two pages, because the two branches are mutually exclusive by design:
-    // turning the Reference Rail on suppresses the Related tab, so
-    // `record:related_list` and `record:reference_rail` never co-occur.
-    const pages = [
-      buildDefaultPageSchema(filesDef, common),
-      buildDefaultPageSchema(filesDef, { ...common, showReferenceRail: true }),
-    ];
+    // One page: the synthesizer emits no reference rail any more
+    // (objectstack#27055), so every branch it has co-occurs here.
+    const pages = [buildDefaultPageSchema(filesDef, common)];
     const nodes: any[] = [];
     const walk = (n: any): void => {
       if (Array.isArray(n)) return n.forEach(walk);
@@ -173,7 +165,6 @@ describe('ADR-0089 D3a — the Studio create payload parses server-side (objectu
       'record:highlights',
       'record:history',
       'record:path',
-      'record:reference_rail',
       'record:related_list',
     ]);
     for (const node of nodes) {
@@ -184,7 +175,6 @@ describe('ADR-0089 D3a — the Studio create payload parses server-side (objectu
   it('the sub-builders emit accepted nodes on their own (slot authors compose these)', () => {
     const nodes = [
       buildDefaultHeader(leadDef),
-      buildDefaultHeader(leadDef, { recordChrome: false }),
       buildDefaultActions(leadDef, [{ name: 'edit', label: 'Edit' }]),
       ...buildDefaultHighlights(leadDef),
       buildDefaultDetails(leadDef),
@@ -216,17 +206,14 @@ describe('the accepted shape still carries the semantics (objectui#4232)', () =>
    * turned the record chrome OFF (a dashboard / landing page) gets that choice
    * PERSISTED, because `recordChrome` is a declared `page:header` prop
    * (`ComponentPropsMap['page:header'].recordChrome`, #6776) and the bag it
-   * lives in is the spec's own carrier.
+   * lives in is the spec's own carrier. The synthesizer no longer takes a
+   * `recordChrome` hint (objectstack#27055), so the OFF node is the authored
+   * one.
    */
-  it('record chrome turned OFF survives the parse rather than silently reverting', () => {
-    const node = buildDefaultHeader(leadDef, { recordChrome: false });
-    expect(node).toEqual({ type: 'page:header', properties: { recordChrome: false } });
+  it('record chrome turned OFF on an authored header survives the parse rather than silently reverting', () => {
+    const node = { type: 'page:header', properties: { recordChrome: false } };
     const parsed = PageComponentSchema.parse(node) as any;
     expect(parsed.properties.recordChrome).toBe(false);
-    // …and it reaches the page body the console PUTs.
-    const body = createBody(leadDef, { recordChrome: false });
-    const page = PageSchema.parse(body) as any;
-    expect(page.regions[0].components[0].properties.recordChrome).toBe(false);
   });
 
   /**

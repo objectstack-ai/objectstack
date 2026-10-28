@@ -123,8 +123,6 @@ if you'd authored nothing else. The default tab strip is **Details** → one
 tab per related list flagged `relatedList: 'primary'` on its relationship → a
 shared **Related** tab for the rest → **History**; so promoting a child table to
 its own tab is a one-word change on the relationship, not a page-authoring task.
-`relatedLayout: 'tabs' | 'stack'` remains an app-level override (force
-all-own-tabs / all-stacked).
 
 That strip is the page at its narrow width. The console lays the same page
 out by the width of the view it occupies (the drawer, the split pane or the
