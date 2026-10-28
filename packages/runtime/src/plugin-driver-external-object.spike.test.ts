@@ -319,7 +319,7 @@ const owned: Row[] = [];
 const calls: Call[] = [];
 const driver = createSpikeTreeDriver({ [OBJECT]: rows, [OWNED]: owned }, calls);
 
-let kernel: any;
+let kernel: ObjectKernel;
 let httpServer: any;
 let app: any;
 let engine: any;
