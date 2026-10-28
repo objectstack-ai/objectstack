@@ -1,0 +1,103 @@
+---
+title: "Object UI SDK"
+description: "Render ObjectStack JSON schemas inside your own React app with the MIT-licensed @object-ui packages"
+---
+
+The Object UI SDK is the set of MIT-licensed `@object-ui/*` packages that render ObjectStack
+JSON schemas inside your own React app. It is a schema-driven UI engine: JSON metadata goes in,
+and accessible, themeable components built with Tailwind CSS, Shadcn UI and Radix primitives come
+out.
+
+Use it when your application needs server-driven pages, metadata-defined forms, reusable
+enterprise views, or an embeddable renderer that stays independent from any single backend.
+
+```bash
+npm install @object-ui/react @object-ui/components
+```
+
+## The SDK and the Console
+
+The ObjectStack Console, the admin UI that ships with every ObjectStack server, is built from
+these same packages. The Console is one application of the SDK: it reads your stack's metadata
+from the server and renders apps, views, forms and dashboards through the same renderer and
+component registry described in this section.
+
+- Building on ObjectStack and happy with the Console? You author metadata and never touch the
+  SDK. Start with [Views & Apps](/docs/ui).
+- Embedding ObjectStack data in your own React app, or rendering JSON schemas with no
+  ObjectStack backend at all? That is the SDK, and this section is its guide.
+
+## Start Here
+
+1. [Quick Start](/docs/sdk/guide/quick-start) - install ObjectUI and render a first schema.
+2. [Schema Rendering](/docs/sdk/guide/schema-rendering) - learn how JSON becomes React UI.
+3. [Data Connectivity](/docs/sdk/guide/data-source) - connect a backend through the `DataSource` contract.
+4. [Schema Reference](/docs/sdk/api/schema-reference) - inspect the supported schema shapes.
+
+## A Small Schema
+
+```json
+{
+  "type": "data-table",
+  "caption": "Users",
+  "className": "rounded-lg border",
+  "columns": [
+    {
+      "header": "Name",
+      "accessorKey": "name",
+      "sortable": true
+    },
+    {
+      "header": "Email",
+      "accessorKey": "email"
+    }
+  ],
+  "data": [
+    {
+      "name": "Ada Lovelace",
+      "email": "ada@example.com"
+    },
+    {
+      "name": "Grace Hopper",
+      "email": "grace@example.com"
+    }
+  ]
+}
+```
+
+That schema renders through `SchemaRenderer` after the component package is imported once for registration side effects.
+
+## Build Paths
+
+### Render Schemas
+
+- [Schema Renderer](/docs/sdk/core/schema-renderer) explains the runtime component.
+- [Component Registry](/docs/sdk/guide/component-registry) explains how `type` maps to React components.
+- [Expressions](/docs/ui) covers visibility, disabled state, and dynamic values.
+
+### Build Applications
+
+- [App Schema](/docs/ui/apps) defines app navigation, branding, and layout.
+- [Layout Guide](/docs/sdk/guide/layout) covers page structure and layout primitives.
+- [Building a CRUD App](/docs/sdk/guide/building-crud-app) walks through a full task manager.
+
+### Connect Data
+
+- [Data Connectivity](/docs/sdk/guide/data-source) covers the backend adapter contract.
+- [ObjectStack Adapter](/docs/sdk/utilities/data-objectstack) connects ObjectUI to ObjectStack backends.
+- [User State Persistence](/docs/ui) covers favorites and recent items.
+
+### Extend ObjectUI
+
+- [Plugin Guide](/docs/sdk/guide/plugins) explains lazy-loaded feature packages.
+- [Plugin Development](/docs/sdk/guide/plugin-development) walks through a custom plugin.
+- [Theming](/docs/sdk/guide/theming) covers design tokens, Tailwind, and runtime themes.
+
+## Reference
+
+- [Components](/docs/sdk/components) - core renderers grouped by category.
+- [Fields](/docs/sdk/guide/fields) - field widgets and cell renderers.
+- [Plugins](/docs/sdk/plugins) - heavier views such as grids, kanban, charts, maps, and reports.
+- [Utilities](/docs/sdk/utilities/cli) - the CLI, plugin scaffolding, and the ObjectStack data adapter.
+
+For how the Console itself behaves, see [Views & Apps](/docs/ui).

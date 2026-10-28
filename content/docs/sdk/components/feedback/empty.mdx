@@ -1,0 +1,103 @@
+---
+title: "Empty"
+description: "Empty state placeholder with optional action"
+---
+
+The Empty component displays a placeholder when there's no content to show.
+
+## Basic Usage
+
+**Basic Empty State**
+
+```json
+{
+  "type": "empty",
+  "title": "No results found",
+  "description": "Try adjusting your search or filters"
+}
+```
+
+## With Icon
+
+**With Icon**
+
+```json
+{
+  "type": "empty",
+  "icon": "inbox",
+  "title": "No messages",
+  "description": "Your inbox is empty"
+}
+```
+
+## With Action
+
+**With Action Button**
+
+```json
+{
+  "type": "empty",
+  "icon": "folder-plus",
+  "title": "No projects yet",
+  "description": "Get started by creating your first project",
+  "action": {
+    "type": "button",
+    "label": "Create Project",
+    "variant": "default"
+  }
+}
+```
+
+## Schema
+
+```ts
+import type { SchemaNode } from '@object-ui/types';
+
+interface EmptySchema {
+  type: 'empty';
+  icon?: string;                  // Lucide icon name
+  title?: string;                 // Main message
+  description?: string;           // Supporting text
+  action?: SchemaNode;            // Call to action button (any node; a bare string renders as text)
+  className?: string;
+}
+```
+
+## Examples
+
+### Search Results
+
+**Empty Search Results**
+
+```json
+{
+  "type": "empty",
+  "icon": "search",
+  "title": "No results for \"example\"",
+  "description": "Try searching with different keywords",
+  "action": {
+    "type": "button",
+    "label": "Clear Search",
+    "variant": "outline"
+  }
+}
+```
+
+### Empty List
+
+**Empty Team List**
+
+```json
+{
+  "type": "empty",
+  "icon": "users",
+  "title": "No team members",
+  "description": "Invite people to join your team",
+  "action": {
+    "type": "button",
+    "label": "Invite Team Members",
+    "variant": "default",
+    "icon": "user-plus"
+  }
+}
+```

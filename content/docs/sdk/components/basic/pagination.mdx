@@ -1,0 +1,51 @@
+---
+title: "Pagination"
+description: "Navigate through pages of content"
+---
+
+The Pagination component allows users to navigate through pages of data.
+
+## Basic Usage
+
+**Basic Pagination**
+
+```json
+{
+  "type": "pagination",
+  "currentPage": 1,
+  "totalPages": 10
+}
+```
+
+## On a Later Page
+
+**With Item Count**
+
+```json
+{
+  "type": "pagination",
+  "currentPage": 3,
+  "totalPages": 20
+}
+```
+
+`pagination` has no page-size or item-count keys: the page state it reads is
+`currentPage` and `totalPages`.
+
+## Schema
+
+```ts
+interface PaginationSchema {
+  type: 'pagination';
+  currentPage: number;            // Current page (1-based)
+  totalPages: number;             // Total number of pages
+  
+  // Events
+  // RUNTIME SLOT (objectui#6124): a React host supplies it; JSON refuses it
+  // by name. Author behaviour as a node type, e.g. an action:button node.
+  onPageChange?: (page: number) => void;
+  
+  // Styling
+  className?: string;
+}
+```

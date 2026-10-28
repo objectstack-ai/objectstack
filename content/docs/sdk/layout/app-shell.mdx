@@ -1,0 +1,306 @@
+---
+title: "AppShell"
+description: "Main application shell with sidebar and header layout"
+---
+
+The AppShell component provides the main application layout structure with an integrated sidebar, header, and content area. It's the foundation for building enterprise applications with ObjectUI.
+
+## Basic Usage
+
+```tsx
+import { AppShell, SidebarNav, type NavItem } from '@object-ui/layout';
+import { Home, Settings, Users } from 'lucide-react';
+
+const navItems: NavItem[] = [
+  { title: 'Dashboard', href: '/', icon: Home },
+  { title: 'Users', href: '/users', icon: Users },
+  { title: 'Settings', href: '/settings', icon: Settings },
+];
+
+<AppShell
+  sidebar={<SidebarNav items={navItems} />}
+  navbar={
+    <div className="flex items-center gap-4">
+      <span className="font-semibold">My App</span>
+    </div>
+  }
+>
+  {/* Your page content */}
+  <div>Main content area</div>
+</AppShell>
+```
+
+## Component Props
+
+```ts
+import type { AppShellBranding } from '@object-ui/layout';
+
+interface AppShellProps {
+  sidebar?: React.ReactNode;     // Sidebar content (usually SidebarNav)
+  navbar?: React.ReactNode;      // Top navbar content (logo, search, user menu)
+  children: React.ReactNode;     // Main content area
+  className?: string;            // Additional CSS classes for content area
+  defaultOpen?: boolean;         // Sidebar default state (default: true)
+  branding?: AppShellBranding;   // App branding — four theme fields, see Branding
+  rightRail?: React.ReactNode;   // Optional right rail beside the content, not
+                                 // over it (ADR-0057 P3a)
+}
+```
+
+## Features
+
+### Responsive Sidebar
+
+The AppShell does not build a sidebar of its own: it renders the node you pass in
+`sidebar`, wrapped in a `SidebarProvider`. Pass a `Sidebar`-based node (`SidebarNav`, or
+your own) and you get a sidebar that:
+- Collapses on mobile devices
+- Can be toggled with the `Cmd/Ctrl + B` keyboard shortcut, or by a toggle button you
+  render yourself — see Collapsible Sidebar below
+- Persists state across page navigations
+- Supports smooth animations
+
+### Header Bar
+
+The header renders your `navbar` content and nothing else — the AppShell adds no controls
+of its own to it, in particular **no sidebar toggle**. If you want one, render it inside
+`navbar` (see Collapsible Sidebar below). The header itself provides:
+- Custom navbar content area
+- Fixed height: `h-12` (3rem / 48px) at every breakpoint — there is no responsive height variant
+- Border bottom separator
+- Background matching app theme
+
+### Content Area
+
+The main content area features:
+- Responsive padding in three steps: `p-3` on mobile, `sm:p-4` from the `sm` breakpoint, `md:p-6` from `md` up
+- A taller bottom padding on mobile only: `pb-20` (5rem), which keeps content clear of the mobile bottom bar (that bar is itself `sm:hidden`); from `sm` up the bottom edge follows `sm:pb-4` / `md:pb-6` like the other sides
+- Automatic scrolling
+- Flexible height (fills viewport)
+- Custom className support
+
+### Branding
+
+`branding` is theming, not chrome — the shell hands it to `useAppShellBranding`, and all
+four of the fields it declares are read:
+
+- `primaryColor` / `accentColor` — a six-digit hex (`#3B82F6`; the leading `#` is
+  optional, three-digit shorthand is not accepted), translated into the Shadcn theme
+  tokens listed under Styling below. A value that does not parse that way is ignored
+  silently.
+- `favicon` — overwrites the `href` of the icon link the page already has (`#favicon`,
+  otherwise `link[rel="icon"]`). It never creates one, so a document with no icon link is
+  left unchanged.
+- `title` — assigned to `document.title` as given. It is the whole title, not a suffix:
+  the caller composes the string it wants (the console passes
+  `"App label — Product name"`).
+
+All of it acts on the document rather than on the shell's subtree, and the colour
+properties are removed again when the shell unmounts.
+
+### Right Rail
+
+`rightRail` renders your node as a flex sibling of the content area, so the rail sits
+**beside** the content and reflows it rather than overlaying it (ADR-0057 P3a). The shell
+adds no wrapper and no width around it — the node you pass owns its width, border and
+scrolling; omit it and the layout is the unchanged single pane.
+
+## Layout Structure
+
+```
+┌─────────────────────────────────────┐
+│     Header (your navbar content)    │
+├──────────┬──────────────────────────┤
+│          │                          │
+│ Sidebar  │   Main Content Area      │
+│          │                          │
+│          │                          │
+│          │                          │
+└──────────┴──────────────────────────┘
+```
+
+## Sidebar Configuration
+
+### Default Open State
+
+Control whether sidebar is open by default:
+
+```plaintext
+<AppShell defaultOpen={false}>
+  {/* Sidebar starts collapsed */}
+</AppShell>
+```
+
+### Collapsible Sidebar
+
+The AppShell renders no toggle button of its own. What it does give you is the
+`SidebarProvider` wrapped around both slots, so the sidebar you supply can be toggled via:
+- The `Cmd/Ctrl + B` keyboard shortcut, provided by `SidebarProvider`
+- Programmatic control — `useSidebar().toggleSidebar()` from any component inside the shell
+- A toggle button you render yourself; it belongs in the `navbar` slot:
+
+```tsx
+import { SidebarTrigger } from '@object-ui/components';
+import { AppShell, SidebarNav, type NavItem } from '@object-ui/layout';
+import { Home, Settings } from 'lucide-react';
+
+const navItems: NavItem[] = [
+  { title: 'Dashboard', href: '/', icon: Home },
+  { title: 'Settings', href: '/settings', icon: Settings },
+];
+
+<AppShell
+  navbar={<SidebarTrigger />}
+  sidebar={<SidebarNav items={navItems} />}
+>
+  <div>Your page content</div>
+</AppShell>
+```
+
+## Navbar Content
+
+The navbar area is flexible and can contain:
+
+### Logo and Title
+
+```plaintext
+navbar={
+  <div className="flex items-center gap-2">
+    <img src="/logo.svg" alt="Logo" className="h-8 w-8" />
+    <span className="font-semibold text-lg">My Application</span>
+  </div>
+}
+```
+
+### Search Bar
+
+```plaintext
+navbar={
+  <div className="flex-1 max-w-md">
+    <Input placeholder="Search..." />
+  </div>
+}
+```
+
+### User Menu
+
+```plaintext
+navbar={
+  <div className="flex items-center gap-4 ml-auto">
+    <NotificationsButton />
+    <UserDropdown />
+  </div>
+}
+```
+
+## Complete Example
+
+```tsx
+import { AppShell, SidebarNav, type NavItem } from '@object-ui/layout';
+import { Avatar, AvatarFallback, Button, Input } from '@object-ui/components';
+import { Bell, Folder, LayoutDashboard, Settings, Users } from 'lucide-react';
+
+const navItems: NavItem[] = [
+  { title: 'Dashboard', href: '/', icon: LayoutDashboard, badge: '12' },
+  {
+    title: 'Projects',
+    href: '/projects',
+    icon: Folder,
+    children: [
+      { title: 'Active', href: '/projects/active' },
+      { title: 'Archived', href: '/projects/archived' },
+    ],
+  },
+  { title: 'Team', href: '/team', icon: Users },
+  { title: 'Settings', href: '/settings', icon: Settings },
+];
+
+function App() {
+  return (
+    <AppShell
+      defaultOpen={true}
+      sidebar={<SidebarNav title="ObjectUI" items={navItems} />}
+      navbar={
+        <div className="flex items-center justify-between w-full">
+          {/* Search */}
+          <div className="flex-1 max-w-md">
+            <Input 
+              placeholder="Search..." 
+              className="w-full"
+            />
+          </div>
+          
+          {/* Right side items */}
+          <div className="flex items-center gap-4">
+            <Button variant="ghost" size="icon">
+              <Bell className="h-5 w-5" />
+            </Button>
+            <Avatar>
+              <AvatarFallback>JD</AvatarFallback>
+            </Avatar>
+          </div>
+        </div>
+      }
+      className="bg-gray-50"
+    >
+      {/* Main content */}
+      <div className="max-w-7xl">
+        <h1 className="text-2xl font-bold mb-4">Dashboard</h1>
+        {/* Page content */}
+      </div>
+    </AppShell>
+  );
+}
+```
+
+`SidebarNav` has no logo slot and no footer slot — `title` is its only branding prop, the
+section label printed above a flat `NavItem[]` (it is ignored when `items` is a
+`NavGroup[]`, since each group prints its own `label`). Put a logo in the `navbar` slot
+instead, as the Logo and Title example under Navbar Content above does.
+
+## With Page Component
+
+Combine AppShell with the Page component for complete layouts:
+
+```plaintext
+<AppShell sidebar={<SidebarNav items={navItems} />}>
+  <Page
+    title="Dashboard"
+    description="Welcome to your dashboard"
+    body={[
+      { type: 'text', content: 'Dashboard content' }
+    ]}
+  />
+</AppShell>
+```
+
+## Styling
+
+The AppShell uses Tailwind CSS and Shadcn UI components:
+
+- `SidebarProvider`: Manages sidebar state
+- `SidebarInset`: Content area wrapper
+
+Brand colours arrive as Shadcn theme tokens rather than as per-component styles: each hex
+from `branding` is converted to the `H S% L%` triple those tokens carry and set as a CSS
+custom property on `document.documentElement`. `primaryColor` writes `--primary`,
+`--primary-foreground`, `--ring`, `--sidebar-primary` and `--sidebar-ring`; `accentColor`
+writes `--accent` and `--accent-foreground`. Tailwind's utilities resolve through the same
+tokens (`--color-primary: hsl(var(--primary))`), so every `bg-primary` / `text-primary` /
+`ring-primary` / `bg-accent` consumer picks the brand colour up with no per-component
+wiring. In dark mode a lighter variant of the same hue is used instead, and the shell
+re-applies the values whenever the `dark` class on the `html` element changes.
+
+## Accessibility
+
+The AppShell includes:
+- A keyboard shortcut for toggling the sidebar (`Cmd/Ctrl + B`), from `SidebarProvider`
+- Keyboard navigation support
+- Focus management
+- Screen reader announcements
+
+## Related
+
+- [SidebarNav](/docs/sdk/layout/sidebar-nav) - Sidebar navigation component
+- [PageHeader](/docs/ui/pages) - Page header component
+- [Page](/docs/sdk/components/layout/page) - Page layout component

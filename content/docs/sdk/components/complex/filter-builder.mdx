@@ -1,0 +1,401 @@
+---
+title: "Filter Builder"
+description: "Visual query builder for constructing complex filter conditions"
+---
+
+The Filter Builder component provides a visual interface for creating filter queries: a flat list of conditions combined with AND or OR, over multiple operators.
+
+## Basic Usage
+
+**Empty Filter Builder**
+
+```json
+{
+  "type": "filter-builder",
+  "name": "filters",
+  "label": "Build Filter",
+  "fields": [
+    {
+      "value": "name",
+      "label": "Name",
+      "type": "text"
+    },
+    {
+      "value": "email",
+      "label": "Email",
+      "type": "text"
+    },
+    {
+      "value": "age",
+      "label": "Age",
+      "type": "number"
+    },
+    {
+      "value": "status",
+      "label": "Status",
+      "type": "text"
+    }
+  ],
+  "value": {
+    "id": "root",
+    "logic": "and",
+    "conditions": []
+  }
+}
+```
+
+## With Initial Conditions
+
+**With Conditions**
+
+```json
+{
+  "type": "filter-builder",
+  "name": "userFilters",
+  "label": "User Filters",
+  "fields": [
+    {
+      "value": "name",
+      "label": "Name",
+      "type": "text"
+    },
+    {
+      "value": "email",
+      "label": "Email",
+      "type": "text"
+    },
+    {
+      "value": "age",
+      "label": "Age",
+      "type": "number"
+    },
+    {
+      "value": "department",
+      "label": "Department",
+      "type": "text"
+    },
+    {
+      "value": "salary",
+      "label": "Salary",
+      "type": "number"
+    }
+  ],
+  "value": {
+    "id": "root",
+    "logic": "and",
+    "conditions": [
+      {
+        "id": "1",
+        "field": "age",
+        "operator": "greater_than",
+        "value": "25"
+      },
+      {
+        "id": "2",
+        "field": "department",
+        "operator": "equals",
+        "value": "Engineering"
+      }
+    ]
+  }
+}
+```
+
+## Schema
+
+```ts
+interface FilterField {
+  value: string;                         // Field identifier
+  label: string;                         // Display label
+  type?:
+    | 'text' | 'number' | 'currency' | 'percent' | 'rating'
+    | 'date' | 'datetime' | 'time'
+    | 'boolean'
+    | 'select' | 'status'
+    | 'lookup' | 'master_detail' | 'user'; // Field type
+  options?: Array<{ value: string; label: string }>;  // Static options (select-like)
+  // Lookup-like fields without `options` render a remote-search picker that
+  // queries the configured DataSource. The metadata below describes how to
+  // resolve and display referenced records:
+  referenceTo?: string;                  // Referenced object name (e.g. "user")
+  displayField?: string;                 // Display field on referenced object (default "name")
+  idField?: string;                      // Id field on referenced object (default "id")
+}
+
+interface FilterCondition {
+  id: string;                            // Condition identifier
+  field: string;                         // Field to filter on
+  operator: string;                      // Comparison operator
+  value: any;                            // Filter value
+}
+
+interface FilterGroup {
+  id?: string;                           // Group identifier (optional)
+  logic: 'and' | 'or';                  // Logic operator (AND/OR)
+  conditions: FilterCondition[];         // Flat condition rows (no nested groups)
+}
+
+interface FilterBuilderSchema {
+  type: 'filter-builder';
+  
+  // Required
+  name: string;                          // Field name for form submission
+  fields: FilterField[];                 // Available fields for filtering
+  
+  // Configuration
+  label?: string;                        // Component label
+  value?: FilterGroup;                   // Initial/controlled filter value
+  
+  // Events
+  // RUNTIME SLOT (objectui#6124): a React host supplies it; JSON refuses it
+  // by name. Author behaviour as a node type, e.g. an action:button node.
+  onChange?: (filter: FilterGroup) => void;  // Change handler
+  
+  // Styling
+  className?: string;                    // Tailwind CSS classes
+  wrapperClass?: string;                 // Wrapper container classes
+  
+  // Base properties
+  id?: string;
+  visible?: boolean | string | { dialect?: string; source: string };
+  testId?: string;
+}
+```
+
+## Retired: nested groups, `allowGroups` and `maxDepth`
+
+A filter group is one level deep. Every entry of `conditions` is one field /
+operator / value row, and the group's `logic` combines all of them. The builder
+never drew a nested group: it showed a sub-group as a row with blank field and
+operator selects and did not show the sub-group's own conditions. Nested
+sub-groups and the two keys that configured them, `allowGroups` and `maxDepth`,
+are therefore retired (objectui#9306). Validation now refuses each of them by
+name. Write the rows into the one group and remove the two keys.
+
+## Examples
+
+### Product Filters
+
+**Product Search**
+
+```json
+{
+  "type": "filter-builder",
+  "name": "productFilters",
+  "label": "Product Search Filters",
+  "fields": [
+    {
+      "value": "name",
+      "label": "Product Name",
+      "type": "text"
+    },
+    {
+      "value": "category",
+      "label": "Category",
+      "type": "text"
+    },
+    {
+      "value": "price",
+      "label": "Price",
+      "type": "number"
+    },
+    {
+      "value": "stock",
+      "label": "Stock Quantity",
+      "type": "number"
+    },
+    {
+      "value": "rating",
+      "label": "Rating",
+      "type": "number"
+    }
+  ],
+  "value": {
+    "id": "root",
+    "logic": "and",
+    "conditions": [
+      {
+        "id": "1",
+        "field": "category",
+        "operator": "equals",
+        "value": "Electronics"
+      },
+      {
+        "id": "2",
+        "field": "price",
+        "operator": "less_than",
+        "value": "1000"
+      },
+      {
+        "id": "3",
+        "field": "stock",
+        "operator": "greater_than",
+        "value": "0"
+      }
+    ]
+  }
+}
+```
+
+### User Query Builder
+
+**User Filters**
+
+```json
+{
+  "type": "filter-builder",
+  "name": "userQuery",
+  "label": "Find Users",
+  "fields": [
+    {
+      "value": "firstName",
+      "label": "First Name",
+      "type": "text"
+    },
+    {
+      "value": "lastName",
+      "label": "Last Name",
+      "type": "text"
+    },
+    {
+      "value": "email",
+      "label": "Email",
+      "type": "text"
+    },
+    {
+      "value": "role",
+      "label": "Role",
+      "type": "text"
+    },
+    {
+      "value": "active",
+      "label": "Active",
+      "type": "boolean"
+    },
+    {
+      "value": "createdAt",
+      "label": "Created Date",
+      "type": "date"
+    }
+  ],
+  "value": {
+    "id": "root",
+    "logic": "and",
+    "conditions": []
+  }
+}
+```
+
+### Advanced Query
+
+**Search Interface**
+
+```json
+{
+  "type": "stack",
+  "gap": 4,
+  "className": "p-6 border rounded-lg max-w-3xl",
+  "children": [
+    {
+      "type": "text",
+      "content": "Advanced Search",
+      "className": "text-xl font-bold"
+    },
+    {
+      "type": "text",
+      "content": "Build complex queries with multiple conditions",
+      "className": "text-sm text-muted-foreground mb-4"
+    },
+    {
+      "type": "filter-builder",
+      "name": "advancedFilters",
+      "fields": [
+        {
+          "value": "title",
+          "label": "Title",
+          "type": "text"
+        },
+        {
+          "value": "author",
+          "label": "Author",
+          "type": "text"
+        },
+        {
+          "value": "publishDate",
+          "label": "Publish Date",
+          "type": "date"
+        },
+        {
+          "value": "views",
+          "label": "Views",
+          "type": "number"
+        },
+        {
+          "value": "likes",
+          "label": "Likes",
+          "type": "number"
+        },
+        {
+          "value": "published",
+          "label": "Published",
+          "type": "boolean"
+        }
+      ],
+      "value": {
+        "id": "root",
+        "logic": "and",
+        "conditions": [
+          {
+            "id": "1",
+            "field": "published",
+            "operator": "equals",
+            "value": "true"
+          },
+          {
+            "id": "2",
+            "field": "views",
+            "operator": "greater_than",
+            "value": "1000"
+          }
+        ]
+      }
+    },
+    {
+      "type": "flex",
+      "properties": {
+        "gap": 2,
+        "children": [
+          {
+            "type": "button",
+            "label": "Apply Filters",
+            "variant": "default"
+          },
+          {
+            "type": "button",
+            "label": "Clear",
+            "variant": "outline"
+          }
+        ]
+      },
+      "className": "mt-4"
+    }
+  ]
+}
+```
+
+## Supported Operators
+
+The Filter Builder supports various comparison operators based on field type:
+
+- **Text fields**: equals, not equals, contains, starts with, ends with
+- **Number fields**: equals, not equals, greater than, less than, between
+- **Date fields**: equals, before, after, between
+- **Boolean fields**: is true, is false
+
+## Use Cases
+
+- **Search interfaces**: Build advanced search forms
+- **Data filtering**: Filter large datasets in tables
+- **Report generation**: Create custom report criteria
+- **Query builders**: Visual SQL/NoSQL query construction
+- **Access control**: Define permission rules

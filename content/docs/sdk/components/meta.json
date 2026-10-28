@@ -1,0 +1,14 @@
+{
+  "title": "Renderer Reference",
+  "pages": [
+    "basic",
+    "form",
+    "layout",
+    "data-display",
+    "feedback",
+    "overlay",
+    "disclosure",
+    "navigation",
+    "complex"
+  ]
+}

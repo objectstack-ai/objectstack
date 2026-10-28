@@ -1,0 +1,42 @@
+---
+title: "Hover Card"
+description: "Display rich content in a popup when hovering over a trigger"
+---
+
+The Hover Card component displays rich content when hovering over an element.
+
+## Basic Usage
+
+**Basic Hover Card**
+
+```json
+{
+  "type": "hover-card",
+  "trigger": {
+    "type": "button",
+    "variant": "link",
+    "label": "Hover over me"
+  },
+  "content": {
+    "type": "text",
+    "content": "This is the hover card content"
+  }
+}
+```
+
+## Schema
+
+```ts
+import type { SchemaNode } from '@object-ui/types';
+
+interface HoverCardSchema {
+  type: 'hover-card';
+  trigger: SchemaNode | SchemaNode[];   // Trigger element
+  content: SchemaNode | SchemaNode[];   // Card content
+  side?: 'top' | 'right' | 'bottom' | 'left';
+  align?: 'start' | 'center' | 'end';
+  openDelayMs?: number;                 // Delay before opening (ms)
+  closeDelayMs?: number;                // Delay before closing (ms)
+  className?: string;
+}
+```

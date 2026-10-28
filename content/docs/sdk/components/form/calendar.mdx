@@ -1,0 +1,146 @@
+---
+title: "Calendar"
+description: "Date selection component with single, multiple, and range modes"
+---
+
+The Calendar component allows users to select dates in various modes including single date, multiple dates, or date ranges.
+
+## Basic Usage
+
+**Simple Calendar**
+
+```json
+{
+  "type": "ui:calendar",
+  "mode": "single",
+  "className": "rounded-md border"
+}
+```
+
+## Selection Modes
+
+**Single Date**
+
+```json
+{
+  "type": "ui:calendar",
+  "mode": "single",
+  "className": "rounded-md border"
+}
+```
+
+**Date Range**
+
+```json
+{
+  "type": "ui:calendar",
+  "mode": "range",
+  "className": "rounded-md border"
+}
+```
+
+## Multiple Selection
+
+**Multiple Dates**
+
+```json
+{
+  "type": "ui:calendar",
+  "mode": "multiple",
+  "className": "rounded-md border shadow-sm"
+}
+```
+
+## Selected Date
+
+Each day in `value` and `defaultValue` is an ISO 8601 date string in JSON (`"2026-09-15"` or `"2026-09-15T09:00:00Z"`); a TypeScript caller may also pass a `Date`. A date-only string selects the day it names in every time zone.
+
+The shape of the selection follows `mode`:
+
+| `mode` | `value` / `defaultValue` |
+|---|---|
+| `single` (default) | one day |
+| `multiple` | a list of days |
+| `range` | `{ "from": …, "to": … }` — `to` is optional |
+
+```json
+{ "type": "ui:calendar", "mode": "single", "defaultValue": "2026-09-15" }
+```
+
+```json
+{ "type": "ui:calendar", "mode": "multiple", "defaultValue": ["2026-09-15", "2026-09-17"] }
+```
+
+```json
+{ "type": "ui:calendar", "mode": "range", "defaultValue": { "from": "2026-09-15", "to": "2026-09-19" } }
+```
+
+Schema validation refuses a selection whose shape does not fit its mode — a single day under `mode: "multiple"`, for example — instead of letting it reach the renderer.
+
+The calendar opens on the month of its first selected day: the day itself in `single` mode, the first valid listed day in `multiple` mode (an entry that is not a date is skipped), and `from` in `range` mode. With no selection it opens on the current month. It reads that month once, when it first renders: a `value` that changes afterwards does not move the month it shows.
+
+## Schema
+
+```ts
+type Day = Date | string; // one calendar day: an ISO 8601 date string in JSON, or a Date
+
+interface CalendarSchema {
+  type: 'calendar';
+  
+  // Selection
+  mode?: 'single' | 'multiple' | 'range';  // Selection mode (default: 'single')
+  defaultValue?: Day | Day[] | { from: Day; to?: Day };  // Default selection, shaped by mode (Day = ISO 8601 string in JSON, or Date)
+  value?: Day | Day[] | { from: Day; to?: Day };         // Controlled selection, shaped by mode
+  
+  // Constraints
+  minDate?: Date | string;                  // Minimum selectable date
+  maxDate?: Date | string;                  // Maximum selectable date
+  disabled?: boolean | string | { dialect?: string; source: string };              // boolean, predicate expression, or CEL envelope
+  
+  // Styling
+  className?: string;                       // Tailwind CSS classes
+  
+  // Base properties
+  id?: string;
+  visible?: boolean | string | { dialect?: string; source: string };
+  testId?: string;
+}
+```
+
+## Examples
+
+### In a Form
+
+**Form Integration**
+
+```json
+{
+  "type": "stack",
+  "gap": 4,
+  "className": "max-w-sm p-4 border rounded-lg",
+  "children": [
+    {
+      "type": "label",
+      "label": "Select a date",
+      "className": "text-sm font-medium"
+    },
+    {
+      "type": "ui:calendar",
+      "mode": "single",
+      "className": "rounded-md border"
+    }
+  ]
+}
+```
+
+### With Custom Styling
+
+**Custom Style**
+
+```json
+{
+  "type": "ui:calendar",
+  "mode": "single",
+  "className": "rounded-xl border-2 shadow-lg"
+}
+```

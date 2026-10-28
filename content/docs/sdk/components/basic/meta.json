@@ -1,0 +1,11 @@
+{
+  "title": "Basic",
+  "pages": [
+    "separator",
+    "button-group",
+    "pagination",
+    "navigation-menu",
+    "sidebar",
+    "div"
+  ]
+}

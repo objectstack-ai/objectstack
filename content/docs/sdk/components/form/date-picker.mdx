@@ -1,0 +1,141 @@
+---
+title: "Date Picker"
+description: "Input for selecting dates with a calendar popup"
+---
+
+The Date Picker component allows users to select a date from a calendar interface.
+
+## Basic Usage
+
+**Basic Date Picker**
+
+```json
+{
+  "type": "date-picker",
+  "placeholder": "Pick a date"
+}
+```
+
+## With Default Date
+
+**With Default Value**
+
+```json
+{
+  "type": "date-picker",
+  "placeholder": "Pick a date",
+  "value": "2024-01-15"
+}
+```
+
+The calendar popup opens on the month of the selected date, so a date in another month or year is in view when the popup opens. With no date it opens on the current month.
+
+## States
+
+**Disabled**
+
+```json
+{
+  "type": "date-picker",
+  "placeholder": "Pick a date",
+  "disabled": true
+}
+```
+
+**Full Width**
+
+```json
+{
+  "type": "date-picker",
+  "placeholder": "Pick a date",
+  "className": "w-full"
+}
+```
+
+## Schema
+
+```ts
+interface DatePickerSchema {
+  type: 'date-picker';
+  value?: string | Date;          // Selected date (ISO string or Date)
+  placeholder?: string;           // Placeholder text
+  
+  // Events
+  // RUNTIME SLOT (objectui#6124): a React host supplies it; JSON refuses it
+  // by name. Author behaviour as a node type, e.g. an action:button node.
+  onChange?: (date: Date | undefined) => void;
+  
+  // States
+  disabled?: boolean | string | { dialect?: string; source: string };   // boolean, predicate expression, or CEL envelope
+  
+  // Styling
+  className?: string;
+  wrapperClass?: string;
+}
+```
+
+<Callout type="warn">
+  `wrapperClass` is now typed. The renderer has read it all along — it lands on the
+  wrapper element around the date picker and its label — but it went undeclared until
+  objectui#7722, surviving on what was then `BaseSchema`'s index signature (objectui#8347 removed it) and the zod mirror's
+  `.passthrough()`. Declared as `string` on both faces, a **non-string**
+  `wrapperClass` that used to parse green is now refused by name — on
+  `DatePickerSchema` and through `safeValidateSchema` alike. Pass the Tailwind class
+  string; a number or an object gets a parse error where it used to get silence.
+</Callout>
+
+## Examples
+
+### In a Form
+
+**Form Field**
+
+```json
+{
+  "type": "flex",
+  "properties": {
+    "direction": "col",
+    "gap": 4,
+    "children": [
+      {
+        "type": "label",
+        "text": "Birth Date",
+        "htmlFor": "birthdate"
+      },
+      {
+        "type": "date-picker",
+        "id": "birthdate",
+        "placeholder": "Select your birth date"
+      }
+    ]
+  }
+}
+```
+
+### Date Range
+
+**Date Range Selector**
+
+```json
+{
+  "type": "flex",
+  "properties": {
+    "gap": 2,
+    "align": "center",
+    "children": [
+      {
+        "type": "date-picker",
+        "placeholder": "Start date"
+      },
+      {
+        "type": "text",
+        "content": "to"
+      },
+      {
+        "type": "date-picker",
+        "placeholder": "End date"
+      }
+    ]
+  }
+}
+```

@@ -1,0 +1,118 @@
+---
+title: "Sonner"
+description: "Toast notifications using Sonner library"
+---
+
+The Sonner component provides beautiful toast notifications with a rich API.
+
+## Basic Usage
+
+A `sonner` node renders its own trigger button. Clicking the button raises the toast the
+node declares, so the whole demo is one schema node with no handler to wire up.
+`buttonLabel` and `buttonVariant` style that trigger; `message`, `description` and
+`variant` describe the toast it raises.
+
+**Basic Sonner Toast**
+
+```json
+{
+  "type": "sonner",
+  "message": "Event has been created",
+  "buttonLabel": "Show Sonner Toast"
+}
+```
+
+## Toast Types
+
+**Success**
+
+```json
+{
+  "type": "sonner",
+  "variant": "success",
+  "message": "Operation completed successfully",
+  "buttonLabel": "Success"
+}
+```
+
+**Error**
+
+```json
+{
+  "type": "sonner",
+  "variant": "error",
+  "message": "Something went wrong",
+  "buttonLabel": "Error",
+  "buttonVariant": "destructive"
+}
+```
+
+**Warning**
+
+```json
+{
+  "type": "sonner",
+  "variant": "warning",
+  "message": "Please review your input",
+  "buttonLabel": "Warning"
+}
+```
+
+**Info**
+
+```json
+{
+  "type": "sonner",
+  "variant": "info",
+  "message": "New update available",
+  "buttonLabel": "Info"
+}
+```
+
+## With Description
+
+`description` adds a secondary line under the message.
+
+**Message With Description** — A sonner toast carrying both a message and a secondary description line.
+
+```json
+{
+  "type": "sonner",
+  "variant": "success",
+  "message": "File uploaded",
+  "description": "Your file has been uploaded successfully",
+  "buttonLabel": "Upload File"
+}
+```
+
+## Schema
+
+```ts
+interface SonnerSchema {
+  type: 'sonner';
+  message?: string;               // Toast message
+  title?: string;                 // Alias for message
+  description?: string;           // Additional description
+  variant?: 'default' | 'success' | 'error' | 'warning' | 'info';
+  
+  // Trigger button
+  buttonLabel?: string;           // Trigger button text (default: 'Show Toast')
+  buttonVariant?: 'default' | 'secondary' | 'destructive' | 'outline' | 'ghost' | 'link';
+}
+```
+
+## Examples
+
+### Custom Trigger Button
+
+**Custom Trigger Button** — A success toast whose trigger button is styled through buttonVariant.
+
+```json
+{
+  "type": "sonner",
+  "variant": "success",
+  "message": "Changes saved!",
+  "buttonLabel": "Save Changes",
+  "buttonVariant": "outline"
+}
+```

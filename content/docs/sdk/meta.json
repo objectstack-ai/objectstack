@@ -1,0 +1,12 @@
+{
+  "title": "Object UI SDK",
+  "pages": [
+    "guide",
+    "core",
+    "layout",
+    "api",
+    "utilities",
+    "plugins",
+    "components"
+  ]
+}

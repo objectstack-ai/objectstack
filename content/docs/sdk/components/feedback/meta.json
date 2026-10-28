@@ -1,0 +1,12 @@
+{
+  "title": "Feedback",
+  "pages": [
+    "loading",
+    "progress",
+    "skeleton",
+    "spinner",
+    "empty",
+    "toast",
+    "sonner"
+  ]
+}

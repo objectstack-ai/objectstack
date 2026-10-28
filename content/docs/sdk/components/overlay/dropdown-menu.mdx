@@ -1,0 +1,115 @@
+---
+title: "Dropdown Menu"
+description: "Display a menu of actions or options triggered by a button"
+---
+
+The Dropdown Menu component displays a list of actions or options when triggered.
+
+## Basic Usage
+
+**Basic Dropdown Menu**
+
+```json
+{
+  "type": "dropdown-menu",
+  "trigger": {
+    "type": "button",
+    "label": "Open Menu"
+  },
+  "items": [
+    {
+      "label": "Profile"
+    },
+    {
+      "label": "Settings"
+    },
+    {
+      "separator": true
+    },
+    {
+      "label": "Logout"
+    }
+  ]
+}
+```
+
+## With Icons
+
+**With Icons**
+
+```json
+{
+  "type": "dropdown-menu",
+  "trigger": {
+    "type": "button",
+    "label": "Actions",
+    "icon": "ellipsis"
+  },
+  "items": [
+    {
+      "label": "Edit",
+      "icon": "square-pen"
+    },
+    {
+      "label": "Copy",
+      "icon": "copy"
+    },
+    {
+      "label": "Delete",
+      "icon": "trash"
+    }
+  ]
+}
+```
+
+## Icons
+
+An item's `icon` is a **kebab-case Lucide icon name**, resolved against lucide's
+runtime `icons` record — the same surface `ui:button` and the `action:*` family
+resolve against. A name that is not a live key of that record (an unknown or a
+retired spelling such as `edit`) renders **no glyph**, never a fallback glyph
+and never the literal name as text.
+
+## Dividers
+
+An item is either a command or a divider between groups of commands — never
+both, and a divider never carries a `label` (objectui#6523). Author a divider
+as `{ "separator": true }`; the retired `{ "type": "separator" }` spelling is
+refused at parse time rather than silently ignored.
+
+## Schema
+
+```ts
+import type { SchemaNode } from '@object-ui/types';
+
+interface DropdownMenuCommandItem {
+  label: string;
+  icon?: string;                  // kebab-case Lucide icon name (e.g. "square-pen")
+  shortcut?: string;              // e.g. "Ctrl+S" — a single string, not an array
+  disabled?: boolean;
+  // RUNTIME SLOT (objectui#6124): a React host supplies it; JSON refuses it
+  // by name. Author behaviour as a node type, e.g. an action:button node.
+  onClick?: () => void;           // Click handler
+  children?: DropdownMenuItem[];  // Submenu items — drawn as a nested submenu
+}
+
+interface DropdownMenuDividerItem {
+  separator: true;                // renders as a divider — no label
+}
+
+type DropdownMenuItem = DropdownMenuCommandItem | DropdownMenuDividerItem;
+
+interface DropdownMenuSchema {
+  type: 'dropdown-menu';
+  trigger: SchemaNode | SchemaNode[];  // Trigger component
+  items: DropdownMenuItem[];      // Menu items
+  
+  // Styling
+  className?: string;
+}
+```
+
+The item's `onClick` is a runtime slot a React host supplies through the
+TypeScript `MenuItem` interface; it has no JSON spelling, and the validator
+refuses it by name on the item. The menu schema itself declares no authorable
+event slot either, so there is no menu-level `onSelect`.

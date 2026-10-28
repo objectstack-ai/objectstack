@@ -1,0 +1,129 @@
+---
+title: "Command"
+description: "Fast command menu with search and keyboard navigation"
+---
+
+The Command component provides a fast, searchable command menu with keyboard navigation.
+
+## Basic Usage
+
+**Command Menu**
+
+```json
+{
+  "type": "command",
+  "placeholder": "Type a command or search...",
+  "groups": [
+    {
+      "heading": "Suggestions",
+      "items": [
+        {
+          "value": "calendar",
+          "label": "Calendar",
+          "icon": "calendar"
+        },
+        {
+          "value": "search",
+          "label": "Search Emoji",
+          "icon": "face-slightly-smiling"
+        },
+        {
+          "value": "calculator",
+          "label": "Calculator",
+          "icon": "calculator"
+        }
+      ]
+    },
+    {
+      "heading": "Settings",
+      "items": [
+        {
+          "value": "profile",
+          "label": "Profile",
+          "icon": "user"
+        },
+        {
+          "value": "billing",
+          "label": "Billing",
+          "icon": "credit-card"
+        },
+        {
+          "value": "settings",
+          "label": "Settings",
+          "icon": "settings"
+        }
+      ]
+    }
+  ]
+}
+```
+
+## Icons
+
+An item's `icon` is a **kebab-case Lucide icon name**, resolved against lucide's
+runtime `icons` record — the same surface `ui:button` and the `action:*` family
+resolve against. A name that is not a live key of that record (an unknown, or a
+retired spelling such as `smile`) renders **no glyph**, never a fallback glyph
+and never the literal name as text.
+
+## Schema
+
+```ts
+interface CommandItem {
+  value: string;
+  label: string;
+  icon?: string;                  // kebab-case Lucide icon name (e.g. "face-slightly-smiling")
+}
+
+interface CommandGroup {
+  heading?: string;
+  items: CommandItem[];
+}
+
+interface CommandSchema {
+  type: 'command';
+  placeholder?: string;           // Search placeholder
+  groups?: CommandGroup[];        // Command groups (absent: only the empty text)
+  emptyText?: string;             // Text when no results
+  
+  // Styling
+  className?: string;
+}
+```
+
+## Examples
+
+### File Command Palette
+
+A single-group palette of file commands, with its own search placeholder.
+
+**File Command Palette**
+
+```json
+{
+  "type": "command",
+  "placeholder": "Search commands...",
+  "groups": [
+    {
+      "heading": "File",
+      "items": [
+        {
+          "value": "new",
+          "label": "New File",
+          "icon": "file-plus"
+        },
+        {
+          "value": "open",
+          "label": "Open File",
+          "icon": "folder-open"
+        },
+        {
+          "value": "save",
+          "label": "Save",
+          "icon": "save"
+        }
+      ]
+    }
+  ]
+}
+```

@@ -1,0 +1,8 @@
+{
+  "title": "Utilities",
+  "pages": [
+    "cli",
+    "create-plugin",
+    "data-objectstack"
+  ]
+}

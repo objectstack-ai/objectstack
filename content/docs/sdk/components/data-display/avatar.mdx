@@ -1,0 +1,38 @@
+---
+title: "Avatar"
+description: "User profile image or fallback initials"
+---
+
+## Examples
+
+**Avatar With Image**
+
+```json
+{
+  "type": "avatar",
+  "src": "https://github.com/shadcn.png",
+  "alt": "User"
+}
+```
+
+**Avatar With Fallback**
+
+```json
+{
+  "type": "avatar",
+  "fallback": "JD"
+}
+```
+
+## Schema
+
+```ts
+interface AvatarSchema {
+  type: 'avatar';
+  src?: string;
+  alt?: string;
+  fallback?: string;
+  size?: 'sm' | 'md' | 'lg';
+  className?: string;
+}
+```

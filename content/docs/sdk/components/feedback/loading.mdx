@@ -1,0 +1,51 @@
+---
+title: "Loading"
+description: "Loading spinner to indicate processing"
+---
+
+## Examples
+
+**Basic Loading**
+
+```json
+{
+  "type": "loading"
+}
+```
+
+**With Text**
+
+```json
+{
+  "type": "stack",
+  "gap": 2,
+  "align": "center",
+  "children": [
+    {
+      "type": "loading"
+    },
+    {
+      "type": "text",
+      "content": "Loading...",
+      "variant": "caption"
+    }
+  ]
+}
+```
+
+## Schema
+
+```ts
+interface LoadingSchema {
+  type: 'loading';
+  label?: string;                 // Text drawn under the spinner
+  size?: 'sm' | 'md' | 'lg';
+  className?: string;
+}
+```
+
+<Callout type="warn">
+  The message under the spinner is `label`, the key `LoadingSchema` declares.
+  Until objectui#11347 the renderer read an undeclared `text` instead and left
+  `label` inert. `text` is not a key of this node: write `label`.
+</Callout>

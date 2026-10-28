@@ -1,0 +1,115 @@
+---
+title: "Toggle Group"
+description: "A group of toggle buttons where one or more can be selected"
+---
+
+The Toggle Group component allows users to toggle between multiple options.
+
+## Basic Usage
+
+**Single Selection**
+
+```json
+{
+  "type": "toggle-group",
+  "selectionType": "single",
+  "items": [
+    {
+      "value": "left",
+      "label": "Left"
+    },
+    {
+      "value": "center",
+      "label": "Center"
+    },
+    {
+      "value": "right",
+      "label": "Right"
+    }
+  ]
+}
+```
+
+## Multiple Selection
+
+**Multiple Selection**
+
+```json
+{
+  "type": "toggle-group",
+  "selectionType": "multiple",
+  "items": [
+    {
+      "value": "bold",
+      "label": "Bold"
+    },
+    {
+      "value": "italic",
+      "label": "Italic"
+    },
+    {
+      "value": "underline",
+      "label": "Underline"
+    }
+  ]
+}
+```
+
+## With Labels
+
+The third item sets `disabled: true`, which the renderer forwards to that toggle
+only — the rest of the group stays interactive.
+
+**With Labels**
+
+```json
+{
+  "type": "toggle-group",
+  "selectionType": "single",
+  "items": [
+    {
+      "value": "list",
+      "label": "List"
+    },
+    {
+      "value": "grid",
+      "label": "Grid"
+    },
+    {
+      "value": "table",
+      "label": "Table",
+      "disabled": true
+    }
+  ]
+}
+```
+
+## Schema
+
+```ts
+interface ToggleGroupItem {
+  value: string;
+  label: string;
+  disabled?: boolean;             // Disables this item only
+}
+
+interface ToggleGroupSchema {
+  type: 'toggle-group';
+  selectionType?: 'single' | 'multiple';  // Selection mode
+  items: ToggleGroupItem[];       // Toggle items
+  value?: string | string[];      // Selected value(s)
+  variant?: 'default' | 'outline';
+  size?: 'sm' | 'default' | 'lg';
+  
+  // Events
+  // RUNTIME SLOT (objectui#6124): a React host supplies it; JSON refuses it
+  // by name. Author behaviour as a node type, e.g. an action:button node.
+  onValueChange?: (value: string | string[]) => void;
+  
+  // States
+  disabled?: boolean | string | { dialect?: string; source: string };   // boolean, predicate expression, or CEL envelope
+  
+  // Styling
+  className?: string;
+}
+```

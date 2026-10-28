@@ -1,0 +1,56 @@
+---
+title: "Checkbox"
+description: "Toggle selection with checkboxes"
+---
+
+## Examples
+
+**Basic Checkbox**
+
+```json
+{
+  "type": "checkbox",
+  "label": "Accept terms and conditions"
+}
+```
+
+**Multiple Checkboxes**
+
+```json
+{
+  "type": "stack",
+  "gap": 2,
+  "children": [
+    {
+      "type": "checkbox",
+      "label": "Option 1"
+    },
+    {
+      "type": "checkbox",
+      "label": "Option 2"
+    },
+    {
+      "type": "checkbox",
+      "label": "Option 3"
+    }
+  ]
+}
+```
+
+## Schema
+
+```ts
+interface CheckboxSchema {
+  type: 'checkbox';
+  name?: string;
+  label?: string;
+  defaultChecked?: boolean;
+  checked?: boolean;
+  required?: boolean;
+  disabled?: boolean | string | { dialect?: string; source: string };   // boolean, predicate expression, or CEL envelope
+  description?: string;
+  error?: string;
+  className?: string;
+  wrapperClass?: string;
+}
+```

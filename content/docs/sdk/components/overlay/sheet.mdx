@@ -1,0 +1,80 @@
+---
+title: "Sheet"
+description: "Slide-in panel from the edge of the screen"
+---
+
+The Sheet component displays content in a panel that slides in from the edge of the screen.
+
+## Basic Usage
+
+**Basic Sheet**
+
+```json
+{
+  "type": "sheet",
+  "trigger": {
+    "type": "button",
+    "label": "Open Sheet"
+  },
+  "title": "Sheet Title",
+  "description": "Sheet description goes here.",
+  "content": {
+    "type": "text",
+    "content": "Sheet content"
+  }
+}
+```
+
+## Sides
+
+**Left Side**
+
+```json
+{
+  "type": "sheet",
+  "side": "left",
+  "trigger": {
+    "type": "button",
+    "label": "Left"
+  },
+  "title": "Left Sheet",
+  "content": {
+    "type": "text",
+    "content": "Content"
+  }
+}
+```
+
+**Right Side**
+
+```json
+{
+  "type": "sheet",
+  "side": "right",
+  "trigger": {
+    "type": "button",
+    "label": "Right"
+  },
+  "title": "Right Sheet",
+  "content": {
+    "type": "text",
+    "content": "Content"
+  }
+}
+```
+
+## Schema
+
+```ts
+import type { SchemaNode } from '@object-ui/types';
+
+interface SheetSchema {
+  type: 'sheet';
+  trigger?: SchemaNode | SchemaNode[];  // Trigger component
+  title?: string;                       // Sheet title
+  description?: string;                 // Sheet description
+  content?: SchemaNode | SchemaNode[];  // Sheet content
+  side?: 'left' | 'right' | 'top' | 'bottom';
+  className?: string;
+}
+```

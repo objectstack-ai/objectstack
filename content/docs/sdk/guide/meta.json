@@ -1,0 +1,18 @@
+{
+  "title": "Guide",
+  "pages": [
+    "quick-start",
+    "architecture-overview",
+    "schema-rendering",
+    "schema-overview",
+    "layout",
+    "data-source",
+    "fields",
+    "component-registry",
+    "theming",
+    "plugins",
+    "plugin-development",
+    "building-crud-app",
+    "troubleshooting"
+  ]
+}

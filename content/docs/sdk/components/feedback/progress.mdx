@@ -1,0 +1,48 @@
+---
+title: "Progress"
+description: "Progress bar to show completion status"
+---
+
+## Examples
+
+**Progress Bar**
+
+```json
+{
+  "type": "progress",
+  "value": 60
+}
+```
+
+**Different Values**
+
+```json
+{
+  "type": "stack",
+  "gap": 3,
+  "children": [
+    {
+      "type": "progress",
+      "value": 25
+    },
+    {
+      "type": "progress",
+      "value": 50
+    },
+    {
+      "type": "progress",
+      "value": 75
+    }
+  ]
+}
+```
+
+## Schema
+
+```ts
+interface ProgressSchema {
+  type: 'progress';
+  value: number;           // 0-100
+  className?: string;
+}
+```

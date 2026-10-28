@@ -1,0 +1,240 @@
+---
+title: "Radio Group"
+description: "A set of checkable buttons where only one can be selected at a time"
+---
+
+The Radio Group component allows users to select one option from a set of mutually exclusive options.
+
+## Basic Usage
+
+**Basic Radio Group**
+
+```json
+{
+  "type": "radio-group",
+  "options": [
+    {
+      "value": "option1",
+      "label": "Option 1"
+    },
+    {
+      "value": "option2",
+      "label": "Option 2"
+    },
+    {
+      "value": "option3",
+      "label": "Option 3"
+    }
+  ]
+}
+```
+
+## With Default Value
+
+**With Default Selection**
+
+```json
+{
+  "type": "radio-group",
+  "value": "option2",
+  "options": [
+    {
+      "value": "option1",
+      "label": "Option 1"
+    },
+    {
+      "value": "option2",
+      "label": "Option 2"
+    },
+    {
+      "value": "option3",
+      "label": "Option 3"
+    }
+  ]
+}
+```
+
+## Layout Options
+
+**Vertical Layout**
+
+```json
+{
+  "type": "radio-group",
+  "orientation": "vertical",
+  "options": [
+    {
+      "value": "sm",
+      "label": "Small"
+    },
+    {
+      "value": "md",
+      "label": "Medium"
+    },
+    {
+      "value": "lg",
+      "label": "Large"
+    }
+  ]
+}
+```
+
+**Horizontal Layout**
+
+```json
+{
+  "type": "radio-group",
+  "orientation": "horizontal",
+  "options": [
+    {
+      "value": "sm",
+      "label": "Small"
+    },
+    {
+      "value": "md",
+      "label": "Medium"
+    },
+    {
+      "value": "lg",
+      "label": "Large"
+    }
+  ]
+}
+```
+
+## States
+
+**Disabled**
+
+```json
+{
+  "type": "radio-group",
+  "disabled": true,
+  "options": [
+    {
+      "value": "option1",
+      "label": "Option 1"
+    },
+    {
+      "value": "option2",
+      "label": "Option 2"
+    }
+  ]
+}
+```
+
+**Individual Disabled**
+
+```json
+{
+  "type": "radio-group",
+  "options": [
+    {
+      "value": "option1",
+      "label": "Option 1"
+    },
+    {
+      "value": "option2",
+      "label": "Option 2",
+      "disabled": true
+    },
+    {
+      "value": "option3",
+      "label": "Option 3"
+    }
+  ]
+}
+```
+
+## Schema
+
+```ts
+interface RadioOption {
+  value: string;
+  label: string;
+  disabled?: boolean;
+}
+
+interface RadioGroupSchema {
+  type: 'radio-group';
+  options: RadioOption[];         // Available options
+  value?: string;                 // Selected value
+  
+  // Layout
+  orientation?: 'horizontal' | 'vertical';
+  
+  // States
+  disabled?: boolean | string | { dialect?: string; source: string };   // boolean, predicate expression, or CEL envelope
+  
+  // Styling
+  className?: string;
+}
+```
+
+## Examples
+
+### In a Form
+
+**Form Field**
+
+```json
+{
+  "type": "flex",
+  "properties": {
+    "direction": "col",
+    "gap": 4,
+    "children": [
+      {
+        "type": "label",
+        "text": "Notification Preference"
+      },
+      {
+        "type": "radio-group",
+        "value": "email",
+        "options": [
+          {
+            "value": "email",
+            "label": "Email notifications"
+          },
+          {
+            "value": "sms",
+            "label": "SMS notifications"
+          },
+          {
+            "value": "none",
+            "label": "No notifications"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+### With Descriptions
+
+**With Descriptions**
+
+```json
+{
+  "type": "radio-group",
+  "value": "free",
+  "options": [
+    {
+      "value": "free",
+      "label": "Free",
+      "description": "Basic features for personal use"
+    },
+    {
+      "value": "pro",
+      "label": "Pro",
+      "description": "Advanced features for professionals"
+    },
+    {
+      "value": "enterprise",
+      "label": "Enterprise",
+      "description": "Full suite for teams"
+    }
+  ]
+}
+```

@@ -1,0 +1,11 @@
+{
+  "title": "Data Display",
+  "pages": [
+    "avatar",
+    "list",
+    "breadcrumb",
+    "kbd",
+    "statistic",
+    "tree-view"
+  ]
+}

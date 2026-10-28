@@ -1,0 +1,110 @@
+---
+title: "Input OTP"
+description: "One-time password input with auto-focus"
+---
+
+The Input OTP component provides a secure way to enter one-time passwords or verification codes.
+
+## Basic Usage
+
+**6 Digit Otp**
+
+```json
+{
+  "type": "input-otp",
+  "length": 6
+}
+```
+
+## With Separator
+
+**With Visual Separator**
+
+```json
+{
+  "type": "input-otp",
+  "length": 6,
+  "separator": true
+}
+```
+
+## Different Lengths
+
+**4 Digit**
+
+```json
+{
+  "type": "input-otp",
+  "length": 4
+}
+```
+
+**8 Digit**
+
+```json
+{
+  "type": "input-otp",
+  "length": 8
+}
+```
+
+## Schema
+
+```ts
+interface InputOTPSchema {
+  type: 'input-otp';
+  length?: number;                // Number of digits (default 6)
+  value?: string;                 // Current value
+  separator?: boolean;            // Show visual separator
+  
+  // Events
+  // RUNTIME SLOT (objectui#6124): a React host supplies it; JSON refuses it
+  // by name. Author behaviour as a node type, e.g. an action:button node.
+  onChange?: (value: string) => void;
+  
+  // States
+  disabled?: boolean | string | { dialect?: string; source: string };   // boolean, predicate expression, or CEL envelope
+  
+  // Styling
+  className?: string;
+}
+```
+
+<Callout type="warn">
+  `length` is the slot count, and the renderer now reads it. Until objectui#11347
+  it read an undeclared `maxLength` instead and ignored `length`, so the 4- and
+  8-digit examples above drew six slots. `maxLength` is not a key of this node:
+  write `length`.
+</Callout>
+
+## Examples
+
+### In a Form
+
+**Verification Form**
+
+```json
+{
+  "type": "flex",
+  "properties": {
+    "direction": "col",
+    "gap": 4,
+    "children": [
+      {
+        "type": "label",
+        "text": "Enter verification code"
+      },
+      {
+        "type": "input-otp",
+        "length": 6,
+        "separator": true
+      },
+      {
+        "type": "text",
+        "content": "We sent a code to your email",
+        "className": "text-sm text-muted-foreground"
+      }
+    ]
+  }
+}
+```

@@ -1,0 +1,100 @@
+---
+title: "Aspect Ratio"
+description: "Maintain a consistent width to height ratio"
+---
+
+The Aspect Ratio component maintains a consistent width to height ratio for content.
+
+## Basic Usage
+
+**16 9 Aspect Ratio**
+
+```json
+{
+  "type": "aspect-ratio",
+  "ratio": 1.7777777777777777,
+  "image": "https://images.unsplash.com/photo-1588345921523-c2dcdb7f1dcd",
+  "alt": "Photo"
+}
+```
+
+## Different Ratios
+
+**Square**
+
+```json
+{
+  "type": "aspect-ratio",
+  "ratio": 1,
+  "children": {
+    "type": "card",
+    "className": "flex h-full items-center justify-center",
+    "children": "Square (1:1)"
+  }
+}
+```
+
+**4 3**
+
+```json
+{
+  "type": "aspect-ratio",
+  "ratio": 1.3333333333333333,
+  "children": {
+    "type": "card",
+    "className": "flex h-full items-center justify-center",
+    "children": "4:3 Ratio"
+  }
+}
+```
+
+**Ultrawide**
+
+```json
+{
+  "type": "aspect-ratio",
+  "ratio": 2.3333333333333335,
+  "children": {
+    "type": "card",
+    "className": "flex h-full items-center justify-center",
+    "children": "21:9 Ratio"
+  }
+}
+```
+
+## Schema
+
+The box holds its content one of two ways, and the renderer reads exactly one of them:
+set `image` for a photo, which is drawn to fill the box; otherwise the box renders
+`children`.
+
+```ts
+import type { SchemaNode } from '@object-ui/types';
+
+interface AspectRatioSchema {
+  type: 'aspect-ratio';
+  ratio?: number;                  // Width / Height ratio (default: 16 / 9)
+  image?: string;                  // Image URL, drawn to fill the box
+  alt?: string;                    // Alt text for `image`
+  children?: SchemaNode | SchemaNode[];   // Content, when no `image` is set
+  className?: string;
+}
+```
+
+## Examples
+
+### Video Container
+
+**Video Aspect Ratio**
+
+```json
+{
+  "type": "aspect-ratio",
+  "ratio": 1.7777777777777777,
+  "children": {
+    "type": "card",
+    "className": "bg-muted flex h-full items-center justify-center",
+    "children": "Video Player (16:9)"
+  }
+}
+```
