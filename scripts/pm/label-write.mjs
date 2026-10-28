@@ -201,6 +201,7 @@ import {
   markerMatches,
   proxyRearmPlan,
   resolveSweepRepo,
+  stripSignatureLine,
 } from './check-half-states.mjs';
 // The comment half of a release, borrowed exactly as close-cards borrows it:
 // the one `comment` op, the stamp render, and the board-side read-back of the
@@ -477,9 +478,9 @@ const RESUME_FROM_SHAPE = /^([^\s@]+)@([0-9a-fA-F]{7,40})$/;
 /** Pages of 100 comments the silence read may walk before it refuses to judge an unexhausted thread. */
 export const RELEASE_COMMENT_PAGE_CAP = 30;
 
-/** The first line of a body with its markdown heading marks and surrounding whitespace removed. Pure. */
+/** The first line of a body — after one leading signature line (`stripSignatureLine`) — with its markdown heading marks and surrounding whitespace removed. Pure. */
 export function firstLineKeyText(body) {
-  const first = String(body ?? '').split(/\r?\n/)[0] ?? '';
+  const first = stripSignatureLine(body).split(/\r?\n/)[0] ?? '';
   return first.replace(/^\s*#+\s*/, '').trim();
 }
 
@@ -542,7 +543,8 @@ export function commentsAfter(comments, knock) {
 export function releaseTextRefusal(text) {
   const raw = String(text ?? '');
   if (raw.trim().length === 0) return 'the release comment is empty';
-  const first = raw.split(/\r?\n/)[0];
+  // One leading signature line stands above the `Release:` line, never in its place (`stripSignatureLine`, #27113).
+  const first = stripSignatureLine(raw).split(/\r?\n/)[0];
   if (!markerMatches(RELEASE_COMMENT_MARKER, first)) {
     return `the release comment's FIRST line must be the \`Release:\` line (session / reason / destination) — the state model's line-start key — got \`${first.slice(0, 80)}\``;
   }

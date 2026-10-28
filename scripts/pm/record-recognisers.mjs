@@ -91,6 +91,7 @@ import {
   deliveryEvidenceNote,
   latestMarkedComment,
   partOfTargets,
+  stripSignatureLine,
 } from './check-half-states.mjs';
 // The tier `isModelIdentifierToken` refuses by VALUE. IMPORTED, never restated:
 // `dispatch-gates.mjs` is the one line in `scripts/pm/**` where the model id is
@@ -1056,7 +1057,9 @@ const MAILBOX_FIELD_READERS = Object.freeze({
  *          | { state: 'read', id: string, kind: string, key: string, numbers: number[] } & Record<string, unknown>}
  */
 export function readMailboxLine(text) {
-  const lines = String(text ?? '').split(/\r?\n/);
+  // The key is the first line AFTER one leading signature line (`stripSignatureLine`, #27113): the
+  // signature names who rang, and is neither the key nor a second line of content.
+  const lines = stripSignatureLine(text).split(/\r?\n/);
   const at = lines.findIndex((l) => l.trim() !== '');
   if (at < 0) return { state: 'refused', reason: 'an empty comment' };
   const first = lines[at];

@@ -465,6 +465,17 @@
  * ceiling tier with nothing behind it, the measurement behind the fourth). `claimKeyedLineRefusals` carries the four
  * decisions that keep it a mirror and not a fifth dialect.
  *
+ * ## The first line is the seat's signature, or the body is refused (#27113)
+ *
+ * Every write here lands under one bot login, so the TEXT is the only place a reader learns who wrote it. The first
+ * non-empty line of every body this tool writes — `--comment` and `--body` alike — is `LANE#N · ACCOUNT · SESSION`,
+ * read by `readSignatureLine` (`check-half-states.mjs`, whose banner carries the shape and the ruling); a body whose
+ * first line is not one is `EXIT_REFUSED` before any request, a dry run included. It is judged beside the stamp
+ * contract, not behind it, so a body missing both hears both. ⛔ Nothing inserts the line: a `--sign-from` that
+ * fills it from the seat's roster entry is the ruling's optional half and is not built — the refusal prints the
+ * shape, and the seat types one line. Every first-line recogniser skips one leading signature line
+ * (`stripSignatureLine`), so a signed record reads exactly as the unsigned one did.
+ *
  * ## A decision analysis carries its four-facet marker, or the comment is refused (#23420)
  *
  * A comment whose decision frame, options and recommendation make it a decision analysis is `EXIT_REFUSED` before any
@@ -941,9 +952,13 @@ import {
   protocolStamps,
   proxyRearmPlan,
   resolveSweepRepo,
+  signatureRefusal,
+  signatureRefusalText,
+  SEAT_SIGNATURE_SHAPE,
   stampDriftMinutes,
   stampSpan,
   stripMarkdownCode,
+  stripSignatureLine,
   threadReadField,
 } from './check-half-states.mjs';
 import { readClause2Line } from './clause2-line.mjs';
@@ -2393,7 +2408,9 @@ function signalsIn(lines) {
  */
 export function decisionAnalysisSignals(body) {
   const code = stripMarkdownCode(String(body ?? ''));
-  const lines = code.split(/\r?\n/u);
+  // The opening line a frame may sit on is the one AFTER a leading signature line (`stripSignatureLine`, #27113); the
+  // marker below keeps reading the whole of `code`, the composition `carriesFacetMarker` reads.
+  const lines = stripSignatureLine(code).split(/\r?\n/u);
   const level = lines.map((line) => /^ {0,3}(#{1,6})[ \t]/u.exec(line)?.[1].length ?? 0);
   const nextHeading = (from, atOrAbove) => {
     for (let j = from + 1; j < lines.length; j++) if (level[j] > 0 && level[j] <= atOrAbove) return j;
@@ -3782,6 +3799,8 @@ const USAGE = [
   '  with no time behind it. Quote the token AND stamp the artefact — a `{{WAS:…}}` outside the quotation',
   '  is a stamp, so a body that quotes the contract beside a declaration is accepted. A body that spells',
   '  no token at all is unchanged.',
+  `  The FIRST non-empty line of every body, comment or card body, is the seat's signature — ${SEAT_SIGNATURE_SHAPE} —`,
+  '  and a body without one is REFUSED, the stamp contract\'s refusals listed beside it; nothing inserts it for you.',
   '  A body refresh is REFUSED while comments newer than the body\'s last write stamp exist and',
   '  --ack-through=ID does not name the newest of them — a refresh must not void an unread knock.',
   '  A `Claim:` comment\'s `Seat:`, `Thread-read:`, `Clause-②:` and `Container & model:` lines are read here by the',
@@ -3832,8 +3851,11 @@ async function main(argv) {
   }
 
   const rendered = renderBody(input);
-  if (!rendered.ok) {
-    console.error(rendered.error);
+  // The signature (#27113), judged BESIDE the render rather than behind it, on both modes: one exit, and a body that
+  // breaks the stamp contract AND carries no signature is told both. An empty body is told it is empty, once.
+  const unsigned = rendered.kind === 'empty' ? null : signatureRefusal(input);
+  if (!rendered.ok || unsigned !== null) {
+    console.error([...(rendered.ok ? [] : [rendered.error]), ...(unsigned === null ? [] : [signatureRefusalText(unsigned, { tool: 'post-stamped' })])].join('\n\n'));
     return EXIT_REFUSED;
   }
 
@@ -4426,7 +4448,7 @@ export function selfTest() {
   // Structural: a predicate nobody is told about is a predicate nobody can act
   // on, so the verdict reaches `$?`, the dry run, `--json` and the read-back.
   const stampSource = readFileSync(SELF_PATH, 'utf8');
-  t('structural: a refused render returns EXIT_REFUSED from the CLI, with nothing written', /if \(!rendered\.ok\) \{\n\s+console\.error\(rendered\.error\);\n\s+return EXIT_REFUSED;/u.test(stampSource));
+  t('structural: a refused render — or an unsigned body, beside it — returns EXIT_REFUSED from the CLI, with nothing written', /if \(!rendered\.ok \|\| unsigned !== null\) \{\n\s+console\.error\(\[\.\.\.\(rendered\.ok \? \[\] : \[rendered\.error\]\)[^\n]*\n\s+return EXIT_REFUSED;/u.test(stampSource));
   t('structural: the DRY RUN line names the verdict, so a caller reads it BEFORE a write', /Stamp verdict: \$\{rendered\.verdict\}/u.test(stampSource));
   t('structural: `--json` carries the verdict and the token count for a script to read', /stamp_verdict: rendered\.verdict,/u.test(stampSource) && /verbatim_tokens: rendered\.verbatimTokens,/u.test(stampSource));
   t('structural: the read-back is HANDED the counts its line needs, never left to guess', /verbatimTokens: rendered\.verbatimTokens,/u.test(stampSource));
