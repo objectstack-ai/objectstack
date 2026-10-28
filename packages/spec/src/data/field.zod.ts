@@ -543,7 +543,7 @@ const CURRENCY_CONFIG_FIXED_WITHOUT_CODE =
   '`currencyConfig.currencyMode: \'fixed\'` needs `defaultCurrency`, the field\'s one currency: '
   + 'give its ISO 4217 code (e.g. `defaultCurrency: \'USD\'`), or use `currencyMode: \'dynamic\'` '
   + 'to display amounts in the tenant default currency (the `localization.currency` setting). '
-  + 'Nothing fills a code in.';
+  + 'Since @objectstack/spec 18 (ADR-0049) nothing fills a code in; it used to be `\'CNY\'`.';
 
 /** `fixed` ⇒ an authored `defaultCurrency`; `dynamic` reads none, so it needs none. */
 function refuseFixedCurrencyWithoutCode(
