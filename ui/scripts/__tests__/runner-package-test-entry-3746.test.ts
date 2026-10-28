@@ -72,7 +72,6 @@ const TEST_FILE = /\.test\.[cm]?[jt]sx?$/;
  * file must not become a reason to touch these packages out of band.
  */
 const BARE_ENTRY_BASELINE = [
-  'packages/plugin-ai',
   'packages/plugin-chatbot',
   'packages/plugin-designer',
   'packages/plugin-editor',

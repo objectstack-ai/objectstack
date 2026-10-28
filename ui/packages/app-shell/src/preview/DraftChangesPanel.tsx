@@ -44,7 +44,7 @@ import {
 } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { useAdapter } from '@object-ui/react';
-import type { MetadataClient } from '@object-ui/data-objectstack';
+import { readDraftChanges, type DraftChange, type MetadataClient } from '@object-ui/data-objectstack';
 // The `/meta` URL-spelling fold (objectstack#7894, objectstack-ai/objectstack#8424), applied once in
 // `listPendingDrafts` below.
 //
@@ -239,6 +239,19 @@ async function fetchItemBody(
   name: string,
   opts: { draft?: boolean; packageId?: string | null; member?: string } = {},
 ): Promise<Record<string, unknown> | null> {
+  return (await fetchItemRead(type, name, opts))?.body ?? null;
+}
+
+/**
+ * The item read {@link fetchItemBody} unwraps, with the `draftChanges` the
+ * strict draft read serves beside `item` (objectstack#24298) — `null` when it
+ * served none ("not recorded"), and always on the published read.
+ */
+async function fetchItemRead(
+  type: string,
+  name: string,
+  opts: { draft?: boolean; packageId?: string | null; member?: string } = {},
+): Promise<{ body: Record<string, unknown> | null; changes: DraftChange[] | null } | null> {
   // `type` is already the canonical singular — folded in `listPendingDrafts`.
   const params: string[] = [];
   if (opts.draft) params.push('state=draft');
@@ -254,7 +267,32 @@ async function fetchItemBody(
   );
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return unwrapItem(await res.json());
+  const payload = await res.json();
+  return { body: unwrapItem(payload), changes: opts.draft ? readDraftChanges(payload) : null };
+}
+
+/**
+ * objectstack#27176 — who of the AI tools drafted part of this item, as the
+ * drill-in names them: the AI copilot once, and each MCP client once (by its
+ * OAuth client id; a client that registered no name, and an `mcp` write that
+ * recorded no client, fold into one unnamed entry). In the order the entries
+ * first name them. `studio` and `api` writes are a person's or another
+ * caller's, and are not listed: the row's own `updatedBy` already names who.
+ */
+export type DraftAgentSource = { by: 'copilot' } | { by: 'mcp'; client?: string };
+
+export function draftAgentSources(changes: readonly DraftChange[] | null | undefined): DraftAgentSource[] {
+  const out: DraftAgentSource[] = [];
+  const seen = new Set<string>();
+  for (const change of changes ?? []) {
+    if (change.by !== 'copilot' && change.by !== 'mcp') continue;
+    const name = change.by === 'mcp' ? change.client?.name : undefined;
+    const key = change.by === 'copilot' ? 'copilot' : name ? `mcp:${change.client!.id}` : 'mcp';
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(change.by === 'copilot' ? { by: 'copilot' } : name ? { by: 'mcp', client: name } : { by: 'mcp' });
+  }
+  return out;
 }
 
 export interface EntryChangeDetail {
@@ -677,6 +715,7 @@ function EntryDetail({
 }) {
   const { t } = useObjectTranslation();
   const [detail, setDetail] = useState<EntryChangeDetail | null>(null);
+  const [agents, setAgents] = useState<DraftAgentSource[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [candidates, setCandidates] = useState<Array<{ field: string; value: unknown }>>([]);
   const [recordCount, setRecordCount] = useState<number | undefined>(undefined);
@@ -703,7 +742,7 @@ function EntryDetail({
     let cancelled = false;
     (async () => {
       try {
-        const [published, draft] = await Promise.all([
+        const [published, draftRead] = await Promise.all([
           // A NEW item has no published body: not asked
           // (objectstack-ai/objectstack#25894). An item the
           // classification could not answer still 404s here when it is new —
@@ -711,14 +750,16 @@ function EntryDetail({
           classifiedNew
             ? null
             : fetchItemBody(entry.type, entry.name, { packageId: entry.packageId, member: entry.member }),
-          fetchItemBody(entry.type, entry.name, {
+          fetchItemRead(entry.type, entry.name, {
             draft: true,
             packageId: entry.packageId,
             member: entry.member,
           }),
         ]);
         if (cancelled) return;
+        const draft = draftRead?.body ?? null;
         const computed = computeChangeDetail(published, draft);
+        setAgents(draftAgentSources(draftRead?.changes));
         setDetail(computed);
         // Only an object's added fields can be backfilled (objectui#12929).
         setCandidates(
@@ -773,6 +814,23 @@ function EntryDetail({
 
   const { fields, keys, generated, isNew } = detail;
   const hasKeyRows = keys.added.length > 0 || keys.changed.length > 0 || keys.removed.length > 0;
+  // objectstack#27176 — which AI tools drafted part of this item, one line each.
+  const agentLines = agents.map((source) => (
+    <p
+      key={source.by === 'mcp' ? `mcp:${source.client ?? ''}` : 'copilot'}
+      className="text-xs text-muted-foreground"
+      data-testid="draft-entry-agent"
+    >
+      {source.by === 'copilot'
+        ? t('preview.changes.draftedByCopilot', { defaultValue: 'Includes changes drafted by the AI copilot' })
+        : source.client
+          ? t('preview.changes.draftedByMcpClient', {
+              client: source.client,
+              defaultValue: 'Includes changes drafted by the MCP client “{{client}}”',
+            })
+          : t('preview.changes.draftedByMcp', { defaultValue: 'Includes changes drafted by an MCP client' })}
+    </p>
+  ));
   if (isEmptyChangeDetail(detail)) {
     return (
       <p className="px-2 py-1 text-xs text-muted-foreground">
@@ -785,6 +843,7 @@ function EntryDetail({
 
   return (
     <div className="flex flex-col gap-0.5 px-2 py-1" data-testid="draft-entry-detail">
+      {agentLines}
       {fields?.added.map((name) => {
         const candidate = backfill ? candidates.find((c) => c.field === name) : undefined;
         const choice: DraftBackfillEntry = { object: entry.name, field: name };

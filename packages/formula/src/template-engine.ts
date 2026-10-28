@@ -37,6 +37,7 @@ type Formatter = (
   arg: string | undefined,
   locale: string,
   timeZone?: string,
+  currency?: string,
 ) => string;
 
 function asNumber(v: unknown): number | undefined {
@@ -68,20 +69,25 @@ const FORMATTERS: Record<string, Formatter> = {
     return new Intl.NumberFormat(locale, digits !== undefined && !Number.isNaN(digits)
       ? { minimumFractionDigits: digits, maximumFractionDigits: digits } : {}).format(n);
   },
-  // currency | currency:EUR  → no argument formats in USD; an argument is a
-  // literal ISO 4217 code. An argument that is not one (a path such as
+  // currency | currency:EUR  → no argument formats in the tenant default
+  // currency (`localization.currency`, handed in by the caller); an argument
+  // is a literal ISO 4217 code. An argument that is not one (a path such as
   // `currency_code`, a lowercase or empty code) is refused when the template
   // is compiled or published (`judgeHoleFormatter`), and refused here too: it
   // throws rather than format the amount in a currency nobody wrote. The mail
   // dialect's `currency:@path` form is resolved by the mail renderer, which
   // hands this formatter the code it read; this formatter never reads a path.
-  currency: (v, arg, locale) => {
+  // With no argument and no tenant default it throws as well, whatever the
+  // value: there is no currency to format in, and none is guessed.
+  currency: (v, arg, locale, _timeZone, currency) => {
     if (arg !== undefined && !isCurrencyCode(arg)) {
       throw new RangeError(currencyArgumentRefusal(`currency:${arg}`, arg));
     }
+    const refusal = arg === undefined ? currencyDefaultRefusal('`currency`', currency) : null;
+    if (refusal) throw new RangeError(refusal);
     const n = asNumber(v);
     if (n === undefined) return baseString(v);
-    const code = arg !== undefined ? arg.trim() : 'USD';
+    const code = (arg ?? currency!).trim();
     return new Intl.NumberFormat(locale, { style: 'currency', currency: code }).format(n);
   },
   // percent | percent:1  → 0.42 → "42%" (value is a 0..1 ratio)
@@ -145,8 +151,14 @@ export const TEMPLATE_FORMATTERS: string[] = Object.keys(FORMATTERS);
 // both template dialects: this engine's (in-app slots, ADR-0032 §3) and the
 // mail renderer's (`mail-hole-grammar.ts`, read by `@objectstack/plugin-email`
 // and by `@objectstack/lint`'s email template rule). Each dialect parses its
-// own path; what follows the first `|` is judged here, once.
+// own path; what follows the first `|` is split into a name and an argument
+// by `splitHoleFormatter` and judged here, once, so the two dialects accept
+// exactly the same formatter parts.
 //
+// - A formatter is a name of one word, optionally followed by `:` and its
+//   argument. The mail renderer used to print any other text after the `|`
+//   (`{{ due | date-long }}`, `{{ x | two words }}`) to the reader as
+//   written, while this engine refused it.
 // - One formatter per hole. A second `|` used to be read as part of the first
 //   formatter's argument, so `{{ x | default:0 | number:2 }}` rendered the
 //   text `0 | number:2` — formatter syntax printed to the reader — and
@@ -166,6 +178,8 @@ export const TEMPLATE_FORMATTERS: string[] = Object.keys(FORMATTERS);
 /** The rule a refused hole breaks. */
 export type TemplateHoleGrammarRule =
   | 'one-formatter'
+  | 'formatter-shape'
+  | 'known-formatter'
   | 'currency-code-literal'
   | 'currency-code-path-mail-only'
   | 'currency-code-path-undeclared';
@@ -187,6 +201,34 @@ export interface TemplateHoleGrammarRefusal {
   message: string;
 }
 
+/** A formatter name as a hole writes one; any other text after the `|` names no formatter. */
+const WORD_RE = /^\w+$/;
+
+/** A hole's formatter part, split into the formatter name and its argument. */
+export interface HoleFormatterParts {
+  /** The text before the first `:`, trimmed: the formatter name when the hole is well formed. */
+  name: string;
+  /** The text after the first `:`, trimmed, one enclosing quote mark removed at each end; absent when no `:` was written. */
+  arg?: string;
+}
+
+/**
+ * Split a hole's formatter part (the text after its first `|`, trimmed) into
+ * a name and an argument — the one tokenizer both template dialects read, so
+ * a formatter part one of them accepts is never one the other refuses or
+ * prints. `currency :EUR` is `currency` with `EUR`, and `default:'n/a'` and
+ * `default:"n/a"` both give `n/a`. The name is judged by
+ * {@link judgeHoleFormatter}.
+ */
+export function splitHoleFormatter(formatterPart: string): HoleFormatterParts {
+  const colon = formatterPart.indexOf(':');
+  if (colon === -1) return { name: formatterPart };
+  return {
+    name: formatterPart.slice(0, colon).trim(),
+    arg: formatterPart.slice(colon + 1).trim().replace(/^['"]|['"]$/g, ''),
+  };
+}
+
 /** An ISO 4217 alphabetic code: three capital letters, the form `Intl` formats with. */
 const CURRENCY_CODE_RE = /^[A-Z]{3}$/;
 
@@ -196,6 +238,36 @@ function isCurrencyCode(arg: string): boolean {
 
 /** The dialect a hole is judged in: the in-app template engine's (the default) or a mail template's. */
 export type TemplateHoleDialect = 'in-app' | 'mail';
+
+/**
+ * Why a `currency` hole with no argument cannot be formatted, or `null` when
+ * it can: such a hole formats in the tenant default currency
+ * (`localization.currency`), so it is formatted only when the caller supplied
+ * one that is an ISO 4217 code in three capitals. Every renderer that refuses
+ * such a hole (the in-app engine, the mail renderer) shows this sentence; the
+ * mail dialect's remedy also names the `currency:@path` form.
+ *
+ * @param hole     the hole as written, braces included, or the formatter's name when no hole text is at hand
+ * @param currency the tenant default currency the caller supplied, if any
+ * @param dialect  `'mail'` names the `currency:@path` form in the remedy; the in-app dialect (the default) does not
+ */
+export function currencyDefaultRefusal(
+  hole: string,
+  currency: unknown,
+  dialect: TemplateHoleDialect = 'in-app',
+): string | null {
+  if (typeof currency === 'string' && isCurrencyCode(currency)) return null;
+  const remedy = dialect === 'mail'
+    ? 'name the currency in the hole: a literal ISO 4217 code in three capital letters (`currency:EUR`), or '
+      + '`@` followed by a path into the send\'s data whose value is such a code (`currency:@currency_code`).'
+    : 'name the currency in the hole with a literal ISO 4217 code in three capital letters (`currency:EUR`).';
+  return (
+    `the hole ${hole} has no currency argument, so it formats in the tenant default currency (the `
+    + '`localization.currency` setting), and no tenant default currency reached this render: the '
+    + 'organization has none set, or the caller did not supply it. The amount is not formatted in any '
+    + `currency. Set the default currency in Setup → Localization, or ${remedy}`
+  );
+}
 
 function currencyArgumentRefusal(hole: string, arg: string, dialect: TemplateHoleDialect = 'in-app'): string {
   if (dialect === 'mail') {
@@ -284,6 +356,15 @@ function chainsASecondFormatter(formatterPart: string): boolean {
 /**
  * Judge one hole's formatter against the grammar both template dialects share.
  *
+ * The name ({@link splitHoleFormatter}) must be one word (`formatter-shape`):
+ * the mail renderer used to print `{{ due | date-long }}` to the reader as
+ * written; the in-app dialect refuses such a hole in its own parse and keeps
+ * its own wording. A formatter the hole names must be one {@link TEMPLATE_FORMATTERS} holds
+ * (`known-formatter`). The mail renderer used to print the raw value for any
+ * other name, so `{{ amount | curency:EUR }}` sent `1234.5` where money was
+ * meant; the in-app dialect refuses such a hole in its own parse, before this
+ * rule's sentence is read, and keeps its own wording.
+ *
  * @param hole          the hole as written, braces included — the refusal names it
  * @param formatterPart the text after the hole's first `|`, trimmed
  * @param formatter     the formatter name the dialect parsed
@@ -307,6 +388,26 @@ export function judgeHoleFormatter(
         + '`{{ path | formatter[:arg] }}`, and the text after the second `|` is never applied. Keep one '
         + 'formatter here, and do any further formatting or branching in the caller that supplies the data, '
         + 'passing the finished value as its own variable.',
+    };
+  }
+  if (!WORD_RE.test(formatter)) {
+    return {
+      rule: 'formatter-shape',
+      message:
+        `the hole ${hole} ${formatter === '' ? 'writes no formatter name after the `|`' : `writes '${formatter}' where the formatter name goes`}, `
+        + 'so it would never format the value: a formatter is one word, optionally followed by `:` and its '
+        + `argument, \`{{ path | formatter[:arg] }}\`. Known formatters: ${TEMPLATE_FORMATTERS.join(', ')}. Write one `
+        + 'of them, or format the value in the caller that supplies the data and pass the finished text as its own '
+        + 'variable.',
+    };
+  }
+  if (!TEMPLATE_FORMATTERS.includes(formatter)) {
+    return {
+      rule: 'known-formatter',
+      message:
+        `the hole ${hole} names the formatter '${formatter}', which is not a template formatter, so it would `
+        + `never format the value. Known formatters: ${TEMPLATE_FORMATTERS.join(', ')}. Correct the name, or `
+        + 'format the value in the caller that supplies the data and pass the finished text as its own variable.',
     };
   }
   if (formatter === 'currency' && arg !== undefined && !isCurrencyCode(arg)) {
@@ -337,16 +438,20 @@ export function judgeHoleFormatter(
  * Exported so renderers that don't run the full CEL template engine — notably
  * the email pipeline (ADR-0053 Phase 2 slice 4) — format dates, money, etc.
  * identically to in-app templates, including reference-timezone `datetime`.
+ *
+ * `opts.currency` is the tenant default currency a `currency` with no
+ * argument formats in. Without one, that call throws a `RangeError` carrying
+ * {@link currencyDefaultRefusal}'s sentence: it never picks a currency.
  */
 export function formatValue(
   name: string,
   value: unknown,
   arg: string | undefined,
-  opts: { locale?: string; timeZone?: string } = {},
+  opts: { locale?: string; timeZone?: string; currency?: string } = {},
 ): string | undefined {
   const fmt = FORMATTERS[name];
   if (!fmt) return undefined;
-  return fmt(value, arg, opts.locale ?? 'en-US', opts.timeZone);
+  return fmt(value, arg, opts.locale ?? 'en-US', opts.timeZone, opts.currency);
 }
 
 function baseString(value: unknown): string {
@@ -408,19 +513,22 @@ function parseHole(inner: string): ParsedHole | null {
   if (!PATH_ONLY_RE.test(path)) return null;
   const filterPart = inner.slice(pipe + 1).trim();
   // `name` or `name:arg` or `name:'arg'`
-  const colon = filterPart.indexOf(':');
-  let name = filterPart;
-  let arg: string | undefined;
-  if (colon !== -1) {
-    name = filterPart.slice(0, colon).trim();
-    arg = filterPart.slice(colon + 1).trim().replace(/^['"]|['"]$/g, '');
-  }
+  const { name, arg } = splitHoleFormatter(filterPart);
   const refusal = judgeHoleFormatter(`{{${inner}}}`, filterPart, name, arg);
   // A chained hole is refused by the one-formatter rule before its first
   // formatter's name is looked up (`upper | lower` names no formatter).
   if (refusal?.rule === 'one-formatter') return { path, refusal };
   if (!FORMATTERS[name]) return null;
   return { path, filter: { name, arg }, ...(refusal ? { refusal } : {}) };
+}
+
+/** The first hole of `source` that is `currency` with no argument, as written, braces included. */
+function firstTenantCurrencyHole(source: string): string | undefined {
+  for (const m of source.matchAll(HOLE_RE)) {
+    const parsed = parseHole(m[1]);
+    if (parsed?.filter?.name === 'currency' && parsed.filter.arg === undefined) return m[0];
+  }
+  return undefined;
 }
 
 function compileTemplate(source: string): EvalResult<ParsedHole[]> {
@@ -474,6 +582,16 @@ export const templateEngine: DialectEngine = {
     const check = compileTemplate(expr.source);
     if (!check.ok) return check as EvalResult<T>;
 
+    // Tenant default currency for a `currency` hole with no argument: the
+    // context's reserved `currency` channel only, never a root. Without one
+    // such a hole refuses the whole sentence, before anything is rendered.
+    const currency = typeof ctx.currency === 'string' ? ctx.currency : undefined;
+    const currencyHole = firstTenantCurrencyHole(expr.source);
+    const currencyRefusal = currencyHole === undefined ? null : currencyDefaultRefusal(currencyHole, currency);
+    if (currencyRefusal) {
+      return { ok: false, error: { kind: 'runtime', message: `invalid template hole: ${currencyRefusal}` } };
+    }
+
     const scope = buildScope(ctx);
     // Formatter locale: the context's reserved `locale` channel only, never a
     // root — a root named `locale` is a value like any other (#26232).
@@ -487,7 +605,7 @@ export const templateEngine: DialectEngine = {
       if (!parsed) return _match; // compile already validated; defensive
       const value = resolvePath(scope, parsed.path);
       if (parsed.filter) {
-        return FORMATTERS[parsed.filter.name](value, parsed.filter.arg, locale, timeZone);
+        return FORMATTERS[parsed.filter.name](value, parsed.filter.arg, locale, timeZone, currency);
       }
       return baseString(value);
     });

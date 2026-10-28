@@ -356,7 +356,10 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // („{{title}}“) — one interpolated span each, runtime data.
     // 97 once objectstack-ai/objectstack#26469 reworded
     // `chatbot.build.draftPosture` to name the chat's „Veröffentlichen“ button.
-    expect(okSpans, 'correctly paired spans').toBe(97);
+    // 98 once objectstack-ai/objectstack#27176 added
+    // `preview.changes.draftedByMcpClient`, the changes drawer's line that names
+    // the MCP client („{{client}}“) — one interpolated span, runtime data.
+    expect(okSpans, 'correctly paired spans').toBe(98);
   });
 
   it('keeps the count identity that replaces the card’s count(„) === count(“)', () => {
@@ -422,8 +425,9 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // after objectstack-ai/objectstack#26172 added `form.createdNamed` and
     // `.updatedNamed`, one matched pair each. 97 / 97 / 0 after
     // objectstack-ai/objectstack#26469 reworded `chatbot.build.draftPosture`,
-    // one more matched pair.
-    expect({ open, close, rdq }).toEqual({ open: 97, close: 97, rdq: 0 });
+    // one more matched pair. 98 / 98 / 0 after objectstack-ai/objectstack#27176
+    // added `preview.changes.draftedByMcpClient`, one more matched pair.
+    expect({ open, close, rdq }).toEqual({ open: 98, close: 98, rdq: 0 });
     // The durable shape: every „ closed by a “, every surplus “ an English
     // opener answered by a ”. Survived translating the two English values.
     expect(close).toBe(open + rdq);

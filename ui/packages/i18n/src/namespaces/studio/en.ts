@@ -1460,6 +1460,7 @@ const STUDIO_EN: Record<string, string> = {
   // Flow reference picker — ReferenceCombobox / FlowReferenceField (objectui#10586)
   'engine.inspector.reference.pickFromRecords': 'Pick from records',
   'engine.inspector.reference.pickFromRegistry': 'Pick from declared items',
+  'engine.inspector.reference.pickFromQueues': 'Pick from the queues',
   'engine.inspector.reference.enterManually': 'Enter value manually',
   'engine.inspector.reference.managerPlaceholder': 'Resolved automatically',
   'engine.inspector.reference.managerHint': "Resolved at runtime from the submitter's manager — no value needed.",
@@ -3190,10 +3191,14 @@ const STUDIO_EN: Record<string, string> = {
   // objectui#12725 — the copilot's draft marks on a field or a view setting it changed.
   'engine.studio.draftMark.chip': 'Draft',
   'engine.studio.draftMark.sourceLabel': 'Source',
-  'engine.studio.draftMark.source': 'Added as a draft by the AI copilot {when}',
-  'engine.studio.draftMark.sourceJustNow': 'Added as a draft by the AI copilot just now',
-  'engine.studio.draftMark.sourceItems': '{items}: {count} added as a draft by the AI copilot {when}',
-  'engine.studio.draftMark.sourceItemsJustNow': '{items}: {count} added as a draft by the AI copilot just now',
+  'engine.studio.draftMark.source': 'Added as a draft by {agent} {when}',
+  'engine.studio.draftMark.sourceJustNow': 'Added as a draft by {agent} just now',
+  'engine.studio.draftMark.sourceItems': '{items}: {count} added as a draft by {agent} {when}',
+  'engine.studio.draftMark.sourceItemsJustNow': '{items}: {count} added as a draft by {agent} just now',
+  // objectstack#27176 — who drafted it: the copilot, or an agent through the MCP build door.
+  'engine.studio.draftMark.agent.copilot': 'the AI copilot',
+  'engine.studio.draftMark.agent.mcp': 'an MCP client',
+  'engine.studio.draftMark.agent.mcpClient': 'the MCP client "{client}"',
   'engine.studio.draftMark.item': '"{label}"',
   'engine.studio.draftMark.minutesAgo': '{n} min ago',
   'engine.studio.draftMark.hoursAgo': '{n} h ago',

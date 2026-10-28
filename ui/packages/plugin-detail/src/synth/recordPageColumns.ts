@@ -35,7 +35,7 @@
  * opt-in rail and the `rightRail` slot that used to add an `aside`).
  *
  * A page this module cannot read — no synthesized tab strip, or a tab whose
- * value it does not know (an authored `slots.tabs` strip) — answers `null`,
+ * value it does not know (an authored strip) — answers `null`,
  * and the host draws the tabs. Tabs are the correct rendering of any strip.
  */
 

@@ -524,27 +524,21 @@ describe('buildDefaultPageSchema', () => {
       expect(firstBodyType).toBe('div');
     });
 
-    it('tabs slot wins over details slot when both provided', () => {
-      // Authored verbatim, in the caller's own spelling: a slot node is the
-      // author's, and the synthesizer places it UNTOUCHED — it does not
-      // re-shape someone else's tree (objectui#4232 canonicalizes the nodes
-      // this file BUILDS, not the ones it is handed).
+    it('reads no `tabs` slot: a stray one is ignored and the details slot applies (objectstack#27053)', () => {
+      // The spec retired `slots.tabs` (a tombstone refuses it at parse), so the
+      // synthesizer composes from the six live slots only. A slot map that
+      // still carries one, unparsed, keeps the synthesized strip.
       const slotNode = { type: 'page:tabs', items: [{ label: 'Only', children: [] }] };
       const page = buildDefaultPageSchema(leadDef, {
         slots: {
           tabs: slotNode,
-          details: { type: 'div', id: 'unused' },
-        },
+          details: { type: 'div', id: 'used' },
+        } as any,
       });
       const tabs = page.regions[0].components.find((c: any) => c.type === 'page:tabs');
-      expect(tabs).toEqual(slotNode);
-      expect(tabs.items).toHaveLength(1);
-      expect(tabs.items[0].label).toBe('Only');
-      // details slot was not applied
-      const hasUnused = page.regions[0].components.some(
-        (c: any) => c.id === 'unused',
-      );
-      expect(hasUnused).toBe(false);
+      expect(tabs).not.toBe(slotNode);
+      expect(tabItems(tabs).map((t: any) => t.label)).not.toEqual(['Only']);
+      expect(tabItems(tabs)[0].children).toEqual([{ type: 'div', id: 'used' }]);
     });
 
     it('discussion slot overrides even when hideDiscussion is true — as the Timeline tab (objectstack#27055)', () => {

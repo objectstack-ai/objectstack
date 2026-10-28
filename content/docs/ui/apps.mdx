@@ -749,6 +749,62 @@ in 17.1). Both the app and `branding` are strict: a top-level `logo` or `theme` 
 refused with a pointer to `branding`, and a misspelled key inside `branding` is
 refused rather than dropped.
 
+## Contributing navigation to another app
+
+A package can add menu entries to an app it does not own with
+`navigationContributions` (ADR-0029 D7). The Setup app is built this way: it ships
+as a shell of empty group anchors, and each capability plugin contributes the
+entries for the objects it owns, so the rendered menu always matches the loaded
+plugins. A disabled plugin contributes nothing and its slot stays empty.
+
+```typescript
+navigationContributions: [
+  {
+    app: 'setup',
+    group: 'group_integrations',
+    priority: 100,
+    items: [
+      { id: 'nav_webhooks', type: 'object', label: 'Webhooks', objectName: 'sys_webhook', requiresObject: 'sys_webhook' },
+    ],
+  },
+]
+```
+
+| Property | Type | Description |
+| :--- | :--- | :--- |
+| `app` | `string` | The target app's name, e.g. `setup` |
+| `group` | `string` | optional. A group nav item id in the target app; omit it to append at the app's top level |
+| `priority` | `number` | Merge order within the group, lower first (default `200`, the object-extender convention) |
+| `items` | `NavigationItem[]` | Ordinary [navigation items](#navigation-items), with the usual `requiresObject`, `requiredPermissions` and `visible` gates |
+
+The runtime merges every contribution into the target app's `navigation` by group
+id and priority when the app is read, so registration order does not matter.
+
+**A group id the target app does not declare is not refused.** The items are
+appended at the app's top level and a `nav_contribution_group_missing` diagnostic
+is raised, at `warn` by the runtime and as a warning by `os build` and
+`os validate` when both packages are composed into one artifact. Neither fails
+the build. The anchor id is the whole contract between the shell and its
+contributors, and a typo renders a working menu with the entry one level up, so
+read that warning.
+
+The Setup app's anchors:
+
+| Group id | Holds |
+| :--- | :--- |
+| `group_overview` | System Overview dashboard |
+| `group_apps` | Packages and the marketplace |
+| `group_people_org` | Users, organizations, business units, teams, invitations |
+| `group_access_control` | Positions, permission sets, sharing rules, API keys |
+| `group_approvals` | Approvals inbox, requests, history, delegations |
+| `group_configuration` | Settings, localization, authentication, email, storage, AI, feature flags, branding |
+| `group_diagnostics` | Sessions, notification events, audit log |
+| `group_integrations` | Webhooks, cloud connection |
+| `group_advanced` | OAuth applications |
+
+Setup is for platform administration and needs `setup.access`. For
+project-specific administration pages, declare an app of your own.
+
 ## Complete Example
 
 {/* os:check */}

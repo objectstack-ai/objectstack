@@ -30,13 +30,20 @@ slotted pages are the right tool.
 | `actions` | `record:quick_actions` (the action bar) |
 | `highlights` | The chips + chevron path strip |
 | `details` | The Details tab body (other tabs stay synthesized) |
-| `tabs` | The entire `page:tabs` node — use to add or reorder tabs (wins over `details`) |
 | `discussion` | `record:discussion` (the inline conversation footer) |
 
 Objects with `enable.files: true` also get a synthesized **Attachments** tab
 (`record:attachments`, with a count badge) beside Details/Related. It is not a
-slot of its own — override `tabs` to reshape it, or pass
-`hideAttachments: true` to the synthesizer to drop it.
+slot of its own — pass `hideAttachments: true` to the synthesizer to drop
+it.
+
+There is no `tabs` slot. The tab strip is composed from the object's fields
+and relationship flags: to change which related lists appear or their order,
+set `relatedList` / `relatedList: 'primary'` on the child's reference field;
+to replace the Details body, author `details`; a page that needs its own strip
+is `kind: "full"`, drawn as authored. A `tabs`, `related` or `relatedLists`
+key under `slots` is refused by name, and `os migrate meta --from 17` drops a
+stored `slots.tabs`.
 
 Each slot accepts a single component schema or an array (arrays are
 flattened in place). Each slot is a **full replacement at the slot
@@ -133,8 +140,9 @@ Attachments and the record's created/updated line); from **1024 px** the
 related column folds into a rail behind a **Related (N)** toggle; below
 1024 px, and always in a drawer or split pane, the strip as described above.
 One header serves every width, and a slotted `details` body fills the details
-column. A slotted `tabs` strip is your own strip, so it stays a strip at every
-width; `?tab=` selects a tab in the strip and is ignored by the columns.
+column. A full page's own `page:tabs` strip is drawn as authored, so it stays
+a strip at every width; `?tab=` selects a tab in the strip and is ignored by
+the columns.
 
 Related lists are additionally gated on the current user's **object-level
 read permission** for the child object: a relationship whose child the user

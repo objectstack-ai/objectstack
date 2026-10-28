@@ -81,19 +81,6 @@ const CALLERS: Record<string, Call[]> = {
   ],
 };
 
-/**
- * Files that call a DIFFERENT function spelled `formatPercent`, named so the
- * exclusion is a decision rather than a blind spot: `plugin-ai` formats a 0–1
- * model confidence through its own module-local helper in
- * `useAiTranslation.ts`, imported from there, not from `@object-ui/fields`.
- */
-const OTHER_FORMAT_PERCENT = new Set([
-  'packages/plugin-ai/src/useAiTranslation.ts',
-  'packages/plugin-ai/src/AIFormAssist.tsx',
-  'packages/plugin-ai/src/AIRecommendations.tsx',
-  'packages/plugin-ai/src/NLQueryInput.tsx',
-]);
-
 const SKIP_DIRS = new Set(['node_modules', 'dist', '__tests__', '__mocks__', 'coverage']);
 const SOURCE_FILE = /\.(ts|tsx|mts|cts)$/;
 const NOT_SOURCE = /\.(test|spec|stories)\.[cm]?tsx?$|\.d\.ts$/;
@@ -212,7 +199,6 @@ describe('every caller of the percent scaling states its storage (objectui#11475
 
   const found: Record<string, Array<{ fn: Call['fn']; args: string[] }>> = {};
   for (const file of files) {
-    if (OTHER_FORMAT_PERCENT.has(file)) continue;
     const calls = callsIn(file);
     if (calls.length > 0) found[file] = calls;
   }
@@ -234,16 +220,5 @@ describe('every caller of the percent scaling states its storage (objectui#11475
       calls.filter((c) => c.args.length < 2).map((c) => `${file}: ${c.fn}(${c.args.join(', ')})`),
     );
     expect(bare).toEqual([]);
-  });
-
-  it('the excluded `formatPercent` really is a different function, imported from its own module', () => {
-    const helper = readFileSync(path.join(repoRoot, 'packages/plugin-ai/src/useAiTranslation.ts'), 'utf8');
-    expect(helper).toMatch(/export function formatPercent\(score: number, locale: string\)/);
-    for (const file of OTHER_FORMAT_PERCENT) {
-      if (file.endsWith('useAiTranslation.ts')) continue;
-      const src = readFileSync(path.join(repoRoot, file), 'utf8');
-      expect(src, file).toMatch(/import \{[^}]*\bformatPercent\b[^}]*\} from '\.\/useAiTranslation'/);
-      expect(src, file).not.toMatch(/from '@object-ui\/fields'[^\n]*formatPercent|formatPercent[^\n]*from '@object-ui\/fields'/);
-    }
   });
 });

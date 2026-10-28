@@ -1,0 +1,172 @@
+---
+title: "Layout and basic components — component reference"
+navTitle: "Layout & Basic"
+description: "The layout primitives and basic display components: flex, grid, stack, card, tabs, text, button and more."
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Generated from sdui.manifest.json by node scripts/gen-sdui-reference.mjs; change the manifest or the generator, never this page. */}
+
+These are the layout primitives and basic display components. The containers among them take child components; the rest draw text, images, icons, badges and buttons.
+
+<Callout type="info">
+This page is generated from the repo-root `sdui.manifest.json`, the component manifest CI
+regenerates from the renderer registry. Regenerate it with
+`node scripts/gen-sdui-reference.mjs`; `node scripts/gen-sdui-reference.mjs --check` fails when it is stale.
+</Callout>
+
+## `accordion` [#accordion]
+
+Namespace `ui`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `accordionType` | `enum`: `single`, `multiple` |  | — |
+| `collapsible` | `boolean` |  | — |
+| `items` | `array` |  | Array of \{ trigger, content, value \} |
+| `className` | `string` |  | — |
+
+## `alert` [#alert]
+
+Namespace `ui`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `title` | `string` | yes | — |
+| `description` | `string` |  | — |
+| `variant` | `enum`: `default`, `destructive` |  | — |
+| `className` | `string` |  | — |
+| `children` | `slot` |  | Rich description content, rendered when `description` is not set |
+
+## `badge` [#badge]
+
+Namespace `ui`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `label` | `string` |  | — |
+| `variant` | `enum`: `default`, `secondary`, `destructive`, `outline` |  | — |
+| `className` | `string` |  | — |
+| `children` | `slot` |  | Rich label content, rendered when `label` is not set |
+
+## `box` [#box]
+
+Namespace `ui` · a container: it takes child components.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `className` | `string` |  | — |
+| `children` | `slot` |  | — |
+
+## `button` [#button]
+
+Namespace `ui`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `label` | `string` |  | — |
+| `variant` | `enum`: `default`, `secondary`, `destructive`, `outline`, `ghost`, `link` |  | — |
+| `size` | `enum`: `default`, `sm`, `lg`, `icon` |  | — |
+| `className` | `string` |  | — |
+| `children` | `slot` |  | Rich label content, rendered when `label` is not set |
+
+## `card` [#card]
+
+Namespace `ui` · a container: it takes child components.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `title` | `string` |  | — |
+| `description` | `string` |  | — |
+| `className` | `string` |  | — |
+| `children` | `slot` |  | — |
+
+## `container` [#container]
+
+Namespace `ui` · a container: it takes child components.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `maxWidth` | `enum`: `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]` |  | — |
+| `padding` | `enum`: `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]` |  | Padding step on the container spacing scale; 0 is none. Default 4. |
+| `centered` | `boolean` |  | — |
+| `className` | `string` |  | — |
+| `children` | `slot` |  | — |
+
+## `flex` [#flex]
+
+Namespace `ui` · a container: it takes child components.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `direction` | `enum`: `row`, `col`, `row-reverse`, `col-reverse` |  | — |
+| `justify` | `enum`: `start`, `end`, `center`, `between`, `around`, `evenly` |  | — |
+| `align` | `enum`: `start`, `end`, `center`, `baseline`, `stretch` |  | — |
+| `gap` | `enum`: `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]` |  | Gap step between items; 0 is none. Default 2. |
+| `wrap` | `boolean` |  | Allow flex items to wrap |
+| `className` | `string` |  | — |
+| `children` | `slot` |  | — |
+
+## `grid` [#grid]
+
+Namespace `ui` · a container: it takes child components.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `columns` | `enum` \| `object`: `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]` |  | Column count, 1 to 12, or an object of such counts keyed by breakpoint (xs, sm, md, lg, xl, 2xl). Default 2. |
+| `gap` | `enum`: `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]` |  | Gap step between items; 0 is none. Default 4. |
+| `className` | `string` |  | — |
+| `children` | `slot` |  | — |
+
+## `icon` [#icon]
+
+Namespace `ui`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `icon` | `string` |  | — |
+| `size` | `number` |  | — |
+| `color` | `string` |  | — |
+| `className` | `string` |  | — |
+
+## `image` [#image]
+
+Namespace `ui`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `src` | `string` |  | — |
+| `alt` | `string` |  | — |
+| `className` | `string` |  | — |
+
+## `stack` [#stack]
+
+Namespace `ui` · a container: it takes child components.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `direction` | `enum`: `col`, `row`, `col-reverse`, `row-reverse` |  | — |
+| `gap` | `enum`: `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]` |  | Gap step between items; 0 is none. Default 2. |
+| `align` | `enum`: `start`, `end`, `center`, `stretch`, `baseline` |  | — |
+| `justify` | `enum`: `start`, `end`, `center`, `between`, `around`, `evenly` |  | — |
+| `className` | `string` |  | — |
+| `children` | `slot` |  | — |
+
+## `tabs` [#tabs]
+
+Namespace `ui`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `defaultValue` | `string` | yes | — |
+| `className` | `string` |  | — |
+| `items` | `array` |  | — |
+
+## `text` [#text]
+
+Namespace `ui`.
+
+| Input | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `content` | `string` | yes | — |
+| `variant` | `enum`: `h1`, `h2`, `h3`, `h4`, `h5`, `h6`, `body`, `caption`, `overline` |  | — |
+| `align` | `enum`: `left`, `center`, `right`, `justify` |  | — |

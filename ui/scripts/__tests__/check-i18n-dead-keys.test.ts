@@ -9,6 +9,7 @@ import {
   DESIGNER_NAMESPACE_HOMES,
   DESIGNER_NAMESPACE_SPECIFIER,
   DESIGNER_TABLE,
+  DESIGNER_TABLE_PAIRS,
   collectDesignerKeys,
   collectIndirectTemplateHeads,
   derivePackObjectImporters,
@@ -17,6 +18,7 @@ import {
   propertyChainProbe,
   sweep,
   sweepDesignerTable,
+  readDesignerPairs,
   textFootprint,
 } from '../check-i18n-dead-keys.mjs';
 import { analyze, collectEnKeys, readVocabulary } from '../check-i18n-call-site-keys.mjs';
@@ -712,8 +714,8 @@ describe('collectDesignerKeys()', () => {
 /**
  * The optional second argument (objectui#8834). Every option defaults to what
  * the dead-keys sweep already did, which is what lets this file stay the ONE
- * reader of these tables — `check-i18n-designer-table-parity.mjs` and the
- * designer population of `check-i18n-en-drift.mjs` both call in here rather
+ * reader of these tables — `readDesignerPairs` and the designer population
+ * of `check-i18n-en-drift.mjs` both call in here rather
  * than growing a second copy of the parse. `changeset-guard.yml:63-72` records
  * what the second copy of a reader costs in this repo.
  */
@@ -820,6 +822,21 @@ describe('collectDesignerKeys() — the namespace homes', () => {
   it('reads no home when the table does not import the namespace, even if the files exist', () => {
     const { tables } = collectDesignerKeys(designerRoot(MOVED));
     expect(tables.get('ENGINE_STRINGS_EN')!.has('designer.fx.moved')).toBe(false);
+  });
+
+  it('a table the module no longer declares is its namespace home alone (objectstack#25922 slice S7)', () => {
+    const TABLELESS = `import { studioString } from '${DESIGNER_NAMESPACE_SPECIFIER}';\nexport const kept = 1;\n`;
+    const { tables, values } = collectDesignerKeys(designerRoot({ [DESIGNER_TABLE]: TABLELESS, ...MOVED }), {
+      withValues: true,
+    });
+    expect([...tables.get('ENGINE_STRINGS_EN')!]).toEqual(['designer.fx.moved']);
+    expect([...tables.get('ENGINE_STRINGS_ZH')!]).toEqual(['designer.fx.moved']);
+    expect(values!.get('ENGINE_STRINGS_EN')!.get('designer.fx.moved')).toBe('Moved');
+  });
+
+  it('a module that neither declares the table nor imports the namespace still throws', () => {
+    const root = designerRoot({ [DESIGNER_TABLE]: 'export const kept = 1;\n', ...MOVED });
+    expect(() => collectDesignerKeys(root)).toThrow(/ENGINE_STRINGS_EN/);
   });
 
   it('throws when the table imports the namespace and a home cannot be read', () => {
@@ -2042,4 +2059,48 @@ export function Widget({ id }: { id: string }) {
       }
     });
   });
+});
+
+/**
+ * objectstack#25922 slice S7 — the pairing invariant the retired
+ * `check-i18n-designer-table-parity.mjs` enforced, held on the REAL tree for
+ * every designer pair (`DESIGNER_TABLE_PAIRS`): the engine strings, which now
+ * live only in the `studio` namespace, and the type and domain label tables,
+ * which stay in the app-shell module. Every `en` key has a `zh` row, and every
+ * shared row carries the same `{placeholders}`, read with `tFormat()`'s own
+ * pattern. The reverse direction (zh-only rows) is not a gap and is not judged:
+ * the namespace's documented zh-only families are
+ * `packages/i18n/src/__tests__/studio-namespace.test.ts`'s.
+ *
+ * Unlike the report-only sweep above, this is an enforcing pin by design, and it
+ * names no key and pins no count: its floors sit far under the real sizes, so
+ * they move for no ordinary string change, and they exist only so a reader that
+ * found nothing cannot pass.
+ */
+describe('the real designer pairs stay paired', () => {
+  const UI_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+  const PLACEHOLDER = /\{(\w+)\}/g;
+  const placeholders = (value: string) => [...new Set(Array.from(value.matchAll(PLACEHOLDER), (m) => m[1]))].sort();
+  const FLOOR: Record<string, number> = { ENGINE_STRINGS: 1500, TYPE_LABELS: 20, DOMAIN_LABELS: 5 };
+  const values = readDesignerPairs(UI_ROOT) as Map<string, Map<string, string>>;
+
+  it('reads every pair in the list', () => {
+    expect(DESIGNER_TABLE_PAIRS.map((pair: { label: string }) => pair.label).sort()).toEqual(Object.keys(FLOOR).sort());
+  });
+
+  it.each(DESIGNER_TABLE_PAIRS.map((pair: { label: string; en: string; zh: string }) => [pair.label, pair]))(
+    '%s: every en key has a zh row with the same {placeholders}',
+    (label, pair) => {
+      const en = values.get(pair.en)!;
+      const zh = values.get(pair.zh)!;
+      expect(en.size).toBeGreaterThanOrEqual(FLOOR[label]);
+      expect([...en.keys()].filter((key) => !zh.has(key))).toEqual([]);
+      expect(
+        [...en.entries()]
+          .filter(([key]) => zh.has(key))
+          .filter(([key, value]) => placeholders(value).join(' ') !== placeholders(zh.get(key)!).join(' '))
+          .map(([key]) => key),
+      ).toEqual([]);
+    },
+  );
 });

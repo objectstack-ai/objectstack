@@ -5,7 +5,7 @@
  *
  * `./index.ts` imports this module only through its lazy loader, so a viewer
  * whose language is not Chinese never downloads it. A key this catalogue does
- * not define renders the `en` row (`./en.ts`); `pnpm check:i18n-designer-parity`
+ * not define renders the `en` row (`./en.ts`); `../../__tests__/studio-namespace.test.ts`
  * holds every `en` key to a row here, with the same `{placeholders}`.
  *
  * ⛔ Keep the declaration `const STUDIO_ZH: Record<string, string> = { … }`
@@ -1312,6 +1312,7 @@ const STUDIO_ZH: Record<string, string> = {
   // Flow reference picker — ReferenceCombobox / FlowReferenceField (objectui#10586)
   'engine.inspector.reference.pickFromRecords': '从记录中选择',
   'engine.inspector.reference.pickFromRegistry': '从已声明的项中选择',
+  'engine.inspector.reference.pickFromQueues': '从队列中选择',
   'engine.inspector.reference.enterManually': '手动输入值',
   'engine.inspector.reference.managerPlaceholder': '自动解析',
   'engine.inspector.reference.managerHint': '运行时根据提交人的上级自动解析 —— 无需填写。',
@@ -2839,10 +2840,14 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.nav.visibleWhen': '可见条件',
   'engine.studio.draftMark.chip': '草稿',
   'engine.studio.draftMark.sourceLabel': '来源',
-  'engine.studio.draftMark.source': '由 AI 副驾在 {when}作为草稿加入',
-  'engine.studio.draftMark.sourceJustNow': '由 AI 副驾刚刚作为草稿加入',
-  'engine.studio.draftMark.sourceItems': '{items} {count} 项由 AI 副驾在 {when}作为草稿加入',
-  'engine.studio.draftMark.sourceItemsJustNow': '{items} {count} 项由 AI 副驾刚刚作为草稿加入',
+  'engine.studio.draftMark.source': '由 {agent}在 {when}作为草稿加入',
+  'engine.studio.draftMark.sourceJustNow': '由 {agent}刚刚作为草稿加入',
+  'engine.studio.draftMark.sourceItems': '{items} {count} 项由 {agent}在 {when}作为草稿加入',
+  'engine.studio.draftMark.sourceItemsJustNow': '{items} {count} 项由 {agent}刚刚作为草稿加入',
+  // objectstack#27176 — 谁起草的:AI 副驾,或经 MCP 构建入口的智能体。
+  'engine.studio.draftMark.agent.copilot': 'AI 副驾',
+  'engine.studio.draftMark.agent.mcp': 'MCP 客户端',
+  'engine.studio.draftMark.agent.mcpClient': 'MCP 客户端「{client}」',
   'engine.studio.draftMark.item': '「{label}」',
   'engine.studio.draftMark.minutesAgo': '{n} 分钟前',
   'engine.studio.draftMark.hoursAgo': '{n} 小时前',

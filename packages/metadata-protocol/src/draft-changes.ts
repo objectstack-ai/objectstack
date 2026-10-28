@@ -20,12 +20,16 @@
  *   (`sys_metadata.draft_changes`), `undefined` when it stores none, so the
  *   read never answers `[]` for a row whose saves recorded nothing.
  *
+ * [#27176] An `mcp` write also stamps the OAuth `client` it was made by, on
+ * the entry beside `by`; {@link authoringClientOf} is the one shape check the
+ * save door and the stored read both apply to it.
+ *
  * The entries live on the draft row, ⛔ never inside the stored body: publish
  * and discard both delete that row, so the entries go with it.
  */
 
 import { canonicalize, orderedMapKeys } from '@objectstack/metadata-core';
-import type { MetadataAuthoringSurface } from '@objectstack/spec/api';
+import { MetadataAuthoringClientSchema, type MetadataAuthoringClient, type MetadataAuthoringSurface } from '@objectstack/spec/api';
 
 /** One entry of `draftChanges`, as stored and as served. */
 export interface DraftChangeEntry {
@@ -33,6 +37,8 @@ export interface DraftChangeEntry {
   readonly by: MetadataAuthoringSurface;
   readonly actor: string | null;
   readonly at: string;
+  /** Only beside `by: 'mcp'`, and only when the save stated it. */
+  readonly client?: MetadataAuthoringClient;
 }
 
 /** The write a {@link mergeDraftChanges} stamps on each path it changed. */
@@ -40,12 +46,26 @@ export interface DraftChangeStamp {
   readonly by: MetadataAuthoringSurface;
   readonly actor: string | null;
   readonly at: string;
+  readonly client?: MetadataAuthoringClient;
 }
 
-const SURFACES: ReadonlySet<string> = new Set<MetadataAuthoringSurface>(['copilot', 'studio', 'api']);
+const SURFACES: ReadonlySet<string> = new Set<MetadataAuthoringSurface>(['copilot', 'mcp', 'studio', 'api']);
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * `value` as a `MetadataAuthoringClient`, or `undefined` when it is not one —
+ * judged by the spec's own `MetadataAuthoringClientSchema` (closed: a
+ * non-empty `id`, an optional non-empty `name`, nothing else), so the writer
+ * never holds a second, drifting verdict. The save door refuses a `client`
+ * this answers `undefined` for; the stored read treats such an entry as
+ * malformed.
+ */
+export function authoringClientOf(value: unknown): MetadataAuthoringClient | undefined {
+  const parsed = MetadataAuthoringClientSchema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
 }
 
 /**
@@ -111,7 +131,16 @@ export function mergeDraftChanges(
   stamp: DraftChangeStamp,
 ): DraftChangeEntry[] {
   const kept = entries.filter((entry) => !paths.some((p) => isAtOrUnder(entry.path, p)));
-  return [...kept, ...paths.map((path) => ({ path: [...path], by: stamp.by, actor: stamp.actor, at: stamp.at }))];
+  return [
+    ...kept,
+    ...paths.map((path) => ({
+      path: [...path],
+      by: stamp.by,
+      actor: stamp.actor,
+      at: stamp.at,
+      ...(stamp.client ? { client: stamp.client } : {}),
+    })),
+  ];
 }
 
 /**
@@ -135,7 +164,17 @@ export function storedDraftChanges(raw: unknown): DraftChangeEntry[] | undefined
     if (typeof by !== 'string' || !SURFACES.has(by)) return undefined;
     if (actor !== null && typeof actor !== 'string') return undefined;
     if (typeof at !== 'string') return undefined;
-    entries.push({ path: [...path] as string[], by: by as MetadataAuthoringSurface, actor, at });
+    // [#27176] A client is the MCP door's alone, so one beside any other
+    // surface is as malformed as a client of the wrong shape.
+    const client = e.client === undefined ? undefined : authoringClientOf(e.client);
+    if (e.client !== undefined && (client === undefined || by !== 'mcp')) return undefined;
+    entries.push({
+      path: [...path] as string[],
+      by: by as MetadataAuthoringSurface,
+      actor,
+      at,
+      ...(client ? { client } : {}),
+    });
   }
   return entries;
 }

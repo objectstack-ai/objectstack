@@ -76,7 +76,7 @@ describe('template-engine', () => {
     // ADR-0053 Phase 2: formatter holes reuse the shared formula whitelist.
     describe('formatter holes', () => {
       it('applies currency / number formatters', () => {
-        expect(renderTemplate('{{ amt | currency }}', { amt: 1234.5 })).toBe('$1,234.50');
+        expect(renderTemplate('{{ amt | currency }}', { amt: 1234.5 }, { currency: 'USD' })).toBe('$1,234.50');
         expect(renderTemplate('{{ n | number:2 }}', { n: 1000 })).toBe('1,000.00');
       });
 
@@ -95,8 +95,9 @@ describe('template-engine', () => {
         expect(renderTemplate('{{{ s | upper }}}', { s: 'a&b' })).toBe('A&B');
       });
 
-      it('falls back to the raw value for an unknown formatter (no throw)', () => {
-        expect(renderTemplate('{{ x | bogus }}', { x: 'hi' })).toBe('hi');
+      it('refuses an unknown formatter with TEMPLATE_INVALID, never the raw value', () => {
+        expect(() => renderTemplate('{{ x | bogus }}', { x: 'hi' })).toThrow(/^TEMPLATE_INVALID: /);
+        expect(() => renderPlainTextTemplate('{{ x | bogus }}', { x: 'hi' })).toThrow("the formatter 'bogus'");
       });
 
       it('renders a missing formatted value as empty (never "undefined")', () => {

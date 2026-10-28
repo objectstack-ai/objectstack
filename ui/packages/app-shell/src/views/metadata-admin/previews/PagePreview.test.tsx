@@ -98,7 +98,7 @@ describe('PagePreview — slotted record page synthesis', () => {
     regions: [], // slotted pages carry an empty regions[] — the blank-canvas trap
     slots: {
       highlights: [{ type: 'record:highlights', fields: ['industry', 'website'] }],
-      tabs: [{ type: 'page:tabs', items: [{ label: 'Custom', children: [] }] }],
+      details: [{ type: 'element:text', id: 'custom_details', properties: { content: 'Custom' } }],
     },
   };
 
@@ -133,9 +133,11 @@ describe('PagePreview — slotted record page synthesis', () => {
     const highlights = comps.find((c) => c.type === 'record:highlights');
     expect(highlights?.fields).toEqual(['industry', 'website']);
 
-    // Authored tabs override wins — the custom tab is present.
+    // Authored details override fills the Details tab of the synthesized
+    // strip (there is no `tabs` slot since objectstack#27053).
     const tabs = comps.find((c) => c.type === 'page:tabs');
-    expect(tabs?.items?.[0]?.label).toBe('Custom');
+    const items = tabs?.items ?? tabs?.properties?.items;
+    expect(items?.[0]?.children).toEqual([{ type: 'element:text', id: 'custom_details', properties: { content: 'Custom' } }]);
   });
 
   it('renders the authored schema unchanged for a non-slotted (full) record page', async () => {

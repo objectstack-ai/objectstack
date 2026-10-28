@@ -1842,7 +1842,14 @@ export interface PageSlotMap {
   actions?: SchemaNode | SchemaNode[];
   highlights?: SchemaNode | SchemaNode[];
   details?: SchemaNode | SchemaNode[];
-  tabs?: SchemaNode | SchemaNode[];
+  /**
+   * @deprecated REMOVED with the spec's `slots.tabs` (objectstack#27053): the
+   * tab strip is composed from the object's roles and relationship flags, and
+   * a page that needs its own strip is a `kind: 'full'` page. Typed `never`
+   * so a typed slot map cannot author it; the spec parse refuses it with the
+   * prescription.
+   */
+  tabs?: never;
   discussion?: SchemaNode | SchemaNode[];
 }
 

@@ -77,6 +77,7 @@ import { describe, expect, it } from 'vitest';
 
 import { ALL_CONVERSIONS } from '../conversions/registry';
 import { TimeUpdateInterval } from '../data/analytics.zod';
+import { CurrencyConfigSchema } from '../data/field.zod';
 import { IndexSchema, ObjectSchema } from '../data/object.zod';
 import { ManifestPermissionsSchema } from '../kernel/manifest.zod';
 import {
@@ -91,7 +92,7 @@ import { SharingLevel } from '../security/sharing.zod';
 import { DatasourceSchema } from '../data/datasource.zod';
 import { TursoConfigSchema } from '../data/driver/turso.zod';
 import { InterfacePageConfigSchema, PageComponentSchema, PageSchema } from '../ui/page.zod';
-import { AddRecordConfigSchema, FormFieldSchema, FormSectionSchema, ListViewSchema, NavigationModeSchema, ObjectListViewSchema } from '../ui/view.zod';
+import { AddRecordConfigSchema, FormFieldSchema, FormSectionSchema, FormViewSchema, ListViewSchema, NavigationModeSchema, ObjectListViewSchema } from '../ui/view.zod';
 import { FlowSchema } from '../automation/flow.zod';
 import { JobSchema } from '../system/job.zod';
 import { TranslationItemSchema } from '../system/translation.zod';
@@ -251,6 +252,15 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
     tombstone(AdminScopeSchema, 'permission.adminScope', 'authorEnvironmentSets'),
   ],
   'permission-set-managed-by-removed': [tombstone(PermissionSetSchema, 'permission', 'managedBy')],
+  // #27157: the D2 strip is the data-at-rest half; what an author meets is the
+  // refusal of a `fixed` config with no code, which names the release.
+  'currency-config-dynamic-default-currency-removed': [
+    refusal(
+      "currencyConfig.currencyMode 'fixed' without defaultCurrency",
+      () => CurrencyConfigSchema.safeParse({ currencyMode: 'fixed' }),
+      'defaultCurrency',
+    ),
+  ],
   'permission-modify-all-allow-delete-false-to-true': [
     refusal(
       'allowDelete: false beside modifyAllRecords: true',
@@ -273,6 +283,14 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
   ],
   'declared-index-unique-scope': [
     refusal('indexes[].unique: true', () => IndexSchema.safeParse({ fields: ['code'], unique: true })),
+  ],
+  'page-action-block-variant-destructive-to-danger': [
+    refusal("action:button variant 'destructive'", () => ActionButtonPropsSchema.safeParse({ label: 'Purge', variant: 'destructive' })),
+    refusal("action:icon variant 'destructive'", () => ActionIconPropsSchema.safeParse({ icon: 'trash', variant: 'destructive' })),
+    refusal("action:group variant 'destructive'", () => ActionGroupPropsSchema.safeParse({ actions: [], variant: 'destructive' })),
+    refusal("action:group member variant 'destructive'", () => ActionGroupPropsSchema.safeParse({ actions: [{ label: 'Purge', type: 'script', variant: 'destructive' }] })),
+    refusal("action:menu variant 'destructive'", () => ActionMenuPropsSchema.safeParse({ actions: [], variant: 'destructive' })),
+    refusal("action:menu member variant 'destructive'", () => ActionMenuPropsSchema.safeParse({ actions: [{ label: 'Purge', type: 'script', variant: 'destructive' }] })),
   ],
   'page-action-row-navigation-executor-to-url': [
     refusal("action:button actionType 'navigation'", () => ActionButtonPropsSchema.safeParse({ label: 'Clone', actionType: 'navigation', target: '/apps/crm/tasks' })),
@@ -386,6 +404,17 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
       'recordAction',
     ),
   ],
+  // #27155: the form view `type` narrowed to the form's layout — each retired
+  // member refused by the enum's own error map, plus the three split-only keys
+  // tombstoned beside it.
+  'form-view-presentation-types-removed': [
+    ...(['split', 'drawer', 'modal'] as const).map((type) =>
+      refusal(`form view type '${type}'`, () => FormViewSchema.safeParse({ type }), 'type'),
+    ),
+    tombstone(FormSectionSchema, 'view.form.sections[]', 'pane'),
+    tombstone(FormViewSchema, 'view.form', 'splitSize'),
+    tombstone(FormViewSchema, 'view.form', 'splitResizable'),
+  ],
   // #25050: retired after 18.0.0, so the v18 train's major. Partial (unset
   // values and remote urls only), so the prescription's migrate sentence is
   // the two-clause form; the release it names is judged the same way.
@@ -431,6 +460,15 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
       "page template 'full-width'",
       () => PageSchema.safeParse({ name: 'lead_detail_page', label: 'Lead', type: 'record', object: 'crm_lead', template: 'full-width', regions: [{ name: 'main', components: [] }] }),
       'template',
+    ),
+  ],
+  // The slotted page's `tabs` slot, tombstoned in the slot map; the page is
+  // otherwise complete, so `slots` is the only issue path.
+  'page-slots-tabs-removed': [
+    refusal(
+      'a slotted page authoring slots.tabs',
+      () => PageSchema.safeParse({ name: 'lead_detail_page', label: 'Lead', type: 'record', object: 'crm_lead', kind: 'slotted', regions: [], slots: { tabs: { type: 'page:tabs' } } }),
+      'slots',
     ),
   ],
   // #23543 F3: a loose `config` key under a sibling-block node type, refused by

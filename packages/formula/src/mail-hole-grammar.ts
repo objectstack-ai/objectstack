@@ -14,14 +14,19 @@
  *
  * A hole is `{{path}}`, `{{{path}}}` or either with one formatter from the
  * shared whitelist, `{{ path | formatter[:arg] }}`. The path is a dotted path
- * of word characters. Text between braces that is not a path is not a hole:
- * the renderer leaves it as written.
+ * of word characters. Text between braces whose part before any `|` is not
+ * a path (`{{ not a path }}`, `{{}}`, `{{ | upper }}`) is not a hole: the
+ * renderer leaves it as written. A path followed by `|` is a formatter use,
+ * and is judged.
  *
- * What follows the first `|` is judged by `judgeHoleFormatter`
- * (`template-engine.ts`), the function the in-app template dialect judges its
- * holes with too, so the two dialects refuse the same formatter parts with the
- * same sentence: one formatter per hole, and a `currency` argument that is a
- * literal ISO 4217 code. A refused hole is a hole — it is found, located and
+ * What follows the first `|` is split by `splitHoleFormatter` and judged by
+ * `judgeHoleFormatter` (`template-engine.ts`), the two functions the in-app
+ * template dialect reads its holes with too, so the two dialects accept the
+ * same formatter parts (`currency :EUR` is `currency` with `EUR` in both) and
+ * refuse the rest with the same sentence: a formatter name of one word
+ * (`{{ due | date-long }}` is refused, never printed as written), one
+ * formatter per hole, a formatter the whitelist names (`TEMPLATE_FORMATTERS`),
+ * and a `currency` argument that is a literal ISO 4217 code. A refused hole is a hole — it is found, located and
  * named — and the renderer refuses to render it rather than print a wrong
  * value or formatter syntax.
  *
@@ -36,7 +41,13 @@
  * currency in its place.
  */
 
-import { CURRENCY_ARGUMENT_RULE, currencyCodePath, judgeHoleFormatter, type TemplateHoleGrammarRefusal } from './template-engine';
+import {
+  CURRENCY_ARGUMENT_RULE,
+  currencyCodePath,
+  judgeHoleFormatter,
+  splitHoleFormatter,
+  type TemplateHoleGrammarRefusal,
+} from './template-engine';
 
 /** 1=open (`{{` or `{{{`), 2=brace-free inner body, 3=close (`}}` or `}}}`). */
 const MAIL_HOLE_SOURCE = String.raw`(\{\{\{?)([^{}]*)(\}\}\}?)`;
@@ -54,7 +65,6 @@ export function mailHolePattern(): RegExp {
 
 // Validated against small, already-extracted strings (bounded input → no ReDoS).
 const PATH_RE = /^[\w.]+$/;
-const FILTER_RE = /^(\w+)(?::\s*'?([^']*?)'?)?$/;
 
 /** A mail hole's inner body, parsed. */
 export interface ParsedMailHole {
@@ -74,8 +84,9 @@ export interface ParsedMailHole {
 
 /**
  * Parse a hole's inner body (the text between the braces). `null` when the
- * body is not a path with an optional formatter — text the renderer leaves
- * verbatim, and that no reader treats as a hole.
+ * part before any `|` is not a path — text the renderer leaves verbatim, and
+ * that no reader treats as a hole. A path followed by `|` always parses: a
+ * formatter part the grammar refuses is carried as the hole's `refusal`.
  */
 export function parseMailHole(inner: string, hole = `{{${inner}}}`): ParsedMailHole | null {
   const pipe = inner.indexOf('|');
@@ -86,18 +97,14 @@ export function parseMailHole(inner: string, hole = `{{${inner}}}`): ParsedMailH
   const path = inner.slice(0, pipe).trim();
   if (!PATH_RE.test(path)) return null;
   const formatterPart = inner.slice(pipe + 1).trim();
-  const m = FILTER_RE.exec(formatterPart);
-  if (!m) {
-    // `{{ x | upper | lower }}` matches no single formatter shape, and the
-    // renderer used to leave it on the page as written: a chained hole is
-    // still a hole, refused by the one-formatter rule.
-    const name = formatterPart.split(/[:|]/, 1)[0].trim();
-    const refusal = judgeHoleFormatter(hole, formatterPart, name, undefined, 'mail');
-    return refusal ? { path, formatter: name, refusal } : null;
+  const { name, arg } = splitHoleFormatter(formatterPart);
+  const refusal = judgeHoleFormatter(hole, formatterPart, name, arg, 'mail');
+  if (refusal?.rule === 'one-formatter') {
+    // `{{ x | upper | lower }}`: the renderer used to leave it on the page as
+    // written. Its formatter is the name before the second `|`.
+    return { path, formatter: formatterPart.split(/[:|]/, 1)[0].trim(), refusal };
   }
-  const formatter = m[1];
-  const arg = m[2];
-  const refusal = judgeHoleFormatter(hole, formatterPart, formatter, arg, 'mail');
+  const formatter = name;
   const codePath = refusal ? undefined : currencyCodePath(formatterPart);
   return {
     path,

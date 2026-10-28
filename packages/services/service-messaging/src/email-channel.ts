@@ -109,6 +109,16 @@ export interface EmailChannelOptions {
      * exist at async delivery time and is not a rung.
      */
     getDefaultTemplateLocale?(): string | undefined;
+    /**
+     * The tenant default currency (ISO 4217, the `localization.currency`
+     * setting) of the delivery's organization, read the way a currency field
+     * reads it (`resolveLocalizationContext` in `@objectstack/core`). Handed to
+     * the template render as its `currency`, the code a `{{ amount | currency }}`
+     * hole with no argument formats in. `undefined` (no default set, or not
+     * wired) leaves the render without one, so such a hole refuses the delivery
+     * with `TEMPLATE_INVALID` instead of formatting in a guessed currency.
+     */
+    getTenantCurrency?(organizationId: string | undefined): Promise<string | undefined>;
 }
 
 /**
@@ -342,11 +352,13 @@ export function createEmailChannel(opts: EmailChannelOptions): MessagingChannel 
                 const templateLocale = recipientLocale;
                 const data = (payload.templateData ?? undefined) as Record<string, unknown> | undefined;
                 try {
+                    const currency = await opts.getTenantCurrency?.(n.organizationId);
                     const result = (await email.sendTemplate({
                         template: templateName,
                         to: address,
                         ...(data !== undefined ? { data } : {}),
                         ...(templateLocale ? { locale: templateLocale } : {}),
+                        ...(currency ? { currency } : {}),
                         // Commit b706af987 — this channel HOLDS the organization (the
                         // tenant stamp the outbox snapshots per delivery), so
                         // it threads it for the sys_email.organization_id
