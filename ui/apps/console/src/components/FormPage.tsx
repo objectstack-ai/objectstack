@@ -1254,6 +1254,12 @@ export function readLoadedRecord(
  *     then write;
  *  3. an explicit `?prefill_<field>=` query param, which wins over both.
  *
+ * A CREATE also reads the form view's own `defaults` (objectstack-ai/objectstack#26843),
+ * the author's opening values for this form: they sit over source 1, since a
+ * form view is narrower than its object, and under source 3, since a `prefill_`
+ * param outranks every default. An edit never reads them: the stored record is
+ * the truth there.
+ *
  * Point 3 is the ruling: "explicit `prefill_` params override the loaded
  * record's values for the fields they name … record values fill the rest". A
  * producer that forwards `?recordId=` AND `?prefill_x=` in one URL is
@@ -1331,6 +1337,7 @@ export function readPrefill(
   fields: RenderableField[],
   search: URLSearchParams,
   record?: Record<string, unknown> | null,
+  formDefaults?: Record<string, unknown> | null,
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const f of fields) {
@@ -1343,6 +1350,10 @@ export function readPrefill(
     } else if (f.defaultValue !== undefined && !isRuntimeDefault(f.defaultValue)) {
       out[f.name] = f.defaultValue;
     }
+    // The form view's `defaults`, on a create only — see the docblock.
+    if (!record && formDefaults && Object.prototype.hasOwnProperty.call(formDefaults, f.name)) {
+      out[f.name] = formDefaults[f.name];
+    }
     // `hasOwnProperty` rather than a truthiness/undefined test: a stored null
     // or empty string is a real value on an edit form, and must beat the
     // default.
@@ -1353,6 +1364,20 @@ export function readPrefill(
     if (fromQuery !== null) out[f.name] = fromQuery;
   }
   return out;
+}
+
+/**
+ * One `FormView.buttons` entry as this page draws it (objectstack-ai/objectstack#26843):
+ * shown unless the author wrote `show: false`, and the authored label — an
+ * `I18nLabel`, resolved against the visitor's language — or `''` when there is
+ * none, so the caller's own label shows. `buttons.reset` is never read: this
+ * page draws no reset button.
+ */
+export function readFormButton(
+  config: { show?: boolean; label?: unknown } | undefined,
+  language: string,
+): { show: boolean; label: string } {
+  return { show: config?.show !== false, label: pickLocalized(config?.label, language) };
 }
 
 /**
@@ -2261,7 +2286,7 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
         // build needs no language and the load does not re-run on a switch.
         const sections = buildSections(result.form, result.objectSchema);
         const allFields = sections.flatMap((s) => s.fields);
-        setValues(readPrefill(allFields, search, result.record));
+        setValues(readPrefill(allFields, search, result.record, result.form?.defaults));
       })
       .catch((e) => {
         if (!cancelled) {
@@ -2283,6 +2308,15 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
     () => (loaded ? buildSections(loaded.form, loaded.objectSchema, language) : []),
     [loaded, language],
   );
+
+  /**
+   * The form view's `buttons` (objectstack-ai/objectstack#26843), which this
+   * page never read: an authored `show: false` removes the button, an authored
+   * `label` replaces this page's own. The public route draws no Cancel,
+   * authored or not — see {@link FormPageProps.cancelPath}.
+   */
+  const submitButton = readFormButton(loaded?.form?.buttons?.submit, language);
+  const cancelButton = readFormButton(loaded?.form?.buttons?.cancel, language);
 
   const behavior: EffectiveSubmitBehavior = resolveSubmitBehavior(
     mode,
@@ -2460,7 +2494,7 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
           // means back to the record as loaded — NOT to blank, which would
           // stage a wipe of every field on the next save.
           const allFields = sections.flatMap((s) => s.fields);
-          setValues(readPrefill(allFields, search, loaded.record));
+          setValues(readPrefill(allFields, search, loaded.record, loaded.form?.defaults));
           break;
         }
         case 'next-record':
@@ -2706,14 +2740,14 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
           </div>
         )}
         <div className="flex justify-end gap-2">
-          {mode === 'internal' && (
+          {mode === 'internal' && cancelButton.show && (
             <button
               type="button"
               onClick={handleCancel}
               disabled={submitting}
               className="rounded-md border bg-background px-4 py-2 text-sm font-medium shadow-sm hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
             >
-              {t('common.cancel')}
+              {cancelButton.label || t('common.cancel')}
             </button>
           )}
           {/* Blocked while an upload is in flight (objectui#10167): a file's
@@ -2721,6 +2755,7 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
               submit that beats it writes an empty field and still reports
               success. The widget contract exists for this — see
               `FieldInputProps.onUploadingChange`. */}
+          {submitButton.show && (
           <button
             type="submit"
             disabled={submitting || isUploading}
@@ -2730,8 +2765,9 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
               ? t('publicForm.submitting')
               : isUploading
                 ? t('fields.file.uploading')
-                : t('publicForm.submit')}
+                : submitButton.label || t('publicForm.submit')}
           </button>
+          )}
         </div>
       </form>
     </div>

@@ -48,7 +48,7 @@ import {
 import { buildExpressionUser } from '../providers/expressionUser.js';
 import { SkeletonDetail } from '../skeletons/index.js';
 import { ManagedByBadge } from '../components/ManagedByBadge.js';
-import { selectRecordFormView } from '../utils/recordFormNavigation.js';
+import { resolveFormViewChrome, selectRecordFormView } from '../utils/recordFormNavigation.js';
 import { useAuth } from '@object-ui/auth';
 
 export interface RecordFormPageProps {
@@ -74,7 +74,7 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
   const [searchParams] = useSearchParams();
   const dataSource = useAdapter();
   const { objects, loading: metadataLoading } = useMetadata();
-  const { t } = useObjectTranslation();
+  const { t, language } = useObjectTranslation();
   const { objectLabel, objectPluralLabel } = useObjectLabel();
   const { user, getAuthConfig, activeOrganization } = useAuth();
 
@@ -341,6 +341,17 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
         splitResizable: formDef.splitResizable,
       }
     : {};
+  // objectstack-ai/objectstack#26843 — the form view's `buttons`, `layout`
+  // and `defaults`, which this page used to hard-set over (`showSubmit: true`,
+  // `layout: 'vertical'`, its own labels). `defaults` seed a create under the
+  // URL prefill, which still wins per field.
+  const formChrome = resolveFormViewChrome(formDef, {
+    flow: mode,
+    language,
+    submitText: t('form.saveRecord'),
+    cancelText: t('common.cancel'),
+    createValues: prefillValues,
+  });
 
   return (
     <ExpressionProvider user={expressionUser} app={{ name: appName }} data={{}} features={features}>
@@ -410,15 +421,7 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
                 objectName: objectDef.name,
                 mode,
                 recordId: mode === 'edit' ? recordId : undefined,
-                ...(prefillValues && { initialValues: prefillValues }),
-                // framework#1894 / objectstack-ai/objectstack#2998: honor the spec-aligned structured
-                // `buttons`/`defaults` from the object's form view. ObjectForm
-                // folds them onto its flat props; an explicit `initialValues`
-                // (URL prefill above) still wins over `defaults`.
-                ...(formDef.buttons && { buttons: formDef.buttons }),
-                ...(formDef.defaults && { defaults: formDef.defaults }),
                 title: pageTitle,
-                layout: 'vertical',
                 fields,
                 // Master-detail by config: if the object's form view declares
                 // inline child collections, ObjectForm renders them as an atomic
@@ -427,10 +430,7 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
                   ?? (objectDef as any).formViews?.default?.subforms,
                 onSuccess: handleSuccess,
                 onCancel: handleCancel,
-                showSubmit: true,
-                showCancel: true,
-                submitText: t('form.saveRecord'),
-                cancelText: t('common.cancel'),
+                ...formChrome,
               }}
               dataSource={dataSource ?? undefined}
             />
