@@ -105,6 +105,7 @@
         "manifest.objects.element.defaultRowScope",
         "manifest.objects.element.fieldGroups",
         "manifest.objects.element.fields.out.valueType",
+        "manifest.objects.element.fields.out.valueType.currencyConfig",
         "manifest.objects.element.fields.out.valueType.inlineColumns.element",
         "manifest.objects.element.lifecycle",
         "manifest.objects.element.membershipKeys",
@@ -234,6 +235,7 @@
         "data.options[1].manifest.objects.element.defaultRowScope",
         "data.options[1].manifest.objects.element.fieldGroups",
         "data.options[1].manifest.objects.element.fields.out.valueType",
+        "data.options[1].manifest.objects.element.fields.out.valueType.currencyConfig",
         "data.options[1].manifest.objects.element.fields.out.valueType.inlineColumns.element",
         "data.options[1].manifest.objects.element.lifecycle",
         "data.options[1].manifest.objects.element.membershipKeys",
@@ -362,6 +364,7 @@
         "options[1].manifest.objects.element.defaultRowScope",
         "options[1].manifest.objects.element.fieldGroups",
         "options[1].manifest.objects.element.fields.out.valueType",
+        "options[1].manifest.objects.element.fields.out.valueType.currencyConfig",
         "options[1].manifest.objects.element.fields.out.valueType.inlineColumns.element",
         "options[1].manifest.objects.element.lifecycle",
         "options[1].manifest.objects.element.membershipKeys",
@@ -433,6 +436,7 @@
         "data.packages.element.options[1].manifest.objects.element.defaultRowScope",
         "data.packages.element.options[1].manifest.objects.element.fieldGroups",
         "data.packages.element.options[1].manifest.objects.element.fields.out.valueType",
+        "data.packages.element.options[1].manifest.objects.element.fields.out.valueType.currencyConfig",
         "data.packages.element.options[1].manifest.objects.element.fields.out.valueType.inlineColumns.element",
         "data.packages.element.options[1].manifest.objects.element.lifecycle",
         "data.packages.element.options[1].manifest.objects.element.membershipKeys",
@@ -485,6 +489,7 @@
         "data.defaultRowScope",
         "data.fieldGroups",
         "data.fields.out.valueType",
+        "data.fields.out.valueType.currencyConfig",
         "data.fields.out.valueType.inlineColumns.element",
         "data.fields.out.valueType.relatedListFilter.lazy",
         "data.lifecycle",
@@ -756,6 +761,11 @@
         "measures.valueType"
       ]
     },
+    "data/CurrencyConfig": {
+      "sites": [
+        ""
+      ]
+    },
     "data/DataEngineAggregateOptions": {
       "sites": [
         "filter.options[1].lazy"
@@ -875,6 +885,7 @@
     "data/Field": {
       "sites": [
         "",
+        "currencyConfig",
         "inlineColumns.element",
         "relatedListFilter.lazy"
       ]
@@ -977,6 +988,7 @@
         "defaultRowScope",
         "fieldGroups",
         "fields.out.valueType",
+        "fields.out.valueType.currencyConfig",
         "fields.out.valueType.inlineColumns.element",
         "fields.out.valueType.relatedListFilter.lazy",
         "lifecycle",
@@ -996,6 +1008,7 @@
       "sites": [
         "",
         "fields.valueType",
+        "fields.valueType.currencyConfig",
         "fields.valueType.inlineColumns.element",
         "fields.valueType.relatedListFilter.lazy"
       ]
@@ -1276,6 +1289,7 @@
     "system/AddFieldOperation": {
       "sites": [
         "field",
+        "field.currencyConfig",
         "field.inlineColumns.element",
         "field.relatedListFilter.lazy"
       ]
@@ -1298,6 +1312,7 @@
     "system/ChangeSet": {
       "sites": [
         "operations.element.options[0].field",
+        "operations.element.options[0].field.currencyConfig",
         "operations.element.options[0].field.inlineColumns.element",
         "operations.element.options[0].field.relatedListFilter.lazy",
         "operations.element.options[3].object",
@@ -1331,6 +1346,7 @@
         "object.defaultRowScope",
         "object.fieldGroups",
         "object.fields.out.valueType",
+        "object.fields.out.valueType.currencyConfig",
         "object.fields.out.valueType.inlineColumns.element",
         "object.fields.out.valueType.relatedListFilter.lazy",
         "object.lifecycle",
@@ -1370,6 +1386,7 @@
     "system/MigrationOperation": {
       "sites": [
         "options[0].field",
+        "options[0].field.currencyConfig",
         "options[0].field.inlineColumns.element",
         "options[0].field.relatedListFilter.lazy",
         "options[3].object",

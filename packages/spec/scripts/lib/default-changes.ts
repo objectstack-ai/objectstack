@@ -622,6 +622,21 @@ export const DEFAULT_CHANGES_BY_MAJOR: Readonly<Record<number, readonly Declared
   ],
   18: [
     {
+      key: 'data/CurrencyConfig:defaultCurrency',
+      from: '"CNY"',
+      to: '(none)',
+      reason:
+        'A RULED narrowing (#27157, ruling 6464202770 on #27119, Q2 = X: an amount whose currency is '
+        + 'not known takes the tenant default, and nothing guesses). A `currencyMode: \'fixed\'` config '
+        + 'that omits `defaultCurrency` is now refused at parse with a prescription instead of silently '
+        + 'becoming a yuan field; a `dynamic` config (the default) parses with no code, and nothing read '
+        + 'its code anyway — its amounts display in the tenant default currency. A consumer that read the '
+        + 'PARSED code of a dynamic config sees no key where it saw `CNY`. A stored row or built artifact '
+        + 'is not refused: every earlier parse baked the code in, so a fixed row keeps it, and the D2 '
+        + 'conversion `currency-config-dynamic-default-currency-removed` strips it from dynamic rows. To '
+        + 'keep a yuan field, write `currencyConfig: { currencyMode: \'fixed\', defaultCurrency: \'CNY\' }`.',
+    },
+    {
       key: 'ui/AddRecordConfig:enabled',
       from: 'true',
       to: '(none)',
