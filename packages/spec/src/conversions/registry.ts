@@ -10863,11 +10863,18 @@ const ACTION_CONTAINER_BLOCK_TYPES = new Set(['action:group', 'action:menu']);
  * artifact door and `os migrate meta --write`, which is why the block
  * renderers forward `danger` directly and keep no `destructive` bridge.
  *
- * Five surfaces, all value renames and nothing else: `properties.variant` on
+ * Its surfaces are value renames and nothing else: `properties.variant` on
  * each of the four block nodes (the containers' own value is their trigger's),
  * and `variant` on each `action:group` / `action:menu` member of
- * `properties.actions`. Every other value is left alone, and so is every other
- * component type: `destructive` stays the Button primitive's word on
+ * `properties.actions`. `action:bar` is visited too, though it has no row
+ * here: the bar spreads each member of `properties.actions` and
+ * `properties.systemActions` onto an `action:button` (or folds it into its
+ * `action:menu`) with `variant: member.variant || properties.variant`, so a
+ * stored bar written `destructive` reaches the block renderers, which no
+ * longer read that word, and would fall back to a plain button with no
+ * refusal anywhere to say so. Its own `variant` and its members' are renamed
+ * as the four blocks' are. Every other value is left alone, and so is every
+ * other component type: `destructive` stays the Button primitive's word on
  * `element:button` and the other primitive-backed components, which this
  * entry never reads. A member that is not an object, or a list that is not an
  * array, is left as stored. The reach is every position `mapPageComponents`
@@ -10887,7 +10894,9 @@ const pageActionBlockVariantDestructiveToDanger: MetadataConversion = {
   retiredAfter: '18.2.0',
   surface: 'page.component.action:button.variant / page.component.action:icon.variant / '
     + 'page.component.action:group.variant / page.component.action:menu.variant / '
-    + 'page.component.action:group.actions[].variant / page.component.action:menu.actions[].variant',
+    + 'page.component.action:group.actions[].variant / page.component.action:menu.actions[].variant / '
+    + 'page.component.action:bar.variant / page.component.action:bar.actions[].variant / '
+    + 'page.component.action:bar.systemActions[].variant',
   summary:
     "action block variant 'destructive' → 'danger' — the spelling ActionSchema.variant and the action runner "
     + 'use; on a block both draw the destructive button and confirm through the destructive confirm button, '
@@ -10896,8 +10905,12 @@ const pageActionBlockVariantDestructiveToDanger: MetadataConversion = {
     return mapPageComponents(stack, (component, path) => {
       const type = component.type;
       if (typeof type !== 'string') return component;
-      const isContainer = ACTION_CONTAINER_BLOCK_TYPES.has(type);
-      if (!isContainer && !ACTION_RUNNER_BLOCK_TYPES.has(type)) return component;
+      const memberLists = ACTION_CONTAINER_BLOCK_TYPES.has(type)
+        ? ['actions'] as const
+        : type === 'action:bar'
+          ? ['actions', 'systemActions'] as const
+          : ACTION_RUNNER_BLOCK_TYPES.has(type) ? [] as const : undefined;
+      if (!memberLists) return component;
       const properties = component.properties;
       if (!isDict(properties)) return component;
       let next = properties;
@@ -10905,16 +10918,17 @@ const pageActionBlockVariantDestructiveToDanger: MetadataConversion = {
         emit({ from: 'destructive', to: 'danger', path: `${path}.properties.variant` });
         next = { ...next, variant: 'danger' };
       }
-      const actions = properties.actions;
-      if (isContainer && Array.isArray(actions)) {
+      for (const key of memberLists) {
+        const members = properties[key];
+        if (!Array.isArray(members)) continue;
         let changed = false;
-        const nextActions = actions.map((member, i) => {
+        const nextMembers = members.map((member, i) => {
           if (!isDict(member) || member.variant !== 'destructive') return member;
           changed = true;
-          emit({ from: 'destructive', to: 'danger', path: `${path}.properties.actions[${i}].variant` });
+          emit({ from: 'destructive', to: 'danger', path: `${path}.properties.${key}[${i}].variant` });
           return { ...member, variant: 'danger' };
         });
-        if (changed) next = { ...next, actions: nextActions };
+        if (changed) next = { ...next, [key]: nextMembers };
       }
       return next === properties ? component : { ...component, properties: next };
     });
@@ -10958,6 +10972,14 @@ const pageActionBlockVariantDestructiveToDanger: MetadataConversion = {
                     children: [
                       { type: 'action:menu', properties: { actions: [{ label: 'Drop', type: 'script', variant: 'destructive' }] } },
                     ],
+                  },
+                },
+                // A bar: no row of its own, but its members reach the block renderers.
+                {
+                  type: 'action:bar',
+                  properties: {
+                    actions: [{ name: 'purge', label: 'Purge', type: 'script', variant: 'destructive' }],
+                    systemActions: [{ name: 'sys_delete', label: 'Delete', type: 'script', variant: 'destructive' }],
                   },
                 },
               ],
@@ -11010,6 +11032,13 @@ const pageActionBlockVariantDestructiveToDanger: MetadataConversion = {
                     ],
                   },
                 },
+                {
+                  type: 'action:bar',
+                  properties: {
+                    actions: [{ name: 'purge', label: 'Purge', type: 'script', variant: 'danger' }],
+                    systemActions: [{ name: 'sys_delete', label: 'Delete', type: 'script', variant: 'danger' }],
+                  },
+                },
               ],
             },
           ],
@@ -11025,8 +11054,8 @@ const pageActionBlockVariantDestructiveToDanger: MetadataConversion = {
       ],
     },
     // The button, the icon, the group's trigger, the group member, the nested
-    // menu member and the slotted header icon.
-    expectedNotices: 6,
+    // menu member, the bar's two members and the slotted header icon.
+    expectedNotices: 8,
   },
 };
 

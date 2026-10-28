@@ -4112,7 +4112,7 @@ export type ActionIconPropsParsed = z.infer<typeof ActionIconPropsSchema>;
  *   dropdown item (`DropdownActionItem`) — and in the menu's item
  *   (`ActionMenuItem`): `visible` (the shared fail-closed gate), `disabled`,
  *   `icon`, `label` falling back to `name`, `variant` (group inline, `primary`
- *   drawn as `default`; the dropdown and menu items, where `destructive` draws
+ *   drawn as `default`; the dropdown and menu items, where `danger` draws
  *   the item red) and `tags` (a `separator-before` tag draws a divider above
  *   the item);
  * - **`size`**, on an `action:group` member only: its inline button reads it,
@@ -4241,7 +4241,7 @@ const actionContainerMemberGuidance = (container: 'action:group' | 'action:menu'
     + 'toast as `successMessage`.',
   className:
     'A member is drawn by its container, not as a page component, and carries no `className`. Style it with its '
-    + '`variant` (`destructive` draws it red), or style the whole container with the node\'s own `className`.',
+    + '`variant` (`danger` draws it red), or style the whole container with the node\'s own `className`.',
   properties:
     'A member carries no `properties` bag: its static parameter values (`properties.params`) are not part of the '
     + 'inline action vocabulary. For a `type: \'api\'` member\'s request body write `bodyExtra`; to run an action '

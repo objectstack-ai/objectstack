@@ -31,6 +31,8 @@ import type { ConversionNotice } from './types.js';
  *   - the stored-row seam REWRITES `destructive` to `danger` on every row
  *     shape, and the result parses against the row that now refuses it;
  *   - the authoring funnel does NOT replay it;
+ *   - the same seam renames an `action:bar`'s own `variant` and its members',
+ *     though the bar has no row: it draws its members through the blocks;
  *   - another component's `destructive` (the Button primitive's own word) and
  *     every other variant are left byte-identical with no notice;
  *   - idempotence, and copy-on-write identity for a page with nothing to do.
@@ -145,6 +147,33 @@ describe('page-action-block-variant-destructive-to-danger (ADR-0087 D2)', () => 
     expect(notices.map((n) => [n.from, n.to, n.path])).toEqual([['destructive', 'danger', `${AT}.actions[1].variant`]]);
   });
 
+  it('the stored-row seam rewrites an `action:bar`\'s own `variant` and its `actions` / `systemActions` members\'', () => {
+    const props = {
+      variant: 'destructive',
+      actions: [
+        { name: 'copy', label: 'Copy', type: 'script', variant: 'ghost' },
+        { name: 'purge', label: 'Purge', type: 'script', variant: 'destructive' },
+      ],
+      systemActions: [{ name: 'sys_delete', label: 'Delete', type: 'script', variant: 'destructive' }],
+    };
+    const { out, notices } = replayStored(pageWith({ type: 'action:bar', properties: props }));
+    const block = blockOf(out);
+    expect(block.properties).toEqual({
+      variant: 'danger',
+      actions: [
+        { name: 'copy', label: 'Copy', type: 'script', variant: 'ghost' },
+        { name: 'purge', label: 'Purge', type: 'script', variant: 'danger' },
+      ],
+      systemActions: [{ name: 'sys_delete', label: 'Delete', type: 'script', variant: 'danger' }],
+    });
+    expect((block.properties as { actions: unknown[] }).actions[0]).toBe(props.actions[0]);
+    expect(notices.map((n) => [n.from, n.to, n.path])).toEqual([
+      ['destructive', 'danger', `${AT}.variant`],
+      ['destructive', 'danger', `${AT}.actions[1].variant`],
+      ['destructive', 'danger', `${AT}.systemActions[0].variant`],
+    ]);
+  });
+
   it.each([
     ['the canonical `danger`', { type: 'action:button', properties: { label: 'Purge', variant: 'danger' } }],
     ['another variant', { type: 'action:icon', properties: { icon: 'copy', variant: 'outline' } }],
@@ -152,6 +181,7 @@ describe('page-action-block-variant-destructive-to-danger (ADR-0087 D2)', () => 
     ["a `destructive` member on a block that has no members", { type: 'action:button', properties: { label: 'Go', actions: [{ variant: 'destructive' }] } }],
     ['a member that is not an object', { type: 'action:menu', properties: { actions: ['destructive'] } }],
     ['`actions` that is not a list', { type: 'action:group', properties: { actions: { variant: 'destructive' } } }],
+    ["a `systemActions` list on a block that has no such list", { type: 'action:menu', properties: { systemActions: [{ variant: 'destructive' }] } }],
   ])('control: %s is left as stored, with no notice', (_label, component) => {
     const page = pageWith(component);
     const { out, notices } = replayStored(page);

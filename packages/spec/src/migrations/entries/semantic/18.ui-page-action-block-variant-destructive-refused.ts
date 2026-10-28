@@ -7,7 +7,7 @@ export const entry: SemanticMigration = {
   // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
   // code span already, and a nested backtick would close it.
   surface: "variant: 'destructive' on an action block: an action:button, action:icon, action:group or action:menu "
-    + 'node, or an action:group / action:menu member',
+    + 'node, an action:group / action:menu member, or an action:bar node or member',
   replacement: "`variant: 'danger'`, the spelling `ActionSchema.variant` and the action runner use. The rename is "
     + 'lossless on a block: it draws the same destructive button, and a `confirmText` question asks through the '
     + 'destructive confirm button as before.',
@@ -22,11 +22,15 @@ export const entry: SemanticMigration = {
     + 'component-props gate at the metadata save door; `os validate` reports the old value as a '
     + '`component-props-invalid` finding. The D2 conversion `page-action-block-variant-destructive-to-danger` '
     + 'performs the rename, retired from the load path, so an author meets the refusal while stored rows, built '
-    + 'artifacts and `os migrate meta --write` are rewritten.',
+    + 'artifacts and `os migrate meta --write` are rewritten. An `action:bar` has no props row, so nothing refuses '
+    + "`destructive` on it; the conversion still renames the bar's own `variant` and its `actions` / "
+    + "`systemActions` members' `variant`, because the bar draws each member through the block renderers, "
+    + 'which no longer read `destructive`.',
   acceptanceCriteria:
     "No `action:button` / `action:icon` / `action:group` / `action:menu` `properties.variant` and no "
     + "`action:group` / `action:menu` member `variant` reads `'destructive'`; `os validate` reports no "
-    + '`component-props-invalid` finding at `properties.variant` or `properties.actions.N.variant`, and each such '
-    + 'block still draws the destructive button and confirms through the destructive confirm button.',
+    + '`component-props-invalid` finding at `properties.variant` or `properties.actions.N.variant`; no '
+    + "`action:bar` `properties.variant` or `actions` / `systemActions` member `variant` reads `'destructive'`; and "
+    + 'each such block still draws the destructive button and confirms through the destructive confirm button.',
   conversionIds: ['page-action-block-variant-destructive-to-danger'],
 };
