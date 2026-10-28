@@ -21,7 +21,7 @@ import { applyTransform } from './createDerive';
 import { buildCreateModeBody } from './createBody';
 import { validateMetadataDraft } from './clientValidation';
 import { getMetadataCreateSeed } from '@objectstack/spec/kernel';
-import { PageSchema } from '@objectstack/spec/ui';
+import { PageSchema, ComponentPropsMap } from '@objectstack/spec/ui';
 
 /**
  * The `page` resource's create-time seeding.
@@ -45,6 +45,34 @@ const objectDef = {
     total: { type: 'currency', label: 'Total' },
   },
 };
+
+/**
+ * Every block in `tree` judged by the spec's own props row for its type
+ * (`ComponentPropsMap`) — the per-block check the save door runs, which the
+ * page-level parse never reaches (`properties` is an open record there).
+ * Returns the refusals and how many `record:details` blocks were judged, so a
+ * walk that judged nothing cannot pass as clean.
+ */
+function blockPropsVerdict(tree: unknown): { refused: string[]; detailsJudged: number } {
+  const map = ComponentPropsMap as Record<string, { safeParse: (v: unknown) => { success: boolean; error?: { issues: Array<{ path: PropertyKey[]; message: string }> } } }>;
+  const refused: string[] = [];
+  let detailsJudged = 0;
+  const walk = (node: unknown) => {
+    if (Array.isArray(node)) { node.forEach(walk); return; }
+    if (!node || typeof node !== 'object') return;
+    const n = node as Record<string, unknown>;
+    if (typeof n.type === 'string' && map[n.type] && n.properties && typeof n.properties === 'object') {
+      const res = map[n.type].safeParse(n.properties);
+      if (n.type === 'record:details') detailsJudged++;
+      if (!res.success) {
+        for (const i of res.error!.issues) refused.push(`${n.type} ${i.path.join('.')}: ${i.message}`);
+      }
+    }
+    Object.values(n).forEach(walk);
+  };
+  walk(tree);
+  return { refused, detailsJudged };
+}
 
 function clientReturning(def: any) {
   return { get: async (_type: string, _name: string) => def };
@@ -94,6 +122,9 @@ describe('page createSeed (record-page region seeding)', () => {
     const body = { name: 'invoice_full', label: 'Invoice', type: 'record', object: 'showcase_invoice', kind: 'full', ...(seeded as object) };
     const verdict = await validateMetadataDraft('page', body, undefined, { mode: 'edit' });
     expect(verdict.issues, JSON.stringify(verdict.issues.slice(0, 3))).toEqual([]);
+    const blocks = blockPropsVerdict((seeded as any).regions);
+    expect(blocks.detailsJudged).toBeGreaterThan(0);
+    expect(blocks.refused).toEqual([]);
   });
 
   it('derives the create form kind from the page type (record → slotted, else full)', () => {

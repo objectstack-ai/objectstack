@@ -56,6 +56,7 @@ vi.mock('@object-ui/react', async (importOriginal) => ({
 import { PagePreview } from './PagePreview';
 import { t } from '../i18n';
 import { validateMetadataDraft } from '../clientValidation';
+import { ComponentPropsMap } from '@objectstack/spec/ui';
 
 const OBJECT = 'showcase_invoice';
 const FIELDS = {
@@ -73,6 +74,34 @@ function stubFetch(schemaGate?: Promise<void>) {
     }
     return { json: async () => ({ records: [] }) } as any;
   }));
+}
+
+/**
+ * Every block in `tree` judged by the spec's own props row for its type
+ * (`ComponentPropsMap`) — the per-block check the save door runs, which the
+ * page-level parse never reaches (`properties` is an open record there).
+ * Returns the refusals and how many `record:details` blocks were judged, so a
+ * walk that judged nothing cannot pass as clean.
+ */
+function blockPropsVerdict(tree: unknown): { refused: string[]; detailsJudged: number } {
+  const map = ComponentPropsMap as Record<string, { safeParse: (v: unknown) => { success: boolean; error?: { issues: Array<{ path: PropertyKey[]; message: string }> } } }>;
+  const refused: string[] = [];
+  let detailsJudged = 0;
+  const walk = (node: unknown) => {
+    if (Array.isArray(node)) { node.forEach(walk); return; }
+    if (!node || typeof node !== 'object') return;
+    const n = node as Record<string, unknown>;
+    if (typeof n.type === 'string' && map[n.type] && n.properties && typeof n.properties === 'object') {
+      const res = map[n.type].safeParse(n.properties);
+      if (n.type === 'record:details') detailsJudged++;
+      if (!res.success) {
+        for (const i of res.error!.issues) refused.push(`${n.type} ${i.path.join('.')}: ${i.message}`);
+      }
+    }
+    Object.values(n).forEach(walk);
+  };
+  walk(tree);
+  return { refused, detailsJudged };
 }
 
 const newRecordPage = { name: 'invoice_page', label: 'Invoice page', type: 'record', object: OBJECT, kind: 'slotted', regions: [] };
@@ -133,13 +162,17 @@ describe('PagePreview — a slotted record page is the default page; converting 
     // The copied body carries the object's details, not a bare shell.
     expect(JSON.stringify(regions)).toContain('record:details');
     expect(JSON.stringify(regions)).toContain('total');
-    // And it is AUTHORED metadata: the converted page passes the check the
-    // console runs on a page draft. (The canvas's own render schema holds the
-    // runtime section shape, field objects, which this check refuses.)
+    // And it is AUTHORED metadata: the converted page passes the page check
+    // the console runs on a draft, and every block passes its own props row.
+    // (The canvas's own render schema holds the runtime section shape, field
+    // objects, which the `record:details` row refuses.)
     const converted = { ...newRecordPage, ...patch };
     delete (converted as Record<string, unknown>).slots;
     const verdict = await validateMetadataDraft('page', converted, undefined, { mode: 'edit' });
     expect(verdict.issues, JSON.stringify(verdict.issues.slice(0, 3))).toEqual([]);
+    const blocks = blockPropsVerdict(regions);
+    expect(blocks.detailsJudged).toBeGreaterThan(0);
+    expect(blocks.refused).toEqual([]);
   });
 
   it('keeps an authored slot override when converting', async () => {
