@@ -585,11 +585,11 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
               No object name and no position: the title and description stay
               for assistive technology only (Radix requires the title). */}
           <SheetHeader className="shrink-0 flex-row items-center justify-between gap-2 space-y-0 px-4 py-2 border-b bg-muted/30">
+            <SheetTitle className="sr-only">{resolvedTitle}</SheetTitle>
+            <SheetDescription className="sr-only">
+              {description || overlayDescription}
+            </SheetDescription>
             <div className="flex min-w-0 flex-1 items-center gap-1" data-testid="record-drawer-leading">
-              <SheetTitle className="sr-only">{resolvedTitle}</SheetTitle>
-              <SheetDescription className="sr-only">
-                {description || overlayDescription}
-              </SheetDescription>
               {onBack && (
                 <button
                   type="button"

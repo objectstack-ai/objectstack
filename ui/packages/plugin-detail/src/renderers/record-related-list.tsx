@@ -723,8 +723,12 @@ const RecordRelatedListBody: React.FC<RecordRelatedListRendererProps> = ({
             ? (row: any, _event?: any, rows?: readonly any[]) => {
                 const id = rowId(row);
                 if (id == null) return;
+                if (!rows) {
+                  handlers.onView!(id, row);
+                  return;
+                }
                 const siblings = rows
-                  ?.map(rowId)
+                  .map(rowId)
                   .filter((sibling): sibling is string | number => sibling != null);
                 handlers.onView!(id, row, siblings);
               }

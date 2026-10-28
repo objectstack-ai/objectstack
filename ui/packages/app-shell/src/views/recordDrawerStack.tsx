@@ -126,19 +126,21 @@ const levelKey = (level: { objectName: string; recordId: string } | null | undef
 function useRecordTabParam() {
   const [, setSearchParams] = useSearchParams();
   const location = useLocation();
-  const stateRef = useRef(location.state);
-  stateRef.current = location.state;
+  // The router's location, read at call time: a handler outlives the render
+  // it was made in.
+  const locationRef = useRef(location);
+  locationRef.current = location;
   const read = useCallback(
-    () => new URLSearchParams(window.location.search).get(RECORD_DETAIL_TAB_PARAM),
+    () => new URLSearchParams(locationRef.current.search).get(RECORD_DETAIL_TAB_PARAM),
     [],
   );
   const write = useCallback(
     (tab: string | null | undefined) => {
-      const sp = new URLSearchParams(window.location.search);
+      const sp = new URLSearchParams(locationRef.current.search);
       if ((sp.get(RECORD_DETAIL_TAB_PARAM) ?? null) === (tab ?? null)) return;
       if (tab) sp.set(RECORD_DETAIL_TAB_PARAM, tab);
       else sp.delete(RECORD_DETAIL_TAB_PARAM);
-      setSearchParams(sp, { replace: true, state: stateRef.current });
+      setSearchParams(sp, { replace: true, state: locationRef.current.state });
     },
     [setSearchParams],
   );
@@ -523,10 +525,15 @@ export function RecordPageDrawerHost({
           : null;
       const to = expandedRecordPath(appName, objects, path, pageTrail);
       if (!to) return;
+      // The way back returns to the page on the tab it showed.
       const search = new URLSearchParams(location.search);
       if (pageTab.current) search.set(RECORD_DETAIL_TAB_PARAM, pageTab.current);
       else search.delete(RECORD_DETAIL_TAB_PARAM);
       const searchText = search.toString();
+      // The drawer closes: the page it opens may be drawn by this same view.
+      setRoot(null);
+      clearRestored();
+      pageTab.current = null;
       navigate(to, {
         state: recordDrawerReturnState(
           { pathname: location.pathname, search: searchText ? `?${searchText}` : '', state: location.state },
@@ -534,7 +541,7 @@ export function RecordPageDrawerHost({
         ),
       });
     },
-    [appName, objects, pageObjectName, pageRecordId, pageTitle, location, navigate],
+    [appName, objects, pageObjectName, pageRecordId, pageTitle, location, navigate, clearRestored],
   );
 
   const rootDef = root ? objects.find((o) => (o as { name?: unknown } | null)?.name === root.objectName) : undefined;
