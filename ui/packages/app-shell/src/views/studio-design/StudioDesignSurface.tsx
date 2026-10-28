@@ -34,6 +34,7 @@ import {
 import type { MetadataClient } from '@object-ui/data-objectstack';
 import type { FlowRuntimeState as SpecFlowRuntimeState } from '@objectstack/spec/contracts';
 import { resolveI18nLabel, type I18nLabel } from '@objectstack/spec/ui';
+import { isPlainRecord } from '@objectstack/spec/data';
 import { StudioChatDock, type StudioCopilotStatus, type StudioSurfaceLabel } from './StudioAiCopilot.js';
 import { StudioRightSlot } from './StudioRightSlot.js';
 import {
@@ -2560,11 +2561,6 @@ function NavTree({
 
 /** The keys an `object` entry's landings own besides its `objectName` (`OBJECT_MODE_FIELDS`). */
 const OBJECT_LANDING_KEYS = ['viewName', 'recordId', 'recordMode', 'filters'] as const;
-
-/** A plain object, not an array: the shape `filters` and an expression envelope take. */
-function isPlainRecord(v: unknown): v is Record<string, unknown> {
-  return !!v && typeof v === 'object' && !Array.isArray(v);
-}
 
 /**
  * A nav entry's `visible` as editable CEL text: the bare string, or a CEL
