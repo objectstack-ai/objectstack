@@ -745,18 +745,20 @@ export function PermissionAdvancedFacets({
       >
         <p className="text-xs text-muted-foreground mb-3">{t('perm.tabs.help')}</p>
         <div className="space-y-2">
-          {tabEntries.map(([tab, vis]) => (
-            <div key={tab} className="flex items-center gap-2">
-              <Input
-                value={tab}
+          {tabEntries.map(([tab, vis], row) => (
+            // objectui#26748 — keyed by position, not by the name the input
+            // edits: a rename keeps insertion order, so the row (and the
+            // input's focus) survives each keystroke.
+            <div key={row} className="flex items-center gap-2">
+              <TabNameInput
+                name={tab}
                 disabled={!writable}
-                onChange={(e) => {
-                  const nextKey = e.target.value;
+                taken={(name) => tabEntries.some(([k], j) => j !== row && k === name)}
+                onRename={(nextKey) => {
                   const next: TabPerms = {};
                   for (const [k, v] of tabEntries) next[k === tab ? nextKey : k] = v;
                   setTabs(next);
                 }}
-                className="h-8 w-64"
               />
               <FacetPicker
                 testId={`tab-visibility-${tab}`}
@@ -935,3 +937,37 @@ export function PermissionAdvancedFacets({
 }
 
 export default PermissionAdvancedFacets;
+
+/**
+ * objectui#26748 — a Tab visibility row's name input. It holds what is typed
+ * and writes the rename only while the name is no other row's: a name that
+ * passes through (or ends at) another row's would otherwise merge the two
+ * rows in `tabPermissions` and drop one.
+ */
+function TabNameInput({
+  name,
+  disabled,
+  taken,
+  onRename,
+}: {
+  name: string;
+  disabled: boolean;
+  taken: (name: string) => boolean;
+  onRename: (name: string) => void;
+}) {
+  const [text, setText] = React.useState(name);
+  React.useEffect(() => setText(name), [name]);
+  return (
+    <Input
+      value={text}
+      disabled={disabled}
+      aria-invalid={text !== name || undefined}
+      onChange={(e) => {
+        const next = e.target.value;
+        setText(next);
+        if (next !== name && !taken(next)) onRename(next);
+      }}
+      className="h-8 w-64"
+    />
+  );
+}
