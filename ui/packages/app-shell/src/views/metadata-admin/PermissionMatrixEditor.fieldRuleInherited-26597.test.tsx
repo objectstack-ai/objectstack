@@ -25,7 +25,8 @@ interface SavedSet {
   fields?: Record<string, FieldEntry>;
 }
 
-type FakeClient = Record<string, (...args: never[]) => Promise<unknown>>;
+// `withPreviewDrafts` answers the client itself, not a promise (objectstack#26840).
+type FakeClient = Record<string, (...args: never[]) => unknown>;
 
 let clientImpl: FakeClient;
 let saved: SavedSet[] = [];

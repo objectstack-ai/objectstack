@@ -50,7 +50,8 @@ function deferred() {
 }
 
 /** The slice of the metadata client the editor calls here. */
-type FakeClient = Record<string, (...args: never[]) => Promise<unknown>>;
+// `withPreviewDrafts` answers the client itself, not a promise (objectstack#26840).
+type FakeClient = Record<string, (...args: never[]) => unknown>;
 
 function makeClient(server: Server, opts: { holdFirstSave?: Promise<void> } = {}): FakeClient {
   return {
