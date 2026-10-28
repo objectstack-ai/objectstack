@@ -82,7 +82,7 @@ export const VITEST_SETUP_FILE = 'vitest.setup.ts';
  * | `jsdom`                     | `^29.1.1` | repo root package.json                     |
  * | `typescript`                | `^6.0.3`  | repo root package.json                     |
  * | `vite`                      | `^8.2.1`  | repo root package.json                     |
- * | `vite-plugin-dts`           | `^5.0.3`  | every `packages/plugin-*` (not in root)    |
+ * | `vite-plugin-dts`           | `^5.1.2`  | every `packages/plugin-*` (not in root)    |
  * | `vitest`                    | `^4.1.10` | repo root package.json                     |
  *
  * `@testing-library/dom` is deliberately absent: it is a peer of
@@ -107,7 +107,7 @@ const DEV_DEPENDENCIES: Record<string, string> = {
   jsdom: '^29.1.1',
   typescript: '^6.0.3',
   vite: '^8.2.1',
-  'vite-plugin-dts': '^5.0.3',
+  'vite-plugin-dts': '^5.1.2',
   vitest: '^4.1.10'
 };
 
