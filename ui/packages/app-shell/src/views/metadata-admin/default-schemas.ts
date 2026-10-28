@@ -220,7 +220,7 @@ const SCHEMAS: Record<string, Record<string, unknown>> = {
       type: {
         type: 'string',
         title: 'View Type',
-        enum: ['grid', 'kanban', 'calendar', 'gantt', 'simple', 'tabbed', 'wizard', 'split', 'drawer', 'modal'],
+        enum: ['grid', 'kanban', 'calendar', 'gantt', 'simple', 'tabbed', 'wizard'],
       },
     },
   },

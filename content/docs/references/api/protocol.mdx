@@ -1828,9 +1828,9 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | **label** | `string \| Record<string, string>` | optional | Human-readable label shown in metadata lists. |
 | **object** | `string` | optional | Object this container binds to — how a stack-level `views: [...]` entry says which object its views belong to; read by `getViewsByObject()` / `GET /meta/view?object=`. |
 | **list** | `{ name?: string; label?: string \| Record<string, string>; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: object \| object \| object; … }` | optional |  |
-| **form** | `{ type?: Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>; layout?: Enum<'vertical' \| 'horizontal'>; columns?: integer; title?: string; … }` | optional |  |
+| **form** | `{ type?: Enum<'simple' \| 'tabbed' \| 'wizard'>; layout?: Enum<'vertical' \| 'horizontal'>; columns?: integer; title?: string; … }` | optional |  |
 | **listViews** | `Record<string, { name?: string; label?: string \| Record<string, string>; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: object \| object \| object; … }>` | optional | Additional named list views (views mode — dropdown userFilters allowed, no tabs; ADR-0047) |
-| **formViews** | `Record<string, { type?: Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>; layout?: Enum<'vertical' \| 'horizontal'>; columns?: integer; title?: string; … }>` | optional | Additional named form views |
+| **formViews** | `Record<string, { type?: Enum<'simple' \| 'tabbed' \| 'wizard'>; layout?: Enum<'vertical' \| 'horizontal'>; columns?: integer; title?: string; … }>` | optional | Additional named form views |
 | **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this view. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
@@ -1895,7 +1895,7 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>` | optional (default: `"simple"`) |  |
+| **type** | `Enum<'simple' \| 'tabbed' \| 'wizard'>` | optional (default: `"simple"`) | Form layout: 'simple' (stacked sections, the default), 'tabbed' (one tab per section) or 'wizard' (one gated step per section). Where the form opens is the caller's choice, not the form's |
 | **layout** | `Enum<'vertical' \| 'horizontal'>` | optional | Field layout direction — 'vertical' (the renderer default) or 'horizontal'. Multi-column is not a layout value: set `columns` |
 | **columns** | `integer` | optional | Number of columns for the form body |
 | **title** | `string` | optional | Form title |
@@ -1905,8 +1905,8 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | **allowSkip** | `boolean` | optional | Wizard step-gate opt-out: allow entering a later step without submitting the one before it. Navigation freedom, NOT a validation exemption — the final submit still re-validates every step and returns to the first failing one. Default (absent/false): steps unlock in array order as each prior step submits validly. UI admission only, never authorization. |
 | **showStepIndicator** | `boolean` | optional | Show the wizard step indicator (renderer default: shown). Step progress (completed/current/upcoming/invalid) is derived from the step gate — this boolean is the only authorable progress surface. |
 | **splitDirection** | `Enum<'horizontal' \| 'vertical'>` | optional | Split orientation (split forms) |
-| **splitSize** | `number` | optional | Primary split panel size, % (split forms) |
-| **splitResizable** | `boolean` | optional | Whether the split is resizable (split forms) |
+| **splitSize** | `never` | optional | [REMOVED] `view.form.splitSize` was removed in @objectstack/spec 18.3.0 (ADR-0050) — it sized the primary pane of a `type: 'split'` form, and `split` left the form view `type` in the same release, so no form view draws panes. Delete the key. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
+| **splitResizable** | `never` | optional | [REMOVED] `view.form.splitResizable` was removed in @objectstack/spec 18.3.0 (ADR-0050) — it made the panes of a `type: 'split'` form resizable, and `split` left the form view `type` in the same release, so no form view draws panes. Delete the key. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **drawerSide** | `Enum<'top' \| 'bottom' \| 'left' \| 'right'>` | optional | Drawer side (drawer forms) |
 | **drawerWidth** | `string` | optional | [DEPRECATED → size buckets] Drawer width, e.g. "480px". A pixel width cannot be chosen without knowing the client viewport — the renderer derives it. |
 | **modalSize** | `Enum<'sm' \| 'default' \| 'lg' \| 'xl' \| 'full'>` | optional | Modal size (modal forms) |
@@ -1974,7 +1974,7 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>` | optional (default: `"simple"`) |  |
+| **type** | `Enum<'simple' \| 'tabbed' \| 'wizard'>` | optional (default: `"simple"`) | Form layout: 'simple' (stacked sections, the default), 'tabbed' (one tab per section) or 'wizard' (one gated step per section). Where the form opens is the caller's choice, not the form's |
 | **layout** | `Enum<'vertical' \| 'horizontal'>` | optional | Field layout direction — 'vertical' (the renderer default) or 'horizontal'. Multi-column is not a layout value: set `columns` |
 | **columns** | `integer` | optional | Number of columns for the form body |
 | **title** | `string` | optional | Form title |
@@ -1984,8 +1984,8 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | **allowSkip** | `boolean` | optional | Wizard step-gate opt-out: allow entering a later step without submitting the one before it. Navigation freedom, NOT a validation exemption — the final submit still re-validates every step and returns to the first failing one. Default (absent/false): steps unlock in array order as each prior step submits validly. UI admission only, never authorization. |
 | **showStepIndicator** | `boolean` | optional | Show the wizard step indicator (renderer default: shown). Step progress (completed/current/upcoming/invalid) is derived from the step gate — this boolean is the only authorable progress surface. |
 | **splitDirection** | `Enum<'horizontal' \| 'vertical'>` | optional | Split orientation (split forms) |
-| **splitSize** | `number` | optional | Primary split panel size, % (split forms) |
-| **splitResizable** | `boolean` | optional | Whether the split is resizable (split forms) |
+| **splitSize** | `never` | optional | [REMOVED] `view.form.splitSize` was removed in @objectstack/spec 18.3.0 (ADR-0050) — it sized the primary pane of a `type: 'split'` form, and `split` left the form view `type` in the same release, so no form view draws panes. Delete the key. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
+| **splitResizable** | `never` | optional | [REMOVED] `view.form.splitResizable` was removed in @objectstack/spec 18.3.0 (ADR-0050) — it made the panes of a `type: 'split'` form resizable, and `split` left the form view `type` in the same release, so no form view draws panes. Delete the key. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **drawerSide** | `Enum<'top' \| 'bottom' \| 'left' \| 'right'>` | optional | Drawer side (drawer forms) |
 | **drawerWidth** | `string` | optional | [DEPRECATED → size buckets] Drawer width, e.g. "480px". A pixel width cannot be chosen without knowing the client viewport — the renderer derives it. |
 | **modalSize** | `Enum<'sm' \| 'default' \| 'lg' \| 'xl' \| 'full'>` | optional | Modal size (modal forms) |
