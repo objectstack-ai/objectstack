@@ -61,7 +61,7 @@ import { resolve } from 'node:path';
 import '../renderers';
 import { SchemaRenderer } from '@object-ui/react';
 
-const GUIDE_PATH = resolve(__dirname, '../../../../content/docs/guide/layout.md');
+const GUIDE_PATH = resolve(__dirname, '../../../../../content/docs/frontend/layout.mdx');
 
 interface Passage {
   heading: string;

@@ -8,7 +8,7 @@
  * objectui#5378 + objectui#5377 + objectui#5446 — the getting-started guide's
  * own `object-grid` snippets are RENDERED here, not read.
  *
- * `content/docs/guide/building-crud-app.md` is the first-run CRUD walkthrough,
+ * `content/docs/frontend/building-crud-app.mdx` is the first-run CRUD walkthrough,
  * and four independent axes each took it from "works" to "renders nothing" (or,
  * for the fourth, to "renders something, but not what the prose claims"):
  *
@@ -56,7 +56,7 @@ import '@object-ui/components';
 import '@object-ui/fields';
 import '../index';
 
-const GUIDE = path.resolve(__dirname, '../../../../content/docs/guide/building-crud-app.md');
+const GUIDE = path.resolve(__dirname, '../../../../../content/docs/frontend/building-crud-app.mdx');
 
 // `listViews` mirrors the guide's own Step 3 `TaskSchema.listViews` exactly
 // (canonical camelCase since #5362; the runtime's snake fallback is pinned by

@@ -355,10 +355,9 @@ const DOCUMENTED_MIRRORS = [
     file: 'packages/vscode-extension/DESIGN.md',
     heading: '### 4. Export to React',
   },
-  {
-    file: 'content/docs/utilities/vscode-extension.mdx',
-    heading: '### `Object UI: Export to React Component`',
-  },
+  // The second mirror, `content/docs/utilities/vscode-extension.mdx`, left the
+  // tree with the ObjectUI docs site (objectstack#27145). The extension is not
+  // published, so the page was not carried into the monorepo docs.
 ] as const;
 
 /**
@@ -435,7 +434,7 @@ describe('Export to React — the documented mirrors of the preamble (objectui#7
   it('binds every known mirror — an emptied list would assert nothing', () => {
     // The floor. A refactor that quietly emptied the list above would satisfy
     // `it.each` by running zero cases and report green having compared nothing.
-    expect(DOCUMENTED_MIRRORS).toHaveLength(2);
+    expect(DOCUMENTED_MIRRORS).toHaveLength(1);
     for (const mirror of DOCUMENTED_MIRRORS) {
       expect(existsSync(join(REPO_ROOT, mirror.file))).toBe(true);
     }

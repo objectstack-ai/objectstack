@@ -96,7 +96,13 @@
  * so this file mirrors exactly what the gallery host registers, in the same
  * order — several packages claim the same bare keyword (`chart`, `calendar`)
  * and the last registration wins, so a reordered mirror would not be a mirror.
- * The last case in this file reads the host and fails if the two lists drift.
+ * The last case in this file read the host and failed if the two lists drifted.
+ *
+ * ⛔ objectstack#27145 deleted that host with the docs site (its
+ * `registerCatalogBlocks.ts`, `SchemaThumbnail.tsx`, `InteractiveDemo.tsx` and
+ * `galleryDataSource.ts`), and every host-parity case went with it. Where a
+ * docblock below still says "the parity case", it is describing history: the
+ * registration list and the fixture in this file are now the only copies.
  *
  * ## What is asserted, per entry
  *
@@ -128,7 +134,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 import { render, waitFor, cleanup } from '@testing-library/react';
 import '@object-ui/components';
-// Mirrors apps/site/app/components/registerCatalogBlocks.ts, in its order.
+// Mirrors the docs-site gallery host's registration list, in its order. The host
+// (`registerCatalogBlocks.ts`) was deleted with the site by objectstack#27145;
+// `HOST_PACKAGES` below is now the only copy.
 import '@object-ui/plugin-dashboard';
 import '@object-ui/plugin-charts';
 import '@object-ui/plugin-calendar';
@@ -220,7 +228,11 @@ const ALL_DIAGNOSTICS = [UNKNOWN_COMPONENT, FAILED_TO_RENDER, DATASOURCE_REQUIRE
  */
 const FORM_LOADING = 'Loading form…';
 
-/** The packages the gallery host must load, in the host's own order. */
+/**
+ * The packages the gallery host loaded, in the host's own order. The host left
+ * the tree with the docs site (objectstack#27145), so its parity cases are gone
+ * and this list is what the imports above are held to.
+ */
 const HOST_PACKAGES = [
   '@object-ui/plugin-dashboard',
   '@object-ui/plugin-charts',
@@ -410,17 +422,6 @@ const galleryDataSource = {
   update: async (_objectName: string, id: string | number, data: Record<string, unknown>) => ({ ...data, id }),
   delete: async () => true,
 };
-
-/** The method names the host fixture must expose for the mirror to be one. */
-const GALLERY_DATA_SOURCE_METHODS = [
-  'queryDataset',
-  'getObjectSchema',
-  'find',
-  'findOne',
-  'create',
-  'update',
-  'delete',
-];
 
 /** The two wrapper elements this harness adds around the entry's own root. */
 const WRAPPER_ELEMENTS = 2;
@@ -754,49 +755,6 @@ describe('objectui#4616 — every catalog entry renders in the docs gallery', ()
     });
   }, 120000);
 
-  /**
-   * HOST PARITY (source-text guard, deliberately not behavioural).
-   *
-   * Everything above mirrors the gallery: the same registration set, in the
-   * same order, with the same dataset-capable `dataSource`. It cannot mirror it
-   * by construction — `apps/**` is outside every root Vitest project — so
-   * deleting a package from the host would leave this file green while
-   * `/docs/guide/schema-catalog` went back to painting red panels. This case
-   * reads the host and pins what the sweep assumes about it.
-   */
-  describe('the docs-site gallery host registers the same set', () => {
-    // Rooted at this file, never at the cwd — see `REPO_ROOT` above.
-    const siteDir = path.join(REPO_ROOT, 'apps/site/app/components');
-    const read = (f: string) => fs.readFileSync(path.join(siteDir, f), 'utf8');
-
-    it('loads every package this pin loads, in this pin’s order', () => {
-      const source = read('registerCatalogBlocks.ts');
-      const imported = [...source.matchAll(/^import\s+'(@object-ui\/[^']+)';$/gm)].map(
-        (m) => m[1],
-      );
-      expect(imported).toEqual(HOST_PACKAGES);
-    });
-
-    it('is imported by the gallery thumbnail host', () => {
-      expect(read('SchemaThumbnail.tsx')).toMatch(
-        /^import\s+'\.\/registerCatalogBlocks';$/m,
-      );
-    });
-
-    /**
-     * The objectui#4600 separation, restated because objectui#4616 is exactly
-     * the change that would tempt someone to collapse it: the per-page demo
-     * hosts opt into their plugins through `PluginLoader`, and importing this
-     * module from them would make every docs page carrying a demo load every
-     * graph in that list eagerly.
-     */
-    it.each(['InteractiveDemo.tsx', 'LiveSplitDemo.tsx'])(
-      '%s still does NOT import it (PluginLoader stays lazy there)',
-      (host) => {
-        expect(read(host)).not.toContain('registerCatalogBlocks');
-      },
-    );
-  });
 });
 
 /**
@@ -1358,37 +1316,9 @@ describe('objectui#6025 — the gallery DECLARES the packages its entries need',
       'these packages register the types their own category’s entries author, and the ' +
         'gallery host does not name them. Whether the types resolve anyway through some ' +
         'other package’s component import is a different question and not this one — add ' +
-        'the side-effect import to `apps/site/app/components/registerCatalogBlocks.ts` and ' +
-        'mirror it in `HOST_PACKAGES`.',
+        'the side-effect import at the top of this file and name it in `HOST_PACKAGES`.',
     ).toEqual([]);
   });
-});
-
-/**
- * HOST PARITY for the fixture, same technique and same reason as the
- * registration-set parity above: the mirror at the top of this file is what
- * the assertions run against, so a host fixture that lost `find` would leave
- * this file green while the docs page went back to an empty view.
- */
-describe('objectui#5113 — the docs-site hosts supply the same fixture', () => {
-  const siteDir = path.join(REPO_ROOT, 'apps/site/app/components');
-  const read = (f: string) => fs.readFileSync(path.join(siteDir, f), 'utf8');
-
-  it('the host fixture exposes every method this mirror implements', () => {
-    const source = read('galleryDataSource.ts');
-    const missing = GALLERY_DATA_SOURCE_METHODS.filter(
-      (method) => !new RegExp(`\\basync ${method}\\s*\\(`).test(source),
-    );
-    expect(missing).toEqual([]);
-  });
-
-  it.each(['SchemaThumbnail.tsx', 'InteractiveDemo.tsx'])(
-    '%s hands it to the renderer',
-    (host) => {
-      expect(read(host)).toMatch(/^import \{ galleryDataSource \} from '\.\/galleryDataSource';$/m);
-      expect(read(host)).toContain('dataSource: galleryDataSource');
-    },
-  );
 });
 
 /**
@@ -1448,50 +1378,6 @@ function distinctRowValues(field: string): Set<string> {
   return seen;
 }
 
-/**
- * The host's `USERS_SCHEMA`, read off its source. `apps/**` is outside every
- * root Vitest project, which is the same constraint that makes this file a
- * mirror in the first place. Brace-matched rather than pattern-matched and then
- * JSON-ified, so an extraction that stops working fails LOUDLY here rather than
- * quietly comparing less than it claims to.
- */
-function readHostUsersFields(source: string): Record<string, UsersFieldDecl> {
-  const start = source.indexOf('const USERS_SCHEMA = {');
-  expect(start, 'the host fixture no longer declares `const USERS_SCHEMA = {`').toBeGreaterThan(-1);
-  const open = source.indexOf('{', start);
-  let depth = 0;
-  let end = -1;
-  for (let i = open; i < source.length; i++) {
-    if (source[i] === '{') depth += 1;
-    else if (source[i] === '}') {
-      depth -= 1;
-      if (depth === 0) {
-        end = i;
-        break;
-      }
-    }
-  }
-  expect(end, 'the host `USERS_SCHEMA` literal has unbalanced braces').toBeGreaterThan(-1);
-  const json = source
-    .slice(open, end + 1)
-    .replace(/'/g, '"')
-    .replace(/([{,[]\s*)([A-Za-z_$][A-Za-z0-9_$]*)\s*:/g, '$1"$2":')
-    .replace(/,(\s*[}\]])/g, '$1');
-  let parsed: { fields?: Record<string, UsersFieldDecl> };
-  try {
-    parsed = JSON.parse(json) as { fields?: Record<string, UsersFieldDecl> };
-  } catch (error) {
-    throw new Error(
-      'the host `USERS_SCHEMA` is no longer a plain single-quoted literal, so this ' +
-        'parity case can no longer read it — a comment inside the literal, or an ' +
-        'apostrophe inside a string, would each do it. Fix the reader, not the pin.',
-      { cause: error },
-    );
-  }
-  expect(parsed.fields, 'the host `USERS_SCHEMA` declares no `fields`').toBeTruthy();
-  return parsed.fields as Record<string, UsersFieldDecl>;
-}
-
 describe('objectui#6317 — a `select` field declares the options its rows use', () => {
   const mirrorFields = USERS_SCHEMA.fields as Record<string, UsersFieldDecl>;
   const selectFields = Object.entries(mirrorFields)
@@ -1523,19 +1409,6 @@ describe('objectui#6317 — a `select` field declares the options its rows use',
     ).toEqual([]);
   });
 
-  it('the host fixture declares the SAME field surface, options included', () => {
-    const hostSource = fs.readFileSync(
-      path.join(REPO_ROOT, 'apps/site/app/components/galleryDataSource.ts'),
-      'utf8',
-    );
-    expect(
-      readHostUsersFields(hostSource),
-      'the host fixture and this mirror declare different `users` field surfaces. They ' +
-        'are ONE fixture in two files and have to move together: the host gained its ' +
-        '`role` / `status` options in 4b0b12630 and this mirror did not follow for 330 ' +
-        'commits, with every case in this file green the whole time.',
-    ).toEqual(mirrorFields);
-  });
 });
 
 /**

@@ -468,7 +468,10 @@ jobs:
             #   - `content/docs/frontend/**`, the ObjectUI SDK pages since the
             #     objectui.org docs folded into this site. Lint UI's doc gates
             #     (doc-types, doc-snippets, doc-json, doc-fences, spec-symbols)
-            #     and the Test UI tests that render a guide's example read them.
+            #     and the Test UI tests that render a guide's example read them;
+            #   - `content/docs/ui/pages.mdx`, where the per-element data
+            #     binding section of the old data-source guide landed. Two Test
+            #     UI pins read its fences and its block table (objectstack#27145).
             ui:
               - 'ui/**'
               - 'pnpm-lock.yaml'
@@ -478,6 +481,7 @@ jobs:
               - '.github/prompts/**'
               - 'skills/objectui/**'
               - 'content/docs/frontend/**'
+              - 'content/docs/ui/pages.mdx'
               # turbo.json's `globalDependencies`: every build task hashes
               # them, so they move what the ui jobs build, the SDUI manifest's
               # regeneration included (#26137).

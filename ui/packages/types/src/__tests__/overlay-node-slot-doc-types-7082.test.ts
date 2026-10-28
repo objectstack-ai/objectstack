@@ -10,6 +10,13 @@
  * Six component pages name their node slots at the type those keys DECLARE
  * (objectui#7082).
  *
+ * ⛔ The page half is gone. objectstack#27145 retired the ObjectUI docs site and
+ * its `content/docs/components/**` pages; the overlay and feedback renderers
+ * are one row each on `content/docs/frontend/renderers.mdx`, which carries no
+ * interface fences. What stays is the declaration half every page pin leaned
+ * on: the slot types, their requiredness, and the read sites. The history
+ * below is kept as it was written.
+ *
  * ## Why this file exists rather than "the docs gates went green"
  *
  * Every row this pins lived in a `plaintext` fence when this file was written
@@ -22,8 +29,8 @@
  * fences may name any type at all and every gate stays green -- the blindness
  * objectui#5250 records and objectui#5867 declares the population of. A green
  * CI run on the correction this file accompanies means "nothing else broke",
- * NOT "the correction is right". Same reasoning, and the same shape, as
- * `button-group-doc-surface-6347.test.ts` (PR #7078).
+ * NOT "the correction is right". Same reasoning, and the same shape, as the
+ * button-group page pin of PR #7078.
  *
  * ## The authority here is the TS declaration, NOT the Zod mirror
  *
@@ -221,20 +228,6 @@ interface Member {
   readonly typeText: string;
 }
 
-/**
- * The one fence of the page's own language that carries its interface blocks.
- * The language is named per subject: objectui#5867 re-fences these pages from
- * `plaintext` to `ts` in batches, so a page reads `ts` once its batch lands.
- */
-function schemaFence(doc: string, path: string, fence: 'plaintext' | 'ts'): string {
-  const opener = new RegExp('```' + fence + '\\n([\\s\\S]*?)```', 'g');
-  const fences = [...doc.matchAll(opener)].map((match) => match[1]);
-  if (fences.length !== 1) {
-    throw new Error(`expected exactly one \`${fence}\` fence in ${path}, found ${fences.length}`);
-  }
-  return fences[0];
-}
-
 /** The body of one `interface <name> {` block, THROWING when absent. */
 function interfaceBody(source: string, opener: string, path: string): string {
   const start = source.indexOf(opener);
@@ -279,29 +272,20 @@ function members(body: string): Map<string, Member> {
 
 interface Subject {
   readonly name: string;
-  readonly docPath: string;
-  /** The page's schema fence language (objectui#5867 re-fences it in batches). */
-  readonly fence: 'plaintext' | 'ts';
   readonly declPath: string;
 }
 
 const SUBJECTS: readonly Subject[] = [
-  { name: 'AlertDialogSchema', docPath: 'content/docs/components/overlay/alert-dialog.mdx', fence: 'ts', declPath: 'packages/types/src/overlay.ts' },
-  { name: 'ContextMenuSchema', docPath: 'content/docs/components/overlay/context-menu.mdx', fence: 'ts', declPath: 'packages/types/src/overlay.ts' },
-  { name: 'HoverCardSchema', docPath: 'content/docs/components/overlay/hover-card.mdx', fence: 'ts', declPath: 'packages/types/src/overlay.ts' },
-  { name: 'DropdownMenuSchema', docPath: 'content/docs/components/overlay/dropdown-menu.mdx', fence: 'ts', declPath: 'packages/types/src/overlay.ts' },
-  { name: 'SheetSchema', docPath: 'content/docs/components/overlay/sheet.mdx', fence: 'ts', declPath: 'packages/types/src/overlay.ts' },
-  { name: 'EmptySchema', docPath: 'content/docs/components/feedback/empty.mdx', fence: 'ts', declPath: 'packages/types/src/feedback.ts' },
+  { name: 'AlertDialogSchema', declPath: 'packages/types/src/overlay.ts' },
+  { name: 'ContextMenuSchema', declPath: 'packages/types/src/overlay.ts' },
+  { name: 'HoverCardSchema', declPath: 'packages/types/src/overlay.ts' },
+  { name: 'DropdownMenuSchema', declPath: 'packages/types/src/overlay.ts' },
+  { name: 'SheetSchema', declPath: 'packages/types/src/overlay.ts' },
+  { name: 'EmptySchema', declPath: 'packages/types/src/feedback.ts' },
 ];
 
-const documented = new Map<string, Map<string, Member>>();
 const declared = new Map<string, Map<string, Member>>();
 for (const subject of SUBJECTS) {
-  const doc = read(subject.docPath);
-  documented.set(
-    subject.name,
-    members(interfaceBody(schemaFence(doc, subject.docPath, subject.fence), `interface ${subject.name} {`, subject.docPath)),
-  );
   declared.set(
     subject.name,
     members(
@@ -314,7 +298,6 @@ for (const subject of SUBJECTS) {
   );
 }
 
-const docRow = (owner: string, key: string): Member | undefined => documented.get(owner)?.get(key);
 const declRow = (owner: string, key: string): Member | undefined => declared.get(owner)?.get(key);
 
 /** The seven rows objectui#7082 corrects: owner, key, and the declared text. */
@@ -328,16 +311,9 @@ const CORRECTED: ReadonlyArray<readonly [string, string, string]> = [
   ['SheetSchema', 'content', 'SchemaNode | SchemaNode[]'],
 ];
 
-describe('six overlay/feedback pages name node slots at the declared type (objectui#7082)', () => {
-  it.each(CORRECTED)('%s.%s is published as the declaration spells it', (owner, key, expected) => {
-    // Both legs, so neither side can drift alone: the page says `expected`, and
-    // `expected` is still what the declaration says.
-    expect(docRow(owner, key)?.typeText).toBe(expected);
+describe('six overlay/feedback declarations type their node slots as `SchemaNode` (objectui#7082)', () => {
+  it.each(CORRECTED)('%s.%s is declared as the corrected rows spelled it', (owner, key, expected) => {
     expect(declRow(owner, key)?.typeText).toBe(expected);
-  });
-
-  it.each(CORRECTED)('%s.%s no longer names `ComponentSchema`', (owner, key) => {
-    expect(docRow(owner, key)?.typeText).not.toContain('ComponentSchema');
   });
 
   it('`ComponentSchema` is no longer a shipped export at all, which is why the old rows were wrong', () => {
@@ -361,9 +337,8 @@ describe('six overlay/feedback pages name node slots at the declared type (objec
 });
 
 describe('objectui#7081 landed: the rows that stayed singular for it now say the union on both faces (objectui#7082)', () => {
-  it('`DropdownMenuSchema.trigger` is declared as the union, so the page says the union', () => {
+  it('`DropdownMenuSchema.trigger` is declared as the union', () => {
     expect(declRow('DropdownMenuSchema', 'trigger')?.typeText).toBe('SchemaNode | SchemaNode[]');
-    expect(docRow('DropdownMenuSchema', 'trigger')?.typeText).toBe('SchemaNode | SchemaNode[]');
   });
 
   it('its Zod mirror says the union it always said -- the mirror is the side that did NOT move', () => {
@@ -390,11 +365,10 @@ describe('objectui#7081 landed: the rows that stayed singular for it now say the
 });
 
 describe('the row a docs-only edit could not honestly resolve, resolved (objectui#7082 -> objectui#7105)', () => {
-  it('`EmptySchema.action` is declared on BOTH faces, and the page names the declared type', () => {
+  it('`EmptySchema.action` is declared on BOTH faces', () => {
     // The inverse of the pin this replaces, read for read: that one asserted
     // `declRow(...)` was undefined and that the mirror body carried no `action:`
     // row. objectui#7105 declared both.
-    expect(docRow('EmptySchema', 'action')?.typeText).toBe('SchemaNode');
     expect(declRow('EmptySchema', 'action')).toEqual({ optional: true, typeText: 'SchemaNode' });
     // The mirror, which is where a "declared elsewhere" reading used to hide.
     const mirrorPath = 'packages/types/src/zod/feedback.zod.ts';
@@ -434,15 +408,14 @@ describe('the row a docs-only edit could not honestly resolve, resolved (objectu
   });
 });
 
-describe('requiredness: the objectui#7073 class, closed -- all four rows agree on both faces (objectui#7106)', () => {
+describe('requiredness: the objectui#7073 class, closed -- all four rows are declared optional (objectui#7106)', () => {
   it.each([
     ['ContextMenuSchema', 'trigger'],
     ['AlertDialogSchema', 'trigger'],
     ['SheetSchema', 'trigger'],
     ['SheetSchema', 'content'],
-  ])('%s.%s is declared optional and published optional', (owner, key) => {
+  ])('%s.%s is declared optional', (owner, key) => {
     expect(declRow(owner, key)?.optional).toBe(true);
-    expect(docRow(owner, key)?.optional).toBe(true);
   });
 });
 
@@ -453,13 +426,8 @@ describe('counter-probes: the readers above can still fail (objectui#7082)', () 
     );
   });
 
-  it('`schemaFence` throws when a page stops holding exactly one fence', () => {
-    expect(() => schemaFence('```plaintext\na\n```\n```plaintext\nb\n```\n', 'x.mdx', 'plaintext')).toThrow(/found 2/);
-  });
-
   it('the extractors really parsed rows, not empty match sets', () => {
     for (const subject of SUBJECTS) {
-      expect(documented.get(subject.name)?.size).toBeGreaterThan(1);
       expect(declared.get(subject.name)?.size).toBeGreaterThan(1);
     }
   });

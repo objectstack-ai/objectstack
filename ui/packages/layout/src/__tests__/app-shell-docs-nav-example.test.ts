@@ -7,7 +7,7 @@
  */
 
 /**
- * `content/docs/layout/app-shell.mdx`'s SidebarNav examples are THIS file's code
+ * `content/docs/frontend/app-shell.mdx`'s SidebarNav examples are THIS file's code
  * (objectui#4793).
  *
  * The published AppShell page (objectui.org/docs/layout/app-shell) taught two
@@ -63,7 +63,7 @@
  * text — with the expectation read OUT OF `AppShell.tsx` on every run, the same
  * never-"update the test" construction the `SidebarNavProps` scan above uses.
  *
- * Scope: this file scans `content/docs/layout/app-shell.mdx` and nothing else.
+ * Scope: this file scans `content/docs/frontend/app-shell.mdx` and nothing else.
  * The `icon:`-as-string rejection in particular must NOT be widened to the docs
  * tree — `NavigationRenderer` really does take `icon` as a string (an icon
  * NAME it resolves through `resolveIcon`), so this is a fact about THIS
@@ -84,7 +84,7 @@ const mask: (source: string) => string = maskComments;
 
 /** Repo root — four levels up from `packages/layout/src/__tests__`. */
 const REPO_ROOT = resolve(__dirname, '../../../..');
-const MDX_PATH = join(REPO_ROOT, 'content', 'docs', 'layout', 'app-shell.mdx');
+const MDX_PATH = join(REPO_ROOT, '..', 'content', 'docs', 'frontend', 'app-shell.mdx');
 const MDX = readFileSync(MDX_PATH, 'utf8');
 const SIDEBAR_NAV_SRC = readFileSync(
   join(REPO_ROOT, 'packages', 'layout', 'src', 'SidebarNav.tsx'),
@@ -260,7 +260,7 @@ describe("app-shell.mdx's SidebarNav examples are this file's type-checked code 
     expect(
       indexOfSequence(MDX_LINES, block),
       [
-        `The \`${name}\` example in content/docs/layout/app-shell.mdx no longer matches the code`,
+        `The \`${name}\` example in content/docs/frontend/app-shell.mdx no longer matches the code`,
         'in this file. One of the two moved on its own, which is exactly how the page came to',
         "teach `{ label, href, icon: 'home' }` (objectui#4793) — a shape `NavItem` has never",
         'had. Fix whichever is wrong, then make the other match; the code here is what `tsc`',
@@ -365,7 +365,7 @@ describe("app-shell.mdx's SidebarNav examples spell only real keys (objectui#479
     expect(
       used.filter((prop) => !declared.includes(prop)),
       [
-        'A `<SidebarNav>` example on content/docs/layout/app-shell.mdx passes a prop the',
+        'A `<SidebarNav>` example on content/docs/frontend/app-shell.mdx passes a prop the',
         'component does not declare. `SidebarNav` destructures a fixed key list with NO rest',
         'element, so an undeclared prop is not "ignored with a warning" — the value is built',
         'and dropped, and the page promises UI that can never appear. That is exactly what',
@@ -388,7 +388,7 @@ describe("app-shell.mdx's `AppShellProps` block reprints the real interface (obj
     expect(
       appShellPropsFences().length,
       [
-        'content/docs/layout/app-shell.mdx should reprint `AppShellProps` in exactly one',
+        'content/docs/frontend/app-shell.mdx should reprint `AppShellProps` in exactly one',
         'fenced block (the `## Component Props` section). Zero means the block was renamed',
         'or unfenced and the parity assertion below is comparing against nothing; more than',
         'one means two copies that can now disagree with each other as well as with source.',
@@ -405,7 +405,7 @@ describe("app-shell.mdx's `AppShellProps` block reprints the real interface (obj
     expect(
       documented.map(format),
       [
-        "The `AppShellProps` block on content/docs/layout/app-shell.mdx no longer matches the",
+        "The `AppShellProps` block on content/docs/frontend/app-shell.mdx no longer matches the",
         'component. That block is a hand-written copy of the interface, and the way it rots is',
         'by OMISSION: it listed 5 of 7 props, so `branding` (the theming entry point) and',
         '`rightRail` (ADR-0057 P3a) were shipped, exported and documented in source while the',
