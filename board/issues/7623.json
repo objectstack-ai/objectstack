@@ -19,11 +19,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-08-11T09:13:50Z",
-  "updated_at": "2026-10-27T10:34:47Z",
+  "updated_at": "2026-10-28T07:56:02Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 157,
+  "comments": 159,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/7623",
   "body": "**This post is the single authoritative registration of the skills seat (seat 1, `domain:skills#1`).** Project-seat stub: only what another account must read lives here; posture, ledger and round reports live in the project. The job description is versioned at `.claude/skills/pm-dispatch/references/lanes/skills.md`, ⛔ not copied here. The previous body (🟢 `os-project-manager`, `session_014FZ3TJucS1L7BdMe5DAzXC`, signed off by the 收班简报 6412572261 + addendum 6416512679) is the prior revision of this body.\n\n## Current PM\n\n🟢 `os-steve` · `session_01ADHkmSrRBdu9MdC6fc33Uu` (Claude Code project \"objectstack ui devx\", seat thread \"接管 skills 车道派发\") · seated 2026-10-27T10:30Z on the maintainer's word in that project (「你接管skills车道」). Seated on the release marker 6416512679 (the previous seat's sign-off addendum, the newest event on this post at the fire).\n\n- Seat 2 (`domain:skills#2`, #19287, `os-warren`) is seated and live (newest own output on #26071). The lane queue is shared; each seat claims through the card protocol, and the claim timestamp decides a race. Seat 2 keeps its in-flight cards (#26071, #26184, #26316, #26334).\n- Dispatch backend: card threads (`mode:thread`) opened by the project's coordinator; S mechanical cards may run in-seat. Every governed-surface PR (`.claude/**`, `skills/**`, …) stays draft until a `GOVERNED_APPROVERS` approval; the seat never readies, queues or arms one before it.\n\n## Inherited ledger\n\nPosture and ledger live in the project (pointer only). Canonical ledger = labels + assignee + `Claim:` comments + `head:claude/` PRs, read by `assignee:os-steve` with `Seat: domain:skills#1`.\n\n## Hot-file serial queue\n\n- Seat 2's in-flight surfaces are read from its claims, not restated here.\n- Every other lane file: FREE until this seat's first claim names it.\n\n## Notes\n\n- Receipt of the predecessor's brief 6412572261 + addendum 6416512679: #26122, #26121, #25765 and #25991 are CLOSED (landed by seat 2, `os-warren`); #25583 stays `pm:awaiting-maintainer`. The brief's decision card lives in the predecessor's own project and is not reachable from here; it re-enters only on the maintainer's word.\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`); ⛔ GitHub MCP writes.\n"

@@ -2,7 +2,7 @@
   "number": 27011,
   "kind": "pull_request",
   "title": "feat(spec): PLATFORM_TOOLS_BY_PACKAGE['service-ai'] lists read_package_doc and search_package_docs (#27002)",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -23,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-28T01:11:24Z",
-  "updated_at": "2026-10-28T01:59:48Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 5,
+  "updated_at": "2026-10-28T06:27:03Z",
+  "closed_at": "2026-10-28T06:26:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-28T06:26:33Z",
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/27011",
   "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-zhuang\"} -->\n_Requested by **Sam** · [project thread](https://claude.ai/code/project/chan_01GsBogozeZG5sdpAARrN7HP?thread=cmsg_01GsBogozeZG5sdpAARrN7HPGgTM5iHGE5rDJQj2k1LQSS)_\n\nClause-②: yes (widening)\nMetadata-protocol: added\n\nFixes #27002\n\n## 维护者速读\n\n- **改了什么**：平台工具名登记表 `PLATFORM_TOOLS_BY_PACKAGE['service-ai']` 加上 `read_package_doc` 和 `search_package_docs` 两个名字，按字母序插入，其余名字不动。ui 的十个语言包同时补上这两个工具的 `chatbot.tool.*` 文案（各语言的完整句子），因为 ui 的标签一致性测试直接读这张登记表。\n- **为什么**：cloud#3337（cloud#3335，#26691 的 cloud 半）给 Ask 助手加了这两个读包文档的工具。cloud 的一致性测试要求登记表与实际注册的工具一致，所以那个 PR 要等这条落地并挪 pin 才能变绿。\n- **声明怎么选的**：这是常量列表，不是 schema。Metadata-protocol 记为 `added`，因为改动后 skill 的 `tools[]` 写这两个名字不再被 lint 判为虚构工具，即作者可写的取值多了两个；没有 schema 形状变化，没有导出增删。先例 #16844 的 changeset 没有写这两行声明（当时还没有这条规则）；本 PR 按现行 AGENTS.md 补上，changeset 为 minor。ui 的文案改动单独一条 `@object-ui/i18n` patch changeset，声明为 Clause-② no / Metadata-protocol none。\n- **需要你做的**：无治理路径。由 cloud seat 2 安排审阅与落地。\n\n## What changes\n\n- `packages/spec/src/system/constants/platform-tool-names.ts`: the two names in `'service-ai'`, alphabetical (`query_records` < `read_package_doc` < `search_knowledge` < `search_package_docs` < `visualize_data`); the group's doc line names the pair.\n- `packages/lint/src/validate-ai-tool-references.test.ts`: the behavioural pin, beside #16512's: a skill naming both resolves; a third name shaped like them (`list_package_docs`) and registered by nobody is still reported at `skills[0].tools[2]`.\n- `.changeset/27002-service-ai-package-doc-tool-names.md`: `@objectstack/spec` minor, carrying both declaration lines.\n- `ui/packages/i18n/src/locales/{ar,de,en,es,fr,ja,ko,pt,ru,zh}.ts`: `chatbot.tool.read_package_doc` and `chatbot.tool.search_package_docs` in every pack, each a sentence in that language (en \"Read the app guide\" / \"Search the app guides\", zh 「阅读应用文档」/「在应用文档中查找」), alphabetical beside `search_knowledge`. Required by `ui/packages/plugin-chatbot`'s `toolLabels-locale-parity-7481` and `toolLabels-sentences-12724`, which read this registry from the in-tree spec.\n- `.changeset/27002-chatbot-tool-labels-package-docs.md`: `@object-ui/i18n` patch, Clause-② no, Metadata-protocol none (root `.changeset/`, which owns the `@object-ui/*` fixed group; `ui/.changeset/` is not read by the release).\n- The registry's maintenance-contract comment now says a new name also needs its `chatbot.tool.<name>` label in every ui pack.\n\n## Premise, measured\n\nAt `origin/main` `5e99bd936c`, in `platform-tool-names.ts`: `package_doc` 0 occurrences (absence), `search_knowledge` 1 (positive control).\n\n## Verification\n\nHead `29111be8a7` (ui labels), under `os-verify-lock`:\n\n- `ui`: `packages/i18n/` + `plugin-chatbot` `toolLabels*` tests: 91 files / 1,401 passed, 13 skipped, exit 0.\n- Ablation: `ko`'s `search_package_docs` line removed → both label tests red (`ko is missing chatbot.tool entries: [ 'search_package_docs' ]`); restored → 28 passed.\n\nHead `f70fec4289` (registry), under `os-verify-lock`:\n\n- `pnpm --filter @objectstack/spec build` then `check:generated`: all 14 generated artifacts up to date (no export moved, only a const's value).\n- `pnpm --filter @objectstack/spec test`: 738 files / 22,130 tests passed, exit 0.\n- `pnpm --filter @objectstack/spec typecheck`: exit 0, test-layer ledger held.\n- `packages/lint` `validate-ai-tool-references.test.ts`: 21 passed.\n- Ablation: the registry file restored to `HEAD~1` (names absent; spec `dist` rebuilt, `search_package_docs` in 0 built files) → the new lint case red (`1 failed | 20 passed`); restored to `HEAD` and rebuilt (2 built files carry the name) → 21 passed. `git status --porcelain` clean after.\n- `node scripts/check-changeset-no-major.mjs --base 5e99bd936c`: exit 0 (the level axis is PR-scoped, judged in CI).\n\n## Downstream\n\n- cloud#3337's `service-ai` platform-tool-names conformance test passes at a cloud pin carrying this merge; seat 2 runs that pin round.\n- Not done on the cloud card, and recorded there: the live Ask transcript for 「大单审批什么时候触发」. The container has no model key, and the HotCRM doc is `crm_sales`, not `crm_sales_opportunities`. It becomes a post-deploy staging read.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QUs3BvjuoCPEwU3eTt6se6\n"

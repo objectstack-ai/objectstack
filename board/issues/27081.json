@@ -1,0 +1,34 @@
+{
+  "number": 27081,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR batch 3 of the stale Proposed records — 0063, 0064, 0071 Accepted, 0072 and 0073 Accepted (narrowed); batch 2 contract-review corrections (0038 L5, 0046 §5, 0052 P0b)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T04:33:57Z",
+  "updated_at": "2026-10-28T05:43:45Z",
+  "closed_at": "2026-10-28T05:43:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-28T05:43:43Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27081",
+  "body": "Part of #26553 (the carrier for the four ADR ruling batches under #26076 ruling A)\n\nClause-②: no\nMetadata-protocol: none\nRuling-ref: https://github.com/objectstack-ai/objectstack/issues/26553#issuecomment-6460071100\nRuling-ref: https://github.com/objectstack-ai/objectstack/issues/26553#issuecomment-6458958232 (batch 2, corrections)\n\nContract review tier: **H** — status lines and one body paragraph in `docs/adr/**` plus the regenerated `docs/adr/README.md`, a governed surface; it lands by the maintainer's approval (AGENTS.md Prime Directive 14), never by a seat's click.\n\n## 维护者速读\n\n- **改了什么：** 两件事，各一个提交。\n  1. **#27034 合约复核的修正**（`e75c243a3d`）：ADR-0038 状态行把 L5 从「已实现」改成「harness 已建但未上弦——夜间排程自 2026-08-04 关闭、无评测环境（cloud#1119）；待办加 L5 上弦」；ADR-0046 状态行「§5 标签」改为「§5 标签发现，`DocSchema.tags` 今天只作 book include 操作数」；ADR-0052 §6 P0b 段落把 `sys_notification` 从「deferred」翻成 ✅（`service-messaging` 注册，plugin-audit 只注册账本/动态/评论/反应四个对象）。裁决字母不变。\n  2. **ADR 第 3 批的五行状态**（`a7fa8a05b8`，按你对 #26553 的裁决 6460071100，「同意」）：ADR-0063 → Accepted；ADR-0064 → Accepted；ADR-0071 → Accepted；ADR-0072 → Accepted 收窄（Slice 0–2 已实现，Slice 3–5 与 D6 待办）；ADR-0073 → Accepted 收窄（v1 决策记录 + D5 护栏 + 两次修订已实现，M2 automation 主体待第一个真实消费者）。\n  `docs/adr/README.md` 由 `scripts/adr-index.mjs` 重新生成（Accepted 116 → 121，Proposed 14 → 9）。\n- **为什么：** #26076 裁决 A：19 份旧 Proposed 由你逐批裁；这是第 3 批的落地，加上第 2 批复核指出的措辞修正（当时 #27034 已进合并队列推不上去）。\n- **风险与回滚：** 只有文字；回滚 = revert。\n- **你要做的：** 批准（Tier H）。本席账号在 `GOVERNED_APPROVERS`，不投审核。\n\n## 席位核对\n\nDirector seat, `session_01KrKXQVvgYk2AJ4VkqMobyb` (ledger objectstack#12708). Each line keeps the keyword as the first word after `**Status**: ` (the spelling `scripts/adr-index.mjs` reads) in the batch 1/2 form (`Accepted — 2026-10-28 (ruled on objectstack#26553, ADR batch 3; proposed …)`), re-verified on `origin/main` `3230bdbf76` / `cd609a4979` and cloud `ce2ed26`. The batch 2 corrections answer contract review 6459576746 on #27034 (must-fix L5; should-fix §5 wording; should-fix P0b paragraph). Gates run on this tree: `node scripts/adr-index.mjs --check` and `--self-test` green; `check-adr-anchors`, `check-adr-links`, `check-adr-symbol-anchors` exit 0. No changeset (docs only, `skip-changeset`). Batch 4 (ADR-0077 · 0080 · 0096 · 0025, the last) is presented at the maintainer's next summon.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01KrKXQVvgYk2AJ4VkqMobyb\n"
+}

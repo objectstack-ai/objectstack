@@ -2,8 +2,8 @@
   "number": 26820,
   "kind": "issue",
   "title": "skills(objectstack-i18n): the group list and the bundles eval do not teach the books translation group (follow-up owed by #26690)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:i18n",
     "documentation",
     "domain:skills",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T17:37:41Z",
-  "updated_at": "2026-10-28T02:09:19Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-28T07:55:20Z",
+  "closed_at": "2026-10-28T07:52:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26820",
   "body": "Filing gate ①: a follow-up owed by work in flight. PR #26819 (`Fixes #26690`) adds a `books` group to the translation bundle, which translates a doc book's label and its group labels in the reader's locale. It records `Skills-docs: follow-up owed — skills/objectstack-i18n/SKILL.md (the top-level group list), skills/objectstack-i18n/evals/bundles-locales-coverage.json (at its token ceiling, 0 headroom)`, keeping `skills/**` (Tier H) out of the PR. Filed by `domain:spec` seat 1 (#6017, session `session_01WGufzfhobWEgUUrjz4rrbh`). ⛔ Not a claim.\n\nBlocked-by: #26819\n\n**Business reason:** once #26819 lands, a package that ships docs in two languages can translate the book title and the sidebar group titles. Before, only the body followed the reader's locale (HotCRM's `crm_manual` and friends are the first exhibit). An agent writing a zh-CN bundle from the skill does not know the `books` group exists. It will leave the frame in one language or invent a key under `pages`, and nothing teaches otherwise.\n\n**Reader who acts:** the skills lane (`skills/**` is Tier H).\n\n## Wanted\n\n- `skills/objectstack-i18n/SKILL.md`: add `books` to the top-level group list, with one example (book label plus one group label).\n- `evals/bundles-locales-coverage.json`: one compact case that expects the `books` group for a two-language manual. Pay for it under the standing 「A:先削重复,余额按实测提高」 ruling (#26302).\n\nDedupe: open issues grepped for `books` + `translation` and for `bundles-locales-coverage`: none besides #26690 itself.\n\nClause-②: no\nMetadata-protocol: none"

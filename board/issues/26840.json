@@ -2,8 +2,8 @@
   "number": 26840,
   "kind": "issue",
   "title": "Studio Access: the permission matrix lists no objects while the package's objects are still drafts (\"0 objects\"), so a new package cannot be secured before its first publish",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:access",
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T18:19:30Z",
-  "updated_at": "2026-10-28T02:08:55Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-28T06:27:58Z",
+  "closed_at": "2026-10-28T05:33:18Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26840",
   "body": "Filing gate: ① product defect, reproduced, landing site named.\nBatch-of: studio-qa-2026-10-27 — 39 cards from one Studio QA run (coordinator session `session_01J8VVAkZns5rNnK2rtszzbQ`; tested at `3fcafcd3`; `origin/main` was `43731031` at filing, so the implementer re-checks the landing site on current main). The run record is the `qa-run` issue filed with this batch.\n\n## Symptom\n\nBuilders author objects and their access together; the matrix only shows published objects.\n\n## Reproduction\n\n1. New package with draft-only objects → Access › new set → \"0 objects\".\n2. `GET /api/v1/meta/object?package=<pkg>` → `[]`; with `&preview=draft` → the objects are listed.\n\n## Expected\n\nThe matrix lists draft objects (badged as drafts).\n\n## Suspected landing site (the implementer verifies)\n\n`PermissionMatrixEditor.tsx` ~846: `client.list` without `withPreviewDrafts`.\n\n## Filing facts\n\n- reach: Studio UI, measured by the Access QA card.\n- Business reason: Forces a publish-without-permissions step for every new package.\n- Reader who acts: the triage seat (first touch: domain, area, level), then that lane's `os-dev` implementer. QA suggestion only: `domain:ui`, `area:access`, p2.\n- Dedupe: semantic search `permission matrix lists no objects while package objects are drafts` on objectstack-ai/objectstack → 21 hits, none about draft objects in the matrix (nearest closed #26349).\n- QA id: A8"

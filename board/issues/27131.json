@@ -1,0 +1,38 @@
+{
+  "number": 27131,
+  "kind": "pull_request",
+  "title": "ci(release),ui: the publish-check texts say what the release does today — the dead ui changeset:publish alias goes, its wiring test pins the live path",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T07:29:48Z",
+  "updated_at": "2026-10-28T08:08:03Z",
+  "closed_at": "2026-10-28T08:08:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-28T08:08:01Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27131",
+  "body": "Fixes #27017\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:`release.yml` 发布步骤上方的注释现在按顺序写清 `scripts/release-publish.sh` 实际做的三件事(先跑 `@object-ui` 发布产物的 tooling 扫描、再 `changeset publish`、最后一次性推 tag);删掉 `ui/package.json` 里没人调用的 `changeset:publish` 别名;它的接线测试改为钉住真实发布路径。\n- 为什么改:发布路径的说明要和真正运行的脚本一致;一个无人调用的别名会让人以为还有第二个发布入口,而且它跑的扫描不带 `--no-build`,与真实发布读的不是同一批产物。\n- 风险与回滚:无运行时影响。`release.yml` 只改注释,发布逻辑一个字节没动;`ui/package.json` 是私有工作区根(`private: true`),不发布。回滚即 revert 本 PR。\n- 先看:① `ui/scripts/__tests__/check-published-dist-tooling.test.ts` 的 `runs on the publish path` 用例(钉的东西从别名换到 `scripts/release-publish.sh`,断言没有放松);② `.github/workflows/release.yml` 发布步骤注释;③ `ui/package.json` 删的那一行。\n- 两分钟验证:`pnpm --dir ui exec vitest run scripts/__tests__/check-published-dist-tooling.test.ts`,预期 35/35 通过。\n- 需要你做的:审阅并批准本 PR(`release.yml` 属 Tier H,需授权审批)。\n\n## What changes\n\n1. **`.github/workflows/release.yml`** — comment only. The text over the publish step said `scripts/release-publish.sh` \"is `changeset publish` followed by ONE atomic `git push origin --tags`\". Measured on `origin/main`: since the four-gate port the script first runs `node ui/scripts/check-published-dist-tooling.mjs --no-build` and refuses to publish when it is red, and since the npm-record change it records npm's per-package answers for `scripts/release-verify-npm.mjs`. The comment now lists the three things the script runs, in order. No step, `run:` line or condition changed. ⛔ The release workflow was not run, dispatched or re-run to test this (Prime Directive 15); the edit is text.\n2. **`ui/package.json`** — the `changeset:publish` alias is **removed**, not re-described. Nothing invokes it: `git grep -n 'changeset:publish'` outside `ui/package.json` hits only the wiring test, a past-tense history line in `scripts/release-publish.sh`'s comment, and released `CHANGELOG.md` entries (release-owned, untouched). No workflow and no script under `.github/` or `scripts/` calls it. JSON carries no comments, so \"make it say what it is for\" has no spelling here, and what it ran (the scan without `--no-build`, then `changeset publish`) is a second publish door that reads a different build from the release's. `ui/package.json` is `private: true`, so nothing publishes.\n3. **`ui/scripts/__tests__/check-published-dist-tooling.test.ts`** — the wiring pin keeps its invariant (the gate runs before `changeset publish` on the publish path) and moves to the live path: the workspace root's `release` script ends in `bash scripts/release-publish.sh`, and that script (comment lines dropped) runs the gate as `if ! node ui/scripts/check-published-dist-tooling.mjs --no-build; then` before its `changeset publish` line. The old comment's claim that `changesets/action` runs `changeset:publish` was false (`release.yml` runs `pnpm run release`) and is gone.\n\nThe whole card rides one PR in lane `domain:skills`, as triage ordered; the two `ui/**` files are the ui lane's tree, carried here because they describe the same publish path as the `release.yml` comment.\n\n## Tests\n\n<details><summary>Edited test file, and the reverse check (three mutations, each red, then green again)</summary>\n\n- `pnpm --dir ui exec vitest run --maxWorkers=2 scripts/__tests__/check-published-dist-tooling.test.ts` (under the verify lock): `Test Files 1 passed (1)`, `Tests 35 passed (35)`, `VERDICT command-exit 0`.\n- Reverse check on the real files (the test reads fixed paths), each through `scripts/ablation-replace.mjs` with the fix committed, anchor hit counted, `git checkout HEAD` trap, and blob-hash restore check:\n  - `--no-build` dropped from the gate line in `scripts/release-publish.sh` → `runs on the publish path` failed (`expected … to match /^if ! node ui\\/scripts\\/check…/`), exit 1; restored, blob equals HEAD.\n  - root `release` script's `&& bash scripts/release-publish.sh` replaced by `&& changeset publish` → failed (`expected false to be true`), exit 1; restored.\n  - a `changeset publish` line put ahead of the gate in `scripts/release-publish.sh` → failed (`expected 43 to be less than 19`), exit 1; restored.\n  - Re-run on the restored tree: 35/35, exit 0.\n\n</details>\n\n## Acceptance notes\n\n- `scripts/release-publish.sh`'s own header (lines 25–27) still says it is \"Run as the `publish:` command of changesets/action\", which `release.yml` says it is not. Same family of stale text, outside this card's three files; noted, not edited here.\n- `ui/scripts/__tests__` full directory on the final head `7076bbdd`: 175 files passed, 2 skipped; 5019 tests passed. On a fresh worktree it first needs `@objectstack/spec`, `@objectstack/formula` and `@objectstack/client` built: before those builds, 3 files failed on missing `dist/` (none of them reads a file this PR changes).\n\n## Verification\n\nHead `7076bbdd` (merged with `origin/main`). `dispatch-gates --commands` derived 62 families; all 62 ran locally with exit 0, including `pnpm check:pm-dispatch-gates` and `pnpm --dir ui exec vitest run scripts/`. `--ran` reconciliation: 62 derived, 62 run, 0 NOT-MEASURED. Outside the derivation: `eslint` on the edited test exit 0. CI check-runs were not awaited. Full readings are in the os-dev report on #27017.\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01QSeKYmhU5KEj1nukYhp1Tg)_\n"
+}

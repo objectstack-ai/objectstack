@@ -1,0 +1,37 @@
+{
+  "number": 27093,
+  "kind": "pull_request",
+  "title": "fix(ui): the phone record header title and path labels fit their row instead of running off the edge",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T05:28:41Z",
+  "updated_at": "2026-10-28T06:53:03Z",
+  "closed_at": "2026-10-28T06:53:00Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-28T06:53:00Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27093",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8XDtEhogeJTkWotrnBZbuqC)_\nFixes #26897\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:手机宽度下,记录页标题过长时改为在行内以省略号截断(与桌面一致);路径(record:path)各阶段平分一行,放不下的名称以省略号截断并在 title 里保留全名,终态阶段名换行。\n- 为什么改:390 宽的手机上标题和阶段名直接冲出屏幕右边、被裁在半个词上(\"Login issues after platfo\"、\"Resolu\"),用户看不出自己在哪条记录、哪个阶段。\n- 风险与回滚:只改两处 class(page:header 标题列加 `w-full sm:w-auto`;路径手机行的阶段与标签 class),桌面布局不变;回滚即 revert 本 PR。\n- 先看:`containers.tsx` 记录头标题列那一行;`record-path.tsx` 的 `PHONE_STAGE_CLASS` / `PHONE_LABEL_CLASS` 与手机行;`ui/e2e/record-path-phone-row.spec.ts`。\n- 两分钟验证:`pnpm --dir ui exec vitest run packages/plugin-detail/src/renderers/__tests__/record-path.phoneRow-26897.test.tsx packages/components/src/__tests__/page-header-title-width.test.tsx`,预期 11 个测试全绿。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- **`page:header` record title column** (`ui/packages/components/src/renderers/layout/containers.tsx`) gains `w-full sm:w-auto`. Below `sm` the header is `flex-col items-start`; a column child's WIDTH is its cross size and `items-start` makes it fit-content, so the column took the h1's max-content width (measured in Chromium: **1015.48px inside a 390px row**) and the console's content pane, which clips sideways overflow, cut the title mid-word with no ellipsis. `min-w-0` was already on the column and is a floor, not a ceiling, so it was not the missing piece; this is the same defect objectui#9119 fixed on DetailView's header, fixed the same way. `sm:w-auto` hands the row back to the objectui#7244 arbitration unchanged.\n- **`record:path` phone row** (`ui/packages/plugin-detail/src/renderers/record-path.tsx`): the stages were `shrink-0` content-width with `whitespace-nowrap` labels inside a sideways scroller whose scrollbar is hidden, so the stage at the right edge read \"Resolu\" with nothing to say the row scrolled. Each phone stage now takes an equal share (`flex-1 min-w-10`, new `PHONE_STAGE_CLASS`); an ordinary label is `text-center truncate` (`PHONE_LABEL_CLASS`) and carries its full text in `title`; a terminal label wraps with `TERMINAL_LABEL_CLASS`, as on the desktop rail (#25895). The 2.5rem floor stops a stage collapsing to a bare ellipsis: a path too long for every stage to keep 2.5rem still scrolls (the row keeps `overflow-x-auto`). The row's own class string is unchanged.\n- The desktop rail and the desktop header markup are unchanged (`renderStage` gains an optional `labelTitle`, passed only by the phone row).\n- `RecordTitleChip.tsx` is not touched: once its container has a definite width, its h1 `truncate` fires as it does on desktop.\n\n## Tests\n\n- `ui/e2e/record-header-title-width.spec.ts` (Chromium geometry, real Tailwind compiled from the class strings read out of `containers.tsx` and `RecordTitleChip.tsx`): new `page:header` block, 4 phone widths (320/375/390/639) assert the title column fits its row, no page overflow, and the h1 is clipped (ellipsis fires); a CONTROL at 1440px asserts the title unclipped and the tail on the same line. On `origin/main` the four phone cases were red (title column 1015.48px); with the fix 14/14 green.\n- New `ui/e2e/record-path-phone-row.spec.ts` (Chromium geometry, class strings read out of `record-path.tsx`): the case path fits its row at 320/375/390 with equal stage widths and every cut label ellipsised (and at least one label really cut, so the ellipsis check is not vacuous); a terminal label wraps instead of being cut; a 10-stage path at 320px keeps 40px stages and scrolls. 5/5 green.\n- `page-header-title-width.test.tsx`: new class-shape pin for `w-full` + `sm:w-auto` on the title column.\n- New `record-path.phoneRow-26897.test.tsx` (4 tests): phone stages `flex-1 min-w-10`, not `shrink-0`; ordinary phone labels `truncate` with `title` = full label; terminal phone labels wrap; CONTROL: the desktop label still truncates and carries no `title`.\n- `record-path.terminalWidth-25895.test.tsx`: doc sentence \"The mobile row scrolls and is unchanged\" replaced (it became false); no assertion changed.\n- Ablations (one-off, via `scripts/ablation-replace.mjs`, each anchor hit 1 → 0, restored blob equal to HEAD, `git diff HEAD` empty):\n  - `w-full sm:w-auto` removed: the page:header e2e block goes 4 failed / 1 passed (the four phone widths red, the 1440 control green); the vitest pin goes 1 failed / 6 passed.\n  - `PHONE_STAGE_CLASS` = `shrink-0 min-w-10`: the path e2e goes 3 failed / 2 passed (\"row holds 479px of stages in 320px / 375px / 390px\").\n  - `labelTitle: stage.label` deleted: the phoneRow vitest goes 1 failed / 3 passed.\n\n## Acceptance notes\n\n- The phone header title ellipsises, as on desktop, rather than wrapping; the card allowed either. Wrapping to two lines (`line-clamp-2` below `sm`) would show more of a long name on a phone; that is a product call left open, not taken here.\n- A path longer than fits at 2.5rem per stage (about seven stages on a 390px phone) still scrolls sideways with a hidden scrollbar, so its last visible stage can be cut at the edge; below that length every stage fits.\n- The desktop rail's ordinary stage labels truncate without a `title` (unchanged, out of this card's scope).\n- `title` reaches mouse and pen users; a phone has no hover, and the full label also reaches assistive tech through each stage's existing `aria-label`.\n\n## Verification\n\nGates derived by `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`, run on head `6fa87db5`: 34 derived plus extras (`check-sdui-manifest` is among the derived ones; extras: `type-check` of `@object-ui/components` and `@object-ui/plugin-detail`, `pnpm --dir ui run type-check:e2e`, eslint on the touched files, `check:changeset-fixed`, `check:new-line-citations`, both Chromium specs), every one exit 0, exits captured before any pipe. Whole `packages/components/` + `packages/plugin-detail/` suites on the same head: 762 files passed, 2 skipped (7258 tests). Details in the os-dev report on the card.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbXctE6WABPKWup61H3)_\n"
+}

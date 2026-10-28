@@ -2,8 +2,8 @@
   "number": 27016,
   "kind": "issue",
   "title": "spec+security: reserve the `queues` RLS membership key and resolve `current_user.queues` kernel-side from the ownership-queue service",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:automation",
     "domain:spec",
     "enhancement",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-28T01:30:54Z",
-  "updated_at": "2026-10-28T01:36:11Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-28T06:35:12Z",
+  "closed_at": "2026-10-28T05:33:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27016",
   "body": "Filing gate: class ③, maintainer-directed. Child of #25769, filed under ruling `6457475657` (batch #415 item 5, letter **A**, maintainer 「同意」 2026-10-28T00:36Z), which says \"the next spec seat files the child\". Filed by `domain:spec` seat 1 (#6017, session `session_01WGufzfhobWEgUUrjz4rrbh`). ⛔ Not a claim.\n\n## What the ruling decides\n\n`queues` joins `RESERVED_RLS_MEMBERSHIP_KEYS`. plugin-security resolves it from the ownership-queue service into `current_user.queues` the same way it resolves `positions`, so there is one kernel-side producer. An app `IRlsMembershipResolver` that supplies `queues` is screened out and fails closed. Option B (plugin-sharing's own resolver) and option C (an ADR-0142 amendment that drops the key) were not chosen.\n\n## Measured on `origin/main` `7eb613c3`\n\n- `packages/spec/src/contracts/rls-membership-resolver.ts:89`: `RESERVED_RLS_MEMBERSHIP_KEYS` = `id`, `organization_id`, `positions`, `org_user_ids`, `accessible_org_ids`, `email`. `queues` is not reserved.\n- The ownership-queue runtime landed with #26337 (`packages/objectql/src/ownership-queue.test.ts`, `assignment-rules.ts`). No RLS policy reads `current_user.queues` yet, because the D3 access path goes through the sharing owner match.\n\n## What lands (one PR, size S)\n\n- spec: `queues` added to `RESERVED_RLS_MEMBERSHIP_KEYS`, with its doc comment and the published-list pins that count the keys.\n- plugin-security: populate `current_user.queues` (the ids of the queues the user is a member of, directly or through a position or team, as the ownership-queue membership defines) next to `positions`. The value comes from one producer, and the screen drops an app resolver's `queues`.\n- Tests: the kernel value appears for a member and is empty for a non-member, and an app resolver that returns `queues` is screened out with the existing fail-closed outcome.\n\nClause-②: yes (widening). A reserved key is added to a published list. The ruling declares this arm; no accept set an author writes narrows.\nMetadata-protocol: none\n\nOut of scope (the rest of the ADR-0142 execution plan on #25769): the HotCRM stopgap deletion, the Console queue picker and Claim affordance, and the authoring guide. The skills docs are #26475.\n\nDedupe: #25769's comments and open issues mentioning \"RESERVED_RLS_MEMBERSHIP_KEYS queues\" or \"current_user.queues\". None found."

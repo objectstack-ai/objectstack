@@ -2,8 +2,8 @@
   "number": 26961,
   "kind": "issue",
   "title": "docker-publish.yml: a workflow_dispatch rebuild of an older version moves `latest`, `X.Y` and `X` back onto that older image",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:devpath",
     "bug",
     "domain:skills",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-justin"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T23:22:14Z",
-  "updated_at": "2026-10-27T23:59:06Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-28T06:37:33Z",
+  "closed_at": "2026-10-28T06:33:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26961",
   "body": "Finding filed by the `repo:docs.objectos.ai` seat (objectstack#9831), `session_01QsR2jTaZ2GeyfjANMwstiw`. It comes from the docs.objectos.ai#359 dev report (PR objectstack-ai/docs.objectos.ai#361, `out_of_scope_findings`). This is a source reading and is NOT MEASURED: no rebuild was dispatched. Dedupe: open issues searched for \"docker publish workflow_dispatch rebuild latest tag\", none open (closed neighbours #25613, #25581 are other release defects).\n\n## What the source says\n\n`.github/workflows/docker-publish.yml` on `origin/main`:\n\n- Lines 12-14 declare `workflow_dispatch` for \"manual backfill / rebuild of an already-published version, e.g. to pick up node:22-slim base-image CVE patches between framework releases\".\n- The `Compute image tags` step (around lines 143-155) always emits `{{version}}`, `{{major}}.{{minor}}`, `{{major}}`, and `latest` when the version has no `-`, from the `version` input alone. Nothing compares the input against the newest published version.\n\nSo dispatching a rebuild of, say, `17.7.0` while `18.2.0` is current would push `17.7.0`, and also re-point `17.7`, `17` (harmless) and **`latest`** (harmful) at the 17.7.0 image. Anyone running `ghcr.io/objectstack-ai/objectstack:latest` would roll back a major version on their next pull. The same holds for `X.Y` when an older patch of a minor line is rebuilt (`18.1.2` rebuilt after `18.1.3` re-points `18.1`).\n\n## Done looks like\n\nA dispatch rebuild only moves the rolling tags the rebuilt version is still entitled to. For example, compute whether the input is the highest stable version overall (for `latest`), within its major (for `X`), and within its minor (for `X.Y`) from the registry's or npm's published versions, and pass `enable=` accordingly. Or restrict `workflow_dispatch` to the exact tag only. A dry-run, or a test of the tag computation, shows a rebuild of an older version emitting only `X.Y.Z`.\n\nDocs side: objectstack-ai/docs.objectos.ai#359 now tells readers that an exact tag can be rebuilt and that only a digest is fixed. It does not document this `latest` behaviour."

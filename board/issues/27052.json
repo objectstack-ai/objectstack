@@ -1,0 +1,35 @@
+{
+  "number": 27052,
+  "kind": "issue",
+  "title": "console: one workspace-preference module (record open mode, drawer width, timeline / related column toggles) read per user × object, with a shared panel-toggle toolbar on the record page — defaults derived from the object, never metadata",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:ui",
+    "enhancement",
+    "pm:dispatched",
+    "pm:epic",
+    "priority:p1"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T03:20:39Z",
+  "updated_at": "2026-10-28T08:13:55Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27052",
+  "body": "Part of the record-page-v3 epic #26676 (v3 child 1 of 8). First of the record-page series: the layout card (#27055) reads what this card stores.\n\n## Source (origin/main `7bb8084590`)\n\n- Three per-user preferences live apart today: `recordOpenPreference.ts` (`os:record-open-mode`, drawer | split, with a write side from #27031), the drawer width (`NavigationOverlay` `storageKey` → `ov:drawer-width:OBJECT` in `localStorage`), and nothing yet for which record-page columns are shown. The record page (`RecordDetailView.tsx`) has no toolbar for the reader: its crumb row is 「‹ 全部联系人」 plus, after #26679, ↑ ↓.\n- The column tiers (#26758, `recordPageColumns.ts`) draw the timeline column for every object: for a product or a price-book entry the middle column is an empty stream and a composer (ruling 2).\n\n## Target\n\n1. One `workspacePreference` module in app-shell (`src/utils/workspacePreference.ts`): a typed store keyed by preference × scope (`user` default; `object:OBJECT_NAME` where the preference is per object), `useSyncExternalStore` read, write, cross-tab `storage` sync, SSR / blocked-storage fallback to the default — the pattern `recordOpenPreference.ts` already has, generalised. `recordOpenPreference` becomes a thin alias over it (no behaviour change for #27031's control); the drawer width's `ov:` key is read through it too (one migration read of the old key, as `navigation-overlay.tsx` already does for its legacy key).\n2. The store's value shape is a small versioned record per key, e.g. the related-card arrangement `{ order: string[], collapsed: string[], basedOn: string }` that #27055 reads (the merge rules are written on that card); every value carries a `v` for migration. Two new preferences: `record.columns.timeline` and `record.columns.related` (on | off), scope `object:OBJECT_NAME`. Default per object, derived with no new key: `timeline` default ON when the object is \"worked\" — a detected stage field (`stageField` or option kinds), or `enable.files: true`, or it is the `master_detail` parent of some object — else OFF; `related` default ON. The derivation is one pure function with a test per branch and a HotCRM reading in the PR body (lead / opportunity / case / task / account / contact / contract / quote ON; product, price book, line items, campaign, event, forecast, knowledge article OFF).\n3. A shared `PanelToggles` component (`@object-ui/components`): a group of icon buttons with `aria-pressed`, tooltip with the shortcut, the pressed state tinted — ☴ 时间线 (`⌘⇧T`) and ⊞ 关联 (`⌘⇧R`) for the record page; the same component is what Studio's right rail and the list page adopt later (not this card). Drawn on the record page's crumb row, right side, after ↑ ↓ and a divider; not drawn in the drawer / split pane (embedded) nor below the two-column tier (tabs).\n4. The column tiers read the toggles: a column that is OFF is not drawn and its blocks fold into the related column's bottom 「动态」 card (timeline) or the tabbed strip; when the container cannot fit the columns the page folds to tabs as today and the reader's choice is kept for when it widens. The `?tab=` URL state stays as is.\n5. Keyboard: `⌘⇧T` / `⌘⇧R` toggle while the record page is focused and no text field has focus; the ⌘K command palette lists 「显示 / 隐藏时间线」「显示 / 隐藏关联」 if a palette registry exists on main (measure; else only the shortcuts).\n6. No metadata key, no spec change. Authored `kind: full` pages and `slots.tabs` are untouched (they never measured).\n\n## File surface\n\n`ui/packages/app-shell/src/utils/{workspacePreference,recordOpenPreference}.ts`, `ui/packages/components/src/custom/panel-toggles.tsx` (new), `ui/packages/app-shell/src/views/RecordDetailView.tsx` (the crumb-row toolbar and the toggle → tier wiring only), `ui/packages/plugin-detail/src/synth/recordPageColumns.ts` + `useRecordPageTier.ts` + `RecordPageColumns.tsx` (column on/off input), i18n keys in all ten packs, tests beside, changesets.\n\n## Acceptance\n\n1. Tests: the derivation function per branch; toggling timeline OFF on a lead draws two columns (details | related) with a folded 「动态」 card; toggling back restores; the choice survives a reload and is per object; a product opens with timeline OFF by default; `⌘⇧T` while an input has focus does nothing.\n2. Screenshots: a lead with both columns, the same lead with timeline OFF, a product by default (two columns) — HotCRM on a fresh DB.\n3. `recordOpenPreference` tests from #27031 still pass unchanged.\n\n## Rulings (maintainer, chat in the filing session, 2026-10-28 — verbatim, not re-decidable here)\n\n1. Record-page model (2026-10-27): 「1. 一个对象一个默认打开方式：默认抽屉（带展开整页），`page` 只给显式声明的对象，`modal` 退役，split / popover 变成用户个人偏好；抽屉和整页是同一张页在两个宽度。」\n2. On the resident timeline column: 「时间线是不是太突出了，这个只适合部分对象吧？适合做所有业务对象的默认布局吗」 and then 「时间线是否显示，是否可以切换，比如当前版本的 Claude code，顶部有很多切换图标」 — the column's presence is a per-user toggle with an object-derived default, never metadata.\n3. On the related column's cost: 「关联都放在右侧，记录打开时是不是会很慢，因为需要加载所有的关联子表。」 — the related column loads counts first, rows on demand, and never blocks the details.\n4. On mobile: 「还要考虑手机端的效果。」\n5. On the definition surfaces: the PM's keep / narrow / retire table was put to the maintainer (keep object roles, relationship flags, six slotted slots and `kind: full`; retire the `tabs` slot and the dead `BuildPageOptions` hints; fold the quick-look path into the one record page) and approved with the instruction in the footer.\n\n<sub>Filed by the epic PM session `session_cdb7a717-def7-4e71-9988-f089fbaa18ff` on 2026-10-28 under epic #26676 (record page v2 → v3), from the record-page definition-surface inventory on objectstack main `7bb8084590` and the maintainer's rulings in that session. The maintainer's instruction to file and dispatch, verbatim: 「同意，以上界面相关的需要我确认的你负责立卡派发，如果有可能可以启动云会话，开发完你来确认。」 Design evidence: the design canvas boards 「记录页 v3」 row (RecordPageV3, RecordPageV3NoTimeline, RecordPageRef, RecordDrawerV3, RecordMobile) — exported to the never-merged branch named in the epic parent once this batch is filed.</sub>\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 27140,
+  "kind": "issue",
+  "title": "docs(ui-merge): fold objectui.org into objectstack docs, K1 — move the Object UI SDK guide (38 pages) and the 57 renderer-type pages into a new content/docs/sdk/ section",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T08:04:42Z",
+  "updated_at": "2026-10-28T08:14:28Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27140",
+  "body": "Filing gate ③ (maintainer-directed). In the \"Restore objectui.org docs deploy\" project thread (card thread of #26993), on 2026-10-28:\n\n- 03:24Z, on the decision card \"objectui.org 文档站以后怎么处理?\", Tesla chose 「B 并入 objectstack 文档站」. www.objectui.org stops being a separate site, and its docs fold into the objectstack docs site (`content/docs`, served at objectstack.ai/docs).\n- 03:24Z, Tesla asked 「objectui 文档全部需要保留吗？这需要评估并和我沟通」. The card thread then sorted the 183 pages under `ui/content/docs` one by one into keep, merge, generate and delete, and put four questions to Tesla.\n- 07:58Z, on that evaluation, Tesla answered 「VS Code 扩展 不会发布，其他同意」 and then 「你负责派卡执行」.\n\nThe fold is split into four cards. The first three can run in parallel; the fourth is blocked by them:\n- **K1** moves the SDK pages.\n- **K2** merges pages into existing ones.\n- **K3** generates the component reference.\n- **K4** retires the old site and adds the redirects.\n\nThis is card **K1**.\n\n## 维护者速读\n\n把 Object UI 作为独立 React SDK 的文档搬进 objectstack 文档站,新开 `content/docs/sdk/` 栏目,共 95 页:\n\n- 原样保留的 38 页:SDK 入门、架构、渲染器、插件、CLI 和连 objectstack 后端的适配器。\n- 57 个渲染器类型参考页:`dialog`、`select`、`data-table` 等。它们是在注册表里注册过、SDK 用户在 JSON 里会写到的类型,但不在 `sdui.manifest.json` 里。\n\n在线演示组件(`InteractiveDemo` 等)改成静态 JSON 代码块。依据是你同意的第 3 条:第一轮不迁演示,不让主文档站多依赖 21 个 @object-ui 包。\n\n本卡只新增页面,不删 `ui/content/docs` 里的原页,删除和跳转都由 K4 做。\n\n## Wanted\n\n1. A new top-level section `content/docs/sdk/` (\"Object UI SDK\"), listed in `content/docs/meta.json`. Its index says what the SDK is: render ObjectStack JSON schemas inside your own React app, MIT-licensed `@object-ui/*` packages. It also says how the SDK relates to the Console.\n2. Move these 38 pages in (paths relative to `ui/content/docs/`), keeping their substance:\n   - `index.md` (home)\n   - `guide/`: `quick-start`, `building-crud-app`, `architecture-overview`, `schema-overview`, `schema-rendering`, `component-registry`, `fields`, `plugins`, `plugin-development`, `data-source`, `layout`, `theming`, `troubleshooting`\n   - `core/schema-renderer`, `layout/app-shell`, `layout/sidebar-nav`, `api/schema-reference`\n   - `utilities/`: `cli`, `create-plugin`, `data-objectstack`\n   - `plugins/`: `index` plus `plugin-calendar`, `plugin-charts`, `plugin-chatbot`, `plugin-dashboard`, `plugin-detail`, `plugin-editor`, `plugin-form`, `plugin-gantt`, `plugin-grid`, `plugin-kanban`, `plugin-list`, `plugin-map`, `plugin-markdown`, `plugin-report`, `plugin-timeline`, `plugin-view`\n3. Move in the 57 renderer-type pages, as a \"Renderer reference\" subsection. These are every `components/**` page except three groups:\n   - the 17 that `sdui.manifest.json` covers, which are K3's: `basic/{icon,image,span,text}`, `complex/table`, `data-display/{alert,badge}`, `disclosure/accordion`, `form/{button,label}`, `layout/{box,card,container,flex,grid,stack,tabs}`;\n   - `components/index`;\n   - `toaster` and `semantic`, which have no registered type and are not moved.\n   \n   Each moved page keeps its type name as the slug, so K4 can map `/docs/components/<group>/<type>` one-to-one.\n4. Rewrite every live-demo MDX component (`InteractiveDemo`, `DemoGrid`, `ComponentDemo`, `LiveSplitDemo`, `SchemaExample`, `SchemaThumbnail`, `ReactVsObjectUI`, `SchemaCatalogIndex`) as plain fenced `json` or `tsx` code blocks. `apps/docs` gains no `@object-ui/*` dependency. Measured on `main` 24351cfe: all 57 renderer pages, 14 of the 17 plugin pages and `core/schema-renderer` use one.\n5. Fix links inside the moved pages so they point within objectstack docs. That covers links to other moved pages, to K2's merge targets and to K3's reference. Where a K2 or K3 target is not on `main` yet, link the section index; K4 sweeps the rest.\n6. Record the old-path → new-path pairs in the PR body, as a table K4 copies into the redirect map.\n\n⛔ Do not delete or edit pages under `ui/content/docs/` and do not touch `ui/apps/site`. K4 does both, together with the `ui/scripts` readers that pin those paths.\n\n## Who acts\n\nA `domain:devx` card thread. The surface is `content/docs/sdk/**` and `content/docs/meta.json`; `apps/docs` is touched only if an MDX component is genuinely needed, which item 4 is meant to avoid. The diff is mostly new pages and will pass the 3000-line human-merge threshold, so the maintainer merges it.\n\n**Business reason.** Integrators of the published `@object-ui/*` packages (18.2.0) keep their SDK guide when www.objectui.org is folded away. The root README still sends them there (`npm install @object-ui/react @object-ui/components`).\n\n## Acceptance\n\n- The 95 pages render under `/docs/sdk/` in the `apps/docs` build. `pnpm --filter @objectstack/docs build` is green, the objectstack docs gates that the derived list names are green, and no `@object-ui/*` dependency is added to `apps/docs/package.json`.\n- `git grep -n \"InteractiveDemo\\|ComponentDemo\\|LiveSplitDemo\\|SchemaExample\" -- content/docs` prints nothing.\n- The PR body carries the old → new path table, with 95 rows.\n\n**Duplicate search.** objectstack-ai/objectstack, \"objectui docs migrate into objectstack docs site content/docs sdk objectui.org redirect retire ui/apps/site\": 33 hits, the first 10 read: #26993 (open, the deploy card this fold supersedes), #27030 (open, the Vercel maintainer card), #27048 (open, skills/objectui plugin-ai, different files), #26140, #26688, #24230, #25677, #26944, #25854, #26035 (closed or unrelated). No card moves the pages. **New.**\n\n**Size:** L. **Clause-②:** no. **Metadata-protocol:** none."
+}

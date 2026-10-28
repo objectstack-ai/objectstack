@@ -1,0 +1,36 @@
+{
+  "number": 27106,
+  "kind": "pull_request",
+  "title": "fix(console): a child written through an authored related list refreshes the record page's header",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/l",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T05:55:48Z",
+  "updated_at": "2026-10-28T08:09:34Z",
+  "closed_at": "2026-10-28T08:09:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-28T08:09:32Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27106",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8QyKhkPtEoqpCPduABeGG56)_\nFixes #26890\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:记录页在子记录写入后重读父记录时,除了按关系推导出的相关列表,现在也盯住作者自己在页面上列出的相关列表块和侧栏引用卡片里的子对象。\n- 为什么改:作者自建的记录页可以列出一个外键写了 `relatedList: false` 的子对象,这时它不在推导集合里,经该列表新建、编辑或删除子记录后,表头的汇总值(如报价总额)要刷新页面才会变。\n- 风险与回滚:只扩大订阅的子对象集合,最坏多一次父记录读取;推导路径与 12244 的行为不变;回滚即 revert 本 PR。\n- 先看:`RecordDetailView.tsx` 中 `relatedChildObjectsKey` 那一段;新文件 `recordPageChildObjects.ts`;`RecordDetailView.authoredChildWriteRefreshesParent-26890.test.tsx`。\n- 两分钟验证:`pnpm --dir ui exec vitest run packages/app-shell/src/views/RecordDetailView.authoredChildWriteRefreshesParent-26890.test.tsx`,预期 4 个测试全绿。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- New `recordPageChildObjects(page)` beside the view: the child objects a record page lists itself, read from every `record:related_list` block (`properties.objectName`, or the node's `dataSource.object` binding that the block's element data-source gate maps onto `objectName`) and every `record:reference_rail` entry's `objectName`, at any depth of the page. Sorted and deduplicated.\n- `RecordDetailView`'s child-write subscription (objectui#12244) now watches the union of the derived related lists' children and those, still keyed by content (AGENTS.md #10). Nothing else in the view moves.\n\n## Why\n\nobjectui#12244 re-reads the parent on a child write, but it watched only the children `deriveRelatedLists` derives from the relationship graph. An authored record page declares its own lists, and a child it lists there need not be derived: its FK can opt out of the derived lists with `relatedList: false`, the authored page then being the only place the child is shown. A create, edit or delete through such a list reached the invalidation bus under the child's name and matched nothing, so the header kept the pre-write rollup until a reload, as the card reports.\n\nReproduced first on `origin/main` `cbb3a1a1` with the new test file: the create, update/delete and rail cases were red (`expected 1 to be 2` parent reads). A one-off control copy of the same file without `relatedList: false` (child derivable from the graph) was green on those three cases on the same tree, so the gap is specific to a child the authored page alone declares. HotCRM's own quote-line metadata was not read here (it lives outside this repository), so whether its FK carries `relatedList: false` is not measured; the fix covers the shape the dispatch named.\n\n## Tests\n\n- New `RecordDetailView.authoredChildWriteRefreshesParent-26890.test.tsx` (4 tests, real page + real MutationEvent bridge, a fake backend that recomputes the rollup): a create of a line listed only by the authored related list re-reads the parent once and the header shows the new total in place; an update and a delete each re-read it; a write to a child listed only in the reference rail re-reads it; a write to a child that points at the parent but is listed nowhere does not.\n- New `recordPageChildObjects.test.ts` (2 tests): every related list and rail entry at any depth including the `dataSource.object` arm, sorted and once; other blocks' objects (`element:chart`, `record:line_items`) and non-string values are not named.\n- `RecordDetailView.childWriteRefreshesParent-12244.test.tsx` still green (5/5) beside the new file.\n- Ablation (one-off, not kept): with `, ...authoredChildObjects])` replaced in `RecordDetailView.tsx` via `scripts/ablation-replace.mjs` (anchor 1 → 0, mutation blob landed, restored blob equal to HEAD, `git diff HEAD` empty), the new page file goes 3 failed / 1 passed: create, update/delete and rail red, the scope control green.\n\n## Acceptance notes\n\n- The subscription covers what the authored page lists, not every object a page binds: a chart or metadata viewer on the record page is not a child list, and a write to its object does not re-read the record.\n- `record:line_items` on a record page is not added: its save writes the parent leg too, which the record's own invalidation already catches.\n\n## Verification\n\nOn head `24529675` (main merged): 24 gates derived by `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`, exits captured before any pipe; `check-sdui-manifest` 0. 23 exit 0; `pnpm --dir ui exec vitest run scripts/` exited 1 on three tests in `check-i18n-dead-keys.test.ts` and `check-vi-mock-inherit.test.ts` that timed out at 15 s while another suite shared the box (5031 others passed); those two files rerun alone: 223/223 passed. `--ran` reconciles 24 derived / 24 run / 0 NOT-MEASURED. The whole `RecordDetailView*` suite plus the helper test: 76 files, 505 tests passed. Extra: `pnpm --filter @object-ui/app-shell run type-check` 0, eslint on the four touched files 0 errors (warnings pre-existing, none on touched lines), `pnpm --dir ui run check:new-line-citations` 0 new. `@object-ui/app-shell` is `private: true`, so `skip-changeset`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbZdCt7JoRJa32i5BHs)_\n"
+}

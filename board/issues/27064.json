@@ -1,0 +1,35 @@
+{
+  "number": 27064,
+  "kind": "pull_request",
+  "title": "fix(app-shell): list a package's draft objects in the Access matrix, badged as drafts",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T03:33:29Z",
+  "updated_at": "2026-10-28T05:33:19Z",
+  "closed_at": "2026-10-28T05:33:17Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-28T05:33:17Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27064",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8VtLrLYVCgWS9LRTX72qamP)_\nFixes #26840\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:Studio 包内的访问矩阵现在也列出该包的草稿对象,并在行上标出「(草稿)」;草稿对象的字段也能展开。\n- 为什么改:原来只列已发布对象,新包的对象都是草稿时矩阵显示「0 个对象」,首次发布前无法配置权限。\n- 风险与回滚:只改包作用域下的三处读取(对象列表、字段读取两处),环境作用域不变;回滚即 revert 本 PR。\n- 先看:`PermissionMatrixEditor.tsx` 的对象列表读取与 `readObjectDefinition`;新测试 `PermissionMatrixEditor.draftObjects-26840.test.tsx`。\n- 两分钟验证:`pnpm --dir ui exec vitest run packages/app-shell/src/views/metadata-admin/PermissionMatrixEditor.draftObjects-26840`,预期 5 个测试全绿。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- Under a `packageId`, the matrix lists its objects through `MetadataClient.withPreviewDrafts(true)` (the `?preview=draft` door the object picker's `useObjectCatalog` uses), so a package whose objects are all drafts lists them instead of \"0 objects\".\n- A row served from its pending draft (`_draft: true`, the picker's signal) carries the picker's draft mark: a muted `data-draft-marker` span reading `engine.inspector.draftSuffix` (\"(draft)\" / \"(草稿)\"), in both the page table and the Studio layout. No new marker, no new i18n key.\n- The two per-object definition reads (field rows in `ensureFields`, and `loadObjectFields` for the RLS and field-condition CEL editors) go through the same door under a `packageId`, via one helper `readObjectDefinition`. Without it a draft-only object expands to \"no fields\".\n- Environment scope (Setup catalog, no `packageId`) keeps the published reads unchanged; only the package door authors drafts. Pinned by a test that asserts no preview read and no draft row there.\n- Test doubles that mount the matrix under a package gain `withPreviewDrafts() { return this; }` (the Studio tests' existing precedent); five typed doubles widen `FakeClient` to `=> unknown` because that method returns the client, not a promise.\n\n## Why\n\nTriage ruling 6450953786: list draft objects too (with `preview=draft`), badged as drafts, so a new package can be secured before its first publish.\n\n## Tests\n\n- New: `PermissionMatrixEditor.draftObjects-26840.test.tsx`, 5 tests: a draft-only object is listed and badged (page and Studio layouts); a published object has no badge; toggling the draft object's Read writes `objects.a_invoice.allowRead` into the set draft (`mode: 'draft'`, `packageId: 'app.a'`); its fields come from its draft; the environment door keeps the published list.\n- Scoped run (every app-shell test that mounts the matrix: 41 importers of `PermissionMatrixEditPage` plus 35 `StudioDesignSurface` tests naming the Access pillar, 73 files after dedupe): Test Files 73 passed, Tests 690 passed.\n- `pnpm --filter @object-ui/app-shell run type-check`: exit 0.\n- Ablation (`scripts/ablation-replace.mjs`, anchor hit 1 to 0, blob f8f9c813 to 36feb5f1 and back, `git diff HEAD` empty after restore): replacing the package-door list read with plain `client.list` turns 4 of the 5 new tests red; the environment-door test stays green, as it should.\n\n## Acceptance notes\n\n- PR #26999 (#26858) edits this same file and was still open when this PR was opened; `origin/main` was merged into this branch twice, the last time at `3230bdbf`.\n- A published object with a pending draft is also served with `_draft: true` and so carries the draft mark, the same as in the object picker.\n- The full app-shell suite (1,816 files) was not run locally; it belongs to CI. The scoped set above is every file that mounts the matrix.\n\n## Verification\n\nDerived gates (`dispatch-gates --commands`) and their exits are in the os-dev report on #26840.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes. (CI)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (`@object-ui/app-shell` is private: `skip-changeset`)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English. (except the six-line maintainer brief the dispatch order asks for in Chinese)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01JQwxbYLTHkXTxBf89Sud8r\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbYLTHkXTxBf89Sud8r)_\n"
+}

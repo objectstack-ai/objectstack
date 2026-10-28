@@ -2,8 +2,8 @@
   "number": 26679,
   "kind": "issue",
   "title": "console record drawer v2: the bar is ↑ ↓ · ⤢ · ✕ (no object name, no counter); a related row or a lookup opens its record in place with a trail, ← / Esc go back one level; ⤢ carries the trail into the page; on the record page a related row opens a drawer over the page",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:records",
     "domain:ui",
     "enhancement",
-    "pm:dispatched",
     "pm:epic",
     "priority:p2"
   ],
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T12:40:58Z",
-  "updated_at": "2026-10-27T23:59:18Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-28T07:02:32Z",
+  "closed_at": "2026-10-28T06:57:01Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26679",
   "body": "Part of the record-page-v2 epic #26676 (child 3 of 4). Runs after #26677 (shared files).\n\n## Source (origin/main `416a76030e`)\n\n- The drawer's bar: `ui/packages/components/src/custom/navigation-overlay.tsx:601-603` draws the object label as the `SheetTitle`, `:614-622` the `Maximize2` expand icon (already icon-only, gated on `onExpand`, `aria-label` and `title` from `expandLabel`), `:625-633` close inside `SheetClose`; there is no previous / next and no counter anywhere in the file.\n- A related row inside the drawer leaves it: `ui/packages/app-shell/src/views/RelatedRecordActionsBridge.tsx:553` `onView: (id) => openRecord(objectName, id)` and `:390-395` `openRecord` = `navigate(path)`; the file has no `embedded` branch at all (docblock `:18` 「查看详情 → navigate to the child record's detail route」). Whether a lookup value on the detail navigates the same way is not measured here — measure it first.\n- `ui/packages/app-shell/src/views/objectViewRecordNavigation.ts` holds one open record (`RECORD_DRAWER_PARAM` at `:87`), no stack or trail; `objectViewRecordLinks.ts` beside it builds the record URLs. `ObjectView.tsx` is being carved into sibling hooks (slices 5+6 on 2026-10-26, 11a/11b on 2026-10-27): work on the merged code, not on the card's line numbers.\n\n## Target\n\n1. Bar: left side empty at the root level; right side `↑` `↓` (previous / next through the host list's current rows; disabled at the ends; keyboard ↑ / ↓ and j / k when no input has focus), `⤢` (icon only, tooltip 「展开为整页」), `✕`. No object name, no \"n / N\" (rulings 2 and 3).\n2. In-place descent: a related row, a lookup value, or any record link inside the drawer opens that record in the same drawer and pushes the previous one on a stack; the bar's left side shows `←` and the trail 「线索 Mira Costa › 任务」 (each ancestor a link that pops to it); `←` or Esc pops one level; Esc at the root closes; `✕` closes the whole stack. `↑` `↓` at a deeper level move through that level's sibling set (the parent's related rows of that object), never across levels. Never a second drawer (ruling 5).\n3. `⤢` at any level navigates to that record's page with the trail carried in router state, so the page breadcrumb reads 「线索 / 全部线索 / Mira Costa / 任务 / 跟进报价」 and 「收为抽屉」 restores the stack.\n4. On the record page (not embedded): a related row or lookup opens its record in a drawer over the page under the same rules; an object declaring `page` navigates instead (#26677's resolution).\n5. URL: the root record stays `?recordId=`; the stack is in-memory (router state), so a reload shows the root record — document this in the component docblock.\n\n## File surface\n\n`ui/packages/components/src/custom/navigation-overlay.tsx` (bar slots: leading trail, prev / next), `ui/packages/app-shell/src/views/objectViewRecordNavigation.ts` (stack, sibling sets, expand-with-trail), `objectViewRecordLinks.ts`, `objectViewRecordOverlay.tsx`, `RelatedRecordActionsBridge.tsx` (查看详情 when embedded → push), `RecordDetailView.tsx` (lookup links when embedded, the page-over-drawer host), `ui/packages/plugin-detail/src/RelatedList.tsx` only if its row click needs a new callback; tests beside; changesets for `@object-ui/components` and `@object-ui/app-shell`.\n\n## Acceptance\n\n1. Tests: open a lead from the list → bar has no title text and no counter; ↓ opens the next row's record; click a related task → trail shows the lead, ← returns to the lead with its tab state; Esc at root closes; ⤢ from the task level lands on the task page with the lead in the breadcrumb.\n2. Screenshot of the drawer at the root level and one level down (HotCRM lead → task), and of the page opened by ⤢ from the task level.\n3. Keyboard: ↑ / ↓ / Esc behave as above and never fire while an input has focus.\n\n## Rulings (maintainer, 2026-10-27, chat in the filing session — verbatim, not re-decidable here)\n\n1. The model, quoted back by the maintainer and ordered built: 「1. 一个对象一个默认打开方式：默认抽屉（带展开整页），`page` 只给显式声明的对象，`modal` 退役，split / popover 变成用户个人偏好；抽屉和整页是同一张页在两个宽度。」\n2. On the drawer's top bar: 「左上角的 任务 · 2 / 2 · 分屏 几个字有必要嘛」 — no object name, no mode label on the bar.\n3. On the position counter: 「我觉得记录详情页显示第几条记录 好像也没必要」 — no \"n / N\" anywhere on a record; the ↑ ↓ previous / next controls stay.\n4. On the right pane: 「右侧应该可以拖动吗？展开为整页那个是不是用图标就可以」 — the pane is drag-resizable and \"open as full page\" is an icon-only control with a tooltip.\n5. On related records, the maintainer confirmed the in-place model: 「所以关联记录是一层一层的往下点，然后可以一层一层的反悔吗」 — one level down per click, one level back per ← / Esc, never a second drawer.\n\n<sub>Filed by the epic PM session `session_cdb7a717-def7-4e71-9988-f089fbaa18ff` on 2026-10-27, from the record-page / list-page assessment and the clickable prototype the maintainer walked and ruled on in that session (objectstack main `416a76030e`, HotCRM `1f3f8880` on platform 18.2.0). The maintainer's instruction to build it, verbatim: 「你直接立卡派发处理这个开发，然后审核。」 Design evidence (never merged): branch `claude/record-page-v2-evidence-20261027b` at commit `345ec777220843ce1fd7f95b6cc0b2b6dcc81bf8`, folder `docs/design/record-page-v2-2026-10-27/` (`prototype.html`, `artboards/`, `assessment.md`).</sub>"

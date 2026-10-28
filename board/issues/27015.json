@@ -2,8 +2,8 @@
   "number": 27015,
   "kind": "issue",
   "title": "spec build fails offline after dbf7e04adf: the deletion gate anchors on authorable-surface.base.json (baseRev 85c6d76ec4) and cannot date #26599 tombstones without the release tag, so every image build breaks",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -22,9 +22,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-28T01:29:51Z",
-  "updated_at": "2026-10-28T01:59:46Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-28T05:57:20Z",
+  "closed_at": "2026-10-28T05:57:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 2,
   "locked": false,

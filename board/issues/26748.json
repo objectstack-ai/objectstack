@@ -2,8 +2,8 @@
   "number": 26748,
   "kind": "issue",
   "title": "Studio Access › Tab visibility: the tab-name input keeps only the first character typed (typing `showcase_app` saves `{\"s\":\"hidden\"}`)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:studio",
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T14:13:08Z",
-  "updated_at": "2026-10-28T02:06:29Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-28T03:27:20Z",
+  "closed_at": "2026-10-28T03:25:44Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26748",
   "body": "Filing gate: ① product defect, reproduced, landing site named.\nBatch-of: studio-qa-2026-10-27 — 39 cards from one Studio QA run (coordinator session `session_01J8VVAkZns5rNnK2rtszzbQ`; tested at `3fcafcd3`; `origin/main` was `43731031` at filing, so the implementer re-checks the landing site on current main). The run record is the `qa-run` issue filed with this batch.\n\n## Symptom\n\nEach keystroke remounts the row, so focus leaves the input after the first character and the rest is lost. Pasting works.\n\n## Reproduction\n\n1. Access › a permission set › Tab visibility › Add tab › type `showcase_app` › Hidden → draft `tabPermissions: {\"s\":\"hidden\"}`; `document.activeElement` is BODY after the first key.\n\n## Expected\n\nThe input keeps focus and the full name is stored.\n\n## Suspected landing site (the implementer verifies)\n\n`PermissionAdvancedFacets.tsx` ~749-758: the row React `key` is the tab name, so editing the name remounts the row.\n\n## Filing facts\n\n- reach: Studio UI, measured by the Access QA card.\n- Business reason: Tab visibility cannot be authored by typing.\n- Reader who acts: the triage seat (first touch: domain, area, level), then that lane's `os-dev` implementer. QA suggestion only: `domain:ui`, `area:access`, p2.\n- Dedupe: semantic search `tab visibility name input keeps only first character permission set` on objectstack-ai/objectstack → 0 hits.\n- QA id: A2"

@@ -1,0 +1,34 @@
+{
+  "number": 27079,
+  "kind": "issue",
+  "title": "[Decision] Studio permission matrix: add a control for a permission set's set-wide object grant, or keep authoring it only through clones and code",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T04:22:15Z",
+  "updated_at": "2026-10-28T05:51:34Z",
+  "closed_at": "2026-10-28T05:51:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27079",
+  "body": "Filing gate: ② maintainer decision, raised as an open question by the #27010 implementer (PR #27051), session `session_01J8VVAkZns5rNnK2rtszzbQ`, 2026-10-28.\n\n## 维护者速读\n- **一句话问题**：权限集可以带一条\"对所有对象生效\"的整体授权（`objects['*']`）。#27010 修好之后，矩阵里的对象行会把它显示为\"继承\"的授权；但矩阵本身没有入口直接查看或编辑这条整体授权，也不能把某一行\"恢复为继承\"。要不要加？\n- 不影响 PR #27051 合入，它实现的就是选项 A。\n\n## Background\n- Where set-wide grants come from today: shipped permission sets declare them in code (`packages/plugins/plugin-security/src/objects/default-permission-sets.ts`), and a clone of a shipped set copies them (`POST /api/v1/security/permission-sets/:name/clone`).\n- After PR #27051, every object row shows the grant the runtime applies, with inherited rows drawn grey/dashed. Editing a row writes an explicit entry for that object, seeded from what the row shows.\n- No named admin request for either new control has been measured.\n\n## Governing text\n- `packages/spec/src/security/permission.zod.ts` (the `objects` map; the set-wide key).\n- `packages/spec/src/security/high-privilege.ts`, which classifies broad grants as high-privilege.\n- AGENTS.md: protocol first. No option changes the spec.\n\n## Options\n\n| | 做什么 | 客户可感知后果 | 工作量 |\n|---|---|---|---|\n| A | 都不加（PR #27051 现状）。行上显示继承来的授权，改哪行就为哪行写显式授权 | 克隆内置权限集后可以逐个对象调整；整体授权只能靠代码或克隆得到 | 无 |\n| B | 矩阵顶部加一行\"全部对象\"，可直接查看、编辑整体授权，并标出对私有对象不生效 | 管理员能一键授予或收回大范围权限 | ui 车道 · 1 PR · 约 1–2 天（含防护与测试） · 无先例 |\n| C | 每行加\"恢复为继承\"操作，删除该行的显式授权 | 可把某行退回整体授权；这可能把该行权限放宽 | ui 车道 · 1 PR · 约半天 · 无先例 |\n\n## Four-axis facets\n<!-- os-decision-facets -->\nos-decision-facets\n- ① 项目长远合理性：A 不新增编辑面。B 新增一个高权限授权的编辑入口，与 spec 把它列为高权限的定位相冲。C 小，以后随时可加。\n- ② 实际业务拉动：没有测到需求。整体授权的真实来源是克隆内置权限集，克隆后只需逐对象调整。\n- ③ 防 AI 犯错：A 让大范围授权不在点击路径上，显式授权仍是常规写法。B 让一次点击就能授出大范围权限。\n- ④ 创业阶段不扩散：A 不新增能力。B、C 都是新增的编辑面，都需要长期维护。\n\nPrior rulings read: `permission matrix wildcard object row Studio Access unticked clone permission set` → 11 hits, none ruling on this; no ADR; thread: none\n\n## Recommendation\n**A**，置信缺口：管理员是否需要整体授权的编辑入口，没有测过。\n\n- 只看①选 A；②③④ 是否翻转：否。\n- 不取 B：新增高权限编辑面，没有实际拉动。\n- 不取 C：有具名需求时再加，成本低。\n\n## After the ruling\n- A：本卡关闭，PR #27051 照常落地。\n- B / C：立 ui 车道执行卡，`Blocked-by:` 本卡。\n\n## Related\n#27010, PR #27051, #26597"
+}

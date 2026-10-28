@@ -1,0 +1,38 @@
+{
+  "number": 27072,
+  "kind": "pull_request",
+  "title": "chore(deps): take #26556's dev-dependency bumps, minus focus-scope and playwright",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T03:54:21Z",
+  "updated_at": "2026-10-28T05:43:58Z",
+  "closed_at": "2026-10-28T05:43:43Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-28T05:43:43Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27072",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoPj8AEeY2Kbt35GAb4BGUDJ)_\n\nSupersedes #26556 (Dependabot's development-dependencies group, red on Test UI).\n\n## 维护者速读\n\n- **改了什么:** 把 Dependabot #26556 里的开发依赖升级在当前 main 上重做一遍（eslint、typescript-eslint、turbo、@types/node、vite-plugin-dts、react-router-dom 等），只动 devDependencies 和 lockfile。另外改了两处脚手架模板的版本号，并在 dependabot.yml 加了 ignore。\n- **为什么改:** 常规工具链保鲜。#26556 原样合会出两个问题：一是让「弹窗里的查找下拉框无法搜索」那个补丁失效（focus-scope 补丁只认 1.1.16）；二是 lockfile 里出现两份 react-router 和两份 playwright-core。所以这两个包这次不升。\n- **风险与回滚:** 不改任何运行时代码，生产依赖一个没动。最大的风险是开发工具小版本的行为变化，CI 全量 65 项已经覆盖。回滚就是 revert 本 PR。\n- **先看:** `.github/dependabot.yml` 新增的 ignore 和注释；`ui/packages/cli/src/utils/app-generator.ts`、`ui/packages/create-plugin/src/templates.ts` 各改一个版本号。\n- **两分钟验证:** 在仓根跑 `pnpm install --frozen-lockfile`，再跑 `pnpm --dir ui run check:lockfile-integrity --base-ref origin/main`，应输出 `VERDICT clean`。\n- **需要你做的:** 无。席位复核通过后经合并队列落地。\n- **席位意见:** ACCEPT。focus-scope 和 playwright 留待手动升级，dependabot 不会再自动提出这两个包。\n\n## What changes\n\nRe-applies #26556's dev-dependency bumps on current `main`, minus two packages, with the repairs its red shards asked for:\n\n| | |\n|---|---|\n| taken | `@types/node` 26.6.5, `@typescript-eslint/parser` / `typescript-eslint` 8.72, `eslint` 10.13, `svelte` range ^5.57.2 (the root override keeps it on 5.57.1), `turbo` 2.11.10, `mysql2` 3.24.6, `pg` 8.23.1, `@testing-library/dom` 10.4.2, `@testing-library/user-event` 14.6.8, `axe-core` 4.14, `concurrently` 10.0.6, `eslint-plugin-react-refresh` 0.5.7, `globals` 17.13, `react-router-dom` 7.18 (resolves 7.18.5), `typedoc-plugin-markdown` 4.14, `vite-plugin-dts` 5.1, `react-grid-layout` 2.3, `@types/vscode` 1.140 |\n| held | `@radix-ui/react-focus-scope` (stays 1.1.16), `playwright` / `@playwright/test` (stay on their ranges, resolving 1.63.0) |\n\n- **focus-scope held.** `pnpm-workspace.yaml` patches `@radix-ui/react-focus-scope@1.1.16` exactly: the focus-trap race fix that keeps a lookup popover's search input focusable inside a Dialog. #26556's 1.3.1 ships unpatched, and `ui/packages/components/src/__tests__/dialog-popover-focus-scope.test.tsx` fails on it (Test UI 4/16 there).\n- **playwright held.** `service-print` and `dogfood` pin `playwright-core` 1.63.0 exactly, matched to the container's chromium build. Bumping the two ranges alone forks `playwright-core` into two copies, which `check:lockfile-integrity` (now in Type Check UI) refuses.\n- **Lockfile deduped.** The peer-resolved copies of `react-router-dom` (plugin-detail, plugin-designer), `mysql2` and `pg` stayed on the old versions after the relock. The second `react-router` copy is what nulled the router context in `RecordDetailView.recordOpenWaves-13010.test.tsx` (Test UI 15/16 there). `pnpm dedupe` removed only those old copies.\n- **Scaffold ranges follow the workspace** (Test UI 10/16 and 14/16 there): `@object-ui/cli`'s routed app declares `react-router-dom` `^7.18.4`, and `@object-ui/create-plugin`'s plugin declares `vite-plugin-dts` `^5.1.2`. Changeset `26556-scaffold-dev-ranges.md`, patch.\n- **`.github/dependabot.yml` ignores** focus-scope and the playwright trio, each with the reason and the by-hand route, so the next group PR does not bring them back. (`dependabot.yml` is not a governed surface; `.github/workflows/**` is untouched.)\n\n## Why\n\nRoutine dev-toolchain freshness, without the two bumps that would regress a patched production fix and fork the browser driver.\n\n## Verification\n\nAt head `bb513d428e`, on `main` 3230bdbf76:\n\n- `pnpm install --frozen-lockfile`: exit 0.\n- `pnpm --dir ui run check:lockfile-integrity --base-ref origin/main`: `VERDICT clean — no package gained a copy.`\n- The four tests that were red on #26556, run together from `ui/`: 4 files, 88 tests passed (`dialog-popover-focus-scope`, `RecordDetailView.recordOpenWaves-13010`, `create-plugin templates`, `cli app-generator`). Before the dedupe, `RecordDetailView.recordOpenWaves-13010` reproduced #26556's failure locally (`Cannot destructure property 'basename'`, two `react-router` copies).\n- The full suites run in CI on this PR.\n\nClause-②: no\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (no schema change)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes. (CI)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (only its `@types/node` devDependency moved)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L9qibwmEPoSR8apWBvbyFj\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L9qibwmEPoSR8apWBvbyFj)_\n"
+}

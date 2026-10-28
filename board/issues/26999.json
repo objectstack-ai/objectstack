@@ -2,7 +2,7 @@
   "number": 26999,
   "kind": "pull_request",
   "title": "fix(app-shell): an expression field shows the draft's server verdict at its own path",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -22,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-28T00:43:41Z",
-  "updated_at": "2026-10-28T02:14:22Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 2,
+  "updated_at": "2026-10-28T07:20:52Z",
+  "closed_at": "2026-10-28T07:20:49Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-28T07:20:49Z",
+  "comments": 12,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/26999",
   "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8257mqSrsY5YAmowqeNZ7Vs)_\n\nFixes #26858\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：表达式字段（RLS 的 USING/CHECK、流程边条件）按自己的路径读取草稿 `_diagnostics` 的服务端裁决；该路径有错误时显示服务端消息，不再显示 \"Valid CEL\"。lint 的边条件 `expression-invalid` 发现补上 `flows[N].edges[M].condition` 路径。\n- 为什么改：#26856 之后横幅已显示发布裁决，但字段仍打印自己的客户端结论，两者矛盾（裁定 p2）。\n- 风险与回滚：只读路径相等匹配，不复制任何发布规则，不改任何规则的裁决或消息；回滚即 revert 本 PR。\n- 先看：`ui/packages/app-shell/src/views/metadata-admin/draftVerdict.ts`、`CelPredicateField.tsx`、`packages/lint/src/validate-expressions.ts`。\n- 两分钟验证：`pnpm --dir ui exec vitest run packages/app-shell/src/views/metadata-admin/serverVerdictAtPath-26858.test.tsx` 与 `pnpm --filter @objectstack/lint exec vitest run src/validate-expressions.edge-condition-path.test.ts`。\n- 需要你做的：评审通过后合并；无需其他操作。\n\n## What changes\n\n- **lint**: `ExprIssue` gains an optional `path`. A top-level flow edge's `condition` finding carries `flows[N].edges[M].condition` beside its unchanged `where`; `authoring-rules` maps it as `path: i.path ?? i.where`. The served draft verdict therefore lands at `edges.M.condition` (via the existing `itemRelativeIssuePath`). Rule, verdict and message are unchanged; the runtime gate's differential fingerprint compares the same written flow on both sides.\n- **app-shell**: `DraftVerdictContext` plus `useServerErrorsAt(path)` in `draftVerdict.ts`, an equality-only lookup on the served path, never a prefix.\n  - `CelPredicateField` takes `verdictPath`; when the served verdict has errors at it, the field shows the server message, sets `aria-invalid`, and withholds \"Valid CEL\". RLS clauses pass `rowLevelSecurity.N.using` / `.check`.\n  - `FlowEdgeInspector` shows served errors at `edges.N.condition` under the condition.\n  - Providers: `ResourceEditPage` (its served diagnostics), `PermissionMatrixEditPage` (its own draft read, refreshed after each save), and the Studio Automations page (its own flow draft read, refreshed after each save).\n\n## Why\n\nRuling p2 on #26858: after #26856 the expression field still printed its own client verdict where the draft's server verdict at that path said otherwise (an RLS predicate over a formula field, a flow edge condition). The field now shows the `_diagnostics` verdict at its own path whenever one exists. No publish rule is copied into the client.\n\n## Acceptance notes\n\nNoted by the implementer, not filed (seat-applied body amendment):\n\n- **Class a candidate (read inference only, reach not measured at a public door):** Studio Automations (`AutomationsPillar` in `StudioDesignSurface.tsx`) shows no draft-level publish verdict in its banner or canvas Problems panel. #26856 wired that for the metadata-admin `ResourceEditPage` only; this PR adds only the field-level provider.\n- The field-permission `when` CEL field in `PermissionMatrixEditor` gets no `verdictPath`: no served rule was measured at such a path.\n- The `lint-flow-patterns` `flow-default-edge-with-condition` finding has no key path, so its served verdict cannot land on an edge field.\n\n## Verification\n\n- New tests: lint 6 (edge path, null member, second flow, map-form no path, start-node no path, runtime gate path); UI 13 across `serverVerdictAtPath-26858`, `PermissionMatrixEditor.serverVerdict-26858`, `ResourceEditPage.serverVerdict-26858`, `AutomationsPillar.serverVerdict-26858`. They cover a refused RLS predicate (server message, no \"Valid CEL\"), a refused edge condition, the no-verdict control, the sibling-path no-leak case, and the lint finding's `edges.N.condition`.\n- Ablations (each restored, blob equal to HEAD): dropping the context read in `CelPredicateField` turns 4 field tests red; in `FlowEdgeInspector`, 3; deleting the lint path assignment, 4; mapping `i.where` only, 1. Controls stay green in each.\n- `@objectstack/lint` full suite 7515 passed plus typecheck; `@object-ui/app-shell` type-check; related app-shell suites 1129 passed; after merging `main`, the touched suites 199 passed.\n- `dispatch-gates --commands`: 63 families run, each exit 0; `--ran` reconciles 63 derived, 63 run, 0 NOT-MEASURED.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (spec untouched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: n/a.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [ ] 8. Title, body and comments are in English, except the dispatch-required Chinese maintainer brief above.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01JQwxbYiz7aUf8wSAnnRyMx\n\n"

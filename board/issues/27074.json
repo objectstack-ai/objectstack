@@ -1,0 +1,34 @@
+{
+  "number": 27074,
+  "kind": "issue",
+  "title": "analytics: a dataset query with a `timeDimensions` window returns no drill bounds for it, so a report drill-down lists records outside the picked period",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:reports",
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T03:56:49Z",
+  "updated_at": "2026-10-28T06:10:04Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27074",
+  "body": "Filing gate **① a product defect with a reproduction path**: this is follow-up work owed by landed work on #25873 (ruling 6408567749, letter B, \"time range + export\"). The ui half is PR #27070 (`Refs #25873`, ui seat 2 ACCEPT 6460227165). It makes a report run every query inside the period picked on its date-range chip, through `selection.timeDimensions: [{ dimension, dateRange }]`.\n\n`finding` class **a** · `reach:` public door. On the Console report page, pick a period on a report that declares `dateRange`, then click a row or bar to drill down. The drill list (`DrillDownDrawer` → `ObjectDataTable`) is not limited to that period, so it lists more records than the row counted. This is recorded in #27070's Acceptance notes.\n\n## Why the ui cannot close it alone (os-dev measurement, `origin/main` `cb8988ee`; full evidence in the project file `issue-25873/drill-window-premise.md`)\n\n- The analytics service resolves a preset in the request's reference time zone to `[start, endBefore)` ISO instants at that zone's midnight (`packages/core/src/utils/analytics-date-range.ts`, `resolveAnalyticsDateRangeString` / `PRESET_WINDOW_TOKENS`). Its header says a bare day would be cut at UTC midnight, \"eight hours late\" in `Asia/Shanghai`.\n- The drill list resolves date macros in the browser to bare local days (`ui/packages/core/src/utils/date-macros.ts`). The engine cuts those at UTC calendar days on a `datetime` column (ADR-0053 D-D, `packages/spec/src/data/calendar-day.ts`). For any viewer outside UTC, the two disagree at both edges of the window. On a `date` column they agree.\n- The drill metadata `queryDataset` returns (`drillRawRows`, `dimensionFields`, `drillRanges`) carries neither the window nor its field. `drillDims` excludes `type: 'date'`, and `drillRanges` covers only bucketed date dimensions in the grouping.\n- Re-deriving the zone arithmetic in the ui would be the second implementation the analytics module header forbids. Importing `@objectstack/core` into app-shell would be a new kernel dependency.\n\n## Expected (proposed by the os-dev; the server lane decides the shape)\n\nWhen the selection carries `timeDimensions[].dateRange`, `AnalyticsService.queryDataset` returns a drill sidecar for each windowed dimension, for example `drillWindow: { [dimension]: { field, gte, lt } }`. It is computed with the same `rangeTz` and `instant`-vs-`date` serialisation the existing `drillRanges` block (#1752) already uses. A custom `[start, end]` window rides the same path. The ui half then ANDs `{ [field]: { $gte, $lt } }` into the drill `objectFilter`, which is a small follow-up ui seat 2 dispatches under #25873 once this lands.\n\n## Business reason\n\nA sales manager who picks \"this quarter\" and clicks a stage bar expects the list behind it to be that quarter's deals. Today the list shows every period's deals, so the number on the bar and the list disagree. That undermines the period feature ruling B asked for.\n\n## Reader who acts\n\nThe `domain:server` seat (analytics service), in one PR to `analytics-service.ts` and its drill-metadata types. Then ui seat 2 dispatches the ui half on #25873.\n\n## Dedupe\n\nI listed `domain:server` issues (state all, newest 300) and checked their titles for \"drill\". No title matches this window."
+}

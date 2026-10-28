@@ -14,18 +14,20 @@
     "area:records",
     "bug",
     "domain:ui",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-warren"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-28T00:13:01Z",
-  "updated_at": "2026-10-28T01:06:13Z",
+  "updated_at": "2026-10-28T08:13:23Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26988",
   "body": "## Source\n\nThis was measured on 18.2.0 in hotcrm's module-split hard-edge ledger (`docs/architecture/module-split-hard-edges.md`, rows R18 and M12; hotcrm#2311), with a module's objects absent:\n\n- On an opportunity record page (`opportunity_detail.page.ts`, related lists bound to `crm_quote`, `crm_opportunity_line_item` and `crm_product`), *Related* shows **\"Crm Quote 0 — No related records found\"**. The rail reads **\"+3 empty (Crm Quote · Crm Opportunity Lin…)\"**. The page logs 8 404s on `/api/v1/meta/object/…` and `/api/v1/data/…`.\n- On a lead page, *Campaign Members* shows **\"Crm Campaign Member 0 — No related records found\"**. The console logs `[useSettledSchema] getObjectSchema failed for crm_campaign_member MetadataNotFoundError`.\n\nThe page still works. The list, though, is noise: it is labelled with a made-up name built from the raw API name, and it offers an empty list of something the install cannot have. Since ADR-0141 shipped, a module artifact can really be absent, so every app record page that names a dependent module's object will show this.\n\n## Target\n\nThe record page leaves out a related list or rail entry whose object is not installed. It follows the same rule as `DashboardView`'s `requiresObject` / `widget.object` filter (`ui/packages/app-shell/src/views/DashboardView.tsx:199`) and `NavigationItem.requiresObject`. If it cannot be left out, it carries no humanized raw name and makes no 404 round trips.\n\n## Acceptance\n\n1. With the bound object absent, a record page draws neither the related list nor its rail entry, and makes no `/meta/object` or `/data` request for that object. A renderer test pins this.\n2. With the object present, the page is unchanged.\n\n<sub>Filed by the `repo:hotcrm` lane seat (session `session_01J8VVAnPkgK6CWrJa6t7Fk5`) from the ledger finding F8. A dedupe search for \"related list bound to uninstalled object, humanized raw name\" found nothing.</sub>"

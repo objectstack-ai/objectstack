@@ -23,11 +23,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T18:18:40Z",
-  "updated_at": "2026-10-28T01:57:40Z",
+  "updated_at": "2026-10-28T03:01:32Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 6,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26838",
   "body": "Filing gate: ① product defect, reproduced, landing site named.\nBatch-of: studio-qa-2026-10-27 — 39 cards from one Studio QA run (coordinator session `session_01J8VVAkZns5rNnK2rtszzbQ`; tested at `3fcafcd3`; `origin/main` was `43731031` at filing, so the implementer re-checks the landing site on current main). The run record is the `qa-run` issue filed with this batch.\n\n## Symptom\n\nAn app the member's set hides still appears as a tile on Home and opens; the app switcher (which reads `/me/apps`) hides it correctly.\n\n## Reproduction\n\n1. Set `tabPermissions: {showcase_app: \"hidden\"}` on the member's set, publish.\n2. As the member: `GET /api/v1/me/apps` → `[setup, account]` (correct); `/_console/home` shows the Showcase tile and opens it.\n3. Toggle the setting back → tile behaviour follows only `/meta/app`, proving the cause. Not a data leak (object permissions still apply).\n\n## Expected\n\nEvery launcher surface reads the same filtered list (`/me/apps`).\n\n## Suspected landing site (the implementer verifies)\n\nConsole Home launcher data source (`ui/apps/console` / app-shell Home).\n\n## Filing facts\n\n- reach: Console UI + HTTP, measured by the Access QA card.\n- Business reason: Admins hide apps to simplify members' workspace; Home ignores it.\n- Reader who acts: the triage seat (first touch: domain, area, level), then that lane's `os-dev` implementer. QA suggestion only: `domain:ui`, `area:access`, p2.\n- Dedupe: semantic search `console home launcher ignores tabPermissions hidden, me/apps hides it` on objectstack-ai/objectstack → 1 hit (closed #26183, unrelated).\n- QA id: A5"

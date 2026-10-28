@@ -2,7 +2,7 @@
   "number": 27025,
   "kind": "pull_request",
   "title": "fix(app-shell): keep the Tab visibility name input across keystrokes",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -20,10 +20,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-28T02:05:39Z",
-  "updated_at": "2026-10-28T02:18:02Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-28T03:25:44Z",
+  "closed_at": "2026-10-28T03:25:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-28T03:25:42Z",
   "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/27025",

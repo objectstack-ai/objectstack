@@ -1,0 +1,34 @@
+{
+  "number": 27118,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0025 v2 — correct §3.3/§3.4/§3.8/§3.10 to the code, record the Q1–Q8 decisions, split §3.5 into M1/M2, set the status line (M0 of #27108)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T06:29:50Z",
+  "updated_at": "2026-10-28T06:57:01Z",
+  "closed_at": "2026-10-28T06:56:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-28T06:56:59Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27118",
+  "body": "Part of #27110 (M0 of #27108; the card is closed by the director seat after this lands — the seat branch is not `claude/issue-N-slug`-shaped, so it cannot carry the closing-target claim the PR-body guard reads)\n\nClause-②: no\nMetadata-protocol: none\nRuling-ref: https://github.com/objectstack-ai/objectstack/issues/26553#issuecomment-6461953053\n\nContract review tier: **H** — one ADR record (`docs/adr/0025-plugin-package-distribution.md`) plus the regenerated `docs/adr/README.md`, a governed surface; it lands by the maintainer's approval (AGENTS.md Prime Directive 14), never by a seat's click.\n\n## 维护者速读\n\n- **改了什么：** ADR-0025 v2。① 状态行改为 Accepted 收窄（Phase 1 + 安装时同意已实现；步 4–7、授权拦截、层级分派、扫描与 secret-refs 由 #27108 的 M1–M3 承接）。② 修正四处与代码不符的段落：§3.3 打包是 esbuild 不是 tsup，manifest-deps 退役（你定的 Q6）；§3.4 发布走 `/cloud/packages`、签名是 Ed25519 `.sig` 旁车、云端审核/反签已建、扫描与 blob 下载路由未建；§3.8 `sys_plugin*` 三表折叠进 `sys_package*`（Q5）；§3.10 L1 层已以脚本体 + QuickJS 上线。③ §3.5 第 4–7 步拆成 M1（本地 T0，仅首方自签，⛔ 不上市场）与 M2（云端取件 + 拦截）；§3.6/§3.7 按 Q3/Q4 分期；§4 用 M0–M3 替换旧 Phase 1–5 并附映射与 Q1–Q8 决定表；§7 五个开放问题逐条答或推迟到 M3；§8 补引用。顶部加 v2 修订说明，历史文本保留，改动处标 *v2*。`README` 重生成（Accepted 124 → 125，Proposed 9 → 5 后再减 1）。\n- **为什么：** 你 2026-10-28 对 ADR 第 4 批的裁决：ADR-0025 是下一阶段重点，先综合评估再立专题；评估后「插件包分发 同意，应该立专题卡吧」→ #27108；M0 先改记录，M1–M3 按 v2 文本开工，避免开发者按旧文本再造 `sys_plugin`。\n- **风险与回滚：** 只有文字；回滚 = revert。每条事实引用 `origin/main` 上存在的文件（盘点见 #27108）。\n- **你要做的：** 批准（Tier H）。本席账号在 `GOVERNED_APPROVERS`，不投审核。\n\n## 席位核对\n\nDirector seat, `session_01KrKXQVvgYk2AJ4VkqMobyb` (ledger objectstack#12708), drafting under the \"authoring stays open to every seat\" rule (claim 6461977360 on #27110). Source of every claim: the code inventory recorded on #27108 (objectstack `f2fdac5d7a`, cloud `ce05c91`), re-read per section. The status keyword stays the first word after `**Status**: ` (`Accepted`). Gates on this tree: `node scripts/adr-index.mjs --check` / `--self-test` green; `check-adr-anchors`, `check-adr-links`, `check-adr-symbol-anchors` exit 0; `check-governed-prose` green. No code change; `skip-changeset`. After this lands the M1–M3 children of #27108 are filed against the v2 text.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01KrKXQVvgYk2AJ4VkqMobyb\n\n"
+}

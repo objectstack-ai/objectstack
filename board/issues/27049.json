@@ -1,0 +1,32 @@
+{
+  "number": 27049,
+  "kind": "pull_request",
+  "title": "fix(plugin-grid): keep a field-backed bulk lookup param's lookupFilters and picker settings",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T03:11:40Z",
+  "updated_at": "2026-10-28T08:05:07Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27049",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ86yUQy7Wc4Viac8Ukpva2fh)_\nRefs #26951 (item: the bulk path forwards the field's lookup settings)\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:批量操作对话框里,字段型查找参数现在保留字段声明的 lookupFilters / lookupColumns / lookupPageSize / descriptionField,和单条记录对话框一致。\n- 为什么改:之前批量路径把这四项丢了,选中多行后的选择器会列出行菜单选择器按过滤条件隐藏的记录(HotCRM 的「加入活动」能选到已完成的活动)。\n- 风险与回滚:只多转发四个已由共享解析器算出的值,不改契约;回滚即 revert 本 PR。\n- 先看:`ui/packages/plugin-grid/src/resolveBulkActions.ts` 的 `toBulkParam`;再看测试文件新增的两个用例。\n- 两分钟验证:`pnpm --dir ui exec vitest run packages/plugin-grid/src/__tests__/bulkFieldBackedParam-12105.test.tsx`,预期 10 个用例全绿。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n`toBulkParam` in `ui/packages/plugin-grid/src/resolveBulkActions.ts` now carries four more values from the shared resolver's output (`resolveActionParams` in `@object-ui/fields`): `lookupFilters`, `lookupColumns`, `lookupPageSize` and `descriptionField`. They keep their own names, which are the names `LookupField` reads and the names app-shell's `paramToField` gives the single-record dialog's picker. `bulkParamToField` needed no change: it already spreads every key it does not destructure onto the widget field, and `BulkActionParam`'s catch-all holds them. The `toBulkParam` JSDoc that said these keys are not forwarded is rewritten.\n\n## Why\n\nA promoted bulk action (a view's `bulkActions` naming an object action) whose param is field-backed (`{ field }`) resolved through the same resolver as the row-menu dialog, but `toBulkParam` then dropped the field's picker settings. So the selection-toolbar picker offered records that the field's `lookupFilters` hides from the row-menu picker. HotCRM's `Add to Campaign` offered a completed campaign. This change makes the two pickers offer the same records.\n\n## Tests\n\n`ui/packages/plugin-grid/src/__tests__/bulkFieldBackedParam-12105.test.tsx`, two new cases:\n\n- **Parity:** for a field declaring all four settings, the widget field that `bulkParamToField` builds carries the same four values as the single-record resolver (`resolveActionParam`), and those equal the field's declaration.\n- **Through the real `ObjectGrid` + `BulkActionDialog`:** the picker's data source applies the query's `$filter`. With `lookupFilters: status in (planning, in_progress)` on the field, the completed campaign is not offered and the `crm_campaign` query carries the `status` `$in` filter. A control run with the same action and no filter offers the completed campaign, so its absence cannot be a picker that never loaded.\n\nAblation (fix committed first, mutation through `scripts/ablation-replace.mjs`, which restored the file to the HEAD blob with an empty `git diff HEAD`): with the four forwarding lines deleted, both new cases fail (`Tests 2 failed | 8 passed (10)`). Restored: `Tests 10 passed (10)`. The test imports the plugin-grid modules by relative path, so no dist leg was needed.\n\n## Acceptance notes\n\n- `idField` and `titleFormat` are still not carried on the bulk path. `paramToField` forwards them, but the resolver reads them only off undeclared snake keys (`id_field`, `title_format`), and the card does not ask for them. They are named in the JSDoc.\n- The card's second acceptance item (the spec note in `packages/spec/src/ui/bulk-action.zod.ts` and the `list.bulkActionDefs` row in `packages/spec/liveness/view.json`) is out of this PR's scope. This PR makes three spec sentences false; they are listed in the os-dev report on #26951 for the spec-lane card.\n\n## Verification\n\nAll readings on head `e5a7a375` (base `cb8988ee`), each through `scripts/pm/os-verify-lock.sh` where it builds or tests.\n\n- Closure build `pnpm --filter '@object-ui/plugin-grid^...' build`: exit 0 (6m00s under the lock).\n- `pnpm --filter @object-ui/plugin-grid run type-check`: exit 0. (The first run, on `c38b5352`, exited 2 on two casts in the new test; `e5a7a375` types the helper instead.)\n- `pnpm --dir ui exec vitest run packages/plugin-grid/src/__tests__/bulkFieldBackedParam-12105.test.tsx`: `Tests 10 passed (10)`.\n- `pnpm --dir ui exec vitest run packages/plugin-grid/`: `Test Files 253 passed (253)`, `Tests 2249 passed (2249)` (on `c38b5352`; `e5a7a375` changes only the test's types).\n- `node scripts/pm/dispatch-gates.mjs --commands`: 34 derived families, every one exit 0 on `e5a7a375`, including `node scripts/check-sdui-manifest.mjs` (`pnpm --dir ui exec vitest run scripts/` read on `c38b5352`: 176 files passed, 2 skipped). `--ran` reconciliation: `34 derived, 34 run, 0 NOT-MEASURED, 0 UNRUN`. `pnpm check:changeset-fixed` (roster under `.changeset/`) also run: exit 0.\n- Repo-wide lint and the type-check lanes are CI's.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (No spec change.)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes. (Lint is CI's repo-wide run.)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: not touched.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01JQwxbYvxwfYJ8EghpgYqpY\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbYvxwfYJ8EghpgYqpY)_\n"
+}

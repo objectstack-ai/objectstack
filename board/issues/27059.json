@@ -1,0 +1,32 @@
+{
+  "number": 27059,
+  "kind": "issue",
+  "title": "skills(objectstack-ui) + docs: teach the record page as it is now — object roles produce the page, six slotted slots, `kind: full` as the escape hatch, drawer default with `page` by declaration, the column tiers and the reader's own toggles — and stop naming `tabs`, `modal` / `split` / `popover`",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "documentation",
+    "domain:ui",
+    "pm:blocked",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T03:21:03Z",
+  "updated_at": "2026-10-28T03:26:25Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27059",
+  "body": "Blocked-by: #27053\nBlocked-by: #27055\n\nPart of the record-page-v3 epic #26676 (v3 child 8 of 8). Runs last, after #27053 and #27055 land (it documents what they ship). Governed surface (`skills/**`): Tier H landing.\n\n## Source (origin/main `7bb8084590`)\n\n`skills/objectstack-ui/SKILL.md:105-127` and `references/pages.md` describe related lists and the record page but not: the slot menu of a slotted page, `isDefault` for record pages, the assignment order, `stageField` with option kinds, `relatedListFilter`, the inherited sort, the column tiers, the drawer default with `page` only by declaration (#26804), or that split / timeline / related are the reader's toggles and never metadata. `ui/content/docs/guide/user-state-persistence.md` still lists `modal` / `split` / `popover` as `navigation.mode` values (noted by #26679's dev); `ui/content/docs/guide/slotted-pages.md` lists the `tabs` slot.\n\n## Target\n\n1. `skills/objectstack-ui`: one rules section 「记录页」 that says, in this order: the object's roles produce the page (list the keys); the relationship flags shape the related column (incl. `relatedListFilter` and the inherited sort); a slotted page overrides one of six slots; `kind: full` is the escape hatch and when to reach for it; a record opens in the drawer unless the object declares `page`; what is the reader's (drawer | split, timeline / related toggles, drawer width) and therefore ⛔ not written in metadata. One eval exercises an AI author being asked to \"put the tasks first on the lead page\" and answering with `relatedList: 'primary'`, not a full page.\n2. Docs: `slotted-pages.md` drops the `tabs` slot; `user-state-persistence.md` lists the live modes and the reader's toggles; the generated references regenerate.\n3. Line budget: the package's SKILL.md total may not grow by more than 40 lines; pay with the sentences the retirements made false.\n\n## File surface\n\n`skills/objectstack-ui/SKILL.md`, `skills/objectstack-ui/rules/*.md`, `skills/objectstack-ui/references/pages.md`, one eval under `skills/objectstack-ui/evals/`, `ui/content/docs/guide/{slotted-pages,user-state-persistence}.md`, generated references; tests that pin the skill text if any; changeset for `@objectstack/spec` only if the generated references move.\n\n## Acceptance\n\n1. The eval passes; `check:skill-*` gates green; the budget line reported in the PR body (before / after per file and per package).\n2. A reviewer reading only the 「记录页」 section can answer: where do related lists come from, how do I reorder them, when do I write a full page, what can I not write.\n\n## Rulings (maintainer, chat in the filing session, 2026-10-28 — verbatim, not re-decidable here)\n\n1. Record-page model (2026-10-27): 「1. 一个对象一个默认打开方式：默认抽屉（带展开整页），`page` 只给显式声明的对象，`modal` 退役，split / popover 变成用户个人偏好；抽屉和整页是同一张页在两个宽度。」\n2. On the resident timeline column: 「时间线是不是太突出了，这个只适合部分对象吧？适合做所有业务对象的默认布局吗」 and then 「时间线是否显示，是否可以切换，比如当前版本的 Claude code，顶部有很多切换图标」 — the column's presence is a per-user toggle with an object-derived default, never metadata.\n3. On the related column's cost: 「关联都放在右侧，记录打开时是不是会很慢，因为需要加载所有的关联子表。」 — the related column loads counts first, rows on demand, and never blocks the details.\n4. On mobile: 「还要考虑手机端的效果。」\n5. On the definition surfaces: the PM's keep / narrow / retire table was put to the maintainer (keep object roles, relationship flags, six slotted slots and `kind: full`; retire the `tabs` slot and the dead `BuildPageOptions` hints; fold the quick-look path into the one record page) and approved with the instruction in the footer.\n\n<sub>Filed by the epic PM session `session_cdb7a717-def7-4e71-9988-f089fbaa18ff` on 2026-10-28 under epic #26676 (record page v2 → v3), from the record-page definition-surface inventory on objectstack main `7bb8084590` and the maintainer's rulings in that session. The maintainer's instruction to file and dispatch, verbatim: 「同意，以上界面相关的需要我确认的你负责立卡派发，如果有可能可以启动云会话，开发完你来确认。」 Design evidence: the design canvas boards 「记录页 v3」 row (RecordPageV3, RecordPageV3NoTimeline, RecordPageRef, RecordDrawerV3, RecordMobile) — exported to the never-merged branch named in the epic parent once this batch is filed.</sub>\n"
+}

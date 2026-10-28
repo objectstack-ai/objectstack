@@ -2,8 +2,8 @@
   "number": 26837,
   "kind": "issue",
   "title": "Studio Access: saving a permission set drops draft values written by another door (`description`, `packageId`) — the save starts from the published body and copies back only editor-managed keys",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:access",
     "bug",
     "domain:ui",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-warren"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T18:17:57Z",
-  "updated_at": "2026-10-27T19:07:57Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-28T06:29:05Z",
+  "closed_at": "2026-10-28T05:43:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26837",
   "body": "Filing gate: ① product defect, reproduced, landing site named.\nBatch-of: studio-qa-2026-10-27 — 39 cards from one Studio QA run (coordinator session `session_01J8VVAkZns5rNnK2rtszzbQ`; tested at `3fcafcd3`; `origin/main` was `43731031` at filing, so the implementer re-checks the landing site on current main). The run record is the `qa-run` issue filed with this batch.\n\n## Symptom\n\nAn admin (or agent) sets a description through the API, then touches one checkbox in Studio; the description and packageId are wiped from the draft.\n\n## Reproduction\n\n1. `PUT /api/v1/meta/permission/project_editor_qa?mode=draft&package=com.qa.accesslab` with `description` and `packageId` → 200.\n2. Open the set in Studio, click one checkbox → draft now has `description: null`, `packageId: null`.\n\n## Expected\n\nA Studio save preserves every key of the current draft it does not edit.\n\n## Suspected landing site (the implementer verifies)\n\n`PermissionMatrixEditor.tsx` ~1288 bases the save on `fresh.effective`; `permission-slice.ts` ~238-243 copies back `EDITOR_AUTHORED_KEYS` only.\n\n## Filing facts\n\n- reach: Studio UI + metadata API, measured by the Access QA card.\n- Business reason: Silent data loss between authoring doors.\n- Reader who acts: the triage seat (first touch: domain, area, level), then that lane's `os-dev` implementer. QA suggestion only: `domain:ui`, `area:access`, p2.\n- Dedupe: semantic search `Studio permission set save drops description packageId written by another door` on objectstack-ai/objectstack → 10 hits, none about the Studio save base (nearest closed #23259, #23233).\n- QA id: A4"

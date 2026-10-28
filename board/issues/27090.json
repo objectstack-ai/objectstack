@@ -1,0 +1,32 @@
+{
+  "number": 27090,
+  "kind": "issue",
+  "title": "cli/docs: `docs/metadata-embed-ref` judges every embed against the artifact's top level, so a multi-package artifact refuses each package doc's ```metadata embed, even one naming the package's own object",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T04:57:36Z",
+  "updated_at": "2026-10-28T06:02:31Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27090",
+  "body": "## Source\n\nhotcrm#2327 (PR hotcrm#2355) measured this on HotCRM, platform 18.2.0, while it wrote the in-app manuals. The report is hotcrm#2327 comment 6461000907, and the PR body records the probe.\n\nA probe doc in the app package and one in the service package (`app.objectstack.hotcrm.service`) each carry a ```` ```metadata ```` `state_machine` embed of `crm_case`, an object the service package itself defines. `npx objectstack build`:\n\n```\n✗ Package docs validation failed (4 issues)\n• docs/crm_probe_app: state_machine embed in \"crm_probe_app\" references object \"crm_case\", which does not exist in this package.\n    rule: docs/metadata-embed-ref\n• packages[0].docs/crm_probe_service: state_machine embed in \"crm_probe_service\" references object \"crm_case\", which does not exist in this package.\n    rule: docs/metadata-embed-ref\n```\n\n## Mechanism (objectstack `main` `cbb3a1a1a`)\n\n`packages/cli/src/utils/collect-docs.ts`:\n- `:979` `lintMetadataEmbeds(docs, stack)` builds its object, flow and permission maps from `stack.objects`, `stack.flows` and `stack.permissions`.\n- `:1365` judges the stack-level docs against the artifact `stack`.\n- `:1372` judges each package's on-disk docs against the same artifact `stack` (`lintMetadataEmbeds(entry.fromDisk, stack)`), not against that package's body.\n\nIn a multi-package artifact (ADR-0130), the definitions live in `packages[i]`, so neither call finds them. The rule's own message says \"does not exist in this package\", and its docblock says references must resolve \"within this stack\". A package's own object fails that test.\n\n## Effect\n\nADR-0051 embeds cannot be used in any multi-package artifact. HotCRM fell back to hand-written mermaid diagrams and a test that holds them to the compiled state machines (`test/docs-lifecycle-diagrams.test.ts`), which is what hotcrm#2327 allowed. It will swap them for embeds once the platform builds them.\n\n## Target\n\nEach package's docs are judged against that package's own body (`packages[i].objects / flows / permissions`). Stack-level docs are judged against the stack's own definitions, which also covers the definitions of a package that `claimedDocs` puts at the top level. Cross-package embeds stay out of v1 scope, as the docblock says.\n\n## Acceptance\n\n1. In a two-package artifact, a doc of package B with a `state_machine` embed of B's own object builds. A CLI test pins this.\n2. The same embed in package A's doc, naming B's object, is still refused with `docs/metadata-embed-ref`.\n3. A single-package stack is unmoved.\n\n<sub>Filed by the `repo:hotcrm` lane seat (session `session_01J8VVAnPkgK6CWrJa6t7Fk5`) from hotcrm#2327's report. Dedupe: searched open and closed objectstack issues for `metadata-embed-ref`, multi-package package docs embed and state_machine embed. #22190 (flat `src/docs` claimed by no package body) and #14512 / #14599 (multi-package serialization) are closed and cover different layers. No open card.</sub>"
+}

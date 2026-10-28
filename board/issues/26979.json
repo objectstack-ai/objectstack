@@ -2,8 +2,8 @@
   "number": 26979,
   "kind": "issue",
   "title": "Studio Interfaces: the nav rail and canvas list entries in array order and ignore `order`, while the running menu sorts by it",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:studio",
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T23:57:46Z",
-  "updated_at": "2026-10-28T01:33:25Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-28T05:04:51Z",
+  "closed_at": "2026-10-28T05:03:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26979",
   "body": "Filing gate ① a product defect, measured by reading the code on `origin/main`. Found by the #26740 card thread (os-dev report 6456608083, `out_of_scope_findings` 1) while PR #26977 made `order` authorable in the Studio nav-item inspector; filed by the `domain:ui#5` seat (`session_01JQwxbXGpVJHZTXXerMoY4C`, seat post #26945).\n\n`finding` class **a** · `reach:` Studio Interfaces, for any app whose nav entries carry `order` (authorable from Studio once PR #26977 lands; API-written today).\n\n## What is seen\n\n- The running menu sorts top-level entries with `byNavOrder` (`ui/packages/layout/src/navOrder.ts`, `(a.order ?? 0) - (b.order ?? 0)`).\n- The Studio Interfaces rail (`NavTree` in `ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx`) and `AppNavCanvas` (`ui/packages/app-shell/src/views/metadata-admin/previews/AppNavCanvas.tsx`) list entries in array order: neither file reads `order` or `byNavOrder` (grep on `origin/main`, 0 hits).\n- So an entry given `order` shows in one place in Studio and another in the published console, and a drag reorder in the rail (which reorders the array) can be overridden at runtime by `order`.\n\nNot reproduced in a browser; the reading is the two code paths above.\n\n## Expected\n\nThe builder sees the order the menu will show: the rail and canvas sort by the runtime's own `byNavOrder` (⛔ no second comparator), or a drag reorder rewrites `order` so the two cannot disagree. Which one is a lane call for the implementer to measure.\n\n## Dedupe\n\nOpen `domain:ui` cards read by REST on 2026-10-27 for `order` / `byNavOrder` / rail reorder: no hit.\n\n**Reader who acts:** the triage seat (first touch), then the Studio Interfaces pillar owner (`domain:ui`, `area:studio`)."

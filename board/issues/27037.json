@@ -1,0 +1,36 @@
+{
+  "number": 27037,
+  "kind": "issue",
+  "title": "Queue-flake anchor: src/data-nested-object-door.test.ts",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:server",
+    "pm:blocked",
+    "priority:p0",
+    "queue-flake-anchor"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T02:34:24Z",
+  "updated_at": "2026-10-28T05:28:59Z",
+  "closed_at": "2026-10-28T05:28:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27037",
+  "body": "`src/data-nested-object-door.test.ts` has ejected **6 pull requests** from the merge\nqueue within a rolling 24 hours — **3 independent hits** once\nGitHub's speculative stacking is accounted for. This issue is the single place for\nthat conversation; it is refreshed by the merge-queue-triage workflow on every\nfurther ejection.\n\n| PR | stack | queue build |\n|---|---|---|\n| #26960 | independent | [40613497338](https://github.com/objectstack-ai/objectstack/actions/runs/40613497338) · [40607197983](https://github.com/objectstack-ai/objectstack/actions/runs/40607197983) |\n| #26999 | S2 · inherited | [40629404974](https://github.com/objectstack-ai/objectstack/actions/runs/40629404974) · [40627570244](https://github.com/objectstack-ai/objectstack/actions/runs/40627570244) · [40625589243](https://github.com/objectstack-ai/objectstack/actions/runs/40625589243) · [40624557779](https://github.com/objectstack-ai/objectstack/actions/runs/40624557779) · [40623264216](https://github.com/objectstack-ai/objectstack/actions/runs/40623264216) |\n| #27007 | S2 · inherited | [40625584826](https://github.com/objectstack-ai/objectstack/actions/runs/40625584826) · [40623580358](https://github.com/objectstack-ai/objectstack/actions/runs/40623580358) · [40621685239](https://github.com/objectstack-ai/objectstack/actions/runs/40621685239) |\n| #27011 | S2 · inherited | [40627568790](https://github.com/objectstack-ai/objectstack/actions/runs/40627568790) · [40625587886](https://github.com/objectstack-ai/objectstack/actions/runs/40625587886) · [40619563635](https://github.com/objectstack-ai/objectstack/actions/runs/40619563635) |\n| #27020 | S2 · inherited | [40621681807](https://github.com/objectstack-ai/objectstack/actions/runs/40621681807) · [40619952219](https://github.com/objectstack-ai/objectstack/actions/runs/40619952219) |\n| #27029 | independent | [40631228200](https://github.com/objectstack-ai/objectstack/actions/runs/40631228200) |\n\n⚠️ **Queue depth is not evidence.** The `stack` column is read out of the queue\nbranch names: GitHub builds each queued PR on top of the previous entry, so a\nbuild whose BASE chain reaches another victim's queue HEAD (directly, or through\ngreen groups queued between them) contains that victim's tree by construction.\nA single deterministic break therefore ejects every PR\nbehind it, and the raw victim count climbs with QUEUE DEPTH until the owner\nlands a fix. Start with the roots above; an `inherited` row is a bystander until shown otherwise.\n\n**This issue is a NAME, not a diagnosis.** The workflow that files it reads the\nfailing test file path out of the job logs and counts PRs; it does not\nknow whether this is a flake, a load/timing cliff, a semantic conflict between\nqueued PRs, or a real regression, and it does not act on any of those. No test is\nskipped, quarantined or re-queued by it, and no PR is labelled by it — weakening\na gate stays a human act.\n\nWhat to do with it: read one victim PR's triage comment for the failure REASON\nline beside the FAIL line (a timeout and an assertion are the same FAIL line and\nopposite diagnoses), decide the cause, and close this issue with the fix or with\nthe reason it is not one.\n\nA later queue build that went green on the same `main` is a control only if its\naffected-only selection ran the failing package; a green group that never selected\nit carried the same tree without testing it.\n\nLast refreshed by queue build [40631228200](https://github.com/objectstack-ai/objectstack/actions/runs/40631228200) (PR #27029).\n\n---\n_Filed by the merge-queue-triage workflow (#4859, aggregation #10128)._\n\n<!-- queue-signature-anchor:src/data-nested-object-door.test.ts -->"
+}

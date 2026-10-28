@@ -1,0 +1,36 @@
+{
+  "number": 27115,
+  "kind": "pull_request",
+  "title": "ci(lint): describe the query-options test ratchet as one-sided",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T06:24:33Z",
+  "updated_at": "2026-10-28T06:53:03Z",
+  "closed_at": "2026-10-28T06:53:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-28T06:53:00Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27115",
+  "body": "Fixes #26586\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:只改 `.github/workflows/lint.yml` 里 `Engine query-options erasure ratchet` 这一步上方的一段注释,把测试代码那个汇总数字从「只降不升」改写成脚本现在的真实行为。\n- 为什么改:#26549 之后这个 ratchet 是单向的:超过上限变红,下降照样通过并打印报告,一次降到 0 按死扫描拒绝;旧注释还写着两向时代的说法,会误导下一个读者。\n- 风险与回滚:零运行时风险,只动注释;YAML 解析前后完全一致,任何 step、`if:`、命令都没变;回滚就是 revert 这一个 commit。\n- 先看:`.github/workflows/lint.yml` 第 4191–4195 行(唯一的改动块)。\n- 两分钟验证:`git diff origin/main -- .github/workflows/lint.yml`,预期只看到 5 行注释替换 3 行注释,没有任何非 `#` 行。\n- 需要你做的:这是 Tier H(`.github/workflows/**`),需要一位 `GOVERNED_APPROVERS` 批准,或由你亲手合并。\n\n## What changes\n\nItem 2 of #26586 only. The comment above the `Engine query-options erasure ratchet` step still called the aggregate test-code number \"decrease-only\". Since #26549 the reader is one-sided, and the comment now says what the code does: growth past the ceiling reds, a fall passes and is reported, and a fall to zero is refused as a dead scan. Items 1 and 3 landed via #26701; item 4 asks for no change and stays with the maintainer. No step, `if:`, command or other comment is touched.\n\n## Tests\n\nNone — comment-only change in a workflow file; nothing executable moved (the parsed YAML is identical before and after).\n\n## Acceptance notes\n\nThe wording was measured against the reader, `scripts/check-query-options-erasure-ratchet.mjs` (the step runs `pnpm check:query-options-erasure`, which is that script's `--self-test` then the scan), on `origin/main` `76e90df6`:\n\n- Growth reds: `diffRatchet` pushes an error when `testSites > testCeiling` (\"test surface grew CEILING → N site(s)\").\n- A fall passes and is reported: `ratchetDownReport` adds a line when `testSites < testCeiling` (\"test surface fell … Passing; until `--update` records it …\"), printed under \"decrease(s) (passing, reported)\", never as an error.\n- A fall to zero is refused: `testSurfaceCollapse` returns a refusal when the ceiling is above 0 and the run measured 0 sites, and the main path exits 2 on it.\n- Before #26549 the fall was an error: its diff removes the `else if (testSites < testCeiling)` error branch (\"ratchet DOWN: run …\") and the self-test row that expected one error for a test-surface shrink; the current self-test row \"test-surface shrink passes (one-sided)\" expects zero.\n\n## Verification\n\n<details><summary>YAML parse and comment-only proof</summary>\n\n`python3` with `yaml.safe_load` on the new file and on `git show HEAD:.github/workflows/lint.yml` before the commit: parsed ok, semantically identical: True. `git diff -U0` filtered to changed lines that are not comments: none.\n\n</details>\n\n<details><summary>Derived gates (dispatch-gates --commands, 42 commands)</summary>\n\nRun on head `5a94fec3` (after merging `origin/main`), each exit captured before any pipe; all 42 exit 0. The first pass on `9be4825d` (before the merge) was also 42 of 42 exit 0.\n\n```text\nnode scripts/check-closing-keyword-parity.mjs :: exit 0\nnode scripts/check-closing-keyword-parity.mjs --self-test :: exit 0\nnode scripts/check-comment-mask-corpus.mjs :: exit 0\nnode scripts/check-merged-branch-reaper-outcome.mjs :: exit 0\nnode scripts/check-merged-branch-reaper-outcome.mjs --self-test :: exit 0\nnode scripts/check-self-test-wired.mjs :: exit 0\nnode scripts/check-self-test-wired.mjs --self-test :: exit 0\nnode scripts/check-self-test-workflow-commands.mjs :: exit 0\nnode scripts/check-self-test-workflow-commands.mjs --self-test :: exit 0\nnode scripts/check-step-collectors.mjs :: exit 0\nnode scripts/check-step-collectors.mjs --self-test :: exit 0\nnode scripts/check-whole-set-label-write.mjs :: exit 0\nnode scripts/check-whole-set-label-write.mjs --self-test :: exit 0\nnode scripts/ci/scheduled-full-run.mjs --self-test :: exit 0\nnode scripts/docs-audit/check-drift-comment.mjs :: exit 0\nnode scripts/pm/ci-failure.mjs --self-test :: exit 0\npnpm check:agent-test-spelling :: exit 0\npnpm check:aggregator-roster :: exit 0\npnpm check:cross-package-test-inputs :: exit 0\npnpm check:declared-population-live :: exit 0\npnpm check:driver-memory-census :: exit 0\npnpm check:gitlink-declared :: exit 0\npnpm check:node-version :: exit 0\npnpm check:nul-bytes :: exit 0\npnpm check:pm-dispatch-gates :: exit 0\npnpm check:pm-expected-skips :: exit 0\npnpm check:pm-governed-merges :: exit 0\npnpm check:pm-post-stamped :: exit 0\npnpm check:pm-record-recognisers :: exit 0\npnpm check:pnpm-acquisition :: exit 0\npnpm check:pnpm-filter-targets :: exit 0\npnpm check:refd-timer-probe :: exit 0\npnpm check:required-contexts :: exit 0\npnpm check:select-gate-families :: exit 0\npnpm check:shard-attestation :: exit 0\npnpm check:stall-guard-budget :: exit 0\npnpm check:stall-guard-headroom :: exit 0\npnpm check:type-check-coverage :: exit 0\npnpm check:type-check-debt :: exit 0\npnpm check:watch-hint-literal :: exit 0\npnpm check:workflow-status-functions :: exit 0\npnpm check:workflow-step-name-quoting :: exit 0\n```\n\n`dispatch-gates --ran` (exit 0): `42 derived famil(ies) accounted for — 42 run, 0 NOT-MEASURED (a DERIVED zero — all 42 recorded an exit code and none of them is 3).`\n\nThe 6 workflow-valued families the derivation lists as NOT MEASURED locally (they take a value only a CI run has: required-contexts --verify-required-set, the shard-attestation emit/verify legs) and every CI-only family are left to the PR's check-runs.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QSeKYpxei8vxY22nkCLVj1)_\n"
+}

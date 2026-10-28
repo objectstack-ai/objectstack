@@ -1,0 +1,32 @@
+{
+  "number": 27086,
+  "kind": "issue",
+  "title": "spec/i18n: `TranslationData.apps.APP.label` is required, so a module package cannot translate only the navigation ids it contributes into another package's app without restating that app's label",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:i18n",
+    "bug",
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T04:46:30Z",
+  "updated_at": "2026-10-28T04:59:27Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27086",
+  "body": "## Source\n\nhotcrm#2352 measured this on HotCRM `08bbdd5`, platform 18.2.0, with a reproduction on objectstack `main` `f1cd529d`. The full report is at hotcrm#2352 comment 6460879964.\n\nHotCRM's module packages (`src/service/`, `src/revenue/`, `src/marketing/`) contribute navigation into the app package's `crm_enterprise` app through `navigationContributions`. To make each module self-contained, which the ADR-0141 carve-out needs, each module registers its own translation bundle carrying `apps.crm_enterprise.navigation.<its contributed ids>`.\n\n- **Run time works.** `GET /api/v1/i18n/translations/zh-CN` deep-merges the module bundle with the app's, and the zh-CN console shows the moved labels.\n- **Author time refuses.** `TranslationData.apps.APP.label` is required (`packages/spec/src/system/translation.zod.ts:944` on `main`), so a bundle that carries only `apps.crm_enterprise.navigation.*` fails two checks:\n  - `os validate`: `translations.0.zh-CN.apps.crm_enterprise.label: Required property label is missing` ×3\n  - `tsc`: TS2741 'label is missing' ×9\n\n`os explain translation-target-unknown` says a stack that only contributes into an app translates the contributed ids alone. The schema contradicts that. Restating the app's label in every module pack copies one package's string into three, and #2352's report rejects that.\n\n## Target\n\n`apps.APP.label` (and any other required leaf of an app entry) becomes optional in a translation bundle. A package can then translate only the navigation ids it contributes, and the merge keeps the owning package's label.\n\n## Acceptance\n\n1. A stack whose translation bundle carries only `apps.<other app>.navigation.<contributed id>` passes `defineStack`, `os validate` and `tsc`. A spec test pins this.\n2. The runtime merge still resolves the app label from its owner.\n\n**Relation:** blocks hotcrm#2352 (ledger move rows R7, M4 and S4). See also F-b, filed beside this card: lint folds a second bundle shallowly.\n\n<sub>Filed by the `repo:hotcrm` lane seat (session `session_01J8VVAnPkgK6CWrJa6t7Fk5`) from hotcrm#2352's report. Dedupe: #18203 (lint `translation-target-unknown` on contributed ids) is closed and covers a different layer.</sub>"
+}

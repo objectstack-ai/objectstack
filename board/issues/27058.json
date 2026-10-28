@@ -1,0 +1,32 @@
+{
+  "number": 27058,
+  "kind": "issue",
+  "title": "console mobile (≤ 640 px): list as card rows with view chips and a FAB, the record page with a compact header, sticky tabs and a bottom action bar, related records pushed as full pages with a path row and back — the record is always a page on a phone",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:ui",
+    "enhancement",
+    "pm:blocked",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T03:21:00Z",
+  "updated_at": "2026-10-28T03:25:49Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27058",
+  "body": "Blocked-by: #27055\n\nPart of the record-page-v3 epic #26676 (v3 child 7 of 8). Runs after #27055 (shares the header and tab components) — design: canvas board RecordMobile.\n\n## Source (origin/main `7bb8084590`)\n\nOn a phone viewport the console's object list is the desktop grid squeezed (horizontal scroll, the `#` column, a toolbar of icons), and a record opens as the full page by `deriveRecordSurface` → `page` on mobile (kept by #26804); the record page is the desktop header stacked, the actions wrap, and the tabs are the only tier. Related rows navigate to a full page with no path back beyond the browser history. `RelatedList` has an `isMobile` card face already.\n\n## Target\n\n1. List (≤ 640 px container): rows are cards — avatar / initials, name, one subtitle line (the first two shown columns), one status chip; the view tabs become a horizontally scrolling chip row; filter / sort chips one row with the count at the right; search and Display in the top bar; 新建 is a bottom-right FAB; selection by long press; the Display menu drops the layout row.\n2. Record page: top bar 「‹ 返回」 + title + ↑ ↓ + ⋯; header avatar + name + chip, highlights in 2 columns (max 4), the stage path compressed to a bar with labels; sticky tabs 详情 / 时间线 / 关联 (the tabbed tier — timeline second for worked objects, last otherwise); the primary action + one secondary + ⋯ fixed in a bottom action bar; sections frameless as on desktop, fields in 2 columns.\n3. Related record: pushed as a full page; a path row under the top bar (「线索 Mira Costa › 任务」) carries the desktop drawer's trail (`?from=`); 「‹」 returns to the parent on the tab it came from; ↑ ↓ step through the same sibling set as the drawer stack (#26679).\n4. No drawer, no split, no column toggles on a phone (the preferences simply do not apply); nothing new in metadata.\n\n## File surface\n\n`ui/packages/plugin-list/src/ListView.tsx` (mobile card face, chip rows, FAB), `plugin-grid` mobile row card if one exists, `ui/packages/app-shell/src/views/RecordDetailView.tsx` (mobile header / action bar / path row), `ui/packages/plugin-detail/src/RecordPageColumns.tsx` (tabbed tier on mobile), `ui/packages/components` for the bottom action bar and FAB primitives if missing, i18n, tests beside, changesets.\n\n## Acceptance\n\n1. Tests (jsdom with a 390 px container): the list renders card rows and the FAB; the record page renders the bottom action bar with the primary action and the tabs; a related row click pushes the record page with the path row.\n2. Screenshots at 390 × 844 (Chromium mobile emulation): leads list, lead record, lead → task with the path row.\n\n## Rulings (maintainer, chat in the filing session, 2026-10-28 — verbatim, not re-decidable here)\n\n1. Record-page model (2026-10-27): 「1. 一个对象一个默认打开方式：默认抽屉（带展开整页），`page` 只给显式声明的对象，`modal` 退役，split / popover 变成用户个人偏好；抽屉和整页是同一张页在两个宽度。」\n2. On the resident timeline column: 「时间线是不是太突出了，这个只适合部分对象吧？适合做所有业务对象的默认布局吗」 and then 「时间线是否显示，是否可以切换，比如当前版本的 Claude code，顶部有很多切换图标」 — the column's presence is a per-user toggle with an object-derived default, never metadata.\n3. On the related column's cost: 「关联都放在右侧，记录打开时是不是会很慢，因为需要加载所有的关联子表。」 — the related column loads counts first, rows on demand, and never blocks the details.\n4. On mobile: 「还要考虑手机端的效果。」\n5. On the definition surfaces: the PM's keep / narrow / retire table was put to the maintainer (keep object roles, relationship flags, six slotted slots and `kind: full`; retire the `tabs` slot and the dead `BuildPageOptions` hints; fold the quick-look path into the one record page) and approved with the instruction in the footer.\n\n<sub>Filed by the epic PM session `session_cdb7a717-def7-4e71-9988-f089fbaa18ff` on 2026-10-28 under epic #26676 (record page v2 → v3), from the record-page definition-surface inventory on objectstack main `7bb8084590` and the maintainer's rulings in that session. The maintainer's instruction to file and dispatch, verbatim: 「同意，以上界面相关的需要我确认的你负责立卡派发，如果有可能可以启动云会话，开发完你来确认。」 Design evidence: the design canvas boards 「记录页 v3」 row (RecordPageV3, RecordPageV3NoTimeline, RecordPageRef, RecordDrawerV3, RecordMobile) — exported to the never-merged branch named in the epic parent once this batch is filed.</sub>\n"
+}

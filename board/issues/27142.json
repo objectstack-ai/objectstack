@@ -1,0 +1,32 @@
+{
+  "number": 27142,
+  "kind": "issue",
+  "title": "docs(ui-merge): fold objectui.org into objectstack docs, K3 — generate the component reference for all 106 authorable components from sdui.manifest.json, with a drift check",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T08:06:35Z",
+  "updated_at": "2026-10-28T08:15:47Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27142",
+  "body": "Filing gate ③ (maintainer-directed). In the \"Restore objectui.org docs deploy\" project thread (card thread of #26993), on 2026-10-28:\n\n- 03:24Z, on the decision card \"objectui.org 文档站以后怎么处理?\", Tesla chose 「B 并入 objectstack 文档站」. www.objectui.org stops being a separate site, and its docs fold into the objectstack docs site (`content/docs`, served at objectstack.ai/docs).\n- 03:24Z, Tesla asked 「objectui 文档全部需要保留吗？这需要评估并和我沟通」. The card thread then sorted the 183 pages under `ui/content/docs` one by one into keep, merge, generate and delete, and put four questions to Tesla.\n- 07:58Z, on that evaluation, Tesla answered 「VS Code 扩展 不会发布，其他同意」 and then 「你负责派卡执行」.\n\nThe fold is split into four cards. The first three can run in parallel; the fourth is blocked by them:\n- **K1** moves the SDK pages.\n- **K2** merges pages into existing ones.\n- **K3** generates the component reference.\n- **K4** retires the old site and adds the redirects.\n\nThis is card **K3**.\n\n## 维护者速读\n\n元数据作者在页面 JSON 里能用的组件,以根目录的 `sdui.manifest.json` 为准。这份清单由 CI 生成并校验,共 106 个组件,每个都带输入项的类型和说明。\n\nobjectui 站点只为其中 17 个手写了组件页,另外 89 个没有自己的组件页。本卡写一个生成脚本,从 manifest 生成 objectstack 文档站的「组件参考」,一次覆盖全部 106 个。生成之后,那 17 个手写页和组件索引页就不再需要,由 K4 删除。\n\n生成物会有漂移检查:manifest 变了而参考页没重新生成,检查就红。\n\n## Wanted\n\n1. A generator script, for example `scripts/gen-sdui-reference.mjs`, with `--self-test`. It reads `sdui.manifest.json` and writes a component reference into `content/docs`:\n   - one page per namespace, or one page per component, whichever reads better at 106 entries (the dev's call, stated in the PR);\n   - each component listed with its `type`, its namespace, and its inputs as a table (name, type, description);\n   - a header on each generated page saying it is generated and naming the command that regenerates it.\n2. The pages go in a new `content/docs/ui/components/` section, linked from `content/docs/ui/meta.json`. If the generated pages fit an existing generated area's conventions better (for example `content/docs/references/`, whose pages are never hand-edited), use that instead and say why.\n3. A drift check: `--check` exits non-zero when the committed pages differ from what the manifest produces. Wire it in where `sdui.manifest.json` is already verified, so that a manifest change and its reference change land in one PR. If that wiring needs a `.github/workflows/**` edit, the PR is Tier H (draft until green, the maintainer merges); otherwise prefer a root `package.json` script that an existing check family already runs.\n4. The 17 hand-written pages this replaces (`ui/content/docs/components/`): `basic/{icon,image,span,text}`, `complex/table`, `data-display/{alert,badge}`, `disclosure/accordion`, `form/{button,label}` and `layout/{box,card,container,flex,grid,stack,tabs}`, plus `components/index`. The PR body records the URL each one maps to, for K4's redirect map. Where a hand page carries a worked example the manifest lacks, put it in the PR body's Acceptance notes and do not copy it into a generated page.\n\n⛔ Do not delete the hand pages and do not touch `ui/apps/site`. That is K4's work.\n\n## Who acts\n\nA `domain:devx` card thread. The surface is `scripts/gen-sdui-reference.mjs` (or the dev's name for it), `content/docs/ui/components/**`, `content/docs/ui/meta.json` and the root `package.json` scripts, plus the workflow line only if item 3 needs one. Serial constraint with K2: both may touch `content/docs/ui/meta.json`, so whichever lands second merges `main`.\n\n**Business reason.** A metadata author placing a component in a page finds no page of its own for 89 of the 106 authorable components today; the inputs and their descriptions exist only inside the manifest file. A generated reference also cannot drift from the renderer the way the 17 hand pages could.\n\n## Acceptance\n\n- `node scripts/gen-sdui-reference.mjs --self-test` exits 0, and `--check` exits 0 on the PR head.\n- Hand-editing one generated line makes `--check` exit non-zero. Record that in the PR as a one-time ablation.\n- All 106 manifest types appear in the generated pages.\n- `pnpm --filter @objectstack/docs build` is green.\n\n**Duplicate search.** The same query as the fold's other cards: 33 hits, the first 10 read (#26993, #27030, #27048, #26140, #26688, #24230, #25677, #26944, #25854, #26035). No card generates docs from `sdui.manifest.json`. **New.**\n\n**Size:** M. **Clause-②:** no. **Metadata-protocol:** none."
+}

@@ -14,18 +14,20 @@
     "area:records",
     "bug",
     "domain:ui",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-warren"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T22:55:04Z",
-  "updated_at": "2026-10-28T02:24:26Z",
+  "updated_at": "2026-10-28T03:29:37Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26951",
   "body": "## Source\n\nMeasured 2026-10-27 on HotCRM `fa2c7a2` (platform 18.2.0), in the os-dev report for objectstack-ai/hotcrm#2336 (comment 6451691064), with screenshot `issue-2336/04-theo-bulk-search.png`.\n\n- `crm_campaign_member.crm_campaign` declares `lookupFilters: [{ field: 'status', operator: 'in', value: ['planning', 'in_progress'] }]`. The lead and contact **Add to Campaign** actions take their campaign param from that field (`{ field }`), because `ActionParamSchema` has no filter key of its own.\n- **Row ⋮ menu:** the picker honours the filter. The Completed campaign CPG-0007 is not offered.\n- **Leads selection toolbar → Add to Campaign:** the picker offers CPG-0007. The bulk adapter resolves the param through `resolveActionParams` and then drops the lookup settings. This is documented in `packages/spec/src/ui/bulk-action.zod.ts`, around lines 156–163: \"`lookupFilters` / `lookupColumns` / `lookupPageSize` / `descriptionField` are resolved and then dropped by the bulk adapter\".\n\nIn HotCRM, the enroll flow refuses the run, so no wrong data is written. The user still picks a campaign they cannot use and is refused only afterwards.\n\n## Target\n\nThe bulk dialog's field-backed lookup param keeps the field's `lookupFilters`, as the single-record dialog does: `ui/packages/plugin-grid/src/resolveBulkActions.ts` `#toBulkParam`. `lookupColumns`, `lookupPageSize` and `descriptionField` can travel the same way. Update the spec note when the adapter carries them.\n\n## Acceptance\n\n1. A promoted bulk action whose param is backed by a lookup field with `lookupFilters` offers the same records in the selection-toolbar picker as in the row-menu picker. A test pins this in `plugin-grid`.\n2. The `bulk-action.zod.ts` note and the `list.bulkActionDefs` liveness row describe the new behaviour.\n\n<sub>Filed by the `repo:hotcrm` lane seat (session `session_01J8VVAnPkgK6CWrJa6t7Fk5`) from hotcrm#2336's out-of-scope findings. A dedupe search for \"bulk action dialog drops field lookupFilters\" found only #22780, which is closed and about a different claim.</sub>"

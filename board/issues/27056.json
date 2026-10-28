@@ -1,0 +1,32 @@
+{
+  "number": 27056,
+  "kind": "issue",
+  "title": "console record page: the related column loads counts first, then the first three rows of only the visible cards, and never blocks the details — one batched request, viewport-lazy cards, a measured budget",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:ui",
+    "enhancement",
+    "pm:blocked",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T03:20:54Z",
+  "updated_at": "2026-10-28T03:24:36Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27056",
+  "body": "Blocked-by: #27055\n\nPart of the record-page-v3 epic #26676 (v3 child 3 of 8). Runs after #27055 (the compact cards it loads).\n\n## Source (origin/main `7bb8084590`)\n\nEvery `record:related_list` node mounts `RelatedList`, which runs its own query on mount (`pageSize` default 10, the child's list columns); the column tier (#26758) mounts all of them at once, so a record with N related lists opens with N concurrent queries racing the record's own read (ruling 3). The folded rail in the two-column tier reads nothing until opened.\n\n## Target\n\n1. Counts first: on open, ONE request answers the count of every related list for this parent (one aggregate per child object's FK, batched through the data source's batch door if main has one, else the `aggregate` API per list in one `Promise.all` behind a single loading state — measure which exists). Card headers render from counts; a count of 0 folds the card to one line and skips its rows.\n2. Rows on demand: a card fetches at most 3 rows (`limit`) with a projection of the name field plus one status / date field (from `relatedListColumns` when declared, else the first status-like or date field), ordered by the inherited sort; only cards in the viewport fetch (IntersectionObserver), `primary` cards first; a folded 「动态」 card fetches nothing until opened.\n3. Details first: the details column renders from the record read alone; the related column shows skeleton cards until counts land, then rows; the page's interactive moment does not wait on related data.\n4. Prefetch on step: in the drawer, ↑ ↓ (#26679) prefetches the next record's counts.\n5. Budget, measured in the PR body on HotCRM (fresh DB, an account with ≥ 8 related lists): details interactive ≤ 300 ms after the record read returns; all card headers ≤ 500 ms; total related requests on open ≤ 2 round trips. Numbers from the browser's network panel, pasted.\n\n## File surface\n\n`ui/packages/plugin-detail/src/RelatedList.tsx` (lazy + limit + projection), `relatedListCompact.ts`, a related-counts hook beside it, `ui/packages/app-shell/src/views/RecordDetailView.tsx` (the counts request and skeleton gating), the data-source batch call if present (`ui/packages/data-objectstack`), tests beside, changesets; ⛔ `packages/spec/**` (no new key: `limit` is an existing node prop).\n\n## Acceptance\n\n1. Tests: a record with 6 related lists issues one counts call and rows only for the 2 cards in view; a 0-count card never queries rows; the details render before any related response resolves.\n2. The measured budget table in the PR body; screenshots not required.\n\n## Rulings (maintainer, chat in the filing session, 2026-10-28 — verbatim, not re-decidable here)\n\n1. Record-page model (2026-10-27): 「1. 一个对象一个默认打开方式：默认抽屉（带展开整页），`page` 只给显式声明的对象，`modal` 退役，split / popover 变成用户个人偏好；抽屉和整页是同一张页在两个宽度。」\n2. On the resident timeline column: 「时间线是不是太突出了，这个只适合部分对象吧？适合做所有业务对象的默认布局吗」 and then 「时间线是否显示，是否可以切换，比如当前版本的 Claude code，顶部有很多切换图标」 — the column's presence is a per-user toggle with an object-derived default, never metadata.\n3. On the related column's cost: 「关联都放在右侧，记录打开时是不是会很慢，因为需要加载所有的关联子表。」 — the related column loads counts first, rows on demand, and never blocks the details.\n4. On mobile: 「还要考虑手机端的效果。」\n5. On the definition surfaces: the PM's keep / narrow / retire table was put to the maintainer (keep object roles, relationship flags, six slotted slots and `kind: full`; retire the `tabs` slot and the dead `BuildPageOptions` hints; fold the quick-look path into the one record page) and approved with the instruction in the footer.\n\n<sub>Filed by the epic PM session `session_cdb7a717-def7-4e71-9988-f089fbaa18ff` on 2026-10-28 under epic #26676 (record page v2 → v3), from the record-page definition-surface inventory on objectstack main `7bb8084590` and the maintainer's rulings in that session. The maintainer's instruction to file and dispatch, verbatim: 「同意，以上界面相关的需要我确认的你负责立卡派发，如果有可能可以启动云会话，开发完你来确认。」 Design evidence: the design canvas boards 「记录页 v3」 row (RecordPageV3, RecordPageV3NoTimeline, RecordPageRef, RecordDrawerV3, RecordMobile) — exported to the never-merged branch named in the epic parent once this batch is filed.</sub>\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 27110,
+  "kind": "issue",
+  "title": "docs(adr): ADR-0025 v2 — rewrite the four stale sections (registry → sys_package*, /cloud/packages, esbuild, L1 script bodies), fold the Q1–Q8 decisions in, split §3.5 steps 4–7 into dispatchable sub-steps, set the status line (M0 of #27108)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "documentation",
+    "domain:skills",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T06:01:59Z",
+  "updated_at": "2026-10-28T06:58:22Z",
+  "closed_at": "2026-10-28T06:58:18Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27110",
+  "body": "Parent: #27108 (M0). Filing gate: ③ maintainer-directed — ruling on ADR-0025 (objectstack#26553, 「插件包分发 同意，应该立专题卡吧？」). Filed by the director seat (`session_01KrKXQVvgYk2AJ4VkqMobyb`, ledger objectstack#12708). ⛔ Not a claim. ⛔ No `domain:*`: `docs/adr/**` is Tier H; authoring is open to every seat and the director seat drafts this one unless triage routes it; the maintainer approves on GitHub.\n\n## 维护者速读\n\n把 ADR-0025 改成 v2：修正四处与代码不符的段落，把你 2026-10-28 同意的 Q1–Q8 决定写进记录，把 §3.5 第 4–7 步拆成可派发的小节，并改状态行。只改文字，一个 PR，你批准。M1–M3 的子卡在 v2 合并后按 v2 文本立。\n\n## What changes\n\n1. **§3.8 Versioning & lifecycle** — `sys_plugin` / `sys_plugin_version` / `sys_plugin_installation` are replaced by the fold the cloud already shipped: `sys_package_version` carries `artifact_kind`, `packaging`, `runtime`, `engines`, `permissions`, `integrity`, `sbom`, `signature`, `platform_signature`, `blob_key`; `sys_package_installation.granted_permissions`; `sys_package.visibility` / `marketplace_listed` (cloud `packages/service-tenant/src/objects/sys-package-*.object.ts`). Side-by-side versions and yank stay as pending items.\n2. **§3.4 Build → sign → publish** — the publish target is `POST /cloud/packages` + `/cloud/packages/:id/versions` with `artifact_kind: 'plugin'` (`packages/cli/src/commands/plugin/publish.ts`), not `/cloud/plugins`; signing is Ed25519 over the raw artifact bytes with a `.sig` sidecar; counter-signing lives in cloud `package-review.ts`.\n3. **§3.3 Packaging strategies** — the bundle is esbuild with `@objectstack/*` externalized (`build.ts`); **manifest-deps is dropped** (Q6; the build-side half is removed in M1 or this PR notes it as retired, enforce-or-remove ADR-0049).\n4. **§3.10 three layers** — L1 is live today as hook / action script bodies under `packages/runtime/src/sandbox/quickjs-runner.ts`; say so.\n5. **§3.5 Install flow** — steps 4–7 become M1 (local, T0, self-signed) and M2 (cloud fetch, enforcement) sub-steps with their acceptance; `--trust-unsigned` named; T0 hard-limited to first-party / self-signed (⛔ line).\n6. **§3.6 / §3.7** — tier dispatch and enforcement phased per Q3 / Q4; the \"Landed as far as REGISTRATION\" note stays until M2 deletes the pin.\n7. **§7 Open questions** — widening UX answered by the shipped 409 re-consent; hot reload retired (#12587) → boot activation; key rotation, T2 RPC, dependency conflicts explicitly deferred to M3.\n8. **Status line** — `Accepted — 2026-10-28 (ruled on objectstack#26553, ADR batch 4; proposed 2026-05-…)` narrowed to Phase 1 + consent, pending M1–M3 on #27108. Regenerate `docs/adr/README.md` with `node scripts/adr-index.mjs`.\n\n## Acceptance\n\n- `node scripts/adr-index.mjs --check` / `--self-test`, `check-adr-anchors`, `check-adr-links`, `check-adr-symbol-anchors` green.\n- Every claim in v2 names a file that exists on `origin/main` (the inventory on #27108 is the source).\n- No code change; `skip-changeset`.\n\n**Size:** S (one record, ~8 sections). **Clause-②:** no. **Metadata-protocol:** none.\n\n## Related\n\n#27108 (epic), #26553 (ruling), ADR-0025, ADR-0049, ADR-0016 §9."
+}

@@ -1,0 +1,33 @@
+{
+  "number": 27043,
+  "kind": "pull_request",
+  "title": "fix(react): mark the field a unique-index refusal names in create/edit forms",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T02:52:52Z",
+  "updated_at": "2026-10-28T08:04:29Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27043",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8FFTSFXvg3gyNdUibNK8VkN)_\nFixes #26891\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:`@object-ui/react` 的 `extractFieldErrors` 现在识别 409 `UNIQUE_VIOLATION` 里单个 `field`,返回一条带服务端句子的字段错误;表单因此把重复值标在对应输入框下。\n- 为什么改:服务端(#26867)已在拒绝里点名字段并用标签造句,但前端只读字段数组,唯一索引冲突仍只显示横幅加 toast,用户要猜是哪个字段重复。\n- 风险与回滚:只在 `code` 为 `UNIQUE_VIOLATION` 且带字符串 `field` 时生效;无 `field`(复合索引、索引名)照旧走横幅。回滚 = revert 本 PR。\n- 先看:`ui/packages/react/src/utils/error-message.ts` 的 `extractFieldErrors` 新分支;`form-server-field-errors.test.tsx` 新增的 unique-index 两例。\n- 两分钟验证:`pnpm --dir ui exec vitest run packages/react/src/utils/error-message.test.ts packages/components/src/renderers/form/__tests__/form-server-field-errors.test.tsx`,预期全绿;在 console 新建一个 SKU 重复的产品,SKU 输入框下出现 \"A record with this SKU already exists\",无 toast。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- `extractFieldErrors` (`@object-ui/react`): when no field-error list is present and the refusal's code is `UNIQUE_VIOLATION` (read from `code`, then `details.code`, the same pair `isPermissionError` reads), the single string `field` (`details.field` on the raw `@objectstack/client` error, `field` on a hand-rolled one) becomes one `WriteFieldError` whose message is the server's sentence (`extractWriteErrorMessage`). Without `field` the answer stays `null`.\n- No change to `form.tsx`: its existing `extractFieldErrors` then `form.setError` path marks the input, and a fully attributed refusal shows no banner and no toast.\n- Changeset: `@object-ui/react` patch.\n\n## Why\n\nThe server half shipped in #26867: the 409 `UNIQUE_VIOLATION` body is `{ error, code, developerMessage?, field?, object? }`, with `error` naming the field by its label. `@objectstack/client` parks that flat body on `err.details`, and `normaliseClientError` (`@object-ui/data-objectstack`) passes a unique 409 through unchanged. The last hop read only arrays (`validationErrors`, `details.fields`, `fields`), so it answered `null` and the dialog showed the generic banner and toast.\n\nSide effect, measured: `InlineEditSaveBar` (`@object-ui/plugin-detail`) calls the same helper, so on the atomic save path a unique refusal with `field` is now attributed to that field (labelled in the bar and published as the per-field hint) instead of the generic text; in callback mode it was already attributed to the in-flight field. Its suites stay green (below).\n\n## Tests\n\n- `error-message.test.ts`: a unique refusal with `field` yields one entry carrying the server's sentence (asserts `code` and `httpStatus` 409 on the refusal); a hand-rolled one with top-level `field`; without `field` it answers `null`; an `INVALID_FIELD` carrying `field` still answers `null`.\n- `error-message.normalisation-boundary.test.ts`: the refusal survives `normaliseClientError` with `code`, `httpStatus` and the field entry intact.\n- `form-server-field-errors.test.tsx`: a rejected submit marks the `sku` input (`aria-invalid`, sentence under it, no toast); without `field` the toast carries the generic sentence and no input is marked.\n\n## Acceptance notes\n\n- `ApiDataSource`, which embeds the body as a JSON tail in the message string, is not read for `field`; the ObjectStack adapter is the console's path.\n\n## Verification\n\nTree: `a17ebf4e` on base `7eb613c3`.\n\n<details><summary>Tests and ablation</summary>\n\n- Three touched files: Test Files 3 passed, Tests 46 passed.\n- Ablation via `scripts/ablation-replace.mjs` (unique branch replaced by `return null`): exactly the four new positive tests red (two helper, one boundary, one form render), 42 passed; restored, blob equals HEAD, `git diff HEAD` empty. Tests resolve `@object-ui/react` to `src` through the ui vitest alias, so no dist leg.\n- Consumer sweep under the lock: `packages/plugin-detail/src/__tests__/`, `packages/react/`, `apps/console/src/pages/settings/`, `apps/console/src/pages/system/`: Test Files 385 passed, 1 skipped; Tests 3607 passed, 18 skipped.\n- `type-check` for `@object-ui/react` and `@object-ui/components`: exit 0. eslint on the four files: 0 errors.\n\n</details>\n\n<details><summary>Derived gates</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`: 34 families, each run, all exit 0, including `node scripts/check-sdui-manifest.mjs` and `pnpm --dir ui exec vitest run scripts/`. `--ran` reconciliation: 34 derived, 34 run, 0 NOT-MEASURED, 0 UNRUN.\n\n</details>\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes. (eslint on the touched files: 0 errors; the repo-wide run is CI's)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbZRo35mpCPrKXVXevY)_\n"
+}

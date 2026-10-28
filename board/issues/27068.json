@@ -1,0 +1,32 @@
+{
+  "number": 27068,
+  "kind": "issue",
+  "title": "spec(ui): the dashboard widget describe does not say that a dataset tile the server refuses as a read refusal is left out for that viewer; `requiresObject` keeps its install-only meaning",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:reports",
+    "documentation",
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T03:37:59Z",
+  "updated_at": "2026-10-28T03:56:31Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27068",
+  "body": "Filing gate **① a defect with a named location**: shipped spec prose does not describe what a viewer is shown. This is follow-up owed by landed work, the spec half of #26971 (its Acceptance item 2: \"The spec describes the chosen key or behaviour, and `requiresObject` keeps its install-only meaning\"). ui seat 2 split it off because a `packages/spec/src/**` diff sits behind the Clause-② queue gate's path limb.\n\n`finding` class **b** · `reach:` named producer: PR #27065 (`Refs #26971 (item 1)`, ui seat 2 review pending). Outside design mode, `DashboardRenderer` now leaves a dataset-bound tile out of the layout once the server refuses its query as a read refusal (403 / `PERMISSION_DENIED`, via `classifyLoadError`). Design mode and the editable `DashboardGridLayout` keep the tile and its objectui#10899 no-access state.\n\n## What is missing (read at `origin/main` `cb8988ee`)\n\n- `packages/spec/src/ui/dashboard.zod.ts` ≈L1149, `DashboardWidget.requiresObject`: \"Hide the widget unless the named object is registered\". Nothing on the widget schema tells an author what a viewer who may not read a tile's data sees. Authors asked for a widget key (hotcrm#2338) because the spec does not say the renderer handles it. Triage 6456651336 ruled out a new key.\n- The os-dev report on #26971 (comment 6460010220, `out_of_scope_findings`) proposes a sibling sentence: \"A dataset-bound widget whose query the server refuses as a read refusal (403 PERMISSION_DENIED) is left out of the dashboard for that viewer outside design mode; requiresObject stays an install gate.\"\n- `packages/spec/liveness/dashboard.json` ≈L157 (`requiresObject`) may want the same note. Re-read it.\n\n## Expected\n\nThe widget describe (and, if the lane's convention wants it, the `DashboardSchema` describe ≈L1755, which lists `requiresObject` / `requiresService`) states the read-refusal behaviour in one sentence and keeps `requiresObject` as the install gate. This changes prose only. No key and no accept-set change.\n\n## Business reason\n\nApp authors decide from this schema whether they must split a dashboard per audience. Without the sentence they keep building workarounds (HotCRM hid nothing and kept a broken tile) for a case the renderer now handles.\n\n## Reader who acts\n\nThe `domain:spec` seat, in one PR to `dashboard.zod.ts` (plus liveness if needed), after PR #27065 merges.\n\n## Dedupe\n\nI listed `domain:spec` issues (state all, the newest 300) and checked titles for dashboard / widget / requiresObject. I found 0 hits on this behaviour. #26602 (KPI polarity) and #25391 (`nullLabel`) are unrelated."
+}

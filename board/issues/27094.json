@@ -1,0 +1,36 @@
+{
+  "number": 27094,
+  "kind": "pull_request",
+  "title": "docs(AGENTS.md): the dev-server port is a default, not hard-wired, and the three contributor lines agree with the code",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T05:29:48Z",
+  "updated_at": "2026-10-28T06:34:00Z",
+  "closed_at": "2026-10-28T06:33:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-28T06:33:58Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27094",
+  "body": "Fixes #26088\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:AGENTS.md 三处贡献者说明改成与代码一致 —— 开发服务端口是默认 3000、不是写死的;`pnpm run setup` 只装依赖并构建 spec,不是首次完整准备;前端快速迭代段改用文档名 `OS_PORT`。\n- 为什么改:照 AGENTS.md 操作的贡献者或 agent 会以为端口必须是 3000、改不了,并把 `pnpm run setup` 当作首次准备,随后 `pnpm dev` 因未构建被拒;README / CONTRIBUTING / getting-started 已在先前一单改好,这一单收尾 AGENTS.md。\n- 风险与回滚:纯文档,不发布任何包;行数不变(1112),无新增行;回滚即 revert 这一个 commit。\n- 先看:`AGENTS.md` L138(开发服务表格那一行,改动最大的 hunk);其次 L40 与 L170–171。\n- 两分钟验证:`grep -n 'hard-wired\\|PORT=3000\\|pnpm run setup' AGENTS.md`,预期只见 L40 新说明、L138 的「not hard-wired」与 `OS_PORT=3000`、L170 的 `OS_PORT=3000`,不再出现「must be 3000」。\n- 需要你做的:作为 GOVERNED_APPROVERS 审阅并批准(AGENTS.md 属 Tier H 受管面)。\n\n## What changes\n\nThree contributor lines in `AGENTS.md`, each edited in place; no line added or removed (1112 lines before and after).\n\n| Line | Before | After | Bytes before → after |\n|:---|:---|:---|:---|\n| L40 (fenced) | `pnpm run setup # first-time: install + build spec (...)` | `pnpm run setup # install + build spec only; pnpm dev needs pnpm build (...)` | 99 → 123 (fenced line: exempt from the 120-byte prose rule) |\n| L138 (table row) | `PORT=3000 pnpm dev` · \"Port **must** be 3000 (UI hard-wired)\" · `PORT=3000 pnpm dev:crm` | `OS_PORT=3000 pnpm dev` · \"Port 3000 is the default, not hard-wired: the Console dev proxy targets it unless `DEV_PROXY_TARGET` says otherwise, and a busy port shifts to the next free one, so read the port it prints (`PORT` is the legacy alias of `OS_PORT`)\" · `OS_PORT=3000 pnpm dev:crm` | 307 → 506 (widest-row pin is 768, held by L709; unchanged) |\n| L170 | `... on :3000** (PORT=3000 pnpm dev for` | `... on :3000** (OS_PORT=3000 pnpm dev` | 117 → 116 |\n| L171 | `showcase) and browse :5180 ...` | `for showcase) and browse :5180 ...` | 114 → 118 |\n\nThe code line that decided each fact:\n\n- **Setup.** Root `package.json:18`: `\"setup\": \"pnpm install && pnpm --filter @objectstack/spec build\"`, so the line's \"install + build spec\" was accurate; \"first-time\" was not. `pnpm dev` runs `scripts/check-dev-prereqs.mjs`, which requires every workspace package's dist entry and prescribes `pnpm install && pnpm build` (`scripts/check-dev-prereqs.mjs:579`), the same sequence `README.md`, `CONTRIBUTING.md` and getting-started give. The line now says what `setup` does and that `pnpm dev` needs `pnpm build`.\n- **Port.** `packages/cli/src/commands/dev.ts:481` reads `flags.port ?? readEnvWithDeprecation('OS_PORT', 'PORT', { silent: true })`, `:537` defaults it to `'3000'`, and `:562` runs `getAvailablePort` over the requested port: dev shifts off a busy port even when the port was asked for explicitly (`serve.ts:2307`, dev mode only). The Console dev server proxies `/api` to `process.env.DEV_PROXY_TARGET || 'http://localhost:3000'` (`ui/apps/console/vite.config.ts:1509`). Nothing is hard-wired; 3000 is the default on both sides.\n- **Spelling.** `OS_PORT` is the documented name (`--port` flag help: \"overrides $OS_PORT; $PORT is the legacy alias\"; `content/docs/getting-started/index.mdx:211-212`; `CONTRIBUTING.md:70-71`), so both AGENTS.md command spellings now use it.\n\nLeft as is, on purpose: L145 \"never run two backends on port 3000\". It does not repeat the \"hard-wired\" claim. With auto-shift it still gives sound advice: a second backend would silently land on 3001 while the proxy keeps hitting the first.\n\n## Tests\n\nDocs-only diff to one governed instruction file. No package code changed, so no package test or typecheck is owed and no ablation applies (no tested behaviour moved). Card acceptance grep at `596cd15e`: `grep -n 'PORT=3000\\|OS_PORT\\|npx create-objectstack\\|npm create objectstack\\|pnpm run setup' AGENTS.md` matches only L40 (`pnpm run setup`, now described accurately), L138 and L170 (both `OS_PORT=3000`); no bare `PORT=3000` remains.\n\n## Acceptance notes\n\n- `examples/README.md:42` carries the same `pnpm run setup # first-time: install + build spec` label. It is outside this card's file surface (AGENTS.md only) and outside the card's acceptance grep. Noted here, not filed.\n- `ui/AGENTS.md:221` (Tier H, outside this surface) still spells the legacy `PORT=3000 pnpm dev` / `PORT=3000 pnpm dev:crm`. The legacy alias still works (`readEnvWithDeprecation`), so this is a spelling drift, not a defect. Noted here, not filed.\n\n## Verification\n\nAll local readings were taken at head `596cd15e` (the final commit).\n\nDerived gates came from `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`, with no paths and a change set of 1 path vs merge base `fbc16563a`. It derived 15 gates, and every one exited 0. I also ran three named gates outside the derivation: `check:doc-authoring`, `check-published-list-mirrors` and its `--self-test`.\n\nThe `--ran` reconciliation reports: 15 derived, 15 run, 0 NOT-MEASURED, 0 UNRUN. That zero is derived from recorded exit codes.\n\n`pnpm check:pm-skill-ratchet` exits 0. Its reading for AGENTS.md: \"1112 lines (ceiling 1112; headroom 0)\", \"widest table row is 768 bytes (pin 768; headroom 0)\", and every prose line is within the 120-byte budget.\n\nThe CI families on this PR are not awaited by the author.\n\n<details><summary>Gate exit codes (head 596cd15e)</summary>\n\n```text\nnode scripts/check-closing-keyword-parity.mjs :: exit 0\nnode scripts/check-closing-keyword-parity.mjs --self-test :: exit 0\nnode scripts/check-comment-mask-corpus.mjs :: exit 0\npnpm check:agent-test-spelling :: exit 0\npnpm check:docs-audit-scope :: exit 0\npnpm check:driver-memory-census :: exit 0\npnpm check:gitlink-declared :: exit 0\npnpm check:nul-bytes :: exit 0\npnpm check:pm-governed-merges :: exit 0\npnpm check:pm-governed-prose :: exit 0\npnpm check:pm-skill-id-lint :: exit 0\npnpm check:pm-skill-ratchet :: exit 0\npnpm check:refd-timer-probe :: exit 0\npnpm check:required-contexts :: exit 0\npnpm check:watch-hint-literal :: exit 0\npnpm check:doc-authoring :: exit 0\nnode scripts/check-published-list-mirrors.mjs --self-test :: exit 0\nnode scripts/check-published-list-mirrors.mjs :: exit 0\n```\n\n</details>\n\nSession: `session_01QSeKYmhU5KEj1nukYhp1Tg` (os-dev subagent, `mode:subagent`).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QSeKYmhU5KEj1nukYhp1Tg)_\n"
+}

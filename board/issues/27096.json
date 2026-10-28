@@ -1,0 +1,36 @@
+{
+  "number": 27096,
+  "kind": "pull_request",
+  "title": "docs(adr-0142): mark the D3 amendment on the status line; annotate plan item 1 as superseded",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T05:35:30Z",
+  "updated_at": "2026-10-28T06:34:00Z",
+  "closed_at": "2026-10-28T06:33:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-28T06:33:58Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27096",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-support-ai\"} -->\n_Requested by **Yibo Wang** · [project thread](https://claude.ai/code/project/chan_01BVUyyPie8gHwoPM18iABwB?thread=cmsg_01BVUyyPie8gHwoPM18iABwBEyP5fgvDswGwJU9prPHL9U)_\n\nPart of #27016\n\n## What changes\n\nThe two should-fixes from the delta contract review on #27044 (comment `6461102189`), both in ADR-0142:\n\n- The `**Status**:` line gains `· **Amended** (2026-10-28, ruling 6457475657 on #25769, letter A)`, saying that D3's `current_user.queues` producer is `@objectstack/plugin-security`, kernel-side, under the reserved key `queues`. This is the amended-status-line convention the README states, in the form ADR-0028/0050/0055 use. `docs/adr/README.md`'s ADR-0142 row is regenerated (`node scripts/adr-index.mjs`).\n- Execution plan item 1's clause \"the queue service and its `queues` membership-resolver key in `plugin-sharing`\" is kept as history and annotated: *superseded 2026-10-28 by D3 as amended: plugin-security resolves `queues` kernel-side*.\n\nThe stale `Proposed` status is left alone: the review places that flip with #26337, the PR that landed the implementation.\n\n## Why\n\n#27044 amended D3 to ruling A but left the record carrying option B's mechanism in the plan, undated, and no marker on the status line. Seat 1 chose to land #27044 from the queue and take these as a follow-up.\n\n## Verification\n\n- `node scripts/adr-index.mjs --check`: exit 0.\n- Diff against `main`: 2 files, +3/−3, docs only. Nothing publishes, so no changeset (`skip-changeset`).\n\nClause-②: no\nMetadata-protocol: none\n\n## Human Minimum\n\nEach item is one rule from\n[CONTRIBUTING.md › Human Minimum](https://github.com/objectstack-ai/objectstack/blob/main/CONTRIBUTING.md#human-minimum),\nwhich links the AGENTS.md text that states it.\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [ ] 3. No formatter ran; `pnpm lint` passes. (No formatter ran. `pnpm lint` is CI's repo-wide run.)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (Publishes nothing.)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (Not touched.)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01WGufzhD6Fqfyavauv2KoGA\n"
+}

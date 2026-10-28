@@ -1,0 +1,38 @@
+{
+  "number": 27087,
+  "kind": "issue",
+  "title": "cli/i18n: `os lint` coverage folds a second translation bundle per locale shallowly, so a multi-package artifact whose packages each register translations gets hundreds of false `i18n/missing-*` under `--strict`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:i18n",
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-28T04:47:00Z",
+  "updated_at": "2026-10-28T07:53:38Z",
+  "closed_at": "2026-10-28T07:52:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27087",
+  "body": "## Source\n\nMeasured by hotcrm#2352 on HotCRM `08bbdd5` with platform 18.2.0, and read again on objectstack `main` `f1cd529d` (report: hotcrm#2352 comment 6460879964).\n\nEach HotCRM module package registers its own translation bundle for the items it owns. `stack.translations` composes as a concat, and the runtime (`service-i18n` deepMerge) merges every bundle per locale. `GET /api/v1/i18n/translations/zh-CN` serves every moved key.\n\n`os lint --strict` then fails with **330 false warnings**:\n- missing-navigation 105\n- missing-widget 84\n- missing-dataset 48\n- missing-flow 39\n- missing-page 30\n- missing-report 18\n- missing-dashboard 6\n\nEach one names a key the runtime does serve. The cause is `packages/cli/src/utils/i18n-coverage.ts` `mergeData` (around line 176 on `main`). It folds a later bundle into an earlier one only for these keys:\n- `objects` (per object)\n- `globalActions`\n- `apps`, where a later `apps.APP` replaces the whole earlier entry, navigation included\n- `messages`\n- `metadataForms`\n\nIt drops everything else in the later bundle: `dashboards`, `datasets`, `pages`, `flows`, `reports`, `picklists` and the rest.\n\n## Target\n\nCoverage merges bundles the way the runtime does: a deep merge per locale over every key, with `apps.APP.navigation` merged per id. The lint then reads exactly what a user is served.\n\n## Acceptance\n\n1. A fixture with two packages, each registering a bundle for its own dashboards, flows, reports and contributed navigation ids, is clean under `os lint --strict`. Deleting one key in either bundle produces exactly one `i18n/missing-*`.\n2. `mergeData` and the runtime merge are covered by one shared test, or the lint reuses the runtime merge.\n\n**Relation:** blocks hotcrm#2352. Same family as #22238 (closed; coverage read only the top level of a multi-package artifact) and #24993 (closed; contributed nav labels).\n\n<sub>Filed by the `repo:hotcrm` lane seat (session `session_01J8VVAnPkgK6CWrJa6t7Fk5`) from hotcrm#2352's report. Dedupe: no open card for a shallow `mergeData`; #22238 and #24993 are closed and cover different gaps.</sub>"
+}

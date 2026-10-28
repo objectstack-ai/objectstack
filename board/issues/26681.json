@@ -2,8 +2,8 @@
   "number": 26681,
   "kind": "issue",
   "title": "console list Display menu: 「打开记录」 (drawer | split) as a per-user preference; an object or view declaring `page` shows the declaration instead; the name cell's hover ↗ opens the record as a full page",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:records",
     "domain:ui",
     "enhancement",
-    "pm:dispatched",
     "pm:epic",
     "priority:p2"
   ],
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T12:41:02Z",
-  "updated_at": "2026-10-28T00:00:06Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-28T04:34:44Z",
+  "closed_at": "2026-10-28T04:31:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26681",
   "body": "Part of the record-page-v2 epic #26676 (child 4 of 4). Runs after #26677 (the preference util it writes) and after #26637 (claimed by the domain:ui seat 4, no PR yet; it edits the same popover's Layout row and width).\n\n## Source (origin/main `416a76030e`)\n\n`ui/packages/plugin-list/src/components/ViewSettingsPopover.tsx` has a Layout row (`:322-329`), the `Section`s Group (`:332`), Row Color (`:358`) and Hide Fields (`:385`), a Density row (`:416-419`) and the Row numbers / Edit inline toggles (`:443`, `:452`), and nothing about how a row opens (grep for navigation, drawer, split: empty); the split pane used to be authored (`navigation.mode: 'split'`), which #26677 retires in favour of a per-user preference read (`recordOpenPreference`, app-shell). A row's name cell opens the record one way only (the resolved mode); there is no affordance to open it as a full page from the list.\n\n## Target\n\n1. Display menu, a new section 「打开记录」 with two segments 抽屉 | 分屏 writing `recordOpenPreference`; the choice is the user's, per browser, across objects; the section's note reads 「个人偏好，不进对象声明；两种都能展开为整页」.\n2. For an object or view whose resolved mode is `page`, the section is a read-only line 「此对象声明为整页打开」 (the declaration wins; no segments).\n3. The name cell shows a hover-only `↗` (tooltip 「整页打开」) that navigates to the record route without changing the preference; keyboard-reachable.\n4. No new metadata; no change to `navigation` reading.\n\n## File surface\n\n`ui/packages/plugin-list/src/components/ViewSettingsPopover.tsx` and its host wiring in app-shell (`ObjectView.tsx` passes the resolved mode and the preference setter), the name-cell renderer in `ui/packages/plugin-grid` (the link column of objectui#4490), i18n keys in `ui/packages/i18n`, tests beside; changesets for the touched published packages.\n\n## Acceptance\n\n1. Tests: the section renders the segments for a drawer object and the read-only line for a `page` object; choosing 分屏 then clicking a row draws the split face; the hover ↗ navigates to the record route.\n2. Screenshot of the Display menu on HotCRM leads and on opportunities (HotCRM lead declares `page`).\n\n## Rulings (maintainer, 2026-10-27, chat in the filing session — verbatim, not re-decidable here)\n\n1. The model, quoted back by the maintainer and ordered built: 「1. 一个对象一个默认打开方式：默认抽屉（带展开整页），`page` 只给显式声明的对象，`modal` 退役，split / popover 变成用户个人偏好；抽屉和整页是同一张页在两个宽度。」\n2. On the drawer's top bar: 「左上角的 任务 · 2 / 2 · 分屏 几个字有必要嘛」 — no object name, no mode label on the bar.\n3. On the position counter: 「我觉得记录详情页显示第几条记录 好像也没必要」 — no \"n / N\" anywhere on a record; the ↑ ↓ previous / next controls stay.\n4. On the right pane: 「右侧应该可以拖动吗？展开为整页那个是不是用图标就可以」 — the pane is drag-resizable and \"open as full page\" is an icon-only control with a tooltip.\n5. On related records, the maintainer confirmed the in-place model: 「所以关联记录是一层一层的往下点，然后可以一层一层的反悔吗」 — one level down per click, one level back per ← / Esc, never a second drawer.\n\n<sub>Filed by the epic PM session `session_cdb7a717-def7-4e71-9988-f089fbaa18ff` on 2026-10-27, from the record-page / list-page assessment and the clickable prototype the maintainer walked and ruled on in that session (objectstack main `416a76030e`, HotCRM `1f3f8880` on platform 18.2.0). The maintainer's instruction to build it, verbatim: 「你直接立卡派发处理这个开发，然后审核。」 Design evidence (never merged): branch `claude/record-page-v2-evidence-20261027b` at commit `345ec777220843ce1fd7f95b6cc0b2b6dcc81bf8`, folder `docs/design/record-page-v2-2026-10-27/` (`prototype.html`, `artboards/`, `assessment.md`).</sub>"
