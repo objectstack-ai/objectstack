@@ -881,6 +881,7 @@ const ko = {
     noCards: "카드 없음",
     columnCards: "{{column}} 열의 카드",
     laneCards: "{{column}} - {{lane}}의 카드",
+    dropBlocked: "{{from}}의 카드는 {{to}}에 놓을 수 없습니다.",
     cardTitlePlaceholder: "카드 제목 입력…",
     requiredFieldsTitle: "필수 항목 입력",
     requiredFieldsDescription: "이 이동으로 아래 항목이 필수가 됩니다. 입력한 후 계속하세요.",
@@ -3186,6 +3187,12 @@ const ko = {
     totals: "합계",
     loading: "로딩 중…",
     forbiddenMessage: "이 보고서의 데이터를 볼 수 있는 권한이 없습니다.",
+    dateRange: {
+      from: "시작",
+      to: "종료",
+      datasetUnreadable: "이 보고서의 기간에 차원이 지정되지 않았으며, 날짜 차원을 찾기 위해 “{{dataset}}” 데이터셋을 읽을 수 없습니다({{reason}}).",
+      noSingleDateDimension: "이 보고서의 기간에 차원이 지정되지 않았으며, “{{dataset}}” 데이터셋은 날짜 차원을 {{total}}개 선언합니다({{found}}). 정확히 하나여야 합니다. 보고서의 dateRange.dimension에 날짜 차원을 지정하세요.",
+    },
     aggregate: {
       count: "개수",
       countDistinct: "고유 개수",

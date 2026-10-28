@@ -56,6 +56,13 @@ The two tiers also differ in what they give you for layout, in opposite directio
 - **`react`** deliberately does **not** inject layout containers — you have real React,
   so you compose with ordinary `<div>` and inline `style={{ … }}`.
 
+On the `html` tier the plain wrapper is `<box>`: `<div>` is not on its roster, and a page
+that writes one is refused at save time with an error that names `box`. Neither tier has a
+raw-HTML block. The `html` node type, which wrote an authored HTML string into the page
+unsanitised, is retired, so an `<html>` tag is refused as an unknown component; rich text a
+user edits belongs in an `html` or `richtext` field, which renders through the sanitised
+field path.
+
 ## The security gate
 
 Because the react tier runs author JavaScript in every viewer's session, with no sandbox,

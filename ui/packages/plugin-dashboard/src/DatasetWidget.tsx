@@ -92,7 +92,7 @@ import { AlertTriangle, ShieldAlert, Download, ArrowUpIcon, ArrowDownIcon, Minus
 // surface (see that component's header for why it is dashboard-local).
 import { WidgetEmptyState } from './WidgetEmptyState';
 import { useFilterScope } from '@object-ui/react';
-import { resolveFilterPlaceholders, computeMetricDelta, formatMetricDeltaPercent } from './utils';
+import { resolveFilterPlaceholders, computeMetricDelta, formatMetricDeltaPercent, type MetricDelta } from './utils';
 import { metricAccentTextClass } from './colorVariants';
 import {
   METRIC_TILE_CONTAINER_CLASS,
@@ -264,6 +264,32 @@ const COMPARE_KIND_TREND_KEY = {
   previousPeriod: 'vsPreviousPeriod',
   previousYear: 'vsLastYear',
 } as const satisfies Record<CompareToConfig['kind'], string>;
+
+/**
+ * The good/bad colour of a period-over-period delta, judged by the measure's
+ * declared polarity (objectstack#26602). The dataset measure's `polarity`
+ * reaches this widget on the answer's column descriptor (`fields[].polarity`),
+ * relayed by the server like `format` and `currency`.
+ *
+ * - `lower`: a fall is good news (green) and a rise is bad (red). Turnaround
+ *   days, overdue counts, cost: a slower approval no longer reads as a win.
+ * - `neutral`: neither direction is good or bad, so no tone at all.
+ * - `higher`, and an UNDECLARED polarity: a rise green, a fall red, the
+ *   colours every delta had before the key existed. Nothing here guesses a
+ *   polarity from the measure's name or unit.
+ *
+ * The arrow is not this function's business: it always shows which way the
+ * number moved. A flat delta (`direction: 'neutral'`) takes no tone under any
+ * polarity, as before.
+ */
+function deltaToneClass(
+  direction: MetricDelta['direction'],
+  polarity: DatasetResultField['polarity'],
+): string | undefined {
+  if (direction === 'neutral' || polarity === 'neutral') return undefined;
+  const good = polarity === 'lower' ? direction === 'down' : direction === 'up';
+  return good ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400';
+}
 
 /**
  * ISO calendar date, optionally carrying a time part — `2026-01-15`,
@@ -658,7 +684,19 @@ function MetricHeadingRow({ heading, label }: { heading: DatasetMetricHeading; l
   );
 }
 
-export function DatasetWidget({ widget, dataSource, heading }: { widget: any; dataSource: unknown; heading?: DatasetMetricHeading }) {
+export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
+  widget: any;
+  dataSource: unknown;
+  heading?: DatasetMetricHeading;
+  /**
+   * Called when the server refuses this widget's query as a READ refusal
+   * (`classifyLoadError(e) === 'forbidden'`). A host that can leave the tile
+   * out of its layout does so for a viewer (objectstack#26971); the widget
+   * itself still draws its no-access state (objectui#10899) for a host that
+   * keeps it on screen. The 403 stays the enforcement: this only reports it.
+   */
+  onForbidden?: () => void;
+}) {
   const datasetName = String(widget?.dataset ?? '');
   const dimensions: string[] = useMemo(() => (Array.isArray(widget?.dimensions) ? widget.dimensions.filter(Boolean) : []), [widget]);
   const values: string[] = useMemo(() => (Array.isArray(widget?.values) ? widget.values.filter(Boolean) : []), [widget]);
@@ -951,6 +989,7 @@ export function DatasetWidget({ widget, dataSource, heading }: { widget: any; da
         // agnostic `classifyLoadError`, never by matching the message text.
         if (classifyLoadError(e) === 'forbidden') {
           setState({ status: 'error', rows: [], forbidden: true });
+          onForbidden?.();
           return;
         }
         setState({ status: 'error', rows: [], error: String((e as Error)?.message ?? e) });
@@ -1378,9 +1417,8 @@ export function DatasetWidget({ widget, dataSource, heading }: { widget: any; da
           <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground" data-testid="dataset-compare-trend">
             <span className={cn(
               'flex shrink-0 items-center font-medium',
-              delta.direction === 'up' && 'text-emerald-600 dark:text-emerald-400',
-              delta.direction === 'down' && 'text-rose-600 dark:text-rose-400',
-              delta.direction === 'neutral' && 'text-muted-foreground',
+              deltaToneClass(delta.direction, f?.polarity),
+              (delta.direction === 'neutral' || f?.polarity === 'neutral') && 'text-muted-foreground',
             )}>
               {delta.direction === 'up' && <ArrowUpIcon className="mr-1 h-3 w-3" />}
               {delta.direction === 'down' && <ArrowDownIcon className="mr-1 h-3 w-3" />}
@@ -1532,8 +1570,7 @@ export function DatasetWidget({ widget, dataSource, heading }: { widget: any; da
               <span
                 className={cn(
                   'flex shrink-0 items-center tabular-nums font-medium',
-                  delta.direction === 'up' && 'text-emerald-600 dark:text-emerald-400',
-                  delta.direction === 'down' && 'text-rose-600 dark:text-rose-400',
+                  deltaToneClass(delta.direction, measureField(measure)?.polarity),
                 )}
               >
                 {delta.direction === 'up' && <ArrowUpIcon className="h-2.5 w-2.5" />}

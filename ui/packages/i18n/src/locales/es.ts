@@ -910,6 +910,7 @@ const es = {
     noCards: "Sin tarjetas",
     columnCards: "Tarjetas de la columna {{column}}",
     laneCards: "Tarjetas de {{column}} - {{lane}}",
+    dropBlocked: "Una tarjeta de {{from}} no se puede mover a {{to}}.",
     cardTitlePlaceholder: "Escriba el título de la tarjeta…",
     requiredFieldsTitle: "Complete los campos obligatorios",
     requiredFieldsDescription: "Este movimiento hace que los campos siguientes sean obligatorios. Complételos para continuar.",
@@ -3248,6 +3249,12 @@ const es = {
     totals: "Totales",
     loading: "Cargando…",
     forbiddenMessage: "No tienes permiso para ver los datos de este informe.",
+    dateRange: {
+      from: "Desde",
+      to: "Hasta",
+      datasetUnreadable: "El periodo de este informe no indica ninguna dimensión y no se pudo leer el conjunto de datos «{{dataset}}» para encontrar su dimensión de fecha ({{reason}}).",
+      noSingleDateDimension: "El periodo de este informe no indica ninguna dimensión y el conjunto de datos «{{dataset}}» declara {{total}} dimensiones de fecha ({{found}}) cuando necesita exactamente una. Indique la dimensión de fecha en dateRange.dimension del informe.",
+    },
     aggregate: {
       count: "Contar",
       countDistinct: "Contar únicos",
