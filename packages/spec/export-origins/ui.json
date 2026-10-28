@@ -153,6 +153,7 @@
     "DatasetMeasure": "src/ui/dataset.zod.ts#DatasetMeasure (type)",
     "DatasetMeasureDuration": "src/ui/dataset.zod.ts#DatasetMeasureDuration (type)",
     "DatasetMeasureDurationSchema": "src/ui/dataset.zod.ts#DatasetMeasureDurationSchema (const)",
+    "DatasetMeasurePolarity": "src/ui/dataset.zod.ts#DatasetMeasurePolarity (type)",
     "DatasetMeasureSchema": "src/ui/dataset.zod.ts#DatasetMeasureSchema (const)",
     "DatasetSchema": "src/ui/dataset.zod.ts#DatasetSchema (const)",
     "DateRangeDefaultRange": "src/ui/dashboard.zod.ts#DateRangeDefaultRange (type)",

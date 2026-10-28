@@ -31,6 +31,7 @@ describe('a row-conditioned field lock, on the record the form edits', () => {
   let draftId: string;
   let approvedId: string;
   let hiddenMemoId: string;
+  let othersNoticeId: string;
 
   beforeAll(async () => {
     stack = await bootStack(recordFieldAccessFixtureStack, { security: recordFieldAccessFixtureSecurity() });
@@ -43,6 +44,8 @@ describe('a row-conditioned field lock, on the record the form edits', () => {
     approvedId = (await ql.insert('rfa_contract', { title: 'A', status: 'approved' }, { context: SYS })).id;
     // A private row the member does not own, so cannot read.
     hiddenMemoId = (await ql.insert('rfa_memo', { title: 'approved' }, { context: SYS })).id;
+    // A public-read row someone else owns: readable, not writable, for the member.
+    othersNoticeId = (await ql.insert('rfa_notice', { title: 'N' }, { context: SYS })).id;
   }, 180_000);
 
   afterAll(async () => {
@@ -116,6 +119,23 @@ describe('a row-conditioned field lock, on the record the form edits', () => {
       expect(projected.status).toBe(read.status);
       expect(projected.body).toEqual(await read.json());
     }
+  }, 60_000);
+
+  it('measure — a row the caller may read but not write: the projection is field-level only, the PATCH refuses the row', async () => {
+    // The row-level write scope (sharing, row-level security, ownership) is
+    // declared outside `editable`: the projection lists the fields
+    // field-level security admits, and the write is refused for the row as a
+    // whole. A reader ANDs this answer with the record's own write scope; the
+    // console's edit dialog has never gated on that scope, so the server's
+    // 403 on save is its answer there, before this card and after it.
+    const read = await stack.apiAs(memberTok, 'GET', `/data/rfa_notice/${othersNoticeId}`);
+    expect(read.status, await read.clone().text()).toBe(200);
+    const { status, body } = await fieldAccess('rfa_notice', othersNoticeId);
+    expect(status).toBe(200);
+    const access = GetRecordFieldAccessResponseSchema.parse(body.data);
+    expect(access.editable).toEqual(expect.arrayContaining(['title', 'summary']));
+    const patch = await stack.apiAs(memberTok, 'PATCH', `/data/rfa_notice/${othersNoticeId}`, { title: 'N' });
+    expect(patch.status, await patch.clone().text()).toBe(403);
   }, 60_000);
 
   it('the row-less reader still answers as before, and the route takes no query parameter', async () => {

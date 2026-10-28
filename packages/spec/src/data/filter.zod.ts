@@ -3406,6 +3406,14 @@ export interface RetiredFilterOperatorGuidance {
    * The upgrade prescription, written as an instruction. This string IS the
    * migration doc for whoever hits it — a refusal is expected to print it
    * verbatim rather than paraphrase, so that five refusal sites say one thing.
+   *
+   * [#27098] PRESCRIPTION FIRST, history after. A client reads at most 500
+   * characters of a refusal (`CLIENT_MESSAGE_MAX` in `@objectstack/types`), and
+   * each site prints this string after a lead-in of its own naming the
+   * operator, the field and {@link to}. So everything an author must WRITE —
+   * every replacement operator and every "there is none, do this instead" —
+   * goes in the opening sentences; why the operator was retired follows, and
+   * may be cut.
    */
   readonly why: string;
 }
@@ -3464,25 +3472,25 @@ export const RETIRED_FILTER_OPERATORS: Readonly<
   $regex: {
     to: '$icontains',
     why:
-      '`$regex` was never declared by the Filter Protocol and is retired under ADR-0049 '
-      + 'enforce-or-remove: it is refused here, never reinterpreted. It could not '
-      + 'mean one thing across the backends: driver-sql compiled it to a LIKE-escaped substring '
+      'Use `$icontains` for the case-insensitive substring search `$regex` was almost always used '
+      + 'for, or `$contains` for a case-sensitive one; a pattern that genuinely needs a regex has no '
+      + 'filter-level replacement, so narrow with the declared operators and match in application '
+      + 'code. Both match the comparand literally, so "." and "%" are ordinary characters, and '
+      + '`$icontains` folds ASCII case. `$regex` was never declared by the Filter Protocol and is '
+      + 'retired under ADR-0049 enforce-or-remove: it is refused here, never reinterpreted. It could '
+      + 'not mean one thing across the backends: driver-sql compiled it to a LIKE-escaped substring '
       + 'match (so "a.b" matched only the literal "a.b"), driver-memory evaluated it as a real '
       + 'RegExp (so it also matched "axb", and an invalid pattern silently matched nothing), and '
       + 'a real regex is not implementable on all five — driver-turso\'s remote transport cannot '
-      + 'register a SQLite REGEXP function over its wire protocol. Write `$icontains` for the '
-      + 'case-insensitive substring search this was almost always used for (ASCII case fold; the '
-      + 'comparand is matched literally, so "." and "%" are ordinary characters), or `$contains` '
-      + 'for a case-sensitive one. A pattern that genuinely needs a regex has no filter-level '
-      + 'replacement — narrow with the declared operators and match in application code.',
+      + 'register a SQLite REGEXP function over its wire protocol.',
   },
   $options: {
     to: '$icontains',
     why:
-      '`$options` was never a predicate — it was the regex-flags companion to `$regex`, which is '
-      + 'retired under ADR-0049 enforce-or-remove. Its only real use was `$options: "i"` for a '
-      + 'case-insensitive match: '
-      + 'write `$icontains` instead, which says that in the operator name and folds ASCII case on '
-      + 'every backend. On its own, with no `$regex` beside it, it never constrained anything.',
+      'Delete `$options`, and write `$icontains` for the case-insensitive match `$options: "i"` '
+      + 'asked for: it says that in the operator name and folds ASCII case on every backend. '
+      + '`$options` was never a predicate — it was the regex-flags companion to `$regex`, which is '
+      + 'retired under ADR-0049 enforce-or-remove — and on its own, with no `$regex` beside it, it '
+      + 'never constrained anything.',
   },
 });

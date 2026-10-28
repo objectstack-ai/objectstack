@@ -131,6 +131,15 @@ ObjectStack provides **nine domain-specific skills**, one per protocol domain â€
 
 The authoritative list (names, domains, and "use when / do not use" boundaries) is generated from each skill's `SKILL.md` frontmatter. See the **[AI Skills Reference](/docs/ai/skills-reference)** for the full catalog with per-skill detail.
 
+The same package also carries **`objectui`**, the skill for the `@object-ui/*` React
+packages rather than for metadata: rendering JSON schemas with `SchemaRenderer`, writing
+renderer plugins, data-source integration, and testing, i18n and mobile layout in a React host.
+Its source is [`skills/objectui/`](https://github.com/objectstack-ai/objectstack/tree/main/skills/objectui):
+a `SKILL.md` entry point, `rules/` the agent always applies, `guides/` it loads per task, and an
+`evals/` prompt per guide that catches regressions in agent behaviour. Its frontmatter defers
+data modelling, APIs, automation, formulas and agents to the domain skills above, so the two
+coexist in one agent. It installs and updates with the rest of `@objectstack/skills`.
+
 <Callout type="info">
 Lifecycle hooks, plugin development, and project bootstrap are **not** separate skills â€” they live in **Data** (record hooks) and **Platform** (plugins, kernel events, `defineStack`).
 </Callout>

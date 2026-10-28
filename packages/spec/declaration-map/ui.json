@@ -94,6 +94,7 @@
     "DatasetMeasure": "ui/DatasetMeasure",
     "DatasetMeasureDuration": "ui/DatasetMeasureDuration",
     "DatasetMeasureDurationSchema": "ui/DatasetMeasureDuration",
+    "DatasetMeasurePolarity": "ui/DatasetMeasurePolarity",
     "DatasetMeasureSchema": "ui/DatasetMeasure",
     "DatasetSchema": "ui/Dataset",
     "DerivedMeasureOp": "ui/DerivedMeasureOp",
