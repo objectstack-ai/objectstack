@@ -600,6 +600,8 @@
     "MarkNotificationsReadRequestSchema": "src/api/protocol.zod.ts#MarkNotificationsReadRequestSchema (const)",
     "MarkNotificationsReadResponse": "src/api/protocol.zod.ts#MarkNotificationsReadResponse (type)",
     "MarkNotificationsReadResponseSchema": "src/api/protocol.zod.ts#MarkNotificationsReadResponseSchema (const)",
+    "MetadataAuthoringClient": "src/api/protocol.zod.ts#MetadataAuthoringClient (type)",
+    "MetadataAuthoringClientSchema": "src/api/protocol.zod.ts#MetadataAuthoringClientSchema (const)",
     "MetadataAuthoringSurface": "src/api/protocol.zod.ts#MetadataAuthoringSurface (type)",
     "MetadataAuthoringSurfaceSchema": "src/api/protocol.zod.ts#MetadataAuthoringSurfaceSchema (const)",
     "MetadataBulkRegisterRequest": "src/api/metadata.zod.ts#MetadataBulkRegisterRequest (type)",

@@ -41,7 +41,7 @@
  *   location: 'record_header',
  *   actions: [
  *     { name: 'mark_complete', label: 'Mark Complete', type: 'script', icon: 'check', component: 'action:button' },
- *     { name: 'delete', label: 'Delete', type: 'api', icon: 'trash', variant: 'destructive', component: 'action:button' },
+ *     { name: 'delete', label: 'Delete', type: 'api', icon: 'trash', variant: 'danger', component: 'action:button' },
  *   ],
  * }} />
  * ```

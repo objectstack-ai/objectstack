@@ -121,9 +121,19 @@ describe('selectViewMetadataBranch reads the members\' own discriminants', () =>
   // a new view type cannot make the dispatch disagree with the members.
   it('covers every declared list/form type', () => {
     const listTypes = ['grid', 'kanban', 'gallery', 'calendar', 'timeline', 'gantt', 'map', 'chart', 'tree'];
-    const formTypes = ['simple', 'tabbed', 'wizard', 'split', 'drawer', 'modal'];
+    const formTypes = ['simple', 'tabbed', 'wizard'];
     for (const type of listTypes) expect(selectViewMetadataBranch({ type })).toBe('listOverlay');
     for (const type of formTypes) expect(selectViewMetadataBranch({ type })).toBe('formOverlay');
+  });
+
+  // [#27155] The retired form `type` members left the enum, so on their own
+  // they settle nothing (as an unknown type does); `viewKind` still claims the
+  // branch, whose parse then names the prescription.
+  it('a retired form type settles nothing on its own; viewKind still does', () => {
+    for (const type of ['split', 'drawer', 'modal']) {
+      expect(selectViewMetadataBranch({ type })).toBe(null);
+      expect(selectViewMetadataBranch({ type, viewKind: 'form' })).toBe('formOverlay');
+    }
   });
 });
 

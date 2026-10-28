@@ -192,7 +192,7 @@ describe('§1 each member accepts every shape a measured writer authors', () => 
         { name: 'shown', label: 'SHOWN', type: 'run' },
         { name: 'hidden', label: 'HIDDEN', type: 'run', visible: false },
         { name: 'greyed', label: 'GREYED', type: 'run', disabled: true },
-        { name: 'loud', label: 'LOUD', type: 'run', variant: 'destructive', size: 'lg' },
+        { name: 'loud', label: 'LOUD', type: 'run', variant: 'danger', size: 'lg' },
         { name: 'alpha', label: 'ALPHA', type: 'run', variant: 'default', size: 'md' },
         { name: 'promoted', label: 'PROMOTED', type: 'run', variant: 'primary', size: 'icon' },
       ],
@@ -205,7 +205,7 @@ describe('§1 each member accepts every shape a measured writer authors', () => 
     ['a destructive menu item below a separator', 'action:menu', {
       actions: [
         { name: 'archive', label: 'Archive', type: 'script' },
-        { name: 'nameonly', type: 'run', tags: ['separator-before'], variant: 'destructive' },
+        { name: 'nameonly', type: 'run', tags: ['separator-before'], variant: 'danger' },
       ],
     }],
     // objectui `types/src/__tests__/held-public-block-arms-10872.test.ts:188` / `:189`.

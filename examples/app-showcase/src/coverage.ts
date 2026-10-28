@@ -259,8 +259,12 @@ export const LIST_VIEW_TYPES = [
   'chart',
 ] as const;
 
-/** Form-view layout types (FormViewSchema `type`). */
-export const FORM_VIEW_TYPES = ['simple', 'tabbed', 'wizard', 'split', 'drawer'] as const;
+/**
+ * Form-view layout types (FormViewSchema `type`). `split`, `drawer` and `modal`
+ * left the enum when `type` became the form's layout only (ADR-0050): where a
+ * form opens is the caller's open mode (`navigation.mode` on a list).
+ */
+export const FORM_VIEW_TYPES = ['simple', 'tabbed', 'wizard'] as const;
 
 /**
  * Human/CI-readable map of each coverage dimension to where it is exercised.
@@ -284,7 +288,7 @@ export const COVERAGE = {
   },
   formViewTypes: {
     expected: FORM_VIEW_TYPES,
-    coveredBy: 'ui/views/task.view.ts form (simple) + formViews (tabbed/wizard/split/drawer)',
+    coveredBy: 'ui/views/task.view.ts form (simple) + formViews (tabbed/wizard, plus `split` (tabbed) and `quick` (simple))',
   },
   chartTypes: {
     source: 'ChartTypeSchema',
