@@ -527,7 +527,6 @@
     "checkPageRecordBindingPlacement (function)",
     "checkPageRegionPlacement (function)",
     "checkPageRequiresKind (function)",
-    "checkPageSlotPair (function)",
     "checkPageSourceCompleteness (function)",
     "columnSummaryAlias (function)",
     "compileListViewGroupQuery (function)",
