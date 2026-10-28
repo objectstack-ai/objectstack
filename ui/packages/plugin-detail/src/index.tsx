@@ -203,6 +203,7 @@ export {
   recordTimelineDefaultReason,
   recordPageColumnOfTab,
   buildDefaultPageColumns,
+  bodyTableIdsOf,
 } from './synth/recordPageColumns';
 export type {
   RecordPageTier,
@@ -220,6 +221,7 @@ export type { RecordPageColumnsProps } from './RecordPageColumns';
 // objectstack#27055 — the record page v3 face: a host drawing the
 // synthesized default page in its tabbed tier marks it, as the column tiers do.
 export { DefaultRecordPageContext, useDefaultRecordPage } from './defaultRecordPage';
+export { RecordBodyTablesContext } from './relatedListCompact';
 // objectstack#27055 — the reader's arrangement of the related cards: the pure
 // merge rule and the stored record's codec halves, for the host's
 // workspace-preference store.

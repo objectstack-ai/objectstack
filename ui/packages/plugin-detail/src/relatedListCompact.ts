@@ -58,3 +58,16 @@ export const RelatedCardChromeContext = React.createContext<RelatedCardChrome | 
  */
 export const RELATED_CARD_DROP_LINE =
   'data-[related-drop=before]:shadow-[0_-3px_0_0_var(--color-primary)] data-[related-drop=after]:shadow-[0_3px_0_0_var(--color-primary)]';
+
+/**
+ * The relationship ids the synthesized default record page draws as the
+ * record's BODY tables (objectstack#27055, Target 8) — the related lists its
+ * Details tab places among the field sections. A list whose id is in the set
+ * takes the body face: collapsible, ⤢ to enlarge, a totals line under its
+ * numeric columns, no 「查看全部」. Set by the record page host from the page
+ * itself (`bodyTableIdsOf`); empty anywhere else.
+ */
+export const RecordBodyTablesContext = React.createContext<ReadonlySet<string>>(new Set());
+
+/** Enlarge a related list in place — the host's `?related=` — for a body table. */
+export const RelatedEnlargeContext = React.createContext<((id: string) => void) | null>(null);

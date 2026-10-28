@@ -217,11 +217,21 @@ export interface BuildPageOptions {
      */
     filter?: Record<string, any> | any[];
     /**
-     * `relatedList: 'primary'` — a CORE relationship. Under the default
-     * layout this list is promoted to its OWN tab; non-primary lists collapse
-     * into a single "Related" tab.
+     * `relatedList: 'primary'` — a CORE relationship (ADR-0085 prominence).
+     * Under the record page v3 (objectstack#27055) a primary list is part of
+     * the record's BODY: unless `isBody` says otherwise, it is drawn as a
+     * table in the Details tab, not as a side card.
      */
     isPrimary?: boolean;
+    /**
+     * The list is the record's own body (objectstack#27055, Target 8): a
+     * `master_detail` FK declaring `inlineEdit`, or `relatedList: 'primary'`.
+     * Drawn as a full-width table section in the Details tab, right after the
+     * first field section, instead of in the Related tab / related column.
+     * Absent: `isPrimary` decides. The host computes it from the FK (no spec
+     * key of its own).
+     */
+    isBody?: boolean;
   }>;
   /**
    * When true, emit an Activity tab that renders `record:activity`.
@@ -898,6 +908,39 @@ export function buildDefaultDetails(
   });
 }
 
+/** Rows on the first page of a body table (objectstack#27055, Target 8). */
+export const BODY_TABLE_PAGE_SIZE = 10;
+
+/**
+ * The Details tab's body with the record's body tables placed in it
+ * (objectstack#27055, Target 8): every body table right after the FIRST field
+ * section (conventionally 基本信息), stacked in the order given, and the
+ * remaining sections after them — the details node split in two around the
+ * tables. With one section or none, the tables follow the details.
+ *
+ * ⛔ FENCE (objectstack#27069): an author who needs a table elsewhere will
+ * place it through a `fieldGroups` entry that references the relationship.
+ * That entry is not in the spec yet, so it is not read here; when it lands,
+ * THIS function is the one read point: place each table at the group entry
+ * that references it, and fall back to "after the first section" for the
+ * rest.
+ */
+export function bodyTablePlacement(
+  def: ObjectDefLike | undefined,
+  sections: BuildPageOptions['sections'],
+  hideFields: string[] | undefined,
+  bodies: any[],
+): any[] {
+  if (bodies.length === 0) return [buildDefaultDetails(def, sections, hideFields)];
+  const resolved = resolveDetailSections(def, sections);
+  if (!resolved || resolved.length <= 1) return [buildDefaultDetails(def, sections, hideFields), ...bodies];
+  return [
+    buildDefaultDetails(def, resolved.slice(0, 1), hideFields),
+    ...bodies,
+    buildDefaultDetails(def, resolved.slice(1), hideFields),
+  ];
+}
+
 /**
  * Sub-builder: the `page:tabs` node. Emits Details / Related /
  * Activity / History tabs in stable order based on the options.
@@ -919,45 +962,43 @@ export function buildDefaultTabs(
   // tab is URL-addressable (`?tab=<value>`, ADR-0054 C3), so values must
   // survive related lists being added/removed — an index-derived value
   // (`tab-2`) would silently point at a different tab after a schema change.
-  const items: any[] = [
-    { label: 'Details', value: 'details', children: [buildDefaultDetails(def, options.sections, highlightFields)] },
-  ];
-  if (Array.isArray(options.related) && options.related.length > 0) {
-    const relatedNode = (rel: NonNullable<BuildPageOptions['related']>[number]) =>
-      componentNode('record:related_list', {
-        title: rel.title,
-        objectName: rel.objectName,
-        relationshipField: rel.relationshipField,
-        ...(rel.columns ? { columns: rel.columns } : {}),
-        ...(rel.limit ? { limit: rel.limit } : {}),
-        ...(rel.icon ? { icon: rel.icon } : {}),
-        // objectui#5795. Emitted only when the host actually supplied one, for
-        // the reason every sibling key here is: a `sort: undefined` written
-        // onto the node is a different fact from "the author said nothing",
-        // and it is the one a later liveness audit would read.
-        ...(rel.sort ? { sort: rel.sort } : {}),
-        // objectui#4664 — same emit-only-when-supplied rule as `sort` above,
-        // and for the same reason. The tab strip's count probe reads this key
-        // off the node it is badging, so emitting it is also what keeps the
-        // badge and the rows asking one question.
-        ...(rel.filter ? { filter: rel.filter } : {}),
-      });
-    const asOwnTab = (rel: NonNullable<BuildPageOptions['related']>[number]) => ({
-      label: rel.title || rel.objectName,
-      value: `related:${rel.objectName}`,
+  const relatedNode = (rel: NonNullable<BuildPageOptions['related']>[number], defaultLimit?: number) =>
+    componentNode('record:related_list', {
+      title: rel.title,
+      objectName: rel.objectName,
+      relationshipField: rel.relationshipField,
+      ...(rel.columns ? { columns: rel.columns } : {}),
+      ...(rel.limit ? { limit: rel.limit } : defaultLimit ? { limit: defaultLimit } : {}),
       ...(rel.icon ? { icon: rel.icon } : {}),
-      children: [relatedNode(rel)],
+      // objectui#5795. Emitted only when the host actually supplied one, for
+      // the reason every sibling key here is: a `sort: undefined` written
+      // onto the node is a different fact from "the author said nothing",
+      // and it is the one a later liveness audit would read.
+      ...(rel.sort ? { sort: rel.sort } : {}),
+      // objectui#4664 — same emit-only-when-supplied rule as `sort` above,
+      // and for the same reason. The tab strip's count probe reads this key
+      // off the node it is badging, so emitting it is also what keeps the
+      // badge and the rows asking one question.
+      ...(rel.filter ? { filter: rel.filter } : {}),
     });
-    // Rule Z, ADR-0085 prominence: `isPrimary` lists become their own tab;
-    // the rest collapse into one `Related` tab. Owned-before-lookup order is
-    // preserved by deriveRelatedLists upstream. With no primary lists this is
-    // the stacked default (opt-in per relationship, never a surprise).
-    const primary = options.related.filter((r) => r.isPrimary);
-    const rest = options.related.filter((r) => !r.isPrimary);
-    for (const rel of primary) items.push(asOwnTab(rel));
-    if (rest.length > 0) {
-      items.push({ label: 'Related', value: 'related', children: rest.map(relatedNode) });
-    }
+  // objectstack#27055, Target 8 — a list that is the record's own body
+  // (`isBody`, else `isPrimary`) is a table section of the Details tab; every
+  // other list is a side card in the one `Related` tab. Body tables keep the
+  // order the host passed (the derived order — the authored `relatedLists`
+  // order waits for objectstack#27069, see `bodyTablePlacement`).
+  const related = Array.isArray(options.related) ? options.related : [];
+  const isBody = (rel: (typeof related)[number]) => rel.isBody ?? rel.isPrimary === true;
+  const bodies = related.filter(isBody).map((rel) => relatedNode(rel, BODY_TABLE_PAGE_SIZE));
+  const sides = related.filter((rel) => !isBody(rel));
+  const items: any[] = [
+    {
+      label: 'Details',
+      value: 'details',
+      children: bodyTablePlacement(def, options.sections, highlightFields, bodies),
+    },
+  ];
+  if (sides.length > 0) {
+    items.push({ label: 'Related', value: 'related', children: sides.map((rel) => relatedNode(rel)) });
   }
   // Approvals tab (objectui#3461) — emitted only when the host reports the
   // record actually HAS approval requests, so approval-free records carry no

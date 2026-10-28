@@ -12,11 +12,12 @@ import { SchemaRenderer, toRenderableSchema } from '@object-ui/react';
 import { ChevronLeft, PanelRightClose, PanelRightOpen } from 'lucide-react';
 import {
   recordPageArrangementFor,
+  relatedListIdsIn,
   type DefaultPageColumns,
   type RecordPageColumnSwitches,
 } from './synth/recordPageColumns';
 import { useDetailTranslation } from './useDetailTranslation';
-import { RelatedListCompactContext } from './relatedListCompact';
+import { RecordBodyTablesContext, RelatedEnlargeContext, RelatedListCompactContext } from './relatedListCompact';
 import { DefaultRecordPageContext } from './defaultRecordPage';
 import { RelatedCardStack } from './RelatedCardStack';
 import { relatedCardId, type RelatedArrangement, type RelatedCardId } from './synth/relatedArrangement';
@@ -192,9 +193,11 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
   const toggleRef = React.useRef<HTMLButtonElement>(null);
   const [railOpen, setRailOpen] = React.useState(false);
   const arrangement = recordPageArrangementFor(tier, switches);
+  // Body tables (in the details column) enlarge too (Target 8 names ⤢ on them).
   const enlargedNode = enlargedRelated
-    ? columns.related.find((node) => relatedNodeId(node) === enlargedRelated)
+    ? [...columns.related, ...columns.details].find((node) => relatedNodeId(node) === enlargedRelated)
     : undefined;
+  const bodyTableIds = React.useMemo(() => new Set(relatedListIdsIn(columns.details)), [columns.details]);
   const hasTimeline = columns.timeline.length > 0;
   const hasRelatedLists = columns.related.length > 0;
   // objectstack#27052 — a timeline the reader switched off is not a column:
@@ -324,6 +327,8 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
 
   return (
     <DefaultRecordPageContext.Provider value>
+    <RecordBodyTablesContext.Provider value={bodyTableIds}>
+    <RelatedEnlargeContext.Provider value={onEnlargeRelated ?? null}>
       <div
         className={cn('w-full bg-background p-3 md:p-4 lg:p-6', className)}
         data-page-type="record"
@@ -334,6 +339,8 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
           {enlargedNode ? <EnlargedRelatedList node={enlargedNode} onClose={onCloseEnlargedRelated} /> : body}
         </div>
       </div>
+    </RelatedEnlargeContext.Provider>
+    </RecordBodyTablesContext.Provider>
     </DefaultRecordPageContext.Provider>
   );
 };

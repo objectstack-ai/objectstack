@@ -112,19 +112,20 @@ describe('buildDefaultPageColumns (objectstack#26678)', () => {
     const tabIndex = main.components.findIndex((n: any) => n.type === 'page:tabs');
     expect(columns!.header).toEqual(main.components.slice(0, tabIndex));
     expect(types(columns!.header)[0]).toBe('page:header');
-    expect(types(columns!.details)).toEqual(['record:details']);
+    // The primary list is the record's body: a table in the details column
+    // (objectstack#27055, Target 8).
+    expect(types(columns!.details)).toEqual(['record:details', 'record:related_list']);
     // The discussion footer first (its composer on top), then Activity, History.
     expect(types(columns!.timeline)).toEqual(['record:discussion', 'record:activity', 'record:history']);
-    // The strip's order: the primary list's own tab, the stacked rest, Approvals, Attachments.
+    // The side lists, then Approvals and Attachments.
     expect(types(columns!.related)).toEqual([
-      'record:related_list',
       'record:related_list',
       'record:related_list',
       'record:approvals',
       'record:attachments',
     ]);
-    expect(columns!.related.slice(0, 3).map((n: any) => n.properties.objectName)).toEqual(['task', 'note', 'call']);
-    expect(columns!.relatedCount).toBe(3);
+    expect(columns!.related.slice(0, 2).map((n: any) => n.properties.objectName)).toEqual(['note', 'call']);
+    expect(columns!.relatedCount).toBe(2);
   });
 
   it('places every node the page holds exactly once', () => {

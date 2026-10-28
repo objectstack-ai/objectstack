@@ -291,3 +291,39 @@ export function buildDefaultPageColumns(page: unknown): DefaultPageColumns | nul
     relatedCount: relatedCollectionsIn(related),
   };
 }
+
+/**
+ * The relationship ids (`object.field`) of the body tables a synthesized
+ * record page draws (objectstack#27055, Target 8): every `record:related_list`
+ * among the Details tab's children. Read off the page itself, so the host and
+ * the column tiers agree with what `buildDefaultTabs` placed.
+ */
+export function bodyTableIdsOf(page: unknown): Set<string> {
+  const ids = new Set<string>();
+  const regions = nodeList(asNode(page)?.regions);
+  for (const region of regions) {
+    for (const component of nodeList(asNode(region)?.components)) {
+      const tabs = asNode(component);
+      if (tabs?.type !== 'page:tabs') continue;
+      for (const item of nodeList(asNode(tabs.properties)?.items)) {
+        if (asNode(item)?.value !== 'details') continue;
+        for (const id of relatedListIdsIn(nodeList(asNode(item)?.children))) ids.add(id);
+      }
+    }
+  }
+  return ids;
+}
+
+/** The relationship ids of the `record:related_list` nodes among `nodes`. */
+export function relatedListIdsIn(nodes: any[]): string[] {
+  const out: string[] = [];
+  for (const raw of nodes) {
+    const node = asNode(raw);
+    if (node?.type !== 'record:related_list') continue;
+    const props = { ...node, ...(asNode(node.properties) ?? {}) };
+    if (typeof props.objectName === 'string' && typeof props.relationshipField === 'string') {
+      out.push(`${props.objectName}.${props.relationshipField}`);
+    }
+  }
+  return out;
+}

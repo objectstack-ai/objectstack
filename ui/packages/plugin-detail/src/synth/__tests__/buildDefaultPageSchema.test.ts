@@ -374,18 +374,18 @@ describe('buildDefaultPageSchema', () => {
       expect(props(tabItems(tabs)[1].children[0]).limit).toBe(10);
     });
 
-    it('promotes an isPrimary related list to its OWN tab (rule Z default)', () => {
+    it('draws an isPrimary related list as a body table of the Details tab (objectstack#27055)', () => {
       const tabs = buildDefaultTabs(leadDef, {
         related: [
           { objectName: 'opportunity', relationshipField: 'lead_id', title: 'Opportunities', isPrimary: true },
         ],
       });
       const labels = tabItems(tabs).map((t: any) => t.label);
-      expect(labels).toEqual(['Details', 'Opportunities']);
-      expect(labels).not.toContain('Related');
+      expect(labels).toEqual(['Details']);
+      expect(tabItems(tabs)[0].children.map((c: any) => c.type)).toContain('record:related_list');
     });
 
-    it('gives primary lists their own tab and collapses the rest into Related', () => {
+    it('draws primary lists in the body and collapses the rest into Related', () => {
       const tabs = buildDefaultTabs(leadDef, {
         related: [
           { objectName: 'opportunity', relationshipField: 'lead_id', title: 'Opportunities', isPrimary: true },
@@ -394,7 +394,7 @@ describe('buildDefaultPageSchema', () => {
         ],
       });
       const labels = tabItems(tabs).map((t: any) => t.label);
-      expect(labels).toEqual(['Details', 'Opportunities', 'Related']);
+      expect(labels).toEqual(['Details', 'Related']);
       const related = tabItems(tabs).find((t: any) => t.label === 'Related');
       expect(related.children).toHaveLength(2);
       expect(related.children.map((c: any) => props(c).objectName)).toEqual(['task', 'note']);
@@ -1006,14 +1006,14 @@ describe('buildDefaultTabs — stable tab values (objectui#2257)', () => {
   const relA = { title: 'Invoices', objectName: 'invoice', relationshipField: 'account', isPrimary: true };
   const relB = { title: 'Notes', objectName: 'note', relationshipField: 'account' };
 
-  it('emits semantic values: details / related:<child> (primary) / related (rest) / activity / history', () => {
+  it('emits semantic values: details (primary in its body) / related (rest) / activity / history', () => {
     const tabs = buildDefaultTabs(undefined, {
       related: [relA, relB],
       showActivity: true,
       history: { entries: [], loading: false },
     });
     expect(tabItems(tabs).map((i: any) => i.value)).toEqual([
-      'details', 'related:invoice', 'related', 'activity', 'history',
+      'details', 'related', 'activity', 'history',
     ]);
   });
 

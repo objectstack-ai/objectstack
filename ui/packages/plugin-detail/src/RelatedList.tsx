@@ -77,7 +77,15 @@ import { useSafeFieldLabel } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import { useDetailTranslation } from './useDetailTranslation';
 import { isMaskedDetailFieldType } from './fieldEnrichment';
-import { COMPACT_RELATED_ROWS, RELATED_CARD_DROP_LINE, RelatedCardChromeContext, RelatedListCompactContext } from './relatedListCompact';
+import {
+  COMPACT_RELATED_ROWS,
+  RELATED_CARD_DROP_LINE,
+  RecordBodyTablesContext,
+  RelatedCardChromeContext,
+  RelatedEnlargeContext,
+  RelatedListCompactContext,
+} from './relatedListCompact';
+import { relatedCardId } from './synth/relatedArrangement';
 import { RelatedCardMenu } from './RelatedCardMenu';
 import { detectStatusField } from '@object-ui/types';
 
@@ -630,6 +638,61 @@ const RelatedListLoadFailed: React.FC<{ error: unknown; onRetry: () => void }> =
  * card that owns which of them is right (objectstack#17469) are recorded on the
  * seam itself — `@object-ui/core`'s `parent-scope` — so one place answers it.
  */
+
+/** Field types a body table totals (objectstack#27055, Target 8). */
+const TOTALLED_FIELD_TYPES = new Set(['currency', 'number', 'integer', 'decimal']);
+
+/**
+ * The totals line of a body table: the sum of each numeric column over the
+ * rows on show (the page), labelled as the page's — never as the whole
+ * list's, which a windowed list does not hold. Currency sums keep the field's
+ * declared currency. Nothing is drawn without a numeric column.
+ */
+const BodyTableTotals: React.FC<{ rows: readonly any[]; columns: any[] | undefined; objectSchema: any }> = ({
+  rows,
+  columns,
+  objectSchema,
+}) => {
+  const { t } = useDetailTranslation();
+  const fields: Record<string, any> = (objectSchema?.fields as any) ?? {};
+  const totals: Array<{ key: string; label: string; text: string }> = [];
+  for (const col of columns ?? []) {
+    const key = col?.accessorKey || columnIdentity(col);
+    const def = key ? fields[key] : undefined;
+    if (!key || !def || !TOTALLED_FIELD_TYPES.has(def.type)) continue;
+    let sum = 0;
+    let counted = 0;
+    for (const row of rows) {
+      const n = typeof row?.[key] === 'number' ? row[key] : Number(row?.[key]);
+      if (row?.[key] === null || row?.[key] === undefined || row?.[key] === '' || !Number.isFinite(n)) continue;
+      sum += n;
+      counted += 1;
+    }
+    if (counted === 0) continue;
+    const currency = def.type === 'currency' ? def.currencyConfig?.defaultCurrency ?? def.currency : undefined;
+    let text: string;
+    try {
+      text = currency
+        ? new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(sum)
+        : new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(sum);
+    } catch {
+      text = String(sum);
+    }
+    totals.push({ key, label: col.header || col.label || def.label || key, text });
+  }
+  if (totals.length === 0) return null;
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 border-t pt-2 text-xs" data-body-table-totals="">
+      <span className="font-medium text-muted-foreground">{t('detail.bodyTableTotals', { defaultValue: 'Totals (this page)' })}</span>
+      {totals.map((total) => (
+        <span key={total.key} className="inline-flex items-center gap-1" data-body-table-total={total.key}>
+          <span className="text-muted-foreground">{total.label}</span>
+          <span className="font-medium tabular-nums">{total.text}</span>
+        </span>
+      ))}
+    </div>
+  );
+};
 
 export const RelatedList: React.FC<RelatedListProps> = ({
   title,
@@ -2357,6 +2420,13 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // enlarge), handed down by the arranged stack that draws it; `null`
   // anywhere else.
   const cardChrome = React.useContext(RelatedCardChromeContext);
+  // objectstack#27055, Target 8 — a body table of the default record page:
+  // collapsible, ⤢ to enlarge, a totals line, no 「查看全部」.
+  const bodyTableIds = React.useContext(RecordBodyTablesContext);
+  const enlargeRelated = React.useContext(RelatedEnlargeContext);
+  const ownRelationshipId = objectName && referenceField ? relatedCardId(objectName, referenceField) : null;
+  const bodyTable = !compact && !!ownRelationshipId && bodyTableIds.has(ownRelationshipId);
+  const isCollapsible = collapsible || bodyTable;
 
   // The row click hands the host the rows on show beside the clicked one
   // (objectstack#26679), so its drawer can step through them.
@@ -2451,8 +2521,8 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     }
   }, [type, paginatedData, tableColumns, effectiveColumns, schema, effectivePageSize, hasRowActions, hasCustomRowActions, rowActions, onRowAction, onRowEdit, onRowDelete, handleDeleteRow, handleRowClick, isMobile, compact, api, objectSchema, activeSort, handleTableSort]);
 
-  const headerClassName = collapsible ? 'cursor-pointer select-none' : undefined;
-  const handleHeaderClick = collapsible ? () => setCollapsed((c) => !c) : undefined;
+  const headerClassName = isCollapsible ? 'cursor-pointer select-none' : undefined;
+  const handleHeaderClick = isCollapsible ? () => setCollapsed((c) => !c) : undefined;
 
   const SectionIcon = resolveIconComponent(icon);
   // Badge shows the COLLECTION size: the server total in windowed mode (only
@@ -2741,7 +2811,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       >
         <CardTitle className={cn('flex items-center justify-between gap-2 text-sm font-semibold', compact && 'flex-wrap')}>
           <div className="flex items-center gap-2 min-w-0">
-            {collapsible && (
+            {isCollapsible && (
               collapsed
                 ? (<ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />)
                 : (<ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />)
@@ -2812,6 +2882,18 @@ export const RelatedList: React.FC<RelatedListProps> = ({
               >
                 <Plus className="h-3.5 w-3.5" />
                 {add.label || t('detail.add', { defaultValue: 'Add' })}
+              </Button>
+            )}
+            {bodyTable && enlargeRelated && ownRelationshipId && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-9 w-9 p-0 sm:h-7 sm:w-7 text-muted-foreground"
+                aria-label={t('detail.relatedCardEnlarge', { defaultValue: 'Enlarge' })}
+                data-related-card-enlarge=""
+                onClick={(e) => { e.stopPropagation(); enlargeRelated(ownRelationshipId); }}
+              >
+                <Maximize2 className="h-3.5 w-3.5" />
               </Button>
             )}
             {onNew && (
@@ -2952,7 +3034,9 @@ export const RelatedList: React.FC<RelatedListProps> = ({
             truncation condition: the full list page is worth opening even when
             every row fits here (sort, filter, export, a shareable URL). An
             empty list has nothing to see in full. */}
-        {onViewAll && !isEmpty && (
+        {bodyTable && <BodyTableTotals rows={paginatedData} columns={effectiveColumns} objectSchema={objectSchema} />}
+
+        {onViewAll && !isEmpty && !bodyTable && (
           <div className="mt-3 pt-3 border-t flex justify-center">
             <button
               type="button"

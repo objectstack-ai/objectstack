@@ -10,7 +10,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom';
-import { activityRowToFeedItem, DefaultRecordPageContext, EMPTY_RELATED_ARRANGEMENT, InlineEditSaveBar, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordPageColumnDefaults, resolveTitleField, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
+import { activityRowToFeedItem, bodyTableIdsOf, DefaultRecordPageContext, EMPTY_RELATED_ARRANGEMENT, InlineEditSaveBar, RecordBodyTablesContext, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordPageColumnDefaults, resolveTitleField, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
 import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions, PanelToggles, type PanelToggleItem } from '@object-ui/components';
 import { useAuth, createAuthenticatedFetch } from '@object-ui/auth';
 import { usePermissions } from '@object-ui/permissions';
@@ -3323,7 +3323,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         sections?: Array<Record<string, any>>;
         highlightFields?: string[];
         headerActions?: ActionDef[];
-        related?: Array<{ title?: string; objectName: string; relationshipField: string; columns?: any[]; icon?: string; isPrimary?: boolean }>;
+        related?: Array<{ title?: string; objectName: string; relationshipField: string; columns?: any[]; icon?: string; isPrimary?: boolean; isBody?: boolean }>;
         history?: { entries: any[]; loading: boolean; unknownUserText?: string };
         approvals?: { count?: number; node?: Record<string, any> };
       };
@@ -3400,8 +3400,26 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     // its tab is shown (nothing is preloaded here), and header/row
     // affordances (+ New / View All / row navigation) are wired
     // downstream by `RelatedRecordActionsBridge`.
-    const related = childRelations.map(({ childObject, childLabel, referenceField, title: titleOverride, columns: columnsOverride, isPrimary, sort: inheritedSort, filter: declaredFilter }) => {
+    // The DEFAULT order of the related lists (objectstack#27055): the derived
+    // order with `relatedList: 'primary'` lists first, each group keeping
+    // `deriveRelatedLists`' order (owned before lookup, then declaration).
+    // ⛔ FENCE (objectstack#27069): the object's authored `relatedLists`
+    // order is not read — the spec key is not declared yet. When it lands,
+    // THIS is the one read point: order by it, then by this derived order.
+    const orderedRelations = [
+      ...childRelations.filter((relation) => relation.isPrimary),
+      ...childRelations.filter((relation) => !relation.isPrimary),
+    ];
+    const related = orderedRelations.map(({ childObject, childLabel, referenceField, title: titleOverride, columns: columnsOverride, isPrimary, sort: inheritedSort, filter: declaredFilter }) => {
       const childObjectDef = objects.find((o: any) => o.name === childObject);
+      // objectstack#27055, Target 8 — the record's own BODY: a `master_detail`
+      // FK declaring `inlineEdit` (the child is edited as part of the parent),
+      // or a list the author marks `relatedList: 'primary'`. The two keys the
+      // spec already has; no key of its own.
+      const fkDef = (childObjectDef as any)?.fields?.[referenceField];
+      const isBody =
+        isPrimary ||
+        (fkDef?.type === 'master_detail' && (fkDef.inlineEdit === true || fkDef.inlineEdit === 'grid' || fkDef.inlineEdit === 'form'));
       // A `relatedListTitle` on the relationship wins; else fall back to the
       // localized child-object PLURAL label — the section lists the child's
       // records, so it is named as that object's list page is (objectui#11733).
@@ -3441,9 +3459,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         // the node is a different fact from "the author said nothing".
         ...(declaredFilter ? { filter: declaredFilter } : {}),
         ...(childObjectDef?.icon ? { icon: childObjectDef.icon } : {}),
-        // `relatedList: 'primary'` prominence flag (ADR-0085) — the list is
-        // promoted to its own tab by `buildDefaultTabs`.
+        // `relatedList: 'primary'` prominence flag (ADR-0085), and the body
+        // verdict above: a body list is a table in the Details tab.
         ...(isPrimary ? { isPrimary: true } : {}),
+        ...(isBody ? { isBody: true } : {}),
       };
     });
 
@@ -3904,6 +3923,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // included). `null` in the tabbed tier, and for a page whose strip the
   // partition cannot read, which then keeps its tabs.
   const pageColumns = pageInColumnTier ? buildDefaultPageColumns(renderedPage) : null;
+  // objectstack#27055, Target 8 — the related lists the synthesized page
+  // places in its Details tab are the record's body tables (the tabbed tier;
+  // the column tiers read the same off their details column).
+  // A plain computation: this point is below the view's early returns, where
+  // no hook may run.
+  const bodyTableIds = assignedPage || namedPageBlocked ? new Set<string>() : bodyTableIdsOf(renderedPage);
 
   // objectstack#27052 — the panel toggles on the crumb row: one per column the
   // page has content for, drawn only where the columns are (never in the
@@ -4249,7 +4274,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   // the empty-sections line, the highlight grid); an authored
                   // page keeps its own face.
                   <DefaultRecordPageContext.Provider value={!assignedPage && !namedPageBlocked}>
-                    <SchemaRenderer schema={withPageTabsUrlSync(renderedPage, { defaultTab: activeTabParam, onTabChange: handleTabChange }) as any} />
+                    <RecordBodyTablesContext.Provider value={bodyTableIds}>
+                      <SchemaRenderer schema={withPageTabsUrlSync(renderedPage, { defaultTab: activeTabParam, onTabChange: handleTabChange }) as any} />
+                    </RecordBodyTablesContext.Provider>
                   </DefaultRecordPageContext.Provider>
                 )}
               </RelatedRecordActionsBridge>
