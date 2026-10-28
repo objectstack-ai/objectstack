@@ -421,6 +421,8 @@ import { hierarchyResolverMounted, orgWallEnforced, rlsMembershipResolverKeys, t
 import { flowRegistrationsOf, resolveFlowCanonicalizer, resolveFlowRegistrationReader } from './protocol-automation-flow-reads.js';
 // [#25467 cut 28] The code-datasource predicates: declared by an installed package, or registered by the host.
 import { isDeclaredCodeDatasource, isHostCodeDatasource } from './protocol-code-datasource-predicates.js';
+// [#25467 cut 29] The legacy-organization row filters: which rows a not-yet-migrated database still holds.
+import { legacyOrganizationRowsOf, withoutLegacyOrganizationRows } from './protocol-legacy-organization-rows.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -10210,18 +10212,20 @@ export class ObjectStackProtocolImplementation implements
     }
 
     private async withoutLegacyOrganizationRows<R>(table: string, rows: R[] | null | undefined, context?: unknown): Promise<R[]> {
-        if (!rows || rows.length === 0) return rows ?? [];
-        const legacy = await this.legacyOrganizationRowsOf(table, context);
-        return legacy.size === 0 ? rows : rows.filter((row) => !legacy.has(String((row as { id?: unknown }).id)));
+        // [#25467 cut 29] The body moved to `protocol-legacy-organization-rows.ts` (see `LegacyOrganizationRowsHost`).
+        const host: ThisParameterType<typeof withoutLegacyOrganizationRows> = {
+            legacyOrganizationRowsOf: (...a) => this.legacyOrganizationRowsOf(...a),
+        };
+        return (withoutLegacyOrganizationRows<R>).call(host, table, rows, context);
     }
 
     private legacyOrganizationRowsOf(table: string, context?: unknown): Promise<ReadonlyMap<string, string>> {
-        const transaction = (context as { transaction?: unknown } | undefined)?.transaction;
-        return readLegacyOrganizationRows(
-            (this.engine as { getDriverForObject?: (objectName: string) => unknown }).getDriverForObject?.(table),
-            table,
-            transaction !== undefined ? { transaction } : {},
-        );
+        // [#25467 cut 29] The body moved to `protocol-legacy-organization-rows.ts` (see `LegacyOrganizationRowsHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof legacyOrganizationRowsOf> = {
+            get engine() { return readEngine(); },
+        };
+        return legacyOrganizationRowsOf.call(host, table, context);
     }
 
     /**
