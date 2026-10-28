@@ -382,6 +382,12 @@ export const ObjectForm: React.FC<ObjectFormComponentProps> = ({
           initialValues: (schema as any).initialValues,
           initialData: (schema as any).initialData,
           formType: schema.formType === 'tabbed' ? 'tabbed' : 'simple',
+          // objectstack-ai/objectstack#26843 — the tabbed header's opening tab
+          // and strip position, and the field layout, which this rebuild
+          // dropped before the header form could read them.
+          defaultTab: schema.defaultTab,
+          tabPosition: schema.tabPosition,
+          layout: schema.layout,
           sections: schema.sections as any,
           fields: schema.fields as any,
           title: schema.title,
@@ -393,7 +399,10 @@ export const ObjectForm: React.FC<ObjectFormComponentProps> = ({
           details: (schema as any).subforms,
           onSuccess: schema.onSuccess,
           onError: schema.onError,
-          onCancel: schema.onCancel,
+          // The master-detail action bar draws Cancel only when handed an
+          // `onCancel`, so a hidden cancel button is no handler
+          // (objectstack-ai/objectstack#26843).
+          onCancel: schema.showCancel === false ? undefined : schema.onCancel,
           className: schema.className,
         }}
         dataSource={dataSource}

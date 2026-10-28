@@ -40,9 +40,11 @@
  * eagerly (`app` is in its `EAGER_TYPES`, i.e. `GET /api/v1/meta/app` on
  * mount). That is the SAME read the top-bar `AppSwitcher` and the Home page
  * make, and the openable-apps filter is the shared `filterActiveApps` helper
- * rather than a second copy of the `active`/`hidden` rule. This is the ruling's
- * "no external data-source dependency" claim, discharged: the block issues no
- * request of its own and reaches no adapter.
+ * rather than a second copy of the `active`/`hidden` rule, narrowed by
+ * `useLauncherApps` — the user's `/me/apps` answer, which the console's one
+ * `LauncherAppsProvider` reads for Home, the switcher and this block alike.
+ * This is the ruling's "no external data-source dependency" claim, discharged:
+ * the block issues no request of its own and reaches no adapter.
  *
  * The grid itself is `HomeAppsStrip` — the console's existing launcher, already
  * the answer to "how does this product draw a wall of apps" — so an authored
@@ -82,13 +84,12 @@
  */
 
 import * as React from 'react';
-import { useMemo } from 'react';
 import { ComponentRegistry } from '@object-ui/core';
 import { useMetadata } from '@object-ui/react';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { HomeAppsStrip } from '../console/home/HomeAppsStrip.js';
 import { useFavorites } from '../hooks/useFavorites.js';
-import { filterActiveApps } from '../utils/index.js';
+import { useLauncherApps } from '../hooks/useLauncherApps.js';
 
 /** Keep the designer's own data attributes on the wrapper, drop the rest. */
 const splitDesigner = (props: Record<string, any>) => {
@@ -113,8 +114,9 @@ export const AppLauncherRenderer: React.FC<AppLauncherRendererProps> = ({
 
   // The openable set, through the SHARED predicate — `active !== false &&
   // hidden !== true`. Two copies of "an app the user can open" is precisely
-  // the dialect `filterActiveApps` exists to prevent.
-  const openable = useMemo(() => filterActiveApps(apps as any[]), [apps]);
+  // the dialect `filterActiveApps` exists to prevent. Narrowed, as Home's own
+  // tiles are, by the user's `/me/apps` answer (objectstack#26838).
+  const { apps: openable } = useLauncherApps(apps as any[]);
 
   return (
     <nav

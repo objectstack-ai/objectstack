@@ -33,8 +33,9 @@ import {
 import { buildExpressionUser } from '../providers/expressionUser.js';
 import { useTrackRouteAsRecent } from '../hooks/useTrackRouteAsRecent.js';
 import { useHomePath } from '../hooks/useHomePath.js';
+import { useLauncherApps } from '../hooks/useLauncherApps.js';
 import { useSignedInUserLocale } from '../hooks/useUserLocale.js';
-import { resolveRecordFormTarget, resolveRecordFormModalLayout, resolveNavigateCreateUrl, resolveNavigateEditUrl, resolvePostCreateTarget, recordFormCreateValues, readRecordFormCreateValues, RECORD_FORM_CREATE_VALUES_STATE } from '../utils/recordFormNavigation.js';
+import { resolveRecordFormTarget, resolveRecordFormModalLayout, resolveFormViewChrome, selectRecordFormView, resolveNavigateCreateUrl, resolveNavigateEditUrl, resolvePostCreateTarget, recordFormCreateValues, readRecordFormCreateValues, RECORD_FORM_CREATE_VALUES_STATE } from '../utils/recordFormNavigation.js';
 import { deriveRecordSurface, deriveRecordFlowSurface } from '@object-ui/plugin-view';
 import { RECORD_FORM_PARAM, RECORD_FORM_OBJECT_PARAM, RECORD_FORM_LINK_PARAM } from '../urlParams.js';
 import { appAddressSegment, appRouteSegment, canonicalAppPathname, matchAppBySegment } from '../utils/appRoute.js';
@@ -322,7 +323,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // worse answer than the literal it replaced.
   const homePath = useHomePath();
   const previewDrafts = usePreviewDrafts();
-  const { t } = useObjectTranslation();
+  const { t, language } = useObjectTranslation();
   const { objectLabel, objectPluralLabel } = useObjectLabel();
 
 
@@ -336,8 +337,11 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // ⛔ `hidden` only — never `_unpublished` (objectstack#6955 / objectstack-ai/objectstack#4829 A1). The
   // publish gate is enforced server-side; duplicating it here would strand a
   // builder on their own unpublished app.
-  const activeApps = apps.filter((a: any) => a.active !== false);
-  const launcherApps = activeApps.filter((a: any) => a.hidden !== true);
+  //
+  // objectstack#26838 — and, like Home's tiles and the switcher, never on an
+  // app the user's permission sets hide (`tabPermissions: hidden`, the
+  // `/me/apps` answer); the route lookup below still finds such an app.
+  const { apps: launcherApps } = useLauncherApps(apps);
   // ADR-0048 (A) — the route segment is the package id; resolve by it,
   // falling back to the app name (legacy/alias URL).
   // Built-in pseudo-routes under /apps/* that are NOT metadata apps (create-app,
@@ -1500,9 +1504,6 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
                 // history entry carries. Each is handed as the object it is,
                 // never a merge rebuilt per render: the form re-seeds whenever
                 // `initialValues` is a new object.
-                ...(!editingRecord && (formLinkValues ?? overlayCreateValues)
-                  ? { initialValues: formLinkValues ?? overlayCreateValues }
-                  : {}),
                 // Honor the object's DEFAULT FORM VIEW: curated sections (field
                 // selection + order + grouping), `contentLayout: 'tabbed'` when the
                 // view is tabbed, inline child collections (master-detail), and its
@@ -1542,7 +1543,6 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
                   : t('form.createTitle', { object: objectLabel(formObjectDef as any) }),
                 open: isDialogOpen,
                 onOpenChange: (open: boolean) => { if (!open) closeRecordForm(); },
-                layout: 'vertical',
                 // objectui#6514 — the same declared-key gate `RecordFormPage`
                 // runs, through the same helper. This read `f.visible`, a key
                 // `FieldSchema` refuses by name, so nothing an author could
@@ -1563,12 +1563,26 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
                   : [],
                 onSuccess: handleRecordFormSuccess,
                 onCancel: handleDialogCancel,
-                showSubmit: true,
-                showCancel: true,
-                submitText: editingRecord
-                  ? t('form.update', { defaultValue: 'Update' })
-                  : t('form.create', { defaultValue: 'Create' }),
-                cancelText: t('common.cancel'),
+                // objectstack-ai/objectstack#26843 — the selected form view's
+                // `buttons`, `layout` and `defaults` over this dialog's own
+                // defaults (`resolveFormViewChrome` states the precedence). A
+                // create's opening values: the `formLink` pre-link
+                // (objectstack-ai/objectstack#2604 D3, refresh-safe), else the
+                // values its opener's history entry carries (objectui#12291),
+                // over the form view's `defaults`; each handed on as the object
+                // it is, as the form re-seeds on a new `initialValues`.
+                ...resolveFormViewChrome(
+                  selectRecordFormView(formObjectDef as any, editingRecord ? 'edit' : 'create'),
+                  {
+                    flow: editingRecord ? 'edit' : 'create',
+                    language,
+                    submitText: editingRecord
+                      ? t('form.update', { defaultValue: 'Update' })
+                      : t('form.create', { defaultValue: 'Create' }),
+                    cancelText: t('common.cancel'),
+                    createValues: editingRecord ? undefined : formLinkValues ?? overlayCreateValues,
+                  },
+                ),
               }}
               dataSource={dataSource}
             />

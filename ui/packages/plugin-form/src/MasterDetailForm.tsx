@@ -142,6 +142,15 @@ export interface MasterDetailFormSchema {
   fields?: any[];
   formType?: 'simple' | 'tabbed';
   /**
+   * The parent header form's initially active tab (a section name) and tab
+   * strip position, read when `formType` is `'tabbed'`, and its field layout —
+   * passed straight through to the header `ObjectForm`, as `sections` are
+   * (objectstack-ai/objectstack#26843).
+   */
+  defaultTab?: string;
+  tabPosition?: 'top' | 'bottom' | 'left' | 'right';
+  layout?: 'vertical' | 'horizontal';
+  /**
    * `title`, `submitText` and `cancelText` are the spec's `I18nLabel`, as
    * `ComponentPropsMap['object-master-detail-form']` in `@objectstack/spec`
    * declares them: a plain string or an inline per-locale map such as
@@ -1969,6 +1978,9 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
       initialValues: schema.initialValues,
       initialData: schema.initialData,
       formType: schema.formType,
+      defaultTab: schema.defaultTab,
+      tabPosition: schema.tabPosition,
+      layout: schema.layout,
       sections: schema.sections,
       fields: schema.fields,
       // The resolved string: `ObjectFormSchema.title` is a `string`.
