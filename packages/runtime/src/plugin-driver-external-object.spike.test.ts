@@ -58,6 +58,8 @@ const MEMBER_PASSWORD = 'Member-Pass-123';
 
 const DATASOURCE = 'spike_tree';
 const OBJECT = 'spike_node';
+/** A second external object on the same driver, left on the platform's default sharing model. */
+const OWNED = 'spike_owned';
 const PLANNER_SET = 'spike_planner';
 
 // ---------------------------------------------------------------------------
@@ -129,12 +131,12 @@ const refuse = (what: string) => async (): Promise<never> => {
 };
 
 /**
- * The remote system's rows live in `rows`; every call is appended to `calls`.
- * `supports.transactionsUnsupported` — a REST-backed transport has no
- * transactions, and the engine reads the bit before it reaches for one.
+ * The remote system's rows live in `tables`, by object; every call is appended
+ * to `calls`. `supports.transactionsUnsupported` — a REST-backed transport has
+ * no transactions, and the engine reads the bit before it reaches for one.
  */
-function createSpikeTreeDriver(rows: Row[], calls: Call[]) {
-  const rowsOf = (object: string): Row[] => (object === OBJECT ? rows : []);
+function createSpikeTreeDriver(tables: Record<string, Row[]>, calls: Call[]) {
+  const rowsOf = (object: string): Row[] => tables[object] ?? [];
   const driver = {
     name: DATASOURCE,
     version: '0.0.1',
@@ -228,7 +230,7 @@ const SPIKE_VIEWS = defineView({
 const js = (source: string) => ({ language: 'js' as const, source, capabilities: [], timeoutMs: 5000 });
 
 const STACK = defineStack({
-  manifest: { id: 'com.spike.plugin-driver', name: 'Plugin driver spike', version: '1.0.0' },
+  manifest: { id: 'com.spike.plugin-driver', name: 'Plugin driver spike', version: '1.0.0', type: 'app' },
   datasources: [
     {
       name: DATASOURCE,
@@ -251,6 +253,10 @@ const STACK = defineStack({
       label: 'Spike node',
       datasource: DATASOURCE,
       external: { remoteName: 'nodes', writable: true },
+      // The remote rows carry no `owner_id` / `created_by`, so who may edit a
+      // node is the hook's question (the customer's "only the planner may
+      // reschedule"), not an ownership column's — see (e3) for the default.
+      sharingModel: 'public_read_write',
       fields: {
         name: { type: 'text', label: 'Name' },
         parent: { type: 'lookup', reference: OBJECT, label: 'Parent' },
@@ -270,6 +276,13 @@ const STACK = defineStack({
           expression: 'record.plan_locked || record.planner != current_user.id',
         },
       },
+    },
+    {
+      name: OWNED,
+      label: 'Spike owned',
+      datasource: DATASOURCE,
+      external: { remoteName: 'owned', writable: true },
+      fields: { name: { type: 'text', label: 'Name' } },
     },
   ],
   views: [SPIKE_VIEWS],
@@ -291,7 +304,7 @@ const STACK = defineStack({
     {
       name: PLANNER_SET,
       label: 'Spike planner',
-      objects: { [OBJECT]: { allowRead: true, allowEdit: true } },
+      objects: { [OBJECT]: { allowRead: true, allowEdit: true }, [OWNED]: { allowRead: true, allowEdit: true } },
     },
   ],
 });
@@ -301,8 +314,9 @@ const STACK = defineStack({
 // ---------------------------------------------------------------------------
 
 const rows: Row[] = [];
+const owned: Row[] = [];
 const calls: Call[] = [];
-const driver = createSpikeTreeDriver(rows, calls);
+const driver = createSpikeTreeDriver({ [OBJECT]: rows, [OWNED]: owned }, calls);
 
 let kernel: any;
 let httpServer: any;
@@ -386,10 +400,12 @@ function seedRemoteRows(): void {
     { id: 'n_weld', name: 'Weld', parent: 'n_root', start_date: '2026-11-09', end_date: '2026-11-13', depends_on: 'n_cut', planner: plannerId, plan_locked: true, archived: false, guard_note: null },
     { id: 'n_old', name: 'Old run', parent: null, start_date: '2026-10-01', end_date: '2026-10-05', depends_on: null, planner: plannerId, plan_locked: false, archived: true, guard_note: null },
   );
+  owned.length = 0;
+  owned.push({ id: 'o_1', name: 'Remote row' });
 }
 
-const callsSince = (mark: number, method?: string) =>
-  calls.slice(mark).filter((c) => (method ? c.method === method : true) && (c.object === undefined || c.object === OBJECT));
+const callsSince = (mark: number, method?: string, object: string = OBJECT) =>
+  calls.slice(mark).filter((c) => (method ? c.method === method : true) && (c.object === undefined || c.object === object));
 
 beforeAll(async () => {
   prevNodeEnv = process.env.NODE_ENV;
@@ -451,10 +467,10 @@ describe('(a) defineStack accepts a datasource whose driver is a plugin-publishe
     expect(engine.getDriverForObject(OBJECT)).toBe(driver);
   });
 
-  it('auto-connect finds the driver already registered and leaves it alone', () => {
+  it('auto-connect finds the driver already registered and leaves it alone; the boot connects it once', () => {
     const connection: any = kernel.getService('datasource-connection');
     expect(connection.getConnectionState?.(DATASOURCE)?.status).toBe('already-registered');
-    expect(bootCalls.filter((c) => c.method === 'connect')).toEqual([]);
+    expect(bootCalls.filter((c) => c.method === 'connect')).toHaveLength(1);
   });
 });
 
@@ -474,24 +490,30 @@ describe('(b) the stack boots with `checkOnBoot: false` and no `introspectSchema
 });
 
 describe('(c) GET /data/spike_node with the view\'s filter and sort reaches `driver.find` with a DriverQuery', () => {
-  it('the view\'s filter and sort arrive as `where` and `orderBy`; the archived row is not served', async () => {
-    // The plan view's filter as the console lowers it (`toFilterNode`), and its
-    // sort as `serializeOrderBy` writes it.
+  it('the view\'s filter arrives as `where`, its sort as `orderBy`, `top` as `limit`; no projection, no offset', async () => {
+    // The plan view's filter as the console lowers it (`toFilterNode`), its
+    // sort as `serializeOrderBy` writes it, and the console's page size.
+    const plan = (STACK.views?.[0] as any)?.listViews?.plan;
+    expect(plan?.filter).toEqual([{ field: 'archived', operator: 'equals', value: false }]);
+    expect(plan?.sort).toEqual([{ field: 'start_date', order: 'asc' }]);
     const mark = calls.length;
-    const res = await as(adminToken, 'GET', `/data/${OBJECT}?filter=${encodeURIComponent(JSON.stringify(['archived', '=', false]))}&sort=start_date&top=50`);
+    const filter = encodeURIComponent(JSON.stringify(['archived', '=', false]));
+    const res = await as(adminToken, 'GET', `/data/${OBJECT}?filter=${filter}&sort=start_date&top=50`);
     const body = await readJson(res);
     expect(res.status, JSON.stringify(body)).toBe(200);
 
-    const finds = callsSince(mark, 'find');
-    expect(finds.length, JSON.stringify(calls.slice(mark))).toBeGreaterThanOrEqual(1);
-    const query = finds[0]!.query as Record<string, unknown>;
-    console.log('[spike (c)] DriverQuery that reached driver.find:', JSON.stringify(query));
-    console.log('[spike (c)] every driver call for the read:', JSON.stringify(calls.slice(mark)));
-    expect(query.orderBy).toEqual([{ field: 'start_date', order: 'asc' }]);
-    expect(JSON.stringify(query.where)).toContain('archived');
-
-    const served = (body.data ?? body.records ?? body.value ?? body) as Row[];
-    expect(served.map((r) => r.id)).toEqual(['n_root', 'n_cut', 'n_weld']);
+    // Exactly what the remote system is asked — the whole DriverQuery,
+    // `object` included (the engine spreads it in although `DriverQuery`
+    // omits it), then a second round trip for the total.
+    expect(calls.slice(mark)).toEqual([
+      {
+        method: 'find',
+        object: OBJECT,
+        query: { where: { archived: false }, orderBy: [{ field: 'start_date', order: 'asc' }], limit: 50, object: OBJECT },
+      },
+      { method: 'count', object: OBJECT, query: { object: OBJECT, where: { archived: false } } },
+    ]);
+    expect((body.records as Row[]).map((r) => r.id)).toEqual(['n_root', 'n_cut', 'n_weld']);
   });
 });
 
@@ -499,43 +521,70 @@ describe('(d) a formula over `current_user` on the external object evaluates per
   it('the planner reads `locked: false` on an unlocked node, the administrator reads `locked: true`', async () => {
     const asPlanner = await readJson(await as(plannerToken, 'GET', `/data/${OBJECT}/n_cut`));
     const asAdmin = await readJson(await as(adminToken, 'GET', `/data/${OBJECT}/n_cut`));
-    console.log('[spike (d)] planner:', JSON.stringify(asPlanner), 'admin:', JSON.stringify(asAdmin));
-    const rec = (b: any) => b?.data ?? b?.record ?? b;
-    expect(rec(asPlanner).locked).toBe(false);
-    expect(rec(asAdmin).locked).toBe(true);
     expect(adminId).not.toBe(plannerId);
+    expect(asPlanner.record).toMatchObject({ id: 'n_cut', planner: plannerId, plan_locked: false, locked: false });
+    expect(asAdmin.record).toMatchObject({ id: 'n_cut', planner: plannerId, plan_locked: false, locked: true });
   });
 
   it('a locked plan reads `locked: true` for the planner too', async () => {
     const asPlanner = await readJson(await as(plannerToken, 'GET', `/data/${OBJECT}/n_weld`));
-    expect((asPlanner?.data ?? asPlanner?.record ?? asPlanner).locked).toBe(true);
+    expect(asPlanner.record).toMatchObject({ id: 'n_weld', plan_locked: true, locked: true });
   });
 });
 
 describe('(e) PATCH /data/spike_node/:id runs `beforeUpdate` first, then `driver.update`', () => {
-  it('a hook refusal answers 4xx with the declared message, and the driver is never asked to write', async () => {
+  it('a hook refusal answers 409 with the declared message, and the driver is never asked to write', async () => {
     const mark = calls.length;
     const res = await as(plannerToken, 'PATCH', `/data/${OBJECT}/n_weld`, { start_date: '2026-11-10', end_date: '2026-11-14' });
     const body = await readJson(res);
-    console.log('[spike (e) refusal]', res.status, JSON.stringify(body), JSON.stringify(calls.slice(mark)));
-    expect(res.status).toBe(409);
-    expect(JSON.stringify(body)).toContain('This plan is locked; unlock it before rescheduling.');
-    expect(callsSince(mark, 'update')).toEqual([]);
+    expect(res.status, JSON.stringify(body)).toBe(409);
+    expect(body).toMatchObject({
+      code: 'RESOURCE_CONFLICT',
+      declaredCode: 'PLAN_LOCKED',
+      error: 'This plan is locked; unlock it before rescheduling.',
+    });
+    // The hook read the pre-image through the driver, and nothing else.
+    expect(calls.slice(mark).map((c) => c.method)).not.toContain('update');
+    expect(callsSince(mark, 'findOne').length).toBeGreaterThanOrEqual(1);
     expect(rows.find((r) => r.id === 'n_weld')).toMatchObject({ start_date: '2026-11-09', end_date: '2026-11-13' });
   });
 
-  it('an allowed write reaches `driver.update` carrying the hook\'s stamp, and the returned row is served', async () => {
+  it('an allowed write reaches `driver.update` last, carrying the hook\'s stamp, and the returned row is served', async () => {
     const mark = calls.length;
     const res = await as(plannerToken, 'PATCH', `/data/${OBJECT}/n_cut`, { start_date: '2026-11-03', end_date: '2026-11-07' });
     const body = await readJson(res);
-    console.log('[spike (e) allowed]', res.status, JSON.stringify(body), JSON.stringify(calls.slice(mark)));
     expect(res.status, JSON.stringify(body)).toBe(200);
 
-    const updates = callsSince(mark, 'update');
-    expect(updates).toHaveLength(1);
-    expect(updates[0]).toMatchObject({ id: 'n_cut', data: { start_date: '2026-11-03', end_date: '2026-11-07', guard_note: 'checked' } });
-    const served = body?.data ?? body?.record ?? body;
-    expect(served).toMatchObject({ id: 'n_cut', start_date: '2026-11-03', end_date: '2026-11-07', guard_note: 'checked' });
+    const seen = calls.slice(mark);
+    expect(seen.at(-1)?.method).toBe('update');
+    expect(callsSince(mark, 'update')).toHaveLength(1);
+    const update = seen.at(-1)!;
+    expect(update).toMatchObject({ object: OBJECT, id: 'n_cut' });
+    // The patch, the hook's stamp, and what the engine adds on its own: the
+    // id and the two audit stamps, which no remote column declares.
+    expect(update.data).toMatchObject({ start_date: '2026-11-03', end_date: '2026-11-07', guard_note: 'checked', id: 'n_cut', updated_by: plannerId });
+    expect(Object.keys(update.data as Row).sort()).toEqual(['end_date', 'guard_note', 'id', 'start_date', 'updated_at', 'updated_by']);
+    // The row the driver returned is the row served, formula included.
+    expect(body.record).toMatchObject({ id: 'n_cut', name: 'Cut', start_date: '2026-11-03', end_date: '2026-11-07', guard_note: 'checked', locked: false });
+  });
+
+  it('(e3) on the default sharing model, a member holding allowEdit is refused every edit: the ownership checks read columns no remote row carries', async () => {
+    const mark = calls.length;
+    const res = await as(plannerToken, 'PATCH', `/data/${OWNED}/o_1`, { name: 'Renamed' });
+    const body = await readJson(res);
+    expect(res.status, JSON.stringify(body)).toBe(403);
+    expect(body?.code).toBe('PERMISSION_DENIED');
+    const seen = calls.slice(mark).filter((c) => c.object === OWNED);
+    expect(seen.map((c) => c.method)).not.toContain('update');
+    // What the remote is asked for: `owner_id` (the sharing check) and
+    // `created_by == current_user.id` (the platform ownership floor).
+    expect(seen).toContainEqual({ method: 'find', object: OWNED, query: { where: { id: 'o_1' }, fields: ['id', 'owner_id'], limit: 1, object: OWNED } });
+    expect(seen).toContainEqual({
+      method: 'findOne',
+      object: OWNED,
+      query: { where: { $and: [{ id: 'o_1' }, { created_by: plannerId }] }, object: OWNED, limit: 1 },
+    });
+    expect(owned[0]).toEqual({ id: 'o_1', name: 'Remote row' });
   });
 });
 
@@ -544,17 +593,22 @@ describe('(g) object permission sets apply to the external object', () => {
     const mark = calls.length;
     const res = await as(outsiderToken, 'GET', `/data/${OBJECT}`);
     const body = await readJson(res);
-    console.log('[spike (g) read]', res.status, JSON.stringify(body));
-    expect(res.status).toBe(403);
-    expect(callsSince(mark, 'find')).toEqual([]);
+    expect(res.status, JSON.stringify(body)).toBe(403);
+    expect(body?.code).toBe('PERMISSION_DENIED');
+    expect(calls.slice(mark)).toEqual([]);
   });
 
-  it('the same caller gets 403 on a PATCH, and nothing reaches `driver.update`', async () => {
+  it('the same caller gets 403 on a PATCH; the remote sees one by-id read and no write', async () => {
     const mark = calls.length;
     const res = await as(outsiderToken, 'PATCH', `/data/${OBJECT}/n_cut`, { name: 'Renamed' });
     const body = await readJson(res);
-    console.log('[spike (g) write]', res.status, JSON.stringify(body));
-    expect(res.status).toBe(403);
-    expect(callsSince(mark, 'update')).toEqual([]);
+    expect(res.status, JSON.stringify(body)).toBe(403);
+    expect(body?.code).toBe('PERMISSION_DENIED');
+    // The write door loads the record before it refuses — on a plugin driver
+    // that is a round trip to the remote on behalf of a caller who may not read.
+    expect(calls.slice(mark)).toEqual([
+      { method: 'findOne', object: OBJECT, query: { where: { id: 'n_cut' }, object: OBJECT, limit: 1 } },
+    ]);
+    expect(rows.find((r) => r.id === 'n_cut')?.name).toBe('Cut');
   });
 });
