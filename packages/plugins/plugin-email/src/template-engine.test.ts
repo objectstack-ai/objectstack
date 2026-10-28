@@ -76,7 +76,7 @@ describe('template-engine', () => {
     // ADR-0053 Phase 2: formatter holes reuse the shared formula whitelist.
     describe('formatter holes', () => {
       it('applies currency / number formatters', () => {
-        expect(renderTemplate('{{ amt | currency }}', { amt: 1234.5 })).toBe('$1,234.50');
+        expect(renderTemplate('{{ amt | currency }}', { amt: 1234.5 }, { currency: 'USD' })).toBe('$1,234.50');
         expect(renderTemplate('{{ n | number:2 }}', { n: 1000 })).toBe('1,000.00');
       });
 

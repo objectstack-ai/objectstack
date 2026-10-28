@@ -88,14 +88,24 @@ never needs triple braces.
 chaining. Decide the value in the caller that supplies the data — a default, a
 second format — and pass the finished value as its own variable.
 
-**The `currency` argument is a literal code.** `currency:EUR` formats in euros,
-and `currency` with no argument formats in US dollars. The argument is an ISO
+**The `currency` argument is a literal code.** `currency:EUR` formats in euros.
+The argument is an ISO
 4217 code in three capital letters, never a path: `currency:currency_code` does
 not read the record's `currency_code`. `os validate`, `os build`, `os lint` and
 the metadata publish door refuse any other argument (`email-template-hole-grammar`,
 a `422 INVALID_METADATA` at the publish door), naming the hole and the rule. To
 show an amount in each record's own currency, format it in the caller that
 supplies the data and pass the formatted text as its own variable.
+
+**`currency` with no argument formats in the tenant default currency.**
+`{{ amount | currency }}` formats in the organization's default currency, the
+`localization.currency` setting (Setup → Localization) that currency fields and
+dashboards read too. The notification channels hand it to every templated
+send; code that calls `sendTemplate` or `renderTemplate` itself passes it as
+`currency`. When no default currency reaches the render, the render fails with
+`TEMPLATE_INVALID`, naming the template, its locale and the hole, and nothing is
+sent: the amount is never formatted in US dollars or any other guess. Set the
+organization's default currency, or name the code in the hole (`currency:EUR`).
 
 **Where a hole may sit in `bodyHtml`.** The renderer's escaping is right for
 element text and for a quoted attribute value that holds plain text, so those

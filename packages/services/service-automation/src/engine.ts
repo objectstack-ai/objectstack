@@ -5530,6 +5530,12 @@ export class AutomationEngine implements IAutomationService {
      * explicit (the build-time lint `flow-runas-unscoped` rejects the
      * statically-decidable shapes earlier — but NOT the record-change shape, which
      * is only knowable at run time).
+     *
+     * Also seeds {@link AutomationContext.currency} — the organization's
+     * default currency — through {@link setTenantCurrencyResolver} when the
+     * context carries none, so a text slot's `{{ amount | currency }}` hole
+     * with no argument formats in it; with none it stays unset and such a hole
+     * refuses by name.
      */
     private resolveRunContext(flow: FlowParsed, context?: AutomationContext, runId?: string): Promise<AutomationContext> {
         // The body lives in ./run-resume.ts (#25222).

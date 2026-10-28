@@ -106,7 +106,7 @@ export interface RunResumeHost {
     readonly failAncestors: AutomationEngine['failAncestors'];
 }
 
-/** The body of {@link AutomationEngine.resolveRunContext}, moved unedited; that method's docblock is its contract. */
+/** The body of {@link AutomationEngine.resolveRunContext}; that method's docblock is its contract. */
 export async function resolveRunContext(this: Pick<RunResumeHost, 'seedRunGrants' | 'logger' | 'expandDeclaredLookups' | 'tenantCurrencyResolver'>, flow: FlowParsed, context?: AutomationContext, runId?: string): Promise<AutomationContext> {
     // `flowRunId` is stamped alongside `runAs` because it shares that field's
     // lifetime and its single construction point: set once here, copied into
