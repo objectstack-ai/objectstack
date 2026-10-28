@@ -1829,6 +1829,29 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
     };
   }, [schema.groupBy, objectDef]);
 
+  // Why a lane the gate closed is closed (#27099): the `message` of each rule
+  // that refuses the move, the sentence the server's refusal of the same move
+  // carries. Each rule is asked alone through the gate's own read, so a rule
+  // the gate ignores (warning-only, inactive, insert-only, or silent on this
+  // from-state) is never named. Several closing rules join their messages. A
+  // rule with no message leaves the board's own sentence (`kanban.dropBlocked`).
+  // The text is the one `/meta` serves: the object's translation bundle does
+  // not reach `validations[].message` there.
+  const dropBlockedReason = React.useMemo(() => {
+    const groupBy = schema.groupBy;
+    const rules = (objectDef as { validations?: unknown } | null)?.validations;
+    if (!groupBy || !Array.isArray(rules)) return undefined;
+    return (fromColumnId: string, toColumnId: string): string | undefined => {
+      const messages = rules.flatMap((rule) => {
+        const reachable = stateMachineNextValues({ validations: [rule] }, groupBy, fromColumnId);
+        if (reachable === null || reachable.has(String(toColumnId))) return [];
+        const message = (rule as { message?: unknown }).message;
+        return typeof message === 'string' && message.trim() ? [message.trim()] : [];
+      });
+      return messages.length > 0 ? [...new Set(messages)].join(' ') : undefined;
+    };
+  }, [schema.groupBy, objectDef]);
+
   // Pre-evaluate the target column's `requiredWhen` predicates and collect what
   // the move makes required BEFORE writing anything (objectui#4254). The board
   // used to PATCH the column value alone into a refusal the user could neither
@@ -2031,6 +2054,8 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
         cardsMovable={cardMoveGranted}
         // #25933: the lanes a dragged card may enter — see `canDropCard`.
         canDropCard={canDropCard}
+        // #27099: why a closed lane is closed — see `dropBlockedReason`.
+        dropBlockedReason={dropBlockedReason}
         schema={{
           ...effectiveSchema,
           // `5591f03bd` — the lane headers count rows that came back, so when

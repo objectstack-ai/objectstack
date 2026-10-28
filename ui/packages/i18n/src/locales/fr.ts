@@ -905,6 +905,7 @@ const fr = {
     noCards: "Aucune carte",
     columnCards: "Cartes de la colonne {{column}}",
     laneCards: "Cartes de {{column}} - {{lane}}",
+    dropBlocked: "Une carte de {{from}} ne peut pas être déplacée vers {{to}}.",
     cardTitlePlaceholder: "Saisir le titre de la carte…",
     requiredFieldsTitle: "Compléter les champs obligatoires",
     requiredFieldsDescription: "Ce déplacement rend les champs ci-dessous obligatoires. Remplissez-les pour continuer.",

@@ -901,6 +901,7 @@ const zh = {
     noCards: '暂无卡片',
     columnCards: '{{column}} 的卡片',
     laneCards: '{{column}} - {{lane}} 的卡片',
+    dropBlocked: '{{from}} 中的卡片不能移到 {{to}}。',
     cardTitlePlaceholder: '输入卡片标题…',
     uncategorized: '未分类',
     loadMore: '加载更多',

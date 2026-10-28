@@ -935,6 +935,7 @@ const ru = {
     noCards: "Нет карточек",
     columnCards: "Карточки в колонке {{column}}",
     laneCards: "Карточки: {{column}} - {{lane}}",
+    dropBlocked: "Карточку из {{from}} нельзя переместить в {{to}}.",
     cardTitlePlaceholder: "Введите название карточки…",
     requiredFieldsTitle: "Заполните обязательные поля",
     requiredFieldsDescription: "Это перемещение делает поля ниже обязательными. Заполните их, чтобы продолжить.",

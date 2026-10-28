@@ -910,6 +910,7 @@ const es = {
     noCards: "Sin tarjetas",
     columnCards: "Tarjetas de la columna {{column}}",
     laneCards: "Tarjetas de {{column}} - {{lane}}",
+    dropBlocked: "Una tarjeta de {{from}} no se puede mover a {{to}}.",
     cardTitlePlaceholder: "Escriba el título de la tarjeta…",
     requiredFieldsTitle: "Complete los campos obligatorios",
     requiredFieldsDescription: "Este movimiento hace que los campos siguientes sean obligatorios. Complételos para continuar.",

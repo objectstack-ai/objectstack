@@ -881,6 +881,7 @@ const ja = {
     noCards: "カードがありません",
     columnCards: "{{column}} のカード",
     laneCards: "{{column}} - {{lane}} のカード",
+    dropBlocked: "{{from}} のカードは {{to}} に移動できません。",
     cardTitlePlaceholder: "カードのタイトルを入力…",
     requiredFieldsTitle: "必須項目を入力してください",
     requiredFieldsDescription: "この移動により以下の項目が必須になります。入力して続行してください。",
