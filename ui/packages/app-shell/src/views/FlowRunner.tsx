@@ -294,6 +294,9 @@
  * as Submit does — the completion toast, `notifyDataChanged`, `onComplete`; a
  * further screen if the run pauses again; the banner if the resume fails.
  * While that resume is in flight the dialog cannot be dismissed, as on Submit.
+ * Once a resume has failed, closing goes back to a plain close: Done stays
+ * the retry, but an outage must never leave the user with a dialog that every
+ * way out answers by trying the same request again.
  *
  * It applies only where the screen is the end of the line. A display-only
  * step the engine says another screen follows (`progress.nextScreen` other
@@ -765,9 +768,10 @@ export function FlowRunner({ state, authFetch, baseUrl, onClose, onComplete, dat
     : undefined;
   // A last screen that only shows what the run did is acknowledged, not
   // cancelled (objectstack#26902 — see the header): Done, and every way of
-  // closing the dialog, resumes the run exactly as Submit does.
+  // closing the dialog, resumes the run exactly as Submit does — until a
+  // resume has failed, when closing is a plain close again and Done the retry.
   const resultScreen = !terminal && !anotherScreen && isDisplayOnlyScreen(screen);
-  const dismiss = resultScreen ? () => { void submit(); } : onClose;
+  const dismiss = resultScreen && !resumeError ? () => { void submit(); } : onClose;
 
   return (
     <Dialog open onOpenChange={(o) => { if (!o && !submitting) dismiss(); }}>

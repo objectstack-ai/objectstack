@@ -177,6 +177,22 @@ describe('objectstack#26902 — a result screen is acknowledged, never cancelled
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  it('after a failed resume the close only closes: an outage never traps the user in the dialog', async () => {
+    const authFetch = vi.fn(async () => jsonResponse({ success: false, error: 'gateway timeout' }, 502));
+    const { onClose, onComplete } = setup(RESULT, authFetch as unknown as ReturnType<typeof completedResume>);
+    fireEvent.click(await screen.findByRole('button', { name: 'Done' }));
+    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument());
+    expect(authFetch).toHaveBeenCalledTimes(1);
+    fireEvent.click(dismissX());
+    expect(onClose).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(2);
+    // Neither close resumed again; Done is still the retry.
+    expect(authFetch).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: 'Done' })).toBeEnabled();
+    expect(onComplete).not.toHaveBeenCalled();
+  });
+
   it('a screen with any input field keeps Cancel + Submit, and its Cancel only closes', async () => {
     const { authFetch, onClose, onComplete } = setup(
       state({ fields: [...LINKS!, { name: 'note', label: 'Note', type: 'text' }], progress: { nextScreen: 'none' } }),
