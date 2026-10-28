@@ -392,7 +392,7 @@ function credentialRefOf(auth: ConnectorInstanceAuth | undefined): string | unde
  * reference — an unresolved one never reaches here: the reconcile degrades
  * the instance first (#27237).
  */
-function instanceAuth(auth: ConnectorInstanceAuth | undefined, secret: string | undefined): ResolvedConnectorAuth | undefined {
+function resolveInstanceAuth(auth: ConnectorInstanceAuth | undefined, secret: string | undefined): ResolvedConnectorAuth | undefined {
     if (!auth) return undefined;
     if (auth.type === 'none') return { type: 'none' };
     const value = secret ?? '';
@@ -2157,7 +2157,7 @@ export class AutomationServicePlugin implements Plugin {
                 }
                 credential = resolution;
             }
-            const auth = instanceAuth(entry.auth, credential?.value);
+            const auth = resolveInstanceAuth(entry.auth, credential?.value);
 
             // The registry hands back RAW authored values (see
             // `DeclaredConnectorItem`), so the schema's defaults are applied
