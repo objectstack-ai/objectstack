@@ -235,16 +235,30 @@ const settle = () =>
 async function settledPage(objects: unknown[]) {
   const ds = makeDataSource();
   renderPage(ds, objects);
-  await waitFor(() => expect(ds.findOne).toHaveBeenCalledWith(PARENT, RECORD_ID, expect.anything()));
+  await waitFor(() => expect(ds.findOne.mock.calls.some(([name, id]) => name === PARENT && id === RECORD_ID)).toBe(true));
   // The registered list draws in both arms: the page is past its first render.
-  await screen.findByText('Grace Hopper');
+  await screen.findAllByText('Grace Hopper');
   await settle();
   return ds;
+}
+
+/**
+ * Every element on screen: the rail reads its entries once it is seen, so an
+ * observer that never fires would leave the rail asking nothing in either arm.
+ */
+class VisibleObserver {
+  constructor(private readonly cb: (entries: Array<{ isIntersecting: boolean }>) => void) {}
+  observe() {
+    queueMicrotask(() => this.cb([{ isIntersecting: true }]));
+  }
+  unobserve() {}
+  disconnect() {}
 }
 
 beforeEach(() => {
   cleanup();
   RelatedCountStore._reset();
+  vi.stubGlobal('IntersectionObserver', VisibleObserver);
   vi.stubGlobal(
     'fetch',
     vi.fn(async () =>
@@ -287,9 +301,12 @@ describe('RecordDetailView — a related list or rail entry whose object is not 
   it('with the module installed, the same page draws and reads every list and rail entry', async () => {
     const ds = await settledPage([parentObject, CONTACT_OBJECT, ...MODULE_OBJECTS]);
 
-    await screen.findByText('QTE-0007');
-    await screen.findByText('Seat licence');
-    const asked = dataSourceObjects(ds);
-    for (const present of [CONTACT, QUOTE, LINE_ITEM, PRODUCT]) expect(asked.has(present)).toBe(true);
+    await screen.findAllByText('QTE-0007');
+    await screen.findAllByText('Seat licence');
+    await screen.findAllByText('Widget Pro');
+    await waitFor(() => {
+      const asked = dataSourceObjects(ds);
+      for (const present of [CONTACT, QUOTE, LINE_ITEM, PRODUCT]) expect(asked.has(present)).toBe(true);
+    });
   });
 });
