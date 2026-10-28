@@ -170,6 +170,19 @@ either adopted by the contract and enforced, or deleted — it does not remain
 exported-but-dead. An exported-but-unconsumed value schema is exactly the
 inert metadata ADR-0078 forbids.
 
+> **Note (2026-10-28, #27182, PR #__PR__) — `CurrencyValueSchema` is deleted.**
+> The deletion this paragraph decided had not happened: through 18.2.0 the
+> schema and its `CurrencyValue` type stayed exported from
+> `@objectstack/spec/data`, `@deprecated`, with zero readers. They are now
+> removed, ahead of the multi-currency epic #8345 (ruling 6465431966 on
+> #27119), so that no author reads `{value, currency}` as the shape that
+> records a currency. With no carrier key there is nothing for a
+> `retiredKey()` tombstone or an `UNKNOWN_KEY_GUIDANCE` entry to sit on, so the
+> FROM → TO note (a currency value is a bare number; the code is
+> `currencyConfig.defaultCurrency`) is carried by `RETIRED_DEFS_BY_MAJOR[18]`
+> (`data/CurrencyValue`), the D3 semantic entry
+> `currency-value-schema-retired` and the changelog.
+
 **Consumers converge on the contract** (each keeps its role, loses its private
 type lists):
 
