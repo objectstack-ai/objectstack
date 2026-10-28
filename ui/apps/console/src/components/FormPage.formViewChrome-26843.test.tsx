@@ -63,7 +63,7 @@ function stubFetch(form: Record<string, unknown>) {
   });
 }
 
-function renderAt(url: string, mode: 'internal' | 'public') {
+function renderAt(url: string) {
   createI18n({ defaultLanguage: 'en', detectBrowserLanguage: false });
   return render(
     <MemoryRouter initialEntries={[url]}>
@@ -85,28 +85,28 @@ afterEach(() => {
 describe('FormPage renders the form view\'s buttons (#26843)', () => {
   it('internal: the authored submit label shows, and a hidden cancel is gone', async () => {
     vi.stubGlobal('fetch', stubFetch({ buttons: { submit: { label: 'File inquiry' }, cancel: { show: false } } }));
-    renderAt('/forms/showcase_inquiry.intake', 'internal');
+    renderAt('/forms/showcase_inquiry.intake');
     expect(await screen.findByRole('button', { name: 'File inquiry' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull();
   });
 
   it('internal: an authored cancel label shows; a hidden submit is gone', async () => {
     vi.stubGlobal('fetch', stubFetch({ buttons: { submit: { show: false }, cancel: { label: 'Back' } } }));
-    const { container } = renderAt('/forms/showcase_inquiry.intake', 'internal');
+    const { container } = renderAt('/forms/showcase_inquiry.intake');
     expect(await screen.findByRole('button', { name: 'Back' })).toBeInTheDocument();
     expect(container.querySelector('button[type="submit"]')).toBeNull();
   });
 
   it('public: the authored submit label shows, and there is still no Cancel', async () => {
     vi.stubGlobal('fetch', stubFetch({ buttons: { submit: { label: 'Send' }, cancel: { label: 'Back' } } }));
-    renderAt('/f/intake', 'public');
+    renderAt('/f/intake');
     expect(await screen.findByRole('button', { name: 'Send' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Back' })).toBeNull();
   });
 
   it('CONTROL: no `buttons` — the page\'s own Submit and Cancel', async () => {
     vi.stubGlobal('fetch', stubFetch({}));
-    renderAt('/forms/showcase_inquiry.intake', 'internal');
+    renderAt('/forms/showcase_inquiry.intake');
     expect(await screen.findByRole('button', { name: 'Submit' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
   });
@@ -115,28 +115,28 @@ describe('FormPage renders the form view\'s buttons (#26843)', () => {
 describe('FormPage seeds a create with the form view\'s defaults (#26843)', () => {
   it('a create opens with them, over the object\'s own field default', async () => {
     vi.stubGlobal('fetch', stubFetch({ defaults: { title: 'Website lead', channel: 'web' } }));
-    renderAt('/forms/showcase_inquiry.intake', 'internal');
+    renderAt('/forms/showcase_inquiry.intake');
     await waitFor(() => expect(input('title')?.value).toBe('Website lead'));
     expect(input('channel')?.value).toBe('web');
   });
 
   it('a `prefill_` param still wins per field', async () => {
     vi.stubGlobal('fetch', stubFetch({ defaults: { title: 'Website lead', channel: 'web' } }));
-    renderAt('/forms/showcase_inquiry.intake?prefill_channel=chat', 'internal');
+    renderAt('/forms/showcase_inquiry.intake?prefill_channel=chat');
     await waitFor(() => expect(input('channel')?.value).toBe('chat'));
     expect(input('title')?.value).toBe('Website lead');
   });
 
   it('an edit reads the stored record, never the defaults', async () => {
     vi.stubGlobal('fetch', stubFetch({ defaults: { title: 'Website lead', channel: 'web' } }));
-    renderAt('/forms/showcase_inquiry.intake?recordId=r1', 'internal');
+    renderAt('/forms/showcase_inquiry.intake?recordId=r1');
     await waitFor(() => expect(input('title')?.value).toBe('Stored'));
     expect(input('channel')?.value).toBe('email');
   });
 
   it('CONTROL: no defaults — the object\'s own field default, else blank', async () => {
     vi.stubGlobal('fetch', stubFetch({}));
-    renderAt('/forms/showcase_inquiry.intake', 'internal');
+    renderAt('/forms/showcase_inquiry.intake');
     await waitFor(() => expect(input('channel')?.value).toBe('phone'));
     expect(input('title')?.value).toBe('');
   });
