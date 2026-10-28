@@ -6,6 +6,7 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 // supply. Consumed — not redeclared — so this merge and `stageRlsMembership`'s
 // resolver screen can never disagree about which keys are reserved.
 import { RESERVED_RLS_MEMBERSHIP_KEYS } from '@objectstack/spec/contracts';
+import { kernelQueuesOf } from './kernel-queue-membership.js';
 // [ADR-0056 D4 / ADR-0058 D1] `isSupportedRlsExpression` and `sqlPredicateToCel`
 // used to be DEFINED in this file. #4983 hoisted them into `@objectstack/formula`
 // — verbatim, behaviour-preserving — because `@objectstack/lint` must ask the
@@ -143,6 +144,16 @@ interface RLSUserContext {
    * that shape survived three green static gates.
    */
   accessible_org_ids?: string[];
+  /**
+   * [ADR-0142 D3] The machine names of the ownership queues the caller belongs
+   * to in the active organization — what `owner_id == null && queue in
+   * current_user.queues` reads. Kernel-resolved from the ownership-queue
+   * service (`kernel-queue-membership.ts`) and reserved like the sets above:
+   * `RESERVED_RLS_MEMBERSHIP_KEYS` refuses it from any `rlsMembership` bag,
+   * so an app cannot seat a caller in a queue. Unresolved (no user, no
+   * service, a failed read) it stays absent and the predicate fails closed.
+   */
+  queues?: string[];
   /**
    * The caller's unique, auth-enforced email. RLS expressions reference it as
    * `current_user.email` for human-readable, *seedable* owner scoping
@@ -924,6 +935,9 @@ export class RLSCompiler {
       accessible_org_ids: (executionContext as any)?.accessible_org_ids,
       // Unique identifier — safe for ownership predicates (see RLSUserContext).
       email: (executionContext as any)?.email,
+      // [ADR-0142 D3] Read from the kernel's own staging only — never from a
+      // `queues` field a caller put on the context.
+      queues: kernelQueuesOf(executionContext),
     };
 
     // §7.3.1 dynamic membership: the runtime pre-resolves arbitrary

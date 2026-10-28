@@ -33,6 +33,8 @@ const SET = {
 const client = {
   layered: async () => ({ effective: SET, code: null, overlay: null, overlayScope: null }),
   getDraft: async () => null,
+  // objectstack#26840 — the package door reads its objects through the draft-overlaid door.
+  withPreviewDrafts() { return this; },
   list: async (type: string) => (type === 'object' ? [{ item: { name: 'a_account' } }] : []),
   get: async () => null,
   save: async (_type: string, _name: string, payload: unknown) => payload,

@@ -95,9 +95,13 @@ first step of any Studio/API authoring action is to target a *writable* package 
 to pick or create a writable base first. A save naming a package id this deployment
 has not installed is refused the same way, draft or active and for every type
 (`422 WRITABLE_PACKAGE_REQUIRED`, nothing written), and
-`POST /packages/:id/publish-drafts` on such an id answers `404`, publishing nothing;
-drafts stored under one before that rule can still be removed with
-`POST /packages/:id/discard-drafts`. An in-place edit of an item the read-only
+`POST /packages/:id/publish-drafts` on such an id answers `404`, publishing nothing.
+Rows stored under such an id before that rule are not extended either: a save
+naming no package, whose address those rows give, and the per-item
+`POST /meta/:type/:name/publish` of such a draft are refused with the same `422`.
+They can still be removed — `DELETE /meta/:type/:name?package=:id` for the active
+row, `POST /packages/:id/discard-drafts` for drafts — or brought back by creating a
+package with that id. An in-place edit of an item the read-only
 package ships is refused too; for a flow, an action or a permission set the refusal
 names that type's sanctioned path instead (see [ADR-0126](#packaged-flows-actions-and-permission-sets-adr-0126)). New objects, fields, views, and
 flows are namespaced into that package — which is exactly what `os package publish`

@@ -97,6 +97,8 @@ function makeClient(seed: { published?: Record<string, Row>; drafts?: Record<str
     drafts,
     save,
     reset,
+    // objectstack#26840 — the Access matrix reads its objects through the draft-overlaid door.
+    withPreviewDrafts() { return this; },
     list: vi.fn(async (type: string, opts: { packageId?: string } = {}) => {
       if (type === 'object') {
         return [

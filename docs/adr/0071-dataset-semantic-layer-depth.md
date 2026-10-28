@@ -1,6 +1,6 @@
 # ADR-0071: Dataset semantic-layer depth — multi-hop joins
 
-**Status**: Proposed. (Refocused — see **Correction** below. The first merged draft also proposed matrix/across pivoting; a code check found that already implemented, so this ADR now covers only the remaining gap: multi-hop joins.) **Multi-hop to-one joins (≤3 hops / 4 objects) have since been implemented & are live — header pending formal update.**
+**Status**: Accepted — 2026-10-28 (ruled on objectstack#26553, ADR batch 3; proposed 2026-06-24, refocused — see **Correction** below; the first merged draft also proposed matrix/across pivoting, which a code check found already implemented, so this record covers only multi-hop joins). implemented: P1 multi-hop to-one joins behind the 3-hop cap (`packages/spec/src/ui/dataset.zod.ts` `include` path validation, `service-analytics` `dataset-compiler.ts` and the ObjectQL / native-SQL strategies) and P2 the Studio include-path editor (`DatasetDefaultInspector.tsx`, `useDatasetFields.ts`). Nothing pending.
 
 ## Correction (2026-06-24)
 

@@ -223,6 +223,31 @@ describe('[ADR-0142 D2] OwnershipQueueService — the one expander', () => {
     expect(await svc.queuesOf('u_nobody', 'org_a')).toEqual([]);
   });
 
+  it('queuesOf agrees with isMember for every user, queue and organization — `current_user.queues` and the claim gate read one answer', async () => {
+    // The security plugin stages `current_user.queues` from `queuesOf`; the
+    // claim gate admits through `isMember`. A row-level policy and the claim
+    // gate must never disagree about who sits in a queue — including a
+    // switched-off position, which confers nothing on either path.
+    const tables = BASE_TABLES();
+    tables[METADATA_ACTIVATION_TABLE] = [{ metadata_type: 'position', name: 'billing_clerk', active: false }];
+    const svc = service(makeEngine({ declared: SUPPORT_DECLARED, tables }));
+    const users = ['u_a', 'u_b', 'u_c', 'u_d', 'u_e', 'u_b_only', 'u_other_org', 'u_nobody'];
+    const queues = ['support_tier1', 'billing', 'nowhere'];
+    const answers = new Set<boolean>();
+    for (const org of ['org_a', 'org_b']) {
+      for (const user of users) {
+        const listed = await svc.queuesOf(user, org);
+        for (const queue of queues) {
+          const member = await svc.isMember(user, queue, org);
+          answers.add(member);
+          expect({ user, org, queue, member: listed.includes(queue) }).toEqual({ user, org, queue, member });
+        }
+      }
+    }
+    // Both answers occur, so the agreement is not vacuous.
+    expect([...answers].sort()).toEqual([false, true]);
+  });
+
   it('queuesNaming looks through from a position or a team to the queues it staffs', async () => {
     const svc = service(makeEngine({ declared: SUPPORT_DECLARED, tables: BASE_TABLES() }));
     expect(await svc.queuesNaming('position', new Set(['support_agent']), 'org_a')).toEqual(['support_tier1']);
