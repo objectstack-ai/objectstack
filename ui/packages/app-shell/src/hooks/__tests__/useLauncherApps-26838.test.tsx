@@ -86,17 +86,19 @@ afterEach(() => {
 describe('useLauncherApps narrows by /me/apps (objectstack#26838)', () => {
   it('drops an app the /me/apps answer does not list, keeping the /meta/app entries', async () => {
     const fetcher = meApps(['setup', 'account', 'crm']);
-    let seen: unknown[] = [];
+    const seen = vi.fn<(apps: unknown[]) => void>();
     function Entries() {
-      seen = useLauncherApps(state.apps).apps;
+      const { apps } = useLauncherApps(state.apps);
+      React.useEffect(() => seen(apps), [apps]);
       return null;
     }
     renderWith(fetcher as unknown as typeof fetch, <><Probe /><Entries /></>);
     await waitFor(() => expect(screen.getByTestId('probe')).toHaveTextContent(/^setup,crm$/));
     expect(screen.getByTestId('probe')).toHaveAttribute('data-pending', 'false');
     // The entries are `/meta/app`'s own objects, not the answer's.
-    expect(seen).toEqual([SETUP, CRM]);
-    expect(seen[0]).toBe(SETUP);
+    const entries = seen.mock.lastCall?.[0];
+    expect(entries).toEqual([SETUP, CRM]);
+    expect(entries?.[0]).toBe(SETUP);
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(fetcher.mock.calls[0][0]).toBe(ENDPOINT);
   });
