@@ -106,6 +106,10 @@ function keyOf(w: Record<string, unknown>) {
 function makeSession(seed: { rows?: Row[]; history?: HistoryRow[] } = {}) {
     const registry = new SchemaRegistry({ multiTenant: false });
     registry.logLevel = 'silent';
+    // [#26708] The authored packages the saves below name are installed, as
+    // every boot rehydrates them: a save naming a package no installed
+    // package has is refused before it is written.
+    for (const id of [APP_PKG, OTHER_PKG]) registry.installPackage({ id, name: id, version: '1.0.0' } as any, 'authored');
     const rows = new Map<string, Row>();
     for (const r of seed.rows ?? []) rows.set(keyOf(r), { ...r });
     const historyRows: HistoryRow[] = (seed.history ?? []).map((h) => ({ ...h }));

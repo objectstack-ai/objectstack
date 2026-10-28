@@ -107,6 +107,6 @@ that input when you need the current title instead of memorising one.
 ## Learn More
 
 - [Full Changesets Documentation](https://github.com/changesets/changesets)
-- [Object UI Contributing Guide](../CONTRIBUTING.md#versioning-and-releases)
+- [Contributing Guide, step 5: changesets](https://github.com/objectstack-ai/objectstack/blob/main/CONTRIBUTING.md#making-a-change)
 - [Common Questions](https://github.com/changesets/changesets/blob/main/docs/common-questions.md)
 

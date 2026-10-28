@@ -797,6 +797,7 @@
     "hasMovedFileColumns": "src/system/migration.zod.ts#hasMovedFileColumns (function)",
     "hasObservedDeviation": "src/system/migration.zod.ts#hasObservedDeviation (function)",
     "hasPlatformObjectPrefix": "src/system/constants/platform-object-names.ts#hasPlatformObjectPrefix (function)",
+    "hookRefusalMessageKey": "src/system/i18n-resolver.ts#hookRefusalMessageKey (function)",
     "inProcessServiceMessage": "src/system/core-services.zod.ts#inProcessServiceMessage (function)",
     "interpolateValidationMessage": "src/system/validation-message.ts#interpolateValidationMessage (function)",
     "isAudiencePosture": "src/system/auth-config.zod.ts#isAudiencePosture (function)",

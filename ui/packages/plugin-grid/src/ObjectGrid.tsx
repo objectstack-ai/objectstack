@@ -277,6 +277,23 @@ export interface ObjectGridComponentProps extends ObjectGridExternalPaginationPr
    */
   rowAdornment?: (record: any) => React.ReactNode;
   /**
+   * [objectstack#26681] A host-drawn node beside ONE row's record LINK — the
+   * link cell the row's record opens from (the primary field, or a column
+   * authored `link: true`) — after the link and never inside it, in the grid
+   * and in the card view's title alike. Called with the row record; `null` /
+   * `undefined` draws nothing, and so does an absent prop, so a caller that
+   * passes nothing renders exactly what it rendered before this prop existed.
+   *
+   * Not {@link rowAdornment}: that one sits beside the row's TITLE, the
+   * declared name field's column when shown, which need not be the column
+   * that opens the record. The console's object list passes an "open as full
+   * page" arrow for a row that opens the drawer, so it belongs at the link.
+   *
+   * A RUNTIME prop, never authored metadata: it is a React node a host
+   * composes, nothing an author writes, and no node key reaches it.
+   */
+  recordLinkAdornment?: (record: any) => React.ReactNode;
+  /**
    * TWO parameters since objectui#9357, and the second is not decoration: this
    * prop reaches `useNavigationOverlay` as its `onRowClick`, and `handleClick`
    * invokes it as `onRowClick(record, event)` — the modifier payload a host
@@ -596,6 +613,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   onDelete,
   rowOperations,
   rowAdornment,
+  recordLinkAdornment,
   onBulkDelete,
   onRowSelect,
   onRowClick,
@@ -1217,7 +1235,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   const { generateColumns } = useObjectGridGenerateColumns({
     schema, dataSource, data, dataConfig, hasInlineData, objectName, objectSchema, objectFields,
     objectTypesPending, schemaFields, schemaColumns, perms, navigation, executeAction, predicateScope,
-    resolveFieldLabel, translateOptions, uiLanguage,
+    resolveFieldLabel, translateOptions, uiLanguage, recordLinkAdornment,
   });
 
   // Formats this grid can actually deliver (objectui#2942): the server stream

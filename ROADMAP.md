@@ -1,7 +1,7 @@
 # ObjectStack Roadmap
 
 > **Last updated:** 2026-06-06
-> **Source of truth:** [content/docs/concepts/north-star.mdx](content/docs/concepts/north-star.mdx) for product direction, ADRs for architectural decisions, and code for shipped behavior.
+> **Source of truth:** [docs/NORTH-STAR.md](docs/NORTH-STAR.md), the one North Star, for product direction and priority, ADRs for architectural decisions, and code for shipped behavior.
 
 This roadmap tracks the current framework repository. Historical Cloud/ObjectOS
 milestone plans that referred to `apps/cloud`, `apps/objectos`,
@@ -21,9 +21,10 @@ docs, adapters, services, plugins, and the bundled console integration.
   `environment`, not `project`: `OS_ENVIRONMENT_ID`,
   `X-Environment-Id`, `/api/v1/environments/:environmentId`, and
   `environment_id`.
-- **Console UI:** framework serves the published ObjectUI console bundle from
-  `packages/console`; active UI source development happens in sibling repo
-  `../objectui`.
+- **Console UI:** framework serves the ObjectUI console bundle from
+  `packages/console`; its source is the `ui/` workspace of this repository
+  (`ui/apps/console` and the `@object-ui/*` packages), and `pnpm console:build`
+  builds it into `packages/console`.
 - **Cloud publishing:** CLI publish/rollback target
   `/api/v1/cloud/environments/:environment/...` endpoints when pointed at an
   ObjectOS Cloud control plane.
@@ -53,8 +54,26 @@ docs, adapters, services, plugins, and the bundled console integration.
 - Use `environment` for runtime/deployment identity.
 - Use `project` only for npm/monorepo/project-folder meaning, or when quoting
   historical ADR text.
-- Link to sibling UI work as `../objectui` or the ObjectUI repo, not
-  `apps/studio`.
+- Link to UI work by its path under `ui/`, never the archived ObjectUI
+  repository, `../objectui` or `apps/studio`.
+
+---
+
+## ObjectUI (`ui/`)
+
+The view layer is planned and tracked like the rest of this repository; plans and
+their status live where they are tracked, not in this file:
+
+- **Open work:** [issues](https://github.com/objectstack-ai/objectstack/issues),
+  filtered by the `area:*` labels for one feature axis and by `priority:*` for order.
+- **Release targets:** [milestones](https://github.com/objectstack-ai/objectstack/milestones)
+  and the `target:*` labels.
+- **What has shipped:** each `@object-ui/*` package's own `CHANGELOG.md`;
+  [ui/CHANGELOG.md](ui/CHANGELOG.md) is the frozen history of ObjectUI's own releases.
+- **Design decisions:** the ADRs in [ui/docs/adr](ui/docs/adr) for the view layer.
+
+ObjectUI's long-form roadmap stopped at v3.3.2 (May 2026); it is in the git history of
+`ui/ROADMAP.md`.
 
 ---
 

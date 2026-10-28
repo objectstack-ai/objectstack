@@ -383,20 +383,12 @@ describe('the Problems panel — expression messages (objectui#10804)', () => {
 
 // ─── Site 4: the dashboard add-widget picker (objectui#10805) ────────────────
 
-/** Stored `type` → the catalogue row its picker entry displays. */
-const WIDGET_TYPE_KEYS: ReadonlyArray<[string, string]> = [
-  ['metric', 'engine.widgetPicker.type.metric'],
-  ['bar', 'engine.widgetPicker.type.bar'],
-  ['horizontal-bar', 'engine.widgetPicker.type.horizontalBar'],
-  ['line', 'engine.widgetPicker.type.line'],
-  ['area', 'engine.widgetPicker.type.area'],
-  ['pie', 'engine.widgetPicker.type.pie'],
-  ['donut', 'engine.widgetPicker.type.donut'],
-  ['scatter', 'engine.widgetPicker.type.scatter'],
-  ['funnel', 'engine.widgetPicker.type.funnel'],
-  ['table', 'engine.widgetPicker.type.table'],
-  ['pivot', 'engine.widgetPicker.type.pivot'],
-];
+/**
+ * Stored `type` → the catalogue row its picker entry displays — read off the
+ * one widget registry (objectstack#26745), which derives the offered set from
+ * the spec, so this suite covers every type the picker offers.
+ */
+const WIDGET_TYPE_KEYS: ReadonlyArray<[string, string]> = Object.values(WIDGET_TYPE_META).map((m) => [m.id, m.labelKey]);
 const CATEGORIES = ['kpi', 'chart', 'data'] as const;
 
 /** Mount the dashboard inspector with no widgets and open its add-widget picker. */

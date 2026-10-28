@@ -72,9 +72,14 @@ const STUDIO_EN: Record<string, string> = {
   'perm.field.empty': 'No fields registered for this object.',
   'perm.field.filter': 'Filter fields…',
   'perm.field.filterEmpty': 'No fields match the filter.',
-  'perm.field.bulk.readable': 'Read all',
+  'perm.field.bulk.readable': 'Read-only all',
   'perm.field.bulk.writable': 'Write all',
   'perm.field.bulk.clear': 'Clear',
+  // objectstack#26597 — a field row with no rule draws the object grant.
+  'perm.field.inherited.legend': 'Grey boxes: no rule for that field, so it follows the object’s Read and Edit. A click there writes a rule.',
+  'perm.field.inherited.tip': 'No rule for this field: it follows the object’s Read and Edit. A click writes a rule.',
+  'perm.field.capped.read': 'This rule grants Read, but the object does not: a holder of this set alone cannot read the field.',
+  'perm.field.capped.edit': 'This rule grants Edit, but the object does not: a holder of this set alone cannot edit the field.',
   'perm.field.col.name': 'Field',
   'perm.field.read': 'Read',
   'perm.field.edit': 'Edit',
@@ -502,7 +507,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.widget.dataset': 'Dataset',
   'engine.inspector.widget.datasetPlaceholder': 'e.g. sales_pipeline',
   'engine.inspector.widget.datasetHint':
-    'Bind a governed dataset. When set, it takes precedence over the inline object query above and the widget renders via the dataset (consistent, cross-object, RLS-enforced).',
+    'Pick the governed dataset this widget draws from, then choose its dimensions and measures below. Dataset numbers stay consistent across objects, and row-level security applies.',
   'engine.inspector.widget.dimensions': 'Dimensions',
   'engine.inspector.widget.dimensionsPlaceholder': 'e.g. stage, region (comma-separated)',
   'engine.inspector.widget.dimensionsHint':
@@ -531,6 +536,31 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.widget.type.funnel': 'Funnel',
   'engine.inspector.widget.type.table': 'Table',
   'engine.inspector.widget.type.pivot': 'Pivot Table',
+  // objectstack#26745 — the rest of the spec's widget types, now that the Type
+  // select reads the one widget registry (`previews/widget-types`).
+  'engine.inspector.widget.type.column': 'Column Chart',
+  'engine.inspector.widget.type.scatter': 'Scatter Plot',
+  'engine.inspector.widget.type.treemap': 'Treemap',
+  'engine.inspector.widget.type.sankey': 'Sankey Diagram',
+  'engine.inspector.widget.type.combo': 'Combo Chart',
+  'engine.inspector.widget.type.gauge': 'Gauge',
+  'engine.inspector.widget.type.solidGauge': 'Solid Gauge',
+  'engine.inspector.widget.type.kpi': 'KPI',
+  'engine.inspector.widget.type.bullet': 'Bullet Chart',
+  'engine.inspector.widget.type.radar': 'Radar Chart',
+  // objectstack#26745 — the Add-widget menu's names for the spec widget types it
+  // did not offer before. The family's other rows sit in the S6 section below
+  // (objectstack#25922); each en row is the type's English `label` in
+  // `previews/widget-types`, word for word.
+  'engine.widgetPicker.type.column': 'Column chart',
+  'engine.widgetPicker.type.treemap': 'Treemap',
+  'engine.widgetPicker.type.sankey': 'Sankey diagram',
+  'engine.widgetPicker.type.combo': 'Combo chart',
+  'engine.widgetPicker.type.gauge': 'Gauge',
+  'engine.widgetPicker.type.solidGauge': 'Solid gauge',
+  'engine.widgetPicker.type.kpi': 'KPI',
+  'engine.widgetPicker.type.bullet': 'Bullet chart',
+  'engine.widgetPicker.type.radar': 'Radar chart',
   'engine.inspector.widget.untitledN': 'Widget {n}',
   'engine.inspector.widget.unsupportedSelection': 'Unsupported selection kind: {kind}',
   'engine.inspector.widget.removed': 'The selected widget was removed from the draft.',
@@ -649,6 +679,20 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.appNav.docHint': 'Choose a doc page, a book, or both.',
   'engine.inspector.appNav.groupHint': 'A group is a titled section of the menu. Items are not nested under it from this editor.',
   'engine.inspector.appNav.separatorHint': 'A separator is a divider: it has no label and opens nothing.',
+  // objectstack#26740 — the Studio nav inspector's fields for the keys the
+  // spec's shared base declares and the rows above did not carry: the badge
+  // and its variant, the order, and the `visible` condition's hints.
+  'engine.inspector.appNav.badge': 'Badge',
+  'engine.inspector.appNav.badgeHint': 'Text or a count shown beside the entry in the menu. Leave it empty for none.',
+  'engine.inspector.appNav.badgeVariant': 'Badge style',
+  'engine.inspector.appNav.badgeVariant.default': 'Default',
+  'engine.inspector.appNav.badgeVariant.secondary': 'Subtle',
+  'engine.inspector.appNav.badgeVariant.destructive': 'Alert',
+  'engine.inspector.appNav.badgeVariant.outline': 'Outline',
+  'engine.inspector.appNav.order': 'Order',
+  'engine.inspector.appNav.orderHint': 'Entries with a lower number come first in the menu; an entry without one counts as 0.',
+  'engine.inspector.appNav.visibleHint': 'Shows this entry only to people for whom the condition is true. Leave it empty to show it to everyone.',
+  'engine.inspector.appNav.visibleNotSaved': 'Not saved yet: the entry keeps its previous condition until this one has no errors.',
   // Page block inspector
   'engine.inspector.pageBlock.kind': 'Block',
   'engine.inspector.pageBlock.close': 'Close block',
@@ -1008,6 +1052,19 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.refusal.action': 'the action “{action}”',
   'engine.studio.refusal.actionInput': '{input} on the action “{action}”',
   'engine.studio.held.actionNeedsInput': '{input} on the action “{action}” needs a value',
+  // objectstack#26730 — the Interfaces pillar's refusal strip, for a dashboard
+  // widget and a report's properties; a refused publish kept on its Pending
+  // changes entry, and the toast that announces it.
+  'engine.studio.refusal.widget': 'the widget “{widget}”',
+  'engine.studio.refusal.widgetInput': '{input} on the widget “{widget}”',
+  'engine.studio.refusal.reportInput': '“{input}” in the report’s properties',
+  'engine.studio.refusal.publishIssue': 'Not published. Check {where} — {problem}',
+  'engine.studio.refusal.publishWhere': 'Not published. Check {where}: Details say what to change.',
+  'engine.studio.refusal.publishUnlocated': 'Not published: the server refused this draft. Details say why.',
+  'engine.studio.refusal.publishPlain': 'Not published: {reason}',
+  'engine.studio.publishRefused': 'Not published: {count} items need a change. Pending changes keeps each reason until it is fixed.',
+  'engine.studio.publishRefusedOne': 'Not published: {count} item needs a change. Pending changes keeps the reason until it is fixed.',
+  'engine.studio.publishRefusedBatch': 'Nothing went live: the package publishes as one batch, so its other drafts wait for this fix.',
   'engine.inspector.action.moreFieldsHint': 'Advanced / rarely-used properties.',
   // Dataset default (home) inspector (objectui#10586). Option labels are keyed
   // by the stored value; `{…}` tokens in a sentence are slots the inspector
@@ -2176,6 +2233,12 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.if.kindDesc.separator': 'A divider, no label, opens nothing',
   'engine.studio.if.addMenuTitle': 'Add to navigation',
   'engine.studio.if.emptyGroup': 'No items in this package',
+  // objectstack#26889 — the rail's sections under the nav tree: the items no entry opens.
+  'engine.studio.if.offNav.heading': 'Not in navigation',
+  'engine.studio.if.offNav.page': 'Pages',
+  'engine.studio.if.offNav.dashboard': 'Dashboards',
+  'engine.studio.if.offNav.report': 'Reports',
+  'engine.studio.if.offNav.view': 'Views',
   'engine.studio.if.openInData': 'Open in Data',
   // objectui#12725 — the status line above the canvas, and the item's ⋯ menu.
   'engine.studio.if.status.design': 'Design',
@@ -2193,7 +2256,6 @@ const STUDIO_EN: Record<string, string> = {
   // Data pillar
   'engine.studio.data.newFieldLabel': 'New field',
   'engine.studio.data.nameFieldLabel': 'Name',
-  'engine.studio.data.idExists': 'Identifier “{name}” already exists',
   'engine.studio.data.fieldCount': '{count} fields',
   'engine.studio.data.pickObject': 'Select an object',
   'engine.studio.data.objects': 'Objects',
@@ -2449,10 +2511,17 @@ const STUDIO_EN: Record<string, string> = {
   // Access pillar: a create over a taken identifier, and the draft discard (objectstack#26836).
   'engine.studio.access.createTaken': 'This package already has a permission set with the identifier “{name}”: {label}. Open it, or choose another identifier.',
   'engine.studio.access.createTakenElsewhere': 'A permission set with the identifier “{name}” already exists outside this package: {label}. Choose another identifier.',
-  'engine.studio.access.openExisting': 'Open “{label}”',
   'engine.studio.access.discardConfirm': 'Discard the pending draft of “{item}”? The published set stays as it is; only its unpublished changes are removed.',
   'engine.studio.access.discardConfirmUnpublished': 'Discard “{item}”? It has never been published, so discarding its draft removes the set.',
   'engine.studio.access.discardFailed': 'Could not discard the draft',
+  // Studio creates over a taken identifier: the Automations, App and Data creates
+  // (objectstack#26917), and the "Open" every create's refusal offers.
+  'engine.studio.create.openExisting': 'Open “{label}”',
+  'engine.studio.auto.createTaken': 'This package already has an automation with the identifier “{name}”: {label}. Open it, or choose another identifier.',
+  'engine.studio.auto.createTakenElsewhere': 'An automation with the identifier “{name}” already exists outside this package: {label}. Choose another identifier.',
+  'engine.studio.app.createTaken': 'An app with the identifier “{name}” already exists: {label}. Choose another identifier.',
+  'engine.studio.data.createTaken': 'This package already has an object with the identifier “{name}”: {label}. Open it, or choose another identifier.',
+  'engine.studio.data.createTakenElsewhere': 'An object with the identifier “{name}” already exists outside this package: {label}. Choose another identifier.',
   // The rest of engine.studio.* (all but engine.studio.inspector) and the
   // metadata preview panes (engine.*Preview, engine.previewShell; the doc, book,
   // flow, page-block and translation previews excepted) (#25922 slice S5).
@@ -2677,6 +2746,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.permissionPreview.scopeDefault': 'default',
   'engine.permissionPreview.fls.hidden': 'hidden',
   'engine.permissionPreview.fls.editable': 'editable',
+  'engine.permissionPreview.fls.readOnly': 'read-only',
   'engine.permissionPreview.sanityOne': '{count} sanity check failed',
   'engine.permissionPreview.sanityOther': '{count} sanity checks failed',
   'engine.permissionPreview.warn.editWithoutRead': 'Edit granted without Read (record updates will fail).',
@@ -2898,6 +2968,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.landingHome': 'Studio home',
   // objectui#11795 — the one line a phone shows under the Studio header.
   'engine.studio.desktopHint': 'Studio is built for a desktop screen.',
+  // objectstack#26708 — the builder's not-found states: a package id the
+  // package list does not hold, and a pillar segment Studio has no pillar for.
+  'engine.studio.notFound.package': 'Package not found. No package with the id "{id}" is installed here, so there is nothing to build in.',
+  'engine.studio.notFound.pillar': 'This page does not exist. Studio has no "{pillar}" section; pick Data, Automations, Interfaces or Access above.',
   'engine.studio.aiCopilot': 'AI copilot',
   // objectui#12725 — the Studio right slot: properties OR the copilot.
   'engine.studio.slot.label': 'Right panel',
@@ -3200,6 +3274,682 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.owd.byParentNoMaster': 'By parent — no master: the object needs exactly one required master-detail field',
   'engine.studio.owd.masterTip':
     'Controlled by parent — record visibility is inherited from the master record.',
+  // The rest of the designer table: the flow designer, the page-block canvas,
+  // the doc and book previews, engine.studio.inspector and the remaining Studio
+  // chrome (engine.translationPreview excepted) (#25922 slice S6).
+  'engine.directory.title': 'All Metadata Types',
+  'engine.directory.description':
+    'The platform protocol exposes {count} metadata types ({writable} writable at runtime). Click any tile to browse, override, or create instances.',
+  'engine.directory.search': 'Search metadata types…',
+  'engine.directory.writableOnly': 'Writable only',
+  'engine.directory.quickFind': 'Quick Find',
+  'engine.directory.noMatches': 'No matches',
+  'engine.directory.noMatchesHint': 'Adjust your search or filters to see more metadata types.',
+  'engine.directory.loading': 'Loading metadata types…',
+  'engine.directory.loadFailed': 'Failed to load metadata types',
+  'engine.directory.all': 'All',
+  'engine.directory.diagnosticsLink': 'View all issues ({count})',
+  'engine.directory.invalidTooltip': '{count} invalid item(s) — click to fix',
+  'engine.directory.warnTooltip': '{count} item(s) with warnings',
+  'engine.directory.itemCountTooltip': '{count} item(s) of this type',
+  'engine.home.recent': 'Recently viewed',
+  'engine.diagnostics.title': 'Metadata Diagnostics',
+  'engine.diagnostics.description':
+    'Every metadata item that failed load-time validation, grouped by type. Errors block features that depend on the item; warnings are advisory.',
+  'engine.diagnostics.back': 'Back to metadata',
+  'engine.diagnostics.refresh': 'Refresh',
+  'engine.diagnostics.loading': 'Scanning metadata…',
+  'engine.diagnostics.loadFailed': 'Failed to load diagnostics: {error}',
+  'engine.diagnostics.summary': '{count} issue(s) across {items} items in {types} types',
+  'engine.diagnostics.cleanTitle': 'All clear',
+  'engine.diagnostics.cleanHint': 'Scanned {items} item(s) across {types} type(s) — no issues found.',
+  'engine.diagnostics.severity.error': 'Errors',
+  'engine.diagnostics.severity.warning': 'Errors + Warnings',
+  'engine.diagnostics.col.name': 'Item',
+  'engine.diagnostics.col.issues': 'Issues',
+  'engine.diagnostics.errorN': '{count} error(s)',
+  'engine.diagnostics.warnN': '{count} warning(s)',
+  'engine.diagnostics.more': '+{count} more…',
+  'engine.list.create': 'New',
+  'engine.list.refresh': 'Refresh',
+  'engine.list.search': 'Search name, label, description…',
+  'engine.list.empty': 'No items yet.',
+  'engine.list.items': 'Items',
+  'engine.list.filtered': 'Filtered',
+  'engine.list.itemCount': '{count} items',
+  'engine.list.itemCountOne': '1 item',
+  'engine.list.invalid': 'Invalid',
+  'engine.list.warnings': 'Warnings',
+  'engine.list.invalidTitle': 'Invalid metadata',
+  'engine.list.invalidCount': '{count} validation error(s):',
+  'engine.list.warnTitle': 'Metadata warnings',
+  'engine.list.warnCount': '{count} warning(s):',
+  'engine.list.allSources': 'All sources',
+  'engine.package.writableRequired': 'Pick or create a writable base (package) first — this item cannot be authored into a read-only code package.',
+  'engine.list.source.artifact': 'Artifact',
+  'engine.list.source.runtime': 'Runtime',
+  'engine.list.source.artifactDesc': 'Shipped by code package',
+  'engine.list.source.runtimeDesc': 'Authored at runtime',
+  'engine.list.col.name': 'Name',
+  'engine.list.col.label': 'Label',
+  'engine.list.col.source': 'Source',
+  'engine.list.col.object': 'Object',
+  'engine.list.col.type': 'Type',
+  'engine.list.col.description': 'Description',
+  'engine.list.col.sharedWith': 'Shared with',
+  'engine.list.col.accessLevel': 'Access',
+  'engine.list.col._packageId': 'Package',
+  'engine.list.col.criteria': 'Criteria',
+  'engine.list.col.actions': 'Actions',
+  // objectstack#25333 — the position list's served columns (`PositionGrantCells.tsx`).
+  'engine.list.col._holderCount': 'Holders',
+  'engine.list.col._grantedPermissionSets': 'Permission sets',
+  'engine.position.holders.unknown': 'The server did not count the holders for you (no active organization, or no read on position assignments).',
+  'engine.position.grants.none': 'None',
+  // objectstack#26187 — the Setup position page's read-only previews of the
+  // permission sets the position names (`PositionPermissionSetsSection.tsx`).
+  'engine.position.sets.title': 'Permission sets',
+  'engine.position.sets.hint':
+    'What each permission set this position names grants, in the order it names them. Open a set to change it.',
+  'engine.position.sets.empty': 'This position names no permission sets.',
+  'engine.position.sets.loading': 'Loading…',
+  'engine.position.sets.notFound': 'Permission set "{name}" was not found.',
+  'engine.position.sets.readFailed': 'Permission set "{name}" could not be read.',
+  'engine.position.sets.open': 'Open this permission set',
+  'engine.list.emptyType': 'No {type} items registered',
+  'engine.list.emptyQuery': 'No matches for "{query}"',
+  'engine.list.createHint': 'Click "New" above to create the first {type}.',
+  'engine.list.readOnlyHint':
+    'This type is read-only — instances are defined by code artifacts in packages.',
+  // objectui#7611 — the environment scope (Setup catalog). See `catalog-scope.ts`.
+  'engine.catalog.col.active': 'Active',
+  'engine.catalog.status.all': 'All',
+  'engine.catalog.status.active': 'Active',
+  'engine.catalog.status.inactive': 'Inactive',
+  'engine.catalog.active.on': 'Active — click to deactivate',
+  'engine.catalog.active.off': 'Inactive — click to activate',
+  'engine.catalog.active.anchor':
+    'An audience anchor: it carries the baseline every principal of the deployment holds, so it cannot be switched off. Change what it grants through the permission sets bound to it.',
+  'engine.catalog.active.unknown': 'Activation state could not be read.',
+  'engine.catalog.active.notVisible': 'Not visible to you',
+  'engine.catalog.active.failed': 'The switch was not saved: {message}',
+  // objectui#13338 — the confirm a permission set's or a position's switch
+  // asks before it switches the item off, and the toast either way.
+  'engine.catalog.active.switchedOn': '{name} activated.',
+  'engine.catalog.active.switchedOff': '{name} deactivated.',
+  'engine.catalog.deactivate.title': 'Deactivate {name}?',
+  'engine.catalog.deactivate.counting': 'Counting the users who hold this access…',
+  'engine.catalog.deactivate.holders': '{count} users will lose this access.',
+  'engine.catalog.deactivate.holdersOne': '1 user will lose this access.',
+  'engine.catalog.deactivate.holdersAtLeast': 'At least {count} users will lose this access.',
+  'engine.catalog.deactivate.everyone':
+    'Every signed-in member will lose this access: it is bound to the everyone position.',
+  'engine.catalog.deactivate.countFailed': 'How many users hold this access could not be read: {message}',
+  'engine.catalog.deactivate.confirm': 'Deactivate',
+  'engine.catalog.readOnly.single':
+    'Read-only for your account. {type} items are defined by the platform administrator (the `manage_metadata` capability); your organization assigns them.',
+  'engine.catalog.readOnly.walled':
+    'Read-only for organization administrators. On this deployment the platform operator defines {type} items for every organization in Studio; your organization assigns them.',
+  // objectui#12982 — a declaration-only catalog (declared sharing rules). See
+  // `sharing-rule-catalog.ts`.
+  'engine.catalog.declaredOnly.hint.sharing_rule':
+    'These sharing rules are declared by installed packages and are read-only. Switch one off, or clone it into a rule your organization owns. Rules your organization authors are on the Organization rules page.',
+  'engine.catalog.declaredOnly.authoredLink.sharing_rule': 'Organization rules',
+  'engine.catalog.declaredOnly.switchReadOnly':
+    'Read-only for your account: switching a declared item on or off requires the `manage_metadata` capability.',
+  'engine.sharingRule.clone.action': 'Clone',
+  'engine.sharingRule.clone.title': 'Clone sharing rule',
+  'engine.sharingRule.clone.body':
+    'Creates a sharing rule your organization owns from the declared rule "{name}", under a new name. The declared rule itself does not change.',
+  'engine.sharingRule.clone.copyLabel': '{label} (copy)',
+  'engine.sharingRule.clone.name': 'New rule name',
+  'engine.sharingRule.clone.label': 'New label',
+  'engine.sharingRule.clone.loading': 'Reading the rule…',
+  'engine.sharingRule.clone.noCriteria':
+    'The server serves no criteria for "{name}" while it is switched off. Continue in the New form and enter them there.',
+  'engine.sharingRule.clone.confirm': 'Create rule',
+  'engine.sharingRule.clone.continueInForm': 'Continue in New form',
+  'engine.sharingRule.clone.failed': 'The rule was not created.',
+  'engine.sharingRule.clone.created':
+    'Created "{name}". The declared rule "{source}" still grants access until you switch it off.',
+  'engine.sharingRule.clone.disableSource': 'Switch "{source}" off',
+  'engine.sharingRule.clone.sourceOff': 'The declared rule "{source}" is switched off.',
+  'engine.sharingRule.clone.openCopy': 'Open the new rule',
+  'engine.sharingRule.clone.done': 'Done',
+  'engine.typeAction.confirmTitle': '{action} on "{item}"?',
+  'engine.typeAction.confirmTitleNoItem': '{action}?',
+  'engine.layers.code': 'Code',
+  'engine.layers.overlay': 'Overlay',
+  'engine.layers.effective': 'Effective',
+  'engine.layers.diff': 'Diff',
+  'engine.layers.diff.field': 'Field',
+  'engine.layers.diff.code': 'Code (artifact)',
+  'engine.layers.diff.effective': 'Effective',
+  'engine.layers.diff.status': 'Status',
+  'engine.layers.diff.unchanged': 'unchanged',
+  'engine.layers.diff.modified': 'modified',
+  'engine.layers.diff.added': 'added',
+  'engine.layers.diff.removed': 'removed',
+  'engine.layers.diff.showUnchanged': 'Show unchanged',
+  'engine.layers.diff.noChanges': 'Overlay matches the code value — no field-level differences.',
+  'engine.layers.diff.noBaseline': 'No code-level artifact to compare against. All fields are runtime-authored.',
+  'engine.layers.diff.summary': '{modified} modified · {added} added · {removed} removed',
+  // objectui#10804 (objectui#10805 folded in) — the dashboard add-widget picker
+  // (`AddWidgetPicker`): its search box, empty text, category headings and the
+  // type names it lists (`WIDGET_TYPE_META[].labelKey`). Display only: the new
+  // widget's default `New TYPE` title is stored author data and keeps writing
+  // `WIDGET_TYPE_META[].label`, the same English as these en rows.
+  'engine.widgetPicker.search': 'Search widgets…',
+  'engine.widgetPicker.noMatches': 'No matches.',
+  'engine.widgetPicker.category.kpi': 'Single value',
+  'engine.widgetPicker.category.chart': 'Charts',
+  'engine.widgetPicker.category.data': 'Tabular',
+  'engine.widgetPicker.type.metric': 'Metric (KPI)',
+  'engine.widgetPicker.type.bar': 'Bar chart',
+  'engine.widgetPicker.type.horizontalBar': 'Horizontal bar',
+  'engine.widgetPicker.type.line': 'Line chart',
+  'engine.widgetPicker.type.area': 'Area chart',
+  'engine.widgetPicker.type.pie': 'Pie chart',
+  'engine.widgetPicker.type.donut': 'Donut chart',
+  'engine.widgetPicker.type.scatter': 'Scatter plot',
+  'engine.widgetPicker.type.funnel': 'Funnel',
+  'engine.widgetPicker.type.table': 'Data table',
+  'engine.widgetPicker.type.pivot': 'Pivot table',
+  // ConditionBuilder raw-expression mode (CEL editor, #1582)
+  'engine.condition.celLabel': 'CEL expression',
+  'engine.condition.advancedHint': 'Advanced expression — Builder only supports simple AND/OR conditions.',
+  // Flow designer add-node palette (search box + recents, #1943)
+  'engine.flowPalette.search': 'Search nodes…',
+  'engine.flowPalette.empty': 'No matching nodes.',
+  'engine.flowPalette.recent': 'Recently used',
+  // Palette section headings (localized display; the canonical NodeCategory
+  // literals stay English as in-memory bucket keys — see flow-canvas-parts).
+  'engine.flowPalette.category.data': 'Data',
+  'engine.flowPalette.category.logic': 'Logic',
+  'engine.flowPalette.category.human': 'Human',
+  'engine.flowPalette.category.integration': 'Integration',
+  'engine.flowPalette.category.flow': 'Flow',
+  // Flow canvas chrome — toolbar, node affordances, banner (FlowCanvas /
+  // flow-canvas-parts). Node-type labels/hints live in the strings table too
+  // (engine.flowNode.*) but are resolved via translateNodeLabel/Hint so the
+  // server descriptor stays the source of truth in English.
+  'engine.flowCanvas.zoomOut': 'Zoom out',
+  'engine.flowCanvas.zoomIn': 'Zoom in',
+  'engine.flowCanvas.fit': 'Fit to view',
+  'engine.flowCanvas.canvas': 'Flow canvas',
+  'engine.flowCanvas.reveal': 'Reveal on canvas',
+  'engine.flowCanvas.moreErrors': '+{count} more…',
+  'engine.flowCanvas.insertNode': 'Insert node here',
+  'engine.flowCanvas.addConnected': 'Add connected node',
+  'engine.flowCanvas.addReviseLoop': 'Add revision loop (send back for revision)',
+  'engine.flowCanvas.addReviseLoopShort': 'Add revision loop',
+  'engine.flowCanvas.awaitingRevision': 'Awaiting Revision',
+  'engine.flowCanvas.collapseRegions': 'Collapse nested regions',
+  'engine.flowCanvas.expandRegions': 'Expand nested regions',
+  // objectui#10862, slice 4 — an edge's hover title and the node card's
+  // one-line config summary (FlowCanvas).
+  'engine.flowCanvas.edge.undeclaredCycle':
+    '{source} → {target} — part of an un-declared cycle; mark the edge that closes the loop as a back-edge',
+  'engine.flowCanvas.edge.backEdge': '{source} ↩ {target} (back-edge)',
+  'engine.flowCanvas.summary.branches': '{count} branches',
+  'engine.flowCanvas.summary.approversOne': '{count} approver',
+  'engine.flowCanvas.summary.approversOther': '{count} approvers',
+  'engine.flowCanvas.summary.unanimous': 'all',
+  'engine.flowCanvas.summary.code': 'code',
+  // objectui#11905 — the connect handle on a node card (FlowCanvas): drag it
+  // onto another node to draw a connection between two existing nodes.
+  'engine.flowCanvas.connect': 'Drag onto another node to connect',
+  // Nested structured-region tray headers (FlowRegionView / extractRegions).
+  'engine.flowRegion.branchN': 'Branch {n}',
+  'engine.flowRegion.try': 'Try',
+  'engine.flowRegion.catch': 'Catch',
+  // objectui#10748 — a loop / map body region; the canvas draws no header for
+  // it, so today only the inspector's nested-node breadcrumb reads it.
+  'engine.flowRegion.body': 'Body',
+  // Flow preview header — pills, panel toggles, empty states (FlowPreview).
+  'engine.flowPreview.emptyHint': 'Add nodes in the Form tab to see the flow preview.',
+  'engine.flowPreview.malformed': 'One of the flow nodes or edges is malformed.',
+  'engine.flowPreview.pill.trigger': 'Trigger',
+  'engine.flowPreview.pill.status': 'Status',
+  'engine.flowPreview.pill.runAs': 'Run as',
+  'engine.flowPreview.pill.onError': 'On error',
+  'engine.flowPreview.showVars': 'Show variables panel',
+  'engine.flowPreview.hideVars': 'Hide variables panel',
+  'engine.flowPreview.variables': 'Variables',
+  'engine.flowPreview.noVars': 'No variables declared.',
+  'engine.flowPreview.runsTitle': 'Run history from the automation engine',
+  'engine.flowPreview.runs': 'Runs',
+  'engine.flowPreview.problemsTitle': 'Validation problems',
+  'engine.flowPreview.problems': 'Problems',
+  'engine.flowPreview.debug': 'Debug',
+  // objectui#10862, slice 4 — the variables panel's input / output tags.
+  'engine.flowPreview.varIn': 'in',
+  'engine.flowPreview.varOut': 'out',
+  // Flow run-history panel (FlowRunsPanel).
+  'engine.flowRuns.title': 'Runs',
+  'engine.flowRuns.refresh': 'Refresh run history',
+  'engine.flowRuns.unavailable':
+    'Run history unavailable — the automation engine is offline or this flow hasn’t been published.',
+  'engine.flowRuns.empty': 'No runs yet.',
+  'engine.flowRuns.noSteps': 'No step log recorded.',
+  'engine.flowRuns.iteration': 'Iteration',
+  'engine.flowRuns.iterationN': 'Iteration {n}',
+  'engine.flowRuns.branch': 'Branch',
+  'engine.flowRuns.branchN': 'Branch {n}',
+  'engine.flowRuns.branchNIterationM': 'Branch {n} · Iteration {m}',
+  'engine.flowRuns.try': 'Try',
+  'engine.flowRuns.catch': 'Catch',
+  'engine.flowRuns.status.completed': 'Completed',
+  'engine.flowRuns.status.failed': 'Failed',
+  'engine.flowRuns.status.paused': 'Paused',
+  'engine.flowRuns.status.running': 'Running',
+  'engine.flowRuns.status.cancelled': 'Cancelled',
+  // objectui#10862, slice 4 — an expanded run's id line (the trigger part is
+  // appended after a ` · ` separator when the run carries one).
+  'engine.flowRuns.runId': 'run {id}',
+  'engine.flowRuns.trigger': 'trigger {type}',
+  // Flow debug simulator (FlowSimulatorPanel).
+  'engine.flowSim.run': 'Run',
+  'engine.flowSim.step': 'Step',
+  'engine.flowSim.continue': 'Continue',
+  'engine.flowSim.reset': 'Reset',
+  'engine.flowSim.add': 'Add',
+  'engine.flowSim.resumeBranch': 'Resume down the “{branch}” branch',
+  'engine.flowSim.screen': 'Screen',
+  'engine.flowSim.inputs': 'Inputs',
+  'engine.flowSim.setVariables': 'Set variables',
+  'engine.flowSim.setVariablesHint': 'Override or inject any variable (wins over inputs and mocks at start).',
+  'engine.flowSim.mockOutputs': 'Mock outputs',
+  'engine.flowSim.mockPlaceholder': 'mocked result (JSON)',
+  'engine.flowSim.variables': 'Variables',
+  'engine.flowSim.noVars': 'No variables set.',
+  'engine.flowSim.timeline': 'Timeline',
+  'engine.flowSim.namePlaceholder': 'name',
+  'engine.flowSim.valuePlaceholder': 'value',
+  'engine.flowSim.removeVariable': 'Remove variable',
+  'engine.flowSim.idleHint':
+    'Press Run to simulate, or Step to walk node by node. Side effects are mocked — no backend is called.',
+  'engine.flowSim.status.idle': 'idle',
+  'engine.flowSim.status.running': 'running',
+  'engine.flowSim.status.paused': 'paused',
+  'engine.flowSim.status.done': 'done',
+  'engine.flowSim.status.error': 'error',
+  // objectui#10835 — the Debug run's step records (`FlowSimulator`, shown by
+  // `FlowSimulatorPanel`): a step's status chip, an out-edge's error result, and
+  // every note and error sentence the simulator writes. Node ids, labels, types,
+  // CEL sources, config paths and the producer text a reason carries
+  // (`@objectstack/spec` / `@objectstack/formula`) pass through as written.
+  'engine.flowSim.stepStatus.ok': 'ok',
+  'engine.flowSim.stepStatus.mocked': 'mocked',
+  'engine.flowSim.stepStatus.paused': 'paused',
+  'engine.flowSim.stepStatus.skipped': 'skipped',
+  'engine.flowSim.stepStatus.error': 'error',
+  'engine.flowSim.edge.error': 'error',
+  'engine.flowSim.note.stepLimit': 'Step limit ({max}) exceeded — the flow may contain an infinite loop.',
+  'engine.flowSim.note.nodeNotFound': 'Node "{id}" not found.',
+  'engine.flowSim.note.resumed': 'Resumed.',
+  'engine.flowSim.note.decisionTaken': 'Decision: {decision} → {taken}.',
+  'engine.flowSim.note.decisionNoneTaken': 'no out-edge taken',
+  'engine.flowSim.note.noDecision': 'No decision supplied; every out-edge is considered.',
+  'engine.flowSim.note.flowEnd': 'Flow end reached.',
+  'engine.flowSim.note.unsupported': '"{type}" is not modelled by the simulator; passing through without its real semantics.',
+  'engine.flowSim.note.parallelSplit': 'Parallel split — branches fan out (no join synchronization is simulated).',
+  'engine.flowSim.note.approvalReached': 'Approval reached — choose a decision to continue.',
+  'engine.flowSim.note.waitReached': 'Wait reached — continue manually.',
+  'engine.flowSim.note.screenReached': 'Screen reached — provide inputs, then continue.',
+  'engine.flowSim.note.screenUnevaluable':
+    "A screen field's visibleWhen may reference only the fields declared on this screen; the screen cannot evaluate {fields}.",
+  'engine.flowSim.note.screenUnevaluableField': '"{name}" ({reason})',
+  'engine.flowSim.note.screenNoInput': 'Screen has no input — passed through (matches runtime).',
+  'engine.flowSim.note.passThrough': 'Type "{type}" treated as pass-through.',
+  'engine.flowSim.note.decisionNoOutEdge': 'The decision has no out-edge; the runtime ends this branch here.',
+  'engine.flowSim.note.branchMatched': 'Branch "{label}" matched (config.conditions).',
+  'engine.flowSim.note.noConditionMatched': 'No entry of config.conditions matched; the branch is "{label}".',
+  'engine.flowSim.note.noAssignments': 'No assignments defined.',
+  'engine.flowSim.note.loopSinglePass': 'Loop simulated as a single pass (body re-execution is not modelled).',
+  'engine.flowSim.note.loopCollection': 'Collection "{ref}" has {count} item(s); simulated as a single pass.',
+  'engine.flowSim.note.loopNotArray': 'Collection "{ref}" is not an array; loop may not run at runtime.',
+  'engine.flowSim.note.loopCollectionNotList': 'Collection "{ref}" is not a list; the runtime fails the loop here.',
+  'engine.flowSim.note.mockedCall': "Mocked call to '{fn}' (no function executed).",
+  'engine.flowSim.note.retiredAction':
+    "Retired '{action}' action — it never delivered anything; use a notify node (or a connector for Slack).",
+  'engine.flowSim.note.retiredScript':
+    'Retired inline script — the runtime never executed it; move the logic into a registered function.',
+  'engine.flowSim.note.mocked': 'Mocked {type} (no backend call).',
+  'engine.flowSim.note.noBranchLabel':
+    'No out-edge carries the branch label "{label}", so every out-edge is considered, as the runtime does (it logs a warning).',
+  'engine.flowSim.note.evaluationFailed': 'Evaluation failed.',
+  'engine.flowSim.note.multipleMatched':
+    'Multiple conditions matched; the first declared branch was taken (the runtime takes every match, objectstack#15429).',
+  'engine.flowSim.note.noEdgeTaken':
+    'No out-edge was taken: no guard was true and there is no default edge. The runtime ends this branch here.',
+  // objectui#10848 — the frames `flow-sim-validate` puts around a CEL failure
+  // on a step or an out-edge. `{message}` is the producer's own text
+  // (`@objectstack/formula`), passed through as written; its fallback, when
+  // the producer gives none, is `engine.flowSim.note.evaluationFailed`.
+  'engine.flowSim.note.celEvaluationFailed': 'CEL evaluation failed: {message}',
+  'engine.flowSim.note.celConditionFailed': 'condition failed to evaluate as CEL: {message}',
+  // objectui#10862 — the RLS policy editor's CEL try-it dialog: the result for
+  // an empty predicate (`celAuthoring.testRunCelPredicate` returns it as a
+  // `messageKey` the dialog reads through its `t`) and the sample-JSON
+  // refusal. The engine's own message, when it gives one, passes through as
+  // written; when it gives none, the fallback key is
+  // `engine.flowSim.note.evaluationFailed`, the same "Evaluation failed.".
+  'engine.celTest.predicateEmpty': 'The predicate is empty.',
+  'engine.celTest.notObject': 'expected a JSON object.',
+  'engine.bookPreview.nameTitle': 'Name your book',
+  'engine.bookPreview.nameDescription': 'Enter a name in the Form tab to start authoring the documentation spine.',
+  'engine.bookPreview.treeTitle': 'Open the live-resolved navigation tree (actual docs per group)',
+  'engine.bookPreview.tree': 'Resolved tree',
+  'engine.bookPreview.audience.public': 'Public',
+  'engine.bookPreview.audience.permissionSet': 'Permission set: {name}',
+  'engine.bookPreview.audience.org': 'Org',
+  'engine.bookPreview.slug': 'Slug: {slug}',
+  'engine.bookPreview.noGroups': 'No groups yet',
+  'engine.bookPreview.noGroupsDescription':
+    'A book needs at least one group in its {groups} spine. Each group derives its members from an {include} rule (a glob like {glob} or a {tag}).',
+  'engine.bookPreview.noKey': '(no key)',
+  'engine.bookPreview.orderTitle': 'Order within the book',
+  'engine.bookPreview.packageTitle': 'Membership rule is scoped to this package',
+  'engine.bookPreview.derived': 'Members derived from the rule above — resolved against the live doc set.',
+  'engine.bookPreview.noRule':
+    'No {include} rule and no explicit {pages} — this group matches nothing unless docs set {group}.',
+  'engine.bookPreview.curatedTitle': 'Curated order via explicit pages',
+  'engine.bookPreview.curated': 'curated',
+  'engine.bookPreview.globTitle': 'Glob over doc names',
+  'engine.bookPreview.tagTitle': 'Match by doc tag',
+  'engine.bookPreview.separator': 'separator',
+  'engine.bookPreview.rest': '…rest (remaining matched docs, by order)',
+  'engine.bookPreview.emptyPage': '(empty)',
+  // The doc editor (previews/DocPreview, objectui#10188).
+  'engine.docPreview.bookSection': 'Book section',
+  'engine.docPreview.noSection': 'Not placed in a section',
+  'engine.docPreview.unknownSection': '{key} (not a section of any book)',
+  'engine.docPreview.booksLoading': 'Loading books…',
+  'engine.docPreview.booksFailed': 'Books could not be loaded: {message}',
+  'engine.docPreview.appearsIn': 'Appears in:',
+  'engine.docPreview.publicBook': 'public',
+  'engine.docPreview.noBooks': 'No documentation book exists yet — create one to place this doc in a section.',
+  'engine.docPreview.unplaced': 'Not in any book section yet — book trees list it under Uncategorized.',
+  'engine.docPreview.locales': 'Locale variants',
+  'engine.docPreview.baseLocale': 'Default',
+  'engine.docPreview.removeLocale': 'Remove the {locale} variant',
+  'engine.docPreview.localePlaceholder': 'zh-CN',
+  'engine.docPreview.addLocaleInput': 'New locale tag',
+  'engine.docPreview.addLocale': 'Locale',
+  'engine.docPreview.localeDuplicate': '{locale} already has a variant',
+  'engine.docPreview.localeInvalid': 'Use a locale tag such as zh-CN',
+  'engine.docPreview.variantTitle': 'Title',
+  'engine.docPreview.variantSummary': 'Summary',
+  'engine.docPreview.preview': 'Live preview',
+  'engine.docPreview.renderFailed': 'The Markdown renderer failed on this content.',
+  'engine.docPreview.emptyEditing': 'Nothing to preview yet — write Markdown in the source pane.',
+  'engine.docPreview.empty': 'This doc has no content.',
+  'engine.docPreview.source': 'Markdown source',
+  'engine.docPreview.sourceLocale': 'Markdown source ({locale})',
+  'engine.docPreview.sourcePlaceholder': '# Title\n\nWrite Markdown here…',
+  // objectui#10862 (slice 2) — the advisory `celAuthoring.lintCelPredicate`
+  // words itself, shown beneath the CEL editors: the wrong-layer root (the
+  // local instrument's sentence; a slot `@objectstack/lint` covers ships that
+  // package's own message instead). The lint returns it as a `messageKey` plus
+  // its values and `CelPredicateField` reads it through the designer `t` its
+  // host binds. `Unknown variable: …` is the runtime's own fault text and stays
+  // as written. (An RLS clause the runtime cannot lower has no row here: it
+  // ships `@objectstack/lint`'s own message, objectui#13061.)
+  'engine.celLint.notTheRow':
+    '`{identifier}` is not the row on this surface: a row predicate binds the record as `{canonical}` and nothing else. The CEL scope vocabulary still accepts `{identifier}`, so nothing here blocks the save, but at runtime the expression faults with `Unknown variable: {identifier}` and the rule never fires. Re-root the reference on `{canonical}`.',
+  'engine.pageBlockCanvas.renderFailed':
+    '"{type}" can\'t render with its current configuration — check its Properties.',
+  'engine.pageBlockCanvas.itemN': 'Item {n}',
+  'engine.pageBlockCanvas.body': 'Body',
+  'engine.pageBlockCanvas.content': 'Content',
+  'engine.pageBlockCanvas.noRegions': 'No regions yet',
+  'engine.pageBlockCanvas.noRegionsHint':
+    'A Page is composed of regions (header / main / sidebar / …). Add a region to start dropping blocks into it.',
+  'engine.pageBlockCanvas.addRegion': 'Add region',
+  // objectui#12902 — "Add region" offers only a slot the page's template places.
+  'engine.pageBlockCanvas.gridCell': 'Grid cell',
+  'engine.pageBlockCanvas.addRegionAllFilled': "Every slot the '{template}' template places is filled ({slots}).",
+  'engine.pageBlockCanvas.addRegionUnknownTemplate': "'{template}' is not a page template, so it places no region.",
+  'engine.pageBlockCanvas.regionN': 'region {n}',
+  'engine.pageBlockCanvas.dropHere': 'drop here',
+  'engine.pageBlockCanvas.slotInherited':
+    'Inherited from the default page — add a block to override this slot.',
+  'engine.pageBlockCanvas.regionEmpty': 'Empty region — drop a block here or use the add button below.',
+  'engine.pageBlockCanvas.select': 'Select {label}',
+  'engine.pageBlockCanvas.span': 'Spans {span} of 12 columns on a wide screen',
+  'engine.pageBlockCanvas.groupEmpty': 'Empty — add a block.',
+  'engine.pageBlockCanvas.searchTypes': 'Search block type…',
+  'engine.pageBlockCanvas.noMatch': 'No matching types.',
+  'engine.pageBlockCanvas.category.data': 'Data',
+  'engine.pageBlockCanvas.category.layout': 'Layout',
+  'engine.pageBlockCanvas.category.record': 'Record context',
+  'engine.pageBlockCanvas.category.navigation': 'Navigation',
+  'engine.pageBlockCanvas.category.element': 'Elements',
+  'engine.pageBlockCanvas.category.ai': 'AI',
+  'engine.pageBlockCanvas.category.misc': 'Other',
+  'engine.pageBlockCanvas.type.grid': 'Grid',
+  'engine.pageBlockCanvas.type.objectGrid': 'Table',
+  'engine.pageBlockCanvas.type.objectForm': 'Form',
+  'engine.pageBlockCanvas.type.objectMetric': 'Metric',
+  'engine.pageBlockCanvas.type.objectKanban': 'Kanban',
+  'engine.pageBlockCanvas.type.pageHeader': 'Header',
+  'engine.pageBlockCanvas.type.pageFooter': 'Footer',
+  'engine.pageBlockCanvas.type.pageSidebar': 'Sidebar',
+  'engine.pageBlockCanvas.type.pageTabs': 'Tabs',
+  'engine.pageBlockCanvas.type.pageAccordion': 'Accordion',
+  'engine.pageBlockCanvas.type.pageCard': 'Card',
+  'engine.pageBlockCanvas.type.pageSection': 'Section',
+  'engine.pageBlockCanvas.type.recordDetails': 'Record details',
+  'engine.pageBlockCanvas.type.recordHighlights': 'Highlights',
+  'engine.pageBlockCanvas.type.recordRelatedList': 'Related list',
+  'engine.pageBlockCanvas.type.recordActivity': 'Activity timeline',
+  'engine.pageBlockCanvas.type.recordDiscussion': 'Discussion',
+  'engine.pageBlockCanvas.type.recordPath': 'Stage path',
+  'engine.pageBlockCanvas.type.recordAlert': 'Alert banner',
+  'engine.pageBlockCanvas.type.recordQuickActions': 'Quick actions',
+  'engine.pageBlockCanvas.type.recordReferenceRail': 'Reference rail',
+  'engine.pageBlockCanvas.type.recordHistory': 'History',
+  'engine.pageBlockCanvas.type.navMenu': 'Nav menu',
+  'engine.pageBlockCanvas.type.navBreadcrumb': 'Breadcrumb',
+  'engine.pageBlockCanvas.type.globalSearch': 'Global search',
+  'engine.pageBlockCanvas.type.aiSuggestion': 'AI suggestion',
+  'engine.pageBlockCanvas.type.elementText': 'Text',
+  'engine.pageBlockCanvas.type.elementNumber': 'Number',
+  'engine.pageBlockCanvas.type.elementImage': 'Image',
+  'engine.pageBlockCanvas.type.elementDivider': 'Divider',
+  'engine.pageBlockCanvas.type.elementButton': 'Button',
+  'engine.pageBlockCanvas.type.elementDefinitionList': 'Definition list',
+  'engine.pageBlockCanvas.type.elementRepeater': 'Repeater',
+  'engine.sourcePageEditor.source': 'Page source',
+  'engine.sourcePageEditor.renderFailed':
+    'The page source threw while rendering — fix the code in the Source tab.',
+  'engine.fieldsListEditor.columns': 'Columns',
+  'engine.fieldsListEditor.empty': 'No columns yet. Add a field below.',
+  'engine.fieldsListEditor.colN': 'col {n}',
+  'engine.viewColumnPanes.remove': 'Remove {label}',
+  // Structural flow validation (flow-sim-validate) — canvas banner, Problems
+  // panel, and the debug simulator.
+  'engine.flowValidate.nodeMissingId': 'A node is missing an id.',
+  'engine.flowValidate.duplicateNodeId': 'Duplicate node id "{id}".',
+  'engine.flowValidate.edgeSourceMissing': 'Edge source "{source}" does not exist.',
+  'engine.flowValidate.edgeTargetMissing': 'Edge target "{target}" does not exist.',
+  // objectui#11838 — the other positions that name a node by id.
+  'engine.flowValidate.exprRefNodeMissing': 'Expression "{ref}" reads node "{id}", which does not exist.',
+  'engine.flowValidate.boundaryHostMissing': 'Boundary event "{name}" ({id}) is attached to node "{host}", which does not exist.',
+  'engine.flowValidate.startHasIncoming': 'Start node has an incoming edge.',
+  'engine.flowValidate.multipleStart': 'Flow has {count} start nodes; expected one.',
+  'engine.flowValidate.noStartUsingRoot': 'No "start" node; using the only root node as the entry.',
+  'engine.flowValidate.noEntry': 'No entry node (every node has an incoming edge — the graph is fully cyclic).',
+  'engine.flowValidate.ambiguousEntry': 'Cannot determine a single entry node ({count} candidates). Add a "start" node.',
+  'engine.flowValidate.decisionMultipleDefaults': 'Decision "{name}" ({id}) has {count} default branches.',
+  'engine.flowValidate.decisionNoBranches': 'Decision "{name}" ({id}) has no outgoing branches.',
+  'engine.flowValidate.decisionNoDefault': 'Decision "{name}" ({id}) has no default branch; it may dead-end when no condition matches.',
+  'engine.flowValidate.nodeUnreachable': 'Node "{name}" ({id}) is unreachable from the entry.',
+  'engine.flowValidate.cycleDetected': 'Cycle detected ({cycle}). Mark the connection that closes the loop as a back-edge (Connection type → Back-edge) to declare an intentional revise/rework loop.',
+  // Unknown-reference (scope) warnings (flow-ref-check) — Problems panel + the
+  // inline expression-field warnings.
+  'engine.flowRef.unknownWithSuggestion': 'Unknown reference `{token}` — did you mean `{suggestion}`?',
+  'engine.flowRef.notInScope': '`{token}` is not a reference in scope at this step.',
+  'engine.flowRef.notInScopeMulti': 'Not in scope: {tokens}.',
+  // objectui#10804 — a screen field's `visibleWhen` names a root that is not a
+  // field declared on the same screen (`screenVisibleWhenScopeError`,
+  // screen-spec): the inline cell's note and the Problems panel. The parse and
+  // shape refusals beside it are `@objectstack/formula`'s and
+  // `@objectstack/spec`'s own words and pass through as they are.
+  'engine.flowRef.notAScreenField': '`{token}` is not a field on this screen',
+  'engine.flowRef.notAScreenFieldWithSuggestion': '`{token}` is not a field on this screen (did you mean `{suggestion}`?)',
+  // objectui#10748 — the author-time expression shape errors
+  // (`validateExpressionClient`, expression-validate), rendered inline under an
+  // expression field, a repeater cell and the edge condition. The code spans
+  // are code and stay as they are in every locale.
+  'engine.flowExpr.templateDialect': 'Expected a text template but got a `{dialect}` expression.',
+  'engine.flowExpr.singleBraceTemplate': 'Single-brace `{{ref}}` is not a valid template hole — use double braces: `{{ {ref} }}`.',
+  'engine.flowExpr.celDialect': 'Expected a CEL expression but got a `{dialect}` dialect.',
+  'engine.flowExpr.braceInCondition':
+    'It looks like a `{{ref}}` template brace was used inside a condition — `{…}` parses as a CEL map literal and fails. Write the bare reference instead, e.g. `{ref}`. Conditions are bare CEL (e.g. `record.rating >= 4`).',
+  'engine.flowExpr.unbalancedParens': 'Unbalanced parentheses in `{source}`.',
+  'engine.flowExpr.unbalancedBrackets': 'Unbalanced brackets in `{source}`.',
+  // objectui#10748 — the variable data-picker (`VariableTextInput`): its button
+  // and search box, its section headings (`useFlowScope`) and the muted detail
+  // beside a reference (`flow-scope`, `useFlowScope`). Tokens, type names and
+  // object names inside a detail are code or author data and stay as they are.
+  'engine.flowScope.picker.insert': 'Insert a reference',
+  'engine.flowScope.picker.search': 'Search references…',
+  'engine.flowScope.picker.empty': 'No matching references.',
+  'engine.flowScope.group.variables': 'Flow variables',
+  'engine.flowScope.group.outputs': 'Upstream outputs',
+  'engine.flowScope.group.loop': 'Loop item',
+  'engine.flowScope.group.trigger': 'Trigger record',
+  'engine.flowScope.group.approvalCurrent': 'Current record (live at node entry)',
+  'engine.flowScope.group.approvalTrigger': 'Trigger snapshot (at submit)',
+  // objectui#10804 — the one section of a screen field's `visibleWhen` picker.
+  'engine.flowScope.group.screenFields': 'Screen fields',
+  'engine.flowScope.detail.variable': 'variable',
+  'engine.flowScope.detail.variableTyped': 'variable · {type}',
+  'engine.flowScope.detail.triggerRecord': 'trigger record · {object}',
+  'engine.flowScope.detail.previousRecord': 'record values before the change',
+  'engine.flowScope.detail.priorOf': 'prior {detail}',
+  'engine.flowScope.detail.priorValue': 'prior value',
+  'engine.flowScope.detail.preUpdateRow': 'pre-update row',
+  // Problems panel (ProblemsPanel).
+  'engine.flowProblems.title': 'Problems',
+  'engine.flowProblems.empty': 'No problems — this flow is structurally valid.',
+  'engine.flowProblems.sourceSchema': 'schema',
+  'engine.flowProblems.sourceExpression': 'expression',
+  // objectui#11772 — one extra copy of a connection (`edgeRouteKey`): the
+  // engine follows every copy, so the target runs once per copy.
+  'engine.flowProblems.repeatedEdge': 'Connection "{sourceName}" ({source}) → "{targetName}" ({target}) is repeated; the flow runs "{targetName}" once for each copy. Remove this copy.',
+  // objectui#11905 — why a connection between two existing nodes is refused,
+  // shown by both doors that draw one: the canvas's connect handle and the
+  // connection inspector's From / To (`edgeConnectionRefusal`).
+  'engine.flowProblems.connectRefused.missingSource': 'Cannot connect: this flow has no node "{source}".',
+  'engine.flowProblems.connectRefused.missingTarget': 'Cannot connect: this flow has no node "{target}".',
+  'engine.flowProblems.connectRefused.self': 'Cannot connect "{source}" to itself.',
+  'engine.flowProblems.connectRefused.repeat': '"{source}" already connects to "{target}". Select that connection to change it.',
+  'engine.badge.createOnly': 'create-only',
+  'engine.repeater.empty': 'No items. Click + to add.',
+  'engine.badge.writable': 'writable',
+  'engine.badge.readOnly': 'read-only',
+  'engine.cancel': 'Cancel',
+  'engine.close': 'Close',
+  'engine.validation.invalid': 'Invalid input',
+  'engine.validation.pattern': 'Invalid string: must match pattern {pattern}',
+  'engine.validation.expectedStringUndefined': 'Required text value',
+  'engine.validation.expectedType': 'Invalid type: expected {expected}, received {received}',
+  'engine.validation.invalidOption': 'Invalid option: expected one of {options}',
+  'engine.validation.failed': 'Validation failed ({count} issues).',
+  'engine.validation.serverRefused': 'The server refused this draft — fix {issue} before saving.',
+  'engine.validation.failedOne': 'Validation failed (1 issue).',
+  'engine.validation.nameRequired': 'A name is required.',
+  // objectui#12810 — a create that leaves a required seed placeholder unset
+  // (a dataset's base object) is refused before any request.
+  'engine.validation.seedPlaceholderUnset': 'Set {fields} before saving: a new item is never saved with the placeholder its template starts from.',
+  'engine.embedded.saved': 'Saved.',
+  'engine.embedded.readOnlyParent': 'The parent type is read-only — saving will still attempt a PUT and may be refused by the server.',
+  'engine.embedded.saveIntoParent': 'Save into {parentType}',
+  'engine.embedded.saveNoPath': 'Cannot save: this item has no embeddedPath registered.',
+  'engine.embedded.noSchema': 'No form schema is registered for {type}. Edit the raw JSON below; saving will splice it back into {target}.',
+  'engine.embedded.readOnly': 'Read-only',
+  'engine.embedded.noPathHint': 'No embedded path registered — cannot determine where to write this item back.',
+  'engine.quickfind.placeholder': "Find metadata types or items… (try 'view', 'account')",
+  'engine.quickfind.empty': 'Type to search across all metadata types.',
+  'engine.quickfind.title': 'Quick Find',
+  'engine.quickfind.indexing': 'Indexing items across',
+  'engine.quickfind.noMatches': 'No matches.',
+  'engine.breadcrumb.allTypes': 'All Metadata Types',
+  // objectui#11773 — the draft-save version conflict (`DraftConflictDialog.tsx`):
+  // a draft save the server refused because the draft was saved elsewhere after
+  // this editor opened it.
+  'engine.draftConflict.title': 'This draft changed since you opened it',
+  'engine.draftConflict.description':
+    'The draft of {type} “{name}” was saved elsewhere — by someone else or in another tab — after you opened it. Reload the saved version (your unsaved edits here are dropped), or overwrite it with yours.',
+  'engine.draftConflict.reload': 'Reload saved version',
+  'engine.draftConflict.overwrite': 'Overwrite…',
+  'engine.draftConflict.keepEditing': 'Keep editing',
+  'engine.draftConflict.overwriteTitle': 'Overwrite the saved draft?',
+  'engine.draftConflict.overwriteDescription':
+    'Your version of {type} “{name}” will replace the saved draft, and the changes saved after you opened it will be lost.',
+  'engine.draftConflict.overwriteConfirm': 'Overwrite',
+  'engine.draftConflict.back': 'Back',
+  'engine.draftConflict.notSaved': 'Not saved: {type} “{name}” was saved elsewhere after you opened it.',
+  'engine.studio.inspector.props': 'Properties',
+  'engine.studio.inspector.draftFooter': 'Edits save as drafts. Publish the package to apply them.',
+  'engine.studio.inspector.collapse': 'Collapse properties',
+  'engine.studio.inspector.expand': 'Show properties',
+  'engine.studio.inspector.emptyLine1': 'Click a block on the canvas,',
+  'engine.studio.inspector.emptyLine2': 'and edit its properties right here.',
+  // objectui#7121 — the rail beside a studio-canvas leaf (a
+  // `registerStudioCanvasPreview` type: the running app, not a block tree).
+  // States what the canvas IS; promises no recovery, because there is nothing
+  // to wait for — `StudioCanvasPreviewProps` carries no selection by contract.
+  'engine.studio.inspector.studioCanvasNoBlocks':
+    'This canvas renders the running app, not a block tree — it has no blocks to select, and nothing here is edited from this panel.',
+  // objectui#11823 — an `object` leaf's panel: the list view its canvas shows.
+  'engine.studio.inspector.listView.kind': 'List view',
+  'engine.studio.inspector.listView.intro':
+    'The list on the canvas. Its columns, filter and sort save to this package\'s draft and show on the canvas at once.',
+  // objectui#13151 — a view with no label is named by its object's display
+  // name and its role, never by its qualified name (`{view}` below is the
+  // panel's title, the same string).
+  'engine.studio.inspector.listView.defaultTitle': '{object} · Default view',
+  'engine.studio.inspector.listView.namedTitle': '{object} · {view}',
+  'engine.studio.inspector.listView.notCreated':
+    'There is no list view “{view}” yet. Your first change here creates it in this package\'s draft.',
+  'engine.studio.inspector.listView.readOnly': 'This package is read-only: the list view is shown here, not edited.',
+  'engine.studio.inspector.listView.notList': '“{view}” is not a list view, so it is not edited here.',
+  'engine.studio.inspector.listView.filter': 'Filter',
+  'engine.studio.inspector.listView.sort': 'Sort',
+  'engine.studio.inspector.listView.addSort': '+ Add sort…',
+  'engine.studio.inspector.listView.sortAsc': '{field} ascending',
+  'engine.studio.inspector.listView.sortDesc': '{field} descending',
+  // objectui#12725 — a kanban view's card section: a card click on the canvas selects it.
+  'engine.studio.inspector.listView.kanbanCard': 'Kanban card',
+  'engine.studio.inspector.listView.kanbanCard.intro': 'What each card on the board shows, and what a click on a card opens.',
+  'engine.studio.inspector.listView.kanbanCard.groupByFirst': 'Pick the group-by field first: the card settings are saved with it.',
+  'engine.studio.inspector.listView.kanbanCard.fields': 'Card fields',
+  'engine.studio.inspector.listView.kanbanCard.title': 'Title',
+  'engine.studio.inspector.listView.kanbanCard.titleRecordName': 'Record name',
+  'engine.studio.inspector.listView.kanbanCard.open': 'Click to open',
+  'engine.studio.inspector.listView.kanbanCard.openDefault': 'Default',
+  'engine.studio.inspector.listView.kanbanCard.mode.page': 'Record page',
+  'engine.studio.inspector.listView.kanbanCard.mode.drawer': 'Side drawer',
+  'engine.studio.inspector.listView.kanbanCard.mode.newWindow': 'New window',
+  'engine.studio.inspector.listView.kanbanCard.mode.none': "Don't open",
+  'engine.studio.inspector.listView.kanbanCard.groupBy': 'Group by field',
+  'engine.studio.inspector.listView.kanbanCard.pickField': 'Pick a field',
+  'engine.studio.inspector.designersMissing':
+    'No metadata designers are registered in this session, so there is nothing to edit here.',
+  'engine.studio.inspector.noPageSchema': 'Page settings are unavailable — the page schema could not be loaded.',
+  // ── AppNavCanvas (nav-tree editor, used by Studio + AppPreview) ─────────
+  'engine.appNav.heading': 'Navigation',
+  'engine.appNav.addItem': 'Add nav item',
+  'engine.appNav.removeItem': 'Remove nav item',
+  'engine.appNav.empty': 'Empty — click “Add nav item” to start',
+  'engine.appNav.emptyReadonly': 'No top-level nav items yet',
+  'engine.appNav.item': 'Item {n}',
+  'engine.appNav.itemOne': 'item',
+  'engine.appNav.itemOther': 'items',
 };
 
 export default STUDIO_EN;

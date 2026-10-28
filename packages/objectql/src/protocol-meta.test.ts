@@ -260,6 +260,12 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             // overwrite) package A's same-name overlay — that is what lets two
             // installed packages keep independent customizations.
             mockEngine.findOne.mockResolvedValue(null);
+            // [#26708] Package B is installed: a save naming a package no
+            // installed package has is refused before it is written.
+            registry.installPackage({ id: 'com.acme.beta', name: 'Beta', version: '1.0.0' } as any, 'authored');
+            // …and the object its grid binds is one it ships: an installed
+            // package's write is judged against its closure.
+            registry.registerObject({ name: 'test_task', label: 'Task', fields: { title: { type: 'text', label: 'Title' } } } as never, 'com.acme.beta');
 
             // [#6190] `app` -> `view` for the same reason as the org-persistence
             // case above: the package dimension this pins is untouched, but the

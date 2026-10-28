@@ -44,7 +44,7 @@
     {
       "id": 5,
       "prompt": "Sales reps need a locked-down task workbench: only open tasks, sorted by due date, grid only, no switching to other views; plus a report of opportunity amounts by stage.",
-      "expected_output": "Capability narrowing is the signal for an interface page: `definePage({ type: 'list', object: 'task', interfaceConfig: { source: 'task', columns: [...], sort: [...], filterBy: [...], userFilters: { element: 'dropdown', ... }, appearance: { allowedVisualizations: ['grid'] }, userActions: {...} } })` — the page IS the view definition (no deprecated `sourceView`). The report is `type: 'summary'` selecting `rows` / `values` from a declared `dataset`; there is no `chart` report type.",
+      "expected_output": "Capability narrowing is the signal for an interface page: `definePage({ type: 'list', object: 'task', interfaceConfig: { source: 'task', columns: [...], sort: [...], filterBy: [...], userFilters: { element: 'dropdown', ... }, appearance: { allowedVisualizations: ['grid'] }, userActions: {...} } })` — the page IS the view definition (no deprecated source view). The report is `type: 'summary'` selecting `rows` / `values` from a declared `dataset`; there is no `chart` report type.",
       "files": [],
       "assertions": {
         "must_contain": ["definePage", "interfaceConfig", "columns", "allowedVisualizations", "summary", "dataset"],
@@ -74,11 +74,21 @@
     {
       "id": 8,
       "prompt": "Make the Reassign Lead toast read 'Lead NAME reassigned'; after Convert's lead_conversion flow completes, open the opportunity it created.",
-      "expected_output": "`successMessage: 'Lead {{ record.name }} reassigned'` (`${record.name}` fails `os validate`); Convert gets `onSuccess: { navigate }` ending `${result.output.opportunity_id}`, an `isOutput` flow variable.",
+      "expected_output": "`successMessage: 'Lead {{ record.name }} reassigned'` (a `${…}` hole fails `os validate`); Convert gets `onSuccess: { navigate }` ending `${result.output.opportunity_id}`, an `isOutput` flow variable.",
       "files": [],
       "assertions": {
         "must_contain": ["{{", "onSuccess", "result.output"],
         "must_not_contain": ["${record.name}"]
+      }
+    },
+    {
+      "id": 9,
+      "prompt": "Approve on `contract` should stay visible but greyed until `legal_review_status` is `approved`, and the rep should see why it is greyed.",
+      "expected_output": "`disabled: P`record.legal_review_status != \"approved\"`` with `disabledReason: 'An approved legal review is required before approval.'` beside it — an I18nLabel the console shows as the greyed button's hover title; display-only, never a predicate, not a gate. The reason is not written into `description`; omitting the key keeps the default \"Not available for this record\", and a blank reason or a `*Message` / `*Tooltip` / `*Hint` spelling of the key is refused.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["disabled:", "disabledReason"],
+        "must_not_contain": ["description:", "disabledMessage", "disabledTooltip", "visible:"]
       }
     }
   ]

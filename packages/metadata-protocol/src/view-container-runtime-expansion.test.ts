@@ -35,6 +35,23 @@ import { savedItemNameRefusal } from '@objectstack/metadata/view-container-name'
 import { ObjectStackProtocolImplementation } from './index.js';
 import { SysMetadataRepository } from './sys-metadata-repository.js';
 
+/**
+ * [#26708] The packages this file's saves name, installed: a save naming a
+ * package no installed package has is refused (`WRITABLE_PACKAGE_REQUIRED`)
+ * before any gate this file pins is reached. Each manifest declares the
+ * packages whose objects its items bind, as a real one must: an installed
+ * package's write is judged against its declared closure (ADR-0028).
+ */
+const INSTALLED_PACKAGES: ReadonlyMap<string, readonly string[]> = new Map([
+    ['com.example.repairassets', ['com.example.showcase']],
+    ['com.example.showcase', []],
+]);
+const installedPackage = (id: string) => {
+    const dependencies = INSTALLED_PACKAGES.get(id);
+    return dependencies ? { manifest: { id, dependencies: Object.fromEntries(dependencies.map((d) => [d, '*'])) } } : undefined;
+};
+
+
 interface Row {
     id: string; type: string; name: string;
     package_id: string | null; state: string; metadata: string; checksum?: string; version?: number;
@@ -104,7 +121,7 @@ function makeStubEngine() {
                 registered.get(type)!.set(item?.name, item);
             },
             registerObject: () => { },
-            getPackage: () => undefined,
+            getPackage: installedPackage,
         },
     };
     return { engine, rows, registered };
@@ -483,11 +500,20 @@ describe('#21334 a container on another package\'s object never takes that packa
             },
             shipObject(name: string, packageId: string) {
                 objects.set(name, { packageId, ownership: 'own', definition: { name, _packageId: packageId } });
+                // [#26708] …and in the package's object listing, as the real
+                // registry holds it: a write into an installed package is
+                // judged against its closure, which this listing supplies.
+                collection('object').set(`${packageId}:${name}`, {
+                    name,
+                    _packageId: packageId,
+                    _provenance: 'package',
+                    fields: Object.fromEntries(PACKAGED_COLUMNS.map((c) => [c.field, { type: 'text' }])),
+                });
             },
             getPackagedObjectOwner: (name: string) => objects.get(name),
             getObject: (name: string) => objects.get(name)?.definition,
             registerObject: () => undefined,
-            getPackage: () => undefined,
+            getPackage: installedPackage,
             isPackageDisabled: () => false,
             isObjectPackageDisabled: () => false,
             applyNavContributions: (app: unknown) => app,
@@ -499,6 +525,15 @@ describe('#21334 a container on another package\'s object never takes that packa
         const stub = makeStubEngine();
         const registry = faithfulRegistry();
         registry.shipObject(TASK, SHOWCASE);
+        // [#26708] The tenant objects this block's environment-wide saves bind:
+        // with the showcase's object listed, the save door judges a binding
+        // against a collection that is no longer empty, so they must exist.
+        for (const name of ['crm_lead', 'crm_account']) {
+            registry.registerItem('object', {
+                name,
+                fields: Object.fromEntries(['name', 'company', 'title'].map((f) => [f, { type: 'text' }])),
+            });
+        }
         registry.registerItem('view', { ...packagedTaskViews, name: TASK }, 'name', SHOWCASE);
         for (const vi of expandViewContainer(TASK, packagedTaskViews)) {
             registry.registerItem('view', { ...(vi as any) }, 'name', SHOWCASE);

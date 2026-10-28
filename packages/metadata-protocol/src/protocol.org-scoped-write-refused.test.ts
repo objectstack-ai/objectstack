@@ -52,6 +52,31 @@ import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { expandViewContainer } from '@objectstack/spec/ui';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
+/**
+ * [#26708] The packages this file's saves name, installed: a save naming a
+ * package no installed package has is refused (`WRITABLE_PACKAGE_REQUIRED`)
+ * before any gate this file pins is reached. Each manifest declares the
+ * packages whose objects its items bind, as a real one must: an installed
+ * package's write is judged against its declared closure (ADR-0028).
+ */
+const INSTALLED_PACKAGES: ReadonlyMap<string, readonly string[]> = new Map([
+    ['app.demo', []],
+    ['pkg_a', ['pkg_b']],
+    ['pkg_b', ['pkg_a']],
+]);
+const installedPackage = (id: string) => {
+    const dependencies = INSTALLED_PACKAGES.get(id);
+    return dependencies ? { manifest: { id, dependencies: Object.fromEntries(dependencies.map((d) => [d, '*'])) } } : undefined;
+};
+
+/** The `task` object the views here bind — tenant-authored, or owned by `owner`. */
+const taskObject = (owner?: string) => ({
+    name: 'task',
+    ...(owner ? { _packageId: owner, _provenance: 'package' } : {}),
+    fields: { name: { type: 'text' }, title: { type: 'text' } },
+});
+
+
 interface Row {
     id: string;
     type: string;
@@ -173,10 +198,13 @@ function makeStubEngine(artifacts: Array<{ type: string; name: string }> = []) {
         registry: {
             registerItem: () => {},
             registerObject: () => {},
-            listItems: () => [],
+            // [#26708] The `task` object every view here binds, tenant-authored
+            // (no package): a save naming an installed package is judged
+            // against its closure, which holds it.
+            listItems: (type: string) => (type === 'object' ? [taskObject()] : []),
             getItem: () => undefined,
             getObject: () => undefined,
-            getPackage: () => undefined,
+            getPackage: installedPackage,
             // The env-wide `view` list read (the public-form re-open refusal).
             isPackageDisabled: () => false,
             // `isArtifactBacked` prefers this lookup — a hit means the name is
@@ -643,7 +671,8 @@ describe('each package\'s copy of a view container expands into its own package\
             },
             listItems: (type: string, packageId?: string) => (type === 'view'
                 ? [...entries.values()].filter((it) => !packageId || it._packageId === packageId)
-                : []),
+                // [#26708] The `task` object, owned by `owner` when a code package owns it.
+                : type === 'object' ? [taskObject(owner)] : []),
             getItem: (type: string, name: string, packageId?: string) => (type !== 'view'
                 ? undefined
                 : entries.get(name) ?? (packageId ? entries.get(`${packageId}:${name}`) : undefined) ?? composite(name)[0]),
@@ -669,7 +698,7 @@ describe('each package\'s copy of a view container expands into its own package\
             },
             getObject: () => undefined,
             registerObject: () => {},
-            getPackage: () => undefined,
+            getPackage: installedPackage,
             isPackageDisabled: () => false,
             isObjectPackageDisabled: () => false,
             applyNavContributions: (app: unknown) => app,
@@ -1380,7 +1409,7 @@ describe('each package\'s copy of a view container expands into its own package\
                     },
                     getObject: () => undefined,
                     registerObject: () => {},
-                    getPackage: () => undefined,
+                    getPackage: installedPackage,
                     isPackageDisabled: () => false,
                     isObjectPackageDisabled: () => false,
                     applyNavContributions: (app: unknown) => app,

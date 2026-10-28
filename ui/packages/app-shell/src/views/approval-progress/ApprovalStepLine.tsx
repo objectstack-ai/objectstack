@@ -16,16 +16,16 @@ import type { ApprovalRequestLite } from '../../hooks/useRecordApprovals.js';
  * ApprovalStepLine — the vertical step line of an approval request's flow:
  * one row per step it is handed, done / current / upcoming (objectui#12491).
  *
- * It draws the steps its caller proves, and the caller owns that proof. The
- * approvals get's `flow_steps` is NOT one: it is the flow graph's trunk, not
- * the route this request takes, so a request a decision sent down another
- * branch was drawn on rungs it never visits (objectstack#26563). The business
- * record's approvals panel (`RecordApprovalsPanel`) hands it the steps the
- * pending request's run has passed plus the pending one, read off the run's
- * own request rows (`visitedApprovalSteps`). The approval request page's
- * decision panel holds only its bound row, which proves no step but its own,
- * so it draws no line until the approvals read serves the route. The gate on
- * HOW MANY steps lives here, once: fewer than two steps draws nothing.
+ * It draws the route the approvals get serves for one request, `flow_route`
+ * (objectstack#26668): the steps the request's run passed, read off the run's
+ * own request rows, its own step, and, while it is pending, the steps ahead
+ * the flow's graph alone decides. Both callers hand it that one list: the
+ * business record's approvals panel (`RecordApprovalsPanel`) for the pending
+ * request, and the approval request page's decision panel for its bound row.
+ * The approvals get's `flow_steps` is NOT a route: it is the flow graph's
+ * trunk, so a request a decision sent down another branch was drawn on rungs
+ * it never visits (objectstack#26563); no caller hands it in. The gate on HOW
+ * MANY steps lives here, once: fewer than two steps draws nothing.
  *
  * ## Vertical, at every step count (objectui#5554)
  *
@@ -46,10 +46,10 @@ import type { ApprovalRequestLite } from '../../hooks/useRecordApprovals.js';
  */
 
 /** One approval step of a request's route: its node id, its label and where it stands. */
-export type ApprovalFlowStep = NonNullable<ApprovalRequestLite['flow_steps']>[number];
+export type ApprovalFlowStep = NonNullable<ApprovalRequestLite['flow_route']>['steps'][number];
 
 export interface ApprovalStepLineProps {
-  /** The steps the caller proved, in route order. Fewer than two steps draws nothing. */
+  /** The served route's steps (`flow_route.steps`), in route order. Fewer than two steps draws nothing. */
   steps: ReadonlyArray<ApprovalFlowStep> | null | undefined;
 }
 

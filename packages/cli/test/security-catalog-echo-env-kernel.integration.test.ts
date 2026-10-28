@@ -52,7 +52,7 @@ const ENV = 'env_catalog_echo';
 const SYS = { context: { isSystem: true } } as any;
 
 /** A writable runtime package, never installed as code. */
-const RUNTIME_PKG = 'app.catalog_echo';
+const RUNTIME_PKG = 'app.catalog-echo';
 /** Its default set: `isDefault: true`, no `packageId` in the body. */
 const PKG_SET = 'echo_pkg_default';
 /** A set saved into no package. */
@@ -143,6 +143,9 @@ function scenario(kind: Kind) {
     const { ql, protocol, org } = state as Required<typeof state>;
     expect(protocol.environmentId ?? null, 'topology').toBe(kind === 'environment' ? ENV : null);
     const set = (name: string) => ({ name, label: name, isDefault: true, objects: { echo_doc: { allowRead: true } } });
+    // [#26708] A save naming a package the registry does not hold is refused,
+    // so the runtime package is created first, as `POST /packages` does.
+    await protocol.installPackage({ manifest: { id: RUNTIME_PKG, name: 'Catalog echo', version: '0.1.0', type: 'app', namespace: 'cecho' } });
     await protocol.saveMetaItem({ type: 'permission', name: PKG_SET, item: set(PKG_SET), packageId: RUNTIME_PKG, mode: 'draft' });
     const published = await protocol.publishPackageDrafts({ packageId: RUNTIME_PKG, actor: 'system' });
     expect(published, JSON.stringify(published)).toMatchObject({ outcome: 'published', failed: [] });

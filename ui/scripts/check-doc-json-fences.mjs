@@ -66,16 +66,19 @@
  *
  * `SCAN_SURFACE` below is everything this gate reads: one leg per entry, in
  * walk order, and the summary prints it leg by leg with the pages each leg
- * collected. Four legs:
+ * collected. Three legs:
  *
  *   1. every `.mdx` / `.md` page under `content/docs` — the population
  *      objectui#5250's measurement priced;
  *   2. every package's own `README.md`, `packages/NAME/README.md`;
- *   3. the root `README.md`;
- *   4. every `.md` page under `skills/objectui/` — the published skill bundle
+ *   3. every `.md` page under `skills/objectui/` — the published skill bundle
  *      (objectui#12204).
  *
- * Leg 4 is a governed, published surface whose fences belong to its owner
+ * A fourth leg, the root `README.md`, stood between 2 and 3 until
+ * objectstack#26080 folded that README into the repository root and moved its
+ * examples to `content/docs/guide/quick-start.md`, which leg 1 reads.
+ *
+ * Leg 3 is a governed, published surface whose fences belong to its owner
  * (objectui#12135), and it joined on that owner's ruling: the json/jsonc
  * examples there are the ones a customer's agent copies through
  * `npx skills add`, and `scripts/check-skill-examples.mjs` holds them to PARSE
@@ -86,13 +89,14 @@
  * collects, so the two gates read the same pages there. `.claude/skills/**`,
  * the internal agent tooling, is not this leg and stays off the surface.
  *
- * Legs 2 and 3 are the published READMEs, and they joined because this gate
- * was green while three README examples were refused by `objectui validate`
- * (objectui#12131): the root README's form and dashboard, and a table in
- * `packages/plugin-dashboard/README.md`. That card's first phase repaired the
- * three; these legs keep them covered. Both legs are IMPORTED from
- * `check-doc-component-types.mjs` (`PACKAGE_READMES` / `packageReadmePages`,
- * `ROOT_PAGES`) rather than spelled again here: they are the README legs the
+ * Leg 2 is the published package READMEs, and it joined, with the root-README
+ * leg, because this gate was green while three README examples were refused by
+ * `objectui validate` (objectui#12131): the root README's form and dashboard,
+ * and a table in `packages/plugin-dashboard/README.md`. That card's first phase
+ * repaired the three; the form and the dashboard are judged on leg 1 now, in
+ * the quick-start page. Leg 2 is IMPORTED from `check-doc-component-types.mjs`
+ * (`PACKAGE_READMES` / `packageReadmePages`) rather than spelled again here: it
+ * is the README leg the
  * doc-gate family already walks, so this gate reads the READMEs its siblings
  * read, and a change to the family's legs moves this gate with them.
  *
@@ -234,7 +238,7 @@ import {
   quoteDepthOf,
   stripQuotePrefix,
 } from './check-doc-snippet-types.mjs';
-import { PACKAGE_READMES, ROOT_PAGES, packageReadmePages } from './check-doc-component-types.mjs';
+import { PACKAGE_READMES, packageReadmePages } from './check-doc-component-types.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 import { labelPath, skillBundleBase } from './skill-bundle-root.mjs';
 import { closesFence, openFence } from './markdown-fence-scan.mjs';
@@ -323,8 +327,12 @@ function pagesUnder(root, dir, extensions) {
  * them, in the slot its siblings walk them: package READMEs before the root
  * pages.
  *
- * Both README anchors are pages objectui#12131 repaired. If one stops holding a
- * node document, name another page on the same leg; ⛔ never delete the control.
+ * The package-README anchor is a page objectui#12131 repaired. If it stops
+ * holding a node document, name another page on the same leg; ⛔ never delete the
+ * control. The root-pages leg and its `README.md` anchor left together when
+ * objectstack#26080 emptied `ROOT_PAGES`: that README's node documents moved to
+ * `content/docs/guide/quick-start.md`, on the first leg, so a leg with no page
+ * left had nothing for an anchor to name.
  * The skills leg (objectui#12204) walks `SKILLS_ROOT` the way the first leg
  * walks `DOCS_ROOT`, last, after the READMEs.
  */
@@ -338,11 +346,6 @@ export const SCAN_SURFACE = Object.freeze([
     leg: `every ${PACKAGE_READMES.dir}/NAME/${PACKAGE_READMES.name}`,
     anchor: 'packages/plugin-dashboard/README.md',
     pages: (root) => packageReadmePages(root).map((abs) => toPosix(root, abs)),
-  }),
-  Object.freeze({
-    leg: `the root ${ROOT_PAGES.join(', ')}`,
-    anchor: 'README.md',
-    pages: (root) => ROOT_PAGES.filter((name) => existsSync(join(root, name))),
   }),
   Object.freeze({
     leg: `every ${SKILL_PAGE_EXTENSIONS.join(' / ')} page under ${SKILLS_ROOT}/`,

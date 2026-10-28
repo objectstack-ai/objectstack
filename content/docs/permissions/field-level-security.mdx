@@ -68,7 +68,10 @@ fields: {
   row under **When (edit)**, in the same CEL editor as the row-level security
   clauses, linted the same way; a condition the publish gate would refuse
   holds the save. Switching **Read** off clears the condition, and the
-  **Read all** / **Write all** shortcuts keep it.
+  **Read-only all** / **Write all** shortcuts keep it. A field row with no
+  rule shows the object's own Read / Edit in grey, marked as following the
+  object; a click or a shortcut writes a rule only for the boxes it changes,
+  and **Clear** returns the visible rows to the object grant.
 
 For an administrator's walk-through (the editor path, the matching metadata,
 and when a validation rule is the better tool), see the recipe

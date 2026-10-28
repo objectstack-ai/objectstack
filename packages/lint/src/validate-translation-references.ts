@@ -124,6 +124,12 @@
  * node, is pointed at `approvals.<node_id>.label` rather than told only that
  * the node is not a screen.
  *
+ * `hooks.<name>.refusals.<CODE>.message` (#26170) is judged against the hook's
+ * refusal catalogue: the hook must be one the stack defines (or a sibling
+ * package's, through the artifact carrier), and the code one its `refusals`
+ * declares — the body runner reads the key for a declared code and nothing
+ * else. An unknown hook and an undeclared code are each an orphan.
+ *
  * `flows.<name>.successMessage` / `.errorMessage` (#22507), the terminal
  * toasts, are judged against the flow itself: `translateFlow` overlays a toast
  * only where the flow AUTHORS one, so a translated toast over a flow that
@@ -511,6 +517,12 @@ interface Universe {
   dashboards: Map<string, { widgets: Set<string>; actions: Set<string> }>;
   /** Flow name (`Flow.name`) → its screen nodes and their declared fields. */
   flows: Map<string, FlowFacts>;
+  /**
+   * [#26170] Hook name (`Hook.name`) → the codes its refusal catalogue
+   * (`HookSchema.refusals`) declares — what a `hooks.<name>.refusals.<CODE>`
+   * key may name. Empty for a hook that declares no catalogue.
+   */
+  hooks: Map<string, Set<string>>;
   /** Object-less actions — the ones `globalActions.*` may name. */
   globalActions: Map<string, AnyRec>;
   /** Action name → owning object, so a misfiled `globalActions` key can say where it belongs. */
@@ -1645,6 +1657,25 @@ function buildUniverse(stack: AnyRec): Universe {
     collectFlowRecord(flow, { ownDeclaration: false });
   }
 
+  // ── Hooks: the refusal codes `hooks.<name>.refusals.<CODE>` may name (#26170) ──
+  //
+  // The body runner reads `hooks.<hook>.refusals.<CODE>.message` for a code the
+  // hook's catalogue declares, so the universe is each hook's declared codes.
+  // `hooks` carries disposition `concat` in `COMPOSE_KEY_DISPOSITIONS`, so a
+  // sibling package's hooks are read through the artifact carrier; the
+  // declaration this leg is JUDGING keeps the slot, the flows' decision.
+  const hooks = new Map<string, Set<string>>();
+  const collectHookRecord = (hook: AnyRec, { ownDeclaration }: { ownDeclaration: boolean }) => {
+    const hookName = strName(hook.name);
+    if (!hookName) return;
+    if (!ownDeclaration && hooks.has(hookName)) return;
+    hooks.set(hookName, new Set(Object.keys(asRecord(hook.refusals))));
+  };
+  for (const hook of recordsOf(stack.hooks)) collectHookRecord(hook, { ownDeclaration: true });
+  for (const hook of artifactProvidedRecords(stack, 'hooks')) {
+    collectHookRecord(hook, { ownDeclaration: false });
+  }
+
   // ── Picklists: the option values `picklists.<name>.options.<key>` may name (#23566) ──
   //
   // The runtime reads this face through `lookupPicklistOption`
@@ -1746,6 +1777,7 @@ function buildUniverse(stack: AnyRec): Universe {
     contributedOnlyApps,
     dashboards,
     flows,
+    hooks,
     globalActions,
     actionOwners,
     picklists,
@@ -2389,6 +2421,39 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
                   `node for, so the step keeps its source-locale label.` +
                   suggest(nodeId, flow.approvals),
             `Approval-step translations are keyed by the \`id\` of an \`approval\` node.`,
+          );
+        }
+      }
+
+      // ── hooks.<name>.refusals.<CODE> (#26170) ───────────────────────────
+      for (const [hookName, rawHook] of Object.entries(asRecord(rawData.hooks))) {
+        const hookPath = `${base}.hooks.${hookName}`;
+        const declared = universe.hooks.get(hookName);
+        if (!declared) {
+          orphan(
+            `${inLocale} · hook "${hookName}"`,
+            hookPath,
+            `Translations are keyed to hook "${hookName}", which this stack does not define, so its ` +
+              `refusals keep their declared messages.` +
+              suggest(hookName, universe.hooks.keys()),
+            `Match the key to a hook's \`name\`, or drop it.`,
+          );
+          continue;
+        }
+        if (!isRec(rawHook)) continue;
+        for (const code of Object.keys(asRecord(rawHook.refusals))) {
+          if (declared.has(code)) continue;
+          orphan(
+            `${inLocale} · hook "${hookName}" · refusal "${code}"`,
+            `${hookPath}.refusals.${code}`,
+            declared.size === 0
+              ? `Translations are keyed to refusal "${code}", but hook "${hookName}" declares no ` +
+                `\`refusals\`, so nothing resolves this key.`
+              : `Translations are keyed to refusal "${code}", a code hook "${hookName}" does not declare ` +
+                `under \`refusals\`, so nothing resolves this key.` +
+                suggest(code, declared),
+            `Refusal translations are keyed by a code the hook's \`refusals\` declares; declare it there, ` +
+              `or drop the key.`,
           );
         }
       }

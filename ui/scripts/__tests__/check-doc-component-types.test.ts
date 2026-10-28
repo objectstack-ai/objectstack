@@ -13,6 +13,7 @@ import {
   deriveRegistryKeys,
   PACKAGE_READMES,
   packageReadmePages,
+  ROOT_PAGES,
   scanDocs,
 } from '../check-doc-component-types.mjs';
 import { blank, scanSource } from '../js-comment-mask.mjs';
@@ -1875,44 +1876,46 @@ describe('objectui#5342 — the key errors the widened collector found stay fixe
  * example existed — four OBJUI-001 panels for anyone who copied the headline
  * snippet.
  *
- * ⚠️ Widening a scan surface is the change that can be GREEN ABOUT NOTHING, so
- * what is pinned here is the three ways it can quietly stop being real: the walk
- * stops reaching the file, the JUDGEMENT stops applying to what it finds there,
- * or the content regresses under a surface that still technically covers it.
- * The fourth — the name in `ROOT_PAGES` going dangling — is the one that would
- * look healthiest, since every count this gate prints stays plausible while the
- * surface shrinks back to what objectui#7115 found.
+ * objectstack#26080 folded that README into the repository's root README,
+ * outside this tree, and moved its examples — the flagship dashboard included —
+ * to `content/docs/guide/quick-start.md`, which the `DOCS_ROOT` walk reads.
+ * `ROOT_PAGES` is empty since. What objectui#7115 pinned still holds, on the
+ * page the examples now live on: the walk reaches it, the judgement applies to
+ * what it finds there, and the content does not regress.
  */
-describe('objectui#7115 — the root README is inside the scan surface', () => {
-  it('the walk really reaches it — the widening, pinned', () => {
+const QUICK_START = 'content/docs/guide/quick-start.md';
+
+describe('objectui#7115 — the root README examples stay inside the scan surface, on the quick-start page', () => {
+  it('the walk really reaches the page the examples moved to', () => {
     const { sites } = scanDocs(repoRoot);
     const files = new Set(sites.map((s: { file: string }) => s.file));
     expect(
-      files.has('README.md'),
-      'no `type` literal was scanned in the root README — the collector narrowed back to content/docs',
+      files.has(QUICK_START),
+      `no \`type\` literal was scanned in ${QUICK_START} — the examples objectui#7115 brought into the surface left it`,
     ).toBe(true);
   });
 
-  it('judges a root page by the same rule, so an unregistered type there is a finding', () => {
+  it('judges that page by the same rule, so an unregistered type there is a finding', () => {
     // The mechanism, over a throwaway tree: reaching the file and JUDGING it are
-    // two different things, and a widening that only did the first would pass
-    // the assertion above.
+    // two different things, and a walk that only did the first would pass the
+    // assertion above.
     const findings = withTree((write) => {
       write(
         'packages/demo/src/index.tsx',
         "ComponentRegistry.register('statistic', S, { namespace: 'ui' });\n",
       );
-      write('README.md', ['```json', '{ "type": "stat-card" }', '```'].join('\n'));
+      write(QUICK_START, ['```json', '{ "type": "stat-card" }', '```'].join('\n'));
     }, (dir) => analyze(dir, BARE).findings as Finding[]);
     expect(findings.map((f) => `${f.reason} :: ${f.site} :: ${f.value ?? ''}`)).toEqual([
-      'unregistered-doc-type :: README.md:2 :: stat-card',
+      `unregistered-doc-type :: ${QUICK_START}:2 :: stat-card`,
     ]);
   });
 
   it('the flagship dashboard example teaches `statistic`, and keeps its expressions', () => {
-    const readme = fs.readFileSync(path.join(repoRoot, 'README.md'), 'utf8');
-    expect(readme, 'the defect objectui#7115 was filed for is back').not.toContain('stat-card');
-    const widgets = readme.split('\n').filter((line) => line.includes('"type": "statistic"'));
+    const page = fs.readFileSync(path.join(repoRoot, QUICK_START), 'utf8');
+    expect(page, 'the defect objectui#7115 was filed for is back').not.toContain('stat-card');
+    const dashboard = page.slice(page.indexOf('### Dashboard'), page.indexOf('### Kanban Board'));
+    const widgets = dashboard.split('\n').filter((line) => line.includes('"type": "statistic"'));
     expect(widgets).toHaveLength(4);
     // A retarget, not a downgrade to literals: `statistic` declares a `value`
     // carriage row in the spec's expression map, which is precisely why the
@@ -1920,18 +1923,15 @@ describe('objectui#7115 — the root README is inside the scan surface', () => {
     for (const widget of widgets) expect(widget).toMatch(/"value": "\$\{stats\./);
   });
 
-  it('refuses to run when a ROOT_PAGES name does not resolve — the silent shrink', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'check-doc-component-types-rootpages-'));
-    try {
-      const run = spawnSync(process.execPath, [path.join(repoRoot, SCRIPT), '--root', dir], {
-        encoding: 'utf8',
-      });
-      expect(run.status, 'a dangling root page must fail the run, not shrink the surface').toBe(1);
-      expect(run.stderr).toContain('ROOT_PAGES');
-      expect(run.stderr).toContain('README.md');
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
+  it('keeps the guard that refuses a dangling ROOT_PAGES name, over an empty list', () => {
+    // The root README is gone, so there is no name left to dangle; the guard
+    // stays for the next page added at the root, and it is read off the CLI
+    // source because an empty list gives a run nothing to refuse.
+    expect([...ROOT_PAGES]).toEqual([]);
+    expect(fs.existsSync(path.join(repoRoot, 'README.md'))).toBe(false);
+    const source = fs.readFileSync(path.join(repoRoot, SCRIPT), 'utf8');
+    expect(source).toContain('for (const name of ROOT_PAGES) {');
+    expect(source).toContain('ROOT_PAGES names');
   });
 });
 
