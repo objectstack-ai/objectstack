@@ -419,6 +419,8 @@ import { emitMetaItemPublished, notifyMutationListenersLocal, publishMetadataMut
 import { hierarchyResolverMounted, orgWallEnforced, rlsMembershipResolverKeys, tenancyPostureInForce } from './protocol-authoring-posture-probes.js';
 // [#25467 cut 27] The automation service's flow reads: the stored-flow canonicalizer and the engine's registrations.
 import { flowRegistrationsOf, resolveFlowCanonicalizer, resolveFlowRegistrationReader } from './protocol-automation-flow-reads.js';
+// [#25467 cut 28] The code-datasource predicates: declared by an installed package, or registered by the host.
+import { isDeclaredCodeDatasource, isHostCodeDatasource } from './protocol-code-datasource-predicates.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -15673,18 +15675,13 @@ export class ObjectStackProtocolImplementation implements
      *    datasource stays creatable, editable and removable through this door.
      */
     private isDeclaredCodeDatasource(type: string, name: string): boolean {
-        if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'datasource') return false;
-        if (this.isHostCodeDatasource(type, name)) return true;
-        const registry = (this.engine as any)?.registry;
-        if (typeof registry?.getAllPackages !== 'function') return false;
-        for (const record of registry.getAllPackages() as unknown[]) {
-            const declared = (record as { manifest?: { datasources?: unknown } } | null | undefined)
-                ?.manifest?.datasources;
-            if (Array.isArray(declared) && declared.some((ds) => (ds as { name?: unknown } | null)?.name === name)) {
-                return true;
-            }
-        }
-        return false;
+        // [#25467 cut 28] The body moved to `protocol-code-datasource-predicates.ts` (see `CodeDatasourcePredicatesHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof isDeclaredCodeDatasource> = {
+            get engine() { return readEngine(); },
+            isHostCodeDatasource: (...a) => this.isHostCodeDatasource(...a),
+        };
+        return isDeclaredCodeDatasource.call(host, type, name);
     }
 
     /**
@@ -15695,9 +15692,12 @@ export class ObjectStackProtocolImplementation implements
      * those rows to that warning).
      */
     private isHostCodeDatasource(type: string, name: string): boolean {
-        if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'datasource') return false;
-        const hostCode = this.getServicesRegistry?.().get('code-datasource-names') as { has?: unknown } | undefined;
-        return typeof hostCode?.has === 'function' && (hostCode as { has(n: string): boolean }).has(name);
+        // [#25467 cut 28] The body moved to `protocol-code-datasource-predicates.ts` (see `CodeDatasourcePredicatesHost`).
+        const readGetServicesRegistry = () => this.getServicesRegistry;
+        const host: ThisParameterType<typeof isHostCodeDatasource> = {
+            get getServicesRegistry() { return readGetServicesRegistry(); },
+        };
+        return isHostCodeDatasource.call(host, type, name);
     }
 
     /**

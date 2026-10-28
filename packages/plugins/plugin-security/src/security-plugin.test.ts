@@ -3377,13 +3377,17 @@ describe('RLSCompiler — SQL→CEL deprecation bridge (ADR-0058 D1)', () => {
 });
 
 describe('SecurityPlugin – metadata-change cache invalidation', () => {
-  it('clears metadata-derived caches when metadata changes at runtime', async () => {
+  // [#26596, #26698] Driven through the protocol's `onMetadataMutation`, the
+  // signal every metadata authoring door emits. The rest of the subscription
+  // contract (drafts, `metadata:reloaded`, absence, `destroy()`) is pinned in
+  // `metadata-change-invalidation.test.ts`.
+  it('clears metadata-derived caches when a metadata mutation lands at runtime', async () => {
     const plugin = new SecurityPlugin();
-    let watchCb: (() => void) | undefined;
-    const metadata = {
-      watch: (_type: string, cb: () => void) => {
-        watchCb = cb;
-        return { unsubscribe: vi.fn() };
+    const listeners: Array<(evt: { type: string; name: string; state: string }) => void> = [];
+    const protocol = {
+      onMetadataMutation: (listener: (typeof listeners)[number]) => {
+        listeners.push(listener);
+        return () => {};
       },
     };
     const ctx: any = {
@@ -3392,7 +3396,8 @@ describe('SecurityPlugin – metadata-change cache invalidation', () => {
       hook: vi.fn(),
       getService: vi.fn().mockImplementation((name: string) => {
         if (name === 'manifest') return { register: vi.fn() };
-        if (name === 'metadata') return metadata;
+        if (name === 'metadata') return {};
+        if (name === 'protocol') return protocol;
         if (name === 'objectql') return { registerMiddleware: vi.fn() };
         return undefined;
       }),
@@ -3400,17 +3405,19 @@ describe('SecurityPlugin – metadata-change cache invalidation', () => {
     await plugin.init(ctx);
     await plugin.start(ctx);
 
-    expect(typeof watchCb).toBe('function');
+    expect(listeners.length).toBeGreaterThan(0);
 
     (plugin as any).fieldNamesCache.set('crm_account', new Set(['name']));
     (plugin as any).tenancyDisabledCache.set('crm_account', true);
     (plugin as any).cbpRelCache.set('crm_account', null);
+    (plugin as any).objectSecurityMetaCache.set('crm_account', { owdOpensRowWrites: false });
 
-    watchCb!();
+    for (const listener of listeners) listener({ type: 'object', name: 'crm_account', state: 'active' });
 
     expect((plugin as any).fieldNamesCache.size).toBe(0);
     expect((plugin as any).tenancyDisabledCache.size).toBe(0);
     expect((plugin as any).cbpRelCache.size).toBe(0);
+    expect((plugin as any).objectSecurityMetaCache.size).toBe(0);
   });
 });
 
