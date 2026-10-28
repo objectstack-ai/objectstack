@@ -2045,6 +2045,62 @@ describe('data.find() — canonical/legacy transport parameters (both copies)', 
         );
         expect(b.fetchMock).not.toHaveBeenCalled();
     });
+
+    /**
+     * A projection that names no field is refused before the request, on both
+     * copies — never dropped.
+     *
+     * An empty array is truthy, so `{ select: [] }` used to reach the wire as
+     * `?select=`, and the list door refused it with `400 VALIDATION_ERROR`
+     * after the round trip. Dropping the parameter instead would be worse: an
+     * absent projection reads every column, the widening the door refuses.
+     * The client now answers what the door would have answered — the same
+     * `code`, `httpStatus` and sentence (parity with the real door is pinned
+     * in `client.hono.test.ts`) — and sends nothing.
+     */
+    const EMPTY_PROJECTIONS: Record<string, { options: QueryOptions | QueryOptionsV2; wire: string }> = {
+        'legacy { select: [] }': { options: { select: [] }, wire: '' },
+        'canonical { fields: [] }': { options: { fields: [] }, wire: '' },
+        'legacy, every member blank': { options: { select: ['', ' '] }, wire: ', ' },
+        'canonical, every member blank': { options: { fields: [' '] }, wire: ' ' },
+    };
+
+    for (const [name, row] of Object.entries(EMPTY_PROJECTIONS)) {
+        it(`refuses an empty projection before any request on both copies: ${name}`, async () => {
+            const expected = {
+                code: 'VALIDATION_ERROR',
+                httpStatus: 400,
+                message: `Query parameter 'select' names no field; got ${JSON.stringify(row.wire)}. The query was not run: `
+                    + 'an empty projection was read as no projection, which answers every column. Name at least one '
+                    + 'field, or leave the parameter out to read every column.',
+            };
+
+            const a = createMockClient({ success: true, data: { object: 'task', records: [] } });
+            await expect(a.client.data.find('task', row.options)).rejects.toMatchObject(expected);
+            expect(a.fetchMock).not.toHaveBeenCalled();
+
+            const b = createMockClient({ success: true, data: { object: 'task', records: [] } });
+            await expect(b.client.environment('env-1').data.find('task', row.options)).rejects.toMatchObject(expected);
+            expect(b.fetchMock).not.toHaveBeenCalled();
+        });
+    }
+
+    it('still sends a projection that names at least one field, blank members and all, on both copies', async () => {
+        const body = { success: true, data: { object: 'task', records: [], total: 0 } };
+        for (const options of [{ select: ['a', 'b'] }, { fields: ['a', 'b'] }] as const) {
+            const a = createMockClient(body);
+            await a.client.data.find('task', options);
+            expect(queryOf(a.fetchMock.mock.calls[0][0] as string)).toBe('select=a%2Cb');
+            const b = createMockClient(body);
+            await b.client.environment('env-1').data.find('task', options);
+            expect(queryOf(b.fetchMock.mock.calls[0][0] as string)).toBe('select=a%2Cb');
+        }
+        // The door splits, trims and keeps the named members, so this one is
+        // served — the client sends it exactly as before.
+        const { direct, scoped } = await driveBoth({ select: ['a', ''] });
+        expect(direct).toBe('select=a%2C');
+        expect(scoped).toBe('select=a%2C');
+    });
 });
 
 describe('QueryBuilder — offset() alias', () => {

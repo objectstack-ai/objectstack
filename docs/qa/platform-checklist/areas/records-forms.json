@@ -1114,7 +1114,7 @@
       "title": "Grid-level conditional rules: row-scoped requiredWhen and parent-scoped readonlyWhen in the inline line-item grid",
       "since": "v16",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -1143,7 +1143,7 @@
         {
           "clause": "row-scoped requiredWhen flags the cell per row: only the row crossing quantity >= 100 is marked, and the batch save is blocked with a named cell error while its description is empty",
           "oracle": "dom",
-          "verify": "after screenshot, assert the required flag on row 1 and its absence on row 2; the blocked save shows the named cell error and NOTHING is written (pinned for the inline flag by objectui e2e/live/grid-conditional-rules.spec.ts). Note for the reader: the client still sends the one batch, and the server refuses it 400 (description / required) — that send is by design (recheck 6218243967 item 13), so score the refusal and the unchanged rows, never the absence of a request; the objectui pin asserts only the inline required flag",
+          "verify": "after screenshot, assert the required flag on row 1 and its absence on row 2; the blocked save shows the named cell error and NOTHING is written (pinned for the inline flag by ui/e2e/live/grid-conditional-rules.spec.ts). Note for the reader: the client still sends the one batch, and the server refuses it 400 (description / required) — that send is by design (recheck 6218243967 item 13), so score the refusal and the unchanged rows, never the absence of a request; that spec asserts only the inline required flag",
           "evidence": "screenshots + blocked save"
         },
         {
@@ -1242,6 +1242,12 @@
           "date": "2026-10-26",
           "change": "automated.ref, from Tier 1 run #25815 (6679644a, pin b41ed7f68956): (1) it no longer names the grid-file-upload spec dropped at revision 8, which a ref parser read as a pin; the drop and its reason stay in history revision 8. (2) It says both remaining pins are Playwright live specs that score only in a browser run against a booted stack, and only the halves named. fixtures.knownGaps[0], the objectui-pinned-automation note, said the objectui specs live in a separate repo and none exist here; they are under ui/ in this checkout since the import, so it says where they resolve and how they run (devx seat 2's direction, carried for #26035). Re-read on main cc378e93. No clause changed",
           "ref": "#25846"
+        },
+        {
+          "revision": 10,
+          "date": "2026-10-27",
+          "change": "acceptance[0].verify: the live spec is named by its ui/ path and no longer called the objectui pin (#26626, maintainer-directed). No clause changed, no status changed",
+          "ref": "#26626"
         }
       ]
     },
@@ -1863,7 +1869,7 @@
       "title": "CSV import: GBK decode, required-field hint, legacy-fallback notice",
       "since": "v16",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -1880,7 +1886,7 @@
         ]
       },
       "steps": [
-        "run the pinned unit suites (they feed real GBK bytes and assert the exact decode, the disabled-Next hint, and the visible degrade notice): pnpm exec vitest run packages/plugin-grid/src/importParsers.test.ts packages/plugin-grid/src/__tests__/importMissingRequiredHint.test.tsx packages/plugin-grid/src/__tests__/importLegacyReferenceGuard.test.tsx — with cwd ui/, the objectui tree's root in this checkout (the .objectui-sha pin is retired: the console builds from ui/ at the framework commit, so the run cites that commit). ⛔ Not `pnpm --filter @object-ui/plugin-grid exec vitest run src/…`: the vitest invocation guard (ui/scripts/vitest-invocation-guard.mjs) refuses a package-cwd run, which would otherwise silently execute the wrong suite (objectui#3378)",
+        "run the pinned unit suites (they feed real GBK bytes and assert the exact decode, the disabled-Next hint, and the visible degrade notice): pnpm exec vitest run packages/plugin-grid/src/importParsers.test.ts packages/plugin-grid/src/__tests__/importMissingRequiredHint.test.tsx packages/plugin-grid/src/__tests__/importLegacyReferenceGuard.test.tsx — with cwd ui/, the objectui tree's root in this checkout (the console builds from ui/ at the framework commit, so the run cites that commit). ⛔ Not `pnpm --filter @object-ui/plugin-grid exec vitest run src/…`: the vitest invocation guard (ui/scripts/vitest-invocation-guard.mjs) refuses a package-cwd run, which would otherwise silently execute the wrong suite (objectui#3378)",
         "capture the suite output as the primary evidence (the native file-picker hand-off is deliberately not browser-automated)",
         "optionally spot-check visually: open the import wizard on showcase_contact, load a GBK CSV past the native picker, and screenshot the decoded preview",
         "in the spot-check, map columns while leaving a required field (name) unmapped; observe the Next control and its hint",
@@ -1970,6 +1976,12 @@
           "date": "2026-10-27",
           "change": "automated.ref names the dogfood pin for acceptance[3]'s server half and negative[1] at the import door (#26573 slice 3). No clause changed",
           "ref": "#26573"
+        },
+        {
+          "revision": 9,
+          "date": "2026-10-27",
+          "change": "steps[0]: the retired pin-file aside dropped; the step already runs the suites from ui/ at the framework commit (#26626, maintainer-directed). No clause changed, no status changed",
+          "ref": "#26626"
         }
       ]
     },
@@ -2315,7 +2327,7 @@
       "title": "Gantt is interactive, not a picture: drag persists, locked tasks survive auto-schedule, host veto restores",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -2327,7 +2339,7 @@
           "the task gantt view (task.view.ts 'Schedule (Gantt)': startDateField/endDateField/titleField/progressField)"
         ],
         "knownGaps": [
-          "the stock task gantt view (examples/app-showcase/src/ui/views/task.view.ts, listViews.gantt) declares NO dependenciesField / lockField / parentField, so the auto-schedule, locked-task and subtree-drag surfaces are unreachable LIVE on stock fixtures. ⚠ All three ARE GanttConfig keys (packages/spec/src/ui/view.zod.ts#GanttConfigSchema). QA run #21782 read `lockField` as no spec key; that is wrong, so the variants need no re-point. The objectui pins `automated` names per clause are component-layer evidence for A2 and A3, never their pass (RUNNER rule 6): those api clauses are scored from live row reads. The one sub-leg no pin reaches is a DIRECT drag on a locked LEAF bar: GanttView.tsx returns from the drag start for a locked task, but only the summary-drag and link-drop locked cases are unit-pinned. It needs the view extended live, with lockField pointing at a boolean on showcase_task such as `done` (a view overlay or a scratch copy). That recipe is not run-proven, so score the sub-leg blocked(fixture) until a run proves it. Re-confirmed by QA run #23163 (objectstack 36b2889c, objectui 1fb1ced36243): the stock view still declares no lockField, and no pin reaches the direct leaf drag. The nearest pin, GanttView.tree.test.tsx ('omits drag/resize/progress handles and the dependency dot on a locked bar'), proves a locked leaf loses its resize grips and link dot, NOT that dragging its body writes nothing, so it does not score the sub-leg either",
+          "the stock task gantt view (examples/app-showcase/src/ui/views/task.view.ts, listViews.gantt) declares NO dependenciesField / lockField / parentField, so the auto-schedule, locked-task and subtree-drag surfaces are unreachable LIVE on stock fixtures. ⚠ All three ARE GanttConfig keys (packages/spec/src/ui/view.zod.ts#GanttConfigSchema). QA run #21782 read `lockField` as no spec key; that is wrong, so the variants need no re-point. The unit pins `automated` names per clause (under ui/packages/plugin-gantt/src) are component-layer evidence for A2 and A3, never their pass (RUNNER rule 6): those api clauses are scored from live row reads. The one sub-leg no pin reaches is a DIRECT drag on a locked LEAF bar: GanttView.tsx returns from the drag start for a locked task, but only the summary-drag and link-drop locked cases are unit-pinned. It needs the view extended live, with lockField pointing at a boolean on showcase_task such as `done` (a view overlay or a scratch copy). That recipe is not run-proven, so score the sub-leg blocked(fixture) until a run proves it. Re-confirmed by QA run #23163 (objectstack 36b2889c, objectui 1fb1ced36243): the stock view still declares no lockField, and no pin reaches the direct leaf drag. The nearest pin, GanttView.tree.test.tsx ('omits drag/resize/progress handles and the dependency dot on a locked bar'), proves a locked leaf loses its resize grips and link dot, NOT that dragging its body writes nothing, so it does not score the sub-leg either",
           "AUTOMATION LIVES IN THE objectui TREE, WHICH IS ui/ IN THIS CHECKOUT — `automated.ref` names objectui specs exclusively, by objectui-relative paths that resolve under ui/ (a unit suite at ui/packages/…, a Playwright spec at ui/e2e/…). They run from that tree: a unit suite with cwd ui/ (pnpm exec vitest run FILE), a live spec only against a booted stack serving a console built by pnpm console:build. Drive the item by hand in the browser and score it as a manual run, OR run the pin from ui/ and cite its output naming the framework commit it ran at. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact, whose 'none of those specs exist here' predates the ui/ import."
         ]
       },
@@ -2423,6 +2435,12 @@
           "date": "2026-10-26",
           "change": "From Tier 1 run #25815 (6679644a, pin b41ed7f68956), re-read in ui/packages/plugin-gantt on main cc378e93. (1) automated.ref and knownGaps[0] scored acceptance[1] and [2] from component and unit cases that stop at the component's update callback; those clauses' oracle is api, so the cases are now named as evidence of their layer only. (2) The ref named objectui 0abd4f9f8769 for the mapping while the run pinned b41ed7f68956; it now says the cases are present at both. fixtures.knownGaps[1], the objectui-pinned-automation note, said the objectui specs live in a separate repo and none exist here; they are under ui/ in this checkout since the import, so it says where they resolve and how they run (devx seat 2's direction, carried for #26035). Re-read on main cc378e93. No clause changed",
           "ref": "#25846"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-27",
+          "change": "fixtures.knownGaps[0]: the per-clause unit pins are located under ui/packages/plugin-gantt/src instead of called objectui pins (#26626, maintainer-directed). Measured objectui revisions kept. No clause changed, no status changed",
+          "ref": "#26626"
         }
       ]
     },
@@ -2494,7 +2512,7 @@
       "title": "Dirty forms guard ACCIDENTAL closes: the X / Escape / backdrop prompt on a dirty form, the footer Cancel discards without a prompt by design, save proceeds, nothing is lost silently",
       "since": "v15",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -2530,7 +2548,7 @@
         {
           "clause": "the guard's behavior is pinned by the existing unit suite",
           "oracle": "test",
-          "verify": "with cwd ui/, the objectui tree's root in this checkout (the console builds from ui/ at the framework commit; the .objectui-sha pin is retired): pnpm exec vitest run packages/plugin-form/src/discardGuard.test.tsx. The file holds 11 it() cases on main at cc378e93: the X close, the footer Cancel and the pristine paths for ModalForm and DrawerForm, plus the beforeunload guard. QA run #23163's 14/14 was counted on another tree, so cite the count the run's own tree reports. No case drives Escape or a backdrop click, so acceptance[0]'s and negative[0]'s Escape and backdrop legs are driven by hand. ⛔ Not `pnpm --filter @object-ui/plugin-form exec vitest run src/discardGuard.test.tsx`: the vitest invocation guard (ui/scripts/vitest-invocation-guard.mjs) refuses a run whose cwd is inside a package, because the root config's project globs resolve against the cwd and such a run would silently execute the wrong suite (objectui#3378)",
+          "verify": "with cwd ui/, the objectui tree's root in this checkout (the console builds from ui/ at the framework commit): pnpm exec vitest run packages/plugin-form/src/discardGuard.test.tsx. The file holds 11 it() cases on main at cc378e93: the X close, the footer Cancel and the pristine paths for ModalForm and DrawerForm, plus the beforeunload guard. QA run #23163's 14/14 was counted on another tree, so cite the count the run's own tree reports. No case drives Escape or a backdrop click, so acceptance[0]'s and negative[0]'s Escape and backdrop legs are driven by hand. ⛔ Not `pnpm --filter @object-ui/plugin-form exec vitest run src/discardGuard.test.tsx`: the vitest invocation guard (ui/scripts/vitest-invocation-guard.mjs) refuses a run whose cwd is inside a package, because the root config's project globs resolve against the cwd and such a run would silently execute the wrong suite (objectui#3378)",
           "evidence": "test output"
         }
       ],
@@ -2578,6 +2596,12 @@
           "date": "2026-10-27",
           "change": "automated.ref says what the unit suite holds and why the rest stays a live leg: every clause needs a browser to drive the guard's exit, acceptance[1]'s re-read included (#26573 Done-when). No clause changed",
           "ref": "#26573"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-27",
+          "change": "acceptance[2].verify: the retired pin-file aside dropped; the verify already runs the suite from ui/ at the framework commit (#26626, maintainer-directed). No clause changed, no status changed",
+          "ref": "#26626"
         }
       ]
     },
@@ -3011,7 +3035,7 @@
       "title": "Record discussion: an @mention comment reconciles optimistically, persists to sys_comment, interleaves with activity, pings the mentioned user's bell — and the feed filter shows exactly each mode's subset without dropping author-extended activity",
       "since": "v16",
       "status": "active",
-      "revision": 11,
+      "revision": 12,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -3048,7 +3072,7 @@
         "RE-THREAD (UPDATE-SIDE) FEEDS_DISABLED probe — take the sys_comment row posted earlier against the feeds-ENABLED record and PATCH /api/v1/data/sys_comment/<its id> with { thread_id: 'qafeeds_nofeeds:<the throwaway record id>' } as admin, capturing the refusal. This is the UPDATE half of the #10170 gate (enforceFeedsCapability registered on beforeUpdate as well as beforeInsert, packages/plugins/plugin-audit/src/audit-writers.ts): re-read the comment afterward and confirm its thread_id is UNCHANGED",
         "control for both probes — repeat the same two calls against a feeds-ENABLED parent (the seeded showcase record used above) and confirm they SUCCEED. A 403 that also fires on the enabled parent is measuring access, not the capability gate, and neither clause may be scored from it",
         "FEED FILTER — on a record whose feed now holds at least one comment (posted above) and one field-change activity (the attributable edit above), cycle the filter control through all four FeedFilterMode values, screenshotting each state before reading the rendered rows",
-        "OPEN-VOCABULARY probe — plant an author-EXTENDED activity type: sys_activity narrows apiMethods to ['get','list'] (sys-activity.object.ts), so a direct POST is refused BY DESIGN — the sanctioned channel is a scratch object declaring activityMilestones[].type with a custom value (ADR-0052 §5b.2, forwarded verbatim) whose milestone the run then triggers; if that authoring is unavailable on the boot under test, score the clause from the objectui pin (recordActivityFeed.test.ts) and record the substitution",
+        "OPEN-VOCABULARY probe — plant an author-EXTENDED activity type: sys_activity narrows apiMethods to ['get','list'] (sys-activity.object.ts), so a direct POST is refused BY DESIGN — the sanctioned channel is a scratch object declaring activityMilestones[].type with a custom value (ADR-0052 §5b.2, forwarded verbatim) whose milestone the run then triggers; if that authoring is unavailable on the boot under test, score the clause from the unit pin ui/packages/plugin-detail/src/renderers/__tests__/recordActivityFeed.test.ts and record the substitution",
         "RECIPIENT READ GATE (acceptance[9]) — on a stock `single` boot with fixtures.requires[2]. The stock boot's audience posture is invite_only, so POST /api/v1/auth/sign-up/email answers 403 SELF_REGISTRATION_CLOSED: the admin mints the member with POST /api/v1/auth/admin/create-user (it lands in the default organization with mustChangePassword true), and the member signs in, calls POST /api/v1/auth/change-password and signs in again. First prove the member's access as the member (GET /api/v1/data/showcase_private_note/ID answers 404, GET /api/v1/data/showcase_account/ID answers 200) and read the member's and the admin's GET /api/v1/notifications. As admin, POST /api/v1/data/sys_comment on the note's thread (thread_id 'showcase_private_note:ID') with mentions naming the member by user id, then a second comment there naming the member by email, then one on the account's thread naming the member by user id and the admin itself. Re-read both inboxes and count the rows of type collab.mention per comment (each row's body is the comment's preview). WALLED LEG, on the group-posture boot of fixtures.requires[2] (#26625), as the seeded admin, the platform owner: (1) POST /api/v1/auth/sign-in/email and keep the session's activeOrganizationId, organization A; (2) POST /api/v1/auth/organization/create {name: 'QA Mention Org B', slug: a fresh one per run} → organization B, then POST /api/v1/auth/organization/set-active {organizationId: B}; (3) POST /api/v1/auth/admin/create-user {email, password, name} → the user lands in B as member with mustChangePassword true; (4) grant the user read on sys_comment: POST /api/v1/packages {manifest: {id: 'com.objectstack.qamention.walled', name: 'QA walled mention fixture', version: '1.0.0', type: 'app', namespace: 'qamention'}, enableOnInstall: true} (201), PUT /api/v1/meta/permission/qamention_comment_reader?package=com.objectstack.qamention.walled {name: 'qamention_comment_reader', label: 'QA mention comment reader', objects: {sys_comment: {allowRead: true}}} (200, saved env-wide), POST /api/v1/data/sys_user_permission_set {user_id, permission_set: 'qamention_comment_reader'} (201); (5) the user signs in, calls POST /api/v1/auth/change-password, signs in again, and proves the grant: GET /api/v1/data/sys_comment answers 200; (6) CONTROL in B: as admin, POST /api/v1/data/showcase_account {name} (organization_id B), confirm the user reads it (200), then POST /api/v1/data/sys_comment on its thread with mentions naming the user by id: the user's inbox gains exactly one collab.mention whose actionUrl names that account. A control that gains nothing means the user cannot read comments and the leg below measures nothing; (7) set-active A, POST /api/v1/data/showcase_account {name} (organization_id A), confirm the user's read of it answers 404 RECORD_NOT_FOUND, then post one comment on its thread naming the user by id and one naming them by email; (8) re-read the user's and the admin's inboxes: no new collab.mention for either comment, and the boot log carries '[audit] mention notification withheld' with reason cannot_read_source, the user id and each comment's id. Teardown: stop the boot (--fresh discards its DB; no repo file is touched)"
       ],
       "acceptance": [
@@ -3220,6 +3244,12 @@
           "date": "2026-10-27",
           "change": "acceptance[9]'s walled leg is written out (#26625, maintainer-directed 「补测试数据配方。立卡」). steps[13] now carries the literal walled sequence, fixtures.requires[2] names the group-posture boot and its three variables, and knownGaps[2] says the leg is driven live. The sequence lives on the item because fixtures.provisioning takes one recipe, and this item already uses qa-feeds-disabled. The mention target holds sys_comment read through a scratch permission set (namespace qamention). No showcase set grants it, and a minted member was refused 403 PERMISSION_DENIED and withheld cannot_read_thread. Re-driven once on a group-posture boot at main 1708115e2f: acceptance[9] walled leg PASS. The control mention on organization B's account notified the user (one collab.mention, actionUrl /showcase_account/ID). The user's read of organization A's account answered 404. Both mentions on that account, by id and by email, were withheld cannot_read_source, and neither inbox gained a row. automated.ref's last sentence no longer says the leg waits on #26625 (folded at the seat's request). No clause changed",
           "ref": "#26625"
+        },
+        {
+          "revision": 12,
+          "date": "2026-10-27",
+          "change": "steps[12]: the substitute unit pin is named by its ui/ path instead of as the objectui pin (#26626, maintainer-directed). No clause changed, no status changed",
+          "ref": "#26626"
         }
       ]
     },
@@ -4545,7 +4575,7 @@
       "title": "fieldGroups[].visibleWhen section predicate: both spellings accepted, the parse normalizes to the envelope, retired visibleOn refused with the located prescription, derivation carries it verbatim — the console gates the section on the form AND the detail page (objectui#11630 fixed)",
       "since": "v17",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -4593,7 +4623,7 @@
         {
           "clause": "the console renders the derived section GATED — the whole 'Pro details' section, header included, absent while kind=basic and appearing LIVE when kind flips to pro, on form and detail alike. At objectui 1fb1ced36243 both halves hold: plugin-form fieldGroups.ts copies visibleWhen onto the derived form section, and the detail page references the group (`{ group }`) so record:details evaluates its visibleWhen per record (objectui#11630, fixed). A section rendered ungated on EITHER page is now a FAIL — a regression, not the known defect. Read the adapters at the running build's revision, or observe the gating itself, before scoring either half",
           "oracle": "dom",
-          "verify": "screenshots of both kind states on form and detail, after settle; plus the console revision consulted (stale-console-bundle discipline) — on both pages the section gates live. objectui pins the detail half in packages/plugin-detail/src/renderers/__tests__/record-details.groupVisibleWhen-11630.test.tsx ('record:details evaluates a group's visibleWhen exactly as the form does'); run it with cwd ui/ in this checkout (pnpm exec vitest run packages/plugin-detail/src/renderers/__tests__/record-details.groupVisibleWhen-11630.test.tsx) to cite it beside the live read",
+          "verify": "screenshots of both kind states on form and detail, after settle; plus the console revision consulted (stale-console-bundle discipline) — on both pages the section gates live. ui/packages/plugin-detail/src/renderers/__tests__/record-details.groupVisibleWhen-11630.test.tsx pins the detail half ('record:details evaluates a group's visibleWhen exactly as the form does'); run it with cwd ui/ in this checkout (pnpm exec vitest run packages/plugin-detail/src/renderers/__tests__/record-details.groupVisibleWhen-11630.test.tsx) to cite it beside the live read",
           "evidence": "the four screenshots + the console revision/adapter reading the verdict rests on"
         },
         {
@@ -4669,6 +4699,12 @@
           "date": "2026-10-27",
           "change": "steps[1] names the scratch package and DECLARES its namespace (manifest id com.objectstack.qa.group, namespace 'qagroup'), and the scratch object is renamed qa_group_gate → qagroup_group_gate in fixtures.knownGaps[0], steps[1], steps[5] and acceptance[0].verify (#26876, the triage sweep of the qa-feeds-disabled pattern this step reuses). Replayed on a fresh stock showcase boot at main a51ba639 (REST only): with no namespace the install derived 'group' from the id and the object save answered 422 NAMESPACE_PREFIX, so the item's carrier could not be authored as written. Not 'qa': qa-scratch-authz's package owns it, and a second 'qa' install answers 422 NAMESPACE_CONFLICT. With 'qagroup', beside the qa, qamedia and qafeeds recipe packages on one boot (no collision), the install answered 201, the active PUT 200, the GET read fieldGroups[0].visibleWhen back as the bare string authored and highlightFields ['kind'], the visibleOn draft answered 422 INVALID_METADATA (fieldGroups.0 unrecognized_keys), a record POST 201, and the teardown DELETE 200. No clause's assertion or oracle changed",
           "ref": "#26876"
+        },
+        {
+          "revision": 9,
+          "date": "2026-10-27",
+          "change": "acceptance[3].verify: the detail-half unit pin is named by its ui/ path instead of as an objectui pin (#26626, maintainer-directed). No clause changed, no status changed",
+          "ref": "#26626"
         }
       ]
     },
@@ -5895,7 +5931,7 @@
       "title": "Defaults that changed meaning on v18 (ADR-0087 D3 18.* entries): an omitted list-view page size is 50 (was 25), an omitted editInline means editable in place, an autonumber with no `unique` is unique per organization, and a field-heavy form opens as a bounded modal on desktop",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -5911,7 +5947,7 @@
           "the console bundle for the browser legs — see knownGaps"
         ],
         "knownGaps": [
-          "STALE (QA runs #24558, #24616): the console those runs pinned (.objectui-sha 4016370af3c9, a pin since retired) built against current spec, so the browser clauses ran — they are no longer blocked(environment). The console now builds from this checkout's ui/ tree (pnpm console:build), with no pin to drift from"
+          "STALE (QA runs #24558, #24616): the console those runs used (built from objectui revision 4016370af3c9, before the console moved into this tree) built against current spec, so the browser clauses ran — they are no longer blocked(environment). The console now builds from this checkout's ui/ tree (pnpm console:build), with no pin to drift from"
         ]
       },
       "steps": [
@@ -5984,6 +6020,12 @@
           "date": "2026-10-27",
           "change": "automated.ref says the spec pins hold acceptance[0] and that acceptance[1]–[3] stay live browser legs, and why (#26573 Done-when). No clause changed",
           "ref": "#26573"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-27",
+          "change": "fixtures.knownGaps[0]: the retired pin-file name dropped; the measured objectui revision 4016370af3c9 kept (#26626, maintainer-directed). No clause changed, no status changed",
+          "ref": "#26626"
         }
       ]
     }

@@ -4,6 +4,7 @@
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0015](./0015-external-datasource-federation.md) (open mechanism / enterprise lifecycle split), [ADR-0018](./0018-unified-node-action-registry.md) (`connector_action` baseline dispatch + `engine.registerConnector()`), [ADR-0022](./0022-connectors-vs-messaging-channels.md) (Connector = transport/integration mechanism; not the messaging-semantic layer)
 **Consumers**: `@objectstack/spec` (`integration/connector.zod.ts`), `@objectstack/service-automation` (connector registry on the engine), `@objectstack/runtime` (the `GET /api/v1/automation/connectors` discovery route), new `@objectstack/connector-openapi`, the Studio flow palette
+**Amended by**: [ADR-0143](./0143-outbound-connector-auth-is-open-tier.md) (2026-10-27) — §4's managed-OAuth2 row moves to the open tier; see the note under §4.
 
 ---
 
@@ -115,6 +116,13 @@ The generator runs when the plugin is constructed (boot) or offline via a CLI th
 | Curated/marketplace connector catalog, paid premium specs | **enterprise** |
 
 A spec that declares OAuth2 is still importable open-source — we generate the actions and let the caller inject a static bearer token; the *managed* OAuth refresh is the enterprise line, exactly as ADR-0022 drew it for Slack.
+
+> **Amendment note (2026-10-27, ADR-0143).** The "Managed OAuth2 (authorize + token refresh) …
+> per-tenant connection lifecycle" row is reversed: outbound connector auth is open tier. The
+> generator gains the matching inputs: an `oauth2` `securitySchemes` entry is mapped rather than
+> left for the caller to replace with a static bearer token, and a declarative instance may also
+> declare an `app-credential` or `signed` auth kind. The vault backend and the curated / paid
+> catalog row keep this record's placement. Every other decision here stands.
 
 ### 5. Anti-patterns this rules out
 

@@ -51,8 +51,9 @@
  * `page`, the spec's default. Since objectui#11293 `useNavigationOverlay` hands
  * a `page` click it has no `onNavigate` for to the record navigator the HOST
  * publishes (`RelatedRecordActionsContext.openRecord` — the seam the grid's
- * link column already reads), so on a calendar under such a host `page` and a
- * mode-less block both open the record page. The rows mount that host and
+ * link column already reads), so on a calendar under such a host `page` opens
+ * the record page. (A mode-less block did too until objectstack#26677 moved
+ * the spec's default to `drawer`; it now opens the drawer.) The rows mount that host and
  * assert the call; the `drawer` row beside them is the lit control, and a
  * parent view's `onRowClick` still takes a non-overlay click before the host.
  * One row keeps the description's remaining claim: with NO host navigator
@@ -211,7 +212,8 @@ describe('object-calendar `navigation` members decide the event click (objectui#
 
   // objectui#11168 slice 5: the description says `openNewTab: true` outranks
   // every mode except `none`. These rows hold both halves of that sentence.
-  it.each(['drawer', 'modal', 'split', 'popover'] as const)(
+  // `drawer` is the one overlay mode left (objectstack#26677).
+  it.each(['drawer'] as const)(
     '`openNewTab: true` OUTRANKS the overlay mode `%s`: a new tab, and no overlay',
     async (mode) => {
       const { open } = await clickEvent({ mode, openNewTab: true });
@@ -290,15 +292,15 @@ describe('`page` opens the record page through the host\'s record navigator (obj
     expect(open).not.toHaveBeenCalled();
   });
 
-  it('a block WITHOUT `mode` resolves to `page` — and navigates the same way', async () => {
-    // `size` alone, written to widen the default drawer, takes the spec's
-    // `page` default rather than the calendar's `drawer`; it now opens the
-    // record page instead of silencing the click.
+  it('a block WITHOUT `mode` takes the spec\'s `drawer` default — it opens the drawer and does NOT navigate (objectstack#26677)', async () => {
+    // `size` alone, written to widen the default drawer, took the spec's
+    // `page` default until objectstack#26677 and opened the record page here.
+    // The spec's default is now `drawer`, the calendar's own, so the same block
+    // opens the record in the drawer and the host navigator is never called.
     const { value, openRecord } = recordNavigatorHost();
     const { open } = await clickEvent({ size: 'lg' }, {}, value);
-    await waitFor(() => expect(openRecord).toHaveBeenCalledTimes(1));
-    expect(openRecord).toHaveBeenCalledWith(OBJECT, '1');
-    expect(dialog()).toBeNull();
+    await waitFor(() => expect(dialog()).not.toBeNull());
+    expect(openRecord).not.toHaveBeenCalled();
     expect(open).not.toHaveBeenCalled();
   });
 

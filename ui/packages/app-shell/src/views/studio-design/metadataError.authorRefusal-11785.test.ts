@@ -25,6 +25,14 @@ import {
 } from './metadataError';
 import { t, tFormat } from '../metadata-admin/i18n';
 
+// The `engine.studio.*` rows this suite reads in zh live in `@object-ui/i18n`'s
+// `studio` namespace, whose `zh` catalogue is fetched on demand
+// (objectstack#25922). Resident before any case: this file runs in the `unit`
+// project, whose shared module graph would otherwise let it pass only when
+// another file had loaded `zh` first.
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+await loadStudioCatalogue('zh');
+
 /** Text an author cannot act on: a class or package name, a tracker id, a raw path, code quotes. */
 const DEVELOPER_TEXT = /MetadataClient|@objectstack|objectstack#|objectui#|`|fields\.|nodes\.\d|navigation\.\d/;
 

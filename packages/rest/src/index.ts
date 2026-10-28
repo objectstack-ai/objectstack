@@ -81,6 +81,11 @@ export { assertFilterParamSuppliedOnce, refuseRepeatedQueryParams, repeatedQuery
 // invitation preview) — the same reason `repeatedQueryParamMessage` travels.
 export { unknownQueryParamRefusalMessage } from './query-allowlist.js';
 
+// [#26898] The closed set of `GET /data/:object/:id` (#7606), published so the
+// runtime dispatcher's twin asks THIS set rather than a copy of it: both hosts
+// refuse a name outside it with the one sentence above.
+export { DATA_RECORD_READ_PARAMS } from './rest-server.js';
+
 // [#20193] THE per-caller read gate of one `/meta/:type/:name` document — the
 // ADR-0046 §6.7 docs audience, the app nav filter (`requiredPermissions`, the
 // ADR-0045 §3 publish gate, the docs-audience entry arm) and the ADR-0057 D10

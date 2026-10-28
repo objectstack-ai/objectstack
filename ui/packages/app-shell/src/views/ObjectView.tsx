@@ -44,6 +44,7 @@ import { IdentityImportOptions, IdentityImportResultExtra, identityImportFields 
 import { ManagedUsersInviteLine } from './managedEnvironmentUsers.js';
 import { importTargetFields } from './importTargetFields.js';
 import { resolveViewId } from '../utils/resolveViewId.js';
+import { readRecordOpenPreference } from '../utils/recordOpenPreference.js';
 import { defaultListViewId, viewRowId } from '../utils/viewIdentity.js';
 import { useObjectActions } from '../hooks/useObjectActions.js';
 import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
@@ -712,6 +713,12 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
 
     // objectstack#25992 slice 6: the record navigation overlay (drawer state in the
     // URL, row click, expand to page, record links) moved to `./objectViewRecordNavigation.ts`.
+    // objectstack#26677 — the side-by-side pane is a READER's preference, not a
+    // `navigation.mode` (`split` left the spec). Read once per mount; the
+    // Display-menu control that writes it is objectstack#26681. It applies only
+    // to a record that opens in the drawer: an object that declares `page`
+    // (or `new_window` / `none`) keeps its declaration.
+    const [recordOpenPreference] = useState(readRecordOpenPreference);
     const { listRecordActions, navOverlay, handleDrawerClose, handleRowClick, handleExpandDrawer } = useObjectViewRecordNavigation({
         activeView,
         objectDef,
@@ -728,6 +735,9 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         unlabelledViewText,
         language,
     });
+    // The split face draws the drawer's own record beside the list: same URL
+    // state (`?recordId=`), same close, a different shell.
+    const opensBesideList = recordOpenPreference === 'split' && navOverlay.mode === 'drawer';
 
     // objectstack#25992 slice 8: the `filter[...]` URL equality filters and the `uf_*`
     // user-filter selections moved to `./objectViewListUrlState.ts`.
@@ -1007,9 +1017,11 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
 
              {/* 2. Content — Plugin ObjectView with ViewSwitcher + Filter + Sort */}
              <div className="flex-1 overflow-hidden relative flex flex-row">
-                {navOverlay.mode === 'split' && navOverlay.isOpen ? (
+                {opensBesideList && navOverlay.isOpen ? (
                     <NavigationOverlay
                         {...navOverlay}
+                        mode="split"
+                        close={handleDrawerClose}
                         setIsOpen={(open: boolean) => { if (!open) handleDrawerClose(); }}
                         title={objectLabel(objectDef)}
                         onExpand={handleExpandDrawer}
@@ -1129,8 +1141,8 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                 />
              </div>
 
-             {/* Record Detail Overlay — navigation mode driven by objectDef.navigation */}
-             {navOverlay.mode !== 'split' && (
+             {/* Record Detail Overlay — the drawer, unless the reader prefers the pane beside the list */}
+             {!opensBesideList && (
              /* objectstack#25992 slice 10: the overlay moved to `./objectViewRecordOverlay.tsx`. */
              <ObjectViewRecordOverlay
                  navOverlay={navOverlay}

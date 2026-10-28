@@ -351,18 +351,17 @@ const schema: ObjectCalendarSchema = {
     colorField: 'statusColor'
   },
   defaultView: 'month',
-  navigation: { mode: 'modal' }   // what an event click opens - see below
+    navigation: { mode: 'drawer' }  // what an event click opens - see below
 };
 ```
 
 `navigation` is what an event click opens — the spec's `NavigationConfig` by
 reference, `ViewNavigationConfig` in `@object-ui/types`, the type
-`ObjectGridSchema.navigation` uses: `mode` (`page`, `drawer`, `modal`, `split`,
-`popover`, `new_window` or `none`) with `size`, `openNewTab` and
-`preventNavigation`. With the key absent a click opens the record in a drawer.
-An overlay mode keeps the click from a parent view's `onRowClick` /
-`onEventClick`; any other mode hands it to them. `page` — and a block written
-without `mode`, which takes the spec's `page` default — opens the record page
+`ObjectGridSchema.navigation` uses: `mode` (`drawer`, `page`, `new_window`
+or `none`) with `size`, `openNewTab` and `preventNavigation`. With the key absent a click opens the record in a drawer.
+The drawer keeps the click from a parent view's `onRowClick` /
+`onEventClick`; any other mode hands it to them. A block written without `mode`
+takes the spec's `drawer` default. `page` opens the record page
 through the record navigator the host publishes on `RelatedRecordActionsContext`
 (objectui#11293); the console publishes one on its custom pages, record pages and
 list views. Under a host that publishes none, such as an embedded renderer,

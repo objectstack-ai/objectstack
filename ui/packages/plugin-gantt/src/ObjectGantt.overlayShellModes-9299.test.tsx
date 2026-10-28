@@ -34,6 +34,15 @@
  * component RESOLVED, and a pass-through recorder on both shells reporting
  * what crossed the handoff. They used to DISAGREE, and the disagreement was
  * the defect. They agree now, and that agreement is the repair.
+ *
+ * ⚠️ objectstack#26677 retired `modal`, `split` and `popover` from the spec's
+ * `NavigationMode` (an object opens its records in the drawer, which expands
+ * to the full page; a side-by-side pane is a reader's own preference), and
+ * with them the shell faces and the anchor this file pinned. The rows are
+ * FLIPPED, not deleted: `drawer` is still resolved and received exactly as
+ * before, and a retired mode that reaches the renderer past the parse (an
+ * authored one is refused there, a stored one converted) now opens NO shell.
+ * The `split` (item 2) and `popover` (item 3) rows went with their faces.
  */
 
 import React from 'react';
@@ -57,7 +66,6 @@ const shellLog = vi.hoisted(() => ({
     mode: unknown;
     carriesMode: boolean;
     hasMainContent: boolean;
-    anchor: unknown;
     storageKey: unknown;
     legacyStorageKey: unknown;
   }>,
@@ -90,7 +98,6 @@ vi.mock('@object-ui/plugin-detail', async (importOriginal) => {
         mode: props?.mode,
         carriesMode: props != null && 'mode' in props,
         hasMainContent: false,
-        anchor: undefined,
         storageKey: undefined,
         legacyStorageKey: undefined,
       });
@@ -111,7 +118,6 @@ vi.mock('@object-ui/components', async (importOriginal) => {
         mode: props?.mode,
         carriesMode: props != null && 'mode' in props,
         hasMainContent: props?.mainContent != null,
-        anchor: props?.popoverAnchorRef,
         storageKey: props?.storageKey,
         legacyStorageKey: props?.legacyStorageKey,
       });
@@ -189,7 +195,7 @@ const BASE: Record<string, any> = {
  * Mount the real `ObjectGantt` with one authored mode, click the task so a
  * record is really selected, and hand back both readings for that mount.
  */
-async function readingsFor(mode: string) {
+async function readingsFor(mode: string, expectShell = true) {
   cleanup();
   hookLog.calls = [];
   shellLog.entries = [];
@@ -200,14 +206,18 @@ async function readingsFor(mode: string) {
   );
   const task = await screen.findByTestId('gv-task-1');
   fireEvent.click(task);
-  await waitFor(() => expect(shellLog.entries.length).toBeGreaterThan(0));
+  if (expectShell) await waitFor(() => expect(shellLog.entries.length).toBeGreaterThan(0));
+  else await new Promise((settle) => setTimeout(settle, 50));
   return {
     resolved: hookLog.calls[hookLog.calls.length - 1],
     boundary: shellLog.entries[shellLog.entries.length - 1],
   };
 }
 
-const OVERLAY_MODES = ['drawer', 'modal', 'split', 'popover'] as const;
+/** `drawer` is the one overlay mode the spec keeps (objectstack#26677). */
+const OVERLAY_MODES = ['drawer'] as const;
+/** The members objectstack#26677 retired: a stale one opens NO shell. */
+const RETIRED_MODES = ['modal', 'split', 'popover'] as const;
 
 beforeEach(() => {
   hookLog.calls = [];
@@ -230,7 +240,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('objectui#9299 — `ObjectGantt` honours all four overlay modes through the shared shell', () => {
+describe('objectui#9299 — `ObjectGantt` honours the drawer through the shared shell (objectstack#26677)', () => {
   it('LIT CONTROL: both instruments fire on a single mount', async () => {
     // First, because every assertion below reads a captured value. A recorder
     // that never fired would make "the shell received `modal`" vacuously
@@ -261,59 +271,17 @@ describe('objectui#9299 — `ObjectGantt` honours all four overlay modes through
     }
   });
 
-  it('⭐ THE REPAIR READING: four authored modes produce FOUR distinct boundary pairs', async () => {
-    // The measurement round read ONE pair here, against the `ObjectTree`
-    // control's four. Both numbers are four now.
-    const pairs: string[] = [];
-    const resolvedModes: string[] = [];
-    for (const mode of OVERLAY_MODES) {
-      const r = await readingsFor(mode);
-      pairs.push(`${r.boundary.shell}:${String(r.boundary.mode)}`);
-      resolvedModes.push(r.resolved.mode);
+  it('⭐ objectstack#26677: a RETIRED mode reaching the renderer past the parse opens NO shell — the drawer is the one overlay', async () => {
+    // This row used to read FOUR distinct boundary pairs, one per authored
+    // overlay mode. `modal`, `split` and `popover` left the spec: an authored
+    // one is refused at parse and a stored one converted, so one arrives here
+    // only past a cast — and the renderer then draws no overlay at all. The
+    // LIT CONTROL above is the same mount under `drawer`, which draws one.
+    for (const mode of RETIRED_MODES) {
+      const r = await readingsFor(mode, false);
+      expect(r.resolved?.isOverlay, mode).toBe(false);
+      expect(shellLog.entries.filter((e) => e.shell === 'NavigationOverlay'), mode).toEqual([]);
     }
-    expect(new Set(resolvedModes).size).toBe(4);
-    expect(new Set(pairs).size).toBe(4);
-    expect(pairs).toEqual([
-      'NavigationOverlay:drawer',
-      'NavigationOverlay:modal',
-      'NavigationOverlay:split',
-      'NavigationOverlay:popover',
-    ]);
-  });
-
-  it('item 2 — `split` is handed this renderer\'s own view as `mainContent`, and renders it', async () => {
-    // The shell's split branch opens `if (!isOpen || !mainContent) return
-    // null`, so a renderer that passes no `mainContent` renders NOTHING for an
-    // authored `split`. Both halves are read: the prop crossed, and the view is
-    // still on screen beside the record panel.
-    //
-    // ⭐ The CLOSED state is pinned too, and not here — it is pinned by
-    // `readingsFor` itself, which finds and clicks an element of the view
-    // BEFORE anything is open. A renderer that enters its split path on the
-    // authored MODE alone renders nothing until a record is selected, and
-    // nothing can be selected because there is no view to click; that reads
-    // here as "unable to find" on every `split` case rather than as a failed
-    // assertion. It is not hypothetical — `ObjectGrid` did exactly that, and
-    // this file is what caught it.
-    await readingsFor('split');
-    const split = shellLog.entries.filter((e) => e.mode === 'split');
-    expect(split.length).toBeGreaterThan(0);
-    expect(split[split.length - 1].hasMainContent).toBe(true);
-    expect(await screen.findByTestId('gantt-view')).toBeInTheDocument();
-  });
-
-  it('item 3 — `popover` is handed the clicked element, so the Dialog fallback is unreachable', async () => {
-    // The shell falls back to a compact `Dialog` only when it is given neither
-    // `popoverTrigger` nor `popoverAnchorRef`; the ruling forbids any of the
-    // five from reaching that after this card. The ref's CONTENTS are read too
-    // — a ref handed down empty would satisfy the branch while anchoring the
-    // popover to nothing.
-    await readingsFor('popover');
-    const pop = shellLog.entries.filter((e) => e.mode === 'popover');
-    expect(pop.length).toBeGreaterThan(0);
-    const anchor = pop[pop.length - 1].anchor as { current: unknown } | undefined;
-    expect(anchor, 'popoverAnchorRef').toBeTruthy();
-    expect(anchor!.current, 'the element the user clicked').toBeInstanceOf(HTMLElement);
   });
 
   it('item 4 — the shell is handed both width keys, so an existing width carries over', async () => {

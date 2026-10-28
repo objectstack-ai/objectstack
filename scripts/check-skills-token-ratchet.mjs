@@ -507,7 +507,32 @@ export const CEILINGS = new Map([
   // bytes, so the priced text is 23924 -> 23985 bytes -> 5997 tokens, ceiling
   // +16, pinned AT the measurement. Same ruling, same arithmetic rule as above.
   //   ceil(($(wc -c < skills/objectstack-platform/SKILL.md) - 20) / 4) == ceil(23985 / 4)
-  ['skills/objectstack-platform/SKILL.md', 5997],
+  // 5997 -> 6014 (card #26764, the follow-up PR #26763 owed this file): the
+  // Demo accounts example names a line manager (`manager`, another entry's
+  // `email`) and the prose says what the key does — the development boot
+  // writes `manager_id` itself once every account exists and keeps one set by
+  // hand, so no seed hook writes it; a display name, an address no entry has,
+  // the entry itself or a loop is refused at load. Triage 6448202744 ordered
+  // the room made inside the package; the spec seat's note 6445537040 names
+  // the payment path, the standing ruling on this row
+  // 「A:先削重复,余额按实测提高」. PAID DOWN FIRST — three restatements cut, each
+  // rule keeping its other home in the file: the sample refusal output under
+  // the phantom-key sentence (the sentence stays — `check:skill-top-level-keys`
+  // quotes it as the page's contract — and the "Refused" posture bullet says
+  // the top level refuses and names the key), the "bad platform default"
+  // bullet (the "fix is upstream" bullet of the same list), and the
+  // driver-wiring parenthetical "(memory in dev, SQL in prod)" (step 4 of
+  // the boot sequence and the drivers table). The `sys_metadata` clause of
+  // the config-generation sentence was cut too and then restored on the
+  // seat's review: its only other home is references/plugin-development.md,
+  // a different reader from one generating objectstack.config.ts. Arithmetic
+  // in bytes: on `origin/main` the priced text was 23980 bytes (5995 tokens,
+  // headroom 2); the cuts remove 257 and the addition is 332, so the LANDED
+  // priced text is 24055 bytes -> 6014 tokens: the 2 tokens of headroom are
+  // absorbed and the ceiling moves 5997 -> 6014 (+17), the measured
+  // remainder only. Pinned AT the measurement.
+  //   ceil(($(wc -c < skills/objectstack-platform/SKILL.md) - 20) / 4) == ceil(24055 / 4)
+  ['skills/objectstack-platform/SKILL.md', 6014],
   // `skills/objectstack-pm-dispatch/SKILL.md` (9708) and its
   // `rules/dev-template.md` (1838) left this table on 2026-09-10 with the files:
   // the maintainer deleted the published PM skill whole (verbatim:
@@ -949,7 +974,21 @@ export const CEILINGS = new Map([
   // file is 5831 -> 5873 bytes -> 1469 tokens, ceiling +11, pinned AT the
   // measurement.
   //   ceil($(wc -c < skills/objectstack-platform/evals/config-plugins-ops.json) / 4) == ceil(5873 / 4)
-  ['skills/objectstack-platform/evals/config-plugins-ops.json', 1469],
+  // 1469 -> 1690 (card #26764, the eval the SKILL.md row above was paid with):
+  // one case for a demo account that reports to another — expected
+  // `manager: '<the other entry's email>'` on the subordinate's `demoStaff`
+  // entry and nothing else, `os dev` writing `manager_id` itself; NO seed row
+  // or hook writing `manager_id`, NO `reportsTo` alias. Triage 6448202744
+  // (room inside the package first) and the spec seat's note 6445537040 (the
+  // standing ruling, tap A verbatim: 「A:先削重复,余额按实测提高」). PAID DOWN
+  // FIRST: the file's seven fixtures share no sentence, so there was no
+  // duplicate to cut (0 bytes) and the remainder is the whole addition. On
+  // `origin/main` the file was 5873 bytes (1469 tokens, headroom 0); the
+  // fixture adds +885 bytes, so the LANDED file is 6758 bytes -> 1690 tokens,
+  // ceiling +221, pinned AT the measurement. The raising PR's body carries
+  // the same arithmetic.
+  //   ceil($(wc -c < skills/objectstack-platform/evals/config-plugins-ops.json) / 4) == ceil(6758 / 4)
+  ['skills/objectstack-platform/evals/config-plugins-ops.json', 1690],
   // 955 -> 1175: one regression case for the now-anchored comparand (the
   // overdue-by-grace-days prompt) — expected `{ $now: true, addDays: { $field:
   // 'grace_days_offset' } }` as the whole comparand of `$lt`, and NO stored
