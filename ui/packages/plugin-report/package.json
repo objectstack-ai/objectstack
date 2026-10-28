@@ -35,8 +35,10 @@
     "@object-ui/core": "workspace:*",
     "@object-ui/fields": "workspace:*",
     "@object-ui/i18n": "workspace:*",
+    "@object-ui/permissions": "workspace:*",
     "@object-ui/react": "workspace:*",
     "@object-ui/types": "workspace:*",
+    "exceljs": "^4.4.0",
     "lucide-react": "^1.43.0"
   },
   "peerDependencies": {
