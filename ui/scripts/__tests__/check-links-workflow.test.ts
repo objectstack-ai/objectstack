@@ -65,7 +65,11 @@ const liveRoot = workspaceRoot();
 const liveLycheeConfigPath = path.join(liveRoot, 'lychee.toml');
 const checkLinksWorkflowPath = path.join(liveRoot, '.github/workflows/check-links.yml');
 
-/** The lychee argv `check-links.yml` declares once in `env.LYCHEE_ARGS`, one token per entry. */
+/**
+ * The lychee argv `check-links.yml` declares once in `env.LYCHEE_ARGS`, one
+ * token per entry. A `${{ … }}` expression is collapsed to one token first
+ * (`${{github.workspace}}/content`), so its inner spaces do not split it.
+ */
 function lycheeArgs(): string[] {
   const lines = fs.readFileSync(checkLinksWorkflowPath, 'utf8').split('\n');
   const start = lines.findIndex((line) => /^\s*LYCHEE_ARGS:\s*>-\s*$/.test(line));
@@ -76,7 +80,11 @@ function lycheeArgs(): string[] {
     if (line.trim() !== '' && /^\s*/.exec(line)![0].length <= indent) break;
     block.push(line.trim());
   }
-  return block.join(' ').split(/\s+/).filter(Boolean);
+  return block
+    .join(' ')
+    .replace(/\$\{\{\s*([^}]*?)\s*\}\}/g, (_, expr: string) => `\${{${expr}}}`)
+    .split(/\s+/)
+    .filter(Boolean);
 }
 
 /**
@@ -249,7 +257,7 @@ describe('check-links — site-absolute routes are resolved against the content 
 
     const rootDir = value('--root-dir');
     expect(rootDir, 'check-links.yml must pass --root-dir, or site-absolute links are hard errors').toBeDefined();
-    const workspace = '${{ github.workspace }}/';
+    const workspace = '${{github.workspace}}/';
     expect(rootDir!.startsWith(workspace), '--root-dir must be absolute, i.e. anchored on the workspace').toBe(true);
     const rel = rootDir!.slice(workspace.length);
     expect(fs.existsSync(path.join(liveRoot, rel, 'docs')), `--root-dir ${rel} must be the tree \`/docs/...\` routes live under`).toBe(true);
