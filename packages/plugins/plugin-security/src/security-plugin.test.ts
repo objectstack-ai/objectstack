@@ -2230,7 +2230,7 @@ describe('SecurityPlugin', () => {
         await expect(updateAdmitted(harness)).resolves.toBe(false);
       });
 
-      it('leaves nothing behind: no write epoch advanced, the caller\'s context unstamped, no executor run', async () => {
+      it('leaves nothing behind: no write epoch advanced, the caller\'s context unstamped', async () => {
         const { plugin, harness } = await bootRows({ inWriteScope: true });
         const epoch = (plugin as any).epoch;
         const bump = vi.spyOn(epoch, 'bump');
