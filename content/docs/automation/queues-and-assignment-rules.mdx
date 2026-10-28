@@ -146,7 +146,7 @@ In the Console both pickers list the declared queues and the organization's own 
 
 ## A queue is not a messaging audience
 
-A queue routes **records** to people. It is not an address for **messages**: a flow's `notify` audience grammar (`user:`, `role:`, `team:`, `owner_of:`) has no `queue:` selector, so "tell the queue that something new arrived" cannot be written as a queue. Address the people who staff it instead — the team, or the users holding the position the queue's members name — and remember that `owner_of:` on a parked record reaches nobody, because nobody owns it yet.
+A queue routes **records** to people. It is not an address for **messages**: a flow's `notify` audience selectors (`user:`, `team:`, `owner_of:` and the rest) include no `queue:`, so "tell the queue that something new arrived" cannot be written as a queue. Address the people who staff it instead — the team, or the users holding the position the queue's members name — and remember that `owner_of:` on a parked record reaches nobody, because nobody owns it yet.
 
 ## Checklist
 
