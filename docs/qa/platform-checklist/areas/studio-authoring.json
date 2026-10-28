@@ -1908,7 +1908,7 @@
       "title": "The metadata save door runs the build's authoring rules on v18 — a page with an unknown component prop, a page with both details and tabs slots, a second default record page, a chart list view with no dataset, an object predicate that does not compile, a `protection` block or a lock change, and a non-http(s) URL target are each refused 4xx at PUT (drafts still admitted where the rule says so)",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1923,7 +1923,7 @@
       },
       "steps": [
         "PUT /api/v1/meta/page/qa_props_page with a page:header block carrying properties.titel",
-        "PUT a record page with both slots.details and slots.tabs",
+        "PUT a record page with slots.tabs (the retired slot)",
         "PUT a second isDefault:true record page for showcase_task",
         "PUT /api/v1/meta/view/showcase_task.qa_chart_view as a chart list view with no dataset binding",
         "PUT an object with an option visibleWhen reading `parent` and a validation condition `sqrt(record.amount)`; then the same with ?mode=draft",
@@ -1940,7 +1940,7 @@
         {
           "clause": "each refused body answers 422 INVALID_METADATA (400 VALIDATION_ERROR for protection / _lock*, 422 DEFAULT_RECORD_PAGE_CONFLICT naming both pages) with the located path — and the rule id where the refusal comes from an authoring lint rule (the component-props and object-predicate refusals) — and a read-back shows nothing stored",
           "oracle": "api",
-          "verify": "status + code + path per PUT, and the rule id on the lint-rule refusals; GET afterwards. The spec-schema refusals (the slots pair, the chart binding, the action URL target) carry the located path and zod code 'custom' with no `rule` key (e.g. packages/spec/src/ui/page.zod.ts checkPageSlotPair), and protection / _lock* and DEFAULT_RECORD_PAGE_CONFLICT carry their error code: a missing rule id on those is the shipped shape, not a FAIL (QA run #24558; the pins assert path and code only)",
+          "verify": "status + code + path per PUT, and the rule id on the lint-rule refusals; GET afterwards. The spec-schema refusals (the retired tabs slot, the chart binding, the action URL target) carry the located path with no `rule` key — zod code 'invalid_type' for the retired slot (packages/spec/src/ui/page.zod.ts PAGE_SLOTS_TABS_RETIRED) and 'custom' for the other two — and protection / _lock* and DEFAULT_RECORD_PAGE_CONFLICT carry their error code: a missing rule id on those is the shipped shape, not a FAIL (QA run #24558; the pins assert path and code only)",
           "evidence": "one line per PUT"
         },
         {
@@ -1961,12 +1961,12 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/metadata-protocol/src/protocol.runtime-authoring-gate.test.ts + packages/metadata-protocol/src/protocol.save-door-protection.test.ts + packages/metadata-protocol/src/protocol.save-door-lock-family.test.ts + packages/objectql/src/default-record-page-save-door.test.ts + packages/spec/src/ui/page-slot-pair.test.ts + packages/rest/src/meta-view-chart-binding.test.ts + packages/lint/src/runtime-gate.object-option-visibility-writes.test.ts + packages/lint/src/validate-component-props-url-target.test.ts. These score acceptance[0] (oracle test) only: none of the eight boots HTTP — metadata-protocol saveMetaItem, objectql, spec and lint units and a RestServer unit — so acceptance[1]-[3] and negative[0], whose oracle is the live door, stay the run's"
+        "ref": "packages/metadata-protocol/src/protocol.runtime-authoring-gate.test.ts + packages/metadata-protocol/src/protocol.save-door-protection.test.ts + packages/metadata-protocol/src/protocol.save-door-lock-family.test.ts + packages/objectql/src/default-record-page-save-door.test.ts + packages/spec/src/ui/page-slots-tabs-retirement.test.ts + packages/rest/src/meta-view-chart-binding.test.ts + packages/lint/src/runtime-gate.object-option-visibility-writes.test.ts + packages/lint/src/validate-component-props-url-target.test.ts. These score acceptance[0] (oracle test) only: none of the eight boots HTTP — metadata-protocol saveMetaItem, objectql, spec and lint units and a RestServer unit — so acceptance[1]-[3] and negative[0], whose oracle is the live door, stay the run's"
       },
       "source": [
         "packages/metadata-protocol/src/runtime-authoring-gate.ts",
         "packages/metadata-protocol/src/protocol.ts#protectionBlockRefusal",
-        "packages/spec/src/ui/page.zod.ts#checkPageSlotPair",
+        "packages/spec/src/ui/page.zod.ts#PAGE_SLOTS_TABS_RETIRED",
         "packages/spec/src/ui/view.zod.ts#checkListViewChartBinding",
         "packages/lint/src/validate-expressions.ts#validateStackExpressions",
         "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 23388-page-component-rules-runtime-door, 23357-page-component-view-data-api-refused, 23332-page-action-row-operation, 23427-page-action-row-declarative-update-rules, 23096-save-door-protection, 23119-save-door-lock-envelope, 23015-one-default-record-page-per-object, 22568-page-slots-details-beside-tabs-refused, 22491-chart-list-view-binds-a-dataset, 22157-option-visible-when-parent, 22274-option-visible-when-members, 22394-option-visible-when-evaluser-members, 22019-object-save-door-formula-verdict, 22019-objectql-formula-fault-log, 22032-object-save-door-action-predicates, 22032-object-save-door-field-rule-slots, 22032-object-save-door-option-visible-when, 22032-object-save-door-validation-predicates, 22042-nested-validation-predicate-verdict, 23010-url-action-target-scheme-set, 23077-url-target-doors-scheme-set, 23103-page-action-row-on-success-and-executor, 23168-page-action-row-name-leg-url-target, 23168-page-action-row-on-success-beside-executor"
@@ -1989,6 +1989,12 @@
           "date": "2026-10-26",
           "change": "automated.ref says its pins score acceptance[0] only (checklist-accuracy finding a1-a3/n0 of QA run #25815, release-18.2.0-tier1 at 6679644a, objectui pin b41ed7f68956; wave anchor #25807): none of the eight pins boots HTTP (metadata-protocol saveMetaItem, objectql, spec, lint units and a RestServer unit), so the api clauses stay the run's. The clauses are unchanged",
           "ref": "#25848"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-28",
+          "change": "steps[1], acceptance[1].verify, automated.ref and source follow the record page's retired tabs slot (#27053): the slots.details + slots.tabs pair check left with the slot, so the step now PUTs a page authoring slots.tabs, which the spec refuses at slots.tabs with zod code 'invalid_type' and the retirement prescription; its pin is packages/spec/src/ui/page-slots-tabs-retirement.test.ts. The clauses are unchanged",
+          "ref": "#27053"
         }
       ]
     },

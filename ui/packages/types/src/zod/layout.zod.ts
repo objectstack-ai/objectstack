@@ -27,7 +27,6 @@ import {
   checkPageRecordBindingPlacement,
   checkPageRegionPlacement,
   checkPageRequiresKind,
-  checkPageSlotPair,
   checkPageSourceCompleteness,
 } from '@objectstack/spec/ui';
 import { BaseSchema, SchemaNodeSchema, specFieldsExcept } from './base.zod.js';
@@ -1355,10 +1354,6 @@ export const PageNodeSchema = BaseSchema.extend(SpecPageFields.shape).extend({
   //  - `requires` is refused at `requires` on a page whose `kind` the platform
   //    does not compile at save — anything but `html`, an absent `kind`
   //    included (`checkPageRequiresKind`, objectstack#21459, the spec's 17.7.0);
-  //  - a page that authors both `slots.details` and `slots.tabs` is refused at
-  //    `slots.details`, because the `tabs` slot replaces the strip the details
-  //    body lives in (`checkPageSlotPair`, objectstack#22568, the spec's 18;
-  //    attached by objectui#12030);
   //  - on a `kind: 'full'` page, a region whose `name` the page's `template`
   //    does not place, or a second region for a slot already filled, is
   //    refused at `regions.N.name` (`checkPageRegionPlacement`, the spec's
@@ -1378,8 +1373,10 @@ export const PageNodeSchema = BaseSchema.extend(SpecPageFields.shape).extend({
   //    this node's own {@link PageNodeRegionSchema} carries with the same
   //    meaning: `page.tsx` places `main` by its lowercased `name` and reads its
   //    `width` only for `'full'`.
-  // The checks listed above are attached as-is: the first three read `kind`,
-  // `source`, `requires` and `slots`, which this node carries by reference —
+  // (`checkPageSlotPair`, the `details` + `tabs` slot pair refusal attached by
+  // objectui#12030, left the spec with the `tabs` slot, objectstack#27053.)
+  // The checks listed above are attached as-is: the first two read `kind`,
+  // `source` and `requires`, which this node carries by reference —
   // none is in {@link PAGE_SPEC_EXCLUDED} nor overridden above.
   // The page-parse judge of a view-data component's retired `api` binding is no
   // longer among them: objectstack#23784 removed it from the spec, which now
@@ -1402,7 +1399,6 @@ export const PageNodeSchema = BaseSchema.extend(SpecPageFields.shape).extend({
   // check the spec adds to `PageSchema` later reddens there.
   .superRefine(checkPageSourceCompleteness)
   .superRefine(checkPageRequiresKind)
-  .superRefine(checkPageSlotPair)
   .superRefine(checkPageRegionPlacement)
   .superRefine(checkPageMainRegionWidth);
 
@@ -1453,9 +1449,8 @@ const { type: _pageNodeTypeLiteral, ...PAGE_NODE_MEMBERS } = PageNodeSchema.shap
  * takes the spec's `PageSchema` fields by reference through
  * {@link SpecPageFields}. Its four refusals (`actions`, `breadcrumbs`,
  * `maxWidth`, `padding`), the `body` refusal and the spec's attachable
- * object-level checks (`source`, `requires` by `kind`, the `details` /
- * `tabs` slot pair, region placement by `template`, and the `main` region's
- * `width`) come with it. The spec's `isDefault` placement check and its
+ * object-level checks (`source`, `requires` by `kind`, region placement by
+ * `template`, and the `main` region's `width`) come with it. The spec's `isDefault` placement check and its
  * `record` binding placement check are attached here only: each reads the page
  * kind from `type`, which this node carries and the `page` node does not. `regions` stays the node's own
  * {@link PageNodeRegionSchema}, so each region component is judged by this
@@ -1467,7 +1462,7 @@ const { type: _pageNodeTypeLiteral, ...PAGE_NODE_MEMBERS } = PageNodeSchema.shap
 export const PageKindNodeSchema: PageKindNodeSchemaType = BaseSchema.extend({
   ...PAGE_NODE_MEMBERS,
   type: PAGE_KIND_NODE_TYPE.describe('The spec page kind — `record`, `home` or `utility` (`@objectstack/spec` `PageTypeSchema`)'),
-}).superRefine(checkPageSourceCompleteness).superRefine(checkPageRequiresKind).superRefine(checkPageSlotPair)
+}).superRefine(checkPageSourceCompleteness).superRefine(checkPageRequiresKind)
   .superRefine(checkPageRegionPlacement)
   .superRefine(checkPageMainRegionWidth)
   // On this node `type` is the spec page kind, the field the spec's

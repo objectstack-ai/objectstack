@@ -223,7 +223,7 @@ describe('§1 the ruled subset converts to the exact rule array', () => {
         {
           name: 'probe',
           slots: {
-            tabs: {
+            details: {
               type: 'page:tabs',
               properties: {
                 items: [
@@ -238,7 +238,7 @@ describe('§1 the ruled subset converts to the exact rule array', () => {
         },
       ],
     });
-    const slot = ((stack.pages as Dict[])[0]!.slots as Dict).tabs as Dict;
+    const slot = ((stack.pages as Dict[])[0]!.slots as Dict).details as Dict;
     const nested = (((slot.properties as Dict).items as Dict[])[0]!.children as Dict[])[0]!;
     expect((nested.properties as Dict).filter).toEqual([{ field: 'a', operator: 'equals', value: 1 }]);
   });

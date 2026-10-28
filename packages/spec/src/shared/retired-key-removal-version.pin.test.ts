@@ -462,6 +462,15 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
       'template',
     ),
   ],
+  // The slotted page's `tabs` slot, tombstoned in the slot map; the page is
+  // otherwise complete, so `slots` is the only issue path.
+  'page-slots-tabs-removed': [
+    refusal(
+      'a slotted page authoring slots.tabs',
+      () => PageSchema.safeParse({ name: 'lead_detail_page', label: 'Lead', type: 'record', object: 'crm_lead', kind: 'slotted', regions: [], slots: { tabs: { type: 'page:tabs' } } }),
+      'slots',
+    ),
+  ],
   // #23543 F3: a loose `config` key under a sibling-block node type, refused by
   // the flow parse; the node's block is complete, so the key is the only issue.
   'flow-node-wait-event-config-lift': [
