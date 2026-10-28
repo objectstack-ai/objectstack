@@ -16,7 +16,7 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import type { ObjectFormSchema, FormField, FormSchema, DataSource } from '@object-ui/types';
 import { SchemaRenderer, useSafeFieldLabel } from '@object-ui/react';
-import { pickLocalized, useObjectTranslation } from '@object-ui/i18n';
+import { pickLocalized, useObjectTranslation, useLocalization } from '@object-ui/i18n';
 import { useRecordInvalidation } from './recordInvalidation';
 import { mapFieldTypeToFormType, buildValidationRules, formatFileSize, fieldHelpText } from '@object-ui/fields';
 import { useIsMobile, toast } from '@object-ui/components';
@@ -1270,13 +1270,16 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
   // the create-mode `required` suppression (#4069), so seeding and validation
   // cannot disagree about which mode this form is in.
   const isCreateForm = isCreateFormMode(schema);
+  // ADR-0144 D8 rule 4 — the organization currency a record-currency code
+  // field opens on in create mode.
+  const { currency: homeCurrency } = useLocalization();
   // [#5683] `currentUserId` lets the one client-resolvable token
   // (`current_user`) pre-fill with the id the server would stamp anyway;
   // null/unloaded seeds nothing and keeps the omit-and-let-the-engine-resolve
   // contract above.
   const schemaDefaults = React.useMemo(
-    () => (isCreateForm ? schemaDefaultValues(objectSchema, { currentUserId: perms.userId }) : {}),
-    [objectSchema, isCreateForm, perms.userId],
+    () => (isCreateForm ? schemaDefaultValues(objectSchema, { currentUserId: perms.userId, homeCurrency }) : {}),
+    [objectSchema, isCreateForm, perms.userId, homeCurrency],
   );
 
   // What the form OPENS with: the seeded defaults, overlaid with the caller's

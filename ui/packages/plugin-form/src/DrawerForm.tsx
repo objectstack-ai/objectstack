@@ -37,7 +37,7 @@ import {
 import { Loader2 } from 'lucide-react';
 
 import { SchemaRenderer, useSafeFieldLabel, usePreviewMode } from '@object-ui/react';
-import { createSafeTranslation } from '@object-ui/i18n';
+import { createSafeTranslation, useLocalization } from '@object-ui/i18n';
 import { MasterDetailForm } from './MasterDetailForm';
 import { buildSectionFields as buildSectionFieldsShared } from './sectionFields';
 import { buildFlatFields } from './flatFields';
@@ -253,6 +253,9 @@ const DrawerFormBody: React.FC<DrawerFormProps> = ({
   const { fieldLabel, sectionLabel } = useSafeFieldLabel();
   const perms = usePermissions();
   const { userId: currentUserId } = perms;
+  // ADR-0144 D8 rule 4 — the organization currency a record-currency code
+  // field opens on in create mode.
+  const { currency: homeCurrency } = useLocalization();
   const { t } = useDiscardTranslation();
   // Upload-in-flight gate (objectui#10166): Save is refused, disabled and
   // EXPLAINED while a file/image widget below is still uploading.
@@ -405,7 +408,7 @@ const DrawerFormBody: React.FC<DrawerFormProps> = ({
         // Declared static defaults are this form's opening values (#4047) —
         // see `schemaDefaults` for the create-only boundary and for why
         // runtime defaults are left to the server.
-        setFormData(seedCreateValues(objectSchema, resolveInitialRecord(schema), { currentUserId }));
+        setFormData(seedCreateValues(objectSchema, resolveInitialRecord(schema), { currentUserId, homeCurrency }));
         // Not a read, so no earlier record read's failure describes the form.
         run.commit();
         setLoading(false);

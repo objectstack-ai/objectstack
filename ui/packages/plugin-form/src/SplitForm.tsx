@@ -26,6 +26,7 @@
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import type { FormField, FormSchema, DataSource, ObjectFormSchema, ObjectFormSection } from '@object-ui/types';
 import { cn, toast } from '@object-ui/components';
+import { useLocalization } from '@object-ui/i18n';
 import { SchemaRenderer, useSafeFieldLabel } from '@object-ui/react';
 import { buildSectionFields as buildSectionFieldsShared } from './sectionFields';
 import { seedCreateValues } from './schemaDefaults';
@@ -182,6 +183,9 @@ export const SplitForm: React.FC<SplitFormProps> = ({
   const { t } = useFormChromeTranslation();
   const perms = usePermissions();
   const { userId: currentUserId } = perms;
+  // ADR-0144 D8 rule 4 — the organization currency a record-currency code
+  // field opens on in create mode.
+  const { currency: homeCurrency } = useLocalization();
   // Upload-in-flight gate (objectui#10166): a `file`/`image` value is only its
   // fileId once the presigned upload settles, so a save during that window
   // stored the record WITHOUT the attachment and reported success.
@@ -270,7 +274,7 @@ export const SplitForm: React.FC<SplitFormProps> = ({
         // Declared static defaults are this form's opening values (#4047) —
         // see `schemaDefaults` for the create-only boundary and for why
         // runtime defaults are left to the server.
-        setFormData(seedCreateValues(objectSchema, resolveInitialRecord(schema), { currentUserId }));
+        setFormData(seedCreateValues(objectSchema, resolveInitialRecord(schema), { currentUserId, homeCurrency }));
         // Not a read, so no earlier record read's failure describes the form.
         run.commit();
         setLoading(false);
