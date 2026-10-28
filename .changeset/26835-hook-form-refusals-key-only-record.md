@@ -1,5 +1,6 @@
 ---
 '@objectstack/spec': patch
+'@objectstack/platform-objects': patch
 '@object-ui/app-shell': patch
 '@object-ui/i18n': patch
 ---
@@ -13,4 +14,5 @@ A hook built in Studio can now declare its refusal catalogue. The hook form show
 
 - **`@object-ui/app-shell`.** The metadata form's `record` editor gains a key-only face. A `type: 'record'` row that declares `widget: 'key-only-record'` edits a map of closed entries (add, rename, remove, reorder, edit each entry's fields) and never writes the key into the entry. A key is checked against the record's served key rule (`propertyNames.pattern`, derived from the spec), so a code like `clean_version` is refused before it reaches the draft. A rename moves the entry in place once the new key is valid. A record row with no such widget behaves as before: the key is still mirrored into each entry.
 - **`@objectstack/spec`.** `hookForm` offers `refusals` with that control. `HookSchema` is unchanged.
+- **`@objectstack/platform-objects`.** The generated metadata-form bundles carry the three new hook-form rows, translated in zh-CN, ja-JP and es-ES.
 - **`@object-ui/i18n`.** One new Studio string, `engine.form.key` (en, zh), which names the key column when the form declares no key label.
