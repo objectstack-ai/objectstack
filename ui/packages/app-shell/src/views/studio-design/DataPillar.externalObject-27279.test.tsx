@@ -73,6 +73,11 @@ vi.mock('@object-ui/plugin-view', async (importOriginal) => {
 
 import { DataPillar } from './StudioDesignSurface';
 import { t } from '../metadata-admin/i18n';
+import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
+import { ObjectFieldInspector } from '../metadata-admin/inspectors/ObjectFieldInspector';
+
+// The rail holds the REAL registered field inspector, as the console registers it.
+registerMetadataInspector('object', ObjectFieldInspector);
 
 const FORM = t('engine.studio.data.tab.form', 'en');
 const ADD_FIELD = t('engine.studio.data.addField', 'en');
