@@ -415,13 +415,23 @@ export function packagedView(a: ArtifactAxis, name = NAME, packageId = PACKAGE_I
  *    that ships the name;
  *  - `getItem`: the same order, without the code-artifact test;
  *  - `listItems`: every entry, a disabled package's hidden;
- *  - `getAllPackages` / `getPackage` / `isPackageDisabled`: the packages the
- *    test installs (none by default: the family's rows install no package).
+ *  - `getAllPackages` / `getPackage` / `isPackageDisabled`: the family's two
+ *    packages, installed and enabled unless the test installs them otherwise.
+ *    [#26708] A save naming a package no installed package has is refused
+ *    before the `_lock` gate, so the packages the family's saves name must be
+ *    installed — as the real registry holds every package whose artifacts it
+ *    registered.
  */
 export function registryDouble(
     artifacts: ReadonlyArray<Record<string, unknown>>,
-    installed: ReadonlyArray<{ id: string; enabled: boolean }> = [],
+    installedByTest: ReadonlyArray<{ id: string; enabled: boolean }> = [],
 ) {
+    const installed = [
+        ...installedByTest,
+        ...[PACKAGE_ID, OTHER_PACKAGE]
+            .filter((id) => !installedByTest.some((p) => p.id === id))
+            .map((id) => ({ id, enabled: true })),
+    ];
     const entries = new Map<string, Record<string, unknown>>();
     for (const artifact of artifacts) entries.set(`${String(artifact._packageId)}:${String(artifact.name)}`, artifact);
     const disabled = (id: unknown) => installed.some((p) => p.id === id && !p.enabled);

@@ -171,6 +171,10 @@ async function boot(driver: unknown) {
     await engine.init();
     engine.registry.registerObject(sysMetadataObject as any);
     for (const o of [SysMetadataHistoryObject, SysMetadataAuditObject, SysMetadataCommitObject]) engine.registry.registerObject(o as any);
+    // [#26708] The tenant's own package is installed, as an authored base: a
+    // save naming a package no installed package has is refused before it is
+    // written.
+    engine.registry.installPackage({ id: PKG, name: PKG, version: '1.0.0' } as any, 'authored');
     const protocol = new ObjectStackProtocolImplementation(engine as any, undefined, ENV);
     return { engine, protocol };
 }
@@ -336,6 +340,8 @@ describe('#16702 door 2 — hydration restates the fact for EVERY type, not only
         for (const o of [SysMetadataHistoryObject, SysMetadataAuditObject, SysMetadataCommitObject]) engine.registry.registerObject(o as any);
         // environmentId omitted — the unscoped (control-plane) kernel is the
         // only one whose list read hydrates the process-wide registry.
+        // [#26708] The tenant's own package is installed, as in `boot`.
+        engine.registry.installPackage({ id: PKG, name: PKG, version: '1.0.0' } as any, 'authored');
         const protocol = new ObjectStackProtocolImplementation(engine as any);
 
         await protocol.getMetaItems({ type: 'app' });
