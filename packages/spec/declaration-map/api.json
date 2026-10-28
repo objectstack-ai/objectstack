@@ -368,6 +368,8 @@
     "GetPresignedUrlRequestSchema": "api/GetPresignedUrlRequest",
     "GetPublishedMetaItemResponse": "api/GetPublishedMetaItemResponse",
     "GetPublishedMetaItemResponseSchema": "api/GetPublishedMetaItemResponse",
+    "GetRecordFieldAccessResponse": "api/GetRecordFieldAccessResponse",
+    "GetRecordFieldAccessResponseSchema": "api/GetRecordFieldAccessResponse",
     "GetRunRequest": "api/GetRunRequest",
     "GetRunRequestSchema": "api/GetRunRequest",
     "GetRunResponse": "api/GetRunResponse",

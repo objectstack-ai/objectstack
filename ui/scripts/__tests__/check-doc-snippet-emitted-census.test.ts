@@ -439,28 +439,8 @@ describe('wiring — a census nothing runs is not a census', () => {
     ).toBeLessThan(gate);
   });
 
-  it('is written up on the page objectui#3653 pins, and declared report-only there', () => {
-    const doc = fs.readFileSync(path.join(repoRoot, 'content/docs/guide/ci-cd-pipeline.md'), 'utf8');
-    expect(doc).toContain('--emit-census');
-    const row = doc.split('\n').find((line) => line.includes('--emit-census'));
-    expect(row, 'the page must say what it runs').toBeDefined();
-    // The paragraph the command lives in, bounded by its own blank lines: a
-    // byte window would pass on a `report-only` belonging to another section.
-    const at = doc.indexOf('--emit-census');
-    const start = doc.lastIndexOf('\n\n', at);
-    const end = doc.indexOf('\n\n', at);
-    // Whitespace-normalised: this page hard-wraps, so a sentence that must be
-    // present is split across lines in the source and matches nothing verbatim.
-    const paragraph = doc
-      .slice(start, end === -1 ? doc.length : end)
-      .toLowerCase()
-      .replace(/\s+/g, ' ');
-    expect(
-      paragraph,
-      'a step the page does not declare report-only is a guardrail readers believe in',
-    ).toContain('report-only');
-    expect(paragraph).toContain('exits 0 regardless of what it finds');
-  });
+  // `is written up on the page objectui#3653 pins, and declared report-only
+  // there` retired with objectstack#26944, which deleted that page.
 });
 
 /**

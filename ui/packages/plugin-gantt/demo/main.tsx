@@ -367,17 +367,19 @@ const planDataSource = {
 const planSchema = {
   type: 'gantt',
   objectName: 'production_plan',
-  startDateField: 'start',
-  endDateField: 'end',
-  titleField: 'name',
-  progressField: undefined,
-  quickFilters: [
-    { field: 'project', label: '项目' },
-    { field: 'product', label: '产品' },
-    { field: 'status', label: '状态' },
-    { field: 'dispatch_type', label: '派工类别' },
-    { field: 'owner', label: '管理责任人' },
-  ],
+  gantt: {
+    startDateField: 'start',
+    endDateField: 'end',
+    titleField: 'name',
+    progressField: undefined,
+    quickFilters: [
+      { field: 'project', label: '项目' },
+      { field: 'product', label: '产品' },
+      { field: 'status', label: '状态' },
+      { field: 'dispatch_type', label: '派工类别' },
+      { field: 'owner', label: '管理责任人' },
+    ],
+  },
   // autoZoomToFilter defaults to true → timeline rescales to the filtered span.
 } as any;
 

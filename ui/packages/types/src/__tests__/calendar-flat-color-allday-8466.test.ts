@@ -29,20 +29,17 @@
  * renderer READS the flat spelling, not that an author should write it. The
  * README row below pins the new teaching.
  *
- * ⚠️ Dated note, objectstack#25923 — superseded in part. The producers now hand
- * the binding off in the `calendar` block, the flat spelling is only a
- * stored-document fallback the renderer still reads, and the five flat
- * declarations DID move: off `ObjectCalendarSchema`, onto `plugin-calendar`'s
- * own hand-off type. This file now pins their absence.
- *
  * ⚠️ Dated note — objectstack#25923. The declarations this file pinned DID move
- * after all: the five left both published faces of `ObjectCalendarSchema`
- * (they are `plugin-calendar`'s package-local hand-off type now, where the one
- * reader lives), because a declared flat key is one the strict authoring face
- * derives from, so `objectui validate` accepted the very spelling the spec
- * refuses. The reads, the README, the spec and the `inputs` rows below are
- * unchanged; the TS and mirror rows are inverted to the new state, and the
- * strict face's refusal is pinned in the mirror section below.
+ * after all, and then the read went too. First the five left both published
+ * faces of `ObjectCalendarSchema` for `plugin-calendar`'s package-local hand-off
+ * type, because a declared flat key is one the strict authoring face derives
+ * from, so `objectui validate` accepted the very spelling the spec refuses; the
+ * producers hand the binding off in the `calendar` block instead. Then the
+ * renderer's flat fallback read retired with that hand-off type, once the
+ * stored-row census found no stored flat row. The README, the spec and the
+ * `inputs` rows below are unchanged; the TS, mirror and read rows are inverted
+ * to the new state, and the strict face's refusal is pinned in the mirror
+ * section below.
  *
  * ## Why BOTH keys, and the measurement that decided the second one
  *
@@ -147,9 +144,9 @@ const CALENDAR_REGISTRATION = 'packages/plugin-calendar/src/index.tsx';
 const CALENDAR_README = 'packages/plugin-calendar/README.md';
 
 /**
- * The five field-name keys `getCalendarConfig` reads off the node FLAT (a
- * stored-document fallback since objectstack#25923, when the producers moved to
- * the block), and that the README authors inside the `calendar` block.
+ * The five field-name keys `getCalendarConfig` read off the node FLAT until
+ * objectstack#25923 retired that fallback, and that the README authors inside
+ * the `calendar` block.
  */
 const FLAT_KEYS = ['titleField', 'startDateField', 'endDateField', 'allDayField', 'colorField'] as const;
 /** The three that were already declared — the precedent the two new ones join. */
@@ -415,41 +412,45 @@ function specShapeKeys(type: string): string[] {
 
 /* ── The reads: the fact the declarations record ──────────────────────────── */
 
-describe('objectui#8466 — the renderer reads these keys, which is what the declarations record', () => {
-  it('`getCalendarConfig` reads all five flat keys off the node', () => {
+describe('objectui#8466 — the renderer reads these keys in the `calendar` block only (objectstack#25923)', () => {
+  it('`getCalendarConfig` reads none of the five flat keys off the node', () => {
     // The FACT, not the spelling. This used to assert the source contained the
     // literal `(schema as any).KEY` — the very cast a cleanup deletes once the
     // key is declared, which this card is what makes possible. So the pin went
     // red on the improvement it existed to enable (objectui#8832; PR #8799 is
     // the precedent, dropping `(schema as any).navigation` once `navigation`
     // was declared). The census reads both forms, so the cleanup lands green.
+    //
+    // ⏱ objectstack#25923 inverted the verdict: the flat fallback read retired,
+    // so the function reads the `calendar` block and nothing flat.
     const reads = configReaderReads(readRepo(CALENDAR_READER));
     for (const key of FLAT_KEYS) {
-      expect([...reads], `getCalendarConfig no longer reads the flat ${key}`).toContain(key);
+      expect([...reads], `getCalendarConfig reads the flat ${key} again`).not.toContain(key);
     }
     // Controls, both fired in THIS slice: `calendar` is the config container the
-    // function prefers over the flat five and is not one of them, so the slice is
-    // not empty by accident; `objectName` is read all over the same FILE and
+    // function reads and is not one of the five, so the slice is not empty by
+    // accident; `objectName` is read all over the same FILE and
     // never inside this function, so a slice that had swallowed the file — which
     // is what would make the five verdicts above cheap — fails here instead.
     expect([...reads]).toContain('calendar');
     expect(reads.has(READ_CONTROL_KEY)).toBe(false);
   });
 
-  it('…and `allDayField` is LOAD-BEARING, not merely resolved (objectui#8026)', () => {
-    // The premise that removed triage's "declaring an inert key would be worse"
-    // objection. If the renderer ever stops honouring the key, this reddens
-    // BEFORE anyone trusts the declaration to mean something.
-    //
-    // The fact: the key is in the dependency list of the memo that recomputes
-    // the config, which is what makes an authored change reach the screen. That
+  it('…and the config memo depends on the `calendar` block, not on flat keys', () => {
+    // This row used to pin `allDayField` as LOAD-BEARING (objectui#8026): the
+    // flat key was in the dependency list of the memo that recomputes the
+    // config, which is what made an authored change reach the screen. That
     // used to be a regex over the list's TEXT, so a formatter run, a reordered
     // dep or a changed print width moved the verdict with no behaviour moving
     // (objectui#8832). The list is sliced out structurally instead, and read
     // with the same census, so only the dependency itself can move it.
+    //
+    // ⏱ objectstack#25923: the five are block members now, so the memo names
+    // the block, and a flat entry here would be a dependency on a key nothing
+    // reads. `allDayField` reaches the memo through the block's identity.
     const deps = configMemoDeps(readRepo(CALENDAR_READER));
     for (const key of FLAT_KEYS) {
-      expect([...deps], `${key} left the config memo's dependency list`).toContain(key);
+      expect([...deps], `${key} is a flat entry in the config memo's dependency list again`).not.toContain(key);
     }
     // Controls in both directions, each known to fire in THIS region: `calendar`
     // is in this very list and is not one of the five, so the slice is not empty

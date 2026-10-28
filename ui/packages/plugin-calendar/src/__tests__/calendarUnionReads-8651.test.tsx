@@ -137,10 +137,14 @@
  * spec refuses them on the node and prescribes the `calendar` block, which both
  * producers now emit. `getCalendarConfig` still reads them flat, so they are
  * declared on this package's hand-off type, `ObjectCalendarFlatFields`, and the
- * props type is `ObjectCalendarHandoff`. The population row below therefore
- * takes its declared set from BOTH: the mirror's shape, and the hand-off's five,
- * pinned equal to that type's keys at compile time. The paragraphs above are
- * this card's reading at the time, kept as written.
+ * props type is `ObjectCalendarHandoff`. The paragraphs above are this card's
+ * reading at the time, kept as written.
+ *
+ * Then the same card retired the flat fallback read, once the stored-row census
+ * found no stored flat row: `getCalendarConfig` reads the `calendar` block only,
+ * the hand-off type is gone, and the props type is the published schema again.
+ * The population row below takes its declared set from the mirror's shape
+ * alone, and the five are pinned as read nowhere flat.
  *
  * ## The ceiling, stated rather than assumed (objectui#5155 / #7927)
  *
@@ -166,8 +170,6 @@ import type { ObjectCalendarSchema } from '@object-ui/types';
 import {
   ObjectCalendar,
   type ObjectCalendarComponentProps,
-  type ObjectCalendarFlatFields,
-  type ObjectCalendarHandoff,
 } from '../ObjectCalendar';
 
 // @ts-expect-error — plain-JS shared helper, intentionally untyped (`allowJs: false`)
@@ -229,11 +231,10 @@ const CANONICAL_TWINS = ['startDateField', 'endDateField'] as const;
 const PRODUCER = 'packages/plugin-list/src/ListView.tsx';
 
 /**
- * The five keys the renderer reads FLAT, declared on the package-local hand-off
- * type rather than on the published schema (objectstack#25923). Pinned equal to
- * `keyof ObjectCalendarFlatFields` below, so this list cannot drift from it.
+ * The five field-name keys the renderer read FLAT until objectstack#25923
+ * retired that fallback; they are read in the `calendar` block only now.
  */
-const HANDOFF_FLAT_KEYS = ['startDateField', 'endDateField', 'titleField', 'colorField', 'allDayField'] as const;
+const RETIRED_FLAT_KEYS = ['startDateField', 'endDateField', 'titleField', 'colorField', 'allDayField'] as const;
 
 /** A key nothing reads and nothing declares: the both-ways control. */
 const CONTROL_KEY = 'zzqxNoSuchField';
@@ -294,35 +295,26 @@ type Expect<T extends true> = T;
  * and a one-way check accepts `any` on both sides — which is precisely the
  * before-state this card removed.
  */
-export type assertionSchemaPropIsThePublishedElementSchemaPlusTheHandoff =
-  Expect<Equal<ObjectCalendarComponentProps['schema'], ObjectCalendarHandoff>>;
-export type assertionHandoffIsThePublishedSchemaPlusTheFlatFive =
-  Expect<Equal<ObjectCalendarHandoff, ObjectCalendarSchema & ObjectCalendarFlatFields>>;
-/** The runtime list above is the hand-off type's key set, exactly. */
-export type assertionHandoffKeysAreTheList =
-  Expect<Equal<keyof ObjectCalendarFlatFields, (typeof HANDOFF_FLAT_KEYS)[number]>>;
-/** …and none of the five is a member of the PUBLISHED schema any more (objectstack#25923). */
+export type assertionSchemaPropIsThePublishedElementSchema =
+  Expect<Equal<ObjectCalendarComponentProps['schema'], ObjectCalendarSchema>>;
+/** …and none of the five is a member of it (objectstack#25923), so none is typed on the node at all. */
 export type assertionPublishedSchemaDeclaresNoFlatKey =
-  Expect<Equal<Extract<keyof ObjectCalendarSchema, (typeof HANDOFF_FLAT_KEYS)[number]>, never>>;
+  Expect<Equal<Extract<keyof ObjectCalendarSchema, (typeof RETIRED_FLAT_KEYS)[number]>, never>>;
 /** The helper can FAIL — synthetic control. */
 export type assertionEqualCanFail = Expect<Equal<Equal<any, ObjectCalendarSchema>, false>>;
 
 /* ── 1. The props type ────────────────────────────────────────────────────── */
 
 describe('objectui#8651 — the props type is the published element schema', () => {
-  it('accepts the flat calendar vocabulary contextually typed, with NO cast', () => {
-    const schema: ObjectCalendarComponentProps['schema'] = {
+  it('refuses the flat calendar vocabulary, contextually typed (objectstack#25923)', () => {
+    const flat: ObjectCalendarComponentProps['schema'] = {
       type: 'object-calendar',
       objectName: 'duly_task',
+      // @ts-expect-error — the flat key is no member of the node; write `calendar.startDateField`
       startDateField: 'kickoff',
-      endDateField: 'wrapup',
-      titleField: 'nickname',
-      colorField: 'status_colour',
-      allDayField: 'is_all_day',
       defaultView: 'week',
     };
-    expect(schema.startDateField).toBe('kickoff');
-    expect(schema.defaultView).toBe('week');
+    expect(flat.defaultView).toBe('week');
   });
 
   it('accepts the nested `calendar` container the spec names, contextually typed', () => {
@@ -340,8 +332,8 @@ describe('objectui#8651 — the props type is the published element schema', () 
 describe('objectui#8651 — every key read off the node is declared on that schema', () => {
   it('no read is undeclared — `navigation` included, since objectui#8652', () => {
     const reads = rendererReads();
-    // The mirror's shape, plus the hand-off's five (objectstack#25923).
-    const declared = new Set([...shapeKeys(ObjectCalendarMirror), ...HANDOFF_FLAT_KEYS]);
+    // The mirror's shape alone since objectstack#25923 retired the flat reads.
+    const declared = new Set(shapeKeys(ObjectCalendarMirror));
     const exempt = new Set<string>([...LEDGERED_OTHER_CARD_READS]);
     const undeclared = [...reads]
       .filter((key) => !declared.has(key))
@@ -382,12 +374,12 @@ describe('objectui#8651 — every key read off the node is declared on that sche
   });
 });
 
-describe('objectstack#25923 — the five flat reads are the hand-off\'s, not the published schema\'s', () => {
-  it('every one is still READ, and none is a member of the mirror', () => {
+describe('objectstack#25923 — the five flat field-name keys are read nowhere flat', () => {
+  it('none is READ off the node, and none is a member of the mirror', () => {
     const reads = rendererReads();
     const mirror = shapeKeys(ObjectCalendarMirror);
-    for (const key of HANDOFF_FLAT_KEYS) {
-      expect([...reads], `the renderer no longer reads the flat ${key}; shrink the hand-off type`).toContain(key);
+    for (const key of RETIRED_FLAT_KEYS) {
+      expect([...reads], `the renderer reads the flat ${key} again`).not.toContain(key);
       expect(mirror, `the published mirror declares the flat ${key} again`).not.toContain(key);
     }
     // CONTROL, same two instruments: `calendar` is read AND declared, so the
@@ -458,11 +450,14 @@ describe('objectui#8355 — the `dateField` / `endField` rungs are RETIRED at bo
     }
   });
 
-  it('CONTROL: the same census sees the canonical twins, and invents nothing', () => {
+  it('CONTROL: the same census sees the block the canonical twins live in, and invents nothing', () => {
     // Without this row the absence above is not a reading: a census that had
-    // stopped matching anything would report the same two zeros.
+    // stopped matching anything would report the same two zeros. Since
+    // objectstack#25923 the canonical twins are read inside the `calendar`
+    // block, never off the node, so the census sees the block.
     const reads = rendererReads();
-    for (const key of CANONICAL_TWINS) expect([...reads]).toContain(key);
+    expect([...reads]).toContain('calendar');
+    for (const key of CANONICAL_TWINS) expect(reads.has(key)).toBe(false);
     expect(reads.has(CONTROL_KEY)).toBe(false);
   });
 
@@ -650,7 +645,7 @@ describe('objectui#8355 — the retired node refuses, and the canonical one stil
   it('CONTROL: the canonical spelling on the same rows draws — the ladder removal narrowed TWO keys', async () => {
     render(
       <ObjectCalendar
-        schema={{ type: 'object-calendar', objectName: 'duly_task', startDateField: 'kickoff', titleField: 'nickname' } as any}
+        schema={{ type: 'object-calendar', objectName: 'duly_task', calendar: { startDateField: 'kickoff', titleField: 'nickname' } } as any}
         dataSource={makeDataSource()}
       />,
     );

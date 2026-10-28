@@ -20,7 +20,8 @@
  * Exit 0 means a verdict was reached -- either one. Any other exit means the
  * question could not be answered, and ci.yml type-checks the whole workspace:
  * a selector that cannot tell must RUN, never skip (the fail-open rule
- * `merge-queue-reporting.test.ts` holds every in-job gate of that workflow to).
+ * `merge-queue-reporting.test.ts` held every in-job gate of that workflow to,
+ * until objectstack#26944 retired it).
  *
  * ## The two speeds
  *

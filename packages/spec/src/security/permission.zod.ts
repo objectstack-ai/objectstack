@@ -992,8 +992,11 @@ export const FieldPermissionSchema = lazySchema(() => strictObject(
       + 'request) the entry is judged as its lock: it contributes no edit grant on that write. Validated like an RLS '
       + 'predicate at authoring and publish time: the fields it names must exist on the entry\'s object and it may '
       + 'not reach across a relation; a condition that cannot be lowered is refused there, never dropped at runtime. '
-      + 'Readers that hold no row (`/auth/me/permissions`, the field projections, the write preview on an update) '
-      + 'report a row-conditioned entry as its lock, so a client never advertises an edit the gate refuses.',
+      + 'Readers that hold no row (`/auth/me/permissions`, the object-wide field projections, the write preview on an '
+      + 'update) report a row-conditioned entry as its lock, so a client never advertises an edit the gate refuses. '
+      + 'The record-scoped field projection (`GET /data/{object}/{id}/field-access`, the answer a record\'s edit form '
+      + 'reads) holds the row: it judges the condition on the stored row exactly as the write gate does on an update '
+      + 'of that row, so a lock that applies only from a stage onward disables the field only on the rows it names.',
     ),
 }).refine(
   // The cross-key rule: a condition reaches the edit vote only, so an entry

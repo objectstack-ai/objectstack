@@ -47,6 +47,7 @@ import type {
     CreateDataRequest,
     UpdateDataRequest,
     DeleteDataRequest,
+    GetDataRequest,
 } from '@objectstack/spec/api';
 // [#20061] The DECLARED request schema the import-job list door parses its
 // numeric parameters through — see `readDeclaredQueryNumber` in `rest-server.ts`.
@@ -75,7 +76,10 @@ import { handleRouteError, logUnexpectedRouteError, mapDataError, nestedRefusalE
 // [#24348] The shared ADR-0112 nested envelope for the import doors' control
 // opt-out refusal — the flat sibling-`code` dialect the doors' older answers
 // use is ratcheted down by `check:route-envelope`.
-import { sendError as sendEnvelopeError } from '@objectstack/types';
+import { sendError as sendEnvelopeError, sendOk } from '@objectstack/types';
+// [#26594] The read path's ONE no-row answer, for a row that left the caller's
+// sight between the record read and the projection.
+import { recordNotFoundError } from '@objectstack/core';
 import { logError } from './log.js';
 import {
     DATA_EXPORT_PARAMS,
@@ -178,6 +182,16 @@ function pickExportKeys(row: Record<string, unknown>, fields: readonly string[])
     }
     return out;
 }
+
+/**
+ * [#26594] The closed query-parameter set of
+ * `GET {basePath}/data/:object/:id/field-access`: EMPTY. Measured from the
+ * handler's reads — the object and the record are path parameters, and neither
+ * the record read it makes (`getData`, called with no `select` / `expand`) nor
+ * the projection reads `req.query` — so any name is refused with a located 400
+ * rather than dropped.
+ */
+export const RECORD_FIELD_ACCESS_PARAMS: readonly string[] = [];
 
 /**
  * The `RestServer` members {@link registerDataActionEndpoints} reads — every
@@ -323,6 +337,71 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
         metadata: {
             summary: 'Clone a record (gated by enable.clone)',
             tags: ['data', 'clone'],
+        },
+    });
+
+    // GET /data/:object/:id/field-access — the field projection of ONE record
+    // (`GetRecordFieldAccessResponseSchema`): the fields the caller may read,
+    // and the fields it may write on this stored row as the write gate judges
+    // an update of it. The answer a record's edit form reads, so a field
+    // permission whose `when` names only some rows disables the field only on
+    // those rows. `/auth/me/permissions` holds no row and stays as it is.
+    //
+    // Never wider than the read path: the record is read first exactly as
+    // `GET /data/:object/:id` reads it (`getData`, same gates, same mapped
+    // refusals), so a row that is absent or that the caller cannot read
+    // answers that route's 404, and no projection discloses its existence.
+    this.routeManager.register({
+        method: 'GET',
+        path: `${dataPath}/:object/:id/field-access`,
+        handler: async (req: any, res: any) => {
+            try {
+                const environmentId = isScoped ? req.params?.environmentId : undefined;
+                const p = await this.resolveProtocol(environmentId, req);
+                const context = await this.resolveExecCtx(environmentId, req);
+                if (this.enforceAuth(req, res, context)) return;
+                if (await this.enforceApiAccess(req, res, p, environmentId, 'get')) return;
+                // Closed and empty: the record is the path, and nothing else is read.
+                if (refuseUnknownQueryParams(req, res, RECORD_FIELD_ACCESS_PARAMS)) return;
+                const object = String(req.params.object);
+                const id = String(req.params.id);
+                // The read path's own answer for this row, refusals included.
+                await p.getData({
+                    object,
+                    id,
+                    ...(environmentId ? { environmentId } : {}),
+                    ...(context ? { context } : {}),
+                } satisfies ServerScopedDataRequest<GetDataRequest>);
+                const security = await this.resolveSecurityService(environmentId, req);
+                if (typeof security?.getRecordFieldAccess !== 'function') {
+                    sendEnvelopeError(
+                        res, 501, 'NOT_IMPLEMENTED',
+                        'The record field projection is not available on this deployment (no security service with '
+                            + 'getRecordFieldAccess); read the row-less one at /auth/me/permissions instead.',
+                    );
+                    return;
+                }
+                const access = await security.getRecordFieldAccess(object, id, context);
+                // The row went away (or out of the caller's sight) after the
+                // read above: the read path's own no-row answer.
+                if (access === null) throw recordNotFoundError(object, id);
+                if (access === undefined) {
+                    sendEnvelopeError(
+                        res, 501, 'NOT_IMPLEMENTED',
+                        `The record field projection has no answer for '${object}' (its schema could not be resolved).`,
+                    );
+                    return;
+                }
+                sendOk(res, access);
+            } catch (error: any) {
+                const mapped = mapDataError(error, req.params?.object);
+                logUnexpectedRouteError(error, mapped);
+                res.status(mapped.status).json(mapped.body);
+            }
+        },
+        metadata: {
+            summary: 'Field projection of one record: readable fields, and the fields the write gate admits on this row',
+            tags: ['data', 'security'],
         },
     });
 
