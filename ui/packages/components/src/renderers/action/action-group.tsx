@@ -36,7 +36,7 @@ import { Loader2, ChevronDown } from 'lucide-react';
 import { resolveIcon } from './resolve-icon';
 import { hasDeclaredVisibilityGate } from './visibility-gate';
 import { readActionEntryParamValues } from './static-params';
-import { toRunnerVariant } from './runner-variant';
+import { toButtonVariant, toRunnerVariant } from './runner-variant';
 import {
   DisabledReasonMenuLabel,
   DisabledReasonTrigger,
@@ -135,7 +135,7 @@ const InlineActionButton: React.FC<{
   );
 
   const Icon = resolveIcon(action.icon);
-  const btnVariant = (action.variant as string) === 'primary' ? 'default' : (action.variant || variant || 'outline');
+  const btnVariant = toButtonVariant((action.variant || variant) as UIActionSchema['variant'], 'outline');
   const btnSize = action.size === 'md' ? 'default' : (action.size || size || 'sm');
 
   const handleClick = useCallback(async () => {
@@ -258,7 +258,7 @@ export const DropdownActionItem: React.FC<{
           await onSelect(action);
         }}
         className={cn(
-          (action.variant as string) === 'destructive' && 'text-destructive focus:text-destructive',
+          action.variant === 'danger' && 'text-destructive focus:text-destructive',
           action.className,
         )}
       >
@@ -431,7 +431,7 @@ const ActionGroupRenderer = forwardRef<HTMLDivElement, { schema: ActionGroupSche
           <DropdownMenuTrigger asChild>
             <Button
               type="button"
-              variant={(schema.variant || 'outline') as any}
+              variant={toButtonVariant(schema.variant as UIActionSchema['variant'], 'outline')}
               size={(schema.size === 'md' ? 'default' : (schema.size || 'default')) as any}
               className={cn(schema.className, className)}
               // `hostDisabled` leads the OR (objectui#9131) — see `action:button`.

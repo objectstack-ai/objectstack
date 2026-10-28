@@ -2474,7 +2474,9 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // grammar — `@objectstack/formula`'s `judgeMailHoleGrammar`, the grammar the
   // mail renderer parses with. A hole that chains a second formatter is
   // refused, naming the one-formatter rule and the "branch in the caller"
-  // remedy (the renderer printed `0 | number:2`); a `currency` argument that
+  // remedy (the renderer printed `0 | number:2`); a formatter name outside
+  // `TEMPLATE_FORMATTERS` is refused, listing the known formatters
+  // (`known-formatter`; the renderer printed the raw value); a `currency` argument that
   // is neither a literal ISO 4217 code nor a marked `@path` into the send's
   // data is refused, naming `CURRENCY_ARGUMENT_RULE` (the renderer printed the
   // amount in USD); and a marked path the template's declared `variables` do

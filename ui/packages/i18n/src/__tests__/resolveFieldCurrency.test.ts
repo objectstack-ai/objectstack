@@ -74,7 +74,7 @@ describe('currencyMode decides whether currencyConfig.defaultCurrency is read (o
     // meaning "whatever the spec materializes for an empty config".
     const parsed = CurrencyConfigSchema.parse({});
     expect(parsed.currencyMode, 'the spec defaults an empty config to dynamic').toBe('dynamic');
-    expect(parsed.defaultCurrency, 'the spec fills in a code of its own').not.toBe(TENANT);
+    expect(parsed.defaultCurrency, 'the spec fills in no code (#27157)').toBeUndefined();
     expect(resolveFieldCurrency({ currencyConfig: parsed }, TENANT)).toBe('USD');
   });
 

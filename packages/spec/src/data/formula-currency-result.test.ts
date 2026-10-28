@@ -57,7 +57,7 @@ describe('a formula declares a currency result', () => {
   });
 
   it('carries its currency in its own `currencyConfig`, parsed exactly as a currency field\'s', () => {
-    for (const config of [FIXED_USD, { currencyMode: 'dynamic' }, { currencyMode: 'fixed' }, {}]) {
+    for (const config of [FIXED_USD, { currencyMode: 'dynamic' }, {}]) {
       const asFormula = FieldSchema.parse(currencyFormula({ currencyConfig: config }));
       const asField = FieldSchema.parse(currencyField({ currencyConfig: config }));
       expect(asFormula.currencyConfig, JSON.stringify(config)).toEqual(asField.currencyConfig);
@@ -70,6 +70,8 @@ describe('a formula declares a currency result', () => {
     const malformed = [
       { currencyMode: 'fixed', defaultCurrency: 'US' },
       { currencyMode: 'per_record' },
+      // `fixed` with no code: refused, never filled in with a code (#27157).
+      { currencyMode: 'fixed' },
       // The removed decimal-places key keeps its tombstone answer on a formula too.
       { ...FIXED_USD, precision: 2 },
     ];
