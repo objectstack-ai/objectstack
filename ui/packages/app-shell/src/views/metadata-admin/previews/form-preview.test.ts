@@ -13,7 +13,7 @@ describe('form-preview — overlay/inline classifier', () => {
   it('isOverlayFormType flags only drawer/modal', () => {
     expect(isOverlayFormType('drawer')).toBe(true);
     expect(isOverlayFormType('modal')).toBe(true);
-    for (const t of ['simple', 'tabbed', 'wizard', 'split']) {
+    for (const t of ['simple', 'tabbed', 'wizard']) {
       expect(isOverlayFormType(t)).toBe(false);
     }
     expect(isOverlayFormType(undefined)).toBe(false);
@@ -25,7 +25,9 @@ describe('form-preview — overlay/inline classifier', () => {
     expect(toInlineFormType('modal')).toBe('simple');
     expect(toInlineFormType('wizard')).toBe('wizard');
     expect(toInlineFormType('tabbed')).toBe('tabbed');
-    expect(toInlineFormType('split')).toBe('split');
+    // `split` left the `object-form` block (ADR-0050, #27159): a stored block
+    // not yet converted previews as the default layout.
+    expect(toInlineFormType('split')).toBe('simple');
     expect(toInlineFormType('simple')).toBe('simple');
     expect(toInlineFormType(undefined)).toBe('simple');
     expect(toInlineFormType('nonsense')).toBe('simple');

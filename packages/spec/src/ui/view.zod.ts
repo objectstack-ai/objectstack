@@ -4509,7 +4509,7 @@ const FORM_VIEW_TYPE_RETIRED = {
     + 'the form\'s layout, and a side-by-side split is not one: whether a record opens beside its list is '
     + 'each reader\'s own preference in the list\'s Display menu, not metadata. Write `type: \'tabbed\'` (one '
     + 'tab per section) or delete the value for the `simple` default, and delete each section\'s `pane` and '
-    + 'the form\'s `splitSize` / `splitResizable`; to edit child records beside the parent, declare '
+    + 'the form\'s `splitDirection` / `splitSize` / `splitResizable`; to edit child records beside the parent, declare '
     + '`subforms`. '
     + FORM_VIEW_TYPE_RETIRED_FIX,
   drawer:
@@ -4529,13 +4529,19 @@ const FORM_VIEW_TYPE_RETIRED = {
 } as const;
 
 // [#27155] The split-only parameter keys, retired with `type: 'split'`. Each
-// was read only by the split form's renderer, behind that type; `splitDirection`
-// stays for now because the React `ObjectForm` block (`react-blocks.ts`) takes
-// its contract from this schema and that tier still renders a split form —
-// the renderer card that retires `SplitForm` (#27159) takes it.
+// was read only by the split form's renderer, behind that type. [#27159]
+// `splitDirection` followed once `SplitForm` retired: it had stayed only
+// because the React `ObjectForm` block (`react-blocks.ts`) takes its contract
+// from this schema, and that tier no longer draws a split form either.
 const FORM_VIEW_SPLIT_SIZE_RETIRED =
   '`view.form.splitSize` was removed in @objectstack/spec 18.3.0 (ADR-0050) — it sized the primary pane of '
   + 'a `type: \'split\'` form, and `split` left the form view `type` in the same release, so no form view '
+  + 'draws panes. Delete the key. '
+  + FORM_VIEW_TYPE_RETIRED_FIX;
+
+const FORM_VIEW_SPLIT_DIRECTION_RETIRED =
+  '`view.form.splitDirection` was removed in @objectstack/spec 18.3.0 (ADR-0050) — it set the pane '
+  + 'orientation of a split form, and the split form renderer retired in the same release, so no form '
   + 'draws panes. Delete the key. '
   + FORM_VIEW_TYPE_RETIRED_FIX;
 
@@ -4686,32 +4692,29 @@ export const FormViewSchema = lazySchema(() => strictObject({
     + '(completed/current/upcoming/invalid) is derived from the step gate — this boolean is the '
     + 'only authorable progress surface.',
   ),
-  /**
-   * Split orientation. [#27155] Inert on a form view since `type: 'split'` was
-   * retired; it stays declared only because the React `ObjectForm` block takes
-   * its contract from this schema (`react-blocks.ts`) and that tier still draws
-   * a split form. It leaves with `SplitForm`, on the renderer card #27159.
-   */
-  splitDirection: z.enum(['horizontal', 'vertical']).optional().describe('Split orientation (split forms)'),
+  /** [#27159] RETIRED with the split form renderer — {@link FORM_VIEW_SPLIT_DIRECTION_RETIRED}. */
+  splitDirection: retiredKey(FORM_VIEW_SPLIT_DIRECTION_RETIRED),
   /** [#27155] RETIRED with `type: 'split'` — {@link FORM_VIEW_SPLIT_SIZE_RETIRED}. */
   splitSize: retiredKey(FORM_VIEW_SPLIT_SIZE_RETIRED),
   /** [#27155] RETIRED with `type: 'split'` — {@link FORM_VIEW_SPLIT_RESIZABLE_RETIRED}. */
   splitResizable: retiredKey(FORM_VIEW_SPLIT_RESIZABLE_RETIRED),
   /**
    * Drawer side and width. [#27155] Inert on a form view since `type: 'drawer'`
-   * was retired; both stay declared for the same React `ObjectForm` reason as
-   * `splitDirection` (a React page's `formType='drawer'` reads them), and the
-   * drawer half of their enforce-or-remove question stays open on #27153.
+   * was retired. [#27159] Both keep a live reader: the React `ObjectForm` block
+   * takes its contract from this schema (`react-blocks.ts`), and a React page's
+   * `formType='drawer'` opens the drawer container the block supplies, which
+   * reads them. The drawer half of their enforce-or-remove question stays open
+   * on #27153.
    */
-  drawerSide: z.enum(['top', 'bottom', 'left', 'right']).optional().describe('Drawer side (drawer forms)'),
+  drawerSide: z.enum(['top', 'bottom', 'left', 'right']).optional().describe("Edge the drawer container opens from, when the React `ObjectForm` block opens this form with formType 'drawer'"),
   /** @deprecated [#2578 → `modalSize` / size buckets] A pixel width can't be authored blind (unknown client viewport); the renderer derives width from content + viewport. */
-  drawerWidth: z.string().optional().describe('[DEPRECATED → size buckets] Drawer width, e.g. "480px". A pixel width cannot be chosen without knowing the client viewport — the renderer derives it.'),
+  drawerWidth: z.string().optional().describe('[DEPRECATED → size buckets] Width of the drawer container the React `ObjectForm` block opens with formType \'drawer\', e.g. "480px". A pixel width cannot be chosen without knowing the client viewport — the renderer derives it.'),
   /**
    * Size bucket of the dialog a caller opens this form in. Live on every
    * layout: the console's New / Edit dialog reads it off the form view it
    * selects, whatever the form's `type` ([#27155] it outlived `type: 'modal'`).
    */
-  modalSize: z.enum(['sm', 'default', 'lg', 'xl', 'full']).optional().describe('Modal size (modal forms)'),
+  modalSize: z.enum(['sm', 'default', 'lg', 'xl', 'full']).optional().describe("Size bucket of the dialog a caller opens this form in: the console's New / Edit dialog, or the modal container of the React `ObjectForm` block (formType 'modal')"),
 
   /**
    * Data Source Configuration. NOT removed in the #3896 sweep despite the

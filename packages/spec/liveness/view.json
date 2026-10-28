@@ -302,10 +302,10 @@
           "note": "objectui: WizardForm.tsx:438."
         },
         "splitDirection": {
-          "status": "live",
+          "status": "dead",
           "verifiedAt": "2026-10-28",
           "evidenceScope": "in-repo",
-          "note": "objectui: SplitForm.tsx:205. INERT ON A FORM VIEW since 2026-10-28 (#27155): its form-view reader sat behind `type: 'split'`, which left the enum. The row stays live because the React `ObjectForm` block takes its contract from FormViewSchema (packages/spec/src/ui/react-blocks.ts dataProps), and that tier's `formType='split'` still reads it (ui/packages/plugin-form/src/SplitForm.tsx). It leaves with SplitForm on #27159."
+          "note": "REMOVED 2026-10-28 (#27159, ADR-0050 Accepted by ruling 6464210455 on #27032, letter A′) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error at every form-view door built from the shape) and stripped from stored rows and sources by the protocol-18 form-view-presentation-types-removed conversion, which #27159 widened before 18.3.0 shipped. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent). It oriented the split form's panes. Its form-view reader left with `type: 'split'` on #27155; its last reader, ui/packages/plugin-form/src/SplitForm.tsx behind the React `ObjectForm` block's `formType='split'`, was deleted with that value on #27159 (the `object-form` block's own splitDirection is tombstoned in the same change); nothing to write instead — a `tabbed` form gives each section its own tab."
         },
         "splitSize": {
           "status": "dead",
@@ -323,13 +323,13 @@
           "status": "live",
           "verifiedAt": "2026-10-28",
           "evidenceScope": "in-repo",
-          "note": "objectui: DrawerForm.tsx:185. INERT ON A FORM VIEW since 2026-10-28 (#27155): its form-view reader sat behind `type: 'drawer'`, which left the enum. The row stays live because the React `ObjectForm` block takes its contract from FormViewSchema (packages/spec/src/ui/react-blocks.ts dataProps), and that tier's `formType='drawer'` still reads it (ui/packages/plugin-form/src/DrawerForm.tsx). Its enforce-or-remove question for form views stays on #27153; the block contract keys move on #27159."
+          "note": "objectui: DrawerForm.tsx:185. INERT ON A FORM VIEW since 2026-10-28 (#27155): its form-view reader sat behind `type: 'drawer'`, which left the enum. The row stays live because the React `ObjectForm` block takes its contract from FormViewSchema (packages/spec/src/ui/react-blocks.ts dataProps), and that tier's `formType='drawer'` still reads it: since #27159 the block renderer is the caller that opens the form in a drawer (ui/packages/plugin-form/src/ObjectFormContainer.tsx hands it to DrawerForm.tsx), so the key keeps a live reader after ObjectForm dropped its drawer arm. Its enforce-or-remove question for form views stays on #27153."
         },
         "drawerWidth": {
           "status": "live",
           "verifiedAt": "2026-10-28",
           "evidenceScope": "in-repo",
-          "note": "objectui: DrawerForm.tsx:377-382 still reads it. DEPRECATED in spec (#2578 → size buckets; a pixel width can't be authored blind) — live-but-deprecated, remove the read when the deprecation completes. INERT ON A FORM VIEW since 2026-10-28 (#27155): its form-view reader sat behind `type: 'drawer'`, which left the enum; it stays for the React `ObjectForm` block contract, as drawerSide does (#27153, #27159)."
+          "note": "objectui: DrawerForm.tsx:377-382 still reads it. DEPRECATED in spec (#2578 → size buckets; a pixel width can't be authored blind) — live-but-deprecated, remove the read when the deprecation completes. INERT ON A FORM VIEW since 2026-10-28 (#27155): its form-view reader sat behind `type: 'drawer'`, which left the enum; it stays for the React `ObjectForm` block contract, as drawerSide does: the block's drawer container (ObjectFormContainer.tsx → DrawerForm.tsx, #27159) still reads it (#27153)."
         },
         "modalSize": {
           "status": "live",

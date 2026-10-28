@@ -313,7 +313,6 @@ describe.each([
 const OBJECT_FORM_ROUTES: Array<{ route: string; layout: Record<string, unknown> }> = [
   { route: 'simple (ObjectForm, finalDefaultValues)', layout: { sections: SECTIONS } },
   { route: 'tabbed (TabbedForm, formData)', layout: { formType: 'tabbed', sections: SECTIONS } },
-  { route: 'split (SplitForm, formData)', layout: { formType: 'split', sections: SECTIONS } },
   { route: 'wizard (WizardForm, its seed ref)', layout: { formType: 'wizard', sections: SECTIONS } },
 ];
 

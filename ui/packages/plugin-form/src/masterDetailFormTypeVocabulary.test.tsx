@@ -23,26 +23,24 @@
  * outside a prop's vocabulary routes AROUND the block instead of exercising it —
  * here, around a real crash, for as long as anyone had looked.
  *
- * ## Why TWO values and not the sibling's six
+ * ## Why TWO values and not the sibling's five
  *
- * Copying the six across would have minted a declared-but-inert vocabulary: an
+ * Copying the five across would have minted a declared-but-inert vocabulary: an
  * authoring UI offering choices this composition cannot honour. So the set was
- * measured rather than assumed, and the four exclusions are each pinned below by
- * the way they BREAK the master-detail composition, not by assertion:
+ * measured rather than assumed, and the three exclusions are each pinned below
+ * by what they do to the master-detail composition, not by assertion:
  *
  *   `simple`  → ObjectForm.tsx:1134 (SimpleObjectForm sections path). Honoured.
  *   `tabbed`  → ObjectForm.tsx:236  (TabbedForm). Presentation honoured.
  *   `wizard`  → ObjectForm.tsx:260  (WizardForm) — mounts only the CURRENT
  *               step's fields, and the master-detail's single bottom Save bar
  *               drives the wizard's `Next` instead of saving.
- *   `split`   → ObjectForm.tsx:287  (SplitForm) — renders two panels inline.
- *               (It ALSO escaped the atomic batch when this file was written;
- *               objectui#6176 fixed that, so only the presentation difference
- *               is left. The set below is unchanged regardless.)
- *   `drawer`  → ObjectForm.tsx:316  (DrawerForm) — hosts the parent half in a
- *               PORTAL dialog, outside the master-detail container, so the Save
- *               bar has no `<form>` to submit.
- *   `modal`   → ObjectForm.tsx:346  (ModalForm) — same portal shape.
+ *   `drawer`, `modal` → name a CONTAINER, which only the `object-form` block
+ *               supplies (ADR-0050 Decision 4); the header `ObjectForm` draws
+ *               its flat layout instead, so the value is inert here. (Before
+ *               the cutover `ObjectForm` opened a portal dialog for them, and
+ *               the Save bar found no form to submit.)
+ *   (`split` left `object-form` with ADR-0050.)
  *
  * The repo already stated the same two independently, which is the corroboration
  * this file is derived against rather than a second guess:
@@ -78,7 +76,7 @@ vi.mock('@object-ui/components', async (orig) => {
 registerAllFields();
 
 /** The vocabulary `object-form` declares — the set this block was measured against. */
-const OBJECT_FORM_SIX = ['simple', 'tabbed', 'wizard', 'split', 'drawer', 'modal'] as const;
+const OBJECT_FORM_FIVE = ['simple', 'tabbed', 'wizard', 'drawer', 'modal'] as const;
 
 /** The subset the master-detail composition honours. */
 const HONOURED = ['simple', 'tabbed'] as const;
@@ -154,7 +152,7 @@ describe('object-master-detail-form `formType` — a closed, measured vocabulary
 
   it('every declared value is one `object-form` also declares (no private dialect)', () => {
     for (const value of declaredInput().enum) {
-      expect(OBJECT_FORM_SIX).toContain(value);
+      expect(OBJECT_FORM_FIVE).toContain(value);
     }
   });
 
@@ -189,17 +187,17 @@ describe('the measurement the vocabulary is derived from', () => {
   });
 
   it.each(['drawer', 'modal'] as const)(
-    '`%s` is excluded: the parent half lands in a PORTAL dialog, leaving the host with no form to save',
+    '`%s` is excluded: it names a container, and the parent form draws none (ADR-0050)',
     async (formType) => {
       const { container } = mountWith(formType);
-      await waitFor(() =>
-        expect(document.querySelectorAll('[role="dialog"]').length).toBeGreaterThan(0),
-      );
-      // Nothing of the parent half is inside the master-detail container, so the
-      // bottom Save bar's `formHostRef.querySelector('form')` returns null and
-      // the click is a no-op.
-      expect(container.querySelectorAll('form').length).toBe(0);
-      expect(container.querySelectorAll('input[name="ref"]').length).toBe(0);
+      await waitFor(() => expect(container.querySelector('input[name="ref"]')).toBeTruthy());
+      // `ObjectForm` lays a form out and never opens one: the drawer and modal
+      // containers are supplied by the `object-form` BLOCK (ADR-0050 Decision
+      // 4). Handed one of those words, the header form draws its flat layout
+      // inline — no portal dialog — so the value buys nothing here, and an
+      // authoring UI offering it would offer a choice this block ignores.
+      expect(document.querySelectorAll('[role="dialog"]').length).toBe(0);
+      expect(container.querySelectorAll('form').length).toBe(1);
     },
   );
 
@@ -213,26 +211,6 @@ describe('the measurement the vocabulary is derived from', () => {
     await waitFor(() => expect(container.textContent).toContain('Step 2 of 2'));
     expect(batchTransaction).not.toHaveBeenCalled();
     expect(create).not.toHaveBeenCalled();
-  });
-
-  it('`split` renders inline and now saves through the ATOMIC batch — its persistence rationale is spent (objectui#6176)', async () => {
-    const { container, batchTransaction, create } = mountWith('split');
-    await waitFor(() => expect(container.querySelector('input[name="ref"]')).toBeTruthy());
-    expect(await clickHostSave(container)).toBe(true);
-    // This row used to read `create 1 / batchTransaction 0`. `submitHandler` —
-    // the hook MasterDetailForm hands the parent form so the save routes
-    // through `batchTransaction` — was read only by SimpleObjectForm, and
-    // SplitForm wrote the parent directly instead. objectui#6176 made every
-    // renderer honour the declared seam, so this row now reads like `simple`.
-    await waitFor(() => expect(batchTransaction).toHaveBeenCalledTimes(1));
-    expect(create).not.toHaveBeenCalled();
-    // ⚠️ The VOCABULARY is deliberately unchanged and stays `simple | tabbed`
-    // (asserted above). Admitting `split` would be a contract change, and
-    // objectui#6176 — a declared-vs-enforced restoration — did not make it.
-    // What this case now records is narrower than before: the PERSISTENCE
-    // reason for excluding `split` no longer holds, so whatever keeps it out is
-    // presentational and is an open question for triage, not a fact this file
-    // may assert.
   });
 
   it('the harm the closed vocabulary guards: an out-of-vocabulary value silently drops the sections', async () => {

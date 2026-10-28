@@ -754,7 +754,6 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.pageBlock.option.formType.simple': 'Simple',
   'engine.inspector.pageBlock.option.formType.tabbed': 'Tabbed',
   'engine.inspector.pageBlock.option.formType.wizard': 'Wizard',
-  'engine.inspector.pageBlock.option.formType.split': 'Split',
   'engine.inspector.pageBlock.option.formType.drawer': 'Drawer',
   'engine.inspector.pageBlock.option.formType.modal': 'Modal',
   'engine.inspector.pageBlock.field.object-form.layout': 'Layout',

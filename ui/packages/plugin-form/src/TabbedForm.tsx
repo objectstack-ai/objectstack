@@ -95,8 +95,8 @@ export interface FormSectionConfig {
    * step by default. `WizardStepConfig` is now declared independently, exactly
    * as `ModalFormSectionConfig` / `DrawerFormSectionConfig` already are, so
    * this type and the wizard's share nothing: a key is authorable on a wizard
-   * step only if someone writes it
-   * there, on the type whose renderer has to honour it.
+   * step only if someone writes it there, on the type whose renderer has to
+   * honour it.
    */
   visibleWhen?: string | { dialect?: string; source: string };
   /**

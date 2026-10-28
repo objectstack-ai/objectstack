@@ -596,12 +596,11 @@ ComponentRegistry.register('object-master-detail-form', MasterDetailFormRenderer
     // `MasterDetailFormSchema.formType?: 'simple' | 'tabbed'`
     // (MasterDetailForm.tsx) and the coercion `formType === 'tabbed' ? 'tabbed'
     // : 'simple'` ObjectForm.tsx uses when it routes a `subforms` schema in here.
-    // The other three BREAK this composition, each observed rather than
-    // assumed: `drawer`/`modal` host the parent half in a portal dialog outside
-    // the master-detail container, so the single bottom Save bar finds no
-    // `<form>` to submit; `wizard` mounts only the current step's fields and
-    // turns that Save bar into a `Next`. (`split`, which persisted through
-    // `dataSource.create` instead of the batch, retired with ADR-0050.)
+    // The other three are each observed rather than assumed: `drawer`/`modal`
+    // name a CONTAINER, which only the `object-form` block supplies (ADR-0050
+    // Decision 4), so the header form draws its flat layout and the value is
+    // inert here; `wizard` mounts only the current step's fields and turns the
+    // single bottom Save bar into a `Next`. (`split` retired with ADR-0050.)
     // Declaring them would mint choices an authoring UI offers and this block
     // cannot honour.
     { name: 'formType', type: 'enum', enum: ['simple', 'tabbed'], description: 'How the PARENT half of the form is presented. The detail grids below it are unaffected.' },

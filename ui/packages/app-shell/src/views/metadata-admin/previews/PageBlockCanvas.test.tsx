@@ -51,7 +51,7 @@ describe('toCanvasSchema — overlay form coercion', () => {
   });
 
   it('leaves inline form types untouched', () => {
-    for (const ft of ['simple', 'tabbed', 'wizard', 'split']) {
+    for (const ft of ['simple', 'tabbed', 'wizard']) {
       const schema = toCanvasSchema({ type: 'object-form', properties: { formType: ft } }) as any;
       expect(schema.properties.formType).toBe(ft);
     }

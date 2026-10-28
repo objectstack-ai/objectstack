@@ -642,7 +642,6 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.inspector.pageBlock.option.formType.simple': '简单',
   'engine.inspector.pageBlock.option.formType.tabbed': '标签页',
   'engine.inspector.pageBlock.option.formType.wizard': '向导',
-  'engine.inspector.pageBlock.option.formType.split': '分栏',
   'engine.inspector.pageBlock.option.formType.drawer': '抽屉',
   'engine.inspector.pageBlock.option.formType.modal': '弹窗',
   'engine.inspector.pageBlock.field.object-form.layout': '布局',

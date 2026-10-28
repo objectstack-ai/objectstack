@@ -6236,6 +6236,46 @@ const OBJECT_FORM_LAYOUT_RETIRED: ReadonlyMap<string, string> = new Map([
     + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.'],
 ]);
 
+// [#27159] The `object-form` block's split presentation, retired with the
+// split form renderer — ADR-0050 Accepted by ruling 6464210455 on #27032
+// (letter A′): `ObjectForm` lays a form out and never chooses where it opens,
+// and `split` was neither a layout nor a container. The form view lost the
+// same member in #27155 (`FORM_VIEW_TYPE_RETIRED`, ui/view.zod.ts); these are
+// the block's own copies. `drawer` and `modal` STAY on the block: a page has
+// no other door to a built-in overlay form, so the block renderer supplies
+// those containers itself. Declared with `//` on purpose, as above. The
+// `form-view-presentation-types-removed` conversion (ADR-0087 D2) deletes the
+// member and strips the keys from every `object-form` page component.
+const OBJECT_FORM_SPLIT_FIX =
+  'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
+
+const OBJECT_FORM_TYPE_RETIRED = {
+  split:
+    "'split' was removed from the `object-form` `formType` enum in @objectstack/spec 18.3.0 (ADR-0050) — "
+    + 'the split form renderer retired with it, so nothing draws two panes: `formType` is the form\'s '
+    + 'layout (`simple`, `tabbed`, `wizard`) or the container the block opens it in (`drawer`, `modal`). '
+    + 'Write `tabbed` (one tab per section) or delete the value for the `simple` default, and delete each '
+    + 'section\'s `pane` and the block\'s `splitDirection` / `splitSize` / `splitResizable`; to edit child '
+    + 'records beside the parent, use an `object-master-detail-form`. '
+    + OBJECT_FORM_SPLIT_FIX,
+} as const;
+
+/** One prescription per split-only key: each was read only by the split form. */
+const objectFormSplitKeyRetired = (key: string, what: string): string =>
+  `\`object-form\` property \`${key}\` was removed in @objectstack/spec 18.3.0 (ADR-0050) — it ${what} `
+  + "of a `formType: 'split'` form, and `split` left the block in the same release, so no form draws "
+  + 'panes. Delete the key. '
+  + OBJECT_FORM_SPLIT_FIX;
+
+const OBJECT_FORM_SPLIT_DIRECTION_RETIRED = objectFormSplitKeyRetired('splitDirection', 'set the pane orientation');
+const OBJECT_FORM_SPLIT_SIZE_RETIRED = objectFormSplitKeyRetired('splitSize', 'sized the primary pane');
+const OBJECT_FORM_SPLIT_RESIZABLE_RETIRED = objectFormSplitKeyRetired('splitResizable', 'made the panes resizable');
+const OBJECT_FORM_SECTION_PANE_RETIRED =
+  '`object-form` property `sections[].pane` was removed in @objectstack/spec 18.3.0 (ADR-0050) — it '
+  + "placed a section in one pane of a `formType: 'split'` form, and `split` left the block in the same "
+  + 'release, so no form draws panes. Delete the key. '
+  + OBJECT_FORM_SPLIT_FIX;
+
 /**
  * [#21464] An `object-form`'s `mobile` block — the five members the form reads
  * (the flat arm only; read points recorded in `liveness/page.json`, row
@@ -6837,7 +6877,8 @@ function buildObjectFormSection() {
     visibleWhen: EvaluatedExpressionInputSchema.optional().describe('Predicate (CEL) — the whole section, heading and fields, is drawn only when TRUE'),
     columns: z.number({ error: (issue) => objectFormSectionColumnsRefusal(issue.input) }).int().min(1).max(4).optional()
       .describe('Field-grid columns for this section (1-4), a number'),
-    pane: z.enum(['primary', 'secondary']).optional().describe("The split form's panel this section renders in; omitted → the first section 'primary', the others 'secondary'"),
+    /** [#27159] RETIRED with `formType: 'split'` — {@link OBJECT_FORM_SECTION_PANE_RETIRED}. */
+    pane: retiredKey(OBJECT_FORM_SECTION_PANE_RETIRED),
     group: SectionGroupKeySchema.optional().describe('Field group key (snake_case) whose members and presentation this section inherits, from the object\'s `fieldGroups`. Mutually exclusive with `fields`, and with every key the group itself declares (`name`, `label`, `description`, `visibleWhen`, and a `true` `collapsible` / `collapsed`)'),
     fields: z.array(z.union([
       z.string(),
@@ -6857,13 +6898,13 @@ let objectFormSectionOnce: ReturnType<typeof buildObjectFormSection> | undefined
 const objectFormSection = () => (objectFormSectionOnce ??= buildObjectFormSection());
 
 /**
- * `object-form` (objectui's `ObjectForm` renderer, plus the sub-forms it
- * forwards the whole bag into; read points recorded in `liveness/page.json`,
- * row `regions`: `TabbedForm`, `WizardForm`,
- * `SplitForm`, `DrawerForm`, `ModalForm` — the declared set is the UNION of
- * their `schema.*` reads, which is how `description` earns its place: the
- * top-level key is read by the drawer/modal presentations, not by the simple
- * form). Enum values are declared only where renderer, registry `inputs` and
+ * `object-form` (objectui's `object-form` block renderer: `ObjectForm` and the
+ * layouts it forwards the whole bag into, plus the drawer / modal container
+ * the block supplies; read points recorded in `liveness/page.json`, row
+ * `regions`: `TabbedForm`, `WizardForm`, `DrawerForm`, `ModalForm` — the
+ * declared set is the UNION of their `schema.*` reads, which is how
+ * `description` earns its place: the top-level key is read by the drawer/modal
+ * containers, not by the simple form. `SplitForm` retired with ADR-0050). Enum values are declared only where renderer, registry `inputs` and
  * designer palette agree. Callbacks (`onSuccess`, `submitHandler`, …) and the
  * controlled `open` state are React-tier props, not authorable metadata — the
  * react tier publishes those separately (`react-blocks.ts`).
@@ -6884,8 +6925,16 @@ export const ObjectFormPropsSchema = lazySchema(() => strictObject({
     .describe('Object this form creates/edits. Optional because the component-level `dataSource` binding can supply the object instead'),
   recordId: z.union([z.string(), z.number()]).optional().describe('Record to load (edit/view modes)'),
   mode: z.enum(['create', 'edit', 'view']).optional().describe('Form mode'),
-  formType: z.enum(['simple', 'tabbed', 'wizard', 'split', 'drawer', 'modal']).optional()
-    .describe('Form presentation'),
+  /**
+   * [#27159] The form's layout, or the container the BLOCK opens it in. The
+   * two dimensions share one key here, unlike the form view (whose `type` is
+   * layout only since #27155), because a page has no other door to a
+   * built-in overlay form: the block renderer supplies `drawer` / `modal`
+   * itself, and `ObjectForm` draws the layout inside. `split` retired —
+   * {@link OBJECT_FORM_TYPE_RETIRED}.
+   */
+  formType: enumWithRetiredValues(['simple', 'tabbed', 'wizard', 'drawer', 'modal'], OBJECT_FORM_TYPE_RETIRED).optional()
+    .describe("The form's layout — 'simple', 'tabbed' or 'wizard' — or the container the block opens it in — 'drawer' or 'modal', which draw the form stacked ('contentLayout: tabbed' puts a modal's sections on tabs)"),
   layout: z.enum(['vertical', 'horizontal'], {
     error: (issue) =>
       typeof issue.input === 'string' ? OBJECT_FORM_LAYOUT_RETIRED.get(issue.input) : undefined,
@@ -6925,20 +6974,23 @@ export const ObjectFormPropsSchema = lazySchema(() => strictObject({
    * view's `FormSectionSchema` is unchanged.
    */
   sections: z.array(objectFormSection()).optional()
-    .describe('Form sections — wizard steps, tab panes or stacked groups: `{ name?, label?, description?, collapsible?, collapsed?, visibleWhen?, columns?, pane?, fields }`, or `{ group, columns?, pane? }` to inherit an object field group. Each `fields` entry is a field name, the form view\'s `{ field, … }` entry, or an inline form field `{ name, type, … }`'),
+    .describe('Form sections — wizard steps, tab panes or stacked groups: `{ name?, label?, description?, collapsible?, collapsed?, visibleWhen?, columns?, fields }`, or `{ group, columns? }` to inherit an object field group. Each `fields` entry is a field name, the form view\'s `{ field, … }` entry, or an inline form field `{ name, type, … }`'),
   title: I18nLabelSchema.optional().describe('Form title'),
   description: I18nLabelSchema.optional().describe('Form description (rendered by the drawer/modal presentations)'),
   defaultTab: z.string().optional().describe('Initially active tab (tabbed)'),
   tabPosition: z.enum(['top', 'bottom', 'left', 'right']).optional().describe('Tab strip position (tabbed)'),
   allowSkip: z.boolean().optional().describe('Allow skipping steps (wizard)'),
   showStepIndicator: z.boolean().optional().describe('Show the step indicator (wizard)'),
-  splitDirection: z.enum(['horizontal', 'vertical']).optional().describe('Split direction (split)'),
-  splitSize: z.number().optional().describe('Split panel size in percent (split)'),
-  splitResizable: z.boolean().optional().describe('Allow resizing the split (split)'),
-  drawerSide: z.enum(['top', 'bottom', 'left', 'right']).optional().describe('Drawer side (drawer)'),
-  drawerWidth: z.union([z.string(), z.number()]).optional().describe('Drawer width (drawer)'),
-  modalSize: z.enum(['sm', 'default', 'lg', 'xl', 'full']).optional().describe('Modal size (modal)'),
-  modalCloseButton: z.boolean().optional().describe('Show the modal close button (modal)'),
+  /** [#27159] RETIRED with `formType: 'split'` — {@link OBJECT_FORM_SPLIT_DIRECTION_RETIRED}. */
+  splitDirection: retiredKey(OBJECT_FORM_SPLIT_DIRECTION_RETIRED),
+  /** [#27159] RETIRED with `formType: 'split'` — {@link OBJECT_FORM_SPLIT_SIZE_RETIRED}. */
+  splitSize: retiredKey(OBJECT_FORM_SPLIT_SIZE_RETIRED),
+  /** [#27159] RETIRED with `formType: 'split'` — {@link OBJECT_FORM_SPLIT_RESIZABLE_RETIRED}. */
+  splitResizable: retiredKey(OBJECT_FORM_SPLIT_RESIZABLE_RETIRED),
+  drawerSide: z.enum(['top', 'bottom', 'left', 'right']).optional().describe("Edge the block's drawer container opens from (formType 'drawer')"),
+  drawerWidth: z.union([z.string(), z.number()]).optional().describe("Width of the block's drawer container (formType 'drawer')"),
+  modalSize: z.enum(['sm', 'default', 'lg', 'xl', 'full']).optional().describe("Size bucket of the block's modal container (formType 'modal')"),
+  modalCloseButton: z.boolean().optional().describe("Show the close button of the block's modal container (formType 'modal')"),
   /**
    * [#21464] Typed to the read: the modal presentation is its only reader,
    * and it tests `schema.contentLayout === 'tabbed' && groups.length > 1`
@@ -7029,8 +7081,8 @@ const MASTER_DETAIL_FORM_TYPE_RETIRED: ReadonlyMap<string, string> = new Map([
   ['split', "'split' is not part of `object-master-detail-form` `formType` — the renderer "
     + 'was measured on both repos: the parent half renders inline but persists via `dataSource.create`, '
     + "bypassing the atomic parent+details batch (ADR-0001, the block's whole contract). Write "
-    + "'simple' or 'tabbed'; for a split presentation without inline details author an "
-    + "`object-form`, where 'split' is honoured."],
+    + "'simple' or 'tabbed'; the split presentation itself was removed from `object-form` in "
+    + '@objectstack/spec 18.3.0 (ADR-0050).'],
   ['drawer', "'drawer' is not part of `object-master-detail-form` `formType` — the renderer "
     + 'was measured on both repos: the parent half renders in a portal dialog outside the master-detail '
     + "container, so the block's Save bar has no form to submit. Write 'simple' or 'tabbed'; for a "

@@ -858,7 +858,7 @@ the spec's row did not declare until objectstack#20694; it is authorable in the
 
 ### ObjectFormSchema
 
-A smart form that auto-generates fields from an ObjectQL object. Supports simple, tabbed, wizard, split, drawer, and modal layouts.
+A smart form that auto-generates fields from an ObjectQL object. It lays its fields out as a simple, tabbed or wizard form, and the block can open that form in a drawer or a modal.
 
 An authored `object-form` node takes its props in its `properties` bag, whose members are `@objectstack/spec`'s `ComponentPropsMap['object-form']` row. `objectui validate` judges the bag against that row and refuses a prop written flat on the node by name, naming its bag member, as the spec's own page component does (objectui#10859). `SchemaRenderer` hoists the bag onto the node before `ObjectForm` runs, so `ObjectFormSchema` is the node as the renderer reads it, and the table below lists its members.
 
@@ -895,7 +895,7 @@ An authored `object-form` node takes its props in its `properties` bag, whose me
 |----------|------|-------------|
 | `objectName` | `string` | **Required.** ObjectQL object API name. |
 | `mode` | `"create" \| "edit" \| "view"` | **Required.** Form interaction mode. |
-| `formType` | `string` | Layout type: `"simple"`, `"tabbed"`, `"wizard"`, `"split"`, `"drawer"`, `"modal"`. Aligned with `@objectstack/spec` `FormViewSchema.type`. |
+| `formType` | `string` | The form's layout — `"simple"` (default), `"tabbed"`, `"wizard"` — or the container the block opens it in: `"drawer"`, `"modal"`. Only the three layouts are `@objectstack/spec` `FormViewSchema.type` values; the two containers belong to the `object-form` block, whose renderer opens them (ADR-0050). `"split"` was removed with its renderer (ADR-0050) and the spec refuses it with a prescription. |
 | `recordId` | `string \| number` | Record ID for edit/view modes. |
 | `fields` | `string[]` | Field API names to include (auto-resolved from object metadata). |
 | `customFields` | `FormField[]` | Manually defined fields that override auto-generated ones. |
@@ -916,7 +916,7 @@ An authored `object-form` node takes its props in its `properties` bag, whose me
 
 `ObjectFormSchema` keys fall into four classes (#2545):
 
-- **Spec-aligned** — same name and semantics as `@objectstack/spec` `FormViewSchema`: `title`, `description`, `layout`, `columns`, `sections`, `defaultTab`, `tabPosition`, `allowSkip`, `showStepIndicator`, `splitDirection`/`splitSize`/`splitResizable`, `drawerSide`/`drawerWidth`, `modalSize`, `subforms`, `submitBehavior` (plus `formType` ↔ spec `type`).
+- **Spec-aligned** — same name and semantics as `@objectstack/spec` `FormViewSchema`: `title`, `description`, `layout`, `columns`, `sections`, `defaultTab`, `tabPosition`, `allowSkip`, `showStepIndicator`, `drawerSide`/`drawerWidth`, `modalSize`, `subforms`, `submitBehavior` (plus `formType` ↔ spec `type` for the three layouts; `drawer` and `modal` are the block's own). `splitDirection`/`splitSize`/`splitResizable` were removed with `formType: "split"` (ADR-0050) and are refused by name.
 - **Component-contract keys** — not on `FormViewSchema`, but members of the spec's `ComponentPropsMap['object-form']` row, the `object-form` block's own props contract: `showSubmit`/`submitText`, `showCancel`/`cancelText`, `showReset`, `nextText`/`prevText`, `successMessage`, `navigateOnSuccess`, `resetOnSuccess`, `modalCloseButton`, `initialValues`, `fields`, `customFields`. `submitText`, `cancelText`, `nextText`, `prevText` and `successMessage` are `I18nLabel` there, as `title` and `description` are. This list was read off the installed `@objectstack/spec`'s `ComponentPropsMap['object-form']` row; nothing re-derives it, so check that row itself before relying on it.
 - **Envelope key** — `className` is on neither `FormViewSchema` nor the `object-form` row, but on the spec's `PageComponentSchema`, the envelope every page node carries beside `type` and `properties`.
 - **Runtime-only** — non-serializable renderer concerns that never appear in view metadata: `mode`, `recordId`, `open`/`onOpenChange`, `readOnly`, and all callbacks (`onSuccess`, `onError`, `onCancel`, `onStepChange`, `submitHandler`).

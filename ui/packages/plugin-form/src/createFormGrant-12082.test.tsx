@@ -85,7 +85,6 @@ const LAYOUTS: Array<{ layout: string; schema: (names: string[]) => Record<strin
   { layout: 'drawer / sections (DrawerForm)', schema: (n) => ({ formType: 'drawer', sections: sections(n) }) },
   { layout: 'modal / sections (ModalForm)', schema: (n) => ({ formType: 'modal', sections: sections(n) }) },
   { layout: 'tabbed / sections (TabbedForm)', schema: (n) => ({ formType: 'tabbed', sections: sections(n) }) },
-  { layout: 'split / sections (SplitForm)', schema: (n) => ({ formType: 'split', sections: sections(n) }) },
   { layout: 'wizard / sections (WizardForm)', schema: (n) => ({ formType: 'wizard', sections: sections(n) }) },
   { layout: 'simple / flat (default arm)', schema: (n) => ({ fields: n }) },
   { layout: 'drawer / flat (DrawerForm)', schema: (n) => ({ formType: 'drawer', fields: n }) },

@@ -172,14 +172,14 @@ A sectioned form renders as ONE grid. The form view's `columns` (spec
 densely that section fills it. The view's value wins; without it the grid takes
 the widest section's density, and without either it is single-column.
 
-`ObjectForm` (simple), `ModalForm`, `TabbedForm`, `SplitForm` and `WizardForm` all
-resolve it that way, so the same metadata lays out identically in every host
+`ObjectForm` (simple), `ModalForm`, `TabbedForm` and `WizardForm` all resolve it
+that way, so the same metadata lays out identically in every host
 (`WizardForm` has no widest-section fallback — its steps never share a viewport,
 so each keeps its own authored width). The grid is applied to the field container
 inside the form, never wrapped around the `<form>`.
 
-One default differs: a dialog. `ModalForm`, whether `ObjectForm` opens it with
-`formType: 'modal'` or a host mounts it directly, draws two fields per row from
+One default differs: a dialog. `ModalForm`, whether an `object-form` block opens
+it with `formType: 'modal'` or a host mounts it directly, draws two fields per row from
 the container's `@md` tier up wherever nothing declares `columns`: the flat
 field list, the object's `fieldGroups`, and every section that declares no
 `columns` in a form that declares none. Such a section draws two per row beside
@@ -352,9 +352,8 @@ the object's `fieldGroups`) follow one rule for a section's divider row:
 
 - A section's **own settings apply whether or not it has a heading.** Its
   `visibleWhen` hides the whole group, fields included, on these three
-  layouts. A section with no `label` is never un-gated there. (The split
-  layout still draws and gates a section's row only when it has a `label` or a
-  `description`, and the wizard drops a step predicate, as described above.)
+  layouts. A section with no `label` is never un-gated there. (The wizard
+  drops a step predicate, as described above.)
 - The **divider row is drawn when the section has a `label` or a
   `description`**. With a `description` alone it is a blurb-only row: no
   heading, just the blurb.
@@ -422,11 +421,20 @@ divider.
 - Fields no pane claims render above the panel group rather than disappearing.
 - Needs at least two panes; ignored when the form uses `children` or `fieldTabs`.
 
-`SplitForm` builds on this. Each section declares its panel via `pane: 'primary'
-| 'secondary'` (spec `FormSection.pane`) — explicit placement that survives
-reordering. When omitted, the legacy rule applies: section 1 becomes the primary
-pane, the rest stack in the secondary one behind inline section headers. (The
-spec rejects `pane` on non-split form types at parse.)
+No `object-form` layout draws panes any more: `formType: 'split'`, the
+`SplitForm` renderer built on this, and the section `pane` key were removed
+together (ADR-0050). `fieldPanes` stays a `form` key for a host that composes
+panes itself.
+
+### Where an `object-form` block opens
+
+An `object-form`'s `formType` is the form's layout — `simple` (the default),
+`tabbed` or `wizard` — or, on the block, the container the block opens it in:
+`drawer` or `modal` (ADR-0050). `ObjectForm` only lays the form out; the block
+renderer is the caller that supplies the container, handing the node to
+`DrawerForm` (with `drawerSide` / `drawerWidth`) or `ModalForm` (with
+`modalSize` / `modalCloseButton`). A host that renders `<ObjectForm>` directly
+gets the inline form and opens its own drawer or dialog around it.
 
 ## Usage
 
@@ -481,7 +489,7 @@ its `schema`, but never a `dataSource` — that travels on
 one or wraps the component the same way.
 
 The components are on the package's export surface — `ObjectForm`,
-`TabbedForm`, `WizardForm`, `SplitForm`, `DrawerForm`, `ModalForm`,
+`TabbedForm`, `WizardForm`, `DrawerForm`, `ModalForm`,
 `EmbeddableForm`, `MasterDetailForm`, `LineItemsPanel`, `FormAnalytics`,
 `FormSectionContainer` — alongside the layout helpers (`applyAutoLayout`,
 `inferColumns`, `filterCreateModeFields`, …) and the per-container schema types
@@ -492,7 +500,7 @@ aggregate map among them.
 
 An `object-form` in `mode: 'edit'` reads its record with `findOne`, and its save
 writes only the fields that differ from that read. That covers every layout — the
-simple form and the `tabbed`, `wizard`, `split`, `modal` and `drawer` variants —
+simple form and the `tabbed`, `wizard`, `modal` and `drawer` variants —
 as well as a simple form whose mobile `stepper` option routes it through the
 wizard, and the parent operation of a master-detail form. Every layout also
 strips what a form never writes, on a create as on an edit: server-owned,
@@ -674,7 +682,7 @@ The plugin supports these field types:
 `@object-ui/types` alongside the rest of the JSON contract. This package imports
 them and does not re-export them — the form types on its own entry are the
 per-container ones (`TabbedFormSchema`, `WizardFormSchema`, `ModalFormSchema`,
-`SplitFormSchema`, `DrawerFormSchema`, `MasterDetailFormSchema`).
+`DrawerFormSchema`, `MasterDetailFormSchema`).
 
 ```typescript
 import type { FormSchema, FormField } from '@object-ui/types';

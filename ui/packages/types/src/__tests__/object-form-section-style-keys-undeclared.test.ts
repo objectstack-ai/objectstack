@@ -45,8 +45,8 @@
  *
  * ## Which types are NOT touched, deliberately
  *
- * The five per-layout config types in @object-ui/plugin-form —
- * `ModalFormSectionConfig`, `SplitFormSectionConfig`, TabbedForm's
+ * The four per-layout config types in @object-ui/plugin-form —
+ * `ModalFormSectionConfig`, TabbedForm's
  * `FormSectionConfig`, `WizardStepConfig`, `DrawerFormSectionConfig` — keep
  * their own `className` / `gridClassName`. Their renderers read them uncast for
  * programmatic React mounts, which the authorable boundary does not govern.
@@ -122,12 +122,10 @@ describe('objectui#7200 — `ObjectFormSection` does not declare the retired sec
       collapsible: true,
       collapsed: false,
       columns: 2,
-      pane: 'primary',
       visibleWhen: '${record.kind === "person"}',
       fields: ['name', { name: 'email', type: 'email', label: 'Email' }],
     };
     expect(section.columns).toBe(2);
-    expect(section.pane).toBe('primary');
   });
 
   it('declared-key census: the full authored section vocabulary, so a re-addition is a deliberate edit here', () => {
@@ -143,7 +141,7 @@ describe('objectui#7200 — `ObjectFormSection` does not declare the retired sec
       collapsible: true,
       collapsed: true,
       columns: true,
-      pane: true,
+      // `pane` left with the split form (objectstack#27159, ADR-0050).
       fields: true,
       // objectui#7051 — the group-reference form (`@objectstack/spec` 17.3.0,
       // objectstack#13855). Added to the census, not to the retired list: the

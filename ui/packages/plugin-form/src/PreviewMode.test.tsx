@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, waitFor, cleanup } from '@testing-library/react';
 import React from 'react';
-import { ObjectForm } from './ObjectForm';
+// objectstack#27159: `drawer` / `modal` are the block's containers, so these renders go
+// through `ObjectFormContainer`, the block's own route (a layout falls through to `ObjectForm`).
+import { ObjectFormContainer } from './ObjectFormContainer';
 import { registerAllFields } from '@object-ui/fields';
 import { PreviewModeProvider } from '@object-ui/react';
 
@@ -24,7 +26,7 @@ describe('Preview mode — overlay forms render inline', () => {
   for (const formType of ['drawer', 'modal'] as const) {
     it(`${formType}: mounts a real overlay dialog at runtime (control)`, async () => {
       render(
-        <ObjectForm
+        <ObjectFormContainer
           schema={{ type: 'object-form', objectName: 'proj', mode: 'create', formType }}
           dataSource={ds}
         />,
@@ -35,7 +37,7 @@ describe('Preview mode — overlay forms render inline', () => {
     it(`${formType}: renders inline with no dialog under PreviewModeProvider`, async () => {
       render(
         <PreviewModeProvider>
-          <ObjectForm
+          <ObjectFormContainer
             schema={{ type: 'object-form', objectName: 'proj', mode: 'create', formType }}
             dataSource={ds}
           />

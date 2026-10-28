@@ -238,11 +238,12 @@ export const REACT_BLOCKS: ReactBlockDef[] = [
     schemaType: 'object-form',
     summary: "Server-connected create/edit/view form for one object. Config props come from the spec FormView schema; bind + wire it with the React props below.",
     schema: FormViewSchema,
-    dataProps: ['layout', 'columns', 'tabPosition', 'drawerSide', 'drawerWidth', 'modalSize', 'splitDirection', 'sections', 'subforms', 'submitBehavior'],
+    // [#27159] `splitDirection` left with the split form renderer (ADR-0050).
+    dataProps: ['layout', 'columns', 'tabPosition', 'drawerSide', 'drawerWidth', 'modalSize', 'sections', 'subforms', 'submitBehavior'],
     interactions: [
       OBJECT_NAME,
       { name: 'mode', type: "'create' | 'edit' | 'view'", kind: 'controlled', description: 'Create a new record, or edit/view an existing one — drive from React state.' },
-      { name: 'formType', type: "'simple' | 'tabbed' | 'wizard' | 'split' | 'drawer' | 'modal'", kind: 'binding', description: 'Form presentation; drawer/modal render the form in a built-in overlay (use drawerSide/drawerWidth/modalSize).' },
+      { name: 'formType', type: "'simple' | 'tabbed' | 'wizard' | 'drawer' | 'modal'", kind: 'binding', description: "The form's layout (simple/tabbed/wizard), or the built-in container the block opens it in: drawer/modal (use drawerSide/drawerWidth/modalSize; contentLayout 'tabbed' puts a modal's sections on tabs)." },
       { name: 'recordId', type: 'string | number', kind: 'controlled', description: 'Which record to load (edit/view). The hook for master/detail.' },
       { name: 'fields', type: 'string[]', kind: 'binding', description: 'Limit/order the fields shown (defaults to the object form fields).' },
       { name: 'initialValues', type: 'Record<string, any>', kind: 'binding', description: 'Prefill values in create mode.' },
@@ -262,7 +263,7 @@ export const REACT_BLOCKS: ReactBlockDef[] = [
       // navigation family ruling — see the baseline note on #9392).
       { name: 'customFields', type: 'any[]', kind: 'binding', description: 'Field definitions merged over the set generated from object metadata. With inline definitions and no data source, this becomes the only field source.' },
       { name: 'readOnly', type: 'boolean', kind: 'binding', description: 'Render every field read-only, whatever `mode` says.' },
-      { name: 'modalCloseButton', type: 'boolean', kind: 'binding', description: "Show the modal presentation's close button (formType 'modal'; honoured by the modal form)." },
+      { name: 'modalCloseButton', type: 'boolean', kind: 'binding', description: "Show the close button of the block's modal container (formType 'modal')." },
       { name: 'contentLayout', type: "'simple' | 'tabbed'", kind: 'binding', description: "How the modal presentation lays out sections; 'tabbed' needs more than one section to differ from 'simple'." },
       { name: 'confirmOnDiscard', type: 'boolean', kind: 'binding', description: 'Ask before discarding unsaved edits when a drawer/modal form is dismissed. Set false to close immediately.' },
       { name: 'submitText', type: 'string', kind: 'binding', description: 'Label of the submit button.' },

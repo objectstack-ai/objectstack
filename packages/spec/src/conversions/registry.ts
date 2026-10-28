@@ -8700,10 +8700,20 @@ const connectorConnectionTimeoutMsRemoved: MetadataConversion = {
  * tombstone. Deleting is the whole edit: a form whose `type` was retired lands
  * on the `simple` default, the conversion invents no layout. The keys go on
  * every form, whatever its `type`: each is refused on every form now, and a
- * `pane` on a non-split form was already a parse error. `splitDirection`,
- * `drawerSide`, `drawerWidth` and `modalSize` stay — the first three for the
- * React `ObjectForm` block contract (#27159), `modalSize` because the
- * console's record dialog reads it on every layout.
+ * `pane` on a non-split form was already a parse error. `drawerSide`,
+ * `drawerWidth` and `modalSize` stay — the first two for the React
+ * `ObjectForm` block contract, whose drawer container reads them, `modalSize`
+ * because the console's record dialog reads it on every layout.
+ *
+ * **[#27159] The renderer half, absorbed here** (the skill's same-major rule:
+ * 18.3.0 is unreleased — `@objectstack/spec` is 18.2.0 on `main` — and one
+ * entry keeps the fixtures disjoint). Once `SplitForm` retired, `splitDirection`
+ * lost its last reader and goes from every form payload too, and the
+ * `object-form` PAGE BLOCK sheds its own copies: a `formType: 'split'` member
+ * (deleted — the block lands on `simple`), `splitDirection`, `splitSize`,
+ * `splitResizable` and every `sections[].pane`. The block's `drawer` / `modal`
+ * members are NOT touched: the block renderer still supplies those containers
+ * (`ObjectFormContainer` in objectui), so they stay authorable there.
  *
  * **Reach: every FORM payload**, exactly as
  * {@link formViewSubformColumnsCanonicalized} below: {@link mapViewPayloads}
@@ -8724,6 +8734,12 @@ const connectorConnectionTimeoutMsRemoved: MetadataConversion = {
  * The D3 entry `ui-form-view-type-layout-only` carries what the edit cannot
  * decide: whether a former `split` form reads better `tabbed`, and how the
  * caller of a former `drawer` / `modal` form opens it.
+ *
+ * **Page-block reach** ([#27159]): {@link mapPageComponents} — regions, slots
+ * and container nesting — scoped to `type === 'object-form'`, as
+ * {@link formLayoutInlineGridToVertical} is. The block accepted `split` and
+ * the three keys through 18.2.0, so a stored page or an assembled artifact
+ * can carry them.
  */
 const formViewPresentationTypesRemoved: MetadataConversion = {
   id: 'form-view-presentation-types-removed',
@@ -8732,12 +8748,17 @@ const formViewPresentationTypesRemoved: MetadataConversion = {
   retiredAfter: '18.2.0',
   surface:
     "view.form.type / view.formViews.<key>.type ('split' | 'drawer' | 'modal') / "
-    + 'view.form.sections[].pane / view.form.splitSize / view.form.splitResizable',
+    + 'view.form.sections[].pane / view.form.splitSize / view.form.splitResizable / '
+    + "view.form.splitDirection / page.component.object-form.formType ('split') / "
+    + 'page.component.object-form.sections[].pane / page.component.object-form.splitDirection / '
+    + 'page.component.object-form.splitSize / page.component.object-form.splitResizable',
   summary:
     "form view `type` members 'split' / 'drawer' / 'modal' removed (`type` is the form's layout — "
     + "simple, tabbed or wizard; where a form opens is the caller's open mode, and a record beside its "
-    + 'list is a reader\'s preference), with the split-only keys `sections[].pane`, `splitSize` and '
-    + '`splitResizable`. The retired member is deleted, which lands the form on the `simple` default',
+    + 'list is a reader\'s preference), with the split-only keys `sections[].pane`, `splitDirection`, '
+    + '`splitSize` and `splitResizable`; the `object-form` page block sheds its `split` member and the same '
+    + 'four keys (its `drawer` / `modal` containers stay). The retired member is deleted, which lands the '
+    + 'form on the `simple` default',
   apply(stack, emit) {
     const RETIRED_TYPES: ReadonlySet<unknown> = new Set(['split', 'drawer', 'modal']);
     const stripSectionPanes = (form: Dict, key: 'sections' | 'groups', path: string): Dict => {
@@ -8759,11 +8780,29 @@ const formViewPresentationTypesRemoved: MetadataConversion = {
         next = { ...next };
         delete next.type;
       }
-      next = stripKeys(next, ['splitSize', 'splitResizable'], emit, path);
+      next = stripKeys(next, ['splitDirection', 'splitSize', 'splitResizable'], emit, path);
       next = stripSectionPanes(next, 'sections', path);
       return stripSectionPanes(next, 'groups', path);
     };
-    const withViews = mapViewPayloads(stack, (payload, kind, path) =>
+    // [#27159] The `object-form` page block: only `split` left its `formType`.
+    const convertBlock = (properties: Dict, path: string): Dict => {
+      let next = properties;
+      if (next.formType === 'split') {
+        emit({ from: 'split', to: '(removed)', path: `${path}.formType` });
+        next = { ...next };
+        delete next.formType;
+      }
+      next = stripKeys(next, ['splitDirection', 'splitSize', 'splitResizable'], emit, path);
+      return stripSectionPanes(next, 'sections', path);
+    };
+    const withPages = mapPageComponents(stack, (component, path) => {
+      if (component.type !== 'object-form') return component;
+      const properties = component.properties;
+      if (!isDict(properties)) return component;
+      const next = convertBlock(properties, `${path}.properties`);
+      return next === properties ? component : { ...component, properties: next };
+    });
+    const withViews = mapViewPayloads(withPages, (payload, kind, path) =>
       kind === 'form' ? convertForm(payload, path) : payload);
     return mapCollection(withViews, ASSEMBLED_VIEW_ITEMS_KEY, (item, path) => {
       if (item.viewKind !== 'form') return item;
@@ -8778,14 +8817,44 @@ const formViewPresentationTypesRemoved: MetadataConversion = {
   },
   fixture: {
     before: {
+      pages: [
+        {
+          name: 'fv_task_desk',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                // [#27159] A split block: the member, the three keys and both panes go.
+                {
+                  type: 'object-form',
+                  properties: {
+                    objectName: 'fv_task',
+                    formType: 'split',
+                    splitDirection: 'horizontal',
+                    splitSize: 40,
+                    splitResizable: true,
+                    sections: [
+                      { label: 'Task', pane: 'primary', fields: ['title'] },
+                      { label: 'Schedule', pane: 'secondary', fields: ['due_date'] },
+                    ],
+                  },
+                },
+                // A drawer block is a live container on the block: untouched.
+                { type: 'object-form', properties: { objectName: 'fv_task', formType: 'drawer', drawerSide: 'right' } },
+                // The same keys on a component that is NOT an `object-form` survive.
+                { type: 'element:custom', properties: { formType: 'split', splitSize: 40 } },
+              ],
+            },
+          ],
+        },
+      ],
       views: [
         {
           object: 'fv_task',
           // A live layout rides through by reference.
           form: { type: 'tabbed', sections: [{ label: 'Main', fields: ['title'] }] },
           formViews: {
-            // A split form: the member, both panes and both split keys go;
-            // `splitDirection` stays (the React block contract still reads it).
+            // A split form: the member, both panes and the three split keys go.
             beside: {
               type: 'split',
               splitSize: 40,
@@ -8813,13 +8882,36 @@ const formViewPresentationTypesRemoved: MetadataConversion = {
       ],
     },
     after: {
+      pages: [
+        {
+          name: 'fv_task_desk',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                {
+                  type: 'object-form',
+                  properties: {
+                    objectName: 'fv_task',
+                    sections: [
+                      { label: 'Task', fields: ['title'] },
+                      { label: 'Schedule', fields: ['due_date'] },
+                    ],
+                  },
+                },
+                { type: 'object-form', properties: { objectName: 'fv_task', formType: 'drawer', drawerSide: 'right' } },
+                { type: 'element:custom', properties: { formType: 'split', splitSize: 40 } },
+              ],
+            },
+          ],
+        },
+      ],
       views: [
         {
           object: 'fv_task',
           form: { type: 'tabbed', sections: [{ label: 'Main', fields: ['title'] }] },
           formViews: {
             beside: {
-              splitDirection: 'vertical',
               sections: [
                 { label: 'Task', fields: ['title'] },
                 { label: 'Schedule', fields: ['due_date'] },
@@ -8836,10 +8928,12 @@ const formViewPresentationTypesRemoved: MetadataConversion = {
         { name: 'fv_task.side', object: 'fv_task', viewKind: 'form' },
       ],
     },
-    // `beside`: the member, `splitSize`, `splitResizable` and two panes (5);
-    // `quick`, `dialog`, the item record and the assembled overlay: one member
-    // each (4). The tabbed form and the list emit none.
-    expectedNotices: 9,
+    // The split block: the member, three keys and two panes (6). `beside`: the
+    // member, `splitDirection`, `splitSize`, `splitResizable` and two panes
+    // (6); `quick`, `dialog`, the item record and the assembled overlay: one
+    // member each (4). The drawer block, the non-form component, the tabbed
+    // form and the list emit none.
+    expectedNotices: 16,
   },
 };
 
