@@ -37,8 +37,10 @@
  * `rowCount` at all, both group as whole rows.
  *
  * Also here, re-homed from the retired `groupedPartialDisclosure-7189` file:
- * grouping never reaches the mobile card view (`useCardView` requires
- * `!isGrouped`), with the ungrouped mobile render as its lit control.
+ * a grouped grid on a phone keeps its groups. Since objectstack#26896 it draws
+ * them as the mobile card view does (each band, then its rows as cards, no
+ * table) rather than as the desktop table, with the ungrouped mobile render as
+ * its lit control.
  */
 import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
 import { render, cleanup, screen, act } from '@testing-library/react';
@@ -267,18 +269,20 @@ describe('a masked-only grouping key shows loading, never an error it withdraws 
   });
 });
 
-describe('grouping never reaches the mobile card view (re-homed from groupedPartialDisclosure-7189)', () => {
+describe('a grouped grid on a phone keeps its groups (re-homed from groupedPartialDisclosure-7189; objectstack#26896)', () => {
   const originalWidth = window.innerWidth;
   const setWidth = (value: number) =>
     Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value });
   afterEach(() => setWidth(originalWidth));
 
-  it('a grouped grid under 768px draws its groups, not cards', async () => {
+  it('a grouped grid under 768px draws its groups, each followed by its rows as cards, with no table', async () => {
     setWidth(390);
     renderGrid(makeFindOnlyDataSource(), { grouping: GROUPING, data: { provider: 'value', items: ROWS } });
 
     await vi.waitFor(() => expect(groupRows()).toHaveLength(5));
-    expect(document.querySelector('table')).not.toBeNull();
+    expect(document.querySelectorAll('[data-testid="grouped-grid-card-band"]')).toHaveLength(5);
+    expect(document.querySelectorAll('[data-testid="grid-card-title"]').length).toBeGreaterThan(0);
+    expect(document.querySelector('table')).toBeNull();
   });
 
   // CONTROL — the same rows ungrouped at the same width ARE the card view.
