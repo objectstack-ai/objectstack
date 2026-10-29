@@ -209,8 +209,29 @@ afterAll(() => {
 beforeEach(() => {
   vi.clearAllMocks();
   lastGridProps = null;
+  // objectstack#27365 — an inline-editable grid asks the record-grained
+  // `update` verdict for its rows (`POST /api/v1/security/explain`). Answer it
+  // here, every row permitted, so it never reaches the network; any other URL
+  // is refused loudly rather than answered.
+  vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: unknown }) => {
+    if (!String(url).endsWith('/api/v1/security/explain')) {
+      throw new Error(`unexpected fetch in this suite: ${String(url)}`);
+    }
+    const body = JSON.parse(String(init?.body ?? '{}')) as { recordIds?: string[] };
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        allowed: true,
+        records: (body.recordIds ?? []).map((recordId) => ({ recordId, visible: true })),
+      }),
+    };
+  }));
 });
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 const settle = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, 100)));
 

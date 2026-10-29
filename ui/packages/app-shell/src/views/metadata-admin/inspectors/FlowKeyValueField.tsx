@@ -359,7 +359,7 @@ export function FlowKeyValueField({
           {ASSIGNMENT_ARRAY_FORM_PRESCRIPTION}
         </p>
       )}
-      <div className="space-y-1.5">
+      <div className="space-y-3">
         {rows.length === 0 && (
           <p className="text-[11px] italic text-muted-foreground">{emptyLabel}</p>
         )}
@@ -373,7 +373,13 @@ export function FlowKeyValueField({
           const refusal = envelopeSlot && writesMap ? valueRefusal(rowValue(row)) : null;
           return (
             <div key={row.id} className="space-y-1">
-              <div className="flex items-center gap-1.5">
+              {/*
+               * objectstack#27356 — the key sits on its own line, over its
+               * value. Side by side, the inspector's width split three ways
+               * (key, value, buttons) and a field name read "subj" or "dueD";
+               * on its own line it keeps the full width beside one button.
+               */}
+              <div className="flex items-center gap-1.5" data-testid="flow-kv-key-line">
                 <Input
                   list={suggestsKeys ? keyListId : undefined}
                   value={row.key}
@@ -384,8 +390,22 @@ export function FlowKeyValueField({
                   }}
                   placeholder={keyLabel}
                   disabled={disabled}
-                  className="h-8 flex-1 font-mono text-xs"
+                  className="h-8 min-w-0 flex-1 font-mono text-xs"
                 />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 w-8 shrink-0 p-0 text-muted-foreground"
+                  onClick={() => removeRow(row.id)}
+                  disabled={disabled}
+                  aria-label={removeLabel}
+                  title={removeLabel}
+                >
+                  <X className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+              <div className="flex items-center gap-1.5" data-testid="flow-kv-value-line">
                 <VariableTextInput
                   mode={hole ? 'hole' : 'expression'}
                   mono={expression}
@@ -415,18 +435,6 @@ export function FlowKeyValueField({
                     <Code2 className="h-3.5 w-3.5" />
                   </Button>
                 )}
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 w-8 shrink-0 p-0 text-muted-foreground"
-                  onClick={() => removeRow(row.id)}
-                  disabled={disabled}
-                  aria-label={removeLabel}
-                  title={removeLabel}
-                >
-                  <X className="h-3.5 w-3.5" />
-                </Button>
               </div>
               {refusal ? (
                 <div className="space-y-0.5" role="alert">

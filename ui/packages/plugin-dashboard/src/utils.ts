@@ -7,6 +7,7 @@
  */
 
 import type { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
+import type { DatasetMeasurePolarity } from '@objectstack/spec/ui';
 
 /** Returns true when the widget data config uses provider: 'object' (async data source). */
 export function isObjectProvider(widgetData: unknown): widgetData is { provider: 'object'; object?: string; aggregate?: any; filter?: any } {
@@ -195,5 +196,35 @@ export function computeMetricDelta(
  */
 export function formatMetricDeltaPercent(value: number | null): string {
   return value === null ? '\u2014' : `${value}%`;
+}
+
+/**
+ * The good/bad colour of a period-over-period delta, judged by the declared
+ * polarity (objectstack#26602): the ONE colouring rule every delta badge in
+ * this package draws by. A dataset measure's `polarity` reaches the
+ * dataset-bound tile on the answer's column descriptor (`fields[].polarity`,
+ * relayed by the server like `format` and `currency`); an inline
+ * `object-metric` tile declares its own `polarity` on the node
+ * (objectstack#27347), in the same vocabulary, and `MetricWidget` reads it.
+ *
+ * - `lower`: a fall is good news (green) and a rise is bad (red). Turnaround
+ *   days, overdue counts, cost: a slower approval no longer reads as a win.
+ * - `neutral`: neither direction is good or bad, so no tone at all.
+ * - `higher`, and an UNDECLARED polarity: a rise green, a fall red, the
+ *   colours every delta had before the key existed. Nothing here guesses a
+ *   polarity from the measure's name or unit.
+ *
+ * The arrow is not this function's business: it always shows which way the
+ * number moved. A flat delta (`direction: 'neutral'`) takes no tone under any
+ * polarity, as before, and neither does a badge with no direction at all (a
+ * static `trend` that names none).
+ */
+export function deltaToneClass(
+  direction: MetricDelta['direction'] | undefined,
+  polarity: DatasetMeasurePolarity | undefined,
+): string | undefined {
+  if (direction === undefined || direction === 'neutral' || polarity === 'neutral') return undefined;
+  const good = polarity === 'lower' ? direction === 'down' : direction === 'up';
+  return good ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400';
 }
 
