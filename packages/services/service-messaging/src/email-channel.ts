@@ -117,8 +117,27 @@ export interface EmailChannelOptions {
      * hole with no argument formats in. `undefined` (no default set, or not
      * wired) leaves the render without one, so such a hole refuses the delivery
      * with `TEMPLATE_INVALID` instead of formatting in a guessed currency.
+     * REJECTS when the read itself failed: the render then runs without one,
+     * and a `TEMPLATE_INVALID` it answers is graded retryable, never permanent
+     * ({@link templateRefusalAfterCurrencyReadFault}).
      */
     getTenantCurrency?(organizationId: string | undefined): Promise<string | undefined>;
+}
+
+/**
+ * [#27257] The row error of a templated delivery whose render failed. A read
+ * that FAILED is not a read that found no default: when `getTenantCurrency`
+ * rejected and the render then answered `TEMPLATE_INVALID` (a no-argument
+ * `currency` hole, or any refusal the missing default may have caused), the
+ * error is rewritten WITHOUT a `TEMPLATE_*` code, so `classifyError` grades it
+ * retryable. Once the read succeeds, a template that is really invalid is
+ * refused again and graded permanent then. Any other failure, and every
+ * refusal after a read that succeeded, is returned unchanged. Shared by the
+ * email and inbox channels.
+ */
+export function templateRefusalAfterCurrencyReadFault(message: string, currencyReadFault: string | undefined): string {
+    if (currencyReadFault === undefined || !/\bTEMPLATE_INVALID\b/.test(message)) return message;
+    return `the template was not rendered: the organization's default currency could not be read (${currencyReadFault}); the delivery is retried until that read succeeds`;
 }
 
 /**
@@ -351,8 +370,16 @@ export function createEmailChannel(opts: EmailChannelOptions): MessagingChannel 
                 }
                 const templateLocale = recipientLocale;
                 const data = (payload.templateData ?? undefined) as Record<string, unknown> | undefined;
+                let currency: string | undefined;
+                let currencyReadFault: string | undefined;
                 try {
-                    const currency = await opts.getTenantCurrency?.(n.organizationId);
+                    currency = await opts.getTenantCurrency?.(n.organizationId);
+                } catch (err) {
+                    // The read failed and learned nothing: render without a
+                    // currency, and grade a refusal below (#27257).
+                    currencyReadFault = (err as Error)?.message ?? String(err);
+                }
+                try {
                     const result = (await email.sendTemplate({
                         template: templateName,
                         to: address,
@@ -377,8 +404,11 @@ export function createEmailChannel(opts: EmailChannelOptions): MessagingChannel 
                     // TEMPLATE_INACTIVE / MISSING_VARIABLES / TEMPLATE_INVALID)
                     // arrives as a thrown Error — keep the code at the front of
                     // the row's error so classifyError() below can grade it
-                    // permanent.
-                    return { ok: false, error: (err as Error)?.message ?? String(err) };
+                    // permanent — unless the currency read failed first.
+                    return {
+                        ok: false,
+                        error: templateRefusalAfterCurrencyReadFault((err as Error)?.message ?? String(err), currencyReadFault),
+                    };
                 }
             }
 

@@ -8,7 +8,7 @@ import type {
     MessagingChannelContext,
     SendResult,
 } from './channel.js';
-import type { EmailSenderSurface } from './email-channel.js';
+import { templateRefusalAfterCurrencyReadFault, type EmailSenderSurface } from './email-channel.js';
 import { RECIPIENT_LOCALE_FIELD, USER_OBJECT, resolveRecipientLocale } from './recipient-locale.js';
 import { FAN_OUT_SYSTEM_CONTEXT } from './fan-out-system-context.js';
 import { assertActorReferenceResolves } from './actor-reference.js';
@@ -61,6 +61,9 @@ export interface InboxChannelOptions {
      * hole with no argument formats in. `undefined` (no default set, or not
      * wired) leaves the render without one, so such a hole refuses the delivery
      * with `TEMPLATE_INVALID` instead of formatting in a guessed currency.
+     * REJECTS when the read itself failed: the render then runs without one,
+     * and a `TEMPLATE_INVALID` it answers is graded retryable, never permanent
+     * (`templateRefusalAfterCurrencyReadFault` in `email-channel.ts`).
      */
     getTenantCurrency?(organizationId: string | undefined): Promise<string | undefined>;
     /** User identity object the recipient's locale is read from (default `sys_user`). */
@@ -194,8 +197,16 @@ export function createInboxChannel(opts: InboxChannelOptions): MessagingChannel 
                     deploymentLocale,
                 );
                 const templateData = (payload.templateData ?? undefined) as Record<string, unknown> | undefined;
+                let currency: string | undefined;
+                let currencyReadFault: string | undefined;
                 try {
-                    const currency = await opts.getTenantCurrency?.(n.organizationId);
+                    currency = await opts.getTenantCurrency?.(n.organizationId);
+                } catch (err) {
+                    // The read failed and learned nothing: render without a
+                    // currency, and grade a refusal below (#27257).
+                    currencyReadFault = (err as Error)?.message ?? String(err);
+                }
+                try {
                     const rendered = await email.renderTemplate({
                         template: templateName,
                         ...(templateData !== undefined ? { data: templateData } : {}),
@@ -209,8 +220,11 @@ export function createInboxChannel(opts: InboxChannelOptions): MessagingChannel 
                     // TEMPLATE_INACTIVE / MISSING_VARIABLES / TEMPLATE_INVALID)
                     // arrives as a thrown Error — keep the code at the front of
                     // the row's error so classifyError() below can grade it
-                    // permanent.
-                    return { ok: false, error: (err as Error)?.message ?? String(err) };
+                    // permanent — unless the currency read failed first.
+                    return {
+                        ok: false,
+                        error: templateRefusalAfterCurrencyReadFault((err as Error)?.message ?? String(err), currencyReadFault),
+                    };
                 }
             }
 
