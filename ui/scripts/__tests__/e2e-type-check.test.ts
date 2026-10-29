@@ -1,11 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import { uiTurboConfigPath } from '../workspace-root.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
-import { globToRegExp, repoFilesOnDisk } from './helpers/turbo-inputs';
+import { liveTurboConfig } from './helpers/turbo-inputs';
+import {
+  UI_JOBS,
+  globMatches,
+  repoPath,
+  rootCiJob,
+  rootCiPath,
+  stepsRunning,
+  uiFilterGlobs,
+  rootCi,
+  uiRun,
+} from './helpers/root-ci';
 
 /**
  * objectui#4471 — the 30 Playwright specs under `e2e/` were compiled by nothing.
@@ -61,9 +71,8 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
 const configPath = path.join(repoRoot, 'tsconfig.e2e.json');
 const e2eDir = path.join(repoRoot, 'e2e');
 
-/** The root script a contributor runs, and the turbo root task that drives it. */
+/** The root script a contributor runs, and the root `ci.yml` step runs. */
 const SCRIPT_NAME = 'type-check:e2e';
-const TURBO_TASK = `//#${SCRIPT_NAME}`;
 
 /**
  * The project as TypeScript itself resolves it: the same parse `tsc -p` does,
@@ -375,13 +384,34 @@ describe('tsconfig.e2e.json — coverage of the root playwright configs (objectu
   });
 });
 
-describe('the gate is actually wired up (objectui#4471)', () => {
+/**
+ * objectui#4471's wiring, as the monorepo runs it (objectstack#27283).
+ *
+ * Standalone, objectui made this gate the turbo ROOT task `//#type-check:e2e`
+ * and every package's `type-check` `dependsOn` it, so `pnpm type-check` reached
+ * `e2e/` with no workflow entry of its own. Under the monorepo `//` is the
+ * objectstack root package and no turbo task can name objectui's root manifest,
+ * so the root `ci.yml` runs the script as a step of `type-check-ui` instead
+ * (objectstack#25697). Each property the root task carried is pinned here
+ * against that step, read from the workflow GitHub runs:
+ *
+ *   - "a turbo root task, so `pnpm type-check` reaches e2e/"  -> the step exists
+ *     in the job that type-checks the ui packages, and runs exactly the script;
+ *   - "runs as part of `pnpm type-check`"                       -> the step has no
+ *     `if:` of its own, and every file of the e2e program sets the `ui` filter
+ *     that job's `if:` reads, so an e2e-only change still runs it;
+ *   - "hashes its own program, not the whole repository"        -> no root task's
+ *     hash is folded into any package's `type-check`: the live `type-check`
+ *     `dependsOn` names no `//#` task, the stronger form of the same property;
+ *   - "is uncached"                                              -> the step is the
+ *     script itself, not a `turbo run`, so no cache can replay its verdict.
+ */
+describe('the gate is actually wired up (objectui#4471, objectstack#27283)', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as {
     scripts?: Record<string, string>;
   };
-  const turbo = JSON.parse(fs.readFileSync(uiTurboConfigPath(), 'utf8')) as {
-    tasks: Record<string, { cache?: boolean; dependsOn?: string[]; inputs?: string[] }>;
-  };
+  const job = rootCiJob(UI_JOBS.typeCheck);
+  const steps = stepsRunning(job, uiRun(SCRIPT_NAME));
 
   it('is runnable locally, by name', () => {
     // A gate nobody can reproduce locally is a gate people learn to ignore.
@@ -389,102 +419,68 @@ describe('the gate is actually wired up (objectui#4471)', () => {
     expect(pkg.scripts?.[SCRIPT_NAME]).toContain('tsconfig.e2e.json');
   });
 
-  it('is a turbo root task, which is what makes `pnpm type-check` reach e2e/', () => {
-    // Turbo resolves `//#x` to the ROOT package.json's `x` script. Declaring the
-    // task without the script (or renaming the script out from under it) is a
-    // hard turbo error rather than a silent skip, but pin the pairing anyway:
-    // it is the whole reason the script above is not dead weight.
+  it('is a step of the job that type-checks the ui packages, which is what makes CI reach e2e/', () => {
     expect(
-      turbo.tasks[TURBO_TASK],
-      `turbo.json must declare the root task \`${TURBO_TASK}\`. Without it, ` +
-        `\`pnpm type-check\` (turbo run type-check) never reaches e2e/ and this config is ` +
-        'CI-invisible unless someone adds a workflow step — which is the shape objectui#4456 ' +
-        'moved away from.',
-    ).toBeDefined();
+      steps,
+      `${rootCiPath}'s \`${UI_JOBS.typeCheck}\` job must run \`${uiRun(SCRIPT_NAME)}\` as a step. ` +
+        'Nothing else compiles e2e/: it is not a workspace package, so `turbo run type-check` cannot ' +
+        'reach it, and the monorepo has no turbo root task that could (`//` is the objectstack root).',
+    ).toHaveLength(1);
     expect(
-      pkg.scripts?.[SCRIPT_NAME],
-      `\`${TURBO_TASK}\` resolves to the root package.json script "${SCRIPT_NAME}"`,
-    ).toBeDefined();
+      job.steps.some((step) => /\bturbo run type-check\b/.test(step.run ?? '')),
+      `the premise: \`${UI_JOBS.typeCheck}\` is the job that runs \`turbo run type-check\` over the ui packages`,
+    ).toBe(true);
   });
 
-  it('runs as part of `pnpm type-check`', () => {
+  it('runs on every type-check of the ui tree, an e2e-only change included', () => {
     expect(
-      turbo.tasks['type-check']?.dependsOn ?? [],
-      `turbo.json's \`type-check\` task must \`dependsOn\` \`${TURBO_TASK}\`. That dependency is ` +
-        'the entire wiring: ci.yml’s existing `Run type-check` step gains e2e/ coverage with ' +
-        'no new workflow entry, exactly as `lint` gained `//#lint:root` in objectui#4456.',
-    ).toContain(TURBO_TASK);
-  });
-
-  /**
-   * objectui#12222. Turbo folds a dependency's hash into its dependent's, and
-   * every package's `type-check` depends on this task — so this task's hash is
-   * part of EVERY package's type-check hash. With no `inputs`, a root task
-   * hashes every tracked file in the repository (turbo's default for the root
-   * package), so any commit anywhere moved all of those hashes and the restored
-   * `.turbo/cache` replayed nothing: `Type Check` re-ran every package on every
-   * pull request and queue build. Measured on that card, before the fix: one
-   * untracked file under `docs/` moved every `type-check` hash and no `build`
-   * hash.
-   *
-   * The task stays uncached (below), so its `inputs` decide nothing but that
-   * hash. They name its own program — what `tsconfig.e2e.json` includes, and
-   * the config itself — so the hash moves when the e2e program does and not
-   * when anything else in the repository does. Turbo adds the root
-   * `package.json` and `turbo.json` on its own.
-   */
-  it('hashes its own program, not the whole repository, because every type-check inherits its hash', () => {
-    const inputs = turbo.tasks[TURBO_TASK]?.inputs ?? [];
-    expect(
-      inputs,
-      `\`${TURBO_TASK}\` declares no \`inputs\`, so turbo hashes every tracked file in the ` +
-        'repository for it — and every package’s `type-check` inherits that hash through ' +
-        '`dependsOn`, so no commit can ever replay a cached type-check (objectui#12222).',
-    ).not.toHaveLength(0);
-    expect(inputs, '`$TURBO_DEFAULT$` on a root task is the whole repository again').not.toContain(
-      '$TURBO_DEFAULT$',
+      steps[0]?.if,
+      `the \`${uiRun(SCRIPT_NAME)}\` step must carry no \`if:\` of its own: as objectui's root task it ` +
+        'ran on every `pnpm type-check`, and a condition here would let a run type-check the packages ' +
+        'and skip e2e/.',
+    ).toBeUndefined();
+    expect(job.if ?? '', 'the premise: the job runs when the `ui` paths filter is set').toMatch(
+      /needs\.filter\.outputs\.ui\b/,
     );
-
-    const matchers = inputs.map((glob) => globToRegExp(glob));
-    const program = [...programFiles(), 'tsconfig.e2e.json'];
-    const unhashed = program.filter((file) => !matchers.some((re) => re.test(file)));
+    const globs = uiFilterGlobs(rootCi());
+    const program = [...programFiles(), 'tsconfig.e2e.json'].map(repoPath);
+    expect(program.length, 'the e2e program resolved implausibly few files').toBeGreaterThan(5);
+    const unfiltered = program.filter((file) => !globs.some((glob) => globMatches(glob, file)));
     expect(
-      unhashed,
-      `files of the e2e program that \`${TURBO_TASK}\`'s inputs do not name — its hash would not ` +
-        'move when they change:\n' +
-        unhashed.map((f) => `  - ${f}`).join('\n'),
-    ).toEqual([]);
-
-    const ownProgram = /^(?:e2e\/|playwright[^/]*\.config\.ts$|tsconfig\.e2e\.json$)/;
-    const beyond = [...repoFilesOnDisk()].filter(
-      (file) => matchers.some((re) => re.test(file)) && !ownProgram.test(file),
-    );
-    expect(
-      beyond,
-      `\`${TURBO_TASK}\`'s inputs reach files outside its own program, and each one moves every ` +
-        'package’s type-check hash when it changes:\n' +
-        beyond.map((f) => `  - ${f}`).join('\n'),
+      unfiltered,
+      'files of the e2e program the `ui` paths filter does not match — a change to only these would ' +
+        `not run \`${UI_JOBS.typeCheck}\`, so nothing would type-check it:\n` +
+        unfiltered.map((f) => `  - ${f}`).join('\n'),
     ).toEqual([]);
   });
 
   /**
-   * The partition rule from `turbo-task-guard-coverage.test.ts`, restated where
-   * it bites. That file requires every CACHEABLE task to have a
-   * `turbo-<task>-inputs.test.ts` deriving its out-of-package reads — and for a
-   * `//#`-prefixed task the derived name is not even a legal path, so a cached
-   * root task cannot satisfy the family at all. The substantive reason is the
-   * same one: tsc's real read set is the import closure (`@playwright/test`'s
-   * declarations, `@types/node`), and the sibling guards deliberately narrow to
-   * config root files. A cached verdict over that is replayable in a way nobody
-   * derives, which is objectui#3514 with a type gate attached.
+   * objectui#12222. Turbo folds a dependency's hash into its dependent's, so
+   * when every package's `type-check` depended on this root task, its hash was
+   * part of every one of theirs, and with no `inputs` any commit anywhere moved
+   * all of them. Measured on that card, before the fix: one untracked file under
+   * `docs/` moved every `type-check` hash and no `build` hash. objectui scoped
+   * the root task's inputs to its own program. Run as a step, the program
+   * enters no turbo hash at all — provided no root task comes back into the
+   * `type-check` graph, which is what this holds.
    */
-  it('is uncached, the side of the guard-coverage partition it belongs on', () => {
+  it('folds no root-task hash into any package type-check, because every type-check would inherit it', () => {
+    const typeCheck = liveTurboConfig().tasks?.['type-check'] as { dependsOn?: string[] } | undefined;
+    expect(typeCheck, 'the root turbo.json must define `type-check`').toBeDefined();
     expect(
-      turbo.tasks[TURBO_TASK]?.cache,
-      `\`${TURBO_TASK}\` must stay "cache": false. If it becomes cacheable, ` +
-        'turbo-task-guard-coverage.test.ts starts demanding a derived-inputs guard for it — and ' +
-        'the name that guard would have to carry (turbo-//#type-check:e2e-inputs.test.ts) is not ' +
-        'a path. It costs a few seconds; leave it uncached.',
-    ).toBe(false);
+      (typeCheck?.dependsOn ?? []).filter((dep) => dep.startsWith('//#')),
+      'the live `type-check` depends on a root task: its hash is now part of every package ' +
+        'type-check hash, so it must declare inputs scoped to its own program (objectui#12222), ' +
+        'and the step this file pins becomes a second run of the same program.',
+    ).toEqual([]);
+  });
+
+  it('is uncached: the step is the script itself, which no turbo cache stores', () => {
+    expect(
+      steps[0]?.run?.trim(),
+      `the step must run \`${uiRun(SCRIPT_NAME)}\` directly. Routed through \`turbo run\` it would be ` +
+        'cacheable, and a tsc program\'s real read set is its import closure (`@playwright/test`\'s ' +
+        'declarations, `@types/node`), which no derived-inputs guard in this family narrows soundly.',
+    ).toBe(uiRun(SCRIPT_NAME));
   });
 });
