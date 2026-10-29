@@ -335,7 +335,7 @@ import { viewContainerNameRefusal } from './view-container-name-refusal.js';
 import { bindHooksToEngine, type BindHooksOptions } from './hook-binder.js';
 import { declaredHookCondition } from './hook-wrappers.js';
 import { validateRecord, validateRecordInScope, normalizeMultiValueFields, normalizeBlankTypedValues, normalizeNumericStringValues, coerceBooleanFields, ValidationError, type FieldValidationError, isScannableValueShapeField } from './validation/record-validator.js';
-import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
+import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink, ValidationMessageContext } from './validation/record-validator.js';
 import type { RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
 import { createBatchSummaryAccumulator } from './summary-batch-accumulation.js';
 import { collectReferenceTraversals, referenceTraversalConflicts, evaluateValidationRules, emitValidationAdvisories, optionVisibilityReadsPermissions, readsPermissionPredicate, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields, staticReadonlyInsertSubject, preserveAuditIgnoredOnInsertWarning } from './validation/rule-validator.js';
@@ -9542,11 +9542,13 @@ export class ObjectQL implements IObjectQLEngine {
     // Only `locale` is read — narrower than `ExecutionContext` so both the
     // resolved and the input-shaped envelope satisfy it.
     context?: { locale?: string },
-  ): { locale?: string; translate?: (key: string, locale: string, params?: Record<string, unknown>) => string; objectName: string } {
+  ): ValidationMessageContext & { objectName: string } {
     // [#25522 cut 1] The body moved to `engine-validation-messages.ts` (see `ValidationMessageHost`).
     const readI18nService = () => this.i18nService;
+    const readRegistry = () => this._registry;
     const host: ThisParameterType<typeof validationMessageContext> = {
       get i18nService() { return readI18nService(); },
+      get registry() { return readRegistry(); },
       negotiatedMessageLocale: (...a) => this.negotiatedMessageLocale(...a),
     };
     return validationMessageContext.call(host, objectName, context);
