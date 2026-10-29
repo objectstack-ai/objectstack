@@ -109,7 +109,7 @@ describe('InboxPopover — bell badge breakdown (#7233)', () => {
     // …and the popover spells out what that "9+" is made of, unclamped.
     expect(screen.getByTestId('inbox-badge-breakdown-total')).toHaveTextContent('15 total');
     expect(screen.getByTestId('inbox-badge-breakdown-notifications')).toHaveTextContent(
-      '12 notifications',
+      '12 unread topics',
     );
     expect(screen.getByTestId('inbox-badge-breakdown-approvals')).toHaveTextContent(
       '3 pending approvals',
@@ -158,7 +158,7 @@ describe('InboxPopover — bell badge breakdown (#7233)', () => {
     });
 
     expect(screen.getByTestId('inbox-badge-breakdown-notifications')).toHaveTextContent(
-      '3 notifications',
+      '3 unread topics',
     );
     expect(screen.getByTestId('inbox-badge-breakdown-total')).toHaveTextContent('4 total');
   });
