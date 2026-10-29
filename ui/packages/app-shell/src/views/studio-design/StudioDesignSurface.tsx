@@ -6307,6 +6307,32 @@ function fieldCelStamp(draft: Record<string, unknown>, field: string): string | 
   return JSON.stringify([cel.map((v) => v ?? null), entries.map((e) => e.name)]);
 }
 
+/** objectstack#27629 — the Data pillar panels that mount a CEL editor and report per item. */
+type CelPanelTab = 'rules' | 'actions';
+const isCelPanelTab = (v: string): v is CelPanelTab => v === 'rules' || v === 'actions';
+
+/** The rule (`rules`) or action (`actions`) named `item` in the object draft. */
+function panelItemOf(draft: Record<string, unknown>, tab: CelPanelTab, item: string): Record<string, unknown> | undefined {
+  const list = tab === 'rules' ? draft.validations : draft.actions;
+  if (!Array.isArray(list)) return undefined;
+  return list.find(
+    (e): e is Record<string, unknown> => !!e && typeof e === 'object' && String((e as { name?: unknown }).name ?? '') === item,
+  );
+}
+
+/**
+ * objectstack#27629 — what a panel's CEL verdict on `item` was judged from, as
+ * the object draft holds it: the rule or action itself (its guard or
+ * predicates among its keys) and the object's field names its lint resolves
+ * references against. `fieldCelStamp`'s counterpart for the panel family; the
+ * same stamp is the same verdict. `null` when the item is gone.
+ */
+function panelItemCelStamp(draft: Record<string, unknown>, tab: CelPanelTab, item: string): string | null {
+  const def = panelItemOf(draft, tab, item);
+  if (!def) return null;
+  return JSON.stringify([def, readFields(draft.fields).entries.map((e) => e.name)]);
+}
+
 /** The data-source writes the Form tab's Preview refuses (objectui#12515). */
 const PREVIEW_REFUSED_WRITES = new Set<PropertyKey>(['create', 'update', 'delete', 'bulk', 'bulkUpdate', 'bulkDelete']);
 
@@ -6499,8 +6525,10 @@ export function DataPillar({
   //
   // Stamped with the panel TAB: exactly one panel is mounted at a time, so
   // leaving the tab unmounts the reporter and it can never retract its last
-  // verdict — deriving against the live tab is what stops a fault authored
-  // under Validations from wedging Save on a tab with no CEL editor at all.
+  // verdict. objectstack#27629 — only Settings still reports through this
+  // count (its inspector mounts no CEL editor today); Validations and Actions
+  // report per item and keep their verdicts with the draft (`panelCelVerdicts`
+  // below), so leaving their tab no longer releases the hold.
   const [panelBlockingReport, setPanelBlockingReport] = React.useState({ key: '', count: 0 });
   const [dirty, setDirty] = React.useState(false);
   const [hasDraft, setHasDraft] = React.useState(false);
@@ -6528,10 +6556,17 @@ export function DataPillar({
   // its "Show me": a fresh object per press, so pressing it again re-selects
   // the action after the author picked another one.
   const [actionFocus, setActionFocus] = React.useState<{ name: string } | null>(null);
+  // objectstack#27629 — the rule a held line names, opened the same way.
+  const [ruleFocus, setRuleFocus] = React.useState<{ name: string } | null>(null);
   const showObjTarget = (target: MetadataSelection) => {
     if (target.kind === 'action') {
       selectViewMode('actions');
       setActionFocus({ name: target.id });
+      return;
+    }
+    if (target.kind === 'rule') {
+      selectViewMode('rules');
+      setRuleFocus({ name: target.id });
       return;
     }
     setFieldSel({ kind: target.kind, id: target.id });
@@ -6584,9 +6619,63 @@ export function DataPillar({
     (count: number) => setPanelBlockingReport({ key: panelKey, count }),
     [panelKey],
   );
+  // objectstack#27629 — the panel family's verdicts belong to the draft, as the
+  // field inspector's do (`celVerdicts` above, the ruling on objectstack#27485).
+  // Validations and Actions report a verdict per rule or action; each is kept
+  // with the stamp of what it judged (`panelItemCelStamp`, retaken while its
+  // panel is mounted) and holds, with the tab left, while the draft still
+  // carries that stamp: an edit to the item, its removal or the object's next
+  // load ends it. While the panel is mounted its own report is the live verdict
+  // and always wins; the held line names the item and its "Show me" reopens it.
+  const [livePanelVerdicts, setLivePanelVerdicts] = React.useState<{
+    key: string;
+    verdicts: Readonly<Record<string, number>>;
+  }>({ key: '', verdicts: {} });
+  const reportPanelVerdicts = React.useCallback(
+    (verdicts: Readonly<Record<string, number>>) => setLivePanelVerdicts({ key: panelKey, verdicts }),
+    [panelKey],
+  );
+  const [panelCelVerdicts, setPanelCelVerdicts] = React.useState<
+    Record<string, { tab: CelPanelTab; item: string; count: number; stamp: string | null }>
+  >({});
+  const livePanel = isCelPanelTab(viewMode) && livePanelVerdicts.key === panelKey ? livePanelVerdicts.verdicts : null;
+  React.useEffect(() => {
+    if (livePanel === null || !isCelPanelTab(viewMode)) return;
+    setPanelCelVerdicts((prev) => {
+      let next = prev;
+      for (const [item, count] of Object.entries(livePanel)) {
+        const kept = { tab: viewMode, item, count, stamp: panelItemCelStamp(objDraft, viewMode, item) };
+        const key = `${panelKey}:${item}`;
+        const was = prev[key];
+        if (was && was.count === kept.count && was.stamp === kept.stamp) continue;
+        if (next === prev) next = { ...prev };
+        next[key] = kept;
+      }
+      return next;
+    });
+  }, [livePanel, viewMode, panelKey, objDraft]);
+  // The open object's panel items whose verdict holds, and their summed count.
+  const celHeldPanelItems: Array<{ tab: CelPanelTab; item: string }> = [];
+  let panelCelBlocking = 0;
+  const celPanelPrefix = `${current?.name ?? ''}:`;
+  for (const [key, kept] of Object.entries(panelCelVerdicts)) {
+    if (!key.startsWith(celPanelPrefix)) continue;
+    if (livePanel !== null && kept.tab === viewMode && Object.prototype.hasOwnProperty.call(livePanel, kept.item)) continue;
+    if (kept.count > 0 && kept.stamp !== null && kept.stamp === panelItemCelStamp(objDraft, kept.tab, kept.item)) {
+      celHeldPanelItems.push({ tab: kept.tab, item: kept.item });
+      panelCelBlocking += kept.count;
+    }
+  }
+  if (livePanel !== null && isCelPanelTab(viewMode)) {
+    for (const [item, count] of Object.entries(livePanel)) {
+      if (count <= 0) continue;
+      celHeldPanelItems.push({ tab: viewMode, item });
+      panelCelBlocking += count;
+    }
+  }
   // Either source closes the door: a malformed field formula and a malformed
   // rule guard are both unsaveable, and neither excuses the other.
-  const saveBlocking = inspectorBlocking + panelBlocking;
+  const saveBlocking = inspectorBlocking + panelBlocking + panelCelBlocking;
   // Within the Form view: Layout (WYSIWYG drag/section designer) ⇄ Preview
   // (live form).
   const [formMode, setFormMode] = React.useState<'layout' | 'preview'>('layout');
@@ -6762,6 +6851,7 @@ export function DataPillar({
     setFieldSel(null);
     // objectstack#27485 — kept CEL verdicts judged the buffer this load replaces.
     setCelVerdicts({});
+    setPanelCelVerdicts({});
     setDirty(false);
     (async () => {
       try {
@@ -7041,22 +7131,41 @@ export function DataPillar({
   // objectstack#27485 — an unsent edit the CEL verdict holds is named like an
   // incomplete one: the held line, the surface's Publish and the rail's
   // question all read it, so it outlives the inspector without going unseen.
+  // objectstack#27629 — then a rule or action the panel family holds.
   const celHeldField = celHeldFields[0] ?? null;
   const celHeldLabel = React.useMemo(() => {
     if (celHeldField === null) return null;
     const label = readFields(objDraft.fields).entries.find((e) => e.name === celHeldField)?.def.label;
     return typeof label === 'string' && label.trim() !== '' ? label.trim() : celHeldField;
   }, [celHeldField, objDraft.fields]);
-  const objCelHeld = React.useMemo<StudioHeld | null>(
-    () =>
-      dirty && celHeldField !== null && celHeldLabel !== null
+  const celHeldPanelTab = celHeldPanelItems[0]?.tab ?? null;
+  const celHeldPanelItem = celHeldPanelItems[0]?.item ?? null;
+  const celHeldPanelLabel = React.useMemo(() => {
+    if (celHeldPanelTab === null || celHeldPanelItem === null) return null;
+    const label = panelItemOf(objDraft, celHeldPanelTab, celHeldPanelItem)?.label;
+    return typeof label === 'string' && label.trim() !== '' ? label.trim() : celHeldPanelItem;
+  }, [celHeldPanelTab, celHeldPanelItem, objDraft]);
+  const objCelHeld = React.useMemo<StudioHeld | null>(() => {
+    if (!dirty) return null;
+    if (celHeldField !== null && celHeldLabel !== null) {
+      return {
+        clause: tFormat('engine.studio.held.celInvalid', locale, { field: celHeldLabel }),
+        target: { kind: 'field', id: celHeldField },
+      };
+    }
+    if (celHeldPanelTab !== null && celHeldPanelItem !== null && celHeldPanelLabel !== null) {
+      return celHeldPanelTab === 'rules'
         ? {
-            clause: tFormat('engine.studio.held.celInvalid', locale, { field: celHeldLabel }),
-            target: { kind: 'field', id: celHeldField },
+            clause: tFormat('engine.studio.held.celInvalidRule', locale, { rule: celHeldPanelLabel }),
+            target: { kind: 'rule', id: celHeldPanelItem },
           }
-        : null,
-    [dirty, celHeldField, celHeldLabel, locale],
-  );
+        : {
+            clause: tFormat('engine.studio.held.celInvalidAction', locale, { action: celHeldPanelLabel }),
+            target: { kind: 'action', id: celHeldPanelItem },
+          };
+    }
+    return null;
+  }, [dirty, celHeldField, celHeldLabel, celHeldPanelTab, celHeldPanelItem, celHeldPanelLabel, locale]);
   // Only the open object's own buffer is held (objectui#11272).
   const objHeld = objLoaded ? (objIncomplete ?? objCelHeld) : null;
   // objectstack#26917 — the refusal's way out: the object holding the
@@ -7562,7 +7671,8 @@ export function DataPillar({
                   draft={objDraft}
                   onPatch={onPatch}
                   disabled={readOnly}
-                  onBlockingIssuesChange={reportPanelBlocking}
+                  focus={ruleFocus}
+                  onCelVerdictsChange={reportPanelVerdicts}
                 />
               ) : viewMode === 'settings' ? (
                 <ObjectSettingsPanel
@@ -7590,7 +7700,7 @@ export function DataPillar({
                     disabled={readOnly}
                     focus={actionFocus}
                     actionSchema={typeSchemas.action}
-                    onBlockingIssuesChange={reportPanelBlocking}
+                    onCelVerdictsChange={reportPanelVerdicts}
                   />
                 </div>
               ) : viewMode === 'api' ? (

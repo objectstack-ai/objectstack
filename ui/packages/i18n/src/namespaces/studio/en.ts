@@ -3014,6 +3014,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.held.widgetNeedsInput': '{input} on the widget “{widget}” needs a value',
   // objectstack#27485 — a field CEL expression the inspector judged broken, held after it closes.
   'engine.studio.held.celInvalid': 'an expression on the field “{field}” has an error to fix',
+  // objectstack#27629 — the same hold for a validation rule, an action, and an item in the metadata editor.
+  'engine.studio.held.celInvalidRule': 'an expression on the rule “{rule}” has an error to fix',
+  'engine.studio.held.celInvalidAction': 'an expression on the action “{action}” has an error to fix',
+  'engine.studio.held.inspectorInvalid': '“{item}” has an error to fix in its inspector',
   'engine.studio.held.line': 'Not saved yet: {clause}. Your changes are kept here and saved once it is filled in.',
   'engine.studio.held.publish': 'Not published: {clause}, so that change is not saved yet. Finish it, then publish.',
   'engine.studio.held.inputHint': 'Required. Changes are saved once this has a value.',

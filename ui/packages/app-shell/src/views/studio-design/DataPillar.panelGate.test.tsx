@@ -13,10 +13,14 @@
  * pillar holds a SECOND stamped count for the panel family and folds it into
  * the same button.
  *
- * The stamp is the panel TAB: only one panel is mounted at a time, so leaving
+ * The stamp was the panel TAB: only one panel is mounted at a time, so leaving
  * the tab unmounts the reporter and it can never retract its last verdict.
- * Deriving the count against the live tab is what stops a fault authored under
- * "Rules" from wedging Save shut while the author is looking at "Fields".
+ * objectstack#27629 replaced it, per the maintainer's ruling on #27485
+ * (comment 6500685972, letter A): each rule's verdict is kept with the draft,
+ * so leaving the tab keeps the hold while the draft still carries the guard it
+ * judged, and the held line names the rule with a "Show me" back to it
+ * ({@link file://./DataPillar.panelHold-27629.test.tsx}). Save is still never
+ * wedged with nothing on screen to fix.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -172,11 +176,10 @@ describe('DataPillar — auto-save is gated on the validations panel’s CEL ver
   });
 
   /**
-   * The tab stamp. Leaving Rules unmounts the panel, so it can never report
-   * `0`; without deriving the count against the live tab, the dirty draft
-   * would stay wedged UNSAVED on a surface with no CEL editor on screen.
+   * objectstack#27629 — leaving Rules unmounts the panel, which can never
+   * report `0`; the rule's kept verdict holds instead, named on the held line.
    */
-  it('expires the panel count when the author leaves the Rules tab', async () => {
+  it('keeps the hold when the author leaves the Rules tab, and names the rule', async () => {
     const box = await openRuleGuard();
 
     fireEvent.change(box, { target: { value: 'record.status ==' } });
@@ -184,6 +187,8 @@ describe('DataPillar — auto-save is gated on the validations panel’s CEL ver
     expect(mockClient.save).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Form' }));
-    await waitFor(() => expect(mockClient.save).toHaveBeenCalled(), { timeout: 4000 });
+    await new Promise((r) => setTimeout(r, 2300));
+    expect(mockClient.save).not.toHaveBeenCalled();
+    expect(screen.getByTestId('studio-held-message')).toHaveTextContent('Rule A');
   });
 });
