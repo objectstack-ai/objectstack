@@ -909,6 +909,7 @@
     "isComposedReadableIds (function)",
     "isContextToken (function)",
     "isControlledByParentMasterField (function)",
+    "isCredentialFieldType (function)",
     "isCurrentUserDefaultToken (function)",
     "isDateMacroToken (function)",
     "isDateRangePresetName (function)",
