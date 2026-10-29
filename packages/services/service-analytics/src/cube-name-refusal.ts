@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { ANALYTICS_CUBE_NAME_REQUIRED, type FieldErrorCode } from '@objectstack/spec/api';
-import { validationFailure, VALIDATION_FAILED_STATUS } from '@objectstack/types';
+import { ANALYTICS_CUBE_NAME_REQUIRED, AnalyticsQueryRequestSchema } from '@objectstack/spec/api';
+import { fieldsFromZodIssues, validationFailure, VALIDATION_FAILED_STATUS } from '@objectstack/types';
 
 /**
  * The ONE refusal for an analytics query that names no cube — `cube` absent or
@@ -25,28 +25,36 @@ import { validationFailure, VALIDATION_FAILED_STATUS } from '@objectstack/types'
  * `VALIDATION_FAILED` — with `status: 400` declared on it as this service's
  * sibling refusals do (`cubeNotFoundError`, 404), so an in-process caller reads
  * `{ code, status }` without a boundary to decide the status for it. Its
- * sentence is `ANALYTICS_CUBE_NAME_REQUIRED`, imported from the schema that
- * refuses the same input at the door: one rule, one wording, two readers.
+ * message is `ANALYTICS_CUBE_NAME_REQUIRED`, the sentence the schema refuses
+ * the empty string with: one rule, one wording, two readers.
  *
- * The `fields[]` entry carries the ADR-0114 catalog code the door produces
- * for the same input — `required` for an absent `cube` (the door hands the
- * body to `fieldsFromZodIssues`, so the D3 split reports a missing key as
- * `required`), `min_length` for the empty string (Zod's `too_small` on a
- * string, mapped by `zodIssuesToFields`) — so a UI anchoring per-field errors
- * sees one vocabulary whichever side refused. `analytics-empty-cube-refusal.test.ts`
- * (runtime) pins the door's half, `analytics-service.test.ts` this one.
+ * ## The `fields[]` entry is the door's, literally
+ *
+ * The value is run through the schema's own `cube` member and the issues
+ * through `fieldsFromZodIssues` with the value beside them — the one ADR-0114
+ * D3 table in the repo (`zodIssuesToFields`, `@objectstack/spec`), the same
+ * call the door makes on the whole body. So the entry's code is whatever the
+ * door answers for the same value — `required` for an absent key, `min_length`
+ * for the empty string, `invalid_type` for a `null` an untyped caller slipped
+ * past `!queryInput.cube` — and its message is the member's own. ⛔ No
+ * hand-rolled `typeof` split here: a second copy of that table is the drift
+ * the ADR exists to prevent, and it disagreed with the door on `null` once.
+ * `analytics-empty-cube-refusal.test.ts` (runtime) pins the door's half,
+ * `analytics-service.test.ts` this one.
  *
  * ⛔ A whitespace-only name is NOT refused here: it is a name, one no cube
  * carries, and the engine's cube resolution answers it `CUBE_NOT_FOUND` / 404.
  * Refusing it would be a second rule beside the schema's `.min(1)`.
  */
 export function cubeNameRequiredError(cube: unknown): Error & { code: string; status: number } {
-  // Only a string can be too short; anything else that `!queryInput.cube`
-  // let through (`undefined`, or a `null` from an untyped caller) is absent.
-  const code: FieldErrorCode = typeof cube === 'string' ? 'min_length' : 'required';
-  const err = validationFailure(ANALYTICS_CUBE_NAME_REQUIRED, [
-    { field: 'cube', code, message: ANALYTICS_CUBE_NAME_REQUIRED },
-  ]) as Error & { code: string; status: number };
+  const verdict = AnalyticsQueryRequestSchema.shape.cube.safeParse(cube);
+  const issues = verdict.success
+    ? []
+    : verdict.error.issues.map((issue) => ({ ...issue, path: ['cube', ...issue.path] }));
+  const err = validationFailure(ANALYTICS_CUBE_NAME_REQUIRED, fieldsFromZodIssues(issues, { cube })) as Error & {
+    code: string;
+    status: number;
+  };
   err.status = VALIDATION_FAILED_STATUS;
   return err;
 }

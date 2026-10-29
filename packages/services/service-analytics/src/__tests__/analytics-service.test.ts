@@ -481,46 +481,45 @@ describe('AnalyticsService', () => {
 
   // A query that names no cube is refused with the typed `VALIDATION_FAILED` /
   // 400 the HTTP doors answer for the same body — not a plain Error, which
-  // every boundary maps to a 500 (`cube-name-refusal.ts`). The sentence is the
-  // schema's own (`ANALYTICS_CUBE_NAME_REQUIRED`); the pins below read the
-  // envelope (`code` + `status`), the field entry and the sentence's head.
+  // every boundary maps to a 500 (`cube-name-refusal.ts`). The message is the
+  // schema's own sentence (`ANALYTICS_CUBE_NAME_REQUIRED`); the `fields[]`
+  // entry is the door's answer for the same value, produced by the one D3
+  // mapper. The pins read the envelope (`code` + `status`), the field entry
+  // and the sentence's head.
   describe('a query that names no cube is the typed VALIDATION_FAILED refusal, in-process', () => {
-    const refused = { code: 'VALIDATION_FAILED', status: 400, name: 'ValidationError' };
+    const refused = { code: 'VALIDATION_FAILED', status: 400, name: 'ValidationError', message: ANALYTICS_CUBE_NAME_REQUIRED };
+    const missing = { ...refused, fields: [{ field: 'cube', code: 'required' }] };
+    const empty = { ...refused, fields: [{ field: 'cube', code: 'min_length', message: ANALYTICS_CUBE_NAME_REQUIRED }] };
 
     it('query(): a missing cube', async () => {
       const service = new AnalyticsService({ logger: silentLogger });
-      await expect(service.query({ measures: ['count'] })).rejects.toMatchObject({
-        ...refused,
-        fields: [{ field: 'cube', code: 'required', message: ANALYTICS_CUBE_NAME_REQUIRED }],
-      });
+      await expect(service.query({ measures: ['count'] })).rejects.toMatchObject(missing);
     });
 
     it('query(): an empty cube name', async () => {
       const service = new AnalyticsService({ cubes: [ordersCube], logger: silentLogger });
-      await expect(service.query({ cube: '', measures: ['count'] })).rejects.toMatchObject({
-        ...refused,
-        fields: [{ field: 'cube', code: 'min_length', message: ANALYTICS_CUBE_NAME_REQUIRED }],
-      });
+      await expect(service.query({ cube: '', measures: ['count'] })).rejects.toMatchObject(empty);
     });
 
     it('generateSql(): a missing cube and an empty cube name', async () => {
       const service = new AnalyticsService({ cubes: [ordersCube], logger: silentLogger });
-      await expect(service.generateSql({ measures: ['count'] })).rejects.toMatchObject({
+      await expect(service.generateSql({ measures: ['count'] })).rejects.toMatchObject(missing);
+      await expect(service.generateSql({ cube: '', measures: ['count'] })).rejects.toMatchObject(empty);
+    });
+
+    it('a null cube from an untyped caller reads as the door reads it: invalid_type, not required', async () => {
+      const service = new AnalyticsService({ logger: silentLogger });
+      await expect(service.query({ cube: null as unknown as string, measures: ['count'] })).rejects.toMatchObject({
         ...refused,
-        fields: [{ field: 'cube', code: 'required', message: ANALYTICS_CUBE_NAME_REQUIRED }],
-      });
-      await expect(service.generateSql({ cube: '', measures: ['count'] })).rejects.toMatchObject({
-        ...refused,
-        fields: [{ field: 'cube', code: 'min_length', message: ANALYTICS_CUBE_NAME_REQUIRED }],
+        fields: [{ field: 'cube', code: 'invalid_type' }],
       });
     });
 
-    it('the refusal reads the prescription first, and is the schema\'s sentence', async () => {
+    it('the refusal reads the prescription first', async () => {
       const service = new AnalyticsService({ logger: silentLogger });
-      const err = await service.query({ cube: '', measures: ['count'] }).catch((e: unknown) => e as Error);
-      expect(err).toBeInstanceOf(Error);
-      expect((err as Error).message).toMatch(/^Name the cube to query/);
-      expect((err as Error).message).toBe(ANALYTICS_CUBE_NAME_REQUIRED);
+      await expect(service.query({ cube: '', measures: ['count'] })).rejects.toMatchObject({
+        message: expect.stringMatching(/^Name the cube to query/),
+      });
     });
 
     it('a whitespace-only name is a NAME, so it passes this guard: whatever refuses it later, it is not the empty-name refusal', async () => {
@@ -528,13 +527,10 @@ describe('AnalyticsService', () => {
       // resolution; this harness has no object registry to resolve against, so
       // only the guard's half is pinned here: the rule is minLength 1, no trim.
       const service = new AnalyticsService({ cubes: [ordersCube], logger: silentLogger });
-      const err: Error & { code?: string } = await service.query({ cube: '   ', measures: ['count'] }).then(
-        () => { throw new Error('expected a rejection'); },
-        (e: unknown) => e as Error & { code?: string },
-      );
-      expect(err).toBeInstanceOf(Error);
-      expect(err.code).not.toBe('VALIDATION_FAILED');
-      expect(err.message).not.toMatch(/^Name the cube to query/);
+      const query = () => service.query({ cube: '   ', measures: ['count'] });
+      await expect(query()).rejects.toThrow();
+      await expect(query()).rejects.not.toMatchObject({ code: 'VALIDATION_FAILED' });
+      await expect(query()).rejects.not.toMatchObject({ message: expect.stringMatching(/^Name the cube to query/) });
     });
   });
 
