@@ -45,6 +45,7 @@
  * is never persisted or logged here.
  */
 
+import { statSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse as parsePostgresConnectionString } from 'pg-connection-string';
 import { resolveDriverId, urlUserinfoUsername, type BuiltinDriverId } from '@objectstack/spec/data';
@@ -489,20 +490,28 @@ function postgresDsnFields(url: string, datasource?: string): Record<string, unk
 
 /**
  * The refusal {@link DatasourceConnectionSpec.fileMustExist} answers for a
- * file-backed database whose file does not exist (#27512). `code` is the
- * operating system's spelling of that fact, as on driver-sql's
- * `SqliteDatabaseFileError`, the refusal the same judgement throws for a file
- * that can be neither opened nor created.
+ * file-backed database whose file does not exist (#27512). Its `code` and
+ * `cause` are the operating system's own answer for the file (`ENOENT`), as on
+ * driver-sql's `SqliteDatabaseFileError`, the refusal the same judgement throws
+ * for a file that can be neither opened nor created: an OS error's code, not an
+ * ADR-0112 code this package stamps.
  */
 class DatabaseFileAbsentError extends Error {
-  readonly code = 'ENOENT';
+  readonly code: string | undefined;
+  readonly filename: string;
+  /** The error the operating system answered for the file. */
+  readonly cause: unknown;
 
-  constructor(readonly filename: string) {
+  constructor(filename: string, cause: unknown) {
     super(
       `SQLite database file '${filename}' does not exist. Testing a connection never creates it: `
       + 'point the draft at an existing database file, or save the datasource to have it created.',
     );
+    const code = (cause as { code?: unknown } | null | undefined)?.code;
     this.name = 'DatabaseFileAbsentError';
+    this.code = typeof code === 'string' ? code : undefined;
+    this.filename = filename;
+    this.cause = cause;
   }
 }
 
@@ -544,8 +553,14 @@ async function assertDatabaseFileExists(kind: ResolvedKind, spec: DatasourceConn
   const filename = databaseFileOf(kind, spec);
   if (filename === undefined) return;
   const { resolveSqliteAbsentFileTarget } = await import('@objectstack/driver-sql');
-  if (resolveSqliteAbsentFileTarget(filename, 'empty-in-memory').openedEmptyInMemory) {
-    throw new DatabaseFileAbsentError(filename);
+  if (!resolveSqliteAbsentFileTarget(filename, 'empty-in-memory').openedEmptyInMemory) return;
+  // Absent: the operating system's own answer for the file becomes the
+  // refusal's `code` and `cause`. A file created in between answers no error,
+  // and is opened like any existing one.
+  try {
+    statSync(filename);
+  } catch (cause) {
+    throw new DatabaseFileAbsentError(filename, cause);
   }
 }
 
