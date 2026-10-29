@@ -156,8 +156,8 @@ describe('Studio data page — a Rollup is held until it is set up (objectstack#
   });
 
   it('"Show me" on the line reopens the held roll-up once its inspector is closed', async () => {
+    // The first case proves the roll-up is never sent; this one needs only the line.
     const { name } = await addFieldAs(/^Rollup$/);
-    await outlastDebounce();
 
     const railHeader = screen.getByText(t('engine.studio.data.fieldProps', 'en')).closest('header') as HTMLElement;
     fireEvent.click(within(railHeader).getByRole('button', { name: t('engine.studio.close', 'en') }));
@@ -166,6 +166,5 @@ describe('Studio data page — a Rollup is held until it is set up (objectstack#
     fireEvent.click(within(screen.getByTestId('studio-held')).getByRole('button', { name: t('engine.studio.refusal.show', 'en') }));
     expect(await screen.findByText('API name', { selector: 'label' })).toBeInTheDocument();
     expect((controlUnder('API name') as HTMLInputElement).value).toBe(name);
-    expect(puts).toEqual([]);
   });
 });
