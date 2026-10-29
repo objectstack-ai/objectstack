@@ -600,25 +600,6 @@ export const CurrencyConfigSchema = lazySchema(() => strictObject({
 }).superRefine(refuseFixedCurrencyWithoutCode));
 
 /**
- * Currency Value Schema
- * Runtime value structure for currency fields
- *
- * Note: Currency codes are validated by length only (3 characters) to support flexibility.
- * See CurrencyConfigSchema for details on currency code validation strategy.
- *
- * @deprecated This shape was never consumed and contradicts the actual runtime
- * contract: a `currency` field's value is a BARE NUMBER everywhere (validator,
- * SQL driver `float` column, import coercion, field-zoo oracle); the currency
- * code lives in field config (`CurrencyConfigSchema`), not per value. Use
- * `valueSchemaFor` from `field-value.zod.ts` (ADR-0104 D1). Removal rides the
- * next spec major.
- */
-export const CurrencyValueSchema = lazySchema(() => z.object({
-  value: z.number().describe('Monetary amount'),
-  currency: z.string().length(3).describe('Currency code (ISO 4217)'),
-}));
-
-/**
  * Address Schema — structured address for the `address` field type.
  *
  * DECLARED in `./field-value.zod` since #7127 (it IS the enforced address
@@ -3099,7 +3080,6 @@ export type Address = z.input<typeof AddressSchema>;
 export type CurrencyConfig = z.input<typeof CurrencyConfigSchema>;
 /** Post-parse shape of {@link CurrencyConfig} — defaults applied, transforms run (ADR-0122). */
 export type CurrencyConfigParsed = z.infer<typeof CurrencyConfigSchema>;
-export type CurrencyValue = z.input<typeof CurrencyValueSchema>;
 
 /**
  * Field Factory Helper
