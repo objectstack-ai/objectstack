@@ -42,9 +42,10 @@ import { currencyFractionDigits } from '../currency.js';
  *               not judge one.
  * @param field  the field metadata; its `type`, `scale` and `useGrouping` are
  *               the inputs read.
- * @param locale the display locale tag, from `useDisplayLocale()`.
+ * @param locale the display locale tag, from `useDisplayLocale()`. Absent,
+ *               the runtime default answers, as for {@link formatCurrency}.
  */
-export function formatNumberFieldValue(value: number, field: FieldMetadata, locale: string): string {
+export function formatNumberFieldValue(value: number, field: FieldMetadata, locale?: string): string {
   // Decimal places come from `scale` (the `s` in a `decimal(p, s)` column),
   // NOT `precision`: `precision` is the TOTAL digit count (`p`), and reading
   // it padded every value out to that width (e.g. `1` from a decimal(10, 0)

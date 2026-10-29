@@ -95,6 +95,7 @@ import { useMetadataClient, useMetadataTypes, type RichMetadataTypeEntry } from 
 import { readDraftForSave, useDraftSaveGuard } from './DraftConflictDialog.js';
 // objectstack#26858 — the served verdict the RLS clause editors read at their paths.
 import {
+  DraftVerdictBodyContext,
   DraftVerdictContext,
   draftEnvelopeDiagnostics,
   editedItemDiagnostics,
@@ -808,6 +809,10 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
   // draft's while the package door holds one (what its publish will refuse),
   // else the layered read's. Taken off each read, never computed here.
   const [servedVerdict, setServedVerdict] = React.useState<ServerDiagnostics | undefined>(undefined);
+  // objectstack#27482 — the body that verdict judged, set beside it from the
+  // same read: an editor holds the save on a server error at its path only
+  // while it still shows the text judged here.
+  const [servedVerdictBody, setServedVerdictBody] = React.useState<unknown>(undefined);
   const verdictReadSeq = React.useRef(0);
   const [saving, setSaving] = React.useState(false);
   // objectui#11787 — when the package door's last draft save landed, for the
@@ -947,6 +952,10 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
             draftDiagnostics: draftEnvelopeDiagnostics(pendingDraft),
             layered: lay,
           }),
+        );
+        // The same choice `editedItemDiagnostics` makes, for the body judged.
+        setServedVerdictBody(
+          pendingDraft && draftEnvelopeDiagnostics(pendingDraft) ? pendingDraftBody(pendingDraft) : lay?.effective,
         );
         // ARTIFACT tier input (objectui#4518) — the `code` layer, and its
         // `provenance` (objectui#4526), of the SAME envelope the display
@@ -1093,7 +1102,9 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
 
   // Count of blocking CEL parse errors in the RLS editor — gates Save
   // (objectui#2413): a malformed predicate silently mis-scopes rows, so we
-  // don't let it persist.
+  // don't let it persist. objectstack#27482 — it counts the served verdict's
+  // errors at a clause's path too, while that clause still shows the text
+  // the verdict judged (`CelPredicateField`'s `verdictPath`).
   const [celErrorCount, setCelErrorCount] = React.useState(0);
   // objectstack#25866 — blocking lint findings on the field rows' `when`
   // conditions, keyed `${object}.${field}`. Held like the RLS clauses: a
@@ -1487,8 +1498,15 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         // verdict on its next read; the one held described the body before it.
         // Read off the save's path, so a later read (or a load) wins.
         const seq = ++verdictReadSeq.current;
-        void readDraftForSave(client, type, payload.name, packageId).then((read) => {
-          if (seq === verdictReadSeq.current) setServedVerdict(draftEnvelopeDiagnostics(read.answer));
+        void readDraftForSave<{ item?: PermissionSetDraft } | PermissionSetDraft>(
+          client,
+          type,
+          payload.name,
+          packageId,
+        ).then((read) => {
+          if (seq !== verdictReadSeq.current) return;
+          setServedVerdict(draftEnvelopeDiagnostics(read.answer));
+          setServedVerdictBody(pendingDraftBody(read.answer) ?? undefined);
         });
         // Let the surface count it.
         onDraftSaved?.();
@@ -1522,6 +1540,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         resetDraftBaseline(toDisplayDraft((lay?.effective ?? toSave) as PermissionSetDraft));
         verdictReadSeq.current += 1;
         setServedVerdict(editedItemDiagnostics({ hasDraft: false, draftDiagnostics: undefined, layered: lay }));
+        setServedVerdictBody(lay?.effective);
         setPostSaveRereadFailed(rereadFailed);
         // The write landed, so the server holds the set now whatever the
         // confirming read said (objectui#7611: its holders can be listed). Only
@@ -2238,18 +2257,20 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
             </div>
             <div hidden={facetTab === null} data-testid="perm-tabpanel-facets" className="min-h-0 flex-1 overflow-auto">
               <DraftVerdictContext.Provider value={servedVerdict}>
-                <PermissionAdvancedFacets
-                  draft={draft}
-                  setDraft={setDraft}
-                  writable={writable}
-                  allSetNames={allSetNames}
-                  loadObjectFields={loadObjectFields}
-                  onCelErrorsChange={setCelErrorCount}
-                  t={t}
-                  only={facetTab}
-                  packageBound={!!packageId}
-                  objectAccessDefault={objectAccessDefault}
-                />
+                <DraftVerdictBodyContext.Provider value={servedVerdictBody}>
+                  <PermissionAdvancedFacets
+                    draft={draft}
+                    setDraft={setDraft}
+                    writable={writable}
+                    allSetNames={allSetNames}
+                    loadObjectFields={loadObjectFields}
+                    onCelErrorsChange={setCelErrorCount}
+                    t={t}
+                    only={facetTab}
+                    packageBound={!!packageId}
+                    objectAccessDefault={objectAccessDefault}
+                  />
+                </DraftVerdictBodyContext.Provider>
               </DraftVerdictContext.Provider>
             </div>
           </div>
@@ -2421,17 +2442,19 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
               admin scope, structured editors instead of raw JSON. Collapsed by
               default so they don't crowd the object matrix. */}
           <DraftVerdictContext.Provider value={servedVerdict}>
-            <PermissionAdvancedFacets
-              draft={draft}
-              setDraft={setDraft}
-              writable={writable}
-              allSetNames={allSetNames}
-              loadObjectFields={loadObjectFields}
-              onCelErrorsChange={setCelErrorCount}
-              t={t}
-              packageBound={!!packageId}
-              objectAccessDefault={objectAccessDefault}
-            />
+            <DraftVerdictBodyContext.Provider value={servedVerdictBody}>
+              <PermissionAdvancedFacets
+                draft={draft}
+                setDraft={setDraft}
+                writable={writable}
+                allSetNames={allSetNames}
+                loadObjectFields={loadObjectFields}
+                onCelErrorsChange={setCelErrorCount}
+                t={t}
+                packageBound={!!packageId}
+                objectAccessDefault={objectAccessDefault}
+              />
+            </DraftVerdictBodyContext.Provider>
           </DraftVerdictContext.Provider>
           {/* ADR-0056 P4 — assigning users is a Setup act, so the DESIGN surface
               (Studio, embedded) never shows it. objectui#7611 — the Setup catalog

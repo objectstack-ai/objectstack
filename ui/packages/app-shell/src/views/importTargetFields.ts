@@ -32,6 +32,7 @@ export interface ImportTargetField {
   required?: boolean;
   matchOnly?: boolean;
   options?: unknown;
+  multiple?: boolean;
 }
 
 /** Minimal slice of the permissions channel this helper consults. */
@@ -67,6 +68,8 @@ export function importTargetFields(
       ...(matchOnly ? { matchOnly: true } : {}),
       // Enum options seed the downloadable template's example row.
       ...(def?.options ? { options: def.options } : {}),
+      // A field holding a list is never offered as a match key (#27567).
+      ...(def?.multiple === true ? { multiple: true } : {}),
     });
   }
   return out;

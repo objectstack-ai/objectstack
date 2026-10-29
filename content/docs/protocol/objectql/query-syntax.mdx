@@ -1484,26 +1484,36 @@ const sorted = monthlyRevenue.sort((a, b) =>
 
 ## 9. Error Handling
 
-### Unknown Fields Are Tolerated
+### Unknown Projection Fields
 
-Unknown field **names** are not rejected by `engine.find()` — a projected field that
-doesn't exist on the object is **silently dropped** (matching OData / `SELECT *`
-tolerance), so a stale field reference never fails the whole query:
+On a registered object, `engine.find()` and `findOne()` drop an unknown plain column from
+`fields` **only while at least one requested column is known**: the unknown name is
+silently omitted from each row, so a stale field reference in a mixed projection does
+not fail the whole query. `id`, `created_at` and `updated_at` always count as known.
 
 ```typescript
 const rows = await engine.find('customer', {
   fields: ['name', 'nonexistent'],  // `nonexistent` is not on the schema
 });
 // Returns each row with `name`; `nonexistent` is omitted — no error thrown.
+
+await engine.find('customer', { fields: ['nonexistent'] });
+// Throws 400 VALIDATION_ERROR: no requested column is a field of 'customer'.
 ```
 
+A projection whose **every** entry is unknown is refused: `find()` / `findOne()` throw
+`400 VALIDATION_ERROR` naming the requested columns, before any driver is asked. It is
+the same refusal `fields: []` gets, because a projection the tolerance empties is an
+empty projection, and an empty projection is never read as every column.
+
 <Callout type="info">
-This tolerance does **not** extend to the REST/protocol ingress: a `select` / `fields`
-naming a column the object does not have is `400 INVALID_FIELD` there, because dropping
-it silently answered a *narrower* projection with a *wider* one — a projection left with
-no known field falls all the way back to every field. The engine's tolerance guards
-internal callers (hooks, flows, expand sub-reads, registry-less hosts) that never pass
-through that ingress.
+`expand` sub-reads are unaffected: the engine always adds `id` to a sub-read's
+projection (and strips it from the expanded record when you did not ask for it), so a
+sub-read never reaches the all-unknown refusal.
+
+The REST/protocol ingress tolerates no unknown name at all: a `select` / `fields`
+naming any column the object does not have, alone or next to known ones, is
+`400 INVALID_FIELD` there.
 </Callout>
 
 ### Security Violations

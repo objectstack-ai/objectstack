@@ -1248,7 +1248,11 @@ key that only looks like an amount by its name never leads. A key the object
 does not declare, a framework column, an
 unresolved reference id, a field declared `hidden: true` and a field the
 reader may not read take no row. Without the target object's definition, the
-summary is not drawn.
+summary is not drawn. The summary is headed "As submitted"
+(`approvalsInbox.snapshotAsSubmitted`): the snapshot is the target record as it
+was submitted, not its current state, so after a decision its values can
+differ from the request's status in the page's highlights. The record's
+current values are the Details tab's record card.
 
 Two more parts come from the same request row. A request no person submitted
 (its `submitter_id` absent or null, as the approvals get serves a request a

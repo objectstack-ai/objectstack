@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 30 — spawns the real producer once per single-cause fixture: each case boots the real stack as its own subject (the instance rule, a re-boot, a refused boot), the first load paid at module scope; slowest CI reading 17.89 s (run 40200279306, refresh PR #25960's window (hourly runs 40200279306 to 40272142430)) x 1.25, rounded up
 
 /**
  * #22301 item 1, ruling A — ONE composition rule: for one configuration,

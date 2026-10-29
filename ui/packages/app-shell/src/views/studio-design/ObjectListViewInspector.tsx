@@ -908,7 +908,11 @@ export function ObjectListViewInspector({
     ? failed(fieldState.error)
     : fieldState.loading
       ? { status: 'loading' }
-      : loaded(fields.map((f) => ({ name: f.name, label: f.label, type: f.type })));
+      : loaded(
+          // `options` ride along for the filter's picklist value picker
+          // (objectstack#27515); the other pickers read name, label and type.
+          fields.map((f) => ({ name: f.name, label: f.label, type: f.type, ...(f.options ? { options: f.options } : {}) })),
+        );
   const labelOf = (name: string) => fields.find((f) => f.name === name)?.label ?? name;
   const sort = sortEntriesOf(body.sort);
   const sortSummary = sort

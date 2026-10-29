@@ -31,7 +31,12 @@ import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { valueSchemaFor, type ValueShapeFieldDef } from '@objectstack/spec/data';
+import {
+  REFERENCE_VALUE_TYPES,
+  referenceTargetOf,
+  valueSchemaFor,
+  type ValueShapeFieldDef,
+} from '@objectstack/spec/data';
 import { isValueDomainMember, type ValueDomain } from '@objectstack/spec/shared';
 
 import { ObjectApiPanel } from './ObjectApiPanel';
@@ -196,15 +201,20 @@ describe('ObjectApiPanel example body: values the write path accepts (objectui#1
         expect(body, name).not.toHaveProperty(name);
         continue;
       }
-      expect(body, name).toHaveProperty(name);
-      const parsed = storedParse(def, body[name]);
-      expect(parsed.success, `${name} (${String(def.type)}) = ${JSON.stringify(body[name])}`).toBe(true);
+      // An optional reference never joins the body (objectstack#27490); its
+      // value shape is read with the field required.
+      const shownDef = REFERENCE_VALUE_TYPES.has(String(def.type)) ? { ...def, required: true } : def;
+      const value = shownDef === def ? body[name] : shownBody({ [name]: shownDef })[name];
+      cleanup();
+      expect(value, name).toBeDefined();
+      const parsed = storedParse(shownDef, value);
+      expect(parsed.success, `${name} (${String(def.type)}) = ${JSON.stringify(value)}`).toBe(true);
     }
   });
 
   it('a multi-valued field shows an array of one element', () => {
     const body = shownBody({
-      f_lookups: ZOO_FIELDS.f_lookups,
+      f_lookups: { ...ZOO_FIELDS.f_lookups, required: true },
       f_multiselect: ZOO_FIELDS.f_multiselect,
       f_tags: ZOO_FIELDS.f_tags,
       f_files: { type: 'file', label: 'Files', multiple: true },
@@ -287,5 +297,82 @@ describe('ObjectApiPanel copied cURL (objectui#11803)', () => {
     expect(copied).toContain('-X POST');
     expect(copied).toMatch(/-H 'Authorization: Bearer [^']+'/);
     expect(copied).toContain(`-d '${JSON.stringify(body)}'`);
+  });
+});
+
+/**
+ * The body the write path accepts as it stands — objectstack#27490.
+ *
+ * The defect: every reference field showed the id `"related_record_id"`, which
+ * names no record, and the platform-added `owner_id` joined the body whenever
+ * there was room under the cap, so the copied Create and Update calls were
+ * refused `reference_not_found` on nearly every object.
+ *
+ * The oracle is the write path's own reference check (`assertReferencesResolve`
+ * in `@objectstack/objectql`): it resolves a supplied value only on a field
+ * `referenceTargetOf` answers a target for, so a body in which no field has
+ * one leaves that check nothing to refuse, and every value still parses under
+ * the stored-form contract.
+ */
+describe('ObjectApiPanel example body: no record id to look up (objectstack#27490)', () => {
+  function expectAcceptedAsItStands(fields: Record<string, Def>) {
+    const body = shownBody(fields);
+    for (const [name, value] of Object.entries(body)) {
+      const def = fields[name];
+      expect(referenceTargetOf(def), `${name} names a record`).toBeUndefined();
+      expect(storedParse(def, value).success, `${name} = ${JSON.stringify(value)}`).toBe(true);
+    }
+    return body;
+  }
+
+  it('leaves owner_id out even when the body has room for it, and says so', () => {
+    const body = expectAcceptedAsItStands(served({ name: { type: 'text', label: 'Name' } }));
+    expect(body).toEqual({ name: 'string' });
+    expect(screen.getByText(/owner_id/)).toBeInTheDocument();
+  });
+
+  it('still names the fields it left out when none of them is shown', () => {
+    const body = shownBody(served({ account: { type: 'lookup', label: 'Account', reference: 'showcase_account' } }));
+    expect(body).toEqual({});
+    expect(screen.getByText(/Optional fields not shown: owner_id, account/)).toBeInTheDocument();
+  });
+
+  it('leaves every optional reference out (showcase Account and field zoo)', () => {
+    expectAcceptedAsItStands(served(ACCOUNT_FIELDS));
+    cleanup();
+    const zoo = Object.fromEntries(Object.entries(ZOO_FIELDS).filter(([n]) => n !== 'f_master_detail'));
+    const body = expectAcceptedAsItStands(served(zoo));
+    expect(Object.keys(body)).toContain('name');
+    const omitted = screen.getByText(/Optional fields not shown/).textContent ?? '';
+    for (const ref of ['owner_id', 'f_lookup', 'f_lookups', 'f_tree', 'f_user', 'f_users']) {
+      expect(omitted, ref).toContain(ref);
+    }
+  });
+
+  it('shows a required reference as a placeholder naming its target, never as an id', () => {
+    const body = shownBody(served(ZOO_FIELDS));
+    expect(body.f_master_detail).toBe('<id of a showcase_project record>');
+    cleanup();
+    const user = shownBody({ assignee: { type: 'user', label: 'Assignee', required: true } });
+    expect(user.assignee).toBe('<id of a sys_user record>');
+  });
+
+  it('the copied Create and Update calls carry the same body, without owner_id', async () => {
+    const writeText = vi.fn(async (_text: string) => {});
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    const body = expectAcceptedAsItStands(served(ACCOUNT_FIELDS));
+    const rows = screen.getAllByTitle('Copy as cURL');
+    // Endpoint rows: list, create (POST), get, update (PATCH), delete.
+    fireEvent.click(rows[1]);
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    fireEvent.click(rows[3]);
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(2));
+    const [create, update] = writeText.mock.calls.map(([text]) => text);
+    expect(create).toContain('-X POST');
+    expect(update).toContain('-X PATCH');
+    for (const copied of [create, update]) {
+      expect(copied).toContain(`-d '${JSON.stringify(body)}'`);
+      expect(copied).not.toContain('owner_id');
+    }
   });
 });

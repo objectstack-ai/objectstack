@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 80 — spawns the real producer once per single-cause fixture: three in-process boots of the real stack (the fixture app and the negative and attribution controls under parentWriteReachSecurity, and one without it), each running the family's proofs once; slowest CI reading 63.34 s (run 40200279306, refresh PR #25960's window (hourly runs 40200279306 to 40272142430)) x 1.25, rounded up; read before this file paid its first boot at module scope
 //
 // The parent-derived write reach family — what it reads from the metadata,
 // what it proves on a real stack, and the controls that keep its green honest:
@@ -21,6 +22,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { defineStack } from '@objectstack/spec';
 
 import { bootStack, type VerifyStack } from './harness.js';
+import { warmUpBoot } from './boot-warm-up.testkit.js';
 import {
   deriveParentWriteReachCases,
   runParentWriteReachProofs,
@@ -28,6 +30,11 @@ import {
   parentWriteReachSecurity,
   type ParentWriteReachReport,
 } from './parent-write-reach.js';
+
+// The boot's first load, paid during collection rather than in the first
+// case's clock (see `boot-warm-up.testkit.ts`). The boots below differ only in
+// their app and its security source, which the warm-up does not share.
+await warmUpBoot();
 
 // Booting the full in-process stack runs well past vitest's 5s default.
 const BOOT_TIMEOUT = 120_000;

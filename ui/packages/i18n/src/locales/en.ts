@@ -2520,6 +2520,8 @@ const en = {
       planApproveDefaultsMessage:
         'Build it with your best assumptions; use sensible defaults for the open questions.',
       planAnswerMessage: 'For "{{question}}", go with: {{option}}.',
+      planExtendExistingMessage: 'Keep improving "{{app}}" instead of building a new app.',
+      planBuildNewAppMessage: 'Build a separate, new app.',
       changesTitle: 'Confirm changes',
       changesConfirmed: 'Confirmed',
       changesConfirm: 'Confirm',
@@ -3799,6 +3801,7 @@ const en = {
       detailLoading: 'Loading detail…',
       detailLoadFailed: 'Could not load change detail:',
       detailNone: 'No differences detected — the draft matches the published version.',
+      fieldOrderChanged: 'Field order changed',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
       draftedByCopilot: 'Includes changes drafted by the AI copilot',
       draftedByMcpClient: 'Includes changes drafted by the MCP client “{{client}}”',
@@ -4516,6 +4519,13 @@ const en = {
       countSeedData: 'sample data',
       extendTarget: 'Adding to existing app: {{app}}',
       awaitingConfirm: 'Awaiting confirmation',
+      iterateOrNew: {
+        question: 'This overlaps "{{app}}", an app you already have. Keep improving it, or build a separate app?',
+        questionUnnamed: 'This overlaps an app you already have. Keep improving that app, or build a separate one?',
+        extend: 'Keep improving "{{app}}"',
+        buildNew: 'Build a separate app',
+        replyHint: 'Reply to say which.',
+      },
       objectsAndFields: 'Objects and fields',
       views: 'Views',
       suggestedField: 'suggested',
@@ -4935,6 +4945,7 @@ const en = {
     progressBar: 'Decision progress',
     declaredActions: 'Actions',
     decisionPanelOffRequestPage: 'The approval decision panel only works on approval request pages.',
+    snapshotAsSubmitted: 'As submitted',
     attachmentChip: 'Attachment',
     attachmentOpenFailed: 'Could not open the attachment — please try again',
     approveOneTitle: 'Approve "{{title}}"?',
