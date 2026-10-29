@@ -987,11 +987,14 @@ function isDeclaredClientRefusal(
  *  2. **A sandboxed body's business sentence** ({@link sandboxBusinessMessage}).
  *     A plain un-coded 4xx from any other producer — a handler that set
  *     `status: 400` and nothing else — fails here and stays loud.
- *  3. **The answer carries no code at all** — neither `code` nor a demoted
- *     `declaredCode`. A body that threw a code is judged by
- *     {@link isDeclaredClientRefusal} like every other producer, so a code the
- *     ledger does not know, or a registered code on a status the producer did
- *     not declare, is still logged exactly as before.
+ *  3. **The body declared no code** — `declaredCode` from
+ *     `resolveThrownHttpError`, the same read {@link isDeclaredClientRefusal}
+ *     makes. A body that threw a code is judged by that predicate like every
+ *     other producer, so a code the ledger does not know, or a registered code
+ *     on a status the producer did not declare, is still logged exactly as
+ *     before. ⛔ Read off the THROWN error, not the answer: a code the door
+ *     itself adds to an undeclared abort's answer is the door's, not the
+ *     body's, and does not turn this refusal back into a logged fault.
  *
  * The marker carries no body KIND, so a sandboxed action's code-less business
  * refusal at a data door is quiet too: the same refusal, the same answer.
@@ -1002,8 +1005,7 @@ function isSandboxBodyRefusal(
 ): boolean {
     if (resolved.status < 400 || resolved.status >= 500) return false;
     return sandboxBusinessMessage(error) !== undefined
-        && resolved.body?.code === undefined
-        && resolved.body?.declaredCode === undefined;
+        && resolveThrownHttpError(error, resolved.status).declaredCode === undefined;
 }
 
 /**
