@@ -292,6 +292,7 @@ function ReportRow({
   opened: string;
   t: Translate;
 }) {
+  const openedText = opened ? t('console.reportIndex.lastOpened', { defaultValue: 'Opened {{time}}', time: opened }) : '';
   return (
     <li className="relative flex items-center gap-3 px-4 sm:px-6 py-3 hover:bg-accent focus-within:bg-accent">
       <BarChart3 className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
@@ -312,10 +313,11 @@ function ReportRow({
         </span>
       )}
       <span
-        className="hidden sm:block w-32 shrink-0 truncate text-right text-xs text-muted-foreground"
+        className="hidden sm:block w-48 shrink-0 truncate text-right text-xs text-muted-foreground"
         data-testid={`report-index-opened-${entry.name}`}
+        title={openedText || undefined}
       >
-        {opened ? t('console.reportIndex.lastOpened', { defaultValue: 'Opened {{time}}', time: opened }) : ''}
+        {openedText}
       </span>
       <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
     </li>
