@@ -438,6 +438,9 @@ const useSafeFormTranslation = createSafeTranslation(
     // so a form with no I18nProvider renders what it always did.
     'common.submit': 'Submit',
     'common.cancel': 'Cancel',
+    // objectstack#27247 — the declared Reset button's copy when no
+    // `resetLabel` is authored; the shared key, for the reason above.
+    'common.reset': 'Reset',
     // objectui#3272 — the fullscreen long-text editor (`mobile_fullscreen`).
     // A whole dialog, not a word: title, its sr-only description, the footer's
     // confirm button, and the trigger's accessible name. `Cancel` in the footer

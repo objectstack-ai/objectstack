@@ -25,6 +25,7 @@ vi.mock('@object-ui/components', async (importOriginal) => {
 });
 
 import { ObjectForm } from './ObjectForm';
+import { ObjectFormContainer } from './ObjectFormContainer';
 import { registerAllFields } from '@object-ui/fields';
 
 registerAllFields();
@@ -52,8 +53,11 @@ const resetButtons = (root: ParentNode) =>
   Array.from(root.querySelectorAll('button[type="reset"]')) as HTMLButtonElement[];
 
 const renderForm = (schema: Record<string, unknown>, ds = makeDS()) => {
+  // The block's drawer/modal route is `ObjectFormContainer`; `ObjectForm`
+  // itself never receives those two `formType`s.
+  const Form = schema.formType === 'drawer' || schema.formType === 'modal' ? ObjectFormContainer : ObjectForm;
   const utils = render(
-    <ObjectForm
+    <Form
       schema={{ type: 'object-form', objectName: 'o', mode: 'create', ...schema } as any}
       dataSource={ds as any}
     />,
@@ -139,11 +143,9 @@ describe('ObjectForm — showReset draws the Reset button (objectstack#27247)', 
     expect(form.id).toBeTruthy();
     expect(reset.getAttribute('form')).toBe(form.id);
 
-    // The footer sits outside the <form>; the browser routes a reset button
-    // that names a form to that form's `reset` event, which jsdom does not
-    // emulate for the `form` attribute, so the event is dispatched the way the
-    // browser would deliver it.
-    fireEvent.reset(form);
+    // The footer sits outside the <form>: the click reaches the form's own
+    // `reset` event through the button's `form` attribute.
+    fireEvent.click(reset);
     await waitFor(() => expect((document.querySelector('input[name="name"]') as HTMLInputElement).value).toBe('Seed'));
   });
 

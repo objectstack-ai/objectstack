@@ -106,6 +106,8 @@ const useDiscardTranslation = createSafeTranslation(
     'form.create': 'Create',
     'form.update': 'Update',
     'common.cancel': 'Cancel',
+    // The footer's declared Reset button (objectstack#27247).
+    'common.reset': 'Reset',
     'form.errorLoading': 'Error loading form',
   },
   'form.discardTitle',
