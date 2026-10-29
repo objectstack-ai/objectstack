@@ -11,7 +11,7 @@
  * it so the long-standing `@object-ui/fields` import path keeps working for
  * every field/cell renderer that already depends on it.
  */
-export { resolveFieldCurrency } from '@object-ui/i18n';
+export { resolveFieldCurrency, recordCurrencyField } from '@object-ui/i18n';
 
 /**
  * Fallback width for a currency whose digit count cannot be resolved: the
