@@ -204,10 +204,21 @@ export function registerSecurityExplainEndpoints(this: SecurityExplainRouteHost,
             const rawRecordIds = req.method === 'GET' && typeof src.recordIds === 'string' && src.recordIds !== ''
                 ? [src.recordIds]
                 : src.recordIds;
+            // [#27442] An omitted `userId` means the caller; an explicit empty
+            // one names nobody, so it is refused rather than dropped (dropping
+            // it answered about the caller, a principal nobody asked about).
+            // `?userId=` names the key on GET, so it is explicit there too.
+            // The schema's `z.string()` admits "", so the refusal is here.
+            if (src.userId === '') {
+                return respondError(
+                    res, 400, 'VALIDATION_FAILED',
+                    'Invalid explain request — userId is empty. Omit userId to explain your own access, or give the id of the user to explain.',
+                );
+            }
             const parsed = (ExplainRequestSchema as any).safeParse({
                 object: src.object,
                 operation: src.operation ?? 'read',
-                ...(src.userId != null && src.userId !== '' ? { userId: src.userId } : {}),
+                ...(src.userId != null ? { userId: src.userId } : {}),
                 // [C2 / ADR-0095] Optional record id — explains ONE concrete
                 // row at record granularity; omitted stays object-level.
                 ...(src.recordId != null && src.recordId !== '' ? { recordId: src.recordId } : {}),
