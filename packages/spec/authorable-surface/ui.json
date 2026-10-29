@@ -985,6 +985,7 @@
     "ui/ObjectMetricProps:invert",
     "ui/ObjectMetricProps:label",
     "ui/ObjectMetricProps:objectName",
+    "ui/ObjectMetricProps:polarity",
     "ui/ObjectMetricProps:prefix",
     "ui/ObjectMetricProps:suffix",
     "ui/ObjectMetricProps:title",
