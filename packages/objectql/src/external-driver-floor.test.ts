@@ -460,13 +460,15 @@ describe('[#27277] predicate writes are not offered: every write reaches the dri
 });
 
 describe('[#27277] a re-registration that names no driver keeps the floor', () => {
-  it('the datasource-connection sequence: def with driver, driver, then a def without driver', async () => {
+  it('a caller registering only the write-gate facts: def with driver, driver, then a def without driver', async () => {
     const engine = new ObjectQL();
     const remote = remoteDriver('tree', TREE_ROWS);
     engine.registerDatasourceDef({ name: 'tree', driver: 'spike_tree', schemaMode: 'external', external: { allowWrites: true } });
     engine.registerDriver(remote.driver);
-    // What `datasource-connection-service.ts` registers after a connect and in
-    // `restoreOldPool`: no `driver` key (`EngineDatasourceDef` has none).
+    // A caller that registers only the write-gate facts (`schemaMode` and
+    // `external`) and names no `driver`. The datasource-connection service is
+    // not that caller: it names `driver` on every registration (the [#27666]
+    // block below).
     engine.registerDatasourceDef({ name: 'tree', schemaMode: 'external', external: { allowWrites: true } });
     engine.registerApp({
       id: 'tree_pkg',
