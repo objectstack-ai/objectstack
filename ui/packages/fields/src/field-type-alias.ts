@@ -129,7 +129,7 @@ export function mapFieldTypeToFormType(
 
     // Boolean
     boolean: 'field:boolean',
-    toggle: 'field:boolean', // toggle is a boolean rendered as a switch
+    toggle: 'field:boolean', // one widget; it draws a switch for toggle (resolveBooleanControl)
 
     // Selection fields
     select: 'field:select',
