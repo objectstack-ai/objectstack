@@ -598,7 +598,7 @@ describe('published packages that declare a license ship its text (objectui#3696
  * while `scripts.build` was `tsc && vite build`, `src` held no `.css` file at
  * all, and nothing anywhere produced `dist/index.css`. Every published tarball
  * up to and including 17.3.0 contained ZERO `.css` files. A consumer writing the
- * `@import '@object-ui/fields/style.css'` that `content/docs/guide/quick-start.md`
+ * `@import '@object-ui/fields/style.css'` that `content/docs/frontend/quick-start.mdx`
  * taught did not get a badly-styled page — the specifier failed to resolve and
  * took their build down.
  *

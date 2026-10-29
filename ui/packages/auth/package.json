@@ -3,8 +3,8 @@
   "version": "18.2.0",
   "type": "module",
   "license": "MIT",
-  "description": "Authentication system for Object UI with AuthProvider, useAuth hook, AuthGuard, and form components.",
-  "homepage": "https://www.objectui.org/docs/packages/auth",
+  "description": "Authentication system for ObjectUI with AuthProvider, useAuth hook, AuthGuard, and form components.",
+  "homepage": "https://objectstack.ai/docs/frontend",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/objectstack-ai/objectstack.git",

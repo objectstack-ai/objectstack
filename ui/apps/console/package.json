@@ -4,7 +4,7 @@
   "description": "ObjectStack Console — opinionated, fork-ready runtime console built on @object-ui/app-shell with the full plugin set wired up. Ships as a Hono UI plugin serving a pre-built SPA.",
   "license": "MIT",
   "type": "module",
-  "homepage": "https://www.objectui.org/docs/guide/console",
+  "homepage": "https://objectstack.ai/docs/build-without-code",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/objectstack-ai/objectstack.git",

@@ -347,7 +347,7 @@ export function unparsedPrescription(lang) {
  * — the other two legs are imported from it, and the test pins this string
  * against that file's source so the three legs cannot drift apart.
  */
-export const DOCS_ROOT = 'content/docs';
+export const DOCS_ROOT = '../content/docs/frontend';
 
 /**
  * The other three legs of `check:doc-types`' surface, re-exported so this file's

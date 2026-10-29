@@ -3,8 +3,8 @@
   "version": "18.2.0",
   "type": "module",
   "license": "MIT",
-  "description": "Real-time collaboration for Object UI with presence tracking, live cursors, conflict resolution, and comment threads.",
-  "homepage": "https://www.objectui.org/docs/packages/collaboration",
+  "description": "Real-time collaboration for ObjectUI with presence tracking, live cursors, conflict resolution, and comment threads.",
+  "homepage": "https://objectstack.ai/docs/frontend",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/objectstack-ai/objectstack.git",

@@ -75,7 +75,7 @@ describe('#5661: a text run keeps the space that separates it from a sibling ele
 
   it("case 3 — 'A trusted <a>…</a> behind a flag.' keeps both spaces around the element", () => {
     const kids = childrenOf(
-      `<li>A trusted <a href="https://objectui.org">react tier</a> behind a flag.</li>`,
+      `<li>A trusted <a href="https://objectstack.ai/docs/frontend">react tier</a> behind a flag.</li>`,
     );
     expect(kids).toEqual(['A trusted ', expect.any(Object), ' behind a flag.']);
     expect(flatten({ type: 'li', children: kids })).toBe('A trusted react tier behind a flag.');
@@ -106,7 +106,7 @@ describe('#5661: a text run keeps the space that separates it from a sibling ele
     // The shape the console's own worked example uses.
     const UL = `<ul>
         <li>Full HTML tag set in the <em>html</em> tier.</li>
-        <li>A trusted <a href="https://objectui.org">react tier</a> behind a flag.</li>
+        <li>A trusted <a href="https://objectstack.ai/docs/frontend">react tier</a> behind a flag.</li>
         <li>Author writes markup; the platform renders it.</li>
       </ul>`;
 
@@ -182,7 +182,7 @@ describe('#5661 rendered: the words are no longer run together', () => {
       'Full HTML tag set in the html tier.',
     );
     expect(
-      renderedText(`<li>A trusted <a href="https://objectui.org">react tier</a> behind a flag.</li>`),
+      renderedText(`<li>A trusted <a href="https://objectstack.ai/docs/frontend">react tier</a> behind a flag.</li>`),
     ).toBe('A trusted react tier behind a flag.');
   });
 });

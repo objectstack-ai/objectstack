@@ -2063,7 +2063,7 @@ function proseFiles() {
       if (/\.mdx?$/.test(entry.name)) out.push(full);
     }
   };
-  walkDocs(resolve(root, "content/docs"));
+  walkDocs(resolve(root, "../content/docs/frontend"));
   return out;
 }
 

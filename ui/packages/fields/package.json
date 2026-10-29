@@ -1,7 +1,7 @@
 {
   "name": "@object-ui/fields",
   "version": "18.2.0",
-  "description": "Field renderers and registry for Object UI",
+  "description": "Field renderers and registry for ObjectUI",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -87,5 +87,5 @@
   "bugs": {
     "url": "https://github.com/objectstack-ai/objectui/issues"
   },
-  "homepage": "https://www.objectui.org/docs/fields"
+  "homepage": "https://objectstack.ai/docs/frontend/fields"
 }

@@ -137,8 +137,8 @@ Console App
 | Document | Description |
 |----------|-------------|
 | [Roadmap](https://github.com/objectstack-ai/objectstack/blob/main/ROADMAP.md) | Repo-wide development plan |
-| [Getting Started Guide](../../content/docs/guide/console.md) | User-facing documentation |
-| [Architecture Guide](../../content/docs/guide/console-architecture.md) | Technical deep-dive |
+| [Getting Started Guide](https://objectstack.ai/docs/build-without-code) | User-facing documentation |
+| [Architecture Guide](../../docs/design/console-architecture.md) | Technical deep-dive |
 | [UI Improvement Proposal](./docs/UI_IMPROVEMENT_PROPOSAL.md) | Modern UI design improvements for metadata inspector |
 
 ## License

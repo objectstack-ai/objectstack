@@ -180,7 +180,16 @@ describe('objectui#11117 — the binding is a record source on every gate-wrappe
 
 /* ── The documented bindings, read off the pages ────────────────────────────── */
 
-const DOCS = ['content/docs/utilities/data-objectstack.mdx', 'content/docs/guide/data-source.md'] as const;
+/**
+ * The per-element binding section of the data-source guide moved to the
+ * platform's page reference when the ObjectUI docs joined the monorepo
+ * (objectstack#27145), so its `element:number` fence is read there.
+ */
+const DOCS = [
+  '../content/docs/frontend/data-objectstack.mdx',
+  '../content/docs/frontend/data-source.mdx',
+  '../content/docs/ui/pages.mdx',
+] as const;
 
 /** Every ```json fence on the page that parses to a node binding an object through `dataSource`. */
 function documentedBindings(doc: string): Array<{ type: string; node: Record<string, unknown> }> {
@@ -208,9 +217,8 @@ describe('objectui#11117 — every documented per-element binding parses on the 
     expect(documentedBindings(DOCS[0]).map((b) => b.type)).toEqual(
       expect.arrayContaining(['list-view', 'object-grid', 'object-form', 'object-kanban']),
     );
-    expect(documentedBindings(DOCS[1]).map((b) => b.type)).toEqual(
-      expect.arrayContaining(['list-view', 'element:number']),
-    );
+    expect(documentedBindings(DOCS[1]).map((b) => b.type)).toEqual(expect.arrayContaining(['list-view']));
+    expect(documentedBindings(DOCS[2]).map((b) => b.type)).toEqual(expect.arrayContaining(['element:number']));
   });
 
   it.each(DOCS)('%s: each binding fence parses', (doc) => {
