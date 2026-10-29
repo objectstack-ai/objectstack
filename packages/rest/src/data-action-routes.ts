@@ -80,6 +80,8 @@ import { sendError as sendEnvelopeError, sendOk } from '@objectstack/types';
 // [#26594] The read path's ONE no-row answer, for a row that left the caller's
 // sight between the record read and the projection.
 import { recordNotFoundError } from '@objectstack/core';
+// [#27501] The data door's answer for a name no object is behind.
+import { objectNotFoundError } from '@objectstack/core';
 import { logError } from './log.js';
 import {
     DATA_EXPORT_PARAMS,
@@ -306,6 +308,31 @@ function importUndoFailure(id: string, action: ImportUndoFailure['action'], erro
     logUnexpectedRouteError(error, mapped);
     const answer = nestedRefusalEnvelope(mapped);
     return { id, action, code: answer.code, error: answer.message };
+}
+
+/**
+ * [#27501] Refuse an import job for an object nothing is behind, with the data
+ * door's own answer for that name: `objectNotFoundError` (`@objectstack/core`),
+ * the one factory the protocol's existence gate and the engine's verbs throw,
+ * classified by the same `handleRouteError` — 404 `OBJECT_NOT_FOUND`, the same
+ * envelope `POST /data/OBJ` answers.
+ *
+ * The object is read by name as the exposure gate reads it (the execution face
+ * where the protocol has one, else `getMetaItem`), and counts only under its
+ * own name. A read the protocol refuses — `OBJECT_PACKAGE_DISABLED` for an
+ * object of a disabled package, the data door's code for it too — or a read
+ * that faults propagates to the caller as thrown; ⛔ never turned into a job.
+ * A protocol with no by-name read cannot answer, and is not asked.
+ */
+async function assertImportObjectExists(p: any, objectName: string, environmentId: string | undefined): Promise<void> {
+    const byName = typeof p.getMetaItemForExecution === 'function'
+        ? p.getMetaItemForExecution
+        : typeof p.getMetaItem === 'function' ? p.getMetaItem : undefined;
+    if (!byName) return;
+    const envelope: any = await byName.call(p, { type: 'object', name: objectName, ...(environmentId ? { environmentId } : {}) });
+    const item = envelope?.item;
+    if (item !== null && typeof item === 'object' && item.name === objectName) return;
+    throw objectNotFoundError(objectName);
 }
 
 /**
@@ -591,6 +618,14 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                     return;
                 }
                 if (await this.enforceApiAccess(req, res, p, environmentId, 'import')) return;
+
+                // [#27501] The object must exist before a job does. The exposure
+                // gate above passes an unknown object through by design (#3770),
+                // and the data door's existence refusal only fires inside the
+                // per-row writes — AFTER the 201 and the persisted job, so the
+                // job read `succeeded` with every row refused. Refused here, up
+                // front, before the body is parsed and before any job row exists.
+                await assertImportObjectExists(p, objectName, environmentId);
 
                 // [#24348] The synchronous door's control opt-out gate, asked at
                 // the same point: before the body is parsed and before a job row
