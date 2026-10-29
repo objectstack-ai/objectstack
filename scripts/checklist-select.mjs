@@ -51,7 +51,8 @@
 // touched when a path it cites is in that set, read the same way every time:
 //
 //   - every path-shaped token of each `source[]` entry and of `automated.ref`, cut at
-//     the anchor (`bar.ts#symbol` → `bar.ts`) and at the prose that follows it;
+//     the `#` that opens a symbol anchor (the path before it is kept) and at the prose
+//     that follows it;
 //     `dir/{a,b}.ts` brace lists are expanded first;
 //   - a cited path matches a changed path that holds it as a whole run of segments:
 //     the same path; any path under it (a directory source matches by prefix); or a
