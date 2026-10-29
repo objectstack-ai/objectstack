@@ -32,15 +32,28 @@ export const EXTERNAL_ROW_CAP_EXCEEDED_CODE = 'EXTERNAL_ROW_CAP_EXCEEDED' as con
  */
 export const EXTERNAL_ROW_CAP = 1000;
 
-/** The write a refusal names. */
+/**
+ * The write a refusal names. `updateMany` / `deleteMany` are not among them:
+ * the floor does not offer predicate writes (`external-driver-floor.ts`).
+ */
 export type ExternalWriteOperation =
   | 'create' | 'update' | 'upsert' | 'delete'
-  | 'bulkCreate' | 'bulkUpdate' | 'bulkDelete'
-  | 'updateMany' | 'deleteMany';
+  | 'bulkCreate' | 'bulkUpdate' | 'bulkDelete';
 
 /**
- * The remote system behind a plugin driver refused a write with a 4xx answer —
- * its validation failed, the record is locked, it does not exist there. 422:
+ * The remote statuses read as a refusal of THIS request — its payload, its
+ * target, its precondition — and so answered {@link ExternalWriteRefusedError}
+ * with the remote's message. Every other 4xx is a condition of the connection,
+ * not of the request (401 / 403 / 407 an expired or refused credential, 429 a
+ * rate limit), whose text may name the credential: it is answered as a remote
+ * failure (`ERR_DATASOURCE_UNAVAILABLE`, 503), the cause in the server log only.
+ */
+export const EXTERNAL_WRITE_REFUSED_STATUSES: ReadonlySet<number> = new Set([400, 404, 409, 412, 422]);
+
+/**
+ * The remote system behind a plugin driver refused a write with a request-shaped
+ * 4xx ({@link EXTERNAL_WRITE_REFUSED_STATUSES}) — its validation failed, the
+ * record is locked, it does not exist there. 422:
  * the request reached the remote and was judged, and a changed payload may
  * pass. The message is the remote's own, so the person who typed the value
  * reads why it was refused.

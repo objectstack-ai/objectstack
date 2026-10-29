@@ -188,12 +188,26 @@ function compareRows(a: Record<string, unknown>, b: Record<string, unknown>, key
       // No value sorts last in either direction.
       return xMissing ? 1 : -1;
     }
-    const left = x instanceof Date ? x.getTime() : x;
-    const right = y instanceof Date ? y.getTime() : y;
+    // A remote may answer one column in both forms (a `Date` on some rows, an
+    // ISO string on others): when either side is a `Date`, both compare as
+    // instants, or `number < string` would read every pair as equal.
+    const temporal = x instanceof Date || y instanceof Date;
+    const left = temporal ? instantOf(x) : x;
+    const right = temporal ? instantOf(y) : y;
     if ((left as any) < (right as any)) return order === 'desc' ? 1 : -1;
     if ((left as any) > (right as any)) return order === 'desc' ? -1 : 1;
   }
   return 0;
+}
+
+/** A value as epoch ms for a temporal comparison; a string that is not a date stays as written. */
+function instantOf(value: unknown): unknown {
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === 'string') {
+    const ms = Date.parse(value);
+    return Number.isNaN(ms) ? value : ms;
+  }
+  return value;
 }
 
 function project(row: Record<string, unknown>, fields: readonly string[]): Record<string, unknown> {

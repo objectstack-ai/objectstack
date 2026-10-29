@@ -194,10 +194,12 @@ trust a plugin driver to have applied the query: it re-applies it
   exactly like "no rows match". A read that throws (a refusal by name included) answers
   the caller `503 ERR_DATASOURCE_UNAVAILABLE` with `reason: 'remote'`. Its message says
   the remote could not answer and to retry; your error's own text goes to the server log
-  at `warn` and never to the caller. A write the remote refuses with a 4xx is answered
-  `422 EXTERNAL_WRITE_REFUSED` carrying your error's message, so set `status` (or
-  `statusCode`) on the error you throw. A write that fails any other way is `503`, as a
-  read is.
+  at `warn` and never to the caller. A write the remote refuses for the request's own
+  sake (400, 404, 409, 412 or 422) is answered `422 EXTERNAL_WRITE_REFUSED` carrying your
+  error's message, so set `status` (or `statusCode`) on the error you throw. A write
+  that fails any other way is `503`, as a read is. That includes 401, 403, 407 and 429:
+  an expired credential or a rate limit is the operator's to fix, and its text may name
+  the credential.
 - **Send the remote only the columns it owns.** `update` receives the patch plus any
   field a hook stamped, plus `id`, `updated_at` and `updated_by`, which the engine adds on
   its own and no remote column declares.
@@ -403,12 +405,17 @@ driver.
   (the engine's own operator vocabulary, `$like` and `$ilike` included), the sort (no
   value sorts last), `offset` and `limit` (a paged read breaks ties by `id`), and the
   projection.
-- **Writes** go to your driver unchanged.
+- **Writes** go to your driver unchanged, one record at a time. The floored driver does
+  not offer `updateMany` or `deleteMany`, so no `where` the engine cannot re-check
+  reaches a write. A by-id write under a precondition goes through `update` by id, and
+  a multi-row predicate update or delete is refused.
 
 So a driver grows in three steps, each correct:
 
 1. **Return every row.** Ignore the query and answer the resource's rows. The answer is
-   correct for any resource with at most 1000 rows.
+   correct for any resource with at most 1000 rows. Honour `limit` by paging the remote:
+   a remote whose page is smaller than 1001 rows, and that you do not page through,
+   answers fewer rows than match, and the engine cannot detect it.
 2. **Push `where` and `orderBy` down.** The remote returns only the matching rows, so the
    1000-row cap now counts matching rows, not the whole resource, and less travels. The
    engine still re-checks every row, so a translation slip shows up as a missing row
@@ -423,13 +430,14 @@ So a driver grows in three steps, each correct:
 narrow the filter so fewer rows match, or, for data that size, to mirror it into a real
 object with a [scheduled pull](/docs/automation/jobs#pulling-a-mapping) and read that.
 The cap applies to plugin drivers only. It also means a list cannot page past its first
-1000 matching rows: the page at offset 1000 is refused, not empty. The cap is fixed and
-not configurable.
+1000 matching rows: when more than 1000 rows match, every page of that read is refused,
+the one at offset 1000 included. The cap is fixed and not configurable.
 
 **Not covered by the floor.**
 
-- `updateMany` and `deleteMany` pass their `where` to your driver unchanged, so a driver
-  that offers them must apply the whole `where`.
+- Predicate writes. `updateMany` and `deleteMany` are not offered on a floored datasource,
+  so a write that selects its rows by a filter is refused rather than handed to your
+  driver. Read the ids, then write each one.
 - A read whose scope composes a `ReadableIds` leaf, such as an object
   `controlled_by_parent`, is refused (ADR-0139): the engine has no semi-join over a
   plugin driver's rows.

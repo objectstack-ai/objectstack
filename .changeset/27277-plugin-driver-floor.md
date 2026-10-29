@@ -18,10 +18,13 @@ Metadata-protocol: none
   - `aggregate` is hidden, so the engine aggregates in memory over that read.
   - The filter is evaluated by the engine's own walker (the one `having` uses). `$like` and `$ilike` now work in its `where` position. It is held to the spec tables `FILTER_LOGIC_CASES`, `FILTER_TEXT_CASES`, `PAGINATION_*_CASES` and `TEMPORAL_CASES`.
 - **Row cap.** A read that matches more than 1000 rows is refused with `EXTERNAL_ROW_CAP_EXCEEDED` (422), whose message says to narrow the filter or mirror the data into a real object with DataSync.
-- **Writes pass through.** A remote refusal with a 4xx status is `EXTERNAL_WRITE_REFUSED` (422). Its message is the remote's own, and `details.remoteStatus` carries the status. A remote that fails, does not answer, or answers 5xx is `ERR_DATASOURCE_UNAVAILABLE` (503, `reason: 'remote'`); its cause goes to the server log at `warn` and is never sent to the caller.
+- **Writes pass through, by id.** The floored driver does not offer `updateMany` or `deleteMany`, so a by-id write under a precondition goes through `update`, and a multi-row predicate update or delete is refused.
+  - A remote refusal for the request's own sake (400, 404, 409, 412 or 422) is `EXTERNAL_WRITE_REFUSED` (422). Its message is the remote's own, and `details.remoteStatus` carries the status.
+  - Any other failure is `ERR_DATASOURCE_UNAVAILABLE` (503, `reason: 'remote'`): no answer, a 5xx, or a 401/403/407/429 credential or rate-limit condition. The cause goes to the server log at `warn` and is never sent to the caller.
 - **One instance.** The engine stores the floored driver in place of the driver, so `getDriverByName`, `datasource()` and the routing for an object all return the same instance. `unwrapExternalDriverFloor` answers the driver behind it.
-- **Not covered.** `updateMany` and `deleteMany` pass the predicate through to the driver unchanged. A `where` with a `ReadableIds` leaf is refused (ADR-0139 D3), because the engine has no semi-join over a plugin driver's rows.
+- **Re-registration.** A datasource definition registered again without `driver` keeps the driver id stored before it, so the floor stays on.
+- **Not covered.** A `where` with a `ReadableIds` leaf is refused (ADR-0139 D3), because the engine has no semi-join over a plugin driver's rows.
 
 **The remedy.** If a read now meets the cap, narrow its filter, or mirror the data with a `mapping` pulled by a `job` and read the real object.
 
-New exports from `@objectstack/objectql`: `applyDriverQueryInMemory`, `ExternalWriteRefusedError`, `ExternalRowCapExceededError`, their `*_CODE` constants, `EXTERNAL_ROW_CAP`, `needsExternalDriverFloor`, `unwrapExternalDriverFloor`, and the types `DriverQueryInMemory`, `DriverQueryInMemoryOptions`, `ExternalWriteOperation` and `DatasourceUnavailableReason`. `DatasourceDef` gains an optional `driver`.
+New exports from `@objectstack/objectql`: `applyDriverQueryInMemory`, `ExternalWriteRefusedError`, `ExternalRowCapExceededError`, their `*_CODE` constants, `EXTERNAL_ROW_CAP`, `EXTERNAL_WRITE_REFUSED_STATUSES`, `needsExternalDriverFloor`, `unwrapExternalDriverFloor`, and the types `DriverQueryInMemory`, `DriverQueryInMemoryOptions`, `ExternalWriteOperation` and `DatasourceUnavailableReason`. `DatasourceDef` gains an optional `driver`.

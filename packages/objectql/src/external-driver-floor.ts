@@ -35,10 +35,13 @@
  *   its length.
  * - `aggregate` is hidden, so the engine's existing find + in-memory
  *   aggregation path runs over the floored `find`.
- * - Writes pass through. A write the remote refuses with a 4xx is
+ * - Writes pass through, by id: `updateMany` / `deleteMany` are hidden too, so
+ *   no `where` the engine cannot re-check reaches a write. A write the remote
+ *   refuses with a request-shaped 4xx (`EXTERNAL_WRITE_REFUSED_STATUSES`) is
  *   {@link ExternalWriteRefusedError} (422, the remote's message); any other
- *   failure of a read or a write is `ERR_DATASOURCE_UNAVAILABLE` (503, reason
- *   `remote`), with the cause in the server log and never on the wire.
+ *   failure of a read or a write — an auth or rate-limit 4xx included — is
+ *   `ERR_DATASOURCE_UNAVAILABLE` (503, reason `remote`), with the cause in the
+ *   server log and never on the wire.
  * - Everything else (`connect`, `supports`, `syncSchema`, `introspectSchema`,
  *   `beginTransaction`, …) is the driver's own, unchanged.
  *
@@ -58,6 +61,7 @@ import { declaredFieldClasses, declaredJsonStoredFields } from './having-filter.
 import { DatasourceUnavailableError } from './driver-connect-errors.js';
 import {
   EXTERNAL_ROW_CAP,
+  EXTERNAL_WRITE_REFUSED_STATUSES,
   ExternalRowCapExceededError,
   ExternalWriteRefusedError,
   type ExternalWriteOperation,
@@ -86,8 +90,18 @@ export interface ExternalDriverFloorHost {
 const WRITE_METHODS: ReadonlySet<string> = new Set<ExternalWriteOperation>([
   'create', 'update', 'upsert', 'delete',
   'bulkCreate', 'bulkUpdate', 'bulkDelete',
-  'updateMany', 'deleteMany',
 ]);
+
+/**
+ * Members the floored driver does not offer, whatever the driver has.
+ * `aggregate`: the engine aggregates in memory over the floored `find`.
+ * `updateMany` / `deleteMany`: a predicate write would hand the driver a
+ * `where` the engine cannot re-check, so a driver that ignored it would write
+ * rows the caller never selected. Without them the engine writes by id (the
+ * ADR-0142 D4 precondition takes its documented no-`updateMany` path) and
+ * refuses a multi-row predicate write.
+ */
+const HIDDEN: ReadonlySet<PropertyKey> = new Set(['aggregate', 'updateMany', 'deleteMany']);
 
 /** floored driver → the driver behind it */
 const innerOf = new WeakMap<object, IDataDriver>();
@@ -173,7 +187,7 @@ export function createExternalDriverFloor(driver: IDataDriver, host: ExternalDri
         return await method.call(inner, object, ...rest);
       } catch (error) {
         const status = declaredStatus(error);
-        if (status !== undefined && status >= 400 && status < 500) {
+        if (status !== undefined && EXTERNAL_WRITE_REFUSED_STATUSES.has(status)) {
           throw new ExternalWriteRefusedError(
             host.datasource, object, operation as ExternalWriteOperation, status,
             error instanceof Error ? error.message : String(error), { cause: error },
@@ -189,7 +203,7 @@ export function createExternalDriverFloor(driver: IDataDriver, host: ExternalDri
       if (prop === 'find') return find;
       if (prop === 'findOne') return findOne;
       if (prop === 'count') return count;
-      if (prop === 'aggregate') return undefined;
+      if (HIDDEN.has(prop)) return undefined;
       const value = Reflect.get(target, prop, target);
       if (typeof value !== 'function') return value;
       if (!bound.has(prop)) {
@@ -200,7 +214,7 @@ export function createExternalDriverFloor(driver: IDataDriver, host: ExternalDri
       return bound.get(prop);
     },
     has(target, prop) {
-      if (prop === 'aggregate') return false;
+      if (HIDDEN.has(prop)) return false;
       return Reflect.has(target, prop);
     },
   }) as IDataDriver;

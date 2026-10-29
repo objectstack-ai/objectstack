@@ -310,6 +310,7 @@ export {
   EXTERNAL_WRITE_REFUSED_CODE,
   EXTERNAL_ROW_CAP_EXCEEDED_CODE,
   EXTERNAL_ROW_CAP,
+  EXTERNAL_WRITE_REFUSED_STATUSES,
 } from './external-driver-errors.js';
 export type { ExternalWriteOperation } from './external-driver-errors.js';
 export { needsExternalDriverFloor, unwrapExternalDriverFloor } from './external-driver-floor.js';

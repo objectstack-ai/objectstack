@@ -9244,7 +9244,12 @@ export class ObjectQL implements IObjectQLEngine {
    */
   registerDatasourceDef(def: DatasourceDef): void {
     if (!def?.name) return;
-    this.datasourceDefs.set(def.name, { driver: def.driver, schemaMode: def.schemaMode, external: def.external });
+    // [#27277] A def that names no driver keeps the id stored before it: the
+    // datasource-connection service re-registers a def without `driver` after
+    // a connect (`EngineDatasourceDef` has no such key), and reading that
+    // absence as "not a plugin driver" would take the floor back off.
+    const driver = def.driver ?? this.datasourceDefs.get(def.name)?.driver;
+    this.datasourceDefs.set(def.name, { driver, schemaMode: def.schemaMode, external: def.external });
     this.applyExternalDriverFloor(def.name);
   }
 

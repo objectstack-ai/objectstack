@@ -267,3 +267,110 @@ describe('[#27277] writes pass through; a remote refusal is 422', () => {
     expect(err.message).not.toContain('upstream exploded');
   });
 });
+
+describe('[#27277] only a request-shaped 4xx is a refusal of the write', () => {
+  const refusing = (status: number, message: string) => makeEngine({
+    extra: { async create() { throw Object.assign(new Error(message), { status }); } },
+  });
+
+  for (const status of [400, 404, 409, 412, 422]) {
+    it(`${status} is EXTERNAL_WRITE_REFUSED / 422`, async () => {
+      const { engine } = refusing(status, `remote said ${status}`);
+      const err = await engine.insert('tree_node', { kind: 'leaf' }).then(() => undefined, (e) => e);
+      expect(err).toBeInstanceOf(ExternalWriteRefusedError);
+      expect(err.details.remoteStatus).toBe(status);
+    });
+  }
+
+  for (const status of [401, 403, 407, 429]) {
+    it(`${status} (a credential or rate-limit condition) is ERR_DATASOURCE_UNAVAILABLE / 503, its text withheld`, async () => {
+      const { engine } = refusing(status, 'token sk_live_123 expired');
+      const err = await engine.insert('tree_node', { kind: 'leaf' }).then(() => undefined, (e) => e);
+      expect(err).toBeInstanceOf(DatasourceUnavailableError);
+      expect(err.code).toBe('ERR_DATASOURCE_UNAVAILABLE');
+      expect(err.kind).toBe('remote');
+      expect(err.message).not.toContain('sk_live_123');
+    });
+  }
+});
+
+describe('[#27277] predicate writes are not offered: every write reaches the driver by id', () => {
+  const predicateDouble = () => {
+    const writes: Row[] = [];
+    const { engine, remote } = makeEngine({
+      extra: {
+        async update(_o: string, id: string, data: Row) { writes.push({ via: 'update', id }); return { id, ...data }; },
+        async updateMany() { writes.push({ via: 'updateMany' }); return 99; },
+        async deleteMany() { writes.push({ via: 'deleteMany' }); return 99; },
+      },
+    });
+    return { engine, remote, writes };
+  };
+
+  it('updateMany and deleteMany are hidden on the floored instance', () => {
+    const { engine, remote } = predicateDouble();
+    const held = engine.getDriverByName('tree')!;
+    expect('updateMany' in held).toBe(false);
+    expect('deleteMany' in held).toBe(false);
+    expect(held.updateMany).toBeUndefined();
+    expect(held.deleteMany).toBeUndefined();
+    expect(typeof (remote.driver as any).updateMany).toBe('function');
+  });
+
+  it('a by-id write under a precondition (ADR-0142 D4) takes the by-id path, not updateMany', async () => {
+    const { engine, writes } = predicateDouble();
+    await (engine as any).updateByIdExpecting(
+      engine.getDriverByName('tree'), 'tree_node', 'n1', { label: 'Echo 2' }, { label: 'Echo' }, {},
+    );
+    expect(writes).toEqual([{ via: 'update', id: 'n1' }]);
+  });
+
+  it('a multi-row predicate update is refused, and the driver writes nothing', async () => {
+    const { engine, writes } = predicateDouble();
+    const err = await engine.update('tree_node', { label: 'x' }, { where: { kind: 'leaf' }, multi: true })
+      .then(() => undefined, (e) => e);
+    // The engine's generic refusal for a `multi` verdict on a driver with no
+    // predicate write — the floored instance offers none.
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toContain('options.multi=true');
+    expect(writes).toEqual([]);
+  });
+
+  it('a multi-row predicate delete is refused, and the driver writes nothing', async () => {
+    const { engine, writes } = predicateDouble();
+    const err = await engine.delete('tree_node', { where: { kind: 'leaf' }, multi: true })
+      .then(() => undefined, (e) => e);
+    // The engine's generic refusal for a `multi` verdict on a driver with no
+    // predicate write — the floored instance offers none.
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toContain('options.multi=true');
+    expect(writes).toEqual([]);
+  });
+});
+
+describe('[#27277] a re-registration that names no driver keeps the floor', () => {
+  it('the datasource-connection sequence: def with driver, driver, then a def without driver', async () => {
+    const engine = new ObjectQL();
+    const remote = remoteDriver('tree', TREE_ROWS);
+    engine.registerDatasourceDef({ name: 'tree', driver: 'spike_tree', schemaMode: 'external', external: { allowWrites: true } });
+    engine.registerDriver(remote.driver);
+    // What `datasource-connection-service.ts` registers after a connect and in
+    // `restoreOldPool`: no `driver` key (`EngineDatasourceDef` has none).
+    engine.registerDatasourceDef({ name: 'tree', schemaMode: 'external', external: { allowWrites: true } });
+    engine.registerApp({
+      id: 'tree_pkg',
+      name: 'Tree',
+      objects: [{
+        name: 'tree_node',
+        datasource: 'tree',
+        external: { remoteName: 'nodes', writable: true },
+        fields: { kind: { type: 'text' }, label: { type: 'text' }, weight: { type: 'number' } },
+      }],
+    } as any);
+    const held = engine.getDriverByName('tree')!;
+    expect(isExternalDriverFloor(held)).toBe(true);
+    expect(unwrapExternalDriverFloor(held)).toBe(remote.driver);
+    // The where-ignoring driver still answers only the matching rows.
+    expect(ids(await engine.find('tree_node', { where: { kind: 'branch' } }))).toEqual(['n2', 'n5']);
+  });
+});
