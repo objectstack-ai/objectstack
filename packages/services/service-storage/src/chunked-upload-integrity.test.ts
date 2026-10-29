@@ -222,7 +222,11 @@ describe('[#22313] the chunked completion door assembles the parts the upload ho
   it('REFUSED: a chunk held beyond the declared chunk count', async () => {
     const { uploadId, resumeToken, fileId } = await init(100);
     const sent0 = await putChunk(uploadId, resumeToken, 0, fill('a', 100));
-    await putChunk(uploadId, resumeToken, 3, fill('z', 5));
+    // The chunk door refuses an index outside the declared range (#27412), so
+    // a stray chunk can only be one a session recorded before that refusal
+    // existed: planted on the session row, the shape such a session carries.
+    const held = JSON.parse((await store.getSession(uploadId))!.parts ?? '[]') as Array<Record<string, unknown>>;
+    await store.updateSession(uploadId, { parts: JSON.stringify([...held, { chunkIndex: 3, eTag: 'stray', size: 5 }]) });
 
     const res = await complete(uploadId, [{ chunkIndex: 0, eTag: etagOf(sent0) }]);
 
@@ -317,6 +321,71 @@ describe('[#22313] the chunked completion door assembles the parts the upload ho
     const res = await complete(uploadId, []);
     expect(res._status, JSON.stringify(res._json)).toBe(200);
     expect((await adapter.download(res._json.data.key)).equals(fill('a', 100))).toBe(true);
+  });
+
+  // ── the chunk door refuses an index the upload did not declare (#27412) ──
+
+  describe('[#27412] the chunk door takes only a whole-number index in [0, totalChunks)', () => {
+    async function putRaw(uploadId: string, resumeToken: string, chunkIndex: string, bytes: Buffer): Promise<Res> {
+      const res = createMockRes();
+      await server.handler('PUT', CHUNK)(
+        createMockReq({ params: { uploadId, chunkIndex }, headers: { 'x-resume-token': resumeToken }, rawBody: async () => bytes }),
+        res,
+      );
+      return res;
+    }
+
+    // `1` is the declared count itself (one chunk declared, so index 0 alone).
+    it.each(['-1', '1', '7', '0.5', '1e0', '0x0', 'abc'])(
+      'REFUSED 400 INVALID_REQUEST: index %s, with nothing stored or counted, and the upload still completes',
+      async (index) => {
+        const { uploadId, resumeToken } = await init(100);
+        const stored = vi.spyOn(adapter, 'uploadChunk');
+        const before = await store.getSession(uploadId);
+
+        const res = await putRaw(uploadId, resumeToken, index, fill('z', 10));
+
+        expect(res._status, JSON.stringify(res._json)).toBe(400);
+        expect(res._json.success).toBe(false);
+        expect(res._json.error.code).toBe('INVALID_REQUEST');
+        expect(res._json.error.message).toMatch(/^chunkIndex must be 0: this upload declared 1 chunk/);
+        expect(res._json.error.details).toEqual({ chunkIndex: index, totalChunks: 1 });
+        expect(stored, 'no byte reached the backend').not.toHaveBeenCalled();
+        const after = await store.getSession(uploadId);
+        expect(after!.parts ?? null).toEqual(before!.parts ?? null);
+        expect(await progress(uploadId)).toMatchObject({ uploadedChunks: 0, uploadedSize: 0, percentComplete: 0 });
+
+        // The refusal left nothing behind that blocks the upload.
+        stored.mockRestore();
+        const sent0 = await putChunk(uploadId, resumeToken, 0, fill('a', 100));
+        const done = await complete(uploadId, [{ chunkIndex: 0, eTag: etagOf(sent0) }]);
+        expect(done._status, JSON.stringify(done._json)).toBe(200);
+        expect((await adapter.download(done._json.data.key)).equals(fill('a', 100))).toBe(true);
+      },
+    );
+
+    it('names the range of a multi-chunk upload', async () => {
+      const { uploadId, resumeToken, totalChunks } = await init(MIN_CHUNK + 10);
+      expect(totalChunks).toBe(2);
+      const res = await putRaw(uploadId, resumeToken, '2', fill('z', 10));
+      expect(res._status, JSON.stringify(res._json)).toBe(400);
+      expect(res._json.error.code).toBe('INVALID_REQUEST');
+      expect(res._json.error.message).toMatch(/^chunkIndex must be a whole number from 0 to 1: this upload declared 2 chunks/);
+    });
+
+    it('CONTROL: the last declared index is accepted', async () => {
+      const { uploadId, resumeToken } = await init(MIN_CHUNK + 10);
+      const res = await putRaw(uploadId, resumeToken, '1', fill('b', 10));
+      expect(res._status, JSON.stringify(res._json)).toBe(200);
+      expect(res._json.data.chunkIndex).toBe(1);
+    });
+
+    it('CONTROL: a caller without the resume token learns nothing of the range — 403 before the index is judged', async () => {
+      const { uploadId } = await init(100);
+      const res = await putRaw(uploadId, 'not-the-token', '7', fill('z', 10));
+      expect(res._status, JSON.stringify(res._json)).toBe(403);
+      expect(res._json.error.code).toBe('INVALID_RESUME_TOKEN');
+    });
   });
 
   // ── sessions recorded before part sizes existed ───────────────────────
