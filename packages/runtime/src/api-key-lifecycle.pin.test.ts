@@ -76,6 +76,8 @@ const caller = () => ({
   response: {},
   environmentId: undefined,
   executionContext: { userId: 'u1', isSystem: false, positions: [], permissions: [] },
+  // A signed-in caller: the credential the dispatcher's identity step records.
+  admission: { credential: 'session' as const, authGate: undefined },
 });
 
 function responseOf(res: HttpDispatcherResult): NonNullable<HttpDispatcherResult['response']> {
@@ -242,11 +244,19 @@ describe('[#23367] the dispatcher face relays a key its lifecycle refuses, by br
     expect(inserted).toEqual([]);
   });
 
-  it('control: the same key, live, is served', async () => {
+  it('control: the same key, live, passes the identity step — admitted as its owner, no lifecycle refusal', async () => {
     const { dispatcher, inserted } = dispatcherWithKey({ expires_at: '2999-01-01T00:00:00.000Z' });
-    const result: any = await dispatcher.dispatch('POST', ROUTE, { name: 'x' }, {}, pctx(post({ 'x-api-key': KEY })));
-    expect(result.response?.status).toBe(201);
-    expect(inserted).toHaveLength(1);
+    const ctx = pctx(post({ 'x-api-key': KEY }));
+    // `dispatch()` RESOLVES: nothing branded leaves the identity step for a
+    // live key, so the refusals above are the key's lifecycle and nothing else.
+    const result: any = await dispatcher.dispatch('POST', ROUTE, { name: 'x' }, {}, ctx);
+    expect(ctx.admission?.credential).toBe('api_key');
+    expect(ctx.executionContext?.userId).toBe('u_owner');
+    // What answers it is the mint door's own rule (a key does not mint keys),
+    // never a lifecycle code.
+    expect(result.response?.status).toBe(403);
+    expect(result.response?.body?.error?.code).toBe('PERMISSION_DENIED');
+    expect(inserted).toEqual([]);
   });
 });
 
