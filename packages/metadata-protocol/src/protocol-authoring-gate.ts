@@ -77,6 +77,7 @@ export interface AuthoringGateHost {
     hierarchyResolverMounted: ObjectStackProtocolImplementation['hierarchyResolverMounted'];
     isArtifactBacked: ObjectStackProtocolImplementation['isArtifactBacked'];
     orgWallEnforced: ObjectStackProtocolImplementation['orgWallEnforced'];
+    permissionSetNameCollisionRefusal: ObjectStackProtocolImplementation['permissionSetNameCollisionRefusal'];
     refuseRestoredBodyTheSaveDoorRefuses: ObjectStackProtocolImplementation['refuseRestoredBodyTheSaveDoorRefuses'];
     resolveSduiManifest: ObjectStackProtocolImplementation['resolveSduiManifest'];
     resolveWritePackageScope: ObjectStackProtocolImplementation['resolveWritePackageScope'];
@@ -112,13 +113,15 @@ export function restoredBodyWriter(
 
 /** The body of `ObjectStackProtocolImplementation#refuseRestoredBodyTheSaveDoorRefuses`; the method's docblock there is its contract. */
 export async function refuseRestoredBodyTheSaveDoorRefuses(
-    this: Pick<AuthoringGateHost, 'anonymousElevatedFlowRefusal' | 'assertRuntimeAuthoringRules' | 'authoringChannel' | 'credentialChannelFor' | 'defaultRecordPageSaveRefusal' | 'externalBindingSaveRefusal' | 'runAuthoringGate' | 'unknownDatasourceSaveRefusal'>,
+    this: Pick<AuthoringGateHost, 'anonymousElevatedFlowRefusal' | 'assertRuntimeAuthoringRules' | 'authoringChannel' | 'credentialChannelFor' | 'defaultRecordPageSaveRefusal' | 'externalBindingSaveRefusal' | 'permissionSetNameCollisionRefusal' | 'runAuthoringGate' | 'unknownDatasourceSaveRefusal'>,
     type: string,
     name: string,
     body: unknown,
     binding: string | null,
     source: string,
 ): Promise<void> {
+    const nameCollision = await this.permissionSetNameCollisionRefusal(type, name, binding, 'restore');
+    if (nameCollision) throw nameCollision;
     const hookRefusal = runtimeHookWithoutBodyRefusal(type, body, name);
     if (hookRefusal) throw hookRefusal;
     const defaultPageRefusal = await this.defaultRecordPageSaveRefusal(type, body, name, 'restored');
