@@ -18,7 +18,9 @@
  *  - the host RESETS its own count when the selection changes or the inspector
  *    unmounts (ruling sub-decision A) — writability must never depend on a
  *    child's teardown running, or closing the panel on a faulty formula leaves
- *    Save wedged shut with no editor on screen to fix it.
+ *    Save wedged shut with no editor on screen to fix it;
+ *  - objectstack#27485, the switch arm: a switch to another object over a
+ *    held formula asks before it drops the edit.
  *
  * The engine is stubbed so the verdict is deterministic; the live lint is
  * CelPredicateField.test.tsx's job.
@@ -26,7 +28,7 @@
 
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
@@ -39,11 +41,18 @@ const objectDef = {
   ],
 };
 
+const siteDef = { name: 'showcase_site', label: 'Site', fields: [{ name: 'address', label: 'Address', type: 'text' }] };
+
 const mockClient = {
   save: vi.fn(async () => ({})),
-  list: vi.fn(async () => [{ name: 'showcase_task', label: 'Task' }]),
+  list: vi.fn(async () => [
+    { name: 'showcase_task', label: 'Task' },
+    { name: 'showcase_site', label: 'Site' },
+  ]),
   listDrafts: vi.fn(async () => []),
-  layered: vi.fn(async () => ({ effective: objectDef, code: objectDef })),
+  layered: vi.fn(async (_type: string, name: string) =>
+    name === 'showcase_site' ? { effective: siteDef, code: siteDef } : { effective: objectDef, code: objectDef },
+  ),
   getDraft: vi.fn(async () => null),
 };
 
@@ -102,6 +111,13 @@ failOnAbsorbedFetchError();
 
 // The right rail resolves the field inspector through the registry.
 registerBuiltinInspectors();
+
+// This environment ships no window.confirm: the pillar's discard question.
+let confirmSpy: ReturnType<typeof vi.fn>;
+beforeEach(() => {
+  confirmSpy = vi.fn(() => false);
+  window.confirm = confirmSpy as unknown as typeof window.confirm;
+});
 
 afterEach(() => {
   cleanup();
@@ -190,5 +206,29 @@ describe('DataPillar — auto-save is gated on the field inspector’s CEL verdi
     fireEvent.click(screen.getAllByRole('button', { name: 'Close' })[0]);
     await waitFor(() => expect(screen.queryByText('Formula (CEL)')).toBeNull(), { timeout: 3000 });
     await waitFor(() => expect(mockClient.save).toHaveBeenCalled(), { timeout: 4000 });
+  });
+});
+
+/**
+ * objectstack#27485, the switch arm — shared with objectstack#27511's
+ * flush-or-ask switch: an edit the CEL verdict holds cannot be sent, so a
+ * switch to another object asks before its load replaces the buffer.
+ */
+describe('DataPillar — a switch to another object over a held formula (objectstack#27485)', () => {
+  it('asks; declined, the edit stays; agreed, it is dropped unsent', async () => {
+    const box = await openFormulaField();
+    fireEvent.change(box, { target: { value: 'record.est_hours *' } });
+    await new Promise((r) => setTimeout(r, 2300));
+    expect(mockClient.save).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: /Site/ }));
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(box.value).toBe('record.est_hours *');
+
+    confirmSpy.mockReturnValue(true);
+    fireEvent.click(screen.getByRole('button', { name: /Site/ }));
+    await waitFor(() => expect(screen.queryByText('Est hours')).toBeNull(), { timeout: 3000 });
+    await new Promise((r) => setTimeout(r, 2300));
+    expect(mockClient.save).not.toHaveBeenCalled();
   });
 });
