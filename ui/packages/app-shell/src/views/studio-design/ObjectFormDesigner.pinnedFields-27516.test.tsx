@@ -53,6 +53,9 @@ const served = (fields: Fields) => ({
   fieldGroups: [{ key: 'details', label: 'Details' }],
 });
 
+/** The audit and tenant names the Studio host keeps off the canvas (`STUDIO_SYSTEM_FIELD_NAMES`). */
+const HOST_SYSTEM_NAMES = new Set(['organization_id', 'created_at', 'created_by', 'updated_at', 'updated_by']);
+
 /** Every `fields` the designer committed, in order. */
 let commits: Fields[] = [];
 
@@ -61,7 +64,7 @@ function Host({ initial }: { initial: Record<string, unknown> }): React.ReactEle
   return (
     <ObjectFormDesigner
       draft={draft}
-      systemFieldNames={new Set()}
+      systemFieldNames={HOST_SYSTEM_NAMES}
       onChange={(patch) => {
         if (patch.fields) commits.push(patch.fields as Fields);
         setDraft((d) => ({ ...d, ...patch }));
@@ -122,7 +125,11 @@ describe('the form canvas settles the platform’s pinned fields first (objectst
     expect(said()).toBe('Condition moved to Ungrouped, position 2 of 3.');
     const shown = ungroupedCards();
     expect(shown).toEqual(['Owner', 'Condition', 'Notes']);
-    expect(Object.keys(commits.at(-1)!)).toEqual(['owner_id', 'condition', 'notes']);
+    expect(Object.keys(commits.at(-1)!).filter((n) => !HOST_SYSTEM_NAMES.has(n))).toEqual([
+      'owner_id',
+      'condition',
+      'notes',
+    ]);
 
     // After the round trip the canvas shows the same order.
     cleanup();
@@ -158,6 +165,8 @@ describe('the form canvas settles the platform’s pinned fields first (objectst
     pointerDrag(card('Owner'), ['f:condition']);
     const committed = commits.at(-1)!;
     expect(committed.owner_id.group).toBe('details');
-    expect(Object.keys(reload(committed))).toEqual(Object.keys(committed));
+    const authored = (fields: Fields) => Object.keys(fields).filter((n) => ['owner_id', 'condition', 'notes'].includes(n));
+    // The section's order is the author's, so the round trip keeps it.
+    expect(authored(reload(committed))).toEqual(authored(committed));
   });
 });
