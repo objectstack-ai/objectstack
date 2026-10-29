@@ -14,8 +14,9 @@
  * `ActionEngine.getActionsForLocation`. So the engine's capability gate never
  * ran on the one surface those locations exist on: an action declaring a
  * capability nobody holds rendered as a live button, and the only thing behind
- * it was the server's 403 — which covers platform action routes only, never a
- * `type: 'api'` action pointed at a custom endpoint.
+ * it was the server's 403 — which covers the calls the platform action door
+ * dispatches only, never a `type: 'api'` action whose `target` is on another
+ * origin (ADR-0066 D4 as amended).
  *
  * The gate reads the ActionProvider's runner user (the same object the engine
  * reads), falls back to the ambient predicate scope, and fails OPEN when
