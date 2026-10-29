@@ -987,9 +987,10 @@ export interface ConnectorCredentialRef {
     /**
      * `set` — a source answers for it; `missing` — none does, and every
      * instance naming it is registered degraded; `rejected` — an upstream
-     * refused the value `source` answers with, and none has accepted it since.
-     * A stored value stays `rejected` across a restart until an upstream
-     * accepts it or it is set again.
+     * refused the value `source` answers with, and no provider has proved it
+     * since. A stored value stays `rejected` across a restart until a provider
+     * proves it while materializing or it is set again; a call answered `2xx`
+     * does not clear it, since the endpoint may not check the credential.
      */
     status: 'set' | 'missing' | 'rejected';
     /** Which arm of the chain answers: `env`, `object` (the stored row) or `vault` (the host's resolver); `null` when missing. */
@@ -1017,9 +1018,9 @@ export interface ConnectorCredentialRef {
     updatedAt?: string;
     updatedBy?: string;
     /**
-     * When an upstream last accepted the stored value: a provider that proved
-     * it while materializing, or a call answered `2xx`. Cleared when the value
-     * is set again.
+     * When the stored value was last seen working: a provider proved it while
+     * materializing, or, while `status` is `set`, a call with it was answered
+     * `2xx`. Cleared when the value is set again.
      */
     lastVerifiedAt?: string;
 }

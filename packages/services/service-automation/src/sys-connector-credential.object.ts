@@ -104,7 +104,7 @@ export const SysConnectorCredential = ObjectSchema.create({
       required: true,
       defaultValue: 'set',
       description:
-        "`set` when a value is stored; `rejected` when an upstream refused it (an instance's materialization or call answered 401 / 403). Back to `set` only when the value is set again or an upstream accepts it. A reference no source answers for is `missing` in the listing and has no row.",
+        "`set` when a value is stored; `rejected` when an upstream refused it (an instance's materialization or call answered 401 / 403). Back to `set` only when the value is set again or a provider proves it while materializing (mcp); a call answered 2xx does not, since the endpoint may not check the credential. A reference no source answers for is `missing` in the listing and has no row.",
     }),
 
     status_reason: Field.textarea({
@@ -117,7 +117,7 @@ export const SysConnectorCredential = ObjectSchema.create({
       label: 'Last Verified At',
       readonly: true,
       description:
-        'When an upstream last accepted this value: a provider that proves the credential at materialization (mcp), or the first call answered 2xx after an instance materialized (rest, openapi). Cleared when the value is set again.',
+        'When this value was last seen working: a provider proved it while materializing (mcp), or, while the row is `set`, the first call answered 2xx after an instance materialized (rest, openapi). Cleared when the value is set again.',
     }),
 
     set_at: Field.datetime({

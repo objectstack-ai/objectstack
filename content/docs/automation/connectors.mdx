@@ -279,8 +279,8 @@ DELETE /api/v1/automation/connectors/credential-refs/BILLING_API_TOKEN
   `missing` or `rejected`), a `source` (`env`, `object`, `vault` or `null`),
   whether this door can write it, and the instances naming it with their state.
   A stored one also says when and by whom it was last set (`updatedAt`,
-  `updatedBy`) and when an upstream last accepted it (`lastVerifiedAt`). It
-  never includes a value.
+  `updatedBy`) and when it was last seen working (`lastVerifiedAt`). It never
+  includes a value.
 - **`PUT`** stores the value, then reconciles. Every instance naming the
   reference re-materializes with it **without a restart**, and the answer is
   the reference's entry after that. The route refuses, before writing anything:
@@ -308,13 +308,15 @@ depends on where the value came from:
 
 - **A value stored here** is marked `rejected`, and its instance is not
   retried until the credential is set again, its declaration changes, or the
-  server restarts. The mark outlives a restart: it clears only when an upstream
-  accepts the value, either an `mcp` handshake that carries it or a `rest` /
-  `openapi` call answered `2xx`.
+  server restarts. The mark outlives a restart: it clears only when the value
+  is set again or an `mcp` handshake that carries it succeeds. A `rest` /
+  `openapi` call answered `2xx` does not clear it, because the endpoint may not
+  check the credential at all.
 - **A value from an environment variable or the host's resolver** can change
   where this door cannot see it (a rotation, or a `403` rate limit that lifts),
   so its instance is retried on the same 5s→5min backoff as an unreachable
-  upstream. The listing reports it `rejected` until an upstream accepts it.
+  upstream. The listing reports it `rejected` until an `mcp` handshake proves
+  it or the server restarts, even while the instance is serving again.
 
 Credentials are **environment-level**: one value per reference for the whole
 environment, read by whichever instance names it. On a multi-organization

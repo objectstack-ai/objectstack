@@ -231,12 +231,15 @@ exactly the plausible-but-dead shape this ADR exists to kill.
 > until the credential is set again, the declaration changes, or the process restarts (a restart
 > lifts the hold). An instance with no `credentialRef`, whose credential is written in the
 > declaration, is held the same way. The `rejected` mark survives a re-materialization, since a
-> `rest` or `openapi` instance materializes without sending the value. Only an upstream accepting
-> the value clears it: a provider answering `credentialVerified` at materialization (the `mcp`
-> handshake over http), or a call answered `2xx`. A value from an environment variable or the
-> host's resolver can change where the process cannot see it (a rotation, or a `403` rate limit
-> that lifts), so its instance is retried on the backoff above instead, and the credential
-> listing reports the refusal until an upstream accepts it.
+> `rest` or `openapi` instance materializes without sending the value. Only proof clears it: a
+> provider answering `credentialVerified` at materialization (the `mcp` handshake over http), or
+> setting the value again. A call answered `2xx` is not proof, since the endpoint may not check
+> the credential (a public path, an operation with `security: []`); it only stamps the
+> last-verified time of a row still at `set`. A value from an environment variable or the host's
+> resolver can change where the process cannot see it (a rotation, or a `403` rate limit that
+> lifts), so its instance is retried on the backoff above instead, and the credential listing
+> reports the refusal until a provider proves the value, it stops resolving from that source, or
+> the process restarts.
 
 The `openapi` provider applies the same split to its **remote-URL spec fetch**:
 an unreachable endpoint (network error) or a transient HTTP status

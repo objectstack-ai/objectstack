@@ -326,12 +326,13 @@ export class ConnectorCredentialStore {
     }
 
     /**
-     * Record that an upstream ACCEPTED revision `revision`: a provider that
-     * proved it at materialization (`credentialVerified`, the mcp provider), or
-     * a call its upstream answered `2xx`. The timestamp moves, and a `rejected`
-     * row whose same value now works returns to `set`. A materialization alone
-     * proves nothing (rest and openapi first send the value on a call), so it
-     * never calls this. A row rewritten since (another revision) is left alone.
+     * Record that a provider PROVED revision `revision` while materializing
+     * (`credentialVerified` — the mcp handshake carried it and the upstream
+     * answered). The timestamp moves, and a `rejected` row whose same value now
+     * works returns to `set`: this and setting the value again are the only
+     * ways back. A materialization alone proves nothing (rest and openapi
+     * first send the value on a call), so it never calls this. A row rewritten
+     * since (another revision) is left alone.
      */
     async markVerified(record: ConnectorCredentialRecord, at: Date = new Date()): Promise<void> {
         const engine = this.resolveEngine();
@@ -341,6 +342,26 @@ export class ConnectorCredentialStore {
         await engine.update(
             CONNECTOR_CREDENTIAL_OBJECT,
             { id: current.id, last_verified_at: at.toISOString(), status: 'set', status_reason: null },
+            { context: SYSTEM_CONTEXT },
+        );
+    }
+
+    /**
+     * Record that a call sent with revision `revision` was answered `2xx`:
+     * the timestamp moves on a row still at `set`, and nothing else. A `2xx`
+     * proves nothing about a credential the endpoint may not have checked (a
+     * public path, an openapi operation with `security: []`), so it never
+     * returns a `rejected` row to `set` — {@link markVerified} or a new value
+     * does that.
+     */
+    async markCallAccepted(record: ConnectorCredentialRecord, at: Date = new Date()): Promise<void> {
+        const engine = this.resolveEngine();
+        if (!engine) return;
+        const current = await this.read(record.ref);
+        if (!current || current.revision !== record.revision || current.status !== 'set') return;
+        await engine.update(
+            CONNECTOR_CREDENTIAL_OBJECT,
+            { id: current.id, last_verified_at: at.toISOString() },
             { context: SYSTEM_CONTEXT },
         );
     }
@@ -582,8 +603,9 @@ export function credentialRejectedOnCallReason(
 }
 
 /**
- * A `2xx` result of a connector call — the upstream accepted the credential.
- * The rest and openapi providers answer `{ status, ok, body }`.
+ * A `2xx` result of a connector call. The rest and openapi providers answer
+ * `{ status, ok, body }`. Not a proof the credential is valid: the endpoint
+ * may not have checked it.
  */
 export function isAcceptedCallResult(result: unknown): boolean {
     if (typeof result !== 'object' || result === null) return false;

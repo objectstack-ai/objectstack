@@ -739,16 +739,18 @@ export class AutomationServicePlugin implements Plugin {
      * does not hold — an environment variable or the host's resolver — keyed
      * by reference, with the source that was refused and the reason (already
      * scrubbed of the value). There is no row to mark, so this is what the
-     * listing reports as `rejected` until an upstream accepts the reference
-     * again or it stops resolving from that source.
+     * listing reports as `rejected` until a provider proves the reference while
+     * materializing, it stops resolving from that source, or the process
+     * restarts. A call answered `2xx` does not clear it, as it does not clear
+     * a row.
      */
     private credentialRefusals = new Map<string, { source: 'env' | 'vault'; reason: string }>();
     /**
      * [#27237] The backoff count of an instance refused on such a value, by
      * instance name. Kept across a re-materialization — a rest or openapi
      * instance materializes without sending its credential, so the count would
-     * otherwise restart at one on every retry — and dropped once an upstream
-     * accepts the credential, or the instance or its credential's source changes.
+     * otherwise restart at one on every retry — and dropped once a provider
+     * proves the credential, or the instance or its credential's source changes.
      */
     private credentialRefusalAttempts = new Map<string, { signature: string; attempts: number }>();
     private declarativeRetryTimer?: ReturnType<typeof setTimeout>;
@@ -2362,10 +2364,10 @@ export class AutomationServicePlugin implements Plugin {
             // [#27237] Only a provider that proved the credential while
             // materializing (`credentialVerified` — mcp's handshake) says the
             // upstream accepted it. rest and openapi first send it on a call,
-            // where the watcher records the first accepted one; a
-            // materialization alone never turns a `rejected` row back to `set`.
+            // where a `2xx` only stamps a `set` row's time; neither that nor a
+            // materialization alone turns a `rejected` row back to `set`.
             if (credential && ref !== undefined && proven) {
-                await this.recordCredentialAccepted(ctx, name, ref, credential);
+                await this.recordCredentialProven(ctx, name, ref, credential);
             }
         }
 
@@ -2934,13 +2936,13 @@ export class AutomationServicePlugin implements Plugin {
     }
 
     /**
-     * [#27237] An upstream accepted an instance's credential — the provider
-     * proved it while materializing, or a call was answered `2xx`. A stored
-     * value's row records when, and a `rejected` row of that same revision
-     * returns to `set`; a refusal of a value the door does not hold is
-     * forgotten, and so is the instance's backoff count.
+     * [#27237] A provider proved an instance's credential while materializing
+     * (`credentialVerified`). A stored value's row records when, and a
+     * `rejected` row of that same revision returns to `set`; a refusal of a
+     * value the door does not hold is forgotten, and so is the instance's
+     * backoff count.
      */
-    private async recordCredentialAccepted(
+    private async recordCredentialProven(
         ctx: PluginContext,
         name: string,
         ref: string,
@@ -2956,7 +2958,30 @@ export class AutomationServicePlugin implements Plugin {
             await this.connectorCredentialStoreOrNone().markVerified(credential.record);
         } catch (markErr) {
             ctx.logger.warn(
-                `[Automation] connector instance '${name}': an upstream accepted its credential, but the credential row could not record it.`,
+                `[Automation] connector instance '${name}': its provider proved its credential, but the credential row could not record it.`,
+                describeThrownForLog(markErr),
+            );
+        }
+    }
+
+    /**
+     * [#27237] A call with a stored credential was answered `2xx`: the row's
+     * last-verified time moves if it is still `set`. Nothing else — a `2xx`
+     * from an endpoint that never checked the credential is no proof, so a
+     * `rejected` row, a refusal of a value the door does not hold and the
+     * backoff count all stay as they are.
+     */
+    private async recordCredentialCallAccepted(
+        ctx: PluginContext,
+        name: string,
+        credential: Extract<ConnectorCredentialResolution, { kind: 'resolved' }>,
+    ): Promise<void> {
+        if (credential.source !== 'object' || !credential.record) return;
+        try {
+            await this.connectorCredentialStoreOrNone().markCallAccepted(credential.record);
+        } catch (markErr) {
+            ctx.logger.warn(
+                `[Automation] connector instance '${name}': a call with its credential was answered 2xx, but the credential row could not record it.`,
                 describeThrownForLog(markErr),
             );
         }
@@ -2966,8 +2991,9 @@ export class AutomationServicePlugin implements Plugin {
      * [#27237] Wrap a credentialed instance's handlers so the first call its
      * upstream answers 401 / 403 degrades the instance (ruling on #27237,
      * comment 6470087293), and — unless the provider already `proven` the
-     * credential at materialization — the first call it answers `2xx` records
-     * the credential as accepted. A call's own result is returned unchanged.
+     * credential at materialization — the first call it answers `2xx` stamps a
+     * stored credential's last-verified time while its row is `set` (never a
+     * proof that clears `rejected`). A call's own result is returned unchanged.
      * Both run on the reconcile queue, and only against the materialization
      * these handlers belong to, so neither races a reconcile or a credential
      * write that already replaced it. A refusal is awaited (the caller sees
@@ -2999,7 +3025,7 @@ export class AutomationServicePlugin implements Plugin {
                 if (!accepted && !refused && isAcceptedCallResult(result)) {
                     accepted = true;
                     void this.onReconcileQueue(async () => {
-                        if (current()) await this.recordCredentialAccepted(ctx, info.name, info.ref, info.credential);
+                        if (current()) await this.recordCredentialCallAccepted(ctx, info.name, info.credential);
                     });
                     return result;
                 }

@@ -219,19 +219,12 @@ async function boot(
     return { ql, engine, provider, call, reload, kernel };
 }
 
-/** Wait until the listing entry for {@link REF} matches — an acceptance is recorded off the call's path. */
-async function listingSettles(engine: AutomationEngine, expected: Record<string, unknown>) {
-    await vi.waitFor(async () => {
-        expect((await engine.listConnectorCredentialRefs()).find((e) => e.ref === REF)).toMatchObject(expected);
-    });
-    return (await engine.listConnectorCredentialRefs()).find((e) => e.ref === REF)!;
-}
 
 const ADMIN = { userId: 'usr_admin_27237' } as never;
 
 describe('[#27237] a missing credential degrades its instance; setting it materializes it, no restart', () => {
     it('missing → degraded naming the reference; set → ready; clear → degraded again', async () => {
-        const { engine, provider, ql, call } = await boot([billing()]);
+        const { engine, provider, ql, call, reload } = await boot([billing()]);
 
         // Missing: no arm of the chain answers — degraded, named, factory never asked.
         expect(provider.state.materialized).toHaveLength(0);
@@ -261,9 +254,10 @@ describe('[#27237] a missing credential degrades its instance; setting it materi
         expect(entry.connectors[0]).toMatchObject({ name: 'billing', state: 'ready' });
         // Materializing sent nothing upstream (the rest shape), so nothing is verified yet…
         expect(entry.lastVerifiedAt).toBeUndefined();
-        // …until a call the upstream accepts.
+        // …until a call answered 2xx stamps the time on the row, which is `set`.
         expect(await call()).toMatchObject({ status: 200 });
-        await vi.waitFor(async () => expect((await engine.listConnectorCredentialRefs())[0].lastVerifiedAt).toBeDefined());
+        await reload(); // the reconcile queue has run the call's bookkeeping by now
+        expect((await engine.listConnectorCredentialRefs())[0]).toMatchObject({ status: 'set', lastVerifiedAt: expect.any(String) });
 
         // Set again: a new revision re-materializes with the new value.
         await engine.setConnectorCredential({ ref: REF, value: DUMMY_VALUE_2, context: ADMIN });
@@ -419,7 +413,7 @@ describe('[#27237] a wrong value degrades the instance and marks the row rejecte
 });
 
 describe('[#27237] seat review r1: only a stored value holds its instance', () => {
-    it('an environment value refused on a call retries on the backoff, says so, and recovers once accepted', async () => {
+    it('an environment value refused on a call retries on the backoff, says so, and recovers', async () => {
         process.env[REF] = DUMMY_ENV_VALUE;
         envKeys.push(REF);
         const out = captureOutput();
@@ -437,18 +431,18 @@ describe('[#27237] seat review r1: only a stored value holds its instance', () =
         // On the backoff: the retry timer is armed for it (a held instance arms none).
         expect(out.text()).toContain('1 degraded connector instance(s); next retry in 5000ms');
 
-        // The retry — the timer's own soft reconcile — re-materializes it.
+        // The retry — the timer's own soft reconcile — re-materializes it, and it serves again.
         provider.state.callStatus = 200;
         const before = provider.state.materialized.length;
         await reload();
         expect(provider.state.materialized).toHaveLength(before + 1);
         expect(engine.getConnectorDegradedReason('billing')).toBeUndefined();
-        // Still reported refused until an upstream accepts it…
-        expect((await engine.listConnectorCredentialRefs())[0]).toMatchObject({ status: 'rejected' });
-        // …which the first accepted call does.
         expect(await call()).toMatchObject({ status: 200 });
-        const recovered = await listingSettles(engine, { source: 'env', status: 'set' });
-        expect(recovered.statusReason).toBeUndefined();
+        await reload();
+        // Still reported refused: a 2xx is no proof (the endpoint may not check the credential).
+        const after = (await engine.listConnectorCredentialRefs())[0];
+        expect(after).toMatchObject({ source: 'env', status: 'rejected' });
+        expect(after.connectors[0]).toMatchObject({ state: 'ready' });
     });
 
     it("a vault value refused at materialization retries, and a rotation the provider proves recovers it", async () => {
@@ -471,7 +465,7 @@ describe('[#27237] seat review r1: only a stored value holds its instance', () =
         expect((await engine.listConnectorCredentialRefs())[0]).toMatchObject({ source: 'vault', status: 'set' });
     });
 
-    it('a stored value refused on a call holds its instance; a restart lifts the hold, the row stays `rejected` until a call is accepted', async () => {
+    it('a stored value refused on a call holds its instance; a restart lifts the hold, and the row stays `rejected` — a 2xx call does not clear it', async () => {
         const first = await boot([billing()]);
         await first.engine.setConnectorCredential({ ref: REF, value: DUMMY_VALUE, context: ADMIN });
         const set = (await first.engine.listConnectorCredentialRefs())[0];
@@ -501,11 +495,20 @@ describe('[#27237] seat review r1: only a stored value holds its instance', () =
         await second.reload();
         expect((await second.engine.listConnectorCredentialRefs())[0]).toMatchObject({ status: 'rejected' });
 
-        // The upstream accepting the same value is what clears it.
+        // A call answered 2xx is no proof — a public path or an operation with
+        // `security: []` never checks the credential — so the row stays
+        // `rejected`, its reason and its unverified time unmoved.
         expect(await second.call()).toMatchObject({ status: 200 });
-        const accepted = await listingSettles(second.engine, { status: 'set', source: 'object' });
-        expect(accepted.statusReason).toBeUndefined();
-        expect(accepted.lastVerifiedAt).toBeDefined();
+        await second.reload(); // the reconcile queue has run the call's bookkeeping by now
+        const afterCall = (await second.engine.listConnectorCredentialRefs())[0];
+        expect(afterCall).toMatchObject({ status: 'rejected', source: 'object', statusReason: reason });
+        expect(afterCall.lastVerifiedAt).toBeUndefined();
+
+        // Setting it again is what clears it.
+        await second.engine.setConnectorCredential({ ref: REF, value: DUMMY_VALUE_2, context: ADMIN });
+        const reset = (await second.engine.listConnectorCredentialRefs())[0];
+        expect(reset).toMatchObject({ status: 'set', source: 'object' });
+        expect(reset.statusReason).toBeUndefined();
     });
 
     it('a provider that proves the credential while materializing (mcp) returns a `rejected` row to `set` on restart', async () => {
