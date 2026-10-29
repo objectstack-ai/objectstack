@@ -1421,6 +1421,7 @@ const ja = {
     datasetUnsupported: "このデータソースはデータセットクエリに対応していません。",
     widgetForbiddenTitle: "アクセス権がありません",
     widgetForbiddenMessage: "このウィジェットのデータを表示する権限がありません。",
+    allWidgetsForbiddenMessage: "このダッシュボードのデータを表示する権限がありません。",
     details: "詳細",
     exportCsv: "CSV で書き出す",
     openInList: "リストで開く",

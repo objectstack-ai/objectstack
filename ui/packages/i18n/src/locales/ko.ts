@@ -1421,6 +1421,7 @@ const ko = {
     datasetUnsupported: "이 데이터 소스는 데이터셋 쿼리를 지원하지 않습니다.",
     widgetForbiddenTitle: "접근 권한 없음",
     widgetForbiddenMessage: "이 위젯의 데이터를 볼 수 있는 권한이 없습니다.",
+    allWidgetsForbiddenMessage: "이 대시보드의 데이터를 볼 수 있는 권한이 없습니다.",
     details: "세부 정보",
     exportCsv: "CSV 내보내기",
     openInList: "목록에서 열기",

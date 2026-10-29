@@ -1421,6 +1421,7 @@ const de = {
     datasetUnsupported: "Diese Datenquelle unterstützt keine Dataset-Abfragen.",
     widgetForbiddenTitle: "Kein Zugriff",
     widgetForbiddenMessage: "Sie haben keine Berechtigung, die Daten dieses Widgets anzuzeigen.",
+    allWidgetsForbiddenMessage: "Sie haben keine Berechtigung, die Daten dieses Dashboards anzuzeigen.",
     details: "Details",
     exportCsv: "CSV exportieren",
     openInList: "In Liste öffnen",

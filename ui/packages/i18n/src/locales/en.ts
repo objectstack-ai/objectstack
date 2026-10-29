@@ -1806,6 +1806,7 @@ const en = {
     datasetUnsupported: 'This data source does not support dataset queries.',
     widgetForbiddenTitle: 'You don’t have access',
     widgetForbiddenMessage: 'You don’t have permission to view the data behind this widget.',
+    allWidgetsForbiddenMessage: 'You don’t have permission to view the data behind this dashboard.',
     details: 'Details',
     exportCsv: 'Export CSV',
     openInList: 'Open in list',

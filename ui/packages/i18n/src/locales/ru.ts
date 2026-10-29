@@ -1521,6 +1521,7 @@ const ru = {
     datasetUnsupported: "Этот источник данных не поддерживает запросы к наборам данных.",
     widgetForbiddenTitle: "Нет доступа",
     widgetForbiddenMessage: "У вас нет прав на просмотр данных этого виджета.",
+    allWidgetsForbiddenMessage: "У вас нет прав на просмотр данных этой панели.",
     details: "Подробности",
     exportCsv: "Экспорт в CSV",
     openInList: "Открыть в списке",
