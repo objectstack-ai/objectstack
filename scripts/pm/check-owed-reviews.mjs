@@ -41,15 +41,25 @@
  *              `unreadable`.
  *   claim      the `Contract-review-claim:` lines: `live` (who holds the head,
  *              the lane winning a tie), `lapsed`, `none`.
+ *   hold       the newest `Contract-review-hold:` line, as `contractReviewHold`
+ *              reads it: `live` (it names the current head: trigger (b) does not
+ *              fire, and its age is printed), `stale` (the head moved: cleared),
+ *              `absent`, `unreadable` (it holds nothing). A live hold at
+ *              `CONTRACT_REVIEW_HOLD_LIST_HOURS` or older on a WAIT row is LISTED,
+ *              for the triage round record — the age is a reading, never a lapse.
  *   lane seat  the lane of the PR's card (`domain:*`) against the open seat
  *              posts: `seated`, `stood-down`, `absent`, `unknown`.
  *   status     `TAKE` (owed, nobody on it, a trigger holds), `WAIT` (owed,
- *              nobody on it, no trigger yet — the lane's own), `HELD` (a live
- *              claim on this head), `DONE` (a record on this head).
+ *              nobody on it, no trigger yet — the lane's own, a lane's live hold
+ *              included), `HELD` (a live claim on this head), `DONE` (a record on
+ *              this head). Four, ⛔ no fifth for a hold: a held head is the lane's
+ *              own wait, and a `HOLD` beside `HELD` is one letter from a misread.
  *   trigger    the first that holds: (a) a hand-off line naming the current
  *              head, or the waiting label — taken the same round; (b) the head
- *              has waited a full triage round (`TRIAGE_ROUND_MINUTES`); (c) the
- *              lane's seat has stood down or is absent from the seat roster.
+ *              has waited a full triage round (`TRIAGE_ROUND_MINUTES`) and no
+ *              live hold names it; (c) the lane's seat has stood down or is
+ *              absent from the seat roster. A live hold holds (b) alone: the
+ *              lane that holds ends it with (a), and a lane gone is (c).
  *
  * ## Report-only — the exit is 0 on every completed or incomplete read
  *
@@ -70,9 +80,11 @@ import { readClause2Line } from './clause2-line.mjs';
 import { parseSeat } from './fleet-roster.mjs';
 import { ghApi, readAllPages } from './gh-pages.mjs';
 import {
+  CONTRACT_REVIEW_HOLD_LIST_HOURS,
   REVIEWED_BY_LINE,
   contractReviewClaims,
   contractReviewHandoff,
+  contractReviewHold,
   deliveredCardNumber,
   locateReviewOfRecord,
   reviewFace,
@@ -229,16 +241,21 @@ export function owedReviewRow(pull, { now, seats, repo = DEFAULT_REPO }) {
   const record = recordReading(pull);
   const handoff = contractReviewHandoff(pull.comments, head);
   const claim = contractReviewClaims(pull.comments, head, { now });
+  const hold = contractReviewHold(pull.comments, head, { now });
   const lane = laneSeatOf(pull.cardLabels, seats);
   const triggers = [];
   if (handoff.state === 'triage') triggers.push('(a) hand-off');
   if (owed.limbs.includes('label')) triggers.push('(a) label');
-  if (waited !== null && waited >= TRIAGE_ROUND_MINUTES) triggers.push(`(b) waited ${waited} min`);
+  // (b) alone yields to a live hold: the lane said "not this head yet", and only (a) or (c) overrides that.
+  const roundWaited = waited !== null && waited >= TRIAGE_ROUND_MINUTES ? `(b) waited ${waited} min` : null;
+  if (roundWaited !== null && hold.state !== 'live') triggers.push(roundWaited);
   if (lane.seat === 'stood-down' || lane.seat === 'absent') triggers.push(`(c) lane seat ${lane.seat}`);
   let status;
   if (record.state === 'current') status = 'DONE';
   else if (claim.state === 'live') status = 'HELD';
   else status = triggers.length > 0 ? 'TAKE' : 'WAIT';
+  // Listed for the round record: a live hold the age reading calls overdue — or cannot time — on a row it keeps waiting.
+  const listed = status === 'WAIT' && hold.state === 'live' && hold.overdue !== false;
   return {
     pr: pull.number,
     draft: pull.draft === true,
@@ -249,6 +266,19 @@ export function owedReviewRow(pull, { now, seats, repo = DEFAULT_REPO }) {
     record,
     handoff: { state: handoff.state, id: handoff.id ?? null },
     claim: { state: claim.state, holder: claim.holder ?? null, tie: claim.tie ?? false, unreadable: claim.unreadable ?? [] },
+    hold: {
+      state: hold.state,
+      id: hold.id ?? null,
+      session: hold.session ?? null,
+      reason: hold.reason ?? null,
+      until: hold.until ?? null,
+      at: hold.at ?? null,
+      ageMinutes: hold.ageMinutes ?? null,
+      overdue: hold.overdue ?? null,
+      holds: hold.state === 'live' ? roundWaited : null,
+      listed,
+      gaps: hold.gaps ?? [],
+    },
     lane: lane.lane,
     laneSeat: lane.seat,
     status,
@@ -285,11 +315,28 @@ export function renderRow(row) {
     `record ${record}`,
     `hand-off ${row.handoff.state}${row.handoff.id === null ? '' : ` (${row.handoff.id})`}`,
     `claim ${claim}`,
+    `hold ${holdText(row.hold)}`,
     `lane ${row.lane ?? '?'} ${row.laneSeat}`,
   ];
   const tail = row.trigger === null ? '' : ` → ${row.trigger}`;
+  const listed = row.hold.listed ? `  ⏳ HOLD ${holdAge(row.hold)} — list it in the triage round record` : '';
   const gaps = row.gaps.length > 0 ? `  ⚠️ UNREAD: ${row.gaps.join('; ')}` : '';
-  return `${parts.join(' · ')}${tail}${gaps}`;
+  return `${parts.join(' · ')}${tail}${listed}${gaps}`;
+}
+
+/** The hold's age as printed: hours, or that it could not be timed. Pure. */
+function holdAge(hold) {
+  return hold.ageMinutes === null ? 'age unknown' : `${Math.floor(hold.ageMinutes / 60)} h old`;
+}
+
+/** The hold part of a row: who holds, since when, until what, and the (b) it holds. Pure. */
+function holdText(hold) {
+  if (hold.state === 'live') {
+    const holds = hold.holds === null ? '' : `, holds ${hold.holds}`;
+    return `live ${hold.session} (${hold.id}, ${holdAge(hold)}${holds}) until ${hold.until}`;
+  }
+  if (hold.state === 'stale' || hold.state === 'unreadable') return `${hold.state}${hold.id === null ? '' : ` (${hold.id})`}`;
+  return hold.state;
 }
 
 /** The printed report. Pure. */
@@ -301,6 +348,14 @@ export function renderReport(rows, { repo, now, read, gaps }) {
     '',
     ...rows.map(renderRow),
   ];
+  const listed = rows.filter((r) => r.hold.listed);
+  if (listed.length > 0) {
+    lines.push(
+      '',
+      `⏳ ${listed.length} hold(s) ${CONTRACT_REVIEW_HOLD_LIST_HOURS} h or older keep a PR waiting — list each in the triage round record:`,
+      ...listed.map((r) => `  - #${r.pr} held by ${r.hold.session} since ${r.hold.at ?? '?'} (${holdAge(r.hold)}) until ${r.hold.until}`),
+    );
+  }
   if (gaps.length > 0) {
     lines.push('', `⚠️ sweep INCOMPLETE — ${gaps.length} read(s) failed; the rows above are not the whole answer:`, ...gaps.map((g) => `  - ${g}`));
   }
@@ -408,8 +463,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the live instance: two Tier H drafts with a hand-off on the current head list as TAKE under (a)': 4,
   'the live read: every read through one reader; a failed read is INCOMPLETE, never clean': 6,
   'the report: one line per owing PR, TAKE first, exit 0': 5,
+  'the hold: a live hold on this head holds (b) alone, (a) and (c) still fire; a new head clears it; at 24 hours it is listed, still WAIT': 13,
 });
-const SELF_TEST_BATTERY_FLOOR = 8;
+const SELF_TEST_BATTERY_FLOOR = 9;
 const UNATTRIBUTED_BATTERY = '(no battery open)';
 
 export function selfTest() {
@@ -553,6 +609,31 @@ export function selfTest() {
   t('--json prints the rows as one JSON document, still exit 0', main(['--repo', DEFAULT_REPO, '--json', '--now', '2026-10-28T13:00:00Z'], { get: fake(routes), log: (l) => jsonOut.push(l) }) === EXIT_OK && JSON.parse(jsonOut.join('\n')).rows[0].pr === 27136);
   t('a usage error exits 2 and prints the usage', main(['--bogus'], { get: fake({}), log: () => {}, error: () => {} }) === EXIT_USAGE);
 
+  battery('the hold: a live hold on this head holds (b) alone, (a) and (c) still fire; a new head clears it; at 24 hours it is listed, still WAIT');
+  // The lane's "not this head yet", posted as the lane posts it: signature, then the one line.
+  const LANE_SIG = `domain:ui#1 · os-bill · ${LANE}`;
+  const holdRow = (head, at, id = 6472451890) => ({ id, created_at: at, body: `${LANE_SIG}\n\nContract-review-hold: \`${LANE}\` · head \`${head}\` · the stack still lands under it · until the last sibling PR merges` });
+  const ripe = '2026-10-28T11:59:00Z'; // committed 61 minutes before NOW: (b) holds when nothing holds it
+  const heldAt = '2026-10-28T12:10:00Z';
+  const held = row({ headCommittedAt: ripe, comments: [holdRow(HEAD, heldAt)] });
+  t('⭐ a live hold on the current head holds (b): a full round waited, no record, no claim ⇒ WAIT, not TAKE — and with no hold the same row is TAKE under (b)', held.status === 'WAIT' && held.trigger === 'none yet' && held.hold.state === 'live' && held.hold.holds === '(b) waited 61 min' && row({ headCommittedAt: ripe }).status === 'TAKE' && row({ headCommittedAt: ripe }).trigger === '(b) waited 61 min', JSON.stringify(held.hold));
+  t('the row prints the hold: who holds, the comment, its age, the (b) it holds and until what', renderRow(held).includes(`hold live ${LANE} (6472451890, 0 h old, holds (b) waited 61 min) until the last sibling PR merges`), renderRow(held));
+  t('⛔ a hold on an EARLIER head holds nothing — the head moved, (b) fires ⇒ TAKE', (() => { const r = row({ headCommittedAt: ripe, comments: [holdRow(HEAD2, heldAt)] }); return r.hold.state === 'stale' && r.status === 'TAKE' && r.trigger === '(b) waited 61 min' && r.hold.holds === null; })());
+  t('⭐ (a) still fires under a live hold — the label or a hand-off on this head is the holding lane ending its hold ⇒ TAKE', row({ headCommittedAt: ripe, labels: [{ name: WAITING_LABEL }], comments: [holdRow(HEAD, heldAt)] }).trigger === '(a) label' && row({ headCommittedAt: ripe, comments: [holdRow(HEAD, heldAt), handoff(HEAD, '2026-10-28T12:40:00Z')] }).trigger === '(a) hand-off');
+  t('(c) still fires under a live hold — a lane seat that is gone holds nothing', row({ headCommittedAt: ripe, comments: [holdRow(HEAD, heldAt)] }, [{ lane: 'domain:ui', status: 'paused' }]).trigger === '(c) lane seat stood-down');
+  t('⛔ an unreadable hold holds nothing ⇒ (b) fires, and the row names the hold comment as unreadable', (() => { const r = row({ headCommittedAt: ripe, comments: [{ id: 7701, created_at: heldAt, body: 'Contract-review-hold: soon' }] }); return r.hold.state === 'unreadable' && r.status === 'TAKE' && renderRow(r).includes('hold unreadable (7701)'); })());
+  t('a hold changes neither a live claim (HELD) nor a record on this head (DONE)', row({ headCommittedAt: ripe, comments: [holdRow(HEAD, heldAt), claimRow(TRIAGE, HEAD, '2026-10-28T12:18:56Z', `triage#1 · os-zhuang · ${TRIAGE}`)] }).status === 'HELD' && row({ headCommittedAt: ripe, comments: [holdRow(HEAD, heldAt), recordRow(HEAD)] }).status === 'DONE');
+  const aged = row({ headCommittedAt: '2026-10-27T08:00:00Z', comments: [holdRow(HEAD, '2026-10-27T13:00:00Z')] });
+  t('⭐ at 24 hours the hold reads overdue and STILL holds — the row stays WAIT, no fifth status — and the row is LISTED for the round record', aged.status === 'WAIT' && aged.hold.state === 'live' && aged.hold.overdue === true && aged.hold.listed === true && renderRow(aged).includes('⏳ HOLD 24 h old — list it in the triage round record'), renderRow(aged));
+  const report = renderReport([aged], { repo: DEFAULT_REPO, now: NOW, read: { pulls: 1, drafts: 1 }, gaps: [] });
+  t('⭐ the report lists it under the rows: the PR, the holder, when it was posted, its age and the condition', report.some((l) => l.startsWith('⏳ 1 hold(s) 24 h or older keep a PR waiting')) && report.includes(`  - #27136 held by ${LANE} since 2026-10-27T13:00:00Z (24 h old) until the last sibling PR merges`), report.join(' | '));
+  t('under 24 hours nothing is listed; an overdue hold on a DONE or HELD row is not listed — nothing waits on it', held.hold.listed === false && !renderReport([held], { repo: DEFAULT_REPO, now: NOW, read: { pulls: 1, drafts: 1 }, gaps: [] }).some((l) => l.startsWith('⏳')) && row({ headCommittedAt: '2026-10-27T08:00:00Z', comments: [holdRow(HEAD, '2026-10-27T13:00:00Z'), recordRow(HEAD)] }).hold.listed === false && row({ headCommittedAt: '2026-10-27T08:00:00Z', comments: [holdRow(HEAD, '2026-10-27T13:00:00Z'), claimRow(TRIAGE, HEAD, '2026-10-28T12:18:56Z', `triage#1 · os-zhuang · ${TRIAGE}`)] }).hold.listed === false);
+  t('⛔ a live hold whose age cannot be timed is LISTED as unknown, never dropped as young', (() => { const r = row({ headCommittedAt: ripe, comments: [{ id: 9, body: holdRow(HEAD, heldAt).body }] }); return r.status === 'WAIT' && r.hold.overdue === null && r.hold.listed === true && renderRow(r).includes('⏳ HOLD age unknown'); })());
+  const holdJson = [];
+  main(['--repo', DEFAULT_REPO, '--json', '--now', '2026-10-28T13:00:00Z'], { get: fake({ ...routes, '/repos/objectstack-ai/objectstack/issues/27136/comments': { ok: true, value: [holdRow(HEAD, '2026-10-27T13:00:00Z')] } }), log: (l) => holdJson.push(l) });
+  t('--json carries the hold on the row, live and listed, through the one live reader — the status still one of the four', (() => { const r = JSON.parse(holdJson.join('\n')).rows[0]; return r.pr === 27136 && r.status === 'WAIT' && r.hold.state === 'live' && r.hold.listed === true && r.hold.session === LANE && STATUS_ORDER.includes(r.status); })());
+  t('⛔ the status vocabulary stays exactly four, in order — a hold is the lane\'s own WAIT', STATUS_ORDER.join() === 'TAKE,WAIT,HELD,DONE');
+
   // Floor: the opened set equals the declared set, each battery at or above its pin.
   const declared = Object.keys(SELF_TEST_BATTERIES);
   if (declared.length < SELF_TEST_BATTERY_FLOOR) cases.push({ name: `SELF_TEST_BATTERIES declares ${declared.length} batteries, below the pinned ${SELF_TEST_BATTERY_FLOOR}`, ok: false });
@@ -572,7 +653,8 @@ export function selfTest() {
     `✓ check-owed-reviews self-test: ${cases.length} cases pass in ${declared.length} batteries (the owed face from paths, `
       + 'the Clause-② line and the label, drafts included; the record on this head, an earlier head, none, unjudged; '
       + 'the (a) / (b) / (c) triggers; claims holding and lapsing, the lane winning a tie; the two live drafts as TAKE; '
-      + 'every read through one reader with failures as gaps; the report, exit 0).',
+      + 'every read through one reader with failures as gaps; the report, exit 0; a lane\'s live hold holding (b) alone, '
+      + 'cleared by a new head, listed at 24 hours and still WAIT).',
   );
   selfTestReachedVerdict = true;
   return 0;
