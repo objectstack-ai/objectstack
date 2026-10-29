@@ -307,7 +307,16 @@ export const ImportRequestSchema = lazySchema(() => z.object({
       'import that carry the same key (the key set each row is matched by, with its cell values ' +
       'as coerced, so an option label and its value are one key) all fail with ' +
       '`DUPLICATE_MATCH_KEY`, naming every row that carries it, and none of them is written, on a ' +
-      'dry run as on the import: keep one row per key.',
+      'dry run as on the import: keep one row per key. In `update` / `upsert`, a key (this field, or the ' +
+      'named mapping\'s `upsertKey` it falls back to) naming a field that holds a list or a structured ' +
+      'value — a `multiple: true` select, radio, lookup, user, file or image field, a `multiselect`, ' +
+      '`checkboxes` or `tags` field, or a `json`, `composite`, `repeater`, `record`, `location`, ' +
+      '`address` or `vector` field, the population `isMultiValueField` and `STRUCTURED_JSON_TYPES` ' +
+      'define — is refused with `400 INVALID_REQUEST` before any row is matched or written, on a dry run ' +
+      'as on the import, naming each such field (match on single-value fields: a code, a name, an email); ' +
+      'a caller that hands rows to ' +
+      'the import runner without this door (a mapping\'s connector pull) gets every row failed with ' +
+      '`VALIDATION_ERROR` and the same refusal instead.',
     ),
   runAutomations: z.boolean().default(true)
     .describe(

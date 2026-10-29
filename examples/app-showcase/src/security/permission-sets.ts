@@ -117,6 +117,25 @@ export const ContributorPermissionSet = definePermissionSet({
       check: 'owner == current_user.email',
       enabled: true,
     },
+    // [ADR-0058 D4] The same ownership CHECK, on INSERT. The rule above is
+    // `operation: 'update'`, so it does not apply to a create, and a `select`
+    // policy's `using` never stands in as an insert check (only an applicable
+    // `insert`/`all` policy's would). This rule keeps a contributor's create
+    // inside their own read scope: the new invoice must be owned by the caller.
+    // Clone is a create, so it is judged here too. `owner` is a plain text field
+    // with no default, so a contributor's create names their own email as owner.
+    // A separate `insert` policy rather than widening the rule above to `all`:
+    // `all` would also make a check-only policy applicable to select and delete.
+    {
+      name: 'invoice_owner_on_create',
+      label: 'Invoice Created Owned By Its Creator',
+      description:
+        'A contributor can only create an invoice owned by themselves (write-time CHECK on insert, ADR-0058 D4).',
+      object: 'showcase_invoice',
+      operation: 'insert' as const,
+      check: 'owner == current_user.email',
+      enabled: true,
+    },
   ],
 });
 

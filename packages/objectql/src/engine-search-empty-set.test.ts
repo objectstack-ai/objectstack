@@ -226,10 +226,19 @@ describe('[#24284] the palette keeps its skip; the data door surfaces the refusa
 
     it('findData over the junction answers the refusal, on the list and the query shapes', async () => {
         const { protocol, reads } = await makeHarness();
-        for (const query of [{ search: 'zzzz-nothing' }, { search: 'Dune', searchFields: '' }, { search: { query: 'Dune' } }]) {
+        for (const query of [{ search: 'zzzz-nothing' }, { search: { query: 'Dune' } }]) {
             const err: any = await (protocol as any).findData({ object: 'lib_loan', query }).then(() => null, (e: any) => e);
             expect(err, JSON.stringify(query)).toMatchObject(REFUSAL);
         }
+        // [#27484] Flipped on purpose (triage ruling 6500648325, option A): a
+        // blank override no longer reaches the engine as "absent", so the door
+        // refuses it first, in the projection's envelope. The point of this
+        // leg holds: a search over the junction never silently widens to every
+        // row; no `lib_loan` read is made on either refusal.
+        const blankOverride: any = await (protocol as any).findData({
+            object: 'lib_loan', query: { search: 'Dune', searchFields: '' },
+        }).then(() => null, (e: any) => e);
+        expect(blankOverride).toMatchObject({ code: 'VALIDATION_ERROR', status: 400, param: 'searchFields' });
         expect(reads.filter((r) => r.object === 'lib_loan')).toEqual([]);
         // …and the control object and the blank term are untouched.
         const book: any = await (protocol as any).findData({ object: 'lib_book', query: { search: 'Dune' } });

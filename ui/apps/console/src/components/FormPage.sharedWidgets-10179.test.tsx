@@ -164,7 +164,7 @@ afterEach(() => {
 describe('a11y — the two defects objectui#10178 measured are gone', () => {
   it('a required boolean is named by its label exactly ONCE, and reports required', async () => {
     await renderForm();
-    const agree = screen.getByRole('switch', { name: 'Agree' });
+    const agree = screen.getByRole('checkbox', { name: 'Agree' });
     // Exact: `Agree * Agree` (and `Agree Agree`) was the doubled name.
     expect(agree).toHaveAccessibleName('Agree');
     expect(agree).toHaveAttribute('aria-required', 'true');
@@ -202,7 +202,7 @@ describe('value shapes — what the shared widgets emit is what the page submits
     await userEvent.click(screen.getByTestId('lookup-trigger-account'));
     await userEvent.click(await screen.findByRole('option', { name: /Acme/ }));
 
-    await userEvent.click(screen.getByRole('switch', { name: 'Agree' }));
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Agree' }));
     await userEvent.click(screen.getByRole('radio', { name: 'High' }));
 
     await userEvent.click(screen.getByRole('button', { name: /Submit/ }));
@@ -223,12 +223,12 @@ describe('value shapes — what the shared widgets emit is what the page submits
 describe('the page refuses a submit that leaves a required row empty', () => {
   it('refuses, names the empty row, and writes nothing', async () => {
     await renderForm();
-    // `agree` is required too, and is switched on and back OFF: `false` is a
+    // `agree` is required too, and is checked and back OFF: `false` is a
     // VALUE for the required rule (`isMissingForRequired`), so it does not
-    // block — the unpicked radio does. (An untouched switch holds no value at
+    // block — the unpicked radio does. (An untouched box holds no value at
     // all, and is refused like any other empty required row, as the sibling
     // chain's `required` rule refuses it.)
-    const agree = screen.getByRole('switch', { name: 'Agree' });
+    const agree = screen.getByRole('checkbox', { name: 'Agree' });
     await userEvent.click(agree);
     await userEvent.click(agree);
     await userEvent.click(screen.getByRole('button', { name: /Submit/ }));
@@ -239,7 +239,7 @@ describe('the page refuses a submit that leaves a required row empty', () => {
 
   it('CONTROL — the same form with the required radio picked submits', async () => {
     await renderForm();
-    const agree = screen.getByRole('switch', { name: 'Agree' });
+    const agree = screen.getByRole('checkbox', { name: 'Agree' });
     await userEvent.click(agree);
     await userEvent.click(agree);
     await userEvent.click(screen.getByRole('radio', { name: 'Low' }));

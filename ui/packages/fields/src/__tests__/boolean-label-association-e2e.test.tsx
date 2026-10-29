@@ -90,16 +90,23 @@ function labelTargets(): Array<{ text: string; forId: string; resolves: boolean 
     .filter((l) => l.forId !== '');
 }
 
-const switchOf = (name: string): Element => {
-  const el = document.querySelector(`[data-field="${name}"] [role="switch"]`);
-  if (!el) throw new Error(`no switch rendered for field "${name}"`);
+/** The two-state control a field row drew — a switch or a checkbox. */
+const controlOf = (name: string): Element => {
+  const el = document.querySelector(`[data-field="${name}"] [role="switch"], [data-field="${name}"] [role="checkbox"]`);
+  if (!el) throw new Error(`no two-state control rendered for field "${name}"`);
   return el;
 };
 
+// A `toggle`, in the shape `ObjectForm` hands the form: the widget id
+// `mapFieldTypeToFormType` resolves (`field:boolean` for both boolean types)
+// plus the object's own field metadata, whose `type` decides the face — a
+// `toggle` draws a switch, a `boolean` a checkbox (objectstack#27519). The
+// two-field case below hosts one of each.
 const BOOLEAN_FIELD = {
   name: 'notifications',
   label: 'Email Notifications',
-  type: 'boolean',
+  type: 'field:boolean',
+  field: { name: 'notifications', label: 'Email Notifications', type: 'toggle' },
 };
 
 describe('a form-hosted boolean field is labelled by its HOST (objectui#3952)', () => {
@@ -127,7 +134,7 @@ describe('a form-hosted boolean field is labelled by its HOST (objectui#3952)', 
     // duplicate is pinned by the label-text count below.
     const labelled = screen.getAllByLabelText('Email Notifications');
     expect(labelled).toHaveLength(1);
-    expect(labelled[0]).toBe(switchOf('notifications'));
+    expect(labelled[0]).toBe(controlOf('notifications'));
     expect(labelled[0]).toHaveAttribute('role', 'switch');
   });
 
@@ -142,7 +149,7 @@ describe('a form-hosted boolean field is labelled by its HOST (objectui#3952)', 
   it('activating the visible label toggles the switch', () => {
     renderForm(BOOLEAN_FIELD, false);
 
-    const control = switchOf('notifications');
+    const control = controlOf('notifications');
     expect(control).toHaveAttribute('aria-checked', 'false');
 
     // The user-facing symptom of #3952: the normal affordance for a switch row
@@ -150,13 +157,13 @@ describe('a form-hosted boolean field is labelled by its HOST (objectui#3952)', 
     // association the form set up.
     fireEvent.click(screen.getByText('Email Notifications'));
 
-    expect(switchOf('notifications')).toHaveAttribute('aria-checked', 'true');
+    expect(controlOf('notifications')).toHaveAttribute('aria-checked', 'true');
   });
 
   it('the control keeps the HOST id verbatim — the widget does not rename it', () => {
     renderForm(BOOLEAN_FIELD, false);
 
-    const control = switchOf('notifications');
+    const control = controlOf('notifications');
     const id = control.getAttribute('id') ?? '';
     // The host's id is a `useId()`-derived form-item id; the field name is what
     // the widget used to substitute for it.
@@ -185,11 +192,14 @@ describe('a form-hosted boolean field is labelled by its HOST (objectui#3952)', 
     );
 
     expect(labelTargets().filter((l) => !l.resolves)).toEqual([]);
-    // Each label reaches its OWN switch (a shared/colliding id would make both
-    // resolve to the first one).
+    // Each label reaches its OWN control (a shared/colliding id would make both
+    // resolve to the first one). The `boolean` row draws a checkbox, the
+    // `toggle` row a switch (objectstack#27519).
     fireEvent.click(screen.getByText('Weekly Digest'));
-    expect(switchOf('digest')).toHaveAttribute('aria-checked', 'true');
-    expect(switchOf('notifications')).toHaveAttribute('aria-checked', 'false');
+    expect(controlOf('digest')).toHaveAttribute('role', 'checkbox');
+    expect(controlOf('digest')).toHaveAttribute('aria-checked', 'true');
+    expect(controlOf('notifications')).toHaveAttribute('role', 'switch');
+    expect(controlOf('notifications')).toHaveAttribute('aria-checked', 'false');
   });
 });
 
@@ -203,7 +213,7 @@ describe('a STANDALONE boolean widget keeps its own accessible name (objectui#39
       <BooleanField
         value={false}
         onChange={() => {}}
-        field={{ name: 'notifications', label: 'Email Notifications', type: 'boolean' } as any}
+        field={{ name: 'notifications', label: 'Email Notifications', type: 'toggle' } as any}
       />,
     );
 
@@ -223,7 +233,6 @@ describe('a STANDALONE boolean widget keeps its own accessible name (objectui#39
             name: 'agreed',
             label: 'I agree',
             type: 'boolean',
-            widget: 'checkbox',
           } as any
         }
       />,
@@ -259,7 +268,7 @@ describe('a host that labels by field NAME keeps its association (objectui#3952)
       </div>,
     );
 
-    const control = document.querySelector('[role="switch"]')!;
+    const control = document.querySelector('[role="checkbox"]')!;
     expect(control).toHaveAttribute('id', 'confirmed');
     expect(labelTargets().filter((l) => !l.resolves)).toEqual([]);
     // The host's OWN label reaches the control through that id.
@@ -268,15 +277,13 @@ describe('a host that labels by field NAME keeps its association (objectui#3952)
 });
 
 describe('a host-supplied id wins for BOTH variants (objectui#3952)', () => {
-  // The checkbox variant is unreachable through the standalone form renderer —
-  // `resolvedType = widget || field.widget || type` turns `widget: 'checkbox'`
-  // into the renderer's own BUILTIN `checkbox` branch before the registry is
-  // consulted — so its host contract is pinned at the prop boundary, exactly
-  // as `<FormControl>`'s Slot delivers it.
+  // Pinned at the prop boundary, exactly as `<FormControl>`'s Slot delivers
+  // it: a `toggle` draws the switch variant and a `boolean` the checkbox
+  // variant (objectstack#27519).
   it.each([
-    ['switch', undefined, 'switch'],
-    ['checkbox', 'checkbox', 'checkbox'],
-  ] as const)('%s variant uses the id the host handed it', (_name, widget, role) => {
+    ['switch', 'toggle', 'switch'],
+    ['checkbox', 'boolean', 'checkbox'],
+  ] as const)('%s variant uses the id the host handed it', (_name, type, role) => {
     render(
       <label htmlFor="host-item">
         Host Label
@@ -284,7 +291,7 @@ describe('a host-supplied id wins for BOTH variants (objectui#3952)', () => {
           value={false}
           onChange={() => {}}
           id="host-item"
-          field={{ name: 'agreed', label: 'I agree', type: 'boolean', widget } as any}
+          field={{ name: 'agreed', label: 'I agree', type } as any}
         />
       </label>,
     );

@@ -12,6 +12,7 @@ import type {
 import { ReadableIds } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { renderOperationMessage, type ValidationMessageTranslator } from '@objectstack/spec/system';
+import { validationFailure } from '@objectstack/types';
 
 import {
   createRefusedAttachTombstoner,
@@ -19,6 +20,7 @@ import {
   type AttachmentLifecycleLogger,
   type AttachmentReadMiddlewareCtx,
 } from './attachment-lifecycle.js';
+import { findReferenceableFile, unreadableFileMessage, type FileReferenceReadAuthorizer } from './referenceable-file.js';
 
 /**
  * sys_attachment access enforcement (#2755, ADR-0049 enforce-or-remove).
@@ -55,6 +57,9 @@ import {
  *    platform's not-visible refusal instead of the named one (#21755) — see
  *    {@link refuseNotVisible}. The named refusals below are what a caller who
  *    can read the parent, but may not edit it, receives.
+ *  - Both write verbs: the `file_id` a row names must be a file the caller
+ *    may open — on insert, and on an update that changes it. See "The file
+ *    an attachment names" below ({@link installAttachmentFileReferenceGate}).
  *  - beforeDelete: the caller must be the uploader OR hold edit on the
  *    parent record (see "Parent EDIT" below). Fail-closed 403
  *    `ATTACHMENT_DELETE_DENIED`; a
@@ -110,6 +115,25 @@ import {
  * took that fold as permission let any member holding the `sys_attachment`
  * create or delete bit write files onto every master-detail child record of
  * the org — including records whose own update refuses them.
+ *
+ * ## The file an attachment names
+ *
+ * An attachment is how an `attachments`-scope file becomes readable: the
+ * download door admits a caller through any parent record the file is
+ * attached to. So linking a file to a record hands its bytes to that record's
+ * readers, and the gate asks of every insert, and of every update that changes
+ * `file_id`, the question a file-class field asks before it claims a file:
+ * may this caller open the file it names? One predicate,
+ * `findReferenceableFile` (`referenceable-file.ts`), bound by the storage
+ * plugin to the download door's own verdict — so the uploader of a file, and a
+ * caller who can already open it through another record, attach it as before.
+ * A file the caller may not open, and an id that names no file the acting
+ * organization reaches, get one answer: the file-field door's `400
+ * VALIDATION_FAILED`, one ADR-0114 `invalid_value` entry for `file_id`, naming
+ * nothing about the file. Installed by {@link installAttachmentFileReferenceGate}
+ * right after the gates above, so it runs after them on each verb and a caller
+ * the parent or row rule refuses keeps that refusal. A kernel that composes no
+ * download gate serves every file, and so every file may be referenced there.
  *
  * System-context operations (engine self-writes, seeds, lifecycle sweeps)
  * bypass all three gates, as do context-less programmatic calls on bare
@@ -498,6 +522,7 @@ async function sharingAndMasterAdmit(
  * asked on a record-sharing abstention instead; absent too, a
  * `controlled_by_parent` parent meets no master check here, exactly as its own
  * update meets none.
+
  */
 export function installAttachmentAccessHooks(
   engine: AttachmentLifecycleEngine,
@@ -734,6 +759,7 @@ export function installAttachmentAccessHooks(
       // Mirrors the comment kit's thread re-point rule (#4630).
       const data: any = ctx?.input?.data;
       if (!data || typeof data !== 'object') return;
+
       if (data.parent_object === undefined && data.parent_id === undefined) return;
 
       /** Attach-rule verdicts memoized per effective (object, id) target. */
@@ -816,6 +842,103 @@ export function installAttachmentAccessHooks(
     // comment kit ships.
     { object: 'sys_attachment', packageId: PACKAGE_ID, dispatchUnscopedMultiWrite: true },
   );
+}
+
+/**
+ * Install the file half of the `sys_attachment` write gate: the `file_id` a
+ * row names must be a file the caller may open — on insert, and on an update
+ * that changes it. See "The file an attachment names" in the module header.
+ *
+ * `authorizeFileRead` is the download door's verdict on one file for one
+ * caller, the same binding the file-reference lifecycle receives. Installed
+ * AFTER {@link installAttachmentAccessHooks} (the engine runs same-priority
+ * hooks in registration order), so the parent and row rules answer first.
+ * System-context and context-less writes are not judged, as at every gate in
+ * this module.
+ */
+export function installAttachmentFileReferenceGate(
+  engine: AttachmentLifecycleEngine,
+  authorizeFileRead: FileReferenceReadAuthorizer,
+): void {
+  /**
+   * Refuse a `file_id` the caller may not open. A value that is no id at all
+   * (absent, `null`, empty, not a scalar) names no file to judge, and is left
+   * to validation.
+   */
+  const assertMayReferenceFile = async (ctx: any, fileId: unknown): Promise<void> => {
+    if (typeof fileId !== 'string' && typeof fileId !== 'number') return;
+    if (fileId === '') return;
+    const org = ctx?.session?.organizationId;
+    const found = await findReferenceableFile(
+      engine,
+      String(fileId),
+      typeof org === 'string' && org.length > 0 ? org : null,
+      callerContext(ctx),
+      authorizeFileRead,
+    );
+    if (found !== 'refused') return;
+    const label = fileIdLabelOf(engine);
+    const message = unreadableFileMessage(label);
+    throw validationFailure(message, [{ field: 'file_id', code: 'invalid_value', message, label }]);
+  };
+
+  engine.registerHook(
+    'beforeInsert',
+    async (ctx: any) => {
+      if (ctx?.session?.isSystem) return;
+      if (!ctx?.session) return; // context-less programmatic call (bare kernel)
+      const data: any = ctx?.input?.data;
+      if (!data || typeof data !== 'object') return;
+      await assertMayReferenceFile(ctx, data.file_id);
+    },
+    { object: 'sys_attachment', packageId: PACKAGE_ID },
+  );
+
+  engine.registerHook(
+    'beforeUpdate',
+    async (ctx: any) => {
+      if (ctx?.session?.isSystem) return;
+      if (!ctx?.session) return; // context-less programmatic call (bare kernel)
+      const data: any = ctx?.input?.data;
+      if (!data || typeof data !== 'object' || data.file_id === undefined) return;
+      // Asked once — the payload names one file for every matched row — and
+      // only when a matched row actually changes file. The per-row dispatch
+      // binds `input.id`; a call naming no id is judged outright (the unscoped
+      // shape is refused by the row rule before this hook runs).
+      const ids = asIdList(ctx?.input?.id);
+      if (ids) {
+        let changes = false;
+        for (const id of ids) {
+          const row = await engine.findOne('sys_attachment', { where: { id }, context: { ...SYSTEM_CTX } });
+          if (row && String(row.file_id ?? '') !== String(data.file_id ?? '')) {
+            changes = true;
+            break;
+          }
+        }
+        if (!changes) return;
+      }
+      await assertMayReferenceFile(ctx, data.file_id);
+    },
+    { object: 'sys_attachment', packageId: PACKAGE_ID },
+  );
+}
+
+/**
+ * The declared label of `sys_attachment.file_id`, which the refusal names the
+ * way the file-field door names its field — or the field's name, on an engine
+ * that serves no object metadata here.
+ */
+function fileIdLabelOf(engine: AttachmentLifecycleEngine): string {
+  const getObject = (engine as { getObject?: (name: string) => unknown }).getObject;
+  let label: unknown;
+  try {
+    label = typeof getObject === 'function'
+      ? (getObject.call(engine, 'sys_attachment') as any)?.fields?.file_id?.label
+      : undefined;
+  } catch {
+    label = undefined;
+  }
+  return typeof label === 'string' && label.trim().length > 0 ? label.trim() : 'file_id';
 }
 
 /** No real row matches — the fail-closed sentinel (mirrors plugin-sharing's

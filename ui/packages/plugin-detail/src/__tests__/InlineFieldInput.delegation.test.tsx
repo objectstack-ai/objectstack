@@ -409,12 +409,13 @@ describe('controls — the routed families are untouched by the delegation', () 
     expect(screen.getByRole('combobox')).toBeInTheDocument();
   });
 
-  it('`boolean` keeps the routed switch', () => {
+  it('`boolean` keeps the routed checkbox', () => {
+    // `boolean` draws a checkbox, `toggle` a switch (objectstack#27519).
     const onChange = vi.fn();
     render(
       <InlineFieldInput field={{ name: 'active', type: 'boolean' }} value={false} onChange={onChange} />,
     );
-    fireEvent.click(screen.getByRole('switch'));
+    fireEvent.click(screen.getByRole('checkbox'));
     expect(onChange).toHaveBeenCalledWith(true);
   });
 

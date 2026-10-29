@@ -586,10 +586,12 @@ export type {
 // [#27069] Related-list names: each `relatedLists` entry and field-group
 // `relatedList` must match an inbound lookup / master_detail relationship.
 // `error`, the verdict `defineStack` gives, and on the runtime publish door,
-// which runs no `defineStack`.
+// which runs no `defineStack`. [#27478] A field group's `relatedList` must
+// name body tables only (`related-list-group-not-body`).
 export {
   validateRelatedListRefs,
   RELATED_LIST_REF_UNKNOWN,
+  RELATED_LIST_GROUP_NOT_BODY,
 } from './validate-related-list-refs.js';
 export type {
   RelatedListRefFinding,

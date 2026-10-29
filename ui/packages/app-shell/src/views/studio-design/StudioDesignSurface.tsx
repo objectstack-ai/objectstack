@@ -3332,11 +3332,12 @@ export function StudioNavItemInspector({
   const visibleShown = typed ? typed.text : (heldVisible ?? '');
   const visibleHeldBack = !!typed && typed.errors > 0 && typed.text !== heldVisible;
   // Whether the entry names a target for its type yet (a group and a
-  // separator name none, and are never unbound).
+  // separator name none, and are never unbound). A `report` entry is never
+  // unbound: with no `reportName` it opens the app's report index
+  // (objectstack#27525).
   const unbound =
     (kind === 'page' && !str(node.pageName)) ||
     (kind === 'dashboard' && !str(node.dashboardName)) ||
-    (kind === 'report' && !str(node.reportName)) ||
     (kind === 'url' && !str(node.url)) ||
     (kind === 'component' && !str(node.componentRef)) ||
     (kind === 'action' && !str(actionDef?.actionName)) ||
@@ -3502,6 +3503,15 @@ export function StudioNavItemInspector({
           options={optionsOf(targets.rows)}
           loading={targets.loading}
           onPick={(v) => setTarget(NAV_TARGET_KEY[kind], v)}
+          // objectstack#27525 — a `report` entry with no `reportName` is the
+          // app's report index: its empty face says so, and picking it
+          // removes the key.
+          {...(kind === 'report'
+            ? {
+                emptyLabel: t('engine.inspector.appNav.reportIndex', locale),
+                hint: str(node.reportName) ? undefined : t('engine.inspector.appNav.reportIndexHint', locale),
+              }
+            : {})}
           locale={locale}
         />
       )}
@@ -3904,6 +3914,7 @@ function NavTargetSelect({
   loading,
   onPick,
   hint,
+  emptyLabel,
   locale,
 }: {
   label: string;
@@ -3912,6 +3923,8 @@ function NavTargetSelect({
   loading: boolean;
   onPick: (value: string) => void;
   hint?: string;
+  /** The face of the empty value, where an absent target means something; else "Choose…". */
+  emptyLabel?: string;
   locale: string;
 }): React.ReactElement {
   const id = React.useId();
@@ -3924,7 +3937,7 @@ function NavTargetSelect({
       <StudioPicker
         id={id}
         value={value}
-        options={[{ value: '', label: t('engine.inspector.appNav.choose', locale) }, ...shown]}
+        options={[{ value: '', label: emptyLabel ?? t('engine.inspector.appNav.choose', locale) }, ...shown]}
         onPick={onPick}
         className={PICKER_XS}
       />
@@ -6279,6 +6292,21 @@ function formFieldNames(fields: unknown): string[] {
     .filter((n) => !STUDIO_SYSTEM_FIELD_NAMES.has(n));
 }
 
+/**
+ * objectstack#27485 — what the field inspector's CEL verdict on `field` was
+ * judged from, as the object draft holds it: the field's type, its CEL texts
+ * (`expression`, the legacy `formula`, `visibleWhen`, `readonlyWhen`,
+ * `requiredWhen`) and the object's field names its lint resolves references
+ * against. The same stamp is the same verdict. `null` when the field is gone.
+ */
+function fieldCelStamp(draft: Record<string, unknown>, field: string): string | null {
+  const { entries } = readFields(draft.fields);
+  const def = entries.find((e) => e.name === field)?.def;
+  if (!def) return null;
+  const cel = [def.type, def.expression, def.formula, def.visibleWhen, def.readonlyWhen, def.requiredWhen];
+  return JSON.stringify([cel.map((v) => v ?? null), entries.map((e) => e.name)]);
+}
+
 /** The data-source writes the Form tab's Preview refuses (objectui#12515). */
 const PREVIEW_REFUSED_WRITES = new Set<PropertyKey>(['create', 'update', 'delete', 'bulk', 'bulkUpdate', 'bulkDelete']);
 
@@ -6415,13 +6443,54 @@ export function DataPillar({
   // that does not parse must not be saveable, let alone publishable as the live
   // field definition (objectui#4306).
   //
-  // The count is STAMPED with the selection it came from, so it expires by
-  // construction when the selection changes or the panel closes: an unmounted
-  // inspector can never retract its last verdict, and a host that waited for
-  // one would leave Save wedged shut with nothing on screen to fix.
+  // The report is STAMPED with the selection it came from: it is the open
+  // inspector's live verdict, and never reads as another selection's.
   const [blockingReport, setBlockingReport] = React.useState({ key: '', count: 0 });
   const fieldSelKey = fieldSel ? `${current?.name ?? ''}:${fieldSel.kind}:${fieldSel.id}` : '';
-  const inspectorBlocking = blockingReport.key === fieldSelKey ? blockingReport.count : 0;
+  // objectstack#27485 — the verdict belongs to the draft, not to the selection.
+  // Expiring it with the selection released the hold the moment the inspector
+  // closed (Escape, Close, another field, another tab) while the broken text
+  // stayed in the draft, and the autosave sent it. So each field's last live
+  // verdict is kept with the stamp of what it judged (`fieldCelStamp`, taken
+  // while the inspector is open on it) and holds, with the inspector closed,
+  // while the draft still carries that stamp: an edit to the text, the field's
+  // removal or the object's next load ends it. Nothing is left shut with
+  // nothing to fix: the held line names the field and its "Show me" opens it,
+  // and the open inspector's live verdict always wins.
+  const [celVerdicts, setCelVerdicts] = React.useState<Record<string, { field: string; count: number; stamp: string | null }>>({});
+  const liveFieldReport = fieldSel?.kind === 'field' && blockingReport.key === fieldSelKey;
+  const openFieldStamp = fieldSel?.kind === 'field' ? fieldCelStamp(objDraft, fieldSel.id) : null;
+  React.useEffect(() => {
+    if (!liveFieldReport || fieldSel === null) return;
+    const kept = { field: fieldSel.id, count: blockingReport.count, stamp: openFieldStamp };
+    setCelVerdicts((prev) => {
+      const was = prev[fieldSelKey];
+      if (was && was.count === kept.count && was.stamp === kept.stamp) return prev;
+      return { ...prev, [fieldSelKey]: kept };
+    });
+  }, [liveFieldReport, fieldSel, fieldSelKey, blockingReport.count, openFieldStamp]);
+  // The open object's fields whose verdict holds, and their summed count.
+  const celHeldFields: string[] = [];
+  let inspectorBlocking = 0;
+  const celFieldPrefix = `${current?.name ?? ''}:field:`;
+  for (const [key, kept] of Object.entries(celVerdicts)) {
+    if (!key.startsWith(celFieldPrefix) || key === fieldSelKey) continue;
+    if (kept.count > 0 && kept.stamp === fieldCelStamp(objDraft, kept.field)) {
+      celHeldFields.push(kept.field);
+      inspectorBlocking += kept.count;
+    }
+  }
+  if (blockingReport.key === fieldSelKey && blockingReport.count > 0) {
+    if (fieldSel?.kind === 'field') celHeldFields.push(fieldSel.id);
+    inspectorBlocking += blockingReport.count;
+  } else if (fieldSelKey !== '' && !liveFieldReport) {
+    // Opened, and its inspector has not reported yet: its kept verdict stands.
+    const kept = celVerdicts[fieldSelKey];
+    if (kept && kept.count > 0 && kept.stamp === openFieldStamp) {
+      celHeldFields.push(kept.field);
+      inspectorBlocking += kept.count;
+    }
+  }
   // The pillar's PANEL family reports separately (objectui#4527): the
   // validations, actions and settings panels all write through this same draft
   // and own no Save of their own, so their CEL faults have to reach this
@@ -6691,6 +6760,8 @@ export function DataPillar({
     setLoading(true);
     setError(null);
     setFieldSel(null);
+    // objectstack#27485 — kept CEL verdicts judged the buffer this load replaces.
+    setCelVerdicts({});
     setDirty(false);
     (async () => {
       try {
@@ -6958,7 +7029,7 @@ export function DataPillar({
 
   // objectui#5813 — auto-save replaces the Save draft button; the blocked guard
   // is the button's old disabled-condition verbatim, plus the hold above.
-  const { sending: sendingObjDraft, loaded: objLoaded } = useDraftAutoSave({
+  const { flush: flushObjSave, sending: sendingObjDraft, loaded: objLoaded } = useDraftAutoSave({
     // objectui#11232 — the object `doSave` addresses.
     target: `object:${current?.name ?? ''}`,
     loadedFor: objDraftFor,
@@ -6967,8 +7038,27 @@ export function DataPillar({
     snapshot: objDraft,
     save: doSave,
   });
+  // objectstack#27485 — an unsent edit the CEL verdict holds is named like an
+  // incomplete one: the held line, the surface's Publish and the rail's
+  // question all read it, so it outlives the inspector without going unseen.
+  const celHeldField = celHeldFields[0] ?? null;
+  const celHeldLabel = React.useMemo(() => {
+    if (celHeldField === null) return null;
+    const label = readFields(objDraft.fields).entries.find((e) => e.name === celHeldField)?.def.label;
+    return typeof label === 'string' && label.trim() !== '' ? label.trim() : celHeldField;
+  }, [celHeldField, objDraft.fields]);
+  const objCelHeld = React.useMemo<StudioHeld | null>(
+    () =>
+      dirty && celHeldField !== null && celHeldLabel !== null
+        ? {
+            clause: tFormat('engine.studio.held.celInvalid', locale, { field: celHeldLabel }),
+            target: { kind: 'field', id: celHeldField },
+          }
+        : null,
+    [dirty, celHeldField, celHeldLabel, locale],
+  );
   // Only the open object's own buffer is held (objectui#11272).
-  const objHeld = objLoaded ? objIncomplete : null;
+  const objHeld = objLoaded ? (objIncomplete ?? objCelHeld) : null;
   // objectstack#26917 — the refusal's way out: the object holding the
   // identifier is on this rail, so it opens instead of a second one being
   // made. The New button already asked about a held edit (objectstack#26845).
@@ -6985,9 +7075,47 @@ export function DataPillar({
   const fieldAgentMark =
     objLoaded && fieldSel?.kind === 'field' ? agentDraftMarkOf(objDraftChanges, ['fields', fieldSel.id]) : null;
   useHeldEditReport(onHeldEditChange, objHeld?.clause ?? null);
+  // objectstack#27511 — opening another object replaces the one buffer the
+  // open object's edits live in, and the autosave's timer sends nothing once
+  // the open object has changed (objectui#11232). So an edit still inside the
+  // debounce was dropped by the switch with nothing on screen. The switch now
+  // sends it first with the autosave's own `flush` and opens the object once
+  // the buffer is clean, as the Interfaces nav's "Done" closes (objectui#11189);
+  // a save already in flight is waited out the same way. An edit that cannot
+  // be sent (held, or its save refused with the refusal on screen) is the
+  // author's to drop: the switch asks (objectstack#26705).
+  const [switchTo, setSwitchTo] = React.useState<Surface | null>(null);
+  const openObject = React.useCallback(
+    (next: Surface): boolean => {
+      if (next.name === current?.name) {
+        setSwitchTo(null);
+        setCurrent(next);
+        return true;
+      }
+      if (saving || (dirty && objHeld === null && flushObjSave())) {
+        setSwitchTo(next);
+        return true;
+      }
+      if (!confirmDropUnsavedWork(dirty, locale)) return false;
+      setSwitchTo(null);
+      setCurrent(next);
+      return true;
+    },
+    [current, saving, dirty, objHeld, flushObjSave, locale],
+  );
+  React.useEffect(() => {
+    if (!switchTo || saving) return;
+    if (dirty && objHeld === null && flushObjSave()) return;
+    setSwitchTo(null);
+    // Still dirty: the save was refused (on screen) or an edit taken meanwhile
+    // is held. The author stays; the next switch asks.
+    if (dirty) return;
+    setCurrent(switchTo);
+  }, [switchTo, saving, dirty, objHeld, flushObjSave]);
   // The live request's apply (see `requestedSurface` above). objectstack#26845
   // — another object's load replaces the buffer a held edit lives in, so it
-  // asks first, as the rail does; declined, the request is spent and the held
+  // goes through the rail's own switch (`openObject`): an unsent edit is sent
+  // first, or the author is asked; declined, the request is spent and the
   // edit stays. A request for the open object drops nothing and asks nothing.
   React.useEffect(() => {
     if (!requestedSurface || !objectsLoaded) return;
@@ -6995,9 +7123,8 @@ export function DataPillar({
     appliedRequestRef.current = requestedSurface.id;
     const match = resolveSurfaceDeepLink(objects, requestedSurface.target, 'object');
     if (!match) return;
-    if (match.name !== current?.name && !confirmDropUnsavedWork(objHeld !== null, locale)) return;
-    setCurrent(match);
-  }, [requestedSurface, objects, objectsLoaded, current, objHeld, locale]);
+    openObject(match);
+  }, [requestedSurface, objects, objectsLoaded, openObject]);
   // objectstack#26845 — a created object opens at once, and its load replaces
   // the buffer a held edit lives in: asked before the dialog opens, so Cancel
   // costs nothing and the create itself asks nothing.
@@ -7283,11 +7410,10 @@ export function DataPillar({
                 key={o.name}
                 active={current?.name === o.name}
                 onClick={() => {
-                  // objectstack#26705 — another object's load replaces the
-                  // buffer the held edit lives in; the open one keeps it.
-                  if (current?.name !== o.name && !confirmDropUnsavedWork(objHeld !== null, locale)) return;
-                  setCurrent(o);
-                  if (isMobile) setRailOpen(false);
+                  // objectstack#26705, objectstack#27511 — another object's load
+                  // replaces the buffer the open one's edits live in: they are
+                  // sent first, or the author is asked (`openObject`).
+                  if (openObject(o) && isMobile) setRailOpen(false);
                 }}
                 icon={<Icon className="h-4 w-4 shrink-0" />}
               >

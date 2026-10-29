@@ -17,7 +17,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { act } from 'react';
-import { LOCALE_SEED_STORAGE_KEY, LOCALE_STORAGE_KEY, useDisplayLocale, useLocalization } from '@object-ui/i18n';
+import {
+  I18nProvider,
+  LOCALE_SEED_STORAGE_KEY,
+  LOCALE_STORAGE_KEY,
+  useDisplayLocale,
+  useLocalization,
+  useObjectTranslation,
+} from '@object-ui/i18n';
 import { formatDate, formatDateTime, setDisplayTimeZone } from '@object-ui/core';
 import { notifyDataChanged } from '@object-ui/react';
 // Test-only and off the `@object-ui/types` barrel; the vitest alias makes this
@@ -356,6 +363,102 @@ describe('LocalizationFetchProvider', () => {
       write('u1');
       await new Promise((r) => setTimeout(r, 20));
       expect(fetchMock()).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('states the device\'s chosen language (objectstack#27625)', () => {
+    const fetchMock = () => globalThis.fetch as never as ReturnType<typeof vi.fn>;
+    /** The `Accept-Language` the Nth request stated; `null` = none, the browser's own goes out. */
+    const statedOn = (n: number) =>
+      (fetchMock().mock.calls[n]?.[1]?.headers as Record<string, string> | undefined)?.['Accept-Language'] ?? null;
+
+    let switchTo: (code: string) => Promise<void> = async () => {};
+
+    /** The date face a grid cell paints, plus a handle on the language switch. */
+    function DisplayProbe() {
+      const { changeLanguage } = useObjectTranslation();
+      switchTo = changeLanguage;
+      const locale = useDisplayLocale();
+      return (
+        <span data-testid="display">
+          {`${locale}|${formatDate('2026-10-11', undefined, { locale, alwaysShowYear: true })}`}
+        </span>
+      );
+    }
+
+    function renderUnderLanguage(language: string) {
+      return render(
+        <I18nProvider config={{ defaultLanguage: language, detectBrowserLanguage: false }}>
+          <LocalizationFetchProvider endpoint={ENDPOINT}>
+            <DisplayProbe />
+          </LocalizationFetchProvider>
+        </I18nProvider>,
+      );
+    }
+
+    beforeEach(() => { window.localStorage.clear(); authUser = { id: 'u1' }; });
+    afterEach(() => {
+      authUser = null;
+      window.localStorage.clear();
+      resetInflightGetsForTesting();
+    });
+
+    it('a language picked before sign-in is the one the read states, and the dates follow it', async () => {
+      // The sign-in page's pick: the explicit-choice slot, no `sys_user.locale`.
+      window.localStorage.setItem(LOCALE_STORAGE_KEY, 'zh');
+      // The server answers the `Accept-Language` rung with what it was told.
+      fetchMock().mockImplementation(async (_url: string, init: RequestInit) =>
+        ok({
+          authenticated: true,
+          currency: null,
+          locale: (init.headers as Record<string, string>)['Accept-Language'] ?? 'en-US',
+          timezone: 'UTC',
+        }),
+      );
+
+      renderUnderLanguage('zh');
+
+      await waitFor(() => expect(screen.getByTestId('display')).toHaveTextContent('zh|2026年10月11日'));
+      expect(statedOn(0)).toBe('zh');
+      expect(fetchMock()).toHaveBeenCalledTimes(1);
+    });
+
+    it('with no choice on this device, the read states nothing and the browser\'s header goes out', async () => {
+      fetchMock().mockResolvedValue(ok({ authenticated: true, currency: null, locale: 'en-US', timezone: 'UTC' }));
+
+      renderUnderLanguage('en');
+
+      await waitFor(() => expect(fetchMock()).toHaveBeenCalledTimes(1));
+      expect(statedOn(0)).toBeNull();
+    });
+
+    it('a change of the chosen language reads again, stating the new one', async () => {
+      window.localStorage.setItem(LOCALE_STORAGE_KEY, 'en');
+      fetchMock()
+        .mockResolvedValueOnce(ok({ authenticated: true, currency: null, locale: 'en', timezone: 'UTC' }))
+        .mockResolvedValueOnce(ok({ authenticated: true, currency: null, locale: 'zh', timezone: 'UTC' }));
+
+      renderUnderLanguage('en');
+      await waitFor(() => expect(screen.getByTestId('display')).toHaveTextContent('en|Oct 11, 2026'));
+
+      await act(async () => { await switchTo('zh'); });
+
+      await waitFor(() => expect(screen.getByTestId('display')).toHaveTextContent('zh|2026年10月11日'));
+      expect(fetchMock()).toHaveBeenCalledTimes(2);
+      expect(statedOn(0)).toBe('en');
+      expect(statedOn(1)).toBe('zh');
+    });
+
+    it('a stored sys_user.locale still wins over the stated language', async () => {
+      window.localStorage.setItem(LOCALE_STORAGE_KEY, 'zh');
+      // The column's rung answers first, whatever the header says.
+      fetchMock().mockResolvedValue(ok({ authenticated: true, currency: null, locale: 'de-DE', timezone: 'UTC' }));
+
+      renderUnderLanguage('zh');
+
+      await waitFor(() => expect(screen.getByTestId('display').textContent).toMatch(/^de-DE\|/));
+      expect(screen.getByTestId('display').textContent).not.toContain('年');
+      expect(statedOn(0)).toBe('zh');
     });
   });
 });

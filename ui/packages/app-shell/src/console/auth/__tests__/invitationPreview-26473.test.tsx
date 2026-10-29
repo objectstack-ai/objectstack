@@ -20,9 +20,12 @@
  *  - found: the card names the inviter and the organization, and shows the
  *    masked address as the one to use, while the email field stays EMPTY — a
  *    masked value is not an address and is never prefilled;
- *  - 404: today's generic invitation copy;
- *  - a failed read (5xx, a network failure, a body of the wrong shape):
- *    today's generic copy too, and the page keeps working.
+ *  - a failed read (5xx, a network failure, a body of the wrong shape, or a
+ *    server without the route, whose 404 is not the door's): today's generic
+ *    copy, and the page keeps working.
+ *
+ * The door's own 404 — the invitation is gone — is #27509's, pinned in
+ * `invitationGone-27509.test.tsx` beside this file.
  *
  * Rendered as shipped, like `defaultPagesFollowPosture-11705.test.tsx` beside
  * this file: the exported pages, `@object-ui/auth`'s real forms, a real
@@ -54,7 +57,7 @@ const CONFIG: AuthPublicConfig = {
   features: { audiencePosture: 'invite_only' },
 };
 
-type PreviewAnswer = 'found' | 'found-no-inviter' | 404 | 500 | 'network' | 'wrong-shape';
+type PreviewAnswer = 'found' | 'found-no-inviter' | 'no-route' | 500 | 'network' | 'wrong-shape';
 
 let previewRequests: string[];
 
@@ -71,11 +74,9 @@ function stubServer(answer: PreviewAnswer): typeof fetch {
           return json({ success: true, data: { organizationName: ORG, inviterName: INVITER, email: MASKED } });
         case 'found-no-inviter':
           return json({ success: true, data: { organizationName: ORG, inviterName: null, email: MASKED } });
-        case 404:
-          return json(
-            { success: false, error: { code: 'RESOURCE_NOT_FOUND', message: 'Invitation not found.' } },
-            404,
-          );
+        case 'no-route':
+          // better-auth's router for a path nothing serves: 404, empty body.
+          return new Response(null, { status: 404, statusText: 'Not Found' });
         case 500:
           return json(
             { success: false, error: { code: 'INTERNAL_ERROR', message: 'The invitation preview is unavailable.' } },
@@ -154,16 +155,7 @@ describe('DefaultLoginPage — the invitation landing reads the signed-out previ
     expect(screen.queryByRole('heading', { name: en.login.invitationTitle })).toBeNull();
   });
 
-  it('404: keeps the generic invitation copy', async () => {
-    renderAt(`/login${INVITE_QUERY}`, 404);
-    await previewAnswered();
-
-    expect(await screen.findByRole('heading', { name: en.login.invitationTitle })).toBeInTheDocument();
-    expect(screen.getByText(en.login.invitationDescription)).toBeInTheDocument();
-    expect(screen.queryByText(new RegExp(ORG))).toBeNull();
-  });
-
-  it.each([500, 'network', 'wrong-shape'] as const)(
+  it.each(['no-route', 500, 'network', 'wrong-shape'] as const)(
     'a failed read (%s): keeps the generic copy and the sign-in form',
     async (answer) => {
       renderAt(`/login${INVITE_QUERY}`, answer);
@@ -197,12 +189,13 @@ describe('DefaultRegisterPage — the sign-up step reads the same preview (#2647
     expect(screen.getByLabelText(en.register.emailLabel)).toHaveValue('');
   });
 
-  it('404: keeps the generic invitation copy', async () => {
-    renderAt(`/register${INVITE_QUERY}`, 404);
+  it('a server without the route: keeps the generic invitation copy and the form', async () => {
+    renderAt(`/register${INVITE_QUERY}`, 'no-route');
     await previewAnswered();
 
     expect(await screen.findByRole('heading', { name: en.register.invitationTitle })).toBeInTheDocument();
     expect(screen.getByText(en.register.invitationDescription)).toBeInTheDocument();
+    expect(screen.getByLabelText(en.register.emailLabel)).toBeInTheDocument();
   });
 
   it('a failed read: keeps the generic copy and the form', async () => {
