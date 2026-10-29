@@ -1,5 +1,5 @@
 ---
-'@object-ui/i18n': patch
+'@object-ui/i18n': minor
 ---
 
 feat(i18n): the Studio's navigation inspector names the report index face

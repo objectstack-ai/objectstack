@@ -1,5 +1,5 @@
 ---
-'@object-ui/types': patch
+'@object-ui/types': minor
 ---
 
 docs(types): `NavigationItem.reportName` says that an omitted name opens the app's report index
