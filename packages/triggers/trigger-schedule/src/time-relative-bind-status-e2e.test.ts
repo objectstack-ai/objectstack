@@ -54,6 +54,7 @@ function timeRelativeFlow(name: string, timeRelative: Record<string, unknown>) {
     return {
         name,
         label: name,
+        type: 'autolaunched',
         nodes: [
             { id: 'start', type: 'start', label: 'Start', config: { timeRelative } },
             { id: 'end', type: 'end', label: 'End' },
