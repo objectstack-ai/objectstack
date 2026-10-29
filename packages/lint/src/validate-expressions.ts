@@ -165,7 +165,10 @@ export interface ExprIssue {
    * [#26858] The judged slot's key path in the stack, in the spelling the other
    * rules' findings carry (`flows[0].edges[1].condition`), beside the human
    * `where`. Set only where the slot has one: a top-level flow edge's
-   * `condition`. Absent, the finding is located by `where` alone.
+   * `condition`, and (#27643) an object validation rule's `condition` / `when`
+   * (`objects[0].validations[1].condition`), a nested branch's included
+   * (`objects[0].validations[1].then.condition`). Absent, the finding is
+   * located by `where` alone.
    */
   path?: string;
 }
@@ -573,6 +576,11 @@ interface RulePredicate {
   slot: 'condition' | 'when';
   /** The name of the rule that carries it (the nested rule's own, below depth 0). */
   ruleName: string;
+  /**
+   * [#27643] Its key path inside the top-level rule (`condition`, `when`,
+   * `then.condition`, `otherwise.then.when`), for a finding's `path`.
+   */
+  key: string;
 }
 
 /**
@@ -580,7 +588,7 @@ interface RulePredicate {
  * `conditional` rule's `then` / `otherwise` — the trap hides there just as
  * happily as at the top level.
  */
-function rulePredicates(rule: AnyRec, path: string, depth = 0): RulePredicate[] {
+function rulePredicates(rule: AnyRec, path: string, depth = 0, keyPrefix = ''): RulePredicate[] {
   const out: RulePredicate[] = [];
   const name = typeof rule.name === 'string' ? rule.name : '?';
   const here = path ? `${path} → '${name}'` : `'${name}'`;
@@ -593,14 +601,18 @@ function rulePredicates(rule: AnyRec, path: string, depth = 0): RulePredicate[] 
   // author who wrote both `condition` and a rejected alias had their canonical
   // predicate short-circuited away and the alias validated instead (#5017).
   const main = rule.condition;
-  if (main != null) out.push({ label: `validation rule ${here}`, raw: main, depth, slot: 'condition', ruleName: name });
+  if (main != null) {
+    out.push({ label: `validation rule ${here}`, raw: main, depth, slot: 'condition', ruleName: name, key: `${keyPrefix}condition` });
+  }
   if (rule.when != null) {
-    out.push({ label: `validation rule ${here} when-predicate`, raw: rule.when, depth, slot: 'when', ruleName: name });
+    out.push({
+      label: `validation rule ${here} when-predicate`, raw: rule.when, depth, slot: 'when', ruleName: name, key: `${keyPrefix}when`,
+    });
   }
   for (const branch of ['then', 'otherwise'] as const) {
     const nested = rule[branch];
     if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
-      out.push(...rulePredicates(nested as AnyRec, `${here} ${branch}`, depth + 1));
+      out.push(...rulePredicates(nested as AnyRec, `${here} ${branch}`, depth + 1, `${keyPrefix}${branch}.`));
     }
   }
   return out;
@@ -2955,6 +2967,11 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   // ── Object validation-rule + formula predicates ────────────────────
   for (const obj of objects) {
     const objectName = typeof obj.name === 'string' ? obj.name : undefined;
+    // [#27643] The object's index in the authored list, for a validation-rule
+    // finding's key path (`recordsOf` hands an array's own members back). A
+    // map-form `objects` has no index to spell, so its findings keep `where`
+    // alone, as a map-form `flows` collection's do (#26858).
+    const objectIndex = Array.isArray(stack.objects) ? stack.objects.indexOf(obj) : -1;
     // `validations` is the key `ObjectSchema` declares; `validationRules` is a
     // rejected alias of it (#5017) — see the `## Scope` table above.
     const validations = obj.validations;
@@ -2963,6 +2980,18 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     // position, so the door's findings and their order are the build's.
     for (const rule of recordsOf(validations)) {
       const where = `object '${objectName}' · validation '${(rule.name as string) ?? '?'}'`;
+      // [#27643] Every finding below also carries the judged slot's key path
+      // (`objects[0].validations[1].condition`), indexed over the lists the
+      // author wrote, in the spelling a flow edge's findings use (#26858), so
+      // a draft's `_diagnostics` reports it item-relative
+      // (`validations.1.condition`). `where` stays the human locator.
+      const ruleIndex = objectIndex >= 0 && Array.isArray(obj.validations) ? obj.validations.indexOf(rule) : -1;
+      const rulePath = ruleIndex >= 0 ? `objects[${objectIndex}].validations[${ruleIndex}]` : undefined;
+      const atSlot = (key: string, first: number): void => {
+        if (!rulePath) return;
+        const path = `${rulePath}.${key}`;
+        for (let k = first; k < issues.length; k++) issues[k] = { ...issues[k]!, path };
+      };
       // The declared predicate key is `condition` (see `rulePredicates`).
       // Validation predicates are `record`-scoped — no field flattening — so
       // bare refs are flagged (#1928).
@@ -2973,8 +3002,12 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       // `traversalHydration` is passed on those two slots here and nested below
       // (#22042), and on a formula field's `expression` (`judgeFieldFormula`,
       // #24197), and NOWHERE else.
+      let first = issues.length;
       check(where, rule.condition, objectName, 'record', undefined, true);
+      atSlot('condition', first);
+      first = issues.length;
       check(`${where} when`, (rule as AnyRec).when, objectName, 'record', undefined, true);
+      atSlot('when', first);
       const predicates = rulePredicates(rule, '');
       // [#22042] The same verdict one level down, and every level below it: a
       // `conditional` rule's `then` / `otherwise` is a rule the evaluator runs
@@ -2989,7 +3022,9 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       // meet the traversal checks.
       for (const p of predicates) {
         if (p.depth === 0) continue;
+        first = issues.length;
         check(`object '${objectName}' · ${p.label}`, p.raw, objectName, 'record', undefined, true);
+        atSlot(p.key, first);
       }
       // [#24720] The rule's root verdict, over every predicate it carries,
       // located where `check()` above located the same predicate. `parent` is
@@ -3004,12 +3039,16 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
           ? `object '${objectName}' · ${p.label}`
           : p.slot === 'when' ? `${where} when` : where;
         // `error`: a rule the runtime cannot evaluate must not pass a door; see the docblock.
+        first = issues.length;
         issues.push({ where: at, message, source: source!, severity: 'error' });
+        atSlot(p.key, first);
       }
       // #4763 — null-guard gate over every predicate the rule carries, nested
       // `then`/`otherwise` branches included.
       for (const p of predicates) {
+        first = issues.length;
         checkNullGuards(`object '${objectName}' · ${p.label}`, p.label, p.raw, objectName);
+        atSlot(p.key, first);
       }
     }
     // Field-level formulas (computed fields) reference the same object.
