@@ -98,12 +98,10 @@ const DATASET = DatasetSchema.parse({
     { name: 'm_nomode', aggregate: 'sum', field: 'amt_nomode' },
     { name: 'm_emptycfg', aggregate: 'sum', field: 'amt_emptycfg' },
     { name: 'm_bare', aggregate: 'sum', field: 'amt_bare' },
-    // An explicit measure `currency` wins over a dynamic field's tenant
-    // default. [ADR-0144 M0-3] Over a FIXED field it may only restate the
-    // field's code: a contradicting one is refused at compile
-    // (`measure-currency-coherence.ts`, record-currency-analytics.test.ts).
+    // An explicit measure `currency` wins over every field-side answer,
+    // the field's FIXED currency included.
     { name: 'm_explicit_dynamic', aggregate: 'sum', field: 'amt_dynamic', currency: 'JPY' },
-    { name: 'm_explicit_fixed', aggregate: 'sum', field: 'amt_fixed', currency: 'EUR' },
+    { name: 'm_explicit_fixed', aggregate: 'sum', field: 'amt_fixed', currency: 'JPY' },
     { name: 'm_units', aggregate: 'sum', field: 'units' },
   ],
 });
@@ -222,11 +220,11 @@ describe.each<Shape>(['raw', 'parsed'])('[#20091] result-column currency honours
     expect(preview.m_bare).toBe('USD');
   });
 
-  it("an explicit measure currency wins over a dynamic field, and restates a fixed one's code", () => {
+  it('an explicit measure currency wins, over a dynamic field and over a fixed one', () => {
     expect(live.m_explicit_dynamic).toBe('JPY');
     expect(preview.m_explicit_dynamic).toBe('JPY');
-    expect(live.m_explicit_fixed).toBe('EUR');
-    expect(preview.m_explicit_fixed).toBe('EUR');
+    expect(live.m_explicit_fixed).toBe('JPY');
+    expect(preview.m_explicit_fixed).toBe('JPY');
   });
 
   it('CONTROL: a non-monetary measure carries no currency', () => {

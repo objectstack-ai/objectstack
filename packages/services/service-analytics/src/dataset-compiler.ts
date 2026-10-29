@@ -854,9 +854,9 @@ export function compileDataset(
     if (m.filter) measureFilters[m.name] = m.filter;
   }
 
-  // [ADR-0144, M0-3] A measure `currency` contradicting its field, and a
-  // derived measure across differing currencies, are refused HERE: both are
-  // properties of the document, decidable from metadata before any query runs.
+  // [ADR-0144, M0-3] A measure `currency` over a record-mode amount, and a
+  // derived measure combining one with another currency, are refused HERE: both
+  // are properties of the document, decidable from metadata before any query runs.
   assertMeasureCurrenciesCoherent(dataset, options?.declaredCurrency);
 
   const cube: Cube = {

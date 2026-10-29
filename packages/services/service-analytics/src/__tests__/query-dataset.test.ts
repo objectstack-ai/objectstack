@@ -153,11 +153,8 @@ describe('AnalyticsService.queryDataset', () => {
     expect(r.fields.find((f: any) => f.name === 'revenue')?.currency).toBe('GBP');
   });
 
-  // [ADR-0144 M0-3] Over a FIXED field a measure currency may only restate the
-  // field's code — a contradicting one is refused at compile
-  // (`measure-currency-coherence.ts`, pinned in record-currency-analytics.test.ts).
-  it('chain: an explicit measure currency wins over the tenant ctx on a dynamic field', async () => {
-    const svc = pricedSvc([{ stage: 'Won', revenue: 1000 }], (_o, f) => f === 'amount' ? { type: 'currency' } : undefined);
+  it('chain: an explicit measure currency wins over the field default and the tenant ctx', async () => {
+    const svc = pricedSvc([{ stage: 'Won', revenue: 1000 }], (_o, f) => f === 'amount' ? { type: 'currency', defaultCurrency: 'EUR' } : undefined);
     const r = await svc.queryDataset(moneyDataset({ currency: 'JPY' }), { dimensions: ['stage'], measures: ['revenue'] }, { tenantId: 'o', currency: 'GBP' } as ExecutionContext) as any;
     expect(r.fields.find((f: any) => f.name === 'revenue')?.currency).toBe('JPY');
   });

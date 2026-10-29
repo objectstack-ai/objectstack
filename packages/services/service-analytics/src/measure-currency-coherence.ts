@@ -2,44 +2,41 @@
 
 /**
  * [ADR-0144, multi-currency M0-3] Two compile-time guards on a dataset's
- * measure currencies — the guards the measurement round on #8345 (its Q6)
- * found missing on today's surface, `DATASET_INVALID` / 400 at compile, where
- * the author still holds the document.
+ * measures over a `currencyMode: 'record'` amount, `DATASET_INVALID` / 400 at
+ * compile, where the author still holds the document. Both judge the record
+ * mode alone, a surface that ships with them, so neither refuses anything a
+ * dataset could write before.
  *
- * 1. **A measure `currency` that contradicts its field.** The column's
- *    currency chain lets an explicit measure `currency` win over everything
- *    (`enrichResultColumns`), so `currency: 'USD'` over a field fixed to `EUR`
- *    printed euros as dollars (probe A, `m_eur_as_usd`: 100 `"USD"`). Refused
- *    when the field is `fixed` to a different code, and over every
- *    `record`-mode field, whose currency is per row and so is contradicted by
- *    any one code. The same code as a `fixed` field's is redundant, not
- *    wrong, and is accepted. A `dynamic` field is not judged: its currency is
- *    the tenant's, which is not known at compile.
- * 2. **A derived measure across differing currencies.** `computeDerived` adds,
- *    subtracts, multiplies and divides bare numbers, so `sum` over a USD
- *    measure and an EUR measure answered `200` with no currency at all (probe
- *    A, `m_mixed_sum`). Refused when two of its operands are monetary and
- *    their resolved currencies provably differ, whatever the op: a ratio or a
- *    product of two amounts in two currencies is no more a number than their
- *    sum. Non-monetary operands (a `count`) are not compared, so revenue per
- *    deal stays legal.
+ * 1. **A measure `currency` over a record-mode amount.** Its currency is per
+ *    row (ADR-0144 D2), so any one code contradicts it, and the column's chain
+ *    would let the measure's code win (`enrichResultColumns`).
+ * 2. **A derived measure that combines a record-mode amount with an operand in
+ *    another currency.** `computeDerived` adds, subtracts, multiplies and
+ *    divides bare numbers, so such a value is not a number in any currency
+ *    (probe A of the #8345 measurement round, `m_mixed_sum`: `200` with no
+ *    currency). Refused, whatever the op, when a record-mode operand and another
+ *    monetary operand provably differ: another code field, a `fixed` code, an
+ *    explicit measure code or the tenant's. Non-monetary operands (a `count`)
+ *    are not compared, so an amount per invoice stays legal.
+ *
+ * ⛔ Not judged: the same two shapes over `fixed` / `dynamic` fields only — a
+ * measure `currency` contradicting a `fixed` field, a derived measure over two
+ * different `fixed` codes. Refusing those would narrow what compiles today,
+ * which neither ruling #27119 nor ADR-0144 decides; it is an ADR-0144 open item
+ * for the maintainer.
  *
  * ## The resolved currency, at compile
  *
  * The column's chain, with the request's half left symbolic: an explicit
  * measure `currency`, else the field's `fixed` code, else the tenant's (one
- * code per request, unknown here). A `record`-mode amount resolves to its code
- * field. Two currencies provably differ when they are two codes, two different
- * code fields, or a code field against anything else; the tenant's against a
- * code is NOT provably different and is not judged ("cannot answer, do not
- * block"). A derived `sum` / `difference` resolves to its operands' common
- * currency, so a derived measure built on one is judged too; a `ratio` or
- * `product` resolves to none.
+ * code per request, unknown here). A record-mode amount resolves to its code
+ * field. A derived `sum` / `difference` resolves to its operands' common
+ * currency (none when they differ), so a derived measure built on one is
+ * judged too; a `ratio` or `product` resolves to none.
  *
  * ## Not judged
  *
- * - No `declaredCurrency` hook (no data engine), or a field it cannot resolve:
- *   only an explicit measure `currency` is known then.
+ * - No `declaredCurrency` hook (no data engine), or a field it cannot resolve.
  * - A relationship-path field (`account.amount`): the hook answers for the
  *   base object, as for the aggregate × field-type door.
  * - A duration measure, which counts time, not money.
@@ -70,12 +67,17 @@ const currencyWords = (r: Resolved): string =>
       ? `each record's '${r.codeField}' (record currency)`
       : "the tenant's default currency";
 
+/** Two currencies that are provably not one: two codes, two code fields, or a code field and anything else. */
 function provablyDiffer(a: Resolved, b: Resolved): boolean {
   if (a.kind === 'record' || b.kind === 'record') {
     return !(a.kind === 'record' && b.kind === 'record' && a.codeField === b.codeField);
   }
   return a.kind === 'code' && b.kind === 'code' && a.code !== b.code;
 }
+
+/** The pair guard 2 refuses: a provable difference with a record-mode amount on one side. */
+const recordPairDiffers = (a: Resolved, b: Resolved): boolean =>
+  (a.kind === 'record' || b.kind === 'record') && provablyDiffer(a, b);
 
 /**
  * Refuse the first measure of `dataset` that breaks either guard — see the
@@ -90,7 +92,7 @@ export function assertMeasureCurrenciesCoherent(
   const fieldOf = (m: DatasetMeasure): DeclaredCurrency | undefined =>
     m.field && !m.field.includes('.') ? declaredCurrency?.(dataset.object, m.field) : undefined;
 
-  // Guard 1 — a measure `currency` that contradicts its field.
+  // Guard 1 — a measure `currency` over a record-mode amount.
   for (const m of dataset.measures) {
     if (m.derived || m.duration || !m.currency || !m.field) continue;
     const field = fieldOf(m);
@@ -103,17 +105,9 @@ export function assertMeasureCurrenciesCoherent(
         + 'row carries its own.',
       );
     }
-    if (field?.defaultCurrency !== undefined && field.defaultCurrency !== m.currency) {
-      throw datasetInvalidError(
-        `[dataset-compiler] dataset "${dataset.name}" measure "${m.name}" declares currency "${m.currency}" `
-        + `over field "${m.field}", which object "${dataset.object}" fixes to ${field.defaultCurrency}. The `
-        + `amounts are ${field.defaultCurrency}, so the column would print them as ${m.currency}: delete the `
-        + `measure's \`currency\` (the column takes the field's ${field.defaultCurrency}).`,
-      );
-    }
   }
 
-  // Guard 2 — a derived measure across differing currencies.
+  // Guard 2 — a derived measure combining a record-mode amount with another currency.
   const memo = new Map<string, Resolved | undefined>();
   const resolving = new Set<string>();
   const resolvedOf = (m: DatasetMeasure): Resolved | undefined => {
@@ -148,9 +142,10 @@ export function assertMeasureCurrenciesCoherent(
   for (const m of dataset.measures) {
     if (!m.derived) continue;
     const operands = monetaryOperands(m);
-    const first = operands[0];
-    const other = operands.find((o) => first && provablyDiffer(o.resolved, first.resolved));
-    if (!first || !other) continue;
+    const pair = operands.flatMap((a, i) => operands.slice(i + 1).map((b) => [a, b] as const))
+      .find(([a, b]) => recordPairDiffers(a.resolved, b.resolved));
+    if (!pair) continue;
+    const [first, other] = pair;
     throw datasetInvalidError(
       `[dataset-compiler] dataset "${dataset.name}" derived measure "${m.name}" (${m.derived.op}) combines `
       + `measure "${first.name}", in ${currencyWords(first.resolved)}, with measure "${other.name}", in `

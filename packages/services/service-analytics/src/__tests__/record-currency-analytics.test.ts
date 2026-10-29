@@ -19,9 +19,11 @@
  *   own capabilities; `ObjectQLStrategy`, narrowed to the engine aggregate),
  *   and the column on the draft-preview path, which shares the one
  *   column-description seam.
- * - The two compile-time guards (`measure-currency-coherence.ts`):
- *   `DATASET_INVALID` / 400 for a measure `currency` that contradicts its
- *   field, and for a derived measure across currencies that provably differ.
+ * - The two compile-time guards (`measure-currency-coherence.ts`), both on
+ *   the record mode alone: `DATASET_INVALID` / 400 for a measure `currency`
+ *   over a record-mode amount, and for a derived measure combining one with an
+ *   operand in another currency. The same shapes over `fixed` fields only
+ *   still compile (controls below).
  *
  * The SQLite cell runs everywhere; the strategies are the axis here, not the
  * dialect (the door stands ahead of both and reads nothing).
@@ -263,20 +265,13 @@ describe('[ADR-0144 M0-3] analytics over a record-currency amount', () => {
       expect(err?.message).toContain(`"${named}"`);
     };
 
-    it('a measure currency contradicting a fixed field is refused', () => {
-      expectRefused([{ name: 'eur_as_jpy', aggregate: 'sum', field: 'amt_eur', currency: 'JPY' }], 'eur_as_jpy');
-    });
-
-    it("a measure currency restating a fixed field's code is accepted", () => {
-      expect(compileRefusal([{ name: 'eur', aggregate: 'sum', field: 'amt_eur', currency: 'EUR' }])).toBeUndefined();
-    });
-
     it('a measure currency over a record-currency amount is refused', () => {
       expectRefused([{ name: 'total_usd', aggregate: 'sum', field: 'amount', currency: 'USD' }], 'total_usd');
     });
 
-    it('a measure currency over a dynamic field is not judged (the tenant currency is unknown at compile)', () => {
-      expect(compileRefusal([{ name: 'tenant_as_usd', aggregate: 'sum', field: 'amt_tenant', currency: 'USD' }])).toBeUndefined();
+    it('CONTROL: a measure currency over a fixed field is not judged, whatever its code (an ADR-0144 open item)', () => {
+      expect(compileRefusal([{ name: 'eur_as_jpy', aggregate: 'sum', field: 'amt_eur', currency: 'JPY' }])).toBeUndefined();
+      expect(compileRefusal([{ name: 'eur', aggregate: 'sum', field: 'amt_eur', currency: 'EUR' }])).toBeUndefined();
     });
 
     const base = [
@@ -288,27 +283,31 @@ describe('[ADR-0144 M0-3] analytics over a record-currency amount', () => {
     ];
 
     for (const op of ['sum', 'difference', 'ratio', 'product'] as const) {
-      it(`a derived ${op} across two fixed currencies is refused`, () => {
-        expectRefused([...base, { name: 'mixed', derived: { op, of: ['usd', 'eur'] } }], 'mixed');
+      it(`a derived ${op} of a record-currency amount and a fixed one is refused`, () => {
+        expectRefused([...base, { name: 'mixed', derived: { op, of: ['total', 'usd'] } }], 'mixed');
       });
     }
 
-    it('a derived measure across a record-currency amount and a fixed one is refused', () => {
-      expectRefused([...base, { name: 'mixed', derived: { op: 'difference', of: ['total', 'usd'] } }], 'mixed');
+    it('a derived measure of a record-currency amount and a tenant-currency one is refused', () => {
+      expectRefused([...base, { name: 'mixed', derived: { op: 'sum', of: ['tenant', 'total'] } }], 'mixed');
     });
 
-    it('a derived measure built on a mixed-currency derived sum is refused at the first mixed one', () => {
+    it('a derived measure built on a record-currency derived sum is judged at the next level', () => {
       expectRefused(
-        [...base, { name: 'usd_twice', derived: { op: 'sum', of: ['usd', 'usd'] } }, { name: 'mixed', derived: { op: 'sum', of: ['usd_twice', 'eur'] } }],
+        [...base, { name: 'total_twice', derived: { op: 'sum', of: ['total', 'total'] } }, { name: 'mixed', derived: { op: 'sum', of: ['total_twice', 'eur'] } }],
         'mixed',
       );
     });
 
-    it('accepted: one currency with a count (revenue per invoice), one fixed with the tenant (not provably different)', () => {
+    it('CONTROL: a derived measure over two different fixed codes is not judged (an ADR-0144 open item)', () => {
+      expect(compileRefusal([...base, { name: 'mixed', derived: { op: 'sum', of: ['usd', 'eur'] } }])).toBeUndefined();
+    });
+
+    it('accepted: an amount per invoice, an amount with itself, a fixed amount with the tenant currency', () => {
       expect(
         compileRefusal([
           ...base,
-          { name: 'per_invoice', derived: { op: 'ratio', of: ['usd', 'invoices'] } },
+          { name: 'per_invoice', derived: { op: 'ratio', of: ['total', 'invoices'] } },
           { name: 'usd_and_tenant', derived: { op: 'sum', of: ['usd', 'tenant'] } },
           { name: 'total_share', derived: { op: 'ratio', of: ['total', 'total'] } },
         ]),
