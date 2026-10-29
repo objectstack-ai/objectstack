@@ -618,7 +618,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       currencyConfig: {
         label: "Currency Config",
-        helpText: "Which currency this field is in — a currency field, or a formula whose return type is Currency. Unset: dynamic mode. The value is a bare number in either mode."
+        helpText: "Which currency this field is in — a currency field, or a formula whose return type is Currency. Unset: dynamic mode. The value is a bare number in every mode."
       },
       "currencyConfig.currencyMode": {
         label: "Currency Mode",
@@ -630,7 +630,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "currencyConfig.defaultCurrency": {
         label: "Default Currency",
-        helpText: "The one currency of a fixed-mode field, as a three-character ISO 4217 code (e.g. USD, EUR). Required in fixed mode; nothing fills one in. Not read in dynamic mode."
+        helpText: "The one currency of a fixed-mode field, as a three-character ISO 4217 code (e.g. USD, EUR). Required in fixed mode; nothing fills one in. Not read in dynamic mode; refused in record mode."
       },
       step: {
         label: "Step",
