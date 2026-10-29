@@ -67,7 +67,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, waitFor, fireEvent } from '@testing-library/react';
 import React from 'react';
 import { registerAllFields } from '@object-ui/fields';
-import { ObjectForm } from '../ObjectForm';
+// objectstack#27159: `drawer` / `modal` are the block's containers, so these renders go
+// through `ObjectFormContainer`, the block's own route (a layout falls through to `ObjectForm`).
+import { ObjectFormContainer } from '../ObjectFormContainer';
 import { ModalForm } from '../ModalForm';
 import { resetHeadinglessCollapseWarnings } from '../fieldGroups';
 import { DrawerForm } from '../DrawerForm';
@@ -164,7 +166,7 @@ const EXPLICIT: Route[] = [
     label: 'ObjectForm — default layout, explicit `sections`',
     mount: (section) =>
       mounted(
-        <ObjectForm
+        <ObjectFormContainer
           schema={{ ...base, sections: [{ label: 'Money', fields: ['amount'], ...section }] } as any}
           dataSource={makeDataSource()}
         />,
@@ -178,7 +180,7 @@ const EXPLICIT: Route[] = [
     label: 'ObjectForm — `formType: "drawer"`, explicit `sections` through the drawer map',
     mount: (section) =>
       mounted(
-        <ObjectForm
+        <ObjectFormContainer
           schema={
             {
               ...base,
@@ -230,7 +232,7 @@ const EXPLICIT: Route[] = [
     label: 'ObjectForm — `formType: "modal"`, explicit `sections` through the modal map',
     mount: (section) =>
       mounted(
-        <ObjectForm
+        <ObjectFormContainer
           schema={
             { ...base, formType: 'modal', open: true, sections: [{ label: 'Money', fields: ['amount'], ...section }] } as any
           }
@@ -247,7 +249,7 @@ const DERIVED: Route[] = [
   {
     label: 'ObjectForm — default layout, DERIVED `fieldGroups`',
     mount: (group) =>
-      mounted(<ObjectForm schema={{ ...base } as any} dataSource={makeDataSource(groupedSchema(group))} />),
+      mounted(<ObjectFormContainer schema={{ ...base } as any} dataSource={makeDataSource(groupedSchema(group))} />),
     open: ['amount', 'customer'],
     closed: ['customer'],
   },
@@ -397,14 +399,14 @@ describe('the drawer trap rows — a headingless section declaring `collapsed` i
       label: 'ObjectForm — default layout (the objectui#9780 reference answer)',
       mount: (s) =>
         mounted(
-          <ObjectForm schema={{ ...base, sections: [{ fields: ['amount'], ...s }] } as any} dataSource={makeDataSource()} />,
+          <ObjectFormContainer schema={{ ...base, sections: [{ fields: ['amount'], ...s }] } as any} dataSource={makeDataSource()} />,
         ),
     },
     {
       label: 'ObjectForm — `formType: "drawer"` through the drawer map',
       mount: (s) =>
         mounted(
-          <ObjectForm
+          <ObjectFormContainer
             schema={{ ...base, formType: 'drawer', open: true, sections: [{ fields: ['amount'], ...s }] } as any}
             dataSource={makeDataSource()}
           />,
@@ -434,7 +436,7 @@ describe('the drawer trap rows — a headingless section declaring `collapsed` i
       label: 'ObjectForm — `formType: "modal"` through the modal map',
       mount: (s) =>
         mounted(
-          <ObjectForm
+          <ObjectFormContainer
             schema={{ ...base, formType: 'modal', open: true, sections: [{ fields: ['amount'], ...s }] } as any}
             dataSource={makeDataSource()}
           />,

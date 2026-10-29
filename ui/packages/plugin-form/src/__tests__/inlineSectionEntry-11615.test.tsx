@@ -42,7 +42,9 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, waitFor, cleanup } from '@testing-library/react';
 import React from 'react';
 import { registerAllFields } from '@object-ui/fields';
-import { ObjectForm } from '../ObjectForm';
+// objectstack#27159: `drawer` / `modal` are the block's containers, so these renders go
+// through `ObjectFormContainer`, the block's own route (a layout falls through to `ObjectForm`).
+import { ObjectFormContainer } from '../ObjectFormContainer';
 
 registerAllFields();
 afterEach(cleanup);
@@ -64,7 +66,7 @@ const makeDataSource = () =>
     update: vi.fn(),
   }) as any;
 
-const ARMS = ['simple', 'drawer', 'modal', 'tabbed', 'wizard', 'split'] as const;
+const ARMS = ['simple', 'drawer', 'modal', 'tabbed', 'wizard'] as const;
 type Arm = (typeof ARMS)[number];
 
 /** The drawer and modal portal their content, so every read is off `document.body`. */
@@ -84,7 +86,7 @@ const TYPELESS = { name: 'typeless', label: 'Typeless' };
 async function mount(arm: Arm, schema: Record<string, unknown>) {
   const adapter = makeDataSource();
   render(
-    <ObjectForm
+    <ObjectFormContainer
       schema={
         {
           type: 'object-form',

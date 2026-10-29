@@ -205,11 +205,12 @@ describe('§1 each member accepts every shape a measured writer authors', () => 
     ['the form view\'s `{ field }` entry', 'object-form', { sections: [{ label: 'Owner', fields: ['name', { field: 'owner', required: true }] }] }],
     // `__tests__/formSectionGroupReference-7051.test.tsx` — the group-reference form, with its layout keys.
     ['a group section', 'object-form', { sections: [{ group: 'contact_info', columns: 2 }, { label: 'Other', fields: ['note'] }] }],
-    // `__tests__/collapseResolution-9849.test.tsx`, `sectionColumns.test.tsx`, the split form's `pane`.
-    ['the collapse pair, columns and pane', 'object-form', {
+    // `__tests__/collapseResolution-9849.test.tsx`, `sectionColumns.test.tsx`. (`pane` left with the
+    // split form, #27159 — refused in §2.)
+    ['the collapse pair and columns', 'object-form', {
       sections: [
-        { name: 'money', label: 'Money', collapsible: true, collapsed: true, columns: 2, pane: 'primary', fields: ['amount'] },
-        { name: 'rest', label: 'Rest', columns: 1, pane: 'secondary', fields: ['note'] },
+        { name: 'money', label: 'Money', collapsible: true, collapsed: true, columns: 2, fields: ['amount'] },
+        { name: 'rest', label: 'Rest', columns: 1, fields: ['note'] },
       ],
     }],
     // §5 — objectui's schema-catalog grid example (recorded in `liveness/page.json`, row `regions`):
@@ -355,7 +356,8 @@ describe('§2 off-shape values are refused with the code and the path', () => {
       { code: 'custom', path: 'sections.0.label' },
       { code: 'custom', path: 'sections.0.collapsible' },
     ]],
-    ['an unknown pane', 'object-form', { sections: [{ fields: ['a'], pane: 'left' }] }, [{ code: 'invalid_value', path: 'sections.0.pane' }]],
+    // #27159: `pane` is a `retiredKey()` tombstone — every value is refused.
+    ['a retired pane', 'object-form', { sections: [{ fields: ['a'], pane: 'primary' }] }, [{ code: 'invalid_type', path: 'sections.0.pane' }]],
     ['a numeric entry', 'object-form', { sections: [{ fields: [5] }] }, [{ code: 'invalid_union', path: 'sections.0.fields.0' }]],
     ['a `{ field }` entry\'s `visibleOn`', 'object-form', { sections: [{ fields: [{ field: 'a', visibleOn: 'record.b == 1' }] }] }, [{ code: 'invalid_union', path: 'sections.0.fields.0' }]],
     ['an inline entry\'s unknown key', 'object-form', { sections: [{ fields: [{ name: 'a', bogus: 1 }] }] }, [{ code: 'invalid_union', path: 'sections.0.fields.0' }]],

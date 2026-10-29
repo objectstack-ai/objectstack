@@ -33,7 +33,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, waitFor, cleanup } from '@testing-library/react';
 import React from 'react';
 import { registerAllFields } from '@object-ui/fields';
-import { ObjectForm } from '../ObjectForm';
+// objectstack#27159: `drawer` / `modal` are the block's containers, so these renders go
+// through `ObjectFormContainer`, the block's own route (a layout falls through to `ObjectForm`).
+import { ObjectFormContainer } from '../ObjectFormContainer';
 import { ModalForm } from '../ModalForm';
 import { DrawerForm } from '../DrawerForm';
 import {
@@ -83,14 +85,14 @@ const ROUTES: Array<{ label: string; arm: string; mount: (s: Record<string, unkn
     label: 'ObjectForm — default layout',
     arm: 'ObjectForm',
     mount: (s) =>
-      mounted(<ObjectForm schema={{ ...base, sections: [{ fields: ['amount'], ...s }] } as any} dataSource={makeDataSource()} />),
+      mounted(<ObjectFormContainer schema={{ ...base, sections: [{ fields: ['amount'], ...s }] } as any} dataSource={makeDataSource()} />),
   },
   {
     label: 'ObjectForm — `formType: "drawer"`',
     arm: 'DrawerForm',
     mount: (s) =>
       mounted(
-        <ObjectForm
+        <ObjectFormContainer
           schema={{ ...base, formType: 'drawer', open: true, sections: [{ fields: ['amount'], ...s }] } as any}
           dataSource={makeDataSource()}
         />,
@@ -112,7 +114,7 @@ const ROUTES: Array<{ label: string; arm: string; mount: (s: Record<string, unkn
     arm: 'ModalForm',
     mount: (s) =>
       mounted(
-        <ObjectForm
+        <ObjectFormContainer
           schema={{ ...base, formType: 'modal', open: true, sections: [{ fields: ['amount'], ...s }] } as any}
           dataSource={makeDataSource()}
         />,

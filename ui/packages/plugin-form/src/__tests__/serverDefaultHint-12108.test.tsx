@@ -116,7 +116,6 @@ const LAYOUTS: Array<[string, Record<string, unknown>]> = [
   ['ModalForm', { formType: 'modal', open: true, sections: SECTIONS }],
   ['DrawerForm', { formType: 'drawer', open: true, sections: SECTIONS }],
   ['TabbedForm', { formType: 'tabbed', sections: SECTIONS }],
-  ['SplitForm', { formType: 'split', sections: SECTIONS }],
   ['WizardForm', { formType: 'wizard', sections: SECTIONS }],
 ];
 

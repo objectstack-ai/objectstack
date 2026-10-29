@@ -10,9 +10,9 @@
  * The one layout arm that still DROPS an authored `FormSection.visibleWhen`
  * (objectui#6237).
  *
- * Of the six layout routes in `ObjectForm`, five honour the predicate:
- * `split` / `drawer` / `modal` rebuild each section key by key and copy it
- * (#6111), the flat arm carries it on the `section-divider` pseudo-field
+ * Of the layout routes an `object-form` block reaches, all but one honour the
+ * predicate: the `drawer` / `modal` containers rebuild each section key by key
+ * and copy it (#6111), the flat arm carries it on the `section-divider` pseudo-field
  * (#6236), and `tabbed` joined them by copying it onto the tab `TabbedForm`
  * synthesises, where the renderer evaluates it (#6237). `wizard` is the
  * remainder.
@@ -44,7 +44,7 @@ export function sectionPredicateUnsupportedWarning(
     + `${sectionNames} render unconditionally. A wizard STEP predicate is a `
     + 'separate contract still being designed (objectui#6237) — it is not the '
     + 'tab predicate with a different name. Today, use '
-    + "`formType: 'tabbed' | 'modal' | 'drawer' | 'split'` or the flat layout — "
+    + "`formType: 'tabbed' | 'modal' | 'drawer'` or the flat layout — "
     + 'each honours a section `visibleWhen` — or move the predicate onto the '
     + 'individual fields, whose own `visibleWhen` is evaluated on every layout.';
 }

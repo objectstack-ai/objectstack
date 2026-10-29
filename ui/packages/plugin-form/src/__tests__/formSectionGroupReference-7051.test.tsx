@@ -41,7 +41,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, waitFor, cleanup } from '@testing-library/react';
 import { registerAllFields } from '@object-ui/fields';
 import { FormSectionSchema, FormViewSchema } from '@objectstack/spec/ui';
-import { ObjectForm } from '../ObjectForm';
+// objectstack#27159: `drawer` / `modal` are the block's containers, so these renders go
+// through `ObjectFormContainer`, the block's own route (a layout falls through to `ObjectForm`).
+import { ObjectFormContainer } from '../ObjectFormContainer';
 import {
   resolveSectionGroupReferences,
   resetSectionGroupReports,
@@ -157,7 +159,7 @@ afterEach(() => {
 
 const renderForm = async (formType: string, sections: any[], ds = makeDS()) => {
   render(
-    <ObjectForm
+    <ObjectFormContainer
       schema={{
         type: 'object-form',
         formType,
@@ -318,7 +320,7 @@ describe('objectui#7051 — `form.sections[].group` resolves through the single 
 
   it('WIZARD_STEP_GROUP_IS_REFUSED_AND_REPORTED — the renderer agrees with the spec instead of inventing semantics', async () => {
     render(
-      <ObjectForm
+      <ObjectFormContainer
         schema={{
           type: 'object-form',
           formType: 'wizard',
@@ -354,7 +356,6 @@ describe('objectui#7051 — `form.sections[].group` resolves through the single 
  */
 const CONTAINERS: Array<[string, any[]]> = [
   ['tabbed', [{ group: 'billing' }, ANCHOR]],
-  ['split', [{ group: 'billing' }, ANCHOR]],
   ['drawer', [{ group: 'billing' }, ANCHOR]],
   ['modal', [{ group: 'billing' }, ANCHOR]],
 ];
@@ -406,13 +407,15 @@ describe('objectui#7051 — resolveSectionGroupReferences', () => {
     });
   });
 
-  it('keeps the two layout keys the spec PERMITS beside `group`, and only those', () => {
+  it('keeps the one layout key the spec PERMITS beside `group`, and only that', () => {
     const [resolved] = resolveSectionGroupReferences(
       [{ group: 'billing', columns: 3, pane: 'secondary', label: 'ignored' }] as any,
       opts,
     )!;
     expect(resolved.columns).toBe(3);
-    expect(resolved.pane).toBe('secondary');
+    // `pane` left with the split form (ADR-0050); the spec refuses it on every
+    // section, and the resolver no longer carries it.
+    expect((resolved as any).pane).toBeUndefined();
     // The group's own label wins; the authored one is not merged in.
     expect(resolved.label).toBe('Billing Details');
     expect((resolved as any).group).toBeUndefined();

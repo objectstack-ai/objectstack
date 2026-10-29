@@ -477,10 +477,10 @@
             "simple",
             "tabbed",
             "wizard",
-            "split",
             "drawer",
             "modal"
-          ]
+          ],
+          "description": "The form layout (`simple`, `tabbed`, `wizard`), or the container the block opens it in (`drawer`, `modal`, drawn as a stacked form; `contentLayout: \"tabbed\"` puts a modal's sections on tabs). `split` was retired with ADR-0050: use `tabbed` (one tab per section), or an `object-master-detail-form` block to edit child records beside the parent."
         },
         {
           "name": "sections",
@@ -538,22 +538,6 @@
           "type": "boolean"
         },
         {
-          "name": "splitDirection",
-          "type": "enum",
-          "enum": [
-            "horizontal",
-            "vertical"
-          ]
-        },
-        {
-          "name": "splitSize",
-          "type": "number"
-        },
-        {
-          "name": "splitResizable",
-          "type": "boolean"
-        },
-        {
           "name": "drawerSide",
           "type": "enum",
           "enum": [
@@ -581,7 +565,7 @@
         {
           "name": "modalCloseButton",
           "type": "boolean",
-          "description": "Show the modal presentation’s close (X) button. Default `true`; `false` hides it. Forwarded by `ObjectForm`’s modal route and honoured by `ModalForm` on both of its dialog arms. With the button hidden the modal still closes on Escape, and on the Cancel action when that is shown."
+          "description": "Show the modal presentation’s close (X) button. Default `true`; `false` hides it. Forwarded by the block’s modal container and honoured by `ModalForm` on both of its dialog arms. With the button hidden the modal still closes on Escape, and on the Cancel action when that is shown."
         },
         {
           "name": "contentLayout",

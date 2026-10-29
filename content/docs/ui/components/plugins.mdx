@@ -131,7 +131,7 @@ Namespace `plugin-form`.
 | `objectName` | `string` |  | Object this form creates or edits. Not required: the node's `dataSource` binding can name the object instead, and `dataSource.object` lands on this key, outranking an authored value. With neither, and no inline fields (non-empty `customFields`, or `sections` whose every field is inline), the form shows a hint naming this key instead of a form with no fields. |
 | `fields` | `array` |  | Bare field names to show, in order (each looked up in the object schema). NOT the same vocabulary as `sections[].fields`, which also accepts the spec `FormFieldSchema` object (identity key `field`, e.g. `{ field: "note", colSpan: 2 }`) — that shape resolves to no name HERE and is silently skipped (SimpleObjectForm in ObjectForm.tsx; buildFlatFields in flatFields.ts for the drawer/modal presentations). |
 | `mode` | `enum`: `create`, `edit`, `view` |  | — |
-| `formType` | `enum`: `simple`, `tabbed`, `wizard`, `split`, `drawer`, `modal` |  | — |
+| `formType` | `enum`: `simple`, `tabbed`, `wizard`, `drawer`, `modal` |  | The form layout (`simple`, `tabbed`, `wizard`), or the container the block opens it in (`drawer`, `modal`, drawn as a stacked form; `contentLayout: "tabbed"` puts a modal's sections on tabs). `split` was retired with ADR-0050: use `tabbed` (one tab per section), or an `object-master-detail-form` block to edit child records beside the parent. |
 | `sections` | `array` |  | — |
 | `title` | `string` \| `object` |  | Heading of the drawer and modal presentations (`formType: "drawer"` / `"modal"`). Accepts either a plain string or an inline per-locale map (`{ en: "New order", "zh-CN": "新建订单" }`) — the `I18nLabel` union the contract admits on this key — and the form resolves the map against the active UI language, falling back through base language, a region-qualified sibling, `default`, then `en`, and finally to any remaining entry. |
 | `description` | `string` \| `object` |  | Subtitle under the drawer and modal heading. Accepts either a plain string or an inline per-locale map (`{ en: "Enter the order details", "zh-CN": "填写订单信息" }`), resolved against the active UI language with the same fallback chain as `title`. |
@@ -141,13 +141,10 @@ Namespace `plugin-form`.
 | `tabPosition` | `enum`: `top`, `bottom`, `left`, `right` |  | — |
 | `allowSkip` | `boolean` |  | — |
 | `showStepIndicator` | `boolean` |  | — |
-| `splitDirection` | `enum`: `horizontal`, `vertical` |  | — |
-| `splitSize` | `number` |  | — |
-| `splitResizable` | `boolean` |  | — |
 | `drawerSide` | `enum`: `top`, `bottom`, `left`, `right` |  | — |
 | `drawerWidth` | `string` |  | — |
 | `modalSize` | `enum`: `sm`, `default`, `lg`, `xl`, `full` |  | — |
-| `modalCloseButton` | `boolean` |  | Show the modal presentation’s close (X) button. Default `true`; `false` hides it. Forwarded by `ObjectForm`’s modal route and honoured by `ModalForm` on both of its dialog arms. With the button hidden the modal still closes on Escape, and on the Cancel action when that is shown. |
+| `modalCloseButton` | `boolean` |  | Show the modal presentation’s close (X) button. Default `true`; `false` hides it. Forwarded by the block’s modal container and honoured by `ModalForm` on both of its dialog arms. With the button hidden the modal still closes on Escape, and on the Cancel action when that is shown. |
 | `contentLayout` | `enum`: `simple`, `tabbed` |  | How the modal presentation lays out sections. `tabbed` differs from `simple` only when more than one section has a field to show (`ModalForm` tests `schema.contentLayout === "tabbed" && groups.length > 1`). |
 | `confirmOnDiscard` | `boolean` |  | Ask before discarding unsaved edits when a drawer/modal form is dismissed. Set `false` to close immediately. |
 | `recordId` | `string` |  | The record to load in `edit` / `view` mode. Leave unset for `create`. |
