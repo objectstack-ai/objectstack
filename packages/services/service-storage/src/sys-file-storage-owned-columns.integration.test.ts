@@ -210,6 +210,8 @@ describe('sys_file storage-owned columns are not writable outside the storage se
     status: 'committed',
     etag: 'forged-etag',
   } as const;
+  /** What a caller would write over a COMMITTED file: every value differs from the one the service wrote. */
+  const FORGED_OVER_COMMITTED = { ...FORGED, status: 'pending' } as const;
 
   it('declares exactly the five storage-owned columns, each readonly on sys_file', () => {
     expect([...SYS_FILE_STORAGE_OWNED_COLUMNS].sort()).toEqual(['etag', 'key', 'mime_type', 'size', 'status']);
@@ -237,7 +239,7 @@ describe('sys_file storage-owned columns are not writable outside the storage se
     const fileId = await committedUpload();
     const before = await owned(fileId);
 
-    await engine.update('sys_file', { id: fileId, name: 'renamed.png', [column]: FORGED[column] } as any, { context: WRITER_CTX });
+    await engine.update('sys_file', { id: fileId, name: 'renamed.png', [column]: FORGED_OVER_COMMITTED[column] } as any, { context: WRITER_CTX });
 
     expect(await owned(fileId)).toEqual(before);
     expect((await fileRow(fileId))?.name).toBe('renamed.png');
@@ -247,7 +249,7 @@ describe('sys_file storage-owned columns are not writable outside the storage se
     const fileId = await committedUpload();
     const before = await owned(fileId);
 
-    await engine.update('sys_file', { ...FORGED, acl: 'private' } as any, { where: { id: fileId }, context: WRITER_CTX } as any);
+    await engine.update('sys_file', { ...FORGED_OVER_COMMITTED, acl: 'private' } as any, { where: { id: fileId }, context: WRITER_CTX } as any);
 
     expect(await owned(fileId)).toEqual(before);
     expect((await fileRow(fileId))?.acl).toBe('private');
