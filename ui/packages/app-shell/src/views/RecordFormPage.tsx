@@ -18,10 +18,10 @@
  *     fetches the existing record (in edit mode) via `dataSource.findOne`,
  *     so this page does not need to manage its own loading state for
  *     record data.
- *   - On success / cancel, navigates back if the user has history, otherwise
- *     falls back to a sensible parent route (record detail in edit mode,
- *     object list in create mode). Cancel always navigates back without a
- *     toast.
+ *   - On success / cancel, navigates back when an earlier entry of THIS
+ *     console session is behind the page, otherwise goes to the parent route
+ *     (record detail in edit mode, object list in create mode). Cancel never
+ *     toasts.
  *   - Wraps the form in a sticky page header (back button + title) for a
  *     consistent full-screen chrome.
  *
@@ -29,7 +29,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
+import { useParams, useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom';
 import { ObjectForm } from '@object-ui/plugin-form';
 import { Button, Empty, EmptyTitle, EmptyDescription } from '@object-ui/components';
 import { ArrowLeft, Building2, Database } from 'lucide-react';
@@ -71,6 +71,7 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
     recordId: string;
   }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const dataSource = useAdapter();
   const { objects, loading: metadataLoading } = useMetadata();
@@ -120,18 +121,24 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
 
   /**
    * Navigate back to the most relevant location.
-   * Prefer `history.back()` so users return to the exact list/view they came
-   * from (preserving filters, scroll position, etc.). Fall back to the
-   * record detail (edit mode) or list (create mode) when there is no
-   * history entry — happens on direct/refreshed loads of the URL.
+   * Back when a page of this console is behind this one, so users return to
+   * the exact list/view they came from (filters, scroll). react-router keys
+   * the entry it started on `'default'` and every entry it navigated to with
+   * a generated key (the rule `FormPage`'s cancel uses). ⛔ Not
+   * `window.history.length`: it counts the tab's entries from BEFORE the
+   * console loaded, so a pasted or deep-linked URL went Back out of the app
+   * and the save toast was lost with the unloaded document
+   * (objectstack-ai/objectstack#27454). Without one, the record detail (edit)
+   * or list (create), inside the app.
    */
+  const hasInAppHistory = location.key !== 'default';
   const goBack = useCallback(() => {
-    if (typeof window !== 'undefined' && window.history.length > 1) {
+    if (hasInAppHistory) {
       navigate(-1);
     } else {
       navigate(recordDetailUrl, { replace: true });
     }
-  }, [navigate, recordDetailUrl]);
+  }, [navigate, recordDetailUrl, hasInAppHistory]);
 
   // Two names, not one (objectui#11733): the title and the toasts speak of ONE
   // record, so they keep the singular; the breadcrumb link opens the object's
