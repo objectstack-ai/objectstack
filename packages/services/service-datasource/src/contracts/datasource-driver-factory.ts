@@ -59,6 +59,23 @@ export interface DatasourceConnectionSpec {
    * own schema comment warns about.
    */
   ssl?: Record<string, unknown>;
+  /**
+   * The caller only PROBES this connection: a file-backed database (`sqlite`,
+   * `sqlite-wasm`, a `turso` `file:` url) whose file does not exist is refused,
+   * never created (#27512).
+   *
+   * Set by the draft probe (`POST /datasources/test`), which persists nothing
+   * and so must leave nothing on disk either. Opening the target as a writing
+   * boot does created the file, and every missing directory above it, for a
+   * datasource nobody saved. Absent ⇒ the target is opened as it always was:
+   * Save, the boot restore and every hot pool keep creating the file on
+   * connect. Server databases are untouched, since this process cannot bring
+   * one into existence anyway.
+   *
+   * The refusal is thrown from `create()`, before any driver is constructed,
+   * and carries `code: 'ENOENT'` and the `filename` it judged.
+   */
+  fileMustExist?: boolean;
 }
 
 /**

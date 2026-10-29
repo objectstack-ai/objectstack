@@ -880,6 +880,9 @@ export class DatasourceAdminServicePlugin implements Plugin {
         config: input.config,
         secret: input.secret,
         external: input.external,
+        // [#27512] A probe persists nothing, so it may create nothing either:
+        // a file-backed draft whose file is missing is reported, not created.
+        fileMustExist: true,
       });
     } catch (err) {
       return { ok: false, error: `Failed to build driver: ${errMsg(err)}` };

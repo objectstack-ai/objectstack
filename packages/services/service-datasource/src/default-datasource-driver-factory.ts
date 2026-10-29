@@ -487,6 +487,68 @@ function postgresDsnFields(url: string, datasource?: string): Record<string, unk
   }
 }
 
+/**
+ * The refusal {@link DatasourceConnectionSpec.fileMustExist} answers for a
+ * file-backed database whose file does not exist (#27512). `code` is the
+ * operating system's spelling of that fact, as on driver-sql's
+ * `SqliteDatabaseFileError`, the refusal the same judgement throws for a file
+ * that can be neither opened nor created.
+ */
+class DatabaseFileAbsentError extends Error {
+  readonly code = 'ENOENT';
+
+  constructor(readonly filename: string) {
+    super(
+      `SQLite database file '${filename}' does not exist. Testing a connection never creates it: `
+      + 'point the draft at an existing database file, or save the datasource to have it created.',
+    );
+    this.name = 'DatabaseFileAbsentError';
+  }
+}
+
+/**
+ * The database file a spec's arm opens, or `undefined` when it opens none — a
+ * server database, a remote libSQL url. `:memory:` is returned as is; the
+ * judgement below leaves every `:`-prefixed name alone.
+ */
+function databaseFileOf(kind: ResolvedKind, spec: DatasourceConnectionSpec): string | undefined {
+  // A `switch`, not `if (kind === …)`: the arms' own pins slice this file's
+  // source at their `if (kind === '…')` heads, and a second copy above them
+  // would be found first.
+  switch (kind) {
+    case 'sqlite':
+    case 'sqlite-wasm':
+      return (buildSqlConnection(spec, 'better-sqlite3') as { filename: string }).filename;
+    case 'turso': {
+      // driver-turso's local engine opens the path of a `file:` url, its scheme
+      // matched in any letter case (`TursoDriver.toKnexConfig`).
+      const url = resolveTursoUrl(spec);
+      return url.slice(0, 'file:'.length).toLowerCase() === 'file:' ? url.slice('file:'.length) : undefined;
+    }
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Refuse a file-backed spec whose database file does not exist, writing
+ * nothing to find out (#27512).
+ *
+ * The judgement is driver-sql's one write-free existence check,
+ * `resolveSqliteAbsentFileTarget`: under `'empty-in-memory'` it answers
+ * `openedEmptyInMemory` for an absent file, and throws its
+ * `SqliteDatabaseFileError` for one that can be neither opened nor created —
+ * either is this refusal, so no second `existsSync` is open-coded here.
+ */
+async function assertDatabaseFileExists(kind: ResolvedKind, spec: DatasourceConnectionSpec): Promise<void> {
+  const filename = databaseFileOf(kind, spec);
+  if (filename === undefined) return;
+  const { resolveSqliteAbsentFileTarget } = await import('@objectstack/driver-sql');
+  if (resolveSqliteAbsentFileTarget(filename, 'empty-in-memory').openedEmptyInMemory) {
+    throw new DatabaseFileAbsentError(filename);
+  }
+}
+
 /** Build the Knex `connection` for a SQL driver from a spec's config + secret. */
 function buildSqlConnection(spec: DatasourceConnectionSpec, client: 'pg' | 'better-sqlite3'): unknown {
   const cfg = (spec.config ?? {}) as Record<string, unknown>;
@@ -1125,6 +1187,12 @@ export function createDefaultDatasourceDriverFactory(
       // — but it is the one every host that builds through this factory passes
       // through, so it is where "declared = honoured" is actually guaranteed.
       assertDatasourcePoolSupported({ driver: spec.driver, pool: spec.pool, name: spec.name });
+
+      // [#27512] A caller that only probes opens nothing it would have to
+      // create. Judged here, before any arm constructs a driver: every
+      // file-backed arm below opens as a writing boot does, and creates the
+      // file — `sqlite`'s native and wasm rungs, `sqlite-wasm`, a `file:` turso.
+      if (spec.fileMustExist) await assertDatabaseFileExists(kind, spec);
 
       // ADR-0015's ownership mode. The three-source fallback moved to
       // `resolveDatasourceSchemaMode` in #7314 — unchanged in behaviour, but it
