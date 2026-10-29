@@ -186,6 +186,31 @@ describe('os plugin build — a native addon is refused (ADR-0025 v2 §3.3)', ()
     });
   }
 
+  it('names the importer chain of a transitive native package, so it traces to the direct dependency', async () => {
+    const dir = await project({}, {
+      'node_modules/fake-native/package.json': JSON.stringify({ name: 'fake-native', version: '1.0.0', main: 'index.js' }),
+      'node_modules/fake-native/binding.gyp': `{ 'targets': [] }\n`,
+      'node_modules/fake-native/index.js': `module.exports = require('./build/Release/fake.js');\n`,
+      'node_modules/fake-native/build/Release/fake.js': `module.exports = 'NATIVE';\n`,
+      'node_modules/ws-like/package.json': JSON.stringify({ name: 'ws-like', version: '1.0.0', main: 'index.js' }),
+      'node_modules/ws-like/index.js': `module.exports = require('./lib/buffer-util.js');\n`,
+      'node_modules/ws-like/lib/buffer-util.js': `module.exports = require('fake-native');\n`,
+      'src/index.ts': `import ws from 'ws-like';\nexport const value = ws;\n`,
+    });
+
+    const { exit, printed } = await build(dir);
+
+    expect(exit).toBe(1);
+    expect(refusals(printed)).toMatch(/native addon/i);
+    expect(printed).toContain('package `fake-native` (node_modules/fake-native) declares a node-gyp build (binding.gyp)');
+    // The file that imports it, and the chain from the plugin's own source.
+    expect(printed).toContain('imported by node_modules/ws-like/lib/buffer-util.js');
+    expect(printed).toContain('reached through src/index.ts → ws-like → fake-native');
+    // `ws-like` is pure JavaScript: named on the chain, never as a native package.
+    expect(printed).not.toContain('package `ws-like`');
+    expect(existsSync(join(dir, ARTIFACT))).toBe(false);
+  });
+
   it('refuses a `.node` file under `assets/`, naming it', async () => {
     const dir = await project({}, {
       'assets/icon.svg': '<svg/>',
