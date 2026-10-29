@@ -8,6 +8,7 @@ import type {
 import { ConnectorUpstreamUnavailableError } from '@objectstack/spec/integration';
 import {
   createOpenApiConnector,
+  operationActionKey,
   type OpenApiDocument,
   type RestAuth,
 } from './openapi-connector.js';
@@ -50,7 +51,39 @@ interface OpenApiProviderConfig {
   spec?: unknown;
   /** Override the base URL (else the document's `servers[0].url`). */
   baseUrl?: unknown;
+  /**
+   * Optional operation allowlist — only the listed operations become actions,
+   * the same allowlist meaning as the `mcp` provider's `include` (tool names
+   * there, action keys here). Each entry is an operation's `operationId`, or
+   * the generated `method_path` key (`get_pets_id`) for an operation the
+   * document gives no `operationId` — i.e. exactly the action key the
+   * operation is exposed under. An entry naming an operation the document
+   * does not carry is a configuration fault (see {@link resolveIncludeList}).
+   */
+  include?: unknown;
 }
+
+/**
+ * Validate `providerConfig.include`: absent ⇒ every operation; otherwise an
+ * array of non-empty strings. Any other shape is a configuration fault, thrown
+ * plain (fatal at boot, a skipped entry on reload) — an allowlist that silently
+ * dropped an entry it could not read would expose the very operations the
+ * author meant to keep out, or hide the one they meant to keep in.
+ */
+function resolveIncludeList(raw: unknown, connectorName: string): readonly string[] | undefined {
+  if (raw === undefined) return undefined;
+  if (!Array.isArray(raw) || raw.some((entry) => typeof entry !== 'string' || entry.length === 0)) {
+    throw new Error(
+      `connector-openapi provider: connector '${connectorName}' providerConfig.include must be an array of ` +
+        `operation keys (strings): each an operationId, or the generated method_path key for an operation ` +
+        `without one.`,
+    );
+  }
+  return raw as string[];
+}
+
+/** How many of the document's action keys an unknown-entry refusal lists. */
+const INCLUDE_REFUSAL_KEY_SAMPLE = 20;
 
 /**
  * Refuse a document that is not OpenAPI 3.x — a Swagger 2.0 document
@@ -204,8 +237,13 @@ async function loadOpenApiDocument(
  * generates for a hand-wired OpenAPI connector — one action per operation over a
  * static-auth HTTP transport, with the resolved `auth` applied.
  *
+ * `providerConfig.include` (optional) narrows the actions to an allowlist of
+ * operation keys, through the generator's own `include` predicate.
+ *
  * Hard-fails on invalid config (missing spec, a wrong spec URL, an unparseable
- * document, a document that is not OpenAPI 3.x, a bad base URL), so a misconfigured instance fails boot loudly. A
+ * document, a document that is not OpenAPI 3.x, a bad base URL, an `include`
+ * that is not a string array or names an operation the document does not
+ * carry), so a misconfigured instance fails boot loudly. A
  * remote spec URL that is merely unreachable / transiently failing instead
  * degrades the instance and retries (#3049) — see {@link loadOpenApiDocument}.
  */
@@ -217,20 +255,54 @@ export function createOpenApiProviderFactory(deps: OpenApiProviderDeps = {}): Co
         `connector-openapi provider: connector '${ctx.name}' providerConfig.baseUrl must be a string when set.`,
       );
     }
+    const includeList = resolveIncludeList(cfg.include, ctx.name);
     const document = await loadOpenApiDocument(cfg.spec, deps.fetchImpl, ctx);
     const auth = ctx.auth as ResolvedConnectorAuth | undefined as RestAuth | undefined;
-    return createOpenApiConnector({
+    // The allowlist rides the generator's own `include` predicate; every key
+    // the document offers is recorded on the way, so an entry nothing matched
+    // can be named in the refusal below.
+    const documentKeys: string[] = [];
+    const include = includeList
+      ? (op: Parameters<typeof operationActionKey>[0]) => {
+          const key = operationActionKey(op);
+          documentKeys.push(key);
+          return includeList.includes(key);
+        }
+      : undefined;
+    const bundle = createOpenApiConnector({
       name: ctx.name,
       label: ctx.label,
       description: ctx.description,
       document,
       baseUrl: typeof cfg.baseUrl === 'string' ? cfg.baseUrl : undefined,
       auth,
+      include,
       // ADR-0049 · #18975 — the authored resilience policy, already resolved by
       // the materializer, reaches the transport this bundle closes over.
       retryConfig: ctx.retryConfig,
       requestTimeoutMs: ctx.requestTimeoutMs,
       fetchImpl: deps.fetchImpl,
     });
+    if (includeList) {
+      // An entry naming an operation the document does not carry is a
+      // configuration fault, thrown plain — fatal at boot, a skipped entry on
+      // reload. Ignoring it would bring the instance up without the action
+      // the author listed (a typo, or an operation the upstream renamed or
+      // removed), and the first sign would be a flow failing at run time.
+      const offered = new Set(documentKeys);
+      const unknown = [...new Set(includeList)].filter((entry) => !offered.has(entry));
+      if (unknown.length > 0) {
+        const sample = [...offered].slice(0, INCLUDE_REFUSAL_KEY_SAMPLE);
+        const more = offered.size > sample.length ? `, … ${offered.size - sample.length} more` : '';
+        throw new Error(
+          `connector-openapi provider: connector '${ctx.name}' providerConfig.include names ` +
+            `${unknown.map((entry) => `'${entry}'`).join(', ')}, which the OpenAPI document does not carry. ` +
+            `Each entry must be an operationId, or the generated method_path key for an operation without one; ` +
+            `the document offers ${offered.size} operation key(s): ` +
+            `${sample.map((key) => `'${key}'`).join(', ')}${more}.`,
+        );
+      }
+    }
+    return bundle;
   };
 }
