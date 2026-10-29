@@ -2999,8 +2999,6 @@ const STUDIO_EN: Record<string, string> = {
   // objectui#11910 — a dashboard widget held until it is bound; `input` is the
   // widget inspector's own label for it (Dataset, Values (measures)).
   'engine.studio.held.widgetNeedsInput': '{input} on the widget “{widget}” needs a value',
-  // objectstack#27485 — a field CEL expression the inspector judged broken, held after it closes.
-  'engine.studio.held.celInvalid': 'an expression on the field “{field}” has an error to fix',
   'engine.studio.held.line': 'Not saved yet: {clause}. Your changes are kept here and saved once it is filled in.',
   'engine.studio.held.publish': 'Not published: {clause}, so that change is not saved yet. Finish it, then publish.',
   'engine.studio.held.inputHint': 'Required. Changes are saved once this has a value.',
