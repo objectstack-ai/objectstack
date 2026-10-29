@@ -885,7 +885,7 @@ describe('external.connector — an API-backed datasource borrows a connector in
     for (const spelling of ['connectorName', 'connectorId', 'connectorRef', 'connectorInstance']) {
       const result = DatasourceSchema.safeParse({ ...odata, external: { [spelling]: 'sap_s4' } });
       const messages = result.success ? [] : result.error.issues.map((i) => i.message);
-      expect(messages.join('\n'), spelling).toContain('connector');
+      expect(messages.join('\n'), spelling).toContain(`\`${spelling}\` → \`connector\``);
     }
   });
 
