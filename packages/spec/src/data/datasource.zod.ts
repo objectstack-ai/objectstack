@@ -290,9 +290,16 @@ export const ExternalDatasourceSettingsSchema = strictObject(
       label: RETIRED_DATASOURCE_BLOCKS.externalLabel,
       requirePermission: RETIRED_DATASOURCE_BLOCKS.externalRequirePermission,
       permission: RETIRED_DATASOURCE_BLOCKS.externalRequirePermission,
+      // The example is the opaque handle the shipped binder mints and resolves
+      // (`parseCredentialsRef` in service-datasource): a hand-written path such
+      // as `secret:warehouse/password` parses, then never dereferences, so the
+      // datasource is left unconnected at boot.
       password:
-        '`password` must never be inlined. Put the secret in the secrets store and reference '
-        + 'it with `credentialsRef` (e.g. `credentialsRef: "secret:warehouse/password"`).',
+        '`password` must never be inlined. Bind the secret instead: the Setup → Datasources '
+        + "connection form's secret field encrypts it into `sys_secret` and stores the opaque "
+        + 'handle here, or set `credentialsRef` to a handle the secret store minted (e.g. '
+        + '`credentialsRef: "sys_secret:9f2c"`). Only `sys_secret:` handles resolve; a '
+        + 'hand-written path is never dereferenced.',
       // #4487 corrected the second half of this line. It used to offer
       // `capabilities.readOnly` as the place to "describe the driver" — a key the
       // liveness audit found has NO reader (liveness/datasource.json), so an
@@ -542,10 +549,18 @@ export const DatasourceSchema = lazySchema(() => strictObject(
       filename: belongsInConfig('filename'),
       url: belongsInConfig('url'),
       connectionString: belongsInConfig('connectionString', 'url'),
+      // Not "move it into `config`": every driver contract refuses
+      // `config.password` (and a `user:password@` URL), so that prescription
+      // led straight into a second refusal. `external.credentialsRef` is valid
+      // in every schemaMode (#8153), so it is the one answer for both.
       password:
-        '`password` must never be inlined on a datasource. Interpolate it from the environment '
-        + 'inside `config`, or for an external datasource reference the secrets store via '
-        + '`external.credentialsRef`.',
+        '`password` must never be inlined on a datasource, and not in `config` either: the '
+        + 'driver contracts refuse `config.password` and a `user:password@` URL. Bind the secret '
+        + "instead: the Setup → Datasources connection form's secret field encrypts it into "
+        + '`sys_secret` and stores the opaque handle at `external.credentialsRef`, or set that '
+        + 'key to a handle the secret store minted (e.g. '
+        + '`external: { credentialsRef: "sys_secret:9f2c" }`). `external.credentialsRef` is '
+        + 'valid in every `schemaMode`, a managed datasource included.',
       readReplicas: RETIRED_READ_REPLICAS,
       replicas: RETIRED_READ_REPLICAS,
       capabilities: RETIRED_CAPABILITIES.capabilities,
@@ -571,8 +586,9 @@ export const DatasourceSchema = lazySchema(() => strictObject(
   
   /** 
    * Connection Configuration 
-   * Specific to the driver (e.g., host, port, user, password, bucket, etc.)
-   * Stored securely (passwords usually interpolated from ENV).
+   * Specific to the driver (e.g., host, port, user, database, bucket, etc.)
+   * Never carries the credential: the driver contracts refuse an inline
+   * password, and the secret is bound through `external.credentialsRef`.
    */
   config: z.record(z.string(), z.unknown()).describe('Driver specific configuration'),
   
