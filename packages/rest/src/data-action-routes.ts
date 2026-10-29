@@ -307,7 +307,7 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                 const p = await this.resolveProtocol(environmentId, req);
                 const context = await this.resolveExecCtx(environmentId, req);
                 if (this.enforceAuth(req, res, context)) return;
-                if (await this.enforceApiAccess(req, res, p, environmentId, 'create')) return;
+                if (await this.enforceApiAccess(req, res, p, environmentId, 'create', context)) return;
                 const cloneData = (p as any).cloneData;
                 if (typeof cloneData !== 'function') {
                     res.status(501).json({ code: 'NOT_IMPLEMENTED', error: 'Clone not supported by this protocol' });
@@ -360,7 +360,7 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                 const p = await this.resolveProtocol(environmentId, req);
                 const context = await this.resolveExecCtx(environmentId, req);
                 if (this.enforceAuth(req, res, context)) return;
-                if (await this.enforceApiAccess(req, res, p, environmentId, 'get')) return;
+                if (await this.enforceApiAccess(req, res, p, environmentId, 'get', context)) return;
                 // Closed and empty: the record is the path, and nothing else is read.
                 if (refuseUnknownQueryParams(req, res, RECORD_FIELD_ACCESS_PARAMS)) return;
                 const object = String(req.params.object);
@@ -426,7 +426,7 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                     res.status(400).json({ code: 'INVALID_REQUEST', error: 'object is required' });
                     return;
                 }
-                if (await this.enforceApiAccess(req, res, p, environmentId, 'import')) return;
+                if (await this.enforceApiAccess(req, res, p, environmentId, 'import', context)) return;
                 const body = req.body ?? {};
 
                 // [#24348] Who may take the object's declared controls off this
@@ -464,7 +464,7 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                 // mode is known, re-gate precisely: insert→create, update→update,
                 // upsert→create∧update. Catches e.g. an object that grants only
                 // `create` receiving an update-mode import.
-                if (await this.enforceApiAccess(req, res, p, environmentId, 'import', { writeMode })) return;
+                if (await this.enforceApiAccess(req, res, p, environmentId, 'import', context, { writeMode })) return;
 
                 // Delegate the per-row coercion + upsert loop to the shared
                 // runner (also used by the async import-job worker).
@@ -546,7 +546,7 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                     res.status(400).json({ code: 'INVALID_REQUEST', error: 'object is required' });
                     return;
                 }
-                if (await this.enforceApiAccess(req, res, p, environmentId, 'import')) return;
+                if (await this.enforceApiAccess(req, res, p, environmentId, 'import', context)) return;
 
                 // [#24348] The synchronous door's control opt-out gate, asked at
                 // the same point: before the body is parsed and before a job row
@@ -574,7 +574,7 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                 // [#3391] Import gate — stage 2 (precise), see the synchronous
                 // route: now that writeMode is resolved, re-gate precisely
                 // (insert→create, update→update, upsert→create∧update).
-                if (await this.enforceApiAccess(req, res, p, environmentId, 'import', { writeMode: prepared.writeMode })) return;
+                if (await this.enforceApiAccess(req, res, p, environmentId, 'import', context, { writeMode: prepared.writeMode })) return;
 
                 const jobId = newImportJobId();
                 const createdAt = new Date().toISOString();
@@ -1027,7 +1027,7 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                 if (readTemplateMode({ template: req.query?.template }).kind === 'template') {
                     if (await this.enforceImportTemplateGates(req, res, p, environmentId, objectName, context)) return;
                 } else {
-                    if (await this.enforceApiAccess(req, res, p, environmentId, 'export')) return;
+                    if (await this.enforceApiAccess(req, res, p, environmentId, 'export', context)) return;
                     // [#3544] …then the USER-level one. The object may expose
                     // export while THIS caller's permission sets deny it.
                     if (await this.enforceExportPermission(req, res, environmentId, objectName, context)) return;

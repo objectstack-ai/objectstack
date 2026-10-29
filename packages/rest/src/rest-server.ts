@@ -2678,6 +2678,13 @@ export class RestServer {
         p: RestProtocol,
         environmentId: string | undefined,
         operation: string,
+        /**
+         * The request's resolved context, as the route already holds it (the
+         * one it handed `enforceAuth`). Required, so a route cannot ask this
+         * gate without it: the API-key management rule below reads which
+         * credential admitted the caller off it (`__admittedBy`).
+         */
+        context: unknown,
         opts?: ApiAccessOpts,
     ): Promise<boolean> {
         const objectName = req?.params?.object;
@@ -2705,14 +2712,12 @@ export class RestServer {
         // `@objectstack/core`, whose docblock carries the rule). Asked after the
         // exposure verdict, so an operation the object does not expose keeps its
         // `405`, and here because every data route of this server passes this
-        // gate. The context is the request's memoized one, already resolved by
-        // the route before it asked this gate; `__admittedBy` is the credential
-        // the shared resolver told `computeExecCtx`.
-        const context = await this.resolveExecCtx(environmentId, req);
+        // gate. `__admittedBy` is the credential the shared resolver told
+        // `computeExecCtx`, on the context the route hands in.
         const credentialRefusal = apiKeyManagementCredentialRefusal({
             object: objectName,
             operation,
-            credential: context?.__admittedBy,
+            credential: (context as { __admittedBy?: 'api_key' | 'session' } | undefined)?.__admittedBy,
         });
         if (credentialRefusal) {
             const mapped = mapDataError(credentialRefusal, objectName);
@@ -2871,7 +2876,7 @@ export class RestServer {
         objectName: string,
         context: any,
     ): Promise<boolean> {
-        if (await this.enforceApiAccess(req, res, p, environmentId, 'import')) return true;
+        if (await this.enforceApiAccess(req, res, p, environmentId, 'import', context)) return true;
         const security = await this.resolveSecurityService(environmentId, req);
         if (!security || typeof security.explain !== 'function') return false;
         let allowed: boolean;
