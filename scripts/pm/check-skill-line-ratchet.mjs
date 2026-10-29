@@ -1564,7 +1564,16 @@ export const CEILINGS = new Map([
   // comment 6500750765 — +13 measured lines (a security finding gets no card and
   // the PM session dispatches its fix, the runner only tests, runner effort by
   // card shape per backend, the spend line).
-  ['.claude/skills/checklist-test/SKILL.md', 259],
+  // 259 → 276: the ruling of record on #27377 — the maintainer's four
+  // standing-regression options and 「这些都应该写到 checklist skills 中」, recorded
+  // verbatim in comment 6501246005 — +17 measured lines: 20 ruled (the
+  // `touched:<sha>` selector row, retest trigger 4, the npm smoke locator
+  // exception in §5, §6 standing regression) less 3 repaid by rejoining §5
+  // wraps that had broken mid-word.
+  // 276 → 277: comment 6500750765 again, +1 measured line: retest trigger 2's
+  // security-hardening clause (no card exists, so the PM session that landed the
+  // hardening re-runs the item itself).
+  ['.claude/skills/checklist-test/SKILL.md', 277],
   ['.claude/skills/checklist-author/SKILL.md', 62],
   // 157 → 140 (#25753): lines that named objectui as a sibling repo retired; landed count.
   ['.claude/skills/dogfood-verification/SKILL.md', 140],
