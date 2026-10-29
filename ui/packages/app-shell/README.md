@@ -544,6 +544,21 @@ for each metadata type. Every type has a pure-renderer **preview** that doubles
 as its **designer** when given `editing` + `onPatch` props — no backend round
 trip is required to edit a draft.
 
+### New dataset beside the Studio's dataset pickers (objectstack#27518)
+
+The Interfaces pillar provides `StudioDatasetAuthoringContext`
+(`src/views/studio-design/datasetCreate.tsx`): the package being edited and the
+pillar's draft-saved signal. A dataset picker that finds it (the New report
+dialog's `ReportCreateFields` and the dashboard widget inspector) reads the
+draft-overlaid dataset catalog (`useDatasetCatalog(…, { previewDrafts: true })`),
+lists the package's datasets first, and renders `DatasetCreateEntry`: a **New
+dataset** button whose dialog saves a `dataset` draft in the package through
+the draft door (the spec's create seed, the picked object, a dimension per
+group-by field and a `sum` measure per total), re-reads the catalog and binds
+the new name. While no dataset reads one of the package's objects, the entry
+says so. Outside the Studio there is no context: Setup's editors keep the
+published catalog and offer no entry.
+
 ### AI chat conversation key (ADR-0057)
 
 The console's AI chat surfaces are **views over one conversation model**, not

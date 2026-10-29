@@ -219,6 +219,7 @@ import {
   type PageSourceKind,
   type ReportBinding,
 } from './interfaceCreate.js';
+import { StudioDatasetAuthoringContext, type StudioDatasetAuthoring } from './datasetCreate.js';
 import { PermissionMatrixEditPage, type PermissionStudioTab } from '../metadata-admin/PermissionMatrixEditor.js';
 import { AccessExplainPanel } from '../metadata-admin/AccessExplainPanel.js';
 import {
@@ -5009,6 +5010,13 @@ export function InterfacesPillar({
   const [createError, setCreateError] = React.useState<string | null>(null);
   const [reportBinding, setReportBinding] = React.useState<ReportBinding>(NO_REPORT_BINDING);
   const [pageKind, setPageKind] = React.useState<PageSourceKind>(DEFAULT_PAGE_SOURCE_KIND);
+  // objectstack#27518 — the New dataset entry beside the report dialog's and
+  // the widget inspector's dataset pickers saves into this package, and its
+  // presence is what has those pickers read the draft-overlaid catalog.
+  const datasetAuthoring = React.useMemo<StudioDatasetAuthoring>(
+    () => ({ packageId, onDraftSaved }),
+    [packageId, onDraftSaved],
+  );
   const openCreate = React.useCallback(
     (kind: InterfaceCreateKind) => {
       // objectstack#26845 — the created item opens at once, and its load
@@ -5914,6 +5922,7 @@ export function InterfacesPillar({
   }));
 
   return (
+    <StudioDatasetAuthoringContext.Provider value={datasetAuthoring}>
     <div className="flex h-full flex-col">
       {leafConflictDialog}
       {navConflictDialog}
@@ -5969,7 +5978,12 @@ export function InterfacesPillar({
         locale={locale}
         extra={
           createKind === 'report' ? (
-            <ReportCreateFields value={reportBinding} onChange={setReportBinding} locale={locale} />
+            <ReportCreateFields
+              value={reportBinding}
+              onChange={setReportBinding}
+              authoring={datasetAuthoring}
+              locale={locale}
+            />
           ) : createKind === 'page' ? (
             <PageCreateFields value={pageKind} onChange={setPageKind} locale={locale} />
           ) : undefined
@@ -6152,6 +6166,7 @@ export function InterfacesPillar({
         </div>
       </div>
     </div>
+    </StudioDatasetAuthoringContext.Provider>
   );
 }
 

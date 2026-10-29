@@ -454,6 +454,15 @@ export function registerExternalDatasourceRoutes(
    * included: a sandboxed refusal declaring one, and the metadata door's
    * `409 DESTRUCTIVE_CHANGE` the import dogfood pins at `400`. That status is
    * a separate decision this does not take.
+   *
+   * [#27618] One exception, the relay `service-datasource`'s admin routes make
+   * for the same throw: the `404` / `RESOURCE_NOT_FOUND` envelope says the
+   * NAME resolves no saved datasource (the service's federation guard throws
+   * it for a name with no definition). It is answered as such, as
+   * `GET /datasources/:name` answers that name, not as this family's `400`,
+   * which told the caller to re-declare a datasource that does not exist. Both
+   * fields are required, so an unrelated error carrying a stray `status`
+   * cannot re-route itself.
    */
   const answerThrown = (
     res: any,
@@ -465,6 +474,10 @@ export function registerExternalDatasourceRoutes(
       logError('[REST] external-datasource error:', err);
       const nested = nestedRefusalEnvelope(fault);
       return sendError(res, nested.status, nested.code, nested.message, nested.extra);
+    }
+    const envelope = err as { code?: unknown; status?: unknown } | null | undefined;
+    if (envelope?.status === 404 && envelope?.code === 'RESOURCE_NOT_FOUND') {
+      return sendError(res, 404, 'RESOURCE_NOT_FOUND', (err as Error).message);
     }
     return sendError(res, 400, code, refusalSentence(err));
   };

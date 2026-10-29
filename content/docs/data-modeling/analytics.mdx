@@ -128,6 +128,29 @@ in place of `field`:
 - Comparing each record's duration against a value held on another object (an
   SLA target per ticket type, say) is not part of it.
 
+### Creating one in Studio
+
+A package author does not have to leave the Studio to get a dataset over the
+package's own objects. The New report dialog's dataset picker and the dashboard
+widget inspector's both carry a **New dataset** button. Its dialog asks for:
+
+- a **name** (the identifier is derived from it and stays editable);
+- the **object** the dataset reads, preselected when the package has exactly
+  one;
+- optionally the fields to **group by** (select, radio, boolean, lookup and
+  master-detail fields, one dimension each) and the number fields to
+  **total** (one `sum` measure each).
+
+It saves an ordinary `dataset` draft in the package, published with the rest of
+the package, and the picker selects it. Every dataset written this way counts
+its records (a `count` measure), so a report or a chart can bind it at once.
+Nothing is derived without the author: there are no implicit datasets. Joins,
+filters, date dimensions and derived measures are edited afterwards in
+**Setup › Datasets**.
+
+While no dataset reads one of the package's objects, the Studio pickers say so
+beside the button, and they list the package's own datasets first.
+
 ## Binding a dashboard widget
 
 A widget selects dimensions/measures by name. Its presentation-scope `filter`
