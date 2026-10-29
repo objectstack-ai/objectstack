@@ -6,10 +6,8 @@
  * or a tab close asks first, as it does for every other held Studio edit.
  *
  * The canvas reports the pending rename and the pillar folds it into the one
- * held-edit report the surface already reads (`useHeldEditReport`), so the
- * surface's single `beforeunload` guard covers it. Rendered through the REAL
- * `StudioDesignSurface` on the real route shape. A bare `AppNavCanvas` (the
- * `AppPreview` caller passes no report) renames as before.
+ * held-edit report the surface already reads, so its one `beforeunload` guard
+ * covers it. A bare `AppNavCanvas` (the `AppPreview` caller) renames as before.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -55,11 +53,8 @@ vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => nul
 import { StudioDesignSurface } from './StudioDesignSurface';
 import { AppNavCanvas } from '../metadata-admin/previews/AppNavCanvas';
 
-window.matchMedia = ((query: string) => ({
-  matches: false, media: query, onchange: null,
-  addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {},
-  dispatchEvent: () => false,
-})) as unknown as typeof window.matchMedia;
+const noop = () => {};
+window.matchMedia = ((media: string) => ({ matches: false, media, addEventListener: noop, removeEventListener: noop })) as unknown as typeof window.matchMedia;
 (globalThis as { ResizeObserver?: unknown }).ResizeObserver =
   (globalThis as { ResizeObserver?: unknown }).ResizeObserver ?? class { observe() {} unobserve() {} disconnect() {} };
 
@@ -67,14 +62,11 @@ beforeEach(() => {
   for (const fn of Object.values(mockClient)) (fn as unknown as { mockClear: () => void }).mockClear();
   mockClient.layered.mockImplementation(async (type: string) => {
     const effective = type === 'app' ? { name: 'acme_app', label: 'Acme', navigation: NAV } : type === 'page' ? HOME : null;
-    return { code: null, overlay: effective, overlayScope: effective ? 'env' : null, effective, editable: true };
+    return { code: null, overlay: null, overlayScope: null, effective, editable: true };
   });
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => [] })) as unknown as typeof fetch);
 });
-afterEach(() => {
-  cleanup();
-  vi.unstubAllGlobals();
-});
+afterEach(() => (cleanup(), vi.unstubAllGlobals()));
 
 /** Whether a reload / tab close would be asked about. */
 function reloadAsks(): boolean {
