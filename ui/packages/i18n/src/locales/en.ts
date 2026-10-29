@@ -2512,6 +2512,8 @@ const en = {
       planApproveDefaultsMessage:
         'Build it with your best assumptions; use sensible defaults for the open questions.',
       planAnswerMessage: 'For "{{question}}", go with: {{option}}.',
+      planExtendExistingMessage: 'Keep improving "{{app}}" instead of building a new app.',
+      planBuildNewAppMessage: 'Build a separate, new app.',
       changesTitle: 'Confirm changes',
       changesConfirmed: 'Confirmed',
       changesConfirm: 'Confirm',
@@ -4508,6 +4510,13 @@ const en = {
       countSeedData: 'sample data',
       extendTarget: 'Adding to existing app: {{app}}',
       awaitingConfirm: 'Awaiting confirmation',
+      iterateOrNew: {
+        question: 'This overlaps "{{app}}", an app you already have. Keep improving it, or build a separate app?',
+        questionUnnamed: 'This overlaps an app you already have. Keep improving that app, or build a separate one?',
+        extend: 'Keep improving "{{app}}"',
+        buildNew: 'Build a separate app',
+        replyHint: 'Reply to say which.',
+      },
       objectsAndFields: 'Objects and fields',
       views: 'Views',
       suggestedField: 'suggested',
