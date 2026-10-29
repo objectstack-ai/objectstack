@@ -15,6 +15,7 @@
 // + `code`) with the protocol never asked, and the served write's arguments.
 
 import { describe, it, expect, vi } from 'vitest';
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { RestServer } from './rest-server';
 
 function createMockServer() {
@@ -52,7 +53,14 @@ function setup(admittedBy: 'api_key' | 'session' | undefined, sysApiKeyMethods =
     updateManyData,
   };
   const transaction = vi.fn(async (fn: any) => fn({}));
-  const engine: any = { transaction, update: vi.fn(async () => ({})), insert: vi.fn(), delete: vi.fn() };
+  // The cross-object batch's engine: its update refuses what a real engine refuses.
+  const engine: any = {
+    transaction,
+    update: vi.fn(async (_object: string, data: any, options?: any) => {
+      assertEngineUpdateDispatch(data, options);
+      return { ...data };
+    }),
+  };
   const rest = new RestServer(
     createMockServer() as any, protocol, { api: { requireAuth: false } } as any,
     undefined, undefined, undefined, undefined,
