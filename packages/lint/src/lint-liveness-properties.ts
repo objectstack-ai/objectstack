@@ -213,14 +213,17 @@ function isAuthored(value: unknown): boolean {
  * `#14057` is the same defect class arriving through a different door, and the
  * reason the boundary below is a THROW rather than a fallthrough. #13483 added
  * the fifth status to the ledger vocabulary — `live-elsewhere`: dead HERE by
- * measurement, genuinely enforced in a sibling repo (first row:
- * `manifest.runtime`, whose enforcer is the cloud marketplace publish gate) —
- * without teaching this function about it. Falling into `dead` would have said
- * "Remove it" about a key whose enforcement is real and remote, i.e. exactly
- * the most wrong sentence available: deleting it tears out a live gate's
- * input. That row is not deletable, so `live-elsewhere` gets its own branch and
- * its own rule id, and its default hint points the author at the ledger row's
- * `evidence` — the enforcer's address — rather than at a delete key.
+ * measurement, genuinely enforced in a sibling repo (a key with zero local
+ * dispatch whose only enforcer is a gate in another repository — a publish
+ * gate, a closed runtime's check — named by the ledger row's `evidence`;
+ * no shipped row holds the verdict today, and the ledger README keeps the
+ * historical worked example) — without teaching this function about it.
+ * Falling into `dead` would have said "Remove it" about a key whose
+ * enforcement is real and remote, i.e. exactly the most wrong sentence
+ * available: deleting it tears out a live gate's input. Such a row is not
+ * deletable, so `live-elsewhere` gets its own branch and its own rule id, and
+ * its default hint points the author at the ledger row's `evidence` — the
+ * enforcer's address — rather than at a delete key.
  *
  * Each verdict below also carries its own DEFAULT hint (used when the ledger
  * entry has no `authorHint`; the row's `note` is never shown to an author, since
@@ -292,7 +295,7 @@ function describe(entry: LedgerEntry): { kind: string; rule: string; defaultHint
       rule: LIVENESS_LIVE_ELSEWHERE_PROPERTY,
       defaultHint:
         'Keep it — nothing reads it when the stack loads here, but a sibling repo enforces it ' +
-        "(for `manifest.runtime`, the cloud marketplace publish gate); see the ledger row's " +
+        "(a publish gate or a closed runtime's own check); see the ledger row's " +
         'evidence for the enforcer.',
     };
   }
