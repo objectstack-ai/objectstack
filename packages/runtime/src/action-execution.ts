@@ -40,6 +40,9 @@ import { relationConditionSites } from '@objectstack/core';
 // [#25653] The app-automation elevation mark an action body's context carries
 // — see `buildActionExecutionContext`.
 import { markAppAutomationElevation } from '@objectstack/core';
+// Managing API keys is a signed-in-session act: the one rule this door's
+// per-object gate asks beside the exposure decision, shared with `RestServer`.
+import { apiKeyManagementCredentialRefusal } from '@objectstack/core';
 // [#9446] The ONE #9378 status table. Imported rather than re-read here: this
 // door's blanket `FLOW_FAILED` was the second of three readings of one engine
 // result, and a second definition of the rule is what let the doors diverge.
@@ -485,6 +488,21 @@ export async function refuseUnexposedDataAction(deps: ActionExecutionDeps,
     if (!gate.allowed) {
         throw Object.assign(new Error(gate.reason ?? 'API access denied'), exposureRefusalFields(gate), { object });
     }
+    // A write to `sys_api_key` from a principal an API key admitted is refused
+    // `403 PERMISSION_DENIED`: changing a key is a signed-in-session act, the
+    // answer `/keys` gives (`@objectstack/core` `apiKeyManagementCredentialRefusal`,
+    // whose docblock carries the rule). Asked after the exposure verdict, so an
+    // operation the object does not expose keeps its `405`, and on this gate
+    // because every data face of this door passes it: `/data`, the `/mcp`
+    // bridge and the action doors, through {@link callData}. The credential is
+    // the one the identity step was told (`HttpProtocolContext.admission`);
+    // a context that carries none keeps today's answer.
+    const credentialRefusal = apiKeyManagementCredentialRefusal({
+        object,
+        operation: action,
+        credential: requestContext?.admission?.credential,
+    });
+    if (credentialRefusal) throw credentialRefusal;
 }
 
 export async function callData(deps: ActionExecutionDeps,

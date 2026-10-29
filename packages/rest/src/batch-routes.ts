@@ -53,6 +53,10 @@ import type { DroppedFieldsEvent } from '@objectstack/spec/data';
 // The write-response rules (credential-class mask, `internal` omit) for
 // the cross-object batch's direct-engine update arm.
 import { omitInternalFieldsFromWriteResponse } from '@objectstack/core';
+// Managing API keys is a signed-in-session act: the rule every other data
+// route of this server asks at `enforceApiAccess`, asked per op here because
+// this route judges each op's object itself.
+import { apiKeyManagementCredentialRefusal } from '@objectstack/core';
 // The engine's own by-id predicates, which `ObjectQL.update` / `.delete`
 // dispatch on — the cross-object batch's up-front id check asks them.
 import { resolveEngineDeleteDispatch, resolveEngineUpdateDispatch } from '@objectstack/metadata-core';
@@ -296,6 +300,20 @@ export function registerBatchEndpoints(this: BatchRouteHost, basePath: string): 
                     }
                 }
 
+                // A write to `sys_api_key` from a request an API key
+                // authenticated is refused `403 PERMISSION_DENIED`, as on every
+                // single-object route (`enforceApiAccess`): after the exposure
+                // verdict above, so an op the object does not expose keeps its
+                // `405`, and before the transaction opens.
+                for (const op of ops) {
+                    const credentialRefusal = apiKeyManagementCredentialRefusal({
+                        object: op.object,
+                        operation: 'bulk',
+                        credential: (context as { __admittedBy?: 'api_key' | 'session' } | undefined)?.__admittedBy,
+                    });
+                    if (credentialRefusal) { handleRouteError(res, credentialRefusal, op.object); return; }
+                }
+
                 // Resolve `{ $ref: <opIndex> }` values against results collected
                 // so far. A ref MUST point at an earlier create whose id is known;
                 // anything else is a 400 (never a silent null FK).
@@ -430,7 +448,7 @@ export function registerBatchEndpoints(this: BatchRouteHost, basePath: string): 
                     if (this.enforceAuth(req, res, context)) return;
                     // [#3391] bulk ∧ child(body.operation) — the object must grant
                     // the `bulk` primitive AND the batched write kind.
-                    if (await this.enforceApiAccess(req, res, p, environmentId, 'bulk', { bulkChild: req.body?.operation })) return;
+                    if (await this.enforceApiAccess(req, res, p, environmentId, 'bulk', context, { bulkChild: req.body?.operation })) return;
                     // [#3899] Validate against the declared contract
                     // (`BatchUpdateRequestSchema`, catalog `requestSchema`) —
                     // this route used to hand the body straight to the
@@ -485,7 +503,7 @@ export function registerBatchEndpoints(this: BatchRouteHost, basePath: string): 
                     const context = await this.resolveExecCtx(environmentId, req);
                     if (this.enforceAuth(req, res, context)) return;
                     // [#3391] bulk ∧ create — createMany requires the `bulk` primitive.
-                    if (await this.enforceApiAccess(req, res, p, environmentId, 'bulk', { bulkChild: 'create' })) return;
+                    if (await this.enforceApiAccess(req, res, p, environmentId, 'bulk', context, { bulkChild: 'create' })) return;
                     // [#3899] Body IS the records array on this route (what
                     // `client.data.createMany` posts). Validate the assembled
                     // protocol request (`CreateManyDataRequestSchema`, catalog
@@ -538,7 +556,7 @@ export function registerBatchEndpoints(this: BatchRouteHost, basePath: string): 
                     const context = await this.resolveExecCtx(environmentId, req);
                     if (this.enforceAuth(req, res, context)) return;
                     // [#3391] bulk ∧ update — updateMany requires the `bulk` primitive.
-                    if (await this.enforceApiAccess(req, res, p, environmentId, 'bulk', { bulkChild: 'update' })) return;
+                    if (await this.enforceApiAccess(req, res, p, environmentId, 'bulk', context, { bulkChild: 'update' })) return;
                     // [#3933] Validate against the spec contract, and write the
                     // PATH object last. The body used to be spread over
                     // `object: req.params.object`, so `{"object":"other", …}`
@@ -594,7 +612,7 @@ export function registerBatchEndpoints(this: BatchRouteHost, basePath: string): 
                     const context = await this.resolveExecCtx(environmentId, req);
                     if (this.enforceAuth(req, res, context)) return;
                     // [#3391] bulk ∧ delete — deleteMany requires the `bulk` primitive.
-                    if (await this.enforceApiAccess(req, res, p, environmentId, 'bulk', { bulkChild: 'delete' })) return;
+                    if (await this.enforceApiAccess(req, res, p, environmentId, 'bulk', context, { bulkChild: 'delete' })) return;
                     // [#3897] Validate against the spec contract instead of
                     // splatting the raw body into the protocol request. Zod
                     // object schemas STRIP unknown keys, which is what makes
