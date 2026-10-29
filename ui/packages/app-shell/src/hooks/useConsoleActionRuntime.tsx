@@ -52,6 +52,7 @@ import { EnvironmentEntitlementDialog, type EntitlementDialogState } from '../en
 import { entitlementDialogFromError, type EntitlementDialogSpec } from '../environment/entitlements.js';
 import { resolvePageVarTokens } from '../utils/resolvePageVarTokens.js';
 import { launchConsoleFlow } from '../utils/flowLaunch.js';
+import { apiActionFailureMessage } from '../utils/flowResponse.js';
 import { createConsoleServerActionHandler } from '../utils/consoleServerAction.js';
 import { withNewTabUrlFastPath } from '../utils/newTabUrlFastPath.js';
 import { modalTargetRefusalMessage } from '../utils/modalTargetDiagnostics.js';
@@ -510,7 +511,9 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
             openEntitlementDialog(entitlementSpec);
             return { success: false };
           }
-          return { success: false, error: errorDetail(body, `HTTP ${res.status}`) };
+          // A flow-backed endpoint's refused run reads its inner refusal, not
+          // the node chain (objectstack#27487).
+          return { success: false, error: apiActionFailureMessage(res, body, `HTTP ${res.status}`, language) };
         }
         const json = await res.json().catch(() => ({}));
         // A business rejection can arrive as HTTP 200 with `success: false`
@@ -630,7 +633,7 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
     } catch (error) {
       return { success: false, error: (error as Error).message };
     }
-  }, [dataSource, objApiName, objects, metadata, authFetch, activeOrganization, refresh, openEntitlementDialog, t]);
+  }, [dataSource, objApiName, objects, metadata, authFetch, activeOrganization, refresh, openEntitlementDialog, t, language]);
 
   /**
    * Flow action handler — starts the flow through one of two doors

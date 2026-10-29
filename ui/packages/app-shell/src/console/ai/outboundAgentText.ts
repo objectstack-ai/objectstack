@@ -19,7 +19,7 @@
 // worse: never gated at all, so it sent the UI locale's value in both
 // directions.
 //
-// Hence this module: ONE resolver, four sites, both directions, and the UI pack
+// Hence this module: ONE resolver, every outbound site, both directions, and the UI pack
 // is never consulted. Chinese conversation -> the `zh` pack's value; anything
 // else -> the `en` pack's value. Reading the built-in packs directly (instead of
 // `t(key, { lng })`) is deliberate: an i18next lookup's answer depends on which
@@ -38,6 +38,8 @@ export type OutboundAgentTextKey =
   | 'planApproveMessage'
   | 'planApproveDefaultsMessage'
   | 'planAnswerMessage'
+  | 'planExtendExistingMessage'
+  | 'planBuildNewAppMessage'
   | 'changesConfirmMessage';
 
 /**
@@ -62,6 +64,17 @@ const GATE_TEXT: Record<OutboundAgentTextKey, Record<'zh' | 'en', string>> = {
   planAnswerMessage: {
     zh: '关于「{{question}}」，我选择「{{option}}」。',
     en: 'For "{{question}}", go with: {{option}}.',
+  },
+  // objectstack#27480 — the two answers of the extend-or-new question an
+  // `iterate_or_new` plan asks. Like `planAnswerMessage` they answer a question
+  // rather than approve a plan.
+  planExtendExistingMessage: {
+    zh: '在「{{app}}」上继续完善，不另建应用。',
+    en: 'Keep improving "{{app}}" instead of building a new app.',
+  },
+  planBuildNewAppMessage: {
+    zh: '另建一个独立应用。',
+    en: 'Build a separate, new app.',
   },
   changesConfirmMessage: {
     zh: '确认修改，应用你刚才提议的改动。',
@@ -106,9 +119,9 @@ export function resolveOutboundAgentText(
   // the boots where the console is running in Chinese. When it is not — an
   // English console answering a Chinese thread — this falls through to
   // {@link GATE_TEXT}, which `outboundAgentText.test.ts` pins BYTE-IDENTICAL to
-  // the `zh` pack's four values, so the text that leaves is the same either
+  // the `zh` pack's outbound values, so the text that leaves is the same either
   // way. ⛔ Do not import the `zh` pack back to close that branch: it would put
-  // a second 156 KB catalogue into every page load to re-derive four strings
+  // a second 156 KB catalogue into every page load to re-derive strings
   // that are already pinned equal.
   const template =
     packText(getLoadedBuiltInLocales()[lang], key) ?? GATE_TEXT[key][lang];

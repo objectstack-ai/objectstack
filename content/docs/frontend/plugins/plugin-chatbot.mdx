@@ -496,6 +496,13 @@ results declare. The plan card (`propose_blueprint`) reads the result's
 dashed chip for a field the agent added on its own, the record's name field,
 one line per view, the assumptions, the sample data the build will stage, and
 how the build will land (`posture`: live at once, or saved as a draft).
+A plan whose result says `decision: 'iterate_or_new'` overlaps an app the user
+already has (`existingAppOverlap`, by `name` and `label`). Its card draws no
+"Build it" button: in its place it asks whether to keep improving that app or
+build a separate one, naming the app, and each choice sends its answer as a
+chat message (`planExtendExistingMessage(app)` and `planBuildNewAppMessage`,
+which the console picks by the conversation's language). The question survives
+a reload from server history and from the console's message cache.
 The result card (`apply_blueprint`, then a later `verify_build` in the same
 turn) reads `checklist`: a passed/total chip, the verified lines in two
 columns, and the app and package that "Open app" and "View in Studio" open.

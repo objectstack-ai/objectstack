@@ -524,7 +524,9 @@ describe('#13753 · ADR-0131 D6 GET /meta/diagnostics sweeps the environment par
         await b.put(CACHED_ARM, 'authored_at_runtime');
         const swept = await b.diagnostics({ type: 'views' });
         expect(swept.status).toBe(200);
-        expect(swept.body?.stats?.views?.count).toBe(1);
+        // [#27514] …and keys it by the canonical type, not the plural it was asked by.
+        expect(swept.body?.stats?.view?.count).toBe(1);
+        expect(swept.body?.stats?.views).toBeUndefined();
     });
 
     it('every caller — another organization, none — is swept over it, on both arms', async () => {
