@@ -25,13 +25,20 @@
  * datasources: `DatasourceAdminServicePlugin` (the `datasource-connection`
  * service AppPlugin auto-connects through), `ExternalDatasourceServicePlugin`
  * and the external-validation plugin. The boot is paid in `beforeAll`.
+ *
+ * [#27277] Since P1 the engine holds this driver behind its correctness floor
+ * (`external-driver-floor.ts` in objectql): a plugin driver on a non-managed
+ * datasource is sent `where` and `orderBy` with `limit` EXTERNAL_ROW_CAP + 1,
+ * and the engine applies the whole query to the rows it returns. `findOne` and
+ * `count` are answered from that same read. The steps below pin what the
+ * remote is asked under the floor.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ObjectKernel, type Plugin, type PluginContext } from '@objectstack/core';
 import { defineStack, defineView } from '@objectstack/spec';
 import type { DriverQuery, IDataDriver, IExternalDatasourceService } from '@objectstack/spec/contracts';
-import { ObjectQLPlugin } from '@objectstack/objectql';
+import { ObjectQLPlugin, EXTERNAL_ROW_CAP, unwrapExternalDriverFloor } from '@objectstack/objectql';
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import { createRestApiPlugin } from '@objectstack/rest';
 import { AuthPlugin } from '@objectstack/plugin-auth';
@@ -464,8 +471,11 @@ afterAll(async () => {
 describe('(a) defineStack accepts a datasource whose driver is a plugin-published `driver.<name>` service', () => {
   it('the datasource names the driver by the service suffix, and the engine routes the object to that instance', () => {
     expect(STACK.datasources?.[0]).toMatchObject({ name: DATASOURCE, driver: DATASOURCE, config: {} });
-    expect(engine.getDriverByName(DATASOURCE)).toBe(driver);
-    expect(engine.getDriverForObject(OBJECT)).toBe(driver);
+    // [#27277] Behind the floor: one floored instance, wrapping this driver.
+    const held = engine.getDriverByName(DATASOURCE)!;
+    expect(held).not.toBe(driver);
+    expect(unwrapExternalDriverFloor(held)).toBe(driver);
+    expect(engine.getDriverForObject(OBJECT)).toBe(held);
   });
 
   it('auto-connect finds the driver already registered and leaves it alone; the boot connects it once', () => {
@@ -491,7 +501,7 @@ describe('(b) the stack boots with `checkOnBoot: false` and no `introspectSchema
 });
 
 describe('(c) GET /data/spike_node with the view\'s filter and sort reaches `driver.find` with a DriverQuery', () => {
-  it('the view\'s filter arrives as `where`, its sort as `orderBy`, `top` as `limit`; no projection, no offset', async () => {
+  it('the view\'s filter arrives as `where`, its sort as `orderBy`; `top` is the engine\'s, the remote is asked for the cap', async () => {
     // The plan view's filter as the console lowers it (`toFilterNode`), its
     // sort as `serializeOrderBy` writes it, and the console's page size.
     const plan = (STACK.views?.[0] as any)?.listViews?.plan;
@@ -503,18 +513,23 @@ describe('(c) GET /data/spike_node with the view\'s filter and sort reaches `dri
     const body = await readJson(res);
     expect(res.status, JSON.stringify(body)).toBe(200);
 
-    // Exactly what the remote system is asked — the whole DriverQuery,
-    // `object` included (the engine spreads it in although `DriverQuery`
-    // omits it), then a second round trip for the total.
+    // Exactly what the remote system is asked — `where` and `orderBy`, which
+    // it may push down, `object` (the engine spreads it in although
+    // `DriverQuery` omits it), and the floor's cap in place of `top`; then a
+    // second round trip for the total, which the floor answers from a read
+    // of the same shape (#27277).
     expect(calls.slice(mark)).toEqual([
       {
         method: 'find',
         object: OBJECT,
-        query: { where: { archived: false }, orderBy: [{ field: 'start_date', order: 'asc' }], limit: 50, object: OBJECT },
+        query: { where: { archived: false }, orderBy: [{ field: 'start_date', order: 'asc' }], limit: EXTERNAL_ROW_CAP + 1, object: OBJECT },
       },
-      { method: 'count', object: OBJECT, query: { object: OBJECT, where: { archived: false } } },
+      { method: 'find', object: OBJECT, query: { object: OBJECT, where: { archived: false }, limit: EXTERNAL_ROW_CAP + 1 } },
     ]);
-    expect((body.records as Row[]).map((r) => r.id)).toEqual(['n_root', 'n_cut', 'n_weld']);
+    // `n_root` and `n_cut` tie on `start_date`. The engine now orders the
+    // page itself, and a paged read breaks a tie by `id` (the partition rule
+    // `driver-sql` follows), so `n_cut` comes first.
+    expect((body.records as Row[]).map((r) => r.id)).toEqual(['n_cut', 'n_root', 'n_weld']);
   });
 });
 
@@ -546,7 +561,8 @@ describe('(e) PATCH /data/spike_node/:id runs `beforeUpdate` first, then `driver
     });
     // The hook read the pre-image through the driver, and nothing else.
     expect(calls.slice(mark).map((c) => c.method)).not.toContain('update');
-    expect(callsSince(mark, 'findOne').length).toBeGreaterThanOrEqual(1);
+    // [#27277] The floor answers `findOne` from a capped `find`.
+    expect(callsSince(mark, 'find').length).toBeGreaterThanOrEqual(1);
     expect(rows.find((r) => r.id === 'n_weld')).toMatchObject({ start_date: '2026-11-09', end_date: '2026-11-13' });
   });
 
@@ -569,21 +585,26 @@ describe('(e) PATCH /data/spike_node/:id runs `beforeUpdate` first, then `driver
     expect(body.record).toMatchObject({ id: 'n_cut', name: 'Cut', start_date: '2026-11-03', end_date: '2026-11-07', guard_note: 'checked', locked: false });
   });
 
-  it('(e3) on the default sharing model, a member holding allowEdit is refused every edit: the ownership checks read columns no remote row carries', async () => {
+  it('(e3) on the default sharing model, a member holding allowEdit is refused every edit: no declared owner, so the member\'s read scope admits no row (404)', async () => {
     const mark = calls.length;
     const res = await as(plannerToken, 'PATCH', `/data/${OWNED}/o_1`, { name: 'Renamed' });
     const body = await readJson(res);
-    expect(res.status, JSON.stringify(body)).toBe(403);
-    expect(body?.code).toBe('PERMISSION_DENIED');
+    // [#27425] The undeclared `owner_id` proves no owner, so the member's read
+    // scope admits no row and the edit's pre-image read finds none: 404, not
+    // the 403 it answered while the read went unscoped.
+    expect(res.status, JSON.stringify(body)).toBe(404);
+    expect(body?.code).toBe('RECORD_NOT_FOUND');
     const seen = calls.slice(mark).filter((c) => c.object === OWNED);
     expect(seen.map((c) => c.method)).not.toContain('update');
-    // What the remote is asked for: `owner_id` (the sharing check) and
-    // `created_by == current_user.id` (the platform ownership floor).
-    expect(seen).toContainEqual({ method: 'find', object: OWNED, query: { where: { id: 'o_1' }, fields: ['id', 'owner_id'], limit: 1, object: OWNED } });
+    // What the remote is asked for: `owner_id` by id (the sharing check), and
+    // the scoped pre-image read, which carries the deny-all sentinel.
+    // [#27277] Under the floor the remote sees each as a capped `find`; the
+    // engine applies the projection and `limit: 1` itself.
+    expect(seen).toContainEqual({ method: 'find', object: OWNED, query: { where: { id: 'o_1' }, limit: EXTERNAL_ROW_CAP + 1, object: OWNED } });
     expect(seen).toContainEqual({
-      method: 'findOne',
+      method: 'find',
       object: OWNED,
-      query: { where: { $and: [{ id: 'o_1' }, { created_by: plannerId }] }, object: OWNED, limit: 1 },
+      query: { where: { $and: [{ id: 'o_1' }, { id: '__deny_all__' }] }, object: OWNED, limit: EXTERNAL_ROW_CAP + 1 },
     });
     expect(owned[0]).toEqual({ id: 'o_1', name: 'Remote row' });
   });
@@ -607,8 +628,9 @@ describe('(g) object permission sets apply to the external object', () => {
     expect(body?.code).toBe('PERMISSION_DENIED');
     // The write door loads the record before it refuses — on a plugin driver
     // that is a round trip to the remote on behalf of a caller who may not read.
+    // [#27277] The floor answers that `findOne` from one capped `find`.
     expect(calls.slice(mark)).toEqual([
-      { method: 'findOne', object: OBJECT, query: { where: { id: 'n_cut' }, object: OBJECT, limit: 1 } },
+      { method: 'find', object: OBJECT, query: { where: { id: 'n_cut' }, object: OBJECT, limit: EXTERNAL_ROW_CAP + 1 } },
     ]);
     expect(rows.find((r) => r.id === 'n_cut')?.name).toBe('Cut');
   });

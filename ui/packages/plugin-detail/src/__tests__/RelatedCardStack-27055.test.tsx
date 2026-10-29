@@ -47,7 +47,7 @@ function StubNode({ schema }: { schema: any }) {
 import { RecordPageColumns } from '../RecordPageColumns';
 import { buildDefaultPageColumns } from '../synth/recordPageColumns';
 import { buildDefaultPageSchema } from '../synth/buildDefaultPageSchema';
-import { editRelatedArrangement, type RelatedArrangement } from '../synth/relatedArrangement';
+import { editRelatedArrangement, relatedDefaultOrderHash, type RelatedArrangement } from '../synth/relatedArrangement';
 
 const RELATED = [
   { objectName: 'task', relationshipField: 'lead_id', title: 'Tasks' },
@@ -125,6 +125,37 @@ describe('RelatedCardStack — the reader arranges the related cards (objectstac
     fireEvent.click(line.querySelector('button')!);
     expect(cardOrder(container)).toEqual(DEFAULT);
     expect(container.querySelector('[data-related-hidden-line]')).toBeNull();
+  });
+
+  it('「恢复默认顺序」 stands at the column foot once a card moved, and restores the default (objectstack#27241)', () => {
+    const onWrite = vi.fn();
+    const { container } = render(<Host onWrite={onWrite} />);
+    // The default arrangement: no foot line at all.
+    expect(container.querySelector('[data-related-foot-line]')).toBeNull();
+    fireEvent.click(screen.getByText('down task'));
+    expect(cardOrder(container)).toEqual(['note.parent_id', 'task.lead_id', 'call.lead_id']);
+    const foot = container.querySelector('[data-record-column="related"] [data-related-foot-line]')!;
+    expect(foot).not.toBeNull();
+    // Not the changed-default hint: the author's default did not change.
+    expect(container.querySelector('[data-related-default-changed]')).toBeNull();
+    const restore = foot.querySelector('[data-related-restore-default-order]') as HTMLButtonElement;
+    expect(restore.textContent).toBe('Restore default order');
+    fireEvent.click(restore);
+    expect(cardOrder(container)).toEqual(DEFAULT);
+    const written = onWrite.mock.calls.at(-1)![0];
+    expect(written.order).toEqual([]);
+    expect(written.basedOn).toBe(relatedDefaultOrderHash(DEFAULT));
+    expect(container.querySelector('[data-related-foot-line]')).toBeNull();
+  });
+
+  it('a hidden card puts 「恢复默认顺序」 on the hidden line, and it shows every card again (objectstack#27241)', () => {
+    const { container } = render(<Host />);
+    fireEvent.click(screen.getByText('hide note'));
+    const foot = container.querySelector('[data-related-foot-line]')!;
+    expect(foot.querySelector('[data-related-hidden-line]')).not.toBeNull();
+    fireEvent.click(foot.querySelector('[data-related-restore-default-order]')!);
+    expect(cardOrder(container)).toEqual(DEFAULT);
+    expect(container.querySelector('[data-related-foot-line]')).toBeNull();
   });
 
   it('says when the default changed under a dragged order, and restores it', () => {

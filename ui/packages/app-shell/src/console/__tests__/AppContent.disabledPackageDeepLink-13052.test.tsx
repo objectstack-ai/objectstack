@@ -272,6 +272,24 @@ describe('a deep link to an object read by name always leaves the splash (object
     expect(probeReads()).toBe(2);
   });
 
+  it('(c) #25915 — the failed-read state is announced (role="alert"), and its Retry still asks again', async () => {
+    server.next = 'server-error';
+    boot(DEEP_LINK);
+    await waitFor(() => expect(screen.getByTestId('route-object-read-failed')).toBeInTheDocument());
+    const failed = screen.getByTestId('route-object-read-failed');
+    expect(failed).toHaveAttribute('role', 'alert');
+    expect(failed).toContainElement(screen.getByTestId('route-object-read-failed-retry'));
+    await settle();
+    expect(probeReads()).toBe(1);
+
+    server.next = 'served';
+    fireEvent.click(screen.getByTestId('route-object-read-failed-retry'));
+    await waitFor(() => expect(screen.getByTestId('object-view')).toHaveTextContent(PROBE));
+    await settle();
+    expect(probeReads()).toBe(2);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
   it('(d) a 404 carrying a code this build does not know draws the failed state', async () => {
     server.next = 'unknown-code';
     boot(DEEP_LINK);
@@ -286,5 +304,6 @@ describe('a deep link to an object read by name always leaves the splash (object
     await settle(150);
     expect(probeReads()).toBe(1);
     expect(screen.queryByTestId('route-object-read-failed')).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });

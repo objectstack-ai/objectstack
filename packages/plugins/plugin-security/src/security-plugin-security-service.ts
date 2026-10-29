@@ -76,6 +76,7 @@ import {
   listAudienceBindingSuggestions,
   confirmAudienceBindingSuggestion,
   dismissAudienceBindingSuggestion,
+  reopenAudienceBindingSuggestion,
   type SuggestionDeps,
   type SuggestionListFilter,
 } from './suggested-audience-bindings.js';
@@ -370,13 +371,16 @@ export function registerSecurityService(
       },
       // [ADR-0090 D5/D9] Install-time suggestion surface: packages suggest a
       // set for `everyone`; a `manage_metadata` holder accepts it once for
-      // the deployment (the `everyone` definition is re-derived) or dismisses.
+      // the deployment (the `everyone` definition is re-derived) or dismisses,
+      // and may re-open a dismissal (back to pending — nothing granted).
       listAudienceBindingSuggestions: (callerContext?: any, filter?: SuggestionListFilter) =>
         listAudienceBindingSuggestions(suggestionDeps, callerContext, filter),
       confirmAudienceBindingSuggestion: (callerContext: any, id: string) =>
         confirmAudienceBindingSuggestion(suggestionDeps, callerContext, id),
       dismissAudienceBindingSuggestion: (callerContext: any, id: string) =>
         dismissAudienceBindingSuggestion(suggestionDeps, callerContext, id),
+      reopenAudienceBindingSuggestion: (callerContext: any, id: string) =>
+        reopenAudienceBindingSuggestion(suggestionDeps, callerContext, id),
     };
     // [ADR-0106 D7] The metadata-plane readable-field query, registered as an
     // EXTENSION of the published contract rather than inside the typed

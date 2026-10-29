@@ -212,11 +212,255 @@ export const blogRedirects = BLOG_PATH_PREFIXES.flatMap((prefix) => [
   ...MOVED_POSTS.map((slug) => [`${prefix}/blog/${slug}`, `${PRODUCT_SITE_ORIGIN}/en/blog/${slug}/`]),
 ]);
 
-/** Next.js redirects() entries derived from the two tables above. */
+/**
+ * This site's own origin, declared here for the same reason as
+ * `PRODUCT_SITE_ORIGIN`: `lib/site.ts` re-exports it as `SITE_ORIGIN` for the
+ * sitemap, `robots.txt` and the canonical links, and the cross-host redirects
+ * below name it, so the two can never name two hosts.
+ */
+export const DOCS_SITE_ORIGIN = 'https://objectstack.ai';
+
+/**
+ * The hosts the retired ObjectUI docs site answered on. `has` values are
+ * anchored regular expressions in Next (`^…$`), matched against the request's
+ * hostname with any port removed.
+ */
+export const OBJECTUI_HOST_PATTERN = '(?:www\\.)?objectui\\.org';
+
+/**
+ * www.objectui.org folded into this site: its pages moved to `/docs/frontend`
+ * (the ObjectUI SDK and its renderers), into the metadata pages they described,
+ * and into the generated component reference. Each row is an old objectui.org
+ * path and the path on THIS site that carries its content now.
+ *
+ * The rows are host-scoped (`has: [{ type: 'host' }]`, see `toNextRedirects`):
+ * they fire only for a request whose host is objectui.org or www.objectui.org,
+ * and answer a permanent redirect to the same path on `DOCS_SITE_ORIGIN`. So
+ * they are inert until those domains point at this Vercel project, and they
+ * can never shadow one of this site's own URLs: `/docs/plugins` on objectui.org
+ * is the old plugin gallery, `/docs/plugins` here is the plugins section.
+ *
+ * Every published path of the old site has a row: the 183 pages under its
+ * `content/docs` at the fold, by their URL. The final row catches everything
+ * else the site served (the home page, the playground, `llms.txt`, OG images)
+ * and sends it to the SDK section's landing page. First match wins, so it stays
+ * last.
+ *
+ * `scripts/check-docs-redirects.mjs` holds this table to the same rules as
+ * `docsRedirects`, judged on the host the destination is served from: every
+ * destination resolves to a real page under `content/docs`, and none is a
+ * source of `docsRedirects` (that would be a second hop).
+ */
+export const objectuiRedirects = [
+  // The ObjectUI SDK guide and the renderer-type pages, now under /docs/frontend.
+  ['/docs', '/docs/frontend'],
+  ['/docs/guide/quick-start', '/docs/frontend/quick-start'],
+  ['/docs/guide/building-crud-app', '/docs/frontend/building-crud-app'],
+  ['/docs/guide/architecture-overview', '/docs/frontend/architecture-overview'],
+  ['/docs/guide/schema-overview', '/docs/frontend'],
+  ['/docs/guide/schema-rendering', '/docs/frontend/schema-rendering'],
+  ['/docs/guide/component-registry', '/docs/frontend/component-registry'],
+  ['/docs/guide/fields', '/docs/frontend/fields'],
+  ['/docs/guide/plugins', '/docs/frontend/plugins'],
+  ['/docs/guide/plugin-development', '/docs/frontend/plugin-development'],
+  ['/docs/guide/data-source', '/docs/frontend/data-source'],
+  ['/docs/guide/layout', '/docs/frontend/layout'],
+  ['/docs/guide/theming', '/docs/frontend/theming'],
+  ['/docs/guide/troubleshooting', '/docs/frontend/troubleshooting'],
+  ['/docs/core/schema-renderer', '/docs/frontend/schema-rendering'],
+  ['/docs/layout/app-shell', '/docs/frontend/app-shell'],
+  ['/docs/layout/sidebar-nav', '/docs/frontend/sidebar-nav'],
+  ['/docs/api/schema-reference', '/docs/ui/components'],
+  ['/docs/utilities/cli', '/docs/frontend/cli'],
+  ['/docs/utilities/create-plugin', '/docs/frontend/create-plugin'],
+  ['/docs/utilities/data-objectstack', '/docs/frontend/data-objectstack'],
+  ['/docs/plugins', '/docs/frontend/plugins'],
+  ['/docs/plugins/plugin-calendar', '/docs/frontend/plugins/plugin-calendar'],
+  ['/docs/plugins/plugin-charts', '/docs/frontend/plugins/plugin-charts'],
+  ['/docs/plugins/plugin-chatbot', '/docs/frontend/plugins/plugin-chatbot'],
+  ['/docs/plugins/plugin-dashboard', '/docs/frontend/plugins/plugin-dashboard'],
+  ['/docs/plugins/plugin-detail', '/docs/frontend/plugins/plugin-detail'],
+  ['/docs/plugins/plugin-editor', '/docs/frontend/plugins/plugin-editor'],
+  ['/docs/plugins/plugin-form', '/docs/frontend/plugins/plugin-form'],
+  ['/docs/plugins/plugin-gantt', '/docs/frontend/plugins/plugin-gantt'],
+  ['/docs/plugins/plugin-grid', '/docs/frontend/plugins/plugin-grid'],
+  ['/docs/plugins/plugin-kanban', '/docs/frontend/plugins/plugin-kanban'],
+  ['/docs/plugins/plugin-list', '/docs/frontend/plugins/plugin-list'],
+  ['/docs/plugins/plugin-map', '/docs/frontend/plugins/plugin-map'],
+  ['/docs/plugins/plugin-markdown', '/docs/frontend/plugins/plugin-markdown'],
+  ['/docs/plugins/plugin-report', '/docs/ui/reports'],
+  ['/docs/plugins/plugin-timeline', '/docs/frontend/plugins/plugin-timeline'],
+  ['/docs/plugins/plugin-view', '/docs/frontend/plugins/plugin-view'],
+  ['/docs/components/basic/button-group', '/docs/frontend/renderers#basic'],
+  ['/docs/components/basic/div', '/docs/frontend/renderers#basic'],
+  ['/docs/components/basic/navigation-menu', '/docs/frontend/renderers#basic'],
+  ['/docs/components/basic/pagination', '/docs/frontend/renderers#basic'],
+  ['/docs/components/basic/separator', '/docs/frontend/renderers#basic'],
+  ['/docs/components/basic/sidebar', '/docs/frontend/renderers#basic'],
+  ['/docs/components/complex/carousel', '/docs/frontend/renderers#complex'],
+  ['/docs/components/complex/data-table', '/docs/frontend/renderers#complex'],
+  ['/docs/components/complex/filter-builder', '/docs/frontend/renderers#complex'],
+  ['/docs/components/complex/filter-ui', '/docs/frontend/renderers#complex'],
+  ['/docs/components/complex/resizable', '/docs/frontend/renderers#complex'],
+  ['/docs/components/complex/scroll-area', '/docs/frontend/renderers#complex'],
+  ['/docs/components/complex/sort-ui', '/docs/frontend/renderers#complex'],
+  ['/docs/components/complex/view-switcher', '/docs/frontend/renderers#complex'],
+  ['/docs/components/data-display/avatar', '/docs/frontend/renderers#data-display'],
+  ['/docs/components/data-display/breadcrumb', '/docs/frontend/renderers#data-display'],
+  ['/docs/components/data-display/kbd', '/docs/frontend/renderers#data-display'],
+  ['/docs/components/data-display/list', '/docs/frontend/renderers#data-display'],
+  ['/docs/components/data-display/statistic', '/docs/frontend/renderers#data-display'],
+  ['/docs/components/data-display/tree-view', '/docs/frontend/renderers#data-display'],
+  ['/docs/components/disclosure/collapsible', '/docs/frontend/renderers#disclosure'],
+  ['/docs/components/disclosure/toggle-group', '/docs/frontend/renderers#disclosure'],
+  ['/docs/components/feedback/empty', '/docs/frontend/renderers#feedback'],
+  ['/docs/components/feedback/loading', '/docs/frontend/renderers#feedback'],
+  ['/docs/components/feedback/progress', '/docs/frontend/renderers#feedback'],
+  ['/docs/components/feedback/skeleton', '/docs/frontend/renderers#feedback'],
+  ['/docs/components/feedback/sonner', '/docs/frontend/renderers#feedback'],
+  ['/docs/components/feedback/spinner', '/docs/frontend/renderers#feedback'],
+  ['/docs/components/feedback/toast', '/docs/frontend/renderers#feedback'],
+  ['/docs/components/form/calendar', '/docs/frontend/renderers#form'],
+  ['/docs/components/form/checkbox', '/docs/frontend/renderers#form'],
+  ['/docs/components/form/combobox', '/docs/frontend/renderers#form'],
+  ['/docs/components/form/command', '/docs/frontend/renderers#form'],
+  ['/docs/components/form/date-picker', '/docs/frontend/renderers#form'],
+  ['/docs/components/form/file-upload', '/docs/frontend/renderers#form'],
+  ['/docs/components/form/form', '/docs/frontend/renderers#form'],
+  ['/docs/components/form/input-otp', '/docs/frontend/renderers#form'],
+  ['/docs/components/form/input', '/docs/frontend/renderers#form'],
+  ['/docs/components/form/radio-group', '/docs/frontend/renderers#form'],
+  ['/docs/components/form/select', '/docs/frontend/renderers#form'],
+  ['/docs/components/form/slider', '/docs/frontend/renderers#form'],
+  ['/docs/components/form/switch', '/docs/frontend/renderers#form'],
+  ['/docs/components/form/textarea', '/docs/frontend/renderers#form'],
+  ['/docs/components/form/toggle', '/docs/frontend/renderers#form'],
+  ['/docs/components/layout/aspect-ratio', '/docs/frontend/renderers#layout'],
+  ['/docs/components/layout/page', '/docs/frontend/renderers#layout'],
+  ['/docs/components/navigation/header-bar', '/docs/frontend/renderers#navigation'],
+  ['/docs/components/overlay/alert-dialog', '/docs/frontend/renderers#overlay'],
+  ['/docs/components/overlay/context-menu', '/docs/frontend/renderers#overlay'],
+  ['/docs/components/overlay/dialog', '/docs/frontend/renderers#overlay'],
+  ['/docs/components/overlay/drawer', '/docs/frontend/renderers#overlay'],
+  ['/docs/components/overlay/dropdown-menu', '/docs/frontend/renderers#overlay'],
+  ['/docs/components/overlay/hover-card', '/docs/frontend/renderers#overlay'],
+  ['/docs/components/overlay/menubar', '/docs/frontend/renderers#overlay'],
+  ['/docs/components/overlay/popover', '/docs/frontend/renderers#overlay'],
+  ['/docs/components/overlay/sheet', '/docs/frontend/renderers#overlay'],
+  ['/docs/components/overlay/tooltip', '/docs/frontend/renderers#overlay'],
+  // Pages merged into the metadata pages. The Console and Studio guides aim at
+  // where their facts went, never at the retired /docs/ui/{console,studio}
+  // pages, which redirect themselves (a chain).
+  ['/docs/fields/auto-number', '/docs/data-modeling/field-types#autonumber'],
+  ['/docs/fields/boolean', '/docs/data-modeling/field-types#boolean'],
+  ['/docs/fields/currency', '/docs/data-modeling/field-types#currency'],
+  ['/docs/fields/date', '/docs/data-modeling/field-types#date'],
+  ['/docs/fields/datetime', '/docs/data-modeling/field-types#datetime'],
+  ['/docs/fields/email', '/docs/data-modeling/field-types#email'],
+  ['/docs/fields/file', '/docs/data-modeling/field-types#media-types'],
+  ['/docs/fields/formula', '/docs/data-modeling/field-types#formula'],
+  ['/docs/fields/grid', '/docs/data-modeling/field-types#master_detail'],
+  ['/docs/fields/image', '/docs/data-modeling/field-types#image'],
+  ['/docs/fields/location', '/docs/data-modeling/field-types#location'],
+  ['/docs/fields/lookup', '/docs/data-modeling/field-types#lookup'],
+  ['/docs/fields/number', '/docs/data-modeling/field-types#number'],
+  ['/docs/fields/object', '/docs/data-modeling/field-types#json'],
+  ['/docs/fields/password', '/docs/data-modeling/field-types#password'],
+  ['/docs/fields/percent', '/docs/data-modeling/field-types#percent'],
+  ['/docs/fields/phone', '/docs/data-modeling/field-types#phone'],
+  ['/docs/fields/rich-text', '/docs/data-modeling/field-types#richtext'],
+  ['/docs/fields/select', '/docs/data-modeling/field-types#select'],
+  ['/docs/fields/summary', '/docs/data-modeling/field-types#summary'],
+  ['/docs/fields/text', '/docs/data-modeling/field-types#text'],
+  ['/docs/fields/textarea', '/docs/data-modeling/field-types#textarea'],
+  ['/docs/fields/time', '/docs/data-modeling/field-types#time'],
+  ['/docs/fields/url', '/docs/data-modeling/field-types#url'],
+  ['/docs/fields/user', '/docs/data-modeling/field-types#user'],
+  ['/docs/fields/vector', '/docs/data-modeling/field-types#vector'],
+  ['/docs/fields/widget-props', '/docs/data-modeling/field-types#how-the-console-renders-a-field'],
+  ['/docs/guide/console', '/docs/build-without-code'],
+  ['/docs/guide/metadata-diagnostics', '/docs/deployment/validating-metadata#metadata-diagnostics-on-load'],
+  ['/docs/guide/flow-designer', '/docs/automation/flows'],
+  ['/docs/guide/notifications', '/docs/build-without-code'],
+  ['/docs/guide/slotted-pages', '/docs/ui/pages#record-pages'],
+  ['/docs/guide/record-edit-modes', '/docs/ui/create-vs-edit-form#modal-or-page-editmode'],
+  ['/docs/guide/designing-app-navigation', '/docs/ui/apps#designing-the-navigation'],
+  ['/docs/guide/dashboard-filters', '/docs/ui/dashboards#filter-controls-and-options'],
+  ['/docs/guide/public-forms', '/docs/ui/forms#6-internal-forms-_consoleformsname'],
+  ['/docs/guide/user-state-persistence', '/docs/ui/views#a-users-list-state-never-writes-the-view'],
+  ['/docs/guide/expressions', '/docs/ui/pages#expression-holes-in-element-properties'],
+  ['/docs/guide/print-pages', '/docs/ui/print-pages#print-in-the-browser'],
+  ['/docs/guide/react-pages', '/docs/ui/react-pages'],
+  ['/docs/guide/agent-skills', '/docs/ai/skills#the-skill-catalog'],
+  ['/docs/core/app-schema', '/docs/ui/apps#action-navigation'],
+  ['/docs/core/report-schema', '/docs/ui/reports'],
+  ['/docs/core/enhanced-actions', '/docs/ui/actions#collect-input-and-shape-the-ux'],
+  ['/docs/core/theme-schema', '/docs/ui/apps#branding'],
+  ['/docs/layout/page-header', '/docs/ui/pages#the-page-header'],
+  // Component pages replaced by the generated component reference.
+  ['/docs/components', '/docs/ui/components'],
+  ['/docs/components/basic/icon', '/docs/ui/components/ui#icon'],
+  ['/docs/components/basic/image', '/docs/ui/components/ui#image'],
+  ['/docs/components/basic/span', '/docs/ui/components/html#span'],
+  ['/docs/components/basic/text', '/docs/ui/components/ui#text'],
+  ['/docs/components/complex/table', '/docs/ui/components/html#table'],
+  ['/docs/components/data-display/alert', '/docs/ui/components/ui#alert'],
+  ['/docs/components/data-display/badge', '/docs/ui/components/ui#badge'],
+  ['/docs/components/disclosure/accordion', '/docs/ui/components/ui#accordion'],
+  ['/docs/components/form/button', '/docs/ui/components/ui#button'],
+  ['/docs/components/form/label', '/docs/ui/components/html#label'],
+  ['/docs/components/layout/box', '/docs/ui/components/ui#box'],
+  ['/docs/components/layout/card', '/docs/ui/components/ui#card'],
+  ['/docs/components/layout/container', '/docs/ui/components/ui#container'],
+  ['/docs/components/layout/flex', '/docs/ui/components/ui#flex'],
+  ['/docs/components/layout/grid', '/docs/ui/components/ui#grid'],
+  ['/docs/components/layout/stack', '/docs/ui/components/ui#stack'],
+  ['/docs/components/layout/tabs', '/docs/ui/components/ui#tabs'],
+  // Pages deleted outright: the nearest section index.
+  ['/docs/guide', '/docs/frontend'],
+  ['/docs/guide/architecture', '/docs/frontend'],
+  ['/docs/guide/console-architecture', '/docs/frontend'],
+  ['/docs/guide/deployment', '/docs/frontend'],
+  ['/docs/guide/objectos-integration', '/docs/frontend'],
+  ['/docs/guide/release-notes', '/docs/frontend'],
+  ['/docs/guide/schema-catalog', '/docs/frontend'],
+  ['/docs/guide/schema-playground', '/docs/frontend'],
+  ['/docs/blocks', '/docs/frontend'],
+  ['/docs/blocks/authentication', '/docs/frontend'],
+  ['/docs/blocks/dashboard', '/docs/frontend'],
+  ['/docs/blocks/ecommerce', '/docs/frontend'],
+  ['/docs/blocks/forms', '/docs/frontend'],
+  ['/docs/blocks/marketing', '/docs/frontend'],
+  ['/docs/api', '/docs/frontend'],
+  ['/docs/utilities', '/docs/frontend'],
+  ['/docs/utilities/runner', '/docs/frontend'],
+  ['/docs/utilities/vscode-extension', '/docs/frontend'],
+  ['/docs/rfcs/0001-clipboard-paste', '/docs/frontend'],
+  ['/docs/plugins/plugin-ai', '/docs/frontend/plugins'],
+  ['/docs/plugins/plugin-designer', '/docs/frontend/plugins'],
+  ['/docs/plugins/plugin-calendar-view', '/docs/frontend/plugins/plugin-calendar'],
+  ['/docs/components/feedback/toaster', '/docs/frontend/renderers#feedback'],
+  ['/docs/components/layout/semantic', '/docs/frontend/renderers#layout'],
+  // Everything else the old site served — keep last.
+  ['/:path*', '/docs/frontend'],
+];
+
+/** Next.js redirects() entries derived from the three tables above. */
 export function toNextRedirects() {
-  return [...docsRedirects, ...blogRedirects].map(([source, destination]) => ({
+  // The host-scoped rows come first: a request on objectui.org must never fall
+  // through to a row written for this site's own paths.
+  const objectui = objectuiRedirects.map(([source, destination]) => ({
     source,
-    destination,
+    destination: `${DOCS_SITE_ORIGIN}${destination}`,
     permanent: true,
+    has: [{ type: 'host', value: OBJECTUI_HOST_PATTERN }],
   }));
+  return [
+    ...objectui,
+    ...[...docsRedirects, ...blogRedirects].map(([source, destination]) => ({
+      source,
+      destination,
+      permanent: true,
+    })),
+  ];
 }

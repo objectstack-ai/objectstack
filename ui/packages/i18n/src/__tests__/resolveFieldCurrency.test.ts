@@ -78,6 +78,14 @@ describe('currencyMode decides whether currencyConfig.defaultCurrency is read (o
     expect(resolveFieldCurrency({ currencyConfig: parsed }, TENANT)).toBe('USD');
   });
 
+  it('record: the field names no currency of its own, so nothing supplies one, the tenant default included', () => {
+    const parsed = CurrencyConfigSchema.parse({ currencyMode: 'record', currencyField: 'currency_code' });
+    expect(resolveFieldCurrency({ currencyConfig: parsed }, TENANT)).toBeUndefined();
+    expect(resolveFieldCurrency({ currencyConfig: { ...parsed, defaultCurrency: 'EUR' } }, TENANT)).toBeUndefined();
+    expect(resolveFieldCurrency({ defaultCurrency: 'EUR', currencyConfig: parsed }, TENANT)).toBeUndefined();
+    expect(resolveFieldCurrency({ currencyConfig: parsed })).toBeUndefined();
+  });
+
   it('parsed-empty: the materialized shape as a renderer receives it', () => {
     expect(
       resolveFieldCurrency({ currencyConfig: { currencyMode: 'dynamic', defaultCurrency: 'CNY' } }, TENANT),

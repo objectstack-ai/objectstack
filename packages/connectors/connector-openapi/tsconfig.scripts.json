@@ -1,0 +1,20 @@
+// The type-check program for `scripts/**` -- the offline normalizer
+// (`normalize-openapi.mts`), its test and nothing else. `tsconfig.json` is the
+// BUILD config (`rootDir: ./src`, tests excluded) and `tsconfig.test.json` is
+// the `src` test layer; neither reaches `scripts/`, and a directory no program
+// includes is never type-checked at all. `package.json`'s `typecheck` script
+// NAMES this file, because a config no script invokes delivers no coverage.
+// Precedent: `packages/spec/tsconfig.scripts.json`.
+//
+// What differs from the build config: `rootDir` widens to the package (the
+// script imports `../src`), and the module semantics are ESM + bundler
+// resolution, which is how `tsx` and vitest run these files. ⛔ Strictness is
+// inherited untouched.
+{
+  "extends": ["./tsconfig.json", "../../../tsconfig.test.base.json"],
+  "compilerOptions": {
+    "rootDir": "."
+  },
+  "include": ["scripts/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

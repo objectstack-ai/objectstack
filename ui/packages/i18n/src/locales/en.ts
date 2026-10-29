@@ -1511,6 +1511,7 @@ const en = {
     relatedCardCount_other: '{{count}} records — enlarge',
     relatedDefaultChanged: 'Default order updated',
     relatedRestoreDefault: 'Restore default',
+    relatedRestoreDefaultOrder: 'Restore default order',
     relatedHiddenCount: '{{count}} hidden',
     relatedHiddenCount_one: '{{count}} hidden',
     relatedHiddenCount_other: '{{count}} hidden',
@@ -4524,6 +4525,9 @@ const en = {
         dashboard: 'Dashboards',
         app: 'App',
         seed: 'Sample data',
+        dataset: 'Datasets',
+        permission: 'Permissions',
+        other: 'Other',
       },
       moreArtifacts: '+{{n}} more',
       verifying: 'Checking the change…',
@@ -5385,6 +5389,11 @@ const en = {
     // keeps the flag, this says the flow does not run. The same words as
     // Studio's rail for the same state (`engine.studio.auto.notRunning`).
     notRunning: 'Not running here',
+    // The same row when the engine's cause is `deployment_policy` (objectstack#27378):
+    // package-authored scheduled work is off on this deployment. Plain words for the
+    // admin; the platform's sentence, which names the operator switch, stays behind
+    // the Details chip.
+    notRunningDeploymentPolicy: 'On, but this deployment does not run scheduled work',
     clone: 'Clone',
     cloneTitle: 'Clone packaged flow',
     cloneBody:

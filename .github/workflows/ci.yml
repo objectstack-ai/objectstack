@@ -451,7 +451,7 @@ jobs:
               # spelled it, exactly as the two narrower `skills/` entries were.
               - 'docs/**'
             # The objectui tree, the root files the ui jobs build from, and the
-            # three roots outside ui/ that the ui jobs' gates and tests read
+            # five paths outside ui/ that the ui jobs' gates and tests read
             # (objectstack#25712):
             #   - every root workflow, not ci.yml alone: Lint UI's pre-install
             #     import graph check scans all of `.github/workflows/` for ui
@@ -464,7 +464,14 @@ jobs:
             #     objectstack#26097. Lint UI's skill gates (skills-paths,
             #     skill-examples, skill-eval-tokens, doc-json,
             #     shell-escape-residue) and Test UI's skill readers find it
-            #     through `ui/scripts/skill-bundle-root.mjs`.
+            #     through `ui/scripts/skill-bundle-root.mjs`;
+            #   - `content/docs/frontend/**`, the ObjectUI SDK pages since the
+            #     objectui.org docs folded into this site. Lint UI's doc gates
+            #     (doc-types, doc-snippets, doc-json, doc-fences, spec-symbols)
+            #     and the Test UI tests that render a guide's example read them;
+            #   - `content/docs/ui/pages.mdx`, where the per-element data
+            #     binding section of the old data-source guide landed. Two Test
+            #     UI pins read its fences and its block table (objectstack#27145).
             ui:
               - 'ui/**'
               - 'pnpm-lock.yaml'
@@ -473,6 +480,8 @@ jobs:
               - '.github/workflows/**'
               - '.github/prompts/**'
               - 'skills/objectui/**'
+              - 'content/docs/frontend/**'
+              - 'content/docs/ui/pages.mdx'
               # turbo.json's `globalDependencies`: every build task hashes
               # them, so they move what the ui jobs build, the SDUI manifest's
               # regeneration included (#26137).
@@ -3981,8 +3990,10 @@ jobs:
       # when the tree moved under `ui/` (it reads only this repository's
       # `.github/workflows/`), and which objectstack#25712 deleted with the
       # rest of `ui/.github/workflows/`. They judge what objectui ships
-      # — `ui/content/docs/**`, the skill bundle (`skills/objectui/**` at the
-      # repository root since objectstack#26097), the package READMEs and the
+      # — the ObjectUI SDK pages (`content/docs/frontend/**` since the
+      # objectui.org docs folded into this site), the skill bundle
+      # (`skills/objectui/**` at the repository root since objectstack#26097),
+      # the package READMEs and the
       # documented component types — so the change most likely to trip them is
       # a docs-only or skills-only PR, which the `filter` job's `ui` globs
       # include.
@@ -3999,7 +4010,9 @@ jobs:
       # job's own restore and save serve the build below). Retired since: the
       # Action Ref Convention scan, which judged objectui's own workflows and
       # went with them (objectstack#25712); a repository-wide action-ref
-      # convention needs a home that no `ui` path filter skips (sub-issue 4).
+      # convention needs a home that no `ui` path filter skips (sub-issue 4);
+      # and the Doc Example Id and Docs Route Eager Closure checks, which
+      # judged the retired objectui.org site and went with it.
       - name: Control Byte Scan — Scan tracked text files for raw control bytes
         if: ${{ !cancelled() }}
         run: pnpm --dir ui run check:control-bytes
@@ -4035,10 +4048,6 @@ jobs:
           pnpm --dir ui run check:doc-fences --self-test
           pnpm --dir ui run check:doc-fences
 
-      - name: Doc Example Id Check — Check documented example ids against the catalog registry
-        if: ${{ !cancelled() }}
-        run: pnpm --dir ui run check:doc-example-ids
-
       - name: Doc Component Type Check — Check documented component types against the registry
         if: ${{ !cancelled() }}
         run: pnpm --dir ui run check:doc-types
@@ -4058,10 +4067,6 @@ jobs:
       - name: Skill Eval Token Check — Check every eval must_contain token against the guides
         if: ${{ !cancelled() }}
         run: pnpm --dir ui run check:skill-eval-tokens
-
-      - name: Docs Route Eager Closure Check — Weigh the docs route eager closure
-        if: ${{ !cancelled() }}
-        run: pnpm --dir ui run check:docs-route-closure
 
       - name: Install dependencies
         id: install

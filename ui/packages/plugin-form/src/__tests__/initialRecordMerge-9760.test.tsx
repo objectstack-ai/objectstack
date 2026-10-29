@@ -85,7 +85,6 @@ import { ObjectForm } from '../ObjectForm';
 import { ModalForm } from '../ModalForm';
 import { DrawerForm } from '../DrawerForm';
 import { TabbedForm } from '../TabbedForm';
-import { SplitForm } from '../SplitForm';
 import { WizardForm } from '../WizardForm';
 
 registerAllFields();
@@ -134,7 +133,6 @@ const SEEDING_ARMS: Array<[string, React.ComponentType<any>, string]> = [
   ['ModalForm', ModalForm as any, 'modal'],
   ['DrawerForm', DrawerForm as any, 'drawer'],
   ['TabbedForm', TabbedForm as any, 'tabbed'],
-  ['SplitForm', SplitForm as any, 'split'],
   ['WizardForm', WizardForm as any, 'wizard'],
 ];
 

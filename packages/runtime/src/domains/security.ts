@@ -18,6 +18,8 @@
  *   GET  /security/suggested-bindings?status=&packageId=   → list (reconciles first)
  *   POST /security/suggested-bindings/:id/confirm          → accept it for the deployment
  *   POST /security/suggested-bindings/:id/dismiss          → decline it, or revoke an acceptance
+ *   POST /security/suggested-bindings/:id/reopen           → take a dismissal back: pending again,
+ *                                                            nothing granted until confirmed
  *   POST /security/_activation/:type/:name                 → switch a position (`position`), a
  *                                                            permission set (`permission`), a declared
  *                                                            sharing rule (`sharing_rule`) or a declared
@@ -181,7 +183,7 @@ export async function handleSecurityRequest(
             return { handled: true, response: deps.success(result) };
         }
 
-        // POST /security/suggested-bindings/:id/confirm|dismiss
+        // POST /security/suggested-bindings/:id/confirm|dismiss|reopen
         if (parts.length === 3 && m === 'POST') {
             const id = decodeURIComponent(parts[1]);
             if (parts[2] === 'confirm') {
@@ -190,6 +192,22 @@ export async function handleSecurityRequest(
             }
             if (parts[2] === 'dismiss') {
                 const result = await service.dismissAudienceBindingSuggestion(ec, id);
+                return { handled: true, response: deps.success(result) };
+            }
+            // [#27149] OPTIONAL on the contract: a security service without the
+            // door is answered as such, never as a 404 on a mounted route.
+            if (parts[2] === 'reopen') {
+                if (typeof service.reopenAudienceBindingSuggestion !== 'function') {
+                    return {
+                        handled: true,
+                        response: deps.error(
+                            'This deployment\'s security service does not implement re-opening a dismissed ' +
+                            'audience-binding suggestion, so the dismissal stands.',
+                            501,
+                        ),
+                    };
+                }
+                const result = await service.reopenAudienceBindingSuggestion(ec, id);
                 return { handled: true, response: deps.success(result) };
             }
         }

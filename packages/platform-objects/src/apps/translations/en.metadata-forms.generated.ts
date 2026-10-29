@@ -618,15 +618,19 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       currencyConfig: {
         label: "Currency Config",
-        helpText: "Which currency this field is in — a currency field, or a formula whose return type is Currency. Unset: dynamic mode. The value is a bare number in either mode."
+        helpText: "Which currency this field is in — a currency field, or a formula whose return type is Currency. Unset: dynamic mode. The value is a bare number in every mode."
       },
       "currencyConfig.currencyMode": {
         label: "Currency Mode",
-        helpText: "dynamic (the default): the field has no currency of its own, and amounts display in the tenant default currency (the localization.currency setting). fixed: the field has one currency, defaultCurrency."
+        helpText: "dynamic (the default): the field has no currency of its own, and amounts display in the tenant default currency (the localization.currency setting). fixed: the field has one currency, defaultCurrency. record: each record has its own currency, stored in the field currencyField names."
+      },
+      "currencyConfig.currencyField": {
+        label: "Currency Field",
+        helpText: "Record mode only, and required there: the field on this object holding each record's ISO 4217 code — a text field with valueDomain iso_4217_currency, conventionally currency_code."
       },
       "currencyConfig.defaultCurrency": {
         label: "Default Currency",
-        helpText: "The one currency of a fixed-mode field, as a three-character ISO 4217 code (e.g. USD, EUR). Required in fixed mode; nothing fills one in. Not read in dynamic mode."
+        helpText: "The one currency of a fixed-mode field, as a three-character ISO 4217 code (e.g. USD, EUR). Required in fixed mode; nothing fills one in. Not read in dynamic mode; refused in record mode."
       },
       step: {
         label: "Step",

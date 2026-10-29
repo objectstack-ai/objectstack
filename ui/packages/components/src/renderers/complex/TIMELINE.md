@@ -346,7 +346,7 @@ The timeline component is built using these base UI components:
 
 ## Examples
 
-See the [interactive documentation](https://www.objectui.org/docs/plugins/plugin-timeline) for comprehensive examples of all three timeline variants in action.
+See the [interactive documentation](https://objectstack.ai/docs/frontend/plugins/plugin-timeline) for comprehensive examples of all three timeline variants in action.
 
 ## License
 

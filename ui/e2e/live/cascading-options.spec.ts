@@ -8,9 +8,8 @@ import { selectOption } from './helpers';
  * Drives the showcase `showcase_cascade` object (framework
  * examples/app-showcase) — a `country` -> `province` cascade authored with
  * per-option `visibleWhen` + field-level `dependsOn`, plus a role-gated `tier`.
- * This is the live-backend counterpart to the no-backend docs e2e
- * `e2e/cascading-options.spec.ts`: it proves the dual-side B3 contract against a
- * REAL stack —
+ * It proves the dual-side B3 contract against a REAL stack (its no-backend docs
+ * counterpart drove the retired objectui.org site and was deleted with it) —
  *
  *   1. CLIENT (UX): opening the create form and driving the parent `country`
  *      re-filters the child `province`'s OFFERED set via the canonical

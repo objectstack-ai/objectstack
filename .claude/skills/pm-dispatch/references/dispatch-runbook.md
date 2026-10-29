@@ -133,11 +133,11 @@
 - 披露纪律卡(私密细节不得离开席位会话)也留席内,认领写明;卡线程照计 `batch`。
 - 项目的 coordinator 跨席位统一调度卡线程;每席一个线程跑 PM 循环,卡线程即 dev。
 - 席位随时把候选卡交 coordinator,附优先级、派发令全文与建议 effort,⛔ 不等自己的槽位。
-- coordinator 按优先级开线程,p1 先;全项目上限由维护者按项目定(`coordinator.md`),满即排队。
 - 卡线程交回即释放槽位,席位当即告知 coordinator;审核期开着不占槽,REWORK 补丁轮再占一槽。
 - 档位与 effort 席位自推导 ⛔ 不等维护者原话:`--tier` 过路径,MANDATORY 即绑;effort 按难度。
 - 派发令写两者与推导(`--tier` 行或难度读数),协调者照令开线程;常设原话有则作 `reason:`。
 - 席位留认领文本/派发令/契约复核/ACCEPT/落地;线程实施、开 draft PR、驱动 CI 与可合并。
+- 线程 ⛔ 不做 harness 开 PR 后指派/请审:「审核通过才会推送给我审核」,请审是席位交棒。
 - 派发令由 coordinator 写进线程开场消息,`Writes:` 行逐字在内,⛔ 不落共享目录;卡上留指针。
 - coordinator 开线程即读线程分支交席位(读不到则线程自报);⛔ 线程不认领、不写 assignee。
 - 席位写 assignee+`pm:dispatched`+带该 `Branch:` 的认领;线程核对最新认领指向本分支方开工。

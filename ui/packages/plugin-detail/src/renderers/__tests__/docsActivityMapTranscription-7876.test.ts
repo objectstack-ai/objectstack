@@ -7,7 +7,7 @@
  *
  * The docs transcription pin for `ACTIVITY_TYPE_TO_FEED_TYPE` (objectui#7876).
  *
- * `content/docs/plugins/plugin-detail.mdx` restates the map in prose so readers
+ * `content/docs/frontend/plugins/plugin-detail.mdx` restates the map in prose so readers
  * can see the mapping without opening the source. Nothing read that sentence:
  * `check:doc-types` reads documented component type literals, `check:doc-snippets`
  * reads fenced code blocks, and `check:doc-fences` / `docs:check-links` /
@@ -59,7 +59,7 @@ import { ACTIVITY_TYPE_TO_FEED_TYPE } from '../recordActivityFeed';
 const here = path.dirname(fileURLToPath(import.meta.url));
 // packages/plugin-detail/src/renderers/__tests__ -> repository root
 const repoRoot = path.resolve(here, '../../../../..');
-const PAGE = path.join(repoRoot, 'content', 'docs', 'plugins', 'plugin-detail.mdx');
+const PAGE = path.join(repoRoot, '..', 'content', 'docs', 'frontend', 'plugins', 'plugin-detail.mdx');
 
 /**
  * The paragraph is located by its OPENING SENTENCE, never by line number.

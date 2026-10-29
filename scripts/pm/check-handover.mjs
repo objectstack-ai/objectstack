@@ -30,6 +30,16 @@
  *                         newer than it, and whose state labels (`PM_EXCLUSIVE_STATE_LABELS`, the six
  *                         mutually exclusive states of `SKILL.md`) are anything but `needs-user-decision` alone.
  *
+ * The sign-off hand-back rule (`seat-post-protocol.md`, 收班) names one refusal inside (a) and narrows (a)'s
+ * stay-behind (section below):
+ *
+ *   (a′) NEEDS_DECISION   a card (a) holds whose NEWEST `os-dev-report` (`latestDevReport`, the patrol's newest-of
+ *        HELD             reading) is newer than the claim and declares `"status": "needs_decision"`, while the card
+ *                         is not `needs-user-decision`. Refused under its own name because its remedy differs: a
+ *                         card whose dev asked a question is handed to the decision box, ⛔ never back to `pm:queue`,
+ *                         where the question reaches no maintainer — the measured shape left such a card
+ *                         `pm:dispatched` under a seat that had gone home.
+ *
  * Two readings in those definitions go past the order's literal spelling, and both are why the check can be
  * passed by a seat that did everything right:
  *
@@ -50,6 +60,9 @@
  *       the last `DEFAULT_WINDOW_HOURS` hours), and for each card whose latest session comment carries the
  *       marker, the card itself. A session comment older than the window is UNREAD, and the verdict says so;
  *       pass `--since` at the seating time the seat post registers to cover a longer shift.
+ *   (c) only when a held card is declared a stay-behind: the board's open pulls (one paged listing), then each pull
+ *       that delivers such a card — its comment thread, and its timeline only when its labels and `auto_merge` did
+ *       not already answer.
  *
  * A listing the ceiling bound, or a read that failed mid-run, is NOT a clean board (#4690): exit 4, never 0.
  *
@@ -72,13 +85,30 @@
  * card measured carried no marker, so (b) would not have fired on them; its recall is the four-facet filing duty's
  * (`decision-analysis.md`), and making the marker mandatory on a comment-anchored analysis is the director's card.
  *
- * ## A declared stay-behind is REPORTED, never refused (round 2, Q1 → B)
+ * The stay-behind reading asks whether the pull's NEWEST seat record is an ACCEPT, not whether that record was made
+ * for the pull's current head (H69 patrols that half on Tier H). And (a′) reads HELD claims only: a card already
+ * released to `pm:queue` while its dev's question is open has left (a)'s population; H52 (open questions unrouted)
+ * is the reader that still sees it.
  *
- * A seat that stays behind for a named tail (`seat-post-protocol.md`, 留守) still holds that card at
- * `pm:dispatched` under its own claim. (a) reports it — one `[stay-behind] #N` line — instead of refusing it, and only
- * when the tail is declared TWICE: on the command line (`--stay-behind=#N[,#N…]`) and on the `Stay-behind:` line of
- * the vacant body about to be written (`--body-file=PATH`). Listed but undeclared, or declared but unlisted, it stays
- * `[claim-unreleased]`; the measured half-state (#23193, never a declared tail) is refused exactly as before.
+ * ## A declared stay-behind is REPORTED only for an ACCEPTed pull that waits (round 2, Q1 → B; narrowed at sign-off)
+ *
+ * The default at sign-off is the hand-back (`seat-post-protocol.md`, 交接收尾清单 step 2): every claimed card goes
+ * back to `pm:queue` in one write — `Release:` with `Resume-from:`, the assignee cleared, `pm:dispatched` →
+ * `pm:queue`. Stay-behind (留守) is the one exception: a card whose pull request the seat has ACCEPTed and which now
+ * waits on someone else. Such a card is still held at `pm:dispatched` under the seat's claim, and (a) reports it —
+ * one `[stay-behind] #N` line — instead of refusing it, only when all three hold:
+ *
+ *   1. DECLARED TWICE  on the command line (`--stay-behind=#N[,#N…]`) and on the `Stay-behind:` line of the vacant
+ *                      body about to be written (`--body-file=PATH`);
+ *   2. ACCEPTED        an open pull request delivers the card (`deliveryEvidence`, the patrol's one reading of "this
+ *                      pull delivers card N") and its NEWEST seat record (`## 席位核对`, `seat-record.mjs`) is ACCEPT;
+ *   3. WAITING         that pull is in the merge queue (its timeline's newest queue event is `added_to_merge_queue`:
+ *                      `enqueuerFromTimeline`, the queue guard's reading), has auto-merge armed (read only in this
+ *                      finding-reducing direction, as H12 reads it), or awaits a human approval
+ *                      (`needs-user-decision` on the pull, the label the seat writes beside the approval request).
+ *
+ * Short of any one, it stays `[claim-unreleased]` and says which one failed; the measured half-state (#23193, never a
+ * declared tail) is refused exactly as before, and a card (a′) names is refused whatever it declares.
  *
  *   - The body comes from `--body-file`, ⛔ not from the live seat post (`--seat=#N` was the other offer): step 5 of the
  *     checklist runs this BEFORE the vacant body is written, so at that moment the live post is still the seated body
@@ -101,15 +131,20 @@ import { isEntrypoint } from '../invoked-as.mjs';
 import {
   CLAIM_COMMENT_MARKER,
   DECISION_FACET_MARKER,
+  GOVERNED_PR_DECISION_LABEL,
   OPEN_LISTING_PAGE_CEILING,
+  OS_DEV_REPORT_MARKER,
   PM_EXCLUSIVE_STATE_LABELS,
   PROXY_FLAG,
   RELEASE_COMMENT_MARKER,
   SEAT_SESSION_ID,
   classifyTransportProbe,
+  deliveryEvidence,
   describeTransportRoute,
+  devReportPayloadCandidates,
   hasDecisionFacetMarker,
   labelNames,
+  latestDevReport,
   latestMarkedComment,
   markerMatches,
   pmLabelListingPath,
@@ -117,8 +152,10 @@ import {
   resolveSweepRepo,
   stripMarkdownCode,
 } from './check-half-states.mjs';
+import { enqueuerFromTimeline } from './check-governed-queue-guard.mjs';
 import { classifyRulingComment } from './check-prior-rulings.mjs';
 import { seatPostVacancy } from './post-stamped.mjs';
+import { SEAT_RECORD_MARKER, seatRecordAccepts } from './seat-record.mjs';
 
 const SELF_PATH = fileURLToPath(import.meta.url);
 const API = 'https://api.github.com';
@@ -180,6 +217,39 @@ export function claimHolding(issue, comments, { session, account }) {
     .reduce((best, c) => (best === null || isNewer(c, best) ? c : best), null);
   if (release !== null && isNewer(release, claim)) return { verdict: 'released', claim, release };
   return { verdict: 'held', claim };
+}
+
+/**
+ * The `status` an `os-dev-report` comment's payload declares, or `null` when the comment is no report or no payload
+ * reads. WHERE a payload sits is the patrol's reading (`devReportPayloadCandidates`: fenced blocks, then an unfenced
+ * object opening its own line), called rather than restated; only the field is read here.
+ */
+export function reportedStatus(body) {
+  const text = String(body ?? '');
+  if (!OS_DEV_REPORT_MARKER.test(text)) return null;
+  for (const candidate of devReportPayloadCandidates(text)) {
+    let doc;
+    try {
+      doc = JSON.parse(candidate);
+    } catch {
+      continue;
+    }
+    if (doc && typeof doc === 'object' && !Array.isArray(doc) && typeof doc.status === 'string') return doc.status;
+  }
+  return null;
+}
+
+/**
+ * (a′) over a card (a) HOLDS: the thread's newest `os-dev-report` (`latestDevReport`, the patrol's newest-of reading),
+ * when it is newer than the claim and reports `needs_decision` while the card is not `needs-user-decision` — that
+ * report's row; otherwise `null`. A report older than the claim belongs to an earlier dispatch, whose question was
+ * answered before this claim was made.
+ */
+export function decisionReportHeld(issue, comments, claim) {
+  if (labelNames(issue).includes(DECISION_INBOX_LABEL)) return null;
+  const report = latestDevReport(comments);
+  if (report === null || !isNewer(report.row, claim)) return null;
+  return reportedStatus(report.row?.body) === 'needs_decision' ? report.row : null;
 }
 
 /**
@@ -276,9 +346,41 @@ export function parseStayBehind(value) {
 }
 
 /**
- * The verdict over what the live read found — pure, so both stay-behind arms are pinned offline. A held card is
- * REPORTED only when it is listed on the command line AND declared on the vacant body's stay-behind line; every other
- * held card, and every decision outside the inbox, is refused.
+ * Conditions 2 and 3 of a stay-behind over ONE open pull request that delivers the card. Pure; `timeline` is
+ * `undefined` until it is read, and it is read only when the cheaper readings did not answer.
+ * @returns {{ state: 'waiting', how: string } | { state: 'no-accept' } | { state: 'not-waiting' } | { state: 'needs-timeline' }}
+ */
+export function acceptedPullWait(pr, comments, timeline) {
+  const rows = Array.isArray(comments) ? comments : [];
+  const record = latestMarkedComment(rows, SEAT_RECORD_MARKER);
+  if (record === null || !seatRecordAccepts(rows[record.index]?.body)) return { state: 'no-accept' };
+  if (labelNames(pr ?? {}).includes(GOVERNED_PR_DECISION_LABEL)) {
+    return { state: 'waiting', how: `awaiting a human approval (\`${GOVERNED_PR_DECISION_LABEL}\` on the pull)` };
+  }
+  if (pr?.auto_merge != null) return { state: 'waiting', how: 'armed for auto-merge' };
+  if (timeline === undefined) return { state: 'needs-timeline' };
+  if (enqueuerFromTimeline(timeline).state === 'read') return { state: 'waiting', how: 'in the merge queue' };
+  return { state: 'not-waiting' };
+}
+
+/** Why a declared stay-behind's pulls do not make it one — the sentence the refusal prints. */
+export function waitShortfall(pulls) {
+  if (!Array.isArray(pulls)) return 'no reading shows an ACCEPTed pull that waits';
+  if (pulls.length === 0) return 'no open pull request delivers it';
+  return pulls
+    .map((p) =>
+      p.state === 'no-accept'
+        ? `pull #${p.number} carries no ACCEPT as its newest \`## 席位核对\` record`
+        : `pull #${p.number} is ACCEPTed but is neither in the merge queue, armed for auto-merge, nor awaiting a human approval`,
+    )
+    .join('; ');
+}
+
+/**
+ * The verdict over what the live read found — pure, so every arm is pinned offline. A held card is REPORTED only
+ * when it is listed on the command line, declared on the vacant body's stay-behind line, AND its `wait` reading names
+ * an ACCEPTed pull that waits; a held card carrying a `needs_decision` report (`decisionReport`, (a′)) is refused by
+ * that name whatever it declares; every other held card, and every decision outside the inbox, is refused.
  */
 export function handoverVerdict({ held = [], decisions = [], stayBehind = [], declared = new Set() } = {}) {
   const listed = new Set(stayBehind);
@@ -286,8 +388,13 @@ export function handoverVerdict({ held = [], decisions = [], stayBehind = [], de
   const reported = [];
   for (const h of held) {
     const n = h.issue.number;
-    if (listed.has(n) && declared.has(n)) reported.push(h);
-    else refused.push({ kind: 'held', ...h, stayBehind: listed.has(n) ? 'listed-undeclared' : declared.has(n) ? 'declared-unlisted' : null });
+    const twice = listed.has(n) && declared.has(n);
+    if (h.decisionReport) refused.push({ kind: 'needs-decision', ...h });
+    else if (twice && h.wait) reported.push(h);
+    else {
+      const arm = twice ? 'not-waiting' : listed.has(n) ? 'listed-undeclared' : declared.has(n) ? 'declared-unlisted' : null;
+      refused.push({ kind: 'held', ...h, stayBehind: arm });
+    }
   }
   for (const row of decisions) refused.push({ kind: 'decision', row });
   const heldNumbers = new Set(held.map((h) => h.issue.number));
@@ -299,8 +406,9 @@ export function stayBehindText(reported) {
   return reported
     .map(
       (h) =>
-        `  [stay-behind] #${h.issue.number} ${JSON.stringify(h.issue.title ?? '')} — held under this session's claim and declared on the ` +
-        'vacant body\'s `Stay-behind:` line: reported, not refused. The tail stays this session\'s to land.',
+        `  [stay-behind] #${h.issue.number} ${JSON.stringify(h.issue.title ?? '')} — held under this session's claim, declared on the ` +
+        `vacant body's \`Stay-behind:\` line, and its pull #${h.wait?.pr} is ACCEPTed and ${h.wait?.how}: reported, not refused. ` +
+        'The tail stays this session\'s to land.',
     )
     .join('\n');
 }
@@ -341,19 +449,33 @@ export function parseArgs(argv) {
   return { ok: true, options };
 }
 
-/** The refusal a departing seat reads. Rows: `{ kind: 'held', issue, claim }` or `{ kind: 'decision', row }`. */
+/**
+ * The refusal a departing seat reads. Rows: `{ kind: 'held', issue, claim, stayBehind?, pulls? }`,
+ * `{ kind: 'needs-decision', issue, claim, decisionReport }` or `{ kind: 'decision', row }`.
+ */
 export function refusalText(findings, { session, account, repo }) {
   const lines = findings.map((f, i) =>
     f.kind === 'held'
       ? `  ${i + 1}. [claim-unreleased] #${f.issue.number} ${JSON.stringify(f.issue.title ?? '')} — \`pm:dispatched\`, assignee ` +
         `\`${account}\`, newest \`Claim:\` (comment ${f.claim?.id}) carries this session, and no \`Release:\` from this session follows it.\n` +
-        '     Land it, or write `Release:` (session · reason · next) and clear the assignee in ONE write, then move it to its real state;\n' +
-        '     or, staying behind on it, declare it on the vacant body\'s `Stay-behind:` line and pass `--stay-behind=#N --body-file=PATH`.' +
+        '     Land it, or hand it back in ONE write: `Release:` (session · reason · next, with `Resume-from: BRANCH@SHA` when work was\n' +
+        '     pushed), the assignee cleared, `pm:dispatched` → `pm:queue`. Only a card whose pull is ACCEPTed and waits on the merge\n' +
+        '     queue or a human approval stays behind: declare it on the vacant body\'s `Stay-behind:` line and pass\n' +
+        '     `--stay-behind=#N --body-file=PATH`.' +
         (f.stayBehind === 'listed-undeclared'
           ? '\n     It is listed in --stay-behind, but the vacant body\'s `Stay-behind:` line does not declare it.'
           : f.stayBehind === 'declared-unlisted'
             ? '\n     The vacant body\'s `Stay-behind:` line declares it, but --stay-behind does not list it.'
-            : '')
+            : f.stayBehind === 'not-waiting'
+              ? `\n     It is declared a stay-behind on both, but ${waitShortfall(f.pulls)}: no ACCEPTed pull waits, so hand it back.`
+              : '')
+      : f.kind === 'needs-decision'
+        ? `  ${i + 1}. [needs-decision-unreleased] #${f.issue.number} ${JSON.stringify(f.issue.title ?? '')} — \`pm:dispatched\` under ` +
+          `this session's unreleased claim (comment ${f.claim?.id}), and its dev's newest \`os-dev-report\` (comment ${f.decisionReport?.id}) ` +
+          `reports \`needs_decision\` while the card is not \`${DECISION_INBOX_LABEL}\`.\n` +
+          `     Hand it to the decision box, ⛔ not back to \`pm:queue\`: \`Release:\` and the assignee cleared in ONE write, ` +
+          `\`pm:dispatched\` → \`${DECISION_INBOX_LABEL}\`,\n` +
+          '     with the four-facet analysis on the card. Declaring it a stay-behind does not excuse it.'
       : `  ${i + 1}. [decision-outside-inbox] #${f.row.number} ${JSON.stringify(f.row.title)} — this session's latest comment ` +
         `(${f.row.comment?.id}) carries the four-facet block and no ruling follows it, but the card's states are ` +
         `${f.row.states.length === 0 ? 'none' : f.row.states.map((s) => `\`${s}\``).join(' + ')}.\n` +
@@ -382,17 +504,23 @@ async function rest(path) {
   return res.json();
 }
 
-async function readThread(repo, number) {
+/** Every page of a listing, in the API's order; a listing that fills `ceiling` pages is truncated — exit 4, never 0. */
+async function readPages(path, what, ceiling = OPEN_LISTING_PAGE_CEILING * 5) {
   const rows = [];
-  for (let page = 1; page <= OPEN_LISTING_PAGE_CEILING * 5; page++) {
-    const batch = await rest(`/repos/${repo}/issues/${number}/comments?per_page=100&page=${page}`);
+  const joiner = path.includes('?') ? '&' : '?';
+  for (let page = 1; page <= ceiling; page++) {
+    const batch = await rest(`${path}${joiner}per_page=100&page=${page}`);
     rows.push(...batch);
     if (batch.length < 100) return rows;
   }
-  const err = new Error(`the thread of #${number} filled ${OPEN_LISTING_PAGE_CEILING * 5} pages — not read to its end`);
+  const err = new Error(`${what} filled ${ceiling} pages — not read to its end`);
   err.truncated = true;
   throw err;
 }
+
+const readThread = (repo, number) => readPages(`/repos/${repo}/issues/${number}/comments`, `the thread of #${number}`);
+const readTimeline = (repo, number) => readPages(`/repos/${repo}/issues/${number}/timeline`, `the timeline of #${number}`);
+const readOpenPulls = (repo) => readPages(`/repos/${repo}/pulls?state=open`, 'the open pull listing', OPEN_LISTING_PAGE_CEILING);
 
 async function probeOnce(path, token = TOKEN) {
   try {
@@ -477,11 +605,40 @@ async function run(options) {
     const held = [];
     const decisions = [];
     for (const issue of mine) {
-      const holding = claimHolding(issue, await readThread(repo, issue.number), options);
-      if (holding.verdict === 'held') held.push({ issue, claim: holding.claim });
+      const thread = await readThread(repo, issue.number);
+      const holding = claimHolding(issue, thread, options);
+      if (holding.verdict === 'held') held.push({ issue, claim: holding.claim, decisionReport: decisionReportHeld(issue, thread, holding.claim) });
       else if (holding.verdict === 'other-session' || holding.verdict === 'unclaimed') listed.push(`#${issue.number} (${holding.verdict === 'unclaimed' ? 'no `Claim:` at all' : 'held by another session'})`);
     }
     coverage.push(`(a) ${dispatched.length} open \`pm:dispatched\` card(s), ${mine.length} assigned to \`${options.account}\`, every one of their threads read`);
+
+    // (c) the stay-behind reads — bought only for a held card declared twice that (a′) does not already refuse.
+    const listedTails = new Set(options.stayBehindCards ?? []);
+    const tails = held.filter((h) => !h.decisionReport && listedTails.has(h.issue.number) && declared.cards.has(h.issue.number));
+    if (tails.length > 0) {
+      const pulls = await readOpenPulls(repo);
+      let threads = 0;
+      let timelines = 0;
+      for (const h of tails) {
+        h.pulls = [];
+        h.wait = null;
+        for (const pr of pulls.filter((p) => deliveryEvidence(p, h.issue.number) !== null)) {
+          const comments = await readThread(repo, pr.number);
+          threads += 1;
+          let reading = acceptedPullWait(pr, comments);
+          if (reading.state === 'needs-timeline') {
+            reading = acceptedPullWait(pr, comments, await readTimeline(repo, pr.number));
+            timelines += 1;
+          }
+          h.pulls.push({ number: pr.number, ...reading });
+          if (h.wait === null && reading.state === 'waiting') h.wait = { pr: pr.number, how: reading.how };
+        }
+      }
+      coverage.push(
+        `(c) ${tails.length} declared stay-behind card(s): ${pulls.length} open pull(s) listed, ${threads} delivering pull ` +
+          `thread(s) and ${timelines} timeline(s) read`,
+      );
+    }
 
     // (b) the comment stream since the window opened, then the candidates' cards.
     const stream = [];
@@ -551,7 +708,8 @@ const USAGE = [
   'check-handover — refuse a seat handover while the departing session still holds a claim or a decision outside the inbox.',
   '',
   '  node scripts/pm/check-handover.mjs --session=session_01… --account=LOGIN [--since=ISO] [--repo=OWNER/NAME]',
-  '    [--stay-behind=#N[,#N…] --body-file=PATH]   a tail this seat stays behind on, declared on the vacant body\'s Stay-behind: line',
+  '    [--stay-behind=#N[,#N…] --body-file=PATH]   a tail this seat stays behind on — an ACCEPTed pull waiting on the queue or a',
+  '                                                human approval — declared on the vacant body\'s Stay-behind: line',
   '  node scripts/pm/check-handover.mjs --probe | --self-test',
   '',
   `  Exit: ${EXIT_OK} clear · ${EXIT_USAGE} usage · ${EXIT_REFUSED} REFUSED · ${EXIT_PREREQUISITE_NOT_MET} prerequisite not met (nothing read) · ${EXIT_UNREAD} no verdict (a read failed or was truncated).`,
@@ -617,20 +775,65 @@ export function selfTest() {
   t('stay-behind: the protocol word reads too (`留守登记:`), while a `#N` inside a code span does not', declaredOf('留守登记:#23193').cards.has(23193) && declaredOf('- **Stay-behind:** `#23193`').cards.size === 0);
   t('⛔ stay-behind: "no stay-behind items" mid-sentence is no stay-behind line', declaredOf('- Seat 1 signed off with no stay-behind items, #23193 closed.').lines.length === 0);
   t('⛔ stay-behind: a seated body is not the vacant body about to be written', stayBehindDeclared('## Current PM\n\n🟢 **x**\n\n- **Stay-behind:** #23193', 'o/r').vacant === false && declaredOf(null).vacant === true);
-  const both = handoverVerdict({ held: [HELD], stayBehind: [23193], declared: declaredOf('- **Stay-behind:** #23193').cards });
-  t('⭐ ARM 1 — listed AND declared: the held card is REPORTED as `[stay-behind] #N`, never refused, and the handover exits 0', both.exit === EXIT_OK && both.refused.length === 0 && both.reported.length === 1 && stayBehindText(both.reported).includes('[stay-behind] #23193'));
+  const WAITING = { ...HELD, wait: { pr: 25427, how: 'in the merge queue' } };
+  const both = handoverVerdict({ held: [WAITING], stayBehind: [23193], declared: declaredOf('- **Stay-behind:** #23193').cards });
+  t('⭐ ARM 1 — listed AND declared, its pull ACCEPTed and waiting: REPORTED as `[stay-behind] #N` naming the pull and the wait, exit 0', both.exit === EXIT_OK && both.refused.length === 0 && both.reported.length === 1 && stayBehindText(both.reported).includes('[stay-behind] #23193') && stayBehindText(both.reported).includes('pull #25427 is ACCEPTed and in the merge queue'));
+  const idle = handoverVerdict({ held: [{ ...HELD, pulls: [{ number: 25427, state: 'not-waiting' }], wait: null }], stayBehind: [23193], declared: declaredOf('- **Stay-behind:** #23193').cards });
+  t('⭐ SIGN-OFF NARROWING — listed AND declared, but no ACCEPTed pull waits: still `[claim-unreleased]`, exit 2, naming the failed condition and the hand-back', idle.exit === EXIT_REFUSED && idle.reported.length === 0 && idle.refused[0]?.stayBehind === 'not-waiting' && refusalText(idle.refused, RCTX).includes('pull #25427 is ACCEPTed but is neither in the merge queue') && refusalText(idle.refused, RCTX).includes('so hand it back'));
+  const unread = handoverVerdict({ held: [HELD], stayBehind: [23193], declared: new Set([23193]) });
+  t('⛔ …and a declared card with no wait reading at all is refused the same way — absence never reads as waiting', unread.exit === EXIT_REFUSED && unread.refused[0]?.stayBehind === 'not-waiting' && refusalText(unread.refused, RCTX).includes('no reading shows an ACCEPTed pull that waits'));
   const undeclared = handoverVerdict({ held: [HELD], stayBehind: [23193], declared: declaredOf('- **Stay-behind:** none.').cards });
   t('⭐ ARM 2 — listed but NOT declared on the body: still `[claim-unreleased]`, exit 2, saying why', undeclared.exit === EXIT_REFUSED && undeclared.refused[0]?.stayBehind === 'listed-undeclared' && refusalText(undeclared.refused, RCTX).includes('[claim-unreleased] #23193') && refusalText(undeclared.refused, RCTX).includes('does not declare it'));
   const unlisted = handoverVerdict({ held: [HELD], stayBehind: [], declared: declaredOf('- **Stay-behind:** #23193').cards });
   t('⛔ declared on the body but not listed: still refused, exit 2 — the flag is the explicit act', unlisted.exit === EXIT_REFUSED && unlisted.refused[0]?.stayBehind === 'declared-unlisted' && refusalText(unlisted.refused, RCTX).includes('does not list it'));
   t('⭐ the measured half-state — no stay-behind at all — is refused as before, and its remedy names the two flags', handoverVerdict({ held: [HELD] }).exit === EXIT_REFUSED && refusalText(handoverVerdict({ held: [HELD] }).refused, RCTX).includes('--stay-behind=#N --body-file=PATH'));
-  t('⛔ a declared stay-behind does not excuse a decision outside the inbox', handoverVerdict({ held: [HELD], decisions: [{ number: 23169, title: 't', states: ['pm:queue'], comment: { id: 5 } }], stayBehind: [23193], declared: new Set([23193]) }).exit === EXIT_REFUSED);
+  t('⛔ a declared stay-behind does not excuse a decision outside the inbox', handoverVerdict({ held: [WAITING], decisions: [{ number: 23169, title: 't', states: ['pm:queue'], comment: { id: 5 } }], stayBehind: [23193], declared: new Set([23193]) }).refused.map((r) => r.kind).join() === 'decision');
   t('a listed card this session does not hold is named apart, and refuses nothing', handoverVerdict({ held: [], stayBehind: [24009] }).notHeld.join() === '24009' && handoverVerdict({ held: [], stayBehind: [24009] }).exit === EXIT_OK);
   t('arguments: --stay-behind needs --body-file, takes `#N[,#N…]`, and refuses anything else', parseArgs([`--session=${S}`, '--account=x', '--stay-behind=#23193']).ok === false && parseArgs([`--session=${S}`, '--account=x', '--stay-behind=#23193,24001', '--body-file=b.md']).options?.stayBehindCards.join() === '23193,24001' && parseArgs([`--session=${S}`, '--account=x', '--stay-behind=pr-5', '--body-file=b.md']).ok === false);
   {
     const ownSource = readFileSync(SELF_PATH, 'utf8');
     t('structural: the vacancy reading is IMPORTED from post-stamped, ⛔ never restated here', ownSource.includes("import { seatPostVacancy } from './post-stamped.mjs';") && !/function\s+seatPostVacancy\b/u.test(ownSource));
     t('structural: the body file is read BEFORE the transport probe — a usage error costs no request', ownSource.indexOf('readFileSync(options.bodyFile') > 0 && ownSource.indexOf('readFileSync(options.bodyFile') < ownSource.indexOf('const probe = await probeTransport(repo);'));
+  }
+
+  // (a′) — the sign-off hand-back: a held card whose dev reported `needs_decision`
+  const SIG = `domain:skills#2 · os-justin · ${S}`;
+  const REPORT = (id, m, status, { fenced = true, signed = true } = {}) => {
+    const json = JSON.stringify({ issue: 23193, status, pr: null, open_questions: status === 'needs_decision' ? [{ question: 'A or B?' }] : [] }, null, 2);
+    return comment(id, m, `${signed ? `${SIG}\n\n` : ''}os-dev-report\n\n${fenced ? `\`\`\`json\n${json}\n\`\`\`` : json}`);
+  };
+  t('(a′) the report status reads signed or not, fenced or not — the patrol\'s payload reading, not a second one', [reportedStatus(REPORT(9, 1, 'needs_decision').body), reportedStatus(REPORT(9, 1, 'needs_decision', { signed: false }).body), reportedStatus(REPORT(9, 1, 'done', { fenced: false }).body)].join() === 'needs_decision,needs_decision,done');
+  t('⛔ (a′) no status from a comment the marker does not open, nor from a payload that does not parse', reportedStatus('The os-dev-report said:\n```json\n{"status":"needs_decision"}\n```') === null && reportedStatus('os-dev-report\n\n```json\n{ status: needs_decision }\n```') === null && reportedStatus(null) === null);
+  const DISPATCHED = card(['pm:dispatched']);
+  t('⭐ (a′) THE MEASURED SHAPE: the dev reported `needs_decision` after this session\'s claim, the card still `pm:dispatched` — that report is named', decisionReportHeld(DISPATCHED, [CLAIM, REPORT(9, 120, 'needs_decision')], CLAIM)?.id === 9);
+  const RECLAIM = comment(20, 200, `Claim: re-dispatch after the ruling\nSession: \`${S}\``);
+  t('⛔ (a′) a `needs_decision` report OLDER than the claim belongs to an earlier dispatch, answered before this claim', decisionReportHeld(DISPATCHED, [CLAIM, REPORT(9, 120, 'needs_decision'), RECLAIM], RECLAIM) === null);
+  t('⛔ (a′) only the NEWEST report decides: a later `done` report ends it', decisionReportHeld(DISPATCHED, [CLAIM, REPORT(9, 120, 'needs_decision'), REPORT(10, 150, 'done')], CLAIM) === null);
+  t('⛔ (a′) a card already carrying `needs-user-decision` is not refused by this name', decisionReportHeld(card(['pm:dispatched', DECISION_INBOX_LABEL]), [CLAIM, REPORT(9, 120, 'needs_decision')], CLAIM) === null);
+  const nd = handoverVerdict({ held: [{ ...WAITING, decisionReport: REPORT(9, 120, 'needs_decision') }], stayBehind: [23193], declared: new Set([23193]) });
+  t('⭐ (a′) refused BY NAME, exit 2, even declared and waiting — the remedy is the decision box, ⛔ not `pm:queue`', nd.exit === EXIT_REFUSED && nd.reported.length === 0 && nd.refused[0]?.kind === 'needs-decision' && refusalText(nd.refused, RCTX).includes('[needs-decision-unreleased] #23193') && refusalText(nd.refused, RCTX).includes(`→ \`${DECISION_INBOX_LABEL}\``) && refusalText(nd.refused, RCTX).includes('not back to `pm:queue`'));
+
+  // the narrowed stay-behind: conditions 2 and 3 over one delivering pull
+  const PR = (extra = {}) => ({ number: 25427, state: 'open', draft: false, auto_merge: null, labels: [], body: 'Fixes #23193', head: { ref: 'claude/issue-23193-x' }, ...extra });
+  const LABELLED = PR({ labels: [{ name: GOVERNED_PR_DECISION_LABEL }] });
+  const ACCEPT_REC = comment(30, 300, '## 席位核对\n\n**ACCEPT** · domain:devx seat 1 · head `7cc88889`', FLEET_BOT_LOGIN, 25427);
+  const REWORK_REC = comment(31, 330, '## 席位核对 — REWORK · tests owed', FLEET_BOT_LOGIN, 25427);
+  const QUEUED = [{ event: 'added_to_merge_queue', actor: { login: 'os-justin' }, created_at: at(340) }];
+  const DEQUEUED = [...QUEUED, { event: 'removed_from_merge_queue', actor: { login: 'github-merge-queue[bot]' }, created_at: at(350) }];
+  t('⭐ wait: ACCEPTed and in the merge queue — the timeline\'s newest queue event is the add', acceptedPullWait(PR(), [ACCEPT_REC], QUEUED).how === 'in the merge queue');
+  t('wait: ACCEPTed and awaiting a human approval (`needs-user-decision` on the pull) answers without the timeline', acceptedPullWait(LABELLED, [ACCEPT_REC]).state === 'waiting');
+  t('wait: ACCEPTed with auto-merge armed answers without the timeline', acceptedPullWait(PR({ auto_merge: { merge_method: 'squash' } }), [ACCEPT_REC]).how === 'armed for auto-merge');
+  t('wait: ACCEPTed, unlabelled and unarmed asks for the timeline before it judges', acceptedPullWait(PR(), [ACCEPT_REC]).state === 'needs-timeline');
+  t('⛔ wait: ACCEPTed, but the newest queue event is a removal, or there is none — not waiting', acceptedPullWait(PR(), [ACCEPT_REC], DEQUEUED).state === 'not-waiting' && acceptedPullWait(PR(), [ACCEPT_REC], []).state === 'not-waiting');
+  t('⛔ wait: no seat record, or a REWORK newer than the ACCEPT, is no ACCEPT — whatever the pull\'s label or queue says', acceptedPullWait(LABELLED, [comment(5, 10, 'LGTM')], QUEUED).state === 'no-accept' && acceptedPullWait(LABELLED, [ACCEPT_REC, REWORK_REC], QUEUED).state === 'no-accept');
+  t('wait: an ACCEPT newer than a REWORK accepts', acceptedPullWait(PR(), [REWORK_REC, comment(32, 360, '## 席位核对 — ACCEPT · re-reviewed', FLEET_BOT_LOGIN, 25427)], QUEUED).state === 'waiting');
+  t('the shortfall names each pull\'s failed condition, and the case no pull delivers', waitShortfall([]) === 'no open pull request delivers it' && waitShortfall([{ number: 25427, state: 'no-accept' }]).includes('pull #25427 carries no ACCEPT') && waitShortfall([{ number: 25428, state: 'not-waiting' }]).includes('pull #25428 is ACCEPTed but is neither'));
+  t('the pull that delivers a card is the patrol\'s reading: a pull closing another card does not', deliveryEvidence(PR(), 23193) !== null && deliveryEvidence(PR({ body: 'Fixes #24001' }), 23193) === null);
+  {
+    const ownSource = readFileSync(SELF_PATH, 'utf8');
+    const head = ownSource.slice(ownSource.indexOf('import process'), ownSource.indexOf('const SELF_PATH'));
+    t('structural: the hand-back readers are IMPORTED from their owners, ⛔ none restated here', ['latestDevReport', 'devReportPayloadCandidates', 'deliveryEvidence', 'enqueuerFromTimeline', 'seatRecordAccepts'].every((name) => new RegExp(`\\b${name}\\b`, 'u').test(head) && !new RegExp(`function\\s+${name}\\b`, 'u').test(ownSource)) && head.includes("import { enqueuerFromTimeline } from './check-governed-queue-guard.mjs';") && head.includes("import { SEAT_RECORD_MARKER, seatRecordAccepts } from './seat-record.mjs';") && !/const\s+(?:OS_DEV_REPORT_MARKER|SEAT_RECORD_MARKER)\b/u.test(ownSource));
+    t('structural: the pull reads are bought only for a declared tail — the open listing sits inside that branch', ownSource.indexOf('if (tails.length > 0) {') > 0 && ownSource.indexOf('await readOpenPulls(repo)') > ownSource.indexOf('if (tails.length > 0) {'));
   }
 
   // the CLI and the contract

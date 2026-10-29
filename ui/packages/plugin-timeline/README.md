@@ -131,7 +131,7 @@ drawer default.
 
 ## Links
 
-- 📚 [Documentation](https://www.objectui.org/docs/plugins/plugin-timeline)
+- 📚 [Documentation](https://objectstack.ai/docs/frontend/plugins/plugin-timeline)
 - 📦 [npm package](https://www.npmjs.com/package/@object-ui/plugin-timeline)
 - 📝 [Changelog](./CHANGELOG.md)
 - 🐛 [Report an issue](https://github.com/objectstack-ai/objectui/issues)

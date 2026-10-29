@@ -452,9 +452,9 @@ Edit \`app.json\` to customize your application. The dev server will automatical
 
 ## Learn More
 
-- [Object UI Documentation](https://www.objectui.org)
-- [Schema Reference](https://www.objectui.org/docs/protocol/overview)
-- [Component Library](https://www.objectui.org/docs/api/components)
+- [Object UI Documentation](https://objectstack.ai/docs/frontend)
+- [Schema Reference](https://objectstack.ai/docs/frontend)
+- [Component Library](https://objectstack.ai/docs/frontend)
 
 ## Commands
 
@@ -462,7 +462,7 @@ Edit \`app.json\` to customize your application. The dev server will automatical
 - \`npm run build\` - Build for production
 - \`npm run preview\` - Preview production build
 
-Built with ❤️ using [Object UI](https://www.objectui.org)
+Built with ❤️ using [Object UI](https://objectstack.ai/docs/frontend)
 `;
 
   const gitignore = `.objectui-tmp

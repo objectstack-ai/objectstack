@@ -356,8 +356,11 @@ export {
   detectBuiltAppPackage,
   detectPendingApproval,
   buildProgressFromDraftReview,
+  chartsFromParts,
+  chartAnswerParts,
 } from './mapMessages';
 export type {
+  ChartAnswerPart,
   DraftReview,
   ProposedPlan,
   BuilderHandoff,

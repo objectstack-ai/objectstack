@@ -17,6 +17,7 @@
     "import-mappings",
     "external-datasources",
     "drivers",
+    "virtual-objects",
     "analytics"
   ]
 }

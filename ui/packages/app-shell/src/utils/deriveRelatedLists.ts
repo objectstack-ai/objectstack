@@ -71,6 +71,7 @@
  */
 
 import { convertSortToQueryParams } from '@object-ui/core';
+import { relatedListEntryNames } from '@object-ui/plugin-detail';
 
 /** Audit/ownership FKs that exist on nearly every object — never related lists. */
 const AUDIT_FK_FIELDS = new Set(['created_by', 'updated_by', 'owner_id']);
@@ -286,18 +287,12 @@ export function resolveRelatedListOrder<T extends { childObject: string; referen
 
 /**
  * Does one `relatedLists` entry (or a field group's `relatedList`) name this
- * list? A bare child object name names every list of that child; `object.field`
- * names the one FK. The ONE reading of an entry, shared by
- * {@link resolveRelatedListOrder} and the Studio editors that author entries.
+ * list? The ONE reading of an entry lives in `@object-ui/plugin-detail`, where
+ * the synthesized record page places a body table by a field group's entry
+ * (objectstack#27069); re-exported here for {@link resolveRelatedListOrder}
+ * and the Studio editors that author entries.
  */
-export function relatedListEntryNames(
-  entry: string,
-  list: { childObject: string; referenceField: string },
-): boolean {
-  const dot = entry.indexOf('.');
-  if (dot === -1) return list.childObject === entry;
-  return list.childObject === entry.slice(0, dot) && list.referenceField === entry.slice(dot + 1);
-}
+export { relatedListEntryNames };
 
 /** Normalize an object's `fields` (record or array) into `[name, def]` pairs. */
 function fieldEntries(fields: MergedObjectLike['fields']): Array<[string, any]> {

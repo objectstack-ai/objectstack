@@ -984,7 +984,7 @@ import { readFileSync, writeSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from '../invoked-as.mjs';
 // The seat record's heading and verdict have ONE reading, shared with
-// fleet-roster's landing-verdict read; H69 asks it, never re-spells it.
+// fleet-roster's landing-verdict read; H43 and H69 ask it, never re-spell it.
 import { SEAT_RECORD_MARKER, seatRecordAccepts, seatRecordOf } from './seat-record.mjs';
 
 /**
@@ -9883,8 +9883,9 @@ export function renderDanglingReferences(report, { markdown = false } = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// H43 — an open GOVERNED-SURFACE PR that has asked NEITHER approver to look
-// (#14967).
+// H43 — an open GOVERNED-SURFACE PR past the seat's hand-off point (its
+// `## 席位核对` ACCEPT and a same-head `## Contract review` PASS are on the
+// thread) that has asked NEITHER approver to look (#14967; the timing below).
 //
 // ## The state nothing could read, and the question that found it
 //
@@ -9895,7 +9896,8 @@ export function renderDanglingReferences(report, { markdown = false } = {}) {
 // asked nobody at all. Two of them were ADR records. They had waited two days.
 //
 // ⭐ The protocol TEXT is not the defect and this row does not touch it: the
-// dispatch skill's ACCEPT path already says to request BOTH accounts, and a
+// dispatch skill's hand-off (ACCEPT 之后的路径分叉 ③) says the seat requests
+// BOTH accounts once its ACCEPT and a same-head PASS are on the thread, and a
 // request to `os-zhuang` succeeded during that same sweep. What was missing is
 // a READING. The three instruments that look at governed PRs each answer a
 // different question: the queue guard asks whether an AUTHORIZED APPROVAL
@@ -9928,6 +9930,38 @@ export function renderDanglingReferences(report, { markdown = false } = {}) {
 //                         carried `requested_reviewers = [hotlong]` with a
 //                         submitted review by `os-zhuang`, and the two-field
 //                         union alone reported it as unasked.
+//
+// ## The timing — a half state only once the hand-off is DUE
+//
+// The maintainer, verbatim: 「这个是技能的bug,应该是开发完了你审核通过才会推送给我
+// 审核」 and 「没有完成复审就推送给我审核了」. A human sees a PR only after the
+// owning seat's `## 席位核对` ACCEPT and, where clause ② applies — on every
+// governed path it does, the register's rows are the review's `rules` face — a
+// `## Contract review` PASS naming the PR's CURRENT head are both on its
+// thread; THEN the request is the seat's hand-off (relay `pr_request_reviewers`,
+// `assign` for an author-approver). So this row has three input states, never
+// two (#4690):
+//
+//   thread unread (undefined/null)          UNJUDGED — quiet, and the coverage
+//                                           clause says the thread was not read
+//   thread read, ACCEPT ∧ same-head PASS    DUE — the request is owed
+//   thread read, either missing             BEFORE — nobody is owed a request
+//                                           yet; asking would put an unreviewed
+//                                           PR in front of a human, the very
+//                                           defect the filing cards measured
+//
+// Only DUE can fire, and only DUE buys the submitted-review page. The two
+// readings reuse the file's own recognisers: `SEAT_RECORD_MARKER` +
+// `seatRecordAccepts` (seat-record.mjs, H69's reading) for the ACCEPT, and
+// `latestContractReviewOnHead` (the record reader `record-recognisers.mjs`
+// imports too) for the PASS, widened with the verdict WORD
+// (`contractReviewVerdictOf`) because a FAIL on the current head owes a patch
+// round, not a request. Two bounds, stated: the PR thread is the one thread
+// read — a PASS that sits on the card alone (the queue guard's second thread)
+// reads here as BEFORE, so this row can only under-report, never ask early;
+// and the ACCEPT's freshness against the head is H69's question, not this
+// row's. A FAIL, a PASS on an older head, a REWORK, or a verdict word the
+// reader cannot make out are all BEFORE.
 //
 // ## Report-only, and pointedly so
 //
@@ -9979,8 +10013,12 @@ export function renderDanglingReferences(report, { markdown = false } = {}) {
 //
 // ZERO extra changed-file requests: the pages are H36's, already fetched for
 // the population this row needs (`h36NeedsFiles` is wider than governed). The
-// one request this row buys is the submitted-review leg, and only for a
-// governed PR whose request∪assignment union is ALREADY short — on the live
+// thread it reads for the hand-off is H48's fetch class (`prCommentCache`, one
+// issue-comment thread per governed open PR; H48 and H69 then pay nothing for
+// it), bought only for a Tier H PR the cheap union already leaves short. The
+// one request of its own this row buys is the submitted-review leg, and only
+// for a governed PR whose request∪assignment union is ALREADY short AND whose
+// hand-off is DUE — on the live
 // board this landed against, 30 open PRs, 29 file pages already in hand, 8
 // governed, 5 review probes. Both bounds are honest about what they hide: a
 // candidate past `H43_REVIEW_PROBE_CAP` (oldest-first, because the oldest
@@ -10129,16 +10167,43 @@ export function h43CheapCoverage(pr) {
   return logins;
 }
 
+/** The three hand-off states (header, "The timing"): unread is UNJUDGED, before is quiet by design, due can fire. */
+export const H43_HANDOFF_STATES = Object.freeze(['unread', 'before', 'due']);
+
 /**
- * The gathering policy, H16's idiom: answerable from the LIST row plus the
- * file page already in hand, and never NARROWER than the population it feeds
- * — nor WIDER: it reads the same matched slice as the row, so a Tier S PR
- * (which the row stands down on) buys no review page either, and cannot crowd
- * a Tier H candidate out of the oldest-first probe cap. A governed PR whose two
- * cheap fields already cover every approver is DECIDED — no row can fire — so
- * its review page is a request nobody needs.
+ * The hand-off reading (header, "The timing"): is this PR past the point at
+ * which the seat owes the approver request? `commentRows` is the PR's own
+ * issue-comment thread — H48's fetch class — in its three states (undefined
+ * never consulted, null unreadable, rows judged); `headSha` is the PR's CURRENT
+ * head. ACCEPT is the NEWEST `## 席位核对` record's verdict (seat-record.mjs,
+ * the one reading); PASS is the newest `## Contract review` naming this head
+ * whose verdict word reads PASS. Pure.
+ *
+ * @returns {{ state: 'unread'|'before'|'due', accepted: boolean, passed: boolean,
+ *   record: { createdAt: string|null, stamp: number|null, index: number }|null,
+ *   review: { id: number|null, sha: string|null, verdict: string|null, createdAt: string|null }|null }}
  */
-export function h43NeedsReviewProbe(pr, governed, approvers) {
+export function h43HandoffReading(commentRows, headSha) {
+  if (commentRows === undefined || commentRows === null) {
+    return { state: 'unread', accepted: false, passed: false, record: null, review: null };
+  }
+  const rows = Array.isArray(commentRows) ? commentRows : [];
+  const record = latestMarkedComment(rows, SEAT_RECORD_MARKER);
+  const accepted = record !== null && seatRecordAccepts(rows[record.index]?.body);
+  const review = latestContractReviewOnHead(rows, headSha);
+  const passed = review !== null && review.verdict === 'PASS';
+  return { state: accepted && passed ? 'due' : 'before', accepted, passed, record, review };
+}
+
+/**
+ * The FIRST gathering policy — which PRs buy the thread read: answerable from
+ * the LIST row plus the file page already in hand, and never NARROWER than the
+ * population it feeds — nor WIDER: it reads the same matched slice as the row,
+ * so a Tier S PR (which the row stands down on) buys nothing, and a governed PR
+ * whose two cheap fields already cover every approver is DECIDED — no row can
+ * fire — so neither its thread nor its review page is a request anybody needs.
+ */
+export function h43NeedsThreadRead(pr, governed, approvers) {
   const surfaces = Array.isArray(governed) ? governed : [];
   if (surfaces.length === 0 || governedLandsOnRecord(surfaces)) return false;
   const cheap = h43CheapCoverage(pr);
@@ -10146,16 +10211,32 @@ export function h43NeedsReviewProbe(pr, governed, approvers) {
 }
 
 /**
+ * The SECOND gathering policy, H16's idiom — which PRs buy the submitted-review
+ * page: the thread-read population narrowed to a hand-off that is DUE. Before
+ * the seat's ACCEPT and a same-head PASS nobody is owed a request, so no page
+ * is bought and no row can fire; an unread thread buys nothing either.
+ */
+export function h43NeedsReviewProbe(pr, governed, approvers, handoff = undefined) {
+  if (!h43NeedsThreadRead(pr, governed, approvers)) return false;
+  return handoff?.state === 'due';
+}
+
+/**
  * The row. `governed` is the matched slice from the imported matcher (empty ⇒
  * out of scope; a slice that lands on a record — Tier S — ⇒ out of scope too,
  * header above); `reviewed` is the logins that have SUBMITTED a review, or
  * `null` when that leg was not read — three input states, never two (#4690):
- * covered, uncovered, and uncovered-on-the-cheap-union-alone, which says so.
+ * covered, uncovered, and uncovered-on-the-cheap-union-alone, which says so;
+ * `handoff` is `h43HandoffReading`'s answer — undefined or `unread` is
+ * UNJUDGED, `before` is not a half state, only `due` can fire (header, "The
+ * timing").
  */
-export function h43GovernedReviewRequestGap(pr, governed, approvers, reviewed = null) {
+export function h43GovernedReviewRequestGap(pr, governed, approvers, reviewed = null, handoff = undefined) {
   const surfaces = governed ?? [];
   const list = approvers ?? [];
   if (surfaces.length === 0 || list.length === 0 || governedLandsOnRecord(surfaces)) return null;
+  // The timing: before the seat's ACCEPT and a same-head PASS, nobody is owed a request — quiet by design.
+  if (handoff?.state !== 'due') return null;
   const cheap = h43CheapCoverage(pr);
   const submitted = reviewed == null ? null : new Set([...reviewed].map((l) => String(l)));
   const missing = list.filter((a) => !cheap.has(a) && !(submitted?.has(a) ?? false));
@@ -10186,16 +10267,24 @@ export function h43GovernedReviewRequestGap(pr, governed, approvers, reviewed = 
         'this row stands on the request∪assignment union alone — an approver who has already SUBMITTED ' +
         'a review would clear it, and that reading is missing rather than negative.'
       : '';
+  const recordWhen = handoff.record?.createdAt ? ` (${handoff.record.createdAt})` : '';
+  const passHead = handoff.review?.sha ? `\`${handoff.review.sha}\`` : 'this head';
+  const passWhere = handoff.review?.id != null ? ` (comment ${handoff.review.id})` : '';
   return (
-    `open and GOVERNED on Tier H (${hits} changed file(s) on the register: ${named}${more}), and ${asked}. ` +
+    `open and GOVERNED on Tier H (${hits} changed file(s) on the register: ${named}${more}), past the seat's ` +
+    `hand-off point — its thread carries a \`## 席位核对\` ACCEPT${recordWhen} and a \`## Contract review\` PASS ` +
+    `naming head ${passHead}${passWhere} — and ${asked}. A human is asked only after the seat's review and a PASS ` +
+    'on that very head (「审核通过才会推送给我审核」), so until both were on the thread this PR was not a half ' +
+    'state; now that they are, the request is the seat\'s hand-off and it has not been made. ' +
     'Being a DRAFT is neither why this fires nor why it would go quiet — a governed PR waiting as a ' +
     'draft for the human merge is the CORRECT terminal state of this regime, and it is still a state ' +
     'in which nobody has been asked to look.' +
     authorClause +
     ' Report-only patrol INPUT, not a verdict and not a gate: nothing can ship through this gap (the ' +
     'queue guard still refuses an unapproved Tier H enqueue), so what is missing is only that the ' +
-    'person the regime protects was never asked. Remedy is the request itself, or the assign fallback ' +
-    'above — ⛔ never a label, and ⛔ never an approving review from a seat.' +
+    'person the regime protects was never asked. Remedy is the seat\'s hand-off stroke — relay ' +
+    '`pr_request_reviewers` naming them, or the assign fallback above — ⛔ never a label, and ⛔ never ' +
+    'an approving review from a seat.' +
     legClause
   );
 }
@@ -11480,10 +11569,13 @@ export function h48GovernedVerdictWithoutBrief(pr, governed, commentRows) {
 // the maintainer being asked to look: before `pr_ready` on Tier H and before
 // a Tier S PR is queued, that record exists on the PR for the head the
 // maintainer would read (pm-dispatch SKILL.md, ACCEPT 之后的路径分叉 ①). The
-// relay requests `GOVERNED_APPROVERS` at `pr_create` as a standing summons and
-// again at `pr_ready`, so a Tier H PR carries a pending request from its
-// first minute — which is exactly why the request alone says nothing about
-// whether the person asked has anything to read. Measured on the filing day:
+// request itself is the seat's HAND-OFF, owed only after that record and a
+// same-head `## Contract review` PASS (路径分叉 ③; the relay's draft open
+// summons nobody), so a pending request with no record newer than the head is
+// a hand-off made out of order, or an off-relay actor's request — and either
+// way the request alone says nothing about whether the person asked has
+// anything to read. Measured on the filing day, under the regime that still
+// summoned at `pr_create`:
 // four of six governed drafts had an approver requested and no seat record at
 // all, so the maintainer opened the dev's draft with 席位意见 empty.
 //
@@ -11619,9 +11711,10 @@ export function h69SeatRecordBehindHead(pr, governed, approvers, commentRows, he
   return (
     `open and GOVERNED on Tier H (${hits} changed file(s) on the register: ${named}${more}), with ${asked} ` +
     `requested for review and ${missing}. The seat's record — the 维护者速读 with 席位意见 filled, then ` +
-    '`## 席位核对` with the six-item check — is what the request is supposed to FOLLOW, not precede: the relay ' +
-    'summons the approvers at `pr_create` and again at `pr_ready`, so a pending request says the maintainer was ' +
-    'asked, and only the record says there is something on this head for them to read. Remedy: post the ' +
+    '`## 席位核对` with the six-item check — is what the request is supposed to FOLLOW, not precede: the request ' +
+    'is the seat\'s HAND-OFF, owed only after that record and a same-head `## Contract review` PASS, so a pending ' +
+    'request says the maintainer was asked, and only the record says there is something on this head for them to ' +
+    'read. Remedy: post the ' +
     `\`## 席位核对\` record as a COMMENT for head \`${sha7}\`${staleClause}. Report-only patrol INPUT, not a ` +
     'verdict and not a gate: nothing ships through this gap (the queue guard still refuses an unapproved Tier H ' +
     'enqueue), ⛔ no label is written from here, and ⛔ no seat may substitute an approving review for the record.'
@@ -12499,7 +12592,51 @@ export function latestContractReviewOnHead(commentRows, headSha) {
   const newest = latestMarkedComment(onHead, CONTRACT_REVIEW_HEADING_MARKER);
   if (!newest) return null;
   const row = onHead[newest.index];
-  return { ...newest, id: row?.id ?? null, sha: contractReviewHeadMatch(row?.body, headSha) };
+  // The verdict WORD rides beside id and sha for H43's hand-off reading; existing readers ignore it.
+  return { ...newest, id: row?.id ?? null, sha: contractReviewHeadMatch(row?.body, headSha), verdict: contractReviewVerdictOf(row?.body) };
+}
+
+/**
+ * The verdict WORD a contract-review record carries — `PASS`, `FAIL`, or
+ * `null` when none can be read.
+ *
+ * ⚠️ This is the ONE reader of the word, and it is a PATROL's reader:
+ * `record-recognisers.mjs` deliberately reads existence and provenance only
+ * (whether a record reads PASS is the seat's precondition ①, and the queue
+ * guard stands on the record's existence). H43 needs the word because the
+ * hand-off it patrols is owed only after a PASS — a FAIL on the current head
+ * owes a patch round, not a request — and a word it cannot read is `null`,
+ * which H43 reads as NOT yet due (a quiet row), never as PASS.
+ *
+ * Three measured dialects, consulted in this order:
+ *   explicit   a line opening `**VERDICT: PASS**` (the `--template` form),
+ *              consulted FIRST wherever it sits, because the template puts it
+ *              LAST, under ①–④ prose whose lines may open with either word;
+ *   inline     the heading's own tail, `## Contract review (clause ②) — **PASS** · head …`;
+ *   bare       the first line under the heading that opens with the word
+ *              (the queue guard's own fixture shape).
+ * No `g` flag anywhere, so two reads of one body agree.
+ */
+export const CONTRACT_REVIEW_VERDICTS = Object.freeze(['PASS', 'FAIL']);
+const CONTRACT_REVIEW_VERDICT_EXPLICIT = /^[ \t]*>?[ \t]*\*{0,2}VERDICT:[ \t]*\*{0,2}(PASS|FAIL)\b/;
+const CONTRACT_REVIEW_VERDICT_INLINE = /(?:^|[\s—–:：·|(-])\*{0,2}(PASS|FAIL)\*{0,2}(?=$|[\s·—–,.。;;)])/;
+const CONTRACT_REVIEW_VERDICT_BARE = /^[ \t]*>?[ \t]*\*{0,2}(PASS|FAIL)\*{0,2}\b/;
+export function contractReviewVerdictOf(body) {
+  const text = String(body ?? '');
+  const m = CONTRACT_REVIEW_HEADING_MARKER.exec(text);
+  if (!m) return null;
+  const [headingTail, ...below] = text.slice(m.index + m[0].length).split(/\r?\n/);
+  for (const line of below) {
+    const explicit = CONTRACT_REVIEW_VERDICT_EXPLICIT.exec(line);
+    if (explicit) return explicit[1];
+  }
+  const inline = CONTRACT_REVIEW_VERDICT_INLINE.exec(headingTail);
+  if (inline) return inline[1];
+  for (const line of below) {
+    const bare = CONTRACT_REVIEW_VERDICT_BARE.exec(line);
+    if (bare) return bare[1];
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -17400,6 +17537,9 @@ export const SWEEP_COUNT_KEYS = [
   'governedPrs',
   'governedReviewCandidates',
   'governedReviewProbed',
+  // H43's hand-off reading: threads read, and how many PRs are past the point where the request is owed.
+  'governedHandoffRead',
+  'governedHandoffDue',
   'governedRegisterReason',
   'liveFolds',
   'memberReadCandidates',
@@ -17987,12 +18127,15 @@ export function summaryLine(counts, findingCount) {
       counts.governedRegisterReason
         ? `NOT MEASURED — ${counts.governedRegisterReason}`
         : `${counts.governedPrs ?? 0} of the open PR(s) whose changed-file page was read hit the ` +
-          `governed register, and the submitted-review leg answered on ${counts.governedReviewProbed ?? 0} ` +
-          `of ${counts.governedReviewCandidates ?? 0} that the request/assignment union already left ` +
-          `short (Tier H only — a Tier S PR lands on a record, is asked nobody, and is out of this item; ` +
-          `oldest-first, ${H43_REVIEW_PROBE_CAP} per run). An unread review leg leaves its row ` +
-          'standing on the two cheap fields and the row says so; a PR whose file page went unread is ' +
-          'not judged by this item at all'
+          'governed register; among the Tier H ones the request/assignment union left short, the thread was ' +
+          `read on ${counts.governedHandoffRead ?? 0} of ${counts.governedReviewCandidates ?? 0} and ` +
+          `${counts.governedHandoffDue ?? 0} are past the seat's hand-off point (a \`## 席位核对\` ACCEPT and a ` +
+          'same-head `## Contract review` PASS on the thread — before both, nobody is owed a request and the row ' +
+          'is quiet; an unread thread is UNJUDGED), and the submitted-review leg answered on ' +
+          `${counts.governedReviewProbed ?? 0} of those ${counts.governedHandoffDue ?? 0} (Tier H only — a Tier S ` +
+          `PR lands on a record, is asked nobody, and is out of this item; oldest-first, ${H43_REVIEW_PROBE_CAP} ` +
+          'per run). An unread review leg leaves its row standing on the two cheap fields and the row says so; a ' +
+          'PR whose file page went unread is not judged by this item at all'
     }. ` +
     `Family folds (H37): ${counts.liveFolds ?? 0} live shared branch(es) claimed by more than their ` +
     `own chain head, and a member comment page read on ${counts.memberReadProbed ?? 0} of ` +
@@ -22386,12 +22529,13 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   // than a widening of the one above on purpose: `commentCache` is keyed by card
   // number and fed by listings that all filter `!i.pull_request`, so a PR
   // number colliding with a card number in one map would hand a card's thread to
-  // a PR row. H48 is its only reader today; a future PR-comment reader finds a
-  // thread this row already bought here and pays nothing for it.
+  // a PR row. Three readers: H43 (the hand-off reading, first in the sweep),
+  // H48 and H69 — whichever asks first buys the thread, the others pay nothing.
   //
-  // ⛔ Bought ONLY for the PRs H48 speaks about (governed and open), never for
-  // the open-PR listing at large — the caller enforces that, and this helper
-  // never fetches a number it was not handed.
+  // ⛔ Bought ONLY for governed open PRs (H48's population; H43's Tier H
+  // short-of-coverage slice is inside it), never for the open-PR listing at
+  // large — the callers enforce that, and this helper never fetches a number
+  // it was not handed.
   //
   // Returns REST ROWS, or `null` for a thread that could not be read — a failed
   // request, or a walk still full at the page ceiling. Both are UNJUDGED
@@ -23016,10 +23160,13 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
 
   // H43 (#14967) — the governed-surface review-request gap, read off the SAME
   // changed-file pages H36 just fetched: this row buys ZERO extra file
-  // requests. Its own request is the submitted-review leg, and only for a
-  // governed PR whose request/assignment union is already short — without that
-  // leg a PR an approver has ALREADY reviewed fires forever, because GitHub
-  // drops the pending request the moment the review lands.
+  // requests. It reads the PR thread (H48's fetch class, cached for H48 and
+  // H69) for the hand-off — the seat's `## 席位核对` ACCEPT and a same-head
+  // `## Contract review` PASS, before which nobody is owed a request — and its
+  // own request is the submitted-review leg, bought only for a governed PR whose
+  // hand-off is due and whose request/assignment union is already short —
+  // without that leg a PR an approver has ALREADY reviewed fires forever,
+  // because GitHub drops the pending request the moment the review lands.
   //
   // A register that would not load skips the pass and NAMES itself on the
   // summary line (#4690): a sibling-repo copy of this sweeper carries no
@@ -23040,14 +23187,31 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     // Oldest-first, because the PR nobody has asked about for longest is the
     // one the cap must not be the reason nobody hears about. The policy reads
     // the matched slice, so a Tier S PR — which the row stands down on — buys
-    // no review page and takes no slot under the cap.
+    // no thread and no review page, and takes no slot under the cap.
     const shortOfCoverage = [...seenPrs.values()]
-      .filter((pr) => h43NeedsReviewProbe(pr, governedByPr.get(pr.number) ?? [], GOVERNED_REGISTER.approvers))
+      .filter((pr) => h43NeedsThreadRead(pr, governedByPr.get(pr.number) ?? [], GOVERNED_REGISTER.approvers))
       .sort((a, b) => String(a.created_at ?? '').localeCompare(String(b.created_at ?? '')));
     stats.governedReviewCandidates = shortOfCoverage.length;
 
+    // The hand-off reading (the row's header, "The timing"): ONE issue-comment
+    // thread per short-of-coverage Tier H PR — H48's fetch class, landing in
+    // `prCommentCache` so H48 and H69 pay nothing for it afterwards. Before
+    // the seat's `## 席位核对` ACCEPT and a same-head `## Contract review` PASS
+    // are both on the thread, nobody is owed a request, so such a PR buys no
+    // review page and fires no row; an unread thread is UNJUDGED.
+    const handoffByPr = new Map();
+    for (const pr of shortOfCoverage) {
+      const rows = await prCommentRowsFor(pr.number);
+      if (rows !== null) stats.governedHandoffRead = (stats.governedHandoffRead ?? 0) + 1;
+      handoffByPr.set(pr.number, h43HandoffReading(rows, pr.head?.sha));
+    }
+    const handoffDue = shortOfCoverage.filter((pr) =>
+      h43NeedsReviewProbe(pr, governedByPr.get(pr.number) ?? [], GOVERNED_REGISTER.approvers, handoffByPr.get(pr.number)),
+    );
+    stats.governedHandoffDue = handoffDue.length;
+
     const reviewedByPr = new Map();
-    for (const pr of shortOfCoverage.slice(0, H43_REVIEW_PROBE_CAP)) {
+    for (const pr of handoffDue.slice(0, H43_REVIEW_PROBE_CAP)) {
       let reviews;
       try {
         reviews = await rest(`/repos/${OWNER_REPO}/pulls/${pr.number}/reviews?per_page=${H43_REVIEWS_PAGE_SIZE}`);
@@ -23073,6 +23237,7 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
         governed,
         GOVERNED_REGISTER.approvers,
         reviewedByPr.get(pr.number) ?? null,
+        handoffByPr.get(pr.number),
       );
       if (gap) findings.push([pr, 'H43', gap]);
     }
@@ -24408,6 +24573,15 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // the non-approver and assign-only requests that must not read as a
   // summons, and the Tier S slice the row stands down on.
   'H69 seat record before governed review': 40,
+  // Registered with the hand-off timing: 89 cases (57 legacy coverage cases now
+  // driven with the hand-off DUE, 32 timing cases), the pin just under. What this
+  // battery floors is a NARROWING of when the row fires — only once the seat's
+  // `## 席位核对` ACCEPT and a same-head `## Contract review` PASS are on the
+  // thread — so the controls that keep it a narrowing and not a silencer live
+  // inside it: the DUE case that must still fire, the FAIL / older-head / REWORK
+  // cases that must stay quiet, the unread thread that must stay UNJUDGED, and
+  // the three verdict-word dialects.
+  'H43 hand-off timing': 80,
 });
 
 /** The floor on the ROSTER itself — how many batteries must be declared at all. */
@@ -31399,78 +31573,96 @@ async function selfTest() {
   });
   const APP43 = ['os-zhuang', 'hotlong'];
   const GOV43 = [{ id: 'adr', glob: 'docs/adr/**', what: 'architecture decision records', files: ['docs/adr/0121-x.md'] }];
-  const h43row = (...args) => String(h43GovernedReviewRequestGap(...args) ?? '');
+  // The hand-off timing (the maintainer's 「审核通过才会推送给我审核」): every
+  // legacy case below that expects a FINDING is driven with the hand-off DUE —
+  // the seat's `## 席位核对` ACCEPT and a `## Contract review` PASS naming the
+  // head both on the thread — because before both, the row is quiet by design;
+  // the timing itself has its own battery after the legacy cases.
+  const BATTERY43 = 'H43 hand-off timing';
+  const t43 = (name, actual, expected) => b(BATTERY43, name, actual, expected);
+  const HEAD43 = '7cc88889e2294032fbb467107499c8f04d9a77da';
+  const ACCEPT43 = '## 席位核对\n\nACCEPT · domain:skills seat 2 · head `7cc88889`';
+  const REWORK43 = '## 席位核对\n\nREWORK · 补测试';
+  const PASS43 = '## Contract review\n\nServed-tier: `CONTRACT_REVIEW_TIER`\nHead-sha: `7cc88889e229`\nReviewed-by: `session_01x`\n\n**VERDICT: PASS**';
+  const FAIL43 = PASS43.replace('**VERDICT: PASS**', '**VERDICT: FAIL**');
+  const OLD_PASS43 = PASS43.replace('`7cc88889e229`', '`0123456789ab`');
+  const rows43 = (...bodies) => bodies.map((body, i) => ({ id: 900 + i, body, created_at: `2026-10-28T1${i}:00:00Z` }));
+  const DUE43 = h43HandoffReading(rows43(ACCEPT43, PASS43), HEAD43);
+  const BEFORE43 = h43HandoffReading(rows43(ACCEPT43), HEAD43);
+  const h43Gap = (pr, governed, approvers, reviewed, handoff = DUE43) => h43GovernedReviewRequestGap(pr, governed, approvers, reviewed, handoff);
+  const h43Probe = (pr, governed, approvers, handoff = DUE43) => h43NeedsReviewProbe(pr, governed, approvers, handoff);
+  const h43row = (...args) => String(h43Gap(...args) ?? '');
 
   // ① The healthy governed PR: both accounts asked. This is the case the row
   // must stay quiet on forever, or the anchor grows a permanent row.
-  t('H43: both approvers requested -> clean', h43GovernedReviewRequestGap(h43pr(1, { requested: APP43 }), GOV43, APP43, []), null);
-  t('H43: …assignment covers just as well as a request', h43GovernedReviewRequestGap(h43pr(1, { assigned: APP43 }), GOV43, APP43, []), null);
-  t('H43: …and a mix of the two fields covers', h43GovernedReviewRequestGap(h43pr(1, { requested: ['os-zhuang'], assigned: ['hotlong'] }), GOV43, APP43, []), null);
+  t43('H43: both approvers requested -> clean', h43Gap(h43pr(1, { requested: APP43 }), GOV43, APP43, []), null);
+  t43('H43: …assignment covers just as well as a request', h43Gap(h43pr(1, { assigned: APP43 }), GOV43, APP43, []), null);
+  t43('H43: …and a mix of the two fields covers', h43Gap(h43pr(1, { requested: ['os-zhuang'], assigned: ['hotlong'] }), GOV43, APP43, []), null);
 
   // ② One account asked — the measured majority shape (7 of 10 governed PRs at
   // the director sweep). The row must NAME the account nobody asked.
-  t('H43: one approver requested -> finding', typeof h43GovernedReviewRequestGap(h43pr(2, { requested: ['hotlong'] }), GOV43, APP43, []), 'string');
-  t('H43: …naming the account that was never asked', h43row(h43pr(2, { requested: ['hotlong'] }), GOV43, APP43, []).includes('`os-zhuang`'), true);
-  t('H43: …and NOT accusing the one that was', h43row(h43pr(2, { requested: ['hotlong'] }), GOV43, APP43, []).includes('`hotlong`'), false);
-  t('H43: …and naming the register hit that makes it governed', h43row(h43pr(2, { requested: ['hotlong'] }), GOV43, APP43, []).includes('`docs/adr/**`×1'), true);
+  t43('H43: one approver requested -> finding', typeof h43Gap(h43pr(2, { requested: ['hotlong'] }), GOV43, APP43, []), 'string');
+  t43('H43: …naming the account that was never asked', h43row(h43pr(2, { requested: ['hotlong'] }), GOV43, APP43, []).includes('`os-zhuang`'), true);
+  t43('H43: …and NOT accusing the one that was', h43row(h43pr(2, { requested: ['hotlong'] }), GOV43, APP43, []).includes('`hotlong`'), false);
+  t43('H43: …and naming the register hit that makes it governed', h43row(h43pr(2, { requested: ['hotlong'] }), GOV43, APP43, []).includes('`docs/adr/**`×1'), true);
 
   // ③ Nobody asked at all — two of the ten, both ADR records.
-  t('H43: nobody requested -> finding', typeof h43GovernedReviewRequestGap(h43pr(3), GOV43, APP43, []), 'string');
-  t('H43: …and it says NOBODY rather than listing a partial gap', h43row(h43pr(3), GOV43, APP43, []).includes('has asked NOBODY'), true);
-  t('H43: …still naming BOTH accounts, so the remedy needs no lookup', /`os-zhuang`[\s\S]*`hotlong`/.test(h43row(h43pr(3), GOV43, APP43, [])), true);
+  t43('H43: nobody requested -> finding', typeof h43Gap(h43pr(3), GOV43, APP43, []), 'string');
+  t43('H43: …and it says NOBODY rather than listing a partial gap', h43row(h43pr(3), GOV43, APP43, []).includes('has asked NOBODY'), true);
+  t43('H43: …still naming BOTH accounts, so the remedy needs no lookup', /`os-zhuang`[\s\S]*`hotlong`/.test(h43row(h43pr(3), GOV43, APP43, [])), true);
 
   // ④ + ⑤ The author-identity case, which is the one that silently produces
   // ZERO coverage: a request naming the PR's own author is a 422, so the
   // documented fallback is to ASSIGN that account and request the other.
-  t('H43: approver-authored WITH the assign fallback taken -> clean', h43GovernedReviewRequestGap(h43pr(4, { author: 'hotlong', assigned: ['hotlong'], requested: ['os-zhuang'] }), GOV43, APP43, []), null);
-  t('H43: approver-authored WITHOUT it -> finding', typeof h43GovernedReviewRequestGap(h43pr(5, { author: 'hotlong' }), GOV43, APP43, []), 'string');
-  t('H43: …⛔ authorship alone is never coverage', h43row(h43pr(5, { author: 'hotlong' }), GOV43, APP43, []).includes('`hotlong`'), true);
-  t('H43: …and the sentence says the request is impossible, not forgotten', h43row(h43pr(5, { author: 'hotlong' }), GOV43, APP43, []).includes('422'), true);
-  t('H43: …naming the fallback that WAS documented and was not taken', h43row(h43pr(5, { author: 'hotlong' }), GOV43, APP43, []).includes('ASSIGN'), true);
+  t43('H43: approver-authored WITH the assign fallback taken -> clean', h43Gap(h43pr(4, { author: 'hotlong', assigned: ['hotlong'], requested: ['os-zhuang'] }), GOV43, APP43, []), null);
+  t43('H43: approver-authored WITHOUT it -> finding', typeof h43Gap(h43pr(5, { author: 'hotlong' }), GOV43, APP43, []), 'string');
+  t43('H43: …⛔ authorship alone is never coverage', h43row(h43pr(5, { author: 'hotlong' }), GOV43, APP43, []).includes('`hotlong`'), true);
+  t43('H43: …and the sentence says the request is impossible, not forgotten', h43row(h43pr(5, { author: 'hotlong' }), GOV43, APP43, []).includes('422'), true);
+  t43('H43: …naming the fallback that WAS documented and was not taken', h43row(h43pr(5, { author: 'hotlong' }), GOV43, APP43, []).includes('ASSIGN'), true);
   // The other half of the same PR: the non-author approver is an ordinary miss
   // and must not inherit the author sentence.
-  t('H43: a non-author approver gets no 422 clause', h43row(h43pr(6, { author: 'someone-else', requested: ['hotlong'] }), GOV43, APP43, []).includes('422'), false);
+  t43('H43: a non-author approver gets no 422 clause', h43row(h43pr(6, { author: 'someone-else', requested: ['hotlong'] }), GOV43, APP43, []).includes('422'), false);
 
   // ⑥ A SUBMITTED review counts as coverage — and it must, because GitHub
   // removes the pending request the moment the review lands. Measured live
   // while this row was written: an open governed PR requesting `hotlong` with a
   // submitted review by `os-zhuang` reads as fully covered, and the two-field
   // union alone called it unasked.
-  t('H43: a submitted review covers its author\'s approver slot', h43GovernedReviewRequestGap(h43pr(7, { requested: ['hotlong'] }), GOV43, APP43, ['os-zhuang']), null);
-  t('H43: …and an unrelated reviewer covers nothing', typeof h43GovernedReviewRequestGap(h43pr(7, { requested: ['hotlong'] }), GOV43, APP43, ['some-dev']), 'string');
+  t43('H43: a submitted review covers its author\'s approver slot', h43Gap(h43pr(7, { requested: ['hotlong'] }), GOV43, APP43, ['os-zhuang']), null);
+  t43('H43: …and an unrelated reviewer covers nothing', typeof h43Gap(h43pr(7, { requested: ['hotlong'] }), GOV43, APP43, ['some-dev']), 'string');
 
   // ⑦ Not governed: out of scope entirely, however empty the request list is.
-  t('H43: a non-governed PR with nobody requested -> clean', h43GovernedReviewRequestGap(h43pr(8), [], APP43, []), null);
+  t43('H43: a non-governed PR with nobody requested -> clean', h43Gap(h43pr(8), [], APP43, []), null);
 
   // Three input states, never two (#4690): the review leg can be MISSING, and
   // a row that stands on the cheap union alone says so rather than asserting.
-  t('H43: an unread review leg is declared, not assumed negative', h43row(h43pr(9), GOV43, APP43, null).includes('NOT read'), true);
-  t('H43: …and a read one makes no such claim', h43row(h43pr(9), GOV43, APP43, []).includes('NOT read'), false);
+  t43('H43: an unread review leg is declared, not assumed negative', h43row(h43pr(9), GOV43, APP43, null).includes('NOT read'), true);
+  t43('H43: …and a read one makes no such claim', h43row(h43pr(9), GOV43, APP43, []).includes('NOT read'), false);
 
   // Draft status decides nothing in either direction — a governed PR waiting as
   // a draft for the human merge is the regime's CORRECT terminal state.
-  t('H43: a ready governed PR fires the same as a draft', h43row(h43pr(10, { draft: false }), GOV43, APP43, []), h43row(h43pr(10, { draft: true }), GOV43, APP43, []));
-  t('H43: …and the row says being a draft is not the point', h43row(h43pr(10), GOV43, APP43, []).includes('DRAFT'), true);
+  t43('H43: a ready governed PR fires the same as a draft', h43row(h43pr(10, { draft: false }), GOV43, APP43, []), h43row(h43pr(10, { draft: true }), GOV43, APP43, []));
+  t43('H43: …and the row says being a draft is not the point', h43row(h43pr(10), GOV43, APP43, []).includes('DRAFT'), true);
 
   // ⛔ No name and no surface is hardcoded: an entirely different approver set
   // drives the row, which is what "imported, never restated" has to mean.
-  t('H43: the approver set is INJECTED, never baked in', h43GovernedReviewRequestGap(h43pr(11, { requested: ['some-other-account'] }), GOV43, ['some-other-account'], []), null);
-  t('H43: an empty approver set can never fire', h43GovernedReviewRequestGap(h43pr(11), GOV43, [], []), null);
+  t43('H43: the approver set is INJECTED, never baked in', h43Gap(h43pr(11, { requested: ['some-other-account'] }), GOV43, ['some-other-account'], []), null);
+  t43('H43: an empty approver set can never fire', h43Gap(h43pr(11), GOV43, [], []), null);
 
   // The gathering policy: a request is bought only for a governed PR the cheap
   // fields already leave short. Never narrower than the population it feeds.
-  t('H43 policy: a non-governed PR buys no review page', h43NeedsReviewProbe(h43pr(12), [], APP43), false);
-  t('H43 policy: a governed PR already covered buys none either', h43NeedsReviewProbe(h43pr(12, { requested: APP43 }), GOV43, APP43), false);
-  t('H43 policy: a governed PR short of coverage does', h43NeedsReviewProbe(h43pr(12, { requested: ['hotlong'] }), GOV43, APP43), true);
-  t('H43 policy: …and one with nobody asked, obviously', h43NeedsReviewProbe(h43pr(12), GOV43, APP43), true);
-  t('H43: the cheap union reads BOTH list fields', [...h43CheapCoverage(h43pr(13, { requested: ['a'], assigned: ['b'] }))].sort().join(','), 'a,b');
+  t43('H43 policy: a non-governed PR buys no review page', h43Probe(h43pr(12), [], APP43), false);
+  t43('H43 policy: a governed PR already covered buys none either', h43Probe(h43pr(12, { requested: APP43 }), GOV43, APP43), false);
+  t43('H43 policy: a governed PR short of coverage does', h43Probe(h43pr(12, { requested: ['hotlong'] }), GOV43, APP43), true);
+  t43('H43 policy: …and one with nobody asked, obviously', h43Probe(h43pr(12), GOV43, APP43), true);
+  t43('H43: the cheap union reads BOTH list fields', [...h43CheapCoverage(h43pr(13, { requested: ['a'], assigned: ['b'] }))].sort().join(','), 'a,b');
 
   // The row is a `stall`, not a gate: nothing ships wrong through this gap —
   // the queue guard still refuses an unapproved governed enqueue — but the PR
   // is stopped and no other sweep moves it.
-  t('H43 band: registered as a stall', familyBand('H43'), 'stall');
-  t('H43 band: …and the sweep really pushes it, so the registry sees it', familyRegistryCoverage().emitted.includes('H43'), true);
-  t('H43: the row states its report-only posture', h43row(h43pr(14), GOV43, APP43, []).includes('not a verdict and not a gate'), true);
+  t43('H43 band: registered as a stall', familyBand('H43'), 'stall');
+  t43('H43 band: …and the sweep really pushes it, so the registry sees it', familyRegistryCoverage().emitted.includes('H43'), true);
+  t43('H43: the row states its report-only posture', h43row(h43pr(14), GOV43, APP43, []).includes('not a verdict and not a gate'), true);
 
   // The REGISTER, pinned against the real imported modules rather than a
   // fabricated pair. ⚠️ This is the positive control that a rename in either
@@ -31480,11 +31672,11 @@ async function selfTest() {
   const register43 = GOVERNED_REGISTER.available
     ? `${GOVERNED_REGISTER.matcher(['docs/adr/0121-x.md']).length > 0}/${GOVERNED_REGISTER.matcher(['packages/core/src/x.ts']).length > 0}/${GOVERNED_REGISTER.approvers.length >= 2}`
     : `NOT MEASURED — ${GOVERNED_REGISTER.reason}`;
-  t('H43 register: the imported matcher answers governed and clear, and the approver set is non-empty', register43, 'true/false/true');
-  t('H43 register: the load is three-state — resolved, or a NAMED reason, never silently absent', GOVERNED_REGISTER.available || typeof GOVERNED_REGISTER.reason === 'string', true);
-  t('H43 register: a missing sibling names the two files to copy', governedRegisterFailure({ code: 'ERR_MODULE_NOT_FOUND' }).includes('check-governed-queue-guard.mjs'), true);
-  t('H43 register: …and says the rest of the sweep is unaffected', governedRegisterFailure({ code: 'ERR_MODULE_NOT_FOUND' }).includes('every other row is unaffected'), true);
-  t('H43 register: any other load failure carries its own message', governedRegisterFailure(new Error('boom')).includes('boom'), true);
+  t43('H43 register: the imported matcher answers governed and clear, and the approver set is non-empty', register43, 'true/false/true');
+  t43('H43 register: the load is three-state — resolved, or a NAMED reason, never silently absent', GOVERNED_REGISTER.available || typeof GOVERNED_REGISTER.reason === 'string', true);
+  t43('H43 register: a missing sibling names the two files to copy', governedRegisterFailure({ code: 'ERR_MODULE_NOT_FOUND' }).includes('check-governed-queue-guard.mjs'), true);
+  t43('H43 register: …and says the rest of the sweep is unaffected', governedRegisterFailure({ code: 'ERR_MODULE_NOT_FOUND' }).includes('every other row is unaffected'), true);
+  t43('H43 register: any other load failure carries its own message', governedRegisterFailure(new Error('boom')).includes('boom'), true);
 
   // The per-row scope (ruling B2, 2026-10-13): the register's question carries
   // the swept board, bound ONCE at load. Driven through the real modules with
@@ -31494,12 +31686,12 @@ async function selfTest() {
   const boundCloud = await loadGovernedRegister(realLoad, 'objectstack-ai/cloud');
   const boundOs = await loadGovernedRegister(realLoad, 'objectstack-ai/objectos');
   const boundForeign = await loadGovernedRegister(realLoad, 'someone/fork');
-  t('H43 register: the loader binds the swept board\'s repository id, and this run\'s is the board it sweeps',
+  t43('H43 register: the loader binds the swept board\'s repository id, and this run\'s is the board it sweeps',
     GOVERNED_REGISTER.available ? GOVERNED_REGISTER.repo : 'NOT MEASURED',
     GOVERNED_REGISTER.available ? (await realLoad('./check-governed-merges.mjs')).repoIdForSlug(OWNER_REPO) : 'NOT MEASURED');
-  t('H43 register: a workflow path is governed on a cloud board (the scoped row names cloud)', boundCloud.available && boundCloud.repo === 'cloud' && boundCloud.matcher(['.github/workflows/ci.yml']).length === 1, true);
-  t('H43 register: …and NOT on an objectos board, while the default rows still govern it', boundOs.available && boundOs.repo === 'objectos' && boundOs.matcher(['.github/workflows/ci.yml']).length === 0 && boundOs.matcher(['AGENTS.md']).length === 1, true);
-  t('H43 register: a board outside GOVERNED_REPOS is NOT MEASURED with the board named, never judged against another repository\'s rows', !boundForeign.available && boundForeign.matcher === null && boundForeign.repo === null && /someone\/fork/.test(boundForeign.reason) && /NOT MEASURED on this board/.test(boundForeign.reason), true);
+  t43('H43 register: a workflow path is governed on a cloud board (the scoped row names cloud)', boundCloud.available && boundCloud.repo === 'cloud' && boundCloud.matcher(['.github/workflows/ci.yml']).length === 1, true);
+  t43('H43 register: …and NOT on an objectos board, while the default rows still govern it', boundOs.available && boundOs.repo === 'objectos' && boundOs.matcher(['.github/workflows/ci.yml']).length === 0 && boundOs.matcher(['AGENTS.md']).length === 1, true);
+  t43('H43 register: a board outside GOVERNED_REPOS is NOT MEASURED with the board named, never judged against another repository\'s rows', !boundForeign.available && boundForeign.matcher === null && boundForeign.repo === null && /someone\/fork/.test(boundForeign.reason) && /NOT MEASURED on this board/.test(boundForeign.reason), true);
 
   // The TIER, read off the REAL register's own slices rather than a fixture
   // that restates which surfaces are which: a PR whose governed paths all lie
@@ -31510,16 +31702,16 @@ async function selfTest() {
   // closed) — every case above it is a Tier H case by construction.
   const TIER_S_43 = GOVERNED_REGISTER.available ? GOVERNED_REGISTER.matcher(['.claude/agents/os-dev.md']) : [];
   const MIXED_43 = GOVERNED_REGISTER.available ? GOVERNED_REGISTER.matcher(['.claude/agents/os-dev.md', 'docs/adr/0121-x.md']) : [];
-  t('H43 register: …and it exports the landing-tier reader beside the matcher, answering its own record tier on the record row', GOVERNED_REGISTER.available && typeof GOVERNED_REGISTER.tierOf === 'function' && GOVERNED_REGISTER.tierOf(TIER_S_43) === GOVERNED_REGISTER.recordTier, true);
-  t('H43 tier: a PR whose governed paths ALL land on a record (Tier S) is asked nobody and is CLEAN, however empty the request list', h43GovernedReviewRequestGap(h43pr(15), TIER_S_43, APP43, []), null);
-  t('H43 tier: …and a MIXED slice (one Tier H row) is Tier H, so the same PR still fires', typeof h43GovernedReviewRequestGap(h43pr(15), MIXED_43, APP43, []), 'string');
-  t('H43 tier: …naming the tier it speaks about', h43row(h43pr(15), MIXED_43, APP43, []).includes('GOVERNED on Tier H'), true);
-  t('H43 tier: the Tier S PR buys no review page either, so it takes no slot under the probe cap', h43NeedsReviewProbe(h43pr(15), TIER_S_43, APP43), false);
-  t('H43 tier: …while the mixed one does', h43NeedsReviewProbe(h43pr(15), MIXED_43, APP43), true);
-  t('H43 tier: the answer is the register\'s, on the slice — S for the record row, H for mixed, H for a tier-less fixture, H for nothing', [governedLandsOnRecord(TIER_S_43), governedLandsOnRecord(MIXED_43), governedLandsOnRecord(GOV43), governedLandsOnRecord([])].join(), 'true,false,false,false');
-  t('H43 tier: ⛔ a register that did not load stands NOTHING down', governedLandsOnRecord(TIER_S_43, { available: false, tierOf: null, recordTier: null }), false);
-  t('H43 tier: …nor does one that loaded without the tier reader', governedLandsOnRecord(TIER_S_43, { available: true, tierOf: null, recordTier: 'S' }), false);
-  t('H43 summary: the review leg is stated as Tier H only', saidBy('h43GovernedReviews', summaryLine({ governedPrs: 8, governedReviewCandidates: 5, governedReviewProbed: 5 }, 0)).includes('Tier H only'), true);
+  t43('H43 register: …and it exports the landing-tier reader beside the matcher, answering its own record tier on the record row', GOVERNED_REGISTER.available && typeof GOVERNED_REGISTER.tierOf === 'function' && GOVERNED_REGISTER.tierOf(TIER_S_43) === GOVERNED_REGISTER.recordTier, true);
+  t43('H43 tier: a PR whose governed paths ALL land on a record (Tier S) is asked nobody and is CLEAN, however empty the request list', h43Gap(h43pr(15), TIER_S_43, APP43, []), null);
+  t43('H43 tier: …and a MIXED slice (one Tier H row) is Tier H, so the same PR still fires', typeof h43Gap(h43pr(15), MIXED_43, APP43, []), 'string');
+  t43('H43 tier: …naming the tier it speaks about', h43row(h43pr(15), MIXED_43, APP43, []).includes('GOVERNED on Tier H'), true);
+  t43('H43 tier: the Tier S PR buys no review page either, so it takes no slot under the probe cap', h43Probe(h43pr(15), TIER_S_43, APP43), false);
+  t43('H43 tier: …while the mixed one does', h43Probe(h43pr(15), MIXED_43, APP43), true);
+  t43('H43 tier: the answer is the register\'s, on the slice — S for the record row, H for mixed, H for a tier-less fixture, H for nothing', [governedLandsOnRecord(TIER_S_43), governedLandsOnRecord(MIXED_43), governedLandsOnRecord(GOV43), governedLandsOnRecord([])].join(), 'true,false,false,false');
+  t43('H43 tier: ⛔ a register that did not load stands NOTHING down', governedLandsOnRecord(TIER_S_43, { available: false, tierOf: null, recordTier: null }), false);
+  t43('H43 tier: …nor does one that loaded without the tier reader', governedLandsOnRecord(TIER_S_43, { available: true, tierOf: null, recordTier: 'S' }), false);
+  t43('H43 summary: the review leg is stated as Tier H only', saidBy('h43GovernedReviews', summaryLine({ governedPrs: 8, governedReviewCandidates: 5, governedReviewProbed: 5 }, 0)).includes('Tier H only'), true);
 
   // The coverage clause, both branches, cut out of the summary line so only
   // H43's own words can answer for H43.
@@ -31529,12 +31721,57 @@ async function selfTest() {
   // copied into `counts`. That is the documented failure this enumeration was
   // built to end — `counts.x ?? 0` renders a missing key and a real zero
   // identically — and it reappears the moment a new row forgets the list.
-  t('H43: every count key rides the enumerated forwarding contract', ['governedPrs', 'governedReviewCandidates', 'governedReviewProbed', 'governedRegisterReason'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
-  t('H43 summary: the triple is reported', saidBy('h43GovernedReviews', summaryLine({ governedPrs: 8, governedReviewCandidates: 5, governedReviewProbed: 5 }, 0)).includes('8 of the open PR(s)'), true);
-  t('H43 summary: …with the review leg named as a subset', saidBy('h43GovernedReviews', summaryLine({ governedPrs: 8, governedReviewCandidates: 5, governedReviewProbed: 5 }, 0)).includes('answered on 5 of 5'), true);
-  t('H43 summary: an unloadable register reports NOT MEASURED, never 0 of 0', saidBy('h43GovernedReviews', summaryLine({ governedRegisterReason: 'the pair is not installed' }, 0)).includes('NOT MEASURED — the pair is not installed'), true);
-  t('H43 summary: …and then claims no governed population at all', saidBy('h43GovernedReviews', summaryLine({ governedRegisterReason: 'the pair is not installed' }, 0)).includes('hit the governed register'), false);
+  t43('H43: every count key rides the enumerated forwarding contract', ['governedPrs', 'governedReviewCandidates', 'governedReviewProbed', 'governedRegisterReason'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
+  t43('H43 summary: the triple is reported', saidBy('h43GovernedReviews', summaryLine({ governedPrs: 8, governedReviewCandidates: 5, governedReviewProbed: 5 }, 0)).includes('8 of the open PR(s)'), true);
+  t43('H43 summary: …with the review leg named as a subset of the PRs whose hand-off is due', saidBy('h43GovernedReviews', summaryLine({ governedPrs: 8, governedReviewCandidates: 5, governedHandoffRead: 5, governedHandoffDue: 5, governedReviewProbed: 5 }, 0)).includes('answered on 5 of those 5'), true);
+  t43('H43 summary: an unloadable register reports NOT MEASURED, never 0 of 0', saidBy('h43GovernedReviews', summaryLine({ governedRegisterReason: 'the pair is not installed' }, 0)).includes('NOT MEASURED — the pair is not installed'), true);
+  t43('H43 summary: …and then claims no governed population at all', saidBy('h43GovernedReviews', summaryLine({ governedRegisterReason: 'the pair is not installed' }, 0)).includes('hit the governed register'), false);
 
+
+  // -- The hand-off timing (the maintainer's 「审核通过才会推送给我审核」) ------
+  //
+  // A Tier H PR is a half state here only once the seat's hand-off is DUE: its
+  // `## 席位核对` ACCEPT and a `## Contract review` PASS naming the CURRENT head
+  // are both on the thread. Before both, nobody is owed a request and asking
+  // would put an unreviewed PR in front of a human — the very defect the
+  // filing cards measured — so the row is QUIET, and an unread thread is
+  // UNJUDGED rather than quiet-by-verdict.
+  const reading = (rows, head = HEAD43) => h43HandoffReading(rows, head);
+  const states = (...pairs) => pairs.map(([rows, head]) => reading(rows, head).state).join();
+  t43('H43 hand-off: an unread thread (never consulted, or unreadable) is UNREAD — never before, never due', states([undefined], [null]), 'unread,unread');
+  t43('H43 hand-off: an empty thread is BEFORE', reading([]).state, 'before');
+  t43('H43 hand-off: ACCEPT alone is BEFORE — the PASS is still owed', [BEFORE43.state, BEFORE43.accepted, BEFORE43.passed].join(), 'before,true,false');
+  t43('H43 hand-off: a PASS alone is BEFORE — the seat has not accepted', [reading(rows43(PASS43)).state, reading(rows43(PASS43)).passed].join(), 'before,true');
+  t43('H43 hand-off: ACCEPT + a same-head PASS is DUE', [DUE43.state, DUE43.accepted, DUE43.passed, DUE43.review?.verdict].join(), 'due,true,true,PASS');
+  t43('H43 hand-off: …in either thread order', reading(rows43(PASS43, ACCEPT43)).state, 'due');
+  t43('H43 hand-off: ⛔ a FAIL on the current head is BEFORE — a patch round is owed, not a request', [reading(rows43(ACCEPT43, FAIL43)).state, reading(rows43(ACCEPT43, FAIL43)).review?.verdict].join(), 'before,FAIL');
+  t43('H43 hand-off: ⛔ a PASS naming an OLDER head is BEFORE — the head moved after the PASS, so it is back to waiting', [reading(rows43(ACCEPT43, OLD_PASS43)).state, reading(rows43(ACCEPT43, OLD_PASS43)).review].join(), 'before,');
+  t43('H43 hand-off: ⛔ a REWORK record beside a PASS is BEFORE — only ACCEPT hands off', reading(rows43(REWORK43, PASS43)).state, 'before');
+  t43('H43 hand-off: the NEWEST seat record decides — ACCEPT then REWORK is BEFORE, REWORK then ACCEPT is DUE', states([rows43(ACCEPT43, REWORK43, PASS43)], [rows43(REWORK43, ACCEPT43, PASS43)]), 'before,due');
+  t43('H43 hand-off: the newest PASS on the head decides, and a FAIL after it withdraws the hand-off', states([rows43(ACCEPT43, PASS43, FAIL43)], [rows43(ACCEPT43, FAIL43, PASS43)]), 'before,due');
+  t43('H43 hand-off: a head too short to match is never DUE (the PASS cannot be bound to it)', reading(rows43(ACCEPT43, PASS43), '7cc8').state, 'before');
+  // The verdict WORD — the one reader of it, three measured dialects.
+  t43('H43 verdict: the template line `**VERDICT: PASS**` reads PASS, and FAIL reads FAIL', [contractReviewVerdictOf(PASS43), contractReviewVerdictOf(FAIL43)].join(), 'PASS,FAIL');
+  t43('H43 verdict: the heading-inline dialect `## Contract review (clause ②) — **PASS** · head …` reads PASS', contractReviewVerdictOf('## Contract review (clause ②) — **PASS** · head `7cc88889`\n\n### ① Derived judgments\n- none'), 'PASS');
+  t43("H43 verdict: the queue guard's bare-line dialect (a line that is just `PASS`) reads PASS", contractReviewVerdictOf('## Contract review\n\nHead: `7cc88889e229`\nReviewed-by: `session_01SEAT`\n\nPASS'), 'PASS');
+  t43('H43 verdict: the explicit VERDICT line wins over prose that happens to open with a verdict word', contractReviewVerdictOf('## Contract review\n\nPASS is what ① would have said, but ②:\n\n**VERDICT: FAIL**'), 'FAIL');
+  t43('H43 verdict: a record with no verdict word, a body with no heading, and a mention in prose all read null', [contractReviewVerdictOf('## Contract review\n\nServed-tier: `CONTRACT_REVIEW_TIER`'), contractReviewVerdictOf('**VERDICT: PASS**'), contractReviewVerdictOf('## Contract review\n\nthe seat will post PASS later')].join(), ',,');
+  t43('H43 verdict: the roster of words is PASS and FAIL, nothing else', CONTRACT_REVIEW_VERDICTS.join(), 'PASS,FAIL');
+  t43('H43 verdict: latestContractReviewOnHead now carries the verdict beside id and sha', [latestContractReviewOnHead(rows43(ACCEPT43, PASS43), HEAD43)?.verdict, latestContractReviewOnHead(rows43(FAIL43), HEAD43)?.verdict, latestContractReviewOnHead(rows43(PASS43), '0123456789abcdef')].join(), 'PASS,FAIL,');
+  // The row and the probe, gated on the reading.
+  t43('H43 row: ⛔ BEFORE the hand-off, nobody asked is NOT a half state — quiet', h43GovernedReviewRequestGap(h43pr(16), GOV43, APP43, [], BEFORE43), null);
+  t43('H43 row: ⛔ an UNREAD thread is UNJUDGED — quiet, never a finding', [h43GovernedReviewRequestGap(h43pr(16), GOV43, APP43, [], reading(undefined)), h43GovernedReviewRequestGap(h43pr(16), GOV43, APP43, [], reading(null)), h43GovernedReviewRequestGap(h43pr(16), GOV43, APP43, [], undefined)].join(), ',,');
+  t43('H43 row: DUE and nobody asked -> finding', typeof h43GovernedReviewRequestGap(h43pr(16), GOV43, APP43, [], DUE43), 'string');
+  t43('H43 row: …DUE and both covered -> clean, exactly as before', h43GovernedReviewRequestGap(h43pr(16, { requested: APP43 }), GOV43, APP43, [], DUE43), null);
+  t43('H43 row: …and the sentence names the two records that make the hand-off due, with the PASS comment id and the head it names', [h43row(h43pr(16), GOV43, APP43, []).includes('`## 席位核对` ACCEPT'), h43row(h43pr(16), GOV43, APP43, []).includes('`## Contract review` PASS naming head `7cc88889e229` (comment 901)')].join(), 'true,true');
+  t43("H43 row: …and the remedy is the seat's hand-off stroke, `pr_request_reviewers`", h43row(h43pr(16), GOV43, APP43, []).includes("the seat's hand-off stroke — relay `pr_request_reviewers`"), true);
+  t43('H43 row: …quoting the ruling that set the timing', h43row(h43pr(16), GOV43, APP43, []).includes('审核通过才会推送给我审核'), true);
+  t43('H43 policy: the THREAD is read for every Tier H PR the cheap union leaves short — and for no other', [h43NeedsThreadRead(h43pr(17), GOV43, APP43), h43NeedsThreadRead(h43pr(17, { requested: APP43 }), GOV43, APP43), h43NeedsThreadRead(h43pr(17), [], APP43), h43NeedsThreadRead(h43pr(17), TIER_S_43, APP43)].join(), 'true,false,false,false');
+  t43('H43 policy: the REVIEW page is bought only once the hand-off is DUE — before it, and on an unread thread, nothing is bought', [h43NeedsReviewProbe(h43pr(17), GOV43, APP43, DUE43), h43NeedsReviewProbe(h43pr(17), GOV43, APP43, BEFORE43), h43NeedsReviewProbe(h43pr(17), GOV43, APP43, reading(null)), h43NeedsReviewProbe(h43pr(17), GOV43, APP43)].join(), 'true,false,false,false');
+  t43('H43 states: the roster of hand-off states is unread, before, due', H43_HANDOFF_STATES.join(), 'unread,before,due');
+  t43('H43 summary: the hand-off reading is disclosed — threads read, how many are due, and that BEFORE is quiet by design', [saidBy('h43GovernedReviews', summaryLine({ governedPrs: 8, governedReviewCandidates: 5, governedHandoffRead: 4, governedHandoffDue: 2, governedReviewProbed: 2 }, 0)).includes('thread was read on 4 of 5'), saidBy('h43GovernedReviews', summaryLine({ governedPrs: 8, governedReviewCandidates: 5, governedHandoffRead: 4, governedHandoffDue: 2, governedReviewProbed: 2 }, 0)).includes("2 are past the seat's hand-off point"), saidBy('h43GovernedReviews', summaryLine({}, 0)).includes('nobody is owed a request and the row is quiet')].join(), 'true,true,true');
+  t43('H43 summary: the two new count keys ride the enumerated forwarding contract', ['governedHandoffRead', 'governedHandoffDue'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
+  t43('H43 floor: this battery is DECLARED on the frozen roster with a positive pin', Object.hasOwn(SELF_TEST_BATTERIES, BATTERY43) && SELF_TEST_BATTERIES[BATTERY43] > 0 && Object.isFrozen(SELF_TEST_BATTERIES), true);
 
   // -- H44 — a reading with no 取数时刻 (#14929, report-only) -----------------
   //
@@ -32491,7 +32728,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   b(BATTERY69, 'H69 row: …and refuses the label and the seat review', h69row(pr69(), []).includes('no label is written from here') && h69row(pr69(), []).includes('no seat may substitute an approving review'), true);
   b(BATTERY69, 'H69 row: names the approver asked', h69row(pr69(), []).includes('with `hotlong` requested for review'), true);
   b(BATTERY69, 'H69 row: names the governed surfaces it matched, from the matcher', h69row(pr69(), []).includes('`docs/adr/**`×1'), true);
-  b(BATTERY69, 'H69 row: says the request is a SUMMONS the record must precede', h69row(pr69(), []).includes('summons the approvers at `pr_create` and again at `pr_ready`'), true);
+  b(BATTERY69, 'H69 row: says the request is the seat\'s HAND-OFF the record must precede', h69row(pr69(), []).includes('is the seat\'s HAND-OFF, owed only after that record and a same-head'), true);
   const many69 = Array.from({ length: H69_SURFACE_LIST_CAP + 2 }, (_, i) => ({ glob: `g${i}/**`, files: ['f'] }));
   b(BATTERY69, 'H69 row: past the surface cap it counts the rest rather than growing', h69row(pr69(), [], HEAD69, many69).includes('+2 more'), true);
   b(BATTERY69, 'H69 row: a PR without a head sha still renders, naming the gap', h69row(pr69({ fields: { head: {} } }), []).includes('for head `unknown`'), true);
