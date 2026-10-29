@@ -200,6 +200,13 @@ export interface TabbedFormSchema {
    * @default true
    */
   showCancel?: boolean;
+
+  /**
+   * Show the Reset button, which restores the opening values without saving
+   * (objectstack#27247).
+   * @default false
+   */
+  showReset?: boolean;
   
   /**
    * Cancel button text
@@ -697,6 +704,7 @@ export const TabbedForm: React.FC<TabbedFormProps> = ({
     cancelLabel: schema.cancelText,
     showSubmit: schema.showSubmit !== false && schema.mode !== 'view',
     showCancel: schema.showCancel !== false,
+    showReset: schema.showReset === true && schema.mode !== 'view',
     onSubmit: handleSubmit,
     onCancel: handleCancel,
     // The renderer's dirtiness feeds the bus gate above (objectui#10715).

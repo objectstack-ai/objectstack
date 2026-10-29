@@ -222,6 +222,8 @@ export interface ModalFormSchema {
   submitText?: string;
   showCancel?: boolean;
   cancelText?: string;
+  /** The Reset button in the footer: restores the opening values, no save (objectstack#27247). */
+  showReset?: boolean;
   initialValues?: Record<string, any>;
   initialData?: Record<string, any>;
   readOnly?: boolean;
@@ -864,6 +866,7 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
   });
   const showSubmit = schema.showSubmit !== false && schema.mode !== 'view' && !closedForRecord(closedAffordance);
   const showCancel = schema.showCancel !== false;
+  const showReset = schema.showReset === true && schema.mode !== 'view' && !closedForRecord(closedAffordance);
   const submitLabel = schema.submitText || (schema.mode === 'create' ? t('form.create') : t('form.update'));
   const cancelLabel = schema.cancelText || t('common.cancel');
 
@@ -1216,7 +1219,7 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
     );
   }
 
-  const hasFooter = !loading && !error && (showSubmit || showCancel);
+  const hasFooter = !loading && !error && (showSubmit || showCancel || showReset);
 
   return (
     <Dialog
@@ -1277,6 +1280,20 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
                   className="w-full sm:w-auto"
                 >
                   {cancelLabel}
+                </Button>
+              )}
+              {/* The declared Reset button (objectstack#27247). It lives out
+                  here, outside the <form>, so it names the form by `id` and
+                  the form's own `reset` handler restores the opening values. */}
+              {showReset && (
+                <Button
+                  type="reset"
+                  form={formId}
+                  variant="outline"
+                  disabled={isSubmitting}
+                  className="w-full sm:w-auto"
+                >
+                  {t('common.reset')}
                 </Button>
               )}
               {showSubmit && (

@@ -1740,6 +1740,8 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
               previousValues,
               showSubmit: schema.showSubmit !== false && schema.mode !== 'view',
               showCancel: schema.showCancel !== false,
+              // The declared Reset button (objectstack#27247); see the flat path.
+              showReset: schema.showReset === true && schema.mode !== 'view',
               // While an upload is in flight the Save button says so, the same
               // answer ActionParamDialog gives its Confirm button. The notice
               // below carries the reason in a sentence (objectui#10166).
@@ -1898,8 +1900,13 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
     cancelLabel: schema.cancelText,
     showSubmit: schema.showSubmit !== false && schema.mode !== 'view',
     showCancel: schema.showCancel !== false,
-    resetOnSubmit: schema.showReset
-      || schema.submitBehavior?.kind === 'continue'
+    // `showReset` is the declared Reset button — "Show the reset button" in
+    // the spec's block contract — drawn by the form's action bar and
+    // restoring the opening values without a save. It is NOT a clear after
+    // submit: it used to be OR-ed into `resetOnSubmit` below, so `true` drew
+    // no button and emptied the form after every save (objectstack#27247).
+    showReset: schema.showReset === true && schema.mode !== 'view',
+    resetOnSubmit: schema.submitBehavior?.kind === 'continue'
       || (!schema.submitBehavior && schema.resetOnSuccess && schema.mode === 'create'),
     defaultValues: finalDefaultValues,
     previousValues,

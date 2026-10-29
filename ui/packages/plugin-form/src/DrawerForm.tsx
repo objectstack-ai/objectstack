@@ -185,6 +185,8 @@ export interface DrawerFormSchema {
   submitText?: string;
   showCancel?: boolean;
   cancelText?: string;
+  /** The Reset button in the footer: restores the opening values, no save (objectstack#27247). */
+  showReset?: boolean;
   initialValues?: Record<string, any>;
   initialData?: Record<string, any>;
   readOnly?: boolean;
@@ -736,6 +738,7 @@ const DrawerFormBody: React.FC<DrawerFormProps> = ({
   });
   const showSubmit = schema.showSubmit !== false && schema.mode !== 'view' && !closedForRecord(closedAffordance);
   const showCancel = schema.showCancel !== false;
+  const showReset = schema.showReset === true && schema.mode !== 'view' && !closedForRecord(closedAffordance);
   const submitLabel = schema.submitText || (schema.mode === 'create' ? t('form.create') : t('form.update'));
   const cancelLabel = schema.cancelText || t('common.cancel');
 
@@ -1011,7 +1014,7 @@ const DrawerFormBody: React.FC<DrawerFormProps> = ({
         {/* Sticky footer — own action buttons. Cancel calls the discard guard
             directly (no form.reset), so unsaved input survives "Keep editing".
             Suppressed for the master-detail path, which owns its own action bar. */}
-        {!error && !loading && !(subforms?.length && schema.mode !== 'view') && (showSubmit || showCancel) && (
+        {!error && !loading && !(subforms?.length && schema.mode !== 'view') && (showSubmit || showCancel || showReset) && (
           <div className="shrink-0 border-t px-4 py-3 bg-background" data-testid="drawer-form-footer">
             {/* The REASON the Save below is disabled (objectui#10166). */}
             <UploadInFlightNotice gate={uploadGate} />
@@ -1025,6 +1028,20 @@ const DrawerFormBody: React.FC<DrawerFormProps> = ({
                   className="w-full sm:w-auto"
                 >
                   {cancelLabel}
+                </Button>
+              )}
+              {/* The declared Reset button (objectstack#27247). It lives out
+                  here, outside the <form>, so it names the form by `id` and
+                  the form's own `reset` handler restores the opening values. */}
+              {showReset && (
+                <Button
+                  type="reset"
+                  form={formId}
+                  variant="outline"
+                  disabled={isSubmitting}
+                  className="w-full sm:w-auto"
+                >
+                  {t('common.reset')}
                 </Button>
               )}
               {showSubmit && (
