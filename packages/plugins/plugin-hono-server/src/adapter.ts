@@ -813,9 +813,19 @@ export class HonoHttpServer implements IHttpServer {
                 }
             },
             status: (code: number) => { c.status(code); return res; },
-            header: (name: string, value: string) => {
-                c.header(name, value);
-                streamHeaders[name] = value;
+            header: (name: string, value: string | string[]) => {
+                // [#27506] An array is one header line per element — the
+                // contract's own signature (`IHttpResponse.header`), and the
+                // only correct spelling for `Set-Cookie`: the Fetch `Headers`
+                // comma-join a repeated `set` would produce is parsed by a
+                // browser as ONE cookie whose attributes carry the rest.
+                if (Array.isArray(value)) {
+                    for (const v of value) c.header(name, v, { append: true });
+                    streamHeaders[name] = value.join(', ');
+                } else {
+                    c.header(name, value);
+                    streamHeaders[name] = value;
+                }
                 return res;
             },
             write: (chunk: string | Uint8Array) => {

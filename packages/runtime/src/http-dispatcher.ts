@@ -151,7 +151,13 @@ export interface HttpDispatcherResult {
     response?: {
         status: number;
         body?: any;
-        headers?: Record<string, string>;
+        /**
+         * Response headers. A `string[]` value is emitted as one header line
+         * PER ELEMENT (`IHttpResponse.header` accepts the array) — the only
+         * correct spelling for `Set-Cookie`, which may not be comma-joined
+         * (#27506: the api-action forward relays a target's cookie rotation).
+         */
+        headers?: Record<string, string | string[]>;
     };
     result?: any; // For flexible return types or direct response objects (Response/NextResponse)
 }
