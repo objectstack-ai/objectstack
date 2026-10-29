@@ -20,6 +20,7 @@ import {
   type ConnectionEngineLike,
 } from './datasource-connection-service.js';
 import { datasourceConnectivityChanged } from './datasource-connectivity-change.js';
+import { resolveDatasourceSchemaMode } from './datasource-schema-mode.js';
 import type { DatasourceConnectPolicy } from './contracts/connect-policy.js';
 import type { Logger } from './logger.js';
 import { resolveTursoUrl } from './turso-driver-config.js';
@@ -402,6 +403,26 @@ export class DatasourceAdminServicePlugin implements Plugin {
     });
     ctx.registerService('datasource-connection', this.connection);
 
+    // [ADR-0015 §4.2 · #25277] The objects bound to a datasource, read from
+    // the engine's object registry (the `objectql` service's `registry`), the
+    // registry the metadata save door writes through to: an object saved
+    // through `PUT /api/v1/meta/object/:name` or imported from a remote table
+    // is in it the moment it is saved, and boot restores the stored rows into
+    // it. ⛔ Not the metadata service's `listObjects()`, which holds a copy of
+    // this registry taken once at boot and never sees a runtime save. A host
+    // with no engine registry serves no objects, so none can be bound.
+    //
+    // Resolved where it is used, never at `init()` (AGENTS.md, "Startup
+    // registry reads"). Two readers: the judgement of a datasource write
+    // (`listObjectsBoundTo`) and the pool's connect (`registerPool`, #27701).
+    const objectsBoundTo = (datasource: string): Array<{ name: unknown; external: unknown }> => {
+      const registry = safeGetService<Partial<Pick<IObjectQLEngine, 'registry'>>>(ctx, 'objectql')?.registry;
+      if (typeof registry?.getAllObjects !== 'function') return [];
+      return (registry.getAllObjects() as Array<{ name?: unknown; datasource?: unknown; external?: unknown }>)
+        .filter((o) => o?.datasource === datasource)
+        .map((o) => ({ name: o.name, external: o.external }));
+    };
+
     const config: DatasourceAdminServiceConfig = {
       probe: (input) => this.probe(factory(), input),
 
@@ -503,24 +524,9 @@ export class DatasourceAdminServicePlugin implements Plugin {
       },
 
       // [ADR-0015 §4.2 · #25277] The objects a datasource write is judged
-      // against. Read from the engine's object registry (the `objectql`
-      // service's `registry`), the registry the metadata save door writes
-      // through to: an object saved through `PUT /api/v1/meta/object/:name` or
-      // imported from a remote table is in it the moment it is saved, and boot
-      // restores the stored rows into it. ⛔ Not the metadata service's
-      // `listObjects()`, which holds a copy of this registry taken once at boot
-      // and never sees a runtime save. A host with no engine registry serves
-      // no objects, so none can be bound.
-      //
-      // Resolved where it is used, never at `init()` (AGENTS.md, "Startup
-      // registry reads").
-      listObjectsBoundTo: async (datasource) => {
-        const registry = safeGetService<Partial<Pick<IObjectQLEngine, 'registry'>>>(ctx, 'objectql')?.registry;
-        if (typeof registry?.getAllObjects !== 'function') return [];
-        return (registry.getAllObjects() as Array<{ name?: unknown; datasource?: unknown; external?: unknown }>)
-          .filter((o) => o?.datasource === datasource)
-          .map((o) => ({ name: o.name, external: o.external }));
-      },
+      // against, read from the engine's object registry (`objectsBoundTo`
+      // above says why that registry, and why per call).
+      listObjectsBoundTo: async (datasource) => objectsBoundTo(datasource),
 
       // Hot pool (de)registration converges on the shared
       // DatasourceConnectionService (ADR-0062 D1) — one connect path for code-
@@ -529,9 +535,26 @@ export class DatasourceAdminServicePlugin implements Plugin {
       // opens the connection, and registers the live driver + datasource def.
       // Runtime-admin connects always degrade-with-warning on failure (never
       // fail-fast), preserving the pre-ADR-0062 admin behavior.
+      //
+      // [#27701] The connect carries the objects already bound to a MANAGED
+      // datasource, so its sync loop gives them their tables, as boot's
+      // `connectDeclared` does for a declared datasource. Boot's schema sync
+      // ran before this driver existed and skipped them; without this a code
+      // object bound to a Setup-created datasource had no table, on create and
+      // after every restart, and every read of it was a 500. ⛔ A datasource
+      // whose schema ObjectStack does not own (`external`, `validate-only`)
+      // passes none: it never gets DDL. Its mode is read the way the driver
+      // factory reads it, so the gate and the driver agree on what it is.
       registerPool: async (record) => {
         this.livePoolRecords.set(record.name, record);
+        const managed = (resolveDatasourceSchemaMode({ ...record, config: record.config ?? {} }) ?? 'managed') === 'managed';
+        const objects = managed
+          ? objectsBoundTo(record.name)
+              .map((o) => o.name)
+              .filter((n): n is string => typeof n === 'string')
+          : [];
         await this.connection?.connect(record, {
+          objects,
           context: { origin: record.origin ?? 'runtime', trigger: 'runtime-admin' },
         });
       },
