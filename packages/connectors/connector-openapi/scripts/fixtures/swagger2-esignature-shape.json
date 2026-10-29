@@ -1,0 +1,103 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "Envelope API (trimmed fixture)",
+    "version": "2.1",
+    "description": "Shaped like DocuSign's eSignature Swagger 2.0 document: host + basePath + schemes, every operation's parameters and an operation-level empty consumes list, definitions reached through $ref (one of them recursive)."
+  },
+  "host": "api.example.com",
+  "basePath": "/restapi",
+  "schemes": ["https"],
+  "consumes": ["application/json"],
+  "produces": ["application/json"],
+  "paths": {
+    "/v2.1/accounts/{accountId}/envelopes": {
+      "parameters": [],
+      "post": {
+        "operationId": "Envelopes_PostEnvelopes",
+        "summary": "Create an envelope",
+        "consumes": [],
+        "produces": [],
+        "parameters": [
+          { "name": "accountId", "in": "path", "required": true, "type": "string", "description": "The account ID." },
+          { "name": "merge_roles_on_draft", "in": "query", "required": false, "type": "string" },
+          { "name": "envelopeDefinition", "in": "body", "required": true, "schema": { "$ref": "#/definitions/envelopeDefinition" } }
+        ],
+        "responses": {
+          "201": { "description": "Created", "schema": { "$ref": "#/definitions/envelopeSummary" } },
+          "400": { "description": "Error", "schema": { "$ref": "#/definitions/errorDetails" } }
+        }
+      },
+      "get": {
+        "operationId": "Envelopes_GetEnvelopes",
+        "summary": "List envelopes",
+        "consumes": [],
+        "produces": [],
+        "parameters": [
+          { "name": "accountId", "in": "path", "required": true, "type": "string" },
+          { "name": "from_date", "in": "query", "required": false, "type": "string" }
+        ],
+        "responses": {
+          "200": { "description": "OK", "schema": { "$ref": "#/definitions/envelopesInformation" } }
+        }
+      }
+    },
+    "/v2.1/accounts/{accountId}/envelopes/{envelopeId}": {
+      "get": {
+        "operationId": "Envelopes_GetEnvelope",
+        "summary": "Get an envelope",
+        "parameters": [
+          { "name": "accountId", "in": "path", "required": true, "type": "string" },
+          { "name": "envelopeId", "in": "path", "required": true, "type": "string" }
+        ],
+        "responses": {
+          "200": { "description": "OK", "schema": { "$ref": "#/definitions/envelope" } }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "envelopeDefinition": {
+      "type": "object",
+      "description": "The envelope to create.",
+      "properties": {
+        "emailSubject": { "type": "string" },
+        "status": { "type": "string", "enum": ["created", "sent"] },
+        "recipients": { "$ref": "#/definitions/recipients" }
+      }
+    },
+    "recipients": {
+      "type": "object",
+      "properties": {
+        "signers": { "type": "array", "items": { "$ref": "#/definitions/signer" } }
+      }
+    },
+    "signer": {
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "name": { "type": "string" }
+      }
+    },
+    "envelopeSummary": {
+      "type": "object",
+      "properties": { "envelopeId": { "type": "string" }, "status": { "type": "string" } }
+    },
+    "envelopesInformation": {
+      "type": "object",
+      "properties": { "envelopes": { "type": "array", "items": { "$ref": "#/definitions/envelope" } } }
+    },
+    "envelope": {
+      "type": "object",
+      "description": "An envelope.",
+      "properties": {
+        "envelopeId": { "type": "string" },
+        "parentEnvelope": { "$ref": "#/definitions/envelope" }
+      }
+    },
+    "errorDetails": {
+      "type": "object",
+      "properties": { "errorCode": { "type": "string" }, "message": { "type": "string" } }
+    }
+  }
+}
