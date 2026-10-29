@@ -307,6 +307,9 @@ import {
 // (`rejectCredentialAggregation`); the methods of the same names below hand
 // each body the members it reads (`CountAggregateHost`).
 import { count, rejectCredentialAggregation } from './engine-count-aggregate.js';
+// ADR-0100: the credential-column guard's filter / sort half, beside the
+// aggregate half above — one collector, one envelope.
+import { rejectCredentialEvaluation } from './credential-evaluation-guard.js';
 import { assertGroupByNamesNoJsonStoredField } from './group-by-structured-json-door.js';
 import { assertProjectionNamesAField, refuseProjectionOfUnknownColumns } from './empty-projection-door.js';
 import { assertAggregationFieldTypesAccepted } from './aggregate-field-type-door.js';
@@ -13395,7 +13398,12 @@ export class ObjectQL implements IObjectQLEngine {
       // narrowing must be a 400, not a silent widening. A direct engine caller
       // naming one has it intersected away here, the engine's existing tolerant
       // posture for an unknown requested search field.
-      const internalFields = collectInternalReadFields(schema);
+      // [ADR-0100] …and never a `secret` / `password` column either, by the
+      // collector the credential guards read: the auto-default already skips
+      // those types, and an author-declared `searchableFields` naming one is
+      // withheld here the same way, so a search term is never evaluated over
+      // a value the read path masks.
+      const internalFields = [...new Set([...collectInternalReadFields(schema), ...collectCredentialFields(schema)])];
       const scanFields = internalFields.length === 0
         ? (schema.fields as any)
         : Object.fromEntries(
@@ -13658,6 +13666,11 @@ export class ObjectQL implements IObjectQLEngine {
     // schemas declare are filled here, before anything downstream reads the AST.
     const { context: _findContext, ...findQuery } = query ?? {};
     const ast: QueryAST = { ...this.fillQueryAstDefaults(findQuery), object };
+    // [ADR-0100] A `secret` / `password` column is never a filter or sort key
+    // for a non-system caller — judged on the caller's own `where` / `orderBy`
+    // / `expand`, before the search term is expanded into `where` and before
+    // the middlewares inject their server-authored filters.
+    rejectCredentialEvaluation(object, 'find', ast, mergeReadContext(query?.context, options?.context), this.relatedSchemaOf);
 
     // Plan formula projection: rewrite ast.fields to drop virtual formula
     // names and inject their dependencies, so the driver returns the raw
@@ -13983,6 +13996,8 @@ export class ObjectQL implements IObjectQLEngine {
     // [commit 74155c735] And the same default-filling as find(), for the same reason.
     const { context: _findOneContext, ...findOneQuery } = query ?? {};
     const ast: QueryAST = { ...this.fillQueryAstDefaults(findOneQuery), object: objectName, limit: 1 };
+    // [ADR-0100] Same credential-column refusal as `find`, same position.
+    rejectCredentialEvaluation(objectName, 'findOne', ast, mergeReadContext(query?.context, options?.context), this.relatedSchemaOf);
 
     // Plan formula projection (same as find): rewrite ast.fields so the driver
     // returns the raw dependency fields, then evaluate formulas after fetch.
@@ -15953,6 +15968,9 @@ export class ObjectQL implements IObjectQLEngine {
      // array that read is `undefined` whatever the caller wrote, so an
      // `update({ where: [['id','=',x]] })` used to route to the multi-row path.
      options = lowerWhereFilterArray(object, 'update', options, this._registry.getObject(object), this.relatedSchemaOf);
+     // [ADR-0100] A predicate write is judged like a read: a non-system
+     // caller's `where` evaluates no `secret` / `password` column.
+     rejectCredentialEvaluation(object, 'update', options, options?.context, this.relatedSchemaOf);
 
      // Expand `{filter-placeholder}` values BEFORE the id is extracted (#3810).
      // The read path resolves them; without the same call here the SAME filter
@@ -19589,6 +19607,8 @@ export class ObjectQL implements IObjectQLEngine {
     // [#5158] Same ordering reason as update(): the dispatch decision below
     // reads `where.id`, which an unlowered array never carries.
     options = lowerWhereFilterArray(object, 'delete', options, this._registry.getObject(object), this.relatedSchemaOf);
+    // [ADR-0100] Same credential-column refusal as update().
+    rejectCredentialEvaluation(object, 'delete', options, options?.context, this.relatedSchemaOf);
 
     // Expand `{filter-placeholder}` values before the id is extracted — same
     // reasoning as update() above (#3810).
@@ -20295,6 +20315,10 @@ export class ObjectQL implements IObjectQLEngine {
       query = foldEngineOptionAliases(object, 'aggregate', query, ENGINE_WHERE_SLOTS);
       rejectUnknownEngineOptions(object, 'aggregate', query, ENGINE_AGGREGATE_OPTION_KEYS);
       query = lowerWhereFilterArray(object, 'aggregate', query, this._registry.getObject(object), this.relatedSchemaOf);
+      // [ADR-0100] The filter half of the credential-column guard — `where`
+      // and every `aggregations[i].filter` — before the search term joins
+      // `where`; the aggregate half (`rejectCredentialAggregation`) follows.
+      rejectCredentialEvaluation(object, 'aggregate', query, mergeReadContext(query?.context, options?.context), this.relatedSchemaOf);
       // ADR-0061 `search` → the rows are searched BEFORE they are grouped, by
       // the one expander `find` runs, at the same point in the sequence (after
       // the `where` doors above, before the AST is built and tokens resolve).

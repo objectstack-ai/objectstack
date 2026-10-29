@@ -256,6 +256,10 @@ const READERS: Record<string, Row> = {
     disposition: 'target-by-id',
     why: 'the ids read off the rows in hand load the TARGET rows; a federated row carries none',
   },
+  'credential-evaluation-guard.ts#judge :: referenceTargetOf()': {
+    disposition: 'caller-predicate',
+    why: "names the object an expand entry the caller wrote is judged against, by its declared fields; it reads no row",
+  },
   'record-title.ts#resolveRelatedTitleTarget :: referenceTargetOf()': {
     disposition: 'target-by-id',
     why: "resolves which object a related record's title is read from",

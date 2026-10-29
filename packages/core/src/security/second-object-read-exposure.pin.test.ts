@@ -209,6 +209,15 @@ const CALLERS: Record<string, Classification> = {
     kind: 'not-a-served-read',
     reason: "resolves a seed's references at install, under the system identity; serves nothing to a caller",
   },
+  // ADR-0100: the credential-column guard's filter / sort half.
+  'packages/objectql/src/credential-evaluation-guard.ts': {
+    kind: 'not-a-served-read',
+    reason:
+      "names the object an `expand` entry the caller wrote targets, only to read that object's DECLARED credential " +
+      'fields from the registry and refuse (`INVALID_FIELD` / 400) a filter or sort key on one; it reads no record and ' +
+      "serves nothing of the target — the expanded read itself is the engine's `expandRelatedRecords`. Pinned by " +
+      '`packages/objectql/src/credential-evaluation-guard.test.ts` (the expand refusals assert the driver was never asked)',
+  },
   // [#25522 cut 10] The write-path reference check, moved out of engine.ts.
   'packages/objectql/src/engine-referential-integrity.ts': {
     kind: 'not-a-served-read',
