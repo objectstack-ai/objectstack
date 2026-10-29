@@ -498,17 +498,16 @@ function MyWidget({ schema }) {
 
 ## Debugging & Browser Simulation Strategy
 
-When debugging the simulated browser environment (e.g., `apps/console` in mock mode), strict adherence to the official toolchain is required.
+When debugging the Console in a browser, strict adherence to the official toolchain is required.
 
-### Rule #1: Official MSW Integration
+### Rule #1: No MSW plugin — debug against a real backend
 
-- **Startup:** Use `@objectstack/plugin-msw` to initialize the mock API server. Do NOT write custom fetch interceptors or manual mock servers unless absolutely necessary.
-- **Configuration:** Ensure the `MSWPlugin` is configured with the correct `baseUrl` (e.g., `/api/v1`) to match the client's expectations.
+- **Startup:** There is no `@objectstack/plugin-msw` package and no tracked `package.json` declares `msw`, so there is no mock API server to start. Run the Console against a real backend, as the 「Local dev and per-agent stacks」 section below describes. Do NOT write custom fetch interceptors or manual mock servers unless absolutely necessary.
 
 ### Rule #2: Client Data Fetching
 
 - **Data Access:** Always use `@objectstack/client` for data fetching. Do not use raw `fetch` or `axios` directly in components.
-- **Alignment:** Verify that the client's `baseUrl` matches the mock server's configuration.
+- **Alignment:** Verify that the client's `baseUrl` matches the backend the Console's `/api` proxy targets (`DEV_PROXY_TARGET`, `http://localhost:3000` by default).
 
 ### Rule #3: Upstream Fixes First
 

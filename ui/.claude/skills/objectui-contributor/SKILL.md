@@ -17,7 +17,7 @@ so shipping these files cost every customer session tokens it could never use.
 
 | Topic | File |
 |---|---|
-| Console app: architecture, metadata-admin registry, routing, MSW debugging, retired names | [`guides/console-development.md`](./guides/console-development.md) |
+| Console app: architecture, metadata-admin registry, routing, debugging against a real backend, retired names | [`guides/console-development.md`](./guides/console-development.md) |
 | Shadcn-synced primitives are overwritten by the sync script — wrap, never edit | [`rules/no-touch-zones.md`](./rules/no-touch-zones.md) |
 | Flaky tests under `ui/`: why the cause is a module load inside a bounded window, how the failure names it | [`guides/flaky-tests.md`](./guides/flaky-tests.md) |
 
