@@ -26,8 +26,7 @@
  *   reviewScopeHits          the at-tier review's scope floor — `reviewFace`'s `hits`, the record's `Scope:` line
  *   recordCarriesDesignJudgment  whether a face's record carries item ④, the full review's design judgment
  *   readLocalRuns            the `Local-runs:` line, and `localRunsStand` on it — judged when present, absent not re-judged
- *   contractReviewHandoff    whose review a PR's contract review is — the newest `Contract-review-handoff:` line against the head; `readContractReviewHandoff` reads the line; `contractReviewClaims` (`readContractReviewClaim`, `contractReviewClaimLapse`) who holds the head
- *   contractReviewHold       whether a lane holds the head — the newest `Contract-review-hold:` line against the head, its age a reading never a lapse; `readContractReviewHold` reads the line
+ *   contractReviewHandoff    whose review a PR's contract review is — the newest `Contract-review-handoff:` line against the head; `readContractReviewHandoff` reads the line; `contractReviewClaims` (`readContractReviewClaim`, `contractReviewClaimLapse`) who holds the head; `contractReviewHold` (`readContractReviewHold`) whether a lane holds it — the newest `Contract-review-hold:` line, its age a reading never a lapse
  *   isModelIdentifierToken   the token a refusal must never quote back
  *   REVIEW_OF_RECORD_THREADS the ONE thread set, and REVIEW_OF_RECORD_LOCATION its words
  *   unexplainedPathsBetween  the pure-regeneration test a carried record re-runs, prose arm included
