@@ -26,7 +26,7 @@
  *   reviewScopeHits          the at-tier review's scope floor — `reviewFace`'s `hits`, the record's `Scope:` line
  *   recordCarriesDesignJudgment  whether a face's record carries item ④, the full review's design judgment
  *   readLocalRuns            the `Local-runs:` line, and `localRunsStand` on it — judged when present, absent not re-judged
- *   contractReviewHandoff    whose review a PR's contract review is — the newest `Contract-review-handoff:` line against the head; `readContractReviewHandoff` reads the line; `contractReviewClaims` (`readContractReviewClaim`, `contractReviewClaimLapse`) who holds the head
+ *   contractReviewHandoff    whose review a PR's contract review is — the newest `Contract-review-handoff:` line against the head; `readContractReviewHandoff` reads the line; `contractReviewClaims` (`readContractReviewClaim`, `contractReviewClaimLapse`) who holds the head; `contractReviewHold` (`readContractReviewHold`) whether a lane holds it — per head, the newest readable `Contract-review-hold:` line naming it, unreadable lines listed and never voiding, its age a reading never a lapse
  *   isModelIdentifierToken   the token a refusal must never quote back
  *   REVIEW_OF_RECORD_THREADS the ONE thread set, and REVIEW_OF_RECORD_LOCATION its words
  *   unexplainedPathsBetween  the pure-regeneration test a carried record re-runs, prose arm included
@@ -74,7 +74,7 @@
 // row is `GOVERNED_READ_FLOOR` in `dispatch-gates.data.mjs`). The derivation
 // grades it against the read the self-test really performs, so it cannot be
 // satisfied by deleting either half.
-// dispatch-gates: self-test-reads .claude/skills/pm-dispatch/references/project-forms.md .claude/skills/pm-dispatch/references/contract-review.md -- the mailbox doorbell battery pins each of the seven key templates verbatim in project-forms.md's 〈信箱 PR〉 section, and the claim-line battery pins the `Contract-review-claim:` template and its lapse hours in contract-review.md, so a change to either spelling there is judged here
+// dispatch-gates: self-test-reads .claude/skills/pm-dispatch/references/project-forms.md .claude/skills/pm-dispatch/references/contract-review.md -- the mailbox doorbell battery pins each of the seven key templates verbatim in project-forms.md's 〈信箱 PR〉 section, the claim-line battery pins the `Contract-review-claim:` template and its lapse hours in contract-review.md, and the hold-line battery pins the `Contract-review-hold:` template and its listing hours there, so a change to any of those spellings is judged here
 
 import process from 'node:process';
 import { spawnSync } from 'node:child_process';
@@ -1055,6 +1055,158 @@ export function contractReviewClaims(rows, headSha, { now } = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// The `Contract-review-hold:` line — a lane's "not this head yet", one per head
+// ---------------------------------------------------------------------------
+
+/**
+ * The `Contract-review-hold:` key line -- a LANE saying "do not review this head
+ * yet": the head will move again, or something must land first. Before it
+ * existed that was prose on the PR, which no reader can tell from commentary, so
+ * the triage seat claimed under gap rule (b) and then had to withdraw.
+ *
+ * ⭐ The rule it makes machine-findable (the skill's contract-review reference,
+ * 〈复核归属与资格〉, beside the claim line): the holding lane posts ONE comment
+ * carrying this line --
+ *
+ *   Contract-review-hold: session_01QSeKYmhU5KEj1nukYhp1Tg · head 3beee64f · the stack still lands under it · until the last sibling merges
+ *
+ * Four facts, each required, separated by the doorbell's dot: the SESSION that
+ * holds (the signature line's session shape, read by the claim's own reader,
+ * ⛔ never a second spelling), the HEAD (7 to 40 hex, matched by PREFIX as the
+ * hand-off line's head is), the REASON, and `until` followed by the CONDITION.
+ * Reason and condition are free text and are not graded -- but each must be
+ * there, and the dot is the separator, so a fifth part is started-and-unreadable,
+ * and an unreadable hold holds nothing.
+ *
+ * PER HEAD, and only a new head clears a hold (the rule's 「新 head 即清;点名现
+ * head 时 (b) 不起」): the newest READABLE hold naming the CURRENT head is `live`,
+ * and while it is, gap rule (b) does not fire -- (a) and (c) still do. When the
+ * head moves past every readable hold, they are cleared (`stale`). Nothing posted
+ * later on the thread clears a hold on the current head: not a newer hold naming
+ * an earlier head, and not a newer line that cannot be read -- a later note, round
+ * record or review quoting this line's template is exactly such a line. An
+ * unreadable hold line holds nothing AND voids nothing; each is returned by
+ * comment id beside the reading, so the gap is printed, never silent (the claim
+ * reader's convention, `contractReviewClaims`). The lane that holds owns the
+ * review once its condition is met: it hangs `needs:contract-review` or posts a
+ * hand-off line, and either is (a).
+ *
+ * The AGE is a reading, ⛔ never a verdict. Whether the condition is met is free
+ * text no reader can judge, so nothing here lapses a hold: at
+ * {@link CONTRACT_REVIEW_HOLD_LIST_HOURS} hours a live hold reads `overdue`,
+ * which the triage round record lists so a hold cannot become a silent skip --
+ * and an overdue hold still holds (b). Age is timed from the comment's
+ * `created_at`, the platform's stamp of when the hold was POSTED; the line
+ * carries no time of its own.
+ *
+ * ⛔ No gate reads it. The queue guard keeps reading the ONE `## Contract
+ * review` record; this line is coordination between reviewers, never a merge
+ * condition. `contractReviewHold` below is the reading the owed-review list
+ * (`check-owed-reviews.mjs`) takes.
+ */
+export const CONTRACT_REVIEW_HOLD_KEY = 'Contract-review-hold';
+/**
+ * The line exactly as the rule text prints it, placeholders included. This file's self-test pins it
+ * VERBATIM in `references/contract-review.md`, so the text and the reader cannot drift apart.
+ */
+export const CONTRACT_REVIEW_HOLD_TEMPLATE = `${CONTRACT_REVIEW_HOLD_KEY}: <session> · head <sha> · <reason> · until <condition>`;
+/** Hours after posting that a live hold reads `overdue` and is listed -- the rule's 「24 小时」. A reading, never a lapse. */
+export const CONTRACT_REVIEW_HOLD_LIST_HOURS = 24;
+const CONTRACT_REVIEW_HOLD_LINE = keyLineRegex(CONTRACT_REVIEW_HOLD_KEY);
+/** The same key as a MARKER over a whole comment body -- `latestMarkedComment`'s convention (multiline, `g`-less). */
+const CONTRACT_REVIEW_HOLD_MARKER = new RegExp(CONTRACT_REVIEW_HOLD_LINE.source, 'm');
+const HOLD_HEAD = /^head[ \t]+`?([0-9a-fA-F]{7,40})`?$/;
+const HOLD_UNTIL = /^until[ \t]+(\S.*)$/;
+
+/**
+ * What one comment declares as a hold on a contract review. The FIRST hold line
+ * of the comment is read, after one leading signature line is set aside
+ * (`stripSignatureLine`, as the claim reader does).
+ *
+ * @returns {{ state: 'missing' }
+ *          | { state: 'unreadable', line: string }
+ *          | { state: 'read', session: string, head: string, reason: string, until: string }}
+ */
+export function readContractReviewHold(text) {
+  for (const line of stripSignatureLine(String(text ?? '')).split(/\r?\n/)) {
+    const m = CONTRACT_REVIEW_HOLD_LINE.exec(line);
+    if (!m) continue;
+    const unreadable = { state: 'unreadable', line: quoteLine(line) };
+    // Leading decoration is the key's (`stripValueDecoration`); trailing spaces and bold are the line's.
+    const parts = stripValueDecoration(m[1]).replace(/(?:[ \t]|\*\*)+$/, '').split(MAILBOX_SEPARATOR);
+    if (parts.length !== 4) return unreadable;
+    const session = CLAIM_SESSION.exec(parts[0]);
+    const head = HOLD_HEAD.exec(parts[1]);
+    const reason = parts[2].trim();
+    const until = HOLD_UNTIL.exec(parts[3].trim());
+    // A reason that is itself the `until` clause means the reason was left out.
+    if (!session || !head || reason === '' || /^until\b/.test(reason) || !until) return unreadable;
+    return { state: 'read', session: session[1], head: head[1].toLowerCase(), reason, until: until[1].trim() };
+  }
+  return { state: 'missing' };
+}
+
+/**
+ * Is a lane holding this pull request's current head, read off its comment thread:
+ *
+ *   live        a READABLE hold line names the current head -- gap rule (b) does not fire; the
+ *               newest such line is the reading; `overdue` is true once it was posted
+ *               CONTRACT_REVIEW_HOLD_LIST_HOURS ago or more (a reading the round record lists; the
+ *               hold still holds), null when the comment carries no stamp to time it from
+ *   stale       readable hold lines exist and none names the current head -- the head moved past
+ *               them, they are cleared; the newest of them is the reading
+ *   absent      no hold line on any comment
+ *   unreadable  the thread, the head or the clock could not be read, or EVERY hold line on the
+ *               thread is unreadable -- it holds nothing
+ *
+ * Per head, not newest-over-all: a hold naming the current head stands whatever is posted after it,
+ * and an unreadable line neither holds nor voids. Every unreadable hold line is returned in
+ * `unreadable` (comment id, its stamp, the line quoted) on EVERY reading, so a caller prints the gap.
+ * "Newest" is `latestMarkedComment`'s order, and the head is matched by PREFIX, exactly as
+ * `contractReviewHandoff` reads its line.
+ *
+ * @param {{ id?: number, body?: string, created_at?: string }[]} rows  the PR's comment rows
+ * @param {string} headSha  the pull request's current head
+ * @param {{ now: number }} clock  milliseconds since the epoch
+ */
+export function contractReviewHold(rows, headSha, { now } = {}) {
+  const gaps = [];
+  if (!Array.isArray(rows)) gaps.push("the pull request's comment thread");
+  const head = String(headSha ?? '').toLowerCase();
+  if (head.length < H51_SHA_MIN_HEX) gaps.push("the pull request's head sha");
+  if (!Number.isFinite(now)) gaps.push("the clock the hold's age is read on");
+  if (gaps.length > 0) return { state: 'unreadable', gaps, unreadable: [] };
+  const read = [];
+  const unread = [];
+  for (const row of rows) {
+    const line = readContractReviewHold(row?.body);
+    if (line.state === 'read') read.push({ row, line });
+    else if (line.state === 'unreadable') unread.push({ row, line });
+  }
+  // The newest of a set of hold-carrying rows, by the one resolution the hand-off line uses. Every
+  // entry carries the key line, so the marker meets each; the thread's last entry is the fallback.
+  const newestOf = (entries) => {
+    const newest = latestMarkedComment(entries.map((e) => e.row), CONTRACT_REVIEW_HOLD_MARKER);
+    return entries[newest === null ? entries.length - 1 : newest.index];
+  };
+  const unreadable = unread.map(({ row, line }) => ({ id: row?.id ?? null, at: row?.created_at ?? null, line: line.line }));
+  if (read.length === 0 && unread.length === 0) return { state: 'absent', read: rows.length, unreadable };
+  if (read.length === 0) {
+    const last = newestOf(unread).row;
+    const gapsOf = unreadable.map((u) => `the hold line in comment ${u.id ?? '?'} cannot be read: ${u.line}`);
+    return { state: 'unreadable', gaps: gapsOf, id: last?.id ?? null, at: last?.created_at ?? null, unreadable };
+  }
+  const onHead = read.filter(({ line }) => shaMeets(head, line.head));
+  const { row, line } = newestOf(onHead.length > 0 ? onHead : read);
+  const reading = { session: line.session, head: line.head, reason: line.reason, until: line.until, id: row?.id ?? null, at: row?.created_at ?? null, unreadable };
+  if (onHead.length === 0) return { state: 'stale', ...reading };
+  const posted = Date.parse(row?.created_at ?? '');
+  const ageMinutes = Number.isFinite(posted) ? Math.max(0, Math.floor((now - posted) / 60000)) : null;
+  const overdue = ageMinutes === null ? null : ageMinutes >= CONTRACT_REVIEW_HOLD_LIST_HOURS * 60;
+  return { state: 'live', ...reading, ageMinutes, overdue };
+}
+
+// ---------------------------------------------------------------------------
 // The mailbox DOORBELL — seven first-line keys, a CLOSED vocabulary
 // ---------------------------------------------------------------------------
 
@@ -1899,6 +2051,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ the mailbox doorbell: the seven first-line keys read — kind, numbers, sha, login, time — and anything else refused': 21,
   '⭐ the signature line: the reader reads LANE#N · ACCOUNT · SESSION exactly, and one leading signature changes no first-line reading': 22,
   '⭐ the `Contract-review-claim:` line — session, FULL head, time; lapses on a moved head or after two hours; the lane wins a tie': 21,
+  '⭐ the `Contract-review-hold:` line — session, head, reason, until; a new head clears it; at 24 hours it reads overdue and still holds': 23,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1916,7 +2069,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // vocabulary): one battery, one row.
 // Raised 14 → 15 with the signature-line battery (the maintainer's signed-post rule): one battery, one row.
 // Raised 15 → 16 with the claim-line battery (the maintainer's one-claim-per-head rule): one battery, one row.
-const SELF_TEST_BATTERY_FLOOR = 16;
+// Raised 16 → 17 with the hold-line battery (the maintainer's lane-hold rule): one battery, one row.
+const SELF_TEST_BATTERY_FLOOR = 17;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -2343,6 +2497,53 @@ export async function selfTest() {
   t('⛔ no gate reads it: a claim beside a record on this head leaves the record reading FOUND, and the hand-off reading is untouched', (() => { const rec = locateReviewOfRecord(pairOf({ prComments: [RECORD_ON_9AF9, CL_ROW(CL_BODY(CL_TRIAGE_SIG, CL_LINE(CL_SESSION, HEAD_9AF9.padEnd(40, '0'))))] })); return rec.state === 'found' && rec.id === 3301 && contractReviewHandoff([CL_ROW(CL_BODY())], CL_HEAD).state === 'absent'; })());
   t('⭐ the line is spelled VERBATIM, in a code span, in the rule text (`references/contract-review.md`), beside its two-hour lapse', (() => { const rules = readFileSync(new URL('../../.claude/skills/pm-dispatch/references/contract-review.md', import.meta.url), 'utf8'); return rules.includes(`\`${CONTRACT_REVIEW_CLAIM_TEMPLATE}\``) && rules.includes(`${CONTRACT_REVIEW_CLAIM_LAPSE_HOURS} 小时`); })());
 
+  // -- the `Contract-review-hold:` line -----------------------------------------
+  //
+  // The maintainer's rule: a lane that does not want a head reviewed yet says so
+  // in ONE line a reader can find, instead of prose the triage seat has to
+  // re-read. These cases read the line as a lane posts it, with and without the
+  // signature above it, refuse every shape missing a fact, pin the PER-HEAD reading
+  // (only a new head clears a hold; a later line on another head or one that
+  // cannot be read voids nothing, and every unreadable line is returned), and pin
+  // the 24-hour age as a READING: an overdue hold is listed and still holds.
+  battery('⭐ the `Contract-review-hold:` line — session, head, reason, until; a new head clears it; at 24 hours it reads overdue and still holds');
+  const HL_HEAD = '3beee64fe77741d07f035f1b80eeaa07e7280ab4';
+  const HL_SESSION = 'session_01JQwxbZeBv2y91towxasSUT';
+  const HL_SIG = `domain:ui#1 · os-bill · ${HL_SESSION}`;
+  const HL_LINE = (head = HL_HEAD, reason = 'the stack still lands under it', until = 'the last sibling PR merges', session = HL_SESSION) => `${CONTRACT_REVIEW_HOLD_KEY}: \`${session}\` · head \`${head}\` · ${reason} · until ${until}`;
+  // The comment as a lane posts it: signature, the line, prose.
+  const HL_BODY = (sig = HL_SIG, line = HL_LINE()) => `${sig === null ? '' : `${sig}\n\n`}${line}\n\nThe lane hangs the label once the condition is met.`;
+  const HL_ROW = (body, id = 6472451890, at = '2026-10-28T09:00:00Z') => ({ id, created_at: at, body });
+  const HL_NOW = Date.parse('2026-10-28T13:00:00Z');
+  const HL_POSTED = Date.parse('2026-10-28T09:00:00Z');
+  const HL_J = (v) => JSON.stringify(v);
+  t('⭐ the live specimen reads: the session, the head, the reason and the condition, behind the signature line', (() => { const r = readContractReviewHold(HL_BODY()); return r.state === 'read' && r.session === HL_SESSION && r.head === HL_HEAD && r.reason === 'the stack still lands under it' && r.until === 'the last sibling PR merges'; })());
+  t('with and without the signature line the reading is the same, byte for byte', HL_J(readContractReviewHold(HL_BODY())) === HL_J(readContractReviewHold(HL_BODY(null))) && readContractReviewHold(HL_BODY(null)).state === 'read');
+  t('decoration reads: bare values, a bulleted bolded key, a blockquoted line, an abbreviated head', [`${CONTRACT_REVIEW_HOLD_KEY}: ${HL_SESSION} · head ${HL_HEAD} · r · until c`, `- **${CONTRACT_REVIEW_HOLD_KEY}:** \`${HL_SESSION}\` · head \`${HL_HEAD.slice(0, 12)}\` · r · until c`, `> ${HL_LINE()}`].every((l) => readContractReviewHold(l).state === 'read' && HL_HEAD.startsWith(readContractReviewHold(l).head)));
+  t('the head is read lowercased; seven hex is the shortest head that reads, six is unreadable', readContractReviewHold(HL_LINE(HL_HEAD.toUpperCase())).head === HL_HEAD && readContractReviewHold(HL_LINE(HL_HEAD.slice(0, 7))).state === 'read' && readContractReviewHold(HL_LINE(HL_HEAD.slice(0, 6))).state === 'unreadable');
+  t('⛔ a missing fact, a fifth part, an empty reason, no `until`, a reason that is the `until`, a session of another shape: unreadable', [`${CONTRACT_REVIEW_HOLD_KEY}: \`${HL_SESSION}\` · head \`${HL_HEAD}\` · until c`, `${HL_LINE()} · round 3`, HL_LINE(HL_HEAD, ''), `${CONTRACT_REVIEW_HOLD_KEY}: \`${HL_SESSION}\` · head \`${HL_HEAD}\` · r · when c`, HL_LINE(HL_HEAD, 'r', ''), HL_LINE(HL_HEAD, 'until a'), HL_LINE(HL_HEAD, 'r', 'c', 'domain:ui#1'), `${CONTRACT_REVIEW_HOLD_KEY}:`].every((l) => readContractReviewHold(l).state === 'unreadable'));
+  t('⛔ the TEMPLATE copied unedited is unreadable — a placeholder holds no head', readContractReviewHold(CONTRACT_REVIEW_HOLD_TEMPLATE).state === 'unreadable' && CONTRACT_REVIEW_HOLD_TEMPLATE === 'Contract-review-hold: <session> · head <sha> · <reason> · until <condition>');
+  t('the key is ONE regex, built by the one key-line convention, and prose naming it mid-sentence is not the line', CONTRACT_REVIEW_HOLD_LINE.source === keyLineRegex(CONTRACT_REVIEW_HOLD_KEY).source && readContractReviewHold(`the lane posts the ${CONTRACT_REVIEW_HOLD_KEY}: line first`).state === 'missing' && readContractReviewHold('').state === 'missing');
+  t('⭐ the thread: the newest hold naming the current head is LIVE — session, reason, condition and the comment that holds', (() => { const r = contractReviewHold([HL_ROW(HL_BODY())], HL_HEAD, { now: HL_NOW }); return r.state === 'live' && r.session === HL_SESSION && r.until === 'the last sibling PR merges' && r.id === 6472451890 && r.ageMinutes === 240 && r.overdue === false; })());
+  t('⭐ per head: the head MOVED past the newest hold ⇒ stale, naming the head it held — a new head clears it', (() => { const r = contractReviewHold([HL_ROW(HL_BODY())], 'f'.repeat(40), { now: HL_NOW }); return r.state === 'stale' && r.head === HL_HEAD && r.overdue === undefined; })());
+  t('⭐ PER HEAD — a newer readable hold naming an EARLIER head does not clear the older hold on this head: live, read off the hold that names it; the reverse order reads live too', (() => { const older = contractReviewHold([HL_ROW(HL_BODY(), 1, '2026-10-28T09:00:00Z'), HL_ROW(HL_BODY(HL_SIG, HL_LINE('deadbeef1')), 2, '2026-10-28T10:00:00Z')], HL_HEAD, { now: HL_NOW }); const newer = contractReviewHold([HL_ROW(HL_BODY(HL_SIG, HL_LINE('deadbeef1')), 1, '2026-10-28T09:00:00Z'), HL_ROW(HL_BODY(), 2, '2026-10-28T10:00:00Z')], HL_HEAD, { now: HL_NOW }); return older.state === 'live' && older.id === 1 && older.head === HL_HEAD && older.ageMinutes === 240 && newer.state === 'live' && newer.id === 2 && newer.ageMinutes === 180; })());
+  t('newest governs AMONG the holds naming this head — the reading is the newer one: its reason, condition and age', (() => { const r = contractReviewHold([HL_ROW(HL_BODY(), 1, '2026-10-28T09:00:00Z'), HL_ROW(HL_BODY(HL_SIG, HL_LINE(HL_HEAD, 'a second sibling joined', 'both siblings merge')), 2, '2026-10-28T11:00:00Z')], HL_HEAD, { now: HL_NOW }); return r.state === 'live' && r.id === 2 && r.reason === 'a second sibling joined' && r.until === 'both siblings merge' && r.ageMinutes === 120; })());
+  t('every readable hold names an earlier head ⇒ stale, read off the newest of them', (() => { const r = contractReviewHold([HL_ROW(HL_BODY(HL_SIG, HL_LINE('deadbeef1')), 1, '2026-10-28T09:00:00Z'), HL_ROW(HL_BODY(HL_SIG, HL_LINE('cafebabe2')), 2, '2026-10-28T10:00:00Z')], HL_HEAD, { now: HL_NOW }); return r.state === 'stale' && r.id === 2 && r.head === 'cafebabe2' && r.unreadable.length === 0; })());
+  t('the head is matched by PREFIX either way, as the hand-off line\'s is', contractReviewHold([HL_ROW(HL_BODY(HL_SIG, HL_LINE(HL_HEAD.slice(0, 8))))], HL_HEAD, { now: HL_NOW }).state === 'live' && contractReviewHold([HL_ROW(HL_BODY())], HL_HEAD.slice(0, 12), { now: HL_NOW }).state === 'live');
+  t('⭐ NO hold line ⇒ absent — a claim, a hand-off line and a record on the thread change nothing', (() => { const r = contractReviewHold([CL_ROW(CL_BODY()), HO_ROW(HO_LINE(HL_HEAD)), RECORD(HL_HEAD)], HL_HEAD, { now: HL_NOW }); return r.state === 'absent' && r.read === 3; })());
+  t('⭐ the age is a READING: 23 h 59 min ⇒ live, not overdue; 24 h ⇒ live AND overdue — ⛔ an overdue hold is not lapsed', (() => { const young = contractReviewHold([HL_ROW(HL_BODY())], HL_HEAD, { now: HL_POSTED + (24 * 60 - 1) * 60000 }); const old = contractReviewHold([HL_ROW(HL_BODY())], HL_HEAD, { now: HL_POSTED + 24 * 3600000 }); return young.state === 'live' && young.overdue === false && old.state === 'live' && old.overdue === true && old.ageMinutes === 1440 && CONTRACT_REVIEW_HOLD_LIST_HOURS === 24; })());
+  t('the age is timed from when the comment was POSTED; a row with no stamp reads overdue null — unknown, never false', (() => { const r = contractReviewHold([{ id: 9, body: HL_BODY() }], HL_HEAD, { now: HL_NOW }); return r.state === 'live' && r.ageMinutes === null && r.overdue === null; })());
+  // A later comment that quotes the template line at a line start -- a round record, a seat note, a review -- is the
+  // measured way an unreadable hold line lands on a thread after a readable one.
+  const HL_QUOTED = (id, at) => HL_ROW(`${CL_TRIAGE_SIG}\n\nRound record: lanes hold a head with\n- \`${CONTRACT_REVIEW_HOLD_TEMPLATE}\``, id, at);
+  t('⭐ an unreadable hold line NEWER than a readable hold on this head voids nothing: still LIVE off the readable one, the unreadable line returned by comment id — and the control (the same thread without it) reads the same hold', (() => { const ctl = contractReviewHold([HL_ROW(HL_BODY(), 1, '2026-10-28T09:00:00Z')], HL_HEAD, { now: HL_NOW }); const r = contractReviewHold([HL_ROW(HL_BODY(), 1, '2026-10-28T09:00:00Z'), HL_QUOTED(7701, '2026-10-28T10:00:00Z')], HL_HEAD, { now: HL_NOW }); return ctl.state === 'live' && ctl.unreadable.length === 0 && r.state === 'live' && r.id === ctl.id && r.session === ctl.session && r.until === ctl.until && r.ageMinutes === ctl.ageMinutes && r.unreadable.length === 1 && r.unreadable[0].id === 7701 && r.unreadable[0].at === '2026-10-28T10:00:00Z' && r.unreadable[0].line.includes('<session>'); })());
+  t('⭐ ONLY unreadable hold lines ⇒ unreadable, holding nothing: each named in the gaps, the reading naming the newest', (() => { const r = contractReviewHold([HL_ROW(HL_BODY(HL_SIG, `${CONTRACT_REVIEW_HOLD_KEY}: soon`), 7700, '2026-10-28T09:00:00Z'), HL_QUOTED(7701, '2026-10-28T10:00:00Z')], HL_HEAD, { now: HL_NOW }); return r.state === 'unreadable' && r.id === 7701 && r.gaps.length === 2 && r.gaps[0].includes('7700') && r.gaps[1].includes('7701') && r.unreadable.length === 2 && r.ageMinutes === undefined; })());
+  t('every reading carries `unreadable`: empty when absent, listed beside a stale reading', contractReviewHold([CL_ROW(CL_BODY())], HL_HEAD, { now: HL_NOW }).unreadable.length === 0 && (() => { const r = contractReviewHold([HL_ROW(HL_BODY(HL_SIG, HL_LINE('deadbeef1')), 1, '2026-10-28T09:00:00Z'), HL_QUOTED(7701, '2026-10-28T10:00:00Z')], HL_HEAD, { now: HL_NOW }); return r.state === 'stale' && r.id === 1 && r.unreadable.length === 1 && r.unreadable[0].id === 7701; })());
+  t('a thread that is not an array, a head too short to match, or no clock is a read that could not be made', contractReviewHold(null, HL_HEAD, { now: HL_NOW }).state === 'unreadable' && contractReviewHold([], 'abc', { now: HL_NOW }).state === 'unreadable' && contractReviewHold([], HL_HEAD, {}).state === 'unreadable' && contractReviewHold([], HL_HEAD, { now: HL_NOW }).state === 'absent');
+  t('a claim line and a hand-off line are not hold lines, and a hold line is neither of them', readContractReviewClaim(HL_BODY()).state === 'missing' && readContractReviewHandoff(HL_BODY()).state === 'missing' && readContractReviewHold(CL_BODY()).state === 'missing' && readContractReviewHold(HO_LINE()).state === 'missing');
+  t('⛔ no gate reads it: a hold beside a record on this head leaves the record FOUND, and the claim and hand-off readings untouched', (() => { const rec = locateReviewOfRecord(pairOf({ prComments: [RECORD_ON_9AF9, HL_ROW(HL_BODY(HL_SIG, HL_LINE(HEAD_9AF9)))] })); return rec.state === 'found' && rec.id === 3301 && contractReviewClaims([HL_ROW(HL_BODY())], HL_HEAD, { now: HL_NOW }).state === 'none' && contractReviewHandoff([HL_ROW(HL_BODY())], HL_HEAD).state === 'absent'; })());
+  t('⭐ the line is spelled VERBATIM, in a code span, in the rule text (`references/contract-review.md`), beside its 24-hour listing', (() => { const rules = readFileSync(new URL('../../.claude/skills/pm-dispatch/references/contract-review.md', import.meta.url), 'utf8'); return rules.includes(`\`${CONTRACT_REVIEW_HOLD_TEMPLATE}\``) && rules.includes(`${CONTRACT_REVIEW_HOLD_LIST_HOURS} 小时`); })());
+
   // -- the mailbox doorbell -----------------------------------------------------
   //
   // One mailbox PR per seat, and a CLOSED vocabulary on it (the maintainer's
@@ -2690,7 +2891,10 @@ export async function selfTest() {
       + 'unreadable refused; the reviewer brief printed by `--brief-template` with its read-only shape; the mailbox '
       + 'doorbell — seven keys read, each spelled verbatim in the protocol text, and free text, an acknowledgement, '
       + 'an eighth key, a second line and an over-long line refused; the review claim line — read signed and unsigned, '
-      + 'spelled verbatim in the rule text, lapsing on a moved head or after two hours, the lane winning a tie; and the ONE '
+      + 'spelled verbatim in the rule text, lapsing on a moved head or after two hours, the lane winning a tie; the review hold '
+      + 'line — read signed and unsigned, spelled verbatim in the rule text, per head and cleared only by a new head, an unreadable '
+      + 'line listed and voiding nothing, its 24-hour age a reading '
+      + 'that still holds; and the ONE '
       + 'thread set, driven through the queue guard itself).',
   );
 

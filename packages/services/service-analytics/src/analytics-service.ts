@@ -81,6 +81,7 @@ import { measureResultType } from './measure-result-type.js';
 // `ensureCube`, ahead of both strategies, as the dataset door refuses it at
 // compile.
 import { assertCubeMeasureFieldTypesAccepted, type MeasureColumn } from './cube-measure-field-type-door.js';
+import { AMOUNT_AGGREGATES, assertRecordCurrencyAggregatesGrouped } from './cube-record-currency-door.js';
 import type { AnalyticsStrategy, AnalyticsDriverCapabilities, StrategyContext, DatasetScopedStrategyContext, DatasetScope, ReadScopeFilterJudge } from './strategies/types.js';
 import { NativeSQLStrategy } from './strategies/native-sql-strategy.js';
 import { ObjectQLStrategy } from './strategies/objectql-strategy.js';
@@ -1134,6 +1135,12 @@ export interface AnalyticsServiceConfig {
    *   naming no mode, `dynamic` by the spec's default — has no field-level
    *   currency; the tenant default applies. `AnalyticsServicePlugin`'s relay
    *   is the reference answer.
+   *   [ADR-0144 D2] `currencyField` is the code field of a `record`-mode
+   *   amount: answer `currencyConfig.currencyField` ONLY when
+   *   `currencyConfig.currencyMode` is `'record'`, and `undefined` otherwise.
+   *   Such an amount has one currency per ROW, so its column carries the
+   *   `currencyField` pointer instead of a `currency`, and the cube door
+   *   refuses an aggregate of it that does not group by that field.
    * - Percent scale (objectui#3136): a measure over a `percent` field inherits
    *   that field's storage scale via `percentScaleOf`, so a renderer scales by
    *   declared metadata instead of guessing from the value.
@@ -1163,7 +1170,7 @@ export interface AnalyticsServiceConfig {
   sourceFieldMeta?: (
     object: string,
     field: string,
-  ) => { type?: string; multiple?: boolean; defaultCurrency?: string; max?: number } | undefined;
+  ) => { type?: string; multiple?: boolean; defaultCurrency?: string; currencyField?: string; max?: number } | undefined;
   /**
    * [#15684] The SQL dialect of the datasource backing `object` — `'sqlite'`,
    * `'postgres'`, `'mysql'`, or `undefined` when the host cannot answer.
@@ -2549,6 +2556,13 @@ export class AnalyticsService implements IAnalyticsService {
         if (typeof meta?.type !== 'string' || meta.type === '') return undefined;
         return { type: meta.type, multiple: meta.multiple === true };
       },
+      // [ADR-0144, M0-3] …and the declared currency off the same hook, so the
+      // compile-time currency guards judge exactly what the column would print.
+      declaredCurrency: (object: string, field: string) => {
+        const meta = this.sourceFieldMeta?.(object, field);
+        if (!meta) return undefined;
+        return { type: meta.type, defaultCurrency: meta.defaultCurrency, currencyField: meta.currencyField };
+      },
     });
   }
 
@@ -2711,6 +2725,10 @@ export class AnalyticsService implements IAnalyticsService {
             // carries the same `internal` fields the published ones do.
             this.assertNoInternalFieldsQueried(q, compiled.cube, previewScope);
             await this.assertFieldsReadable(q, compiled.cube, previewScope, context);
+            // [ADR-0144 D6] …and the record-currency door, which the published
+            // path meets in `ensureCube`: a draft preview must not serve the
+            // sum across currencies that the published dataset refuses.
+            this.assertRecordCurrencyGrouped(q, compiled.cube);
             return evaluateAnalyticsQueryOverRows(
               q,
               compiled.cube,
@@ -3158,10 +3176,26 @@ export class AnalyticsService implements IAnalyticsService {
         // A measure is monetary if it declares a currency OR aggregates a
         // `currency`-type field; non-monetary measures (count, avg of a plain
         // number) never receive a currency code.
-        const fc = f as { currency?: string };
+        //
+        // [ADR-0144 D2] A `record`-mode amount has one currency per ROW, held
+        // in its code field, so no single code describes the column and no
+        // step of the chain is asked. The column names, by `currencyField`,
+        // the selected dimension that groups by that code field: each row's
+        // currency is that row's value of it. Read off the dataset and the
+        // declaration like every key here, never off the rows. The cube door
+        // has already refused an amount aggregate that drops the grouping; a
+        // column left without the dimension gets neither key, rather than a
+        // label that is wrong for every other row. A `count` over the amount
+        // reads no amount, so it gets neither key either, grouped or not.
+        const fc = f as { currency?: string; currencyField?: string };
         const mc = m as { currency?: string };
         const meta = m.field ? this.sourceFieldMeta?.(dataset.object, m.field) : undefined;
-        if (fc.currency == null) {
+        if (meta?.currencyField !== undefined) {
+          const codeColumn = AMOUNT_AGGREGATES.has(m.aggregate ?? '')
+            ? this.selectedDimensions(dataset, selection).find((d) => d.field === meta.currencyField)?.name
+            : undefined;
+          if (fc.currencyField == null && codeColumn !== undefined) fc.currencyField = codeColumn;
+        } else if (fc.currency == null) {
           const monetary = !!mc.currency || meta?.type === 'currency';
           if (monetary) {
             const resolved = mc.currency ?? meta?.defaultCurrency ?? context?.currency;
@@ -3483,6 +3517,10 @@ export class AnalyticsService implements IAnalyticsService {
       // [#21044] …and a measure's aggregate must be one the aggregate ×
       // field-type table accepts for its column's declared type.
       this.assertMeasureFieldTypes(query, cube);
+      // [ADR-0144 D6] …and an amount aggregate over a record-currency field
+      // must group by its code field: this ad-hoc exit is the one
+      // `ObjectStackDataSource.aggregate()` reaches (`${field}_${fn}`).
+      this.assertRecordCurrencyGrouped(query, cube);
       // [#5669] …and the `where`'s, third and last of the three request keys that
       // carry a field name. Its members are read from the filter TREE, not from
       // `cube.dimensions` — which on this path was minted from this very query,
@@ -3566,6 +3604,7 @@ export class AnalyticsService implements IAnalyticsService {
       // [#21044] Judged on the AUGMENTED cube: a suffix-inferred measure and an
       // authored one are one population for the aggregate × field-type table.
       this.assertMeasureFieldTypes(query, augmented);
+      this.assertRecordCurrencyGrouped(query, augmented);
       // [#5669] The `where` gate resolves a filter member through dimensions AND
       // measures (that is what the strategies do for a filter member), so it is
       // handed the AUGMENTED cube — a caller filtering on a suffix-inferred
@@ -3582,6 +3621,7 @@ export class AnalyticsService implements IAnalyticsService {
       this.assertDimensionFields(query, cube, Object.keys(cube.dimensions));
       this.assertDimensionsGroupScalarColumns(query, cube);
       this.assertMeasureFieldTypes(query, cube);
+      this.assertRecordCurrencyGrouped(query, cube);
       this.assertWhereFields(query, cube, Object.keys(cube.dimensions));
     }
   }
@@ -3621,6 +3661,46 @@ export class AnalyticsService implements IAnalyticsService {
       cube.name,
       (member) => declaredMeasureColumn(cube, member, object, this.hopReference),
       (o, field) => fieldMeta(o, field)?.type,
+    );
+  }
+
+  /**
+   * [ADR-0144 D6] Refuse a `sum` / `avg` / `min` / `max` measure over a
+   * `record`-mode amount whose query does not group by the amount's code field
+   * — `INVALID_FIELD` / 400, naming the member the caller wrote — before either
+   * strategy reads anything. The rule and the envelope are
+   * {@link assertRecordCurrencyAggregatesGrouped}'s
+   * (`cube-record-currency-door.ts`); this method supplies the answers only the
+   * service has: the measure column {@link declaredMeasureColumn} resolves
+   * (the #21044 door's resolver), each dimension's column by the same
+   * {@link declaredMemberEntry} lookup and hop resolver, and the code field off
+   * {@link AnalyticsServiceConfig.sourceFieldMeta}.
+   *
+   * Runs after the #21044 door, so a pair the field-type table refuses is
+   * answered as that first. Same stand-downs: no `sourceFieldMeta`, or a cube
+   * whose `sql` is not a bare object name.
+   */
+  private assertRecordCurrencyGrouped(query: AnalyticsQuery, cube: Cube): void {
+    const fieldMeta = this.sourceFieldMeta;
+    if (!fieldMeta) return;
+    const object = typeof cube.sql === 'string' ? cube.sql.trim() : '';
+    if (!object || !BARE_IDENTIFIER.test(object)) return;
+    assertRecordCurrencyAggregatesGrouped(
+      query,
+      cube.name,
+      (member) => declaredMeasureColumn(cube, member, object, this.hopReference),
+      (member) => {
+        const entry = declaredMemberEntry(cube, member, 'dimension');
+        const sql = (entry ? (typeof entry.sql === 'string' ? entry.sql : '') : member).trim();
+        if (BARE_IDENTIFIER.test(sql)) return { object, column: sql, path: sql };
+        if (!IDENTIFIER_PATH.test(sql)) return null;
+        return {
+          object: columnObjectOf(cube, object, sql, this.hopReference),
+          column: sql.slice(sql.lastIndexOf('.') + 1),
+          path: sql,
+        };
+      },
+      (o, field) => fieldMeta(o, field)?.currencyField,
     );
   }
 
