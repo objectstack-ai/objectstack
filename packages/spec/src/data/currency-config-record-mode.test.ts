@@ -5,7 +5,8 @@
  * amount points at a sibling ISO 4217 code field on the same object.
  *
  * Two doors, one per half: `CurrencyConfigSchema` refuses the half one config
- * can see (`record` without a pointer, a pointer under another mode), and the
+ * can see (`record` without a pointer or with a `defaultCurrency`, a pointer
+ * under another mode, an empty pointer), and the
  * object's `superRefine` refuses what the pointer names (nothing, a non-text
  * field, a text field with no ISO 4217 value domain). A `formula` declaring
  * `returnType: 'currency'` carries the same config, so it meets both doors.
@@ -57,6 +58,31 @@ describe('`CurrencyConfigSchema`: `record` ⇔ `currencyField`', () => {
     expect(r.error.issues).toHaveLength(1);
     expect(r.error.issues[0]!.path).toEqual(['currencyField']);
     expect(r.error.issues[0]!.message).toMatch(/^`currencyField` is read only under `currencyMode: 'record'`/);
+  });
+
+  it('refuses an empty `currencyField`, at the key, in every mode', () => {
+    for (const mode of ['record', 'dynamic', 'fixed'] as const) {
+      const config = mode === 'fixed' ? { currencyMode: mode, defaultCurrency: 'USD', currencyField: '' } : { currencyMode: mode, currencyField: '' };
+      const r = CurrencyConfigSchema.safeParse(config);
+      expect(r.success, mode).toBe(false);
+      if (r.success) continue;
+      // Under `dynamic` / `fixed` the out-of-mode refusal is told too, at the same key.
+      expect(r.error.issues.length, mode).toBe(mode === 'record' ? 1 : 2);
+      expect(r.error.issues.every((i) => i.path.join('.') === 'currencyField'), mode).toBe(true);
+      expect(r.error.issues[0]!.message).toMatch(/^`currencyField` names a field: an empty name points at nothing/);
+    }
+  });
+
+  it('refuses `defaultCurrency` under `record`, at the key, with the prescription', () => {
+    const r = CurrencyConfigSchema.safeParse({ ...RECORD, defaultCurrency: 'EUR' });
+    expect(r.success).toBe(false);
+    if (r.success) return;
+    expect(r.error.issues).toHaveLength(1);
+    expect(r.error.issues[0]!.code).toBe('custom');
+    expect(r.error.issues[0]!.path).toEqual(['defaultCurrency']);
+    expect(r.error.issues[0]!.message).toMatch(/^`defaultCurrency` is not read under `currencyMode: 'record'`/);
+    // …and `dynamic` keeps tolerating its inert code, for the rows #27157 left behind.
+    expect(CurrencyConfigSchema.safeParse({ currencyMode: 'dynamic', defaultCurrency: 'EUR' }).success).toBe(true);
   });
 
   it('refuses `currencyField` under the defaulted mode (no `currencyMode` written ⇒ dynamic)', () => {
